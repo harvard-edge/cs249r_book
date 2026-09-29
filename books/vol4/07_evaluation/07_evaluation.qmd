@@ -144,15 +144,15 @@ The campaign needs an outcome rule and a sampled population before its perfect o
 
 The same latch policy can open the nominal door and jam against a displaced strike plate. Its measured success rate therefore belongs to the coupled policy, mechanical plant, computational hardware, environment, and trial protocol. Even a reproducible offline score describes a model on a specified dataset, not its behavior under arbitrary conditions.
 
-The **offline evaluation illusion** is the mistaken belief that lower validation loss, higher action cosine similarity, or smaller Mean Squared Error (MSE) on logged data establishes superior physical performance. Offline loss functions $\mathcal{L}_{\text{val}}(\theta) = \frac{1}{N} \sum_{i=1}^N \|a_i^* - \pi_\theta(s_i^*)\|^2$ score predictions along frozen demonstrator trajectories. Physical evaluation must instead specify the conditions under which admitted actions generate the next state.
+The **offline evaluation illusion** is the mistaken belief that lower validation loss, higher action cosine similarity, or smaller Mean Squared Error (MSE) on logged data establishes superior physical performance. Offline loss functions $\mathcal{L}_{\text{val}}(\theta) = \frac{1}{N} \sum_{i=1}^N \|a_i^* - \pi_\theta(s_i^*)\|^2$ score predictions along frozen demonstrator trajectories. The illusion is measured, not hypothetical. In a controlled study of imitation learning on simulated and real manipulation tasks, the checkpoint with the lowest validation loss was consistently worse in rollouts than the best checkpoint, and rollout success could rise while validation loss rose [@mandlekar2021matters]. Physical evaluation must instead specify the conditions under which admitted actions generate the next state.
 
-To evaluate a policy, an engineering team executes a sequence of discrete physical runs. A single trial is fully determined only when every variable that can alter the physical state trajectory is fixed or explicitly sampled. Formally, let a single trial condition be defined by a tuple $c = (s_0, e, m, \pi_\theta, \kappa)$, drawn from an operational testing distribution $\mathcal{D}$. The vector $s_0$ represents the initial state of the machine, including pose in the Special Euclidean group $\mathrm{SE}(3)$\index{SE(3) pose} (three-dimensional position and orientation), linear and angular velocities, and joint encoder positions. The environment vector $e$ captures external variables such as floor friction ($\mu$), ambient illuminance, obstacle geometry, and ambient air temperature. The machine state $m$ captures physical and hardware properties drawn from the fleet manufacturing distribution $\mathcal{M}$, encompassing unit-to-unit mechanical tolerances, battery state of charge, payload mass, tire wear, mechanical backlash\index{Mechanical backlash} in harmonic drive gearboxes, and sensor calibration matrices. The computational configuration $\pi_\theta$ encompasses the frozen policy weights $\theta$, inference quantization, scheduling deadlines, and software versions. Finally, the termination protocol $\kappa = (T_{\max}, g, \phi)$ defines the execution time limit $T_{\max}$, the spatial goal region $g$, and the binary evaluation function $\phi$ that maps the resulting trajectory to a terminal outcome $Y \in \{0, 1\}$.
+To evaluate a policy, an engineering team executes a sequence of discrete physical runs. A single trial is fully determined only when every variable that can alter the physical state trajectory is fixed or explicitly sampled. Formally, let a single trial condition be defined by a tuple $c = (s_0, e, m, \pi_\theta, \kappa)$, drawn from an operational testing distribution $\mathcal{D}$. The vector $s_0$ represents the initial state of the machine: its pose (position and orientation), linear and angular velocities, and joint encoder positions. The environment vector $e$ captures external variables such as floor friction ($\mu$), ambient illuminance, obstacle geometry, and ambient air temperature. The machine state $m$ captures physical and hardware properties drawn from the fleet manufacturing distribution $\mathcal{M}$, encompassing unit-to-unit mechanical tolerances, battery state of charge, payload mass, tire wear, lost motion and compliance in the arm's transmissions\index{Mechanical backlash}, and sensor calibration matrices. The computational configuration $\pi_\theta$ encompasses the frozen policy weights $\theta$, inference quantization, scheduling deadlines, and software versions. Finally, the termination protocol $\kappa = (T_{\max}, g, \phi)$ defines the execution time limit $T_{\max}$, the spatial goal region $g$, and the binary evaluation function $\phi$ that maps the resulting trajectory to a terminal outcome $Y \in \{0, 1\}$.
 
 In static machine learning benchmarks, inputs $(x_i, y_i)$ are sampled independently from a static data distribution $p_{\text{data}}(x, y)$. In Physical AI, the continuous trajectory $\text{Traj}(c) = (s_0, u_0, s_1, u_1, \dots, s_T)$ is generated sequentially by the closed-loop physical state transition kernel:
 $$s_{t+1} \sim \mathcal{T}(s_t, u_t; m, e), \quad a_t = \pi_\theta(s_t), \quad u_t = \text{Gate}(a_t, s_t)$$
 The true success probability under this evaluation protocol is the expected value of the binary task outcome averaged over the joint distribution of trial conditions:
 $$p(\mathcal{D}) = \mathbb{E}_{c \sim \mathcal{D}}[\phi(\text{Traj}(c))]$$
-(@sec-appendix-ml-trajectory-distribution gives the formal integral). In test engineering, the abstract distribution $\mathcal{D}$ is operationalized through a **stratified test matrix** or Latin hypercube sampling grid across controllable parameters—systematically varying payload mass, approach speed, illumination, and initial spatial standoff—while logging uncontrollable environmental parameters such as ambient temperature and floor friction. Unstratified, naive random sampling is inadequate because it oversamples benign nominal states while leaving boundary regions unvisited.
+(@sec-appendix-ml-trajectory-distribution gives the formal integral). In test engineering, the abstract distribution $\mathcal{D}$ is operationalized through a **stratified test matrix** across controllable parameters—systematically varying payload mass, approach speed, illumination, and initial spatial standoff—while logging uncontrollable environmental parameters such as ambient temperature and floor friction. Unstratified, naive random sampling is inadequate because it oversamples benign nominal states while leaving boundary regions unvisited.
 
 Here $\text{Traj}(c)$ is the physical trajectory generated under condition $c$. Changing floor friction or battery voltage changes the transition kernel $\mathcal{T}$ even with identical weights $\theta$. The sampling protocol is consequently part of the quantity being estimated.
 
@@ -174,16 +174,51 @@ The physical mechanisms that alter $c$ between trials operate independently of t
 
 First, hardware instance variance reflects the physical reality that robotic production lines do not manufacture identical copies. Even within the same manufacturing batch, robots exhibit unit-to-unit mechanical tolerances:
 
-- **Gearbox backlash and compliance**: Harmonic drive gearboxes in the arm exhibit machining tolerances resulting in joint backlash ($\Delta \theta_{\text{backlash}} \sim 0.5\text{ to }2.0\text{ mrad}$). Under direction reversals, this deadband introduces non-linear hysteresis and phase lag that destabilize tight neural feedback loops.
+- **Transmission lost motion and compliance**: The arm's strain-wave (harmonic) drives have no backlash at the gear mesh by design; their dominant nonlinearities are torsional compliance and hysteresis, and couplings or planetary stages elsewhere in a drivetrain add true backlash [@harmonicdrive2006csf]. These properties differ from unit to unit and grow with wear. Under direction reversals they introduce nonlinear hysteresis and phase lag that can destabilize tight neural feedback loops, so each unit's lost motion and stiffness are measured on the bench rather than taken from a nominal.
 - **Structural link compliance**: Elastic link deflection under payload varies across chassis assemblies, shifting the true Tool Center Point (TCP)\index{Tool center point} relative to forward kinematics calculations.
-- **Sensor assembly misalignments**: Real-world camera mounts and depth sensor brackets deviate by $\pm 1\text{ to }3\text{ mm}$ and $\pm 0.5^\circ$ from CAD nominals, introducing systematic coordinate frame offsets between sensor frame $\mathcal{F}_{\text{cam}}$ and base frame $\mathcal{F}_{\text{base}}$.
-- **Actuator electrical variance**: Motor phase resistances and torque constants ($K_t$) vary by up to $\pm 5$ percent across stator windings. Furthermore, as the battery discharges\index{State of charge (SoC)}, the drives lose voltage headroom against back-electromotive force (back-EMF)\index{Back-EMF}, shifting the torque-speed curve\index{Torque-speed curve} and diminishing acceleration authority.
+- **Sensor assembly misalignments**: Real camera mounts and depth sensor brackets deviate from their CAD nominals, introducing systematic coordinate frame offsets between sensor frame $\mathcal{F}_{\text{cam}}$ and base frame $\mathcal{F}_{\text{base}}$ whose size an extrinsic calibration of each unit measures.
+- **Actuator electrical variance**: Motor phase resistances and torque constants ($K_t$) differ across stator windings by amounts the drive datasheet's tolerance or a per-unit characterization states. Furthermore, as the battery discharges\index{State of charge (SoC)}, the drives lose voltage headroom against back-electromotive force (back-EMF)\index{Back-EMF}, shifting the torque-speed curve\index{Torque-speed curve} and diminishing acceleration authority.
 
 Second, environmental unobservables alter the physical interaction dynamics without changing camera pixels in a way the neural network recognizes. Ambient daylight shifting across the warehouse alters illuminance, causing camera auto-exposure to stretch shutter times, inducing motion blur during base turns. Direct solar glare at dawn or dusk saturates complementary metal-oxide-semiconductor (CMOS) sensor arrays, washing out visual contrast at the latch interface. On the floor, dust accumulation and ambient humidity alter the tire-floor friction coefficient ($\mu$), extending braking distance. In the manipulator arm, repeated door openings generate Joule heating ($I^2 R$)\index{Joule heating} in motor windings and warm harmonic drive lubricants, decreasing damping and expanding link dimensions. Consequently, the tool-center point meets the latch at a different spatial offset on a hot afternoon than on a cold morning. A policy evaluated across twenty trials on Unit 01 in the morning may fail completely when tested on Unit 02 in the afternoon, despite running identical frozen weights.
 
 The reset procedure moves $c$ as well. An operator who repositions the base after a difficult run may favor an easy start, and an automated reset that repeats one path heats the windings cyclically. An operator who catches a failing run and discards it as a reset erases the hardest failure from the sample. Statistical evaluation must therefore distinguish sampling variation from a change in the estimand. When $n$ trials are drawn from a fixed $\mathcal{D}$, the sample proportion $\hat{p} = \frac{1}{n} \sum_{i=1}^n Y_i$ fluctuates around $p(\mathcal{D})$, and standard estimators bound that noise. Loading the tote rack or moving the door's strike plate changes the experiment to a different distribution $\mathcal{D}'$ with its own $p(\mathcal{D}')$, and pooling the two samples combines observations from two different machines.
 
 ### Intervention-based physical metrics
+
+```{python}
+#| label: calc-evaluation-jam-reset
+#| echo: false
+#| warning: false
+#| message: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ RESET SHARE OF A JAMMED DOOR RUN (LEGO)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: Reset Latency item and @dfn-evaluation-intervention-metrics.
+# │ Show: the share of test-cell occupancy a jammed-latch reset consumes.
+# │ How: share = t_jam_reset / (t_run + t_jam_reset); t_run matches DoorCycle.
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import *
+from mlsysim.core.units import *
+from mlsysim.fmt import fmt_time, fmt_percent, check
+
+class JamReset:
+    """Occupancy share of a manual reset after a jammed latch."""
+
+    # ┌── 1. LOAD (Constants & Parameters) ─────────────────────────────────
+    t_run = 25.0 * ureg.second  # category: illustrative; door run, same as DoorCycle.t_run
+    t_jam_reset = 60.0 * ureg.second  # category: illustrative; clear a jammed pin, recalibrate, return to standoff
+
+    # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────
+    reset_share = (t_jam_reset / (t_run + t_jam_reset)).to(ureg.dimensionless).magnitude
+
+    # ┌── 3. GUARD (Assertions) ────────────────────────────────────────────
+    check(0.70 < reset_share < 0.72, "Jammed-latch reset should take about 71 percent of occupancy")
+
+    # ┌── 4. OUTPUT (Format & Export) ────────────────────────────────────────
+    t_run_str = fmt_time(t_run, unit=ureg.second, precision=0)
+    t_jam_reset_str = fmt_time(t_jam_reset, unit=ureg.second, precision=0)
+    reset_share_pct_str = fmt_percent(reset_share, precision=1)
+```
 
 A door may open after the permission path slightly reduces the proposed force. That run can satisfy the whole-machine service requirement while exposing a limitation of the raw proposer. A stop short of the door can instead preserve the physical limit while failing the task. A human recovery can complete the task without demonstrating unassisted autonomy. These outcomes require separate fields.
 
@@ -205,7 +240,7 @@ We therefore report whole-machine task completion within its time and physical l
 
 4. **Reset Latency ($T_{\text{reset}}$)**: In physical qualification campaigns, the true experimental cost is governed by the time required to recover the plant and environment after a trial concludes or aborts:
    $$T_{\text{reset}} = t_{\text{physical\_restore}} + t_{\text{calibration}} + t_{\text{telemetry\_flush}}$$
-   If a manipulation task takes 25 seconds of active execution ($t_{\text{run}} = 25\text{ s}$) but requires 60 seconds of manual reset latency ($T_{\text{reset}} = 60\text{ s}$) to clear jammed latch pins, recalibrate joint encoders, and return the base to its initial standoff, the reset latency consumes over 70 percent of test-cell occupancy. Campaigns with high reset latency create intense organizational pressure to take shortcuts—such as skipping motor thermal cooldown or repositioning the robot to easier initial poses—which corrupts trial stationarity.
+   The door run takes `{python} JamReset.t_run_str` of active execution. Its nominal reset is short (@sec-evaluation-trial-costs), but a run that jams the latch needs a manual reset of about `{python} JamReset.t_jam_reset_str` (illustrative) to clear the pin, recalibrate joint encoders, and return the base to its standoff. For such runs the reset consumes `{python} JamReset.reset_share_pct_str` percent of test-cell occupancy. Campaigns with high reset latency create intense organizational pressure to take shortcuts—such as skipping motor thermal cooldown or repositioning the robot to easier initial poses—which corrupts trial stationarity.
 
 ::: {#dfn-evaluation-intervention-metrics .callout-definition title="Intervention-based physical metrics"}
 
@@ -215,9 +250,9 @@ We therefore report whole-machine task completion within its time and physical l
 - **Mean Time Between Interventions (MTBI)**: $T_{\text{MTBI}} = \frac{T_{\text{active}}}{N_{\text{int}}} = \frac{\sum_{i=1}^n t_{\text{active}, i}}{\sum_{i=1}^n I_i}$, measuring the burden of the declared intervention class.
 - **Intervention Density ($D_{\text{int}}$)**: $D_{\text{int}} = \frac{N_{\text{int}}}{\sum_{i=1}^n L_i}$ or $1{,}000 \times \frac{N_{\text{int}}}{\sum_{i=1}^n T_{\text{steps}, i}}$, reporting interventions per kilometer or per 1,000 discrete control steps.
 - **Reset Latency ($T_{\text{reset}}$)**: $T_{\text{reset}} = t_{\text{physical\_restore}} + t_{\text{calibration}} + t_{\text{telemetry\_flush}}$, tracking physical cell recovery downtime.
-1.  **Significance**: In static machine learning, held-out accuracy is a scalar score over frozen test samples. In physical AI, scalar success rates ($Y \in \{0, 1\}$) obscure policy inadequacy whenever runtime safety envelopes, Control Barrier Functions, or human safety operators intervene to prevent collisions. Zero hardware damage can coexist with frequent human takeover or automatic adjustment; event classes determine how that burden affects service.
-2.  **Distinction**: Mean Time Between Failures (MTBF) refers to a separately defined failure event, which need not be destruction. MTBI, ACR, and $D_{\text{int}}$ describe intervention burden and strict proposer autonomy inside the tested envelope. Conflating censored interventions with unassisted survival commits the censored trial fallacy.
-3.  **Common pitfall**: Omitting Reset Latency from qualification budgets. When manual resets consume 70 percent of test-cell occupancy, operators face intense organizational pressure to bypass motor thermal cooldown periods or favor easier initial conditions, breaking trial stationarity.
+1.  **Significance**: In static machine learning, held-out accuracy is a scalar score over frozen test samples. In physical AI, scalar success rates ($Y \in \{0, 1\}$) obscure policy inadequacy whenever runtime safety envelopes, permission-path filters, or human safety operators intervene to prevent collisions. Zero hardware damage can coexist with frequent human takeover or automatic adjustment; event classes determine how that burden affects service.
+2.  **Distinction**: Mean Time Between Failures (MTBF) refers to a separately defined failure event, which need not be destruction. MTBI, ACR, and $D_{\text{int}}$ describe intervention burden and strict proposer autonomy inside the tested envelope. Counting a run that supervision cut short as unassisted survival commits the censored trial fallacy (@sec-evaluation-evidence-regimes).
+3.  **Common pitfall**: Omitting Reset Latency from qualification budgets. When manual resets consume `{python} JamReset.reset_share_pct_str` percent of test-cell occupancy, operators face intense organizational pressure to bypass motor thermal cooldown periods or favor easier initial conditions, breaking trial stationarity.
 
 :::
 
@@ -227,7 +262,7 @@ The outcome definitions identify what to count. The next choice is how to expose
 
 In standard deep learning pipelines, model performance is evaluated by computing empirical risk across a static held-out validation split $\mathcal{D}_{\text{val}} = \{(x_i, y_i)\}_{i=1}^N$:
 $$\mathcal{L}_{\text{val}}(\theta) = \frac{1}{N} \sum_{i=1}^N \ell(f_\theta(x_i), y_i)$$
-Whether the target metric is Top-1 classification accuracy, token perplexity, F1 score, or action regression loss, evaluation is fundamentally passive and decoupled. The data-generating process is feedforward and memoryless with respect to the model's predictions: mispredicting sample $i$ has zero causal influence on sample $i+1$ ($\partial x_{i+1} / \partial \hat{y}_i = 0$). Relying on this static paradigm in embodied autonomy produces the **offline evaluation illusion**: the false assumption that minimizing regression loss or maximizing action cosine similarity against static logs translates to safe, stable closed-loop execution.
+Whether the target metric is Top-1 classification accuracy, token perplexity, F1 score, or action regression loss, evaluation is fundamentally passive and decoupled. The data-generating process is feedforward and memoryless with respect to the model's predictions: mispredicting sample $i$ has zero causal influence on sample $i+1$ ($\partial x_{i+1} / \partial \hat{y}_i = 0$). Relying on this static paradigm in embodied autonomy produces the offline evaluation illusion defined in @sec-evaluation-what-measured.
 
 In Physical AI, this decoupling vanishes entirely. Actions cross the causal boundary into mass, momentum, and non-smooth contact mechanics. The policy's admitted actions physically move the plant, endogenously creating subsequent sensory inputs ($s_{t+1} = f(s_t, u_t)$). Actions are not classifications; they are physical forces, torques, and velocity setpoints that interact with inertia, friction, and backlash. A navigation policy can reproduce recorded aisle runs almost perfectly under static regression metrics, yet spend the base's entire clearance to a storage rack before traversing a third of the aisle. The difference lies in what each kind of test feeds back to the policy.
 
@@ -244,7 +279,7 @@ Why does a neural policy that achieves negligible open-loop validation loss driv
 
 For a bounded illustration, let $\ell$ be the zero-one cost of disagreeing with a deterministic expert action, rather than an arbitrary regression loss. Assume its expectation is at most $\epsilon$ under the expert state distribution at each step of a $T$-step horizon, written $\mathbb{E}_{s \sim d^*}[\ell(s, \pi_\theta(s))] \le \epsilon$. The expert's cumulative cost $J(\pi^*)$ is zero for this disagreement metric. On recorded expert states, the expected cumulative cost is bounded linearly:
 $$\mathbb{E}_{\text{open}}\left[\sum_{t=1}^T \ell(s_t^*, \pi_\theta(s_t^*))\right] \le T \epsilon$$
-In closed loop, the simplified transition $s_{t+1} = f(s_t, \pi_\theta(s_t))$ includes the fixed permission path. Couple expert and candidate runs to the same initial state and disturbances; their states agree until the first differing action. A disagreement at step $t$ can then cost at most one at each remaining step. A union bound over possible first disagreements gives this worst-case imitation-cost bound [@ross2011reduction]:
+In closed loop, the simplified transition $s_{t+1} = f(s_t, \pi_\theta(s_t))$ includes the fixed permission path. Couple expert and candidate runs to the same initial state and disturbances; their states agree until the first differing action. A disagreement at step $t$ can then cost at most one at each remaining step. A union bound over possible first disagreements gives this worst-case imitation-cost bound [@ross2010efficient; @ross2011reduction]:
 $$\mathbb{E}_{\text{closed}}\left[\sum_{t=1}^T \ell(s_t, \pi_\theta(s_t))\right] - J(\pi^*) \le \sum_{t=1}^T (T - t + 1)\epsilon = \mathcal{O}(T^2 \epsilon)$$
 This bound does not apply directly to unbounded MSE, contact force, or damage severity. A separate kinematic calculation shows one physical consequence of persistent error: an uncorrected heading or steering bias integrates forward into macroscopic lateral displacement, causing the robot to exhaust its safe clearance envelope.
 
@@ -345,7 +380,7 @@ Touching the latch can change motion abruptly: a gripper moving freely can strik
 
 1. **Why action cosine similarity fails**: In representation learning and behavior modeling, action cosine similarity:
    $$\text{Cosine}(\hat{a}, a^*) = \frac{\hat{a}^\top a^*}{\|\hat{a}\| \|a^*\|}$$
-   is widely used to measure directional alignment between predicted and expert commands. In physical contact, however, cosine similarity is dangerously deceptive because it completely discards command magnitude. Directional alignment without force calibration is useless: a policy proposal with 0.999 cosine similarity that commands 25 percent insufficient force stalls against the latch spring without overcoming static stiction ($F_t < \mu_s F_n$), stranding the robot indefinitely. Conversely, a proposal with 0.999 cosine similarity that commands 150 percent of the required force can overload the contact, potentially crossing the `{python} EvalMachine.f_trip_str` contact tripwire. Whether damage occurs depends on precontact energy, compliance, and the protective response; a trip is not evidence that the latch sheared.
+   is widely used to measure directional alignment between predicted and expert commands. In physical contact, however, cosine similarity misleads because it discards command magnitude. A policy proposal with 0.999 cosine similarity that commands 25 percent insufficient force stays below the latch's release force (its spring preload plus friction) and stalls against the latch, stranding the robot indefinitely. Conversely, a proposal with 0.999 cosine similarity that commands 150 percent of the required force can overload the contact, potentially crossing the `{python} EvalMachine.f_trip_str` contact tripwire. Whether damage occurs depends on precontact energy, compliance, and the protective response; a trip is not evidence that the latch sheared.
 
 2. **Why action mean squared error fails**: In offline supervised validation, Mean Squared Error:
    $$\text{MSE} = \frac{1}{d} \sum_{j=1}^d (\hat{a}_j - a_j^*)^2$$
@@ -353,17 +388,13 @@ Touching the latch can change motion abruptly: a gripper moving freely can strik
    $$\Delta F = k_{\text{contact}} \Delta x = (5 \times 10^5\,\text{N/m})(0.002\,\text{m}) = 1{,}000\,\text{N}$$
    This illustrative stiffness calculation estimates the force associated with the commanded penetration, not a measured impact peak or a verified gearbox yield threshold. Actual compliance and protective response determine the realized load. Offline MSE gives that contact residual the same weight as a $2\text{ mm}$ drift in free space.
 
-3. **Hardware instance variance at contact boundaries**: The sensitivity of contact dynamics exacerbates **hardware instance variance**. Unit-to-unit variations in joint backlash ($\Delta \theta_{\text{backlash}} \sim 0.5\text{ to }2.0\text{ mrad}$) and camera mounting tolerances ($\pm 1\text{ to }3\text{ mm}$) shift the spatial boundary of the contact interface. A policy trained on demonstrations logged on Unit 01 will encounter the physical latch surface earlier or later on Unit 02. Because contact is non-smooth, this microscopic spatial shift triggers immediate contact bifurcations: the arm either stalls in free space short of the latch or impacts the frame prematurely, causing physical jamming that offline evaluation on recorded logs can never expose.[^fn-math-contact-bifurcation]
+3. **Hardware instance variance at contact boundaries**: The sensitivity of contact dynamics exacerbates the hardware instance variance of @sec-evaluation-what-measured. Unit-to-unit differences in transmission lost motion and camera mounting shift the spatial boundary of the contact interface. A policy trained on demonstrations logged on Unit 01 will encounter the physical latch surface earlier or later on Unit 02. Because contact is non-smooth, this microscopic spatial shift triggers immediate contact bifurcations: the arm either stalls in free space short of the latch or impacts the frame prematurely, causing physical jamming that offline evaluation on recorded logs can never expose.[^fn-math-contact-bifurcation]
 
 The arm shows this exact disconnect in contact. An end-effector position error of a fraction of a millimeter per step scores as negligible Cartesian error offline, but on the latch that offset acts as a wedge. The latch's stiffness turns the lateral displacement into a reaction force ($F_{xy} = k_{\text{env}} \Delta_{xy}$) that climbs past the `{python} EvalMachine.f_trip_str` contact tripwire, which ends the attempt before the door unlatches.
 
 [^fn-math-contact-bifurcation]: **Contact transitions in ideal models**\index{Contact mechanics!bifurcation}: An ideal rigid-body impact produces a velocity jump ($v^+ \ne v^-$), while ideal static friction permits a range of forces. Smooth-dynamics assumptions can fail at these transitions. Real compliance regularizes the transient but does not make replay reveal whether a shifted contact will stick, slip, or jam.
 
 Offline scores can also mislead in the pessimistic direction when the task admits several valid actions. If the demonstrator passed an obstacle on the left, an open-loop score penalizes a candidate that passes on the right (the two-mode case of @sec-training-synthesis-regimes), although in closed loop both reach the goal. An action-level error measures divergence from one recording, not satisfaction of the task.
-
-::: {.column-margin .margin-pointer}
-⇄ **Contrast:** Open-loop prediction loss contrasts with the photon-to-actuation age-of-information bounds analyzed in @sec-perception-cost-ingestion.
-:::
 
 <!-- fig-alt below hand-types values because fig-alt cannot hold inline python. Keep them in sync with these cell outputs:
      "one-degree heading offset"          = AisleDrift.heading_offset_deg (1.0)
@@ -460,13 +491,13 @@ The campaign must therefore compare goal completion and contact behavior, rather
 
 The same gap separates each offline metric commonly reported for a learned policy from the machine failure it hides, and @tbl-07-offline-closed-loop-disconnect pairs each with the closed-loop measure that exposes it, among them the time to intervention $T_{\text{TTI}}$, measured from the start of policy authority to the first permission-path override (the permission path refuses a proposal and applies its fallback) or operator takeover. Together with Autonomous Completion Rate, MTBI, and Intervention Density ($D_{\text{int}}$), these closed-loop measures reveal what offline tensors hide.
 
-| Offline metric                     | Open-loop assumption                                             | Why it breaks in closed loop                                                                       | Failure on the machine                                                 | Closed-loop measure                                                                                                |
-|:-----------------------------------|:-----------------------------------------------------------------|:---------------------------------------------------------------------------------------------------|:-----------------------------------------------------------------------|:-------------------------------------------------------------------------------------------------------------------|
-| **Action mean squared error**      | Small residuals give small path deviations                       | A persistent bias integrates into drift and carries the machine off the demonstrated states        | The base spends its rack clearance (stop or strike)                    | Peak deviation from the reference path; time to intervention\index{Time-to-Intervention!metric} ($T_{\text{TTI}}$) |
-| **Discrete action accuracy**       | Correct labels on logged states give identical execution         | Benign alternatives and boundary excursions cost the same; errors correlated in time are invisible | Command chatter and joint over-torque                                  | Peak jerk; adherence to actuator torque limits                                                                     |
-| **Cosine similarity**              | Collinear proposals give stable paths                            | Magnitude is ignored, so under-actuation stalls against static friction and over-actuation slips   | The base stalls or slips its wheels; the arm stalls short of the latch | Slip ratio and damping (@sec-appendix-control-slip)                                                                |
-| **Negative log-likelihood**        | Likelihood at the expert action captures the action distribution | Valid alternatives, such as passing an obstacle on the other side, are penalized                   | Valid policies rejected; demonstrator noise imitated as jitter         | Closed-loop task success over randomized starts                                                                    |
-| **Reconstruction or Chamfer loss** | Accurate scene prediction gives safe plans                       | Background pixels outweigh thin obstacles and contact geometry                                     | Phantom braking; clipping a cable or a glass partition                 | Measured clearance; barrier-condition invariance                                                                   |
+| Offline metric                     | Open-loop assumption                                             | Why it breaks in closed loop                                                                                                    | Failure on the machine                                                 | Closed-loop measure                                                                                                |
+|:-----------------------------------|:-----------------------------------------------------------------|:--------------------------------------------------------------------------------------------------------------------------------|:-----------------------------------------------------------------------|:-------------------------------------------------------------------------------------------------------------------|
+| **Action mean squared error**      | Small residuals give small path deviations                       | A persistent bias integrates into drift and carries the machine off the demonstrated states                                     | The base spends its rack clearance (stop or strike)                    | Peak deviation from the reference path; time to intervention\index{Time-to-Intervention!metric} ($T_{\text{TTI}}$) |
+| **Discrete action accuracy**       | Correct labels on logged states give identical execution         | Benign alternatives and boundary excursions cost the same; errors correlated in time are invisible                              | Command chatter and joint over-torque                                  | Peak jerk; adherence to actuator torque limits                                                                     |
+| **Cosine similarity**              | Collinear proposals give stable paths                            | Magnitude is ignored, so under-actuation stalls against static friction and over-actuation slips                                | The base stalls or slips its wheels; the arm stalls short of the latch | Slip ratio and damping (@sec-appendix-control-slip)                                                                |
+| **Negative log-likelihood**        | Likelihood at the expert action captures the action distribution | A unimodal likelihood head averages valid alternatives, such as passing an obstacle on either side, into an invalid mean action | Valid policies rejected; demonstrator noise imitated as jitter         | Closed-loop task success over randomized starts                                                                    |
+| **Reconstruction or Chamfer loss** | Accurate scene prediction gives safe plans                       | Background pixels outweigh thin obstacles and contact geometry                                                                  | Phantom braking; clipping a cable or a glass partition                 | Measured clearance; barrier-condition invariance                                                                   |
 
 : **Offline metrics and the closed-loop failures they hide**: Each open-loop metric assumes the demonstrator's state distribution is unaffected by policy error; on the machine, biases integrate into drift, valid alternatives are penalized, and shifted states produce boundary violations. {#tbl-07-offline-closed-loop-disconnect tbl-colwidths="[18,20,24,18,20]"}
 
@@ -504,7 +535,7 @@ Shadow operation mounts the candidate policy onto an active physical machine whi
 
 Constrained physical testing closes the causal loop on real hardware by letting candidate proposals reach the actuators within a bounded envelope. Boundaries take the form of physical tethers, velocity clamps, padded test cells, or the permission path itself (@sec-boundary-machine-model), which refuses unsafe commands at a validated response rate. This regime supports claims about contact dynamics, actuator saturation, and sensor noise within the tested envelope, which is why the twenty door runs belong to it.
 
-An intervention changes or truncates the raw candidate's trajectory ($I_i \ge 1, A_i = 0$), leaving its unmitigated consequence unobserved. The permitted whole-machine trajectory may still complete the task. Constrained trials therefore report completion, intervention, and recovery metrics inside the tested envelope. Counting an intercepted run as an unassisted pass commits the **censored trial fallacy**, crediting the policy with protection supplied by the supervisor.
+An intervention changes or truncates the raw candidate's trajectory ($I_i \ge 1, A_i = 0$), leaving its unmitigated consequence unobserved. The permitted whole-machine trajectory may still complete the task. For the event "the unassisted policy fails," such a run is right-censored in the survival-analysis sense: the observation stopped before the outcome was known, so the run is neither a success nor a failure for that event. Its strict autonomy outcome is still defined, $A_i = 0$, because the policy did not complete unassisted. Constrained trials therefore report completion, intervention, and recovery metrics inside the tested envelope. Reading intercepted runs as unassisted survival commits the **censored trial fallacy**\index{Censored trial fallacy!definition}, crediting the policy with protection supplied by the supervisor.
 
 Some properties transfer across regime boundaries. Numerical outputs for identical input tensors transfer, as do algorithmic invariants, so an overflow that saturates an output in simulation saturates it on hardware given the same input; measured timing and memory pressure must be retested under each regime's bus, thermal, and scheduling load. The state distribution does not transfer. The moment the environment model changes from $f_{\text{sim}}$ to $f_{\text{real}}$, or the tested permission path changes, the sequence of states $s_0, s_1, \dots, s_t$ diverges.
 
@@ -523,23 +554,13 @@ Viewing these regimes as a ladder of fidelity is a trap. Advancing from replay t
 
 A simulator can screen latch candidates before scarce physical trials, but its usefulness depends on agreement for the mechanisms the decision uses. The paired probes in @sec-training compare contact and timing channel by channel. Evaluation carries those discrepancies into its test plan: a favorable simulated recovery nominates a physical trial; it does not close the manifest's contact or transport omissions. Visual rendering, friction regularization, and missing force observations can each change candidate rankings.
 
+Whether a simulator ranks candidates correctly is itself a measurable quantity. The check pairs the two regimes: run the same set of candidate policies, here the latch checkpoints of @sec-training, on the simulated door and on the physical door under matched initial conditions, and compare the two orderings. A correlation coefficient between simulated and physical success rates summarizes linear agreement, but a high correlation can coexist with the one inversion that matters, the simulator preferring a checkpoint that is worse on the real door. @li2024simpler therefore score rank agreement by weighting each misordered pair by its real success-rate gap, averaging each policy's worst violation into a Mean Maximum Rank Violation, and report it beside the correlation after roughly 1,500 paired simulated and real episodes. The logic transfers directly to the latch. A simulator whose rankings of past checkpoints agreed with physical trials earns the right to screen the next candidates; one that has never been checked against paired physical runs has earned nothing, however realistic its rendering. A validated ranking still licenses only screening. The physical campaign remains the source of the bound, because agreement on which candidate is better says nothing about how rarely the better one fails.
+
 ### System identification vs. domain randomization {#sec-evaluation-sysid-domain-randomization}
 
-The training methods of @sec-training leave an evaluation obligation: identify which physical variations the simulator represents and which remain absent. Calibration and randomization matter here because they determine what a simulated trial can support. Their evaluation role is to expose the limits of the proxy before its scores influence the physical campaign.
+The training methods of @sec-training leave an evaluation obligation: identify which physical variations the simulator represents and which remain absent. System identification fits the simulator's parameter vector $\boldsymbol{\xi}$ (link masses, inertias, motor constants, friction, damping) to logged hardware trajectories by minimizing one-step prediction error. The fitted $\boldsymbol{\xi}^*_{\text{Unit 01}}$ is evidence about the unit and conditions that supplied the telemetry. Heating, wear, and a second chassis move the plant away from that estimate, so the fit is checked on held-out trajectories and held-out units, and no fit can recover a mechanism absent from the simulator's equations, such as drivetrain lost motion or wiring-harness drag.
 
-A physics engine represents link masses, inertias, motor constants, friction, and damping through a parameter vector $\boldsymbol{\xi} \in \Xi$. Calibration and randomization address different uncertainties in the parameterized operator $f_{\text{sim}}(\cdot; \boldsymbol{\xi})$ relative to the physical plant $f_{\text{real}}$:
-
-**System Identification (SysID)**:
-SysID treats the physics parameters $\boldsymbol{\xi}$ as unknown deterministic constants to be calibrated against physical telemetry. Given a calibration dataset of logged hardware trajectories $\mathcal{D}_{\text{real}} = \{(s_t^{\text{real}}, u_t^{\text{real}}, s_{t+1}^{\text{real}})\}_{t=1}^K$, SysID solves a non-linear parameter optimization problem:
-$$\boldsymbol{\xi}^* = \arg\min_{\boldsymbol{\xi} \in \Xi} \sum_{t=1}^K \left\| s_{t+1}^{\text{real}} - f_{\text{sim}}(s_t^{\text{real}}, u_t^{\text{real}}; \boldsymbol{\xi}) \right\|_2^2$$
-A calibration vector $\boldsymbol{\xi}^*_{\text{Unit 01}}$ characterizes the unit and conditions that supplied its telemetry. Hardware differences, heating, and wear can move the plant away from that estimate, so evaluation needs held-out trajectories and units. Parameter fitting also cannot recover a mechanism absent from the simulator's equations, such as unmodeled backlash or wiring harness drag.
-
-**Domain Randomization (DR)**:
-Rather than seeking a single point estimate $\boldsymbol{\xi}^*$, Domain Randomization treats the physical parameters as random variables sampled from an epistemic prior distribution $p(\boldsymbol{\Xi})$ during closed-loop policy training:
-$$\theta^* = \arg\max_\theta \mathbb{E}_{\boldsymbol{\xi} \sim p(\boldsymbol{\Xi})} \left[ \sum_{t=0}^T \gamma^t R(s_t, \pi_\theta(s_t)) \right], \quad \text{subject to } s_{t+1} = f_{\text{sim}}(s_t, \pi_\theta(s_t); \boldsymbol{\xi})$$
-By exposing the candidate policy to randomized variations in surface friction ($\mu \sim \mathcal{U}[0.3, 1.2]$), link masses, and disturbance impulses across millions of parallel simulated rollouts, DR optimizes expected return over the chosen parameter distribution. It does not certify stability at every point in its support.
-
-However, DR is vulnerable to the **conservatism trap**: if the randomization distribution $p(\boldsymbol{\Xi})$ is chosen excessively wide (for instance, forcing a single manipulation policy to remain stable simultaneously across frictionless ice and high-friction rubber), the expected-return objective may spend capacity on conditions irrelevant to the intended deployment. It does not become a worst-case objective merely because the support is wide. On real hardware, this manifests as high-frequency torque chatter, sluggish motion, or an inability to generate sufficient contact force to overcome nominal static friction. Conversely, if $p(\boldsymbol{\Xi})$ is chosen too narrow, the policy collapses the moment physical hardware encounters unmodeled environmental conditions.
+Domain randomization instead trains over a distribution of $\boldsymbol{\xi}$ (@sec-training-sim-to-real-gap). Its objective is expected return over that distribution, so a randomized policy is evidence only over the sampled parameter support, and even there it is not a worst-case guarantee at every point. A distribution that is too wide can spend policy capacity on irrelevant conditions and appear on hardware as torque chatter or insufficient contact force; one that is too narrow leaves the policy exposed the moment the hardware leaves the support. For evaluation, both methods reduce to one question the record must answer: which physical variations did the simulated evidence actually span?
 
 ### Hardware-in-the-loop simulation and transport fidelity {#sec-evaluation-hil-simulation}
 
@@ -612,9 +633,18 @@ class ClopperPearsonZeroFailure:
     failure_upper = 1.0 - p_lower
     p_clean_one_in = (1.0 - 1.0 / n_one_in) ** n_runs  # chance that policy still logs n_runs clean runs
 
-    # Scaling to 99.9% reliability
-    p_target_999 = 0.999
+    p_clean_at_bound = p_lower**n_runs  # probability of n clean runs at the bound itself; equals alpha
+
+    # Scaling to 90, 99, and 99.9% reliability
+    p_target_90 = 0.90  # category: chosen; pilot target in the fallacy and the SPRT contrast
+    p_target_99 = 0.99  # category: chosen; industrial target in the prose
+    p_target_999 = 0.999  # category: chosen; the target the chapter argues toward
+    n_req_90 = calc_zero_failure_sample_size(p_target_90, confidence=confidence)
+    n_req_99 = calc_zero_failure_sample_size(p_target_99, confidence=confidence)
     n_req_999 = calc_zero_failure_sample_size(p_target_999, confidence=confidence)
+    rule_of_three_20 = 3.0 / n_runs  # Rule of Three approximation to failure_upper at n_runs
+    n_cells_joint = 2  # category: illustrative; nominal and displaced-plate cells of the recovery branch
+    n_req_999_joint = calc_zero_failure_sample_size(p_target_999, confidence=1.0 - alpha / n_cells_joint)  # Bonferroni split
     p_lower_fallacy = calc_clopper_pearson_zero_failure_bound(n_fallacy, confidence=confidence)
     p_any_false_positive = 1.0 - (1.0 - alpha) ** n_looks  # chance of at least one false positive across independent looks
 
@@ -622,6 +652,10 @@ class ClopperPearsonZeroFailure:
     check(abs(p_lower - 0.8609) < 0.001, "Unexpected 20-run lower bound")
     check(abs(failure_upper - 0.1391) < 0.001, "Unexpected 20-run upper confidence limit")
     check(n_req_999 == 2995, "Unexpected sample size for 99.9% reliability")
+    check(n_req_999_joint == 3688, "Splitting alpha over two cells should need 3,688 runs per cell")
+    check(n_req_99 == 299 and n_req_90 == 29, "Zero-failure counts for 99 and 90 percent should be 299 and 29")
+    check(abs(p_clean_at_bound - alpha) < 1e-12, "At the lower bound, n clean runs must have probability alpha")
+    check(p_clean_one_in > alpha, "The one-in-eight policy must pass 20/20 more often than alpha")
     check(n_one_in == 8 and abs(p_clean_one_in - 0.0692) < 0.001, "Unexpected clean-record probability for a one-in-eight policy")
     check(p_lower_fallacy < p_target_999 and abs(p_lower_fallacy - 0.9970) < 0.0001, "The 1,000-run bound must fall short of 99.9 percent")
     check(abs(p_any_false_positive - 0.2262) < 0.001, "Five independent 5 percent looks should give about 22.6 percent")
@@ -633,6 +667,13 @@ class ClopperPearsonZeroFailure:
     failure_upper_pct_str = fmt_percent(failure_upper, precision=1)
     p_lower_val_str = fmt(p_lower, precision=3)
     n_req_999_str = fmt_int(n_req_999, commas=True)
+    n_req_99_str = fmt_int(n_req_99, commas=True)
+    n_req_999_joint_str = fmt_int(n_req_999_joint, commas=True)
+    alpha_joint_str = fmt(alpha / n_cells_joint, precision=3)
+    n_req_90_str = fmt_int(n_req_90)
+    alpha_str = fmt(alpha, precision=2)
+    p_one_in_str = fmt(1.0 - 1.0 / n_one_in, precision=3)
+    rule_of_three_20_str = fmt(rule_of_three_20, precision=2)
     _words = {5: "five", 8: "eight"}
     n_one_in_str = MarkdownStr(_words[n_one_in])
     p_clean_one_in_pct_str = fmt_percent(p_clean_one_in, precision=1)
@@ -644,25 +685,29 @@ class ClopperPearsonZeroFailure:
 
 With the outcome, population, regime, and denominator fixed, the twenty clean nominal runs leave a statistical question. A confidence bound states how much uncertainty remains under the declared sampling model; it does not estimate failure severity or authorize deployment.
 
-A normal-approximation Wald interval collapses at an observed success fraction of one because its estimated variance vanishes. That collapse reflects a failed approximation, not certainty. For the predeclared zero-failure campaign, the exact one-sided Clopper-Pearson lower bound\index{Clopper-Pearson non-asymptotic bound!definition}\index{Clopper-Pearson method} [@clopper1934use] follows by asking which success probability would produce all $n$ successes with probability $\alpha$:
+The textbook interval for a proportion, the normal-approximation (Wald) interval $\hat p \pm 1.96\sqrt{\hat p(1-\hat p)/n}$, has zero width at an observed success fraction of one because its estimated variance vanishes. That collapse reflects a failed approximation, not certainty. The correct reasoning needs only the product rule for independent events.
+
+Suppose the true per-run success probability of the latch policy were $p$. Twenty independent runs all succeed with probability $p^{20}$. A policy that fails one run in `{python} ClopperPearsonZeroFailure.n_one_in_str` ($p =$ `{python} ClopperPearsonZeroFailure.p_one_in_str`) still produces a clean twenty-run record in `{python} ClopperPearsonZeroFailure.p_clean_one_in_pct_str` percent of campaigns, so the observed record does not rule it out. As $p$ falls, a clean record becomes less likely, and at $p =$ `{python} ClopperPearsonZeroFailure.p_lower_val_str` its probability reaches exactly $\alpha =$ `{python} ClopperPearsonZeroFailure.alpha_str`, where $\alpha$ is the significance level ($\alpha_{\text{sig}}$ on the notation page). Any smaller $p$ would make the observed record rarer than one campaign in twenty. The one-sided lower confidence bound reports the smallest success probability that the record does not make too surprising. Here "95 percent confidence" is a property of the procedure: applied to many campaigns, it places the true $p$ above its reported bound in at least 95 percent of them. It is not a 95 percent probability statement about this particular policy, and the bound is not an estimate of $p$.
+
+For a predeclared zero-failure campaign, this inversion is the exact one-sided Clopper-Pearson lower bound\index{Clopper-Pearson non-asymptotic bound!definition}\index{Clopper-Pearson method} [@clopper1934use]. Setting $p^n = \alpha$ gives
 $$p_{\text{lower}} = \alpha^{1/n}$$
-and the corresponding exact upper bound on failure probability:
+and the corresponding upper confidence limit on the per-run failure probability:
 $$p_{\text{fail, upper}} = 1 - \alpha^{1/n}$$
-The related zero-event exposure derivations are collected in @sec-appendix-ml-exposure; campaigns with failures require the general binomial inversion. Here the zero-failure result is enough to decide what the nominal door record supports.
+@Sec-evaluation-bounds-with-failures extends the same inversion to campaigns that contain failures, and @sec-appendix-ml-exposure collects the related zero-event exposure derivations.
 
-For rare failure rates ($p_{\text{fail}} \ll 1$), we obtain the celebrated **Rule of Three**\index{Rule of Three} [@hanley1983nothing] via first-order Taylor expansion: $\ln(1 - p_{\text{fail}}) = -p_{\text{fail}} - \frac{p_{\text{fail}}^2}{2} - \dots \approx -p_{\text{fail}}$. Setting the zero-failure probability $(1 - p_{\text{fail}})^n = \alpha = 0.05$ implies $n \ln(1 - p_{\text{fail}}) = \ln(0.05) \approx -2.9957 \approx -3.0$. Substituting the linear expansion yields $-n p_{\text{fail}} \approx -3.0$, establishing that when $n$ independent trials pass with zero failures, the upper 95 percent confidence bound on failure probability is approximately:
+For rare failures ($p_{\text{fail}} \ll 1$), a first-order Taylor expansion turns this bound into the **Rule of Three**\index{Rule of Three!definition} [@hanley1983nothing]. Since $\ln(1 - p_{\text{fail}}) = -p_{\text{fail}} - p_{\text{fail}}^2/2 - \dots \approx -p_{\text{fail}}$, setting the zero-failure probability $(1 - p_{\text{fail}})^n$ equal to $\alpha = 0.05$ gives $-n\,p_{\text{fail}} \approx \ln(0.05) \approx -3.0$. When $n$ independent trials pass with zero failures, the upper 95 percent confidence limit on the per-trial failure probability is therefore approximately:
 $$p_{\text{fail, upper}}^{95\%} \approx \frac{3}{n}.$$ {#eq-eval-rule-of-three}
-For the twenty door runs, @eq-eval-rule-of-three yields $p_{\text{fail, upper}}^{95\%} \approx 3/20 = 0.15$. The exact computation in \ref{nbk-evaluation-derivation-20-run-lower-bound} tightens this to a `{python} ClopperPearsonZeroFailure.failure_upper_pct_str` percent failure upper limit, which leaves the machine far short of 95 percent demonstrated reliability. Crucially, this non-asymptotic formulation demonstrates why **twenty trials cannot prove 99 percent reliability**. To mathematically certify a 99 percent operational reliability lower bound ($p_{\text{target}} = 0.99$, or $p_{\text{fail}} = 0.01$) at 95 percent confidence ($\alpha = 0.05$), the required zero-failure sample size inverts to:
-$$n = \left\lceil \frac{\ln(\alpha)}{\ln(p_{\text{target}})} \right\rceil = \left\lceil \frac{\ln(0.05)}{\ln(0.99)} \right\rceil = \left\lceil \frac{-2.99573}{-0.01005} \right\rceil = 299 \text{ consecutive trials}$$
-By contrast, twenty consecutive failure-free runs certify a lower bound of merely $p_{\text{lower}} = (0.05)^{1/20} \approx 0.8609$ (86.1 percent), leaving a massive 13.9 percent probability of physical failure unrefuted. Believing that twenty clean runs demonstrate a 99 percent reliable machine is an error of almost fifteen-fold in statistical exposure ($299$ versus $20$). A defective policy that fails once in every `{python} ClopperPearsonZeroFailure.n_one_in_str` runs ($p = 0.875$) still completes twenty consecutive runs cleanly `{python} ClopperPearsonZeroFailure.p_clean_one_in_pct_str` percent of the time—so a clean observed fraction alone cannot qualify that checkpoint at a higher reliability target.[^fn-math-rule-three]
+Read in reverse, the rule gives the trials a target needs, $n \approx 3/(1-p_{\text{target}})$, so each additional nine in the target costs ten times the trials. For the twenty door runs, @eq-eval-rule-of-three gives $3/20 =$ `{python} ClopperPearsonZeroFailure.rule_of_three_20_str`, and the exact computation in \ref{nbk-evaluation-derivation-20-run-lower-bound} gives `{python} ClopperPearsonZeroFailure.failure_upper_pct_str` percent. Per-run failure probabilities as high as `{python} ClopperPearsonZeroFailure.failure_upper_pct_str` percent remain consistent with twenty clean runs at 95 percent confidence. The record therefore cannot demonstrate 99 percent reliability. Demonstrating a 99 percent success lower limit ($p_{\text{target}} = 0.99$) at 95 percent confidence requires
+$$n = \left\lceil \frac{\ln(\alpha)}{\ln(p_{\text{target}})} \right\rceil = \left\lceil \frac{\ln(0.05)}{\ln(0.99)} \right\rceil$$
+or `{python} ClopperPearsonZeroFailure.n_req_99_str` consecutive clean trials, against the twenty the campaign ran.[^fn-math-rule-three]
 
-Moreover, this statistical bound assumes stationary, identically distributed draws across trials—an assumption routinely shattered on physical testbeds by **hardware instance variance**. If twenty trials are executed on a single physical robot (Unit 01), they characterize that unit's individual harmonic drive gear backlash ($\Delta \theta_{\text{backlash}} \sim 1\text{ mrad}$), motor torque constant tolerance ($\pm 5$ percent), and sensor mounting alignment. When deployed onto Unit 02, differing machining tolerances, gear backlash, and structural compliance alter the physical transfer function, converting nominal runs into latch jams without changing a single neural weight.
+The bound also assumes stationary, identically distributed draws. Twenty runs on Unit 01 characterize that unit's transmission compliance, motor constants, and sensor mounting (@sec-evaluation-what-measured); Unit 02 samples a different plant, and its nominal runs can jam the latch without a single changed weight.
 
 [^fn-math-rule-three]: **Continuous-time Poisson equivalence of the Rule of Three**: The Rule of Three applies equally to continuous-time Poisson processes with constant hazard rate $\lambda$. For a declared failure event, if qualifying exposure totals $T$ with zero such events, the probability of zero Poisson arrivals is $P(N(T) = 0) = e^{-\lambda T}$. Equating this to significance level $\alpha = 0.05$ yields $-\lambda T = \ln(0.05) \approx -2.9957$, proving that the 95 percent upper confidence limit on failure rate is $\lambda_{\text{upper}} \approx 3.0/T$, or conversely that bounding $\lambda \le \lambda_{\text{target}}$ requires exposure time $T \ge 3.0 / \lambda_{\text{target}}$. To certify a target Mean Time Between Failures of $\text{MTBF} = 1/\lambda_{\text{target}}$, the model requires total qualifying zero-event exposure of at least three times the target MTBF ($T \ge 3.0 \times \text{MTBF}$). Exposure may span sessions or units when the pooling assumptions hold. Interventions are counted separately unless the declared failure event includes them; a supervised campaign does not estimate the unassisted hazard rate.
 
 ::: {.column-margin}
 ![](images/svg/margin_nonasymptotic_reliability_ladder.svg){width="100%" fig-alt="Vertical ladder comparing trial sample sizes against achievable statistical reliability bounds."}
-*Twenty consecutive zero-failure runs bound reliability at only 86 percent, requiring thousands of runs for high-assurance certification.*
+*Twenty consecutive zero-failure runs bound reliability from below at `{python} ClopperPearsonZeroFailure.p_lower_pct_str` percent at 95 percent confidence; a 99.9 percent lower limit needs thousands of runs.*
 :::
 
 ::: {#nbk-evaluation-derivation-20-run-lower-bound .callout-notebook title="Derivation of the 20-run lower bound"}
@@ -672,6 +717,73 @@ Moreover, this statistical bound assumes stationary, identically distributed dra
 
 **Systems insight**: The observation "`{python} ClopperPearsonZeroFailure.n_runs_str` out of `{python} ClopperPearsonZeroFailure.n_runs_str` passed" supplies a confidence limit under those sampling assumptions, not an observed failure rate, a mean interval between failures, or a deployment permission. Inverting the bound gives the trials a target needs, $n = \lceil \ln\alpha / \ln p_{\text{target}} \rceil$\index{Clopper-Pearson method!sample size bound}, so a $99.9$ percent success lower limit requires `{python} ClopperPearsonZeroFailure.n_req_999_str` consecutive zero-failure trials drawn from the target distribution.
 :::
+
+### Bounds when failures occur {#sec-evaluation-bounds-with-failures}
+
+```{python}
+#| label: calc-evaluation-bound-with-failures
+#| echo: false
+#| warning: false
+#| message: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ ONE-SIDED CLOPPER-PEARSON LOWER BOUND WITH FAILURES (LEGO)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @sec-evaluation-bounds-with-failures.
+# │ Show: the 95 percent lower bound when a twenty-run campaign has one failure,
+# │       beside the zero-failure bound.
+# │ How: solve P(X >= k | n, p) = alpha for p by bisection, X ~ Binomial(n, p);
+# │      at k = n this reduces to p^n = alpha (the zero-failure case).
+# └─────────────────────────────────────────────────────────────────────────────
+import math
+from mlsysim import *
+from mlsysim.fmt import fmt_percent, check
+
+def _binom_upper_tail(k, n, p):
+    """P(X >= k) for X ~ Binomial(n, p)."""
+    return sum(math.comb(n, j) * p**j * (1.0 - p) ** (n - j) for j in range(k, n + 1))
+
+def _cp_lower(k, n, alpha):
+    """One-sided Clopper-Pearson lower limit on p after k successes in n trials."""
+    if k == 0:
+        return 0.0
+    lo, hi = 0.0, 1.0
+    for _ in range(200):
+        mid = 0.5 * (lo + hi)
+        if _binom_upper_tail(k, n, mid) > alpha:
+            hi = mid
+        else:
+            lo = mid
+    return 0.5 * (lo + hi)
+
+class BoundWithFailures:
+    """Lower confidence bound for a campaign that records failures."""
+
+    # ┌── 1. LOAD (Constants & Parameters) ─────────────────────────────────
+    n_runs = ClopperPearsonZeroFailure.n_runs  # category: illustrative; the opening campaign size
+    n_fail = 1  # category: illustrative; one failed run in the same campaign
+    alpha = ClopperPearsonZeroFailure.alpha  # category: chosen; one-sided significance level
+
+    # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────
+    k_success = n_runs - n_fail
+    p_lower_one_fail = _cp_lower(k_success, n_runs, alpha)
+    p_lower_zero_fail = _cp_lower(n_runs, n_runs, alpha)
+    p_hat = k_success / n_runs
+
+    # ┌── 3. GUARD (Assertions) ────────────────────────────────────────────
+    check(abs(p_lower_zero_fail - ClopperPearsonZeroFailure.p_lower) < 1e-9, "k = n must reproduce alpha^(1/n)")
+    check(abs(p_lower_one_fail - 0.7839) < 0.0005, "19 of 20 should give a 95 percent lower bound near 78.4 percent")
+    check(p_lower_one_fail < p_lower_zero_fail < 1.0, "A failure must lower the bound")
+
+    # ┌── 4. OUTPUT (Format & Export) ────────────────────────────────────────
+    p_hat_pct_str = fmt_percent(p_hat, precision=0)
+    p_lower_one_fail_pct_str = fmt_percent(p_lower_one_fail, precision=1)
+```
+
+A campaign that records a failure still supports a bound; it answers the same question with a different event. With $k$ successes in $n$ runs, the one-sided lower limit is the success probability $p$ at which a record at least this good has probability $\alpha$:
+$$P(X \ge k \mid n, p) = \sum_{j=k}^{n} \binom{n}{j} p^{j} (1-p)^{n-j} = \alpha,$$
+where $X$ counts successes. At $k = n$ the sum has one term, $p^n = \alpha$, which is the zero-failure bound above. With one failure in twenty runs the equation becomes $p^{20} + 20\,p^{19}(1-p) = \alpha$, which has no closed form; solved numerically, it gives a 95 percent lower limit of `{python} BoundWithFailures.p_lower_one_fail_pct_str` percent, against `{python} ClopperPearsonZeroFailure.p_lower_pct_str` percent for the clean record, while the observed fraction is `{python} BoundWithFailures.p_hat_pct_str` percent. Equivalently, the limit is a quantile of a Beta distribution, which is how statistical libraries compute it.
+
+Two practical cautions follow. First, the failure stays in the record; a campaign that stops at its first failure and restarts cannot then report a zero-failure bound on the runs that followed (@sec-evaluation-trials-per-claim). Second, the Clopper-Pearson bound is conservative by construction, because its coverage is at least the nominal level for every $p$. Brown, Cai, and DasGupta recommend the Wilson or Jeffreys intervals for routine interval estimation because their coverage stays close to nominal with shorter intervals [@brown2001interval]. For a qualification claim, where overstating reliability is the costly error, the conservative exact bound is the defensible default, and the record states which method it used.
 
 The nominal door result now has a defined interpretation. Raising the desired lower limit changes the trial count and the physical cost of collecting it.
 
@@ -722,6 +834,7 @@ class DoorCycle:
 
     # ┌── 3. GUARD (Assertions) ────────────────────────────────────────────
     check(abs(t_cycle.to(ureg.second).magnitude - 40.0) < 1e-9, "Door cycle should be 40 s")
+    check(t_run == JamReset.t_run, "The door run must match the jammed-reset example")
     check(n_target == 2995, "Zero-failure trials for a 99.9 percent lower limit should be 2,995")
     check(abs(t_opening.to(minute).magnitude - 13.33) < 0.005, "Twenty runs should take about 13.3 min")
     check(abs(t_target.to(ureg.hour).magnitude - 33.28) < 0.005, "2,995 runs should take about 33.3 h")
@@ -761,10 +874,7 @@ The plant also changes while the trials accumulate. The confidence bound assumes
 
 The target success probability and confidence level determine the required evidence. If the facility cannot afford the corresponding exposure, the campaign must narrow its claim rather than report an underpowered result as qualification.
 
-A zero-failure empirical campaign is sized by inverting the exact Clopper--Pearson binomial survival bound of @sec-evaluation-closed-loop-survival for the trial count $n$:
-$$n \ge \frac{\ln(1 - C)}{\ln(p_{\text{target}})}$$
-where $C$ is the required statistical confidence (typically 95 percent, so $\alpha = 1 - C = 0.05$) and $p_{\text{target}}$ is the lower success probability threshold. For rare failure probabilities ($p_{\text{fail}} = 1 - p_{\text{target}} \ll 1$) at 95 percent confidence ($\ln(1 - C) = \ln(0.05) \approx -2.9957 \approx -3.0$), the first-order Taylor approximation $\ln(p_{\text{target}}) = \ln(1 - p_{\text{fail}}) \approx -p_{\text{fail}}$ connects this exact formula directly to the Rule of Three:
-$$n \approx \frac{3}{p_{\text{fail}}} = \frac{3}{1 - p_{\text{target}}}.$$
+A zero-failure empirical campaign is sized by inverting the exact bound of @sec-evaluation-closed-loop-survival for the trial count, $n \ge \ln\alpha / \ln p_{\text{target}}$, where $\alpha$ is one minus the required confidence and $p_{\text{target}}$ is the success lower limit the claim needs. For rare failures, the Rule of Three (@eq-eval-rule-of-three) approximates the same count as $n \approx 3/(1-p_{\text{target}})$.
 
 The notebook below translates the target into a trial budget. A campaign with any failures needs the general binomial bound; it cannot recover a zero-failure claim by appending enough clean runs after inspecting the result.
 
@@ -775,7 +885,7 @@ A fixed-sample zero-failure protocol may reject a candidate at the first failure
 ::: {#nbk-evaluation-statistical-scaling-high-reliability-assurance .callout-notebook title="Statistical scaling of assurance"}
 **Problem**: Suppose an evaluation target calls for a one-sided success lower limit of $p_{\text{target}} = 0.999$ at 95 percent confidence ($\alpha = 0.05$). If each door trial requires $T_{\text{trial}} =$ `{python} DoorCycle.t_cycle_str`, how many zero-failure runs and how much wall-clock testing time are required?
 
-**Calculations**: The inversion of \ref{nbk-evaluation-derivation-20-run-lower-bound} gives $n = \lceil\ln(0.05)/\ln(0.999)\rceil = 2{,}995$ consecutive zero-failure trials. At `{python} DoorCycle.t_cycle_str` per trial, this demands $T_{\text{total}} =$ `{python} ClopperPearsonZeroFailure.n_req_999_str` $\times$ `{python} DoorCycle.t_cycle_str` $\approx$ `{python} DoorCycle.t_target_str` (`{python} DoorCycle.t_target_days_str`) of continuous testing. With a `{python} DoorCycle.n_operators_str`-operator safety protocol, this consumes `{python} DoorCycle.t_target_operator_str` of operator time, or over `{python} DoorCycle.shifts_floor_str` eight-hour shifts.
+**Calculations**: The inversion of \ref{nbk-evaluation-derivation-20-run-lower-bound} gives $n = \lceil\ln(0.05)/\ln(0.999)\rceil =$ `{python} ClopperPearsonZeroFailure.n_req_999_str` consecutive zero-failure trials. At `{python} DoorCycle.t_cycle_str` per trial, this demands $T_{\text{total}} =$ `{python} ClopperPearsonZeroFailure.n_req_999_str` $\times$ `{python} DoorCycle.t_cycle_str` $\approx$ `{python} DoorCycle.t_target_str` (`{python} DoorCycle.t_target_days_str`) of continuous testing. With a `{python} DoorCycle.n_operators_str`-operator safety protocol, this consumes `{python} DoorCycle.t_target_operator_str` of operator time, or over `{python} DoorCycle.shifts_floor_str` eight-hour shifts.
 
 **Systems insight**: Even on a cycle as short as the door's, a 99.9 percent lower limit costs `{python} DoorCycle.t_target_days_str` of continuous test-cell occupancy, and a longer cycle scales it in proportion. A component replacement during the campaign may require a new population definition rather than pooling incompatible runs.
 :::
@@ -848,10 +958,7 @@ plt.show()
 
 :::
 
-@Fig-07-confidence-bounds maps this statistical reality across trial counts from 10 to 4,200 on a logarithmic horizontal axis against the success lower limit (60 to 100 percent) on the vertical axis:
-
-- **Steep initial gains**: At small sample sizes, each additional clean trial produces substantial statistical leverage. For instance, twenty zero-failure trials (the left marked point) establish an $86.1$ percent success lower bound at 95 percent confidence (with an upper failure bound of $13.9$ percent).
-- **Asymptotic flattening**: As the target reliability approaches unity, the curves flatten dramatically due to the logarithmic relationship $n = \lceil \ln(1-C) / \ln(p_{\text{target}}) \rceil$. Reaching a $99.9$ percent success lower limit at 95 percent confidence (the right marked point) demands $2{,}995$ consecutive zero-failure trials—requiring $33.3$ hours of continuous test-cell occupancy for a 40-second door cycle.
+@Fig-07-confidence-bounds shows the cost of each additional nine. Early clean trials raise the lower limit quickly, from `{python} ClopperPearsonZeroFailure.p_lower_pct_str` percent at twenty runs, but because the required count grows as $3/(1-p_{\text{target}})$, each further nine costs ten times the trials, and a 99.9 percent limit takes `{python} ClopperPearsonZeroFailure.n_req_999_str` runs, or `{python} DoorCycle.t_target_str` at the `{python} DoorCycle.t_cycle_str` door cycle.
 
 ```{python}
 #| label: calc-evaluation-confidence-table
@@ -917,15 +1024,15 @@ When the twenty door runs are over, the record they leave behind is the form in 
 
 \Needspace{28\baselineskip}
 
-| Record Schema Field           | Physical / Statistical Modality                                                                                                                                                                                                                                                           | Cryptographic & Provenance Guarantee                                                    | Downstream Verifier & Usage                                                                                      |
-|:------------------------------|:------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|:----------------------------------------------------------------------------------------|:-----------------------------------------------------------------------------------------------------------------|
-| **`target_odd_boundary`**     | Target Operational Design Domain (ODD): the sampled cells of the declared ODD, here the nominal strike plate at the `{python} EvalMachine.v_approach_str` guarded approach under the door's own latch load, base stopped                                                                  | Signed ODD specification; must lie inside the policy manifest's `declared_odd_boundary` | Defining tested conditions and calibrated OOD alerts; physical gating remains independent                        |
-| **`component_hashes`**        | Policy manifest digest, frozen neural network weights ($H(\theta)$), inference engine binary, chassis serial number, unit hardware tolerances (joint backlash $\Delta \theta_{\text{backlash}}$, structural link compliance), tire batch, sensor calibration matrices, and firmware build | SHA-256 binary digests, hardware UUID, ISO 9001 calibration certificate references      | Supporting configuration traceability; preventing unrecorded hardware substitutions or unit-specific overfitting |
-| **`sampling_protocol`**       | Target-distribution draw weights or per-stratum quotas, PRNG seed, reset procedure, and independence audit                                                                                                                                                                                | Automated test harness configuration script hash, telemetry sequence log                | Auditing against optional stopping and testing against hidden autocorrelation across trials                      |
-| **`complete_outcome_ledger`** | Full-denominator task, autonomy, and protection outcomes; raw counts ($n_{\text{attempted}}$, $n_{\text{unassisted}}$, $N_{\text{int}}$, $n_{\text{estop}}$, $n_{\text{timeout}}$) and physical metrics ($\text{ACR}$, MTBI, $D_{\text{int}}$, and $T_{\text{reset}}$ time-series)        | Monotonic microsecond hardware timestamps, uninterrupted ring-buffer telemetry          | Preventing censored trial fallacy; calculating uncorrupted empirical reliability and supervisory burden          |
-| **`statistical_evidence`**    | Exact non-asymptotic Clopper-Pearson binomial lower bound, Rule of Three limit, or a predeclared sequential decision record with its error calibration; Poisson rate for modeled physical exposure                                                                                        | Cryptographic verification signature, reproducible Python evaluation script             | Passing bounded evidence and explicit assumptions to @sec-verification                                           |
-| **`unsupported_gap_catalog`** | Explicit catalog of unvisited state spaces and omitted dynamics (surface water, dynamic crowds); contains the provenance record's known absences and the manifest's omission log                                                                                                          | Declared non-support manifest, signed safety engineering sign-off                       | Parameterizing the permission path's checks, CBF constraints, and fallback policies in Part III                  |
-| **`runtime_monitor_specs`**   | For each monitorable boundary of the claim: signal, threshold, and tested response, across the five channels of @sec-evaluation-limits                                                                                                                                                    | Measured detection coverage and false-negative rate per channel                         | Implemented by the permission path and the observation contract's health field; read by the enforcement record   |
+| Record Schema Field           | Physical / Statistical Modality                                                                                                                                                                                                                                                    | Cryptographic & Provenance Guarantee                                                    | Downstream Verifier & Usage                                                                                      |
+|:------------------------------|:-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|:----------------------------------------------------------------------------------------|:-----------------------------------------------------------------------------------------------------------------|
+| **`target_odd_boundary`**     | Target Operational Design Domain (ODD): the sampled cells of the declared ODD, here the nominal strike plate at the `{python} EvalMachine.v_approach_str` guarded approach under the door's own latch load, base stopped                                                           | Signed ODD specification; must lie inside the policy manifest's `declared_odd_boundary` | Defining tested conditions and calibrated OOD alerts; physical gating remains independent                        |
+| **`component_hashes`**        | Policy manifest digest, frozen neural network weights ($H(\theta)$), inference engine binary, chassis serial number, unit hardware tolerances (transmission lost motion and stiffness, structural link compliance), tire batch, sensor calibration matrices, and firmware build    | SHA-256 binary digests, hardware UUID, ISO 9001 calibration certificate references      | Supporting configuration traceability; preventing unrecorded hardware substitutions or unit-specific overfitting |
+| **`sampling_protocol`**       | Target-distribution draw weights or per-stratum quotas, PRNG seed, reset procedure, and independence audit                                                                                                                                                                         | Automated test harness configuration script hash, telemetry sequence log                | Auditing against optional stopping and testing against hidden autocorrelation across trials                      |
+| **`complete_outcome_ledger`** | Full-denominator task, autonomy, and protection outcomes; raw counts ($n_{\text{attempted}}$, $n_{\text{unassisted}}$, $N_{\text{int}}$, $n_{\text{estop}}$, $n_{\text{timeout}}$) and physical metrics ($\text{ACR}$, MTBI, $D_{\text{int}}$, and $T_{\text{reset}}$ time-series) | Monotonic microsecond hardware timestamps, uninterrupted ring-buffer telemetry          | Preventing censored trial fallacy; calculating uncorrupted empirical reliability and supervisory burden          |
+| **`statistical_evidence`**    | Exact non-asymptotic Clopper-Pearson binomial lower bound, Rule of Three limit, or a predeclared sequential decision record with its error calibration; Poisson rate for modeled physical exposure                                                                                 | Cryptographic verification signature, reproducible Python evaluation script             | Passing bounded evidence and explicit assumptions to @sec-verification                                           |
+| **`unsupported_gap_catalog`** | Explicit catalog of unvisited state spaces and omitted dynamics (surface water, dynamic crowds); contains the provenance record's known absences and the manifest's omission log                                                                                                   | Declared non-support manifest, signed safety engineering sign-off                       | Parameterizing the permission path's checks, CBF constraints, and fallback policies in Part III                  |
+| **`runtime_monitor_specs`**   | For each monitorable boundary of the claim: signal, threshold, and tested response, across the five channels of @sec-evaluation-limits                                                                                                                                             | Measured detection coverage and false-negative rate per channel                         | Implemented by the permission path and the observation contract's health field; read by the enforcement record   |
 
 : **Physical policy predeployment evaluation record schema**: Fields the evaluation record adds to the policy manifest it consumes, recording the target ODD, configuration digests, the sampling protocol, the complete-denominator trial ledger, non-asymptotic confidence bounds, the unsupported coverage gaps, and the runtime monitor specifications. {#tbl-07-evaluation-record-schema tbl-colwidths="[20,18,22,40]"}
 
@@ -941,7 +1048,7 @@ The statistical specification defines the point estimator, confidence method, no
 
 Consider the twenty-run door campaign that opened this chapter. The latch policy opened the cage door twenty times from the `{python} EvalMachine.standoff_str` standoff at the `{python} EvalMachine.v_approach_str` guarded approach, with the base stopped and no permission-path override. An auditor reads the record's statistical evidence as the exact bound of @sec-evaluation-closed-loop-survival, a 95 percent lower confidence limit of `{python} ClopperPearsonZeroFailure.p_lower_pct_str` percent, never as the degenerate interval $[1.0, 1.0]$.
 
-The completed record exposes the structural limits of the claim, and it shows how far the evidence narrowed on its way through Part II. The scenario ledger of @sec-data-policy-coverage crossed `{python} EvalMachine.n_plate_positions_str` strike-plate positions with `{python} EvalMachine.n_speeds_str` approach speeds, `{python} EvalMachine.n_cells_str` cells in all, and the retained demonstrations supported `{python} EvalMachine.n_supported_str`, the nominal plate at the guarded approach. The policy manifest made that cell the declared ODD of `latch-bc-01`, the target ODD took in the whole cell, the twenty clean runs were drawn from it, and they bound the failure probability there at `{python} ClopperPearsonZeroFailure.failure_upper_pct_str` percent, the one-sided upper confidence limit under the tested iid distribution (@tbl-07-confidence-bounds). Everything that narrowing left out enters the coverage gap catalog as a gap the campaign inherited rather than closed. The `{python} EvalMachine.n_absences_str` cells that held zero demonstrations hold zero trials as well, including the displaced-plate conditions. Because `latch-bc-01` was trained without a simulator, its own omission log is empty. The `{python} EvalMachine.n_omissions_str` unclosed simulator omissions, soft penalty contact and missing transport lag, belong to its simulator-trained descendants, the distilled student `latch-sim-02` and the residual candidate `latch-res-03`; those descendants require separate evidence, and this record cannot close their omissions or transfer its result to their changed weights. The trials add a gap of their own, because the base carried nothing in its `{python} EvalMachine.rack_capacity_str` tote rack, so the record says nothing about the loaded machine. The record shows why twenty successful runs cannot support a high-reliability claim (which requires at least $n=299$ zero-failure runs for 99 percent reliability at 95 percent confidence), and it gives a fixed basis for refusing any assertion that the policy is ready for unmonitored deployment.
+The completed record exposes the structural limits of the claim, and it shows how far the evidence narrowed on its way through Part II. The scenario ledger of @sec-data-policy-coverage crossed `{python} EvalMachine.n_plate_positions_str` strike-plate positions with `{python} EvalMachine.n_speeds_str` approach speeds, `{python} EvalMachine.n_cells_str` cells in all, and the retained demonstrations supported `{python} EvalMachine.n_supported_str`, the nominal plate at the guarded approach. The policy manifest made that cell the declared ODD of `latch-bc-01`, the target ODD took in the whole cell, the twenty clean runs were drawn from it, and they bound the failure probability there at `{python} ClopperPearsonZeroFailure.failure_upper_pct_str` percent, the one-sided upper confidence limit under the tested iid distribution (@tbl-07-confidence-bounds). Everything that narrowing left out enters the coverage gap catalog as a gap the campaign inherited rather than closed. The `{python} EvalMachine.n_absences_str` cells that held zero demonstrations hold zero trials as well, including the displaced-plate conditions. Because `latch-bc-01` was trained without a simulator, its own omission log is empty. The `{python} EvalMachine.n_omissions_str` unclosed simulator omissions, soft penalty contact and missing transport lag, belong to its simulator-trained descendants, the distilled student `latch-sim-02` and the residual candidate `latch-res-03`; those descendants require separate evidence, and this record cannot close their omissions or transfer its result to their changed weights. The trials add a gap of their own, because the base carried nothing in its `{python} EvalMachine.rack_capacity_str` tote rack, so the record says nothing about the loaded machine. The record shows why twenty successful runs cannot support a high-reliability claim (which requires at least `{python} ClopperPearsonZeroFailure.n_req_99_str` zero-failure runs for a 99 percent success lower limit at 95 percent confidence), and it gives a fixed basis for refusing any assertion that the policy is ready for unmonitored deployment.
 
 ### Qualifying a recovery update {#sec-evaluation-recovery-update}
 
@@ -949,7 +1056,7 @@ The original nominal campaign remains unchanged. A separate, explicitly stipulat
 
 The evaluator freezes the new weights and reserves fresh physical runs from both the nominal cell and that recovery cell. The nominal campaign checks regression against the original service requirement; the displaced-plate campaign checks the proposed expansion. Each has its own full denominator, declared within-cell sampling distribution, fixed time limit, strict autonomy predicate, and contact limits. Development rollouts and the earlier checkpoint's twenty runs do not enter either new candidate's denominator.
 
-Suppose, solely for this worked evidence branch, that each cell supplies `{python} ClopperPearsonZeroFailure.n_req_999_str` independent zero-failure trials under that predeclared protocol, with on-time door completion, no counted overrides, and no contact-limit violation. Each cell then reaches the existing 99.9 percent one-sided success lower target at `{python} ClopperPearsonZeroFailure.confidence_pct_str` percent confidence. These are separate marginal bounds; a simultaneous claim across both cells requires its own confidence allocation. At the illustrative `{python} DoorCycle.t_cycle_str` cycle, each campaign occupies `{python} DoorCycle.t_target_str` before additional recovery-specific reset, cooldown, or maintenance time. A different measured recovery cycle changes the time budget, not the required sample count.
+Suppose, solely for this worked evidence branch, that each cell supplies `{python} ClopperPearsonZeroFailure.n_req_999_str` independent zero-failure trials under that predeclared protocol, with on-time door completion, no counted overrides, and no contact-limit violation. Each cell then reaches the existing 99.9 percent one-sided success lower target at `{python} ClopperPearsonZeroFailure.confidence_pct_str` percent confidence. These are separate marginal bounds; a simultaneous claim across both cells requires its own confidence allocation. Splitting $\alpha$ equally between the two cells (a Bonferroni allocation) gives each cell $\alpha =$ `{python} ClopperPearsonZeroFailure.alpha_joint_str` and raises the per-cell count to `{python} ClopperPearsonZeroFailure.n_req_999_joint_str` clean runs. At the illustrative `{python} DoorCycle.t_cycle_str` cycle, each campaign occupies `{python} DoorCycle.t_target_str` before additional recovery-specific reset, cooldown, or maintenance time. A different measured recovery cycle changes the time budget, not the required sample count.
 
 Under those stipulated premises, the evaluation record supports the new candidate on the nominal and newly evaluated displaced-plate cells of the tested unit. The original candidate retains its original narrower evidence. Other plate positions, faster approaches, loaded operation, and other chassis remain outside this extension. If normal permission-path adjustments occur while tasks still finish, the evaluator instead records successful whole-machine service alongside reduced strict proposer autonomy and recomputes the relevant bounds from those outcomes. Protective adjustment is not erased to improve ACR, nor mislabeled as a service failure.
 
@@ -1031,7 +1138,7 @@ When the event of interest is a hazard per operating hour, rather than a failed 
 
 The **exposure wall**\index{Exposure wall!definition} is the failure-free exposure a zero-event test needs before it can bound a hazard rate. Under a constant-rate model at 95 percent confidence, $T \ge -\ln(0.05)/\lambda \approx 3.0/\lambda$: a target of $\lambda=10^{-6}$ per hour needs `{python} ExposureWall.t_e6_math` failure-free hours (`{python} ExposureWall.yr_e6_str` machine-years), and $\lambda=10^{-9}$ per hour needs `{python} ExposureWall.t_e9_math`.
 
-Butler and Finelli drew the design conclusion from this arithmetic [@butler1993infeasibility] (\ref{psp-evaluation-untestable-reliability}). A fleet does not rescue the test, because `{python} ExposureWall.fleet_rigs_str` rigs running continuously would still need about `{python} ExposureWall.yr_e9_fleet_str` calendar years at $10^{-9}$ per hour. Road-vehicle mileage meets the same wall (@fig-07-av-miles-scaling), and simulated miles add no physical exposure to it. A high-assurance claim therefore rests on independently validated runtime constraints and structured fault injection (@sec-verification-deriving-fault-list).[^fn-std-iso-asil]
+Butler and Finelli drew the design conclusion from this arithmetic [@butler1993infeasibility] (\ref{psp-evaluation-untestable-reliability}). A fleet does not rescue the test, because `{python} ExposureWall.fleet_rigs_str` rigs running continuously would still need about `{python} ExposureWall.yr_e9_fleet_str` calendar years at $10^{-9}$ per hour. Road-vehicle mileage meets the same wall (@fig-07-av-miles-scaling). A high-assurance claim therefore rests on independently validated runtime constraints and structured fault injection (@sec-verification-deriving-fault-list).[^fn-std-iso-asil]
 
 [^fn-std-iso-asil]: **Functional safety scope**\index{Functional safety!random hardware metrics}\index{ISO 26262!ASIL D}: Functional safety standards define context-specific hardware metrics and assurance processes; a single failure-rate number cannot be assigned to all physical AI systems or certified by mileage alone. The Poisson examples here are analytical targets, not claims of compliance with IEC 61508 or ISO 26262.
 
@@ -1039,39 +1146,126 @@ Butler and Finelli drew the design conclusion from this arithmetic [@butler1993i
 **Result**: Butler and Finelli argued that validating ultra-high reliability requirements for life-critical cyber-physical systems (such as commercial fly-by-wire flight control software requiring a catastrophic failure rate $\lambda \le 10^{-9}\text{ failures/hour}$) through operational testing alone is infeasible [@butler1993infeasibility].
 :::
 
-::: {#fig-07-av-miles-scaling fig-env="figure" fig-pos="htb" fig-cap="**Autonomous miles scaling deficit**: Constructed physical and simulated mileage series against RAND Table 1 [@kalra2016driving], which gives 275 million zero-failure physical miles for a 95 percent upper confidence limit at the human fatality rate and 8.8 billion miles for ±20 percent rate precision. Simulated miles add no physical exposure." fig-alt="Log-scale constructed illustration of physical and simulated miles from 2010 to 2024. Horizontal lines mark RAND Table 1 examples: 275 million zero-failure miles for a one-sided upper limit at the human fatality rate and 8.8 billion physical miles for ±20 percent fatality-rate precision. The series are not audited fleet exposure; simulated miles cannot satisfy physical-mile thresholds."}
+```{python}
+#| label: calc-evaluation-av-exposure
+#| echo: false
+#| warning: false
+#| message: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ ROAD-VEHICLE EXPOSURE REQUIREMENTS AGAINST A REAL FLEET TOTAL (LEGO)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @fig-07-av-miles-scaling and the paragraph after it.
+# │ Show: RAND's miles-to-demonstrate requirements for three human-driver
+# │       benchmark rates and three statistical questions, beside Waymo's
+# │       rider-only mileage through January 2025.
+# │ How: literature values, transcribed; Q1 is re-derived as -ln(0.05)/rate to
+# │      guard the transcription. Promotion candidate: literature registry.
+# │ Sources: Kalra and Paddock, RAND RR-1478 (2016), Table 1; Kusano et al.,
+# │          Traffic Injury Prevention 26(sup1), 2025.
+# └─────────────────────────────────────────────────────────────────────────────
+import math
+from mlsysim.fmt import fmt, fmt_int, check, MarkdownStr
+
+class AvExposure:
+    """RAND Table 1 mileage requirements and one dated fleet exposure total."""
+
+    # ┌── 1. LOAD (Constants & Parameters) ─────────────────────────────────
+    # Human-driver benchmark rates, events per 100 million miles (RAND Table 1 column heads)
+    rate_fatal = 1.09  # category: literature; RAND RR-1478 Table 1 (A)
+    rate_injury = 77.0  # category: literature; RAND RR-1478 Table 1 (B), reported injuries
+    rate_crash = 190.0  # category: literature; RAND RR-1478 Table 1 (C), reported crashes
+    # Miles required, millions: rows (1) zero failures, 95% upper limit at the benchmark;
+    # (2) rate within 20% at 95%; (3) 20% better than human at 95% and 80% power
+    miles_fatal = (275.0, 8800.0, 11000.0)  # category: literature; RAND RR-1478 Table 1
+    miles_injury = (3.9, 125.0, 161.0)  # category: literature; RAND RR-1478 Table 1
+    miles_crash = (1.6, 51.0, 65.0)  # category: literature; RAND RR-1478 Table 1
+    waymo_ro_miles = 56.7  # category: literature; millions of rider-only miles through Jan 2025 (Kusano et al. 2025)
+    waymo_injury_reduction = 0.79  # category: literature; any-injury-reported crashed-vehicle rate vs aligned benchmark
+    waymo_airbag_reduction = 0.81  # category: literature; airbag-deployment crashed-vehicle rate vs aligned benchmark
+
+    # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────
+    q1_check = [-math.log(0.05) / (r / 100.0) for r in (rate_fatal, rate_injury, rate_crash)]  # millions of miles
+    fatal_zero_ratio = miles_fatal[0] / waymo_ro_miles
+    cleared = [m for m, w in zip(miles_injury + miles_crash, [waymo_ro_miles] * 6) if m < w]  # requirements the fleet total exceeds; zip: class scope
+
+    # ┌── 3. GUARD (Assertions) ────────────────────────────────────────────
+    for q, m in zip(q1_check, (miles_fatal[0], miles_injury[0], miles_crash[0])):
+        check(abs(q - m) / m < 0.02, "RAND row (1) must equal -ln(0.05)/rate within rounding")
+    check(waymo_ro_miles < miles_fatal[0], "The fleet total must fall short of the fatality zero-failure requirement")
+    check(miles_injury[0] < waymo_ro_miles < miles_injury[1], "Fleet total exceeds the injury zero-failure row only")
+    check(
+        sorted(cleared) == sorted([miles_injury[0], miles_crash[0], miles_crash[1]]),
+        "Fleet total clears the injury and crash zero-failure rows and the crash precision row only",
+    )
+    check(4 < fatal_zero_ratio < 5, "Prose says the fatality requirement is about five times the fleet total")
+
+    # ┌── 4. OUTPUT (Format & Export) ────────────────────────────────────────
+    miles_fatal_zero_str = fmt_int(round(miles_fatal[0]))
+    miles_fatal_prec_str = fmt(miles_fatal[1] / 1000.0, precision=1)
+    rate_fatal_str = fmt(rate_fatal, precision=2)
+    waymo_ro_miles_str = fmt(waymo_ro_miles, precision=1)
+    fatal_zero_ratio_str = fmt(fatal_zero_ratio, precision=1)
+    waymo_injury_reduction_str = fmt_int(round(100 * waymo_injury_reduction))
+    waymo_airbag_reduction_str = fmt_int(round(100 * waymo_airbag_reduction))
+```
+
+<!-- fig-alt below hand-types the RAND and Kusano values because fig-alt cannot hold inline python.
+     Keep in sync with AvExposure: 275 million, 8.8 billion, 11 billion (fatality); 3.9, 125, 161 million (injury);
+     1.6, 51, 65 million (crash); 56.7 million rider-only miles through January 2025. -->
+
+::: {#fig-07-av-miles-scaling fig-env="figure" fig-pos="htb" fig-cap="**Miles needed to demonstrate road-vehicle reliability**: RAND's Table 1 requirements at three human-driver benchmark rates [@kalra2016rr1478], for three statistical questions: a zero-failure 95 percent upper limit at the benchmark, a rate estimate within 20 percent, and a demonstration that the rate is 20 percent better than human at 80 percent power. The dashed line marks `{python} AvExposure.waymo_ro_miles_str` million rider-only miles, Waymo's total through January 2025 [@kusano2025comparison]. That exposure clears the zero-failure rows for injuries and crashes and the crash-precision row, and falls short of every fatality requirement." fig-alt="Horizontal bar chart on a logarithmic miles axis. Three groups: fatalities at 1.09 per 100 million miles need 275 million, 8.8 billion, and 11 billion miles for the three questions; reported injuries need 3.9, 125, and 161 million; reported crashes need 1.6, 51, and 65 million. A dashed vertical line at 56.7 million rider-only miles through January 2025 lies beyond the injury and crash zero-failure bars and the crash precision bar, and short of all fatality bars."}
 
 ```{python}
 #| echo: false
 #| warning: false
 #| message: false
-import pandas as pd
-import matplotlib.pyplot as plt
-import os
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ RAND MILEAGE REQUIREMENTS VS. A DATED FLEET TOTAL (FIGURE)
+# │ Context: @fig-07-av-miles-scaling
+# │ Goal:    show which event classes a real fleet's exposure can support
+# │ Show:    required miles per benchmark and question; one sourced exposure line
+# │ How:     every plotted value comes from calc-evaluation-av-exposure
+# ├─────────────────────────────────────────────────────────────────────────────
+import numpy as np
+from mlsysim import viz
 
-_csv = (
-    "vol4/07_evaluation/data/autonomous_miles_scaling.csv"
-    if os.path.exists("vol4/07_evaluation/data/autonomous_miles_scaling.csv")
-    else "data/autonomous_miles_scaling.csv"
+fig, ax, COLORS, plt = viz.setup_plot(figsize=(8.4, 4.2))
+
+# ┌── 1. LOAD (Scenario parameters) ────────────────────────────────────────────
+GROUPS = (
+    (f"Fatalities\n({AvExposure.rate_fatal:.2f} per 100M mi)", AvExposure.miles_fatal),
+    (f"Reported injuries\n({AvExposure.rate_injury:.0f} per 100M mi)", AvExposure.miles_injury),
+    (f"Reported crashes\n({AvExposure.rate_crash:.0f} per 100M mi)", AvExposure.miles_crash),
 )
-data = pd.read_csv(_csv, comment="#")
+QUESTIONS = ("Zero failures, 95% upper limit", "Rate within 20%", "20% better, 80% power")
+SHADES = (COLORS["BlueL"], COLORS["BlueLine"], COLORS["primary"])  # ordered questions: one hue, rising weight
+FLEET = AvExposure.waymo_ro_miles
 
-fig, ax, COLORS, plt = viz.setup_plot(figsize=(10, 6))
+# ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────────────
+bar_h = 0.24
+y_centers = np.arange(len(GROUPS))[::-1]
 
-ax.plot(data['Year'], data['Physical_Miles'], marker='o', linewidth=2.5, color=COLORS["BlueLine"], label='Constructed physical-mile example')
-ax.plot(data['Year'], data['Simulated_Miles'], marker='s', linewidth=2.5, color=COLORS["GreenLine"], label='Constructed simulated-mile example')
+# ┌── 3. PLOT ──────────────────────────────────────────────────────────────────
+for gi, (label, miles) in enumerate(GROUPS):
+    for qi, m in enumerate(miles):
+        y = y_centers[gi] + (1 - qi) * bar_h
+        ax.barh(y, m, height=bar_h * 0.9, color=SHADES[qi], label=QUESTIONS[qi] if gi == 0 else None)
+        txt = f"{m / 1000:g}B" if m >= 1000 else f"{m:g}M"
+        x_txt = max(m, FLEET) * 1.12 if FLEET / 1.5 < m < FLEET * 1.5 else m * 1.12  # keep labels off the fleet line
+        ax.text(x_txt, y, txt, va="center", fontsize=8.5)
 
-ax.axhline(y=275, color=COLORS["RedLine"], linestyle='--', linewidth=2, label='RAND: 275M zero-fatality upper limit')
-ax.axhline(y=8800, color=COLORS["RedLine"], linestyle=':', linewidth=2, label='RAND: 8.8B for ±20% rate precision')
+ax.axvline(FLEET, color=COLORS["RedLine"], lw=1.4, linestyle=(0, (5, 3)))
+ax.text(FLEET * 1.08, y_centers[0] + 0.52, f"{FLEET:g}M rider-only miles\n(through Jan 2025)", fontsize=8.5, color=COLORS["RedLine"], va="bottom")
 
-ax.set_yscale('log')
-ax.set_ylim(0.01, 100000)
-ax.set_xlim(2010, 2025)
-
-ax.set_xlabel("Year", fontsize=12, fontweight='bold')
-ax.set_ylabel("Constructed Miles (millions, log scale)", fontsize=12, fontweight='bold')
-
-ax.legend(loc='lower right', fontsize=9, frameon=True)
+ax.set_xscale("log")
+ax.set_xlim(1, 1e5)
+ax.set_axisbelow(True)
+ax.grid(False, axis="y")
+ax.set_ylim(-0.55, len(GROUPS) - 0.1)
+ax.set_yticks(y_centers)
+ax.set_yticklabels([g[0] for g in GROUPS], fontsize=9)
+ax.set_xlabel("Miles required (millions, log scale)")
+ax.legend(loc="lower right", fontsize=8.5, frameon=True)
 plt.tight_layout()
 plt.show()
 plt.close()
@@ -1079,7 +1273,7 @@ plt.close()
 
 :::
 
-The constructed series in @fig-07-av-miles-scaling compare two kinds of exposure arithmetic. Their simulated-mile total cannot satisfy a physical-mile threshold, and neither series is an audited fleet history. The horizontal thresholds express the cited sampling assumptions, not standards compliance.
+Road exposure shows what a real campaign of this size can and cannot support. RAND's first row is the exposure wall in miles: at the human fatality rate of `{python} AvExposure.rate_fatal_str` per 100 million miles, a zero-fatality record needs `{python} AvExposure.miles_fatal_zero_str` million miles to bound the rate at the benchmark, about `{python} AvExposure.fatal_zero_ratio_str` times the rider-only total one operator had accumulated by January 2025, and estimating the rate to within 20 percent needs `{python} AvExposure.miles_fatal_prec_str` billion. The same exposure does support claims about more frequent events. @kusano2025comparison compared crashed-vehicle rates over those `{python} AvExposure.waymo_ro_miles_str` million miles with human benchmarks aligned to the same vehicle types, roads, and cities, and reported `{python} AvExposure.waymo_injury_reduction_str` and `{python} AvExposure.waymo_airbag_reduction_str` percent reductions in injury-reported and airbag-deployment crashes, each with a confidence interval that excludes zero. The mechanism is the chapter's own. A finite exposure bounds the event classes frequent enough to occur in it, and a comparison needs an exposure-matched benchmark and an interval on the rate ratio; the rarest and most severe class remains beyond the reach of testing. Simulated miles add no physical exposure to any of these rows.
 
 ```{python}
 #| label: calc-evaluation-mtbf-campaign
@@ -1161,13 +1355,90 @@ By the exposure wall, this target needs `{python} MtbfCampaign.t_continuous_str`
 
 The wheel-rotation total is `{python} MtbfCampaign.rev_ratio_str` times the gearhead's $L_{10}$ rating, but the comparison holds only after the drivetrain ratio maps wheel revolutions to bearing revolutions, and $L_{10}$ is a population-life statistic at specified load and speed, not a destruction deadline. A campaign of this length must therefore plan maintenance and component replacement, and record each one, before it may pool trials.
 
-In interpreting these campaigns, engineering teams must not conflate MTBF with the suite of **intervention-based physical metrics**: the Autonomous Completion Rate (ACR), Mean Time Between Interventions (MTBI), Intervention Density ($D_{\text{int}}$), and Reset Latency ($T_{\text{reset}}$). In physical testing under runtime safety guardrails, catastrophic failures are prevented by permission-path overrides, emergency stops, or human safety driver interventions. What the testbed actually measures during an active campaign is the **Intervention Rate**:
-$$\lambda_{\text{int}} = \frac{N_{\text{interventions}}}{\sum_{i=1}^n t_{\text{active}, i}}$$
-the corresponding Mean Time Between Interventions:
-$$T_{\text{MTBI}} = \frac{1}{\lambda_{\text{int}}} = \frac{\sum_{i=1}^n t_{\text{active}, i}}{N_{\text{interventions}}}$$
-and the Autonomous Completion Rate $\text{ACR} = N_{\text{unassisted}} / n$.
+```{python}
+#| label: calc-evaluation-intervention-campaign
+#| echo: false
+#| warning: false
+#| message: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ INTERVENTION RATE OF A SUPERVISED MISSION CAMPAIGN (LEGO)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: the censored-trial example after the MTBF campaign.
+# │ Show: active hours, distance, MTBI, intervention density, and an exact
+# │       95 percent interval on the intervention rate for 38 interventions in
+# │       100 retrieval missions of the MTBF campaign's mission.
+# │ How: T = n t_mission; L = n d_mission; MTBI = T / N; D = N / L; the Garwood
+# │      interval solves the Poisson tails P(N >= k) = P(N <= k) = alpha / 2.
+# └─────────────────────────────────────────────────────────────────────────────
+import math
+from mlsysim import *
+from mlsysim.core.units import *
+from mlsysim.fmt import fmt, fmt_int, fmt_time, fmt_length, check
 
-Conflating MTBI with MTBF is the **censored trial fallacy**. If a safety supervisor or Control Barrier Function intervened 38 times over 50 hours across 100 retrieval missions, zero hardware damage ($N_{\text{damage}} = 0$) coexists with an MTBI of $50 / 38 \approx 1.32\text{ hours}$ and an Intervention Density of $D_{\text{int}} = 38 / 54\text{ km} \approx 0.70$ interventions per kilometer. These event counts do not determine ACR: several interventions may occur in one mission, and other missions may fail without an intervention. The per-mission ledger must identify unassisted completions. Nor does zero damage estimate an MTBF of 50 hours; the report must define the failure event and account for the supervision that prevented its observation. Reset latency $T_{\text{reset}}$ adds the recovery cost to the campaign budget.
+def _poisson_cdf(k, mu):
+    """P(N <= k) for N ~ Poisson(mu)."""
+    term, total = math.exp(-mu), math.exp(-mu)
+    for j in range(1, k + 1):
+        term *= mu / j
+        total += term
+    return total
+
+def _garwood(k, alpha):
+    """Exact two-sided (1 - alpha) interval on a Poisson mean after k events."""
+
+    def _solve(f):
+        lo, hi = 0.0, 10.0 * (k + 10)
+        for _ in range(200):
+            mid = 0.5 * (lo + hi)
+            lo, hi = (mid, hi) if f(mid) > 0 else (lo, mid)
+        return 0.5 * (lo + hi)
+
+    lower = 0.0 if k == 0 else _solve(lambda mu: alpha / 2 - (1.0 - _poisson_cdf(k - 1, mu)))
+    upper = _solve(lambda mu: _poisson_cdf(k, mu) - alpha / 2)
+    return lower, upper
+
+class InterventionCampaign:
+    """Supervised mission campaign: intervention burden, not failure rate."""
+
+    # ┌── 1. LOAD (Constants & Parameters) ─────────────────────────────────
+    n_missions = 100  # category: illustrative; retrieval missions in the supervised campaign
+    n_int = 38  # category: illustrative; recorded interventions of the declared class
+    t_mission = MtbfCampaign.t_mission  # category: illustrative; one retrieval mission (MTBF campaign)
+    d_mission = MtbfCampaign.d_mission  # category: derived; mission distance at the drive limit
+    alpha = 0.05  # category: chosen; two-sided interval level
+
+    # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────
+    t_active = (n_missions * t_mission).to(hour)
+    d_total = (n_missions * d_mission).to(kilometer)
+    mtbi = (t_active / n_int).to(minute)
+    d_int = (n_int / d_total).to(1 / kilometer)
+    rate = (n_int / t_active).to(1 / hour)
+    _lo, _hi = _garwood(n_int, alpha)
+    rate_lo = (_lo / t_active).to(1 / hour)
+    rate_hi = (_hi / t_active).to(1 / hour)
+
+    # ┌── 3. GUARD (Assertions) ────────────────────────────────────────────
+    check(abs(t_active.to(hour).magnitude - 10.0) < 1e-9, "100 missions of 360 s must be 10 active hours")
+    check(abs(d_total.to(kilometer).magnitude - 54.0) < 1e-9, "100 missions of 540 m must be 54 km")
+    check(abs(mtbi.to(minute).magnitude - 15.79) < 0.01, "MTBI should be about 15.8 min")
+    check(abs(d_int.magnitude - 0.704) < 0.001, "Intervention density should be about 0.70 per km")
+    check(abs(_lo - 26.89) < 0.01 and abs(_hi - 52.16) < 0.01, "Garwood interval for 38 events should be 26.9 to 52.2")
+
+    # ┌── 4. OUTPUT (Format & Export) ────────────────────────────────────────
+    n_missions_str = fmt_int(n_missions)
+    n_int_str = fmt_int(n_int)
+    t_active_str = fmt_time(t_active, unit=hour, precision=0)
+    d_total_str = fmt_length(d_total, unit=kilometer, precision=0)
+    mtbi_str = fmt_time(mtbi, unit=minute, precision=1)
+    d_int_str = fmt(d_int.magnitude, precision=2)
+    rate_str = fmt(rate.magnitude, precision=1)
+    rate_lo_str = fmt(rate_lo.magnitude, precision=1)
+    rate_hi_str = fmt(rate_hi.magnitude, precision=1)
+```
+
+Engineering teams must not conflate MTBF with the intervention-based metrics of @sec-evaluation-what-measured. Under runtime guardrails, permission-path overrides, emergency stops, and human takeovers prevent the failures a campaign would otherwise observe, so what the testbed measures is an intervention rate, $\lambda_{\text{int}} = N_{\text{int}}/T_{\text{active}}$, whose reciprocal is the MTBI defined there.
+
+Suppose a supervisor or a permission-path filter intervenes `{python} InterventionCampaign.n_int_str` times across `{python} InterventionCampaign.n_missions_str` retrieval missions of the kind just sized. At `{python} MtbfCampaign.t_mission_str` and `{python} MtbfCampaign.d_mission_str` per mission, the campaign accumulates `{python} InterventionCampaign.t_active_str` of active operation over `{python} InterventionCampaign.d_total_str`, so the MTBI is about `{python} InterventionCampaign.mtbi_str` and the intervention density is `{python} InterventionCampaign.d_int_str` per kilometer. Because the events are numerous, the rate also has a usable interval: treating interventions as a Poisson process, the exact 95 percent interval on $\lambda_{\text{int}}$ runs from `{python} InterventionCampaign.rate_lo_str` to `{python} InterventionCampaign.rate_hi_str` per active hour around the observed `{python} InterventionCampaign.rate_str` [@garwood1936fiducial]. Zero hardware damage coexists with that burden. The counts do not determine ACR, because several interventions may fall in one mission and other missions may fail without one; only the per-mission ledger identifies unassisted completions. Nor does zero damage estimate an MTBF of `{python} InterventionCampaign.t_active_str`. For the unassisted-failure event, every intervened mission is right-censored: the intervention stopped the observation before its consequence was known, so the record holds neither a failure nor a success for that event. Reading those censored missions as unassisted survival is the censored trial fallacy of @sec-evaluation-evidence-regimes. Reset latency adds the recovery cost to the campaign budget.
 
 ### Peak loads and unvisited conditions
 
@@ -1180,11 +1451,11 @@ For physical survival, a mean is an inadequate description of a peak. Consider a
 *Illustrative tail shapes motivate measuring peak forces; neither curve establishes the latch campaign's tail family or event rate.*
 :::
 
-This limitation is governed by the **physical impact roofline**\index{Physical impact roofline!definition}. When a moving arm of effective mass $m_{\text{eff}}$ strikes a rigid mechanical contact of stiffness $k_{\text{contact}}$ at approach velocity $v_{\text{approach}}$, kinetic energy converts into elastic spring deformation: $\frac{1}{2} m_{\text{eff}} v_{\text{approach}}^2 = \frac{1}{2} k_{\text{contact}} x^2$, yielding maximum elastic deflection $x_{\text{max}} = v_{\text{approach}} \sqrt{m_{\text{eff}} / k_{\text{contact}}}$. By Hooke's law ($F = k x$), the resulting peak transient impact force is:
-$$F_{\text{peak}} = k_{\text{contact}} x_{\text{max}} = v_{\text{approach}} \sqrt{m_{\text{eff}} k_{\text{contact}}}$$
-In this undamped spring-impact idealization, the rise time is $\Delta t_{\text{rise}} \approx \frac{\pi}{2} \sqrt{m_{\text{eff}} / k_{\text{contact}}}$. Its value requires the effective mass and contact stiffness of the specific configuration. A monitor whose detection and physical response exceed that rise time cannot reduce the initial peak. Requiring the modeled peak to remain below $F_{\text{limit}}$ gives the approach-speed condition:
-$$v_{\text{approach}} \le \frac{F_{\text{limit}}}{\sqrt{m_{\text{eff}} k_{\text{contact}}}}$$
-As the Williams roofline model [@williams2009roofline] caps computational throughput by memory bandwidth and the kinematic stopping roofline (@sec-boundary-machine-model, @sec-enforcement-stopping-envelopes) caps transit speed by braking distance, the physical impact roofline caps safe approach velocity before contact. Autonomous evaluation benches cannot overcome this roofline through faster neural inference; they require either passive mechanical compliance (lowering $k_{\text{contact}}$ via series elasticity or spring couplings) to dilate the shock rise time into the bandwidth of current tripwires, or strictly enforcing pre-contact speed limits—such as the guarded approach speed $v_{\text{guarded}} =$ `{python} EvalMachine.v_approach_str`—before crossing the contact boundary. Extreme value theory (EVT)\index{Extreme value theory} offers candidate models for maxima, but a Gumbel, Fréchet, or Weibull family must be fitted to a defined sample of block maxima or threshold exceedances, checked against alternatives, and reported with its uncertainty; the physical mechanism alone does not select the family.[^fn-math-extreme-value] Without those data, @tbl-07-extreme-value-tails states what to measure and what protection to validate rather than predicting rare-event frequencies.
+A spring-impact model bounds the first peak\index{Contact impact!approach-speed bound}. When a moving arm strikes a contact of stiffness $k_{\text{contact}}$ at relative speed $v_{\text{approach}}$, the kinetic energy of the relative motion, $\tfrac{1}{2}m_{\text{red}} v_{\text{approach}}^2$, converts into elastic deformation $\tfrac{1}{2}k_{\text{contact}}x^2$. Here $m_{\text{red}} = (1/m_{\text{arm}} + 1/m_{\text{obj}})^{-1}$ is the reduced mass of the two bodies, which equals the arm's effective mass only against an immovable object such as a latched door frame. The peak force is then
+$$F_{\text{peak}} = k_{\text{contact}} x_{\text{max}} = v_{\text{approach}} \sqrt{m_{\text{red}}\, k_{\text{contact}}}$$
+reached after a quarter period, $\Delta t_{\text{rise}} \approx \frac{\pi}{2} \sqrt{m_{\text{red}} / k_{\text{contact}}}$, in this undamped idealization. Requiring the peak to stay below a force limit $F_{\text{limit}}$ gives the admissible approach speed
+$$v_{\text{approach}} \le \frac{F_{\text{limit}}}{\sqrt{m_{\text{red}}\, k_{\text{contact}}}},$$
+the same transient-contact relation that ISO/TS 15066 Annex A uses to set maximum relative speeds for power- and force-limited collaborative robots, a specification whose collaborative-application requirements are now carried by ISO 10218-2:2025 [@isots15066; @iso10218part2]. Evaluating the bound on the latch needs the arm's effective mass at the gripper and the latch's contact stiffness, both of which must be measured for the configuration; neither is in the machine's data sheet. The evaluation consequence does not depend on those values. A monitor whose detection and physical response take longer than the rise time cannot reduce the first peak, however fast the neural inference, so the campaign measures force-time traces at the load path and validates the two protections that act before contact: passive compliance, which lowers $k_{\text{contact}}$ and stretches the rise time, and a precontact speed limit such as the `{python} EvalMachine.v_approach_str` guarded approach. Extreme value theory (EVT)\index{Extreme value theory} offers candidate models for maxima, but a Gumbel, Fréchet, or Weibull family must be fitted to a defined sample of block maxima or threshold exceedances, checked against alternatives, and reported with its uncertainty; the physical mechanism alone does not select the family.[^fn-math-extreme-value] Without those data, @tbl-07-extreme-value-tails states what to measure and what protection to validate rather than predicting rare-event frequencies.
 
 [^fn-math-extreme-value]: **Extreme value disturbance modeling**\index{Extreme value theory!physical disturbances}: The Fisher–Tippett–Gnedenko theorem describes the possible limiting forms of block maxima under stated assumptions; it does not assign a tail family to impact, glare, or latency by physical mechanism alone.
 
@@ -1209,7 +1480,7 @@ The repeatable challenges in @fig-07-nist-test-arena support comparisons across 
 
 These ceilings force an architectural conclusion. Physical AI safety cannot rest on statistical confidence in the learned weights. The exposure examples at $10^{-6}$ to $10^{-9}$ failures per hour show why more trials cannot carry the whole protection argument. Runtime constraints must have their own evidence, including the assumptions under which they can prevent a hazardous action and the time available to respond. Policy trials characterize task completion and intervention rates within the tested envelope; they do not establish that the envelope will contain every fault. The protection argument therefore shifts toward the independent permission path and physical safeguards, whose limits require separate validation.
 
-A stability argument can use a **Lyapunov function**\index{Lyapunov function!stability certification}, an energy-like or error measure that decreases along the modeled motion. For example, $V(\mathbf{x}) > 0$ away from equilibrium with $\dot{V}(\mathbf{x}) \le -\gamma V(\mathbf{x})$ establishes decay under the stated model and domain assumptions. @Sec-appendix-control-lyapunov develops that certificate. It is a different kind of evidence from finite task trials, and the evaluated proposer supplies no such certificate. The machine therefore needs its own containment and fault evidence:
+A model-based stability certificate, such as the Lyapunov argument of @sec-appendix-control-lyapunov\index{Lyapunov function!stability certification}, is a different kind of evidence from finite task trials, and the evaluated proposer supplies none. The machine therefore needs its own containment and fault evidence:
 
 1. **Runtime Containment**: Bounding the physical authority of the learned policy by delegating the collaborative-robot force limits, kinematic acceleration limits, and emergency stops to the permission path, an independent, deterministic mechanism below the proposal boundary of @sec-boundary-machine-model. The protection claim then rests on the permission path and its fallback, whose state estimates, plant and actuator models, response timing, and reserved stopping margin must be validated separately from the policy.
 2. **Fault Injection on Physical Benches**: Rather than waiting for passive disturbances to strike, engineers inject them. Injected trials follow the fault-injection method of @sec-verification-deriving-fault-list; their fault population belongs in a separate labeled ledger rather than being pooled with operational draws.
@@ -1268,7 +1539,7 @@ Six recurring procedural flaws distort empirical evaluation: environment selecti
 
 **Pathology 4: Optional stopping and multi-look inflation.** Evaluation protocols are equally vulnerable to unintended cherry-picking through optional stopping. When an engineer monitors a continuous sequence of physical runs and halts the experiment as soon as a target performance threshold or statistical significance criterion is reached, the reported confidence is distorted. If an evaluation team conducts an experiment where each look carries a nominal false-positive threshold of 5 percent, stopping early upon observing an apparent success across multiple evaluation checkpoints inflates the true error rate. `{python} ClopperPearsonZeroFailure.n_looks_str` independent 5 percent looks would have a `{python} ClopperPearsonZeroFailure.p_any_false_positive_pct_str` percent chance of at least one false positive. Repeated looks at one accumulating run are dependent, so the inflation for a real stopping rule must be computed for that rule. Optional stopping\index{Optional stopping} cannot be detected from summary tables or final pass rates. It is detected only by auditing the pre-registered trial protocol, verifying that sample sizes, stopping conditions, and evaluation milestones were fixed before the first physical run began.
 
-**Pathology 5: Denominator filtering and the censored trial fallacy.** A related statistical distortion occurs when the denominator of an evaluation is quietly filtered, breaking the full-denominator condition of @sec-evaluation-trial-protocol. A team that discards runs ending on software timeouts, emergency stops, sensor communication drops, or permission-path overrides as invalid test artifacts reports success over the surviving trials only. This denominator truncation systematically masks low Autonomous Completion Rates ($\text{ACR} = N_{\text{unassisted}} / n$) and artificially inflates apparent MTBI ($T_{\text{MTBI}} = T_{\text{active}} / N_{\text{int}}$). By discarding interrupted rollouts, nonzero intervention counts ($I_i \ge 1$) vanish from both the numerator and denominator, driving measured Intervention Density ($D_{\text{int}}$) toward zero. Furthermore, filtering omits the hidden operational overhead of Reset Latency ($T_{\text{reset}}$)—the minutes spent untangling jammed end-effectors, clearing fault registers, and physically restoring the scene—creating a false impression of rapid, autonomous operation. If the arm opens the door on nine of ten attempts and the tenth needs an operator takeover to stop the gripper wedging against the latch, removing that attempt falsely raises the apparent success rate from 90 percent to 100 percent and reports an infinite MTBI for that batch. Crucially, infrastructure aborts—such as Wi-Fi packet drops, operating system kernel thread stalls, or bus brownouts—must remain in the denominator. The physical world does not care which software or hardware subsystem failed; an autonomous forklift that stalls in an aisle intersection because of an operating system thread lock has failed its operational mission. Removing infrastructure aborts evaluates an idealized mathematical abstraction rather than the deployed cyber-physical system. When physical constraints or safety limits truncate a run before its time limit $T_{\max}$ expires, the trial is recorded as a censored failure ($A_i = 0, I_i \ge 1$) rather than omitted from the ledger. Reading survival on truncated trajectories as operational competence is the **censored trial fallacy**\index{Censored trial fallacy!definition}. Denominator filtering\index{Denominator filtering} is detected by cross-referencing low-level actuator telemetry and permission-path logs against the trial ledger, confirming that every power-on cycle, autonomy engagement, and physical reset corresponds to a recorded outcome.
+**Pathology 5: Denominator filtering and the censored trial fallacy.** A related statistical distortion occurs when the denominator of an evaluation is quietly filtered, breaking the full-denominator condition of @sec-evaluation-trial-protocol. A team that discards runs ending on software timeouts, emergency stops, sensor communication drops, or permission-path overrides as invalid test artifacts reports success over the surviving trials only. This denominator truncation systematically masks low Autonomous Completion Rates ($\text{ACR} = N_{\text{unassisted}} / n$) and artificially inflates apparent MTBI ($T_{\text{MTBI}} = T_{\text{active}} / N_{\text{int}}$). By discarding interrupted rollouts, nonzero intervention counts ($I_i \ge 1$) vanish from both the numerator and denominator, driving measured Intervention Density ($D_{\text{int}}$) toward zero. Furthermore, filtering omits the hidden operational overhead of Reset Latency ($T_{\text{reset}}$)—the minutes spent untangling jammed end-effectors, clearing fault registers, and physically restoring the scene—creating a false impression of rapid, autonomous operation. If the arm opens the door on nine of ten attempts and the tenth needs an operator takeover to stop the gripper wedging against the latch, removing that attempt falsely raises the apparent success rate from 90 percent to 100 percent and reports an infinite MTBI for that batch. Crucially, infrastructure aborts—such as Wi-Fi packet drops, operating system kernel thread stalls, or bus brownouts—must remain in the denominator. The physical world does not care which software or hardware subsystem failed; an autonomous forklift that stalls in an aisle intersection because of an operating system thread lock has failed its operational mission. Removing infrastructure aborts evaluates an idealized mathematical abstraction rather than the deployed cyber-physical system. When physical constraints or safety limits truncate a run before its time limit $T_{\max}$ expires, the trial stays in the ledger as not unassisted ($A_i = 0, I_i \ge 1$), and for the unassisted-failure event it is right-censored rather than omitted. Reading survival on truncated trajectories as operational competence is the censored trial fallacy\index{Censored trial fallacy} of @sec-evaluation-evidence-regimes. Denominator filtering\index{Denominator filtering} is detected by cross-referencing low-level actuator telemetry and permission-path logs against the trial ledger, confirming that every power-on cycle, autonomy engagement, and physical reset corresponds to a recorded outcome.
 
 ::: {#ws-evaluation-nhtsa-40-percent-mirage .callout-war-story title="The 2017 NHTSA Autopilot crash rate mirage"}
 **Context**: In January 2017, the National Highway Traffic Safety Administration (NHTSA) closed Preliminary Evaluation PE 16-007, which it had opened after a fatal Florida crash of a Model S operating in Autopilot mode (@sec-perception-failure-modes) [@nhtsa2017pe16007]. The closing report compared airbag-deployment crash rates in the subject Tesla vehicles before and after Autosteer was installed and stated that "the Tesla vehicles crash rate dropped by almost 40 percent after Autosteer installation," from 1.3 to 0.8 crashes per million miles.
@@ -1284,9 +1555,94 @@ Six recurring procedural flaws distort empirical evaluation: environment selecti
 
 **Pathology 6: Substituting visual demonstrations for statistical measurements.** A successful video shows that the machine reached the goal under one sequence of conditions; without a sampling record, it does not establish how often that outcome recurs. Smooth $\mathrm{SE}(3)$ kinematics (rigid-body motions in three dimensions)\index{SE(3) kinematics} can conceal small physical margins. A representative campaign needs predeclared sampling from the target ODD or separate per-stratum analysis, full-denominator accounting, and a sample size tied to its stated claim.
 
-The same discipline governs comparisons. As Jacob Cohen formalized in his statistical power analysis[^fn-math-cohen-power] [@cohen1988power], deciding whether `latch-bc-01` opens the cage door more reliably than another checkpoint requires the Type I error ($\alpha$), the Type II error ($\beta$), and the effect size, the smallest difference in success rate worth detecting. Twenty runs per checkpoint carry no stated power until those quantities and the baseline success rate are known, so the protocol fixes $\alpha$, $\beta$, and the effect size before the first run.
+### Comparing two policies {#sec-evaluation-policy-comparison}
+
+```{python}
+#| label: calc-evaluation-policy-comparison
+#| echo: false
+#| warning: false
+#| message: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ TWO-POLICY COMPARISON: EXACT TEST AND RUNS PER ARM (LEGO)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @sec-evaluation-policy-comparison.
+# │ Show: Fisher's exact two-sided p for 20/20 against 16/20, and the runs per
+# │       arm needed to detect 0.90 against 0.80 at alpha = 0.05 (two-sided)
+# │       with 80 percent power.
+# │ How: hypergeometric probabilities of every 2x2 table with the observed
+# │      margins, summing those no more probable than the observed table;
+# │      n = ((z_{1-a/2} + z_{1-b}) / h)^2 with Cohen's h = 2 asin sqrt(p1) - 2 asin sqrt(p2).
+# └─────────────────────────────────────────────────────────────────────────────
+import math
+from statistics import NormalDist
+from mlsysim.fmt import fmt, fmt_int, fmt_percent, check
+
+def _fisher_two_sided(a, b, c, d):
+    """Two-sided Fisher exact p for the table [[a, b], [c, d]] (rows are policies)."""
+    r1, c1, n = a + b, a + c, a + b + c + d
+
+    def _prob(x):
+        return math.comb(c1, x) * math.comb(n - c1, r1 - x) / math.comb(n, r1)
+
+    p_obs = _prob(a)
+    lo, hi = max(0, r1 + c1 - n), min(r1, c1)
+    return sum(_prob(x) for x in range(lo, hi + 1) if _prob(x) <= p_obs * (1 + 1e-9))
+
+class PolicyComparison:
+    """Can twenty runs per arm separate two latch checkpoints?"""
+
+    # ┌── 1. LOAD (Constants & Parameters) ─────────────────────────────────
+    n_arm = 20  # category: illustrative; interleaved runs per checkpoint on the nominal cell
+    k_a = 20  # category: illustrative; successes of latch-bc-01
+    k_b = 16  # category: illustrative; successes of the comparison candidate
+    alpha = 0.05  # category: chosen; two-sided significance level
+    power = 0.80  # category: chosen; probability of detecting the stated effect
+    p_high = 0.90  # category: chosen; success rate of the better policy in the sizing example
+    p_low = 0.80  # category: chosen; success rate of the worse policy
+
+    # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────
+    p_fisher = _fisher_two_sided(k_a, n_arm - k_a, k_b, n_arm - k_b)
+    cohen_h = 2 * math.asin(math.sqrt(p_high)) - 2 * math.asin(math.sqrt(p_low))
+    _z = NormalDist().inv_cdf
+    n_per_arm = math.ceil(((_z(1 - alpha / 2) + _z(power)) / cohen_h) ** 2)
+
+    # ┌── 3. GUARD (Assertions) ────────────────────────────────────────────
+    check(abs(p_fisher - 0.1060) < 0.0005, "Fisher two-sided p for 20/20 vs 16/20 should be about 0.106")
+    check(p_fisher > alpha, "The example must fail to separate the policies at alpha")
+    check(n_per_arm == 98, "Detecting 0.90 vs 0.80 at 80 percent power should need 98 runs per arm")
+
+    # ┌── 4. OUTPUT (Format & Export) ────────────────────────────────────────
+    n_arm_str = fmt_int(n_arm)
+    k_b_str = fmt_int(k_b)
+    p_fisher_str = fmt(p_fisher, precision=3)
+    p_high_pct_str = fmt_percent(p_high, precision=0)
+    p_low_pct_str = fmt_percent(p_low, precision=0)
+    power_pct_str = fmt_percent(power, precision=0)
+    cohen_h_str = fmt(cohen_h, precision=2)
+    n_per_arm_str = fmt_int(n_per_arm)
+```
+
+Most robot-learning evaluations are not qualifications against a fixed target; they are comparisons. A team retrains the latch policy and asks whether the new checkpoint is better than `latch-bc-01`. The comparison inherits every requirement of the single-policy campaign and adds three of its own.
+
+The first is the design of the trials. The plant drifts while a comparison runs: windings warm, the latch spring relaxes, lighting changes through the day. If all runs of one checkpoint precede all runs of the other, that drift enters the comparison as if it were a policy effect. The two policies therefore run interleaved in a randomized order on the same unit and door, from matched initial conditions drawn from the same target ODD, and the operator who resets the cell and judges borderline outcomes does not know which checkpoint ran. @kressgazit2024robot set out these practices as a reporting standard for physical policy evaluation, together with stating the number of runs, the initial conditions, and the success criteria, and describing failures qualitatively. Toyota Research Institute's evaluation of large behavior models ran its real-world comparisons as blind A/B trials under the same discipline [@trilbm2025careful].
+
+The second is the test. Each arm yields a count of successes, and the question is whether the two counts could plausibly come from one shared success probability. Fisher's exact test answers that for small samples by enumerating every table with the observed totals [@fisher1922interpretation]. Suppose, for illustration, that `latch-bc-01` completes all `{python} PolicyComparison.n_arm_str` interleaved nominal runs and a candidate completes `{python} PolicyComparison.k_b_str`. The two-sided $p$-value is `{python} PolicyComparison.p_fisher_str`: a split this lopsided occurs by chance often enough at this sample size that the campaign cannot declare either checkpoint better at $\alpha = 0.05$. Robot-learning comparisons commonly rest on samples this small, because each physical trial costs operator time [@snyder2025policy].
+
+The third is power, which sets the sample size before the first run. Cohen's power analysis fixes the significance level, the Type II error $\beta$, and the effect size, the smallest difference worth detecting, and derives the runs per arm [@cohen1988power].[^fn-math-cohen-power] For success rates, the effect size is Cohen's $h = 2\arcsin\sqrt{p_1} - 2\arcsin\sqrt{p_2}$. Distinguishing a `{python} PolicyComparison.p_high_pct_str` percent policy from an `{python} PolicyComparison.p_low_pct_str` percent one ($h =$ `{python} PolicyComparison.cohen_h_str`) at $\alpha = 0.05$ with `{python} PolicyComparison.power_pct_str` percent power needs about `{python} PolicyComparison.n_per_arm_str` runs per arm. The Toyota team reached the same conclusion from the other direction: many of the effects it reported were measurable only with larger-than-standard sample sizes and careful statistical testing [@trilbm2025careful].
 
 [^fn-math-cohen-power]: **Statistical Power in Physical Trials**\index{Statistical power!sample size}: The probability $1 - \beta$ of correctly rejecting a false null hypothesis. For a two-policy comparison, compute power from the baseline rate, effect size, sample allocation, and chosen test before collecting physical trials [@cohen1988power].
+
+Comparisons also invite the optional-stopping hazard of pathology 4, because a team watching two running tallies is tempted to stop when one pulls ahead. Sequential tests designed for two-policy comparison, such as STEP, let an evaluator stop as soon as the evidence is decisive while keeping the Type I error at its declared level [@snyder2025policy]; they are the comparison counterpart of the single-policy sequential test that follows. A simulator can rank candidates before any of these physical runs only after paired sim-and-real trials have measured its rank agreement (@sec-evaluation-proxy-transfer-law). @Tbl-07-evaluation-practice collects dated instances of each of these practices.
+
+| Practice                                | What it measures or controls                                                 | Instance (as of 2026)                                              |
+|:----------------------------------------|:-----------------------------------------------------------------------------|:-------------------------------------------------------------------|
+| **Reporting standard for robot trials** | Conditions, run counts, success criteria, statistics, and failure narratives | Kress-Gazit et al. 2024 [@kressgazit2024robot]                     |
+| **Paired sim-and-real ranking check**   | Whether a simulator orders policies as the physical cell does                | SIMPLER, Li et al. 2024 [@li2024simpler]                           |
+| **Blind randomized A/B trials**         | Policy differences with drift and evaluator bias controlled                  | TRI large-behavior-model study 2025 [@trilbm2025careful]           |
+| **Sequential two-policy test**          | Early decisions with the Type I error held at its declared level             | STEP, Snyder et al. 2025 [@snyder2025policy]                       |
+| **Exposure-matched rate comparison**    | Crash-rate ratios against human benchmarks aligned by road, vehicle, city    | Waymo rider-only study, Kusano et al. 2025 [@kusano2025comparison] |
+
+: **State of practice in policy evaluation, as of 2026**: Each row is a dated instance of a mechanism taught in this chapter; the mechanisms outlast the instances. {#tbl-07-evaluation-practice tbl-colwidths="[28,42,30]"}
 
 ### Sequential probability ratio testing {#sec-evaluation-sequential-sprt}
 
@@ -1294,17 +1650,83 @@ A fixed-sample campaign can reject at its first failure, but early acceptance ne
 
 Let $p$ be the per-trial failure probability, the convention of @sec-appendix-ml-sprt. For hypotheses $H_0: p = p_0$ (unacceptable) and $H_1: p = p_1 < p_0$ (acceptable), after $k$ failures in $m$ independent trials the log-likelihood ratio is:
 $$\Lambda_m = k \ln \left(\frac{p_1}{p_0}\right) + (m - k) \ln \left(\frac{1 - p_1}{1 - p_0}\right)$$
-Each success moves the ratio toward acceptance and each failure toward rejection. With the illustrative hypotheses $p_0 = 0.10$ and $p_1 = 0.01$, a success adds about $0.09531$ while a failure subtracts about $2.30259$. Starting from zero, an immediate failure crosses the approximate rejection boundary below; an initial success leaves the test running. This is evidence for the declared outcome, not permission to continue an unsafe physical trial.
+```{python}
+#| label: calc-evaluation-sprt
+#| echo: false
+#| warning: false
+#| message: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ SPRT INCREMENTS, BOUNDARIES, AND ERROR BOUNDS (LEGO)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @sec-evaluation-sequential-sprt and the early-stopping pitfall.
+# │ Show: log-likelihood increments for p0 = 0.10, p1 = 0.01 (failure
+# │       probabilities, the @sec-appendix-ml-sprt convention); Wald boundaries
+# │       at alpha = 0.05, beta = 0.10; clean runs to accept; Ville/Wald error
+# │       bounds alpha/(1 - beta) and beta/(1 - alpha); the score after 25
+# │       successes and one failure; and the fixed-sample contrast.
+# │ How: Lambda_m = k ln(p1/p0) + (m - k) ln((1 - p1)/(1 - p0)).
+# └─────────────────────────────────────────────────────────────────────────────
+import math
+from mlsysim.fmt import fmt, fmt_int, fmt_percent, check
+
+class Sprt:
+    """Wald's SPRT for the latch campaign in the failure-probability convention."""
+
+    # ┌── 1. LOAD (Constants & Parameters) ─────────────────────────────────
+    p0 = 0.10  # category: chosen; unacceptable per-run failure probability (H0)
+    p1 = 0.01  # category: chosen; acceptable per-run failure probability (H1)
+    alpha = 0.05  # category: chosen; allowed false acceptance of H1 under H0
+    beta = 0.10  # category: chosen; allowed false rejection of H1 under H1
+    m_before_fail = 25  # category: illustrative; clean runs before the first failure in the trace example
+
+    # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────
+    inc_success = math.log((1 - p1) / (1 - p0))
+    inc_failure = math.log(p1 / p0)
+    A = math.log((1 - beta) / alpha)
+    B = math.log(beta / (1 - alpha))
+    n_accept = math.ceil(A / inc_success)
+    false_accept_bound = math.exp(-A)  # Ville: P(sup L_m >= e^A | H0) <= e^-A = alpha / (1 - beta)
+    false_reject_bound = math.exp(B)  # reciprocal martingale under H1: beta / (1 - alpha)
+    score_trace = m_before_fail * inc_success + inc_failure
+    n_fixed_90 = ClopperPearsonZeroFailure.n_req_90  # fixed-sample zero-failure count for a 90% success lower limit
+    p_good_rejected_fixed = 1.0 - (1.0 - p1) ** n_fixed_90  # a p1 policy fails the fixed zero-failure test
+
+    # ┌── 3. GUARD (Assertions) ────────────────────────────────────────────
+    check(abs(inc_success - 0.09531) < 1e-5 and abs(inc_failure + 2.30259) < 1e-5, "SPRT increments changed")
+    check(abs(A - 2.890) < 5e-4 and abs(B + 2.251) < 5e-4, "Wald boundaries changed")
+    check(n_accept == 31, "Accepting from zero should take 31 clean runs")
+    check(inc_failure < B, "One failure from zero must cross the rejection boundary")
+    check(B < score_trace < A, "After 25 successes and one failure the test must still be running")
+    check(abs(false_accept_bound - alpha / (1 - beta)) < 1e-12, "Ville bound must equal alpha/(1-beta)")
+    check(n_fixed_90 == 29 and abs(p_good_rejected_fixed - 0.2528) < 0.001, "Fixed 29-run test rejects a p1 policy about 25 percent of the time")
+
+    # ┌── 4. OUTPUT (Format & Export) ────────────────────────────────────────
+    inc_success_str = fmt(inc_success, precision=4)
+    inc_failure_str = fmt(abs(inc_failure), precision=3)
+    A_str = fmt(A, precision=3)
+    B_str = fmt(B, precision=3)
+    n_accept_str = fmt_int(n_accept)
+    false_accept_bound_str = fmt(false_accept_bound, precision=3)
+    false_reject_bound_str = fmt(false_reject_bound, precision=3)
+    m_before_fail_str = fmt_int(m_before_fail)
+    score_trace_str = fmt(score_trace, precision=2)
+    n_fixed_90_str = fmt_int(n_fixed_90)
+    p_good_rejected_fixed_pct_str = fmt_percent(p_good_rejected_fixed, precision=1)
+```
+
+Each success moves the ratio toward acceptance and each failure toward rejection. With the illustrative hypotheses $p_0 = 0.10$ and $p_1 = 0.01$, a success adds `{python} Sprt.inc_success_str` while a failure subtracts `{python} Sprt.inc_failure_str`. This is evidence for the declared outcome, not permission to continue an unsafe physical trial.
 
 Wald's approximate boundaries on the log-likelihood ratio are:
 $$A \approx \ln \left(\frac{1 - \beta}{\alpha}\right), \quad B \approx \ln \left(\frac{\beta}{1 - \alpha}\right)$$
-For standard engineering confidence parameters $\alpha = 0.05$ and $\beta = 0.10$, the decision boundaries are $A \approx \ln(0.90 / 0.05) \approx 2.890$ and $B \approx \ln(0.10 / 0.95) \approx -2.251$. At each physical rollout $m$:
+where $\alpha$ is the allowed probability of accepting $H_1$ when $H_0$ holds and $\beta$ the allowed probability of rejecting $H_1$ when it holds, the two error allowances of @sec-appendix-ml-sprt. For $\alpha = 0.05$ and $\beta = 0.10$, the boundaries are $A \approx$ `{python} Sprt.A_str` and $B \approx$ `{python} Sprt.B_str`. At each physical rollout $m$:
 
 1. If $\Lambda_m \ge A$: Halt testing and accept $H_1$ under the declared test (evidence for the evaluation record within the target ODD).
 2. If $\Lambda_m \le B$: Halt testing and reject $H_1$ (policy rejected; abort campaign immediately to prevent hardware damage).
 3. If $B < \Lambda_m < A$: Continue sampling; execute rollout $m+1$.
 
-The approximate boundaries must be calibrated for the actual discrete outcomes and stopping rule. Ville's inequality gives a direct false-acceptance guarantee at likelihood ratio $1/\alpha$; that guarantee does not automatically apply to a different approximate threshold. @Sec-appendix-ml-sprt derives the likelihood-ratio updates and approximate expected sample counts, and explains the stopping boundaries and their calibration assumptions. A real campaign records the hypotheses, outcome definition, calibrated boundaries, complete trace, and terminal decision in its evaluation record.
+Tracing the rule shows what it buys. From a score of zero, a first-run failure crosses $B$ at once, and acceptance needs `{python} Sprt.n_accept_str` consecutive clean runs, $A$ divided by the per-success increment and rounded up. A failure later in the campaign does not end it: after `{python} Sprt.m_before_fail_str` clean runs and one failure the score is `{python} Sprt.score_trace_str`, still between the boundaries, so testing continues. Compare the fixed-sample zero-failure test for a 90 percent success lower limit, which needs `{python} Sprt.n_fixed_90_str` clean runs and rejects at any failure. On a clean record the two costs are similar, but the fixed test rejects a genuinely good policy with $p = p_1$ in `{python} Sprt.p_good_rejected_fixed_pct_str` percent of campaigns, whereas the sequential test bounds that error, as the next paragraph shows. The sequential design earns its keep by controlling both errors, not by always running fewer trials.
+
+The error guarantees follow from the likelihood ratio itself. Under $H_0$ the likelihood ratio $e^{\Lambda_m}$ is a nonnegative sequence with mean one that no gambling strategy can inflate, so by Ville's inequality the probability that it ever reaches $e^{A}$ is at most $e^{-A}$ [@ville1939etude]. With Wald's boundary that bound is $\alpha/(1-\beta) =$ `{python} Sprt.false_accept_bound_str`, slightly above the nominal $\alpha$ because a discrete score can overshoot the boundary; the same argument under $H_1$ bounds false rejection by $\beta/(1-\alpha) =$ `{python} Sprt.false_reject_bound_str`. These are Wald's own bounds on the realized error rates [@wald1945sequential]. A campaign that must hold false acceptance at exactly $\alpha$ uses the conservative boundary $A = \ln(1/\alpha)$ at the cost of a few more clean runs. @Sec-appendix-ml-sprt derives the likelihood-ratio updates and approximate expected sample counts. A real campaign records the hypotheses, outcome definition, boundaries, complete trace, and terminal decision in its evaluation record.
 
 The fixed-sample door campaign already supplies a useful record. A sequential design can reduce expected testing cost under its own assumptions, but it cannot repair an undefined population, a filtered denominator, or unsupported transfer to another machine.
 
@@ -1326,7 +1748,7 @@ The door campaign repeats one condition twenty times: the nominal strike plate, 
 
 **Fallacy**: *Zero failures in 1,000 trials proves compliance with a 99.9 percent reliability specification.*
 
-Suppose the latch policy opens the door `{python} ClopperPearsonZeroFailure.n_fallacy_str` times without a trip against a requirement of 99.9 percent success at 95 percent confidence. The observed success fraction is perfect ($\hat{p} = 1.00$), and textbook Central Limit Theorem Wald intervals collapse into the degenerate point $[1.0, 1.0]$ because estimated variance $\hat{p}(1-\hat{p})/n$ vanishes identically. Yet exact non-asymptotic Clopper-Pearson inversion ($p_{\text{lower}} = 0.05^{1/n}$) demonstrates that the true one-sided lower confidence bound is only `{python} ClopperPearsonZeroFailure.p_lower_fallacy_str`, falling short of the 99.9 percent requirement (@tbl-07-confidence-bounds); certifying it requires `{python} ClopperPearsonZeroFailure.n_req_999_str` clean runs. A parallel fallacy occurs in early-stage pilot evaluation: observing zero failures in 20 trials ($p_{\text{lower}} = 86.1$ percent) cannot certify even a 90 percent reliability target ($n = 29$ clean runs required), let alone an industrial 99 percent reliability target ($n = 299$ clean runs required). The gap is an evidence deficit, not an empirical proof of compliance. The trial budget follows strictly from the claim and confidence level, fixed in advance, and the report must state the exact Clopper-Pearson lower bound rather than the perfect empirical fraction. **Zero failures with an insufficient sample size represents an evidence deficit, not an empirical proof of compliance.**
+Suppose the latch policy opens the door `{python} ClopperPearsonZeroFailure.n_fallacy_str` times without a trip against a requirement of 99.9 percent success at 95 percent confidence. The observed success fraction is perfect ($\hat{p} = 1.00$), and textbook Central Limit Theorem Wald intervals collapse into the degenerate point $[1.0, 1.0]$ because estimated variance $\hat{p}(1-\hat{p})/n$ vanishes identically. Yet exact non-asymptotic Clopper-Pearson inversion ($p_{\text{lower}} = 0.05^{1/n}$) demonstrates that the true one-sided lower confidence bound is only `{python} ClopperPearsonZeroFailure.p_lower_fallacy_str`, falling short of the 99.9 percent requirement (@tbl-07-confidence-bounds); certifying it requires `{python} ClopperPearsonZeroFailure.n_req_999_str` clean runs. A parallel fallacy occurs in early-stage pilot evaluation: observing zero failures in 20 trials ($p_{\text{lower}} =$ `{python} ClopperPearsonZeroFailure.p_lower_pct_str` percent) cannot demonstrate even a 90 percent success lower limit (`{python} ClopperPearsonZeroFailure.n_req_90_str` clean runs required), let alone an industrial 99 percent limit (`{python} ClopperPearsonZeroFailure.n_req_99_str` clean runs required). The gap is an evidence deficit, not an empirical proof of compliance. The trial budget follows strictly from the claim and confidence level, fixed in advance, and the report must state the exact Clopper-Pearson lower bound rather than the perfect empirical fraction. **Zero failures with an insufficient sample size represents an evidence deficit, not an empirical proof of compliance.**
 
 **Architect's countermeasure:** Reject asymptotic Wald intervals at parameter boundaries; precalculate the required sample size via the non-asymptotic Clopper-Pearson bound ($n = \lceil \ln\alpha / \ln p_{\text{target}} \rceil$) or the Poisson Rule of Three ($T \ge 3.0/\lambda$), and report exact one-sided lower confidence bounds.
 
@@ -1346,9 +1768,9 @@ An evaluation report that cites close agreement with expert actions\index{Evalua
 
 **Pitfall**: *Peeking at accumulating rollouts and terminating testing early inflates false safety certification.*
 
-An engineering team halts after 30 clean runs because the accumulating result looks favorable, then reports the confidence of a fixed-sample test. That stopping rule changes the test; its error rate cannot be read from a fixed-sample calculation. A predeclared zero-failure protocol may stop at a failure to reject the candidate, but early acceptance needs its own calibration. Sequential probability ratio testing supplies one such approach. Ville's inequality ($P(\sup_{m \ge 1} L_m \ge 1/\alpha \mid H_0) \le \alpha$) controls false acceptance at its stated likelihood-ratio threshold; approximate Wald boundaries require their own error calibration. **Choose the stopping rule before collecting outcomes, and report the error guarantee for that rule.**
+An engineering team halts after 30 clean runs because the accumulating result looks favorable, then reports the confidence of a fixed-sample test. That stopping rule changes the test; its error rate cannot be read from a fixed-sample calculation. A predeclared zero-failure protocol may stop at a failure to reject the candidate, but early acceptance needs its own calibration. Sequential probability ratio testing supplies one such approach: Ville's inequality bounds its false acceptance by $e^{-A}$ for whatever acceptance boundary $A$ the protocol declares, which is $\alpha/(1-\beta)$ for Wald's boundary (@sec-evaluation-sequential-sprt). **Choose the stopping rule before collecting outcomes, and report the error guarantee for that rule.**
 
-**Architect's countermeasure:** Pre-register sequential decision boundaries ($A \approx \ln((1-\beta)/\alpha)$, $B \approx \ln(\beta/(1-\alpha))$) and update the likelihood-ratio martingale after each rollout, halting testing only when cumulative log-likelihood crosses an absorbing threshold.
+**Architect's countermeasure:** Pre-register sequential decision boundaries ($A \approx \ln((1-\beta)/\alpha)$, $B \approx \ln(\beta/(1-\alpha))$) and update the log-likelihood ratio $\Lambda_m$ after each rollout, halting testing only when it crosses a declared boundary.
 
 :::
 
@@ -1368,7 +1790,7 @@ The mobile manipulator completes 50 nominal aisle runs, and the team credits its
 
 When an autonomous vehicle or mobile manipulator completes an extended campaign with zero collisions, teams frequently declare that the policy achieved high reliability (e.g., claiming an MTBF equal to total run time). But if human safety supervisors or runtime Control Barrier Functions intervened repeatedly to prevent impending impacts, the system achieved zero hardware damage ($N_{\text{damage}} = 0$) only because the protective safety envelope intervened to censor the failure trajectories. What the testbed actually measured was an intervention event; the true autonomous reliability is captured by Autonomous Completion Rate (ACR) and Mean Time Between Interventions (MTBI). Frequent human takeovers can make a proposed service impractical, while frequent automatic least-change adjustments may be normal operation; the report must separate those classes. Discarding these interventions or treating them as unassisted proposer successes confuses the protective competence of the safety architecture with the operational competence of the learned policy. **Zero collisions under active safety supervision must be interpreted alongside interventions; they do not by themselves establish policy reliability or complete protection coverage.**
 
-**Architect's countermeasure:** Enforce full-denominator accounting; record every supervisory takeover, CBF clamping event, and tripwire crossing as an autonomy failure ($A_i = 0, I_i \ge 1$), and report those strict autonomy measures beside whole-machine task completion, cycle time, and protective outcomes.
+**Architect's countermeasure:** Enforce full-denominator accounting; record every supervisory takeover, permission-path clamping event, and tripwire crossing as an autonomy failure ($A_i = 0, I_i \ge 1$), and report those strict autonomy measures beside whole-machine task completion, cycle time, and protective outcomes.
 
 :::
 
@@ -1376,9 +1798,9 @@ When an autonomous vehicle or mobile manipulator completes an extended campaign 
 
 **Pitfall**: *Qualifying a policy on a single reference robot assumes zero unit-to-unit hardware variance across the fleet.*
 
-An engineering team executes 300 failure-free runs on a single robot (Unit 01) and declares the policy qualified for fleet release. When flashed onto Unit 02, the policy repeatedly jams or chatters. Mechanical tolerances in harmonic drive gear teeth ($\Delta \theta_{\text{backlash}} \sim 0.5\text{ to }2.0\text{ mrad}$), structural link compliance under load, camera bracket mounting angles ($\pm 0.5^\circ$), and stator winding resistance tolerances ($\pm 5$ percent) alter the plant transfer function across physical chassis. Testing on a single golden unit measures that individual unit's specific mechanical quirks, not fleet-wide reliability. Furthermore, testing at a single time of day ignores environmental unobservables—such as diurnal solar glare angling through clerestory windows, changing floor friction from ambient humidity, or motor winding heating ($I^2 R$)—that shift physical dynamics without changing a single neural weight. **Evaluating a single robot chassis characterizes that specific unit's mechanical quirks; fleet release requires stratifying trials across the manufacturing distribution.**
+An engineering team executes 300 failure-free runs on a single robot (Unit 01) and declares the policy qualified for fleet release. When flashed onto Unit 02, the policy repeatedly jams or chatters. The unit-to-unit differences of @sec-evaluation-what-measured (transmission lost motion and stiffness, structural link compliance under load, camera bracket mounting, and stator winding tolerances) alter the plant transfer function across physical chassis. Testing on a single golden unit measures that individual unit's specific mechanical quirks, not fleet-wide reliability. Furthermore, testing at a single time of day ignores environmental unobservables—such as diurnal solar glare angling through clerestory windows, changing floor friction from ambient humidity, or motor winding heating ($I^2 R$)—that shift physical dynamics without changing a single neural weight. **Evaluating a single robot chassis characterizes that specific unit's mechanical quirks; fleet release requires stratifying trials across the manufacturing distribution.**
 
-**Architect's countermeasure:** Stratify physical qualification across multiple chassis serial numbers drawn from the fleet manufacturing distribution $\mathcal{M}$, audit unit-specific backlash and kinematic offsets, and quarantine final qualification testing to fresh units that were not used during policy development.
+**Architect's countermeasure:** Stratify physical qualification across multiple chassis serial numbers drawn from the fleet manufacturing distribution $\mathcal{M}$, audit unit-specific lost motion and kinematic offsets, and quarantine final qualification testing to fresh units that were not used during policy development.
 
 :::
 

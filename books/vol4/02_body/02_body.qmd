@@ -147,11 +147,10 @@ Sensor selection spends both error tolerance and time. A sensor must resolve the
    An inertial measurement unit (IMU) measures acceleration and angular velocity. Sampling must distinguish the motion of interest from faster structural vibration. Under the Nyquist-Shannon sampling theorem, a band-limited signal requires sampling above twice its highest frequency ($f_s > 2 f_{\max}$). Without adequate analog anti-aliasing filtering, vibrations above that range can appear as slower motion, misleading the state estimator. Raising the software update rate cannot recover information already aliased at the sensor.
 
 3. **Tactile Sensor Arrays and Scanning Bandwidth:**
-   Tactile arrays measure contact stress across a gripper through individual sensing elements called taxels. Scanning their elements sequentially reduces wiring but makes the frame span an interval rather than a single instant.
-   Scanning an $M \times N$ matrix sequentially creates an inherent trade-off between spatial taxel count and temporal frame rate. A tactile skin scanning at $60\text{ Hz}$ introduces an immediate $16.7\text{ ms}$ sample-and-hold delay, plus intra-frame temporal skew between the first and last scanned taxel. In dynamic slip detection—where high-frequency micro-vibrations ($200\text{--}500\text{ Hz}$) signal incipient grasp failure as object surfaces shear across finger ridges—a $60\text{ Hz}$ tactile matrix is severely bandwidth-limited and blinded to high-frequency stick-slip transitions.
+   Tactile arrays measure contact stress across a gripper through individual sensing elements called taxels. Scanning the elements one after another reduces wiring, but one frame then spans the whole scan, so the scan period adds directly to observation age and sets the fastest contact event, such as the onset of slip, that the array can resolve. More taxels at the same readout rate mean an older frame.
 
-4. **Cameras and Rolling-Shutter Exposure Skew:**
-   In CMOS image sensors, exposure integration represents an analog photon-counting window ($t_{\text{exp}} \approx 5\text{--}16.7\text{ ms}$). Rolling-shutter sensors expose pixel rows sequentially from top to bottom. If a manipulator moves at $1.5\text{ m/s}$ during a $16.7\text{ ms}$ readout, objects imaged at the bottom of the frame are captured after displacing by $2.5\text{ cm}$ relative to objects imaged at the top, inducing non-rigid geometric warping that degrades 3D bounding-box estimation unless compensated by hardware global-shutter sensors or explicit ego-motion undistortion.
+4. **Cameras and Rolling-Shutter Readout:**
+   A rolling-shutter camera exposes and reads its pixel rows in sequence, so the rows of one frame differ in age by the full readout time, and motion during the readout shears the image. A frame's timestamp must therefore state which row, or which exposure midpoint, it represents. @Sec-perception-transduction-calibration sizes this skew on the mobile manipulator's navigation camera and removes it before the image reaches the estimator.
 
 ### The end-to-end sense-to-actuation latency pipeline {#sec-body-latency-pipeline}
 
@@ -185,18 +184,18 @@ To see how stage timing differs from end-to-end age, consider a timing profile f
 
 The $50.0\text{ ms}$ sum of stage $P_{99}$ values differs from the $46.2\text{ ms}$ system percentile, and against the $20\text{ ms}$ deadline even the $35.0\text{ ms}$ median would be late.
 
-Late feedback can also reinforce a tracking error instead of correcting it,[^fn-math-bode-delay] but the freshness calculation needs no frequency-domain model: the parcel has already moved beyond the allowed tolerance. The architecture must preserve the observation's physical capture time. Hardware timestamps synchronized through **IEEE 1588 gPTP**\index{IEEE 1588 gPTP!hardware timestamping}[^fn-hw-gptp-timestamp] or capture strobes associated with the **MIPI CSI-2**\index{MIPI CSI-2!sensor readout interface}[^fn-hw-mipi-capture] interface provide a timing reference; the sensor's exposure and readout behavior determine how that reference maps to the measurement. The timestamp then travels with the observation through computation.
+Late feedback can also reinforce a tracking error instead of correcting it,[^fn-math-bode-delay] but the freshness calculation needs no frequency-domain model: the parcel has already moved beyond the allowed tolerance. The architecture must preserve the observation's physical capture time. Hardware timestamps synchronized through **IEEE 802.1AS**\index{IEEE 802.1AS!hardware timestamping}, the generalized Precision Time Protocol (gPTP),[^fn-hw-gptp-timestamp] or capture strobes associated with the **MIPI CSI-2**\index{MIPI CSI-2!sensor readout interface}[^fn-hw-mipi-capture] interface provide a timing reference; the sensor's exposure and readout behavior determine how that reference maps to the measurement. The timestamp then travels with the observation through computation.
 
 Before committing a proposal to actuator registers, the permission path compares observation age $t_{\text{age}} = t_{\text{now}} - t_{\text{transduction}}$ with the freshness deadline, reserving time for the remaining actuator response. If $t_{\text{age}} > \Delta t_{\text{fresh}}$, it refuses that proposal. An already active command may continue only while its own evidence and permission remain valid; otherwise the path invokes a qualified fallback within the remaining physical margin [@brooks1986robust]. Refusing a stale replacement and ending valid ongoing motion are separate decisions.
 
 [^fn-math-bode-delay]: **Transport Delay and Feedback Stability**\index{Transport delay!feedback instability}\index{Asynchronous divergence!closed-loop}: Transport delay makes a controller act on historical state. Whether delayed corrections destabilize the loop depends on the plant, controller, and total response. @Sec-appendix-control-zoh develops the phase-margin calculation; delay alone does not establish a particular oscillation or damage outcome.
 
-[^fn-hw-gptp-timestamp]: **IEEE 1588 gPTP**\index{IEEE 1588 gPTP!hardware timestamping}: The Generalized Precision Time Protocol (gPTP) provides sub-microsecond clock synchronization across Ethernet networks by exchanging hardware-timestamped packets directly at the network chip (media access control [MAC] PHY) layer. Capturing the timestamp in hardware keeps the operating system scheduler's jitter out of the measurement.
+[^fn-hw-gptp-timestamp]: **IEEE 802.1AS (gPTP)**\index{IEEE 802.1AS!hardware timestamping}\index{IEEE 1588!Precision Time Protocol}: The generalized Precision Time Protocol of IEEE 802.1AS is a profile of the IEEE 1588 Precision Time Protocol for time-sensitive Ethernet networks [@ieee8021as2020]. It synchronizes clocks by exchanging packets timestamped in hardware at the network interface, which keeps the operating-system scheduler's jitter out of the measurement.
 
 [^fn-hw-mipi-capture]: **MIPI CSI-2**\index{MIPI CSI-2!sensor readout interface}: The Mobile Industry Processor Interface Camera Serial Interface 2 (MIPI CSI-2) is a high-bandwidth, high-speed differential protocol used for transmitting uncompressed video data directly from image sensors to host system-on-chip (SoC) devices with minimal latency.
 
 ::: {.callout-perspective title="The publish timestamp anti-pattern"}
-A common architectural defect in robotics software is timestamping sensor observations inside user-space publishers (such as a ROS 2 or DDS node). Doing so discards exposure midpoint, rolling-shutter integration, sensor readout, DMA transfers, and kernel queue latency—often hiding 15 to 30 ms of physical age. Timestamps must be latched at the physical transducer via hardware strobes at the silicon interface (such as MIPI CSI-2 Start-of-Frame or Ethernet PHY hardware timestamps via IEEE 1588 gPTP) before data enters operating-system queues.
+A common architectural defect in robotics software is timestamping sensor observations inside user-space publishers (such as a ROS 2 or DDS node). Doing so discards exposure midpoint, rolling-shutter integration, sensor readout, DMA transfers, and kernel queue latency, which removes the first four stages of @tbl-02-latency-breakdown from the age calculation. Timestamps must be latched at the physical transducer via hardware strobes at the silicon interface (such as MIPI CSI-2 Start-of-Frame or Ethernet PHY hardware timestamps synchronized through IEEE 802.1AS) before data enters operating-system queues.
 :::
 
 Throughout that sense-to-actuation interval, the body continues moving, carrying momentum that no software interrupt can cancel.
@@ -503,7 +502,7 @@ class BrakingLimits:
     headroom_str = fmt_voltage(headroom, unit=volt, precision=1)
 ```
 
-In an embodied machine, stored kinetic energy includes both translational kinetic energy of the chassis and payload ($E_{k,\text{trans}} = \frac{1}{2} m v^2$) and the rotational kinetic energy stored across spinning wheels, gearboxes, and motor rotors ($E_{k,\text{rot}} = \sum_i \frac{1}{2} J_{\text{rotor}, i} \omega_{i}^2$). Because transmission gear reduction $N_i$ spins the motor rotor at high angular velocity ($\omega_i = N_i \frac{v}{r_{\text{wheel}}}$), the rotor's rotational kinetic energy reflects into the linear translational domain scaled by the square of the gear ratio:
+In an embodied machine, stored kinetic energy includes the spinning parts as well as the translating chassis. A part spinning at angular velocity $\omega$ stores $\frac{1}{2} J \omega^2$, where its moment of inertia $J$ (in $\text{kg}\cdot\text{m}^2$) plays the role that mass plays in $\frac{1}{2} m v^2$: it measures how strongly the part resists a change in its rotation speed. A transmission with **gear ratio**\index{Gear ratio!definition} $N$ turns the motor $N$ times for every turn of its output, multiplying the motor's torque by $N$ and dividing its speed by $N$. The machine's kinetic energy is therefore the translational energy of the chassis and payload ($E_{k,\text{trans}} = \frac{1}{2} m v^2$) plus the rotational energy of its wheels, gearboxes, and motor rotors ($E_{k,\text{rot}} = \sum_i \frac{1}{2} J_{\text{rotor}, i} \omega_{i}^2$). Because a drive of ratio $N_i$ spins its rotor at $\omega_i = N_i \frac{v}{r_{\text{wheel}}}$, the rotor's rotational kinetic energy reflects into the translational domain scaled by the square of the gear ratio:
 $$E_{k,\text{total}} = \frac{1}{2} m v^2 + \sum_i \frac{1}{2} J_{\text{rotor}, i} \left(N_i \frac{v}{r_{\text{wheel}}}\right)^2 = \frac{1}{2} \left(m + \sum_i \frac{N_i^2 J_{\text{rotor}, i}}{r_{\text{wheel}}^2}\right) v^2$$
 This formulation reveals that the effective translational inertia of the machine is $m_{\text{eff}} = m + \sum_i \frac{N_i^2 J_{\text{rotor}, i}}{r_{\text{wheel}}^2}$. For a machine decelerating to rest under sustained retarding force $F_{\text{brake}} = m_{\text{eff}} a_{\text{brake}}$, the work-energy theorem balances mechanical work against total kinetic energy:
 $$m_{\text{eff}} a_{\text{brake}} d_{\text{brake}} = \frac{1}{2} m_{\text{eff}} v^2$$
@@ -511,7 +510,7 @@ Dividing by effective mass yields the kinematic braking travel:
 $$d_{\text{brake}} = \frac{v^2}{2 a_{\text{brake}}}$$
 If an engineer evaluates braking capacity using bare chassis mass alone ($a_{\text{nominal}} = F_{\text{brake}} / m$), they ignore the kinetic energy stored in the spinning motor rotors, overestimating deceleration by the factor $m_{\text{eff}} / m$ and underestimating stopping travel by $\frac{m_{\text{eff}} - m}{m} = \sum_i \frac{N_i^2 J_{\text{rotor}, i}}{m r_{\text{wheel}}^2}$. On the running machine the correction is small. Its two driven wheels are direct-drive hub motors ($N_i = 1$), and although their datasheet omits rotor inertia, no part of a hub motor lies outside its tire, so each $J_i/r_{\text{wheel}}^2$ cannot exceed the motor's `{python} BrakingLimits.m_rot_wheel_str` mass. The rotating parts add at most `{python} BrakingLimits.rot_pct_str` to the `{python} BrakingLimits.m_str` loaded mass. Because the correction grows with $N_i^2$, it matters most on light platforms driven through high-ratio gearboxes.
 
-The parameter $a_{\text{brake}}$ is the credible sustained deceleration the physical plant can exert against the environment, not an idealized rating copied from an actuator datasheet. The retarding force $F_{\text{brake}} = m_{\text{eff}} a_{\text{brake}}$ must fit under three independent ceilings. Traction bounds it at the floor. Only the braked wheels push against the floor, so $a_{\text{brake}} \le \mu g \phi_{\text{drive}}$, where $\mu$ is the tire-floor friction coefficient and $\phi_{\text{drive}}$ is the fraction of the weight those wheels carry. Tip-over bounds it through the mass distribution. The braking force acts at the floor while inertia acts at the center of gravity, so the body pitches forward unless $a_{\text{brake}} \le g\,d/h_{\text{cg}}$, with $h_{\text{cg}}$ the height of the center of gravity and $d$ its horizontal distance to the leading support. Raising or extending the arm changes both terms, so this ceiling depends on the machine's state. The drives bound it through the torque ceiling $\tau_{\text{out, max}} = \eta N K_t I_{\max}$ that @sec-body-electrical-time-constants derives. If an engineer restricts inverter current limits, or if back-EMF at high rotational speed robs the inverter of the voltage it needs to control current, the drive cannot deliver the required braking torque, silently degrading $a_{\text{brake}}$ and expanding braking travel without software notification. The rotor's own inertia is already counted in $m_{\text{eff}}$ and must not be charged a second time. \ref{nbk-body-braking-drive-limits} checks all three ceilings on the running machine.
+The parameter $a_{\text{brake}}$ is the credible sustained deceleration the physical plant can exert against the environment, not an idealized rating copied from an actuator datasheet. The retarding force $F_{\text{brake}} = m_{\text{eff}} a_{\text{brake}}$ must fit under three independent ceilings. Traction bounds it at the floor. Only the braked wheels push against the floor, so $a_{\text{brake}} \le \mu g \phi_{\text{drive}}$, where $\mu$ is the tire-floor friction coefficient and $\phi_{\text{drive}}$ is the fraction of the weight those wheels carry. Tip-over bounds it through the mass distribution. The braking force acts at the floor while inertia acts at the center of gravity, so the body pitches forward unless $a_{\text{brake}} \le g\,d/h_{\text{cg}}$, with $h_{\text{cg}}$ the height of the center of gravity and $d$ its horizontal distance to the leading support. Raising or extending the arm changes both terms, so this ceiling depends on the machine's state. The drives bound it through the largest torque their current limit allows, a ceiling that @sec-body-electrical-time-constants derives from the motor's torque per ampere. If an engineer restricts inverter current limits, or if back-EMF, the voltage a spinning motor generates against its own supply, leaves the inverter too little headroom to control current, the drive cannot deliver the required braking torque, silently degrading $a_{\text{brake}}$ and expanding braking travel without software notification. The rotor's own inertia is already counted in $m_{\text{eff}}$ and must not be charged a second time. \ref{nbk-body-braking-drive-limits} checks all three ceilings on the running machine.
 
 Reflected rotor energy also matters during contact. The transmission and contact compliance determine how that energy reaches the obstacle and gear teeth. The stopping calculation therefore cannot substitute for a contact-load assessment; @sec-body-actuator-limits develops the corresponding transmission trade-off.
 
@@ -748,25 +747,90 @@ While electromechanical drives dominate mobile manipulation and form the primary
 
 - **Hydraulic servovalves**: For heavy machinery, construction robots, and high-load dynamic platforms, fluid power achieves operating pressures exceeding 20–35 MPa, delivering specific force densities an order of magnitude beyond what permanent magnets can produce. The miniature servovalves on hydraulic legged robots respond fast, with bandwidths of hundreds of hertz [@scully2015hydraulic], so the valve is rarely the slow element. Hydraulic control is bounded instead by fluid compressibility (oil bulk modulus $\beta$), non-linear orifice flow, and the plumbing, pumps, and cooling needed to keep the fluid within its operating range. That maintenance burden is one reason Boston Dynamics retired its hydraulic Atlas humanoid in 2024 in favor of an all-electric successor [@bostondynamics2024electric].
 - **Pneumatics and soft actuation**: Pneumatic artificial muscles and elastomeric chambers provide physical compliance, which can reduce contact loads. Gas compressibility and transport delay also limit response. Compliance alone does not establish safe contact: pressure, stored energy, geometry, and the measured response still require qualification.
-- **Series elastic actuators (SEAs)**: By intentionally placing a calibrated spring between the gearbox and the output link (as in the ANYbotics ANYdrive and Baxter), an SEA introduces physical compliance directly into the drive train. The spring acts as a mechanical low-pass filter: it isolates delicate gear teeth from shock loads and decouples the large reflected rotor inertia ($N^2 J_{\text{rotor}}$) from the environment during impact. Its measured deflection is also a force sensor, since spring stiffness times deflection gives output torque [@pratt1995series]. The spring does not lengthen the machine's stopping budget; it stores energy at the joint and can return it into a contact. The trade-off is reduced closed-loop control bandwidth and structural resonance, requiring the permission path to monitor spring deflection rather than assuming rigid load tracking.
+- **Series elastic actuators (SEAs)**: By intentionally placing a calibrated spring between the gearbox and the output link (as in the ANYbotics ANYdrive), an SEA introduces physical compliance directly into the drive train. The spring acts as a mechanical low-pass filter: it isolates delicate gear teeth from shock loads and decouples the large reflected rotor inertia ($N^2 J_{\text{rotor}}$) from the environment during impact. Its measured deflection is also a force sensor, since spring stiffness times deflection gives output torque [@pratt1995series]. The spring does not lengthen the machine's stopping budget; it stores energy at the joint and can return it into a contact. The trade-off is reduced closed-loop control bandwidth and structural resonance, requiring the permission path to monitor spring deflection rather than assuming rigid load tracking.
 
 ### Electrical time constants, back-EMF, and current clamping {#sec-body-electrical-time-constants}
 
-Because electromechanical drives provide the tightest coupling between compute and actuation—delivering millisecond control bandwidths with linear magnetic torque—they serve as the baseline physical plant for our analysis. To an ML engineer accustomed to software abstractions, an actuator might appear as a simple software routine that instantly assigns a target torque tensor $\tau \in \mathbb{R}^m$. In physical reality, **an electric actuator operates as a specialized electromechanical Digital-to-Analog Converter (DAC)**. It converts discrete digital torque setpoints into continuous magnetic flux and mechanical shaft torque through a multi-stage physical conversion pipeline.
+Electromechanical drives couple compute to actuation most tightly, with current loops that close in well under a millisecond, so they serve as the baseline physical plant for our analysis. To a policy, a torque command is a number written to a register; to the motor, it is a current that must be built up in a coil. Three results from introductory physics describe that conversion [@lynch2017modern]. First, a wire carrying current across a magnetic field feels a force proportional to the current. Wound around a rotor, those forces produce a torque proportional to current, $\tau = K_t i$, where the **torque constant**\index{Torque constant!definition} $K_t$ (in $\text{N}\cdot\text{m/A}$) collects the magnet strength and the winding geometry. Second, the same wires, swept through the same field by the spinning rotor, have a voltage induced in them. A spinning motor is therefore also a generator, and its **back-EMF**\index{Back-EMF!definition} (back electromotive force) $e_{\text{bemf}} = K_e \omega$ opposes the supply. Energy conservation ties the two constants together: the electrical power the motor converts, $e_{\text{bemf}}\,i$, equals the mechanical power it delivers, $\tau \omega$, so $K_e$ and $K_t$ are the same number in SI units. A three-phase drive's current and voltage conventions scale them by constant factors, which is why both must be identified under one convention. Third, the winding is a coil, and a coil opposes any change in its current, $v = L\,di/dt$ for inductance $L$. Current, and therefore torque, cannot jump.
 
-The budget needs two results from the motor controller: the torque delivered for a given current and the delay before that current appears. The torque-producing current is $i_q$, with $\tau = K_t i_q$. Field-oriented control (FOC) maintains that current as the rotor turns by measuring winding currents and adjusting inverter voltages.[^fn-hw-foc-current] The current-rise and current-limit relations below supply the quantities needed for admission. The coordinate transformations inside the drive are supporting detail, presented after the transmission choice.
+The budget needs two results from the motor controller: the torque delivered for a given current and the delay before that current appears. In a three-phase motor, field-oriented control (FOC) measures the winding currents and adjusts the inverter voltages so that the torque-producing current $i_q$ stays at right angles to the rotor's magnetic field as the rotor turns, giving $\tau = K_t i_q$.[^fn-hw-foc-current] The coordinate transformations inside the drive are supporting detail, presented after the transmission choice.
 
-The delay between commanding a torque and delivering it begins in the stator windings. Each phase winding constitutes an inductive-resistive ($RL$) circuit governed by Kirchhoff's Voltage Law:
+The delay between commanding a torque and delivering it begins in the stator windings. Adding the three effects around one winding circuit, the supply voltage must cover the resistive drop, the inductive voltage, and the back-EMF, which is Kirchhoff's voltage law for the torque-producing current:
 $$L \frac{di_q(t)}{dt} + R i_q(t) = v_q(t) - e_{\text{bemf}}(t)$$
-where $L$ is phase inductance, $R$ is phase resistance, $v_q(t)$ is the applied quadrature voltage from the inverter bridge, and $e_{\text{bemf}}(t) = K_e \omega(t)$ is the back-electromotive force opposing the supply voltage. The stator electrical time constant is:
+where $L$ is phase inductance, $R$ is phase resistance, $v_q(t)$ is the applied quadrature voltage from the inverter bridge, and $e_{\text{bemf}}(t) = K_e \omega(t)$ is the back-EMF. The stator electrical time constant is:
 $$\tau_e = \frac{L}{R}$$
-When the inverter applies a step voltage command, current cannot jump discontinuously; it rises along an exponential trajectory $i_q(t) = I_{\text{target}}(1 - e^{-t/\tau_e})$. A policy that assumes torque appears instantaneously spends this rise as unguided drift before the arm can correct or brake.
 
-Torque is strictly proportional to quadrature current ($\tau = K_t i_q$), but the rate at which current can physically rise is bounded by the available DC bus voltage headroom $(V_{\text{bus}} - e_{\text{bemf}})$ divided by stator inductance:
-$$\frac{di_q}{dt} \le \frac{V_{\text{bus}} - e_{\text{bemf}}}{L}$$
-In neural network optimization, gradient clipping enforces an upper bound on parameter update steps ($||\mathbf{g}|| \le c$) to stabilize stochastic gradient descent. In physical AI, stator inductance ($L$) and voltage headroom ($V_{\text{bus}} - e_{\text{bemf}}$) act as **hardware gradient clipping** on the policy's torque slew rate:
-$$\frac{d\tau}{dt} \le \frac{K_t (V_{\text{bus}} - K_e \omega)}{L}$$
-At low rotational speed, voltage headroom permits rapid current rise. As speed increases, back-EMF consumes that headroom, reducing the current the inverter can establish. A policy's abrupt torque request therefore becomes a finite physical ramp, and a request above the available slew rate creates tracking error. The stopping budget must use that delivered response. Torque and back-EMF constants must be identified using consistent current and voltage conventions before applying this simplified motor model.
+```{python}
+#| label: body-current-rise-calc
+#| echo: false
+#| warning: false
+#| message: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ CURRENT RISE IN THE RUNNING MACHINE'S HUB MOTORS (LEGO)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: the current-rise paragraph in @sec-body-electrical-time-constants
+# │          and the electrical-rise test in @sec-body-dynamometer-characterization.
+# │ Goal:    Put a number on tau_e for a sourced motor and compare the
+# │          voltage-limited current ramp with the brake-onset allowance.
+# │ Show:    tau_e = 1.885 mH / 0.7 Ohm = 2.69 ms; from a depleted 42 V pack the
+# │          current reaches the 25 A limit in about 1.12 ms, 5.6 percent of the
+# │          20 ms brake onset; the full 42 V across the 0.7 Ohm winding would
+# │          drive 60 A, 2.4 times the motor's 25 A peak.
+# │ How:     tau_e = L/R (line quantities, same ratio as phase quantities for a
+# │          star winding); ramp time L I_max / V at stall, where e_bemf = 0;
+# │          RM.drive_unit (ZLTECH ZLLG10ASM800 datasheet), AISLE.t_brake_onset.
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import *
+from mlsysim.core.units import *
+from mlsysim.fmt import fmt_latency, fmt_inductance, fmt_resistance, fmt_current, fmt_voltage, fmt_percent, fmt_multiple, check
+
+RM = Embodied.MobileManipulator.WarehouseMobileManipulator
+AISLE = Embodied.Scenario.WarehouseAisle
+
+class CurrentRise:
+    """Electrical time constant and voltage-limited current ramp of the hub motors."""
+
+    # ┌── 1. LOAD (Constants & Parameters) ─────────────────────────────────
+    hub = RM.drive_unit  # category: sourced (ZLTECH ZLLG10ASM800 datasheet)
+    l_line = hub.line_inductance  # category: sourced (line-to-line)
+    r_line = hub.line_resistance  # category: sourced (line-to-line)
+    i_max = RM.drive_current_limit  # category: chosen (the motor's datasheet peak current)
+    i_peak = hub.peak_current  # category: sourced
+    v_low = RM.drive_bus_battery_low  # category: sourced (48 V-class pack minimum)
+    t_act = AISLE.t_brake_onset  # category: illustrative (brake onset)
+
+    # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────
+    tau_e = (l_line / r_line).to(millisecond)
+    t_ramp = (l_line * i_max / v_low).to(millisecond)  # stall, e_bemf = 0, full depleted-bus voltage
+    ramp_share = (t_ramp / t_act).to("dimensionless").magnitude
+    i_full_step = (v_low / r_line).to(ureg.ampere)  # steady current of a full-bus step
+    step_over_peak = (i_full_step / i_peak).to("dimensionless").magnitude
+
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(abs(tau_e.magnitude - 2.693) < 1e-3, f"Unexpected electrical time constant: {tau_e}")
+    check(abs(t_ramp.magnitude - 1.122) < 1e-3, f"Unexpected current ramp: {t_ramp}")
+    check(t_ramp < 0.1 * t_act, "The current ramp must be small against the brake onset.")
+    check(abs(i_full_step.magnitude - 60.0) < 1e-9, f"Unexpected full-bus step current: {i_full_step}")
+    check(i_full_step > i_peak, "A full-bus step must exceed the motor's peak current.")
+
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
+    l_line_str = fmt_inductance(l_line, unit=ureg.millihenry, precision=3)
+    r_line_str = fmt_resistance(r_line, unit=ureg.ohm, precision=1)
+    tau_e_str = fmt_latency(tau_e, unit=millisecond, precision=1)
+    i_max_str = fmt_current(i_max, unit=ureg.ampere, precision=0)
+    v_low_str = fmt_voltage(v_low, unit=volt, precision=0)
+    t_ramp_str = fmt_latency(t_ramp, unit=millisecond, precision=1)
+    t_act_str = fmt_latency(t_act, unit=millisecond, precision=0)
+    ramp_share_pct_str = fmt_percent(ramp_share, precision=1, style="prose")
+    i_full_step_str = fmt_current(i_full_step, unit=ureg.ampere, precision=0)
+    step_over_peak_mult_str = fmt_multiple(step_over_peak, precision=1)
+```
+
+If the inverter applied a fixed voltage step, the current would approach its final value along $i_q(t) = I_{\text{final}}(1 - e^{-t/\tau_e})$, reaching 63 percent of it after one $\tau_e$. A current-controlled drive does better: it applies all the voltage it has until the current reaches the target, so the current ramps at nearly $(V_{\text{bus}} - e_{\text{bemf}})/L$, and the loop then holds it. On the running machine this rise is short. The hub motors' windings (line inductance `{python} CurrentRise.l_line_str`, line resistance `{python} CurrentRise.r_line_str`) have $\tau_e =$ `{python} CurrentRise.tau_e_str`. Starting from rest on a depleted `{python} CurrentRise.v_low_str` pack, the current reaches the `{python} CurrentRise.i_max_str` limit in about `{python} CurrentRise.t_ramp_str`, `{python} CurrentRise.ramp_share_pct_str` of the `{python} CurrentRise.t_act_str` brake onset that the stopping budget already allows, and when braking from speed the back-EMF adds to the voltage available, so the braking current builds faster still. The electrical rise therefore does not limit the base's stop. Traction, the torque ceiling, and voltage headroom at speed do, as \ref{nbk-body-braking-drive-limits} shows below.
+
+Torque follows current, so the same voltage headroom bounds how fast torque can change:
+$$\frac{d\tau}{dt} = K_t \frac{di_q}{dt} \le \frac{K_t (V_{\text{bus}} - K_e \omega)}{L}$$
+The voltage and the inductance must share one convention. Line-to-line values, as hub-motor data sheets give them, pair with the full bus voltage; per-phase values under space-vector modulation pair with an available amplitude of about $V_{\text{bus}}/\sqrt{3}$ (@sec-appendix-systems-actuators). At low rotational speed, voltage headroom permits rapid current rise. As speed increases, back-EMF consumes that headroom, reducing the current the inverter can establish. A policy's abrupt torque request therefore becomes a finite physical ramp, and a request above the available slew rate creates tracking error. The stopping budget must use that delivered response. Torque and back-EMF constants must be identified using consistent current and voltage conventions before applying this simplified motor model.
 
 [^fn-hw-foc-current]: **Field-Oriented Control (FOC) as an Actuator HAL**\index{Field-Oriented Control!current loop limits}: Field-Oriented Control executes as an embedded hardware abstraction layer (HAL) on dedicated motor-control silicon at $10\text{--}25\text{ kHz}$. It translates high-level torque requests into coordinated three-phase AC voltages while enforcing hardware current limits. Upstream neural policies issue target torques, but the torque reaches the winding only at the ramp rate permitted by the motor's electrical time constant and DC bus voltage headroom.
 
@@ -811,12 +875,15 @@ Gearing adds a mechanical asymmetry. High-reduction joints use ratios of $50{:}1
 # │ Context: the reflected-inertia paragraph in @sec-body-actuator-limits.
 # │ Goal:    Give N^2 J_rotor a physical size at the joint.
 # │ Show:    a 50 g rotor (5.6e-6 kg m^2) through 100:1 reflects 0.056 kg m^2,
-# │          the inertia of an 11.2 kg solid flywheel of 10 cm radius.
-# │ How:     J_ref = N^2 J_rotor; solid disk m = 2 J_ref / r^2.
+# │          the inertia of an 11.2 kg solid flywheel of 10 cm radius; with an
+# │          illustrative 8.5e-3 kg m^2 link, N* = 39, and 100:1 delivers 67.7
+# │          percent of the matched-ratio acceleration.
+# │ How:     J_ref = N^2 J_rotor; solid disk m = 2 J_ref / r^2;
+# │          N* = sqrt(J_load / J_rotor); qdd(N)/qdd(N*) = 2x / (1 + x^2), x = N/N*.
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim import *
 from mlsysim.core.units import *
-from mlsysim.fmt import fmt_int, fmt_mass, fmt_length, check
+from mlsysim.fmt import fmt_int, fmt_mass, fmt_length, fmt_sci_qty, fmt_percent, check
 
 class ReflectedInertia:
     """Reflected rotor inertia through a 100:1 transmission, sized as a flywheel."""
@@ -826,11 +893,15 @@ class ReflectedInertia:
     m_rotor = 50.0 * ureg.gram  # category: illustrative (rotor mass)
     j_rotor = 5.6e-6 * kilogram * meter**2  # category: illustrative (rotor inertia of that rotor)
     r_fly = 0.10 * meter  # category: illustrative (comparison flywheel radius)
+    j_load = 8.5e-3 * kilogram * meter**2  # category: illustrative (link inertia at the joint)
 
     # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────
     j_ref = (n_gear**2 * j_rotor).to(kilogram * meter**2)
     m_fly = (2 * j_ref / r_fly**2).to(kilogram)
     k_gyr = ((j_rotor / m_rotor) ** 0.5).to(ureg.millimeter)  # radius of gyration ties J_rotor to the quoted mass
+    n_star = ((j_load / j_rotor).to("dimensionless").magnitude) ** 0.5
+    x_ratio = n_gear / n_star
+    accel_share = 2 * x_ratio / (1 + x_ratio**2)  # qdd at n_gear relative to qdd at N*, same motor torque
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(abs(j_ref.magnitude - 0.056) < 1e-9, f"Reflected inertia must be 0.056 kg m^2: {j_ref}")
@@ -839,12 +910,18 @@ class ReflectedInertia:
     check(abs(m_rotor.to(ureg.gram).magnitude - 50.0) < 1e-9, f"Quoted rotor mass must be 50 g: {m_rotor}")
     check(abs(r_fly.to(meter).magnitude - 0.10) < 1e-12, f"Quoted flywheel radius must be 10 cm: {r_fly}")
     check(5.0 < k_gyr.magnitude < 20.0, f"Rotor inertia implausible for a 50 g rotor (k = {k_gyr})")
+    check(abs(n_star - 38.96) < 0.01, f"Inertia-matching ratio must be about 39 (margin figure peak): {n_star}")
+    check(abs(accel_share - 0.677) < 1e-3, f"Unexpected acceleration share at 100:1: {accel_share}")
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
     n_gear_str = fmt_int(n_gear)
     m_rotor_str = fmt_mass(m_rotor, unit=ureg.gram, precision=0)
     m_fly_str = fmt_mass(m_fly, unit=kilogram, precision=1)
     r_fly_str = fmt_length(r_fly, unit=ureg.centimeter, precision=0)
+    j_load_str = fmt_sci_qty(j_load, kilogram * meter**2, precision=1)
+    n_star_str = fmt_int(round(n_star))
+    accel_share_pct_str = fmt_percent(accel_share, precision=1, style="prose")
+    accel_loss_pct_str = fmt_percent(1 - accel_share, precision=1, style="prose")
 ```
 
 Through a `{python} ReflectedInertia.n_gear_str`:1 transmission, a `{python} ReflectedInertia.m_rotor_str` rotor presents the joint with the inertia of a `{python} ReflectedInertia.m_fly_str` flywheel of `{python} ReflectedInertia.r_fly_str` radius [@lynch2017modern]. An obstacle striking the gripper must accelerate that flywheel through the gear teeth, whose roots can crack under the shock (@fig-02-real-broken-gear-tooth).
@@ -867,7 +944,7 @@ $$ N^* = \sqrt{\frac{J_{\text{load}}}{J_{\text{rotor}}}} $$
 
 [^fn-math-inertia-matching]: **Inertia Matching and Systems Trade-Offs**: Maximizing joint acceleration $\ddot{q}$ balances load inertia against reflected rotor inertia, establishing the optimum $N^* = \sqrt{J_{\text{load}}/J_{\text{rotor}}}$. While this ratio maximizes theoretical load acceleration, practical robotic systems select lower ratios to protect gear teeth from shock stress, maintain physical backdrivability, and expand top cruise speed.
 
-Below $N^*$, joint acceleration is torque-limited: increasing $N$ leverages motor torque to accelerate the heavy load faster. Above $N^*$, more gearing *decreases* delivered joint acceleration, because the motor expends most of its electromagnetic torque accelerating its own spinning rotor ($N^2 J_{\text{rotor}}$) rather than the external link.
+Below $N^*$, joint acceleration is torque-limited: increasing $N$ leverages motor torque to accelerate the heavy load faster. Above $N^*$, more gearing *decreases* delivered joint acceleration, because the motor expends most of its electromagnetic torque accelerating its own spinning rotor ($N^2 J_{\text{rotor}}$) rather than the external link. For the `{python} ReflectedInertia.m_rotor_str` rotor above driving an illustrative link of $J_{\text{load}} =$ `{python} ReflectedInertia.j_load_str`, the matched ratio is $N^* \approx$ `{python} ReflectedInertia.n_star_str`. At `{python} ReflectedInertia.n_gear_str`:1 the same motor torque delivers only `{python} ReflectedInertia.accel_share_pct_str` of the matched-ratio acceleration, because $\ddot{q}(N)/\ddot{q}(N^*) = 2x/(1+x^2)$ with $x = N/N^*$: the extra gearing has cost `{python} ReflectedInertia.accel_loss_pct_str` of the joint's acceleration.
 
 The same ratio also increases the effort needed for an external contact to move the joint. That resistance to imposed motion is mechanical impedance. Inertia, damping, stiffness, and friction all contribute, so a ratio alone cannot establish contact force or a fracture threshold. The transmission choice must consider those effects alongside delivered acceleration.
 
@@ -947,7 +1024,7 @@ The joint's programmed stiffness $K_p$ and damping $K_d$ make it yield under pos
 
 The strain wave assembly in @fig-02-real-strain-wave-gear obtains its reduction through repeated elastic deformation of the flexspline. That compliance allows the motor and link to move differently under load, so motor-side tracking alone cannot establish the output motion.
 
-::: {#fig-02-real-broken-gear-tooth fig-env="figure" fig-pos="t" fig-cap="**Gear tooth shock fracture under high reflected inertia**: Macro-fracture of a high-torque transmission gear tooth undergoing cyclic stress testing at NASA Glenn Research Center: [①] intact gear tooth flank supporting continuous drive contact; [②] tooth root fillet stress concentration, where cyclic tension initiates micro-cracking; [③] sheared tooth fragment with granular fatigue striations and sudden cleavage fracture under shock load; and [④] reflected rotor inertia ($J_{\text{ref}} = N^2 J_{\text{rotor}}$). A high gear ratio reduces backdrivability and can increase tooth-root stress under impact; compliance and the contact path determine how much energy reaches any one tooth." fig-alt="Annotated macro photograph of a fractured transmission gear tooth, identifying the intact flank, the root fillet crack initiation site, the sheared tooth fragment with granular cleavage surface, and the reflected rotor inertia formula."}
+::: {#fig-02-real-broken-gear-tooth fig-env="figure" fig-pos="t" fig-cap="**Gear tooth fatigue fracture**: A high-torque transmission gear tooth broken during cyclic load testing at NASA Glenn Research Center: [①] intact gear tooth flank supporting continuous drive contact; [②] tooth root fillet, where bending stress concentrates and the fatigue crack starts; [③] fracture surface of the broken tooth, where the crack grew under repeated loading until the remaining section gave way; and [④] reflected rotor inertia ($J_{\text{ref}} = N^2 J_{\text{rotor}}$). Impacts transmitted through a high gear ratio add to the cyclic bending stress at the root; compliance and the contact path determine how much energy reaches any one tooth." fig-alt="Annotated macro photograph of a fractured transmission gear tooth, identifying the intact flank, the root fillet where the crack started, the fracture surface of the broken tooth, and the reflected rotor inertia formula."}
 ![](images/jpg/fig02_real_broken_gear_tooth_annotated.jpg){width="65%"}
 :::
 
@@ -955,19 +1032,146 @@ The damaged tooth in @fig-02-real-broken-gear-tooth illustrates why repeated con
 
 ### Actuation regimes and gear reduction trade-offs {#sec-body-actuation-regimes}
 
-The choice of transmission trades continuous torque density against mechanical backdrivability. Gearboxes amplify motor torque linearly by $N_g$ ($\tau_{\text{out}} = \eta N_g \tau_{\text{motor}}$), but amplify the rotor's rotational inertia quadratically by $N_g^2$ ($J_{\text{ref}} = N_g^2 J_{\text{rotor}}$). This fundamental scaling asymmetry divides robotic actuation into three distinct architectural regimes (@tbl-02-mechanical-drives):
+The choice of transmission trades continuous torque density against mechanical backdrivability. Gearboxes amplify motor torque linearly by $N$ ($\tau_{\text{out}} = \eta N \tau_{\text{motor}}$), but amplify the rotor's rotational inertia quadratically by $N^2$ ($J_{\text{ref}} = N^2 J_{\text{rotor}}$). This fundamental scaling asymmetry divides robotic actuation into three distinct architectural regimes, distinguished by stage count and ratio as much as by gear type (@tbl-02-mechanical-drives):
 
-| Transmission                       | Gear Ratio ($N$)                     | Reflected Inertia ($N^2$)                 | Implication for Learned Policies                                                                                                        |
-|:-----------------------------------|:-------------------------------------|:------------------------------------------|:----------------------------------------------------------------------------------------------------------------------------------------|
-| **Quasi-Direct Drive (QDD)**       | $3:1\text{--}10:1$ ($N \le 10$)      | $N^2 \le 100$ (Low)                       | Lower reflected inertia supports backdriving and current-based torque estimation; contact response still requires qualification.        |
-| **Planetary Gearing (Multistage)** | $15:1\text{--}50:1$ ($N \approx 30$) | $N^2 \approx 225\text{--}2500$ (Moderate) | Semi-backdrivable; higher torque density than QDD; gear tooth backlash ($5\text{--}15\text{ arcmin}$) requires load-side joint sensing. |
-| **Strain Wave (Harmonic Drive)**   | $50:1\text{--}160:1$ ($N \ge 50$)    | $N^2 \ge 2500\text{--}25{,}600$ (Extreme) | High reflected inertia; zero initial backlash; torsional compliance and impact loading require qualification.                           |
+| Transmission                                    | Gear Ratio ($N$)                     | Reflected Inertia ($N^2$)                 | Implication for Learned Policies                                                                                                 |
+|:------------------------------------------------|:-------------------------------------|:------------------------------------------|:---------------------------------------------------------------------------------------------------------------------------------|
+| **Quasi-Direct Drive (single-stage planetary)** | $3:1\text{--}10:1$ ($N \le 10$)      | $N^2 \le 100$ (Low)                       | Lower reflected inertia supports backdriving and current-based torque estimation; contact response still requires qualification. |
+| **Multistage Planetary**                        | $15:1\text{--}50:1$ ($N \approx 30$) | $N^2 \approx 225\text{--}2500$ (Moderate) | Semi-backdrivable; a smaller motor than QDD for the same output torque; gear backlash requires load-side joint sensing.          |
+| **Strain Wave (Harmonic Drive)**                | $50:1\text{--}160:1$ ($N \ge 50$)    | $N^2 \ge 2500\text{--}25{,}600$ (Extreme) | High reflected inertia; zero initial backlash; torsional compliance and impact loading require qualification.                    |
 
-: **Actuator transmission trade-off**: Reduction ratio ($N$), reflected rotor inertia scaling ($N^2$), and the consequence for learned control policies across Quasi-Direct Drive, multi-stage planetary, and strain wave transmissions. {#tbl-02-mechanical-drives tbl-colwidths="[22,18,20,40]"}
+: **Actuator transmission trade-off**: Reduction ratio ($N$), reflected rotor inertia scaling ($N^2$), and the consequence for learned control policies across quasi-direct-drive (a single low-ratio planetary stage), multistage planetary, and strain wave transmissions. The strain wave range is that of one catalog series [@harmonicdrive2014csg2uh]. {#tbl-02-mechanical-drives tbl-colwidths="[22,18,20,40]"}
 
-Transmission choice must satisfy both the torque requirement and the permitted contact response. Direct drive removes gearbox backlash but requires a motor large enough to supply the output torque itself [@asada1983design]. Reduction allows a smaller motor to deliver the same torque while adding reflected inertia and transmission losses. Backdrivability describes whether an external force at the output can move the motor through that transmission. The simplified reverse-drive relation is:
-$$\tau_{\text{ext}} = \frac{N^2 J_{\text{rotor}}}{\eta_{\text{rev}}} \ddot{q} + \frac{\tau_{\text{friction}}}{\eta_{\text{rev}}}$$
-where $\eta_{\text{rev}}$ is reverse transmission efficiency. Low reverse efficiency raises the required external torque, while reflected inertia raises the torque needed for rapid acceleration. A high ratio can therefore resist contact motion strongly, but backdrivability must be characterized on the assembly rather than inferred from ratio alone.
+Transmission choice must satisfy both the torque requirement and the permitted contact response. Direct drive removes gearbox backlash but requires a motor large enough to supply the output torque itself [@asada1983design]. Reduction allows a smaller motor to deliver the same torque while adding reflected inertia and transmission losses.
+
+The torque requirement and the thermal budget meet in one figure of merit for the motor. Copper loss is $P_{\text{loss}} = I^2 R$ and torque is $\tau = K_t I$, so the loss for a given torque is $P_{\text{loss}} = (\tau / K_m)^2$, where the **motor constant**\index{Motor constant!definition} $K_m = K_t / \sqrt{R}$ (in $\text{N}\cdot\text{m}/\sqrt{\text{W}}$) is the torque a motor produces per square root of the heat it dissipates. Motor data sheets publish it [@tq2014ilm], with $R$ the effective loss resistance that @sec-body-thermal-capacity defines. Through a transmission of ratio $N$ and efficiency $\eta$, the motor supplies $\tau_{\text{out}}/(\eta N)$, so
+$$P_{\text{loss}} = \left(\frac{\tau_{\text{out}}}{\eta N K_m}\right)^2, \qquad J_{\text{ref}} = N^2 J_{\text{in}}$$
+where $J_{\text{in}}$ is the inertia at the transmission input, the rotor plus the gear's input stage. Raising $N$ divides the heat by $N^2$ and multiplies the reflected inertia by $N^2$, so for a given motor and gear their product does not depend on the ratio at all:
+$$P_{\text{loss}}\,J_{\text{ref}} = \frac{\tau_{\text{out}}^2\,J_{\text{in}}}{\eta^2 K_m^2}$$
+The ratio only chooses where the joint sits on this fixed trade between heat and reflected inertia. Improving both at once requires a different motor, one whose $K_m^2/J_{\text{in}}$ is larger. \ref{nbk-body-gear-ratio-cost} prices the trade on the running machine's arm.
+
+```{python}
+#| label: body-gear-ratio-cost-calc
+#| echo: false
+#| warning: false
+#| message: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ WHAT THE GEAR RATIO COSTS IN HEAT AND REFLECTED INERTIA (LEGO)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: \ref{nbk-body-gear-ratio-cost} in @sec-body-actuation-regimes, the
+# │          continuous-torque paragraph in @sec-body-thermal-capacity, and the
+# │          gear efficiency of \ref{nbk-body-thermal-stall-derating}.
+# │ Goal:    Price the gear ratio for the arm's Panda-class stand-in joint
+# │          holding the arm's 87 N m repeatable-peak torque: copper loss and
+# │          reflected inertia at 50:1 and 100:1, and feasibility at a QDD-class
+# │          10:1, with the same TQ ILM 70x18 motor.
+# │ Show:    K_m = 0.187/sqrt(0.495) = 0.266 N m/sqrt(W) (matches the data
+# │          sheet); 50:1: 2.05 N m, 59.3 W, 0.1835 kg m^2; 100:1: 1.02 N m,
+# │          14.8 W, 0.734 kg m^2; product 10.9 W kg m^2 at both; 10:1 needs
+# │          10.2 N m, 2.5 times the 4.05 N m motor peak. Motor rated 1.25 N m,
+# │          peak 4.05 N m (ratio 3.2).
+# │ How:     P = (tau_out / (eta N K_m))^2 with K_m = K_t / sqrt(R_loss);
+# │          J_ref = N^2 J_in with J_in = rotor + gear input inertia (the
+# │          catalog lists one input inertia per gear size).
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import *
+from mlsysim.core.units import *
+from mlsysim.fmt import (
+    fmt,
+    fmt_qty,
+    fmt_int,
+    fmt_torque,
+    fmt_torque_constant,
+    fmt_resistance,
+    fmt_power,
+    fmt_inertia,
+    fmt_sci_qty,
+    fmt_multiple,
+    fmt_ratio,
+    check,
+)
+
+class GearRatioCost:
+    """Copper loss and reflected inertia against gear ratio for the arm's stand-in joint."""
+
+    # ┌── 1. LOAD (Constants & Parameters) ─────────────────────────────────
+    joint = Actuators.PandaClassJoint.CSG_25_50_ILM70x18  # category: sourced (CSG-25-50 gear with TQ ILM 70x18 motor)
+    motor = Actuators.FramelessMotor.TQ_ILM70x18  # category: sourced (TQ-RoboDrive data sheet)
+    tau_out = Embodied.Manipulator.Panda.max_torque  # category: sourced (Panda axes 1-4 repeatable peak)
+    k_t = motor.torque_constant  # category: sourced (amplitude-invariant i_q, i_d = 0)
+    r_loss = joint.internal_resistance  # category: sourced (0.75 R_TT at 20 C)
+    j_in = joint.rotor_inertia  # category: sourced (motor rotor plus CSG-25 input inertia)
+    n_joint = joint.gear_ratio  # category: sourced (CSG-25-50)
+    n_high = 100  # category: chosen (a catalog CSG-25 ratio)
+    n_qdd = 10  # category: illustrative (quasi-direct-drive class ratio)
+    eta = 0.85  # category: illustrative (gear efficiency; the catalog's varies with load, speed, and temperature)
+
+    # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────
+    k_m = (k_t / r_loss**0.5).to(ureg.newton * meter / ureg.watt**0.5)
+    tau_m_joint = (tau_out / (eta * n_joint)).to(ureg.newton * meter)
+    tau_m_high = (tau_out / (eta * n_high)).to(ureg.newton * meter)
+    tau_m_qdd = (tau_out / (eta * n_qdd)).to(ureg.newton * meter)
+    p_joint = ((tau_m_joint / k_m) ** 2).to(ureg.watt)
+    p_high = ((tau_m_high / k_m) ** 2).to(ureg.watt)
+    j_ref_joint = (n_joint**2 * j_in).to(kilogram * meter**2)
+    j_ref_high = (n_high**2 * j_in).to(kilogram * meter**2)
+    product_joint = (p_joint * j_ref_joint).to(ureg.watt * kilogram * meter**2)
+    product_high = (p_high * j_ref_high).to(ureg.watt * kilogram * meter**2)
+    qdd_over_peak = (tau_m_qdd / motor.peak_torque).to("dimensionless").magnitude
+    peak_over_rated = (motor.peak_torque / motor.rated_torque).to("dimensionless").magnitude
+
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(abs(k_m.magnitude - motor.motor_constant.magnitude) < 1e-3, "K_t / sqrt(R) must match the data sheet's motor constant.")
+    check(abs(p_joint.magnitude - 59.32) < 0.01, f"Loss at 50:1 must match the stall notebook's 59.3 W: {p_joint}")
+    check(abs(p_high.magnitude - p_joint.magnitude / 4) < 1e-9, "Doubling N must quarter the loss.")
+    check(abs(j_ref_joint.magnitude - 0.1835) < 1e-4, f"Unexpected reflected inertia at 50:1: {j_ref_joint}")
+    check(abs(product_joint.magnitude - product_high.magnitude) < 1e-9, "Loss times reflected inertia must not depend on N.")
+    check(abs(tau_m_qdd.magnitude - 10.235) < 1e-3 and qdd_over_peak > 1, f"QDD-class ratio must exceed the motor peak: {tau_m_qdd}")
+    check(abs(peak_over_rated - 3.24) < 1e-9, f"Unexpected peak-to-rated torque ratio: {peak_over_rated}")
+
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
+    tau_out_str = fmt_torque(tau_out, precision=0)
+    k_t_str = fmt_torque_constant(k_t, precision=3)
+    r_loss_str = fmt_resistance(r_loss, unit=ureg.ohm, precision=3)
+    k_m_str = fmt_qty(k_m, ureg.newton * meter / ureg.watt**0.5, precision=3, unit_label="N·m/√W")
+    n_joint_str = fmt_int(n_joint)
+    n_high_str = fmt_int(n_high)
+    n_qdd_str = fmt_int(n_qdd)
+    eta_str = fmt(eta, precision=2)
+    j_in_str = fmt_sci_qty(j_in, kilogram * meter**2, precision=2)
+    tau_m_joint_str = fmt_torque(tau_m_joint, precision=2)
+    tau_m_high_str = fmt_torque(tau_m_high, precision=2)
+    tau_m_qdd_str = fmt_torque(tau_m_qdd, precision=1)
+    p_joint_str = fmt_power(p_joint, unit=ureg.watt, precision=1)
+    p_high_str = fmt_power(p_high, unit=ureg.watt, precision=1)
+    j_ref_joint_str = fmt_inertia(j_ref_joint, precision=3)
+    j_ref_high_str = fmt_inertia(j_ref_high, precision=3)
+    peak_str = fmt_torque(motor.peak_torque, precision=2)
+    rated_str = fmt_torque(motor.rated_torque, precision=2)
+    qdd_over_peak_mult_str = fmt_multiple(qdd_over_peak, precision=1)
+    peak_over_rated_str = fmt_ratio(peak_over_rated, precision=1)
+```
+
+::: {#nbk-body-gear-ratio-cost .callout-notebook title="What does the gear ratio cost?"}
+The running machine's arm uses strain-wave joints in the Panda's torque class. Franka does not publish their motors, so this example, like the thermal examples of @sec-body-thermal-duty-cycles, uses a sourced stand-in: a TQ-RoboDrive ILM 70x18 frameless motor [@tq2014ilm] with $K_t =$ `{python} GearRatioCost.k_t_str` and effective loss resistance $R =$ `{python} GearRatioCost.r_loss_str`, driving a CSG-25 strain-wave gear [@harmonicdrive2014csg2uh], whose catalog lists one input inertia for all of that size's ratios. Rotor plus gear input give $J_{\text{in}} =$ `{python} GearRatioCost.j_in_str`. The joint must hold the arm's repeatable-peak torque $\tau_{\text{out}} =$ `{python} GearRatioCost.tau_out_str` through a gear of efficiency $\eta =$ `{python} GearRatioCost.eta_str` (illustrative).
+
+**Problem**: How do the copper loss and the reflected inertia change if the same motor drives the joint through `{python} GearRatioCost.n_joint_str`:1, `{python} GearRatioCost.n_high_str`:1, or a quasi-direct-drive ratio of `{python} GearRatioCost.n_qdd_str`:1?
+
+**Math**:
+
+1. **Motor constant**: $K_m = K_t/\sqrt{R} =$ `{python} GearRatioCost.k_m_str`, the value the motor's data sheet publishes.
+2. **At `{python} GearRatioCost.n_joint_str`:1**: The motor supplies $\tau_{\text{out}}/(\eta N) =$ `{python} GearRatioCost.tau_m_joint_str`, dissipating $(\tau_{\text{motor}}/K_m)^2 =$ `{python} GearRatioCost.p_joint_str`, and the joint reflects $N^2 J_{\text{in}} =$ `{python} GearRatioCost.j_ref_joint_str`.
+3. **At `{python} GearRatioCost.n_high_str`:1**: The motor supplies `{python} GearRatioCost.tau_m_high_str`, the loss falls fourfold to `{python} GearRatioCost.p_high_str`, and the reflected inertia rises fourfold to `{python} GearRatioCost.j_ref_high_str`. The product $P_{\text{loss}} J_{\text{ref}}$ is unchanged.
+4. **At `{python} GearRatioCost.n_qdd_str`:1**: The motor would have to supply `{python} GearRatioCost.tau_m_qdd_str`, `{python} GearRatioCost.qdd_over_peak_mult_str` its `{python} GearRatioCost.peak_str` peak torque. No current can make this motor hold the load.
+
+**Result**: Doubling the ratio buys a fourfold cut in holding heat with a fourfold rise in the inertia that an impact must accelerate, and lowering the ratio toward quasi-direct drive fails outright with this motor. The gear ratio moves the joint along a fixed trade; only the motor sets the trade itself.
+
+**Systems insight**: A low-ratio, backdrivable joint requires a motor with a much larger torque per square root of watt, which is why quasi-direct-drive legs use large-diameter motors that deliver the output torque through a single low-ratio stage [@seok2015design; @wensing2017proprioceptive]. A high-ratio arm joint instead accepts the reflected inertia and recovers contact sensitivity by measuring torque at its output.
+:::
+
+Backdrivability describes whether an external force at the output can move the motor through the transmission. The external torque needed to move a geared joint is
+$$\tau_{\text{ext}} = N^2 J_{\text{rotor}} \ddot{q} + \tau_{\text{fric}}$$
+where $\tau_{\text{fric}}$ is the friction of the motor bearings and the gearbox referred to the output. That friction is not a constant [@lynch2017modern]. A static term must be overcome before the joint moves at all, a viscous term grows with speed, and at low speed friction can dip before it rises again (the Stribeck effect). Gearbox friction also changes with load, temperature, and time at rest, and it generally grows with the gear ratio. Low-speed backdriving of a high-ratio joint is therefore dominated by friction, and rapid backdriving by reflected inertia. A high ratio can resist contact motion strongly, but backdrivability must be characterized on the assembly rather than inferred from ratio alone.
 
 **Quasi-direct drive (QDD)** actuation[^fn-hist-qdd-lineage] uses a high-torque motor with a low reduction ratio [@seok2015design; @wensing2017proprioceptive; @katz2019mini]. Reducing the reflected inertia and transmission friction improves mechanical transparency, the ability of forces at the output to produce observable motion and current at the motor. The cost is a greater demand on the motor for a given output torque.
 
@@ -975,7 +1179,9 @@ Mechanical transparency also changes what motor current can reveal. In a high-fr
 $$\tau_{\text{joint}} \approx \eta N K_t I_q$$
 Motor current can then support **proprioceptive sensing** of interaction torque. The estimate requires calibration across the operating conditions; current remains a measurement of motor effort, and acceleration or friction can consume part of that effort. Backdrivability allows contact to move the joint, but neither low gearing nor current sensing alone establishes a safe impact force.
 
-[^fn-hist-qdd-lineage]: **Lineage of direct drive and quasi-direct drive (QDD) robotics**: Direct drive manipulation was pioneered by Haruhiko Asada and Takeo Kanade at CMU (1983), eliminating transmission backlash and friction at the expense of heavy, bulky motors. The modern Quasi-Direct Drive (QDD) paradigm was established by Sangbae Kim, Patrick Wensing, and Benjamin Katz at MIT (Cheetah 3 and Mini Cheetah, 2017–2019), demonstrating that low single-stage planetary gear reductions ($N \le 10{:}1$) preserve backdrivability and proprioceptive current sensing while multiplying continuous torque density fourfold.
+A high-ratio joint can recover what friction hides by measuring torque after the gear. Strain gauges on the output of a strain-wave gear sense the torque actually delivered, and a local loop adjusts the motor current to cancel the gearbox's frictional uncertainty [@lynch2017modern]. The running machine's arm takes this route, with a torque sensor in each of its seven joints [@franka2018panda], so its joints are transparent to the controller by measurement rather than by construction. The price is added complexity in every joint and the torsional compliance of the strain-wave gear, whose dynamics complicate fast motion control.
+
+[^fn-hist-qdd-lineage]: **Lineage of direct drive and quasi-direct drive (QDD) robotics**: Direct drive manipulation was pioneered by Haruhiko Asada and Takeo Kanade at CMU (1983), eliminating transmission backlash and friction at the expense of heavy, bulky motors. The MIT Cheetah group then showed that a large-diameter motor behind a single low-ratio planetary stage preserves most of that transparency while supplying the torque of a dynamic leg: the Cheetah's design principles [@seok2015design], its proprioceptive actuator [@wensing2017proprioceptive], and the Mini Cheetah [@katz2019mini].
 
 For a contact-dominated arm, the choice is a joint whose measured compliance, torque response, and sensing support the intended interaction [@seok2015design; @wensing2017proprioceptive]. Load-side position or torque sensing can expose disagreement hidden by the motor encoder, allowing the permission path to reject further force commands when the qualified response no longer holds.
 
@@ -985,20 +1191,15 @@ For a contact-dominated arm, the choice is a joint whose measured compliance, to
 
 ### Supporting drive and impedance models {#sec-body-drive-supporting-models}
 
-The actuator decision above depends on measured torque, response time, and contact behavior. For readers inspecting a drive implementation, the following coordinate model explains how FOC represents the torque-producing current. Current sensors measure the three phase currents $(i_a, i_b, i_c)$. Using the amplitude-invariant convention, the Clarke transform projects these currents onto a stationary two-axis frame $(\alpha, \beta)$:
-   $$\begin{bmatrix} i_\alpha \\ i_\beta \end{bmatrix} = \frac{2}{3}\begin{bmatrix} 1 & -\frac{1}{2} & -\frac{1}{2} \\ 0 & \frac{\sqrt{3}}{2} & -\frac{\sqrt{3}}{2} \end{bmatrix} \begin{bmatrix} i_a \\ i_b \\ i_c \end{bmatrix}$$
-
-The measured shaft angle $\theta_m$ determines electrical angle $\theta_e = P_n \theta_m$, where $P_n$ is the number of magnetic pole pairs. The Park transform rotates the stationary currents into a frame $(d, q)$ aligned with the rotor flux:
-   $$\begin{bmatrix} i_d \\ i_q \end{bmatrix} = \begin{bmatrix} \cos\theta_e & \sin\theta_e \\ -\sin\theta_e & \cos\theta_e \end{bmatrix} \begin{bmatrix} i_\alpha \\ i_\beta \end{bmatrix}$$
-In the torque model used here, the controller regulates quadrature current $i_q$ for torque while keeping direct-axis current $i_d$ near zero:
-   $$\tau = \frac{3}{2} P_n \Phi_m i_q = K_t i_q$$
-Here $\Phi_m$ denotes permanent-magnet flux linkage. Current feedback determines voltage requests; inverse coordinate transforms and pulse-width modulation turn them into inverter switching duty cycles. The current convention used in a drive must match the convention used to identify its torque constant.
+The actuator decision above depends on measured torque, response time, and contact behavior, not on the drive's internals. Inside the drive, FOC projects the three measured phase currents onto two axes that turn with the rotor: the direct axis $d$ along the magnet's flux and the quadrature axis $q$ at right angles to it. @Sec-appendix-systems-actuators gives these Clarke and Park transformations and the resulting voltage equations. With $i_d$ held near zero, torque is proportional to the quadrature current alone:
+$$\tau = \frac{3}{2} P_n \Phi_m i_q = K_t i_q$$
+where $P_n$ is the number of magnetic pole pairs and $\Phi_m$ the permanent-magnet flux linkage. The factor $\frac{3}{2}$ belongs to the amplitude-invariant current convention used in this chapter; the current convention used in a drive must match the convention used to identify its torque constant.
 
 For readers using frequency-domain models, mechanical impedance expresses the joint's resistance to imposed motion. With $s$ the Laplace frequency variable, the apparent mechanical impedance $Z_{\text{out}}(s) = \tau_{\text{ext}}(s) / \dot{q}(s)$ at the output flange combines the load side directly with the reflected rotor side through the transmission's torsional stiffness $K_{\text{joint}}$. That stiffness sits in series between rotor and load, so the two carry the same torque and their velocities add; the spring's impedance $K_{\text{joint}}/s$ and the rotor's therefore combine through the sum of their reciprocals [@spong1987modeling]:
 $$Z_{\text{out}}(s) = s J_{\text{load}} + B_{\text{joint}} + \left[\frac{1}{s N^2 J_{\text{rotor}} + N^2 B_{\text{motor}}} + \frac{s}{K_{\text{joint}}}\right]^{-1}$$
 The coefficients $B_{\text{joint}}$ and $B_{\text{motor}}$ describe viscous damping. At low frequency the series spring is stiff compared with the rotor, and the output feels $J_{\text{load}} + N^2 J_{\text{rotor}}$, the rigid-joint inertia used in transmission selection. Above the spring's corner frequency the bracketed term approaches $K_{\text{joint}}/s$, and an impact sees $J_{\text{load}}$ and the spring rather than the reflected rotor. That series decoupling is why a compliant transmission or series elastic actuator softens impacts, and why the flexible-joint model of @sec-appendix-control-flexible-joints is needed to predict contact loads.
 
-Operating near the resulting current and torque limits has a thermodynamic cost. Every ampere that accelerates rotor inertia or sustains peak torque dissipates $I^2 R$ in the copper, and that heat accumulates in the actuator's thermal mass, bounding how long peak torque can last before insulation breaks down.
+Operating near the resulting current and torque limits has a thermodynamic cost. Every ampere that accelerates rotor inertia or sustains peak torque dissipates $I^2 R$ in the copper, and that heat accumulates in the actuator's thermal mass, bounding how long peak torque can last before the winding insulation ages faster than its rating allows.
 
 ## Thermal Duty Cycles {#sec-body-thermal-duty-cycles}
 
@@ -1039,7 +1240,7 @@ At thermal steady state ($dT/dt = 0$), heat generation balances heat dissipation
 $$P_{\text{loss, ss}} = \frac{T_{\max} - T_{\text{amb}}}{\theta_{JA}}$$
 Substituting the copper loss identity $P_{\text{loss}} = \frac{\tau^2}{K_t^2} R(T_{\max})$ reveals the **continuous thermal torque ceiling**:
 $$\tau_{\text{cont}} = K_t \sqrt{\frac{T_{\max} - T_{\text{amb}}}{R(T_{\max}) \theta_{JA}}}$$
-**Continuous torque is limited by thermal dissipation, not peak silicon or battery current ratings.** An actuator rated for $30\text{ N}\cdot\text{m}$ peak acceleration torque may sustain only $8\text{ N}\cdot\text{m}$ continuously. A brief torque burst of several seconds causes a rapid transient temperature rise that stays within the insulation rating ($T_{\text{limit}} = 155^\circ\text{C}$) if its peak does. However, sustained holding torque or high-frequency cycling drives the winding toward an asymptotic thermal equilibrium $T_\infty = T_{\text{amb}} + \bar{P}_{\text{loss}} \theta_{JA}$. If that equilibrium exceeds the rating, continuous operation ages the winding insulation far faster than its rated life allows and ends in phase-to-phase short circuits.
+**Continuous torque is limited by thermal dissipation, not peak silicon or battery current ratings.** The arm's stand-in motor, for example, is rated for `{python} GearRatioCost.peak_str` peak but only `{python} GearRatioCost.rated_str` continuous, a ratio of `{python} GearRatioCost.peak_over_rated_str` [@tq2014ilm]. A brief torque burst of several seconds causes a rapid transient temperature rise that stays within the insulation rating ($T_{\text{limit}} = 155^\circ\text{C}$) if its peak does. However, sustained holding torque or high-frequency cycling drives the winding toward an asymptotic thermal equilibrium $T_\infty = T_{\text{amb}} + \bar{P}_{\text{loss}} \theta_{JA}$. If that equilibrium exceeds the rating, continuous operation ages the winding insulation far faster than its rated life allows and ends in phase-to-phase short circuits.
 
 ```{python}
 #| label: body-copper-resistance-rise-calc
@@ -1085,7 +1286,7 @@ class CopperResistanceRise:
 
 The loss term must also change with temperature. Copper's positive temperature coefficient\index{Copper resistance!temperature dependence}\index{Stator resistance!thermal coefficient} (`{python} CopperResistanceRise.alpha_cu_math`) increases the effective winding resistance by `{python} CopperResistanceRise.rise_pct_str` from `{python} CopperResistanceRise.t_0_str` to the `{python} CopperResistanceRise.t_ceiling_str` engineering ceiling, according to $R(T) = R_0 [1 + \alpha_{\text{Cu}}(T - T_0)]$. Holding the same torque therefore dissipates `{python} CopperResistanceRise.rise_pct_str` more winding power. A fixed-resistance calculation omits this feedback; the burst example below uses that approximation explicitly, and the subsequent stall calculation restores it.
 
-Datasheet thermal ratings are optimistic because they are measured on an unconstrained motor mounted to a large heat sink in free air at $20^\circ\text{C}$ or $25^\circ\text{C}$. Installed in a sealed chassis beside power electronics, battery packs, and other joints, the motor loses convective airflow, which raises $\theta_{JA}$, and neighboring loads can raise its local ambient to $45^\circ\text{C}$ to $55^\circ\text{C}$ before its own coils carry current. Thermal margins must therefore be budgeted from heating and cooling time constants measured with the enclosure sealed and adjacent loads at their $P_{99}$ power draw.
+Datasheet thermal ratings are optimistic because they are measured on an unconstrained motor mounted to a large heat sink in free air at $20^\circ\text{C}$ or $25^\circ\text{C}$. Installed in a sealed chassis beside power electronics, battery packs, and other joints, the motor loses convective airflow, which raises $\theta_{JA}$, and neighboring loads raise its local ambient above the test ambient before its own coils carry current. Thermal margins must therefore be budgeted from heating and cooling time constants measured with the enclosure sealed and adjacent loads at their $P_{99}$ power draw.
 
 ::: {.column-margin .margin-pointer}
 ↪ Real-time telemetry for thermal and power integrity budgets is transported by the deterministic fieldbuses analyzed in @sec-nervous-deterministic-fieldbuses.
@@ -1218,7 +1419,7 @@ class ThermalBurst:
 ```
 
 ::: {#nbk-body-thermal-burst-limits .callout-notebook title="Thermal accumulation across duty cycles"}
-The arm's joints are strain-wave joints in the Panda's torque class. Franka does not publish their motors, so this example uses a sourced stand-in: a CSG-25-50 strain-wave gear [@harmonicdrive2014csg2uh] driven by a TQ-RoboDrive ILM 70x18 frameless motor [@tq2014ilm], whose rated current is $I_{\text{cont}} =$ `{python} ThermalBurst.i_cont_str`. The motor has effective aggregate loss resistance $R =$ `{python} ThermalBurst.r_wind_str`, lumped thermal capacitance $C_{\text{th}} =$ `{python} ThermalBurst.c_th_str`, and installed thermal resistance $\theta_{JA} =$ `{python} ThermalBurst.theta_ja_str` (both thermal values illustrative, because the motor's data sheet leaves them to the installation), and it runs in an enclosed ambient $T_{\text{amb}} =$ `{python} ThermalBurst.t_amb_str` with Class F insulation rated to `{python} ThermalBurst.t_limit_str`. The thermal time constant is $\tau_{\text{th}} = \theta_{JA} C_{\text{th}} =$ `{python} ThermalBurst.tau_str`.
+This example uses the arm's sourced stand-in joint of \ref{nbk-body-gear-ratio-cost}: a CSG-25-50 strain-wave gear [@harmonicdrive2014csg2uh] driven by a TQ-RoboDrive ILM 70x18 frameless motor [@tq2014ilm], whose rated current is $I_{\text{cont}} =$ `{python} ThermalBurst.i_cont_str`. The motor has effective aggregate loss resistance $R =$ `{python} ThermalBurst.r_wind_str`, lumped thermal capacitance $C_{\text{th}} =$ `{python} ThermalBurst.c_th_str`, and installed thermal resistance $\theta_{JA} =$ `{python} ThermalBurst.theta_ja_str` (both thermal values illustrative, because the motor's data sheet leaves them to the installation), and it runs in an enclosed ambient $T_{\text{amb}} =$ `{python} ThermalBurst.t_amb_str` with Class F insulation rated to `{python} ThermalBurst.t_limit_str`. The thermal time constant is $\tau_{\text{th}} = \theta_{JA} C_{\text{th}} =$ `{python} ThermalBurst.tau_str`.
 
 **Problem**: How does the initial winding temperature change how long a threefold rated-current burst can last before the insulation limit?
 
@@ -1250,6 +1451,8 @@ The burst calculation limits duration, while the back-EMF relation in @sec-body-
 The continuous-duty region ($S_1$) permits sustained operation under the declared cooling conditions. The larger intermittent region ($S_3$) permits periodic bursts only with the starting temperature, duration, and recovery interval established above. Both regions narrow when speed consumes the drive's voltage headroom. Their intersection with the current thermal state, rather than the catalog peak, gives the available torque for the next maneuver.
 
 A simulator that uses only a fixed torque clamp can therefore teach a policy an unavailable action: maximum torque while the rotor is already near its voltage-limited speed, or a repeated burst without recovery. The actuator model and permission limits must include speed and thermal history. Temperature-dependent winding resistance further shrinks the available region during a sustained hold.
+
+The standard remedy in legged-robot sim-to-real transfer replaces the clamp with an actuator model identified on the hardware. For the series elastic actuators of the ANYmal quadruped, @hwangbo2019learning trained a small network on a few minutes of logged joint data to map a short history of position errors and velocities to the torque the actuator actually delivered, then ran it inside the simulator in place of an ideal actuator; the ideal model, which assumes any commanded torque appears instantly, failed to predict the measured torque. The same structure carries the envelope of this section into training: an actuator model that also takes speed, bus voltage, and winding temperature as inputs lets the simulator deny the torque the hardware cannot deliver. @Sec-training-learning-by-trial develops how such models enter the training loop.
 
 ### Copper resistance feedback and stall thermal runaway {#sec-body-copper-resistance-feedback}
 
@@ -1308,7 +1511,7 @@ class StallDerating:
     t_amb = ureg.Quantity(40.0, ureg.degC).to(K)  # category: illustrative (limb ambient)
     t_limit = ureg.Quantity(155.0, ureg.degC).to(K)  # category: sourced (IEC 60085 Class F hotspot)
     n_gear = joint.gear_ratio  # category: sourced (CSG-25-50 strain-wave reduction)
-    eta = 0.85  # category: illustrative (gear efficiency; the catalog's varies with load, speed, and temperature)
+    eta = GearRatioCost.eta  # category: illustrative (gear efficiency, declared once in GearRatioCost)
     alpha_cu = 0.00393 / K  # category: sourced (annealed copper, 100 percent IACS, at 20 C; NBS Handbook 100, Copper Wire Tables)
 
     # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────
@@ -1445,7 +1648,50 @@ class SpringBrake:
 
 ### Unpowered states and unmanaged fallback dynamics {#sec-body-unpowered-states}
 
-Power removal is an unmanaged state transition, not an automatic return to safety. Cutting power leaves an actuator in one of three unpowered states, namely free coasting, phase-short dynamic braking, or spring-engaged mechanical braking, and each enforces a distinct mechanical behavior. An electromechanical friction brake requires `{python} SpringBrake.t_engage_min_str` to `{python} SpringBrake.t_engage_max_str` for its mechanical spring to overcome magnetic coil decay and engage its friction pads, during which gravity accelerates an overhead arm downward. Phase-short dynamic braking generates counter-torque directly proportional to angular velocity ($\tau = \frac{K_t K_e}{R_{\text{phase}}} \omega$), providing electromechanical damping at speed but generating zero holding torque at zero velocity. Free coasting simply allows gravity to accelerate unconstrained joints without any resistance. The trajectory a machine follows after an electrical cutoff must be measured under full mechanical payload, not deduced from circuit diagrams. The choice of which safe fallback state the machine should enter belongs to system safety architecture in @sec-enforcement, but the physical dynamics of an unpowered joint are unalterable mechanical constraints of the body.
+```{python}
+#| label: body-phase-short-peak-calc
+#| echo: false
+#| warning: false
+#| message: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ WHERE PHASE-SHORT BRAKING PEAKS ON THE HUB MOTORS (LEGO)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: the unpowered-states paragraph in @sec-body-unpowered-states.
+# │ Goal:    Locate the speed at which short-circuit braking torque peaks on
+# │          the running machine's hub motors and compare it with the drive
+# │          limit.
+# │ Show:    omega_e = R/L = 371 rad/s; with 20 pole pairs the wheel speed is
+# │          18.6 rad/s, about 177 rpm, above the 108 rpm of the 1.5 m/s drive
+# │          limit.
+# │ How:     tau_short = K^2 omega R / (R^2 + (P_n omega L)^2) peaks at
+# │          P_n omega L = R; line R and L (same ratio as per phase).
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import *
+from mlsysim.core.units import *
+from mlsysim.fmt import fmt_angular_velocity, check
+
+class PhaseShortPeak:
+    """Speed of peak short-circuit braking torque for the hub motors."""
+
+    # ┌── 1. LOAD (Constants & Parameters) ─────────────────────────────────
+    hub = BrakingLimits.hub  # category: sourced (ZLTECH ZLLG10ASM800 datasheet)
+    omega_drive = BrakingLimits.omega  # category: derived (wheel speed at the drive limit)
+
+    # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────
+    omega_e_peak = (hub.line_resistance / hub.line_inductance).to(ureg.radian / second)
+    omega_m_peak = (omega_e_peak / hub.pole_pairs).to(ureg.rpm)
+
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(abs(omega_e_peak.magnitude - 371.35) < 0.01, f"Unexpected electrical peak speed: {omega_e_peak}")
+    check(abs(omega_m_peak.magnitude - 177.31) < 0.01, f"Unexpected wheel speed at the peak: {omega_m_peak}")
+    check(omega_m_peak > omega_drive, "The peak must lie above the drive-limit wheel speed.")
+
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
+    omega_m_peak_str = fmt_angular_velocity(omega_m_peak, unit=ureg.rpm, precision=1)
+    omega_drive_str = fmt_angular_velocity(omega_drive, unit=ureg.rpm, precision=1)
+```
+
+Power removal is an unmanaged state transition, not an automatic return to safety. Cutting power leaves an actuator in one of three unpowered states, namely free coasting, phase-short dynamic braking, or spring-engaged mechanical braking, and each enforces a distinct mechanical behavior. An electromechanical friction brake requires `{python} SpringBrake.t_engage_min_str` to `{python} SpringBrake.t_engage_max_str` for its mechanical spring to overcome magnetic coil decay and engage its friction pads, during which gravity accelerates an overhead arm downward. Phase-short dynamic braking generates a counter-torque that at low speed grows in proportion to angular velocity ($\tau \approx \frac{K_t K_e}{R_{\text{phase}}} \omega$) and gives zero holding torque at zero velocity. The proportionality does not last. As speed rises, the winding inductance limits the short-circuit current, so the braking torque peaks where the electrical speed $P_n \omega$ equals $R/L$ and falls beyond it: a phase short brakes weakest when the joint is fastest. For the base's hub motors that peak lies at `{python} PhaseShortPeak.omega_m_peak_str` of the wheel, above the `{python} PhaseShortPeak.omega_drive_str` of the drive limit, so the proportional picture holds across the base's speed range; a fast, high-ratio joint motor has no such guarantee. Free coasting simply allows gravity to accelerate unconstrained joints without any resistance. Industrial standards name these responses. IEC 60204-1 defines stop category 0 as immediate removal of power from the machine actuators, category 1 as a controlled stop with power kept available until the machine has stopped and then removed, and category 2 as a controlled stop that leaves power available [@iec60204]. The drive safety functions of IEC 61800-5-2 implement them: Safe Torque Off (STO) removes the torque-producing drive signals and leaves the joint in free coast, Safe Stop 1 (SS1) decelerates the motor and then applies STO, and Safe Brake Control (SBC) switches the spring brake [@iec61800]; @sec-nervous-actuation-authority places STO in the machine's interlock. The trajectory a machine follows after an electrical cutoff must be measured under full mechanical payload, not deduced from circuit diagrams. The choice of which safe fallback state the machine should enter belongs to system safety architecture in @sec-enforcement, but the physical dynamics of an unpowered joint are unalterable mechanical constraints of the body.
 
 ### Regenerative overvoltage surges and dynamic brake choppers {#sec-body-regenerative-surges}
 
@@ -1722,17 +1968,17 @@ On a dynamometer, a controlled load machine resists the actuator while torque, s
   $$\tau = K_t i_q$$
   Driving the unpowered motor at known speed and measuring open-circuit voltage supplies the corresponding back-EMF constant $K_e = e_{\text{bemf}} / \omega$. These tests establish the conversion factors used in @sec-body-electrical-time-constants.
 
-- **Electrical rise time and inductive bandwidth ($\tau_e = L/R$)**: Under locked-rotor conditions ($\omega = 0$), the dynamometer clamps the output shaft while the inverter applies a step voltage command. The quadrature current step response:
-  $$i_q(t) = \frac{V_{\text{bus}}}{R}\left(1 - e^{-t/\tau_e}\right)$$
-  reveals the electrical time constant. The current probe and acquisition path must resolve the rise; otherwise the instrument smooths the response being measured and hides the actuator limit.
+- **Electrical rise time and inductive bandwidth ($\tau_e = L/R$)**: With the rotor held so that the test current produces no torque, the inverter applies a small voltage step $V_{\text{step}}$ across the winding. The current response:
+  $$i(t) = \frac{V_{\text{step}}}{R}\left(1 - e^{-t/\tau_e}\right)$$
+  reveals the electrical time constant. The step must stay small, because its steady current $V_{\text{step}}/R$ flows through a winding of low resistance: the full `{python} CurrentRise.v_low_str` of a depleted pack across a hub motor's `{python} CurrentRise.r_line_str` would drive `{python} CurrentRise.i_full_step_str`, `{python} CurrentRise.step_over_peak_mult_str` the motor's peak current. The current probe and acquisition path must resolve the rise; otherwise the instrument smooths the response being measured and hides the actuator limit.
 
 - **Enclosed thermal resistance ($\theta_{JA}$) and continuous torque ceilings**: A heating trial under the installed cooling conditions measures the winding temperature rise and loss power, establishing $\theta_{JA} = \Delta T / P_{\text{loss}}$. The continuous torque ceiling from @sec-body-thermal-capacity is then:
   $$\tau_{\text{cont}} = K_t \sqrt{\frac{T_{\max} - T_{\text{amb}}}{R(T_{\max}) \theta_{JA}}}$$
   The test must reproduce the enclosure and neighboring heat loads under which that ceiling will be used.
 
-- **Reverse backdrive efficiency ($\eta_{\text{rev}}$) and impact dynamics**: By driving the actuator output shaft with the dynamometer load motor, the testbed measures the reverse backdrive torque threshold:
-  $$\tau_{\text{ext}} = \frac{N_g^2 J_{\text{rotor}}}{\eta_{\text{rev}}} \ddot{q} + \frac{\tau_{\text{friction}}}{\eta_{\text{rev}}}$$
-  The measured response establishes whether the transmission can yield under the intended external load. Contact qualification must additionally exercise the relevant compliance and impact conditions; the reverse-drive model alone does not predict tooth failure.
+- **Backdrive friction and impact dynamics**: By driving the actuator output shaft with the dynamometer load motor, the testbed measures the torque needed to backdrive the joint across speed, load, and temperature:
+  $$\tau_{\text{ext}} = N^2 J_{\text{rotor}} \ddot{q} + \tau_{\text{fric}}$$
+  The measured response establishes whether the transmission can yield under the intended external load and maps the friction term that @sec-body-actuation-regimes shows is not a constant. Contact qualification must additionally exercise the relevant compliance and impact conditions; the backdrive model alone does not predict tooth failure.
 
 ::: {#fig-02-real-motor-dyno-bench fig-env="figure" fig-pos="t" fig-cap="**Electric motor dynamometer testbed**: High-bandwidth actuator characterization stand at NASA Armstrong Flight Research Center. Direct empirical measurement of peak torque saturation, electrical time constants ($\tau_e = L/R$), continuous thermal rise ($\Delta T = P_{\text{loss}} \theta_{JA}$), and regenerative power feedback requires synchronizing multi-channel load cells, optical encoders, and isolated current probes on a shared hardware timebase rather than trusting manufacturer catalog ratings. (Source: NASA, Public Domain)." fig-alt="Photograph of an instrumented electric motor mounted on an optical dynamometer test bench at NASA Armstrong Flight Research Center, showing coupled torque transducers and sensor wiring."}
 ![](images/jpg/fig02_real_motor_dyno_bench.jpg){width="85%"}
@@ -2043,7 +2289,7 @@ A team quantizes its vision backbone and reduces inference time from $30\text{ m
 
 **Fallacy**: *Software step commands deliver instantaneous physical torque.*
 
-A simulated policy issues piecewise-constant setpoints at $50\text{ Hz}$ and assumes the actuator acts as an ideal linear force source that follows each tensor update immediately. On physical hardware, however, an electric actuator functions as an electromechanical Digital-to-Analog Converter (DAC): it must synthesize torque through Field-Oriented Control (FOC) current loops, where current rise is strictly bounded by stator winding inductance ($\tau_e = L/R$) and DC bus voltage headroom ($\frac{d\tau}{dt} \le \frac{K_t(V_{\text{bus}} - e_{\text{bemf}})}{L}$). Furthermore, the transmission gearhead amplifies rotor inertia quadratically ($J_{\text{ref}} = N_g^2 J_{\text{rotor}}$), acting as an aggressive mechanical low-pass filter on joint acceleration.
+A simulated policy issues piecewise-constant setpoints at $50\text{ Hz}$ and assumes the actuator acts as an ideal linear force source that follows each tensor update immediately. On physical hardware, however, an electric actuator is a dynamic system rather than an instantaneous converter from number to torque: it must build torque through Field-Oriented Control (FOC) current loops, where current rise is strictly bounded by stator winding inductance ($\tau_e = L/R$) and DC bus voltage headroom ($\frac{d\tau}{dt} \le \frac{K_t(V_{\text{bus}} - e_{\text{bemf}})}{L}$). Furthermore, the transmission gearhead amplifies rotor inertia quadratically ($J_{\text{ref}} = N^2 J_{\text{rotor}}$), acting as an aggressive mechanical low-pass filter on joint acceleration.
 
 When a policy demands abrupt changes, some motor effort accelerates the rotor rather than the external link, and transmission compliance can turn the mismatch into oscillation. Contact loads then depend on the reflected inertia, friction, and compliance of the assembled joint. Repeated high-current corrections also consume the thermal budget through $P_{\text{loss}} = \frac{\tau^2}{K_t^2} R$. Setpoint shaping must therefore be checked against delivered response, rather than accepted because the command sequence is numerically smooth.
 
@@ -2051,13 +2297,60 @@ When a policy demands abrupt changes, some motor effort accelerates the rotor ra
 
 :::
 
+```{python}
+#| label: body-catalog-derating-calc
+#| echo: false
+#| warning: false
+#| message: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ INSTALLED CONTINUOUS TORQUE AGAINST THE CATALOG RATING (LEGO)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: the datasheet pitfall in @sec-body-fallacies-pitfalls.
+# │ Goal:    Show how far the continuous-torque ceiling falls when a motor
+# │          rated at a 25 C test ambient runs at the enclosed 40 C of the
+# │          thermal notebooks, and again if installation doubles theta_JA.
+# │ Show:    ambient alone: sqrt(100/115) = 0.933, 6.7 percent lower; with
+# │          theta_JA doubled as well: 0.659, 34.1 percent lower.
+# │ How:     tau_cont proportional to sqrt((T_max - T_amb) / theta_JA), same
+# │          motor and ceiling; T_max from CopperResistanceRise, T_amb from
+# │          ThermalBurst.
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import *
+from mlsysim.core.units import *
+from mlsysim.fmt import fmt_temperature, fmt_percent, check
+
+class CatalogDerating:
+    """Continuous-torque ceiling at installed ambient and thermal resistance, relative to the catalog."""
+
+    # ┌── 1. LOAD (Constants & Parameters) ─────────────────────────────────
+    t_max = CopperResistanceRise.t_ceiling  # category: chosen (engineering ceiling, declared once)
+    t_amb_catalog = ureg.Quantity(25.0, ureg.degC).to(ureg.kelvin)  # category: illustrative (catalog test ambient)
+    t_amb_installed = ThermalBurst.t_amb  # category: illustrative (enclosed ambient of the thermal notebooks)
+    theta_factor = 2.0  # category: illustrative (installed theta_JA relative to the catalog heat sink)
+
+    # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────
+    ambient_share = (((t_max - t_amb_installed) / (t_max - t_amb_catalog)).to("dimensionless").magnitude) ** 0.5
+    both_share = ambient_share / theta_factor**0.5
+
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(abs(ambient_share - 0.9325) < 1e-4, f"Unexpected ambient-only share: {ambient_share}")
+    check(abs(both_share - 0.6594) < 1e-4, f"Unexpected combined share: {both_share}")
+
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
+    t_max_str = fmt_temperature(t_max, unit=ureg.degC, precision=0)
+    t_amb_catalog_str = fmt_temperature(t_amb_catalog, unit=ureg.degC, precision=0)
+    t_amb_installed_str = fmt_temperature(t_amb_installed, unit=ureg.degC, precision=0)
+    ambient_loss_pct_str = fmt_percent(1 - ambient_share, precision=1, style="prose")
+    both_loss_pct_str = fmt_percent(1 - both_share, precision=1, style="prose")
+```
+
 ::: {.fallacy-pitfall}
 
 **Pitfall**: *Treating isolated component datasheets as operational system guarantees.*
 
-An engineer uses a motor's catalog continuous torque rating or a sensor's nominal accuracy specification to set policy action limits. The motor rating carries the vendor's free-air test conditions (@sec-body-thermal-duty-cycles)—an unconstrained motor mounted to an enormous aluminum heatsink at $20^\circ\text{C}$—not those of a sealed joint operating beside a $70\text{ W}$ compute module inside an unventilated limb. In reality, continuous torque is strictly limited by thermal dissipation ($T_{\max} \approx 150^\circ\text{C}$):
+An engineer uses a motor's catalog continuous torque rating or a sensor's nominal accuracy specification to set policy action limits. The motor rating carries the vendor's free-air test conditions (@sec-body-thermal-duty-cycles)—an unconstrained motor mounted to an enormous aluminum heatsink at $20^\circ\text{C}$—not those of a sealed joint operating beside a $70\text{ W}$ compute module inside an unventilated limb. In reality, continuous torque is limited by thermal dissipation up to the winding's temperature ceiling $T_{\max}$:
 $$\tau_{\text{cont}} = K_t \sqrt{\frac{T_{\max} - T_{\text{amb}}}{R(T_{\max}) \theta_{JA}}}$$
-In an enclosed chassis where ambient temperature reaches $45^\circ\text{C}\text{--}55^\circ\text{C}$ and thermal resistance $\theta_{JA}$ increases, the true sustainable continuous torque can fall by 30 to 50 percent below catalog ratings. If the planner treats the catalog number as its operational limit, stator copper losses ($P_{\text{loss}} = \frac{\tau^2}{K_t^2} R$) will exceed the thermal dissipation capacity and age the slot insulation faster than its thermal class allows. Similarly, an IMU or optical encoder tested on an isolated bench exhibits far higher variance, quantization noise, and vibration aliasing when bolted to a vibrating mobile chassis. Operational limits must derive from empirical limit records measured on the fully assembled machine under compound operational stress.
+With the `{python} CatalogDerating.t_max_str` engineering ceiling, moving the motor from a `{python} CatalogDerating.t_amb_catalog_str` test ambient into the `{python} CatalogDerating.t_amb_installed_str` enclosure of the thermal examples costs `{python} CatalogDerating.ambient_loss_pct_str` of continuous torque by itself. Because the ceiling scales as $1/\sqrt{\theta_{JA}}$, losing the catalog's heat sink and free airflow matters more: if installation doubles $\theta_{JA}$, the two effects together remove `{python} CatalogDerating.both_loss_pct_str` of the catalog rating. If the planner treats the catalog number as its operational limit, stator copper losses ($P_{\text{loss}} = \frac{\tau^2}{K_t^2} R$) will exceed the thermal dissipation capacity and age the slot insulation faster than its thermal class allows. Similarly, an IMU or optical encoder tested on an isolated bench exhibits far higher variance, quantization noise, and vibration aliasing when bolted to a vibrating mobile chassis. Operational limits must derive from empirical limit records measured on the fully assembled machine under compound operational stress.
 
 **Architect's Countermeasure**: Calibrate actuator continuous torque ceilings and sensor noise profiles on fully assembled, enclosed hardware across the entire operational temperature envelope rather than copying open-bench catalog numbers into planner configuration files.
 
