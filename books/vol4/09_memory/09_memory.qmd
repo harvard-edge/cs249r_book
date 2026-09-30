@@ -34,12 +34,14 @@ format:
 
 _How long can a robot act on a remembered scene after it loses sight of it?_
 
-A person hidden behind a storage rack can keep moving while the robot's map still shows an empty aisle. Forgetting the person loses a constraint on motion; preserving the last position indefinitely turns old evidence into false certainty. The engineer must retain useful state through brief sensing gaps while limiting how long it can support a decision. That limit depends on the motion the sensors cannot observe, the error already present, and the clearance the task can tolerate. A stored estimate must therefore carry both its physical age and the conditions under which its uncertainty remains bounded. The permission path needs that information in time to refuse motion whose evidence has expired. Spatial memory connects sensing to the causal boundary by preserving what an observation supports without extending its authority beyond the physical margin.
+A person hidden behind a storage rack can keep moving while the robot's map still shows an empty aisle. Forgetting the person loses a constraint on motion; preserving the last position indefinitely turns old evidence into false certainty. The engineer must estimate the scene from measurements that arrive at different times with different errors, retain that estimate through brief sensing gaps, and limit how long it can support a decision. That limit depends on the motion the sensors cannot observe, the error already present, and the clearance the task can tolerate. A stored estimate must therefore carry both its physical age and the conditions under which its uncertainty remains bounded. The permission path needs that information in time to refuse motion whose evidence has expired. Spatial memory connects sensing to the causal boundary by preserving what an observation supports without extending its authority beyond the physical margin.
 
 {{< pagebreak >}}
 
 ::: {.callout-learning-objectives}
 
+- Apply a state estimator's predict and update steps to dated measurements, including late ones at their capture epoch, and test whether its reported covariance matches its actual error
+- Track objects across frames without withholding occupancy evidence until their identity is confirmed
 - Specify a spatial belief record that carries evidence age, uncertainty growth, and consumer query budgets
 - Set belief expiry from bounded uncertainty growth and the task's physical tolerance
 - Select a spatial representation for a clearance query from the query it answers, the memory reads it costs, and the storage it needs
@@ -51,7 +53,7 @@ A person hidden behind a storage rack can keep moving while the robot's map stil
 
 ## Spatial Belief Persistence and Expiry {#sec-memory-preserving-belief}
 
-Every physical AI system acts on a world it observes only intermittently. Perception delivers dated, calibrated observations (@sec-perception-handoff), yet frames arrive tens of milliseconds apart, a rack upright or a gripper finger can hide the relevant surface for far longer, and the controller must keep deciding in the intervals. **Spatial memory**\index{Spatial memory} is the layer that carries physical state across those gaps. In a conventional computer, a stored value remains correct because nothing outside the machine changes what it describes. In a physical machine the stored value remains exact while the world it describes keeps moving, so a remembered state loses its truth without losing a bit. The central question of spatial memory is therefore how long a stored state may continue to authorize motion. The answer is a physical deadline rather than a software timeout, set by the error present at capture, the rate at which unobserved motion can enlarge that error, and the clearance the task can tolerate. Computing and enforcing that deadline requires four things, each developed in turn: a record that carries every value with its evidence epoch and an explicit error-growth law, transforms and maps that preserve those epochs through composition and update, an expiry derived from the growth law, and an account of the errors that no sensor on the machine can see.
+Every physical AI system acts on a world it observes only intermittently. Perception delivers dated, calibrated observations (@sec-perception-handoff), yet frames arrive tens of milliseconds apart, a rack upright or a gripper finger can hide the relevant surface for far longer, and the controller must keep deciding in the intervals. **Spatial memory**\index{Spatial memory} is the layer that carries physical state across those gaps. In a conventional computer, a stored value remains correct because nothing outside the machine changes what it describes. In a physical machine the stored value remains exact while the world it describes keeps moving, so a remembered state loses its truth without losing a bit. The central question of spatial memory is therefore how long a stored state may continue to authorize motion. The answer is a physical deadline rather than a software timeout, set by the error present at capture, the rate at which unobserved motion can enlarge that error, and the clearance the task can tolerate. Computing and enforcing that deadline requires five things, each developed in turn: an estimator that fuses dated measurements into a state whose reported uncertainty can be tested, a record that carries every value with its evidence epoch and an explicit error-growth law, transforms and maps that preserve those epochs through composition and update, an expiry derived from the growth law, and an account of the errors that no sensor on the machine can see.
 
 On the warehouse mobile manipulator the question arises at every rack end. As the machine pivots away from the end of a storage rack, the rack uprights hide the cross aisle from the navigation camera, and whatever the vision backbone last detected there now survives only in memory. A person out of sight past the rack end can walk directly into the corridor that memory marks empty, and republishing the cached observation with a fresh software timestamp cannot restore the lost evidence. The stopping budget built so far defends a static obstacle at the declared clearance. A hidden person who keeps approaching changes that premise, and the expiry calculation of @sec-memory-belief-through-occlusion shows why that encounter needs a separately qualified crossing control or an operating restriction rather than a longer memory.
 
@@ -76,7 +78,390 @@ Externalizing that state also separates the consumers' work. A policy retrieves 
 
 Internal memory integrity alone cannot establish physical geometric validity. To prevent a machine from acting on stale data, memory systems must treat expiry as an explicit interface event. Each belief carries a deadline, its invalidation horizon (derived in @sec-memory-belief-through-occlusion), at which its declared error bound reaches the task's physical margin. At that deadline the belief stops supporting motion, and the permission path refuses any proposal that still depends on it and selects a feasible fallback.
 
-A belief that must declare its own expiry has to travel with more than its value, so the first handoff question is what a consumer needs to evaluate a stored value after its sensor loses sight of the object.
+Every belief, and every deadline derived from one, begins as the output of an estimator. Perception hands memory one dated, framed, and error-qualified measurement at a time (@sec-perception-observation-contract). Turning those measurements into a state that stays current between them, with an uncertainty that means what it says, is where spatial memory begins.
+
+## Estimating State from Dated Measurements {#sec-perception-state-estimation}
+
+A single LiDAR return or stereo match places the rack-end upright once. The permission path needs a range that stays current between sweeps, combines the LiDAR with any other qualified sensor, and reports an uncertainty that means what it says. A recursive **state estimator**\index{State estimation!recursive estimator} supplies all three by alternating two steps: a prediction that carries the state forward through a motion model, and an update that folds in each dated measurement. The Kalman filter [@kalman1960new] is the standard form of that recursion, and the rest of this chapter is built on its two steps [@thrun2005probabilistic, ch. 3; @barshalom2001estimation]. Tracking and the delayed update later in this section apply them directly. The occlusion decay of @sec-memory-belief-through-occlusion is the prediction step run with no update, and the observability limits of @sec-memory-state-estimation-bounds are the states no update can reach. We work the two steps once on a scalar, the remaining distance $s$ from the base to the rack-end upright, and then state them for vectors.
+
+```{python}
+#| label: calc-perception-aisle-kalman
+#| echo: false
+#| warning: false
+#| message: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ ONE-DIMENSIONAL KALMAN FILTER ON THE RACK-END DISTANCE
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @sec-perception-state-estimation and the consistency checks of
+# │          @sec-memory-estimator-consistency.
+# │
+# │ Goal:    Predict the remaining distance to the rack-end upright over one
+# │          LiDAR sweep, update it with the OS1-64, fuse an illustrative stereo
+# │          range, and show what an arrival-stamped stereo range does.
+# │ Show:    prior 20.0 mm -> 20.6 mm after prediction; LiDAR gain 0.32,
+# │          posterior 17.0 mm; stereo sigma 3.8 mm at 1.10 m, gain 0.95,
+# │          posterior 3.7 mm; misdating bias 38.0 mm, about 10 posterior
+# │          standard deviations; expected NIS 6.25.
+# │ How:     scalar predict (P + (sigma_v dt)^2) and update (g = P / (P + R));
+# │          OS1-64 sweep period and worst-case precision from the registry;
+# │          the illustrative stereo rig of @sec-perception-error-clearance at
+# │          AISLE.d_clear; the arrival-stamp travel of @sec-perception-handoff
+# │          (t_exp/2 + t_readout + t_transport + t_dma at the drive limit)
+# │          as the misdating bias. All three inputs are re-derived here from
+# │          the registry or re-loaded with guards matching Ch8's cells.
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import *
+from mlsysim.core.units import *
+from mlsysim.fmt import fmt, fmt_latency, fmt_length, check
+
+RM = Embodied.MobileManipulator.WarehouseMobileManipulator
+AISLE = Embodied.Scenario.WarehouseAisle
+
+class AisleKalman:
+    """Scalar predict, update, two-sensor fusion, and a misdated update on the rack-end distance."""
+
+    # ┌── 1. LOAD (Constants & Parameters) ─────────────────────────────────
+    sigma_prior = 20.0 * ureg.millimeter  # category: illustrative (posterior from the previous sweep)
+    sigma_v = 0.1 * meter / second  # category: illustrative (odometry speed error, e.g. wheel slip)
+    dt = (1 / RM.lidar.scan_rate).to(millisecond)  # category: datasheet (one 20 Hz sweep; LidarSweep.t_sweep in @sec-perception)
+    sigma_lidar = RM.lidar.range_precision_max  # category: datasheet (OS1 precision, worst case, 1 sigma)
+    bias_r = RM.lidar.range_accuracy  # category: datasheet (OS1 accuracy, a bias the filter cannot represent)
+    z = AISLE.d_clear  # category: illustrative (range to the upright)
+    b = 0.20 * meter  # category: illustrative (stereo baseline; StereoDepthError.b in @sec-perception-error-clearance)
+    f_px = 800.0  # category: illustrative (focal length, pixels; StereoDepthError.f_px)
+    sigma_d_px = 0.5  # category: illustrative (disparity standard deviation, pixels; StereoDepthError.sigma_d_px)
+    tau_recv = (RM.nav_camera.exposure_time / 2 + RM.nav_camera.readout_time + AISLE.t_transport + AISLE.t_dma).to(
+        millisecond
+    )  # category: derived (ArrivalStampOffset.tau_recv in @sec-perception-handoff)
+    bias_misdate = calc_spatial_information_age_displacement(RM.base.max_velocity, tau_recv).to(
+        ureg.millimeter
+    )  # category: derived (arrival-stamp travel)
+
+    # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────
+    mm2 = ureg.millimeter**2
+    P0 = sigma_prior.to(ureg.millimeter) ** 2
+    q = ((sigma_v * dt).to(ureg.millimeter)) ** 2
+    P_pred = (P0 + q).to(mm2)
+    R_lidar = sigma_lidar.to(ureg.millimeter) ** 2
+    g_lidar = (P_pred / (P_pred + R_lidar)).to(ureg.dimensionless).magnitude
+    P_lidar = ((1 - g_lidar) * P_pred).to(mm2)
+    sigma_stereo = (z**2 * sigma_d_px / (f_px * b)).to(ureg.millimeter)
+    R_stereo = sigma_stereo**2
+    S_stereo = (P_lidar + R_stereo).to(mm2)
+    g_stereo = (P_lidar / S_stereo).to(ureg.dimensionless).magnitude
+    P_fused = ((1 - g_stereo) * P_lidar).to(mm2)
+    sigma_pred = P_pred**0.5
+    sigma_lidar_post = P_lidar**0.5
+    sigma_fused = P_fused**0.5
+    bias_post = (g_stereo * bias_misdate).to(ureg.millimeter)
+    bias_in_sigmas = (bias_post / sigma_fused).to(ureg.dimensionless).magnitude
+    nis_expected = 1 + (bias_misdate.to(ureg.millimeter) ** 2 / S_stereo).to(ureg.dimensionless).magnitude
+
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(abs(dt.magnitude - 50.0) < 1e-9, f"Sweep period must match the perception chapter's 50 ms: {dt}")
+    check(abs(tau_recv.magnitude - 26.6) < 0.05, f"Arrival offset must match the perception chapter's 26.6 ms: {tau_recv}")
+    check(abs(bias_misdate.magnitude - 39.9) < 0.05, f"Arrival-stamp travel must match the perception chapter's 39.9 mm: {bias_misdate}")
+    check(abs(sigma_pred.magnitude - 20.6) < 0.05, f"Unexpected predicted sigma: {sigma_pred}")
+    check(abs(g_lidar - 0.32) < 0.005, f"Unexpected LiDAR gain: {g_lidar}")
+    check(abs(sigma_lidar_post.magnitude - 17.0) < 0.05, f"Unexpected LiDAR posterior: {sigma_lidar_post}")
+    check(sigma_lidar_post < min(sigma_pred, sigma_lidar), "Posterior must be tighter than either input")
+    check(abs(sigma_stereo.magnitude - 3.8) < 0.05, f"Unexpected stereo sigma: {sigma_stereo}")
+    check(abs(g_stereo - 0.95) < 0.005, f"Unexpected stereo gain: {g_stereo}")
+    check(abs(sigma_fused.magnitude - 3.7) < 0.05, f"Unexpected fused sigma: {sigma_fused}")
+    check(abs(bias_post.magnitude - 38.0) < 0.05, f"Unexpected misdating bias: {bias_post}")
+    check(9.5 < bias_in_sigmas < 11.0, f"Prose says the bias is about ten posterior sigmas: {bias_in_sigmas}")
+    check(abs(nis_expected - 6.25) < 0.05, f"Unexpected expected NIS: {nis_expected}")
+
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
+    sigma_prior_str = fmt_length(sigma_prior, unit=ureg.millimeter, precision=0)
+    sigma_v_str = fmt(sigma_v.to(meter / second).magnitude, precision=1)
+    dt_str = fmt_latency(dt, unit=millisecond, precision=0)
+    sigma_w_str = fmt_length((sigma_v * dt).to(ureg.millimeter), unit=ureg.millimeter, precision=0)
+    sigma_pred_str = fmt_length(sigma_pred, unit=ureg.millimeter, precision=1)
+    sigma_lidar_str = fmt_length(sigma_lidar, unit=ureg.millimeter, precision=0)
+    g_lidar_str = fmt(g_lidar, precision=2)
+    sigma_lidar_post_str = fmt_length(sigma_lidar_post, unit=ureg.millimeter, precision=1)
+    z_str = fmt_length(z.to(meter), unit=meter, precision=2)
+    sigma_stereo_str = fmt_length(sigma_stereo, unit=ureg.millimeter, precision=1)
+    g_stereo_str = fmt(g_stereo, precision=2)
+    sigma_fused_str = fmt_length(sigma_fused, unit=ureg.millimeter, precision=1)
+    bias_misdate_str = fmt_length(bias_misdate.to(ureg.millimeter), unit=ureg.millimeter, precision=1)
+    bias_r_str = fmt_length(bias_r, unit=ureg.millimeter, precision=0)
+    bias_post_str = fmt_length(bias_post, unit=ureg.millimeter, precision=1)
+    bias_in_sigmas_str = fmt(bias_in_sigmas, precision=1)
+    nis_expected_str = fmt(nis_expected, precision=2)
+```
+
+The **predict** step carries the estimate forward without new evidence. Between two LiDAR sweeps, `{python} AisleKalman.dt_str` apart, odometry says the base closed the distance by $v\,\Delta t$, so $\hat{s}^- = \hat{s} - v\,\Delta t$. Odometry is itself uncertain: an illustrative speed error of `{python} AisleKalman.sigma_v_str` m/s, such as wheel slip on a polished floor, adds `{python} AisleKalman.sigma_w_str` of standard deviation over the interval. Independent errors add in variance, $P^- = P + \sigma_w^2$, so a `{python} AisleKalman.sigma_prior_str` estimate grows to `{python} AisleKalman.sigma_pred_str`. Prediction can only widen the uncertainty.
+
+```{python}
+#| label: calc-perception-imu-error-growth
+#| echo: false
+#| warning: false
+#| message: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ IMU ERROR GROWTH WITHOUT A RANGE UPDATE
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: The IMU paragraph of @sec-perception-state-estimation.
+# │
+# │ Goal:    Show from the BMI088 datasheet why white noise and constant offsets
+# │          grow differently under integration, and which one limits coasting.
+# │ Show:    over 1 s: 0.014 deg from gyro noise vs 1 deg from the zero-rate
+# │          offset (19.2 mm at the rack end); 0.9 mm from accelerometer noise
+# │          vs 98 mm from the zero-g offset, about twice delta_loc.
+# │ How:     angle = N_g sqrt(T); heading = b_g T; position from white
+# │          acceleration noise = N_a sqrt(T^3 / 3); position from offset =
+# │          b_a T^2 / 2. BMI088 datasheet rev 1.9 (Jan 2024), Tables 4-5,
+# │          typical values, from the registry (Sensors.IMU.Bosch_BMI088).
+# └─────────────────────────────────────────────────────────────────────────────
+import math
+from mlsysim import *
+from mlsysim.core.units import *
+from mlsysim.fmt import fmt, fmt_int, fmt_length, check
+
+AISLE = Embodied.Scenario.WarehouseAisle
+
+class ImuErrorGrowth:
+    """Attitude and position error of the BMI088 integrated open loop."""
+
+    # ┌── 1. LOAD (Constants & Parameters) ─────────────────────────────────
+    g0 = 1.0 * ureg.standard_gravity  # category: constant (standard gravity)
+    imu = Embodied.MobileManipulator.WarehouseMobileManipulator.imu  # category: datasheet (registry: Bosch BMI088)
+    n_gyro = imu.gyro_noise_density.to("deg/s/Hz**0.5").magnitude  # category: datasheet (BMI088 gyro rate-noise density)
+    b_gyro = imu.gyro_zero_rate_offset.to("deg/s").magnitude  # category: datasheet (BMI088 typical zero-rate offset, offset cancellation off)
+    n_acc = (imu.accel_noise_density / g0).to("Hz**-0.5").magnitude  # category: datasheet (BMI088 accel noise density X/Y, in g/sqrt(Hz))
+    b_acc = (imu.accel_zero_g_offset / g0).to("dimensionless").magnitude  # category: datasheet (BMI088 typical zero-g offset, in g)
+    t_coast = 1.0 * second  # category: illustrative (interval without a range update)
+    z = AISLE.d_clear  # category: illustrative (rack-end distance)
+    delta_loc = AISLE.delta_loc  # category: illustrative (along-travel localization allowance)
+
+    # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────
+    T = t_coast.to(second).magnitude
+    ang_noise_deg = n_gyro * math.sqrt(T)
+    ang_bias_deg = b_gyro * T
+    lat_bias = (z * math.sin(math.radians(ang_bias_deg))).to(ureg.millimeter)
+    pos_noise = (n_acc * g0 * math.sqrt(T**3 / 3.0) * second**2).to(ureg.millimeter)
+    pos_bias = (0.5 * b_acc * g0 * t_coast**2).to(ureg.millimeter)
+    bias_over_loc = (pos_bias / delta_loc).to(ureg.dimensionless).magnitude
+
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(abs(ang_noise_deg - 0.014) < 1e-9, f"Unexpected gyro-noise angle: {ang_noise_deg}")
+    check(abs(lat_bias.magnitude - 19.2) < 0.05, f"Unexpected lateral error from gyro offset: {lat_bias}")
+    check(abs(pos_noise.magnitude - 0.91) < 0.01, f"Unexpected position error from accel noise: {pos_noise}")
+    check(abs(pos_bias.magnitude - 98.1) < 0.05, f"Unexpected position error from accel offset: {pos_bias}")
+    check(1.8 < bias_over_loc < 2.1, f"Prose says the offset term is about twice delta_loc: {bias_over_loc}")
+    check(pos_bias > 50 * pos_noise, "Prose says offsets, not white noise, limit coasting")
+
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
+    n_gyro_str = fmt(n_gyro, precision=3)
+    b_gyro_str = fmt(b_gyro, precision=0)
+    n_acc_str = fmt_int(round(n_acc * 1e6))
+    b_acc_str = fmt_int(round(b_acc * 1e3))
+    t_coast_str = fmt(T, precision=0)
+    ang_noise_str = fmt(ang_noise_deg, precision=3)
+    ang_bias_str = fmt(ang_bias_deg, precision=0)
+    z_str = fmt_length(z.to(meter), unit=meter, precision=2)
+    lat_bias_str = fmt_length(lat_bias, unit=ureg.millimeter, precision=1)
+    pos_noise_str = fmt_length(pos_noise, unit=ureg.millimeter, precision=1)
+    pos_bias_str = fmt_length(pos_bias, unit=ureg.millimeter, precision=1)
+    delta_loc_str = fmt_length(delta_loc.to(ureg.millimeter), unit=ureg.millimeter, precision=0)
+```
+
+The machine's IMU is the other source a prediction can draw on, and its datasheet shows why it cannot carry the estimate alone for long. The BMI088's gyroscope has a rate-noise density of `{python} ImuErrorGrowth.n_gyro_str` °/s/$\sqrt{\text{Hz}}$ and a typical zero-rate offset of `{python} ImuErrorGrowth.b_gyro_str` °/s before calibration; its accelerometer has a noise density of `{python} ImuErrorGrowth.n_acc_str` µg/$\sqrt{\text{Hz}}$ and a typical zero-g offset of `{python} ImuErrorGrowth.b_acc_str` mg [@bosch2024bmi088]. Integration adds errors up, and the two kinds add differently. White noise adds in variance, so the angle it produces grows only as the square root of time: over an illustrative `{python} ImuErrorGrowth.t_coast_str` s without a range update it reaches `{python} ImuErrorGrowth.ang_noise_str`°. A constant offset adds linearly, so the heading error grows in proportion to time and reaches `{python} ImuErrorGrowth.ang_bias_str`° in the same second, which moves the rack-end upright `{python} ImuErrorGrowth.lat_bias_str` sideways at `{python} ImuErrorGrowth.z_str`. The accelerometer is integrated twice to reach position, so its offset grows with the square of time, $\tfrac{1}{2} b_a T^2$: `{python} ImuErrorGrowth.pos_bias_str` after one second, about twice the `{python} ImuErrorGrowth.delta_loc_str` localization allowance, while its white noise contributes only `{python} ImuErrorGrowth.pos_noise_str`. Offsets, not noise, limit how long the IMU can coast. The estimator therefore carries the offsets as extra states, which the LiDAR updates make observable, and uses the noise densities to set $\mathbf{Q}$. Because the offsets change with temperature and from unit to unit, their values on this machine come from a stationary recording on the robot, not from the datasheet.
+
+The **update** step folds in a measurement $z$ with variance $\sigma_z^2$. The new estimate is a blend, $(1-g)\,\hat{s}^- + g\,z$, and because the two errors are independent its variance is $(1-g)^2 P^- + g^2 \sigma_z^2$. Setting the derivative with respect to $g$ to zero gives the weight that minimizes that variance, which weighs each source by the other's variance:
+$$g = \frac{P^-}{P^- + \sigma_z^2}, \qquad \hat{s} = \hat{s}^- + g\,(z - \hat{s}^-), \qquad P = (1 - g)\,P^-$$
+The difference $z - \hat{s}^-$ is the **innovation**\index{Innovation!definition}, what the measurement says that the prediction did not. With the OS1-64's worst-case datasheet precision of `{python} AisleKalman.sigma_lidar_str`, the gain is `{python} AisleKalman.g_lidar_str`: the filter moves a third of the way toward the LiDAR, and the posterior standard deviation falls to `{python} AisleKalman.sigma_lidar_post_str`, smaller than either input. The datasheet's precision is specified in a different scan mode from the machine's, so this input still needs confirmation at the configured rate. Its separate `{python} AisleKalman.bias_r_str` accuracy figure is a bias, which the filter's zero-mean noise model cannot represent; calibration must remove it or the clearance inset must carry it.
+
+**Fusing a second sensor** is a second update. The illustrative stereo rig of @sec-perception-error-clearance has $\sigma_z =$ `{python} AisleKalman.sigma_stereo_str` at the `{python} AisleKalman.z_str` rack-end distance, so the gain is `{python} AisleKalman.g_stereo_str` and the fused standard deviation is `{python} AisleKalman.sigma_fused_str`. Order does not matter for independent measurements taken at the same instant; each update consumes one measurement, and the inverse variances add.
+
+**A misdated measurement** breaks the arithmetic silently. Suppose the stereo range carries the arrival stamp of @sec-perception-handoff, so the filter pairs it with a pose `{python} AisleKalman.bias_misdate_str` farther along the aisle than the one at capture. The range then reads long by that amount, and the update pulls the estimate `{python} AisleKalman.bias_post_str` too far from the upright while reporting the same `{python} AisleKalman.sigma_fused_str` standard deviation. The error is about `{python} AisleKalman.bias_in_sigmas_str` reported standard deviations, in the dangerous direction, and nothing in the variance reveals it, because the variance update never looks at the measurement's value. This is the claim that a wrong timestamp is worse than a lost frame, made concrete: a lost frame would have left the standard deviation at `{python} AisleKalman.sigma_lidar_post_str`, wider but honest.
+
+@Fig-08-kalman-predict-update draws the same four steps as error bars on one scale, with the misdated case beside them.
+
+::: {#fig-08-kalman-predict-update fig-env="figure" fig-pos="t" fig-cap="**Predict and update on the rack-end range**: Each bar spans one standard deviation of the range estimate. Prediction widens the bar from `{python} AisleKalman.sigma_prior_str` to `{python} AisleKalman.sigma_pred_str`; the LiDAR update (gain `{python} AisleKalman.g_lidar_str`) and the stereo update (gain `{python} AisleKalman.g_stereo_str`) each narrow it below both of their inputs, whose own spreads appear as gray bars. The misdated stereo update on the right reports the same `{python} AisleKalman.sigma_fused_str` spread while sitting `{python} AisleKalman.bias_post_str` from the true range, which the variance alone cannot reveal." fig-alt="Error-bar chart with five columns on a vertical axis of range error in millimeters. Prior, predicted, after LiDAR update, and after stereo update columns are centered on zero, with the bar shrinking sharply after the stereo update. Gray bars beside the two update columns show the LiDAR and stereo measurement spreads. A fifth red column, labeled misdated stereo, has a short bar centered well above zero."}
+
+```{python}
+#| label: fig-08-kalman-predict-update
+#| echo: false
+#| warning: false
+#| message: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ SCALAR KALMAN PREDICT AND UPDATE (FIGURE)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @fig-08-kalman-predict-update in @sec-perception-state-estimation.
+# │
+# │ Goal:    Show prediction widening and each update narrowing the estimate,
+# │          and a misdated update that stays narrow while biased.
+# │ Show:    sigma 20.0 -> 20.6 -> 17.0 -> 3.7 mm; LiDAR and stereo input
+# │          spreads; the 38.0 mm misdating bias at the fused spread.
+# │ How:     Every value reads AisleKalman (no literals).
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import viz
+
+AK = AisleKalman
+_mm = lambda q: q.to(ureg.millimeter).magnitude
+PETROL = "#007A87"  # measured (theme-colors.tex)
+CRIMSON = "#A51C30"  # consequence (theme-colors.tex)
+INK, SOFT, PALE = "#1A202C", "#4A5568", "#A0AEC0"
+
+steps = [
+    ("prior", 0.0, _mm(AK.sigma_prior), AK.sigma_prior_str, None),
+    ("predict", 0.0, _mm(AK.sigma_pred), AK.sigma_pred_str, None),
+    ("LiDAR\nupdate", 0.0, _mm(AK.sigma_lidar_post), AK.sigma_lidar_post_str, (_mm(AK.sigma_lidar), AK.sigma_lidar_str, AK.g_lidar_str)),
+    ("stereo\nupdate", 0.0, _mm(AK.sigma_fused), AK.sigma_fused_str, (_mm(AK.sigma_stereo), AK.sigma_stereo_str, AK.g_stereo_str)),
+]
+
+fig, ax, COLORS, plt = viz.setup_plot(figsize=(5.4, 2.9))
+ax.grid(False)
+ax.spines["top"].set_visible(False)
+ax.spines["right"].set_visible(False)
+ax.axhline(0, color=PALE, lw=0.8, ls="--", zorder=0)
+
+for i, (name, mu, sig, lab, meas) in enumerate(steps):
+    ax.errorbar(i, mu, yerr=sig, fmt="o", color=PETROL, ms=3.5, capsize=4, lw=1.6, zorder=3)
+    # sigma labels centred over their own bar so none runs into the next column's input bar
+    ax.text(i, mu + sig + 1.2, f"σ = {lab}", ha="center", va="bottom", fontsize=7, color=INK)
+    if meas is not None:
+        s_m, s_lab, g_lab = meas
+        ax.errorbar(i - 0.42, 0.0, yerr=s_m, fmt="none", color=PALE, capsize=3, lw=1.2, zorder=2)
+        ax.text(i - 0.42, -s_m - 1.2, f"input {s_lab}", ha="center", va="top", fontsize=6.5, color=SOFT)
+        ax.text(i + 0.1, -sig - 1.2, f"gain {g_lab}", ha="left", va="top", fontsize=7, color=SOFT)
+
+# Misdated stereo update: same reported spread, biased mean
+xm = len(steps) + 0.2
+b = _mm(AK.bias_post)
+ax.errorbar(xm, b, yerr=_mm(AK.sigma_fused), fmt="s", color=CRIMSON, ms=3.5, capsize=4, lw=1.6, zorder=3)
+ax.annotate("", xy=(xm + 0.3, b), xytext=(xm + 0.3, 0), arrowprops=dict(arrowstyle="<->", color=CRIMSON, lw=0.8))
+ax.text(xm + 0.38, b / 2, f"bias\n{AK.bias_post_str}\n≈ {AK.bias_in_sigmas_str} σ", ha="left", va="center", fontsize=7, color=CRIMSON)
+ax.text(xm, b + _mm(AK.sigma_fused) + 1.2, f"σ = {AK.sigma_fused_str}", ha="center", va="bottom", fontsize=7, color=INK)
+ax.axvline(len(steps) - 0.4, color=PALE, lw=0.6)
+
+ax.set_xticks(list(range(len(steps))) + [xm])
+ax.set_xticklabels([s[0] for s in steps] + ["misdated\nstereo"], fontsize=7.5)
+ax.set_xlim(-0.7, xm + 1.1)
+ax.set_ylabel("estimate minus true range (mm)", fontsize=8)
+ax.tick_params(axis="y", labelsize=7)
+ax.set_ylim(-_mm(AK.sigma_lidar) - 8, max(b + 12, _mm(AK.sigma_lidar) + 6))
+plt.tight_layout()
+plt.show()
+plt.close()
+```
+:::
+
+For a state vector $\hat{\mathbf{x}}$ with covariance $\mathbf{P}$, the same two steps use a transition matrix $\mathbf{F}$, process noise covariance $\mathbf{Q}$, a measurement matrix $\mathbf{H}$ that maps state to measurement, and a measurement covariance $\boldsymbol{\Sigma}_z$ (@eq-percep-kf-predict and @eq-percep-kf-update):
+$$\hat{\mathbf{x}}_{k|k-1} = \mathbf{F}\,\hat{\mathbf{x}}_{k-1|k-1}, \qquad \mathbf{P}_{k|k-1} = \mathbf{F}\,\mathbf{P}_{k-1|k-1}\mathbf{F}^\top + \mathbf{Q}$$ {#eq-percep-kf-predict}
+$$\boldsymbol{\nu}_k = \mathbf{z}_k - \mathbf{H}\hat{\mathbf{x}}_{k|k-1}, \quad \mathbf{S}_k = \mathbf{H}\mathbf{P}_{k|k-1}\mathbf{H}^\top + \boldsymbol{\Sigma}_z, \quad \mathbf{G}_k = \mathbf{P}_{k|k-1}\mathbf{H}^\top\mathbf{S}_k^{-1}, \quad \hat{\mathbf{x}}_{k|k} = \hat{\mathbf{x}}_{k|k-1} + \mathbf{G}_k\boldsymbol{\nu}_k, \quad \mathbf{P}_{k|k} = (\mathbf{I} - \mathbf{G}_k\mathbf{H})\,\mathbf{P}_{k|k-1}$$ {#eq-percep-kf-update}
+Here $\boldsymbol{\nu}_k$ is the innovation, $\mathbf{S}_k$ its covariance, and $\mathbf{G}_k$ the Kalman gain (written $\mathbf{G}$ so that $\mathbf{K}$ remains the camera's intrinsic matrix). The scalar example is the case $\mathbf{F} = \mathbf{H} = 1$. When motion and measurement are linear and the noise is Gaussian, this update gives the minimum-variance estimate; outside those assumptions it is only a weighted correction whose covariance must be checked against data. @Sec-appendix-control-covariance develops the continuous-time counterpart.
+
+The machine's sensors are not linear in its state. A LiDAR range to the upright is $r = \|\mathbf{p}_{\text{upright}} - \mathbf{p}_{\text{base}}\|$, and a camera measures a bearing through the pinhole projection of @eq-percep-pinhole-projection. The **extended Kalman filter (EKF)**\index{Extended Kalman filter!definition} keeps @eq-percep-kf-update but replaces $\mathbf{H}$ with the Jacobian of the measurement function $h(\mathbf{x})$ evaluated at the prediction, and the predicted measurement with $h(\hat{\mathbf{x}}_{k|k-1})$. For the range, that Jacobian with respect to the base position is the unit vector pointing from the upright toward the base. The linearization is a first-order approximation. When $h$ curves appreciably across the prior's spread, as a bearing does for a nearby object or when the prior is wide, the EKF can report a covariance smaller than its actual error [@julier2004unscented], which is one reason the consistency tests of @sec-memory-estimator-consistency are required rather than optional.
+
+The **unscented Kalman filter (UKF)**\index{Unscented Kalman filter!definition} avoids the Jacobian. It chooses $2n+1$ sigma points for an $n$-dimensional state, spread according to a square root of $\mathbf{P}$, passes each through the nonlinear function, and recomputes the mean and covariance from the transformed points [@julier2004unscented]. It captures the effect of curvature on the mean that the EKF drops, at the cost of $2n+1$ function evaluations per step, but it still summarizes the state by a mean and covariance and still needs the same qualification.
+
+Both filters, and the tracking and delayed-update procedures built on them, assume that every measurement carries its capture epoch. The misdated example shows what happens otherwise. Its reported variance did not change while its error grew to about ten reported standard deviations, so the covariance an estimator reports is a claim that has to be tested against data.
+
+### Testing whether the covariance is honest {#sec-memory-estimator-consistency}
+
+Two statistics test that claim, one offline against ground truth and one at runtime against the measurements themselves. Both use the same fact: an error scaled by the covariance that is supposed to describe it has a known distribution when the covariance is honest.
+
+```{python}
+#| label: calc-memory-estimator-consistency
+#| echo: false
+#| warning: false
+#| message: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ NEES AND NIS CONSISTENCY NUMBERS
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @sec-memory-estimator-consistency (moved from the perception
+# │          chapter's error-qualification cell with the estimator).
+# │
+# │ Goal:    Give the acceptance band for mean NEES over a finite campaign and
+# │          the single-update NIS gates that one misdated update must exceed.
+# │ Show:    mean-NEES band 0.65 to 1.43 (N = 50, scalar, 95 percent); NIS
+# │          gates 3.84 and 6.63, which one misdated update exceeds with
+# │          probability 0.63 and 0.39.
+# │ How:     chi-squared quantiles (scipy.stats.chi2); noncentral chi-squared
+# │          survival (scipy.stats.ncx2) for the misdated update's NIS.
+# └─────────────────────────────────────────────────────────────────────────────
+from scipy.stats import chi2, ncx2
+from mlsysim import *
+from mlsysim.core.units import *
+from mlsysim.fmt import fmt, fmt_int, fmt_percent, check
+
+class EstimatorConsistency:
+    """Acceptance bands and single-update gates for testing an estimator's covariance."""
+
+    # ┌── 1. LOAD (Constants & Parameters) ─────────────────────────────────
+    n_runs = 50  # category: chosen (qualification runs with ground truth)
+    n_dim = 1  # category: derived (scalar rack-end distance)
+    conf = 0.95  # category: chosen (two-sided acceptance level)
+    nis_expected = AisleKalman.nis_expected  # category: derived (misdated stereo update)
+
+    # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────
+    dof = n_runs * n_dim
+    nees_lo = chi2.ppf((1 - conf) / 2, dof) / n_runs
+    nees_hi = chi2.ppf(1 - (1 - conf) / 2, dof) / n_runs
+    nis_95 = chi2.ppf(0.95, n_dim)
+    nis_99 = chi2.ppf(0.99, n_dim)
+    p_catch_95 = ncx2.sf(nis_95, n_dim, nis_expected - n_dim)
+    p_catch_99 = ncx2.sf(nis_99, n_dim, nis_expected - n_dim)
+
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(abs(nees_lo - 0.65) < 0.005 and abs(nees_hi - 1.43) < 0.005, f"Unexpected NEES band: {nees_lo}, {nees_hi}")
+    check(abs(nis_95 - 3.84) < 0.005 and abs(nis_99 - 6.63) < 0.005, f"Unexpected NIS gates: {nis_95}, {nis_99}")
+    check(0.55 < p_catch_95 < 0.7 and 0.35 < p_catch_99 < 0.5, f"Unexpected single-update detection probabilities: {p_catch_95}, {p_catch_99}")
+    check(nis_expected > nees_hi, "Prose says the averaged NIS falls far outside the band")
+
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
+    n_runs_str = fmt_int(n_runs)
+    conf_pct_str = fmt_percent(conf, precision=0)
+    nees_lo_str = fmt(nees_lo, precision=2)
+    nees_hi_str = fmt(nees_hi, precision=2)
+    nis_95_str = fmt(nis_95, precision=2)
+    nis_99_str = fmt(nis_99, precision=2)
+    nis_expected_str = fmt(nis_expected, precision=2)
+    p_catch_95_str = fmt(p_catch_95, precision=2)
+    p_catch_99_str = fmt(p_catch_99, precision=2)
+```
+
+A filter is consistent\index{Filter consistency} when its reported covariance matches its actual error. With ground truth, for example a surveyed rack-end upright and an external reference for the base pose, the normalized estimation error squared (NEES)\index{NEES!definition}, $\epsilon_k = (\mathbf{x}_k - \hat{\mathbf{x}}_k)^\top \mathbf{P}_k^{-1} (\mathbf{x}_k - \hat{\mathbf{x}}_k)$, follows a chi-squared distribution with $n$ degrees of freedom for an $n$-dimensional state when the filter is consistent. The reason is elementary: a consistent filter's error, scaled by its reported covariance, is a vector of $n$ independent standard normal variables, and a chi-squared variable with $n$ degrees of freedom is by definition the sum of their squares, so its mean is $n$. Averaged over $N$ independent runs, $N\bar{\epsilon}$ is chi-squared with $Nn$ degrees of freedom [@barshalom2001estimation]. For the scalar rack-end distance and `{python} EstimatorConsistency.n_runs_str` runs, the `{python} EstimatorConsistency.conf_pct_str` percent acceptance band for $\bar{\epsilon}$ is `{python} EstimatorConsistency.nees_lo_str` to `{python} EstimatorConsistency.nees_hi_str`. A mean above the band means the filter is overconfident, the failure that shrinks clearance; a mean below it means the reported covariance is wider than necessary, which costs speed.
+
+Ground truth is not available at runtime, but the innovation is. The normalized innovation squared (NIS)\index{NIS!definition}, $\boldsymbol{\nu}_k^\top\mathbf{S}_k^{-1}\boldsymbol{\nu}_k$, is chi-squared with $m$ degrees of freedom for an $m$-dimensional measurement when the models hold, and it is the same quantity the tracking gate of @eq-percep-mahalanobis-gate computes later in this section. The misdated stereo update of @fig-08-kalman-predict-update has an expected NIS of `{python} EstimatorConsistency.nis_expected_str`. Because the innovation also carries the measurement's random error, a single misdated update exceeds the 95 percent gate of `{python} EstimatorConsistency.nis_95_str` only with probability `{python} EstimatorConsistency.p_catch_95_str`, and the 99 percent gate of `{python} EstimatorConsistency.nis_99_str` with probability `{python} EstimatorConsistency.p_catch_99_str`, so a per-update gate lets a large share of such updates through. Averaged over a window of updates, the mean NIS sits several times above the consistency band, so a runtime monitor on windowed NIS detects a systematic dating error that per-update gating does not.
+
+### Multi-object tracking and temporal data association {#sec-perception-tracking-association}
+
+A fresh occupied-region claim can constrain motion before the system knows which object produced it. Persistent identity serves another purpose: joining detections across frames lets the planner estimate velocity and anticipate a crossing. Detection flicker makes that association uncertain, but withholding occupancy until identity is confirmed would create an avoidable interval of blindness.
+
+The interface therefore separates immediate geometric evidence from a **tracking-by-detection** hypothesis. The tracker associates detections, estimates motion, and carries uncertainty; persistence and expiry through missing observations are the subject of the rest of this chapter. The following state equations describe the additional information a confirmed track can supply, not a prerequisite for acting on an obstacle return.
+
+Each active track $i$ runs the same filter on a kinematic state vector $\hat{\mathbf{x}}_t = [\hat{\mathbf{p}}_t^\top, \hat{\mathbf{v}}_t^\top]^\top$ with error covariance $\mathbf{P}_t \in \mathbb{R}^{6\times6}$. A constant-velocity transition matrix $\mathbf{F}$ and process noise covariance $\mathbf{Q}$ propagate it between frames by @eq-percep-kf-predict.
+When a new frame delivers $M$ candidate detections $\{\mathbf{z}_{t, j}\}_{j=1}^M$, the tracker must resolve **data association**—deciding which detection belongs to which track. To prevent associating spurious sensor noise or distant objects, the tracker computes the squared Mahalanobis distance $d_{M, ij}^2$ between detection $\mathbf{z}_{t, j}$ and the predicted measurement $\mathbf{H}\hat{\mathbf{x}}_{t|t-1}$:
+$$d_{M, ij}^2 = (\mathbf{z}_{t, j} - \mathbf{H}\hat{\mathbf{x}}_{t|t-1})^\top \mathbf{S}_{ij}^{-1} (\mathbf{z}_{t, j} - \mathbf{H}\hat{\mathbf{x}}_{t|t-1})$$ {#eq-percep-mahalanobis-gate}
+where $\mathbf{S}_{ij} = \mathbf{H}\mathbf{P}_{t|t-1}\mathbf{H}^\top + \boldsymbol{\Sigma}_{z,j}$ is the innovation covariance of @eq-percep-kf-update and $\boldsymbol{\Sigma}_{z,j}$ is the measurement error covariance; the gated quantity is the NIS of @sec-memory-estimator-consistency. A **validation gate** evaluates @eq-percep-mahalanobis-gate and rejects any pairing where $d_{M, ij}^2 > \gamma_{\text{gate}}$, where a chi-squared threshold $\chi_3^2(1 - \alpha)$, with three degrees of freedom because the detection measures a three-dimensional position, has its nominal interpretation only under the assumed residual model. Empirical association errors require separate validation. For all gated pairs, the tracker constructs an assignment cost matrix with entries $c_{ij} = d_{M, ij}^2$ and solves the optimal global bipartite matching via the Hungarian algorithm [@kuhn1955hungarian], as the SORT tracker does [@bewley2016simple], or the Jonker-Volgenant shortest-augmenting-path algorithm [@jonker1987shortest], enforcing one-to-one assignment among the candidate pairings; it does not prove that the association is physically correct.
+
+One common track lifecycle distinguishes three states:
+
+1. **Tentative state**: Unassociated detections spawn tentative tracks. Because false detections arise frequently from specular reflections, dust, or lens flare, the identity remains tentative until an $M$-of-$N$ confirmation rule is met. Fresh occupied-region evidence remains visible to clearance consumers during confirmation. If a downstream decision requires confirmed identity or velocity, its detection delay must include that confirmation interval; the single-frame latency waterfall of @sec-perception-latency-waterfall cannot stand in for it.
+2. **Confirmed state**: Once confirmed, the track publishes its full state estimate $(\text{ID}_i, \hat{\mathbf{p}}_i, \hat{\mathbf{v}}_i, \mathbf{P}_i)$ to the planning and intent layers. Each associated detection updates the track through @eq-percep-kf-update, which refines the mean and contracts the covariance; the correction is minimum-variance only under linear-Gaussian assumptions, so the track's covariance must pass the consistency checks of @sec-memory-estimator-consistency.
+3. **Coasting state (occlusion)**: When an obstacle passes behind a warehouse shelf or is occluded by another actor, detection fails. Rather than terminating the track immediately, the system transitions the track to a coasting state. During coasting, state is propagated strictly via the motion model $\mathbf{F}$ in @eq-percep-kf-predict, and process noise $\mathbf{Q}$ adds uncertainty without a new measurement to constrain it. Downstream planners must treat coasting obstacles with expanding clearance margins. If no matching detection arrives within a timeout horizon $T_{\text{lost}}$, the identity track terminates. Termination does not establish that its last occupied region is free; the map must retain the appropriate unknown-space constraint (@sec-memory-scene-attention-buffers), and how fast a coasting track's uncertainty may grow before it stops supporting motion is the expiry question of @sec-memory-belief-through-occlusion.
+
+When a decision requires tracked motion, the tracker also emits an auditable **dynamic track manifest** $[(\text{ID}_k, \hat{\mathbf{p}}_k, \hat{\mathbf{v}}_k, \mathbf{P}_k, t_{\text{last}}, \text{state})]$. Downstream intent filters in @sec-intent-admissible-goal-sets consume these velocities and covariances to establish dynamic exclusion cones, while safety enforcers in @sec-enforcement evaluate stopping clearance against moving targets.
+
+### Applying a delayed observation {#sec-perception-discrete-state-estimation}
+
+Tracking assumes that each detection arrives in capture order. A camera frame that spends tens of milliseconds in inference can arrive after a faster sensor's later measurement has already updated the state. The capture epoch the observation contract preserves (@sec-perception-observation-contract) makes such a delayed measurement usable when the estimator has a qualified history and motion model. The notation is that of @eq-percep-kf-update: $\hat{\mathbf{x}}$ the estimated state, $\mathbf{P}$ its covariance, $\mathbf{H}$ the measurement model, and $\mathbf{G}$ the Kalman gain. @Sec-appendix-control-lqr develops the estimation/control relationship.
+
+A delayed visual observation must correct the state at its capture epoch before the estimator propagates the correction to the present. One implementation retains historical states and inertial inputs in an **out-of-sequence ring buffer** with $N_{\text{buffer}} = \lceil T_{\text{buffer}} / \Delta t_{\text{IMU}} \rceil$ slots. Its horizon $T_{\text{buffer}}$ bounds the delay it can accommodate. When observation $\mathbf{z}_{t_0}$ arrives at $t_{\text{recv}}$, the estimator retrieves the prediction at $t_0$, computes its innovation and gain, and applies the update of @eq-percep-kf-update at that epoch (@eq-percep-oosm-correction):
+$$\hat{\mathbf{x}}_{t_0|t_0} = \hat{\mathbf{x}}_{t_0|t_0-1} + \mathbf{G}_{t_0} (\mathbf{z}_{t_0} - \mathbf{H}_{t_0} \hat{\mathbf{x}}_{t_0|t_0-1}), \quad \mathbf{P}_{t_0|t_0} = (\mathbf{I} - \mathbf{G}_{t_0}\mathbf{H}_{t_0}) \mathbf{P}_{t_0|t_0-1}$$ {#eq-percep-oosm-correction}
+For the following propagation-only replay, assume no intervening measurement updates. If other sensors corrected the state during the interval, their updates must also be replayed in timestamp order. The estimator then executes a fast replay pass—re-integrating buffered IMU samples from $t_0$ to $t_{\text{recv}}$ using the updated initial condition $\hat{\mathbf{x}}_{t_0|t_0}$—to bring the current state estimate $\hat{\mathbf{x}}_{t_{\text{recv}}}$ into alignment with the new observation without introducing non-causal state discontinuities (@eq-percep-oosm-replay):
+$$\hat{\mathbf{x}}_{t_{\text{recv}}} = \hat{\mathbf{x}}_{t_0|t_0} + \sum_{k = t_0}^{t_{\text{recv}}-1} \mathbf{f}(\hat{\mathbf{x}}_k, \mathbf{u}_k) \Delta t_{\text{IMU}}$$ {#eq-percep-oosm-replay}
+with covariance forward replay governed by state transition matrix $\mathbf{\Phi}(t_{\text{recv}}, t_0) = \prod_{k = t_0}^{t_{\text{recv}}-1} \mathbf{F}_k$:
+$$\mathbf{P}_{t_{\text{recv}}} = \mathbf{\Phi}(t_{\text{recv}}, t_0) \mathbf{P}_{t_0|t_0} \mathbf{\Phi}^\top(t_{\text{recv}}, t_0) + \sum_{k = t_0}^{t_{\text{recv}}-1} \mathbf{\Phi}(t_{\text{recv}}, k+1) \mathbf{Q}_k \mathbf{\Phi}^\top(t_{\text{recv}}, k+1)$$ {#eq-percep-oosm-cov-replay}
+This rewind-and-replay routine (@eq-percep-oosm-cov-replay) is strictly bounded by ring buffer horizon $T_{\text{buffer}}$. If pipeline jitter or memory bus contention stretches observation age such that $t_{\text{age}} > T_{\text{buffer}}$, the ring buffer has already overwritten epoch $t_0$. The estimator must refuse the delayed measurement, allow process noise $\mathbf{Q}$ to inflate the predictive covariance $\mathbf{P}$, and alert the downstream permission path that visual grounding has lapsed.
+
+**Observation tokens in end-to-end VLA policies**: A learned policy that consumes the delayed observation faces the same out-of-sequence problem without a ring buffer. The observation tokenizer proposed in @sec-perception-observation-contract gives it the elapsed time and propagated state that the estimator uses here; it does not validate the estimate or grant the resulting action permission.
+
+The estimator's output is what spatial memory stores: a state, its tested covariance, the instant the state describes, and the capture epochs of the measurements that last constrained it. Prediction and delayed replay keep the state current, but only a measurement adds evidence, and neither step moves the evidence epochs forward. That output must also leave the estimator in a form a consumer can check. A belief that must declare its own expiry has to travel with more than its value, so the first handoff question is what a consumer needs to evaluate a stored value after its sensor loses sight of the object.
 
 ## The Spatial Memory Handoff and State Invariants {#sec-memory-handoff}
 
@@ -86,7 +471,7 @@ Specifying the quantity and units remains incomplete without binding the value t
 
 Geometry and identity describe physical state at a single moment, but spatial memory must also capture the temporal anchor of that state. The record carries the evidence epoch $t_0$ of the physical interaction or optical exposure that last constrained the estimate at the causal boundary. In distributed machine architectures, intermediate nodes often republish data, execute Kalman filter prediction steps, or run forward kinematic propagations to maintain high-rate control streams; none of these computational steps adds physical evidence. The evidence epoch must therefore pass unchanged through every republish, filter, and prediction stage, so that consumers measure the age of the information against the physical world rather than against the scheduling frequency of the local computer.
 
-Generating this anchored belief relies on **multi-sensor state estimation**\index{State estimation!contract boundary}\index{Sensor fusion!informational contract}. An estimator combines asynchronous observations with a motion model to infer the state between measurements [@kalman1960new]; @sec-perception-state-estimation works the Kalman filter's predict and update steps on the rack-end distance, and @sec-perception-qualifying-error tests whether the covariance it reports matches its actual error. Consumers need the resulting state, its justified error model, and the physical evidence that constrains each relevant component. They do not need to reproduce the estimator. A prediction step advances the estimate epoch while its evidence continues aging; a fresh measurement renews only the state dimensions it actually constrains. The covariance propagation mechanics are collected in @sec-appendix-control-covariance. Here the engineering obligation is to expose bounded growth through occlusion and withdraw claims whose assumptions no longer hold.
+The anchored belief is the output of the multi-sensor state estimator\index{State estimation!contract boundary}\index{Sensor fusion!informational contract} of @sec-perception-state-estimation, which combines asynchronous measurements with a motion model to infer the state between them, and whose reported covariance the tests of @sec-memory-estimator-consistency check against the actual error. Consumers need the resulting state, its justified error model, and the physical evidence that constrains each relevant component. They do not need to reproduce the estimator. A prediction step advances the estimate epoch while its evidence continues aging; a fresh measurement renews only the state dimensions it actually constrains. The covariance propagation mechanics are collected in @sec-appendix-control-covariance. Here the engineering obligation is to expose bounded growth through occlusion and withdraw claims whose assumptions no longer hold.
 
 Knowing the evidence epoch $t_0$ establishes elapsed time $\Delta t = t - t_0$, but elapsed time alone cannot determine whether a belief is valid for a given action. Two estimates of identical age diverge at different rates depending on physical constraints. The rack end itself is bolted to the floor, so its remembered position can remain useful while the machine's localization bound and the fixed-rack premise hold, whereas a person hidden behind it can move at walking speed and close the narrow gap beside it before the next camera frame arrives.
 
@@ -889,11 +1274,62 @@ Each of these is a rate model: it states how an unobserved cell is expected to c
 
 ### Hierarchical 3D dynamic scene graphs {#sec-memory-hierarchical-scene-graphs}
 
-Semantic memory sits above the metric layer and inherits its limits. @Sec-perception-error-clearance introduced the object-centric 3D scene graph as something perception produces; memory has to keep one. The structure descends from the 3D scene graph of @armeni20193d, which organized a building into layers of objects, rooms, and cameras, and the 3D dynamic scene graph of @rosinol20203d, which added places, agents, and their motion; Kimera and Hydra build such graphs incrementally from a robot's sensor stream [@rosinol2021kimera; @hughes2022hydra]. @Fig-09-dynamic-scene-graph shows the layers, from a metric mesh through objects and agents, places, and rooms to the building.
+Semantic memory sits above the metric layer and inherits its limits. It is built, not sensed. Learned models supply what an object is, and the metric layer supplies where it is. Open-vocabulary scene memory combines the two with **3D vision foundation models**\index{3D vision foundation models}. A self-supervised backbone such as DINOv2 [@oquab2023dinov2] yields dense patch features, a promptable segmenter such as SAM [@kirillov2023segment] yields class-agnostic instance masks, and systems such as ConceptGraphs [@kuwajerwala2024conceptgraphs; @jatavallabhula2023conceptfusion] and Hydra [@hughes2022hydra] lift those masks and features through calibrated depth, extrinsics, and odometry into an **object-centric 3D scene graph**\index{Object-centric 3D scene graph!definition} whose nodes carry a centroid, a spatial covariance, and a text-aligned embedding.
+
+Each node is therefore an estimate in the sense of @sec-perception-state-estimation, fused from many dated measurements, and it ages like any other belief. The structure descends from the 3D scene graph of @armeni20193d, which organized a building into layers of objects, rooms, and cameras, and the 3D dynamic scene graph of @rosinol20203d, which added places, agents, and their motion; Kimera and Hydra build such graphs incrementally from a robot's sensor stream [@rosinol2021kimera; @hughes2022hydra]. @Fig-09-dynamic-scene-graph shows the layers, from a metric mesh through objects and agents, places, and rooms to the building.
 
 ::: {#fig-09-dynamic-scene-graph fig-env="figure" fig-pos="t" fig-cap="**Hierarchical 3D dynamic scene graph architecture**: Five-layer spatio-temporal memory organization bridging continuous 3D-indexed metric state stores to symbolic foundation reasoning. Drawn for the warehouse, Layer 1 captures triangular metric mesh geometry; Layer 2 extracts 3D objects and dynamic agents such as a walking person; Layer 3 models topological places via Voronoi freespace clearance spheres ($p_i$); Layer 4 structures architectural rooms and portals; and Layer 5 establishes global building mission topology. Vertical inter-layer edges coordinate upward abstraction (compressing metric surfaces into symbolic entities) and downward grounding (translating task tokens into metric coordinates) (adapted from Rosinol et al. [@rosinol20203d; @rosinol2021kimera] and Hughes et al. [@hughes2022hydra])." fig-alt="Five stacked horizontal bands. From bottom to top: layer 1, a triangle mesh; layer 2, boxes for mug, tote, cage door, and a dashed box for person; layer 3, four places p1 to p4 drawn as dashed circles joined in a chain; layer 4, rooms aisle 12, cross aisle, and dock bay joined in a row; layer 5, buildings warehouse and loading dock. Thin lines connect each node to its parent in the band above, and the mesh to three of the objects. An upward arrow labeled abstraction and a downward arrow labeled grounding run beside the bands."}
 ![](images/svg/fig09_dynamic_scene_graph_hierarchy.svg){width="100%"}
 :::
+
+```{python}
+#| label: calc-perception-encoder-rate
+#| echo: false
+#| warning: false
+#| message: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ FOUNDATION-MODEL ENCODER AT CAMERA RATE
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: The construction-cost paragraph of
+# │          @sec-memory-hierarchical-scene-graphs.
+# │
+# │ Goal:    Show that a heavy encoder at the navigation camera's frame rate
+# │          exceeds the application processor's peak dense FP16 rate.
+# │ Show:    3 TFLOP per frame at 60 Hz = 180 TFLOP/s against 43 TFLOP/s.
+# │ How:     Assumed encoder cost; RM.nav_camera.frame_rate; published Jetson
+# │          AGX Orin dense FP16 peak (registry carries only INT8; LOAD here
+# │          until an add-only precision_flops fp16 entry lands).
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import *
+from mlsysim.core.units import *
+from mlsysim.fmt import fmt, fmt_flops, fmt_frequency, check
+
+RM = Embodied.MobileManipulator.WarehouseMobileManipulator
+
+class EncoderAtCameraRate:
+    """Sustained throughput a per-frame foundation encoder would need."""
+
+    # ┌── 1. LOAD (Constants & Parameters) ─────────────────────────────────
+    encoder_tflop = 3.0  # category: illustrative (assumed encoder cost per frame, TFLOP)
+    f_frame = RM.nav_camera.frame_rate  # category: datasheet
+    orin_fp16_dense_tflops = 43.0  # category: datasheet (NVIDIA Jetson AGX Orin technical brief, dense FP16 peak)
+
+    # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────
+    required_tflops = encoder_tflop * f_frame.to(ureg.hertz).magnitude
+    shortfall = required_tflops / orin_fp16_dense_tflops
+
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(abs(required_tflops - 180.0) < 1e-9, f"Unexpected required throughput: {required_tflops}")
+    check(shortfall > 1.0, "Prose says the encoder cannot run at camera rate even at peak")
+
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
+    encoder_tflop_str = fmt_flops(encoder_tflop * TFLOP, unit=TFLOP, precision=0)
+    f_frame_str = fmt_frequency(f_frame, unit=ureg.hertz, precision=0)
+    required_tflops_str = fmt(required_tflops, precision=0)
+    orin_fp16_dense_tflops_str = fmt(orin_fp16_dense_tflops, precision=0)
+```
+
+Building the graph spends a compute and age budget [@williams2009roofline]. An assumed `{python} EncoderAtCameraRate.encoder_tflop_str` encoder at the navigation camera's `{python} EncoderAtCameraRate.f_frame_str` frame rate would require `{python} EncoderAtCameraRate.required_tflops_str` TFLOP/s of sustained useful throughput before preprocessing or memory traffic, while NVIDIA lists up to `{python} EncoderAtCameraRate.orin_fp16_dense_tflops_str` dense FP16 TFLOP/s for the Jetson AGX Orin in its [technical brief](https://www.nvidia.com/content/dam/en-zz/Solutions/gtcf21/jetson-orin/nvidia-jetson-agx-orin-technical-brief.pdf), a peak arithmetic rate rather than sustained model throughput. The encoder cannot run at camera rate on that processor even at the arithmetic ceiling, so one candidate design is a **multi-rate hierarchy**\index{Multi-rate hierarchy!definition}. In that alternative, metric ingress on the application processor\index{Microprocessor} turns the camera frames that land in host memory\index{MIPI CSI-2!DMA buffers} into obstacle points and occupancy grids at $30\text{--}60\text{ Hz}$ without the heavy backbone, and the foundation models update the scene graph's semantic nodes on keyframes at $1\text{--}5\text{ Hz}$. A slow semantic update is admissible only when fresh metric sensing and the permission path hold the physical margin between updates.
 
 The inter-layer edges in @fig-09-dynamic-scene-graph let a policy reason over objects and places without repeatedly processing the full metric mesh. In the opposite direction, a request for the latch handle resolves through the graph to an object frame and the geometry needed for a candidate approach. For memory, the question is what ages in a node, and three things age at different rates. A node's pose ages at the speed bound of what it describes: the bolted rack not at all, a tote on a cart at walking speed. Its existence ages independently of its pose, because an object can leave while unseen, and a tight pose covariance says nothing about whether it is still there (@sec-memory-fallacies-pitfalls). Its label comes from a learned model and does not decay physically, but it is only as reliable as that model's calibration and is revisited only on reobservation. Current systems update graphs when the sensors return: Hydra corrects the graph when the underlying trajectory is optimized after a loop closure [@hughes2022hydra], and Khronos detects objects that have changed or disappeared when it revisits them [@schmid2024khronos]. Neither ages an unobserved node by a physical bound, so that remains the belief record's job, and a room or object label cannot renew the age of the metric cells beneath it.
 
@@ -905,7 +1341,7 @@ For motion permission, then, a representation without an epoch is an unverified 
 
 ## Forward State Propagation and Occlusion Decay {#sec-memory-belief-through-occlusion}
 
-When a sensor loses sight of a moving body, stopping also takes time and requires a usable state estimate. Forward propagation carries the last observation across that interval, whether the machine continues a permitted task or executes a fallback. A learned generative model can also predict future trajectories autoregressively\index{Network!autoregressive}, and ensembles or sampled rollouts give it a spread of predictions, but that spread is not a qualified bound on physical error. In physical AI, forward propagation must be coupled to explicit error-growth models—whether implemented via recursive continuous-discrete Kalman filters [@kalman1960new], learned stochastic state observers, or expanding 3D Gaussian covariance ellipsoids.[^fn-hist-bayesian-filter]
+When a sensor loses sight of a moving body, stopping also takes time and requires a usable state estimate. Forward propagation carries the last observation across that interval, whether the machine continues a permitted task or executes a fallback. A learned generative model can also predict future trajectories autoregressively\index{Network!autoregressive}, and ensembles or sampled rollouts give it a spread of predictions, but that spread is not a qualified bound on physical error. In physical AI, forward propagation must be coupled to explicit error-growth models, whether implemented as the Kalman prediction step of @eq-percep-kf-predict run without updates, as learned stochastic state observers, or as expanding 3D Gaussian covariance ellipsoids.[^fn-hist-bayesian-filter]
 
 Forward propagation changes the estimate and its uncertainty while preserving the hardware evidence epoch. Across the blind interval, anticipated motion remains useful only while the growing error fits the task's clearance. The rack-end example makes that limit explicit.
 
@@ -953,7 +1389,7 @@ class RackEndBelief:
     t_age = AISLE.perception_age  # category: derived (@sec-perception-transduction-calibration)
     v_drive = RM.base.max_velocity  # category: illustrative (drive limit)
     a_brake = AISLE.a_brake  # category: illustrative (credible deceleration)
-    tau_delay = AISLE.tau_delay  # category: derived (total pre-brake delay)
+    tau_delay = AISLE.tau_delay  # category: derived (pre-brake delay, excl. dispatch-to-admission)
 
     # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────────
     t_exp_abreast = calc_free_space_expiry(side_clearance, delta_loc, delta_margin, v_h).to(millisecond)
@@ -1009,7 +1445,7 @@ class RackEndBelief:
 
 The difference between predicting a state and observing it decides what the machine may do at the rack end. A person can step out there into the illustrative `{python} RackEndBelief.d_clear_str` clear distance $D_{\text{clear}}$ that the stopping budget defends, and once the rack hides the cross aisle, the question is how long the remembered view may vouch that the machine's surroundings are still empty.
 
-Every physical model simplifies reality, causing error between the projected state and the physical world to expand continuously during the blind interval. In state estimation\index{State estimation}, this dispersion is governed by **occlusion covariance expansion**\index{Occlusion covariance expansion}, the continuous, physics-governed widening of uncertainty during sensor line-of-sight dropouts. Mathematically formalized by stochastic models (such as the continuous Lyapunov/Riccati covariance propagation equation, detailed in @sec-appendix-control-covariance), this expansion quantifies the growing doubt about where an object actually is, bounding the unobserved divergence caused by unknown drift velocities and unexpected physical disturbances before the sensor regains visibility. For a deterministic worked model, suppose sensor characterization and disturbance limits establish an initial position-error bound $E_0$ at the moment of occlusion ($\Delta t = 0$). Two bounded terms then degrade the prediction. Motion the model does not know about introduces a drift velocity bounded by $v_{\text{drift}}$, and forces it does not model create a disturbance acceleration bounded by $a_{\text{dist}}$. Over an occlusion duration $\Delta t$, the error bound $E(\Delta t)$ then follows the quadratic expansion:
+Every physical model simplifies reality, causing error between the projected state and the physical world to expand continuously during the blind interval. This is the prediction step of @eq-percep-kf-predict with no update to undo it, the widening that @fig-08-kalman-predict-update showed over one sweep, now run for as long as the occlusion lasts. In state estimation\index{State estimation}, this dispersion is governed by **occlusion covariance expansion**\index{Occlusion covariance expansion}, the continuous, physics-governed widening of uncertainty during sensor line-of-sight dropouts. Mathematically formalized by stochastic models (such as the continuous Lyapunov/Riccati covariance propagation equation, detailed in @sec-appendix-control-covariance), this expansion quantifies the growing doubt about where an object actually is, bounding the unobserved divergence caused by unknown drift velocities and unexpected physical disturbances before the sensor regains visibility. For a deterministic worked model, suppose sensor characterization and disturbance limits establish an initial position-error bound $E_0$ at the moment of occlusion ($\Delta t = 0$). Two bounded terms then degrade the prediction. Motion the model does not know about introduces a drift velocity bounded by $v_{\text{drift}}$, and forces it does not model create a disturbance acceleration bounded by $a_{\text{dist}}$. Over an occlusion duration $\Delta t$, the error bound $E(\Delta t)$ then follows the quadratic expansion:
 
 $$E(\Delta t) = E_0 + v_{\text{drift}}\Delta t + \frac{1}{2}a_{\text{dist}}(\Delta t)^2$$ {#eq-mem-occlusion-expansion}
 
@@ -1452,7 +1888,7 @@ class MachineExpiryRoots:
 
 : **Belief-expiry roots on the machine**: Each root solves $E(t)=E_{\max}$ for that belief's error model and task limit. The two free-space rows are @eq-mem-free-space-expiry, with limits set by the depth to the nearest unobserved boundary less the protective clearance. The coworker's initial error is illustrative and its tolerance chosen, while its speed is the same walking-speed bound, so all three person rows grow linearly. The last column names the required disposition by that root; any physical response must begin early enough to remain feasible. The record for the mug-handle belief that @sec-intent consumes is filled in @sec-memory-spatial-state-schema. {#tbl-09-belief-decay-horizons tbl-colwidths="[20,28,14,12,26]"}
 
-Each deadline in the table ends in refusal unless the sensors regain sight of what they lost, and reacquisition restores useful evidence only conditionally. The estimator computes the **innovation**\index{Innovation}, the difference between the new measurement and the predicted observation. A compatible measurement supports an update only after identity, calibration, and the relevant physical constraints have also been checked. A large residual may expose an outlier or a violated motion model; the estimator must resolve that discrepancy before renewing dependent authority. Updating the estimate does not authorize a discontinuous actuator target. The later force-and-bias example shows the complementary limit: a small residual cannot validate a state dimension the sensor does not observe.
+Each deadline in the table ends in refusal unless the sensors regain sight of what they lost, and reacquisition restores useful evidence only conditionally. The estimator computes the innovation of @sec-perception-state-estimation, the difference between the new measurement and the observation its prediction expected. A compatible measurement supports an update only after identity, calibration, and the relevant physical constraints have also been checked. A large residual may expose an outlier or a violated motion model; the estimator must resolve that discrepancy before renewing dependent authority. Updating the estimate does not authorize a discontinuous actuator target. The later force-and-bias example shows the complementary limit: a small residual cannot validate a state dimension the sensor does not observe.
 
 Every root in this section trusts the growth law it was computed from. A growth law is only as good as the machine's ability to catch its failures, through a residual at reacquisition or a staged dropout test, and some errors produce no residual at all because no sensor on the machine can see them.
 
@@ -1519,7 +1955,7 @@ To see why predictability differs from observability, follow that end-effector a
 
 Because the measurement stream cannot distinguish between physical load and sensor drift, an estimator must rely on prior assumptions about how each state evolves. If a Kalman filter or a learned recurrent estimator is configured with a belief that the sensor offset $b(t)$ is static with near-zero variance, it attributes every variation in $y(t)$ to changes in true contact force $x(t)$. As new samples arrive at `{python} MemoryBiasDrift.f_sample_str` $\text{Hz}$, the filter incorporates the incoming data, repeatedly updating its internal state. Because the incoming measurements match the forward projection of the state dynamics, the calculated state covariance contracts, and the estimator reports an increasingly narrow uncertainty bound, publishing an estimate of `{python} MemoryBiasDrift.y_str` $\pm$ `{python} MemoryBiasDrift.sigma_str` at $P_{99}$. Meanwhile, thermal dissipation from nearby joint actuators warms the end-effector structure, causing the sensor bias $b(t)$ to drift at `{python} MemoryBiasDrift.rate_str` $\text{N/min}$. Over `{python} MemoryBiasDrift.span_str` $\text{min}$, $b(t)$ shifts by `{python} MemoryBiasDrift.shift_str`. The true force on the surface has fallen from `{python} MemoryBiasDrift.y_str` to `{python} MemoryBiasDrift.x_true_str`, yet the estimator reports high confidence in a state that has drifted by `{python} MemoryBiasDrift.pct_str` percent of its nominal value.
 
-The downstream control policy responds to this false certainty by commanding motor torques to maintain what it believes is a `{python} MemoryBiasDrift.y_str` preload. If the workpiece needs more frictional support than that reduced preload supplies, it can slip even while the reported force remains on target. The force estimate alone cannot reveal the loss of support. The estimator monitors its innovation sequence\index{Innovation sequence}, the innovation of @sec-memory-belief-through-occlusion evaluated at every sample between incoming measurements $y(t)$ and predicted measurements $\hat{y}(t)$. In this drift scenario, the estimator predicted $\hat{y}(t) = \hat{x}(t) + \hat{b}(t) =$ `{python} MemoryBiasDrift.y_str`, and the physical sensor returned $y(t) =$ `{python} MemoryBiasDrift.y_str`. The innovation is zero at every time step. An innovation check measures only whether the physical sensors disagree with the forward projection of the internal state. It cannot expose an unobservable error mode, because along the unobservable manifold the sensor output is invariant to the drift.
+The downstream control policy responds to this false certainty by commanding motor torques to maintain what it believes is a `{python} MemoryBiasDrift.y_str` preload. If the workpiece needs more frictional support than that reduced preload supplies, it can slip even while the reported force remains on target. The force estimate alone cannot reveal the loss of support. The estimator monitors its innovation sequence\index{Innovation sequence}, the innovation of @sec-perception-state-estimation evaluated at every sample between incoming measurements $y(t)$ and predicted measurements $\hat{y}(t)$. In this drift scenario, the estimator predicted $\hat{y}(t) = \hat{x}(t) + \hat{b}(t) =$ `{python} MemoryBiasDrift.y_str`, and the physical sensor returned $y(t) =$ `{python} MemoryBiasDrift.y_str`. The innovation is zero at every time step. An innovation check measures only whether the physical sensors disagree with the forward projection of the internal state. It cannot expose an unobservable error mode, because along the unobservable manifold the sensor output is invariant to the drift.
 
 Recovering observability requires the system architecture to provide an additional constraint that breaks the symmetry along the unobservable subspace. An engineering design accomplishes this in one of three ways. First, independent sensing can introduce a second measurement channel with different failure physics, such as monitoring joint motor current or an optical deflection sensor that does not share the strain gauge's thermal sensitivity. Second, the machine can perform deliberate physical excitation, after independently supporting the workpiece, commanding the gripper to briefly break contact for `{python} MemoryBiasDrift.t_excite_str` $\text{ms}$, creating a known boundary condition of $x(t) =$ `{python} MemoryBiasDrift.zero_str` where the measured sensor value directly exposes $b(t)$. Third, the machine can rely on periodic external anchoring, bringing the tool into contact with a calibrated reference load cell during scheduled tool-change cycles to reset the bias estimate. The mobile manipulator's base already depends on the third remedy, because odometry leaves its position along the aisle unobservable and only the map-based corrections of @sec-memory-localization-slam supply the missing constraint.
 
@@ -1591,7 +2027,7 @@ When the sensor behind a publish-time stamp has stopped altogether, the anti-pat
 
 Coordinate frame misattributions divide along a similar boundary between syntax and semantics. A **schema-detectable frame mismatch**\index{Schema-detectable frame mismatch} occurs when a publisher supplies a malformed frame identifier or a value outside a declared frame enumeration. Static schema enforcement can reject that packet. A well-formed identifier can still name an undefined frame in the transformation tree graph. Resolving an otherwise well-formed identifier against the current transform tree requires a frame-aware validator or consumer; the transport schema alone does not establish that the named parent link exists. In contrast, a **semantically wrong frame assignment**\index{Semantically wrong frame assignment} occurs when an engineer or configuration file assigns a valid, type-correct frame identifier that represents the wrong physical link. For example, commanding the mobile manipulator's fingertip trajectory using the transform of the arm's bare mounting flange $T_{\text{flange}}$ instead of the gripper's tool tip $T_{\text{tool}}$ satisfies every schema validation check, type assertion, and tree traversal test. In an illustrative setup with a tool tip $150\text{ mm}$ beyond the flange along the tool $z$-axis, a flange-as-tip error shifts the intended contact point by that offset. Whether contact occurs depends on the fixture geometry and admitted path. Detecting a semantic frame error requires physical consistency checks, such as verifying measured motor torques against an analytical dynamic model of the arm, or cross-referencing multi-camera optical tracker observations against joint encoder kinematics.
 
-When sensor updates drop out, an estimator relies entirely on its predictive forward model to advance state estimates across the blind interval. A well-formulated filter propagates the mean state estimate $\hat{\mathbf{x}}(t)$ and covariance $\mathbf{\Sigma}(t)$ under its stated dynamics and process-noise model. The worked drift model grows position uncertainty during the gap; general covariance propagation need not be monotonic in every direction. An **overconfident predictor**\index{Overconfident predictor} understates process variance $\mathbf{Q}$, holding $\mathbf{\Sigma}(t)$ artificially compact over an extended prediction duration exceeding $200\text{ ms}$. When fresh sensor measurements eventually arrive, the artificially small covariance causes the filter to discount incoming observations; it weights its internal dead-reckoning so heavily that it classifies valid measurements as statistical outliers and rejects them. Engineers identify overconfidence during system qualification by executing staged synthetic occlusions, dropping sensor frames for a range of intervals and evaluating the innovation at reacquisition, $\tilde{\mathbf{y}} = \mathbf{y} - \hat{\mathbf{y}}$, against the covariance $\mathbf{S}$ the filter predicted for it. The standard test is the normalized innovation squared (NIS) of @sec-perception-qualifying-error, $\tilde{\mathbf{y}}^\top \mathbf{S}^{-1} \tilde{\mathbf{y}}$, which for a consistent filter is chi-squared with as many degrees of freedom as the measurement has dimensions; averaged over the staged trials it must fall inside the chi-squared acceptance interval at a stated confidence, and the NEES of the same section, the test on the state error against ground truth, checks the propagated covariance directly [@barshalom2001estimation]. An average above the interval means the process noise model is too optimistic, and the number of trials needed for a stated tail follows the trial-count reasoning of @sec-evaluation. Drift along an unobservable degree of freedom, such as workpiece slippage inside compliant gripper pads, produces no reacquisition residual at all (@sec-memory-state-estimation-bounds). At vehicle scale, a terrain belief stands until the wheels themselves contradict it.
+When sensor updates drop out, an estimator relies entirely on its predictive forward model to advance state estimates across the blind interval. A well-formulated filter propagates the mean state estimate $\hat{\mathbf{x}}(t)$ and covariance $\mathbf{\Sigma}(t)$ under its stated dynamics and process-noise model. The worked drift model grows position uncertainty during the gap; general covariance propagation need not be monotonic in every direction. An **overconfident predictor**\index{Overconfident predictor} understates process variance $\mathbf{Q}$, holding $\mathbf{\Sigma}(t)$ artificially compact over an extended prediction duration exceeding $200\text{ ms}$. When fresh sensor measurements eventually arrive, the artificially small covariance causes the filter to discount incoming observations; it weights its internal dead-reckoning so heavily that it classifies valid measurements as statistical outliers and rejects them. Engineers identify overconfidence during system qualification by executing staged synthetic occlusions, dropping sensor frames for a range of intervals and evaluating the innovation at reacquisition, $\tilde{\mathbf{y}} = \mathbf{y} - \hat{\mathbf{y}}$, against the covariance $\mathbf{S}$ the filter predicted for it. The standard test is the normalized innovation squared (NIS) of @sec-memory-estimator-consistency, $\tilde{\mathbf{y}}^\top \mathbf{S}^{-1} \tilde{\mathbf{y}}$, which for a consistent filter is chi-squared with as many degrees of freedom as the measurement has dimensions; averaged over the staged trials it must fall inside the chi-squared acceptance interval at a stated confidence, and the NEES of the same section, the test on the state error against ground truth, checks the propagated covariance directly [@barshalom2001estimation]. An average above the interval means the process noise model is too optimistic, and the number of trials needed for a stated tail follows the trial-count reasoning of @sec-evaluation. Drift along an unobservable degree of freedom, such as workpiece slippage inside compliant gripper pads, produces no reacquisition residual at all (@sec-memory-state-estimation-bounds). At vehicle scale, a terrain belief stands until the wheels themselves contradict it.
 
 ::: {#ws-memory-spirit-rover-troy-entrapment .callout-war-story title="A rover trapped in sand (2009)"}
 **Context**: By 2009 the *Spirit* rover had been driving for three years with an inoperative right-front wheel drive, dragging the dead wheel behind it as it drove backward on drives planned by operators on Earth. In the valley west of Home Plate, at a site the team named Troy, it drove onto soil that looked like the ground it had already crossed [@arvidson2010spirit].
@@ -1695,8 +2131,9 @@ A consumer of either record converts the capture epoch to its own clock, include
 
 ::: {#chk-mem-observability-state-schema .callout-checkpoint title="Belief expiry and the memory record"}
 
-Before turning to the fallacies that arise when valid records are trusted too far, verify your understanding of evidence epochs, belief expiry, observability limits, and the belief record:
+Before turning to the fallacies that arise when valid records are trusted too far, verify your understanding of estimator consistency, evidence epochs, belief expiry, observability limits, and the belief record:
 
+- [ ] **Estimator consistency**: Can you explain why a misdated update leaves the reported variance unchanged, and why a windowed NIS monitor catches the systematic dating error that a per-update gate lets through?
 - [ ] **Epoch classification**: Can you distinguish the evidence (acquisition) epoch ($t_0$) from the estimate epoch ($t_{\text{est}}$) and the publication epoch ($t_{\text{pub}}$), and explain why stamping an estimate with its publication time hides the displacement accumulated since capture?
 - [ ] **Physical invalidation horizon**: Can you explain why the shelf life of a spatial belief during occlusion is set by task clearance and bounded disturbance rather than by a software timeout, and why a constant-velocity extrapolation admits the belief past its deadline?
 - [ ] **Unobservable manifold hazards**: Can you explain why zero innovation ($y - \hat{y} = 0$) fails to detect sensor bias drift caused by motor thermal heating ($I^2 R$ Joule heating) along an unobservable degree of freedom?
@@ -1784,7 +2221,9 @@ In 3D neural scene reconstruction (such as NeRFs, 3D Gaussian Splatting, or stat
 
 ## Summary {#sec-memory-summary}
 
-Spatial memory\index{Spatial memory} preserves useful state across sensing gaps while keeping evidence-backed physical claims separate from model context. The spatial belief record carries the frame, evidence epoch ($t_0$), estimate epoch ($t_{\text{est}}$), error-growth law, and validity region needed to judge a remembered state. A predictor can advance the represented state without renewing its evidence. Transforms age like any other belief, and a chain composed from edges of different epochs describes a pose the machine never held, with the error amplified by every lever arm. The representation follows the query the permission path must answer. A Euclidean distance field certifies a hull's clearance in a fixed handful of reads, which is why the controller's local snapshot uses one, while rendering representations serve only the policy. A consumer checks the supporting transform chain, current error, and query execution budget before admitting that state to a separate permission decision.
+Spatial memory\index{Spatial memory} begins with an estimator. Its prediction step widens uncertainty and its update step narrows it, so fusing the LiDAR with a stereo range yields a tighter estimate than either sensor alone, but only when each measurement is applied at its capture epoch. A misdated measurement moves the estimate while its reported variance stays the same, so the covariance is a claim that NEES tests offline and windowed NIS tests at runtime. Tracking adds identity and velocity without delaying occupancy evidence, and a late measurement corrects the state at its capture epoch before the correction is replayed to the present.
+
+The estimator's output is what memory preserves across sensing gaps, kept separate from model context. The spatial belief record carries the frame, evidence epoch ($t_0$), estimate epoch ($t_{\text{est}}$), error-growth law, and validity region needed to judge a remembered state. A predictor can advance the represented state without renewing its evidence. Transforms age like any other belief, and a chain composed from edges of different epochs describes a pose the machine never held, with the error amplified by every lever arm. The representation follows the query the permission path must answer. A Euclidean distance field certifies a hull's clearance in a fixed handful of reads, which is why the controller's local snapshot uses one, while rendering representations serve only the policy. A consumer checks the supporting transform chain, current error, and query execution budget before admitting that state to a separate permission decision.
 
 Expiry follows from the task tolerance and the validated error-growth model. Free space erodes from its unobserved boundary at the speed of whatever it may hide, so memory certifies the aisle only to a depth set by that boundary: `{python} RackEndBelief.t_exp_ahead_str` for the open aisle ahead, and nothing abreast of the rack end, where localization error and protective clearance consume the whole gap. Localization error itself comes from odometry that drifts between map corrections, and a loop closure can move remembered cells without renewing their evidence. Memory adds a deadline to the stopping budget but no distance; an approaching person still requires a separately qualified crossing control or a restriction that excludes the unsupported encounter. For maps, only valid negative evidence supports a free-space claim. A rendered view or recent map publication cannot renew an occluded cell.
 
@@ -1796,6 +2235,8 @@ Fresh-looking records can still mislead. Frozen transforms hide stale evidence, 
 
 ::: {.callout-takeaways title="Evidence age and belief expiry"}
 
+* **An estimator's covariance is a claim to test**: Prediction widens uncertainty and each correctly dated update narrows it, but a misdated update narrows it around the wrong value. NEES against ground truth and windowed NIS at runtime check whether the reported covariance matches the actual error.
+* **Occupancy precedes identity confirmation**:\index{Spatial representation!agency} A tentative track does not hide a fresh occupied-region claim. Decisions that require confirmed identity or velocity must charge the confirmation delay, and track termination does not establish free space.
 * **Prediction advances state, never evidence**: Forward propagation dates the represented state at a later instant, but its evidence epoch stays at the last physical measurement. Physical claims must retain their own records when a policy evicts its context.
 * **Representation follows the consumer's query**: Metric maps support clearance queries, scene graphs support semantic selection, and episodic memory supports task recovery. Their storage, update traffic, and measured query time must fit the deployed workload; the record exposes those obligations without proving them.
 * **Expiry follows the declared error model**: A belief expires when its validated error bound $E(\Delta t)$ reaches the task tolerance $E_{\max}$. Acceleration white noise adds a cubic process-noise term to position variance; initial uncertainty also propagates. Converting total variance into a clearance margin requires calibrated coverage; bounded disturbances support a different, conditional worst-case argument.

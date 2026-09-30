@@ -348,6 +348,21 @@ def test_dispatch_to_admission_allocation():
     assert _AISLE.t_dispatch_to_admission.to("ms").magnitude == pytest.approx(parts.to("ms").magnitude)
 
 
+def test_capture_to_brake_onset_event_ledger():
+    """One ledger (2026-09-29): capture -> dispatch -> admission -> brake onset (Ch4, Ch8, Ch11, Ch13)."""
+    L = _AISLE.t_capture_to_admission.to("ms").magnitude
+    assert L == pytest.approx(51.6 + 63.31072, abs=1e-9)
+    assert L == pytest.approx((_AISLE.perception_age + _AISLE.t_dispatch_to_admission).to("ms").magnitude)
+    after = _AISLE.t_admission_to_brake_onset.to("ms").magnitude
+    assert after == pytest.approx(82.0, abs=1e-9)
+    total = _AISLE.t_capture_to_brake_onset.to("ms").magnitude
+    assert total == pytest.approx(L + after)
+    # tau_delay is the ledger without Delta_da; the ledger closes on it exactly.
+    assert total == pytest.approx((_AISLE.tau_delay + _AISLE.t_dispatch_to_admission).to("ms").magnitude)
+    # Validation sits inside Delta_da once; L must not re-add it.
+    assert _AISLE.t_plan_validate < _AISLE.t_dispatch_to_admission
+
+
 def test_in_loop_takeover_speed_is_derived_under_the_charged_ceiling():
     """The in-loop slow-down is the Delta_da-charged ceiling rounded down to the resolution."""
     ceiling = _scurve_ceiling(_AISLE.t_takeover_in_loop + _AISLE.t_dispatch_to_admission)

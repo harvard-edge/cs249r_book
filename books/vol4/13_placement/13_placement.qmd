@@ -57,7 +57,7 @@ Workload placement decides which silicon executes each computation on a machine,
 
 The hardware trend runs against that condition. A heterogeneous system-on-chip (SoC) integrates application processors, neural accelerators, real-time cores, and in some products an isolated safety island on one die, where they share memory controllers, caches, supply rails, clock governors, and the package that carries away their heat. Integration lowers cost, board area, and communication delay, and it reconnects, through shared hardware, the two paths that the software architecture keeps apart. The central question of placement is whether the permission path can keep its deadline and its authority to refuse while the proposer runs at full load on hardware the two paths share. A block diagram cannot answer it. The answer is a bound on interference, which analysis can support and a loaded test can refute, and the chapter builds it in stages: an inventory of what each candidate placement leaves shared, the mechanisms by which memory, power, and heat couple the paths on timescales from nanoseconds to hours, the contract by which separated paths exchange records, the remedies and their prices, the test that could falsify the claim, and the record that carries the result to release review.
 
-On the warehouse mobile manipulator, the software architecture diagram draws the proposal boundary between the Brain and the Nervous System as a clean dashed line, and the design already runs the permission path on a discrete safety microcontroller beside the application SoC. Both of the machine's jobs show what that choice guards against. For the Class 1 base, a memory crossbar stall during feature extraction would delay the permission path's refusal while the loaded base closes on a rack end, and every tick of delay beyond the one the stopping budget counts is distance it never reserved. For the Class 2 arm, an accelerator burst that evicted the permission path's tables from a shared cache would delay the contact check while the gripper presses on the spring-latched cage door. The shared die is the alternative the machine must be able to reject on evidence, and the discrete controller is a claim it must support rather than assume.
+On the warehouse mobile manipulator, the software architecture diagram draws the proposal boundary between the Brain and the Nervous System as a clean dashed line, and Part I built the machine on a hypothesis about where that line falls in hardware: the permission path runs on a discrete safety microcontroller beside the application SoC (@sec-nervous-silicon-partitioning). This chapter owns the decision that hypothesis anticipated. Both of the machine's jobs show what that choice guards against. For the Class 1 base, a memory crossbar stall during feature extraction would delay the permission path's refusal while the loaded base closes on a rack end, and every tick of delay beyond the one the stopping budget counts is distance it never reserved. For the Class 2 arm, an accelerator burst that evicted the permission path's tables from a shared cache would delay the contact check while the gripper presses on the spring-latched cage door. The shared die is the alternative the machine must be able to reject on evidence, and the discrete controller is a claim it must support rather than assume.
 
 ::: {.column-margin .margin-pointer}
 ↩ Hardware execution cadences and microcontroller timing loops were defined in @sec-nervous-cadences.
@@ -71,7 +71,7 @@ A placement claim must therefore name the resources that could delay or disable 
 
 ## Proposal and Permission Co-location on Shared Silicon {#sec-placement-two-paths-one-die}
 
-The mobile manipulator must keep checking clearance while its proposal model computes the next chunk. The architectural overview established why these jobs need separate authority; placement asks whether the hardware can preserve that separation in time. Each path's work and timing allowance determine how much interference its placement can tolerate.
+The mobile manipulator must keep checking clearance while its proposal model computes the next chunk. @Sec-nervous-silicon-partitioning established why these jobs need separate authority and adopted the two-processor split as a hypothesis; placement asks whether the hardware can preserve that separation in time, and this section supplies the three things a decision needs: each path's execution profile, an inventory of the resources the two paths could still share, and the candidate placements run against that inventory. Each path's work and timing allowance determine how much interference its placement can tolerate.
 
 ```{python}
 #| label: calc-placement-machine-paths
@@ -217,7 +217,68 @@ On the unloaded machine the computational budgets appear generous. Illustrative 
 
 ### Shared microarchitectural failure domains and cyber-physical attack surfaces
 
-Assigning tasks to separate processor cores does not create independent failure domains if the silicon infrastructure is shared.[^fn-std-cast-32a] @sec-nervous-hardware-isolation traced these common-cause paths on the machine's board, where separate packages and the isolated rail cut the memory and supply paths. On a shared die, the rejected option for this machine, they move inside one package. The real-time core executes instructions independently from the application processor, yet both cores rely on common hardware services:
+Assigning tasks to separate processor cores does not create independent failure domains if the silicon infrastructure is shared.[^fn-std-cast-32a] Four couplings can join the proposal and permission paths beneath every software access control: memory, power, heat, and the clock. The machine's board is laid out to cut each of them, and the inventory starts there, because the board is where the hypothesis of Part I either holds or fails.
+
+Memory couples first. Memory-map updates can interrupt other cores,[^fn-os-tlb-shootdown] and direct memory access (DMA) transfers may require cache-coherence work.[^fn-hw-dma-coherence] More fundamentally, a control task cannot read an encoder buffer while another device monopolizes the route to that buffer. On a unified memory architecture, in which the accelerator, the application cores, and a real-time core reach one DRAM through one crossbar, a high-bandwidth visual pipeline or a misbehaving DMA controller can saturate that route and starve the permission path of encoder feedback and sensor telemetry however high its software priority. The **Unified Memory Architecture (UMA) crossbar trap**\index{Unified Memory Architecture!crossbar trap} is this mismatch between a high-priority software task and a shared physical memory path. @Sec-appendix-systems-dram explains how memory arbitration creates the waits, and @sec-placement-resource-contention prices them. The machine's discrete controller escapes the trap by owning its memory: proposals arrive over a board link into a local buffer, and no DRAM is shared.
+
+```{python}
+#| label: calc-placement-board-rail
+#| echo: false
+#| warning: false
+#| message: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ SHARED DRIVE BUS VS. THE ISOLATED PERMISSION RAIL (LEGO)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @sec-placement-two-paths-one-die, the power-coupling paragraph
+# │          (moved from the Nervous System chapter with its prose).
+# │ Goal:    Name the bus the application processor shares with the drives and
+# │          the converter lockout that resets the host when that bus sags.
+# │ Show:    47.7 V nominal drive bus; the application processor's converter
+# │          locks out at 33 V; a depleted pack starts 9 V above it.
+# │ How:     Registry fields on RM (M6: 48 V drive bus, MiR250-class pack,
+# │          MEAN WELL DDR-240C-24 converter); the sag screen is derived in
+# │          @sec-body-power-integrity.
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import *
+from mlsysim.core.units import *
+from mlsysim.fmt import fmt_voltage, check
+
+RM = Embodied.MobileManipulator.WarehouseMobileManipulator
+
+class PlacementBoardRail:
+    """The drive bus the host shares, and the lockout that resets the host."""
+
+    # ┌── 1. LOAD (Constants & Parameters) ─────────────────────────────────
+    v_bus_nom = RM.drive_bus_nominal  # category: datasheet (48 V-class pack, nominal)
+    v_bus_low = RM.drive_bus_battery_low  # category: datasheet (pack minimum)
+    v_uvlo = RM.drive_bus_uvlo  # category: datasheet (converter input lockout)
+
+    # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────
+    v_headroom_low = (v_bus_low - v_uvlo).to(volt)  # headroom a depleted pack starts with
+
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(abs(v_bus_nom.to(volt).magnitude - 47.7) < 1e-9, f"Drive bus nominal drifted: {v_bus_nom}")
+    check(abs(v_uvlo.to(volt).magnitude - 33.0) < 1e-9, f"Converter lockout drifted: {v_uvlo}")
+    check(abs(v_headroom_low.magnitude - 9.0) < 1e-9, "Even a depleted pack starts 9 V above the converter lockout")
+
+    # ┌── 4. OUTPUT (Format & Export) ────────────────────────────────────────
+    v_bus_nom_str = fmt_voltage(v_bus_nom, unit=volt, precision=1)
+    v_uvlo_str = fmt_voltage(v_uvlo, unit=volt, precision=0)
+```
+
+Power couples second. The application processor and the permission path share the machine's battery but not a power rail. The application processor draws from the `{python} PlacementBoardRail.v_bus_nom_str` drive bus through a converter that shuts off when the bus falls to `{python} PlacementBoardRail.v_uvlo_str`. The sustained screen of @sec-body-power-integrity keeps even a depleted pack above that lockout under a coincident drive and inference step, but a transient the screen does not bound, or a supply fault such as a tripped fuse or a battery-management disconnect, can take the converter down and reset the application processor. Had the safety microcontroller drawn from that unisolated supply, the same brownout would have reset it too. Gate drivers are designed for that moment: undervoltage lockout holds their outputs off when their own supply sags, and input pull-downs keep a floating control pin from switching a transistor on, so the first line of defense against shoot-through is in the power stage. What the reset removes is the permission path itself, leaving the machine's kinetic energy coasting through clearance with no controller to request a stop. The isolated, held-up rail described earlier exists to cut this path: while the application processor reboots, the safety microcontroller stays powered long enough to receive the undervoltage flag and request a fallback.
+
+Heat couples third, and the clock fourth. On a shared package or a common heat sink, sustained load on the application processor raises the junction temperature toward the throttle threshold, and a governor that slows the die slows every core on it, including a real-time core that shares nothing else with the proposer; @sec-placement-thermal-timing-coupling shows that the slowdown outlasts the burst that caused it. A common clock oscillator is an unbudgeted single point of failure of its own, since thermal drift, mechanical vibration, or a cracked crystal desynchronizes both domains at the same instant. The discrete controller cuts both with its own package and its own crystal.
+
+Each coupling names the fault that would refute its separation, and the board is qualified by injecting those faults rather than by reading its layout. Four regimes exercise the physical prototype: power-rail droop testing (injecting maximum-slew current steps to verify less than $50\text{ mV}$ of rail cross-coupling noise), clock glitching (verifying that independent timing domains maintain stable cycle counts under frequency drift), communication bus flooding (saturating links to verify that heartbeat telemetry retains deterministic transmission slots),[^fn-hw-canfd-arbitration] and numerical fault injection (streaming synthetic proposals containing NaNs and infinite floats to verify single-cycle rejection without execution stalls). @Sec-placement-testing-separation designs the loaded timing campaign whose threshold is the declared worst-case execution time, and @sec-verification-hardware-fault-injection runs the injections.
+
+[^fn-os-tlb-shootdown]: **TLB Shootdown**\index{Translation lookaside buffer!shootdown}: When an operating system modifies page tables, it broadcasts inter-processor interrupts (IPIs) to invalidate stale Translation Lookaside Buffer entries across all active cores. Receiving cores must suspend thread execution and flush affected entries, introducing unbudgeted multi-microsecond stalls. In shared-silicon architectures, these unpredictable synchronization pauses destroy the cycle determinism demanded by inner motor regulation loops.
+
+[^fn-hw-dma-coherence]: **DMA Cache Coherence**\index{Direct memory access!cache coherence}: Direct memory access transfers bypass CPU cache hierarchies, requiring explicit cache line invalidation or write-back operations to maintain memory consistency between peripherals and cores. Without hardware-enforced snoop filtering or explicit barriers, processors read stale sensor frames or overwrite pending actuator commands. These maintenance operations inject variable latency penalties into high-rate control routines unless static, unbuffered SRAM regions are dedicated to peripheral transfers.
+
+[^fn-hw-canfd-arbitration]: **CAN Arbitration**\index{CAN arbitration}: Controller Area Network protocols resolve bus contention at the physical layer using wired-AND dominant ('0') and recessive ('1') signaling. If a defective transceiver continuously asserts a dominant state (a "babbling idiot" fault), it monopolizes the shared physical bus and blocks all higher-level communication. Hardware bus guardians and dominant-timeout clamp circuits monitor transmission duration, physically disconnecting jabbering nodes to preserve network availability for remaining safety participants.
+
+On a shared die, the option this machine must be able to reject, all four couplings move inside one package. The real-time core executes instructions independently from the application processor, yet both cores rely on common hardware services:
 
 - *Interrupt and memory service:* Camera, accelerator, and logging traffic can delay dispatch or memory reads unless arbitration bounds their interference.
 - *Clock and thermal control:* A shared governor can slow the permission core when another domain heats the package.
@@ -1115,7 +1176,7 @@ Physical relocation also dictates sensor attachment topology. The machine connec
 
 ### The discrete placement's transport budget and the dispatch-to-admission interval
 
-Every worked number so far has been charged to placements the machine rejects. The placement it uses has a budget of its own, and one interval in it has been left open since @sec-perception: the time from the moment perception dispatches an observation to the moment the permission path admits the chunk built on it. Call it the **dispatch-to-admission interval**\index{Dispatch-to-admission interval!budget} $\Delta_{\text{da}}$. It includes whatever proposer inference remains after dispatch, serialization across the board link, receipt and deserialization on the microcontroller, whole-plan validation, activation, and the wait for the next permission tick. Because the stopping ledger of @sec-enforcement-composite-budget starts from the observation's capture, every millisecond of $\Delta_{\text{da}}$ is travel the machine makes on evidence that is already that much older, and the ledger's displayed spare must pay for it.
+Every worked number so far has been charged to placements the machine rejects. The placement it uses has a budget of its own, and one interval in it has been left open since @sec-perception: the time from the moment perception dispatches an observation to the moment the permission path admits the chunk built on it. Call it the **dispatch-to-admission interval**\index{Dispatch-to-admission interval!budget} $\Delta_{\text{da}}$, the second of the three intervals in the event ledger of @tbl-04-event-ledger, and the one this chapter owns. It includes whatever proposer inference remains after dispatch, serialization across the board link, receipt and deserialization on the microcontroller, whole-plan validation, activation, and the wait for the next permission tick. Because the stopping ledger of @sec-enforcement-composite-budget starts from the observation's capture, every millisecond of $\Delta_{\text{da}}$ is travel the machine makes on evidence that is already that much older, and the ledger's displayed spare must pay for it.
 
 ```{python}
 #| label: calc-placement-transport-budget
@@ -1177,6 +1238,8 @@ class PlacementTransport:
     reserve_d = (v_aisle * reserve_t).to(millimeter)
     travel_da = (v_aisle * delta_da).to(millimeter)
     delta_da_slow = (delta_da + t_infer).to(millisecond)
+    t_replace = AISLE.t_capture_to_admission.to(millisecond)  # rows 1 + 2 of @tbl-04-event-ledger
+    t_capture_onset = AISLE.t_capture_to_brake_onset.to(millisecond)  # rows 1 + 2 + 3
 
     # ┌── 3. GUARD ──────────────────────────────────────────────────────────
     check(abs(t_link.magnitude - 1.31072) < 1e-9, "4 KiB x 8 bits at 25 MHz is 1.31 ms.")
@@ -1189,6 +1252,8 @@ class PlacementTransport:
     check(abs(t_ceiling.magnitude - 100.77) < 0.01, "Spare / v = 100.8 ms, the budget's unallocated allowance.")
     check(delta_da < t_ceiling and delta_da_slow > t_ceiling, "The allocation fits; one more inference's worth of delay does not.")
     check(t_link < 0.05 * delta_da, "The link is a small share of the interval; inference and validation dominate.")
+    check(abs((AISLE.perception_age + delta_da - t_replace).to(millisecond).magnitude) < 1e-9, "L = t_age + Delta_da.")
+    check(abs((tau_delay + delta_da - t_capture_onset).to(millisecond).magnitude) < 1e-9, "Capture to onset = tau_delay + Delta_da.")
 
     # ┌── 4. OUTPUT ─────────────────────────────────────────────────────────
     chunk_bytes_str = fmt_int(chunk_bytes)
@@ -1207,19 +1272,23 @@ class PlacementTransport:
     reserve_d_str = fmt_length(reserve_d, unit=millimeter, precision=1)
     travel_da_str = fmt_length(travel_da, unit=millimeter, precision=1)
     delta_da_slow_str = fmt_latency(delta_da_slow, unit=millisecond, precision=1)
+    t_replace_str = fmt_latency(t_replace, unit=millisecond, precision=1)
+    t_capture_onset_str = fmt_latency(t_capture_onset, unit=millisecond, precision=1)
 ```
 
 ::: {#nbk-placement-transport-budget .callout-notebook title="Dispatch-to-admission budget of the discrete placement"}
 
 **Problem**: The machine's permission path runs on a discrete microcontroller that receives each chunk over a board link. How long may the interval from perception dispatch to admission last before the finished stopping budget has nothing left at the aisle speed?
 
-**Variables**: The chunk policy's P99 inference takes `{python} PlacementTransport.t_infer_str`; charging all of it after dispatch is conservative, because its vision stage already lies in the dispatch age of @sec-perception. The serialized chunk is `{python} PlacementTransport.chunk_bytes_str` bytes on a `{python} PlacementTransport.link_clock_str` MHz SPI link. Deserialization, whole-plan validation, and activation take the illustrative `{python} PlacementTransport.t_deser_str`, `{python} PlacementTransport.t_validate_str`, and `{python} PlacementTransport.t_activate_str` of @sec-planning-horizon-tradeoff, and admission may wait up to one `{python} PlacementTransport.tick_str` permission tick. At `{python} PlacementTransport.v_aisle_str` m/s the finished budget leaves `{python} PlacementTransport.spare_str` of spare.
+**Variables**: The chunk policy's P99 inference takes `{python} PlacementTransport.t_infer_str`; charging all of it after dispatch is conservative, because its vision stage already lies in the dispatch age of @sec-perception. The serialized chunk is `{python} PlacementTransport.chunk_bytes_str` bytes on a `{python} PlacementTransport.link_clock_str` MHz SPI link. Deserialization, whole-plan validation, and activation take the illustrative `{python} PlacementTransport.t_deser_str`, `{python} PlacementTransport.t_validate_str`, and `{python} PlacementTransport.t_activate_str`; @sec-planning-horizon-tradeoff explains why validation is a workload of its own. Admission may wait up to one `{python} PlacementTransport.tick_str` permission tick. At `{python} PlacementTransport.v_aisle_str` m/s the finished budget leaves `{python} PlacementTransport.spare_str` of spare.
 
 **Math**: Serialization takes $8B/f_{\text{link}} =$ `{python} PlacementTransport.t_link_str`. The allocation totals $\Delta_{\text{da}} =$ `{python} PlacementTransport.delta_da_str`, which the base covers as `{python} PlacementTransport.travel_da_str` of travel. The spare pays for at most $\Delta_{\text{da,max}} = d_{\text{spare}}/v =$ `{python} PlacementTransport.t_ceiling_str`, so the allocation leaves `{python} PlacementTransport.reserve_t_str`, or `{python} PlacementTransport.reserve_d_str` of positive reserve. Doubling the chunk or halving the link clock adds only another `{python} PlacementTransport.t_link_str`; adding one more inference's worth of delay, `{python} PlacementTransport.delta_da_slow_str` in all, exhausts the spare.
 
 **Systems insight**: The board link that buys the discrete placement its separation costs about a millisecond, a small share of $\Delta_{\text{da}}$; proposer inference and whole-plan validation dominate it. The placement decision therefore does not threaten the stopping budget, while a slower policy or a heavier admission check could. The allocation is a budget to qualify, not a measurement: the fixed part of $\Delta_{\text{da}}$ ages evidence and is charged here, while its variation between renewals draws on the `{python} PlacementMachine.renewal_jitter_str` renewal-jitter allowance, which host contention alone already fills.
 
 :::
+
+With $\Delta_{\text{da}}$ allocated, the event ledger of @tbl-04-event-ledger has no open interval. Capture to admission, the replacement latency of @eq-plan-replacement-latency, is `{python} PlacementTransport.t_replace_str`, and capture to brake onset for a stalled proposer is `{python} PlacementTransport.t_capture_onset_str`. Both are allocations the loaded campaign of @sec-placement-testing-separation must replace with measured event timestamps.
 
 The allocation also answers the question that the embedded pathway asks first: what interferes with the enforcer on the microcontroller itself? The link's receive DMA and its completion interrupt, the fieldbus master that sends the drive frame, the interruptible whole-plan validation above, and the ingestion of each evidence snapshot all claim the microcontroller's bus, interrupt controller, and memory. Each needs a stated bound, whether an interrupt priority below the tick, a dedicated DMA channel, or a separate tightly coupled memory bank, and the loaded campaign of @sec-placement-testing-separation must saturate the link and run maximum-size validation while the refusal branch executes. A response-time analysis of the tick with those claimants as higher-priority or blocking terms is the static counterpart of that test (@sec-appendix-systems-timers).
 
@@ -1473,11 +1542,9 @@ Had the trace passed, its ticks would show only that observed interference staye
 
 A failed interference test returns the allocation to the relevant remedy: bound the queue, partition the working set, reduce the workload, or relocate the permission path. A passing campaign instead produces scoped observations for the placement record; it never changes a sampled maximum into a universal bound.
 
-## The Placement Record and a Second Embodiment {#sec-placement-hardware-allocation}
+## The Placement Record {#sec-placement-hardware-allocation}
 
 The mobile manipulator now has a placement for its permission path, a deadline, an unloaded execution estimate, and a test that could refute the separation. None of it reaches the release decision unless it is written down with the conditions under which it holds.
-
-### The placement record and external test ledger schema
 
 The **placement record**\index{Placement record!definition}, the eleventh record in the record chain, states where the permission path runs and the evidence that its timing holds there. It consumes the enforcement record of @sec-enforcement-telemetry, from which it takes the permission path's declared worst-case execution time and deadline, and adds the physical evidence that this timing bound holds under peak cognitive contention on target silicon: execution domain, privilege ring, nominal period, unloaded and loaded observed maxima, AXI interconnect arbitration settings, inductive droop limits, thermal trip thresholds, hardware mitigations, and a cryptographic digest of the external test ledger (@tbl-13-deployment-envelope-schema). A loaded maximum above the declared worst-case execution time refutes the claim. Maxima below it support only the tested conditions; as @sec-nervous-deterministic-fieldbuses argued for any observed latency distribution, a sample maximum is evidence about that bound and never replaces it.
 
@@ -1524,13 +1591,7 @@ Every placement entry requires a predeclared falsification criterion written bef
 ↪ Hardware placement safety cases provide evidentiary warrants for production deployment in @sec-release-safety-cases-claims.
 :::
 
-### Humanoid capstone and angular information age on dynamic embodiments
-
-With the placement record, Part III has built its stopping budget row by row for one wheeled machine, and a budget built on one embodiment should be tested against another before it is trusted as a method. The warehouse mobile manipulator operates on stable ground contact, where the resident fallback is a brake-to-stop suffix that halts motion within observed clearance $D_{\text{clear}}$. A walking machine tests which parts of this argument transfer. Its permission path still needs timely evidence and independent execution, but its fallback must preserve balance while moving.
-
-A mid-stride recovery may require an active step into a reachable support region. A zero-velocity command alone does not establish a feasible balanced state. The placement record must therefore name the resources and energy that sustain the selected recovery, just as the wheeled machine's record names those needed by its powered stop.
-
-A moving vision head also changes how timing error becomes spatial error. For a point at range $r$, angular speed $\omega$ gives tangential speed $\omega r$; a camera–IMU offset then misplaces the point. The following stipulated example transfers the same information-age calculation to that geometry.
+With the placement record, Part III has built its stopping budget row by row for one wheeled machine, whose resident fallback is a brake-to-stop suffix on stable ground. A budget built on one embodiment should be tested against another before it is trusted as a method, and a walking machine, whose fallback must preserve balance while it moves, is the hardest test at hand (\ref{capstone-placement-humanoid-crucible}).
 
 ```{python}
 #| label: calc-placement-humanoid-offset
@@ -1573,16 +1634,15 @@ class HumanoidOffset:
     displacement_str = fmt_length(displacement, unit=ureg.centimeter, precision=1)
 ```
 
-Perspective \ref{capstone-placement-humanoid-crucible} analyzes how Part III's stopping budget and silicon allocation rules generalize when the physical fallback transition shifts from powered deceleration to dynamic step stabilization.
-
 ::: {#capstone-placement-humanoid-crucible .callout-perspective title="When the fallback is a step"}
 **Question**: Which rows of the stopping budget survive when the fallback is a step rather than a stop?
 
 With placement protecting the one tick that $\tau_{\text{delay}}$ counts, Part III's stopping-budget structure applies to the mobile manipulator's selected powered stop, with dispatch-to-admission delay and drive-energy qualification still open. A walking humanoid has no rest state to brake into mid-stride, so its fallback is a recovery step, and each row of the budget has to be rechecked against that maneuver.
 
-* **Observation age survives.** Age still becomes displacement (@sec-perception-photons-to-claims), and on a turning head the error is angular. An uncalibrated `{python} HumanoidOffset.offset_str` camera–IMU offset during a `{python} HumanoidOffset.omega_str` rad/s head turn misplaces a point `{python} HumanoidOffset.lookahead_str` ahead by `{python} HumanoidOffset.displacement_str`.
+* **Observation age survives.** Age still becomes displacement (@sec-perception-photons-to-claims), and on a turning head the error is angular: a point at range $r$ moves at tangential speed $\omega r$ when the head turns at $\omega$. An uncalibrated `{python} HumanoidOffset.offset_str` camera–IMU offset during a `{python} HumanoidOffset.omega_str` rad/s head turn misplaces a point `{python} HumanoidOffset.lookahead_str` ahead by `{python} HumanoidOffset.displacement_str`.
 * **Commitment changes.** The latched stop suffix of @sec-planning-behavior-seam becomes a validated step, admitted with the trajectory as before but ending on a new foothold rather than at rest.
 * **The inset changes.** The clearance construction of @sec-enforcement-safe-sets-conditional-permission does not directly establish balance. A recovery step needs its own dynamics, relative-degree analysis, reachable support region, and admissible control set. Tracking uncertainty must then be propagated into that derived recovery condition before an inset can be assigned.
+* **The placement record grows.** A zero-velocity command does not establish a balanced state mid-stride, so the permission path's independence must cover the resources and energy that sustain the recovery step, just as the wheeled machine's record names those its powered stop needs.
 :::
 
 ## Fallacies and Pitfalls {#sec-placement-fallacies-pitfalls}
@@ -1670,7 +1730,7 @@ A mutex held by a stalled proposer transfers control of the enforcement deadline
 
 ## Summary {#sec-placement-summary}
 
-The selected mobile manipulator places its learned proposer on application processors and accelerators and the permission path on a bare-metal microcontroller\index{Microcontroller!bare-metal}, but that allocation alone does not separate them, because privilege boundaries govern none of the physical resources the two paths still share. Partitioning therefore requires a justified timing bound and fault evidence, with loaded tests able to refute the claim.
+Part I built the mobile manipulator on a hypothesis: its learned proposer runs on application processors and accelerators and its permission path on a bare-metal microcontroller\index{Microcontroller!bare-metal}. This chapter turned that hypothesis into a placement decision that evidence can refute. The allocation alone does not separate the two paths, because privilege boundaries govern none of the physical resources the two paths still share. Partitioning therefore requires a justified timing bound and fault evidence, with loaded tests able to refute the claim.
 
 The evidence must cover the physical resources that the placement still shares. A loaded test supports a scoped claim about its workload, arbitration policy, supply, clock governance, and thermal conditions. Separate processor packages remove some coupling paths, but the board's common supply and communication links remain part of the argument. Across the link, the boundary contract keeps a stalled proposer from holding the permission deadline. The reader makes one bounded attempt per tick and discards a torn record, and a windowed watchdog trips on feeds that arrive too early as well as too late.
 

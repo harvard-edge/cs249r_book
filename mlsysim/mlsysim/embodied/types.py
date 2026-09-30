@@ -717,6 +717,48 @@ class EmbodiedSiteScenario(BaseModel):
                 + self.t_chunk_deserialize + self.t_plan_validate + self.t_plan_activate
                 + self.t_tick).to(ureg.millisecond)
 
+    # ── The capture-to-brake-onset event ledger (2026-09-29) ─────────────────
+    # Four events (capture, dispatch, admission, brake onset) bound three
+    # intervals. One interval, one owner: perception_age (capture to dispatch),
+    # t_dispatch_to_admission (dispatch to admission), and
+    # t_admission_to_brake_onset (admission to brake onset for a stalled
+    # proposer). The replacement latency and the full pre-brake interval are
+    # sums of those, never separate stage lists.
+
+    @property
+    def t_capture_to_admission(self):
+        """Replacement latency L: capture (exposure midpoint) to admission.
+
+        perception_age + t_dispatch_to_admission. The inference inside Delta_da
+        is charged in full after dispatch, so the vision backbone already in
+        perception_age is counted twice; the sum is conservative.
+
+        Source: sum of the two registry intervals; an allocation to qualify,
+        not a measurement.
+        """
+        return (self.perception_age + self.t_dispatch_to_admission).to(ureg.millisecond)
+
+    @property
+    def t_admission_to_brake_onset(self):
+        """Stalled-proposer response after admission: lease, one tick, one bus cycle, brake onset.
+
+        Source: the lease-path terms of tau_delay; the lease starts at admission.
+        """
+        return (self.t_lease + self.t_tick + self.t_bus
+                + self.t_brake_onset).to(ureg.millisecond)
+
+    @property
+    def t_capture_to_brake_onset(self):
+        """Full pre-brake interval, capture to brake onset, for a stalled proposer.
+
+        t_capture_to_admission + t_admission_to_brake_onset, which equals
+        tau_delay + t_dispatch_to_admission (tau_delay stops short of Delta_da).
+
+        Source: sum of the three registry intervals.
+        """
+        return (self.t_capture_to_admission
+                + self.t_admission_to_brake_onset).to(ureg.millisecond)
+
     @property
     def v_takeover_in_loop_ceiling(self):
         """Highest slow-down speed whose in-loop takeover, charged with Delta_da, still fits.

@@ -277,21 +277,15 @@ A policy can choose a coherent route around the column and still drift into stat
 $$\min_{\boldsymbol{\theta}} \mathbb{E}_{\mathbf{s} \sim d^{\pi^*}} \left[ \ell\left(\pi_{\boldsymbol{\theta}}(\mathbf{s}), \pi^*(\mathbf{s})\right) \right].$$
 The fixed archive supplies the states used by the loss. Deployment instead follows $\mathbf{s}_{t+1} \sim P(\mathbf{s}_{t+1} \mid \mathbf{s}_t, \mathbf{a}_t)$, where $P$ describes how the next state depends on the current state and action. Online reinforcement learning samples that feedback under its current policy, whose visited-state distribution is $d^{\pi_{\boldsymbol{\theta}}}(\mathbf{s})$, and maximizes the expected return of @sec-training-rl-primer over those states. Fixed-archive BC does not itself collect the states created by its own execution errors. In continuous physical state spaces, this structural decoupling triggers **compounding covariate shift** under Principle \ref{pri-vol4-endogenous-drift}.
 
-The physical effect of persistent action error depends on what the action commands. Let $\bar{e}_a = \mathbb{E}_{\mathbf{s} \sim d^{\pi^*}}\left[\|\pi_{\boldsymbol{\theta}}(\mathbf{s}) - \pi^*(\mathbf{s})\|\right]$ denote the average single-step action error under the demonstration distribution, in the units of the action. It is a different quantity from the disagreement probability $\epsilon$ of @eq-data-quadratic-drift. The calculations below illustrate errors that persist without corrective feedback, with fixed control intervals and bounded dynamic coefficients. They sum physical displacement over time; they are not a derivation of the worst-case imitation-learning cost bound. The distinction matters because displacement, accumulated task cost, and probability of collision are different quantities. Persistent velocity errors integrate differently from persistent torque errors:
+@Sec-data-curse-dimensionality-recoverability bounds the price of this shift: fixed-archive cloning admits a worst-case imitation cost that grows as $T^2\epsilon$ over a $T$-step horizon (@eq-data-quadratic-drift). That bound counts accumulated task cost, not displacement, and the physical drift behind it depends on what the action commands and on the feedback below the policy. A persistent error in a commanded velocity integrates once into position; a persistent error in a commanded torque integrates twice, so a torque-level policy leaves more of the correction to the low-level controllers. Offline validation on demonstration splits measures prediction accuracy on the demonstrated distribution; recovery after displacement requires additional closed-loop evidence.
 
-1. **Kinematic Control (Velocity Tracking):** When actions command velocities ($\dot{\mathbf{x}} = \mathbf{v}$), a single-step action error $\Delta \mathbf{a}_t \sim \mathcal{O}(\bar{e}_a)$ manifests as an uncorrected velocity discrepancy $\Delta \mathbf{v}_t \sim \mathcal{O}(\bar{e}_a)$. Integrating this discrepancy over control interval $\Delta t$ shifts the physical state by $\Delta \mathbf{s}_t \approx \sum_{k=1}^t \Delta \mathbf{v}_k \Delta t \sim \mathcal{O}(t \bar{e}_a)$. Integrating this displacement over an entire execution horizon of $T$ control steps yields cumulative trajectory drift:
-   $$\text{Cumulative Drift} = \sum_{t=1}^T \|\mathbf{s}_t - \mathbf{s}_t^*\| \approx \sum_{t=1}^T \mathcal{O}(t \bar{e}_a) = \mathcal{O}\left(T^2 \bar{e}_a\right).$$
-2. **Dynamic Control (Direct Torque and Current Control):** When actions command generalized actuator torques ($\mathbf{M}(\mathbf{q})\ddot{\mathbf{q}} + \mathbf{h} = \boldsymbol{\tau}$, where $\mathbf{h}$ collects Coriolis, gravity, and friction torques), a single-step error manifests as an uncorrected acceleration discrepancy $\Delta \ddot{\mathbf{q}}_t = \mathbf{M}^{-1}\Delta \boldsymbol{\tau}_t \sim \mathcal{O}(\bar{e}_a)$. Second-order Newtonian integration double-integrates this acceleration error into velocity error $\Delta \dot{\mathbf{q}}_t \sim \mathcal{O}(t \bar{e}_a)$ and position displacement $\Delta \mathbf{q}_t \sim \mathcal{O}(t^2 \bar{e}_a)$. Over an uncorrected execution horizon $T$, cumulative trajectory drift compounds cubically as $\sum_{t=1}^T \mathcal{O}(t^2 \bar{e}_a) = \mathcal{O}(T^3 \bar{e}_a)$ unless actively arrested by a low-level physical feedback controller.
-
-These examples explain why the control interface and the available feedback matter when interpreting an action error. The worst-case imitation-learning cost can grow as $\mathcal{O}(T^2 \epsilon)$ (@eq-data-quadratic-drift) under the assumptions of the corresponding bound [@ross2010efficient], but that scaling alone specifies neither a collision time nor a physical displacement. Offline validation on demonstration splits measures prediction accuracy on the demonstrated distribution; recovery after displacement requires additional closed-loop evidence.
-
-Interactive imitation learning methods such as **Dataset Aggregation (DAgger)** [@ross2011reduction] obtain expert labels during learner-generated execution. At iteration $k$, the learner samples states $\mathbf{s} \sim d^{\pi_{\boldsymbol{\theta}}}$, queries an expert $\pi^*$ for labels, appends the new state-action pairs to the dataset $\mathcal{D} \leftarrow \mathcal{D} \cup \{(\mathbf{s}, \pi^*(\mathbf{s}))\}$, and retrains. Aggregating learner-visited states across $\frac{1}{K}\sum_{k=1}^K d^{\pi_k}$ addresses the mismatch between demonstration and execution distributions. The resulting guarantee bounds the learner's cost by the expert's cost plus a term $u T \epsilon$, where $u$ bounds how much a single deviation can raise the expert's remaining cost-to-go [@ross2011reduction]. The linear scaling therefore holds only while $u$ is finite, which is a recoverability assumption about the plant, not a property of the learner. The next two paragraphs say what that assumption means on hardware.
+The regime that supplies that recovery experience is interactive imitation learning, of which **Dataset Aggregation (DAgger)** [@ross2011reduction] is the classic form. At each iteration the learner runs, an expert labels the states the learner visited, the new pairs join the dataset, and the policy retrains, so the training distribution moves toward the states the learner actually reaches. @Sec-data-intervention-recovery states its guarantee, a cost that grows linearly in the horizon (@eq-data-dagger-bound), and the recoverability constant $u$ that the guarantee depends on: the linear scaling holds only while a single deviation raises the expert's remaining cost by a bounded amount, which is an assumption about the plant, not a property of the learner. The next two paragraphs say what that assumption means on hardware.
 
 On hardware, collecting those labels requires a recoverable rollout and an expert who has enough information to choose a correction. A camera log may support a path label while leaving contact force or joint torque ambiguous. Live supervision supplies richer feedback, but the machine continues moving during human reaction and control handoff. Intervention must begin within the available stopping margin, and the handoff must avoid discontinuous setpoints.
 
-Expert availability also does not imply physical recoverability. The machine may lack enough actuator effort or frictional grip to return from a deviation. In the simplified force balance $\mathbf{M}\ddot{\mathbf{q}} = \boldsymbol{\tau} + \mathbf{J}_c^\top \boldsymbol{\lambda}$, $\mathbf{q}$ denotes joint positions, $\mathbf{M}$ inertia, $\boldsymbol{\tau}$ actuator torque, and $\mathbf{J}_c^\top \boldsymbol{\lambda}$ contact forces mapped into joint torques; other forces are omitted here for clarity. Actuator limits require $|\tau_i| \le \tau_{i,\max}$ for every joint axis $i$, while available friction bounds tangential force by $\|\mathbf{f}_t\| \le \mu f_n$, with normal force $f_n$ and friction coefficient $\mu$. These constraints can leave no action that restores the task, and then $u$ is unbounded and DAgger's linear guarantee no longer applies. Interactive aggregation is therefore most useful where learner deviations can be contained, labeled, and repeated within the operator-time and hardware-exposure budget. It supplies recovery experience; it cannot make an unrecoverable state recoverable.
+Expert availability also does not imply physical recoverability. The machine may lack enough actuator effort or frictional grip to return from a deviation. The simplified force balance $\mathbf{M}\ddot{\mathbf{q}} = \boldsymbol{\tau} + \boldsymbol{\tau}_c$ is Newton's second law written per joint: $\mathbf{q}$ denotes joint positions, $\mathbf{M}$ inertia, $\boldsymbol{\tau}$ actuator torque, and $\boldsymbol{\tau}_c$ the torque that contact forces exert about the joints; other forces are omitted here for clarity, and @sec-planning-rigidbody-dynamics develops the full equation. Actuator limits require $|\tau_i| \le \tau_{i,\max}$ for every joint axis $i$, while available friction bounds tangential force by $\|\mathbf{f}_t\| \le \mu f_n$, with normal force $f_n$ and friction coefficient $\mu$. These constraints can leave no action that restores the task, and then $u$ is unbounded and DAgger's linear guarantee no longer applies. Interactive aggregation is therefore most useful where learner deviations can be contained, labeled, and repeated within the operator-time and hardware-exposure budget. It supplies recovery experience; it cannot make an unrecoverable state recoverable.
 
-For the latch, these distinctions select a concrete next training step. The stipulated follow-up campaign in @sec-data supplies `latch-recovery-02`, a versioned archive of expert recovery from the positively displaced plate at the guarded approach. We train `latch-bc-recovery-02` on the original nominal demonstrations and those attributable corrections. Learner commands that preceded takeover remain failure evidence unless an expert supplied replacement labels; they do not become imitation targets merely because the episode eventually succeeded. A multimodal chunk decoder can preserve a coherent back-off and re-seating sequence, while the additional demonstrations supply the recovery states that changing the decoder alone could not provide.
+For the latch, these distinctions select a concrete next training step. The stipulated follow-up campaign in @sec-data supplies `latch-recovery-02`, a versioned archive of expert recovery from the positively displaced plate at the guarded approach. We train `latch-bc-recovery-02` on the original nominal demonstrations and the stabilized, reviewed segment of each correction; the enforcer's blend and the operator's re-orientation after takeover stay masked, as @sec-intervention-recovery-eligibility requires. Learner commands that preceded takeover remain failure evidence unless an expert supplied replacement labels; they do not become imitation targets merely because the episode eventually succeeded. A multimodal chunk decoder can preserve a coherent back-off and re-seating sequence, while the additional demonstrations supply the recovery states that changing the decoder alone could not provide.
 
 The training decision is complete, but the improvement claim remains to be tested. Entire collection sessions are held out for nominal and recovery checks, so neighboring frames from one run do not appear on both sides of the split. Training diagnostics check whether the candidate represents the demonstrated correction; qualification must then test whether it completes the door task under the declared perturbation without regressing nominal behavior. The candidate carries that request to @sec-evaluation, including task completion, cycle time, proposer intervention, and protective outcomes as separate measures. This is a stipulated engineering branch, not a report of collected data or measured improvement. The negative displacement and faster approach remain unsupported.
 
@@ -425,7 +419,7 @@ The number and dependency of decoder evaluations constrain proposal latency; the
 $$t_{\text{infer}} = t_{\text{enc}}(\mathbf{O}_t) + \sum_{k=1}^{N_{\text{eval}}} t_{\text{eval}}\left(\mathbf{A}^k, k\right) \le t_{\text{deadline}},$$
 where $t_{\text{enc}}$ is the visual backbone and proprioceptive encoding latency, $N_{\text{eval}}$ is the number of dependent decoder evaluations (denoising or ODE solver steps), $t_{\text{eval}}$ is the latency of one forward pass of the action head, and $t_{\text{deadline}}$ is the real-time execution deadline.
 
-The encoder runs once per proposal, whereas each dependent decoder evaluation adds work. The memory-wall analysis of @sec-brain-memory-wall explains why repeatedly fetching a large action head can dominate that work. The relevant arithmetic intensity depends on the architecture and reuse within each evaluation; batch size alone does not establish that all policy decoders have the same bottleneck.
+The encoder runs once per proposal, whereas each dependent decoder evaluation adds work. @Sec-brain-action-chunking prices that work for each decoder family on the machine's processor, and the memory-wall analysis of @sec-brain-memory-wall explains why re-reading a large action head on every evaluation can dominate it. Training decides the two quantities those prices depend on, the head and its evaluation count $N_{\text{eval}}$, so the question here is whether a head chosen for its multimodal fit also meets the latch's deadlines.
 
 ```{python}
 #| label: calc-training-decoder-budget
@@ -439,15 +433,15 @@ The encoder runs once per proposal, whereas each dependent decoder evaluation ad
 # │ Goal: Price an iterative diffusion head that could replace the one-pass
 # │       ACT decoder of latch-bc-01 against the machine's setpoint step,
 # │       renewal period, and the lease rule's jitter allowance.
-# │ Show: 2.4 GB of head traffic, >= 11.8 ms at the 204 GB/s peak; 48 ms
-# │       stipulated DDIM latency and 2.5 ms per evaluation; 18 ms for four
-# │       flow evaluations; 2 ms of renewal slack against ACT's 10 ms; a 5 ms
-# │       stretch carries the diffusion head 3 ms past its renewal.
-# │ How: D = K x M; t_mem = D / B_peak; t_eval = (t_infer - t_enc) / K;
-# │      deployed decoder and periods from RM (2026-09-28, M5).
+# │ Show: 48 ms stipulated DDIM latency and 2.5 ms per evaluation; 18 ms
+# │       for four flow evaluations; 2 ms of renewal slack against ACT's
+# │       10 ms; a 5 ms stretch carries the diffusion head 3 ms past its
+# │       renewal. The weight-streaming floor is priced in
+# │       @sec-brain-action-chunking, not here (coherence P1-4).
+# │ How: t_eval = (t_infer - t_enc) / K; deployed decoder and periods from
+# │      RM (2026-09-28, M5).
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim import *
-from mlsysim.fmt import fmt_display_math
 
 RM = Embodied.MobileManipulator.WarehouseMobileManipulator
 
@@ -458,8 +452,6 @@ class DecoderBudget:
     t_act = RM.chunk_inference_latency.to(millisecond)  # category: illustrative (P99 incl. vision)
     t_step = RM.chunk_step.to(millisecond)  # category: chosen (setpoint step, synchronous deadline)
     t_renew = RM.chunk_period  # category: derived (renewal period, asynchronous deadline)
-    b_peak = RM.brain_soc.memory.bandwidth  # category: datasheet (application-processor peak)
-    m_head = 150 * MB  # category: illustrative (diffusion action-head weights)
     k_ddim = 16  # category: illustrative (DDIM denoising steps)
     k_flow = 4  # category: illustrative (flow-matching evaluations)
     t_enc = 8 * millisecond  # category: illustrative (visual encoding, once per proposal)
@@ -467,8 +459,6 @@ class DecoderBudget:
     t_jitter = 5 * millisecond  # category: chosen (renewal-jitter allowance of the lease rule, @sec-nervous-coupled-budget)
 
     # ┌── 2. EXECUTE (The Compute) ─────────────────
-    d_mem = (k_ddim * m_head).to(GB)
-    t_mem = (d_mem / b_peak).to(millisecond)
     t_eval = ((t_ddim - t_enc) / k_ddim).to(millisecond)
     t_flow = (t_enc + k_flow * t_eval).to(millisecond)
     slack_act = (t_renew - t_act).to(millisecond)
@@ -476,27 +466,21 @@ class DecoderBudget:
     ddim_stretch_over = (t_ddim + t_jitter - t_renew).to(millisecond)
 
     # ┌── 3. GUARD (Invariants) ────────────────────
-    check(abs(d_mem.magnitude - 2.4) < 1e-9, f"head traffic {d_mem}")
-    check(abs(t_mem.magnitude - 11.765) < 1e-3, f"transfer floor {t_mem}")
     check(abs(t_eval.magnitude - 2.5) < 1e-9, f"per-evaluation time {t_eval}")
     check(abs(t_flow.magnitude - 18.0) < 1e-9, f"flow latency {t_flow}")
     check(t_ddim > t_step, "DDIM must overrun the synchronous setpoint deadline")
     check(t_flow < t_step, "four flow evaluations must fit the synchronous setpoint deadline")
-    check(t_mem < t_ddim, "the transfer floor must sit below the stipulated latency")
     check(t_act < t_ddim < t_renew, "both decoders must fit the renewal period, ACT with more slack")
     check(abs(slack_act.magnitude - 10.0) < 1e-9 and abs(slack_ddim.magnitude - 2.0) < 1e-9, "renewal slack")
     check(t_act + t_jitter < t_renew, "a jitter-sized stretch must leave ACT inside its renewal period")
     check(abs(ddim_stretch_over.magnitude - 3.0) < 1e-9, f"diffusion overrun under stretch {ddim_stretch_over}")
-    check(t_mem < t_step, "the bandwidth floor alone must fit the setpoint step (the fallacy's point)")
 
     # ┌── 4. OUTPUT (Formatting) ───────────────────
     act_params_str = fmt_params(act_params, precision=0)
     horizon_str = fmt_int(horizon)
     t_act_str = fmt_latency(t_act, unit=millisecond, precision=0)
-    m_head_str = fmt_memory(m_head, unit=MB, precision=0)
     k_ddim_str = fmt_int(k_ddim)
     k_flow_str = fmt_int(k_flow)
-    b_peak_str = fmt_bandwidth(b_peak, unit=GB / second, precision=0)
     t_enc_str = fmt_latency(t_enc, unit=millisecond, precision=0)
     t_ddim_str = fmt_latency(t_ddim, unit=millisecond, precision=0)
     t_eval_str = fmt_latency(t_eval, unit=millisecond, precision=1)
@@ -505,23 +489,9 @@ class DecoderBudget:
     slack_ddim_str = fmt_latency(slack_ddim, unit=millisecond, precision=0)
     t_jitter_str = fmt_latency(t_jitter, unit=millisecond, precision=0)
     ddim_stretch_over_str = fmt_latency(ddim_stretch_over, unit=millisecond, precision=0)
-    d_mem_str = fmt_memory(d_mem, unit=GB, precision=1)
-    t_mem_str = fmt_latency(t_mem, unit=millisecond, precision=1)
-    d_mem_math = fmt_display_math(
-        rf"D_{{\text{{mem}}}} = {k_ddim_str} \times {fmt(m_head.to(MB).magnitude, precision=0)}\,\text{{MB}} = {fmt(d_mem.magnitude, precision=1)}\,\text{{GB}}."
-    )
-    t_mem_math = fmt_display_math(
-        rf"t_{{\text{{mem}}}} \ge \frac{{D_{{\text{{mem}}}}}}{{B_{{\text{{mem}}}}}} = \frac{{{fmt(d_mem.magnitude, precision=1)}\,\text{{GB}}}}{{{fmt(b_peak.to(GB / second).magnitude, precision=0)}\,\text{{GB/s}}}} \approx {fmt(t_mem.magnitude, precision=1)}\,\text{{ms}},"
-    )
 ```
 
-For an action head parameterized by $M$ weight bytes, suppose the weights do not remain in cache between evaluations. A streaming estimate then charges one weight fetch per evaluation:
-$$D_{\text{mem}} = N_{\text{eval}} \times M.$$
-The latch policies do not pay this cost: `latch-bc-01` decodes each chunk with the machine's `{python} DecoderBudget.act_params_str`-parameter ACT network in one pass, within the `{python} DecoderBudget.t_act_str` P99 inference target of @sec-brain. Consider instead replacing its decoder with an illustrative diffusion head of $M =$ `{python} DecoderBudget.m_head_str` operating under an $N_{\text{eval}} =$ `{python} DecoderBudget.k_ddim_str` step DDIM schedule. The total DRAM traffic per inference cycle reaches:
-`{python} DecoderBudget.d_mem_math`
-At the application processor's peak unified memory bandwidth, $B_{\text{mem}} =$ `{python} DecoderBudget.b_peak_str`, memory transfer alone consumes:
-`{python} DecoderBudget.t_mem_math`
-a lower bound that does not determine the full execution time. Arithmetic can overlap memory transfers, while kernel launch, synchronization, and feature processing can add costs; they require an implementation-specific timing model. The bandwidth estimate is not a latency measurement. Stipulate a visual encoding latency of $t_{\text{enc}} =$ `{python} DecoderBudget.t_enc_str` and a total inference duration $t_{\text{infer}} \approx$ `{python} DecoderBudget.t_ddim_str` once all evaluation work is included, which leaves `{python} DecoderBudget.t_eval_str` per denoising evaluation; these inputs define the comparison below.
+The latch policies avoid repeated evaluations: `latch-bc-01` decodes each chunk with the machine's `{python} DecoderBudget.act_params_str`-parameter ACT network in one pass, within the `{python} DecoderBudget.t_act_str` P99 inference target of @sec-brain. Consider instead replacing its decoder with an illustrative diffusion head under an $N_{\text{eval}} =$ `{python} DecoderBudget.k_ddim_str` step DDIM schedule, the kind of head that multimodal latch demonstrations might motivate. Stipulate a visual encoding latency of $t_{\text{enc}} =$ `{python} DecoderBudget.t_enc_str` and a total inference duration $t_{\text{infer}} \approx$ `{python} DecoderBudget.t_ddim_str` once all evaluation work is included, which leaves `{python} DecoderBudget.t_eval_str` per denoising evaluation. These stipulated inputs define the comparison below; a measurement of the real head replaces them, and the weight-streaming floor of @sec-brain-memory-wall is the lower bound that measurement must clear.
 
 The illustrative budget distinguishes sampler choice from execution authority:
 
@@ -1436,7 +1406,7 @@ Minimizing loss on an offline demonstration split, or maximizing simulated retur
 
 Suppose the latch archive also held recovery runs, and two cage-door latch policies train on different versions of it. One retains the recovery runs, in which the operator backed the gripper off and re-seated it after the latch cam caught on the strike plate; the other removes them and achieves a lower loss on its own held-out split. When the cam catches on the machine, the first policy backs off and re-seats, while the second keeps pushing along the demonstrated path until the permission path's contact tripwire halts the mechanism. Because the sanitized dataset lacks examples of correcting from errors, the lower loss merely reflects an artificially simplified test set, not better physical disturbance handling\index{Disturbance rejection!recovery data}. Scrubbing the recovery data has made the mathematical prediction task easier at the direct expense of removing the corrective behavior the deployed controller physically needs. **Removing recovery trajectories to optimize offline prediction loss strips the policy of the only data demonstrating how to escape compounding error.**
 
-**Architect's countermeasure**: Retain authority-record entries and curate attributable expert recovery trajectories as training targets. Never filter demonstration datasets solely to minimize validation MSE, and mandate closed-loop perturbation benchmarks to evaluate recovery capability before releasing checkpoints.
+**Architect's countermeasure**: Retain authority-record entries and admit, as training targets, only the stabilized and reviewed segment of each attributable expert recovery (@sec-intervention-recovery-eligibility). Never filter demonstration datasets solely to minimize validation MSE, and mandate closed-loop perturbation benchmarks to evaluate recovery capability before releasing checkpoints.
 
 :::
 
@@ -1474,7 +1444,7 @@ To overcome sim-to-real transfer failures, an engineering team widens domain ran
 
 **Fallacy**: *Assuming multi-step generative decoders can execute synchronously within inner actuator control loops.*\index{Diffusion policy!inference latency wall}
 
-An ML engineer proposes replacing `latch-bc-01`'s one-pass ACT decoder with a `{python} DecoderBudget.k_ddim_str`-step diffusion head, having observed better multimodal trajectory modeling in offline benchmarks, and runs it synchronously, one inference per `{python} LatchContactDeadline.t_step_str` setpoint. Under the budget of @sec-training-decoder-costs, streaming the head's weights once per denoising step moves `{python} DecoderBudget.d_mem_str` per inference, which needs `{python} DecoderBudget.t_mem_str` at the application processor's peak bandwidth even if arithmetic overlaps every transfer, and the stipulated complete inference takes `{python} DecoderBudget.t_ddim_str`. The bandwidth bound alone fits inside the step; the full inference does not, so the synchronous schedule drops setpoints, and the execution path must either hold the last admitted setpoint or invoke its fallback on every overrun. The bandwidth lower bound is a floor, not a latency measurement, and a decoder can fail its deadline while passing it. **A decoder that overruns its deadline needs fewer evaluations, a different implementation, or asynchronous execution under an independently validated lease.**
+An ML engineer proposes replacing `latch-bc-01`'s one-pass ACT decoder with a `{python} DecoderBudget.k_ddim_str`-step diffusion head, having observed better multimodal trajectory modeling in offline benchmarks, and runs it synchronously, one inference per `{python} LatchContactDeadline.t_step_str` setpoint. Under the budget of @sec-training-decoder-costs, the stipulated complete inference takes `{python} DecoderBudget.t_ddim_str`, longer than the step, so the synchronous schedule drops setpoints, and the execution path must either hold the last admitted setpoint or invoke its fallback on every overrun. Checking only the weight-streaming floor of @sec-brain-memory-wall would not have caught this: that floor is a lower bound, not a latency measurement, and a decoder can fail its deadline while passing it. **A decoder that overruns its deadline needs fewer evaluations, a different implementation, or asynchronous execution under an independently validated lease.**
 
 **Architect's countermeasure**: Decouple iterative inference from inner actuator execution when the measured decoder latency requires it. Record the prediction horizon, executed prefix, proposal-renewal deadline, and active lease separately under the qualified contract of @sec-nervous-lease-sizing. Buffering does not extend permission: the execution path checks current evidence and state and invokes its qualified fallback on expiry.
 

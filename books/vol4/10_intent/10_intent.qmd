@@ -75,12 +75,10 @@ from mlsysim.fmt import (
     fmt_acceleration,
     fmt_frequency,
     fmt_force,
-    fmt_force_rate,
     fmt_heat_capacity,
     fmt_power,
     fmt_temperature,
     fmt_temperature_rate,
-    fmt_sci_qty,
     check,
 )
 from mlsysim.physics.robotics import (
@@ -229,16 +227,11 @@ class IntentLeaseArchetypes:
     t_arm_onset_str = fmt_latency(t_arm_onset_after_expiry, unit=millisecond, precision=0)
     v_tcp_str = fmt_velocity(RM.tcp_speed_limit.to(meter / second))
     # Latch contact
-    k_latch_str = fmt_sci_qty(AISLE.k_latch, newton / meter, precision=1)
     v_latch_str = fmt_velocity(AISLE.v_latch_approach, unit=meter / second, precision=2)
     f_trip_str = fmt_force(AISLE.f_latch_tripwire, precision=0)
     t_contact_str = fmt_latency(AISLE.t_contact_response, unit=millisecond, precision=0)
-    df_dt_nms_str = fmt_force_rate(df_dt, unit=newton / millisecond, precision=0)
     f_at_brake_onset_n_str = fmt_force(f_at_brake_onset, precision=0)
     f_lim_str = fmt_force(AISLE.f_latch_limit, precision=0)
-    x_remaining_str = fmt_length(round(x_remaining.magnitude, 2) * millimeter, unit=millimeter, precision=2)
-    a_arm_str = fmt_acceleration(round(a_arm_needed.magnitude) * meter / second**2, unit=meter / second**2, precision=0)
-    t_arm_stop_str = fmt_latency(round(t_arm_stop.magnitude) * millisecond, unit=millisecond, precision=0)
     t_stall_arm_str = fmt_latency(delta_t_stall_arm, unit=millisecond, precision=0)
     delta_x_unbounded_mm_str = fmt_length(delta_x_unbounded, unit=millimeter, precision=0)
     f_unbounded_n_str = fmt_force(f_unbounded, precision=0, commas=True)
@@ -796,112 +789,16 @@ Omitting any of these three bounds leaves a physical machine exposed during comm
 
 The intent lease bounds how long the high-level target remains justified. Expiration withdraws permission to keep tracking that target and invokes a validated response. It does not replace the chunk lease or remove sensing, communication, actuator, and braking delays from the stopping budget.
 
-::: {#nbk-intent-lease-duration-collision-exposure-tradeoff-across .callout-notebook title="Latch contact after the tripwire"}
+::: {#nbk-intent-lease-duration-collision-exposure-tradeoff-across .callout-notebook title="What the latch ceilings buy"}
 
-A stopping calculation requires the total delay to brake onset and the deceleration available from the *current* measured physical state. The arm's guarded approach to the cage door shows why the stop must be sized from the force already reached when braking begins, not from the tripwire.
+**Problem**: The intent lease for the cage door requests a `{python} IntentLeaseArchetypes.f_trip_str` tripwire and a `{python} IntentLeaseArchetypes.v_latch_str` approach speed against a `{python} IntentLeaseArchetypes.f_lim_str` latch limit. What happens if the arm's authority to keep pressing outlives the contact loop and waits instead on the proposer?
 
-Against a stiff surface, contact force rises at $df/dt = k\,v_{\text{approach}}$. At the guarded approach speed of `{python} IntentLeaseArchetypes.v_latch_str` against the `{python} IntentLeaseArchetypes.k_latch_str` strike plate of the cage door, modeled force rises at `{python} IntentLeaseArchetypes.df_dt_nms_str`. With a `{python} IntentLeaseArchetypes.f_trip_str` tripwire and a `{python} IntentLeaseArchetypes.t_contact_str` contact-loop response, force has reached `{python} IntentLeaseArchetypes.f_at_brake_onset_n_str` **at the instant the brake command begins**, and it keeps rising while the arm decelerates. Three steps size the stop that keeps it below the `{python} IntentLeaseArchetypes.f_lim_str` latch limit. The compression left is $x_{\text{rem}} = (F_{\lim} - F_{\text{brake}})/k$, which is `{python} IntentLeaseArchetypes.x_remaining_str`. Stopping from $v_{\text{approach}}$ within that distance needs $a = v_{\text{approach}}^2/(2x_{\text{rem}})$, about `{python} IntentLeaseArchetypes.a_arm_str`, and the stop takes $t = v_{\text{approach}}/a$, about `{python} IntentLeaseArchetypes.t_arm_stop_str`. The units check: newtons over newtons per meter give meters, $(\text{m/s})^2/\text{m}$ gives meters per second squared, and $(\text{m/s})/(\text{m/s}^2)$ gives seconds. These numbers treat the arm as rigid, so the plate's stiffness is the whole contact stiffness. A real arm adds gripper, wrist-sensor, and joint compliance in series, which lowers the effective stiffness and slows the rise, and a joint torque limit or collision detector may cap force before the spring model does; both need measured values for this arm. Whether the manipulator can sustain the required deceleration depends on its actuator torque limits and link inertia. Without a timely abort the picture reverses. If unbraked motion continues for `{python} IntentLeaseArchetypes.t_stall_arm_str`, the gripper advances `{python} IntentLeaseArchetypes.delta_x_unbounded_mm_str` past initial contact, and the linear model predicts `{python} IntentLeaseArchetypes.f_unbounded_n_str`, far past the `{python} IntentLeaseArchetypes.f_lim_str` limit. Beyond yield the model no longer applies: the latch has failed.
+**Math**: The contact itself is derived in @sec-enforcement-intentional-contact. At this approach speed, @eq-release-trip-indentation carries the force to `{python} IntentLeaseArchetypes.f_at_brake_onset_n_str` by the time the `{python} IntentLeaseArchetypes.t_contact_str` contact-loop response issues the brake command, and the stop that follows has only a fraction of a millimeter of compression left to spend. The lease question is the duration term. If unbraked motion instead continues for `{python} IntentLeaseArchetypes.t_stall_arm_str`, a stall shorter than one `{python} IntentLeaseArchetypes.t_intent_period_str` intent period, the gripper advances $\Delta x = v_{\text{latch}}\,\Delta t$, or `{python} IntentLeaseArchetypes.delta_x_unbounded_mm_str`, past first contact, and the plate's linear model gives $F = k_{\text{latch}}\,\Delta x$, or `{python} IntentLeaseArchetypes.f_unbounded_n_str`. Meters per second times seconds give meters, and newtons per meter times meters give newtons.
+
+**Systems insight**: The predicted force lies far past the `{python} IntentLeaseArchetypes.f_lim_str` limit, beyond the point where the spring model applies at all: the latch has failed. The lease therefore does not size the contact stop, which is millisecond work for the contact loop. It carries the two ceilings that make that stop feasible, and it must never leave contact authority waiting on a proposer whose silence is measured in intent periods.
 :::
 
-@Fig-10-latch-force-budget draws the cage-door contact on one clock: force keeps rising through the response interval, and the sized stop spends exactly the compression that remains.
-
-::: {#fig-10-latch-force-budget fig-env="figure" fig-pos="t" fig-cap="**Latch contact force against time**: Force on the strike plate rises at `{python} IntentLeaseArchetypes.df_dt_nms_str` from first contact. It crosses the `{python} IntentLeaseArchetypes.f_trip_str` tripwire, but the `{python} IntentLeaseArchetypes.t_contact_str` contact-loop response lets it reach `{python} IntentLeaseArchetypes.f_at_brake_onset_n_str` before the brake command. A stop at about `{python} IntentLeaseArchetypes.a_arm_str`, lasting about `{python} IntentLeaseArchetypes.t_arm_stop_str`, brings the arm to rest exactly at the `{python} IntentLeaseArchetypes.f_lim_str` limit; without the brake, force crosses the limit within a few milliseconds. The plate is modeled as a linear spring and the arm as rigid." fig-alt="Plot of contact force in newtons against time since first contact in milliseconds. A solid line rises straight from zero, passes a dotted tripwire line at 15 newtons, crosses a shaded band labeled response 2 milliseconds, and reaches a dot labeled brake command 39 newtons. After the dot the line bends over and levels off exactly at a dashed limit line labeled latch limit 100 newtons, with a label reading arm stop about 3 meters per second squared, about 10 milliseconds. A dashed red line labeled no brake continues straight up from the dot and crosses the limit near 8 milliseconds. The region above the limit is shaded."}
-
-```{python}
-#| label: plot-intent-latch-force-budget
-#| echo: false
-#| warning: false
-#| message: false
-# ┌─────────────────────────────────────────────────────────────────────────────
-# │ LATCH CONTACT FORCE AGAINST TIME (FIGURE)
-# ├─────────────────────────────────────────────────────────────────────────────
-# │ Context: @fig-10-latch-force-budget
-# │
-# │ Goal:    show why the stop must be sized from the force already reached at
-# │          brake command, not from the tripwire.
-# │ Show:    rise at k*v to the 15 N tripwire, 2 ms response to 39 N, the sized
-# │          arm stop peaking at the 100 N limit; the unbraked rise for contrast.
-# │ How:     reads calc-intent-lease-duration-collision-exposure; guards that the
-# │          drawn profile hits 39 N at command and 100 N at rest.
-# └─────────────────────────────────────────────────────────────────────────────
-import numpy as np
-import matplotlib.pyplot as plt
-from mlsysim import viz
-from mlsysim.core.units import millisecond, newton, meter, second
-from mlsysim.fmt import check
-
-# ┌── 1. LOAD (values from calc-intent-lease-duration-collision-exposure) ─────
-K = AISLE.k_latch.to(newton / meter).magnitude  # N/m
-V = AISLE.v_latch_approach.to(meter / second).magnitude  # m/s
-F_TRIP = AISLE.f_latch_tripwire.to(newton).magnitude
-F_LIM = AISLE.f_latch_limit.to(newton).magnitude
-T_RESP = AISLE.t_contact_response.to(second).magnitude
-F_CMD = f_at_brake_onset.to(newton).magnitude
-A_ARM = a_arm_needed.to(meter / second**2).magnitude
-T_STOP = t_arm_stop.to(second).magnitude
-
-# ┌── 2. EXECUTE: force from first contact through the arm stop ──────────────
-t_trip = F_TRIP / (K * V)
-t_cmd = t_trip + T_RESP
-tau = np.linspace(0.0, T_STOP, 200)
-f_brake = F_CMD + K * (V * tau - 0.5 * A_ARM * tau**2)
-t_rise = np.linspace(0.0, t_cmd, 50)
-f_rise = K * V * t_rise
-check(abs(f_rise[-1] - F_CMD) < 1e-6, "latch figure: rise reaches the brake-command force")
-check(abs(f_brake[-1] - F_LIM) < 1e-6, "latch figure: the sized stop peaks exactly at the latch limit")
-ms = 1000.0
-t_end = (t_cmd + T_STOP) * ms
-t_nb = np.linspace(t_cmd, t_end, 50)
-f_nb = K * V * t_nb / ms
-
-# ┌── 3. PLOT ────────────────────────────────────────────────────────────────
-R = viz.VOL4_ROLES
-viz.set_book_style()
-fig, ax = plt.subplots(figsize=(6.2, 3.0))
-ax.grid(False)
-for s in ("top", "right"):
-    ax.spines[s].set_visible(False)
-Y_TOP = 1.45 * F_LIM
-ax.axhspan(F_LIM, Y_TOP, color=R["consequence"], alpha=0.07, lw=0)
-ax.axhline(F_LIM, color=R["consequence"], lw=1.2, ls=(0, (5, 3)))
-ax.text(t_end * 1.02, F_LIM + 3, f"latch limit {F_LIM:.0f} N", ha="right", va="bottom", fontsize=8.5, color=R["consequence"])
-ax.axhline(F_TRIP, color=R["neutral"], lw=0.8, ls=(0, (1, 2)))
-ax.text(t_end * 1.02, F_TRIP + 2, f"tripwire {F_TRIP:.0f} N", ha="right", va="bottom", fontsize=8.5, color=R["neutral"])
-ax.axvspan(t_trip * ms, t_cmd * ms, color="#D97706", alpha=0.14, lw=0)
-ax.text((t_trip + t_cmd) / 2 * ms, Y_TOP * 0.93, f"response\n{T_RESP * ms:.0f} ms", ha="center", va="top", fontsize=8.5, color="#B45309")
-ax.plot(t_nb, f_nb, color=R["consequence"], lw=1.4, ls=(0, (5, 3)), clip_on=True)
-ax.text(t_nb[18], min(f_nb[18], Y_TOP) + 2, "no brake", ha="right", va="bottom", fontsize=8.5, color=R["consequence"])
-ax.plot(t_rise * ms, f_rise, color=R["structural"], lw=2.0)
-ax.plot((t_cmd + tau) * ms, f_brake, color=R["structural"], lw=2.0)
-ax.plot([t_cmd * ms], [F_CMD], "o", ms=5, color=R["structural"])
-ax.annotate(
-    f"brake command {F_CMD:.0f} N",
-    xy=(t_cmd * ms, F_CMD),
-    xytext=(t_cmd * ms + 1.0, F_CMD - 16),
-    fontsize=8.5,
-    color=R["structural"],
-    va="top",
-    arrowprops=dict(arrowstyle="-", color=R["structural"], lw=0.7),
-)
-ax.text(
-    (t_cmd + 0.58 * T_STOP) * ms,
-    F_CMD + 22,
-    f"arm stop ≈ {A_ARM:.0f} m/s², ≈ {T_STOP * ms:.0f} ms",
-    ha="center",
-    va="top",
-    fontsize=8.5,
-    color=R["structural"],
-)
-ax.set_xlim(0, t_end * 1.03)
-ax.set_ylim(0, Y_TOP)
-ax.set_xlabel("time since first contact (ms)", fontsize=9)
-ax.set_ylabel("contact force (N)", fontsize=9)
-ax.tick_params(labelsize=8.5)
-fig.tight_layout()
-plt.show()
-```
-
-:::
+The enforcement layer owns this contact once it begins: @sec-enforcement-intentional-contact derives the force at brake onset and the stop it requires, and draws the contact on one clock in @fig-10-latch-force-budget. What the intent lease contributes is the pair of ceilings that contact is checked against, the tripwire and the approach speed.
 
 The mug and latch expose different limits on the same **privilege separation boundary**\index{Privilege separation!intent boundary}.[^fn-ai-subsumption-intent] The proposer requests a target and effort bounds; the independent supervisor must retain a feasible response when target evidence expires or contact changes. This separates deliberation from real-time supervision, echoing the behavioral priority separation of early reactive systems [@brooks1986robust].
 
@@ -1312,7 +1209,7 @@ When a vision-language model\index{Vision-language model} or multimodal transfor
 
 All five failures arrive across the proposal boundary in the same format: a candidate position $\mathbf{p} \in \mathbb{R}^3$ and orientation $\mathbf{R} \in SO(3)$.
 
-A pose on an empty location may lead to a futile reach, and a pose inside an occupied fixture may lead to contact if the later path and permission checks fail. In the wrong-object case, by contrast, the geometry can be valid while the selected object is wrong. The independent permission path checks what it can measure (freshness, coverage, geometry, current state, and actuator limits) without claiming to verify the task's meaning. **The Safety MCU enforces physical feasibility, not semantic truth: a goal can be collision-free, kinematically smooth, and torque-limited, yet wrong for the task.** Semantic verification belongs to upstream task monitoring and operator oversight.
+A pose on an empty location may lead to a futile reach, and a pose inside an occupied fixture may lead to contact if the later path and permission checks fail. In the wrong-object case, by contrast, the geometry can be valid while the selected object is wrong. The independent permission path checks what it can measure (freshness, coverage, geometry, current state, and actuator limits) without claiming to verify the task's meaning. **The Safety MCU enforces physical feasibility, not semantic truth: a goal can be collision-free, kinematically smooth, and torque-limited, yet wrong for the task.** Semantic verification belongs to upstream task monitoring and operator oversight. The same limit holds when an adversary shapes the proposal: an injected instruction or a printed patch in the camera view yields a pose in this same format, and @sec-verification-transduction-attacks tests what the permission path can and cannot catch when the proposer itself is attacked.
 
 A fresh depth observation can reject a proposed grasp whose required object evidence is absent in a covered, visible region. No return in an occluded or unobserved region leaves it unknown. For this station, the selected singulation rule requires independently qualified evidence of a single candidate in the pick window, even when the grounding model is confident. A window with multiple candidates leaves this operating mode and goes to a coworker for manual selection. This is a scoped operating choice: another qualified mode could select a uniquely identified mug among several objects. Counting itself needs validated coverage and segmentation, and it shares a failure mode with the phantom target: touching objects can merge into one cluster, and transparent objects such as the glass jar return little or no depth [@sajjan2020cleargrasp]. The counter's qualified coverage must therefore exclude those cases or route them to a manual pick. Counting also cannot establish that the lone object is a mug. The producer's calibrated ambiguity filter may refuse earlier but cannot replace the station's independent check.
 

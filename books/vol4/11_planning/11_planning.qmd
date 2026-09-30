@@ -41,7 +41,7 @@ A moving robot cannot pause its momentum while a learned policy computes the nex
 ::: {.callout-learning-objectives}
 
 - Distinguish prediction horizon, executed prefix, renewal cadence, and evidence age when budgeting trajectory replacement
-- Map tool-space speed limits to joint rates through the manipulator Jacobian and explain why the mapping fails near a singularity
+- Map tool-space speed limits to joint rates through the manipulator Jacobian, explain why the mapping fails near a singularity, and bound an inverse-kinematics step there with damped least squares
 - Evaluate a timed trajectory and its time parameterization against actuator torque, current-slew, and voltage limits, including reflected rotor inertia ($N_g^2 J_{\text{rotor}}$)
 - Synthesize closed-form quintic spline bridges that eliminate acceleration steps and bound commanded jerk across replanning seams
 - Size a jerk-limited $C^2$ stopping suffix from deceleration and jerk bounds and verify stopping clearance ($d_{\text{stop}} \le d_{\text{clear}}$)
@@ -98,7 +98,7 @@ class PlanningOpeningMachine:
 
 Trajectory planning converts a goal into motion a body can execute. Robotics has long posed the problem in two parts: find a collision-free path through the space of the machine's joint configurations, then assign that path a timing the actuators can follow. Physical AI changes both parts. The proposer is often a learned policy that emits short chunks of future setpoints from camera images rather than a search over a known map, and it replans continuously while the body moves, so each plan must take over from motion already under way instead of starting from rest. The inference that produces a plan takes a variable, heavy-tailed time, and the machine keeps moving throughout it. The central question is therefore broader than whether a motion avoids obstacles. A planner must also establish how long a proposed motion remains executable, how it joins the motion it replaces, and how the machine stops if its successor never arrives.
 
-This chapter establishes those answers in the order a plan must satisfy them. It fixes what the planner hands to the tracking controller and the permission path, including the kinematic map between joint space and tool space, then sizes the prediction horizon and replacement deadline against inference latency. It derives the physical limits that make a timed motion followable, from rigid-body dynamics through seam continuity and time parameterization. It then builds the jerk-limited stop that every admitted plan carries, and only after those obligations are clear compares the generators, from sampling-based search to learned action chunks, that propose candidate motion. It closes with the failures that invalidate a plan and the trajectory record that carries these obligations to the permission path.
+This chapter establishes those answers in the order a plan must satisfy them. It fixes what the planner hands to the tracking controller and the permission path, including the kinematic map between joint space and tool space and its damped inverse, then sizes the prediction horizon and replacement deadline against inference latency. It derives the physical limits that make a timed motion followable, from rigid-body dynamics through seam continuity and time parameterization. It then builds the jerk-limited stop that every admitted plan carries, and only after those obligations are clear compares the generators, from sampling-based search to learned action chunks, that propose candidate motion. It closes with the failures that invalidate a plan and the trajectory record that carries these obligations to the permission path.
 
 The warehouse mobile manipulator makes the question concrete. It is reaching for a mug on a moving conveyor when its next motion proposal is delayed. The intent lease still identifies the mug, but the arm must keep moving smoothly or begin a controlled stop, and a target with an expiry time specifies neither motion. Planning must supply a timed path, a feasible transition from the motion already under way, and a stopping continuation that does not depend on the next inference finishing.
 
@@ -335,6 +335,85 @@ plt.show()
 :::
 
 ```{python}
+#| label: calc-planning-dls-step
+#| echo: false
+#| warning: false
+#| message: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ ONE DAMPED-LEAST-SQUARES INVERSE-KINEMATICS STEP ON THE TWO-LINK ARM
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @sec-planning-handoff (inverse-kinematics paragraphs after
+# │          @fig-11-two-link-singularity).
+# │
+# │ Goal:    Show that damping bounds the joint command near the singularity
+# │          the figure shows, and what it costs in tool motion.
+# │ Show:    lambda = 50 mm; weakest-direction 1.0 m/s request needs 4.6 rad/s
+# │          (was 4.9) at a 90 degree elbow, 94.3 percent of the request realized;
+# │          8.3 rad/s (was 37.8) at a 10 degree elbow, 21.9 percent realized;
+# │          bound v / (2 lambda) = 10 rad/s at any configuration.
+# │ How:     Per singular direction the DLS gain is sigma / (sigma^2 + lambda^2)
+# │          and the realized fraction sigma^2 / (sigma^2 + lambda^2)
+# │          (wampler1986manipulator; nakamura1986inverse); sigma_min from
+# │          PlanningTwoLinkArm. Chapter-local: promote to MLSysIM only if a
+# │          second chapter reuses it.
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim.core.units import ureg
+from mlsysim.fmt import check, fmt_length, fmt_angular_velocity, fmt_percent
+
+class PlanningDLSStep:
+    """Damped-least-squares IK gain and realized tool motion in the arm's weakest direction."""
+
+    # ┌── 1. LOAD (Constants) ──────────────────────
+    lam = 50 * ureg.millimeter  # category: chosen; illustrative damping, not a vendor setting
+    v_tool = PlanningTwoLinkArm.v_tool  # category: chosen; free-space TCP limit, registry
+    qd_max = PlanningTwoLinkArm.qd_max  # category: datasheet; shoulder and elbow limit, registry
+    sig_good = PlanningTwoLinkArm.sig_good * ureg.meter  # derived; 90 degree elbow
+    sig_bad = PlanningTwoLinkArm.sig_bad * ureg.meter  # derived; 10 degree elbow
+
+    # ┌── 2. EXECUTE (The Compute) ─────────────────
+    def _gain(sig, lam):
+        return (sig / (sig**2 + lam**2)).to(ureg.meter**-1)
+
+    def _realized(sig, lam):
+        return (sig**2 / (sig**2 + lam**2)).to(ureg.dimensionless).magnitude
+
+    rad_s = ureg.radian / ureg.second
+    qd_dls_good = (v_tool * _gain(sig_good, lam)).to(ureg.second**-1).magnitude * rad_s
+    qd_dls_bad = (v_tool * _gain(sig_bad, lam)).to(ureg.second**-1).magnitude * rad_s
+    qd_bound = (v_tool / (2 * lam)).to(ureg.second**-1).magnitude * rad_s
+    frac_good = _realized(sig_good, lam)
+    frac_bad = _realized(sig_bad, lam)
+
+    # ┌── 3. GUARD (Invariants) ────────────────────
+    check(qd_dls_good < PlanningTwoLinkArm.qd_norm_good, "damping must not raise the joint command")
+    check(qd_dls_bad < PlanningTwoLinkArm.qd_norm_bad / 4, "damping no longer cuts the near-singular command by 4x")
+    check(qd_dls_bad <= qd_bound and qd_dls_good <= qd_bound, "DLS gain exceeded its 1/(2 lambda) bound")
+    check(abs(qd_bound.magnitude - 10.0) < 1e-9, "DLS joint-rate bound changed")
+    check(frac_good > 0.9 and frac_bad < 0.3, "damping no longer spares the good pose and taxes the bad one")
+    check(qd_dls_bad > qd_max, "damped command now within the joint limit; revise the feasibility sentence")
+
+    # ┌── 4. OUTPUT (Formatting) ───────────────────
+    lam_str = fmt_length(lam, unit=ureg.millimeter)
+    qd_dls_good_str = fmt_angular_velocity(qd_dls_good, precision=1)
+    qd_dls_bad_str = fmt_angular_velocity(qd_dls_bad, precision=1)
+    qd_bound_str = fmt_angular_velocity(qd_bound, precision=0)
+    frac_good_str = fmt_percent(frac_good, precision=1, style="prose")
+    frac_bad_str = fmt_percent(frac_bad, precision=1, style="prose")
+```
+
+The same map must also run in reverse. A proposal stated in tool space, whether a grasp pose from the intent lease or a Cartesian velocity from a policy or a teleoperation device, leaves the planner to find the joint motion that produces it, the **inverse kinematics**\index{Inverse kinematics!differential step} problem. The two-link arm has a closed-form inverse, but a seven-joint arm replanning chunk by chunk is solved by differential steps: linearize at the current configuration and solve $\mathbf{J}\,\Delta\mathbf{q} = \Delta\mathbf{x}$ for the joint step that moves the tool by $\Delta\mathbf{x}$, then repeat from the new configuration. Where $\mathbf{J}$ is invertible the exact step is $\Delta\mathbf{q} = \mathbf{J}^{-1}\Delta\mathbf{x}$. Written along the singular directions of $\mathbf{J}$, this step divides the part of $\Delta\mathbf{x}$ along each tool direction by that direction's singular value $\sigma$. The weakest direction therefore receives the largest joint step, $1/\sigma_{\min}$ per unit of tool motion, which is exactly the joint-rate demand that @fig-11-two-link-singularity shows growing without bound as the elbow straightens. An exact inverse passes the singularity's arithmetic straight to the drives.
+
+**Damped least squares**\index{Damped least squares!inverse kinematics} gives up exactness to bound the step [@wampler1986manipulator; @nakamura1986inverse]. Instead of demanding $\mathbf{J}\,\Delta\mathbf{q} = \Delta\mathbf{x}$, it chooses the joint step that best trades tool error against joint motion, with a damping length $\lambda$ that sets the exchange rate:
+
+$$\Delta\mathbf{q}_\lambda = \arg\min_{\Delta\mathbf{q}} \left(\|\mathbf{J}\,\Delta\mathbf{q}-\Delta\mathbf{x}\|^2 + \lambda^2\|\Delta\mathbf{q}\|^2\right) = \mathbf{J}^T\!\left(\mathbf{J}\mathbf{J}^T+\lambda^2\mathbf{I}\right)^{-1}\Delta\mathbf{x}$$ {#eq-plan-dls-ik}
+
+Setting the gradient of the objective to zero gives $(\mathbf{J}^T\mathbf{J}+\lambda^2\mathbf{I})\,\Delta\mathbf{q} = \mathbf{J}^T\Delta\mathbf{x}$, and moving $\mathbf{J}^T$ through the inverse yields the form in @eq-plan-dls-ik, which needs only a $2 \times 2$ solve for the planar arm. A reader who has trained a model will recognize ridge regression, with $\lambda^2$ as the weight-decay coefficient. Along each singular direction the gain changes from $1/\sigma$ to $\sigma/(\sigma^2+\lambda^2)$. Far from the singularity, where $\sigma \gg \lambda$, the two agree. As $\sigma$ falls toward zero the damped gain falls with it instead of diverging, and it never exceeds $1/(2\lambda)$, reached where $\sigma = \lambda$. The damping thus places a configuration-independent ceiling on the joint step, which no choice of pose can breach.
+
+With an illustrative $\lambda$ of `{python} PlanningDLSStep.lam_str`, the weakest-direction request at the `{python} PlanningTwoLinkArm.v_tool_str` TCP limit needs `{python} PlanningDLSStep.qd_dls_good_str` of joint rate at the `{python} PlanningTwoLinkArm.q2_good_str`° elbow, against `{python} PlanningTwoLinkArm.qd_norm_good_str` undamped, and the tool still realizes `{python} PlanningDLSStep.frac_good_str` of the requested motion. At the `{python} PlanningTwoLinkArm.q2_bad_str`° elbow the damped command is `{python} PlanningDLSStep.qd_dls_bad_str` instead of `{python} PlanningTwoLinkArm.qd_norm_bad_str`, and no pose can demand more than `{python} PlanningDLSStep.qd_bound_str`. The price is paid where the damping acts: the tool realizes only `{python} PlanningDLSStep.frac_bad_str` of the requested motion along the arm, so the step lags its target in exactly the direction the arm cannot move well. That residual is a tracking error the planner must carry into the trajectory's timing and clearance checks rather than discard. A larger $\lambda$ lowers the ceiling and enlarges the error everywhere, which is why practical solvers raise the damping only as $\sigma_{\min}$ approaches it.
+
+Damping bounds the inverse-kinematics step; it does not make the step feasible. Even the damped `{python} PlanningDLSStep.qd_dls_bad_str` exceeds the `{python} PlanningTwoLinkArm.qd_max_str` joint limit, so the planner must still slow the tool through time parameterization (@sec-planning-time-parameterization), and the permission path still checks every joint rate against the limits the drives enforce. Damped least squares is a better proposal, not a permission. The general $n$-joint form, with its singular-value expansion, is stated in @sec-appendix-control-kinematics.
+
+```{python}
 #| label: calc-planning-lease-rule
 #| echo: false
 #| warning: false
@@ -457,12 +536,17 @@ Before sizing the temporal prediction horizon $H$, the systems engineer must con
 # ┌─────────────────────────────────────────────────────────────────────────────
 # │ REPLACEMENT-LATENCY STAGE LEDGER FOR THE MACHINE'S CHUNK POLICY
 # ├─────────────────────────────────────────────────────────────────────────────
-# │ Context: @sec-planning-goal-to-trajectory (replacement-latency paragraph).
+# │ Context: @sec-planning-horizon-tradeoff (replacement-latency paragraph),
+# │          @eq-plan-replacement-latency; rows 1 + 2 of @tbl-04-event-ledger.
 # │
-# │ Goal:    Sum one representative pass of the replacement path, with the
-# │          inference stage taken from the machine's chunk policy.
-# │ Show:    15 + 5 + 40 + 2 + 18 + 1 = 81 ms.
-# │ How:     RM chunk inference latency; other stages are scenario assumptions.
+# │ Goal:    Read replacement latency L as capture to admission from the
+# │          shared ledger, not from a stage list of this chapter's own.
+# │ Show:    L = t_age 51.6 + Delta_da 63.3 = 114.9 ms; inside Delta_da the
+# │          40 ms inference and the 18 ms whole-plan validation.
+# │ How:     AISLE.perception_age (Ch8), AISLE.t_dispatch_to_admission (Ch13),
+# │          AISLE.t_capture_to_admission (MLSysIM). 2026-09-29: replaced the
+# │          15 + 5 + 40 + 2 + 18 + 1 = 81 ms chapter-local ledger, whose
+# │          sensing stages disagreed with the registry's capture-to-dispatch age.
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim import *
 from mlsysim.core.units import millisecond
@@ -472,38 +556,36 @@ RM = Embodied.MobileManipulator.WarehouseMobileManipulator
 AISLE = Embodied.Scenario.WarehouseAisle
 
 class PlanningReplacementLedger:
-    """Stage-by-stage replacement latency for one chunk-policy pass."""
+    """Replacement latency L: capture to admission, from the two registry intervals."""
 
     # ┌── 1. LOAD (Constants) ──────────────────────
-    t_sense = 15 * millisecond  # category: illustrative; sensor ingress
-    t_dma = 5 * millisecond  # category: illustrative; IPC and DMA transfer
-    t_infer = RM.chunk_inference_latency  # category: illustrative; P99 incl. vision, registry
-    t_deser = AISLE.t_chunk_deserialize  # category: illustrative; deserialization (registry)
-    t_validate = AISLE.t_plan_validate  # category: illustrative; full-trajectory validation (registry)
-    t_admit = AISLE.t_plan_activate  # category: illustrative; activation (registry)
+    t_age = AISLE.perception_age  # category: derived; capture to dispatch (@sec-perception-latency-waterfall)
+    t_da = AISLE.t_dispatch_to_admission  # category: derived; dispatch to admission allocation (@sec-placement-isolation-decisions)
+    t_infer = RM.chunk_inference_latency  # category: illustrative; P99 incl. vision, registry (inside t_da)
+    t_validate = AISLE.t_plan_validate  # category: illustrative; whole-plan validation, registry (inside t_da)
 
     # ┌── 2. EXECUTE (The Compute) ─────────────────
-    t_sum = t_sense + t_dma + t_infer + t_deser + t_validate + t_admit
+    t_sum = AISLE.t_capture_to_admission.to(millisecond)
 
     # ┌── 3. GUARD (Invariants) ────────────────────
     check(abs(t_infer.to(millisecond).magnitude - 40.0) < 1e-9, "chunk inference latency changed")
-    check(abs(t_sum.to(millisecond).magnitude - 81.0) < 1e-9, "stage ledger total changed")
+    check(abs((t_age + t_da - t_sum).to(millisecond).magnitude) < 1e-9, "L must be capture-to-dispatch plus dispatch-to-admission")
+    check(abs(t_sum.magnitude - 114.91072) < 1e-6, "replacement latency changed")
+    check(t_validate < t_da, "validation is counted once, inside Delta_da")
 
     # ┌── 4. OUTPUT (Formatting) ───────────────────
-    t_sense_str = fmt_latency(t_sense, unit=millisecond)
-    t_dma_str = fmt_latency(t_dma, unit=millisecond)
+    t_age_str = fmt_latency(t_age.to(millisecond), unit=millisecond, precision=1)
+    t_da_str = fmt_latency(t_da.to(millisecond), unit=millisecond, precision=1)
     t_infer_str = fmt_latency(t_infer, unit=millisecond)
-    t_deser_str = fmt_latency(t_deser, unit=millisecond)
     t_validate_str = fmt_latency(t_validate, unit=millisecond)
-    t_admit_str = fmt_latency(t_admit, unit=millisecond)
-    t_sum_str = fmt_latency(t_sum, unit=millisecond)
+    t_sum_str = fmt_latency(t_sum, unit=millisecond, precision=1)
 ```
 
-The scheduling quantity is **replacement latency** $L$: elapsed time from the observation needed for a new proposal through transfer, inference, full-trajectory validation, and admission. An illustrative stage ledger for the machine's chunk policy has `{python} PlanningReplacementLedger.t_sense_str` of sensing, `{python} PlanningReplacementLedger.t_dma_str` of direct memory access (DMA), the policy's `{python} PlanningReplacementLedger.t_infer_str` of inference, `{python} PlanningReplacementLedger.t_deser_str` of deserialization, `{python} PlanningReplacementLedger.t_validate_str` of validation, and `{python} PlanningReplacementLedger.t_admit_str` of activation, totaling `{python} PlanningReplacementLedger.t_sum_str`. When stages overlap or share contention, a sum of stage percentiles is not a percentile of the sum (@sec-body-measurement-freshness), so the horizon is sized from the end-to-end distribution of $L$.
+The scheduling quantity is **replacement latency** $L$: elapsed time from the capture of the observation a new proposal rests on to the admission of that proposal. In the event vocabulary of @tbl-04-event-ledger, $L$ runs from capture to admission, so it is the sum of two intervals that other chapters derive, the capture-to-dispatch age $t_{\text{age}}$ of @sec-perception-latency-waterfall and the dispatch-to-admission interval $\Delta_{\text{da}}$ that @sec-placement-isolation-decisions allocates:
+$$L = \underbrace{t_{\text{age}}}_{\text{capture}\,\to\,\text{dispatch}} + \underbrace{\Delta_{\text{da}}}_{\text{dispatch}\,\to\,\text{admission}}, \qquad \Delta_{\text{da}} = t_{\text{infer}} + t_{\text{link}} + t_{\text{deser}} + t_{\text{validate}} + t_{\text{activate}} + t_{\text{wait}}$$ {#eq-plan-replacement-latency}
+On the running machine the observation is `{python} PlanningReplacementLedger.t_age_str` old at dispatch. The allocation of $\Delta_{\text{da}}$, `{python} PlanningReplacementLedger.t_da_str`, charges the chunk policy's `{python} PlanningReplacementLedger.t_infer_str` inference in full, `{python} PlanningReplacementLedger.t_validate_str` of whole-plan validation, and the board link, deserialization, activation, and wait for the next permission tick, which brings $L$ to `{python} PlanningReplacementLedger.t_sum_str`. Charging the whole inference after dispatch counts its vision stage twice, since that stage already lies in $t_{\text{age}}$, so the allocated $L$ is conservative. When stages overlap or share contention, a sum of stage percentiles is not a percentile of the sum (@sec-body-measurement-freshness), so the horizon is sized from the end-to-end distribution of $L$ measured between capture and admission timestamps.
 
-The `{python} PlanningReplacementLedger.t_validate_str` validation allowance is a separate admission workload, not work silently placed inside a millisecond permission tick. Admission needs bounded staging memory, the candidate and stop coefficients, and qualified local clearance evidence; the host's full scene map need not reside on the MCU. Scheduling must preserve per-tick enforcement while admission proceeds and refresh the seam check before activation. @Sec-placement must allocate and qualify that work and memory under interference. The stage ledger is illustrative, so neither its total nor its constituent allowances are measured bounds. Its sensing-to-admission decomposition is distinct from the capture-to-proposer-dispatch budget in @sec-perception; the inference allowance already includes vision. The two ledgers cannot be summed or substituted without reconciling their event boundaries and overlap. Dispatch-to-admission age continues to accumulate and remains an explicit qualification obligation.
-
-$$L = t_{\mathrm{sense\_ingress}} + t_{\mathrm{ipc\_dma}} + t_{\mathrm{infer}} + t_{\mathrm{deser}} + t_{\mathrm{validate}} + t_{\mathrm{admit}}$$ {#eq-plan-replacement-latency}
+Validation is the planner's own term in that sum. The `{python} PlanningReplacementLedger.t_validate_str` allowance is a separate admission workload, not work silently placed inside a millisecond permission tick. Admission needs bounded staging memory, the candidate and stop coefficients, and qualified local clearance evidence; the host's full scene map need not reside on the MCU. Scheduling must preserve per-tick enforcement while admission proceeds and refresh the seam check before activation. @Sec-placement must allocate and qualify that work and memory under interference. Every term is an illustrative allocation, so neither $L$ nor its parts are measured bounds; both intervals remain explicit qualification obligations.
 
 Prediction length and execution length are separate choices. A prediction horizon $H\Delta t$ describes how far the proposer looks ahead; the **executed prefix** is the portion used before a checked replacement takes over. Increasing the predicted horizon supplies candidate motion beyond the next renewal, but does not grant permission to execute all of it. The running machine still targets admitted renewal every `{python} PlanningLeaseRule.t_renew_str`, with expiry at `{python} PlanningLeaseRule.t_lease_str` after the last admission. Target evidence can expire sooner.
 
@@ -1486,7 +1568,7 @@ class PlanningC2Stop:
     # Base: the stop at the rack end.
     v_drive = RM.base.max_velocity  # category: illustrative; registry drive limit
     a_brake = AISLE.a_brake  # category: illustrative; credible deceleration, loaded, dry floor
-    tau_delay = AISLE.tau_delay  # category: derived; total pre-brake delay
+    tau_delay = AISLE.tau_delay  # category: derived; pre-brake delay, excl. dispatch-to-admission
     delta_loc = AISLE.delta_loc  # category: illustrative
     delta_margin = AISLE.delta_margin  # category: chosen
     d_clear = AISLE.d_clear  # category: illustrative; rack-end clear distance
@@ -2273,7 +2355,7 @@ A trajectory remains feasible only while its physical assumptions hold at chunk 
 
 A trajectory turns a goal into timed motion, and on a moving machine it must settle three questions that a path alone leaves open: how long the motion remains executable, how it joins the motion already under way, and how the machine stops if no successor arrives. The mug reach can progress through renewed, checked prefixes without forcing the overall task into one observation window. Prediction provides candidate motion; fresh evidence, timely admission, and the current state determine how much may execute. A delayed replacement calls on the resident fallback, so latency-tail targets describe expected service interruption under the fallback premises rather than physical failure by themselves.
 
-Whether the body can follow a candidate is a separate question from whether the candidate avoids obstacles. The Jacobian maps a tool-speed limit into joint rates that grow without bound near a singularity, the manipulator equation turns planned motion into torque, and reflected rotor inertia turns a velocity or acceleration step at a seam into an outsized torque request. A quintic bridge matches the seam through acceleration, and time parameterization finds the fastest timing a path allows; that fastest timing switches acceleration abruptly, and a jerk bound, which costs little time, is what makes it executable. Sampling-based search, trajectory optimization, and learned chunking differ in how they find such a candidate and how much admission work it creates, not in the obligations it must meet. Each construction yields a better proposal, never permission.
+Whether the body can follow a candidate is a separate question from whether the candidate avoids obstacles. The Jacobian maps a tool-speed limit into joint rates that grow without bound near a singularity, and damped least squares bounds the inverse step there only by letting the tool lag its target; the manipulator equation turns planned motion into torque, and reflected rotor inertia turns a velocity or acceleration step at a seam into an outsized torque request. A quintic bridge matches the seam through acceleration, and time parameterization finds the fastest timing a path allows; that fastest timing switches acceleration abruptly, and a jerk bound, which costs little time, is what makes it executable. Sampling-based search, trajectory optimization, and learned chunking differ in how they find such a candidate and how much admission work it creates, not in the obligations it must meet. Each construction yields a better proposal, never permission.
 
 The running machine's `{python} PlanningLeaseRule.t_lease_str` lease stops a stalled proposal stream through a state-matched response, leaving an illustrative `{python} PlanningLeaseRule.lease_margin_str` before sensing and model uncertainty. The alternate longer-lease case teaches a different limit: replacement admission closes by `{python} PlanningLeaseRule.t_alt_admission_cutoff_str` to permit physical stop onset at `{python} PlanningArmTimeline.t_commit_str`. Both cases preserve the same obligation to reserve response travel and the entire stop. On the base, even the jerk-limited S-curve, the shortest stop the load tolerates, raises the drive-limit stopping budget to `{python} PlanningC2Stop.total_new_str`, beyond the `{python} PlanningC2Stop.d_clear_str` rack-end clearance, making the runtime speed decision unavoidable.
 
@@ -2282,7 +2364,7 @@ The running machine's `{python} PlanningLeaseRule.t_lease_str` lease stops a sta
 * **Prediction is not execution authority**: A long predicted path can support short, repeatedly checked prefixes. Renewal cadence determines request throughput; target evidence retains its own capture-based age.
 * **Reserve a response from the current state**: The matched suffix belongs to its declared entry state. Earlier lease or evidence expiry needs a validated state-matched fallback, available sensing and drive energy, and enough clearance for response delay plus stopping.
 * **Admission precedes physical commitment**: The alternate arm schedule closes admission by `{python} PlanningLeaseRule.t_alt_admission_cutoff_str` to begin its stop at `{python} PlanningArmTimeline.t_commit_str`. A late proposer cannot spend that response interval.
-* **A collision-free path is not yet followable**: Near a singularity a tool-speed limit demands joint rates the arm cannot supply, and a time-optimal schedule demands torque steps the drive refuses. A quintic seam and a jerk bound remove the steps, but interior jerk, torque, and clearance still decide execution.
+* **A collision-free path is not yet followable**: Near a singularity a tool-speed limit demands joint rates the arm cannot supply; damping bounds the inverse-kinematics step but leaves a tool error and can still exceed the joint limit. A time-optimal schedule demands torque steps the drive refuses. A quintic seam and a jerk bound remove the steps, but interior jerk, torque, and clearance still decide execution.
 * **The stop's shape sets its distance**: A finite jerk bound makes every smooth stop longer than constant-deceleration braking. The S-curve pays the least, one half jerk ramp of cruise, and that cost still drives the base's remaining speed restriction.
 * **Rejecting a candidate need not stop service**: The current record can continue while its own state, evidence, lease, and fallback remain valid. A rejected replacement renews none of them.
 * **Admission and enforcement need separate budgets**: Whole-plan validation scans bounded candidate content; per-tick permission checks current state and local evidence. Their execution time, memory, and interference must be allocated separately.
