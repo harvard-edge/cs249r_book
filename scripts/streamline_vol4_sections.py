@@ -424,7 +424,7 @@ def process_chapter_file(
 
 def main():
     parser = argparse.ArgumentParser(description="Parallel Section-by-Section Streamlining for Volume IV")
-    parser.add_argument("--chapter", "-c", type=str, help="Specific chapter number to process (e.g., '01' or '02')")
+    parser.add_argument("--chapters", "--chapter", "-c", nargs="+", type=str, help="Specific chapter number(s) to process (e.g., '14 15 16 17')")
     parser.add_argument("--section", "-s", type=int, default=None, help="Optional specific section index to process")
     parser.add_argument("--file", "-f", type=Path, help="Specific .qmd file to process")
     parser.add_argument("--all", action="store_true", help="Process all chapter .qmd files in books/vol4")
@@ -441,13 +441,14 @@ def main():
 
     if args.file:
         target_files.append(args.file.resolve())
-    elif args.chapter:
-        target_num = args.chapter.zfill(2)
-        candidates = list(VOL4_ROOT.glob(f"{target_num}_*/*.qmd"))
-        if not candidates:
-            print(f"Error: No chapter found matching '{target_num}_*' in {VOL4_ROOT}")
-            sys.exit(1)
-        target_files.append(candidates[0])
+    elif args.chapters:
+        for ch_arg in args.chapters:
+            target_num = ch_arg.zfill(2)
+            candidates = list(VOL4_ROOT.glob(f"{target_num}_*/*.qmd"))
+            if not candidates:
+                print(f"Error: No chapter found matching '{target_num}_*' in {VOL4_ROOT}")
+                sys.exit(1)
+            target_files.append(candidates[0])
     elif args.all:
         for ch_dir in sorted(VOL4_ROOT.glob("[0-9][0-9]_*")):
             qmds = list(ch_dir.glob("*.qmd"))
