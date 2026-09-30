@@ -213,8 +213,17 @@ def execute_agent_call(
 # Validation & Invariant Checking
 # ==============================================================================
 
-def validate_section_rewrite(original: SectionChunk, rewritten: str) -> Tuple[bool, List[str]]:
-    """Checks that the rewritten section preserved all essential invariants."""
+def sanitize_standalone_prose(text: str) -> str:
+    """Removes series-dependent volume references to satisfy standalone-prose rules."""
+    text = re.sub(r"\bVolume\s+I\b", "single-device systems", text)
+    text = re.sub(r"\bVolume\s+II\b", "distributed fleet systems", text)
+    text = re.sub(r"\bVolume\s+III\b", "this book", text)
+    text = re.sub(r"\bthis volume\b", "this book", text, flags=re.IGNORECASE)
+    return text
+
+
+def validate_section_rewrite(original: SectionChunk, rewritten: str) -> Tuple[bool, str, List[str]]:
+    """Checks that the rewritten section preserved all essential invariants and sanitizes formatting."""
     issues = []
 
     # 1. Heading preserved
@@ -235,12 +244,25 @@ def validate_section_rewrite(original: SectionChunk, rewritten: str) -> Tuple[bo
     # 4. Invariant presence check
     rewritten_invariants = extract_invariants(rewritten)
     missing = original.invariants - rewritten_invariants
-    # Filter out acceptable footnote movements if any
-    critical_missing = [m for m in missing if m.startswith("@sec-") or m.startswith("@fig-") or m.startswith("@eq-") or m.startswith("@tbl-")]
+    critical_missing = [m for m in missing if m.startswith("@sec-") or m.startswith("@fig-") or m.startswith("@eq-") or m.startswith("@tbl-") or m.startswith("@lst-")]
     if critical_missing:
         issues.append(f"Dropped critical cross-references: {critical_missing[:5]}")
 
-    return (len(issues) == 0, issues)
+    # 5. Check Python code labels
+    orig_labels = set(re.findall(r"#\|\s*label:\s*([^\s\n]+)", original.content))
+    new_labels = set(re.findall(r"#\|\s*label:\s*([^\s\n]+)", rewritten))
+    missing_labels = orig_labels - new_labels
+    if missing_labels:
+        issues.append(f"Dropped Python cell labels: {missing_labels}")
+
+    # Sanitize volume references
+    sanitized = sanitize_standalone_prose(rewritten)
+
+    # Clean trailing whitespace per line
+    sanitized_lines = [line.rstrip() for line in sanitized.splitlines()]
+    sanitized = "\n".join(sanitized_lines) + "\n"
+
+    return (len(issues) == 0, sanitized, issues)
 
 
 # ==============================================================================
@@ -278,12 +300,12 @@ def refine_single_section(
 
     try:
         rewritten = execute_agent_call(prompt, backend=backend, model=model, timeout=timeout)
-        valid, issues = validate_section_rewrite(section, rewritten)
+        valid, sanitized, issues = validate_section_rewrite(section, rewritten)
         if valid:
             # Append trailing newline for clean formatting
-            if not rewritten.endswith("\n"):
-                rewritten += "\n"
-            return section, rewritten, True, []
+            if not sanitized.endswith("\n"):
+                sanitized += "\n"
+            return section, sanitized, True, []
         else:
             return section, section.content, False, issues
     except Exception as e:
