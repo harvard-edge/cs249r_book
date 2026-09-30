@@ -374,65 +374,6 @@ The aisle example shows both reasons that an open-loop score\index{Open-loop eva
 $$s_t = f(f(\dots f(s_0, u_0)\dots, u_{t-2}), u_{t-1})$$
 A persistent heading bias needs no software bug, since differential tire wear, camera-mast vibration, or floor camber produces one. Second, static evaluation cannot follow the machine into the unfamiliar states that early errors steer it toward. The first admitted error moves the base from the demonstrated state $s_1^*$ to an unvisited state $s_1$, and once it drifts a few centimeters off the centerline it occupies states absent from $\mathcal{D}_{\mathrm{demo}}$. The offline metric, computed only where $y = 0\text{ m}$, holds no evidence about $\pi_\theta(s)$ for $y \neq 0\text{ m}$, and a policy never shown recoveries from off-center states can make larger errors there, accelerating the divergence that @sec-training-synthesis-regimes traced for behavioral cloning.
 
-### Contact discontinuities and metric masking {#sec-evaluation-non-lipschitz-contact}
-
-```{python}
-#| label: calc-evaluation-stiff-contact
-#| echo: false
-#| warning: false
-#| message: false
-# ┌─────────────────────────────────────────────────────────────────────────────
-# │ STIFF-CONTACT RESIDUAL VERSUS FREE-SPACE RESIDUAL (LEGO)
-# ├─────────────────────────────────────────────────────────────────────────────
-# │ Context: "Why action mean squared error fails" in
-# │          @sec-evaluation-non-lipschitz-contact.
-# │ Show: the reaction force a small commanded penetration attempts against a
-# │       hypothetical stiff surface (not the running machine's latch).
-# │ How: dF = k_contact * dx (linear spring).
-# └─────────────────────────────────────────────────────────────────────────────
-from mlsysim import *
-from mlsysim.core.units import *
-from mlsysim.fmt import fmt_length, fmt_force, fmt_math, sci_latex, check
-
-class StiffContact:
-    """Force a millimeter-scale residual attempts against a stiff surface."""
-
-    # ┌── 1. LOAD (Constants & Parameters) ─────────────────────────────────
-    k_contact = 5e5 * ureg.newton / ureg.meter  # category: illustrative; hypothetical stiff surface
-    dx = 2.0 * ureg.millimeter  # category: illustrative; tracking residual / commanded penetration
-
-    # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────
-    dF = (k_contact * dx).to(newton)
-
-    # ┌── 3. GUARD (Assertions) ────────────────────────────────────────────
-    check(abs(dF.to(newton).magnitude - 1000.0) < 1e-6, "2 mm into 5e5 N/m should attempt 1,000 N")
-
-    # ┌── 4. OUTPUT (Format & Export) ────────────────────────────────────────
-    k_contact_math = fmt_math(sci_latex(k_contact.to(ureg.newton / ureg.meter).magnitude, precision=0) + r"\text{ N/m}")
-    dx_str = fmt_length(dx, unit=ureg.millimeter, precision=0)
-    dF_str = fmt_force(dF, precision=0, commas=True)
-```
-
-Touching the latch can change motion abruptly: a gripper moving freely can strike the plate, stick, or slip. Ideal rigid-body models represent impacts as velocity jumps ($v^+ \ne v^-$) and static friction as a set of possible forces ($F_{\text{friction}} \in [-\mu F_n, \mu F_n]$). These idealizations need not satisfy Lipschitz continuity, the condition that small state changes produce proportionally bounded changes in the dynamics. Real compliance spreads contact over time, but offline averages can still hide the load and task consequences of crossing the contact boundary:
-
-1. **Why action cosine similarity fails**: In representation learning and behavior modeling, action cosine similarity:
-   $$\text{Cosine}(\hat{a}, a^*) = \frac{\hat{a}^\top a^*}{\|\hat{a}\| \|a^*\|}$$
-   is widely used to measure directional alignment between predicted and expert commands. In physical contact, however, cosine similarity misleads because it discards command magnitude. A policy proposal with 0.999 cosine similarity that commands 25 percent insufficient force stays below the latch's release force (its spring preload plus friction) and stalls against the latch, stranding the robot indefinitely. Conversely, a proposal with 0.999 cosine similarity that commands 150 percent of the required force can overload the contact, potentially crossing the `{python} EvalMachine.f_trip_str` contact tripwire. Whether damage occurs depends on precontact energy, compliance, and the protective response; a trip is not evidence that the latch sheared.
-
-2. **Why action mean squared error fails**: In offline supervised validation, Mean Squared Error:
-   $$\text{MSE} = \frac{1}{d} \sum_{j=1}^d (\hat{a}_j - a_j^*)^2$$
-   weights every millimeter of position residual equally, regardless of physical context. In open-space transit, an end-effector tracking deviation of `{python} StiffContact.dx_str` is benign and easily recovered. For a separate hypothetical stiff-contact illustration, not the running warehouse latch, take local stiffness $k_{\text{contact}} \approx$ `{python} StiffContact.k_contact_math`. A surface this stiff behaves as a spring, so an unmitigated commanded penetration $\Delta x$ attempts to generate a normal reaction force
-   $$\Delta F = k_{\text{contact}} \Delta x,$$
-   which for `{python} StiffContact.dx_str` is `{python} StiffContact.dF_str`. This illustrative stiffness calculation estimates the force associated with the commanded penetration, not a measured impact peak or a verified gearbox yield threshold. Actual compliance and protective response determine the realized load. Offline MSE gives that contact residual the same weight as a `{python} StiffContact.dx_str` drift in free space.
-
-3. **Hardware instance variance at contact boundaries**: The sensitivity of contact dynamics exacerbates the hardware instance variance of @sec-evaluation-what-measured. Unit-to-unit differences in transmission lost motion and camera mounting shift the spatial boundary of the contact interface. A policy trained on demonstrations logged on Unit 01 will encounter the physical latch surface earlier or later on Unit 02. Because contact is non-smooth, this microscopic spatial shift triggers immediate contact bifurcations: the arm either stalls in free space short of the latch or impacts the frame prematurely, causing physical jamming that offline evaluation on recorded logs can never expose.[^fn-math-contact-bifurcation]
-
-The arm shows this exact disconnect in contact. An end-effector position error of a fraction of a millimeter per step scores as negligible Cartesian error offline, but on the latch that offset acts as a wedge. The latch's stiffness turns the lateral displacement into a reaction force ($F_{xy} = k_{\text{env}} \Delta_{xy}$) that climbs past the `{python} EvalMachine.f_trip_str` contact tripwire, which ends the attempt before the door unlatches.
-
-[^fn-math-contact-bifurcation]: **Contact transitions in ideal models**\index{Contact mechanics!bifurcation}: An ideal rigid-body impact produces a velocity jump ($v^+ \ne v^-$), while ideal static friction permits a range of forces. Smooth-dynamics assumptions can fail at these transitions. Real compliance regularizes the transient but does not make replay reveal whether a shifted contact will stick, slip, or jam.
-
-Offline scores can also mislead in the pessimistic direction when the task admits several valid actions. If the demonstrator passed an obstacle on the left, an open-loop score penalizes a candidate that passes on the right (the two-mode case of @sec-training-synthesis-regimes), although in closed loop both reach the goal. An action-level error measures divergence from one recording, not satisfaction of the task.
-
 <!-- fig-alt below hand-types values because fig-alt cannot hold inline python. Keep them in sync with these cell outputs:
      "one-degree heading offset"          = AisleDrift.heading_offset_deg (1.0)
      "3.05 times 10 to the minus four"    = AisleDrift.angular_mse_math (the fig-cap and prose use it inline)
@@ -521,6 +462,65 @@ plt.show()
 ```
 
 :::
+
+### Contact discontinuities and metric masking {#sec-evaluation-non-lipschitz-contact}
+
+```{python}
+#| label: calc-evaluation-stiff-contact
+#| echo: false
+#| warning: false
+#| message: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ STIFF-CONTACT RESIDUAL VERSUS FREE-SPACE RESIDUAL (LEGO)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: "Why action mean squared error fails" in
+# │          @sec-evaluation-non-lipschitz-contact.
+# │ Show: the reaction force a small commanded penetration attempts against a
+# │       hypothetical stiff surface (not the running machine's latch).
+# │ How: dF = k_contact * dx (linear spring).
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import *
+from mlsysim.core.units import *
+from mlsysim.fmt import fmt_length, fmt_force, fmt_math, sci_latex, check
+
+class StiffContact:
+    """Force a millimeter-scale residual attempts against a stiff surface."""
+
+    # ┌── 1. LOAD (Constants & Parameters) ─────────────────────────────────
+    k_contact = 5e5 * ureg.newton / ureg.meter  # category: illustrative; hypothetical stiff surface
+    dx = 2.0 * ureg.millimeter  # category: illustrative; tracking residual / commanded penetration
+
+    # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────
+    dF = (k_contact * dx).to(newton)
+
+    # ┌── 3. GUARD (Assertions) ────────────────────────────────────────────
+    check(abs(dF.to(newton).magnitude - 1000.0) < 1e-6, "2 mm into 5e5 N/m should attempt 1,000 N")
+
+    # ┌── 4. OUTPUT (Format & Export) ────────────────────────────────────────
+    k_contact_math = fmt_math(sci_latex(k_contact.to(ureg.newton / ureg.meter).magnitude, precision=0) + r"\text{ N/m}")
+    dx_str = fmt_length(dx, unit=ureg.millimeter, precision=0)
+    dF_str = fmt_force(dF, precision=0, commas=True)
+```
+
+Touching the latch can change motion abruptly: a gripper moving freely can strike the plate, stick, or slip. Ideal rigid-body models represent impacts as velocity jumps ($v^+ \ne v^-$) and static friction as a set of possible forces ($F_{\text{friction}} \in [-\mu F_n, \mu F_n]$). These idealizations need not satisfy Lipschitz continuity, the condition that small state changes produce proportionally bounded changes in the dynamics. Real compliance spreads contact over time, but offline averages can still hide the load and task consequences of crossing the contact boundary:
+
+1. **Why action cosine similarity fails**: In representation learning and behavior modeling, action cosine similarity:
+   $$\text{Cosine}(\hat{a}, a^*) = \frac{\hat{a}^\top a^*}{\|\hat{a}\| \|a^*\|}$$
+   is widely used to measure directional alignment between predicted and expert commands. In physical contact, however, cosine similarity misleads because it discards command magnitude. A policy proposal with 0.999 cosine similarity that commands 25 percent insufficient force stays below the latch's release force (its spring preload plus friction) and stalls against the latch, stranding the robot indefinitely. Conversely, a proposal with 0.999 cosine similarity that commands 150 percent of the required force can overload the contact, potentially crossing the `{python} EvalMachine.f_trip_str` contact tripwire. Whether damage occurs depends on precontact energy, compliance, and the protective response; a trip is not evidence that the latch sheared.
+
+2. **Why action mean squared error fails**: In offline supervised validation, Mean Squared Error:
+   $$\text{MSE} = \frac{1}{d} \sum_{j=1}^d (\hat{a}_j - a_j^*)^2$$
+   weights every millimeter of position residual equally, regardless of physical context. In open-space transit, an end-effector tracking deviation of `{python} StiffContact.dx_str` is benign and easily recovered. For a separate hypothetical stiff-contact illustration, not the running warehouse latch, take local stiffness $k_{\text{contact}} \approx$ `{python} StiffContact.k_contact_math`. A surface this stiff behaves as a spring, so an unmitigated commanded penetration $\Delta x$ attempts to generate a normal reaction force
+   $$\Delta F = k_{\text{contact}} \Delta x,$$
+   which for `{python} StiffContact.dx_str` is `{python} StiffContact.dF_str`. This illustrative stiffness calculation estimates the force associated with the commanded penetration, not a measured impact peak or a verified gearbox yield threshold. Actual compliance and protective response determine the realized load. Offline MSE gives that contact residual the same weight as a `{python} StiffContact.dx_str` drift in free space.
+
+3. **Hardware instance variance at contact boundaries**: The sensitivity of contact dynamics exacerbates the hardware instance variance of @sec-evaluation-what-measured. Unit-to-unit differences in transmission lost motion and camera mounting shift the spatial boundary of the contact interface. A policy trained on demonstrations logged on Unit 01 will encounter the physical latch surface earlier or later on Unit 02. Because contact is non-smooth, this microscopic spatial shift triggers immediate contact bifurcations: the arm either stalls in free space short of the latch or impacts the frame prematurely, causing physical jamming that offline evaluation on recorded logs can never expose.[^fn-math-contact-bifurcation]
+
+The arm shows this exact disconnect in contact. An end-effector position error of a fraction of a millimeter per step scores as negligible Cartesian error offline, but on the latch that offset acts as a wedge. The latch's stiffness turns the lateral displacement into a reaction force ($F_{xy} = k_{\text{env}} \Delta_{xy}$) that climbs past the `{python} EvalMachine.f_trip_str` contact tripwire, which ends the attempt before the door unlatches.
+
+[^fn-math-contact-bifurcation]: **Contact transitions in ideal models**\index{Contact mechanics!bifurcation}: An ideal rigid-body impact produces a velocity jump ($v^+ \ne v^-$), while ideal static friction permits a range of forces. Smooth-dynamics assumptions can fail at these transitions. Real compliance regularizes the transient but does not make replay reveal whether a shifted contact will stick, slip, or jam.
+
+Offline scores can also mislead in the pessimistic direction when the task admits several valid actions. If the demonstrator passed an obstacle on the left, an open-loop score penalizes a candidate that passes on the right (the two-mode case of @sec-training-synthesis-regimes), although in closed loop both reach the goal. An action-level error measures divergence from one recording, not satisfaction of the task.
 
 A policy whose residual errors concentrate at latch contact can rank below a policy with larger errors in forgiving free space. The possible ranking inversion is:
 $$\mathcal{L}_{\text{val}}(\pi_A) < \mathcal{L}_{\text{val}}(\pi_B) \quad \text{yet} \quad \text{ACR}(\pi_A) \ll \text{ACR}(\pi_B)$$

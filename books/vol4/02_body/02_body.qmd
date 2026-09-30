@@ -122,39 +122,6 @@ Each budget becomes a limit established on the assembled machine under declared 
 
 ## Measurement Freshness {#sec-body-measurement-freshness}
 
-Software benchmarks in machine learning frequently report latency as isolated accelerator execution time (e.g., $18.5\text{ ms}$ for a vision backbone on an edge NPU), creating the dangerous illusion of a responsive $50\text{ Hz}$ control loop. In physical AI systems, however, that compute kernel is only one intermediate stage in an end-to-end silicon-to-plant dataflow pipeline. **A measurement decays continuously from the instant of physical transduction; what governs physical behavior is its total age when torque actually appears at the joint.** That physical age spans the interval from the moment photons strike a photodiode array, magnetic flux passes a Hall sensor, or strain deflects a piezoresistor to the moment motor inverter switches build stator magnetic flux that changes link acceleration. If a perception policy evaluates an obstacle bounding box in $18.5\text{ ms}$, but exposure integration, sensor readout, PCIe transport, kernel scheduling, fieldbus dispatch, and motor electrical current rise add another $40\text{ ms}$, the true physical age of the observation when the joint accelerates is nearly $60\text{ ms}$.
-
-During that entire window, the continuous physical environment continues to evolve unobserved. In distributed data systems, read-after-write consistency windows govern whether a client acts on stale or linearized state. In Physical AI, the physical plant is an autonomous, unpausable concurrent writer: world state $\mathbf{x}(t)$ evolves along continuous trajectories at velocity $\mathbf{v}(t)$. An observation age $t_{\text{age}}$ converts directly into unobserved physical displacement $\Delta x \approx \int_0^{t_{\text{age}}} v(t)\,dt$. High-speed machines inevitably act on historical state.
-
-::: {.column-margin .margin-pointer}
-↪ @Sec-memory-belief-through-occlusion derives how long a stored belief stays valid as its measurement ages.
-:::
-
-The rate of world-state change dictates how long a measurement remains valid before acting on it introduces intolerable error. Let $e_{\max}$ denote the maximum acceptable error in a tracked state, such as a joint angle or the position of a part on a conveyor, and let $v_{\max}$ denote the fastest credible velocity at which that state can evolve. The freshness deadline $\Delta t_{\text{fresh}}$ is the upper bound on measurement age before a control action based on that measurement becomes invalid, defined by the inequality
-$$\Delta t_{\text{fresh}} \le \frac{e_{\max}}{v_{\max}}$$
-
-For a vision-guided picker on a parcel sorter, tracking parcels at a maximum relative velocity $v_{\max} = 1.2\text{ m/s}$ with a geometric clearance tolerance $e_{\max} = 24\text{ mm}$, the freshness deadline is $24\text{ mm} / (1200\text{ mm/s}) = 20\text{ ms}$. If an actuation command reaches the motor based on an image captured $35\text{ ms}$ earlier, the parcel has displaced by $42\text{ mm}$, exceeding the position allowance by $18\text{ mm}$ and missing the grasp. The deadline governs a target that keeps moving while its measurement ages, such as the parcel here or the mug riding the mobile manipulator's pick-station conveyor. For such a target it limits only motion-induced error, and only while relative velocity is bounded and the initial observation is credible; sensing and estimation errors consume additional tolerance. Conversely, a stationary person standing in an aisle does not move while the observation ages; instead, the robot base moves toward the person, so the observation age converts into unguided vehicular travel before braking begins, which @sec-body-kinetic-momentum charges against the kinetic stopping budget.
-
-### Transduction physics, quantization noise, and Nyquist limits {#sec-body-sensor-transduction}
-
-Sensor selection spends both error tolerance and time. A sensor must resolve the motion of interest, and the filtering or scanning needed to obtain that resolution must fit the freshness deadline. Four mechanisms make this trade-off concrete:
-
-1. **Optical Encoders and Velocity Quantization Noise:**
-   An encoder measures joint angle in discrete increments. An $n$-bit encoder discretizes the continuous $2\pi$ radian circle into angular resolution $\delta \theta = \frac{2\pi}{2^n}$. For an 18-bit absolute encoder, $\delta \theta \approx 2.4 \times 10^{-5}\text{ rad}$ ($0.0014^\circ$); for a 12-bit magnetic encoder, $\delta \theta \approx 1.53 \times 10^{-3}\text{ rad}$ ($0.088^\circ$). Joint velocity must typically be estimated from successive angle samples across control cycle $\Delta t$:
-   $$\dot{\theta}_k \approx \frac{\theta_k - \theta_{k-1}}{\Delta t}$$
-   Backward differencing emphasizes rapid changes between samples, much as a high-pass filter does, so small angle errors can become large velocity errors when divided by a short sampling period. If successive quantization errors are independent and uniformly distributed over one encoder step, each has variance $(\delta\theta)^2/12$. Subtracting two such errors adds their variances, giving velocity-error standard deviation $\sigma_{\dot{\theta}} = \frac{\delta\theta}{\sqrt{6}\,\Delta t}$. This statistical model differs from a single count transition. At a $1\text{ kHz}$ servo loop ($\Delta t = 1\text{ ms}$), a one-count change of $1.53\text{ mrad}$ produces a velocity-estimate jump of $1.53\text{ rad/s}$ ($88^\circ/\text{s}$). If fed directly to velocity feedback or velocity-conditioned policy inputs, these jumps can provoke torque chatter and excite structural vibration. A low-pass filter smooths rapid sample changes, but that smoothing also delays the estimate's response to real motion. Filter selection must therefore balance noise suppression against the freshness budget.
-
-2. **Inertial Measurement Units (IMUs) and Nyquist Aliasing:**
-   An inertial measurement unit (IMU) measures acceleration and angular velocity. Sampling must distinguish the motion of interest from faster structural vibration. Under the Nyquist-Shannon sampling theorem, a band-limited signal requires sampling above twice its highest frequency ($f_s > 2 f_{\max}$). Without adequate analog anti-aliasing filtering, vibrations above that range can appear as slower motion, misleading the state estimator. Raising the software update rate cannot recover information already aliased at the sensor.
-
-3. **Tactile Sensor Arrays and Scanning Bandwidth:**
-   Tactile arrays measure contact stress across a gripper through individual sensing elements called taxels. Scanning the elements one after another reduces wiring, but one frame then spans the whole scan, so the scan period adds directly to observation age and sets the fastest contact event, such as the onset of slip, that the array can resolve. More taxels at the same readout rate mean an older frame.
-
-4. **Cameras and Rolling-Shutter Readout:**
-   A rolling-shutter camera exposes and reads its pixel rows in sequence, so the rows of one frame differ in age by the full readout time, and motion during the readout shears the image. A frame's timestamp must therefore state which row, or which exposure midpoint, it represents. @Sec-perception-transduction-calibration sizes this skew on the mobile manipulator's navigation camera and removes it before the image reaches the estimator.
-
-### The end-to-end sense-to-actuation latency pipeline {#sec-body-latency-pipeline}
-
 ```{python}
 #| label: body-latency-profile-calc
 #| echo: false
@@ -163,8 +130,9 @@ Sensor selection spends both error tolerance and time. A sensor must resolve the
 # ┌─────────────────────────────────────────────────────────────────────────────
 # │ THE PARCEL SORTER'S SENSE-TO-ACTUATION PROFILE (LEGO)
 # ├─────────────────────────────────────────────────────────────────────────────
-# │ Context: @fig-02-latency-waterfall, @tbl-02-latency-breakdown, and the
-# │          freshness-deadline paragraph of @sec-body-measurement-freshness.
+# │ Context: the opening and freshness-deadline paragraphs of
+# │          @sec-body-measurement-freshness, @fig-02-latency-waterfall and
+# │          @tbl-02-latency-breakdown.
 # │ Goal:    Hold the illustrative stage profile in one place so the figure,
 # │          the table, and the caption cannot disagree.
 # │ Show:    20 ms deadline (24 mm at 1.2 m/s); stage P50 sum 35.0 ms, P99 sum
@@ -175,7 +143,7 @@ Sensor selection spends both error tolerance and time. A sensor must resolve the
 # │          replaces it.
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim.core.units import *
-from mlsysim.fmt import fmt_latency, fmt_length, check
+from mlsysim.fmt import fmt_latency, fmt_length, fmt_velocity, check
 
 class ParcelLatencyProfile:
     """Illustrative stage and end-to-end ages for the parcel-sorter picker."""
@@ -203,6 +171,7 @@ class ParcelLatencyProfile:
     travel_p50 = (v_max * sum_p50).to(millimeter)
     travel_p999 = (v_max * sys_p999).to(millimeter)
     excess_p50 = (travel_p50 - e_max).to(millimeter)
+    t_rest_p50 = sum_p50 - stages[2][1] * millisecond  # every stage but the backbone
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(abs(t_fresh.magnitude - 20.0) < 1e-9, f"Freshness deadline drifted: {t_fresh}")
@@ -215,6 +184,7 @@ class ParcelLatencyProfile:
         "The freshness paragraph states 42 mm of travel, 18 mm past the tolerance.",
     )
     check(abs(travel_p999.magnitude - 82.08) < 1e-9, f"Tail travel drifted: {travel_p999}")
+    check(abs(t_rest_p50.magnitude - 16.5) < 1e-9, f"Non-backbone median share drifted: {t_rest_p50}")
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
     t_fresh_str = fmt_latency(t_fresh, unit=millisecond, precision=0)
@@ -225,7 +195,45 @@ class ParcelLatencyProfile:
     t_backbone_str = fmt_latency(stages[2][1] * millisecond, unit=millisecond, precision=1)
     travel_p50_cm_str = fmt_length(travel_p50, unit=ureg.centimeter, precision=1)
     travel_p999_cm_str = fmt_length(travel_p999, unit=ureg.centimeter, precision=1)
+    t_rest_p50_str = fmt_latency(t_rest_p50, unit=millisecond, precision=1)
+    e_max_str = fmt_length(e_max, unit=millimeter, precision=0)
+    v_max_str = fmt_velocity(v_max, unit=meter / second, precision=1)
+    travel_p50_mm_str = fmt_length(travel_p50, unit=millimeter, precision=0)
+    excess_p50_mm_str = fmt_length(excess_p50, unit=millimeter, precision=0)
 ```
+
+Software benchmarks in machine learning frequently report latency as isolated accelerator execution time (e.g., `{python} ParcelLatencyProfile.t_backbone_str` for a vision backbone on an edge NPU), creating the dangerous illusion of a responsive $50\text{ Hz}$ control loop. In physical AI systems, however, that compute kernel is only one intermediate stage in an end-to-end silicon-to-plant dataflow pipeline. **A measurement decays continuously from the instant of physical transduction; what governs physical behavior is its total age when torque actually appears at the joint.** That physical age spans the interval from the moment photons strike a photodiode array, magnetic flux passes a Hall sensor, or strain deflects a piezoresistor to the moment motor inverter switches build stator magnetic flux that changes link acceleration. If a perception policy evaluates an obstacle bounding box in `{python} ParcelLatencyProfile.t_backbone_str`, but exposure integration, sensor readout, PCIe transport, kernel scheduling, fieldbus dispatch, and motor electrical current rise add another `{python} ParcelLatencyProfile.t_rest_p50_str` at the median, the true physical age of the observation when the joint accelerates is `{python} ParcelLatencyProfile.sum_p50_str`, and its tail runs longer still.
+
+During that entire window, the continuous physical environment continues to evolve unobserved. In distributed data systems, read-after-write consistency windows govern whether a client acts on stale or linearized state. In Physical AI, the physical plant is an autonomous, unpausable concurrent writer: world state $\mathbf{x}(t)$ evolves along continuous trajectories at velocity $\mathbf{v}(t)$. An observation age $t_{\text{age}}$ converts directly into unobserved physical displacement $\Delta x \approx \int_0^{t_{\text{age}}} v(t)\,dt$. High-speed machines inevitably act on historical state.
+
+::: {.column-margin .margin-pointer}
+↪ @Sec-memory-belief-through-occlusion derives how long a stored belief stays valid as its measurement ages.
+:::
+
+The rate of world-state change dictates how long a measurement remains valid before acting on it introduces intolerable error. Let $e_{\max}$ denote the maximum acceptable error in a tracked state, such as a joint angle or the position of a part on a conveyor, and let $v_{\max}$ denote the fastest credible velocity at which that state can evolve. The freshness deadline $\Delta t_{\text{fresh}}$ is the upper bound on measurement age before a control action based on that measurement becomes invalid, defined by the inequality
+$$\Delta t_{\text{fresh}} \le \frac{e_{\max}}{v_{\max}}$$
+
+The warehouse that the mobile manipulator serves shows how hard this bound can bite. Upstream of the pick stations, a vision-guided picker on the inbound parcel sorter tracks parcels at a maximum relative velocity $v_{\max} =$ `{python} ParcelLatencyProfile.v_max_str` with a geometric clearance tolerance $e_{\max} =$ `{python} ParcelLatencyProfile.e_max_str`, so its freshness deadline is `{python} ParcelLatencyProfile.t_fresh_str`. If an actuation command reaches the motor based on an image captured `{python} ParcelLatencyProfile.sum_p50_str` earlier, the parcel has displaced by `{python} ParcelLatencyProfile.travel_p50_mm_str`, exceeding the position allowance by `{python} ParcelLatencyProfile.excess_p50_mm_str` and missing the grasp. The sorter's belt is the fast case; the mug riding the mobile manipulator's own pick-station conveyor moves far more slowly, which buys its grasp a longer deadline despite a tighter tolerance, one the five-budget checkpoint later in this chapter asks you to compute. The deadline governs any target that keeps moving while its measurement ages, the parcel and the mug alike. For such a target it limits only motion-induced error, and only while relative velocity is bounded and the initial observation is credible; sensing and estimation errors consume additional tolerance. Conversely, a stationary person standing in an aisle does not move while the observation ages; instead, the robot base moves toward the person, so the observation age converts into unguided vehicular travel before braking begins, which @sec-body-kinetic-momentum charges against the kinetic stopping budget.
+
+### Transduction physics, quantization noise, and Nyquist limits {#sec-body-sensor-transduction}
+
+Sensor selection spends both error tolerance and time. A sensor must resolve the motion of interest, and the filtering or scanning needed to obtain that resolution must fit the freshness deadline. Four mechanisms make this trade-off concrete:
+
+1. **Optical Encoders and Velocity Quantization Noise:**
+   An encoder measures joint angle in discrete increments. An $n$-bit encoder discretizes the continuous $2\pi$ radian circle into angular resolution $\delta \theta = \frac{2\pi}{2^n}$. For an 18-bit absolute encoder, $\delta \theta \approx 2.4 \times 10^{-5}\text{ rad}$ ($0.0014^\circ$); for a 12-bit magnetic encoder, $\delta \theta \approx 1.53 \times 10^{-3}\text{ rad}$ ($0.088^\circ$). Joint velocity must typically be estimated from successive angle samples across control cycle $\Delta t$:
+   $$\dot{\theta}_k \approx \frac{\theta_k - \theta_{k-1}}{\Delta t}$$
+   Backward differencing emphasizes rapid changes between samples, much as a high-pass filter does, so small angle errors can become large velocity errors when divided by a short sampling period. If successive quantization errors are independent and uniformly distributed over one encoder step, each has variance $(\delta\theta)^2/12$. Subtracting two such errors adds their variances, giving velocity-error standard deviation $\sigma_{\dot{\theta}} = \frac{\delta\theta}{\sqrt{6}\,\Delta t}$. This statistical model differs from a single count transition. At a $1\text{ kHz}$ servo loop ($\Delta t = 1\text{ ms}$), a one-count change of $1.53\text{ mrad}$ produces a velocity-estimate jump of $1.53\text{ rad/s}$ ($88^\circ/\text{s}$). If fed directly to velocity feedback or velocity-conditioned policy inputs, these jumps can provoke torque chatter and excite structural vibration. A low-pass filter smooths rapid sample changes, but that smoothing also delays the estimate's response to real motion. Filter selection must therefore balance noise suppression against the freshness budget.
+
+2. **Inertial Measurement Units (IMUs) and Nyquist Aliasing:**
+   An inertial measurement unit (IMU) measures acceleration and angular velocity. Sampling must distinguish the motion of interest from faster structural vibration. Under the Nyquist-Shannon sampling theorem, a band-limited signal requires sampling above twice its highest frequency ($f_s > 2 f_{\max}$). Without adequate analog anti-aliasing filtering, vibrations above that range can appear as slower motion, misleading the state estimator. Raising the software update rate cannot recover information already aliased at the sensor.
+
+3. **Tactile Sensor Arrays and Scanning Bandwidth:**
+   Tactile arrays measure contact stress across a gripper through individual sensing elements called taxels. Scanning the elements one after another reduces wiring, but one frame then spans the whole scan, so the scan period adds directly to observation age and sets the fastest contact event, such as the onset of slip, that the array can resolve. More taxels at the same readout rate mean an older frame.
+
+4. **Cameras and Rolling-Shutter Readout:**
+   A rolling-shutter camera exposes and reads its pixel rows in sequence, so the rows of one frame differ in age by the full readout time, and motion during the readout shears the image. A frame's timestamp must therefore state which row, or which exposure midpoint, it represents. @Sec-perception-transduction-calibration sizes this skew on the mobile manipulator's navigation camera and removes it before the image reaches the estimator.
+
+### The end-to-end sense-to-actuation latency pipeline {#sec-body-latency-pipeline}
 
 ::: {#fig-02-latency-waterfall fig-env="figure" fig-pos="t" fig-cap="**Where a measurement's age comes from**: (a) The illustrative stages of @tbl-02-latency-breakdown laid end to end at their medians, with each stage's $P_{99}$ as a thin extension. The backbone's `{python} ParcelLatencyProfile.t_backbone_str` alone fits the parcel sorter's `{python} ParcelLatencyProfile.t_fresh_str` deadline; the stages around it do not. (b) The end-to-end age at the median, `{python} ParcelLatencyProfile.sum_p50_str`, and at $P_{99.9}$, `{python} ParcelLatencyProfile.sys_p999_str`, against that deadline; the shaded part of each bar is the overrun. At the parcel's speed they correspond to `{python} ParcelLatencyProfile.travel_p50_cm_str` and `{python} ParcelLatencyProfile.travel_p999_cm_str` of unguided motion." fig-alt="Two panels sharing a time axis in milliseconds from 0 to 85. Panel a: six horizontal bars, one per stage, placed end to end: exposure and readout, transport and DMA, backbone and policy, scheduling and IPC, fieldbus, and current rise, each with a thin extension to its 99th percentile. A red vertical line marks the 20 millisecond deadline; the median chain ends at 35 milliseconds. Panel b: two bars labeled median 35.0 milliseconds and 99.9th percentile 68.4 milliseconds, each shaded red beyond the 20 millisecond line, annotated 4.2 centimeters and 8.2 centimeters of travel."}
 
@@ -318,7 +326,7 @@ The stage timings behind the figure (@tbl-02-latency-breakdown), profiled on the
 | **Arithmetic Stage Sum**           | Sum of each column's stage values; not an end-to-end quantile    |    **35.0**   |    **50.0**   | **80.7** |
 | **End-to-End Age**                 | System-level profile ($t_{\text{transduction}} \to \tau$)        |    **35.0**   |    **46.2**   | **80.7** |
 
-: **Illustrative sense-to-actuation latency decomposition**: Stage and system-level timings show why the arithmetic sum of stage percentiles is not the end-to-end tail. The example's $P_{99.9} = 68.4\text{ ms}$ exceeds the $20\text{ ms}$ freshness deadline of the parcel sorter. {#tbl-02-latency-breakdown tbl-colwidths="[26,38,12,12,12]"}
+: **Illustrative sense-to-actuation latency decomposition**: Stage and system-level timings show why the arithmetic sum of stage percentiles is not the end-to-end tail. The example's $P_{99.9}$ of `{python} ParcelLatencyProfile.sys_p999_str` exceeds the parcel sorter's `{python} ParcelLatencyProfile.t_fresh_str` freshness deadline. {#tbl-02-latency-breakdown tbl-colwidths="[26,38,12,12,12]"}
 
 The `{python} ParcelLatencyProfile.sum_p99_str` sum of stage $P_{99}$ values differs from the `{python} ParcelLatencyProfile.sys_p99_str` system percentile, and against the `{python} ParcelLatencyProfile.t_fresh_str` deadline even the `{python} ParcelLatencyProfile.sum_p50_str` median would be late.
 
@@ -1760,7 +1768,10 @@ ax.text(0.0, 1.03, "(a)", transform=ax.transAxes, fontsize=10.5, fontweight="bol
 tau_s = T.tau.to(second).magnitude
 t_inf = T.t_inf.to(ureg.degC).magnitude
 t = np.linspace(0, 100, 400)
-for T0, t_hit, lab, xy in [(T.t_amb, T.t_cold, "from ambient", (3, 30)), (T.t_equil, T.t_hot, "from $S_1$ equilibrium", (12, 92))]:
+for T0, t_hit, lab, xy in [
+    (T.t_amb, T.t_cold, "from ambient", (3, 30)),
+    (T.t_equil, T.t_hot, "from $S_1$ equilibrium", (14, 172)),
+]:  # label above-left of its dashed curve, clear of the solid one
     T0c = T0.to(ureg.degC).magnitude
     curve = t_inf - (t_inf - T0c) * np.exp(-t / tau_s)
     bx.plot(t, curve, color=R["measured"], lw=1.8, ls="-" if xy[0] < 10 else (0, (5, 2)))

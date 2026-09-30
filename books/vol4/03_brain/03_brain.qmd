@@ -166,27 +166,29 @@ fig, ax, COLORS, plt = viz.setup_plot(figsize=(7, 4.5))
 ax.set_xscale("log")
 ax.set_yscale("log")
 ax.axhspan(100, 1000, color="gray", alpha=0.12, label="Permission and servo loops (100–1000 Hz)")
-ax.axhspan(10, 50, color="#0D9488", alpha=0.08, label="Chunk renewal (10–50 Hz)")
-ax.axhspan(1, 5, color="#E11D48", alpha=0.06, label="Intent revision (1–5 Hz)")
+# Vol IV roles: learned proposers in the proposal role (bronze); red is reserved for consequence.
+PROPOSAL = "#B87333"
+ax.axhspan(10, 50, color="#007A87", alpha=0.08, label="Chunk renewal (10–50 Hz)")
+ax.axhspan(1, 5, color="#B87333", alpha=0.08, label="Intent revision (1–5 Hz)")
 for (k, f), ls in zip(_ceiling.items(), ["-", "--"]):
     ax.plot(_n, f, ls, color=COLORS["BlueLine"], lw=1.4, label=f"Streaming ceiling, {k}")
-ax.plot(*_chunk, "o", ms=9, color=COLORS["VioletLine"], zorder=5)
+ax.plot(*_chunk, "o", ms=9, color=PROPOSAL, zorder=5)
 ax.annotate(
     "Chunk policy\n(ACT, 20 Hz)",
     xy=_chunk,
     xytext=(_chunk[0] * 0.18, _chunk[1] * 0.25),
     fontsize=8,
-    color=COLORS["VioletLine"],
-    arrowprops=dict(arrowstyle="->", color=COLORS["VioletLine"], lw=0.9),
+    color=PROPOSAL,
+    arrowprops=dict(arrowstyle="->", color=PROPOSAL, lw=0.9),
 )
-ax.plot(*_intent, "o", ms=9, color=COLORS["VioletLine"], zorder=5)
+ax.plot(*_intent, "o", ms=9, color=PROPOSAL, zorder=5)
 ax.annotate(
     "Intent model\n(INT4, 2 Hz)",
     xy=_intent,
     xytext=(_intent[0] * 0.05, _intent[1] * 0.3),
     fontsize=8,
-    color=COLORS["VioletLine"],
-    arrowprops=dict(arrowstyle="->", color=COLORS["VioletLine"], lw=0.9),
+    color=PROPOSAL,
+    arrowprops=dict(arrowstyle="->", color=PROPOSAL, lw=0.9),
 )
 ax.set_xlim(1e7, 3e10)
 ax.set_ylim(0.3, 3e4)
@@ -423,10 +425,6 @@ When each evaluation streams weights that cannot remain on-chip, memory bandwidt
 
 On-chip static RAM (SRAM) and caches can reuse weights and intermediate state without another external transfer, but only while the working set fits the memory available to that workload. Off-chip LPDDR5 provides much greater capacity through a narrower shared interface. Cache sizes, access latency, and attainable bandwidth depend on the particular processor and allocation; nominal chip-wide capacity does not establish that an action head will remain resident.
 
-To understand the physical consequence of this bandwidth ceiling, consider what happens if a robot attempts to generate continuous motor actions one discrete step at a time through an autoregressive foundation model (such as a multi-billion-parameter VLA model). For a decoder that revisits nonresident weights at each token step, each evaluation streams those weights across the external DRAM bus. In single-token decoding with FP16 weights and request batch size $B = 1$, the dense weight projections become matrix-vector operations ($\mathbf{y} = \mathbf{W}\mathbf{x}$), yielding an arithmetic intensity, the operations performed per byte transferred, of just $I \approx 1.0\,\text{FLOP/byte}$. The sustained memory bandwidth $B_{\text{mem}}$ and model weight footprint $M_{\text{weights}}$ strictly bound the maximum fresh-evaluation frequency:
-$$f \le \frac{B_{\text{mem}}}{M_{\text{weights}}}$$
-This bound must use the bandwidth actually available to the policy and the weights it transfers at the selected precision. It prices only the weight transfer. A fresh evaluation first reads its input tokens (image patches and the instruction) through the backbone in one pass, the **prefill**\index{Prefill!compute-bound phase}, and that pass reuses every fetched weight across all of those tokens, so arithmetic rather than bandwidth can bind it. The worked example in \ref{nbk-brain-intent-model-latency} prices both terms for the mobile manipulator's intent model. When a decoder emits one token per action dimension, each action dimension requires another token; if each token revisits off-chip parameters, that decode latency scales linearly with degrees of freedom.
-
 ```{python}
 #| label: calc-brain-intent-model-latency
 #| echo: false
@@ -622,15 +620,6 @@ class IntentModelLatency:
     )
 ```
 
-This memory wall[^fn-hw-dram-bandwidth] places single-token streaming deep in the memory-bound region of the roofline (@fig-patterson-roofline) [@williams2009roofline]. On the mobile manipulator's application processor it caps the intent model's fresh-evaluation rate, before any vision or decoding work, far below the $100\text{--}1000\,\text{Hz}$ at which stabilization, joint impedance control, and reflex-level collision avoidance run (\ref{nbk-brain-intent-model-latency}). A model renewed that slowly can say where the arm should go, but it cannot close the loop on moving mass, so it proposes waypoints and a faster loop below it tracks them. That conclusion is about timing only. The separate requirement that learned outputs remain proposals, even when they arrive in time, comes from the failures of @sec-brain-cognitive-vulnerabilities.
-
-[Single-token decoding at batch size 1]{.heading-3-inline}
-Servers can combine independent requests so that a weight matrix multiplies several input vectors at once, reusing fetched weights. A robot waiting for its next action token often has only one such request. Waiting for future observations to form a batch would add delay, and sequentially dependent action tokens cannot all be evaluated at once by an autoregressive decoder. This limits reuse in those projections. It does not make every operation in an embodied model a matrix-vector product. Image patches, multiple camera views, prompt tokens, and parallel action decoders can expose matrix-matrix work within one robot's request. The low-intensity estimate therefore describes the single-token weight sweep, not the complete perception-and-action workload.
-
-[^fn-hw-dram-bandwidth]: **Autoregressive DRAM Bandwidth Saturation**\index{GPU!memory bandwidth wall}: Sequential action tokens can trigger repeated full-model weight traffic when weights are nonresident and the decoder revisits the backbone; cache behavior and hardware determine the actual bandwidth ceiling. Action chunking is one way to reduce the number of full policy evaluations per unit of physical time.
-
-Repeated off-chip transfers also consume memory-system energy. Their power cost depends on the DRAM, controller, access pattern, and transfer rate, so a bandwidth calculation alone does not establish battery drain or actuator heating. The processor's measured power and the chassis thermal path belong in the shared thermal budget of @sec-body-thermal-duty-cycles.
-
 ::: {#fig-patterson-roofline fig-env="figure" fig-pos="t" fig-cap="**Illustrative embodied roofline**: Arithmetic intensity against attainable throughput using the application processor's dense FP16 GPU ceiling and rounded peak memory bandwidth. Single-token weight streaming sits deep in the memory-bound region, while the intent model's prefill, which reuses each fetched weight across all of its input tokens, lies past the ridge where compute binds. Chunk length alone does not determine arithmetic intensity; chunked workloads require measured operations and memory traffic. A separate real-time loop executes accepted waypoints between fresh model updates." fig-alt="Illustrative roofline diagram plotting arithmetic intensity against attainable throughput, with a single-token weight-streaming point on the sloped memory-bound roof, an intent-model prefill point on the flat compute-bound roof, and a ridge separating the two bounds."}
 
 ```{python}
@@ -639,14 +628,15 @@ Repeated off-chip transfers also consume memory-system energy. Their power cost 
 #| message: false
 # ┌─────────────────────────────────────────────────────────────────────────────
 # │ EMBODIED ROOFLINE (FIGURE)
-# │ Context: @fig-patterson-roofline
+# │ Context: @fig-patterson-roofline, placed ahead of the memory-wall bound
+# │          f <= B_mem / M_weights that it illustrates
 # │ Goal:    show single-token decode inside the memory-bound regime and the
 # │          intent model's prefill past the ridge
 # │ Show:    arithmetic intensity against attainable throughput for an edge part
 # │ How:     roof from the registry node; one point represents an FP16
 # │          matrix-vector weight sweep, excluding other memory traffic; the
 # │          other the intent model's prefill (intensity ~ S, from
-# │          calc-brain-intent-model-latency)
+# │          calc-brain-intent-model-latency, which therefore runs first)
 # ├─────────────────────────────────────────────────────────────────────────────
 from mlsysim import viz
 from mlsysim import Embodied
@@ -711,7 +701,7 @@ for t in ax.texts:
         t.xyann = (ridge * 0.12, peak * 0.55)
         t.arrow_patch.set_color(INK)
     elif s.startswith("MEMORY"):
-        t.set_position((t.get_position()[0], peak * 0.0025))  # below the roof line
+        t.set_position((t.get_position()[0], peak * 0.008))  # below the roof line, clear of the ridge annotation
 for idx, (label, ai) in enumerate(points):
     y = attainable(ai)
     ax.plot(ai, y, "o", ms=8, color=PROPOSAL, zorder=11)
@@ -730,7 +720,7 @@ for idx, (label, ai) in enumerate(points):
         ha=ha,
         va=va,
         zorder=11,
-        arrowprops=dict(arrowstyle="->", color=COLORS["VioletLine"], lw=0.9),
+        arrowprops=dict(arrowstyle="->", color=PROPOSAL, lw=0.9),  # leader in the label's proposal role
     )
 
 # the reuse a workload would need before it left the memory-bound regime
@@ -751,6 +741,19 @@ plt.show()
 ```
 
 :::
+
+To understand the physical consequence of this bandwidth ceiling, consider what happens if a robot attempts to generate continuous motor actions one discrete step at a time through an autoregressive foundation model (such as a multi-billion-parameter VLA model). For a decoder that revisits nonresident weights at each token step, each evaluation streams those weights across the external DRAM bus. In single-token decoding with FP16 weights and request batch size $B = 1$, the dense weight projections become matrix-vector operations ($\mathbf{y} = \mathbf{W}\mathbf{x}$), yielding an arithmetic intensity, the operations performed per byte transferred, of just $I \approx 1.0\,\text{FLOP/byte}$. The sustained memory bandwidth $B_{\text{mem}}$ and model weight footprint $M_{\text{weights}}$ strictly bound the maximum fresh-evaluation frequency:
+$$f \le \frac{B_{\text{mem}}}{M_{\text{weights}}}$$
+This bound must use the bandwidth actually available to the policy and the weights it transfers at the selected precision. It prices only the weight transfer. A fresh evaluation first reads its input tokens (image patches and the instruction) through the backbone in one pass, the **prefill**\index{Prefill!compute-bound phase}, and that pass reuses every fetched weight across all of those tokens, so arithmetic rather than bandwidth can bind it. The worked example in \ref{nbk-brain-intent-model-latency} prices both terms for the mobile manipulator's intent model. When a decoder emits one token per action dimension, each action dimension requires another token; if each token revisits off-chip parameters, that decode latency scales linearly with degrees of freedom.
+
+This memory wall[^fn-hw-dram-bandwidth] places single-token streaming deep in the memory-bound region of the roofline (@fig-patterson-roofline) [@williams2009roofline]. On the mobile manipulator's application processor it caps the intent model's fresh-evaluation rate, before any vision or decoding work, far below the $100\text{--}1000\,\text{Hz}$ at which stabilization, joint impedance control, and reflex-level collision avoidance run (\ref{nbk-brain-intent-model-latency}). A model renewed that slowly can say where the arm should go, but it cannot close the loop on moving mass, so it proposes waypoints and a faster loop below it tracks them. That conclusion is about timing only. The separate requirement that learned outputs remain proposals, even when they arrive in time, comes from the failures of @sec-brain-cognitive-vulnerabilities.
+
+[Single-token decoding at batch size 1]{.heading-3-inline}
+Servers can combine independent requests so that a weight matrix multiplies several input vectors at once, reusing fetched weights. A robot waiting for its next action token often has only one such request. Waiting for future observations to form a batch would add delay, and sequentially dependent action tokens cannot all be evaluated at once by an autoregressive decoder. This limits reuse in those projections. It does not make every operation in an embodied model a matrix-vector product. Image patches, multiple camera views, prompt tokens, and parallel action decoders can expose matrix-matrix work within one robot's request. The low-intensity estimate therefore describes the single-token weight sweep, not the complete perception-and-action workload.
+
+[^fn-hw-dram-bandwidth]: **Autoregressive DRAM Bandwidth Saturation**\index{GPU!memory bandwidth wall}: Sequential action tokens can trigger repeated full-model weight traffic when weights are nonresident and the decoder revisits the backbone; cache behavior and hardware determine the actual bandwidth ceiling. Action chunking is one way to reduce the number of full policy evaluations per unit of physical time.
+
+Repeated off-chip transfers also consume memory-system energy. Their power cost depends on the DRAM, controller, access pattern, and transfer rate, so a bandwidth calculation alone does not establish battery drain or actuator heating. The processor's measured power and the chassis thermal path belong in the shared thermal budget of @sec-body-thermal-duty-cycles.
 
 The roofline model in @fig-patterson-roofline formalizes the hardware boundary governing embodied inference by plotting attainable computational throughput against **arithmetic intensity** ($I$), defined as:
 $$I = \frac{\text{FLOPs}}{\text{Bytes transferred from off-chip memory}}$$
