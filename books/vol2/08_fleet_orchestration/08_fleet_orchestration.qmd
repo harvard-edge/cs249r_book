@@ -1145,7 +1145,7 @@ Rail-aware scheduling\index{Topology-Aware Scheduling!rail-aware} assigns corres
 
 The interaction between rail-aware scheduling and topology-aware placement creates a multi-dimensional optimization problem. The scheduler must simultaneously optimize for high-bandwidth-domain locality (the tensor-parallel group must meet its communication budget), intra-rack switch locality (pipeline parallelism benefits from minimal switch hops between stages), and rail alignment (data parallelism benefits from same-rail communication). These three objectives are partially conflicting: constraining data parallel replicas to specific GPU positions within each node (for rail alignment) reduces the scheduler's flexibility to choose nodes based on rack locality, and requiring full-node allocations for NVLink locality prevents sharing nodes between jobs that could improve packing efficiency.
 
-A scheduler can resolve these conflicts using weighted scoring functions whose priorities follow the workload (@fig-fleet-orchestration-hierarchical-placement). Frequent tensor-parallel exchanges may justify a high locality weight; large data-parallel exchanges may make rail alignment more valuable. Neither ordering is universal. Even a single-node allocation can have meaningful topology constraints when GPUs occupy different interconnect, PCIe, or non-uniform memory access (NUMA) domains. Packing efficiency should therefore be optimized only among placements that satisfy the job's local and external communication contract.
+As illustrated in @fig-fleet-orchestration-hierarchical-placement, a scheduler can resolve these conflicts by mapping parallelism dimensions onto physical interconnect hierarchies. Frequent tensor-parallel exchanges may justify a high locality weight; large data-parallel exchanges may make rail alignment more valuable. Neither ordering is universal. Even a single-node allocation can have meaningful topology constraints when GPUs occupy different interconnect, PCIe, or non-uniform memory access (NUMA) domains. Packing efficiency should therefore be optimized only among placements that satisfy the job's local and external communication contract.
 
 ::: {#fig-fleet-orchestration-hierarchical-placement fig-env="figure" fig-pos="htb" fig-cap="**Hierarchical placement for 3D parallelism**: This placement example maps distributed training dimensions to physical interconnect layers. Tensor parallelism (TP), which exchanges activations at every layer, stays inside a node on NVLink (`{python} FleetTopologyInterconnect.nvlink_h100_perdir_gb_per_s_str`); pipeline parallelism (PP) maps across adjacent nodes under one leaf switch (`{python} FleetTopologyInterconnect.ib_ndr_gb_per_s_str`); and data parallelism (DP), which exchanges gradients only once per step, spans racks through the oversubscribed spine, where rail-aligned placement keeps each rank on its own rail of switches. Bandwidths are per direction, as in @fig-fleet-orchestration-topology-hierarchy." fig-alt="Three rows, each an arrow from a parallelism dimension to a hardware domain. Tensor parallelism, activations at every layer, maps over NVLink at 450 GB/s to one node of 8 GPUs on one NVSwitch. Pipeline parallelism, activations at stage boundaries, maps over the leaf switch at 50 GB/s to adjacent nodes in one rack. Data parallelism, gradients once per step, maps over the spine at about 12.5 to 25 GB/s to replicas across racks."}
 ![](images/svg/hierarchical-placement.svg)
@@ -2478,13 +2478,13 @@ phase = np.where(
     np.pi + np.pi * (t + 24 - t_high) / (24 + t_low - t_high),
     np.where(t < t_high, np.pi * (t - t_low) / (t_high - t_low), np.pi + np.pi * (t - t_high) / (24 + t_low - t_high)),
 )
-u = ((1 - np.cos(phase)) / 2) ** 2          # time average 3/8, maximum 1
+u = ((1 - np.cos(phase)) / 2) ** 2  # time average 3/8, maximum 1
 u_mean = 3 / 8
 amp = (D.peak_demand - D.serving_avg) / (1 - u_mean)
 base = D.peak_demand - amp
 demand = base + amp * u
 
-serving_alloc = demand + D.safety_buffer          # never exceeds the reservation
+serving_alloc = demand + D.safety_buffer  # never exceeds the reservation
 reclaimed = D.serving_peak - serving_alloc
 check(np.all(serving_alloc <= D.serving_peak + 1e-9), "buffered serving must fit inside the reservation")
 check(abs(np.trapezoid(reclaimed, t) / 24 - D.reclaimed) < 1.0, "figure's daily-average reclaim must match the notebook")
@@ -2498,14 +2498,38 @@ ax.fill_between(t, D.serving_peak, top_train, color=COLORS['BlueLine'], alpha=0.
 ax.axhline(D.serving_peak, color=COLORS['primary'], ls='--', lw=1.1)
 ax.axhline(D.fleet, color=COLORS['grid'], lw=0.8)
 
-ax.text(23.6, D.serving_peak + 14, f'static serving reservation ({D.serving_peak:,} GPUs)', ha='right', va='bottom', fontsize=9, color=COLORS['primary'],
-        bbox=dict(boxstyle='round,pad=0.2', facecolor='white', edgecolor='none', alpha=0.85))
-ax.text(12, (D.serving_peak + top_train) / 2, f'training base: {D.training_fixed:,} GPUs', ha='center', va='center', fontsize=10, color='white', fontweight='bold')
+ax.text(
+    23.6,
+    D.serving_peak + 14,
+    f'static serving reservation ({D.serving_peak:,} GPUs)',
+    ha='right',
+    va='bottom',
+    fontsize=9,
+    color=COLORS['primary'],
+    bbox=dict(boxstyle='round,pad=0.2', facecolor='white', edgecolor='none', alpha=0.85),
+)
+ax.text(
+    12,
+    (D.serving_peak + top_train) / 2,
+    f'training base: {D.training_fixed:,} GPUs',
+    ha='center',
+    va='center',
+    fontsize=10,
+    color='white',
+    fontweight='bold',
+)
 ax.annotate(f'reclaimed for training\n(average {D.reclaimed:,})', xy=(3, 330), ha='center', va='center', fontsize=9, color=COLORS['primary'])
 ax.annotate(f'serving demand\n(average {D.serving_avg:,}, peak {D.peak_demand:,})', xy=(14, 70), ha='center', va='center', fontsize=9, color='white')
-ax.annotate(f'surge buffer ({D.safety_buffer:,})', xy=(20.5, float(np.interp(20.5, t, demand + D.safety_buffer / 2))), xytext=(20.8, 300),
-            ha='center', va='center', fontsize=9, color=COLORS['primary'],
-            arrowprops=dict(arrowstyle='-', color=COLORS['primary'], lw=0.6))
+ax.annotate(
+    f'surge buffer ({D.safety_buffer:,})',
+    xy=(20.5, float(np.interp(20.5, t, demand + D.safety_buffer / 2))),
+    xytext=(20.8, 300),
+    ha='center',
+    va='center',
+    fontsize=9,
+    color=COLORS['primary'],
+    arrowprops=dict(arrowstyle='-', color=COLORS['primary'], lw=0.6),
+)
 
 ax.set_xlim(0, 24)
 ax.set_ylim(0, D.fleet)
