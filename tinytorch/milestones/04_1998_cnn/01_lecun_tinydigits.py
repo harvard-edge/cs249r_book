@@ -110,6 +110,38 @@ from tinytorch.core.dataloader import DataLoader, TensorDataset
 
 console = Console()
 
+# Success criterion. The docstring expects 85-95% test accuracy, but measured
+# 2026-09-28 over three full 50-epoch runs of this script: 85.5%, 85.0%, 86.0%.
+# A correct CNN lands at the bottom of that stated range, so gating at 85%
+# would fail correct work on an unlucky shuffle. 75% fails a network that has
+# not learned while leaving margin for run-to-run variation.
+MIN_TEST_ACCURACY = 75.0
+
+# Accuracy alone cannot prove the CONVOLUTION learned. 2026-09-29: with every
+# Conv2d filter gradient forced to zero (filters frozen at their random init),
+# this script still reached 80.5-81% test accuracy, because the Linear head can
+# classify 8x8 digits from 72 random-filter features. So the milestone also
+# checks the thing it claims to teach: YOUR Conv2d backward must deliver a
+# non-zero gradient to every filter, and the filters must actually move.
+#
+# Relative change = ||W_final - W_init|| / ||W_init|| for each Conv2d weight.
+# Measured 2026-09-29, full 50-epoch runs of this script:
+#
+#   run                                test acc     filters moved   max |grad|
+#   correct (3 runs)                   86.0-86.5%   76.0-76.1%      0.25-0.34
+#   filter gradients zeroed (frozen)   81.0%         0.0%           0
+#   filter gradients scaled by 0.1     81.0%        14.5%           4.2e-2
+#   filter gradients scaled by 0.01    81.0%         1.7%           4.5e-3
+#   filter gradients scaled by 0.001   81.0%         0.2%           4.1e-4
+#
+# Accuracy separates correct from broken by 5 points (10 of 200 test images);
+# filter movement separates them by 76% vs at most 14.5%. The 25% threshold
+# sits 3x below the correct runs and fails a conv whose gradient is missing
+# or 10x too small. That is why MIN_TEST_ACCURACY can stay at 75%: raising it
+# to ~83% would split today's numbers too, but on a margin of a few test
+# images, and it would still say nothing about whether the convolution learned.
+MIN_CONV_RELATIVE_CHANGE = 0.25
+
 # Note: Autograd is automatically enabled when tinytorch is imported
 
 # =============================================================================
@@ -156,55 +188,7 @@ console = Console()
 
 
 # ============================================================================
-# 📊 DATA LOADING
-# ============================================================================
-
-def load_digits_dataset():
-    """
-    Load the TinyDigits dataset (8×8 curated digits).
-
-    Returns 150 training + 47 test grayscale images of handwritten digits (0-9).
-    Each image is 8×8 pixels, perfect for quick CNN demonstrations.
-    Ships with TinyTorch - no downloads needed!
-    """
-    # Load from TinyDigits dataset (shipped with TinyTorch)
-    project_root = Path(__file__).parent.parent.parent
-    train_path = project_root / "datasets" / "tinydigits" / "train.pkl"
-    test_path = project_root / "datasets" / "tinydigits" / "test.pkl"
-
-    if not train_path.exists() or not test_path.exists():
-        console.print(f"[red]✗ TinyDigits dataset not found![/red]")
-        console.print(f"[yellow]Expected location: {train_path.parent}[/yellow]")
-        console.print("[yellow]Run: python3 datasets/tinydigits/create_tinydigits.py[/yellow]")
-        sys.exit(1)
-
-    # Load training data
-    with open(train_path, 'rb') as f:
-        train_data = pickle.load(f)
-    train_images = train_data['images']  # (150, 8, 8)
-    train_labels = train_data['labels']  # (150,)
-
-    # Load test data
-    with open(test_path, 'rb') as f:
-        test_data = pickle.load(f)
-    test_images = test_data['images']  # (47, 8, 8)
-    test_labels = test_data['labels']  # (47,)
-
-    # CNN expects (batch, channels, height, width)
-    # Add channel dimension: (N, 8, 8) → (N, 1, 8, 8)
-    train_images = train_images[:, np.newaxis, :, :]  # (150, 1, 8, 8)
-    test_images = test_images[:, np.newaxis, :, :]    # (47, 1, 8, 8)
-
-    return (
-        Tensor(train_images.astype(np.float32)),
-        Tensor(train_labels.astype(np.int64)),
-        Tensor(test_images.astype(np.float32)),
-        Tensor(test_labels.astype(np.int64))
-    )
-
-
-# ============================================================================
-# 🏗️ NETWORK ARCHITECTURE
+# 🎓 ZONE 1: STUDENT LEGO BRICKS (LeNet CNN Architecture)
 # ============================================================================
 
 class SimpleCNN:
@@ -260,11 +244,121 @@ class SimpleCNN:
 
 
 # ============================================================================
+# 📊 ZONE 2: MILESTONE HARNESS & TRAINING UX
+# ============================================================================
+
+def load_digits_dataset():
+    """
+    Load the TinyDigits dataset (8×8 curated digits).
+
+    Returns 150 training + 47 test grayscale images of handwritten digits (0-9).
+    Each image is 8×8 pixels, perfect for quick CNN demonstrations.
+    Ships with TinyTorch - no downloads needed!
+    """
+    # Load from TinyDigits dataset (shipped with TinyTorch)
+    project_root = Path(__file__).parent.parent.parent
+    train_path = project_root / "datasets" / "tinydigits" / "train.pkl"
+    test_path = project_root / "datasets" / "tinydigits" / "test.pkl"
+
+    if not train_path.exists() or not test_path.exists():
+        console.print(f"[red]✗ TinyDigits dataset not found![/red]")
+        console.print(f"[yellow]Expected location: {train_path.parent}[/yellow]")
+        console.print("[yellow]Run: python3 datasets/tinydigits/create_tinydigits.py[/yellow]")
+        sys.exit(1)
+
+    # Load training data
+    with open(train_path, 'rb') as f:
+        train_data = pickle.load(f)
+    train_images = train_data['images']  # (150, 8, 8)
+    train_labels = train_data['labels']  # (150,)
+
+    # Load test data
+    with open(test_path, 'rb') as f:
+        test_data = pickle.load(f)
+    test_images = test_data['images']  # (47, 8, 8)
+    test_labels = test_data['labels']  # (47,)
+
+    # CNN expects (batch, channels, height, width)
+    # Add channel dimension: (N, 8, 8) → (N, 1, 8, 8)
+    train_images = train_images[:, np.newaxis, :, :]  # (150, 1, 8, 8)
+    test_images = test_images[:, np.newaxis, :, :]    # (47, 1, 8, 8)
+
+    return (
+        Tensor(train_images.astype(np.float32)),
+        Tensor(train_labels.astype(np.int64)),
+        Tensor(test_images.astype(np.float32)),
+        Tensor(test_labels.astype(np.int64))
+    )
+
+
+# ============================================================================
 # 🎯 TRAINING & EVALUATION
 # ============================================================================
 
-def train_epoch(model, dataloader, criterion, optimizer):
-    """Train for one epoch."""
+def conv_layers(model):
+    """Every Conv2d the model owns, in attribute order."""
+    return [layer for layer in vars(model).values() if isinstance(layer, Conv2d)]
+
+
+class ConvGradientMonitor:
+    """Remember the largest filter gradient each Conv2d received in training.
+
+    Called right after loss.backward() and before optimizer.step(), which is
+    the only moment the gradient YOUR autograd computed is visible.
+    """
+
+    def __init__(self, layers):
+        self.layers = list(layers)
+        self.max_abs_grad = [0.0 for _ in self.layers]
+
+    def __call__(self):
+        for i, layer in enumerate(self.layers):
+            grad = layer.weight.grad
+            if grad is None:
+                continue
+            grad = np.asarray(getattr(grad, "data", grad), dtype=np.float64)
+            if np.all(np.isfinite(grad)):
+                self.max_abs_grad[i] = max(self.max_abs_grad[i], float(np.max(np.abs(grad))))
+
+
+def relative_change(before, after):
+    """||after - before|| / ||before||: how far a weight tensor moved."""
+    before = np.asarray(before, dtype=np.float64)
+    after = np.asarray(after, dtype=np.float64)
+    scale = np.linalg.norm(before)
+    if scale == 0:
+        scale = 1.0
+    return float(np.linalg.norm(after - before) / scale)
+
+
+def conv_learning_failures(max_abs_grads, relative_changes,
+                           min_relative_change=MIN_CONV_RELATIVE_CHANGE):
+    """Return a list of reasons the convolution did not learn (empty = learned).
+
+    max_abs_grads: largest |gradient| each Conv2d weight saw during training.
+    relative_changes: relative_change(init, final) for each Conv2d weight.
+    """
+    failures = []
+    if not max_abs_grads:
+        failures.append("the model has no Conv2d layer")
+    for i, (g, rel) in enumerate(zip(max_abs_grads, relative_changes)):
+        if not np.isfinite(g) or g == 0.0:
+            failures.append(f"Conv2d #{i + 1} never received a non-zero filter gradient")
+        if not np.isfinite(rel):
+            failures.append(f"Conv2d #{i + 1} filters became NaN/inf")
+        elif rel < min_relative_change:
+            failures.append(
+                f"Conv2d #{i + 1} filters moved only {rel:.1%} from their random init "
+                f"(a learning conv moves at least {min_relative_change:.0%})")
+    return failures
+
+
+def train_epoch(model, dataloader, criterion, optimizer, on_backward=None):
+    """Train for one epoch.
+
+    on_backward, if given, is called after each loss.backward() and before
+    optimizer.step(), so the gate can see the gradients YOUR autograd produced.
+    """
     total_loss = 0.0
     n_samples = 0
 
@@ -275,6 +369,8 @@ def train_epoch(model, dataloader, criterion, optimizer):
 
         # Backward pass
         loss.backward()
+        if on_backward is not None:
+            on_backward()
 
         # Update weights
         optimizer.step()
@@ -287,6 +383,62 @@ def train_epoch(model, dataloader, criterion, optimizer):
     return total_loss / n_samples
 
 
+# ============================================================================
+# 🔎 LOSS FORWARD CHECK (is YOUR Module 04 loss value right?)
+# ============================================================================
+#
+# 2026-09-29: with CrossEntropy's forward returning 0, this milestone still
+# passed. Training only needs the gradient, and the gradient comes from the
+# backward pass, so the network learned while every printed loss was wrong.
+# One batch, checked against an independent NumPy computation before training
+# starts, catches that without touching the training run.
+
+def reference_cross_entropy(logits, targets):
+    """Mean cross-entropy computed directly in NumPy (Module 04's definition).
+
+    Uses the stable log-softmax: subtract each row's max before exponentiating.
+    """
+    z = np.asarray(logits, dtype=np.float64)
+    z = z.reshape(-1, z.shape[-1])
+    t = np.asarray(targets).reshape(-1).astype(int)
+    z = z - z.max(axis=1, keepdims=True)
+    log_probs = z - np.log(np.exp(z).sum(axis=1, keepdims=True))
+    return float(-np.mean(log_probs[np.arange(len(t)), t]))
+
+
+def loss_forward_failure(loss_fn, outputs, targets, reference_fn, rtol=1e-3, atol=1e-4):
+    """Compare YOUR loss value on one batch to the NumPy reference.
+
+    Returns None when they agree, otherwise a message naming both numbers.
+    """
+    name = type(loss_fn).__name__
+    expected = reference_fn(outputs.data, targets.data)
+    value = np.asarray(getattr(loss_fn(outputs, targets), "data", None), dtype=np.float64)
+    if value.size != 1:
+        return (f"your {name} forward returns an array of shape {value.shape} for this batch, "
+                f"but a loss is one number (the mean over the batch, here {expected:.4f}): "
+                "check Module 04")
+    got = float(value.reshape(()))
+    if np.isfinite(got) and np.isclose(got, expected, rtol=rtol, atol=atol):
+        return None
+    return (f"your {name} forward returns {got:.4f} for this batch, "
+            f"but the loss of these outputs is {expected:.4f}: check Module 04")
+
+
+def report_loss_forward_failure(message):
+    """Print the teaching panel for a wrong loss value."""
+    console.print(Panel.fit(
+        "[bold red]❌ YOUR loss value is wrong[/bold red]\n\n"
+        f"{message}.\n\n"
+        "Training could still work, because the gradient comes from the backward\n"
+        "pass, but every loss this milestone prints would be wrong. Cross-entropy\n"
+        "is -mean(log_softmax(logits)[i, target_i]), with the row max subtracted\n"
+        "before exp so large logits cannot overflow.",
+        title="Needs Work",
+        border_style="red",
+    ))
+
+
 def evaluate_accuracy(model, images, labels):
     """Evaluate model accuracy on a dataset."""
     logits = model(images)
@@ -295,11 +447,13 @@ def evaluate_accuracy(model, images, labels):
     avg_loss = float(CrossEntropyLoss()(logits, labels).data)
     return accuracy, avg_loss
 
-def press_enter_to_continue() :
-    if sys.stdin.isatty() and sys.stdout.isatty() :
-        try :
+def press_enter_to_continue():
+    if os.environ.get("TINYTORCH_NON_INTERACTIVE") == "1" or os.environ.get("CI") == "true":
+        return
+    if sys.stdin.isatty() and sys.stdout.isatty():
+        try:
             console.input("\n[yellow]Press Enter to continue...[/yellow] ")
-        except EOFError :
+        except EOFError:
             pass
         console.print()
 
@@ -415,9 +569,23 @@ def train_cnn():
 
     console.print("[bold]🔬 Training CNN on Handwritten Digits...[/bold]\n")
 
-    # Before training
+    # Before training: snapshot the filters so we can prove they learned.
+    convs = conv_layers(model)
+    initial_filters = [layer.weight.data.copy() for layer in convs]
+    grad_monitor = ConvGradientMonitor(convs)
     initial_acc, initial_loss = evaluate_accuracy(model, test_images, test_labels)
-    console.print(f"[yellow]Before training:[/yellow] Accuracy = {initial_acc:.1f}%\n")
+    console.print(f"[yellow]Before training:[/yellow] Accuracy = {initial_acc:.1f}%")
+
+    # One training-sized batch, sliced directly so the DataLoader's shuffle
+    # order is untouched.
+    check_images = Tensor(train_images.data[:batch_size])
+    check_labels = Tensor(train_labels.data[:batch_size])
+    loss_failure = loss_forward_failure(criterion, model(check_images), check_labels,
+                                        reference_cross_entropy)
+    if loss_failure:
+        report_loss_forward_failure(loss_failure)
+        return 1
+    console.print("[green]✓[/green] YOUR CrossEntropyLoss matches a NumPy check on one batch\n")
 
     # Training loop
     history = {
@@ -437,7 +605,8 @@ def train_cnn():
             live.update(spinner_text)
 
             # Train
-            train_loss = train_epoch(model, train_loader, criterion, optimizer)
+            train_loss = train_epoch(model, train_loader, criterion, optimizer,
+                                     on_backward=grad_monitor)
 
             # Evaluate on both train and test
             train_acc, _ = evaluate_accuracy(model, train_images, train_labels)
@@ -496,7 +665,7 @@ def train_cnn():
     table.add_row(
         "Training Time",
         f"{training_time*1000:.0f}ms",
-        "—"
+        "-"
     )
 
     console.print(table)
@@ -536,6 +705,50 @@ def train_cnn():
     # ACT 5: THE REFLECTION 🌟
     # ═══════════════════════════════════════════════════════════════════════
 
+    # 2026-09-28: this milestone once printed "Success!" and exited 0 at any accuracy.
+    # 2026-09-29: accuracy alone also passed a frozen convolution (see
+    # MIN_CONV_RELATIVE_CHANGE), so the filters must be shown to learn too.
+    filter_changes = [relative_change(before, layer.weight.data)
+                      for before, layer in zip(initial_filters, convs)]
+    console.print("[bold]🔎 Did YOUR convolution learn?[/bold]")
+    for i, (g, rel) in enumerate(zip(grad_monitor.max_abs_grad, filter_changes)):
+        console.print(f"  Conv2d #{i + 1}: largest filter gradient {g:.2e}, "
+                      f"filters moved {rel:.1%} from init "
+                      f"(needs ≥ {MIN_CONV_RELATIVE_CHANGE:.0%})")
+    conv_failures = conv_learning_failures(grad_monitor.max_abs_grad, filter_changes)
+
+    if final_test_acc < MIN_TEST_ACCURACY:
+        console.print(Panel.fit(
+            f"[bold red]❌ MILESTONE 04 FAILED: test accuracy {final_test_acc:.1f}% "
+            f"is below the {MIN_TEST_ACCURACY:.0f}% target[/bold red]\n\n"
+            "A working CNN reaches about 85% here. Check YOUR Conv2d, MaxPool2d,\n"
+            "and their backward passes.",
+            title="Needs Work",
+            border_style="red",
+        ))
+        return 1
+
+    if conv_failures:
+        console.print(Panel.fit(
+            "[bold red]❌ MILESTONE 04 FAILED: YOUR convolution did not learn[/bold red]\n\n"
+            + "\n".join(f"  • {reason}" for reason in conv_failures) + "\n\n"
+            f"Test accuracy was {final_test_acc:.1f}%, but that came from the Linear\n"
+            "head reading features from filters stuck at their random start.\n"
+            "Random 3×3 filters already extract usable features from 8×8 digits;\n"
+            "the point of a CNN is that the filters themselves are learned.\n\n"
+            "Check YOUR Conv2dFunction.backward (Module 09): it must return a\n"
+            "grad_weight of shape (out_channels, in_channels, kH, kW), built by\n"
+            "correlating the input patches with grad_output, and Conv2d must pass\n"
+            "its weight into Conv2dFunction.apply so autograd can reach it.",
+            title="Needs Work",
+            border_style="red",
+        ))
+        return 1
+
+    generalization = (f"  ✓ Model generalizes well (gap: {overfitting_gap:.1f}%)\n"
+                      if overfitting_gap < 10 else
+                      f"  ⚠ Train/test gap is {overfitting_gap:.1f}%, a sign of overfitting\n")
+
     console.print(Panel.fit(
         "[bold green]🎉 Success! Your CNN Learned to Recognize Digits![/bold green]\n\n"
 
@@ -548,7 +761,7 @@ def train_cnn():
         "  ✓ Used Conv2d for spatial feature extraction\n"
         "  ✓ Applied MaxPooling for translation invariance\n"
         f"  ✓ Achieved {final_test_acc:.1f}% test accuracy!\n"
-        f"  ✓ Model generalizes well (gap: {overfitting_gap:.1f}%)\n"
+        + generalization +
         "  ✓ Used about 3× fewer parameters than the Milestone 03 MLP\n\n"
 
         "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
@@ -586,6 +799,7 @@ def train_cnn():
     ))
 
     press_enter_to_continue()
+    return 0
 
 if __name__ == "__main__":
-    train_cnn()
+    sys.exit(train_cnn())

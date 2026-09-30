@@ -163,16 +163,31 @@ def test_layernorm_forward():
 
 
 def test_batchnorm_forward():
-    """Test BatchNorm (if implemented)."""
-    # Skip if not implemented
-    try:
-        from tinytorch.nn import BatchNorm1d
-        layer = BatchNorm1d(128)
-        x = Tensor(rng.standard_normal((32, 128)))
-        y = layer(x)
-        assert y.shape == x.shape
-    except ImportError:
-        pass  # BatchNorm not implemented yet
+    """BatchNorm2d normalizes per channel in training and uses running stats in eval."""
+    from tinytorch.core.spatial import BatchNorm2d
+
+    layer = BatchNorm2d(4, eps=1e-5, momentum=0.1)
+    data = rng.standard_normal((8, 4, 5, 5)) * 3.0 + 2.0
+    y = layer(Tensor(data))
+    assert y.shape == data.shape
+
+    # Training mode: gamma=1, beta=0, so each channel is standardized with
+    # its own batch statistics.
+    mean = data.mean(axis=(0, 2, 3), keepdims=True)
+    var = data.var(axis=(0, 2, 3), keepdims=True)
+    expected = (data - mean) / np.sqrt(var + 1e-5)
+    np.testing.assert_allclose(y.data, expected, rtol=1e-5, atol=1e-5)
+
+    # Running statistics moved one momentum step from (0, 1) toward the batch.
+    np.testing.assert_allclose(layer.running_mean, 0.1 * mean.ravel(), rtol=1e-6, atol=1e-8)
+    np.testing.assert_allclose(layer.running_var, 0.9 + 0.1 * var.ravel(), rtol=1e-6, atol=1e-8)
+
+    # Eval mode: normalize with the frozen running statistics, not the batch.
+    layer.eval()
+    y_eval = layer(Tensor(data))
+    rm = layer.running_mean.reshape(1, 4, 1, 1)
+    rv = layer.running_var.reshape(1, 4, 1, 1)
+    np.testing.assert_allclose(y_eval.data, (data - rm) / np.sqrt(rv + 1e-5), rtol=1e-5, atol=1e-5)
 
 
 # Test complex architectures

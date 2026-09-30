@@ -73,14 +73,31 @@ measure it and then change it on the evidence, and the measuring has to come fir
 
 ## 📋 Module Dependencies
 
+**Prerequisites**: Modules 01 (Tensor), 03 (Layers), and 09 (Convolutions) must be complete
+
+**External Dependencies**:
+
+| Dependency | Origin | Imported Symbols | Architectural Purpose in Profiling |
+| :--- | :--- | :--- | :--- |
+| `numpy` | External | `np`, `default_rng` | High-performance array generation and statistical reductions |
+| `tracemalloc` | Standard Lib | `tracemalloc` | Python memory allocation snapshotting and peak heap tracking |
+| `time` | Standard Lib | `perf_counter` | High-precision nanosecond monotonic timestamping for latency benchmarking |
+| `typing` | Standard Lib | `Any`, `Dict`, `Tuple` | Type hints |
+
+**TinyTorch Dependencies**:
+
 | Dependency | Origin | Imported Symbols | Architectural Purpose in Profiling |
 | :--- | :--- | :--- | :--- |
 | `tinytorch.core.tensor` | Module 01 | `Tensor` | Multi-dimensional array container and gradient storage tracker |
 | `tinytorch.core.layers` | Module 03 | `Linear` | Dense projection layers evaluated for FLOPs and parameter memory |
 | `tinytorch.core.spatial` | Module 09 | `Conv2d` | Sliding window spatial convolutions with high compute reuse |
-| `numpy` | External | `np`, `default_rng` | High-performance array generation and statistical reductions |
-| `tracemalloc` | Standard Lib | `tracemalloc` | Python memory allocation snapshotting and peak heap tracking |
-| `time` | Standard Lib | `perf_counter` | High-precision nanosecond monotonic timestamping for latency benchmarking |
+
+**Dependency Flow**:
+```
+Module 01 (Tensor) ──┐
+Module 03 (Linear) ──┼──→ Module 14 (Profiler)
+Module 09 (Conv2d) ──┘
+```
 """
 
 # %% nbgrader={"grade": false, "grade_id": "imports", "solution": false}

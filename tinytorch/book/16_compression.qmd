@@ -25,11 +25,12 @@ print("Tensor storage shape:", layer.weight.shape)                   # (128, 128
 ```
 
 Underneath that simple call, the systems reality of compression reveals critical nuances:
+
 1. **The dense array illusion:** A pruned tensor with 50% zeros in a dense float32 array still occupies exactly the same memory footprint and performs the same number of arithmetic multiplications. Dense GEMM kernels do not check for zeros before multiplying.
 2. **Mask indirection overhead:** Pruning frameworks maintain auxiliary binary masks alongside original weights, temporarily *increasing* memory consumption until weights are pruned permanently.
 3. **Structured vs. low-rank dimension reduction:** To achieve actual speedups without specialized sparse hardware, compression must either prune whole structured channels or factorize weight matrices via low-rank SVD ($W \approx U V$), physically reducing matrix dimensions and arithmetic counts.
 
-This chapter implements TinyTorch's compression tools (pruning, SVD factorization, and knowledge distillation) and measures what each one changes. Before building these techniques, we must inspect the systems trap of dense zeroed weights.
+This chapter implements TinyTorch's compression tools (pruning, SVD factorization, and knowledge distillation) and measures what each one changes. Before building these techniques, the first step is to inspect the systems trap of dense zeroed weights.
 
 ::: {#fig-compression-spectrum fig-env="figure" fig-pos="htb" fig-cap="**Compression representations**: Both pruning functions preserve dense array dimensions. Low-rank approximation returns three factors; a caller must retain and use them to benefit from their smaller storage." fig-alt="Three panels show scattered zero weights, zeroed output columns, and SVD factors with shapes M by r, r, and r by N."}
 ![](assets/images/diagrams/16_compression-diag-1.svg){width="100%"}
@@ -64,18 +65,24 @@ assert W.shape == (2, 3) and W.nbytes == before == 24
 
 A sparse format such as compressed sparse row[^fn-csr-sparse-format] stores nonzero values with their positions. At 80 percent sparsity, the large matrix needs about 3.4 million values and as many column indices. With four bytes for each value and index, this is about 26.8 MB, plus the row-position array. The value-only estimate of a $5\times$ reduction becomes roughly $2.5\times$ after indexing. A sparse multiplication must interpret these positions, so its runtime depends on the pattern, batch size, and implementation. TinyTorch's dense NumPy multiplication does not consume such a format. Deleting whole hidden units provides another route: rebuild smaller dense arrays that the existing `Linear` can use.
 
-[^fn-csr-sparse-format]: **Compressed sparse row (CSR)**: a storage format that keeps three arrays, the nonzero values, the column index of each one, and the position where each row starts. It only saves memory once fewer than roughly half the entries are nonzero, because every stored value drags an index along with it.
+[^fn-csr-sparse-format]: **Compressed sparse row (CSR)**: a format storing nonzeros with column indices and row start pointers. It saves memory only when fewer than half the entries are nonzero, because each stored value carries an index.
+
+::: {.callout-tip title="Pause & Predict: The Breakeven SVD Rank"}
+For a linear layer weight matrix $W \in \mathbb{R}^{M \times N}$, low-rank factorization replaces $W$ with $W_A \in \mathbb{R}^{M \times r}$ and $W_B \in \mathbb{R}^{r \times N}$. This changes the parameter count from $M \times N$ to $r(M + N)$. For a square projection matrix where $M = N = 4096$, what is the maximum rank $r$ that yields any memory reduction? What rank $r$ provides a $2\times$ reduction in parameters? If you choose rank $r = 512$, what percentage of weight parameters are eliminated?
+:::
 
 ::: {.column-margin}
 **Core Invariant: CSR Index Metadata Breakeven**\
 $$\text{Memory}_{\text{CSR}} = \text{NNZ} \times (\text{sizeof}(V) + \text{sizeof}(I)) + (M + 1) \times \text{sizeof}(P)$$\
-*Because each nonzero requires an explicit column index, CSR only saves memory when sparsity exceeds $\approx 66\%$.*
+*Because each nonzero requires an explicit column index, CSR with equal-width values and indices saves memory only when sparsity exceeds $50\%$ (plus the row pointers); narrower values, such as FP16 with 32-bit indices, move the breakeven toward $67\%$.*
 :::
 
-![**Compressed Sparse Row (CSR) 3-array representation**: Storing sparse matrices requires three coordinated buffers: non-zero `values`, corresponding `col_indices`, and `row_ptr` slicing bounds. Below $\sim 66\%$ sparsity, column index metadata outweighs the memory saved by omitting zero elements.](assets/images/diagrams/16_csr-three-arrays.svg){#fig-csr-three-arrays width="100%" fig-alt="Diagram comparing a dense 3x3 grid with 66% zeros against CSR 3-array representation showing values, col_indices, and row_ptr arrays."}
+![**Compressed Sparse Row (CSR) 3-array representation**: Storing sparse matrices requires three coordinated buffers: non-zero `values`, corresponding `col_indices`, and `row_ptr` slicing bounds. Below $50\%$ sparsity with equal-width values and indices, column index metadata outweighs the memory saved by omitting zero elements.](assets/images/diagrams/16_csr-three-arrays.svg){#fig-csr-three-arrays width="100%" fig-alt="Diagram comparing a dense 3x3 grid with five zeros against CSR 3-array representation showing values, col_indices, and row_ptr arrays."}
 
 
 ---
+
+\newpage
 
 ## The Idea
 
@@ -93,7 +100,7 @@ Magnitude pruning picks a threshold $\theta$ and replaces every weight with
 
 $$W_{\text{sparse}} = W \odot M, \qquad M_{i,j} = \begin{cases} 1 & |W_{i,j}| \ge \theta \\ 0 & |W_{i,j}| < \theta \end{cases}$$
 
-where $\odot$ multiplies element by element and $M$ is the binary mask. A percentile threshold can miss the intended count when magnitudes tie. The module instead ranks entries and selects the requested number, with a stable tie order. On its own it does not change the shape, so the dense allocation and arithmetic count are unchanged. We build it anyway, and the first listing in The Code says what it is good for.
+where $\odot$ multiplies element by element and $M$ is the binary mask. A percentile threshold can miss the intended count when magnitudes tie. The module instead ranks entries and selects the requested number, with a stable tie order. On its own it does not change the shape, so the dense allocation and arithmetic count are unchanged. Without specialized hardware support (such as NVIDIA Ampere 2:4 structured sparse Tensor Cores), unstructured zero values still traverse the memory bus and consume ALU cycles, failing to shift the Roofline curve (@sec-profiling). Modern LLM pruning algorithms address accuracy rather than this hardware limitation: Wanda (Sun et al., 2023) scores weights by $|W_{ij}| \cdot \|X_j\|_2$, and SparseGPT (Frantar and Alistarh, 2023) uses an approximate second-order reconstruction, both preserving perplexity at high sparsity. The module still implements plain magnitude pruning because it makes the storage and arithmetic contract easy to check.
 
 ### Structured pruning: delete whole neurons
 
@@ -121,7 +128,7 @@ W_B = \sqrt{\Sigma_r} V_r^T \in \mathbb{R}^{r \times N}.
 \end{gathered}
 $$
 
-where $U_r$ holds the first $r$ columns of $U$, $V_r$ the first $r$ columns of $V$, and $\sqrt{\Sigma_r}$ splits each $\sigma_i$ evenly across the two factors. The split is a convention that keeps the two factors at similar scale. For a `Linear` weight stored as inputs by outputs, $M$ is the input width and $N$ the output width, and the layer becomes two linear layers in sequence, one with weight $W_A$ that maps $M$ inputs to $r$, then one with weight $W_B$ that maps $r$ to $N$ outputs.
+where $U_r$ holds the first $r$ columns of $U$, $V_r$ the first $r$ columns of $V$, and $\sqrt{\Sigma_r}$ splits each $\sigma_i$ evenly across the two factors. The split is a convention that keeps the two factors at similar scale. For a `Linear` weight stored as inputs by outputs, $M$ is the input width and $N$ the output width, and the layer becomes two linear layers in sequence, one with weight $W_A$ that maps $M$ inputs to $r$, then one with weight $W_B$ that maps $r$ to $N$ outputs. @sec-extensions describes a related but different use of thin matrices, Low-Rank Adaptation (LoRA), which freezes the base weights and trains a separately initialized low-rank update rather than an SVD of $W$.
 
 Two facts make this useful. First, the Eckart-Young theorem (1936) says $W_r$ is the best rank-$r$ approximation there is, and its error is exactly the part you dropped:
 
@@ -129,7 +136,7 @@ $$\|W - W_r\|_F = \sqrt{\sum_{i=r+1}^{\min(M,N)} \sigma_i^2}$$
 
 where $\|\cdot\|_F$ is the Frobenius norm.[^fn-frobenius-svd-error] You can read the error off the singular values before deciding on $r$. Second, the parameter count changes from $M \times N$ to $r \times (M + N)$, and so does the multiply count, because computing $x W_A$ and then multiplying the result by $W_B$ costs $2r(M+N)$ operations instead of $2MN$.[^fn-svd-activation-traffic]
 
-[^fn-frobenius-svd-error]: **Frobenius norm**: the square root of the sum of the squares of every entry, which is the ordinary vector length applied to a matrix as if it were one long vector. For the $3 \times 3$ matrix in the worked trace it is $\sqrt{18} \approx 4.24$, so a reconstruction error of $1.41$ means about a third of the matrix's "length" was dropped.
+[^fn-frobenius-svd-error]: **Frobenius norm**: the square root of the sum of the squares of every entry, which is the ordinary vector length applied to a matrix as if it were one long vector. For the $3 \times 3$ matrix in the worked trace, the Frobenius norm equals $\sqrt{18} \approx 4.24$, so a reconstruction error of $1.41$ is one third of the norm but only $2/18 \approx 11\%$ of the matrix energy (the squared norm).
 [^fn-svd-activation-traffic]: **Activation traffic in low-rank factorization**: While factorizing $W \in \mathbb{R}^{M \times N}$ into $W_A \in \mathbb{R}^{M \times r}$ and $W_B \in \mathbb{R}^{r \times N}$ strictly reduces parameter storage and multiply-accumulate FLOPs for $r < \frac{MN}{M+N}$, it introduces an intermediate hidden activation tensor $h = x W_A \in \mathbb{R}^{B \times r}$ for batch size $B$. In unfused execution runtimes, $h$ must be written to DRAM or L2 cache after the first GEMM and reloaded for the second GEMM. If $B$ is large, the memory bandwidth consumed by streaming intermediate activations can offset the weight traffic savings, making operator fusion of $x W_A W_B$ or kernel chaining essential.
 
 ![**Low-rank SVD factorization and breakeven rank**: A weight matrix $W \in \mathbb{R}^{M \times N}$ is factorized into two thin matrices $W_A \in \mathbb{R}^{M \times r}$ and $W_B \in \mathbb{R}^{r \times N}$. The scree plot (left) reveals exponential decay of singular values, indicating low effective rank. Stored parameters drop from $M \times N$ to $r(M+N)$, achieving real storage and FLOP savings whenever chosen rank $r < \frac{MN}{M+N}$ (right).](assets/images/diagrams/16_svd-rank-breakeven.svg){#fig-svd-rank-breakeven width="100%" fig-alt="Left panel shows singular value scree plot. Right panel shows parameter count scaling with rank r, crossing the original uncompressed line at the breakeven rank."}
@@ -137,7 +144,8 @@ where $\|\cdot\|_F$ is the Frobenius norm.[^fn-frobenius-svd-error] You can read
 ### Distillation: teaching the small model from the large one
 
 ::: {.column-margin}
-![](assets/images/diagrams/16_compression-margin-temperature.svg){width="100%"}
+![](assets/images/diagrams/16_compression-margin-temperature.svg){width="100%" fig-alt="Bar charts contrasting sharp prediction probabilities at temperature T=1 with softened dark knowledge distributions across non-target classes at T=4."}
+
 *Soft target entropy: higher temperature $T=4$ uncovers dark knowledge in non-target class distributions.*
 :::
 
@@ -147,11 +155,11 @@ The loss has two parts. The hard part is the ordinary cross-entropy from @sec-lo
 
 $$\mathcal{L} = \alpha \, \mathrm{KL}\!\left(p_{\text{teacher}}^{(T)} \,\|\, p_{\text{student}}^{(T)}\right) + (1 - \alpha)\, \mathrm{CE}\!\left(p_{\text{student}}, y\right)$$
 
-::: {#nbk-compression-distillation-overhead .callout-notebook title="Napkin math: memory overhead of dual-model distillation"}
+::: {#nbk-compression-distillation-overhead .callout-notebook title="Napkin Math: Memory overhead of dual-model distillation"}
 Knowledge distillation trains a compact student model, but the training run must host two networks simultaneously:
 
 - **Teacher State**: The full-scale teacher model (e.g., 12-layer GPT, 120M parameters) runs in inference mode. While gradients and optimizer moment buffers are omitted, its weights ($120\text{M} \times 4\text{ B} = 480\text{ MB}$) and forward activations must reside in memory.
-- **Student State**: The compact student model (e.g., 4-layer GPT, 15M parameters) requires weights ($60\text{ MB}$), autograd activation graphs ($120\text{ MB}$), gradients ($60\text{ MB}$), and AdamW momentum buffers ($120\text{ MB}$).
+- **Student State**: The compact student model (e.g., 4-layer GPT, 15M parameters) requires weights ($60\text{ MB}$), gradients ($60\text{ MB}$), AdamW moment buffers ($120\text{ MB}$), and activations whose size depends on batch and sequence length (for example, an assumed $120\text{ MB}$).
 - **Logit Buffers**: Both teacher and student produce vocab-sized logit arrays $(B, S, V)$. For $B=16, S=1024, V=32000$, each logit tensor spans $16 \times 1024 \times 32000 \times 4\text{ B} \approx 2.1\text{ GB}$.
 
 Dual forward passes and high-dimensional KL divergence evaluations require substantial temporary memory headroom before the compressed student can be deployed standalone.
@@ -159,17 +167,11 @@ Dual forward passes and high-dimensional KL divergence evaluations require subst
 
 Module 16 defaults to $T = 3$ and $\alpha = 0.7$. Both terms average over examples after summing over classes, so duplicating a batch leaves the objective unchanged. The soft term here omits the optional temperature-squared multiplier; changing temperature therefore changes both the target distribution and its gradient scale.[^fn-distillation-temperature-squared] The training loop still uses @sec-training's forward, backward, and update sequence, with the teacher held fixed.
 
-[^fn-distillation-temperature-squared]: **The $T^2$ scaling factor in knowledge distillation**: In the high-temperature limit ($T \to \infty$), the Taylor expansion of softened softmax probabilities yields $p_i \approx \frac{1}{K} + \frac{z_i - \bar{z}}{K T}$. Differentiating the KL divergence between teacher and student softened distributions with respect to student logit $z_i$ produces $\frac{\partial \mathcal{L}_{\text{KL}}}{\partial z_i} \approx \frac{1}{K T^2} (z_i - v_i)$, where $v_i$ is the teacher logit. Because the gradient magnitude decays quadratically ($1/T^2$) as logits are flattened, Hinton et al. (2015) multiply the soft loss term by $T^2$ to keep the gradient scale and the balance between hard cross-entropy and soft distillation invariant to temperature adjustments. TinyTorch intentionally omits $T^2$ to preserve code transparency, requiring users to adjust $\alpha$ or learning rate when modifying $T$.
+[^fn-distillation-temperature-squared]: **The $T^2$ scaling factor in knowledge distillation**: In the high-temperature limit ($T \to \infty$), the Taylor expansion of softened softmax probabilities yields $p_i \approx 1/K + (z_i - \bar{z}) / (KT)$. Differentiating the KL divergence between teacher and student softened distributions with respect to student logit $z_i$ produces $\partial \mathcal{L}_{\text{KL}} / \partial z_i \approx (1 / (KT^2)) (z_i - v_i)$, where $v_i$ is the teacher logit. Because the gradient magnitude decays quadratically ($1/T^2$) as logits are flattened, Hinton et al. (2015) multiply the soft loss term by $T^2$ to keep the gradient scale and the balance between hard cross-entropy and soft distillation invariant to temperature adjustments. TinyTorch intentionally omits $T^2$ to preserve code transparency, requiring users to adjust $\alpha$ or learning rate when modifying $T$.
 
 ---
 
 ## The Code
-
-::: {.column-margin}
-![](assets/images/diagrams/16_comp-margin-source.svg){width="100%" fig-alt="Source code mapping card for Module 16 Compression showing file path, exported package, and tested primitives."}
-
-*Source Code Mapping: Module 16 extracts knowledge distillation loss, magnitude pruning, and low-rank approximation directly from the working repository.*
-:::
 
 Everything below works on @sec-layers's `Linear` and `Sequential` and @sec-autograd's `Tensor`. `Linear` keeps its weight as an `(in_features, out_features)` array and computes `x @ weight + bias`, and every shape comment follows that layout.
 
@@ -180,6 +182,12 @@ Every compression claim starts with a number. A paper reports that a model is 80
 The obvious count divides zeros by all parameters, biases included. @sec-layers's `Linear` initializes its biases to zero, so on a fresh two-layer model with 64 inputs, 128 hidden units, and 10 outputs, that count reports 1.4 percent sparsity, 138 zeros out of 9,610 parameters, before anything has been pruned. That number describes all-parameter sparsity, but it does not measure the weight sparsity this chapter is trying to change. The obvious pruning pass has a subtler flaw. It thresholds each layer on its own, which forces exactly 80 percent out of every layer whether that layer's weights are uniformly tiny or uniformly large.
 
 The module counts weight matrices only and ranks their entries together, so that a layer whose weights are small gives up more of them than a layer whose weights are large.
+
+::: {.column-margin}
+![](assets/images/diagrams/16_comp-margin-source.svg){width="100%" fig-alt="Source code mapping card for Module 16 Compression showing file path, exported package, and tested primitives."}
+
+*Source Code Mapping: Module 16 extracts knowledge distillation loss, magnitude pruning, and low-rank approximation directly from the working repository.*
+:::
 
 {{< include _listings/16_compression/measure_sparsity.qmd >}}
 
@@ -236,12 +244,18 @@ def prune_neurons(first: Linear, second: Linear, keep: int):
 
 Column scores can miss redundancy between columns. The all-$4/3$ matrix introduced earlier has no zero column, yet one direction describes it exactly. The same possibility motivates examining the singular values of a larger trained projection. The reconstruction error determines which directions can be discarded, while storage arithmetic determines whether the retained factors are smaller than the original matrix.
 
-::: {#nbk-compression-svd-breakeven-rank .callout-notebook title="Napkin math: the break-even rank"}
+::: {#nbk-compression-svd-breakeven-rank .callout-notebook title="Napkin Math: The break-even rank"}
 Factorizing $W \in \mathbb{R}^{M \times N}$ into $W_A \in \mathbb{R}^{M \times r}$ and $W_B \in \mathbb{R}^{r \times N}$ saves parameters only when
 
 $$r \times (M + N) < M \times N \quad\Longleftrightarrow\quad r < \frac{MN}{M+N}.$$
 
 For a square $4096 \times 4096$ layer the break-even rank is $4096^2 / 8192 = 2048$, half the full rank. At $r = 256$ the count drops from $16{,}777{,}216$ to $256 \times 8192 = 2{,}097{,}152$, an $8\times$ reduction in weight entries and matrix-multiplication arithmetic. These counts describe the two folded factors, excluding the unchanged bias and the new intermediate activation. Whether the accuracy survives depends on how fast the singular values of that particular layer decay, which is a property of the trained weights, not of the method.
+:::
+
+::: {.column-margin}
+![](assets/images/diagrams/16_compression-margin-svd-activation.svg){width="100%" fig-alt="Diagram contrasting direct GEMM with two-stage factorized GEMM, illustrating intermediate activation traffic to DRAM."}
+
+*Intermediate activation traffic: factorizing a layer saves weight parameters but writes and reloads intermediate tensor h, requiring operator fusion when batch size B is large.*
 :::
 
 The naive way to choose $r$ is trial. Pick a rank, factorize, retrain, measure, and repeat, with a training run per guess. Eckart-Young removes the guessing from the reconstruction side. One SVD returns every singular value, and the error at every $r$ reads off the tail of that list before a single factor is built. Whether the accuracy survives is still a question for fine-tuning, but you go into it knowing how much of the matrix you dropped.
@@ -250,7 +264,7 @@ The module's function does the SVD and the truncation and stops there.
 
 {{< include _listings/16_compression/low_rank_approximate.qmd >}}
 
-The function validates `rank_ratio` in $(0,1]$ and computes `max(1, int(rank_ratio * min(M, N)))`. This fraction refers to the maximum possible rank, not the matrix's measured numerical rank. A ratio of $0.5$ on a $3 \times 3$ matrix therefore keeps one term. NumPy returns singular values in descending order and its third result is already $V^T$, so the function selects columns of $U$, entries of `S`, and rows of $V^T$. Each slice is copied. A view would keep the full SVD backing array alive and defeat the storage reduction.
+The function validates `rank_ratio` in $(0,1]$, computes `max(1, int(rank_ratio * min(M, N)))`, and raises an error if that rank exceeds the three-factor break-even rank $MN/(M+N+1)$. This fraction refers to the maximum possible rank, not the matrix's measured numerical rank. A ratio of $0.5$ on a $3 \times 3$ matrix therefore keeps one term. NumPy returns singular values in descending order and its third result is already $V^T$, so the function selects columns of $U$, entries of `S`, and rows of $V^T$. Each slice is copied. A view would keep the full SVD backing array alive and defeat the storage reduction.
 
 
 The returned arrays have shapes $(M,r)$, $(r,)$, and $(r,N)$ and own $r(M+N+1)$ values. This three-factor representation saves storage when $r < MN/(M+N+1)$. It does not modify the input matrix or any layer. The book extension below folds the singular values into two factors, reducing that count to $r(M+N)$, and places the original bias after the second multiplication. Reconstructing the full matrix first would lose the storage benefit.
@@ -273,7 +287,7 @@ def factorize_linear(layer: Linear, rank_ratio: float):
 ```
 :::
 
-Because @sec-layers's weight is inputs by outputs, `inner` maps the input width to $r$ and `outer` maps $r$ to the output width. At `rank_ratio=1.0`, the pair reproduces the original output up to floating-point error; at lower ranks, the omitted singular directions can change it. Both weights and the copied output bias belong to the returned model. The original layer remains available for comparison, and the caller must replace it explicitly in the enclosing model.
+Because @sec-layers's weight is inputs by outputs, `inner` maps the input width to $r$ and `outer` maps $r$ to the output width. Ranks above the break-even point are refused: `low_rank_approximate` raises an error rather than return factors larger than the dense matrix, so `rank_ratio=1.0` is not a way to reproduce the original layer. At an accepted rank, the omitted singular directions can change the output. Both weights and the copied output bias belong to the returned model. The original layer remains available for comparison, and the caller must replace it explicitly in the enclosing model.
 
 ### The distillation loss
 
@@ -297,9 +311,9 @@ The method returns a scalar `Tensor`, ready for `backward()`. Its stable `log_so
 
 ### Following one distillation update
 
-Use one input, two output classes, and explicitly chosen weights so that the trace has no random initialization hidden in it. In @lst-compression-student-update, lines 7--10 construct `teacher` and `student` linear layers with weights `[[2.0, 0.0]]` and `[[0.0, 0.0]]`. Constructing the optimizer in line 11 before the forward pass enables gradient tracking on the student's parameters. Line 12 initializes `KnowledgeDistillation(teacher, student, temperature=2.0, alpha=0.5)`. In lines 13--15, input `x` evaluates `teacher_logits` while `teacher_before` takes a reference copy.
+Use one input, two output classes, and explicitly chosen weights so that the trace has no random initialization hidden in it. In @lst-compression-student-update, lines 7 to 10 construct `teacher` and `student` linear layers with weights `[[2.0, 0.0]]` and `[[0.0, 0.0]]`. Constructing the optimizer in line 11 before the forward pass enables gradient tracking on the student's parameters. Line 12 initializes `KnowledgeDistillation(teacher, student, temperature=2.0, alpha=0.5)`. In lines 13 to 15, input `x` evaluates `teacher_logits` while `teacher_before` takes a reference copy.
 
-Lines 17--19 evaluate the combined distillation loss. In line 20, `loss.backward()` executes backpropagation. Lines 21--23 confirm that `student.weight.grad` receives the analytical gradient `[[-0.307765, 0.307765]]` while `teacher.weight.grad` remains `None` (the teacher is not trained). In line 24, `optimizer.step()` updates the student; lines 25--27 verify that student loss decreased while teacher parameters remained strictly frozen. Lines 29--31 confirm that duplicating the input maintains consistent sample-mean loss.
+Lines 17 to 19 evaluate the combined distillation loss. In line 20, `loss.backward()` executes backpropagation. Lines 21 to 23 confirm that `student.weight.grad` receives the analytical gradient `[[-0.307765, 0.307765]]` while `teacher.weight.grad` remains `None` (the teacher is not trained). In line 24, `optimizer.step()` updates the student; lines 25 to 27 verify that student loss decreased while teacher parameters remained strictly frozen. Lines 29 to 31 confirm that duplicating the input maintains consistent sample-mean loss.
 
 ::: {#lst-compression-student-update lst-pos="H" lst-cap="**A distillation update with fixed teacher state**: The assertions check the state contract described in the surrounding text."}
 ```python
@@ -399,17 +413,17 @@ $$W_1 = \sigma_1 u_1 v_1^T = \frac{4}{3}\begin{bmatrix} 1 & 1 & 1 \\ 1 & 1 & 1 \
 
 The Frobenius norm of the residual is $\sqrt{3 \cdot (2/3)^2 + 6 \cdot (1/3)^2} = \sqrt{2} \approx 1.41$, and Eckart-Young predicts $\sqrt{\sigma_2^2 + \sigma_3^2} = \sqrt{2}$. The two factors are $W_A = \sqrt{4} \, u_1 \approx [1.155, 1.155, 1.155]^T$ and $W_B = \sqrt{4} \, v_1^T$, the same three numbers as a row. An SVD routine may flip the signs of both $u_1$ and $v_1$; their outer product remains unchanged, so the test must compare the reconstructed matrix rather than assume a sign. Each of the three ranks tells a different story about storage, summarized in @tbl-svd-trace.
 
-| Rank $r$ | Stored values | Returned shapes | Frobenius error | Size vs. original |
+| Rank $r$ | Stored values | Factor shapes | Frobenius error | Relative size |
 | :--- | :---: | :--- | :---: | :---: |
-| 3 | 21 | $(3,3), (3,), (3,3)$ | $0$ | $2.33\times$ |
-| 2 | 14 | $(3,2), (2,), (2,3)$ | $1$ | $1.56\times$ |
-| 1 | 7 | $(3,1), (1,), (1,3)$ | $\sqrt{2}$ | $0.78\times$ |
+| 3 (refused; NumPy SVD) | 21 | $(3,3), (3,), (3,3)$ | $0$ | $2.33\times$ |
+| 2 (refused; NumPy SVD) | 14 | $(3,2), (2,), (2,3)$ | $1$ | $1.56\times$ |
+| 1 (`low_rank_approximate`) | 7 | $(3,1), (1,), (1,3)$ | $\sqrt{2}$ | $0.78\times$ |
 
-: **Storage of the returned SVD factors**: Module 16 retains the singular values separately. The original matrix stores nine values; only rank one saves storage in this example. {#tbl-svd-trace tbl-colwidths="[12,18,32,18,20]"}
+: **Storage of three-factor SVD truncations**: Module 16 retains the singular values separately. The original matrix stores nine values; only rank one saves storage in this example, and it is the only rank `low_rank_approximate` returns. The rank-2 and rank-3 rows come from truncating NumPy's SVD directly. {#tbl-svd-trace tbl-colwidths="[12,18,32,18,20]"}
 
 Rank 2 is larger than the original matrix, as predicted by the three-factor bound $r < 9/7$. Folding `S` into two factors saves another $r$ entries, giving six entries at rank one and twelve at rank two. Keeping the dense original is cheaper than either full-rank representation. Reconstruction error and storage are separate criteria even on this small example.
 
-The following check measures both the reconstruction and the storage returned by the module. The rank ratio is $r / 3$ because the matrix has full rank 3. The error assertion checks the Eckart-Young prediction; the remaining assertions check factor size and ownership.
+The following check measures both the reconstruction and the storage returned by the module at rank one, then asks the module for ranks two and three. The rank ratio is $r / 3$ because the matrix has full rank 3. The error assertion checks the Eckart-Young prediction; the size and ownership assertions check the returned factors. Above the break-even rank the module refuses, so the listing truncates NumPy's SVD directly to show what those ranks would have cost.
 
 ::: {#lst-compression-svd-trace lst-pos="H" lst-cap="**Checking SVD error and owned storage**: The assertions check the state contract described in the surrounding text."}
 ```python
@@ -418,22 +432,29 @@ from tinytorch.perf.compression import low_rank_approximate
 W = np.array([[2.0, 1.0, 1.0],
               [1.0, 2.0, 1.0],
               [1.0, 1.0, 2.0]])
-all_sigma = np.linalg.svd(W, compute_uv=False)
+U_all, all_sigma, Vt_all = np.linalg.svd(W)
 print("singular values:", np.round(all_sigma, 3))          # [4. 1. 1.]
 
-for r in (1, 2, 3):
-    U, S, Vt = low_rank_approximate(W, r / 3)
-    W_r = (U * S) @ Vt
-    error = np.linalg.norm(W - W_r)
-    predicted = np.sqrt(np.sum(all_sigma[r:] ** 2))
-    print(f"rank {r}: kept {np.round(S, 3)}, error {error:.3f}, Eckart-Young predicts {predicted:.3f}")
-    assert np.isclose(error, predicted)
-    assert U.size + S.size + Vt.size == 7 * r
-    assert all(f.flags.owndata for f in (U, S, Vt))
+U, S, Vt = low_rank_approximate(W, 1 / 3)                  # rank 1 < r* = 9/7
+error = np.linalg.norm(W - (U * S) @ Vt)
+print(f"rank 1: kept {np.round(S, 3)}, error {error:.3f}")  # kept [4.], error 1.414
+assert np.isclose(error, np.sqrt(np.sum(all_sigma[1:] ** 2)))   # Eckart-Young
+assert U.size + S.size + Vt.size == 7                      # fewer than 9 dense values
+assert all(f.flags.owndata for f in (U, S, Vt))
+
+for r in (2, 3):                                           # above r* = 9/7
+    try:
+        low_rank_approximate(W, r / 3)
+        refused = False
+    except ValueError:
+        refused = True
+    W_r = (U_all[:, :r] * all_sigma[:r]) @ Vt_all[:r]       # NumPy truncation, outside the module
+    print(f"rank {r}: refused={refused}, NumPy error {np.linalg.norm(W - W_r):.3f}, {7 * r} values")
+    assert refused
 ```
 :::
 
-Rank 1 gives error $1.414$, rank 2 gives $1.000$, and rank 3 reconstructs the matrix within floating-point tolerance. The ownership assertion checks a separate invariant: small shapes really correspond to small independent factor buffers, rather than views keeping the full SVD allocation alive.
+Rank 1 gives error $1.414$. Ranks 2 and 3 exceed the break-even rank $9/7$, so `low_rank_approximate` refuses them; computed directly with NumPy's SVD, they give $1.000$ and a reconstruction within floating-point tolerance, while storing 14 and 21 values against the dense nine. The ownership assertion checks a separate invariant: small shapes really correspond to small independent factor buffers, rather than views keeping the full SVD allocation alive.
 
 ---
 
@@ -443,18 +464,24 @@ The reference pruning functions make one in-place edit. PyTorch's pruning utilit
 
 A sparse execution path can exploit zeros without changing the logical matrix dimensions. For example, PyTorch documents [semi-structured sparse tensors](https://docs.pytorch.org/docs/stable/sparse.html#sparse-semi-structured-tensors) with a restricted pattern, a packed value representation, and metadata identifying retained positions. A 2:4 pattern retains two values in each group of four. Metadata adds storage beyond those values, and supported devices, dtypes, shapes, and operations constrain its use. The relevant comparison is therefore a specific packed representation and its supported multiplication, not a dense matrix that happens to contain zeros. Module 16 implements neither this format nor its kernel.
 
-Low-rank adaptation uses the same thin-matrix arithmetic for a different purpose. [LoRA, by Hu et al.](https://arxiv.org/abs/2106.09685), freezes pretrained weights and trains a low-rank update. In this chapter's inputs-by-outputs layout, the adapted weight is $W + AB$, with $A$ shaped $(M,r)$ and $B$ shaped $(r,N)$, apart from a scaling constant. The update adds $r(M+N)$ trainable values while retaining the $MN$ values of the base. In contrast, `factorize_linear` replaces the base matrix. A small adapter therefore does not imply a smaller base-model allocation. TinyTorch's SVD routine computes an approximation of existing weights; it does not implement LoRA training.
+Low-rank adaptation uses thin-matrix arithmetic for a different purpose. [LoRA (Hu et al., 2021)](https://arxiv.org/abs/2106.09685) freezes pretrained weights and trains a low-rank update $W + AB$, with $A \in \mathbb{R}^{M \times r}$ and $B \in \mathbb{R}^{r \times N}$. The update adds $r(M+N)$ trainable parameters alongside the base $MN$ weights. In contrast, `factorize_linear` replaces the base matrix directly; an adapter does not shrink the base allocation. TinyTorch computes an SVD approximation of existing weights rather than an adapter.
 
-The teacher-student objective transfers directly. [Hinton, Vinyals, and Dean](https://arxiv.org/abs/1503.02531) use softened teacher predictions to guide a student and compensate for the temperature dependence of soft-target gradients with a $T^2$ factor. TinyTorch deliberately leaves that multiplier out. In the local trace, increasing temperature therefore changes both the probabilities and the strength of their contribution relative to the hard labels. A production objective must specify its reductions and scaling just as explicitly; matching the name “distillation” is not enough to establish that two training runs use the same loss.
+The teacher-student objective transfers directly. [Hinton, Vinyals, and Dean (2015)](https://arxiv.org/abs/1503.02531) soften teacher predictions to guide a student, scaling gradients by $T^2$. TinyTorch intentionally omits that multiplier. In the local trace, increasing temperature changes both target entropy and relative gradient scale. A production pipeline must specify reductions and scalings explicitly; the label “distillation” alone does not guarantee matching losses.
 
-::: {#psp-compression-structured-vs-unstructured .callout-production title="Production bridge: 2:4 structured sparsity and hardware accelerators"}
-Unstructured pruning zeros arbitrary weights but produces random sparsity patterns that standard GEMM hardware cannot accelerate without expensive CSR indexing overhead. Modern production deployments navigate this through hardware-aligned sparsity:
+::: {.column-margin}
+![](assets/images/diagrams/16_compression-margin-sparsity-24.svg){width="100%" fig-alt="Card illustrating NVIDIA 2:4 structured sparsity where a four-float row block compresses into two stored values and two-bit index metadata to double Tensor Core throughput."}
 
-1. **NVIDIA 2:4 Structured Sparsity**: Starting with Ampere (A100) and Hopper (H100), Tensor Cores support native 2:4 structured sparsity. For every block of four consecutive values along a matrix row, exactly two must be zero. The hardware stores only the two nonzero values alongside 2-bit indices per pair, cutting memory storage in half and doubling GEMM arithmetic throughput with minimal accuracy loss.
-2. **Channel and Block Pruning**: Serving frameworks (e.g., TensorRT, ONNX Runtime) favor structured pruning, removing entire attention heads, MLP intermediate channels, or transformer blocks. Because shrinking channel dimensions preserves contiguous memory strides and standard BLAS kernels, structured pruning yields guaranteed wall-clock latency reductions without requiring specialized sparse execution engines.
+*2:4 structured sparsity: storing two non-zero weights per four-element block with two-bit indices achieves 2.0x math throughput on Tensor Cores.*
 :::
 
-@Tbl-compression-production separates the allocation changes from the execution path they require. A proposed optimization needs both a representation that saves work or storage and a computation that consumes that representation. Prediction error and latency remain measurements on the target workload.
+::: {#psp-compression-structured-vs-unstructured .callout-perspective title="Production Bridge: 2:4 Structured Sparsity and Hardware Accelerators"}
+Unstructured pruning zeroes arbitrary weights, producing irregular sparsity that standard GEMM hardware cannot accelerate without indexing overhead. Modern production runtimes resolve this through hardware-aligned sparsity:
+
+1. **NVIDIA 2:4 Structured Sparsity**: Starting with Ampere and Hopper, Tensor Cores support native 2:4 structured sparsity. For every four values along a row, at least two must be zero. Accelerators store two values per group plus 2-bit position metadata, reducing weight storage by somewhat less than half and offering up to twice the peak math throughput on supported shapes; accuracy after pruning must still be measured.
+2. **Channel and Block Pruning**: Serving frameworks (such as TensorRT and ONNX Runtime) favor structured pruning, removing entire attention heads (@sec-attention), MLP intermediate channels, or transformer blocks. Preserving contiguous memory strides lets standard dense BLAS kernels consume the smaller matrices without specialized sparse hardware; the latency change still has to be measured.
+:::
+
+@Tbl-compression-production separates allocation changes from the required execution path. A proposed optimization needs both a representation that saves work or storage and a kernel that consumes that representation.
 
 | Method | Stored state | Execution requirement |
 | :--- | :--- | :--- |
@@ -464,9 +491,9 @@ Unstructured pruning zeros arbitrary weights but produces random sparsity patter
 | Folded SVD factors | Two weights totaling $r(M+N)$ values | Two successive dense multiplications |
 | LoRA update | Base $W$ plus $r(M+N)$ update values | Base computation plus update, or a merged dense weight |
 
-: **Representation and execution**: Pruning, factorization, and adaptation change different parts of the state. Smaller stored factors do not establish a latency improvement by themselves. {#tbl-compression-production tbl-colwidths="[22,36,42]"}
+: **Representation and execution**: Pruning, factorization, and adaptation change different parts of the state. Smaller stored factors do not establish a latency improvement by themselves. {#tbl-compression-production tbl-colwidths="[24,38,38]"}
 
----
+{{< pagebreak >}}
 
 ## Summary
 

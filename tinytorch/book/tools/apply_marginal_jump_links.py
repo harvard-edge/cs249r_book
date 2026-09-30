@@ -181,15 +181,15 @@ JUMP_SIGNPOSTS = [
         r"## The Idea\n",
         "after",
         """::: {.column-margin}
-**↪ Jump ahead:** @sec-milestone-1  
+**↪ Jump ahead:** [Synthesis I](synthesis_01.qmd#sec-milestone-1)  
 *Deploying the five-step training engine to train a multi-layer perceptron from scratch.*
 :::
 
 """
     ),
-    # Milestone 01
+    # Synthesis I
     (
-        "milestone_01.qmd",
+        "synthesis_01.qmd",
         r"## The Problem\n",
         "after",
         """::: {.column-margin}
@@ -200,7 +200,7 @@ JUMP_SIGNPOSTS = [
 """
     ),
     (
-        "milestone_01.qmd",
+        "synthesis_01.qmd",
         r"## The Idea\n",
         "after",
         """::: {.column-margin}
@@ -308,15 +308,15 @@ JUMP_SIGNPOSTS = [
         r"## The Idea\n",
         "after",
         """::: {.column-margin}
-**↪ Jump ahead:** @sec-milestone-2  
+**↪ Jump ahead:** [Synthesis II](synthesis_02.qmd#sec-milestone-2)  
 *Autoregressive text generation and next-token probability distribution sampling with TinyGPT.*
 :::
 
 """
     ),
-    # Milestone 02
+    # Synthesis II
     (
-        "milestone_02.qmd",
+        "synthesis_02.qmd",
         r"## The Problem\n",
         "after",
         """::: {.column-margin}
@@ -327,7 +327,7 @@ JUMP_SIGNPOSTS = [
 """
     ),
     (
-        "milestone_02.qmd",
+        "synthesis_02.qmd",
         r"## The Idea\n",
         "after",
         """::: {.column-margin}
@@ -481,15 +481,15 @@ JUMP_SIGNPOSTS = [
         r"## The Idea\n",
         "after",
         """::: {.column-margin}
-**↪ Jump ahead:** @sec-milestone-3  
-*The Torch Olympics: deploying optimized candidate models against strict competitive scoring gates.*
+**↪ Jump ahead:** [Synthesis III](synthesis_03.qmd#sec-milestone-3)
+*The MLPerf Optimization Olympics: deploying optimized candidate models against strict competitive scoring gates.*
 :::
 
 """
     ),
-    # Milestone 03
+    # Synthesis III
     (
-        "milestone_03.qmd",
+        "synthesis_03.qmd",
         r"## The Problem\n",
         "after",
         """::: {.column-margin}
@@ -500,7 +500,7 @@ JUMP_SIGNPOSTS = [
 """
     ),
     (
-        "milestone_03.qmd",
+        "synthesis_03.qmd",
         r"## The Idea\n",
         "after",
         """::: {.column-margin}
@@ -547,8 +547,9 @@ def apply_signposts():
         content = filepath.read_text(encoding="utf-8")
 
         # Skip if signpost target is already present in this file to avoid duplicates
-        target_marker = signpost.strip().split("\n")[1]  # e.g., "**↩ Jump back:** @sec-tensors"
-        if target_marker in content:
+        target_marker = signpost.strip().split("\n")[1].strip()  # e.g., "**↩ Jump back:** @sec-tensors"
+        content_lines = {line.strip() for line in content.splitlines()}
+        if target_marker in content_lines:
             print(f"Already present in {filename}: {target_marker}")
             continue
 

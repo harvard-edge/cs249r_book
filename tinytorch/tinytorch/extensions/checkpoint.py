@@ -12,23 +12,33 @@ def checkpoint(function, *args):
             with no_grad():
                 out_tensor = function(*self.inputs)
             # The returned value of forward() must be a numpy array
-            return out_tensor.data
+            return out_tensor.data if isinstance(out_tensor, Tensor) else out_tensor
             
         def backward(self, grad_output):
             # 1. Detach inputs so they act as graph leaves for the recomputation
             detached_inputs = []
             for inp in self.inputs:
-                x = Tensor(inp.data, requires_grad=inp.requires_grad)
+                if isinstance(inp, Tensor):
+                    x = Tensor(inp.data, requires_grad=inp.requires_grad)
+                else:
+                    x = inp
                 detached_inputs.append(x)
                 
             # 2. Recompute the forward pass WITH gradients enabled
             recomputed_out = function(*detached_inputs)
             
             # 3. Trigger the local backward pass from the recomputed output
-            # We wrap the incoming grad_output numpy array into a Tensor
-            recomputed_out.backward(Tensor(grad_output))
+            grad_tensor = Tensor(grad_output) if not isinstance(grad_output, Tensor) else grad_output
+            recomputed_out.backward(grad_tensor)
             
             # 4. Return the gradients of the inputs (numpy arrays)
-            return tuple(x.grad.data if x.grad is not None else None for x in detached_inputs)
+            grads = []
+            for x in detached_inputs:
+                if isinstance(x, Tensor) and x.grad is not None:
+                    g = x.grad.data if isinstance(x.grad, Tensor) else x.grad
+                    grads.append(g)
+                else:
+                    grads.append(None)
+            return tuple(grads)
 
     return CheckpointFunction.apply(*args)

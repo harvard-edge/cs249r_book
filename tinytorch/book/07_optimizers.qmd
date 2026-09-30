@@ -25,6 +25,7 @@ optimizer.step()                        # 4. Update parameter trajectories
 ```
 
 Underneath that straightforward step, the optimizer coordinates extensive per-parameter state:
+
 1. **Auxiliary moment buffer tracking:** For every registered parameter, adaptive optimizers allocate and maintain persistent first-moment (momentum $m_t$) and second-moment (uncentered variance $v_t$) tensors, tripling the parameter memory footprint.
 2. **Bias correction during early iterations:** Because running moments are initialized to zeros, early estimates are biased toward zero. The runtime computes exponential decay correction factors ($1 - \beta_1^t$ and $1 - \beta_2^t$) to rescale steps during initial warm-up.
 3. **Decoupled weight decay (AdamW):** Rather than adding $L_2$ penalties to the gradient (which distorts moment estimates), the optimizer directly shrinks weight values ($W \leftarrow W(1 - \eta \lambda)$) independently of the adaptive gradient scale.
@@ -73,11 +74,6 @@ The two-coordinate example isolates a problem that also arises in networks: one 
 
 ## The Idea
 
-::: {.column-margin}
-**↪ Jump ahead:** @sec-training
-*Coordinates in-place optimizer parameter mutation within the unified training lifecycle.*
-:::
-
 
 ### Gradient descent, and why it is called stochastic
 
@@ -87,17 +83,28 @@ $$\theta \leftarrow \theta - \eta\, g,$$
 
 where $\eta$ is the **learning rate**, the fraction of the gradient applied per step. In training, $g$ is computed on one mini-batch rather than the whole dataset, so it is a noisy estimate of the true gradient. That noise is why the method is called **stochastic gradient descent** (SGD). The noise is a second reason, besides the ravine, to average gradients over several steps instead of trusting each one alone.
 
+::: {.column-margin}
+**↪ Jump ahead:** @sec-training
+*Coordinates in-place optimizer parameter mutation within the unified training lifecycle.*
+:::
+
 ### Momentum: let consistent gradients add up
 
 Suppose two successive gradients are both $2$, the learning rate is $0.1$, and the retained fraction of the previous update is $0.9$. Starting with velocity zero, the first velocity is $2$ and the second is $0.9\times2+2=3.8$. The weight moves by $0.2$, then $0.38$. If the second gradient were $-2$, the second velocity would instead be $-0.2$, giving a much smaller reversal. **Momentum** implements this memory with a velocity $v$:
 
-$$v \leftarrow \beta\, v + g, \qquad \theta \leftarrow \theta - \eta\, v.$$
+$$v \leftarrow \beta\, v + g, \qquad \theta \leftarrow \theta - \eta\, v.$$[^fn-nesterov-momentum]
+
+[^fn-nesterov-momentum]: Classical momentum (Polyak, 1964) computes velocity updates using the gradient at the current position $g_t = \nabla \mathcal{L}(\theta_t)$. In contrast, Nesterov accelerated gradient evaluates the gradient at an anticipated look-ahead position; in this chapter's convention ($\theta \leftarrow \theta - \eta v$), that is $g_t = \nabla \mathcal{L}(\theta_t - \eta\beta v_{t-1})$. This look-ahead acts as an anticipatory predictive brake, damping oscillation when approaching high-curvature ravine walls.
 
 The coefficient $\beta$, usually $0.9$, is the fraction of the previous velocity that survives into the next step. Unrolling the recurrence shows what $v$ holds after $t$ steps:
 
 $$v_t = g_t + \beta\, g_{t-1} + \beta^2 g_{t-2} + \cdots$$
 
 For a constant gradient $g$, the terms reinforce and $v$ approaches $g/(1-\beta)$, ten times $g$ at $\beta=0.9$. For an alternating gradient of fixed magnitude, they partly cancel and the velocity's eventual magnitude is $|g|/(1+\beta)$. Those two idealized sequences explain how momentum can reinforce a consistent direction and soften reversals. In a real optimization run the gradient changes with the weights, so the factors are not universal speedups or guarantees against oscillation.
+
+::: {.callout-tip title="Pause & Predict: The Hidden Memory Cost of AdamW"}
+If a transformer model contains 1 billion parameters stored in float32 (4 GB of DRAM), how much memory is required strictly for optimizer state during AdamW training? (Hint: compute first and second moment buffers.) What fraction of the total parameter plus optimizer memory does the optimizer consume?
+:::
 
 ### Adam: a step size for every parameter
 
@@ -107,11 +114,11 @@ $$m \leftarrow \beta_1 m + (1 - \beta_1)\, g, \qquad v \leftarrow \beta_2 v + (1
 
 The first, $m$, tracks the direction. The second, $v$, tracks the scale. Both are averages, so $\beta_1$ and $\beta_2$ are the fractions of history retained, with defaults $0.9$ and $0.999$. The squaring in $v$ is elementwise, so each parameter gets its own scale.
 
-Both averages start at zero, which biases them low at first. At the very first step, $m = 0.1\, g$, a tenth of the true gradient. Adam corrects this by dividing by $1 - \beta^t$, where $t$ counts updates of this parameter from one:
-
-$$\hat{m} = \frac{m}{1 - \beta_1^t}, \qquad \hat{v} = \frac{v}{1 - \beta_2^t}.$$[^fn-adam-bias-correction]
+Both averages start at zero, which biases them low at first. At the very first step, $m = 0.1\, g$, a tenth of the true gradient. Adam corrects this by dividing by $1 - \beta^t$, where $t$ counts updates of this parameter from one:[^fn-adam-bias-correction]
 
 [^fn-adam-bias-correction]: **Derivation of bias correction**: Unrolling the recurrence $v_t = \beta_2 v_{t-1} + (1 - \beta_2) g_t^2$ starting from $v_0 = 0$ yields $v_t = (1 - \beta_2) \sum_{i=1}^t \beta_2^{t-i} g_i^2$. Taking expectations under the assumption that true second moments $\mathbb{E}[g_i^2]$ are stationary yields $\mathbb{E}[v_t] = \mathbb{E}[g^2] (1 - \beta_2) \sum_{i=1}^t \beta_2^{t-i} = \mathbb{E}[g^2] (1 - \beta_2^t)$. Dividing by $1 - \beta_2^t$ produces an exact unbiased estimator $\mathbb{E}[\hat{v}_t] = \mathbb{E}[g^2]$ even at step $t=1$.
+
+$$\hat{m} = \frac{m}{1 - \beta_1^t}, \qquad \hat{v} = \frac{v}{1 - \beta_2^t}.$$
 
 At $t = 1$ the denominator for $m$ is $1 - 0.9 = 0.1$, which restores the full gradient. As $t$ grows the denominators approach one and the correction fades. The update is then
 
@@ -127,7 +134,7 @@ The thing to see in that formula is the ratio. For a parameter whose gradient is
 *AdamW quadruples parameter memory footprint: 16 bytes per scalar weight in FP32.*
 :::
 
-![**Optimization trajectories in an ill-conditioned ravine**: On an anisotropic loss surface ($100x^2 + y^2$), plain SGD oscillates violently across the steep walls while making negligible progress along the gentle valley floor. Momentum damps perpendicular oscillations and accelerates along the consistent direction. AdamW computes coordinate-wise adaptive step sizes from first and second gradient moments, driving directly toward the global minimum.](assets/images/diagrams/07_ravine-optimization.svg){#fig-ravine-optimization width="100%" fig-alt="Contour plot of an elongated loss ravine comparing three optimization trajectories: SGD zig-zagging between steep walls, Momentum accelerating along the ravine axis, and AdamW taking an efficient direct path to the center."}
+![**Optimization trajectories in an ill-conditioned ravine**: On an anisotropic loss surface ($100x^2 + y^2$), plain SGD oscillates violently across the steep walls while making negligible progress along the gentle valley floor. AdamW computes coordinate-wise adaptive step sizes from first and second gradient moments, driving directly toward the global minimum. The right panel counts the 16 bytes per parameter that AdamW keeps in float32: weight, gradient, and two moments.](assets/images/diagrams/07_ravine-optimization.svg){#fig-ravine-optimization width="100%" fig-alt="Contour plot of an elongated loss ravine comparing two optimization trajectories, SGD zig-zagging between steep walls and AdamW taking an efficient direct path to the center, beside a panel listing the four 4-byte values AdamW stores per parameter."}
 
 ### Weight decay and adaptive scaling
 
@@ -139,7 +146,9 @@ so a weight stays large only if the gradient keeps pushing it there. The coeffic
 
 Under Adam they are not the same. Adding $\lambda\theta$ to the gradient changes both running averages, then the result passes through the adaptive division. The amount of shrinkage can no longer be read as $\eta\lambda\theta$ independently of gradient history. AdamW keeps the L2 term out of $m$ and $v$ and applies the shrink to the old weight before subtracting the adaptive update:
 
-$$\theta \leftarrow (1 - \eta\lambda)\, \theta - \eta\, \frac{\hat{m}}{\sqrt{\hat{v}} + \epsilon}.$$
+$$\theta \leftarrow (1 - \eta\lambda)\, \theta - \eta\, \frac{\hat{m}}{\sqrt{\hat{v}} + \epsilon}.$$[^fn-decoupled-weight-decay]
+
+[^fn-decoupled-weight-decay]: In standard Adam with L2 regularization, the weight penalty $\lambda \theta$ is added directly to $g_t$, entering the second moment accumulator $v_t$. Coordinates with large gradients receive suppressed decay, while coordinates with infrequent or small gradients receive excessively strong decay. Loshchilov & Hutter (2019) showed that decoupling weight decay from the gradient moments restores the intended shrinkage $\theta \leftarrow (1 - \eta \lambda) \theta$ and improves Adam's generalization on image-classification benchmarks.
 
 For the weight above, an adaptive update of $0.1$ therefore gives $0.999-0.1=0.899$. Reversing the operations would give $(1-0.1)\times0.999=0.8991$, a different algorithm. The update paths in @fig-optimizers-landscape make the placement of decay explicit.
 
@@ -150,7 +159,7 @@ For the weight above, an adaptive update of $0.1$ therefore gives $0.999-0.1=0.8
 
 ### What a learning rate means
 
-The two families give $\eta$ different units, which is why their customary values differ by about a factor of ten. For SGD the step is $\eta g$, so a safe rate depends on the curvature of the loss. The ravine above diverged along its steep axis for any $\eta$ above $2/100$; a loss with ten times that curvature would need a rate ten times smaller. There is no universal SGD rate, only a rate for a given loss. For Adam the normalized step $\hat m / (\sqrt{\hat v} + \epsilon)$ has magnitude close to one when a coordinate's gradients agree in sign and less when they do not, so $\eta$ approximately bounds how far any parameter moves in one step, whatever the scale of its gradient (Kingma and Ba, 2015). That is why an Adam rate carries between models more readily than an SGD rate. TinyTorch's defaults follow the usual convention, $0.01$ for SGD and $0.001$ for Adam and AdamW, and the course milestones use those values: SGD at 0.01 for the digit networks of @sec-milestone-1 and @sec-milestone-2, and Adam at 0.001 for the attention tasks.
+The two families give $\eta$ different units, which is why their customary values differ by about a factor of ten. For SGD the step is $\eta g$, so a safe rate depends on the curvature of the loss. The ravine above diverged along its steep axis for any $\eta$ above $2/100$; a loss with ten times that curvature would need a rate ten times smaller. There is no universal SGD rate, only a rate for a given loss. For Adam the normalized step $\hat m / (\sqrt{\hat v} + \epsilon)$ has magnitude close to one when a coordinate's gradients agree in sign and less when they do not, so $\eta$ approximately bounds how far any parameter moves in one step, whatever the scale of its gradient (Kingma and Ba, 2015). That is why an Adam rate carries between models more readily than an SGD rate. TinyTorch's defaults follow the usual convention, $0.01$ for SGD and $0.001$ for Adam and AdamW, and the course milestones use those values: SGD at 0.01 for the digit networks of [Synthesis I](synthesis_01.qmd#sec-milestone-1) and [Synthesis II](synthesis_02.qmd#sec-milestone-2), and Adam at 0.001 for the attention routing task; the TinyGPT runs raise AdamW to between 0.002 and 0.008.
 
 The batch size moves the rate as well. Averaging $B$ independent per-example gradients divides the variance of the estimate by $B$, so a larger batch gives a more reliable direction and can support a larger step. Goyal and colleagues (2017) turned this into a rule for SGD: when the batch grows by a factor of $k$, multiply the learning rate by $k$, and ramp the rate up over the first few epochs. With it they trained ResNet-50 on ImageNet at batches of up to 8,192 images without losing accuracy, and accuracy fell at larger batches. The rule is an empirical regularity for a family of models, not a law, and it is the reason a learning rate reported without its batch size is incomplete.
 
@@ -168,17 +177,19 @@ The batch size moves the rate as well. Averaging $B$ independent per-example gra
 
 An optimizer separates the update rule from the loop that obtains gradients. The loop clears old gradients with `zero_grad()`, computes the next loss, calls `backward()`, and then calls `step()`. It can change optimizer classes without changing this sequence. The base class owns a list of parameter references and supplies gradient clearing; each subclass supplies the update rule.
 
-::: {#chk-optimizer-zero-grad-subtle-bug .callout-check title="Sanity Check: The silent accumulation trap of missing zero_grad()"}
-Because `backward()` accumulates gradients via `+=`, omitting `optimizer.zero_grad()` before backward causes gradients to sum continuously across consecutive mini-batches. Step 1 computes $\nabla L_1$; step 2 updates with $\nabla L_1 + \nabla L_2$; step $k$ updates with $\sum_{i=1}^k \nabla L_i$. The model diverges exponentially without raising any runtime errors.
+::: {#chk-optimizer-zero-grad-subtle-bug .callout-checkpoint title="Checkpoint: The silent accumulation trap of missing zero_grad()"}
+Because `backward()` accumulates gradients via `+=`, omitting `optimizer.zero_grad()` before backward causes gradients to sum continuously across consecutive mini-batches. Step 1 computes $\nabla L_1$; step 2 updates with $\nabla L_1 + \nabla L_2$; step $k$ updates with $\sum_{i=1}^k \nabla L_i$. The update drifts away from the current batch's gradient and can oscillate or diverge, without raising any runtime error.
 :::
 
-Clearing must remove the previous objective's gradient without removing the optimizer's history. The `backward()` traversal from @sec-autograd accumulates into `.grad`, so a second batch otherwise adds to the previous batch's gradient. Assigning `None` releases the parameter's reference to its gradient array instead of filling it with zeros. TinyTorch's backward traversal allocates a zero buffer when it first reaches the parameter, then adds the incoming contribution. The avoided work is the explicit clearing pass; the next backward pass still initializes storage.
+Clearing must remove the previous objective's gradient without removing the optimizer's history. The `backward()` traversal from @sec-autograd accumulates into `.grad`, so a second batch otherwise adds to the previous batch's gradient. Assigning `None` releases the parameter's reference to its gradient array instead of filling it with zeros.[^fn-zero-grad-set-to-none] TinyTorch's backward traversal allocates a zero buffer when it first reaches the parameter, then adds the incoming contribution. The avoided work is the explicit clearing pass; the next backward pass still initializes storage.
 
-The constructor copies the supplied parameter list, retains the original tensors, and rejects duplicates so the same tensor cannot be updated twice in one step. It enables gradient recording on these tensors without clearing any gradients already present. `zero_grad()` clears the gradients. `step()` is left for each subclass to define.
+[^fn-zero-grad-set-to-none]: In PyTorch, calling \texttt{zero\_grad} with \texttt{set\_to\_none=True} frees gradient memory buffers rather than filling them with zeros. This eliminates memory bandwidth overhead by skipping zero-fill memory writes; subsequent backward operations allocate and write gradients without reading previous zeros across the memory bus.
+
+The constructor copies the supplied parameter list, retains the original tensors, and rejects duplicates so the same tensor cannot be updated twice in one step. It preserves existing parameter gradient state without clearing any gradients already present. `zero_grad()` clears the gradients. `step()` is left for each subclass to define.
 
 {{< include _listings/07_optimizers/Optimizer.qmd >}}
 
-Parameters must require gradients before the forward pass that will be differentiated. Constructing an optimizer enables that flag; explicitly setting `requires_grad=True` earlier works too. `Optimizer.__init__` stores references to the original parameter tensors and sets their `requires_grad` flags. `Function.apply` reads those flags while each operation executes; setting them after the loss has already been computed cannot reconstruct missing records. The optimizer does not discover parameters by traversing the graph, either. A weight omitted from `parameters()` will not be updated, even if a separate path computed its gradient. @Lst-optimizers-recording isolates the recording requirement with one weight.
+Parameters must have `requires_grad=True` before the forward pass that will be differentiated. TinyTorch layer parameters (such as `Linear.weight` and `Linear.bias`) enable this flag at construction, while arbitrary tensors default to `requires_grad=False`. The optimizer does not mutate `requires_grad`; it simply stores references to the tensors passed to it. `Function.apply` inspects `requires_grad` during the forward pass to build the autograd graph. If a tensor was evaluated with `requires_grad=False`, running `backward()` produces no gradient for it, and the optimizer step leaves its data untouched. The optimizer also does not discover parameters by traversing the computation graph: a tensor omitted from `params` will never be updated, even if autograd computed its gradient. @Lst-optimizers-recording demonstrates how `requires_grad` controls gradient generation and optimizer updates.
 
 ::: {#lst-optimizers-recording lst-pos="H" lst-cap="**Enable recording before forward**: Constructing an optimizer cannot recover an earlier unrecorded graph."}
 ```python
@@ -186,18 +197,23 @@ from tinytorch.core.tensor import Tensor
 from tinytorch.core.optimizers import SGD
 import tinytorch.core.autograd
 
-w = Tensor([1.0])
-old_loss = (w * w).sum()             # no input requests recording yet
-opt = SGD([w], lr=0.1)              # marks this same w as trainable
-old_loss.backward()
-print(w.grad)                       # None: the old forward recorded no graph
+# Case 1: Tensor without requires_grad produces no gradient
+w_frozen = Tensor([1.0], requires_grad=False)
+opt_frozen = SGD([w_frozen], lr=0.1)
+loss_frozen = (w_frozen * w_frozen).sum()
+loss_frozen.backward()
+print(w_frozen.grad)                # None: unrecorded graph
+opt_frozen.step()
+print(w_frozen.data)                # [1.]: parameter untouched
 
-opt.zero_grad()
-loss = (w * w).sum()                # recompute after enabling recording
+# Case 2: Trainable parameter records graph and receives update
+w = Tensor([1.0], requires_grad=True)
+opt = SGD([w], lr=0.1)
+loss = (w * w).sum()
 loss.backward()
 print(w.grad)                       # [2.]
 opt.step()
-print(w.data)                       # [0.8]
+print(w.data)                       # [0.8]: updated by lr * grad
 ```
 :::
 
@@ -213,11 +229,11 @@ A zero gradient and a missing gradient have different meanings. All three optimi
 
 SGD's loop adds one array to the state we already know. For a parameter tensor of shape $(2,3)$, its gradient and optional momentum buffer also have shape $(2,3)$. The scalar learning rate and momentum coefficient apply elementwise across those arrays. The list index associates each parameter with its own history.
 
-The constructor checks the learning rate, momentum coefficient, and decay coefficient before enabling gradients on the parameters. Invalid negative or nonfinite values raise an error before any parameter is changed. The buffer list starts with `None` entries; a tensor receives a velocity array only when it first has a gradient.
+The constructor checks the learning rate, momentum coefficient, and decay coefficient before initializing parameter buffers. Invalid negative or nonfinite values raise an error before any parameter is changed. The buffer list starts with `None` entries; a tensor receives a velocity array only when it first has a gradient.
 
 {{< include _listings/07_optimizers/SGD.qmd >}}
 
-The order inside the loop is the order of The Idea. Weight decay folds into the gradient first (the coupled L2 form), momentum accumulates second, and the parameter moves last. The momentum buffers are allocated on the first step rather than in the constructor, so a parameter that never receives a gradient needs no velocity array. Once allocated, a buffer persists across steps, which is the whole point. It is state that outlives a batch, and the three elided helpers exist so that the training engine's checkpoints can save and restore it. A parameter with `grad=None` is skipped. This describes an unused parameter only if the caller cleared stale gradients before the batch. Whole-array NumPy expressions perform the arithmetic and may allocate intermediate arrays. The final assignment replaces `param.data`, preserving the Tensor object that the model owns.
+The order inside the loop is the order of The Idea. Weight decay folds into the gradient first (the coupled L2 form), momentum accumulates second, and the parameter moves last. The momentum buffers are allocated on the first step rather than in the constructor, so a parameter that never receives a gradient needs no velocity array. Once allocated, a buffer persists across steps, which is the whole point. It is state that outlives a batch, and the three elided helpers exist so that the training engine's checkpoints can save and restore it. A parameter with `grad=None` is skipped. This describes an unused parameter only if the caller cleared stale gradients before the batch. Whole-array NumPy expressions perform the arithmetic and may allocate intermediate arrays. The final assignment casts the result back to the parameter's dtype and replaces `param.data`, preserving the Tensor object that the model owns. Without the cast, a float64 learning rate or gradient would silently promote float32 weights to float64 and double their storage.
 
 Run SGD on the ravine from $(1,1)$ with $\eta=0.019$ and `momentum=0.9`, supplying $(100x,y)$ as a float32 gradient on each step. After 100 steps, $(x,y)\approx(0.005154,0.005234)$; plain SGD at the same rate gives $(0.000027,0.146859)$. Momentum has reduced the slowly changing $y$ coordinate much further, although its $x$ coordinate is farther from zero at that particular step. For this quadratic, eliminating velocity gives $x_{t+1}=(1+\beta-100\eta)x_t-\beta x_{t-1}$. Its stability condition is $0<100\eta<2(1+\beta)$, so with $\beta=0.9$ the upper boundary is $0.038$. At that boundary the coefficient is $-1.9$, and substituting $x_t=(-1)^t$ satisfies the recurrence. An alternating component can therefore persist without decay; this is not a convergent run.
 
@@ -235,9 +251,15 @@ With nonzero decay, `step()` must keep the two paths separate. It extracts the g
 
 {{< include _listings/07_optimizers/AdamW_step.qmd >}}
 
-The call chain preserves three useful invariants. The per-parameter update count advances before bias correction, which divides by $1 - \beta^t$ and would divide by zero at $t = 0$. The gradient handed to `_update_moments` is the raw gradient, with no weight decay mixed in, so $m$ and $v$ never see the L2 term. The decay is a separate multiply on `param.data` before the adaptive step, exactly the decoupled formula. The bias-corrected values are computed fresh each step and discarded; only the raw `m_buffers` and `v_buffers` are stored, along with their update counts.
+The call chain preserves three useful invariants. The per-parameter update count advances before bias correction, which divides by $1 - \beta^t$ and would divide by zero at $t = 0$. The gradient handed to `_update_moments` is the raw gradient, with no weight decay mixed in, so $m$ and $v$ never see the L2 term. The decay is a separate multiply on `param.data` before the adaptive step, exactly the decoupled formula, and the result is cast back to the dtype the parameter had on entry. The bias-corrected values are computed fresh each step and discarded; only the raw `m_buffers` and `v_buffers` are stored, along with their update counts.
 
 ### The original Adam, for contrast
+
+::: {.column-margin}
+![](assets/images/diagrams/07_optimizers-margin-decay.svg){width="100%" fig-alt="Comparison of coupled L2 regularization in Adam versus decoupled weight decay in AdamW showing variance suppression versus scale-invariant shrinkage."}
+
+*Decoupled Weight Decay: Adam couples decay to gradient variance, suppressing shrinkage on active weights, whereas AdamW applies uniform parameter decay.*
+:::
 
 TinyTorch's `Adam` uses the same moment equations, but it adds $\lambda\theta$ before calling the helper. To isolate the role of the denominator, first hold the normalization fixed in @lst-optimizers-decay-scaling.
 
@@ -298,7 +320,7 @@ for t in (1, 2):
 ```
 :::
 
-In @lst-optimizers-adamw-run, line 4 initializes weight `w = Tensor([1.0])`, and lines 5--6 configure `AdamW` with learning rate $\eta = 0.1$, $\beta = (0.9, 0.999)$, and weight decay $\lambda = 0.01$. The loop in lines 7--12 executes two consecutive update cycles. In line 8, a synthetic gradient `w.grad = Tensor([0.5])` is assigned. Line 9 executes `opt.step()`, which updates the first and second moment estimates, applies weight decay ($0.999\theta$), and adjusts the parameter. Line 10 extracts the internal moment values `m` and `v`, and line 11 prints the state (`t=1: m=0.05000 v=0.00025000 theta=0.8990` and `t=2: m=0.09500 v=0.00049975 theta=0.7981`). Finally, line 12 calls `opt.zero_grad()` to wipe `w.grad` before the next iteration.
+In @lst-optimizers-adamw-run, line 4 initializes weight `w = Tensor([1.0])`, and lines 5 to 6 configure `AdamW` with learning rate $\eta = 0.1$, $\beta = (0.9, 0.999)$, and weight decay $\lambda = 0.01$. The loop in lines 7 to 12 executes two consecutive update cycles. In line 8, a synthetic gradient `w.grad = Tensor([0.5])` is assigned. Line 9 executes `opt.step()`, which updates the first and second moment estimates, applies weight decay ($0.999\theta$), and adjusts the parameter. Line 10 extracts the internal moment values `m` and `v`, and line 11 prints the state (`t=1: m=0.05000 v=0.00025000 theta=0.8990` and `t=2: m=0.09500 v=0.00049975 theta=0.7981`). Finally, line 12 calls `opt.zero_grad()` to wipe `w.grad` before the next iteration.
 
 After either call, the weight has changed, the two raw moment arrays and their age remain available for the next call, and the assigned gradient is still present until `zero_grad()` clears it in line 12. The normalized update and the decayed intermediate weight are temporary values. The model continues to hold the same `Tensor`; its next forward pass reads the new array.
 
@@ -331,16 +353,16 @@ $$\begin{aligned}
 **Total model footprint**:
 $$\text{Memory} = 7 \times 10^9 \times 16\text{ bytes} = 112\text{ GB}$$
 
-**Systems insight**: Weights and gradients require $28\text{ GB} + 28\text{ GB} = 56\text{ GB}$, but AdamW's momentum buffers double that requirement to $112\text{ GB}$. A single 80 GB NVIDIA A100 cannot even hold the static training state of a 7B model without optimizer offloading or ZeRO state sharding.
+**Systems insight**: Weights and gradients require $28\text{ GB} + 28\text{ GB} = 56\text{ GB}$, but AdamW's momentum buffers double that requirement to $112\text{ GB}$. A single 80 GB NVIDIA A100 cannot even hold the static training state of a 7B model without optimizer offloading or ZeRO state sharding. Production systems compress these moment states further; 8-bit optimizers (Dettmers et al., 2022) store them in about 2 bytes per parameter using block-wise quantization, a technique outside TinyTorch. In @sec-extensions, we implement parameter-efficient fine-tuning via LoRA, which freezes the original weight matrices and trains low-rank adapter matrices, eliminating AdamW state for over 98% of the model parameters.
 
 :::
 
 NumPy evaluates the update as several array expressions, with temporary arrays between operations. Production implementations can combine work across tensors or fuse several operations into one device program, reducing intermediate storage and launch overhead. PyTorch exposes `foreach` and `fused` implementations in its [AdamW interface](https://docs.pytorch.org/docs/stable/generated/torch.optim.AdamW.html). Their performance depends on the workload and device; neither changes the intended update equation. @Sec-acceleration will examine how execution choices affect repeated array operations.
 
 ::: {#psp-fused-adamw-kernel .callout-perspective title="Production Bridge: Fused AdamW GPU kernels and multi-tensor launches"}
-In standard PyTorch, an unfused optimizer executes up to 10 discrete CUDA kernels per parameter (scaling, decay, momentum updates, square root, division). For a 70-layer model with hundreds of weight matrices, launching thousands of small kernels saturates the CPU-GPU command queue.
+A per-parameter ("for-loop") optimizer implementation launches several small kernels for each parameter tensor (decay, two moment updates, square root, division, update). For a 70-layer model with hundreds of weight matrices, launching thousands of small kernels saturates the CPU-GPU command queue.
 
-Production systems use `torch.optim.AdamW(..., fused=True)`, which compiles the entire weight update into a single fused GPU kernel per parameter group. This reduces DRAM memory round-trips by $4\times$ and eliminates kernel launch latency entirely.
+Production systems use `torch.optim.AdamW(..., fused=True)`, which compiles the entire weight update into a single fused GPU kernel per parameter group. This cuts intermediate memory traffic and the number of kernel launches; the size of the saving depends on the model and device.
 :::
 
 The mapping in @tbl-optimizers-production separates the mathematical state from the implementation that holds it.

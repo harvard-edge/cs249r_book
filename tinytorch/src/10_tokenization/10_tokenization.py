@@ -70,11 +70,15 @@ r"""
 **External Dependencies**:
 - `numpy` (for numerical arrays and statistical analysis)
 - `collections.Counter` (for frequency counting of adjacent token pairs)
+- `typing` (for type hints)
+- `time`, `tracemalloc`, and `string` (used only inside the analysis cells)
 
-**TinyTorch Dependencies**:
-- Module 01 (`Tensor`): Downstream integration, converting token ID lists into tensor buffers for model ingestion
+**TinyTorch Dependencies**: NONE
 
-### Ingestion & Transformation Pipeline
+This module imports nothing from TinyTorch. Its output is a plain `list[int]`;
+Module 11 will be the first to wrap token IDs in a `Tensor` for model ingestion.
+
+**Dependency Flow**: the ingestion and transformation pipeline
 
 | Stage | Data Representation | Type & Shape | Systems Operation |
 | :--- | :--- | :--- | :--- |
@@ -349,7 +353,7 @@ class CharTokenizer(Tokenizer):
         TODO: Set up vocabulary mappings
 
         APPROACH:
-        1. Store vocabulary list
+        1. Store vocabulary list, with duplicates removed (first occurrence wins)
         2. Create char→id and id→char mappings
         3. Handle special tokens (unknown character)
 
@@ -357,13 +361,16 @@ class CharTokenizer(Tokenizer):
         >>> tokenizer = CharTokenizer(['a', 'b', 'c'])
         >>> tokenizer.vocab_size
         4  # 3 chars + 1 unknown token
+
+        HINT: A repeated character would get two IDs, and char_to_id would keep
+        only the last one. list(dict.fromkeys(items)) drops repeats but keeps order.
         """
         ### BEGIN SOLUTION role="scaffold"
         if vocab is None:
             vocab = []
 
-        # Add special unknown token
-        self.vocab = [Tokenizer.TOK_UNKNOWN] + vocab
+        # Add special unknown token; drop repeats so every token has exactly one ID
+        self.vocab = list(dict.fromkeys([Tokenizer.TOK_UNKNOWN] + list(vocab)))
         self.vocab_size = len(self.vocab)
 
         # Create bidirectional mappings

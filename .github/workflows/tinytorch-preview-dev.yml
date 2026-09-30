@@ -13,7 +13,11 @@ name: '🔥 TinyTorch · 👁️ Preview (Dev)'
 #   3. DEPLOY       — Push to dev preview repo via SSH
 #
 # Triggers:
-#   - workflow_run: after Validate (Dev) succeeds on dev branch
+#   - workflow_run: after Validate (Dev) succeeds on a PUSH to dev in this
+#     repo (never a PR run: a fork branch named "dev" also has head_branch
+#     == 'dev'). Builds and deploys workflow_run.head_sha, the validated SHA.
+#     Both conditions travel together: checking out head_sha without the
+#     push/same-repo check would run fork code next to SSH_DEPLOY_KEY.
 #   - workflow_dispatch: manual
 #
 # Deploys to: harvard-edge.github.io/{DEV_REPO}/{DEV_TINYTORCH_PATH}/
@@ -46,8 +50,12 @@ jobs:
   # Build PDFs (only if Validate passed or manual trigger)
   build-pdfs:
     name: '📚 Build PDFs'
-    if: (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.head_branch == 'dev') || github.event_name == 'workflow_dispatch'
+    if: (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push' && github.event.workflow_run.head_branch == 'dev' && github.event.workflow_run.head_repository.full_name == github.repository) || github.event_name == 'workflow_dispatch'
     uses: ./.github/workflows/tinytorch-build-pdfs.yml
+    with:
+      # The SHA that validate went green on (github.sha on workflow_run is the
+      # default-branch tip, which may have moved).
+      ref: ${{ github.event.workflow_run.head_sha || github.sha }}
 
   # Build the site (after PDFs complete — site builds even if PDFs fail).
   # Split out from deploy so the artifact gates the visual-smoke job before
@@ -56,9 +64,10 @@ jobs:
     name: '🔥 Build TinyTorch Dev Site'
     runs-on: ubuntu-latest
     needs: [build-pdfs]
+    timeout-minutes: 30
     if: |
       always() &&
-      ((github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.head_branch == 'dev') || github.event_name == 'workflow_dispatch')
+      ((github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push' && github.event.workflow_run.head_branch == 'dev' && github.event.workflow_run.head_repository.full_name == github.repository) || github.event_name == 'workflow_dispatch')
     permissions:
       contents: read
       actions: read
@@ -66,9 +75,12 @@ jobs:
     steps:
       - name: 📥 Checkout
         uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
+          persist-credentials: false
 
       - name: 🔧 Setup Quarto
-        uses: quarto-dev/quarto-actions/setup@v2
+        uses: quarto-dev/quarto-actions/setup@8a96df13519ee81fd526f2dfca5962811136661b # v2
 
       # Community dashboard is in-tree at tinytorch/guide/community/
       # and published via Quarto's `resources: community/**` entry; no
@@ -175,14 +187,15 @@ jobs:
         run: bash .github/scripts/rewrite-dev-urls.sh tinytorch tinytorch/guide/_build
 
       - name: 🔧 Modify announcement for dev preview
+        env:
+          BUILT_SHA: ${{ github.event.workflow_run.head_sha || github.sha }}
         run: |
-          COMMIT_SHORT="${{ github.sha }}"
-          COMMIT_SHORT="${COMMIT_SHORT:0:8}"
+          COMMIT_SHORT="${BUILT_SHA:0:8}"
 
           python3 binder/tools/scripts/publish/modify_dev_announcement.py \
             tinytorch/guide/_build \
             --verbose \
-            --commit-hash "${{ github.sha }}" \
+            --commit-hash "$BUILT_SHA" \
             --commit-short "$COMMIT_SHORT"
 
       - name: 📤 Upload built site as artifact
@@ -213,6 +226,7 @@ jobs:
     runs-on: ubuntu-latest
     needs: [smoke]
     if: needs.smoke.result == 'success'
+    timeout-minutes: 15
     permissions:
       contents: read
     steps:
@@ -225,6 +239,7 @@ jobs:
       - name: 🚀 Deploy to Dev Site via SSH
         env:
           SSH_DEPLOY_KEY: ${{ secrets.SSH_DEPLOY_KEY }}
+          BUILT_SHA: ${{ github.event.workflow_run.head_sha || github.sha }}
         run: |
           echo "🔐 Starting ssh-agent..."
           eval "$(ssh-agent -s)"
@@ -258,15 +273,22 @@ jobs:
           ls -la ${{ vars.DEV_TINYTORCH_PATH }}/ | head -10
 
           git add .
-          git commit -m "🔥 Deploy TinyTorch dev (Quarto) to /${{ vars.DEV_TINYTORCH_PATH }}/ from ${{ github.sha }}" --allow-empty || echo "🟡 Nothing to commit"
+          git commit -m "🔥 Deploy TinyTorch dev (Quarto) to /${{ vars.DEV_TINYTORCH_PATH }}/ from ${BUILT_SHA}" --allow-empty || echo "🟡 Nothing to commit"
 
+          PUSHED=false
           for i in 1 2 3; do
-            if git push origin main 2>/dev/null; then
+            if git push origin main; then
               echo "✅ Push succeeded on attempt $i"
+              PUSHED=true
               break
             fi
             echo "⚠️ Push failed (attempt $i/3), pulling with rebase..."
-            git pull --rebase origin main || true
+            git pull --rebase origin main || { git rebase --abort 2>/dev/null || true; }
+            sleep $((i * 5))
           done
+          if [ "$PUSHED" != "true" ]; then
+            echo "::error::Dev preview push failed after 3 attempts."
+            exit 1
+          fi
 
           echo "✅ TinyTorch deployed to: https://harvard-edge.github.io/${{ vars.DEV_REPO }}/${{ vars.DEV_TINYTORCH_PATH }}/"

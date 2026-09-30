@@ -15,11 +15,14 @@ name: '🔥 TinyTorch · ✅ Validate (Dev)'
 #   5. E2E_TESTS        — Full end-to-end validation (gates on 2-4)
 #   6. FRESH_INSTALL    — Docker-based student install simulation
 #   7. USER_JOURNEY     — Destructive full journey (resets + rebuilds)
+#   9. MILESTONES       — Slow milestone training/accuracy gates (release path)
+#   2b. PY_COMPAT       — Unit tests on Python 3.10 / 3.13 (Linux; standard+all)
 #
 # Triggers:
 #   - push: dev/main branches, tinytorch/** paths (all tests)
 #   - pull_request: dev/main branches (standard tests, stages 1-5)
-#   - workflow_call: from publish workflow (pre-release gate)
+#   - workflow_call: from publish workflow (pre-release gate). The caller
+#     passes `ref` = the exact commit it will ship; every stage checks it out.
 #   - workflow_dispatch: manual with test type + OS selection
 #
 # OS Support:
@@ -51,6 +54,11 @@ on:
       - '.github/workflows/tinytorch-preview-dev.yml'
   workflow_call:
     inputs:
+      ref:
+        description: 'Exact commit to test (publish-live passes the SHA it will ship). Blank = github.sha.'
+        required: false
+        default: ''
+        type: string
       test_type:
         description: 'Test type to run'
         required: false
@@ -109,6 +117,7 @@ jobs:
   configure:
     name: 📋 Configure
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     outputs:
       test_type: ${{ steps.config.outputs.test_type }}
       os_matrix: ${{ steps.config.outputs.os_matrix }}
@@ -118,16 +127,23 @@ jobs:
       run_cli: ${{ steps.config.outputs.run_cli }}
       run_e2e: ${{ steps.config.outputs.run_e2e }}
       run_release: ${{ steps.config.outputs.run_release }}
+      run_py_compat: ${{ steps.config.outputs.run_py_compat }}
 
     steps:
       - name: Determine test configuration
         id: config
+        env:
+          # `inputs` is populated for both workflow_call and workflow_dispatch.
+          # Do NOT branch on github.event_name == 'workflow_call': inside a
+          # called workflow, event_name is the CALLER's event, so that branch
+          # never fires. Before 2026-09-28 this left TEST_TYPE empty on every
+          # publish-live preflight and all seven stages were silently skipped.
+          INPUT_TEST_TYPE: ${{ inputs.test_type }}
+          INPUT_OS: ${{ inputs.os }}
         run: |
-          # Determine test type based on trigger
-          if [ "${{ github.event_name }}" = "workflow_call" ]; then
-            TEST_TYPE="${{ inputs.test_type }}"
-          elif [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            TEST_TYPE="${{ github.event.inputs.test_type }}"
+          # Determine test type: explicit input wins, otherwise infer from trigger
+          if [ -n "$INPUT_TEST_TYPE" ]; then
+            TEST_TYPE="$INPUT_TEST_TYPE"
           elif [ "${{ github.event_name }}" = "pull_request" ]; then
             TEST_TYPE="standard"
           elif [ "${{ github.ref }}" = "refs/heads/main" ]; then
@@ -143,10 +159,8 @@ jobs:
           echo "test_type=$TEST_TYPE" >> $GITHUB_OUTPUT
 
           # Determine OS matrix based on input (default: both Linux and Windows)
-          if [ "${{ github.event_name }}" = "workflow_call" ]; then
-            OS_INPUT="${{ inputs.os }}"
-          elif [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            OS_INPUT="${{ github.event.inputs.os }}"
+          if [ -n "$INPUT_OS" ]; then
+            OS_INPUT="$INPUT_OS"
           else
             # Automatic triggers run both Linux and Windows
             OS_INPUT="all"
@@ -179,6 +193,7 @@ jobs:
               echo "run_cli=true" >> $GITHUB_OUTPUT
               echo "run_e2e=false" >> $GITHUB_OUTPUT
               echo "run_release=false" >> $GITHUB_OUTPUT
+              echo "run_py_compat=false" >> $GITHUB_OUTPUT
               ;;
             standard)
               # Stages 1-5: inline + unit + integration + cli + e2e
@@ -188,6 +203,7 @@ jobs:
               echo "run_cli=true" >> $GITHUB_OUTPUT
               echo "run_e2e=true" >> $GITHUB_OUTPUT
               echo "run_release=false" >> $GITHUB_OUTPUT
+              echo "run_py_compat=true" >> $GITHUB_OUTPUT
               ;;
             all|user-journey)
               # All stages 1-7 (full validation including destructive user journey)
@@ -197,6 +213,13 @@ jobs:
               echo "run_cli=true" >> $GITHUB_OUTPUT
               echo "run_e2e=true" >> $GITHUB_OUTPUT
               echo "run_release=true" >> $GITHUB_OUTPUT
+              echo "run_py_compat=true" >> $GITHUB_OUTPUT
+              ;;
+            *)
+              # Fail loudly: an unrecognized or empty test type would otherwise
+              # skip every stage and let the caller report a green preflight.
+              echo "::error::Unknown test_type '$TEST_TYPE' (expected quick|standard|all|user-journey)"
+              exit 1
               ;;
           esac
 
@@ -226,11 +249,16 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.ref || github.sha }}
+          persist-credentials: false
 
       - name: Setup Python
         uses: actions/setup-python@v6
         with:
           python-version: '3.11'
+          cache: pip
+          cache-dependency-path: tinytorch/requirements.txt
 
       - name: Install dependencies
         run: |
@@ -278,11 +306,16 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.ref || github.sha }}
+          persist-credentials: false
 
       - name: Setup Python
         uses: actions/setup-python@v6
         with:
           python-version: '3.11'
+          cache: pip
+          cache-dependency-path: tinytorch/requirements.txt
 
       - name: Install dependencies
         run: |
@@ -321,11 +354,16 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.ref || github.sha }}
+          persist-credentials: false
 
       - name: Setup Python
         uses: actions/setup-python@v6
         with:
           python-version: '3.11'
+          cache: pip
+          cache-dependency-path: tinytorch/requirements.txt
 
       - name: Install dependencies
         run: |
@@ -364,11 +402,16 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.ref || github.sha }}
+          persist-credentials: false
 
       - name: Setup Python
         uses: actions/setup-python@v6
         with:
           python-version: '3.11'
+          cache: pip
+          cache-dependency-path: tinytorch/requirements.txt
 
       - name: Install dependencies
         run: |
@@ -378,6 +421,56 @@ jobs:
       - name: Run CLI Tests
         run: |
           ./bin/tito dev test --cli --ci
+
+  # ===========================================================================
+  # STAGE 2b: PYTHON COMPATIBILITY - unit tests on the other supported Pythons
+  # pyproject declares >=3.10 with 3.10-3.13 classifiers; the stages above run
+  # 3.11 only. Linux-only, standard/all runs; 3.11 stays the full path.
+  # ===========================================================================
+  stage-2b-py-compat:
+    name: 🐍 Stage 2b · Unit Tests (py${{ matrix.python }})
+    runs-on: ubuntu-latest
+    needs: [configure, stage-1-inline]
+    if: |
+      always() &&
+      needs.configure.outputs.run_py_compat == 'true' &&
+      (needs.stage-1-inline.result == 'success' || needs.stage-1-inline.result == 'skipped')
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ['3.10', '3.13']
+
+    defaults:
+      run:
+        working-directory: tinytorch
+        shell: bash
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.ref || github.sha }}
+          persist-credentials: false
+
+      - name: Setup Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: ${{ matrix.python }}
+          cache: pip
+          cache-dependency-path: tinytorch/requirements.txt
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Export package from src/
+        run: python3 -m tito.main dev export --all
+
+      - name: Run Unit Tests
+        run: |
+          ./bin/tito dev test --unit --ci
 
   # ===========================================================================
   # STAGE 5: E2E TESTS - Full user journey validation
@@ -393,7 +486,10 @@ jobs:
       (needs.stage-2-unit.result == 'success' || needs.stage-2-unit.result == 'skipped') &&
       (needs.stage-3-integration.result == 'success' || needs.stage-3-integration.result == 'skipped') &&
       (needs.stage-4-cli.result == 'success' || needs.stage-4-cli.result == 'skipped')
-    timeout-minutes: 15
+    # 52aea3c1bd widened E2E (module_flow + milestone_flow markers, 600 s
+    # pytest cap); 25 min leaves room for install + Windows until a real run
+    # measures it.
+    timeout-minutes: 25
     # Windows runners have flaky infrastructure issues - don't block CI
     continue-on-error: ${{ contains(matrix.os, 'windows') }}
     strategy:
@@ -409,11 +505,16 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.ref || github.sha }}
+          persist-credentials: false
 
       - name: Setup Python
         uses: actions/setup-python@v6
         with:
           python-version: '3.11'
+          cache: pip
+          cache-dependency-path: tinytorch/requirements.txt
 
       - name: Install dependencies
         run: |
@@ -445,17 +546,22 @@ jobs:
       - name: Checkout (for test script only)
         uses: actions/checkout@v6
         with:
+          ref: ${{ inputs.ref || github.sha }}
+          persist-credentials: false
           sparse-checkout: |
             tinytorch/scripts/test-fresh-install.sh
 
       - name: Run Fresh Install Test (Docker)
+        env:
+          # Install the exact commit under test, not a branch tip that may have
+          # moved: raw.githubusercontent.com serves install.sh by SHA, and the
+          # installer fetches a full 40-hex ref as a commit (TINYTORCH_BRANCH is
+          # set from --branch inside the script). For PRs this is the merge
+          # commit, i.e. what the other stages tested.
+          REF_UNDER_TEST: ${{ inputs.ref || github.sha }}
         run: |
           chmod +x tinytorch/scripts/test-fresh-install.sh
-          # For PRs, github.ref_name is the merge ref (e.g. "1159/merge") which doesn't
-          # exist as a real branch on raw.githubusercontent.com. Use head_ref (the actual
-          # source branch) for PRs, falling back to ref_name for push events.
-          BRANCH="${{ github.head_ref || github.ref_name }}"
-          ./tinytorch/scripts/test-fresh-install.sh --branch "$BRANCH"
+          ./tinytorch/scripts/test-fresh-install.sh --branch "$REF_UNDER_TEST"
 
   # ===========================================================================
   # STAGE 7: USER JOURNEY - Destructive full journey (after all stages)
@@ -478,11 +584,16 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.ref || github.sha }}
+          persist-credentials: false
 
       - name: Setup Python
         uses: actions/setup-python@v6
         with:
           python-version: '3.11'
+          cache: pip
+          cache-dependency-path: tinytorch/requirements.txt
 
       - name: Install dependencies
         run: |
@@ -494,6 +605,56 @@ jobs:
           echo "🎓 Running user journey validation..."
           echo "   This resets all modules and runs the full user journey."
           ./bin/tito dev test --user-journey --ci
+
+  # ===========================================================================
+  # STAGE 9: MILESTONE TRAINING GATES - slow tests (release path only)
+  # ===========================================================================
+  # Stage 2 runs tests with -m "not slow" and Stage 7 only checks milestone exit
+  # codes, so nothing else proves the milestones actually learn (gradients reach
+  # every parameter, reported accuracy clears its target). Runs in parallel
+  # with Stage 7 on the `all` / `user-journey` path, i.e. push-to-dev and the
+  # publish preflight.
+  stage-9-milestones:
+    name: 🏁 Stage 9 · Milestone Training Gates
+    runs-on: ubuntu-latest
+    needs: [configure, stage-5-e2e]
+    if: |
+      always() &&
+      needs.configure.outputs.run_release == 'true' &&
+      (needs.stage-5-e2e.result == 'success' || needs.stage-5-e2e.result == 'skipped')
+    timeout-minutes: 30
+
+    defaults:
+      run:
+        working-directory: tinytorch
+        shell: bash
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.ref || github.sha }}
+          persist-credentials: false
+
+      - name: Setup Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.11'
+          cache: pip
+          cache-dependency-path: tinytorch/requirements.txt
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Export package from src/
+        run: python3 -m tito.main dev export --all
+
+      - name: Slow milestone tests (train + accuracy gates)
+        env:
+          PYTHONPATH: ${{ github.workspace }}/tinytorch
+        run: python3 -m pytest tests/milestones -m slow -v --tb=short -o addopts=
 
   # ===========================================================================
   # Stage 8: Link integrity (Tier 2 — non-blocking baseline)
@@ -517,8 +678,9 @@ jobs:
   summary:
     name: 📊 Summary
     runs-on: ubuntu-latest
-    needs: [configure, stage-1-inline, stage-2-unit, stage-3-integration, stage-4-cli, stage-5-e2e, stage-6-fresh-install, stage-7-user-journey, stage-8-links]
+    needs: [configure, stage-1-inline, stage-2-unit, stage-2b-py-compat, stage-3-integration, stage-4-cli, stage-5-e2e, stage-6-fresh-install, stage-7-user-journey, stage-8-links, stage-9-milestones]
     if: always()
+    timeout-minutes: 10
 
     steps:
       - name: Generate Summary
@@ -557,6 +719,17 @@ jobs:
             esac
           else
             echo "| 2 | 🧪 Unit Tests | ⏭️ Skipped |" >> $GITHUB_STEP_SUMMARY
+          fi
+
+          # Stage 2b: Python compatibility
+          if [ "${{ needs.configure.outputs.run_py_compat }}" = "true" ]; then
+            case "${{ needs.stage-2b-py-compat.result }}" in
+              success) echo "| 2b | 🐍 Py 3.10/3.13 Unit | ✅ Passed |" >> $GITHUB_STEP_SUMMARY ;;
+              failure) echo "| 2b | 🐍 Py 3.10/3.13 Unit | ❌ Failed |" >> $GITHUB_STEP_SUMMARY ;;
+              *) echo "| 2b | 🐍 Py 3.10/3.13 Unit | ⏭️ ${{ needs.stage-2b-py-compat.result }} |" >> $GITHUB_STEP_SUMMARY ;;
+            esac
+          else
+            echo "| 2b | 🐍 Py 3.10/3.13 Unit | ⏭️ Skipped |" >> $GITHUB_STEP_SUMMARY
           fi
 
           # Stage 3: Integration
@@ -614,6 +787,17 @@ jobs:
             echo "| 7 | 🎓 User Journey | ⏭️ Skipped |" >> $GITHUB_STEP_SUMMARY
           fi
 
+          # Stage 9: Milestone training gates
+          if [ "${{ needs.configure.outputs.run_release }}" = "true" ]; then
+            case "${{ needs.stage-9-milestones.result }}" in
+              success) echo "| 9 | 🏁 Milestone Gates | ✅ Passed |" >> $GITHUB_STEP_SUMMARY ;;
+              failure) echo "| 9 | 🏁 Milestone Gates | ❌ Failed |" >> $GITHUB_STEP_SUMMARY ;;
+              *) echo "| 9 | 🏁 Milestone Gates | ⏭️ ${{ needs.stage-9-milestones.result }} |" >> $GITHUB_STEP_SUMMARY ;;
+            esac
+          else
+            echo "| 9 | 🏁 Milestone Gates | ⏭️ Skipped |" >> $GITHUB_STEP_SUMMARY
+          fi
+
           # Stage 8: Link Check (non-blocking)
           case "${{ needs.stage-8-links.result }}" in
             success) echo "| 8 | 🔗 Link Check | ✅ Passed (non-blocking) |" >> $GITHUB_STEP_SUMMARY ;;
@@ -621,39 +805,76 @@ jobs:
             *) echo "| 8 | 🔗 Link Check | ⏭️ ${{ needs.stage-8-links.result }} |" >> $GITHUB_STEP_SUMMARY ;;
           esac
 
+      # Windows stages run with continue-on-error (flaky runners; whether they
+      # should block is an open decision). A failed Windows leg therefore reports
+      # success through needs.*.result, so read the per-job conclusions from the
+      # API to at least make the failure visible. Reporting only, never blocking.
+      - name: Report Windows failures (non-blocking)
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          RUN_ID: ${{ github.run_id }}
+        run: |
+          # filter=latest = most recent execution of each job across attempts,
+          # so "Re-run failed jobs" still sees legs carried over from attempt 1.
+          FAILED_WIN=$(gh api --paginate "repos/$REPO/actions/runs/$RUN_ID/jobs?filter=latest&per_page=100" \
+            --jq '.jobs[] | select((.name | test("[(]windows-")) and (.conclusion == "failure" or .conclusion == "cancelled" or .conclusion == "timed_out")) | "\(.name) [\(.conclusion)]"')
+          if [ -n "$FAILED_WIN" ]; then
+            echo "⚠️ Windows failures (non-blocking):"
+            {
+              echo ""
+              echo "### ⚠️ Windows failures (non-blocking)"
+              echo ""
+            } >> "$GITHUB_STEP_SUMMARY"
+            while IFS= read -r job; do
+              echo "  - $job"
+              echo "- $job" >> "$GITHUB_STEP_SUMMARY"
+            done <<< "$FAILED_WIN"
+            echo "::warning title=Windows failures (non-blocking)::$(echo "$FAILED_WIN" | paste -sd ';' -)"
+          else
+            echo "No Windows stage failures."
+          fi
+
       - name: Check for failures
         run: |
           FAILED=false
 
-          # Check each enabled test
-          if [ "${{ needs.configure.outputs.run_inline }}" = "true" ] && [ "${{ needs.stage-1-inline.result }}" = "failure" ]; then
-            echo "❌ Stage 1 (Inline Build) failed"
+          # A requested stage must END in success. Checking only for "failure"
+          # let a skipped or cancelled stage count as a pass, which is how an
+          # empty test_type once produced a green preflight with zero tests run.
+          require() {  # require <enabled> <result> <label>
+            if [ "$1" = "true" ] && [ "$2" != "success" ]; then
+              echo "❌ $3 did not pass (result: ${2:-none})"
+              FAILED=true
+            fi
+          }
+
+          if [ "${{ needs.configure.result }}" != "success" ]; then
+            echo "❌ Configure did not succeed (result: ${{ needs.configure.result }})"
             FAILED=true
           fi
-          if [ "${{ needs.configure.outputs.run_unit }}" = "true" ] && [ "${{ needs.stage-2-unit.result }}" = "failure" ]; then
-            echo "❌ Stage 2 (Unit Tests) failed"
-            FAILED=true
+
+          require "${{ needs.configure.outputs.run_inline }}"      "${{ needs.stage-1-inline.result }}"      "Stage 1 (Inline Build)"
+          require "${{ needs.configure.outputs.run_unit }}"        "${{ needs.stage-2-unit.result }}"        "Stage 2 (Unit Tests)"
+          require "${{ needs.configure.outputs.run_py_compat }}"   "${{ needs.stage-2b-py-compat.result }}"  "Stage 2b (Python 3.10/3.13 Unit)"
+          require "${{ needs.configure.outputs.run_integration }}" "${{ needs.stage-3-integration.result }}" "Stage 3 (Integration)"
+          require "${{ needs.configure.outputs.run_cli }}"         "${{ needs.stage-4-cli.result }}"         "Stage 4 (CLI Tests)"
+          require "${{ needs.configure.outputs.run_e2e }}"         "${{ needs.stage-5-e2e.result }}"         "Stage 5 (E2E Tests)"
+
+          # Stage 6 is legitimately skipped for fork PRs (install script needs an in-repo branch)
+          FRESH_RESULT="${{ needs.stage-6-fresh-install.result }}"
+          IS_FORK_PR="${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository }}"
+          if [ "$IS_FORK_PR" = "true" ] && [ "$FRESH_RESULT" = "skipped" ]; then
+            FRESH_RESULT="success"
           fi
-          if [ "${{ needs.configure.outputs.run_integration }}" = "true" ] && [ "${{ needs.stage-3-integration.result }}" = "failure" ]; then
-            echo "❌ Stage 3 (Integration) failed"
-            FAILED=true
+          FRESH_ENABLED=false
+          if [ "${{ needs.configure.outputs.run_e2e }}" = "true" ] || [ "${{ needs.configure.outputs.run_release }}" = "true" ]; then
+            FRESH_ENABLED=true
           fi
-          if [ "${{ needs.configure.outputs.run_cli }}" = "true" ] && [ "${{ needs.stage-4-cli.result }}" = "failure" ]; then
-            echo "❌ Stage 4 (CLI Tests) failed"
-            FAILED=true
-          fi
-          if [ "${{ needs.configure.outputs.run_e2e }}" = "true" ] && [ "${{ needs.stage-5-e2e.result }}" = "failure" ]; then
-            echo "❌ Stage 5 (E2E Tests) failed"
-            FAILED=true
-          fi
-          if { [ "${{ needs.configure.outputs.run_e2e }}" = "true" ] || [ "${{ needs.configure.outputs.run_release }}" = "true" ]; } && [ "${{ needs.stage-6-fresh-install.result }}" = "failure" ]; then
-            echo "❌ Stage 6 (Fresh Install) failed"
-            FAILED=true
-          fi
-          if [ "${{ needs.configure.outputs.run_release }}" = "true" ] && [ "${{ needs.stage-7-user-journey.result }}" = "failure" ]; then
-            echo "❌ Stage 7 (User Journey) failed"
-            FAILED=true
-          fi
+          require "$FRESH_ENABLED" "$FRESH_RESULT" "Stage 6 (Fresh Install)"
+          require "${{ needs.configure.outputs.run_release }}"     "${{ needs.stage-7-user-journey.result }}" "Stage 7 (User Journey)"
+          require "${{ needs.configure.outputs.run_release }}"     "${{ needs.stage-9-milestones.result }}"   "Stage 9 (Milestone Gates)"
 
           if [ "$FAILED" = "true" ]; then
             echo ""

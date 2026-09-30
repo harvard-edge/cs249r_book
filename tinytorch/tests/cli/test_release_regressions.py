@@ -145,15 +145,32 @@ def test_mlperf_optimization_loads_packaged_tinydigits():
 
 
 def test_generation_speedup_import_error_lists_actual_requirements():
-    text = (
+    # Run the milestone with Module 13 unavailable and check the real behavior:
+    # a clean exit 1 naming the modules to export, not a raw traceback. A
+    # text search of the source passed even when the guard had been removed.
+    script = (
         TINYTORCH_ROOT
         / "milestones"
         / "06_2018_mlperf"
         / "02_generation_speedup.py"
-    ).read_text(encoding="utf-8")
+    )
+    runner = (
+        "import runpy, sys\n"
+        "sys.modules['tinytorch.core.transformers'] = None\n"
+        f"runpy.run_path({str(script)!r}, run_name='__main__')\n"
+    )
+    result = subprocess.run(
+        [sys.executable, "-c", runner],
+        cwd=TINYTORCH_ROOT,
+        capture_output=True,
+        text=True,
+        timeout=120,
+    )
 
-    assert "modules 01-08, 11-13, and 18" in text
-    assert "modules 11-17" not in text
+    assert result.returncode == 1, result.stdout + result.stderr
+    assert "Traceback" not in result.stderr, result.stderr
+    assert "modules 01-08, 11-13, and 18" in result.stdout
+    assert "modules 11-17" not in result.stdout
 
 
 def test_milestone_list_uses_actual_history_start_year():
@@ -168,8 +185,8 @@ def test_milestone_list_uses_actual_history_start_year():
     )
 
     assert result.returncode == 0
-    assert "1958 to 2018" in result.stdout
-    assert "1957 to 2018" not in result.stdout
+    assert "1958 to 2024" in result.stdout
+    assert "1957 to 2024" not in result.stdout
 
 
 def test_package_reset_success_messages_render_real_newlines(monkeypatch, tmp_path):
@@ -257,3 +274,108 @@ def test_open_jupyter_logs_to_file_not_pipe(monkeypatch, tmp_path):
     assert hasattr(stdout_file, "write") or hasattr(stdout_file, "fileno")
     assert Path(stdout_file.name) == command._jupyter_log_file()
 
+
+
+def _run_kernels_milestone(patch_lines):
+    """Run Milestone 07 with extension behavior patched in-process."""
+    script = TINYTORCH_ROOT / "milestones" / "07_2024_kernels" / "01_custom_kernels.py"
+    runner = "\n".join(
+        ["import runpy", "import numpy as np", "import tinytorch.extensions.simd_ops as s"]
+        + patch_lines
+        + [f"runpy.run_path({str(script)!r}, run_name='__main__')"]
+    )
+    return subprocess.run(
+        [sys.executable, "-c", runner],
+        cwd=TINYTORCH_ROOT,
+        capture_output=True,
+        text=True,
+        timeout=300,
+    )
+
+
+def test_kernels_milestone_reports_numpy_fallback_honestly():
+    # Every extension silently falls back to NumPy. The milestone once printed
+    # [PASS] for NumPy vs NumPy and credited it as a native kernel. Milestone 07
+    # now grades the student's Module 17 code (test_gates_kernels.py); a native
+    # kernel that wasn't built must be reported as such, never as verified.
+    result = _run_kernels_milestone(
+        ["s.simd_build_info = lambda: {'built': False, 'error': 'no compiler (test)'}"]
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    native_lines = [line for line in result.stdout.splitlines() if "not built" in line]
+    assert native_lines, result.stdout
+    assert not any("verified" in line.lower() for line in native_lines)
+
+
+def test_kernels_milestone_flags_wrong_bundled_kernel():
+    # A bundled native kernel that computes the wrong answer must be flagged,
+    # not reported as agreeing with NumPy. It doesn't fail the student, whose
+    # Module 17 code is what the milestone grades.
+    result = _run_kernels_milestone(
+        [
+            "s.simd_build_info = lambda: {'built': True, 'openmp': False}",
+            "s.simd_matmul = lambda a, b: np.zeros((a.shape[0], b.shape[1]), np.float32)",
+        ]
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "disagrees with NumPy" in result.stdout
+
+
+def _load_tinycopilot():
+    path = TINYTORCH_ROOT / "milestones" / "05_2017_transformer" / "03_tinycopilot.py"
+    spec = importlib.util.spec_from_file_location("tinycopilot_milestone", path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def test_tinycopilot_scored_prompts_are_absent_from_training_corpus():
+    # The syntax gate once scored prompts that appeared 6-7 times each in the
+    # training text, so it measured recall. Scored prompts must stay held out.
+    module = _load_tinycopilot()
+    corpus = (TINYTORCH_ROOT / "datasets" / "tinypy" / "tinypy_sample.txt").read_text(encoding="utf-8")
+    leaked = [p for p in module.HELDOUT_PROMPTS if p in corpus]
+    assert module.HELDOUT_PROMPTS, "TinyCopilot needs held-out prompts to score"
+    assert not leaked, f"Scored prompts found in training corpus: {leaked}"
+
+
+def test_tinycopilot_ast_gate_rejects_garbage():
+    # The gate once trimmed lines and appended `pass` until anything parsed,
+    # so these all counted as valid Python.
+    check = _load_tinycopilot().check_ast_validity
+    garbage = [
+        ("def add(a, b):", "\n)))) !!! garbage $$$"),
+        ("class Linear:", "\n\x00@@@"),
+        ("def f(x):", "\n    for i in in in ====="),
+        ("def f(x):", "\n    return x\n    y = = 1\n    z = = 2"),
+        ("def f(x):", "\n    y = = 1"),
+        ("def f(x):", "\n    return x\n    y = =\n\n"),
+        ("def f(x):", ""),
+    ]
+    for prompt, completion in garbage:
+        is_valid, _ = check(prompt + completion, prompt)
+        assert not is_valid, f"AST gate accepted invalid completion: {completion!r}"
+
+    # Honest completions still pass, including one cut off mid-line by the budget
+    assert check("def f(x):\n    return x\n\n", "def f(x):")[0]
+    assert check("def f(x):\n    y = x + 1\n    return y\n    y = =", "def f(x):")[0]
+
+
+def test_chat_overfitting_diagnosis_follows_measured_test_loss():
+    # Labels were once assigned by epoch number: the midpoint epoch was always
+    # "Sweet Spot" even when held-out loss rose every epoch.
+    path = TINYTORCH_ROOT / "milestones" / "05_2017_transformer" / "04_tinygpt_chat.py"
+    spec = importlib.util.spec_from_file_location("tinygpt_chat_milestone", path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+
+    rising = [(1, 5.4, 5.99, 0.5), (2, 3.8, 6.35, 2.5), (3, 2.0, 7.69, 5.7), (4, 0.7, 9.10, 8.4)]
+    labels = [diag for diag, _ in module.diagnose_epochs(rising)]
+    assert labels[0].startswith("Sweet Spot")
+    assert all(label.startswith("Overfitting") for label in labels[1:])
+
+    u_shaped = [(1, 5.0, 6.0, 1.0), (2, 3.0, 4.0, 1.0), (3, 1.0, 5.0, 4.0)]
+    labels = [diag for diag, _ in module.diagnose_epochs(u_shaped)]
+    assert labels[0].startswith("Learning")
+    assert labels[1].startswith("Sweet Spot")
+    assert labels[2].startswith("Overfitting")

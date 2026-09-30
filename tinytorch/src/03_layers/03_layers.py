@@ -195,10 +195,43 @@ Let's build our layer system step by step. We'll implement two essential layer t
 ### Layer Base Class: Foundation for All Layers
 
 All neural network layers share common functionality: forward pass, parameter management, and callable interface. The base Layer class provides this consistent interface.
+
+Every layer also carries a `training` flag, `True` by default. Most layers ignore it; Dropout reads it to decide whether to mask. `model.train()` and `model.eval()` flip that flag on the model *and every layer stored inside it*, the same tree walk PyTorch's `nn.Module.train()` does. `set_training_mode` is that walk, written once so that the training loop you will build in Module 08 can switch any model, including a hand-written class that never inherited from `Layer`.
 """
 
 # %% nbgrader={"grade": false, "grade_id": "layer-base", "solution": false}
 #| export
+def set_training_mode(model, training=True):
+    """
+    Set `.training` on a model and on every layer reachable from its attributes.
+
+    Anything with a forward() method counts as a layer, whether it is stored
+    directly (self.fc = Linear(...)) or inside a list, tuple, or dict
+    (self.layers = [...]). The `seen` set keeps shared or circular references
+    from being visited twice.
+    """
+    seen = set()
+
+    def visit(obj):
+        if id(obj) in seen:
+            return
+        seen.add(id(obj))
+        obj.training = training
+        for value in getattr(obj, '__dict__', {}).values():
+            if isinstance(value, dict):
+                children = value.values()
+            elif isinstance(value, (list, tuple)):
+                children = value
+            else:
+                children = (value,)
+            for child in children:
+                if callable(getattr(child, 'forward', None)):
+                    visit(child)
+
+    visit(model)
+    return model
+
+
 class Layer:
     """
     Base class for all neural network layers.
@@ -211,7 +244,14 @@ class Layer:
     any extra arguments (such as Dropout's training flag) to forward().
     The default parameters() returns an empty list, which is right for any
     layer without learnable weights.
+
+    train() and eval() switch the `training` flag on this layer and on every
+    layer stored inside it, so a whole model changes mode with one call.
     """
+
+    # A class attribute, so every subclass starts in training mode even when
+    # its __init__ never calls super().__init__().
+    training = True
 
     def forward(self, x):
         """
@@ -236,6 +276,14 @@ class Layer:
     def __call__(self, x, *args, **kwargs):
         """Allow layer to be called like a function."""
         return self.forward(x, *args, **kwargs)
+
+    def train(self, mode=True):
+        """Put this layer and every layer inside it in training mode (or eval if mode=False)."""
+        return set_training_mode(self, mode)
+
+    def eval(self):
+        """Put this layer and every layer inside it in evaluation mode."""
+        return set_training_mode(self, False)
 
     def parameters(self):
         """
@@ -711,7 +759,7 @@ class Dropout(Layer):
         return Tensor(binary_mask * scale)
         ### END SOLUTION
 
-    def forward(self, x, training=True):
+    def forward(self, x, training=None):
         """
         Forward pass through dropout layer.
 
@@ -721,6 +769,8 @@ class Dropout(Layer):
         TODO: Implement dropout forward pass
 
         APPROACH:
+        0. If training is None, use this layer's own flag, self.training
+           (set by model.train() / model.eval())
         1. Use _should_apply_dropout to check if dropout is needed
         2. Handle the special case p=1 (drop everything)
         3. Use _generate_dropout_mask to create the scaled mask
@@ -731,13 +781,19 @@ class Dropout(Layer):
         >>> x = Tensor([1, 2, 3, 4])
         >>> y_train = dropout.forward(x, training=True)   # Some elements zeroed
         >>> y_eval = dropout.forward(x, training=False)   # All elements preserved
+        >>> dropout.eval()
+        >>> y_eval = dropout.forward(x)                   # Flag comes from self.training
 
         HINTS:
+        - An explicit training=True/False argument wins over self.training
         - _should_apply_dropout returns False for inference or p=0
         - When p=1.0 every element is dropped (return zeros)
         - Multiply x by the mask tensor for the final output
         """
         ### BEGIN SOLUTION
+        if training is None:
+            training = self.training
+
         if not self._should_apply_dropout(training):
             return x
 
@@ -748,7 +804,7 @@ class Dropout(Layer):
         return x * mask
         ### END SOLUTION
 
-    def __call__(self, x, training=True):
+    def __call__(self, x, training=None):
         """Allows the layer to be called like a function."""
         return self.forward(x, training)
 
@@ -909,7 +965,10 @@ class Sequential:
         ... )
         >>> output = model(input_tensor)
         >>> params = model.parameters()  # All parameters from all layers
+        >>> model.eval()                 # Every layer inside switches to eval mode
     """
+
+    training = True  # Same default as Layer
 
     def __init__(self, *layers):
         """Initialize with layers to chain together."""
@@ -919,16 +978,20 @@ class Sequential:
         else:
             self.layers = list(layers)
 
-    def forward(self, x, training=True):
+    def forward(self, x, training=None):
         """Forward pass through all layers sequentially.
 
         Passes training=True/False to layers that support it (e.g. Dropout),
         and falls back to a plain forward(x) call for layers that don't.
-        This lets you switch between training and eval mode with one flag:
+        With no argument the container's own flag is used, so model.eval()
+        and an explicit flag both work:
 
+            model.eval(); output = model(x)             # eval: Dropout disabled
             output = model.forward(x, training=False)   # eval: Dropout disabled
             output = model.forward(x, training=True)    # train: Dropout active
         """
+        if training is None:
+            training = self.training
         for layer in self.layers:
             # Only layers whose forward takes a `training` flag (Dropout) receive it
             if 'training' in inspect.signature(layer.forward).parameters:
@@ -937,9 +1000,17 @@ class Sequential:
                 x = layer.forward(x)
         return x
 
-    def __call__(self, x, training=True):
+    def __call__(self, x, training=None):
         """Allow model to be called like a function."""
         return self.forward(x, training=training)
+
+    def train(self, mode=True):
+        """Put the container and every layer in it in training mode (or eval if mode=False)."""
+        return set_training_mode(self, mode)
+
+    def eval(self):
+        """Put the container and every layer in it in evaluation mode."""
+        return set_training_mode(self, False)
 
     def parameters(self):
         """Collect each parameter once, even when layers share a weight."""
@@ -1443,8 +1514,9 @@ Congratulations! You've built the fundamental building blocks that make neural n
 - **Dropout costs memory, not just compute**: the mask is a full float32 tensor
   the same shape as the activations it gates
 - **Composition is the whole idea**: layers are interchangeable because they almost all
-  agree on one contract, forward(x) -> Tensor. Dropout is the seam, since it needs
-  forward(x, training=True), and that single extra flag is why Sequential.forward has to
+  agree on one contract, forward(x) -> Tensor. Dropout is the seam, since it reads a
+  training flag, passed as forward(x, training=...) or stored on the layer by
+  model.train()/model.eval(), and that single extra flag is why Sequential.forward has to
   inspect each layer's signature before calling it
 
 ### Ready for Next Steps

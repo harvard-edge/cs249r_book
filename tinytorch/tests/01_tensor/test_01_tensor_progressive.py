@@ -132,10 +132,10 @@ class TestDependencyValidation:
             t = Tensor(np.array([1, 2, 3]))
             assert isinstance(t.data, np.ndarray), "Tensor should use numpy internally"
 
-            # Should support optional features
-            if hasattr(t, 'device') or hasattr(t, 'dtype'):
-                # Advanced tensor features
-                assert True, "Module 01 advanced features present"
+            # The NumPy array holds the values as float32, and dtype reports it
+            assert t.data.dtype == np.float32, f"Tensor should store float32, got {t.data.dtype}"
+            assert t.dtype == np.float32, f"Tensor.dtype should report float32, got {t.dtype}"
+            np.testing.assert_array_equal(t.data, [1.0, 2.0, 3.0])
 
         except ImportError:
             raise

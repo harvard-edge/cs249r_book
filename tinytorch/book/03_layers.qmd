@@ -26,13 +26,14 @@ print("Output shape:", y.shape)             # (32, 128)
 ```
 
 Underneath that clean interface, the framework resolves several fundamental systems responsibilities:
+
 1. **Persistent state versus ephemeral activations:** The layer creates persistent parameter tensors (`weight` and `bias`) that live across training iterations, distinct from the transient activation tensors allocated during each forward step.
 2. **Variance-scaled parameter initialization:** Rather than initializing weights with raw unscaled random noise (which causes activations to explode or vanish exponentially with depth), the constructor scales initial weight variance inversely with fan-in.
 3. **Hierarchical parameter discovery:** The layer registers its weights in an internal container hierarchy so optimizers can traverse the model and retrieve all trainable parameters in a single call (`model.parameters()`).
 
 Building upon the memory buffers of @sec-tensors and activations of @sec-activations, this chapter encapsulates stateful parameters into reusable, composable layer blocks. Before building these abstractions, we must inspect what breaks when multi-layer networks are implemented with raw, unmanaged tensors.
 
-![**A shared layer interface**: Linear owns parameters, Dropout changes behavior with the training argument, and Sequential composes their forward calls and collects parameters.](assets/images/diagrams/03_layers-diag-1.svg){#fig-layers-container width="100%"}
+![**A shared layer interface**: Linear owns parameters, Dropout changes behavior with the training flag, and Sequential composes their forward calls and collects parameters.](assets/images/diagrams/03_layers-diag-1.svg){#fig-layers-container width="100%" fig-alt="Linear holds weight and bias, Dropout reads the training flag, and Sequential calls each child's forward in order and collects their parameters."}
 
 ---
 
@@ -47,6 +48,10 @@ Building upon the memory buffers of @sec-tensors and activations of @sec-activat
 Write a three-layer network with nothing but tensors. You allocate `W1`, `b1`, `W2`, `b2`, `W3`, `b3`, write the forward pass as three matrix multiplies with a ReLU between each, and the code runs. Then three things go wrong.
 
 First, the numbers. The weights need starting values, and the obvious choice is standard normal noise, `randn`. The loop in @lst-layers-variance-run uses a hidden width of 1024 to make the change in activation spread visible as depth grows.
+
+::: {.callout-tip title="Pause & Predict: Unscaled Variance Across Depth"}
+Before running the code below, consider a 15-layer network where each layer has width $D = 1024$, weights are drawn from $\mathcal{N}(0, 1)$, and inputs have unit variance. What happens to the activation variance? Will it grow linearly, stay bounded, or explode?
+:::
 
 ::: {#lst-layers-variance-run lst-pos="H" lst-cap="**Unscaled initialization**: A ReLU stack exposes growth in pre-activation variance."}
 ```python
@@ -106,21 +111,27 @@ For a general width, take one output $y = \sum_{j=1}^{D_{\text{in}}} x_j w_j$, w
 
 $$\text{Var}(y) = D_{\text{in}} \cdot \text{Var}(x) \cdot \text{Var}(w).$$
 
-[^fn-fan-in-layer-width]: **Fan-in**: the number of inputs feeding one output of a layer, which for `Linear(in_features, out_features)` is `in_features`; **fan-out** is the number of outputs each input feeds. A 1024-wide layer sums 1024 products per output, and that count, not the weight values, is what decides how much the signal grows.
+This exact variance scaling principle reappears in @sec-attention when computing scaled dot-product attention: the inner product between query and key vectors of dimension $d_k$ sums $d_k$ independent products, scaling variance by $d_k$. Dividing the dot product by $\sqrt{d_k}$ scales its standard deviation back to 1.0, preventing softmax from saturating into one-hot distributions.
+
+[^fn-fan-in-layer-width]: **Fan-in** is the number of inputs feeding one output unit (`in_features` in `Linear`). **Fan-out** is the number of outputs each input feeds. Summing over fan-in inputs scales forward signal variance by $D_{\text{in}}$.
 
 With $\text{Var}(w) = 1$ and $D_{\text{in}} = 1024$, the first linear operation multiplies the input variance by 1024. For a symmetric input distribution, ReLU halves the second moment, $\mathbb{E}[x^2]$ (the average squared value), rather than exactly halving the variance: its output no longer has mean zero. With independent zero-mean weights in the next layer, that second moment determines the next pre-activation variance. This gives the approximate factor of 512 seen in the loop.
 
-To hold the variance steady, set $D_{\text{in}} \cdot \text{Var}(w) = 1$, or $\text{Var}(w) = 1 / D_{\text{in}}$. This is LeCun's rule and it is what the TinyTorch course module uses. Kaiming initialization accounts for the ReLU halving by doubling the weight variance:
-
-::: {.column-margin}
-![](assets/images/diagrams/03_layers-margin-fanin.svg){width="100%" fig-alt="Kaiming weight standard deviation ladder showing scale decreasing from 0.250 at fan-in 32 down to 0.044 at fan-in 1024."}
-
-*Kaiming weight $\sigma = \sqrt{2/D_{\text{in}}}$ scales inversely with the square root of fan-in.*
-:::
+To hold the variance steady, set $D_{\text{in}} \cdot \text{Var}(w) = 1$, or $\text{Var}(w) = 1 / D_{\text{in}}$. This is LeCun's rule and it is what the TinyTorch course module uses. Kaiming initialization accounts for the ReLU halving by doubling the weight variance:[^fn-kaiming-relu-proof]
 
 $$\text{Var}(w) = \frac{2}{D_{\text{in}}}, \qquad \sigma_w = \sqrt{\frac{2}{D_{\text{in}}}}.$$
 
-Here we call the multiplier on weight *variance* the **gain**, matching the first exercise; a gain on standard deviation would be its square root. The appropriate multiplier depends on the activation and its input distribution. Gain 1 preserves the linear case and is the module's default, rather than a universal prescription for tanh. Xavier Glorot's earlier rule, $\text{Var}(w) = 2 / (D_{\text{in}} + D_{\text{out}})$, splits the difference between keeping the forward signal steady (which wants $1/D_{\text{in}}$) and keeping the backward gradient steady (which wants $1/D_{\text{out}}$; @sec-autograd will introduce that backward computation). Any of these rules can be realized with a normal distribution of the right standard deviation or a uniform one on $[-a, a]$, whose variance is $a^2/3$. For a fixed ratio of input to output width, each rule in @tbl-init-schemes reduces the standard deviation as the inverse square root of width. The activation determines the appropriate constant.
+[^fn-kaiming-relu-proof]: For a zero-mean symmetric input $z$, $\text{ReLU}(z) = \max(0, z)$ zeroes out the negative half-space, halving the expected second moment: $\mathbb{E}[(\text{ReLU}(z))^2] = \frac{1}{2}\mathbb{E}[z^2]$. To preserve variance through the subsequent matrix multiplication, the weight variance must double from $1/D_{\text{in}}$ to $2/D_{\text{in}}$ (He et al., 2015).
+
+Here we call the multiplier on weight *variance* the **gain**, matching the first exercise; a gain on standard deviation would be its square root. The appropriate multiplier depends on the activation and its input distribution. Gain 1 preserves the linear case and is the module's default, rather than a universal prescription for tanh. Xavier Glorot's earlier rule, $\text{Var}(w) = 2 / (D_{\text{in}} + D_{\text{out}})$, splits the difference between keeping the forward signal steady (which wants $1/D_{\text{in}}$) and keeping the backward gradient steady (which wants $1/D_{\text{out}}$; @sec-autograd will introduce that backward computation).
+
+Why does backward propagation through a layer demand $1/D_{\text{out}}$? In the forward pass, each output feature sums over $D_{\text{in}}$ incoming terms ($y_i = \sum_{j=1}^{D_{\text{in}}} x_j W_{ji}$). In the reverse direction, backward signal flow transposes the weight matrix ($W^T$), so each input coordinate accumulates incoming signals across all $D_{\text{out}}$ downstream outputs ($s_j = \sum_{i=1}^{D_{\text{out}}} s_i W_{ji}$). Reverse flow treats the layer's fan-out as its effective fan-in. When $D_{\text{in}} \neq D_{\text{out}}$, no single fixed variance can hold both forward and reverse signals constant simultaneously, which is why Glorot proposed the harmonic mean. Any of these rules can be realized with a normal distribution of the right standard deviation or a uniform one on $[-a, a]$, whose variance is $a^2/3$. For a fixed ratio of input to output width, each rule in @tbl-init-schemes reduces the standard deviation as the inverse square root of width. The activation determines the appropriate constant.
+
+::: {.column-margin}
+![](assets/images/diagrams/03_layers-margin-fanin-fanout.svg){width="100%" fig-alt="Diagram contrasting forward fan-in scaling (1/Din) with backward gradient fan-out scaling (1/Dout) and Xavier's harmonic mean compromise."}
+
+*Xavier Glorot's harmonic mean balances forward signal preservation with backward gradient stability across dimension changes.*
+:::
 
 | Scheme | Meant for | Weight variance | Uniform bound $a$ |
 | :--- | :--- | :---: | :---: |
@@ -145,23 +156,31 @@ Rerunning the loop from The Problem with the weights scaled three ways gives @tb
 
 ### Dropout, and why a layer needs a mode
 
+::: {.column-margin}
+![](assets/images/diagrams/03_layers-margin-dropout.svg){width="100%" fig-alt="Inverted dropout mechanism contrasting training phase Bernoulli mask and scaling with evaluation phase zero-overhead identity."}
+
+*Inverted Dropout: Training scales active activations by $1/(1-p)$ so that evaluation executes as a zero-overhead identity pass.*
+:::
+
 For an activation of value 3 and dropout probability $p=0.5$, half of the random outcomes discard the value and half retain it. Returning either 0 or 3 would average to 1.5. Returning either 0 or 6 instead averages to 3, matching the value passed through at evaluation. That correction is the arithmetic behind dropout, a training technique intended to reduce overfitting.[^fn-overfitting-dropout-motive] Each activation is independently dropped, so later computations cannot always rely on the same inputs being present.
 
-[^fn-overfitting-dropout-motive]: **Overfitting**: fitting training examples, including their noise, so closely that performance on new examples suffers. Dropout perturbs the activations during training; it can reduce reliance on particular combinations of features, but does not guarantee that a model will generalize.
+[^fn-overfitting-dropout-motive]: **Overfitting** occurs when a model memorizes training noise at the expense of generalization. Dropout injects stochastic perturbations to prevent co-adaptation of features.
 
 The correction can be placed on either side of training. One convention leaves surviving values unchanged during training and scales them down at evaluation. **Inverted dropout**, which TinyTorch implements, instead divides surviving training activations by the probability of keeping them, $1-p$. Evaluation can then return the original input without performing any scaling or array passes:
 
 $$y_{\text{train}} = \frac{x \cdot m}{1 - p}, \quad m \in \{0, 1\} \text{ with } P(m = 1) = 1 - p, \qquad y_{\text{eval}} = x.$$
 
-For $0 \leq p < 1$, the expected value of $m$ is $1 - p$, so the expected value of $y_{\text{train}}$ is exactly $x$. Training sees a noisy version of what eval sees, with the same average, and the eval path becomes an exact zero-overhead identity. The price is that `Dropout` must know which of the two it is doing, and that is the `training` argument it is called with.
+For $0 \leq p < 1$, the expected value of $m$ is $1 - p$, so the expected value of $y_{\text{train}}$ is exactly $x$. Training sees a noisy version of what eval sees, with the same average, and the eval path becomes an exact zero-overhead identity. The price is that `Dropout` must know which of the two it is doing. That knowledge is the layer's `training` flag, which a single call can override with a `training` argument.
 
 ::: {#chk-dropout-inference-mode .callout-checkpoint title="Checkpoint: The dropout evaluation trap"}
 
-**Mechanism**: Inverted dropout scales activations by $\frac{1}{1-p}$ during training. At test time, dropout must be turned off ($y_{\text{eval}} = x$) so predictions remain deterministic.
+**Mechanism**: Inverted dropout scales activations by $\frac{1}{1-p}$ during training.[^fn-dropout-inverted-origin] At test time, dropout must be turned off ($y_{\text{eval}} = x$) so predictions remain deterministic.
 
 **Failure mode**: If evaluation runs with `training=True`, inferences become stochastic and activations are scaled up by $\frac{1}{1-p}$ (e.g., $2\times$ when $p=0.5$). Conversely, if training runs with `training=False`, the regularization effect vanishes and downstream weights overfit without gradient noise.
 
 :::
+
+[^fn-dropout-inverted-origin]: In standard dropout (Srivastava et al., 2014), activations are kept unscaled during training and multiplied by $1-p$ during inference. Inverted dropout divides by $1-p$ during training instead, keeping the test-time forward pass an exact zero-overhead identity read without modifying tensor values.
 
 ---
 
@@ -177,15 +196,21 @@ Module 03 builds on the `Tensor` operators from @sec-tensors and the callable ac
 
 ### The base class
 
-A caller needs two independent operations on a model. `model(x)` computes an output from the current parameter values; `model.parameters()` returns the tensors available for learning. @sec-optimizers's optimizer will take that list and enable gradient tracking on its entries, while @sec-training will use it for training and checkpoints. `Layer` defines the common call and parameter methods without allocating weights itself.
+A caller needs two independent operations on a model. `model(x)` computes an output from the current parameter values; `model.parameters()` returns the tensors available for learning. @sec-optimizers's optimizer will take that list and update its entries, while @sec-training will use it for training and checkpoints. `Layer` defines the common call and parameter methods without allocating weights itself.
 
 {{< include _listings/03_layers/Layer.qmd >}}
 
-`forward` is abstract, `__call__` turns a layer into something you can call and passes any extra arguments through, and `parameters()` returns an empty list until a subclass says otherwise. Notice what is not here. There is no registry of parameters and no mode flag. Module 03 takes the direct route on both. Each layer that owns trainable tensors lists them in its own `parameters()`, right next to the code that allocated them, and a container collects its children's lists and removes repeated tensor references. [Milestone I](milestone_01.qmd#sec-milestone-1)'s XOR network does exactly this; its `parameters()` returns `self.hidden.parameters() + self.output.parameters()`. The list lives where the tensors live, so it stays short and readable, and the price is that a forgotten entry fails silently: the layer keeps its random weights, the loss may still fall because other layers change, and nothing raises. That silence is the reason PyTorch automates the registration, and the production section shows how. The mode question, which layers need to know whether the network is training, is answered the same direct way: the caller passes `training` as an argument, and `__call__` forwards it.
+`forward` is abstract, `__call__` turns a layer into something you can call and passes any extra arguments through, and `parameters()` returns an empty list until a subclass says otherwise. Notice what is not here. There is no registry of parameters. Module 03 takes the direct route. Each layer that owns trainable tensors lists them in its own `parameters()`, right next to the code that allocated them, and a container collects its children's lists and removes repeated tensor references. [Synthesis I](synthesis_01.qmd#sec-milestone-1)'s XOR network does exactly this; its `parameters()` returns `self.hidden.parameters() + self.output.parameters()`. The list lives where the tensors live, so it stays short and readable, and the price is that a forgotten entry fails silently: the layer keeps its random weights, the loss may still fall because other layers change, and nothing raises. That silence is the reason PyTorch automates the registration, and the production section shows how. The mode question, which layers need to know whether the network is training, gets one piece of stored state. Line 8 makes `training = True` a class attribute, so every layer starts in training mode even if its constructor never calls `super().__init__()`. `train()` and `eval()` (lines 28 to 34) hand the layer to `set_training_mode`, a module-level function that sets `training` on the layer and on every attribute, or list, tuple, or dict entry, that has a `forward` method, visiting each object once so shared or circular references cannot loop. The walk finds children by inspecting attributes rather than a registry, so it also reaches a hand-written model class that never inherited from `Layer`. A layer that cares about the mode reads its own flag, and a caller can still pass `training=` for one call; `__call__` forwards that argument, and it takes precedence over the stored flag.
 
 ### Linear
 
 `Linear(2, 3)` packages the opening calculation. Its constructor allocates a `(2, 3)` weight matrix and a `(3,)` bias once; calling the layer with a `(1, 2)` row then returns a `(1, 3)` result. A later call reads the same tensors. The constructor chooses random starting values and their scale, while `forward` only reads them.
+
+::: {.column-margin}
+![](assets/images/diagrams/03_layers-margin-fanin.svg){width="100%" fig-alt="Kaiming weight standard deviation ladder showing scale decreasing from 0.250 at fan-in 32 down to 0.044 at fan-in 1024."}
+
+*Kaiming weight $\sigma = \sqrt{2/D_{\text{in}}}$ scales inversely with the square root of fan-in.*
+:::
 
 The constructor derives the initialization scale from its own width. Module 03 uses LeCun's rule from @tbl-init-schemes, $\text{Var}(w) = 1 / D_{\text{in}}$, so `Linear` draws its weight with standard deviation $\sqrt{1 / D_{\text{in}}}$ (the module's `INIT_SCALE_FACTOR` is 1) and applies $y = xW + b$. The weight is stored as `(in_features, out_features)`, so a batch `x` of shape `(B, in_features)` multiplies it directly. The bias starts at zero; it adds nothing to the initial weighted sum. `rng` is the module's NumPy generator, created once with seed 7, and each constructor consumes the next draw from that generator. Repeated calls therefore create different weights; constructing a new layer does not reset the random sequence.
 
@@ -193,11 +218,12 @@ The constructor derives the initialization scale from its own width. Module 03 u
 
 Notice that `scale` comes from `in_features` alone. With a ReLU after every layer, LeCun's scale lets the next pre-activation variance shrink rather than hold steady, which is the gap Kaiming's gain of 2 closes. The module implements one simple default; the first exercise changes the gain and measures its effect instead of assuming that one initializer suits every network. PyTorch's `nn.Linear` stores the weight the other way around, as `(out_features, in_features)`, and uses a different default distribution; the bridge section takes up both. Notice also that the weights are created with `requires_grad=True`. As defined on `Tensor` in @sec-tensors, learnable parameters declare their need for gradients at construction so that when @sec-autograd activates backward graph recording, operations seamlessly capture the parameters without requiring manual flags.
 
-The forward pass is two tensor operations, `matmul` and `+`, and that choice is doing quiet work. Each returns a fresh `Tensor`. Once @sec-autograd adds gradient recording to tensor operations, the same forward code can connect the result to `weight` and `bias`. The addition of `self.bias` relies on the broadcasting from @sec-tensors: the bias has shape `(out_features,)`, the product has shape `(B, out_features)`, and NumPy reads the same bias values for all $B$ rows without allocating a repeated bias matrix. The addition still allocates its output, and the Tensor constructor copies the returned array into its own storage. That forward efficiency creates an obligation for @sec-autograd. Because the bias influenced every row in the batch, the backward engine will have to sum those gradients across the batch to keep the parameter's shape.
+The forward pass is two tensor operations, `matmul` and `+`, and that choice is doing quiet work. Each returns a fresh `Tensor`. Once @sec-autograd adds gradient recording to tensor operations, the same forward code can connect the result to `weight` and `bias`. The addition of `self.bias` relies on the broadcasting from @sec-tensors: the bias has shape `(out_features,)`, the product has shape `(B, out_features)`, and NumPy reads the same bias values for all $B$ rows without allocating a repeated bias matrix. However, executing this as two separate operations incurs a concrete memory traffic penalty: the intermediate matrix product $\mathbf{x}\mathbf{W}$ of shape $(B, D_{\text{out}})$ ($4 \times B \times D_{\text{out}}$ bytes in float32) must be written out to main memory, only to be immediately reread across the memory bus to add the bias and write a second $(B, D_{\text{out}})$ array. For a modest batch size of 64 and hidden width 4096, this un-fused intermediate round-trip forces over 2 MB of unnecessary DRAM traffic per layer invocation. We eliminate this round-trip through operator fusion in @sec-acceleration. That forward efficiency creates an obligation for @sec-autograd: because the bias influenced every row in the batch, the backward engine will have to sum those gradients across the batch to keep the parameter's shape.
 
 ::: {.column-margin}
 **Core Invariant: Linear Contraction**\
-$$(B, D_{\text{in}}) \times (D_{\text{in}}, D_{\text{out}}) + (D_{\text{out}},) \to (B, D_{\text{out}})$$\
+$$(B, D_{\text{in}}) \times (D_{\text{in}}, D_{\text{out}})$$
+$$+ (D_{\text{out}},) \to (B, D_{\text{out}})$$\
 *Inner dimension $D_{\text{in}}$ contracts via row-major GEMM; bias broadcasts with stride 0.*
 :::
 
@@ -206,9 +232,9 @@ $$(B, D_{\text{in}}) \times (D_{\text{in}}, D_{\text{out}}) + (D_{\text{out}},) 
 
 ### Dropout
 
-`Dropout` gives the `training` argument its job. For the three-element hidden row `[1, 2, 3]`, a keep-drop-keep draw at `p=0.5` produces the scaled mask `[2, 0, 2]` and output `[2, 0, 6]`. On evaluation the same layer returns `[1, 2, 3]`. The probability belongs to the layer, while the mask belongs to one training call.
+`Dropout` gives the `training` flag its job. For the three-element hidden row `[1, 2, 3]`, a keep-drop-keep draw at `p=0.5` produces the scaled mask `[2, 0, 2]` and output `[2, 0, 6]`. On evaluation the same layer returns `[1, 2, 3]`. The probability belongs to the layer, while the mask belongs to one training call.
 
-The constructor validates `p` before storing it. The forward method then delegates its first decision to `_should_apply_dropout`. If that helper says no, the method returns before drawing random numbers. Otherwise it handles `p=1` separately, then asks `_generate_dropout_mask` for an input-shaped mask. That helper draws uniform values, compares each with `1-p`, converts the resulting booleans to float32, and folds the scale into the mask. The final tensor multiplication both zeros and scales the input elements.
+The constructor validates `p` before storing it. The forward method first settles the mode: its `training` argument defaults to `None`, which falls back to the layer's own `self.training` (lines 41 and 42), while an explicit `True` or `False` overrides the flag for that call. It then delegates its first decision to `_should_apply_dropout`. If that helper says no, the method returns before drawing random numbers. Otherwise it handles `p=1` separately, then asks `_generate_dropout_mask` for an input-shaped mask. That helper draws uniform values, compares each with `1-p`, converts the resulting booleans to float32, and folds the scale into the mask. The final tensor multiplication both zeros and scales the input elements.
 
 {{< include _listings/03_layers/Dropout.qmd >}}
 
@@ -220,9 +246,9 @@ The worked example needs one object that accepts the input row, calls two linear
 
 {{< include _listings/03_layers/Sequential.qmd >}}
 
-Calling `Sequential.__call__` forwards the input and `training` argument to `Sequential.forward`, which runs its children in order. Follow the assignment `x = layer.forward(...)`: after each iteration, `x` holds the previous child's output, so the next child must accept that shape. The container does not reshape or repair it.
+Calling `Sequential.__call__` forwards the input and any `training` argument to `Sequential.forward`, which runs its children in order. Follow the assignment `x = layer.forward(...)`: after each iteration, `x` holds the previous child's output, so the next child must accept that shape. The container does not reshape or repair it.
 
-The `inspect.signature` test handles a second contract. `Dropout.forward` accepts `training`, while `Linear.forward` does not, so the container inspects the signature before making one call. It does not catch a `TypeError` from inside the layer and retry: a genuine layer error must reach the caller. This makes a failing child visible at the point where composition breaks. A nested `Sequential` also accepts `training`, so the argument reaches dropout at every depth. No method stores the flag: a later call with no argument returns to the default `training=True`. Signature inspection adds Python work on every forward pass, a cost of making dispatch explicit in this implementation. Building a small model shows the container doing its two jobs.
+The `inspect.signature` test handles a second contract. `Dropout.forward` accepts `training`, while `Linear.forward` does not, so the container inspects the signature before making each call. It does not catch a `TypeError` from inside the layer and retry: a genuine layer error must reach the caller. This makes a failing child visible at the point where composition breaks. A nested `Sequential` also accepts `training`, so the value reaches dropout at every depth. When the call supplies no argument, the container resolves it from its own flag (lines 19 and 20), which `model.eval()` set along with every child's, and passes that value down explicitly. An explicit `model(x, training=False)` overrides the stored flags for that call without changing them, so a later call with no argument returns to whatever mode `train()` or `eval()` last set. Signature inspection adds noticeable Python overhead on every forward pass, typically 1 to 5 microseconds of CPython bytecode introspection per layer. For small batch sizes or shallow networks, this reflection latency can rival or exceed the execution time of the matrix multiplication itself. Production engines avoid dynamic reflection entirely, relying on cached method dispatch tables or static C++ polymorphic dispatch. Building a small model shows the container doing its two jobs.
 
 ```python
 from tinytorch.core.layers import Linear, Dropout, Sequential
@@ -235,15 +261,15 @@ print([p.shape for p in model.parameters()])
 [(4, 3), (3,), (3, 2), (2,)]
 ```
 
-Four parameter tensors came back, weight before bias within each layer and layer order within the container, and `Dropout` contributed none. In practice a `ReLU` from @sec-activations sits between the two `Linear` layers; it is left out here so the trace below stays short, and [Milestone I](milestone_01.qmd#sec-milestone-1) builds the full version.
+Four parameter tensors came back, weight before bias within each layer and layer order within the container, and `Dropout` contributed none. In practice a `ReLU` from @sec-activations sits between the two `Linear` layers; it is left out here so the trace below stays short, and [Synthesis I](synthesis_01.qmd#sec-milestone-1) builds the full version.
 
-Parameter collection follows `self.layers` in that same order, but its `seen` set records `id(param)` before appending. For `shared = Linear(2, 2)` and `Sequential(shared, Sequential(shared))`, the forward pass applies `shared` twice, while `parameters()` returns only `[shared.weight, shared.bias]`. An optimizer should update those tensors once per step. Returning them twice would confuse reuse in the forward computation with ownership of two independent parameters.
+Parameter collection follows `self.layers` in that same order, but its `seen` set records `id(param)` before appending. For `shared = Linear(2, 2)` and `Sequential(shared, Sequential(shared))`, the forward pass applies `shared` twice, while `parameters()` returns only `[shared.weight, shared.bias]`. An optimizer should update those tensors once per step. Returning them twice would confuse reuse in the forward computation with ownership of two independent parameters. This deduplication is also an architectural requirement for modern language models. In Transformer architectures (as explored in @sec-transformers), **weight tying** shares the exact same weight matrix between input token embeddings and the final output vocabulary projection head. Deduplication ensures that `optimizer.step()` (@sec-optimizers) updates the shared weights exactly once per iteration, rather than erroneously applying duplicate gradient steps or corrupting optimizer momentum buffers.
 
 ---
 
 ## A Worked Trace
 
-We trace that same model with weights chosen by hand so every number can be checked on paper. Parameter discovery first. @Tbl-parameter-ledger lists what `model.parameters()` returns and what it costs in memory at four bytes per float32 value. The byte count covers array payloads, excluding Python objects and list overhead. Listed tensors are available for training, although gradient tracking has not yet been enabled.
+We trace that same model with weights chosen by hand so every number can be checked on paper. Parameter discovery first. @Tbl-parameter-ledger lists what `model.parameters()` returns and what it costs in memory at four bytes per float32 value. The byte count covers array payloads, excluding Python objects and list overhead. Listed tensors already carry `requires_grad=True`; the operations that record gradients arrive in @sec-autograd.
 
 | Layer | Attribute | Shape | Values | Listed | Bytes |
 | :--- | :--- | :---: | :---: | :---: | :---: |
@@ -293,9 +319,9 @@ y_train  [[5. 2.]]
 y_eval   [[4.5 3.5]]
 ```
 
-In @lst-layers-fixed-mask, lines 3--12 overwrite the model's random parameters with exact weights and biases for hand tracing. Line 14 supplies a single input vector `x`, and line 15 evaluates the first affine layer `h1 = lin1(x)`. Check the first hidden unit by hand: its column of `W1` is $[0.5, 0.5, 1.0, 0.0]$, so $x W_1$ gives $0.5 + 1.0 - 1.0 + 0 = 0.5$, and adding the bias $0.5$ makes $1.0$ (printed in line 16 as `[[1. 2. 3.]]`). Before adding the bias, the full product is `[0.5, 1.0, 4.0]`; the bias `[0.5, 1.0, -1.0]` produces `[1.0, 2.0, 3.0]`. The input shape is `(1, 4)`, the hidden and mask shapes are `(1, 3)`, and the final output shape is `(1, 2)`.
+In @lst-layers-fixed-mask, lines 3 to 12 overwrite the model's random parameters with exact weights and biases for hand tracing. Line 14 supplies a single input vector `x`, and line 15 evaluates the first affine layer `h1 = lin1(x)`. Check the first hidden unit by hand: its column of `W1` is $[0.5, 0.5, 1.0, 0.0]$, so $x W_1$ gives $0.5 + 1.0 - 1.0 + 0 = 0.5$, and adding the bias $0.5$ makes $1.0$ (printed in line 16 as `[[1. 2. 3.]]`). Before adding the bias, the full product is `[0.5, 1.0, 4.0]`; the bias `[0.5, 1.0, -1.0]` produces `[1.0, 2.0, 3.0]`. The input shape is `(1, 4)`, the hidden and mask shapes are `(1, 3)`, and the final output shape is `(1, 2)`.
 
-In lines 18--21, the inverted dropout mask keeps the first and third units and scales them by $1 / (1 - 0.5) = 2$, yielding `h_drop = [[2. 0. 6.]]` (line 20) and a training prediction `y_train = [[5. 2.]]` (line 21). Line 23 switches to `training=False`, bypassing dropout to produce `y_eval = [[4.5 3.5]]`. @Tbl-dropout-trace contrasts the two computational paths through the second layer.
+In lines 18 to 21, the inverted dropout mask keeps the first and third units and scales them by $1 / (1 - 0.5) = 2$, yielding `h_drop = [[2. 0. 6.]]` (line 20) and a training prediction `y_train = [[5. 2.]]` (line 21). Line 23 switches to `training=False`, bypassing dropout to produce `y_eval = [[4.5 3.5]]`. @Tbl-dropout-trace contrasts the two computational paths through the second layer.
 
 | Stage | `training=True` | `training=False` |
 | :--- | :--- | :--- |
@@ -332,18 +358,20 @@ On return, the model still owns the same four parameter tensors with the same va
 
 ## From TinyTorch to Production
 
-PyTorch moves parameter bookkeeping into its base class. Assigning an `nn.Parameter` or a child module to an `nn.Module` attribute registers it for later traversal. `parameters()` can then discover nested parameters without a handwritten list in each layer. `train()` and `eval()` set a stored `training` flag recursively; TinyTorch instead forwards a call argument. Both designs need a path from the root model to the components whose behavior or values matter. The [Module documentation](https://docs.pytorch.org/docs/stable/generated/torch.nn.Module.html) describes that registration and mode contract.
+PyTorch moves parameter bookkeeping into its base class. Assigning an `nn.Parameter` or a child module to an `nn.Module` attribute registers it for later traversal. `parameters()` can then discover nested parameters without a handwritten list in each layer. `train()` and `eval()` set a stored `training` flag recursively. TinyTorch's `train()` and `eval()` do the same through `set_training_mode`, which finds children by walking attributes instead of a registry, and TinyTorch also accepts a per-call `training` argument that overrides the stored flag. Both designs need a path from the root model to the components whose behavior or values matter. The [Module documentation](https://docs.pytorch.org/docs/stable/generated/torch.nn.Module.html) describes that registration and mode contract.
 
 The shared interface does not imply identical weight layout or initialization. PyTorch's [Linear documentation](https://docs.pytorch.org/docs/stable/generated/torch.nn.Linear.html) specifies a weight of shape `(out_features, in_features)` and the calculation $xW^T+b$.[^fn-pytorch-weight-layout] Its default uniform bound is $1/\sqrt{D_{\text{in}}}$, giving variance $1/(3D_{\text{in}})$. TinyTorch stores `(in_features, out_features)` and uses a normal draw with variance $1/D_{\text{in}}$. Transferring weights between those conventions requires a transpose, and matching dimensions alone does not establish matching initial values.
 
-[^fn-pytorch-weight-layout]: PyTorch's `nn.Linear` stores weights as `(out_features, in_features)` so that low-level BLAS and cuBLAS routines (`sgemm`) can compute matrix products directly over row-major memory buffers without requiring explicit transposition of weight matrices in GPU SRAM.
+[^fn-pytorch-weight-layout]: PyTorch's `nn.Linear` stores weights as `(out_features, in_features)` so that low-level BLAS and cuBLAS routines (such as `cublasSgemm`) can stream output rows as contiguous blocks in row-major memory buffers without requiring explicit transposition of weight matrices in GPU SRAM.
 
-PyTorch's [Dropout documentation](https://docs.pytorch.org/docs/stable/generated/torch.nn.Dropout.html) specifies the same inverted scaling and evaluation identity. That mathematical contract does not depend on how a backend schedules the work. TinyTorch exposes separate NumPy steps for the random draw, comparison, scaling, and multiplication, plus Tensor allocations. A production implementation can combine those steps to reduce temporary storage and repeated passes over the arrays. The local contract remains the one we traced: preserve the input's expected value during training and pass it through at evaluation.
+PyTorch's [Dropout documentation](https://docs.pytorch.org/docs/stable/generated/torch.nn.Dropout.html) specifies the same inverted scaling and evaluation identity. That mathematical contract does not depend on how a backend schedules the work. TinyTorch exposes separate NumPy steps for the random draw, comparison, scaling, and multiplication, plus Tensor allocations, materializing a full 32-bit float mask in DRAM. In contrast, production GPU runtimes like cuDNN and Triton use counter-based pseudo-random number generators (such as Philox) to generate random bits on-the-fly in processor registers. Rather than storing a 32-bit float or 8-bit boolean per activation, production backends pack dropout decisions into 1-bit boolean masks (packing 32 elements per 32-bit word) or simply recompute the mask during backward passes from the original Philox seed and offset, reducing memory bus traffic by a factor of 32. The local contract remains the one we traced: preserve the input's expected value during training and pass it through at evaluation.
 
 ::: {#nbk-layers-parameter-memory-budget .callout-notebook title="What one production-sized Linear layer weighs"}
 This is a storage and operation count, not a timing measurement. `Linear(4096, 4096)` stores $4096 \times 4096 \times 4 = 67{,}108{,}864$ bytes of float32 weights and $4096 \times 4 = 16{,}384$ bytes of bias. The parameter payload is about $67.1$ MB. A batch of 16 produces $16 \times 4096$ output values, or $262{,}144$ bytes. These counts exclude temporary arrays and Python objects.
 
-The matrix product contains $16 \times 4096 \times 4096 = 268{,}435{,}456$ multiply-accumulate terms. Counting one multiply and one add per term gives approximately $537$ million floating-point operations; adding the bias requires another $65{,}536$ additions. Increasing batch size increases arithmetic and output storage while leaving parameter storage unchanged. Whether the measured call is limited by computation or memory movement depends on the backend and its reuse of those weights. The storage count alone cannot decide that.
+The matrix product contains $16 \times 4096 \times 4096 = 268{,}435{,}456$ multiply-accumulate terms. Counting one multiply and one add per term gives approximately $537$ million floating-point operations; adding the bias requires another $65{,}536$ additions. Increasing batch size increases arithmetic and output storage while leaving parameter storage unchanged. Whether the measured call is limited by computation or memory movement depends on the backend and its reuse of those weights; the storage count alone cannot decide that. @sec-profiling formalizes this trade-off using the Roofline model to compute operational intensity (FLOPs per byte transferred), while @sec-acceleration experiments with cache loop tiling to improve the reuse of each loaded block.
+
+In @sec-compression and @sec-extensions, we address the massive memory footprint of these large linear layers. Instead of fine-tuning the full 67 MB weight matrix, Low-Rank Adaptation (LoRA) decomposes the weight update $\Delta W$ into two low-rank matrices $B \times A$ of rank $r \ll D_{\text{in}}$ (for instance, $r=8$). Initializing $A$ randomly and $B$ to zero guarantees that $\Delta W = 0$ at the start of training while slashing trainable parameter memory by over 99%.
 :::
 
 ::: {#psp-kaiming-fp16-underflow .callout-perspective title="Systems Perspective: Initialization in mixed-precision FP16/BF16"}
@@ -354,13 +382,13 @@ The matrix product contains $16 \times 4096 \times 4096 = 268{,}435{,}456$ multi
 
 :::
 
-The comparison suggests concrete debugging checks. If a parameter never changes, verify that the model returns the exact tensor read by its forward pass. If the first outputs are too large or too small, inspect the initializer and measure intermediate values before blaming training. If repeated evaluation calls differ, inspect the argument reaching each dropout layer. Each check follows state already visible in the reference.
+The comparison suggests concrete debugging checks. If a parameter never changes, verify that the model returns the exact tensor read by its forward pass. If the first outputs are too large or too small, inspect the initializer and measure intermediate values before blaming training. If repeated evaluation calls differ, inspect the `training` flag of each dropout layer and any argument that overrides it. Each check follows state already visible in the reference.
 
 ---
 
 ## Summary
 
-A `Linear` constructor allocates weight and optional bias once; `forward` reads those tensors and returns a new result. Its fan-in controls the initial weight scale. `Sequential` executes every child in order but returns each distinct parameter only once. Its `training` argument reaches nested containers and dropout without becoming stored mode state. `Dropout` preserves the input object during evaluation and creates a masked result during training; for $p<1$, its scaling preserves each input element in expectation.
+A `Linear` constructor allocates weight and optional bias once; `forward` reads those tensors and returns a new result. Its fan-in controls the initial weight scale. `Sequential` executes every child in order but returns each distinct parameter only once. `model.train()` and `model.eval()` set the `training` flag on it and on every layer inside it, and an explicit `training` argument overrides that flag for one call. `Dropout` preserves the input object during evaluation and creates a masked result during training; for $p<1$, its scaling preserves each input element in expectation.
 
 Those contracts are enough to reconstruct the worked path from `(1, 4)` to `(1, 3)` to `(1, 2)`, identify the 23 stored parameter values, and explain why one training output differs from evaluation. @sec-losses takes the next step. A final linear layer supplies one raw score per class; a loss function must combine those scores with the correct label into a scalar that measures the prediction error.
 
@@ -371,7 +399,7 @@ With `Tensor` (Module 01), activations (`Sigmoid`, Module 02), and `Linear` laye
 tito milestone run 01
 ```
 
-This milestone executes Frank Rosenblatt's 1958 single-layer perceptron on linearly separable 2D data using random weights. You will observe that while the forward pass computes without error, accuracy hovers around 50%—pure chance. The fundamental takeaway: **a forward pass alone is not intelligence**. Building model architectures is straightforward; making them learn requires loss functions, automatic differentiation, and optimizers (@sec-losses through @sec-training). See @sec-milestone-1 (Part 1) for the full historical analysis.
+This milestone executes Frank Rosenblatt's 1958 single-layer perceptron on linearly separable 2D data using random weights. You will observe that while the forward pass computes without error, the accuracy is whatever a random line happens to give, anywhere from 0% to 100%, and changes from run to run. What the milestone grades is the arithmetic: YOUR output must match $\sigma(XW + b)$ computed in NumPy from the same weights. The fundamental takeaway: **a forward pass alone is not intelligence**. Building model architectures is straightforward; making them learn requires loss functions, automatic differentiation, and optimizers (@sec-losses through @sec-training). See [Synthesis I](synthesis_01.qmd#sec-milestone-1) for the full historical analysis.
 :::
 
 ---

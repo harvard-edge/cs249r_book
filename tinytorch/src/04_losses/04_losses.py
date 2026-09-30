@@ -638,7 +638,7 @@ def test_unit_cross_entropy_loss():
     uniform_targets = Tensor([0, 1])
     uniform_loss = loss_fn.forward(uniform_logits, uniform_targets)
     expected_uniform_loss = np.log(3)  # log(3) ≈ 1.099 for 3 classes
-    assert np.allclose(uniform_loss.data, expected_uniform_loss, atol=0.1), f"Uniform predictions should have loss ≈ log(3) = {expected_uniform_loss:.3f}, got {uniform_loss.data:.3f}"
+    assert np.allclose(uniform_loss.data, expected_uniform_loss, atol=1e-5), f"Uniform predictions should have loss ≈ log(3) = {expected_uniform_loss:.3f}, got {uniform_loss.data:.3f}"
 
     # Test that wrong confident predictions have high loss
     wrong_logits = Tensor([[10.0, -10.0, -10.0], [-10.0, -10.0, 10.0]])  # Confident but wrong

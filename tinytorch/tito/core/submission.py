@@ -28,6 +28,87 @@ from .config import CLIConfig
 # Where users should report sync problems (kept in one place).
 ISSUE_URL = "https://github.com/harvard-edge/cs249r_book/issues/1849"
 
+# ---------------------------------------------------------------------------
+# Sync consent and opt-out
+# ---------------------------------------------------------------------------
+# Automatic sync (after `tito module complete`, a milestone, or login) uploads
+# progress to the TinyTorch website. It is governed by:
+#   * TITO_NO_SYNC=1           -- never sync automatically (explicit
+#                                 `tito community sync` still works).
+#   * ~/.tinytorch/sync.json   -- {"auto_sync": true|false}, the persisted
+#                                 consent, stored next to credentials.json.
+# On a non-interactive terminal (no way to ask), automatic sync runs only when
+# the stored consent is true. Consent is recorded at `tito community login`
+# after the disclosure below is shown, and can be changed with
+# `tito community sync --enable-auto / --disable-auto`.
+NO_SYNC_ENV = "TITO_NO_SYNC"
+SYNC_SETTINGS_FILE_NAME = "sync.json"
+
+SYNC_DISCLOSURE = (
+    "When you sync, tito uploads to the TinyTorch website "
+    "(tinytorch.netlify.app / Supabase):\n"
+    "  • your account email (as user_id)\n"
+    "  • which modules you completed, and when\n"
+    "  • which milestones you unlocked/completed, and when\n"
+    "  • your completion percentage and current streak\n"
+    "No code, notebooks, or test output is uploaded.\n"
+    f"Opt out of automatic sync: set {NO_SYNC_ENV}=1, or run "
+    "'tito community sync --disable-auto'."
+)
+
+
+def sync_disabled_by_env() -> bool:
+    """True when the user has opted out of automatic sync via TITO_NO_SYNC."""
+    return os.environ.get(NO_SYNC_ENV, "").strip().lower() in ("1", "true", "yes", "on")
+
+
+def _sync_settings_path() -> Path:
+    return auth._credentials_dir() / SYNC_SETTINGS_FILE_NAME
+
+
+def load_sync_settings() -> Dict[str, Any]:
+    p = _sync_settings_path()
+    try:
+        with p.open("r", encoding="utf-8") as f:
+            data = json.load(f)
+        return data if isinstance(data, dict) else {}
+    except (OSError, json.JSONDecodeError, UnicodeDecodeError):
+        return {}
+
+
+def _save_sync_settings(data: Dict[str, Any]) -> None:
+    auth._ensure_dir()
+    p = _sync_settings_path()
+    tmp = p.with_suffix(".tmp")
+    fd = os.open(str(tmp), os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, "w", encoding="utf-8") as f:
+        json.dump(data, f, indent=2)
+    os.replace(str(tmp), str(p))
+
+
+def get_auto_sync_consent() -> Optional[bool]:
+    """Stored consent for automatic sync: True, False, or None (never asked)."""
+    value = load_sync_settings().get("auto_sync")
+    return value if isinstance(value, bool) else None
+
+
+def set_auto_sync_consent(allowed: bool) -> None:
+    data = load_sync_settings()
+    data["auto_sync"] = bool(allowed)
+    _save_sync_settings(data)
+
+
+def show_sync_disclosure(console: Console) -> None:
+    """Print exactly what a sync sends, and how to opt out."""
+    from rich.panel import Panel
+    console.print(Panel(SYNC_DISCLOSURE, title="What 'sync' shares", border_style="cyan"))
+
+
+def _milestone_registry() -> Dict[str, Dict[str, Any]]:
+    """The milestone registry the CLI runs from (single source of truth)."""
+    from ..commands.milestone import MILESTONE_SCRIPTS  # lazy: avoid import cycle
+    return MILESTONE_SCRIPTS
+
 
 class SubmissionError(Exception):
     """Custom exception for submission-related errors."""
@@ -104,14 +185,11 @@ class SubmissionHandler:
         unlock_dates = local_data.get("unlock_dates", {})
         completion_dates = local_data.get("completion_dates", {})
 
-        # You might want a lookup map for real names
+        # Names come from the milestone registry so new milestones (e.g. 07)
+        # are never reported as "Milestone NN".
         milestone_names = {
-            "01": "1958: Perceptron",
-            "02": "1969: XOR Problem",
-            "03": "1986: MLP Revival",
-            "04": "1998: CNN Revolution",
-            "05": "2017: Transformer Era",
-            "06": "2018: MLPerf Benchmarking",
+            m_id: info.get("name", f"Milestone {m_id}")
+            for m_id, info in _milestone_registry().items()
         }
 
         formatted = []
@@ -130,7 +208,10 @@ class SubmissionHandler:
         Reads distinct local files and assembles the Unified Payload.
         """
         progress_data = self._read_json_safe(self.progress_file)
-        milestone_data = self._read_json_safe(self.milestones_file)
+        # Normalize through the milestone ledger so only milestones complete
+        # under the per-part rule are reported (legacy files included).
+        from .milestone_tracker import normalize
+        milestone_data = normalize(self._read_json_safe(self.milestones_file))
 
         completed_modules = progress_data.get("completed_modules", [])
 
@@ -148,7 +229,7 @@ class SubmissionHandler:
                 "completion_percentage": (len(completed_modules) / total_modules) * 100 if total_modules > 0 else 0,
             },
             "milestone_progress": {
-                "total_milestones": 6,
+                "total_milestones": len(_milestone_registry()),
                 "unlocked_count": milestone_data.get("total_unlocked", 0),
                 "unlocked_milestones": self._format_milestones(milestone_data)
             },
@@ -315,28 +396,55 @@ def auto_sync_after_completion(config: CLIConfig, console: Console, *,
     across the module, milestone, and login commands:
 
     - In CI / automation: do nothing (never sync automatically there).
+    - TITO_NO_SYNC=1: do nothing (user opt-out).
     - Not logged in: print a hint, do nothing.
-    - Interactive terminal: ask first (default yes), then sync.
+    - Interactive terminal: ask first (default yes), then sync. The first time,
+      show exactly what is uploaded.
     - Non-interactive but a real user (Git Bash / MinTTY / IDE terminal where
-      ``stdin.isatty()`` is False): sync WITHOUT prompting. We must not skip the
-      sync here -- skipping on non-TTY is exactly the bug that left Windows
-      users silently unsynced (#1849).
+      ``stdin.isatty()`` is False): sync without prompting ONLY if the user
+      previously consented (recorded at `tito community login`). Skipping
+      silently here was the #1849 bug, so when we skip we say how to sync.
 
     Returns the :class:`SyncResult` when a sync was attempted, else ``None``.
     """
     if runtime.is_ci():
         return None
 
+    if sync_disabled_by_env():
+        console.print(f"[dim]Automatic sync is off ({NO_SYNC_ENV} is set). Run 'tito community sync' to upload manually.[/dim]")
+        return None
+
     if not auth.is_logged_in():
         console.print("[dim]💡 Run 'tito community login' to sync your progress to the TinyTorch website.[/dim]")
         return None
 
-    if runtime.is_interactive():
+    consent = get_auto_sync_consent()
+
+    if consent is False:
+        # An explicit 'tito community sync --disable-auto' means no prompt after
+        # every completion either; manual sync still works.
+        console.print("[dim]Automatic sync is off. Run 'tito community sync' to upload manually.[/dim]")
+        return None
+
+    if runtime.is_interactive() and consent is not True:
+        if consent is None:
+            # Never recorded a choice on this machine (e.g. logged in with an
+            # older tito): show what is sent before asking. This path does not
+            # write anything; consent is recorded at login or via
+            # 'tito community sync --enable-auto/--disable-auto'.
+            show_sync_disclosure(console)
         if not Confirm.ask(f"[bold yellow]{prompt}[/bold yellow]", default=True):
             console.print("[dim]Skipped. Run 'tito community sync' anytime to upload your progress.[/dim]")
             return None
     else:
-        # No usable TTY to prompt on, but a logged-in real user -> sync quietly.
+        if consent is not True:
+            console.print(
+                "[dim]Not syncing automatically (no saved consent on this machine). "
+                "Run 'tito community sync' to upload, or 'tito community sync --enable-auto' "
+                "to sync automatically from now on.[/dim]"
+            )
+            return None
+        # No usable TTY to prompt on, but the user opted in -> sync quietly.
         console.print("[dim]Syncing your progress to the TinyTorch website…[/dim]")
 
     return SubmissionHandler(config, console).sync_progress(total_modules=total_modules)

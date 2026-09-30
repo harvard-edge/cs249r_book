@@ -365,41 +365,53 @@ def gen_20_capstone_margin_pareto():
 <rect width="220" height="{h}" fill="#ffffff"/>
   <rect x="5" y="5" width="210" height="110" rx="2" fill="#ffffff" stroke="#9ca3af" stroke-width="1.2"/>
   <rect x="5" y="5" width="210" height="20" rx="2" fill="#f1f5f9" stroke="#9ca3af" stroke-width="1.2"/>
-  <text x="12" y="19" font-size="8.5" font-weight="700" fill="#1f2937">CAPSTONE OPTIMIZATION PARETO</text>
+  <text x="12" y="19" font-size="8.5" font-weight="700" fill="#1f2937">CAPSTONE STACK (ANALYTICAL MODEL)</text>
 
   <g transform="translate(15, 26)">
-    <!-- Axes -->
+    <!-- Axes: y = estimated cumulative speedup, x = stages applied in order -->
     <line x1="20" y1="52" x2="185" y2="52" stroke="#cbd5e1" stroke-width="1"/>
-    <line x1="20" y1="8" x2="20" y2="52" stroke="#cbd5e1" stroke-width="1"/>
-    <text x="185" y="61" text-anchor="end" font-size="6" font-family="monospace" fill="#9ca3af">Throughput (tok/s) →</text>
-    <text x="23" y="13" font-size="6" font-family="monospace" fill="#9ca3af">Perplexity</text>
+    <line x1="20" y1="4" x2="20" y2="52" stroke="#cbd5e1" stroke-width="1"/>
+    <text x="23" y="8" font-size="6" font-family="monospace" fill="#9ca3af">Est. speedup ↑</text>
 
-    <!-- Frontier Curve -->
-    <path d="M 35 38 Q 75 37 115 35 T 165 33" fill="none" stroke="#cbd5e1" stroke-width="1" stroke-dasharray="2 2"/>
+    <!-- Stack path (y = 40 - 5 × (speedup - 1)) -->
+    <path d="M 30 40 L 67 40 L 104 39.9 L 141 26.6 L 178 20.6" fill="none" stroke="#cbd5e1" stroke-width="1" stroke-dasharray="2 2"/>
 
-    <!-- Point 1: Baseline -->
-    <circle cx="35" cy="38" r="2.5" fill="#9ca3af"/>
-    <text x="35" y="32" text-anchor="middle" font-size="5.2" fill="#6b7280">1. Baseline</text>
-    <text x="35" y="47" text-anchor="middle" font-size="4.8" fill="#9ca3af">1.0×</text>
+    <!-- Stage 1: Baseline FP32 -->
+    <circle cx="30" cy="40" r="2.5" fill="#9ca3af"/>
+    <text x="30" y="34" text-anchor="middle" font-size="5.2" fill="#6b7280">Baseline</text>
+    <text x="30" y="48" text-anchor="middle" font-size="4.8" fill="#9ca3af">1.00×</text>
 
-    <!-- Point 2: Distilled -->
-    <circle cx="75" cy="37" r="2.5" fill="#6b7280"/>
-    <text x="75" y="31" text-anchor="middle" font-size="5.2" fill="#6b7280">2. Distilled</text>
-    <text x="75" y="47" text-anchor="middle" font-size="4.8" fill="#9ca3af">1.4×</text>
+    <!-- Stage 2: + INT8 weights -->
+    <circle cx="67" cy="40" r="2.5" fill="#6b7280"/>
+    <text x="67" y="34" text-anchor="middle" font-size="5.2" fill="#6b7280">+ INT8</text>
+    <text x="67" y="48" text-anchor="middle" font-size="4.8" fill="#9ca3af">1.00×</text>
 
-    <!-- Point 3: Quantized -->
-    <circle cx="115" cy="35" r="2.5" fill="#c85a17"/>
-    <text x="115" y="29" text-anchor="middle" font-size="5.2" font-weight="bold" fill="#c85a17">3. INT8</text>
-    <text x="115" y="47" text-anchor="middle" font-size="4.8" fill="#c85a17">2.8×</text>
+    <!-- Stage 3: + MLP factorized at rank 32 -->
+    <circle cx="104" cy="39.9" r="2.5" fill="#6b7280"/>
+    <text x="104" y="34" text-anchor="middle" font-size="5.2" fill="#6b7280">+ SVD r32</text>
+    <text x="104" y="48" text-anchor="middle" font-size="4.8" fill="#9ca3af">1.01×</text>
 
-    <!-- Point 4: Fully Accelerated Capstone -->
-    <circle cx="165" cy="33" r="3.5" fill="#ff8246" stroke="#c85a17" stroke-width="1"/>
-    <text x="165" y="25" text-anchor="middle" font-size="5.8" font-weight="bold" fill="#c85a17">4. Fused+Cached</text>
-    <text x="165" y="47" text-anchor="middle" font-size="5.2" font-weight="bold" fill="#c85a17">4.8×</text>
+    <!-- Stage 4: + fusion -->
+    <circle cx="141" cy="26.6" r="2.5" fill="#c85a17"/>
+    <text x="141" y="20.6" text-anchor="middle" font-size="5.2" font-weight="bold" fill="#c85a17">+ Fusion</text>
+    <text x="141" y="35.6" text-anchor="middle" font-size="4.8" fill="#c85a17">3.68×</text>
+
+    <!-- Stage 5: + KV cache (full stack) -->
+    <circle cx="178" cy="20.6" r="3.5" fill="#ff8246" stroke="#c85a17" stroke-width="1"/>
+    <text x="178" y="13" text-anchor="middle" font-size="5.8" font-weight="bold" fill="#c85a17">+ KV cache</text>
+    <text x="178" y="30.6" text-anchor="middle" font-size="5.2" font-weight="bold" fill="#c85a17">4.89×</text>
+
+    <!-- Parameter memory under each stage -->
+    <text x="17" y="59" text-anchor="end" font-size="4.8" font-family="monospace" fill="#9ca3af">MB</text>
+    <text x="30" y="59" text-anchor="middle" font-size="4.8" font-family="monospace" fill="#6b7280">4.17</text>
+    <text x="67" y="59" text-anchor="middle" font-size="4.8" font-family="monospace" fill="#6b7280">1.04</text>
+    <text x="104" y="59" text-anchor="middle" font-size="4.8" font-family="monospace" fill="#6b7280">0.68</text>
+    <text x="141" y="59" text-anchor="middle" font-size="4.8" font-family="monospace" fill="#6b7280">0.68</text>
+    <text x="178" y="59" text-anchor="middle" font-size="4.8" font-family="monospace" fill="#6b7280">0.68</text>
 
     <!-- Summary Badge -->
-    <rect x="20" y="66" width="150" height="12" rx="1" fill="#fff1e8" stroke="#ff8246" stroke-width="0.6"/>
-    <text x="95" y="75" text-anchor="middle" font-size="5.8" font-weight="bold" fill="#c85a17">Total speedup: 4.8× · Footprint reduced 75%</text>
+    <rect x="10" y="66" width="175" height="12" rx="1" fill="#fff1e8" stroke="#ff8246" stroke-width="0.6"/>
+    <text x="97.5" y="75" text-anchor="middle" font-size="5.8" font-weight="bold" fill="#c85a17">Estimated 4.89× · params 4.17 → 0.68 MB (6.1×)</text>
   </g>
 </svg>
 """

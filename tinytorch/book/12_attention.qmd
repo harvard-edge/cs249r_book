@@ -26,7 +26,8 @@ print("Attention output shape:", out.shape)  # (1, 4, 8, 16)
 ```
 
 Underneath that compact functional call, the runtime coordinates multiple linear algebra stages:
-1. **The quadratic all-to-all similarity matrix ($Q K^T$):** The engine multiplies query and key projections across all heads simultaneously, materializing an $(S \times S)$ score matrix per head. This creates the characteristic $O(S^2)$ quadratic memory and compute footprint that defines transformer scaling.
+
+1. **The quadratic all-to-all similarity matrix ($Q K^T$):** The engine multiplies query and key projections across all heads simultaneously, materializing an $(S \times S)$ score matrix per head. This creates the characteristic $O(S^2)$ quadratic memory and compute footprint that defines transformer scaling (@sec-profiling).
 2. **Variance scaling ($1/\sqrt{d_k}$):** As the head dimension $d_k$ grows, dot products scale proportionally in variance. Scaling by $1/\sqrt{d_k}$ keeps logits in a moderate range, preventing Softmax from saturating into near-zero gradients.
 3. **Causal autoregressive masking:** In generative decoders, future tokens must remain invisible. The runtime injects an upper-triangular mask of $-\infty$ prior to Softmax, forcing future attention probabilities to exactly zero without branching logic.
 
@@ -55,21 +56,20 @@ print([avg for _ in X])
 
 Averaging gives every token the identical vector, so a pronoun receives as much of *because* as of *machine*, and every output receives the same mixture of positional signals. A learned weight for each pair of positions is no better. The noun that *it* refers to can change from sentence to sentence; the right weights depend on what the tokens say, not on where they sit. A fixed table also imposes a maximum sequence length and does not adapt its weights to the input.
 
-The operation we need has three properties. The mixing weights must be computed from the token contents themselves. They must form a proper set of proportions, non-negative and summing to one, so a token can commit most of its attention to one source. The whole computation must also be expressible as matrix arithmetic so that all tokens compute their weights at once instead of one after another. Generation adds a fourth requirement, which we meet in @sec-milestone-2: a token that will be predicted from its predecessors must not be allowed to read from its successors while training.
+The operation we need has three properties. The mixing weights must be computed from the token contents themselves. They must form a proper set of proportions, non-negative and summing to one, so a token can commit most of its attention to one source. The whole computation must also be expressible as matrix arithmetic so that all tokens compute their weights at once instead of one after another. Generation adds a fourth requirement, which we meet in [Synthesis II](synthesis_02.qmd#sec-milestone-2): a token that will be predicted from its predecessors must not be allowed to read from its successors while training.
 
 ::: {.column-margin}
 **↪ Jump ahead:** @sec-memoization
 *Evaluating attention across expanding prefixes incurs $O(S^2)$ recomputation; the KV cache eliminates it.*
 :::
 
+::: {.callout-tip title="Pause & Predict: The Attention Variance Explosion"}
+Let query vector $q \in \mathbb{R}^{d_k}$ and key vector $k \in \mathbb{R}^{d_k}$ have elements drawn independently from zero-mean, unit-variance distributions. What is the expected mean and variance of their dot product $q \cdot k = \sum_{i=1}^{d_k} q_i k_i$? If $d_k = 128$, what happens to the softmax probabilities if we omit the $1/\sqrt{d_k}$ scaling factor?
+:::
+
 ---
 
 ## The Idea
-
-::: {.column-margin}
-![](assets/images/diagrams/12_attention-margin-mask.svg){width="100%"}
-*Causal attention mask setting future tokens to $-\infty$.*
-:::
 
 ### Queries, keys, and values
 
@@ -85,11 +85,19 @@ The score between query $i$ and key $j$ is their dot product $q_i \cdot k_j$, wh
 
 $$\text{Attention}(Q, K, V) = \text{softmax}\!\left( \frac{Q K^T}{\sqrt{d_k}} + M \right) V$$
 
-where $V$ is the $S \times d_v$ matrix of values and $M$ is a mathematical mask of zeros and negative infinities, and the division by $\sqrt{d_k}$ is the scaling that gives the mechanism its name. Every quantity here is a matrix of shape $S \times S$ or $S \times d$, and every operation is a matrix multiply, an elementwise scale, an elementwise add, or a row-wise softmax. That is why attention runs in parallel across all tokens where earlier sequence models had to walk the sequence one step at a time. The three weight matrices are what make it learnable; the network is free to decide what each token should ask and advertise.
+where $V$ is the $S \times d_v$ matrix of values and $M$ is a mathematical mask of zeros and negative infinities, and the division by $\sqrt{d_k}$ is the scaling that gives the mechanism its name.[^fn-attn-variance-derivation] Every quantity here is a matrix of shape $S \times S$ or $S \times d$, and every operation is a matrix multiply, an elementwise scale, an elementwise add, or a row-wise softmax. That is why attention runs in parallel across all tokens where earlier sequence models had to walk the sequence one step at a time. The three weight matrices are what make it learnable; the network is free to decide what each token should ask and advertise.
+
+[^fn-attn-variance-derivation]: For independent zero-mean unit-variance components $q_i, k_i \sim \mathcal{N}(0, 1)$, $\text{Var}(q \cdot k) = \sum_{i=1}^{d_k} \text{Var}(q_i k_i) = d_k$. Dividing by $\sqrt{d_k}$ scales variance by $1/d_k$, restoring unit variance for arbitrary head width.
 
 ### Why divide by $\sqrt{d_k}$
 
-Suppose the entries of $q$ and $k$ are independent with mean zero and variance one. Their dot product is a sum of $d_k$ products, each with mean zero and variance one, so by the same variance argument @sec-layers made for a layer's fan-in, the sum has variance $d_k$ and standard deviation $\sqrt{d_k}$. The spread of the scores grows with the width of the head, and a softmax fed scores spread too far apart collapses toward a nearly one-hot vector with very small derivatives. Dividing every score by $\sqrt{d_k}$ divides the variance by $d_k$ and restores unit variance whatever the head width. The numbers for what goes wrong without it are beside the line of code that does the division.
+::: {.column-margin}
+![](assets/images/diagrams/12_attention-margin-variance.svg){width="100%" fig-alt="Variance scaling margin card contrasting unscaled score variance of d_k causing softmax gradient saturation against scaled score variance of 1.0 preserving active gradients."}
+
+*Variance scaling preserves unit variance for any head width, preventing softmax logits from saturating into near-zero gradients.*
+:::
+
+Suppose the entries of $q$ and $k$ are independent with mean zero and variance one. Their dot product is a sum of $d_k$ products, each with mean zero and variance one, so by the same variance argument @sec-layers made for a layer's fan-in ($1/\sqrt{D_{\text{in}}}$), the sum has variance $d_k$ and standard deviation $\sqrt{d_k}$. The spread of the scores grows with the width of the head, and a softmax fed scores spread too far apart collapses toward a nearly one-hot vector with very small derivatives. Dividing every score by $\sqrt{d_k}$ divides the variance by $d_k$ and restores unit variance whatever the head width. The numbers for what goes wrong without it are beside the line of code that does the division.
 
 ### Causal masking
 
@@ -140,19 +148,27 @@ The helper contains two operations from @sec-tensors. `transpose(-2, -1)` swaps 
 
 ### Softmax by rows
 
-Each row of the score matrix belongs to one query, so each row needs its own softmax over keys. Direct exponentiation can overflow for large scores. Module 12 reuses `Softmax()(scores, dim=-1)`, which subtracts the maximum of each row before exponentiating. For a row containing an allowed finite score, the largest shifted entry is zero, its exponential is one, and the denominator is positive. Forbidden entries remain negative infinity and contribute zero. The mask validation is what rules out the undefined all-negative-infinity case.
+Each row of the score matrix belongs to one query, so each row needs its own softmax over keys. Direct exponentiation can overflow for large scores. Module 12 reuses `Softmax()(scores, dim=-1)`, which subtracts the maximum of each row before exponentiating (@sec-activations). For a row containing an allowed finite score, the largest shifted entry is zero, its exponential is one, and the denominator is positive. Forbidden entries remain negative infinity and contribute zero. The mask validation is what rules out the undefined all-negative-infinity case.
 
 The implementation makes separate NumPy passes to find the maximum, shift the scores, exponentiate, sum, and divide. These passes operate on a fully materialized score tensor. The production bridge will return to the memory cost of keeping and revisiting that tensor.
 
 ### The causal mask
 
-@sec-milestone-2 trains a next-token predictor, and the loss at position $t$ scores a prediction of token $t+1$. That only works if position $t$'s output was computed without reading token $t+1$. @sec-memoization leans on the same guarantee from the other side. It generates one token at a time and reuses the keys and values of earlier positions, which is valid only because an earlier position's output never depended on anything after it. The naive way to keep the future out is to run the model once per prefix, $S$ forward passes for a sequence of $S$ tokens, a thousand passes for 1,024 tokens to get what one masked pass gives.
+::: {.column-margin}
+![](assets/images/diagrams/12_attention-margin-mask.svg){width="100%" fig-alt="Four by four causal keep-mask matrix showing lower-triangular allowed entries with value 1 and upper-triangular blocked entries with value 0, whose scores are replaced with negative infinity before softmax."}
+
+*Causal mask: the module takes 1 (allowed) and 0 (blocked); blocked scores are replaced with $-\infty$ before softmax.*
+:::
+
+[Synthesis II](synthesis_02.qmd#sec-milestone-2) trains a next-token predictor, and the loss at position $t$ scores a prediction of token $t+1$. That only works if position $t$'s output was computed without reading token $t+1$. @sec-memoization leans on the same guarantee from the other side. It generates one token at a time and reuses the keys and values of earlier positions, which is valid only because an earlier position's output never depended on anything after it. The naive way to keep the future out is to run the model once per prefix, $S$ forward passes for a sequence of $S$ tokens, a thousand passes for 1,024 tokens to get what one masked pass gives.
 
 Setting a forbidden score to zero does not exclude it. Softmax over `[0.7071, 0.0]` gives approximately `[0.67, 0.33]`, so the forbidden key still receives a third of the weight. Subtracting a large finite constant is also insufficient for an unrestricted score range. A forbidden score of $10^{10}$ remains large after subtracting $10^9$. Replacing the score with negative infinity enforces exclusion independently of its previous finite value.
 
 {{< include _listings/12_attention/apply_mask.qmd >}}
 
-The mask arrives as ones and zeros, with the same convention as `np.tril(np.ones((S, S)))`. `_apply_mask` first rejects nonbinary entries, broadcasts the mask to the score shape, and checks that each query has an allowed key. `scores.masked_fill(allowed == 0, MASK_VALUE)` then returns a new tensor with blocked scores replaced by `float("-inf")`. It preserves the input scores and records the operation for backward. The rule from @sec-autograd passes gradients at allowed positions and zeros them at forbidden positions. The mask itself is a fixed choice of connectivity, not a trainable parameter.
+The mask arrives as ones and zeros, with the same convention as `np.tril(np.ones((S, S)))`. `_apply_mask` first rejects nonbinary entries, broadcasts the mask to the score shape, and checks that each query has an allowed key. `scores.masked_fill(allowed == 0, MASK_VALUE)` then returns a new tensor with blocked scores replaced by `float("-inf")`.[^fn-fp16-masking] It preserves the input scores and records the operation for backward. The rule from @sec-autograd passes gradients at allowed positions and zeros them at forbidden positions. The mask itself is a fixed choice of connectivity, not a trainable parameter.
+
+[^fn-fp16-masking]: In 32-bit floating point, \texttt{-inf} evaluates reliably. In half-precision formats like FP16, \texttt{-inf} can produce \texttt{NaN} values during exponent subtraction if all row entries are masked. Production engines frequently substitute large finite negatives such as \texttt{-1e4} or \texttt{-1e9} to avoid precision overflow.
 
 ![**The causal attention engine**: Queries and keys interact via scaled dot products $QK^T / \sqrt{d_k}$ to form an $S \times S$ score matrix. An upper-triangular mask sets future positions to $-\infty$ so row-wise softmax normalizes attention weights exclusively over past and present tokens ($j \le i$), strictly preserving autoregressive causality during value mixing.](assets/images/diagrams/12_causal-attention-engine.svg){#fig-causal-attention-engine width="100%" fig-alt="Causal attention engine diagram showing multi-head projection split, score matrix computation, upper-triangular -inf masking, softmax normalization, and value matrix mixture."}
 
@@ -199,9 +215,9 @@ The projections run once at full width. `_split_heads` reshapes `(B, S, D)` to `
 After attention, `_merge_heads` reverses the axis swap and combines the head and feature axes. The output projection then mixes information across heads and returns `(B, S, D)`. Split and merge preserve the association between a token and its features, but each `reshape` and `transpose` returns a tensor with its own storage in TinyTorch. Forward creates these temporary activations without changing the input or the four projection layers.
 
 ::: {.column-margin}
-**Core Invariant: Head Split Origami**\
-$$(B, S, D) \xrightarrow{\text{reshape}} (B, S, H, d_k) \xrightarrow{\text{transpose}(1, 2)} (B, H, S, d_k)$$\
-*Placing head dimension before sequence turns multi-head attention into a single batched 2D GEMM.*
+![](assets/images/diagrams/12_attention-margin-origami.svg){width="100%" fig-alt="Head split coordinate origami margin card illustrating tensor reshape from (B, S, D) to (B, S, H, d_k), axis transposition to (B, H, S, d_k) for batched 2D GEMM, and head merging back to (B, S, D)."}
+
+*Coordinate origami swaps head and sequence dimensions to place independent 2D matrix planes into the batch grid for hardware GEMM execution.*
 :::
 
 ![**Multi-head coordinate origami**: Slicing the full hidden embedding $(B, S, D)$ into $(B, H, S, d_k)$ via reshape and transposition isolates head subspaces into independent 2D planes, enabling hardware parallel matrix multiplication across all heads in a single batch call.](assets/images/diagrams/12_head-split-origami.svg){#fig-head-split-origami width="100%" fig-alt="Diagram of coordinate origami: (B, Seq, D_model) reshapes and transposes to Head 0 and Head 1 subspaces, enabling batched Q @ K.T matrix multiplication."}
@@ -229,7 +245,7 @@ so that $\sqrt{d_k} = \sqrt{2} \approx 1.4142$. Row 0 belongs to token 0 and may
 
 The first score in row 1 is $[0,2]\cdot[1,1]=2$. After scaling, its exponential is $e^{1.4142}\approx4.11325$, compared with $e^0=1$ for the other key. Dividing by their sum, $5.11325$, produces the row's weights. Their value mixture is $0.80443[2,1]+0.19557[0,3]=[1.6089,1.3911]$. This is the same selection introduced in The Idea, now placed inside a complete two-query call.
 
-Token 0's second score was $0.7071$ before masking, a perfectly respectable value, and the mask removed it entirely; the forbidden key receives exactly zero weight. Token 1 puts $80\%$ of its weight on token 0 because its query $[0, 2]$ aligns with key $[1, 1]$ and is orthogonal to key $[1, 0]$. The following assertions in the first listing reproduce @tbl-attention-trace step-by-step from the module. In lines 8--11, `Q`, `K`, `V`, and lower-triangular mask `M` are defined. Line 12 computes raw dot-product scores ($QK^T$), scaled by $1/\sqrt{2}$ in line 13. Line 14 applies the causal mask, replacing forbidden entries with $-\infty$ (verified by `isneginf` in line 17). Line 15 invokes `scaled_dot_product_attention(Q, K, V, mask=M)`, and lines 18--20 confirm that attention weights `w` ($[1, 0]$ and $[0.80443, 0.19557]$) and output values `out` ($[2, 1]$ and $[1.6089, 1.3911]$) agree with the manual trace.
+Token 0's second score was $0.7071$ before masking, a perfectly respectable value, and the mask removed it entirely; the forbidden key receives exactly zero weight. Token 1 puts $80\%$ of its weight on token 0 because its query $[0, 2]$ aligns with key $[1, 1]$ and is orthogonal to key $[1, 0]$. The following assertions in the first listing reproduce @tbl-attention-trace step-by-step from the module. In lines 7 to 10, `Q`, `K`, `V`, and lower-triangular mask `M` are defined. Line 11 computes raw dot-product scores ($QK^T$), scaled by $1/\sqrt{2}$ in line 12. Line 13 applies the causal mask, replacing forbidden entries with $-\infty$ (verified by `isneginf` in line 16). Line 14 invokes `scaled_dot_product_attention(Q, K, V, mask=M)`, and lines 18 to 19 confirm that attention weights `w` ($[1, 0]$ and $[0.80443, 0.19557]$) and output values `out` ($[2, 1]$ and $[1.6089, 1.3911]$) agree with the manual trace.
 
 ```python
 import numpy as np
@@ -254,7 +270,7 @@ assert np.allclose(out.data, [[2, 1], [1.6089, 1.3911]], atol=1e-4)
 print(out.data)
 ```
 
-The layer adds learned projections and head axes to this picture. In the second snippet below, lines 4--6 instantiate `MultiHeadAttention(embed_dim=4, num_heads=2)`, an input sequence `X` of shape `(1, 3, 4)`, and a lower-triangular causal mask `(1, 3, 3)`. Line 7 evaluates `Y = mha(X, mask)`, preserving input dimensions `(1, 3, 4)` in line 8. Lines 10--12 trace the internal projection and head-splitting step `_split_heads`, reorganizing the tensors to shape `(1, 2, 3, 2)` (batch, head, token, strip). Line 13 runs attention over all heads simultaneously. Lines 14--17 isolate head 0's $3 \times 3$ attention weight matrix `w0`, verifying that its rows sum to 1.0 (line 15) and all values above the diagonal are strictly 0.0 (line 16).
+The layer adds learned projections and head axes to this picture. In the second snippet below, lines 3 to 5 instantiate `MultiHeadAttention(embed_dim=4, num_heads=2)`, an input sequence `X` of shape `(1, 3, 4)`, and a lower-triangular causal mask `(1, 3, 3)`. Line 6 evaluates `Y = mha(X, mask)`, preserving input dimensions `(1, 3, 4)` in line 7. Lines 9 to 11 trace the internal projection and head-splitting step `_split_heads`, reorganizing the tensors to shape `(1, 2, 3, 2)` (batch, head, token, strip). Line 12 runs attention over all heads simultaneously. Lines 13 to 15 isolate head 0's $3 \times 3$ attention weight matrix `w0`, verifying that its rows sum to 1.0 (line 14) and all values above the diagonal are strictly 0.0 (line 15).
 
 ```python
 from tinytorch.core.attention import MultiHeadAttention
@@ -295,7 +311,7 @@ The reference keeps the complete score matrix because it makes the computation e
 
 
 
-::: {#nbk-attention-quadratic-vram-wall .callout-notebook title="Napkin math: the quadratic attention memory wall"}
+::: {#nbk-attention-quadratic-vram-wall .callout-notebook title="Napkin Math: The quadratic attention memory wall"}
 Consider $H=12$ heads of width $d_k=64$, a batch of $B=8$ sequences, and four bytes per element. These are array-size estimates, not measured peak memory.
 
 - At $S=2{,}048$, the three projected tensors occupy $3BHSd_k \times 4 = 150{,}994{,}944$ bytes, approximately $151$ MB.
@@ -307,8 +323,8 @@ These counts exclude parameters, gradients, other activations, and intermediate 
 
 [FlashAttention](https://arxiv.org/abs/2205.14135) changes how attention uses memory. It partitions the calculation into blocks that fit in small, fast on-chip storage, reducing transfers to and from the GPU's larger main memory. For each query it maintains a running maximum and normalization sum, allowing later key blocks to join the same softmax calculation. The output can therefore be accumulated without storing a complete $S \times S$ score matrix. This is exact attention in its mathematical formulation, with possible floating-point differences from a different evaluation order. Tiling reduces intermediate storage and memory traffic; dense attention still scores all allowed query-key pairs.
 
-::: {#psp-attention-flashattention-tiling .callout-production title="Production Bridge: FlashAttention SRAM Tiling and Online Softmax"}
-In modern GPU architectures, memory bandwidth to high-bandwidth memory (HBM) is orders of magnitude slower than on-chip SRAM cache (e.g. ~3 TB/s HBM vs ~19 TB/s SRAM on NVIDIA H100). Standard attention materializes the $S \times S$ score matrix in HBM, reads it back for softmax, writes the probabilities to HBM, and reads them again to multiply by $V$. FlashAttention tiles $Q$, $K$, and $V$ into small SRAM blocks, computes attention using the online softmax algorithm (tracking running max $m_i$ and normalizer $\ell_i$), and accumulates output vectors entirely within SRAM registers without ever writing the quadratic intermediate matrix to DRAM.
+::: {#psp-attention-flashattention-tiling .callout-perspective title="Production Bridge: FlashAttention SRAM tiling and online softmax"}
+In modern GPU architectures, bandwidth to high-bandwidth memory (HBM) is several times lower than to on-chip SRAM (the FlashAttention paper cites about 1.5 to 2.0 TB/s HBM versus about 19 TB/s SRAM on an NVIDIA A100). Standard attention materializes the $S \times S$ score matrix in HBM, reads it back for softmax, writes the probabilities to HBM, and reads them again to multiply by $V$. FlashAttention tiles $Q$, $K$, and $V$ into small SRAM blocks, computes attention using the online softmax algorithm (tracking running max $m_i$ and normalizer $\ell_i$), and accumulates output vectors entirely within SRAM registers without ever writing the quadratic intermediate matrix to DRAM (as profiled in @sec-profiling and accelerated via tiled loops in @sec-acceleration, with an end-to-end blueprint developed in @sec-extensions).
 :::
 
 The [PyTorch scaled-dot-product attention interface](https://docs.pytorch.org/docs/stable/generated/torch.nn.functional.scaled_dot_product_attention.html) can select optimized or math implementations according to the input and available backends. Its boolean mask uses `True` for allowed entries, while a floating-point mask is an additive score bias. TinyTorch instead accepts only a binary allow-mask even though its Tensor storage is float32. PyTorch's function also returns only the mixed output; TinyTorch returns `(output, weights)` to make the mechanism inspectable. These interface differences matter when translating a test. A production causal option specifies the connectivity without requiring the caller to construct a square mask, but it does not by itself guarantee a particular backend.
@@ -325,20 +341,22 @@ The [PyTorch scaled-dot-product attention interface](https://docs.pytorch.org/do
 
 The comparison in @tbl-attention-bridge concerns execution and storage. It does not add FlashAttention to this NumPy implementation. For either approach, valid probability rows sum to one and a causal output cannot depend on later input tokens. Comparisons should allow for floating-point rounding and should use probabilities before any production attention dropout, since dropout changes individual row sums.
 
-A separate opportunity appears during generation. Under causal attention, adding a token does not change the keys and values already computed for earlier tokens. @Sec-memoization will introduce the state and lifetime needed to reuse them. That cache removes repeated projection work but still leaves the new query to attend over its growing prefix. The attention computation and the storage decision remain distinct mechanisms.
+A separate opportunity appears during generation. Under causal attention, adding a token does not change the keys and values already computed for earlier tokens. @sec-memoization will introduce the state and lifetime needed to reuse them. That cache removes repeated projection work but still leaves the new query to attend over its growing prefix. The attention computation and the storage decision remain distinct mechanisms.
 
 ::: {#psp-attention-gqa-mqa .callout-perspective title="Systems Perspective: From MHA to Multi-Query and Grouped-Query Attention"}
-Standard Multi-Head Attention (MHA) pairs each query head with its own dedicated key and value heads ($H_q = H_k = H_v$). While computationally expressive, storing separate KV vectors per head for long contexts causes the KV cache to overwhelm accelerator DRAM during generation. **Multi-Query Attention** (MQA; Shazeer, 2019) collapses all heads to a single shared key/value projection ($H_k = H_v = 1$), reducing KV cache memory by $H\times$ at the cost of modest model capacity. Modern frontier models (LLaMA 3, Mistral, Gemma) adopt the optimal middle ground: **Grouped-Query Attention** (GQA; Ainslie et al., 2023), grouping $H_q$ query heads into $G$ key/value partitions ($H_k = H_v = G$, typically $G = 8$), slashing KV memory traffic while retaining full multi-head modeling accuracy. @sec-memoization explores this cache lifecycle in depth.
+Standard Multi-Head Attention (MHA) pairs each query head with its own dedicated key and value heads ($H_q = H_k = H_v$). While computationally expressive, storing separate KV vectors per head for long contexts causes the KV cache to overwhelm accelerator DRAM during generation. **Multi-Query Attention** (MQA; Shazeer, 2019) collapses all heads to a single shared key/value projection ($H_k = H_v = 1$), reducing KV cache memory by $H\times$ at the cost of modest model capacity. Modern frontier models (LLaMA 3, Mistral, Gemma) adopt the optimal middle ground: **Grouped-Query Attention** (GQA; Ainslie et al., 2023), grouping $H_q$ query heads into $G$ key/value partitions ($H_k = H_v = G$, typically $G = 8$), cutting KV memory traffic with quality close to multi-head attention. @sec-memoization explores this cache lifecycle in depth.
 :::
 
 
----
+```{=latex}
+\newpage
+```
 
 ## Summary
 
 Module 12 computes scores, divides by the square root of the query width, replaces blocked scores with negative infinity, normalizes across keys, and mixes the values. `MultiHeadAttention` supplies four learned projections around that function. Its head split and merge preserve token order, and its output has the same `(B, S, D)` shape as its input. Forward preserves the input and parameter values; the graph records the operations needed for backward.
 
-For a valid binary mask and finite unmasked scores, each weight row sums to one and forbidden keys receive zero weight. An all-blocked row is rejected. These are the local checks behind the stronger causal contract: changing a future input cannot change an earlier output. @Sec-transformers will combine this token-mixing layer with per-token transformations, normalization, and residual connections to build a complete predictor.
+For a valid binary mask and finite unmasked scores, each weight row sums to one and forbidden keys receive zero weight. An all-blocked row is rejected. These are the local checks behind the stronger causal contract: changing a future input cannot change an earlier output. @sec-transformers will combine this token-mixing layer with per-token transformations, normalization, and residual connections to build a complete predictor.
 
 ---
 
@@ -346,4 +364,6 @@ For a valid binary mask and finite unmasked scores, each weight row sums to one 
 
 - **Bahdanau, Cho, and Bengio** (2015). "[Neural machine translation by jointly learning to align and translate](https://arxiv.org/abs/1409.0473)." *ICLR*. Attention as learned, data-dependent alignment, before transformers.
 - **Vaswani et al.** (2017). "[Attention is all you need](https://arxiv.org/abs/1706.03762)." *NeurIPS*. Scaled dot-product and multi-head attention in the form this chapter implements.
-- **Dao et al.** (2022). "[FlashAttention: fast and memory-efficient exact attention with IO-awareness](https://arxiv.org/abs/2205.14135)." *NeurIPS*. Computing the same result without storing the full score matrix this chapter keeps.
+- **Shazeer** (2019). "[Fast transformer decoding: One write-head is all you need](https://arxiv.org/abs/1911.02150)." Multi-Query Attention (MQA), sharing key-value projections across heads to reduce memory bandwidth during inference.
+- **Dao et al.** (2022). "[FlashAttention: fast and memory-efficient exact attention with IO-awareness](https://arxiv.org/abs/2205.14135)." *NeurIPS*. Computing the exact attention result without storing the full score matrix this chapter keeps.
+- **Ainslie et al.** (2023). "[GQA: Training Generalized Multi-Query Transformer Models from Multi-Head Checkpoints](https://arxiv.org/abs/2305.13245)." *EMNLP*. Grouped-Query Attention as the modern standard balancing memory bandwidth and model capacity.

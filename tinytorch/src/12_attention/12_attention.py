@@ -64,21 +64,29 @@ from tinytorch.core.attention import scaled_dot_product_attention, MultiHeadAtte
 r"""
 ## 📋 Module Dependencies
 
+**Prerequisites**: Modules 01 (Tensor), 02 (Activations), and 03 (Layers) must be complete. Module 11 produces this module's input vectors conceptually but is not imported.
+
+**External Dependencies**:
+- `numpy`: fast array operations, lower-triangular (causal) masking, and benchmarking; provides `np.tril` and `np.broadcast_to` for causal masks
+- `math` (for the $1/\sqrt{d_k}$ scale factor)
+- `time` and `typing` (for timing measurements and type hints)
+
+**TinyTorch Dependencies**:
+
 | Dependency | Origin | Purpose in Module 12 | Systems Invariant |
 | :--- | :--- | :--- | :--- |
 | `Tensor` | Module 01 (`core.tensor`) | Multi-dimensional array container supporting strided matmul and transposition | Manages contiguous memory buffers and backward computational graph |
 | `Softmax` | Module 02 (`core.activations`) | Normalizes raw attention scores into probability distributions | Numerically stable along last dimension `dim=-1` |
 | `Linear` | Module 03 (`core.layers`) | Parameter projections $W_Q, W_K, W_V$ and output projection $W_O$ | Dense matrix multiplication $(B, S, D) \times (D, D)$ |
-| `EmbeddingLayer` | Module 11 (`core.embeddings`) | Upstream provider of position-aware continuous vectors | Produces input tensor $X \in \mathbb{R}^{B \times S \times D}$ |
-| `numpy` | External | Fast array operations, upper-triangular masking, and benchmarking | Provides `np.tril` and `np.broadcast_to` for causal masks |
+| `EmbeddingLayer` | Module 11 (`core.embeddings`), not imported | Upstream provider of position-aware continuous vectors | Produces input tensor $X \in \mathbb{R}^{B \times S \times D}$ |
 
-### Attention Information Routing Pipeline
+**Dependency Flow**: the attention information routing pipeline
 
 | Step | Operation | Mathematical Formula | Tensor Shape & Semantics |
 | :--- | :--- | :--- | :--- |
 | **1. Linear Projections**| Query, Key, Value mappings | $\mathbf{Q} = \mathbf{X}\mathbf{W}_Q, \; \mathbf{K} = \mathbf{X}\mathbf{W}_K, \; \mathbf{V} = \mathbf{X}\mathbf{W}_V$ | $(B, S, D) \rightarrow (B, H, S, d_k)$ |
 | **2. Scaled Dot-Product**| Raw attention scores | $\mathbf{S} = \frac{\mathbf{Q}\mathbf{K}^T}{\sqrt{d_k}}$ | $(B, H, S, S)$ query-key correlation |
-| **3. Causal Masking** | Autoregressive masking | $\mathbf{S}_{\text{masked}} = \mathbf{S} + \mathbf{M}$ (upper triangle $= -\infty$) | Prevents attending to future tokens |
+| **3. Causal Masking** | Autoregressive masking | $\mathbf{S}_{\text{masked}} = \text{masked\_fill}(\mathbf{S}, \mathbf{M} = 0, -\infty)$, where $\mathbf{M}$ is a 0/1 keep-mask (1 = allowed, lower triangle for causal) | Prevents attending to future tokens |
 | **4. Probability Weights**| Softmax normalizer | $\mathbf{A} = \text{softmax}(\mathbf{S}_{\text{masked}}, \text{dim}=-1)$ | Non-negative attention distribution |
 | **5. Value Mixture** | Context aggregation | $\mathbf{Y} = \mathbf{A}\mathbf{V}$ | Weighted sum of value vectors |
 | **6. Output Projection** | Feature projection | $\text{Output} = \mathbf{Y}\mathbf{W}_O$ | Restores model dimension $(B, S, D)$ |
@@ -577,6 +585,28 @@ def test_unit_scaled_dot_product_attention():
             for j in range(i + 1, seq_len):  # Future positions
                 assert abs(weights_masked.data[b, i, j]) < 1e-6, f"Future attention not masked at ({i},{j})"
 
+    # Check VALUES against an independent NumPy reference: softmax(QKᵀ/√d_k)·V
+    def _reference_attention(q, k, v, keep=None):
+        scores = q @ np.swapaxes(k, -1, -2) / np.sqrt(q.shape[-1])
+        if keep is not None:
+            scores = np.where(keep == 0, -np.inf, scores)
+        scores = scores - scores.max(axis=-1, keepdims=True)
+        w = np.exp(scores)
+        w = w / w.sum(axis=-1, keepdims=True)
+        return w @ v, w
+
+    ref_out, ref_w = _reference_attention(Q.data, K.data, V.data)
+    assert np.allclose(weights.data, ref_w, atol=1e-5), \
+        "Attention weights should equal softmax(QKᵀ/√d_k) along the key axis (did you forget the 1/√d_k scaling?)"
+    assert np.allclose(output.data, ref_out, atol=1e-5), \
+        "Attention output should equal softmax(QKᵀ/√d_k)·V (the weighted sum of value rows, not V itself)"
+
+    ref_out_m, ref_w_m = _reference_attention(Q.data, K.data, V.data, mask.data)
+    assert np.allclose(weights_masked.data, ref_w_m, atol=1e-5), \
+        "Masked attention weights should equal softmax over the allowed (keep=1) keys only"
+    assert np.allclose(output_masked.data, ref_out_m, atol=1e-5), \
+        "Masked attention output should equal softmax(masked QKᵀ/√d_k)·V"
+
     print("✅ scaled_dot_product_attention works correctly!")
 
 if __name__ == "__main__":
@@ -967,6 +997,37 @@ def test_unit_multihead_attention():
     mask = Tensor(np.tril(np.ones((batch_size, seq_len, seq_len))))
     output_masked = mha.forward(x, mask)
     assert output_masked.shape == (batch_size, seq_len, embed_dim)
+
+    # Check VALUES against an independent NumPy reference that uses the layer's own
+    # weights: project, split into heads, attend per head, concatenate, project out.
+    # Give the biases nonzero values so they are exercised too.
+    for proj in (mha.q_proj, mha.k_proj, mha.v_proj, mha.out_proj):
+        proj.bias.data[...] = rng.standard_normal(proj.bias.data.shape)
+
+    def _reference_mha(x_np, keep=None):
+        H, dh = num_heads, embed_dim // num_heads
+        q = x_np @ mha.q_proj.weight.data + mha.q_proj.bias.data
+        k = x_np @ mha.k_proj.weight.data + mha.k_proj.bias.data
+        v = x_np @ mha.v_proj.weight.data + mha.v_proj.bias.data
+        heads = []
+        for h in range(H):
+            cols = slice(h * dh, (h + 1) * dh)
+            scores = q[..., cols] @ np.swapaxes(k[..., cols], -1, -2) / np.sqrt(dh)
+            if keep is not None:
+                scores = np.where(keep == 0, -np.inf, scores)
+            scores = scores - scores.max(axis=-1, keepdims=True)
+            w = np.exp(scores)
+            w = w / w.sum(axis=-1, keepdims=True)
+            heads.append(w @ v[..., cols])
+        concat = np.concatenate(heads, axis=-1)
+        return concat @ mha.out_proj.weight.data + mha.out_proj.bias.data
+
+    output = mha.forward(x)
+    assert np.allclose(output.data, _reference_mha(x.data), atol=1e-5), \
+        "MHA output should equal Concat(head_1..head_H)·W_O + b_O, where head_h = softmax(Q_h K_hᵀ/√head_dim)·V_h"
+    output_masked = mha.forward(x, mask)
+    assert np.allclose(output_masked.data, _reference_mha(x.data, mask.data), atol=1e-5), \
+        "Masked MHA output should match per-head causal attention broadcast across all heads"
 
     # Test different head configurations
     mha_small = MultiHeadAttention(embed_dim=32, num_heads=4)

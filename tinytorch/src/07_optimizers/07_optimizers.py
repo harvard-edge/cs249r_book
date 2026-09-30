@@ -64,13 +64,22 @@ r"""
 - **Module 01 (`Tensor`)**: Provides model parameter tensors with contiguous data buffers.
 - **Module 06 (`Autograd`)**: Writes analytical gradients into `param.grad` via reverse topological traversal.
 
+**External Dependencies**:
+- `numpy` (for array operations and the optimizer state buffers)
+- `typing` (for type hints)
+
+**TinyTorch Dependencies**:
+- `tinytorch.core.tensor.Tensor` (Module 01)
+- `tinytorch.core.autograd` (Module 06), imported whole so every operation gains its backward half, plus its `method_of` decorator
+
 | Component | Upstream Origin | Role in Module 07 | Downstream Target |
 | :--- | :--- | :--- | :--- |
 | **`Tensor`** | Module 01 (`core.tensor`) | Model parameter instances carrying weight buffers | Consumed by optimizers |
 | **`param.grad`** | Module 06 (`core.autograd`) | Instantaneous gradient vectors $\nabla_{\boldsymbol{\theta}} \mathcal{L}$ | Read by optimizer `step()` |
 | **`method_of`** | Module 06 (`core.autograd`) | Method decorator attaching step logic to optimizer classes | Implementation cleanly modularized |
-| **Optimizers** | Module 07 (`core.optimizers`) | State buffers ($\mathbf{v}, \mathbf{m}$) and the rebinding of `param.data` to the updated array | Wired into Module 08 Training Loop |
+| **Optimizers** | Module 07 (`core.optimizers`) | State buffers ($\mathbf{v}, \mathbf{m}$) and the rebinding of `param.data` to the updated array | The Module 08 training loop will call `step()` |
 
+**Dependency Flow**:
 $$\mathbf{w} \in \mathbb{R}^D \xrightarrow{\text{Forward (Mod 01)}} \mathcal{L} \xrightarrow{\text{Backward (Mod 06)}} \mathbf{g} = \nabla_{\mathbf{w}} \mathcal{L} \xrightarrow{\text{Step (Mod 07)}} \mathbf{w}' = \mathbf{w} - \eta \cdot \mathbf{u}(\mathbf{g}) \xrightarrow{\text{Epoch (Mod 08)}} \text{Trained Model}$$
 
 Optimizers are the operational step that transforms gradients into learning. Module 08 will integrate them into an end-to-end training loop.
@@ -620,6 +629,7 @@ class SGD(Optimizer):
         - Skip parameters without gradients
         - Use self._extract_gradient() from the base class
         - Initialize momentum buffers on first use
+        - Keep the parameter's dtype: .astype(param.data.dtype, copy=False)
         """
         ### BEGIN SOLUTION
         for i, param in enumerate(self.params):
@@ -643,8 +653,10 @@ class SGD(Optimizer):
                 self.momentum_buffers[i] = self.momentum * self.momentum_buffers[i] + grad_data
                 grad_data = self.momentum_buffers[i]
 
-            # Update parameter: param = param - lr * grad
-            param.data = param.data - self.lr * grad_data
+            # Update parameter: param = param - lr * grad. Cast back to the
+            # parameter's dtype so a float64 lr or gradient cannot silently
+            # promote float32 weights (and double their memory).
+            param.data = (param.data - self.lr * grad_data).astype(param.data.dtype, copy=False)
 
         # Increment step counter
         self.step_count += 1
@@ -980,6 +992,7 @@ def step(self):
     - step_count counts optimizer calls; update_counts counts each parameter's updates
     - _update_moments returns (m_hat, v_hat) tuple
     - Weight decay modifies grad_data before moment update
+    - Keep the parameter's dtype: .astype(param.data.dtype, copy=False)
     """
     ### BEGIN SOLUTION
     # Count optimizer calls; each parameter separately counts its moment updates.
@@ -999,8 +1012,9 @@ def step(self):
         # Update moments and get bias-corrected estimates
         m_hat, v_hat = self._update_moments(i, grad_data)
 
-        # Update parameter
-        param.data = param.data - self.lr * m_hat / (np.sqrt(v_hat) + self.eps)
+        # Update parameter, keeping its dtype (float32 stays float32)
+        update = self.lr * m_hat / (np.sqrt(v_hat) + self.eps)
+        param.data = (param.data - update).astype(param.data.dtype, copy=False)
     ### END SOLUTION
 
 
@@ -1322,6 +1336,7 @@ def step(self):
     HINTS:
     - Do NOT modify grad_data with weight decay (that is Adam's coupled form)
     - Apply decay as a multiplicative factor on param.data
+    - Keep the parameter's dtype: .astype(param.data.dtype, copy=False)
     """
     ### BEGIN SOLUTION role="scaffold"
     # Increment step counter first
@@ -1337,12 +1352,16 @@ def step(self):
         # Update moments using PURE gradients (no weight decay mixed in)
         m_hat, v_hat = self._update_moments(i, grad_data)
 
+        # Remember the dtype so float32 weights come back out as float32.
+        dtype = param.data.dtype
+
         # Decay the old weight, not the adaptive update we are about to add.
         if self.weight_decay != 0:
             param.data = param.data * (1 - self.lr * self.weight_decay)
 
         # Apply gradient-based update independently of decay.
         param.data = param.data - self.lr * m_hat / (np.sqrt(v_hat) + self.eps)
+        param.data = param.data.astype(dtype, copy=False)
     ### END SOLUTION
 
 

@@ -25,22 +25,23 @@ print(prof.key_averages().table(sort_by="cpu_time_total", row_limit=5))
 ```
 
 Underneath that profiling report, the systems profiler tracks the fundamental physical reality of computation:
+
 1. **Operator runtime attribution:** The profiler hooks into dispatcher call-sites to measure the wall-clock execution time and kernel launch overheads of individual layers and functions.
 2. **Memory traffic accounting:** The engine tracks buffer allocations, peak memory residency, and memory deallocations, distinguishing persistent parameter storage from transient activation buffers.
-3. **Operational intensity and hardware bounds:** By comparing floating-point arithmetic (FLOPs) against memory moved across the bus (bytes), the profiler grounds operations in the **Roofline Model**, diagnosing whether an operator is **memory-bandwidth bound** (stalled on DRAM) or **compute-bound** (saturating ALUs).
+3. **Operational intensity and hardware bounds:** By comparing floating-point arithmetic (FLOPs) against memory moved across the bus (bytes), a practitioner can place operations on the **Roofline Model** and ask whether an operator is **memory-bandwidth bound** or **compute-bound**; `torch.profiler` supplies timings, shapes, and optional FLOP estimates, not a bus-traffic measurement.
 
-This chapter establishes TinyTorch's profiling harness, providing the analytical and empirical diagnostic foundations that guide all performance optimizations in Part III. Before building our profiling tools, we must examine why naive arithmetic counting fails to predict execution time.
+This chapter establishes TinyTorch's profiling harness, providing the analytical and empirical diagnostic foundations that guide all performance optimizations in Part III. Before constructing these profiling tools, the first step is to examine why naive arithmetic counting fails to predict execution time.
+
+::: {.column-margin}
+**↩ Jump back:** @sec-transformers
+*Accounting for TinyGPT's parameter budget across multi-head attention and feed-forward sub-layers.*
+:::
 
 ![The roofline model. Performance rises with arithmetic intensity along the bandwidth ceiling until it reaches the compute ceiling; the corner where they meet is the ridge point.](assets/images/diagrams/14_profiling-diag-1.svg){#fig-roofline-model width="100%"}
 
 ---
 
 ## The Problem
-
-::: {.column-margin}
-**↩ Jump back:** @sec-transformers
-*Accounting for TinyGPT's parameter budget across multi-head attention and feed-forward sub-layers.*
-:::
 
 
 The natural way to estimate how long a computation takes is to count its arithmetic. A Linear layer with $n$ inputs and $m$ outputs, applied to $R$ rows, does $2Rnm$ floating-point operations, or FLOPs, counting one for each multiply and one for each add.[^fn-fma-flops] Doubling the rows doubles the FLOPs, which suggests doubling the time.
@@ -75,7 +76,13 @@ This experiment deliberately has no expected pair of timings. The second call do
 
 A nearly flat pair would be evidence against predicting time from FLOPs alone. One possible explanation is that fetching the weights costs more than the arithmetic, allowing additional rows to reuse data already fetched. Another is a change in the library's execution path. The timer alone does not distinguish them. Counting both operations and bytes gives a model against which to test those explanations.
 
+::: {.callout-tip title="Pause & Predict: Arithmetic Intensity & The Memory Wall"}
+Suppose an accelerator has a peak compute throughput of $P_{\text{peak}} = 100\text{ TFLOP/s}$ and a memory bandwidth of $B_{\text{peak}} = 1{,}000\text{ GB/s}$. What is the hardware ridge point $I_{\text{ridge}}$? If an autoregressive token decode step has an arithmetic intensity of $I = 0.5\text{ FLOP/B}$, what is the maximum achievable compute throughput? What percentage of the processor's peak compute capacity sits idle waiting for memory transfers?
+:::
+
 ---
+
+\newpage
 
 ## The Idea
 
@@ -95,6 +102,11 @@ $$T \;\ge\; \max\!\left(\frac{F}{P_{\text{peak}}},\; \frac{Q}{B_{\text{peak}}}\r
 
 For a large weight matrix and a small number of rows, the weight reads can dominate $Q$. Increasing the rows then raises the arithmetic term much faster than the transfer term. If transfer remains the larger term, the model predicts little change in the lower bound. This is a conditional explanation for flat timings, not proof that the experiment reached the bound.
 
+::: {.column-margin}
+![](assets/images/diagrams/14_profiling-margin-roofline.svg){width="100%"}
+*The Roofline model: operational intensity separates the memory-bound bandwidth slope from the compute-bound peak ceiling.*
+:::
+
 ### Arithmetic intensity and the roofline
 
 Their ratio summarizes the balance between these costs. **Arithmetic intensity** is the FLOPs an operation performs per byte it moves:
@@ -105,18 +117,15 @@ An operation with high intensity does a lot of work on each byte it fetches; an 
 
 $$\frac{F}{T} \;\le\; \min\!\left(P_{\text{peak}},\; I \times B_{\text{peak}}\right)$$
 
-::: {.column-margin}
-![](assets/images/diagrams/14_profiling-margin-roofline.svg){width="100%"}
-*The Roofline model: operational intensity separates the memory-bound bandwidth slope from the compute-bound peak ceiling.*
-:::
-
 Plotted against $I$, as in @fig-roofline-model, the right-hand side is a slanted line that rises with intensity until it hits a flat ceiling at $P_{\text{peak}}$. The corner is the **ridge point**, the intensity at which the two ceilings meet:
 
 $$I_{\text{ridge}} = \frac{P_{\text{peak}}}{B_{\text{peak}}}$$
 
 Left of the ridge, the model's lower ceiling comes from memory bandwidth; this is its **memory-bound** region. Reducing transferred bytes or increasing available bandwidth raises that ceiling. Right of the ridge, peak arithmetic throughput supplies the lower ceiling; this is its **compute-bound** region. Fewer FLOPs or faster arithmetic can then reduce the time bound. Real operations can run below both ceilings because of costs such as Python calls, allocation, or incomplete use of the processor.
 
-The illustrative machine in @fig-roofline-model has a peak of 1,000 GFLOP/s and bandwidth of 200 GB/s. Here a GFLOP is a billion floating-point operations, and a GB is a billion bytes. Its ridge is $1000 / 200 = 5$ FLOPs per byte. An operation at 2 FLOPs per byte has a ceiling of $2 \times 200 = 400$ GFLOP/s. These are chosen numbers that make the relationship visible, not specifications for the reader's computer.
+The illustrative machine in @fig-roofline-model has a peak of 1,000 GFLOP/s and bandwidth of 200 GB/s. Here a GFLOP is a billion floating-point operations, and a GB is a billion bytes. Its ridge is $1000 / 200 = 5$ FLOPs per byte. An operation at 2 FLOPs per byte has a ceiling of $2 \times 200 = 400$ GFLOP/s. These are chosen numbers that make the relationship visible, not specifications for the reader's computer.[^fn-hardware-ridge-points]
+
+[^fn-hardware-ridge-points]: Real hardware accelerators exhibit dramatically different ridge points: an illustrative laptop CPU with $1.5\text{ TFLOP/s}$ of FP32 arithmetic and $400\text{ GB/s}$ of memory bandwidth, roughly the class of an Apple M3 Max, has $I_{\text{ridge}} \approx 3.75\text{ FLOP/B}$ (the same chip's GPU, with several times the arithmetic, has a far higher ridge), an Intel Xeon 8480+ has $I_{\text{ridge}} \approx 25\text{ FLOP/B}$ ($7.6\text{ TFLOP/s} / 307\text{ GB/s}$), and an NVIDIA H100 SXM5 GPU has $I_{\text{ridge}} \approx 295\text{ FLOP/B}$ ($989\text{ TFLOP/s FP16} / 3{,}350\text{ GB/s HBM3}$). Higher ridge points demand higher batch sizes to escape the memory-bound regime.
 
 ### Why a Linear layer's intensity grows with its row count
 
@@ -124,22 +133,22 @@ Apply the definition to the layer that dominates every model in this book. A Lin
 
 $$I \;\approx\; \frac{2Rnm}{4nm} \;=\; \frac{R}{2}$$
 
-Under this traffic model, a Linear layer's intensity is roughly half its row count. The approximation assumes float32 weights, one transfer of each weight, and small input and output arrays relative to the weight matrix. One row gives about 0.5 FLOPs per byte; sixty-four rows give about 32. Rows can come from several examples in a batch or several positions in a sequence.
+Under this traffic model, a Linear layer's intensity is roughly half its row count. The approximation assumes float32 weights, one transfer of each weight, and small input and output arrays relative to the weight matrix. One row gives about 0.5 FLOPs per byte; sixty-four rows give about 32. Rows can come from several examples in a batch or several positions in a sequence. As established in @sec-tensors, memory layout and contiguous strides govern transfer efficiency. At $I \approx 0.5\text{ FLOP/B}$, the model places the operation far left of any realistic ridge, so its ceiling comes from memory bandwidth. @sec-acceleration examines how fewer intermediate arrays could reduce traffic, and @sec-memoization shows how caching removes repeated projections while attention still reads the growing prefix.
 
 This explains why the generation algorithm matters. @sec-transformers's ordinary `GPT.generate` recomputes the supplied prefix, so a prefix of length $S$ sends $S$ rows through each projection. Processing only the newest position requires the cache introduced in @sec-memoization, and even then attention must read earlier keys and values. An `S = 1` forward pass here is a one-token input, not a cached decoding step with a long history.
 
-![**Weight streaming and operational intensity across batch sizes**: At batch size $B=1$ (single-token inference), weights are streamed from DRAM over the memory bus and touched only once, resulting in low arithmetic intensity ($I \approx 0.5$ FLOPs/byte) and severe memory bandwidth starvation. At batch size $B=64$, loaded weights are reused across all 64 tokens in fast on-chip cache, boosting arithmetic intensity ($I \approx 32$ FLOPs/byte) and saturating compute execution units.](assets/images/diagrams/14_weight-streaming-reuse.svg){#fig-weight-streaming-reuse width="100%" fig-alt="Diagram contrasting memory bandwidth starvation at batch size 1 with compute-bound weight reuse at batch size 64."}
+![**Weight streaming and operational intensity across batch sizes**: At batch size $B=1$ (single-token inference), weights are streamed from DRAM over the memory bus and touched only once, resulting in low arithmetic intensity ($I \approx 0.5$ FLOPs/byte) and severe memory bandwidth starvation. At batch size $B=64$, each loaded weight can serve all 64 rows, raising modeled arithmetic intensity to about 32 FLOPs/byte, which lies right of the ridge on many CPUs but left of it on accelerators with higher ridges.](assets/images/diagrams/14_weight-streaming-reuse.svg){#fig-weight-streaming-reuse width="100%" fig-alt="Diagram contrasting memory bandwidth starvation at batch size 1 with compute-bound weight reuse at batch size 64."}
 
-::: {#nbk-profiling-tinygpt-intensity .callout-notebook title="Napkin math: TinyGPT operational intensity across prefill and decode"}
+::: {#nbk-profiling-tinygpt-intensity .callout-notebook title="Napkin Math: TinyGPT operational intensity across prefill and decode"}
 Consider the reference `TinyGPT` configuration ($d_{\text{model}}=128$, $n_{\text{layers}}=4$, context $S$, vocabulary $V=1000$). Each Transformer block contains $4 d^2$ projection parameters in attention ($W_Q, W_K, W_V, W_O$) and $8 d^2$ parameters in the two-layer MLP ($W_1, W_2$).
 
-Across $L=4$ layers, parameter weights total approximately $12 L d^2 \approx 786\text{ KB}$ in FP32 ($196,608$ floats $\times 4$ bytes), dominating activation traffic when batch size is 1:
+Per block, the projection weights total $12 d^2 = 196{,}608$ floats, or about $786\text{ KB}$ in FP32; across $L=4$ blocks, $12 L d^2 = 786{,}432$ floats, or about $3.15\text{ MB}$. Per block, these weights dominate activation traffic when batch size is 1:
 
-- **Autoregressive Decode ($S=1$)**: A single new token processes each weight matrix once. Arithmetic is $2 \times 1 \times 196,608 \approx 3.93 \times 10^5$ FLOPs. Memory traffic is dominated by reading the $786\text{ KB}$ of weights.
+- **Autoregressive Decode ($S=1$)**: A single new token processes each weight matrix once. Per block, arithmetic is $2 \times 1 \times 196,608 \approx 3.93 \times 10^5$ FLOPs, and memory traffic is dominated by reading that block's $786\text{ KB}$ of weights.
   $$I_{\text{decode}} \approx \frac{3.93 \times 10^5\text{ FLOPs}}{7.86 \times 10^5\text{ Bytes}} \approx 0.50\text{ FLOP/B}$$
   At $0.50\text{ FLOP/B}$, execution sits deeply in the memory-bound slope of the roofline.
 
-- **Prompt Prefill ($S=16$)**: The entire prompt of 16 tokens passes through simultaneously. Arithmetic scales linearly to $2 \times 16 \times 196,608 \approx 6.29 \times 10^6$ FLOPs, while weight reads remain $786\text{ KB}$:
+- **Prompt Prefill ($S=16$)**: The entire prompt of 16 tokens passes through simultaneously. Per block, arithmetic scales linearly to $2 \times 16 \times 196,608 \approx 6.29 \times 10^6$ FLOPs, while that block's weight reads remain $786\text{ KB}$:
   $$I_{\text{prefill}} \approx \frac{6.29 \times 10^6\text{ FLOPs}}{7.86 \times 10^5\text{ Bytes}} \approx 8.0\text{ FLOP/B}$$
   Arithmetic intensity increases $16\times$, pushing execution toward or past the ridge point of typical desktop processors.
 :::
@@ -160,11 +169,11 @@ A timer supplies elapsed time $T$, from which $F/T$ is an achieved compute rate.
 *Source Code Mapping: Module 14 extracts analytical FLOP accounting, parameter memory quantification, and roofline profiling directly from the working repository.*
 :::
 
-Begin at `Profiler.profile_forward_pass(model, input_tensor)`, the entry point that joins the counters to execution. It reads the parameter count and a per-sample FLOP estimate, probes memory using a separate dummy input, then times repeated calls on the supplied input. The returned dictionary mixes those sources, so reading it requires keeping their meanings separate. We follow each helper below, then return to the entry point to check how it combines a per-sample count with a whole-batch time.
+Begin at `Profiler.profile_forward_pass(model, input_tensor)`, the entry point that joins the counters to execution. It reads the parameter count and a per-sample FLOP estimate, probes memory using a separate dummy input, then times repeated calls on the supplied input. The returned dictionary mixes those sources, so reading it requires keeping their meanings separate. The following sections trace each helper before returning to the entry point to verify how it combines a per-sample count with a whole-batch time.
 
 ### Counting parameters and bytes
 
-Parameter storage determines whether a model can fit in memory before any input is processed. For the opening `Linear(3, 2)`, eight float32 parameters occupy $8 \times 4 = 32$ bytes. Counting the arrays also avoids omissions when a model contains biases, normalization parameters, or lookup tables in addition to weight matrices.
+Parameter storage determines whether a model can fit in memory before any input is processed. For a `Linear(3, 2)` like the last layer of @sec-layers's parameter ledger, eight float32 parameters occupy $8 \times 4 = 32$ bytes. Counting the arrays also avoids omissions when a model contains biases, normalization parameters, or lookup tables in addition to weight matrices.
 
 The architecture provides a useful independent check, but the framework can count the arrays it already owns. Each parameter is a `Tensor` around a NumPy array, and `.data.size` gives its element count. The model's `parameters()` method collects those tensors, so the main path is a sum over that list.
 
@@ -178,7 +187,7 @@ The byte calculation assumes float32 storage and multiplies the element count by
 
 ### Counting FLOPs
 
-Operation counts answer a different question from parameter counts. The opening layer has six weights whether the input contains one row or four, but its matrix-product work grows from twelve FLOPs to forty-eight. A count computed before execution makes that distinction visible without paying for a timed forward pass.
+Operation counts answer a different question from parameter counts. That `Linear(3, 2)` has six weights whether the input contains one row or four, but its matrix-product work grows from twelve FLOPs to forty-eight. A count computed before execution makes that distinction visible without paying for a timed forward pass.
 
 Counting each multiplication as it executes would add work to the operation under study. Instead, the profiler reads shapes. A Linear matrix product costs $2 \times \text{rows} \times \text{in} \times \text{out}$ under the multiply-plus-add convention. This is a conventional estimate: it omits the bias addition and treats every dot-product term as one multiplication plus one addition. In a transformer block, the two attention matrix products add $4 B S^2 D$ FLOPs for batch $B$, sequence length $S$, and embedding width $D$. The GPT counter omits embeddings, normalization, activations, softmax, and residual additions; these can still consume time and memory.
 
@@ -228,17 +237,23 @@ The entry point must keep the origins of its numbers visible. FLOPs come from sh
 
 {{< include _listings/14_profiling/compute_derived_metrics.qmd >}}
 
-The first rate divides estimated batch FLOPs by measured batch time. The second divides reported peak storage by that time and calls the result `memory_bandwidth_mbs`. Its units resemble bandwidth, but its numerator is footprint rather than transferred bytes. The helper also divides achieved GFLOP/s by an assumed 100 GFLOP/s and clamps the result to one. That `computational_efficiency` field is a comparison with a constant, not a measured percentage of this machine's capacity.
+::: {.column-margin}
+![](assets/images/diagrams/14_profiling-margin-traffic-vs-footprint.svg){width="100%" fig-alt="Margin card contrasting resident memory footprint against cumulative DRAM bus traffic."}
+
+*Capacity vs Traffic: Resident footprint dictates peak memory residency and out-of-memory limits, while memory bus traffic governs transfer latency along the roofline slope.*
+:::
+
+The first rate divides estimated batch FLOPs by measured batch time, reporting computational throughput in GFLOP/s. The second divides reported peak resident storage by that time and labels the result `memory_bandwidth_mbs`. Here we must dissect a critical systems distinction: this metric measures **resident allocation velocity**, not physical DRAM memory bus traffic. Physical hardware bus traffic (captured via hardware performance monitoring units like Linux `perf` or NVIDIA Nsight) tracks actual 64-byte cache lines crossing between processor caches and physical DRAM pins. If an operation reuses data residing entirely inside L1/L2 caches, physical DRAM traffic is virtually zero despite high memory operations. Conversely, if successive un-fused operators flush and re-read arrays from DRAM, physical bus traffic can far exceed resident peak footprint. The helper also divides achieved GFLOP/s by an assumed nominal ceiling of 100 GFLOP/s, clamping the result to one. That `computational_efficiency` field provides an illustrative baseline rather than a measured percentage of a specific machine's hardware capacity.
 
 {{< include _listings/14_profiling/analyze_bottleneck.qmd >}}
 
-The classifier compares `memory_bandwidth_mbs` with `100 * gflops_per_second`. Both rates divide by the same elapsed time, so time cancels from the comparison. The label is therefore determined by footprint relative to counted operations. Because the footprint field uses $2^{20}$ bytes per MB, the threshold corresponds to approximately 9.54 FLOPs per footprint byte. It would be 10 with decimal megabytes. Neither version uses a measured machine ceiling or actual traffic, so `memory` and `compute` are heuristic labels. `profile_forward_pass` returns them alongside the underlying numbers.
+The classifier compares `memory_bandwidth_mbs` with `100 * gflops_per_second`. Both rates divide by the same elapsed time, so elapsed time cancels algebraically from the comparison. The classification label is therefore determined strictly by footprint relative to counted operations. Because the footprint field uses binary scaling ($2^{20}$ bytes per MB), the threshold corresponds to approximately 9.54 FLOPs per resident footprint byte. It would be 10 with decimal megabytes. Neither metric queries a measured machine ceiling or hardware bus counter directly, so `memory` and `compute` serve as heuristic architectural indicators. `profile_forward_pass` returns them alongside the underlying raw measurements.
 
 {{< include _listings/14_profiling/Profiler_profile_forward_pass.qmd >}}
 
 The key join occurs at `batch_flops = flops * batch_size`. `count_flops` reports one sample, whereas `measure_latency` times the whole input tensor. Omitting the multiplier makes a larger batch appear artificially inefficient. For `Linear(3, 2)` and an input of shape `(4, 3)`, the parameter count is eight including bias, the per-sample matrix-product count is twelve, and `batch_flops` is forty-eight. A GPT sample is a whole sequence, so its sequence-length cost is already inside `flops`; only the outer batch dimension is multiplied here. The entry point also chooses five warmup calls and twenty timed calls rather than the timer's defaults.
 
-The returned fields retain those distinctions instead of collapsing them into one score. `profile_backward_pass`, despite its name, estimates backward cost from the forward report; it does not execute `backward()`. For the roofline calculation below we need explicit compute and bandwidth ceilings. The following book-only class holds those assumptions and applies the bound from The Idea.
+The returned fields retain those distinctions instead of collapsing them into one score. `profile_backward_pass`, despite its name, estimates backward cost from the forward report; it does not execute `backward()`. The roofline calculation below requires explicit compute and bandwidth ceilings. The following book-only class holds those assumptions and applies the bound from The Idea.
 
 ```python
 class Roofline:
@@ -268,7 +283,7 @@ The trace first checks deterministic counts against TinyGPT. It then times an is
 
 ### Counting TinyGPT
 
-Take the `TinyGPT` that @sec-milestone-2 trained, which is @sec-transformers's NumPy `GPT` under the name the milestone gave it, at `GPT(vocab_size=1000, embed_dim=128, num_layers=4, num_heads=4, max_seq_len=256)`. Its parameters live in two lookup tables, four identical blocks, a final LayerNorm, and the head, and each entry is a product of shapes plus a bias where the layer has one.
+Take the `TinyGPT` that [Synthesis II](synthesis_02.qmd#sec-milestone-2) trained, which is @sec-transformers's NumPy `GPT` under the name the milestone gave it, at `GPT(vocab_size=1000, embed_dim=128, num_layers=4, num_heads=4, max_seq_len=256)`. Its parameters live in two lookup tables, four identical blocks, a final LayerNorm, and the head, and each entry is a product of shapes plus a bias where the layer has one.
 
 | Component | Shape arithmetic | Parameters |
 | :--- | :--- | ---: |
@@ -299,7 +314,7 @@ FLOPs depend on the row count. Each block has six Linear layers whose in-times-o
 
 : FLOP counts and boundary-storage accounting for TinyGPT at two sequence lengths. The last row is a footprint ratio, not measured arithmetic intensity. {#tbl-tinygpt-intensity tbl-colwidths="[46,27,27]"}
 
-The longer input increases counted arithmetic by about 68.5 times, while this storage total increases by about 5.8 percent. The table deliberately excludes intermediate activations. Its last row checks the ratio of two known counts; it cannot place the model on a main-memory roofline. That would require a traffic estimate accounting for lookup rows, intermediate arrays, and reuse. The arithmetic in the listing below verifies the table without executing a forward pass. In line 1, dimensions `D, V, L, P = 128, 1000, 4, 256` define the TinyGPT configuration. Lines 2--6 express the analytical parameter formulas, verified by `assert params == 1_082_112` in line 7. The loop in lines 9--14 evaluates total FLOPs and storage footprint across prompt lengths $S=1$ and $S=64$, printing the ratios $0.42$ and $27.42$ matching @tbl-tinygpt-intensity.
+The longer input increases counted arithmetic by about 68.5 times, while this storage total increases by about 5.8 percent. The table deliberately excludes intermediate activations. Its last row checks the ratio of two known counts; it cannot place the model on a main-memory roofline. That would require a traffic estimate accounting for lookup rows, intermediate arrays, and reuse. The arithmetic in the listing below verifies the table without executing a forward pass. In line 1, dimensions `D, V, L, P = 128, 1000, 4, 256` define the TinyGPT configuration. Lines 2 to 6 express the analytical parameter formulas, verified by `assert params == 1_082_112` in line 7. The loop in lines 9 to 14 evaluates total FLOPs and storage footprint across prompt lengths $S=1$ and $S=64$, printing the ratios $0.42$ and $27.42$ matching @tbl-tinygpt-intensity.
 
 The same counts say when attention's quadratic term takes over. Per block, the two attention products cost $4S^2D$ FLOPs, the four projections $8SD^2$, and the MLP $16SD^2$. The products overtake the projections when $S > 2D$, the MLP when $S > 4D$, and all six Linear layers together when $S > 6D$. For TinyGPT's $D = 128$, those thresholds are 256, 512, and 768 tokens, and its 256-position table stops the model at the first one, so Linear layers dominate every configuration it can run. At $S = 64$ the attention products are under 8 percent of the block arithmetic in @tbl-tinygpt-intensity. A model with $D = 4096$ reaches the all-Linear threshold at 24,576 tokens, so whether attention dominates depends on the context the model actually runs at, not on the architecture alone.
 
@@ -345,7 +360,15 @@ print(profiler.count_flops(model, (1, 1)), profiler.count_flops(model, (1, 64)))
 
 The counters return the same three numbers as the hand calculation. The input term is four bytes per token because the reference `Tensor` stores float32 arrays, including token IDs. GPT returns `(B, S, V)` logits, so a 64-token input produces $64 \times 1000 \times 4 = 256{,}000$ output bytes. The memory probe counts those actual boundary arrays; its peak can be larger because it also traces intermediate allocations.
 
+\newpage
+
 ### Comparing a measured sweep with a model
+
+::: {.column-margin}
+![](assets/images/diagrams/14_profiling-margin-linear-intensity.svg){width="100%" fig-alt="Margin card illustrating why Linear arithmetic intensity scales as R over 2 and transitions from memory-bound to compute-bound at the ridge point."}
+
+*Linear Intensity Scaling: For small row counts, weight bytes dominate activation traffic, yielding arithmetic intensity of approximately R/2. Execution stays flat on the memory bus until crossing the ridge into compute saturation.*
+:::
 
 The second half returns to the $4096 \times 4096$ weight matrix from The Problem. Its float32 storage is 67,108,864 bytes. For the traffic model, assume the multiplication reads each weight and input once and writes each output once. This gives $Q = 4(N^2 + 2RN)$ for a square weight of width $N$ and $R$ rows. The assumption describes an ideal transfer count at a chosen memory boundary; it does not count NumPy's internal traffic.
 
@@ -434,21 +457,15 @@ The assertions pin down what can be predicted from shapes and the report's own c
 
 ## From TinyTorch to Production
 
-TinyTorch exposes the accounting in ordinary Python. Production profiling adds finer observation points so that a slow forward pass can be traced to particular operations. PyTorch's `torch.profiler` can record CPU and accelerator activities, input shapes, and tensor allocation information. Its optional FLOP estimate uses formulas for selected operations, including matrix multiplication and two-dimensional convolution; even a production report requires checking which operations it counts. These capabilities are described in the [PyTorch profiler documentation](https://docs.pytorch.org/docs/stable/profiler.html).
+TinyTorch exposes the accounting in ordinary Python. Production profiling adds finer observation points so that a slow forward pass can be traced to particular operations. PyTorch's `torch.profiler` can record CPU and accelerator activities, input shapes, and tensor allocation information.[^fn-triton-operator-lowering] Its optional FLOP estimate uses formulas for selected operations, including matrix multiplication and two-dimensional convolution; even a production report requires checking which operations it counts. These capabilities are described in the [PyTorch profiler documentation](https://docs.pytorch.org/docs/stable/profiler.html).
+
+[^fn-triton-operator-lowering]: In modern PyTorch 2.x, the profiler often reveals that memory-bound pointwise and reduction operators dominate runtime. PyTorch Inductor addresses this by delegating operator fusion directly to OpenAI Triton, compiling fused GPU kernels that keep intermediate tensors in on-chip SRAM instead of issuing repeated DRAM roundtrips.
 
 Timing requires another distinction on a GPU. The CPU can queue an operation and return before the GPU finishes it. Timing only that call measures submission, not completion. An accurate device measurement uses timing events on the GPU or waits for queued work to finish before reading the host clock. PyTorch documents both methods in its [CUDA timing guidance](https://docs.pytorch.org/docs/stable/notes/cuda.html#asynchronous-execution). TinyTorch's NumPy timer measures the synchronous CPU forward call used in this module.
 
 Allocation tracking still does not reveal memory traffic. NVIDIA's Nsight Compute collects hardware metrics for GPU kernels, the individual device computations, and offers roofline analysis using compute and memory information. Its [profiling guide](https://docs.nvidia.com/nsight-compute/ProfilingGuide/index.html#roofline-charts) distinguishes traffic at different cache and memory levels. A weight read served from cache does not have the same cost as fetching that weight from main memory. The chosen memory boundary therefore belongs in the definition of $Q$.
 
 The comparison in @tbl-profiler-comparison separates the three kinds of evidence. A framework trace locates operations; an allocation report describes storage lifetime; hardware traffic metrics test transfer assumptions. These tools answer related questions, but their byte fields are not interchangeable.
-
-::: {#psp-profiling-nsight-profiler .callout-production title="Production bridge: PyTorch Profiler and NVIDIA Nsight Systems"}
-TinyTorch uses analytical FLOP accounting and Python's `time.perf_counter` to estimate compute rates and memory bottlenecks on the host CPU. In production GPU environments, profiling requires visibility into hardware execution pipelines:
-
-1. **PyTorch Profiler (`torch.profiler`)**: Records operator execution timelines, CPU-to-GPU kernel dispatch latency, memory allocation/free events (`record_shapes=True`, `profile_memory=True`), and exports execution traces viewable in Chrome (`chrome://tracing`) or Perfetto.
-2. **NVIDIA Nsight Systems (`nsys`)**: Traces system-wide execution, correlating host CPU threads, CUDA runtime calls, PCIe memory transfers, and GPU kernel execution on a unified microsecond timeline to detect CPU starvation and pipeline bubbles.
-3. **NVIDIA Nsight Compute (`ncu`)**: Profiles individual CUDA kernels at the hardware instruction level, measuring streaming multiprocessor (SM) occupancy, warp stall reasons, Tensor Core utilization, and cache hit rates against hardware roofline limits.
-:::
 
 | Quantity | TinyTorch `Profiler` | Production observation |
 | :--- | :--- | :--- |
@@ -460,9 +477,17 @@ TinyTorch uses analytical FLOP accounting and Python's `time.perf_counter` to es
 
 : Measurement sources in the reference profiler and production tools. Storage, traffic, and time remain separate quantities. {#tbl-profiler-comparison tbl-colwidths="[16,40,44]"}
 
-The transferable habit is to make each optimization claim match its evidence. Reducing parameter bytes establishes a storage change. Reducing modeled transfers establishes a prediction under stated assumptions. A repeatable timing improvement on the same workload establishes an execution result. Subsequent chapters need all three distinctions because a numerically faithful simulation of a smaller representation can still allocate and execute in float32.
+{{< pagebreak >}}
 
----
+::: {#psp-profiling-nsight-profiler .callout-perspective title="Production Bridge: PyTorch Profiler and NVIDIA Nsight Systems"}
+TinyTorch uses analytical FLOP accounting and Python's `time.perf_counter` to estimate compute rates and memory bottlenecks on the host CPU. In production GPU environments, profiling requires visibility into hardware execution pipelines:
+
+1. **PyTorch Profiler (`torch.profiler`)**: Records operator execution timelines, kernel dispatch latency, memory allocation events, and exports execution traces viewable in Chrome (`chrome://tracing`) or Perfetto.
+2. **NVIDIA Nsight Systems (`nsys`)**: Traces system-wide execution, correlating host CPU threads, CUDA runtime calls, PCIe memory transfers, and GPU kernel execution on a unified microsecond timeline to detect CPU starvation and pipeline bubbles.
+3. **NVIDIA Nsight Compute (`ncu`)**: Profiles individual CUDA kernels at the hardware instruction level, measuring streaming multiprocessor (SM) occupancy, warp stall reasons, Tensor Core utilization, and cache hit rates against hardware roofline limits.
+:::
+
+The transferable habit is to make each optimization claim match its evidence. Reducing parameter bytes establishes a storage change. Reducing modeled transfers establishes a prediction under stated assumptions. A repeatable timing improvement on the same workload establishes an execution result. Subsequent chapters require all three distinctions because simulated low-precision arithmetic can still execute in float32.
 
 ## Summary
 
@@ -475,4 +500,4 @@ The roofline adds an explicit model of transferred bytes and machine ceilings. I
 ## Further Reading
 
 - **Williams, Waterman, and Patterson** (2009). "[Roofline: an insightful visual performance model for multicore architectures](https://doi.org/10.1145/1498765.1498785)." *CACM*. The roofline model this chapter applies.
-- **Hennessy and Patterson** (2019). *Computer Architecture: A Quantitative Approach*, 6th edition, Morgan Kaufmann. Memory hierarchies and the discipline of measuring before optimizing.
+- **Hennessy and Patterson** (2017). *Computer Architecture: A Quantitative Approach*, 6th edition, Morgan Kaufmann. Memory hierarchies and the discipline of measuring before optimizing.

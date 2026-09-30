@@ -76,10 +76,12 @@ class OlympicsCommand(BaseCommand):
             ))
             return 0
 
-        message = Text()
-        message.append("🚧 COMING SOON 🚧\n\n", style="bold yellow")
-        message.append("The TinyTorch Olympics is currently under development.\n\n", style="white")
+        coming_soon = Text()
+        coming_soon.append("🚧 COMING SOON 🚧\n\n", style="bold yellow")
+        coming_soon.append("The TinyTorch Olympics is currently under development.\n\n", style="white")
+        coming_soon.justify = "center"
 
+        message = Text()
         message.append("🎯 What to Expect:\n\n", style="bold cyan")
         message.append("  • ", style="cyan")
         message.append("🏃 Speed Challenges", style="bold white")
@@ -108,6 +110,7 @@ class OlympicsCommand(BaseCommand):
         # Combine logo and message
         content = Group(
             Align.center(logo),
+            coming_soon,
             Align.center(message),
         )
 

@@ -8,7 +8,7 @@ To build is to assemble components until an output appears. To engineer is to un
 
 This book is anchored on a different principle: **track the byte, not just the loss.**
 
-A machine learning framework is systems software. When a model trains or generates a token, floating-point numbers do not compute themselves in mathematical ether. They move across physical silicon. They stream through memory buses, contend for cache lines, saturate execution units, and stall on memory bandwidth. The practitioner who understands only the loss curve is helpless when an accelerator runs out of memory, when an inference pipeline delivers 5 percent of hardware peak throughput, or when a float32 exponential underflows to NaN. As machine learning matures into an engineering discipline, durable value belongs to those who understand the engine room.
+A machine learning framework is systems software. When a model trains or generates a token, floating-point numbers do not compute themselves in mathematical ether. They move across physical silicon. They stream through memory buses, contend for cache lines, saturate execution units, and stall on memory bandwidth. The practitioner who understands only the loss curve is helpless when an accelerator runs out of memory, when an inference pipeline delivers 5 percent of hardware peak throughput, or when a float32 exponential overflows to infinity and a loss turns into NaN. As machine learning matures into an engineering discipline, durable value belongs to those who understand the engine room.
 
 This book is designed as the code-level, executable companion to the broader machine learning systems curriculum at **[MLSysBook.ai](https://mlsysbook.ai)** (*Machine Learning Systems*). While MLSysBook presents the architectural concepts, hardware landscape, and distributed scaling principles across the field, TinyTorch opens the hood on the software runtime itself, walking line by executable line through how a complete framework is built.
 
@@ -20,47 +20,27 @@ In 1976, John Lions wrote his famous commentary on the Unix Sixth Edition kernel
 
 **TinyTorch**, which we developed at Harvard University, adopts that exact philosophy for machine learning systems.
 
-In traditional systems curricula—operating systems, compilers, or computer architecture—it is a rite of passage to build the entire system from scratch. A student in an OS class builds a miniature kernel (like Pintos, TinyOS, or xv6); a compilers student builds a toolchain from lexing to assembly; an architecture student builds a working processor. Yet, in modern machine learning education, this systems-building tradition is genuinely lacking. Students write a tremendous amount of deep learning code, scripting isolated layers or assembling pre-built modules, but they rarely build the underlying system that collectively orchestrates them from the ground up.
+In traditional systems curricula (operating systems, compilers, or computer architecture), it is a rite of passage to build the entire system from scratch. A student in an OS class builds a miniature kernel (like Pintos, TinyOS, or xv6); a compilers student builds a toolchain from lexing to assembly; an architecture student builds a working processor. Yet, in modern machine learning education, this systems-building tradition is genuinely lacking. Students write a tremendous amount of deep learning code, scripting isolated layers or assembling pre-built modules, but they rarely build the underlying system that collectively orchestrates them from the ground up.
 
 Compounding this educational gap, modern deep learning frameworks have become massive software infrastructure. The PyTorch repository spans millions of lines of Python dispatch wrappers, C++ ATen tensor engines, cuDNN epilogues, and CUDA kernel templates. A newcomer attempting to understand how `loss.backward()` works inside PyTorch is immediately lost in an ocean of template metaprogramming, reference counting, and vendor-specific device drivers.
 
 TinyTorch provides the executable commentary. It is a complete, self-contained machine learning framework implemented from scratch. It contains no external deep learning dependencies. A reader can study its tensor memory layouts, write its forward activations, construct its computational graph, implement reverse-mode automatic differentiation, and trace its optimizers line by line. Nothing is hidden; no operation is relegated to a pre-compiled binary.
 
-## A Deliberate Pedagogical Contract: Limitations and Choices
+## The Architectural Choice: An Executable Specification
 
-Engineering education requires honest boundaries. TinyTorch makes deliberate design choices to maximize clarity, and a reader should understand those boundaries from page one.
+Engineering education requires honest boundaries. TinyTorch makes deliberate design choices to maximize clarity, and a reader should understand those choices from page one.
 
-First, TinyTorch uses Python for framework orchestration and NumPy arrays for raw buffer storage. NumPy supplies C-contiguous memory allocations, strided addressing, and vectorized floating-point arithmetic. Python supplies the inspectable logic: how an autograd tape records operations, how parameter discovery traverses an object hierarchy, how a data loader collates batches, and how a key-value cache manages write pointers.
+TinyTorch uses Python for framework orchestration and NumPy arrays for raw buffer storage. NumPy supplies C-contiguous memory allocations, strided addressing, and vectorized floating-point arithmetic. Python supplies the inspectable logic: how an autograd tape records operations, how parameter discovery traverses an object hierarchy, how a data loader collates batches, and how a key-value cache manages write pointers.
 
-We deliberately do not write the core of TinyTorch in raw CUDA or C++ template code. Writing custom CUDA thread-block synchronization and PTX assembly in @sec-tensors would trap the reader in syntax and hardware compilation flags, obscuring the architectural contracts of the framework. TinyTorch serves as an **executable architectural specification**. It allows a student to run the entire system in a standard Python debugger, place breakpoints on gradient accumulation steps, and inspect memory strides directly.
+We deliberately do not write the core of TinyTorch in raw CUDA or C++ template code. Writing custom CUDA thread-block synchronization and PTX assembly in the foundational chapters would trap the reader in syntax and vendor compilation flags, obscuring the architectural contracts of the runtime. TinyTorch serves as an **executable architectural specification**. It allows a student to run the entire system in a standard Python debugger, place breakpoints on gradient accumulation steps, and inspect memory strides directly.
 
-Second, TinyTorch acknowledges its operational limitations upfront:
+To keep the educational contracts transparent, TinyTorch maintains deliberate pedagogical firewalls, such as synchronous CPU execution and simulated quantization, which are detailed in the Introduction. To bridge this boundary, every chapter concludes with a dedicated section titled *From TinyTorch to Production*, detailing how the mechanisms modeled in TinyTorch translate to the C++ ATen runtime, NVIDIA cuDNN, CUTLASS, and Triton. Part IV (@sec-extensions) then leaves NumPy for the first time, walking TinyTorch's optional C++, Triton, and Apple GPU extensions to measure what each one gains and costs.
 
-1. **Synchronous Single-Thread Execution:** TinyTorch executes synchronously on CPU memory. It does not implement multi-stream GPU concurrency or asynchronous command queues in its core engine.
-2. **Pedagogical Storage Models:** In topics such as INT8 quantization, TinyTorch simulates integer rounding and dynamic range scaling while retaining float32 containers, isolating numerical mechanics before discussing packed byte arrays.
-3. **Contiguous Buffer Allocation:** The TinyTorch autograd engine relies on standard array allocations rather than an ahead-of-time static memory planner.
+## Why a Generative Transformer is the Central Workload
 
-These limitations are not oversights; they are pedagogical firewalls. By isolating framework agreements from vendor driver complexities, TinyTorch ensures that when a student encounters those production complexities, they recognize exactly what problem the hardware is solving.
+A systems textbook requires a workload demanding enough to stress the software runtime. While toy classifiers on synthetic datasets can verify that backpropagation computes correct numerical derivatives, they cannot expose the physical memory wall. A multi-layer perceptron with a few thousand parameters fits entirely inside a CPU's L1 data cache; it experiences no memory-bandwidth starvation, requires no context caching, and reveals nothing about sequence scaling.
 
-To bridge this boundary, every chapter concludes with a dedicated section titled *From TinyTorch to Production*. These sections detail how the mechanisms modeled in TinyTorch translate to the C++ ATen runtime, NVIDIA cuDNN, and CUTLASS. Part IV (@sec-extensions) then leaves NumPy for the first time. It walks TinyTorch's optional extensions, a C++ kernel called through `ctypes`, a Triton kernel for NVIDIA GPUs, and a matrix multiply on the Apple GPU, and measures what each one gains and costs.
-
-## TinyGPT as the Flagship
-
-A systems textbook requires a workload demanding enough to stress the framework. Toy multi-layer perceptrons on synthetic data can verify that backpropagation computes the correct derivative, but they cannot expose the memory wall. A two-layer network with a few thousand parameters fits entirely inside a CPU's L1 cache; it experiences no memory-bandwidth starvation, requires no context caching, and reveals nothing about sequence scaling.
-
-For this reason, **TinyGPT serves as the flagship model of TinyTorch**.
-
-Across the chapters of this book, the student builds every component required to train and deploy a generative transformer:
-
-- @sec-tokenization constructs a Byte-Pair Encoding (BPE) tokenizer that compresses raw text into subword integers.
-- @sec-embeddings designs the embedding table and learned positional encodings.
-- @sec-attention builds scaled dot-product causal multi-head self-attention.
-- @sec-transformers synthesizes these mechanisms into the complete TinyGPT decoder block.
-- @sec-milestone-2 trains TinyGPT to generate text autoregressively.
-
-When the book turns to systems performance in Part III, TinyGPT remains the centerpiece. We do not abandon our flagship to benchmark toy classifiers. We profile TinyGPT against the Roofline model to demonstrate why single-token generation is memory-bandwidth bound (@sec-profiling). We compress its weights to INT8 to quadruple cache line density (@sec-quantization). We distill its representations into a compact student to preserve language quality under parameter reduction (@sec-compression). We fuse its normalization and projection layers to eliminate intermediate DRAM traffic (@sec-acceleration). We equip it with a static Key-Value cache to eliminate quadratic decoding latency (@sec-memoization). Finally, the Capstone (@sec-capstone) and Edge Milestone (@sec-milestone-3) synthesize these optimizations into an integrated, verified deployment pipeline.
-
-By anchoring the systems curriculum to a complete language model, TinyTorch ensures that every optimization technique confronts the exact computational and memory dynamics that govern modern artificial intelligence.
+For this reason, **TinyGPT serves as the unifying workload of TinyTorch**. From subword tokenization and multi-headed self-attention to autoregressive generation, memory profiling, INT8 quantization, and Key-Value caching, the framework is built and optimized around a complete generative language model. By anchoring the curriculum to a modern transformer, TinyTorch ensures that every optimization technique confronts the exact computational and memory dynamics that govern modern artificial intelligence.
 
 ## Training the Next Generation of Systems Architects
 
@@ -70,29 +50,48 @@ We wrote TinyTorch to train the next generation of engineers who can build the *
 
 It is natural to ask, in an era where AI coding assistants can generate boilerplate scripts and assemble neural networks in seconds, what the value of building a system from scratch truly is. If the AI can write the code, why learn how the engine works?
 
-The answer lies in the limits of automation. Generative AI is remarkably effective at assembling known APIs, but it struggles with novel architectural design, strict numerical invariants, and physical hardware constraints. As AI abstracts away the routine coding tasks of the past, the bottleneck in technology development shifts. The engineers of the future will not be hired to write superficial deep learning scripts—they will be hired to reason about memory physics, to debug complex latency stalls, and to architect the systems that the AI itself runs on.
+The answer lies in the limits of automation. Generative AI is remarkably effective at assembling known APIs, but it struggles with novel architectural design, strict numerical invariants, and physical hardware constraints. As AI abstracts away the routine coding tasks of the past, the bottleneck in technology development shifts. The engineers of the future will not be hired to write superficial deep learning scripts: they will be hired to reason about memory physics, to debug complex latency stalls, and to architect the systems that the AI itself runs on.
 
 The world needs more AI systems engineers. The practitioner who only knows how to prompt a language model for a PyTorch script is ultimately replaceable. The systems architect who understands how that script translates into strided memory allocations, backward-mode tape execution, and hardware-accelerated kernels is indispensable.
 
 The fundamentals are what endure: how memory buffers are laid out and strided, how computational graphs record dependencies and execute reverse-mode differentiation, how cache lines pack quantized values, and how memory bandwidth governs execution throughput. By mastering these first principles in TinyTorch, students graduate not as passive consumers of existing software, but as the systems architects equipped to build the future of artificial intelligence.
 
-## How to Read This Book
+## The Journey Ahead
 
-This book is designed to be read with the source code open. The companion repository contains the complete, tested reference implementation.
+This book is designed to be read with the source code open. The companion repository contains the complete, tested reference implementation. The Introduction that follows details the five-part chapter structure, the visual signposts and callout tiers, the full curriculum roadmap across our four architectural tiers, the six reading flows, and the interactive development environment.
 
-Each chapter follows a five-part discipline:
-1. **The Problem:** The physical, numerical, or computational failure that occurs when naive mathematics meets finite computer hardware.
-2. **The Idea:** The architectural mechanism designed to resolve the failure, derived through equations and systems invariants.
-3. **The Code:** The inspectable Python implementation, extracted directly from the working repository at build time.
-4. **A Worked Trace:** A step-by-step verification of numerical state during execution, on numbers small enough to check by hand.
-5. **From TinyTorch to Production:** An analysis of how production engines scale that same mechanism, and what they do differently.
+## Author's Note: On Craft, Systems Pedagogy, and Progressive Disclosure
 
-The margin columns provide continuous performance anchors: micro-plots illustrating arithmetic intensity, cache line packing, memory breakdowns, and latency distributions at the exact line of prose where those concepts appear. Semantic callouts mark four specific categories of engineering knowledge: **Napkin Math** for quantitative hardware budgets, **Systems Perspectives** for production framework internals, **Checkpoints** for non-negotiable correctness invariants, and **War Stories** for real-world production post-mortems.
+I learned computer systems by building them.
 
-A student who reads this book from page one to the final chapter will not merely know how to import an artificial intelligence library. They will know how to engineer one.
+In computer science, that is how we master complex abstractions: we learn operating systems by writing a kernel like xv6; we learn compilers by writing an AST parser and a code generator; we learn computer architecture by designing a pipelined processor.
 
-## Acknowledgements and Note on AI Assistance
+Yet in machine learning, that tactile, build-it-from-scratch pedagogy was missing. Most people learn deep learning as passive consumers of massive frameworks, importing a library, calling `.fit()`, and treating the underlying machinery as an opaque black box. I wanted to bring the foundational systems way of learning to a field that desperately needed it.
 
-This curriculum grew out of machine learning systems research and teaching at Harvard University. We are grateful to the students, teaching fellows, and colleagues whose questions and classroom debugging sessions shaped the pedagogical boundaries of TinyTorch.
+My goal was to give students and learners a framework that clicks together like a precision Lego set. Granted, systems engineers do not usually invent the original mathematical algorithms; the backpropagation formulation, the attention mechanism, and adaptive optimizers were created by pioneering researchers. But there is tremendous intellectual merit, craft, and discipline in understanding how those pieces actually fit together into a performant, coherent engine. I wanted learners to hold every piece in their hands: to lay out raw tensor memory, attach the autograd tape, wire up the optimizer, assemble multi-headed attention, and watch a complete GPT transformer come to life from components they engineered themselves.
 
-In the spirit of modern engineering practice, the drafting and production tooling for this text was accelerated through collaborative pair-programming with AI coding assistants. AI tools assisted in mechanical test-harness construction, Quarto layout automation, vector diagram scripting, and continuous integration verification. All pedagogical arcs, systems invariants, mathematical formulations, numerical verifications, and architectural decisions were designed, authored, and rigorously verified by human instructors.
+Designing that progression was one of the hardest parts of this project. Progressive disclosure in a complex software stack is deceptively difficult. Every single module had to be self-contained and immediately runnable on day one, yet snap cleanly into the next module without circular dependencies, hidden global state, or hand-waving. I spent countless days and nights brainstorming, sifting through design possibilities, and writing prototypes only to tear them down when the progression did not feel natural for learners. Every abstraction boundary in this book, from keeping `Layer` minimal with explicit `forward()` and `parameters()`, to designing the four native extension points, was shaped through that iteration.
+
+### On AI Assistance and Modern Engineering
+
+To bring this curriculum together at the depth and rigor it required, I worked side by side with AI coding assistants. I want to be transparent about what that collaboration actually looked like:
+
+- **The architecture, pedagogical progression, and design decisions were mine.** I decided how the pieces should fit together, what should be included in the core versus the extensions, and how to sequence the concepts so learners build real systems intuition.
+- **I used AI as an untiring pair programmer and sounding board.** We used AI to help scaffold initial code blocks, generate repetitive boilerplate, write test harnesses, and translate concepts into C++ and Triton kernels.
+- **We brainstormed and stress-tested relentlessly.** I used the AI to debate trade-offs, challenge over-engineered ideas (like stripping out artificial "Track A/B" groupings in favor of a flat extension catalog), and refine explanations until they were direct and clear.
+- **Exhaustive verification.** We used AI to verify mathematical equations against numerical baselines in PyTorch and NumPy, construct unit test suites, run regression checks, and inspect rendered figures and tables in the compiled PDF to ensure everything met high visual and technical standards.
+
+This is what modern engineering looks like: the human provides the domain judgment, the architectural blueprint, and the pedagogical vision; the AI provides speed, exhaustiveness, and rapid iteration.
+
+**A thought for students and learners:**
+As you work through TinyTorch, you will likely use AI tools like Cursor, Copilot, Claude, or Gemini. I encourage you to use them. But be deliberate about how you do.
+
+If you use AI to simply generate solutions for the exercises, you skip the struggle, and the struggle is where the learning happens. You miss the visceral understanding of stride arithmetic, memory bandwidth bottlenecks, and cache locality.
+
+Use AI the way we did: as a tireless collaborator. Ask it to explain why an unaligned vector load carries a performance penalty. Have it help you write tricky unit tests. Use it to review your code for edge cases. But make sure that you understand how every nut and bolt fits together, because in systems engineering, real mastery comes from knowing how the machine works from the ground up.
+
+Vijay Janapa Reddi
+
+## Acknowledgements
+
+This curriculum grew out of machine learning systems research and teaching at Harvard University. We are grateful to the students, teaching fellows, and colleagues whose questions, classroom feedback, and debugging sessions shaped the pedagogical boundaries of TinyTorch.

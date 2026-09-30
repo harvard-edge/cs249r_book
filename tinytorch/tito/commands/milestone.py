@@ -18,8 +18,10 @@ from rich.tree import Tree
 from rich.columns import Columns
 from rich.cells import cell_len
 import sys
+import os
 import json
 import time
+import signal
 import subprocess
 import importlib
 import yaml
@@ -29,6 +31,7 @@ from pathlib import Path
 from .base import BaseCommand
 from ..core.console import print_ascii_logo
 from ..core.console import get_console
+from ..core import milestone_tracker
 
 
 # Name aliases for milestone IDs (allows `tito milestone run perceptron`)
@@ -41,11 +44,28 @@ MILESTONE_ALIASES = {
     "tinygpt": "05",
     "gpt": "05",
     "shakespeare": "05",
+    "code": "05",
+    "tinypy": "05",
+    "tinycopilot": "05",
+    "copilot": "05",
     "mlperf": "06",
     "olympics": "06",
+    "serving": "06",
+    "kernels": "07",
+    "triton": "07",
+    "metal": "07",
+    "extensions": "07",
+    "accelerators": "07",
 }
 
 # Milestone-to-script mapping for tito milestone run command
+#
+# required_modules rule (audited 2026-09 against cProfile traces of each part):
+# list every module whose code the part actually runs, plus each of those
+# modules' own declared prerequisites (the "**Prerequisites**" line in its
+# Module Dependencies section). A module that neither runs nor is such a
+# prerequisite is not listed, so it cannot gate the unlock. The top-level list
+# is the union of the per-part lists.
 MILESTONE_SCRIPTS = {
     "01": {
         "id": "01",
@@ -53,6 +73,7 @@ MILESTONE_SCRIPTS = {
         "year": 1958,
         "title": "Frank Rosenblatt's First Neural Network",
         "script": "milestones/01_1958_perceptron/01_rosenblatt_forward.py",
+        "required_parts": [1],
         "required_modules": [1, 2, 3],  # Tensor, Activations, Layers (forward pass only)
         "description": "Build the first neural network (forward pass)",
         "historical_context": "Rosenblatt's perceptron proved machines could learn",
@@ -64,6 +85,7 @@ MILESTONE_SCRIPTS = {
         "year": 1969,
         "title": "The Problem That Stalled AI",
         "script": "milestones/02_1969_xor/01_xor_crisis.py",
+        "required_parts": [1],
         "required_modules": [1, 2, 3],  # Just forward pass: Tensor, Activations, Layers
         "description": "Single-layer perceptron CANNOT solve XOR (75% max)",
         "historical_context": "Minsky & Papert proved limits of single-layer networks",
@@ -74,21 +96,26 @@ MILESTONE_SCRIPTS = {
         "name": "MLP Revival (1986)",
         "year": 1986,
         "title": "Backpropagation Breakthrough",
+        # Both parts are the milestone: XOR shows hidden layers are sufficient,
+        # TinyDigits shows the same MLP learns real data.
+        "required_parts": [1, 2],
         "scripts": [
             {
                 "name": "XOR Solved",
                 "script": "milestones/02_1969_xor/02_xor_solved.py",
                 "description": "Hidden layers + backprop SOLVE the impossible XOR problem!",
-                "required_modules": [1, 2, 3, 4, 5, 6, 7, 8]  # Full training: Tensor through Training
+                # Runs 01-04, 06, 07 (manual loop, no DataLoader or Trainer).
+                "required_modules": [1, 2, 3, 4, 6, 7]
             },
             {
                 "name": "TinyDigits",
                 "script": "milestones/03_1986_mlp/01_rumelhart_tinydigits.py",
                 "description": "Scale up to real data - handwritten digit recognition",
-                "required_modules": [1, 2, 3, 4, 5, 6, 7, 8]  # Full training infrastructure
+                # Runs 01-07 (YOUR DataLoader, manual loop; no Trainer).
+                "required_modules": [1, 2, 3, 4, 5, 6, 7]
             }
         ],
-        "required_modules": [1, 2, 3, 4, 5, 6, 7, 8],  # Full training for XOR Solved
+        "required_modules": [1, 2, 3, 4, 5, 6, 7],  # Union of both parts
         "description": "Solve XOR with hidden layers, then train on real data",
         "historical_context": "Rumelhart, Hinton & Williams (Nature, 1986) ended the AI Winter",
         "emoji": "🎓"
@@ -98,22 +125,27 @@ MILESTONE_SCRIPTS = {
         "name": "CNN Revolution (1998)",
         "year": 1998,
         "title": "LeNet - Computer Vision Breakthrough",
-        "default_part": 1,  # TinyDigits (no download required) is the default
+        # Part 1 (TinyDigits, offline) is the milestone. Part 2 (CIFAR-10) is an
+        # optional extension: it needs a large download, so it is recorded per
+        # part when run but never required for completion.
+        "required_parts": [1],
         "scripts": [
             {
                 "name": "TinyDigits",
                 "script": "milestones/04_1998_cnn/01_lecun_tinydigits.py",
                 "description": "Train a LeNet-style CNN on 8x8 handwritten digits (works offline)",
-                "required_modules": [1, 2, 3, 4, 5, 6, 7, 8, 9]  # Full training + Convolutions
+                # Runs 01-07 and 09 (manual loop; no Trainer).
+                "required_modules": [1, 2, 3, 4, 5, 6, 7, 9]
             },
             {
                 "name": "CIFAR-10",
                 "script": "milestones/04_1998_cnn/02_lecun_cifar10.py",
                 "description": "Scale to natural images with YOUR DataLoader (requires download)",
-                "required_modules": [1, 2, 3, 4, 5, 6, 7, 8, 9]  # Full training + Convolutions
+                # Imports 01-05, 07, 09 (+06 via autograd); no Trainer.
+                "required_modules": [1, 2, 3, 4, 5, 6, 7, 9]
             }
         ],
-        "required_modules": [1, 2, 3, 4, 5, 6, 7, 8, 9],  # Full training + Convolutions
+        "required_modules": [1, 2, 3, 4, 5, 6, 7, 9],  # Union of both parts
         "description": "Build LeNet for digit recognition, then scale to natural images",
         "historical_context": "Yann LeCun's convolutional networks revolutionized computer vision",
         "emoji": "👁️"
@@ -123,7 +155,12 @@ MILESTONE_SCRIPTS = {
         "name": "Transformer Era (2017)",
         "year": 2017,
         "title": "TinyGPT: Autoregressive Language Modeling (ChatGPT Foundation)",
-        "default_part": 1,
+        # Parts 1-2 are the milestone: train an autoregressive transformer
+        # (TinyGPT) and prove attention routes information (sequence tasks).
+        # Parts 3-4 (TinyCopilot, Conversational Q&A) are optional extensions:
+        # they reuse the same modules on new corpora and teach no new mechanism,
+        # so they are recorded per part when run but never required.
+        "required_parts": [1, 2],
         "scripts": [
             {
                 "name": "TinyGPT (Shakespeare)",
@@ -135,37 +172,74 @@ MILESTONE_SCRIPTS = {
                 "name": "Sequence Routing",
                 "script": "milestones/05_2017_transformer/02_vaswani_attention.py",
                 "description": "Prove attention mechanism on sequence reversal and copying",
-                "required_modules": [1, 2, 3, 4, 5, 6, 7, 8, 11, 12, 13]
+                # Runs 01-07 and 11-13 (no Trainer, no tokenizer).
+                "required_modules": [1, 2, 3, 4, 5, 6, 7, 11, 12, 13]
+            },
+            {
+                "name": "TinyCopilot",
+                "script": "milestones/05_2017_transformer/03_tinycopilot.py",
+                "description": "Train TinyCopilot on Python code to complete functions and syntax",
+                "required_modules": [1, 2, 3, 4, 5, 6, 7, 8, 10, 11, 12, 13]
+            },
+            {
+                "name": "Conversational Q&A",
+                "script": "milestones/05_2017_transformer/04_tinygpt_chat.py",
+                "description": "Train conversational TinyGPT on TinyTorch Q&A and analyze overfitting",
+                # Measured 2026-09 as running 01-08 and 11-13 only: Module 10 is
+                # listed because this part is being switched to the student's
+                # Module 10 tokenizer. Drop 10 if that switch does not land.
+                "required_modules": [1, 2, 3, 4, 5, 6, 7, 8, 10, 11, 12, 13]
             }
         ],
         "required_modules": [1, 2, 3, 4, 5, 6, 7, 8, 10, 11, 12, 13],  # TinyGPT training requirements
-        "description": "Train TinyGPT from scratch on Shakespeare and generate text",
-        "historical_context": "Vaswani et al. (2017) and the Generative LLM revolution (2020–2022) proved transformers and emergent autoregressive scaling",
+        "description": "Train TinyGPT from scratch on Shakespeare, TinyCopilot code generation, and concept Q&A",
+        "historical_context": "Vaswani et al. (2017) and the Generative LLM revolution (2020-2022) proved transformers and emergent autoregressive scaling",
         "emoji": "🤖"
     },
     "06": {
         "id": "06",
-        "name": "MLPerf Benchmarks (2018)",
+        "name": "MLPerf to Generative Serving (2018)",
         "year": 2018,
-        "title": "The Optimization Olympics",
+        "title": "MLPerf to ChatGPT Serving (The Optimization Olympics)",
+        # Both parts are the milestone: compression (Part 1) and generation
+        # speedup via KV caching (Part 2) cover different optimization modules.
+        "required_parts": [1, 2],
         "scripts": [
             {
                 "name": "Model Compression",
                 "script": "milestones/06_2018_mlperf/01_optimization_olympics.py",
                 "description": "Profiling + Quantization + Pruning on MLP",
-                "required_modules": [1, 2, 3, 4, 5, 6, 7, 8, 14, 15, 16, 17, 18, 19]  # Full training + Optimization tier
+                # Runs 01-04, 06, 07, 09, 11-19 (the GPT candidates need 11-13;
+                # Module 17 kernels need 09). No DataLoader or Trainer.
+                "required_modules": [1, 2, 3, 4, 6, 7, 9, 11, 12, 13, 14, 15, 16, 17, 18, 19]
             },
             {
                 "name": "Generation Speedup",
                 "script": "milestones/06_2018_mlperf/02_generation_speedup.py",
                 "description": "Verify cached GPT outputs and measure inference speed",
-                "required_modules": [1, 2, 3, 4, 5, 6, 7, 8, 11, 12, 13, 18]  # GPT and its prerequisites + Memoization
+                # Runs 01-03, 06, 11-13, 18; plus 04 (prerequisite of 06) and
+                # 14 (prerequisite of 18).
+                "required_modules": [1, 2, 3, 4, 6, 11, 12, 13, 14, 18]
             }
         ],
-        "required_modules": [1, 2, 3, 4, 5, 6, 7, 8, 11, 12, 13, 14, 15, 16, 17, 18, 19],  # Full default run: optimization + generation speedup parts
-        "description": "Compress and accelerate your neural network",
-        "historical_context": "MLPerf standardized ML benchmarks",
+        "required_modules": [1, 2, 3, 4, 6, 7, 9, 11, 12, 13, 14, 15, 16, 17, 18, 19],  # Union of both parts
+        "description": "Compress and accelerate TinyGPT across the MLPerf Pareto frontier",
+        "historical_context": "MLPerf standardized ML benchmarks (2018), paving the way for ChatGPT-scale production serving (2022)",
         "emoji": "🏆"
+    },
+    "07": {
+        "id": "07",
+        "name": "Custom Kernels (2024)",
+        "year": 2024,
+        "title": "Your Kernels vs. Native Silicon: C++ SIMD, Apple Metal & Triton",
+        "script": "milestones/07_2024_kernels/01_custom_kernels.py",
+        "required_parts": [1],
+        # Only Module 17's code runs; 01, 06, 09, 14 are its declared
+        # prerequisites (Module Dependencies), which its export depends on.
+        "required_modules": [1, 6, 9, 14, 17],
+        "description": "Verify YOUR Module 17 kernels on ragged shapes, then time them against bundled C++ SIMD, Metal, and Triton kernels",
+        "historical_context": "Modern AI systems rely on custom GPU shaders to bypass framework overhead (2024)",
+        "emoji": "⚡"
     }
 }
 
@@ -192,8 +266,8 @@ MILESTONE_ACHIEVEMENT_HIGHLIGHTS = {
     ],
     "04": [
         "Every line of code: YOUR implementations",
-        "Every convolution: YOUR Conv2d",
-        "Every gradient: YOUR autograd",
+        "Every convolution forward: YOUR Conv2d",
+        "Every training step: YOUR optimizer and loss",
     ],
     "05": [
         "Every line of code: YOUR implementations",
@@ -203,7 +277,13 @@ MILESTONE_ACHIEVEMENT_HIGHLIGHTS = {
     "06": [
         "Every line of code: YOUR implementations",
         "Every candidate measured: YOUR quantization and compression",
-        "Every gradient: YOUR autograd",
+        "Every gate: YOUR quantizer, pruner, and KV cache checked against measured results",
+    ],
+    "07": [
+        "Every line of code: YOUR implementations",
+        "Every tiled matmul: YOUR blocked loop order, ragged tiles included",
+        "Every convolution lowering: YOUR im2col and col2im",
+        "Native C++/Metal/Triton kernels: bundled reference points, timed against yours",
     ],
 }
 
@@ -230,6 +310,11 @@ MODULE_EXPORT_CHECKS = {
     19: [("tinytorch.perf.benchmarking", "Benchmark")],
     20: [("tinytorch", "olympics")],
 }
+
+
+def _tito_dir() -> Path:
+    """Student state lives in .tito/ under the directory tito runs from."""
+    return Path(".tito")
 
 
 def _module_progress_to_int(module_value):
@@ -297,6 +382,59 @@ def _validate_required_exports(required_modules: list[int]) -> list[str]:
                 failures.append(f"{module_path}.{symbol_name}: exported as None")
 
     return failures
+
+
+def _warn_on_stale_exports(console, project_root, required_modules: list[int]) -> dict:
+    """Warn (never fail) when a required module's notebook changed after export.
+
+    The export check above only proves each symbol exists; it cannot tell
+    whether the package holds the student's latest notebook code.
+    """
+    from .module.workflow import stale_export_report
+
+    try:
+        report = stale_export_report(Path(project_root), required_modules)
+    except Exception:
+        return {"stale": [], "unrecorded": []}
+    for num in report["stale"]:
+        console.print(
+            f"  [bold yellow]⚠ Module {num} changed since you last exported; run "
+            f"`tito module complete {num}` (or export) so the milestone runs your latest code[/bold yellow]"
+        )
+    if report["unrecorded"]:
+        nums = ", ".join(report["unrecorded"])
+        console.print(
+            f"  [dim]• No export record for module(s) {nums}, so tito can't tell whether the "
+            f"package matches your notebook. Re-run `tito module complete NN` to record it.[/dim]"
+        )
+    return report
+
+
+
+# Exit codes of a milestone script stopped by Ctrl-C: killed by SIGINT (POSIX),
+# the shell convention 128 + SIGINT, and STATUS_CONTROL_C_EXIT (Windows).
+INTERRUPTED_EXIT_CODES = (-signal.SIGINT, 130, 0xC000013A)
+
+
+def run_milestone_script(script_file) -> int:
+    """Run one milestone script and return its exit code.
+
+    Ctrl-C belongs to the script while it runs. The script decides whether it
+    was interrupted mid-run (it then dies of SIGINT, see INTERRUPTED_EXIT_CODES)
+    or the student left the post-pass try-it prompt (it exits 0 and the pass
+    records). tito used to catch the same Ctrl-C itself and drop an earned
+    pass (2026-09-29). A Python handler, unlike SIG_IGN, is not inherited by
+    the child process, so the script still receives the default behavior.
+    """
+    previous_handler = signal.signal(signal.SIGINT, lambda signum, frame: None)
+    try:
+        return subprocess.run(
+            [sys.executable, str(script_file)],
+            capture_output=False,
+            text=True, encoding="utf-8", errors="replace",
+        ).returncode
+    finally:
+        signal.signal(signal.SIGINT, previous_handler)
 
 
 class MilestoneSystem:
@@ -380,7 +518,7 @@ class MilestoneSystem:
             )
 
             # Check if milestone is unlocked (ready to run, not the same as actually
-            # run and achieved -- see is_completed below)
+            # run and achieved; see is_completed below)
             is_unlocked = milestone_id in milestone_data.get("unlocked_milestones", [])
 
             # Check if the milestone has actually been run and passed
@@ -535,40 +673,11 @@ class MilestoneSystem:
         return False
 
     def _get_milestone_progress_data(self) -> dict:
-        """Get or create milestone progress data."""
-        progress_dir = Path(".tito")
-        progress_file = progress_dir / "milestones.json"
-
-        progress_dir.mkdir(exist_ok=True)
-
-        if progress_file.exists():
-            try:
-                with open(progress_file, 'r', encoding='utf-8') as f:
-                    return json.load(f)
-            except (json.JSONDecodeError, IOError):
-                pass
-
-        return {
-            "completed_milestones": [],
-            "completion_dates": {},
-            "unlocked_milestones": [],
-            "unlock_dates": {},
-            "total_unlocked": 0,
-            "achievements": []
-        }
+        """Read the milestone ledger (normalized; see tito/core/milestone_tracker.py)."""
+        return milestone_tracker.load(_tito_dir())
 
     def _save_milestone_progress_data(self, milestone_data: dict) -> None:
-        """Save milestone progress data."""
-        progress_dir = Path(".tito")
-        progress_file = progress_dir / "milestones.json"
-
-        progress_dir.mkdir(exist_ok=True)
-
-        try:
-            with open(progress_file, 'w', encoding='utf-8') as f:
-                json.dump(milestone_data, f, indent=2)
-        except IOError:
-            pass
+        milestone_tracker.save(_tito_dir(), milestone_data)
 
 
 class MilestoneCommand(BaseCommand):
@@ -605,17 +714,28 @@ class MilestoneCommand(BaseCommand):
         )
         run_parser.add_argument(
             'milestone_id',
-            help='Milestone ID (01-06) or name (perceptron, xor, mlp, cnn, transformer, mlperf, tinygpt)'
+            help='Milestone ID (01-07) or name (perceptron, xor, mlp, cnn, transformer, mlperf, tinygpt, kernels)'
         )
         run_parser.add_argument(
             '--part',
             type=int,
-            help='Run only a specific part (for multi-part milestones)'
+            help='Run and record only this part (the milestone completes once every required part has passed)'
+        )
+        run_parser.add_argument(
+            '--all',
+            action='store_true',
+            help='Run every part, including optional extensions'
         )
         run_parser.add_argument(
             '--skip-checks',
             action='store_true',
-            help='Skip prerequisite checks (not recommended)'
+            help='Skip prerequisite checks and run as a demo; nothing is recorded'
+        )
+        run_parser.add_argument(
+            '--non-interactive', '-y', '--yes',
+            dest='non_interactive',
+            action='store_true',
+            help='Run non-interactively without prompting'
         )
 
         # Info subcommand (NEW)
@@ -625,7 +745,7 @@ class MilestoneCommand(BaseCommand):
         )
         info_parser.add_argument(
             'milestone_id',
-            help='Milestone ID (01-06) or name (perceptron, xor, mlp, cnn, transformer, mlperf, tinygpt)'
+            help='Milestone ID (01-07) or name (perceptron, xor, mlp, cnn, transformer, mlperf, tinygpt, kernels)'
         )
 
         # Status subcommand
@@ -688,7 +808,7 @@ class MilestoneCommand(BaseCommand):
                 "  • [bold]demo[/bold]       - Run capability demonstration\n\n"
                 "[dim]Examples:[/dim]\n"
                 "[dim]  tito milestone list[/dim]\n"
-                "[dim]  tito milestone run 03           # Run all parts[/dim]\n"
+                "[dim]  tito milestone run 03           # Run every required part[/dim]\n"
                 "[dim]  tito milestone run 03 --part 1  # Run Part 1 only[/dim]\n"
                 "[dim]  tito milestone run 03 --part 2  # Run Part 2 only[/dim]\n"
                 "[dim]  tito milestone info 03[/dim]\n"
@@ -729,7 +849,7 @@ class MilestoneCommand(BaseCommand):
 
         # Show header with overall progress. Note: status['overall_progress']
         # is unlock-based (it also drives the timeline progress bar elsewhere,
-        # where that's the correct meaning), so it isn't used here -- showing
+        # where that's the correct meaning), so it isn't used here: showing
         # it next to "Milestones Achieved" would be contradictory (e.g. "0/6
         # achieved" beside "100%"). This header's percentage is achievement-
         # based instead, to actually match the achieved count shown above it.
@@ -1016,6 +1136,7 @@ class MilestoneCommand(BaseCommand):
                 title="Requirements Missing",
                 border_style="yellow"
             ))
+            return 1  # 2026-09-29: returned 0 even when requirements were missing
 
         return 0
 
@@ -1132,7 +1253,7 @@ class MilestoneCommand(BaseCommand):
 
         # Check milestone completion
         milestone_progress = self._get_milestone_progress_data()
-        completed_milestones = milestone_progress.get("completed_milestones", [])
+        completed_milestones = milestone_tracker.completed_ids(milestone_progress)
 
         for milestone_id in sorted(MILESTONE_SCRIPTS.keys()):
             milestone = MILESTONE_SCRIPTS[milestone_id]
@@ -1167,6 +1288,12 @@ class MilestoneCommand(BaseCommand):
                     f"[dim]Historical: {milestone['historical_context']}[/dim]\n\n"
                 )
 
+                if not is_complete and milestone_tracker.passed_parts(milestone_progress, milestone_id):
+                    missing_parts = milestone_tracker.missing_required_parts(milestone_progress, milestone_id)
+                    milestone_display += (
+                        "[yellow]Required parts still missing a pass: "
+                        + ", ".join(f"Part {p}" for p in missing_parts) + "[/yellow]\n"
+                    )
                 if prereqs_met and not is_complete:
                     milestone_display += f"[bold yellow]▶ Run now:[/bold yellow] [cyan]tito milestone run {milestone_id}[/cyan]\n"
                 elif not prereqs_met:
@@ -1183,6 +1310,8 @@ class MilestoneCommand(BaseCommand):
 
     def _handle_run_command(self, args: Namespace) -> int:
         """Handle milestone run command - run a milestone with checks."""
+        if getattr(args, 'non_interactive', False):
+            os.environ["TINYTORCH_NON_INTERACTIVE"] = "1"
         console = self.console
         milestone_id = args.milestone_id
 
@@ -1204,48 +1333,95 @@ class MilestoneCommand(BaseCommand):
 
         milestone = MILESTONE_SCRIPTS[milestone_id]
 
-        # Handle both single script and multiple scripts
-        # Also track which script configs we're running (for per-part requirements)
-        scripts_to_run = []
-        script_configs = []  # Store full config for each script (includes required_modules)
+        # Decide which parts to run. Completion is recorded per part (see
+        # tito/core/milestone_tracker.py), so the default must run every
+        # REQUIRED part: running only Part 1 used to record the whole
+        # milestone (2026-09-29 audit, B1). `--part N` runs and records only N.
+        n_parts = milestone_tracker.part_count(milestone)
+        req_parts = milestone_tracker.required_parts(milestone)
+        run_all = getattr(args, "all", False)
 
         if "scripts" in milestone:
             all_script_configs = milestone["scripts"]
-            all_scripts = [(s["name"], s["script"], s.get("description", "")) for s in all_script_configs]
-
-            # Handle --part flag for multipart milestones
-            if args.part is not None:
-                if args.part < 1 or args.part > len(all_scripts):
-                    console.print(Panel(
-                        f"[red]Invalid part number: {args.part}[/red]\n\n"
-                        f"Milestone {milestone_id} has {len(all_scripts)} parts.\n"
-                        f"Valid parts: 1-{len(all_scripts)}\n\n"
-                        f"[dim]Available parts:[/dim]\n" +
-                        "\n".join(f"  Part {i+1}: {s[0]} - {s[2]}" for i, s in enumerate(all_scripts)),
-                        title="Invalid Part",
-                        border_style="red"
-                    ))
-                    return 1
-                scripts_to_run = [all_scripts[args.part - 1]]
-                script_configs = [all_script_configs[args.part - 1]]
-                console.print(f"[dim]Running Part {args.part} of {len(all_scripts)}[/dim]\n")
-            else:
-                # Check if milestone has a default_part (e.g., TinyDigits for CNN milestone)
-                # This allows multi-part milestones to have a "no-download" default
-                default_part = milestone.get("default_part")
-                if default_part is not None and 1 <= default_part <= len(all_scripts):
-                    scripts_to_run = [all_scripts[default_part - 1]]
-                    script_configs = [all_script_configs[default_part - 1]]
-                    console.print(f"[dim]Running Part {default_part} (default). Use --part N for other parts.[/dim]\n")
-                else:
-                    scripts_to_run = all_scripts
-                    script_configs = all_script_configs
         else:
-            if args.part is not None:
-                console.print(f"[yellow]⚠️ Milestone {milestone_id} has only one part, ignoring --part flag[/yellow]\n")
-            scripts_to_run = [("Main", milestone["script"], milestone.get("description", ""))]
-            script_configs = [milestone]  # Single script uses milestone-level config
+            all_script_configs = [dict(milestone, name="Main")]  # milestone-level config
 
+        if args.part is not None:
+            if run_all:
+                console.print("[yellow]Notice: Both --part and --all specified; prioritizing --part[/yellow]\n")
+            if n_parts == 1:
+                console.print(f"[yellow]Notice: Milestone {milestone_id} has only one part, ignoring --part flag[/yellow]\n")
+                selected_parts = [1]
+            elif args.part < 1 or args.part > n_parts:
+                console.print(Panel(
+                    f"[red]Invalid part number: {args.part}[/red]\n\n"
+                    f"Milestone {milestone_id} has {n_parts} parts.\n"
+                    f"Valid parts: 1-{n_parts}\n\n"
+                    f"[dim]Available parts:[/dim]\n" +
+                    "\n".join(f"  Part {i+1}: {s['name']} - {s.get('description', '')}"
+                              for i, s in enumerate(all_script_configs)),
+                    title="Invalid Part",
+                    border_style="red"
+                ))
+                return 1
+            else:
+                selected_parts = [args.part]
+                role = "required" if args.part in req_parts else "optional extension"
+                console.print(f"[dim]Running Part {args.part} of {n_parts} ({role}); only this part is recorded[/dim]\n")
+        elif run_all:
+            if n_parts == 1:
+                console.print(f"[yellow]Notice: Milestone {milestone_id} has only one part, ignoring --all flag[/yellow]\n")
+            selected_parts = list(range(1, n_parts + 1))
+            if n_parts > 1:
+                console.print(f"[bold cyan]Running all {n_parts} parts sequentially[/bold cyan]\n")
+        else:
+            selected_parts = list(req_parts)
+            is_interactive = (
+                sys.stdin.isatty()
+                and sys.stdout.isatty()
+                and os.environ.get("TINYTORCH_NON_INTERACTIVE") != "1"
+                and os.environ.get("CI") != "true"
+            )
+            req_text = ", ".join(str(p) for p in req_parts)
+
+            if is_interactive and n_parts > 1:
+                menu_lines = []
+                for i, s in enumerate(all_script_configs):
+                    tag = " (required)" if (i + 1) in req_parts else " (optional)"
+                    menu_lines.append(f"  [{i+1}] {s['name']}: {s.get('description', '')}{tag}")
+                menu_lines.append("  [A] Run all parts sequentially")
+                console.print(Panel(
+                    f"[bold cyan]Milestone {milestone_id} Parts Menu:[/bold cyan]\n\n"
+                    + "\n".join(menu_lines)
+                    + f"\n\n[dim]Press Enter to run the required parts ({req_text})[/dim]",
+                    title="Choose Part to Run",
+                    border_style="cyan"
+                ))
+                try:
+                    prompt_text = f"[bold yellow]Select part (1 to {n_parts}, A for all, or Enter for required parts {req_text}): [/bold yellow]"
+                    user_choice = console.input(prompt_text).strip()
+                    if user_choice.lower() in ("a", "all"):
+                        selected_parts = list(range(1, n_parts + 1))
+                    elif user_choice.isdigit() and 1 <= int(user_choice) <= n_parts:
+                        selected_parts = [int(user_choice)]
+                    elif user_choice != "":
+                        console.print(f"[yellow]Invalid selection '{user_choice}'; running the required parts ({req_text})[/yellow]\n")
+                except (EOFError, KeyboardInterrupt):
+                    pass
+            elif n_parts > 1:
+                parts_overview = "\n".join(
+                    f"  {'▶' if i+1 in selected_parts else ' '} Part {i+1}: {s['name']}"
+                    f" ({'required' if i+1 in req_parts else 'optional'})"
+                    for i, s in enumerate(all_script_configs)
+                )
+                console.print(
+                    f"[dim]Milestone {milestone_id} has {n_parts} parts:[/dim]\n"
+                    f"[dim]{parts_overview}[/dim]\n"
+                    f"[dim]Running the required parts ({req_text}). Use --part N for one part or --all for every part.[/dim]\n"
+                )
+
+        script_configs = [all_script_configs[p - 1] for p in selected_parts]
+        scripts_to_run = [(c["name"], c["script"], c.get("description", "")) for c in script_configs]
         # Check if all scripts exist
         for script_name, script_file, _ in scripts_to_run:
             script_path = Path(script_file)
@@ -1260,7 +1436,9 @@ class MilestoneCommand(BaseCommand):
                 return 1
 
         # Check prerequisites and validate exports/tests (unless skipped)
-        if not args.skip_checks:
+        if args.skip_checks:
+            console.print("[yellow]⚠️ --skip-checks: running as a demo. Results will NOT be recorded.[/yellow]\n")
+        else:
             console.print(f"\n[bold cyan]🔍 Checking prerequisites for Milestone {milestone_id}...[/bold cyan]\n")
 
             # Check module completion status using module workflow
@@ -1308,8 +1486,7 @@ class MilestoneCommand(BaseCommand):
             # Test imports work
             console.print("[bold cyan]🧪 Testing YOUR implementations...[/bold cyan]\n")
 
-            import sys as _sys
-            _sys.path.insert(0, str(Path.cwd()))
+            sys.path.insert(0, str(Path.cwd()))
 
             export_failures = _validate_required_exports(required_modules)
             if export_failures:
@@ -1329,6 +1506,8 @@ class MilestoneCommand(BaseCommand):
             for module_num in required_modules:
                 console.print(f"  [green]✓[/green] Module {module_num:02d} exports available")
 
+            _warn_on_stale_exports(console, module_workflow.config.project_root, required_modules)
+
             console.print(f"\n[green]✅ YOUR Tiny🔥Torch is ready![/green]\n")
 
         # Show milestone banner
@@ -1340,12 +1519,14 @@ class MilestoneCommand(BaseCommand):
         else:
             scripts_info = f"[bold]📂 Running:[/bold] {scripts_to_run[0][1]}"
 
-        WIDTH = 48
-
         line1_text = f"  {milestone['emoji']} Milestone {milestone_id}: {milestone['name']}"
+        line2_text = f"  {milestone['title']}"
+        # The box grows to fit the longest title (Milestone 06's overflowed a
+        # fixed 48 columns, 2026-09-29).
+        WIDTH = max(48, cell_len(line1_text) + 2, cell_len(line2_text) + 2)
+
         line1 = f"[bold magenta]║[/bold magenta]{line1_text}{' ' * (WIDTH - cell_len(line1_text))}[bold magenta]║[/bold magenta]"
 
-        line2_text = f"  {milestone['title']}"
         line2 = f"[bold magenta]║[/bold magenta]{line2_text}{' ' * (WIDTH - cell_len(line2_text))}[bold magenta]║[/bold magenta]"
 
         console.print(Panel(
@@ -1365,19 +1546,19 @@ class MilestoneCommand(BaseCommand):
         ))
 
         # Only prompt if in interactive terminal and not non-interactive mode
-        import sys
-        import os
         if sys.stdin.isatty() and sys.stdout.isatty() and os.environ.get("TINYTORCH_NON_INTERACTIVE") != "1" and os.environ.get("CI") != "true":
             try:
                 console.input("\n[yellow]Press Enter to begin...[/yellow] ")
             except EOFError:
                 pass
 
-        # Run all milestone scripts
-        all_passed = True
-        for part_idx, (script_name, script_file, script_desc) in enumerate(scripts_to_run):
-            if len(scripts_to_run) > 1:
-                console.print(f"\n[bold cyan]━━━ Part {part_idx + 1}/{len(scripts_to_run)}: {script_name} ━━━[/bold cyan]")
+        # Run the selected parts, recording each part's outcome as it finishes.
+        tito_dir = _tito_dir()
+        part_outcomes = []  # (part_no, name, passed)
+        interrupted = False
+        for idx, (part_no, (script_name, script_file, script_desc)) in enumerate(zip(selected_parts, scripts_to_run)):
+            if len(scripts_to_run) > 1 or n_parts > 1:
+                console.print(f"\n[bold cyan]━━━ Part {part_no}/{n_parts}: {script_name} ━━━[/bold cyan]")
                 if script_desc:
                     console.print(f"[dim]{script_desc}[/dim]\n")
             else:
@@ -1386,45 +1567,64 @@ class MilestoneCommand(BaseCommand):
             console.print("━" * 80 + "\n")
 
             try:
-                result = subprocess.run(
-                    [sys.executable, script_file],
-                    capture_output=False,
-                    text=True, encoding="utf-8", errors="replace"
-                )
-
-                console.print("\n" + "━" * 80)
-
-                if result.returncode != 0:
-                    all_passed = False
-                    console.print(f"[yellow]⚠️ Part {script_name} completed with errors[/yellow]")
-                    if len(scripts_to_run) > 1:
-                        # Ask if they want to continue (only in interactive mode)
-                        if sys.stdin.isatty() and sys.stdout.isatty():
-                            try:
-                                cont = input("\n[yellow]Continue to next part? (y/n): [/yellow] ")
-                                if cont.lower() != 'y':
-                                    return result.returncode
-                            except EOFError:
-                                return result.returncode
-                        else:
-                            # Non-interactive: stop on first failure
-                            return result.returncode
-
-            except KeyboardInterrupt:
-                console.print(f"\n\n[yellow]⚠️ Milestone interrupted by user[/yellow]")
-                return 130
+                returncode = run_milestone_script(script_file)
             except Exception as e:
                 console.print(f"[red]Error running {script_name}: {e}[/red]")
-                all_passed = False
+                returncode = 1
+            if returncode in INTERRUPTED_EXIT_CODES:
+                console.print(f"\n\n[yellow]⚠️ Milestone interrupted by user (Part {part_no} not recorded)[/yellow]")
+                interrupted = True
+                break
 
-        if all_passed:
-            # Success! Mark milestone as complete
-            self._mark_milestone_complete(milestone_id)
+            console.print("\n" + "━" * 80)
+            passed = returncode == 0
+            part_outcomes.append((part_no, script_name, passed))
+            if not args.skip_checks:
+                milestone_tracker.record_part_result(tito_dir, milestone_id, part_no, passed)
 
+            if not passed:
+                console.print(f"[yellow]⚠️ Part {part_no} ({script_name}) failed (exit code {returncode})[/yellow]")
+                if idx < len(scripts_to_run) - 1:
+                    # Ask to continue only in an interactive terminal; otherwise stop.
+                    if sys.stdin.isatty() and sys.stdout.isatty() and os.environ.get("TINYTORCH_NON_INTERACTIVE") != "1":
+                        try:
+                            cont = console.input("\n[yellow]Continue to next part? (y/n): [/yellow] ")
+                        except EOFError:
+                            cont = "n"
+                        if cont.strip().lower() != "y":
+                            break
+                    else:
+                        break
+
+        all_passed = (not interrupted) and len(part_outcomes) == len(scripts_to_run) \
+            and all(ok for _, _, ok in part_outcomes)
+
+        if args.skip_checks:
+            console.print(Panel(
+                "[yellow]--skip-checks ran this milestone as a demo. Nothing was recorded:[/yellow]\n"
+                "[yellow]no part result and no milestone completion.[/yellow]\n\n"
+                f"[dim]Run without --skip-checks to record progress: tito milestone run {milestone_id}[/dim]",
+                title="Not Recorded",
+                border_style="yellow"
+            ))
+            if interrupted:
+                return 130
+            return 0 if all_passed else 1
+
+        if interrupted:
+            return 130
+
+        ledger = milestone_tracker.load(tito_dir)
+        missing = milestone_tracker.missing_required_parts(ledger, milestone_id)
+
+        if all_passed and not missing:
             parts_text = ""
-            if len(scripts_to_run) > 1:
-                parts_text = f"\n\n[bold]All {len(scripts_to_run)} parts completed:[/bold]\n" + "\n".join(
-                    f"  ✅ {name}" for name, _, _ in scripts_to_run
+            if n_parts > 1:
+                passed_now = {p for p, _, ok in part_outcomes if ok}
+                parts_text = "\n\n[bold]Required parts passed:[/bold]\n" + "\n".join(
+                    f"  ✅ Part {p}: {milestone_tracker.part_name(milestone, p)}"
+                    + ("" if p in passed_now else " [dim](earlier run)[/dim]")
+                    for p in req_parts
                 )
 
             default_highlights = [
@@ -1456,33 +1656,40 @@ class MilestoneCommand(BaseCommand):
                 next_milestone = MILESTONE_SCRIPTS[next_id]
                 console.print(f"\n[bold yellow]🎯 What's Next:[/bold yellow]")
                 console.print(f"[dim]Milestone {next_id}: {next_milestone['name']}[/dim]")
-
-                # Get completed modules for checking next milestone
-                progress_file = Path(".tito") / "progress.json"
-                completed_modules = []
-                if progress_file.exists():
-                    try:
-                        with open(progress_file, 'r', encoding='utf-8') as f:
-                            progress_data = json.load(f)
-                            for mod in progress_data.get("completed_modules", []):
-                                try:
-                                    completed_modules.append(int(mod.split("_")[0]))
-                                except (ValueError, IndexError):
-                                    pass
-                    except (json.JSONDecodeError, IOError):
-                        pass
-
-                # Check if unlocked
-                missing = [m for m in next_milestone["required_modules"] if m not in completed_modules]
-                if missing:
-                    console.print(f"[dim]Unlock by completing modules: {', '.join(f'{m:02d}' for m in missing[:3])}[/dim]")
+                completed_modules = _load_completed_module_numbers()
+                missing_mods = [m for m in next_milestone["required_modules"] if m not in completed_modules]
+                if missing_mods:
+                    console.print(f"[dim]Unlock by completing modules: {', '.join(f'{m:02d}' for m in missing_mods[:3])}[/dim]")
                 else:
                     console.print(f"[green]Ready to run: tito milestone run {next_id}[/green]")
-
             return 0
+
+        # Not complete: say exactly which parts ran, which passed, and what is missing.
+        lines = []
+        for p, name, ok in part_outcomes:
+            mark = "[green]✅ passed[/green]" if ok else "[red]❌ failed[/red]"
+            lines.append(f"  Part {p}: {name}: {mark} (recorded)")
+        for p in selected_parts[len(part_outcomes):]:
+            lines.append(f"  Part {p}: {milestone_tracker.part_name(milestone, p)}: [dim]not run[/dim]")
+        if missing:
+            missing_text = ", ".join(f"Part {p} ({milestone_tracker.part_name(milestone, p)})" for p in missing)
+            status_line = (
+                f"[bold yellow]Milestone {milestone_id} is NOT complete.[/bold yellow]\n"
+                f"[yellow]Required parts still missing a pass: {missing_text}[/yellow]"
+            )
+            if len(missing) == 1:
+                hint = f"tito milestone run {milestone_id} --part {missing[0]}" if n_parts > 1 else f"tito milestone run {milestone_id}"
+            else:
+                hint = f"tito milestone run {milestone_id}"
+            status_line += f"\n\n[dim]Next: {hint}[/dim]"
         else:
-            console.print(f"[yellow]⚠️ Milestone completed with errors[/yellow]")
-            return 1
+            status_line = f"[green]Milestone {milestone_id} stays complete from earlier runs.[/green]"
+        console.print(Panel(
+            "\n".join(lines) + "\n\n" + status_line,
+            title=f"Milestone {milestone_id} Parts",
+            border_style="yellow" if missing or not all_passed else "green"
+        ))
+        return 0 if all_passed else 1
 
     def _handle_info_command(self, args: Namespace) -> int:
         """Handle milestone info command - show detailed information."""
@@ -1552,64 +1759,9 @@ class MilestoneCommand(BaseCommand):
 
         return 0
 
-    def _mark_milestone_complete(self, milestone_id: str) -> None:
-        """Mark a milestone as complete in progress tracking."""
-        progress = self._get_milestone_progress_data()
-
-        # Add to completed_milestones
-        if milestone_id not in progress.get("completed_milestones", []):
-            if "completed_milestones" not in progress:
-                progress["completed_milestones"] = []
-            progress["completed_milestones"].append(milestone_id)
-            progress["completion_dates"] = progress.get("completion_dates", {})
-            progress["completion_dates"][milestone_id] = datetime.now().isoformat()
-
-        # Also add to unlocked_milestones (for status display)
-        if milestone_id not in progress.get("unlocked_milestones", []):
-            if "unlocked_milestones" not in progress:
-                progress["unlocked_milestones"] = []
-            progress["unlocked_milestones"].append(milestone_id)
-            progress["unlock_dates"] = progress.get("unlock_dates", {})
-            progress["unlock_dates"][milestone_id] = datetime.now().isoformat()
-            progress["total_unlocked"] = len(progress["unlocked_milestones"])
-
-        self._save_milestone_progress_data(progress)
-
     def _get_milestone_progress_data(self) -> dict:
-        """Get or create milestone progress data."""
-        progress_dir = Path(".tito")
-        progress_file = progress_dir / "milestones.json"
-
-        progress_dir.mkdir(exist_ok=True)
-
-        if progress_file.exists():
-            try:
-                with open(progress_file, 'r', encoding='utf-8') as f:
-                    return json.load(f)
-            except (json.JSONDecodeError, IOError):
-                pass
-
-        return {
-            "completed_milestones": [],
-            "completion_dates": {},
-            "unlocked_milestones": [],
-            "unlock_dates": {},
-            "total_unlocked": 0,
-            "achievements": []
-        }
-
-    def _save_milestone_progress_data(self, milestone_data: dict) -> None:
-        """Save milestone progress data."""
-        progress_dir = Path(".tito")
-        progress_file = progress_dir / "milestones.json"
-
-        progress_dir.mkdir(exist_ok=True)
-
-        try:
-            with open(progress_file, 'w', encoding='utf-8') as f:
-                json.dump(milestone_data, f, indent=2)
-        except IOError:
-            pass
+        """Read the milestone ledger (normalized; see tito/core/milestone_tracker.py)."""
+        return milestone_tracker.load(_tito_dir())
 
     def _offer_progress_sync(self, milestone_id: str, milestone_name: str) -> None:
         """Offer to sync progress after milestone completion.
@@ -1617,7 +1769,7 @@ class MilestoneCommand(BaseCommand):
         Delegates to the shared :func:`auto_sync_after_completion` helper so the
         CI / interactivity / logged-in rules match the module-completion path.
         Crucially, this no longer skips the sync on a non-TTY shell (Git Bash /
-        IDE terminals) -- that silent skip left progress unsynced (#1849).
+        IDE terminals): that silent skip left progress unsynced (#1849).
         """
         from ..core.submission import auto_sync_after_completion
 

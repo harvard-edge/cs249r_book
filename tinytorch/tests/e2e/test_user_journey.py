@@ -140,6 +140,7 @@ class TestQuickVerification:
         assert (milestones_dir / "04_1998_cnn").exists(), "Milestone 04 missing"
         assert (milestones_dir / "05_2017_transformer").exists(), "Milestone 05 missing"
         assert (milestones_dir / "06_2018_mlperf").exists(), "Milestone 06 missing"
+        assert (milestones_dir / "07_2024_kernels").exists(), "Milestone 07 missing"
 
     @pytest.mark.quick
     def test_tinytorch_package_importable(self):

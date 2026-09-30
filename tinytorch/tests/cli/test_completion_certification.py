@@ -128,3 +128,32 @@ def test_timed_out_notebook_cannot_complete_or_replace_export(curriculum, monkey
     result = command._run_inline_unit_tests('01_demo', False)
     assert result['failed'] == 1
     assert 'timed out after 300 seconds' in str(result)
+
+
+def test_stop_jupyter_on_module_completion(curriculum, monkeypatch):
+    """Verify that successful complete_module invokes _stop_jupyter."""
+    command, notebook, target = curriculum
+    write_notebook(notebook)
+
+    stopped = []
+    monkeypatch.setattr('tito.commands.module.workflow.get_module_mapping', lambda: {'01': '01_demo'})
+    monkeypatch.setattr(command, '_stop_jupyter', lambda: stopped.append(True))
+    monkeypatch.setattr(command, '_trigger_submission', lambda: None)
+    monkeypatch.setattr(command, '_check_milestone_unlocks', lambda name: None)
+
+    res = command.complete_module('01', skip_tests=True, skip_export=False)
+    assert res == 0
+    assert len(stopped) == 1, "_stop_jupyter must be called on successful module completion"
+
+
+def test_stop_jupyter_cleans_up_pid_file(curriculum, monkeypatch):
+    """Verify _stop_jupyter cleanly unlinks stale PID file."""
+    command, _, _ = curriculum
+    pid_file = command._jupyter_pid_file()
+    pid_file.parent.mkdir(parents=True, exist_ok=True)
+    pid_file.write_text("999999", encoding="utf-8")
+
+    monkeypatch.setattr(command, '_pid_is_running_jupyter', lambda pid: False)
+    assert command._stop_jupyter() is False
+    assert not pid_file.exists()
+

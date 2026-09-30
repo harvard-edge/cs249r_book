@@ -12,8 +12,19 @@ class GPT:
         num_layers: int,
         num_heads: int,
         max_seq_len: int = 1024,
+        *,
+        block_cls: Optional[type] = None,
+        norm_cls: Optional[type] = None,
+        mask_fn: Optional[Callable] = None,
+        sample_fn: Optional[Callable] = None,
+        generate_fn: Optional[Callable] = None,
     ):
-        _get_transformer_components()
+        block_cls = block_cls or _exported("TransformerBlock")
+        norm_cls = norm_cls or _exported("LayerNorm")
+        self._mask_fn = mask_fn or _exported("create_causal_mask")
+        self._sample_fn = sample_fn or _exported("sample_next_token")
+        self._generate_fn = generate_fn or _exported("generate")
+
         self.vocab_size = vocab_size
         self.embed_dim = embed_dim
         self.num_layers = num_layers
@@ -25,25 +36,24 @@ class GPT:
 
         # Stack of transformer blocks
         self.blocks = [
-            TransformerBlock(embed_dim, num_heads) for _ in range(num_layers)
+            block_cls(embed_dim, num_heads) for _ in range(num_layers)
         ]
 
         # Final layer normalization
-        self.ln_f = LayerNorm(embed_dim)
+        self.ln_f = norm_cls(embed_dim)
 
         # Language modeling head (projects to vocabulary)
         self.lm_head = Linear(embed_dim, vocab_size, bias=False)
 
     def forward(self, tokens: Tensor, start_pos: int = 0) -> Tensor:
         """Forward pass through GPT model."""
-        _get_transformer_components()
         batch_size, seq_len = tokens.shape
 
         # Token + positional embeddings
         x = self.embedding_layer.forward(tokens, start_pos)
 
         # Causal mask for autoregressive routing
-        mask = create_causal_mask(seq_len)
+        mask = self._mask_fn(seq_len)
 
         # Transformer blocks
         for block in self.blocks:
@@ -59,7 +69,7 @@ class GPT:
         return self.forward(tokens, start_pos)
 
     def _create_causal_mask(self, seq_len: int) -> Tensor:
-        return create_causal_mask(seq_len)
+        return self._mask_fn(seq_len)
 
     def _sample_next_token(self, logits: np.ndarray, temperature: float = 1.0) -> int:
         ...

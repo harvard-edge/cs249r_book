@@ -28,3 +28,11 @@ class LoRALinear(Layer):
         
         # The autograd tape automatically merges gradients where they sum!
         return base + adapter
+
+    def parameters(self):
+        """Only the adapter matrices train; the base weight and bias stay frozen.
+
+        Without this, an optimizer built from model.parameters() never sees A
+        and B, so fine-tuning silently updates nothing in this layer.
+        """
+        return [self.A, self.B]

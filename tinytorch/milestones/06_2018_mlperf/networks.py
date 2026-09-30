@@ -10,17 +10,19 @@ These are the SAME network architectures you built in earlier milestones:
 - DigitMLP: Milestone 03 (1986 Rumelhart)
 - SimpleCNN: Milestone 04 (1998 LeCun)
 - MinimalTransformer: Milestone 05 (2017 Vaswani)
+- TinyGPT: Milestone 05 (2017/2018 Decoder-only Transformer)
 
 In Milestone 06 (MLPerf), we focus on OPTIMIZING these networks, not building them.
-You've already proven you can build them - now let's make them production-ready!
+You've already proven you can build them: now let's make them production-ready!
 
 Usage:
-    from networks import DigitMLP, SimpleCNN, MinimalTransformer
+    from networks import DigitMLP, SimpleCNN, MinimalTransformer, TinyGPT
 
-    # These use YOUR Tiny🔥Torch implementations under the hood!
-    mlp = DigitMLP()       # YOUR Linear, ReLU
-    cnn = SimpleCNN()      # YOUR Conv2d, MaxPool2d
+    # These use YOUR TinyTorch implementations under the hood!
+    mlp = DigitMLP()                    # YOUR Linear, ReLU
+    cnn = SimpleCNN()                   # YOUR Conv2d, MaxPool2d
     transformer = MinimalTransformer()  # YOUR Attention, Embeddings
+    tinygpt = TinyGPT()                 # YOUR Full Causal Decoder Stack
 """
 
 import sys
@@ -29,18 +31,20 @@ repo_root = str(Path(__file__).resolve().parents[2])
 if repo_root not in sys.path:
     sys.path.insert(0, repo_root)
 
-import numpy as np
 
+# =============================================================================
+# 🎓 ZONE 1: STUDENT CORE LEGO BRICKS (Architectures from Milestones 01 to 05)
+# =============================================================================
 
 # ============================================================================
-# MILESTONE 01: Perceptron (1958 - Rosenblatt)
+# MILESTONE 01: Perceptron (1958: Rosenblatt)
 # ============================================================================
 
 class Perceptron:
     """
     The original Perceptron from Milestone 01.
 
-    A single-layer linear classifier - the foundation of neural networks.
+    A single-layer linear classifier: the foundation of neural networks.
     Architecture: Input → Linear(in_features, num_classes)
 
     From: Rosenblatt (1958) "The Perceptron: A Probabilistic Model"
@@ -247,6 +251,69 @@ class MinimalTransformer:
 
 
 # ============================================================================
+# MILESTONE 05: Decoder-Only Generative Transformer (TinyGPT)
+# ============================================================================
+
+class TinyGPT:
+    """
+    Decoder-only Generative Pretrained Transformer from Milestone 05.
+
+    Architecture: EmbeddingLayer -> Pre-LN TransformerBlocks -> LayerNorm -> Linear LM Head
+
+    From: Radford et al. (2018/2019) "Improving Language Understanding" / "Language Models are Unsupervised Multitask Learners"
+    """
+
+    def __init__(
+        self,
+        vocab_size: int = 27,
+        embed_dim: int = 32,
+        num_layers: int = 2,
+        num_heads: int = 2,
+        max_seq_len: int = 64,
+    ):
+        from tinytorch.core.embeddings import EmbeddingLayer
+        from tinytorch.core.transformers import LayerNorm, TransformerBlock
+        from tinytorch.core.layers import Linear
+
+        self.vocab_size = vocab_size
+        self.embed_dim = embed_dim
+        self.num_layers = num_layers
+        self.num_heads = num_heads
+        self.max_seq_len = max_seq_len
+
+        self.embedding_layer = EmbeddingLayer(vocab_size, embed_dim, max_seq_len)
+        self.blocks = [
+            TransformerBlock(embed_dim, num_heads) for _ in range(num_layers)
+        ]
+        self.ln_f = LayerNorm(embed_dim)
+        self.lm_head = Linear(embed_dim, vocab_size, bias=False)
+        self.name = "TinyGPT"
+
+    def forward(self, tokens, start_pos: int = 0):
+        from tinytorch.core.transformers import create_causal_mask
+
+        batch_size, seq_len = tokens.shape
+        x = self.embedding_layer(tokens, start_pos)
+        mask = create_causal_mask(seq_len)
+        for block in self.blocks:
+            x = block(x, mask)
+        x = self.ln_f(x)
+        return self.lm_head(x)
+
+    def __call__(self, tokens, start_pos: int = 0):
+        return self.forward(tokens, start_pos)
+
+    def parameters(self):
+        params = []
+        params.extend(self.embedding_layer.parameters())
+        for block in self.blocks:
+            params.extend(block.parameters())
+        params.extend(self.ln_f.parameters())
+        params.extend(self.lm_head.parameters())
+        return params
+
+
+# ============================================================================
 # UTILITY: Get all networks
 # ============================================================================
 
@@ -257,6 +324,7 @@ def get_all_networks():
         'mlp': DigitMLP,
         'cnn': SimpleCNN,
         'transformer': MinimalTransformer,
+        'tinygpt': TinyGPT,
     }
 
 
