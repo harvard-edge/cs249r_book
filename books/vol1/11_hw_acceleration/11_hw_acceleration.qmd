@@ -131,7 +131,7 @@ Hardware alone cannot achieve these gains. Algorithms must structure operations 
 
 Co-design explains why the compression techniques introduced in @sec-model-compression deliver real speedups. The quantization techniques in @sec-model-compression-quantization-precision-cd46 show why converting FP32 to INT8\index{Quantization!INT8 co-design} accelerates execution on supported hardware: reduced precision cuts memory traffic, while specialized arithmetic units execute more low-precision operations per cycle than FP32 equivalents [@NVIDIA2020]. Structured pruning\index{Structured pruning!hardware alignment} improves performance when it produces smaller dense shapes or a sparsity pattern recognized by silicon, whereas arbitrary unstructured sparsity incurs metadata handling and non-coalesced memory accesses that often erase theoretical gains. Evaluating accelerator performance requires tracing this path from workload to silicon: compute primitives, memory hierarchies, roofline diagnosis, mapping and dataflow, and compiler scheduling. The recurring question is why algorithmic improvements frequently fail to deliver proportional end-to-end speedups. @Sec-model-compression ended on Amdahl's cap for a model-only speedup, and the same cap governs hardware. The theorem below is Amdahl's law (principle \ref{pri-amdahl}) specialized to an accelerator: the accelerated fraction $p$ plays the role of $f_{\text{parallel}}$, and the path gain $G_{\text{accel}}$ plays the role of $S_{\text{parallel}}$.
 
-::: {#thrm-hw-acceleration-fundamental-limit-acceleration-amdahls-law .callout-theorem title="The fundamental limit of acceleration (Amdahl's Law)"}
+::: {#thrm-hw-acceleration-fundamental-limit-acceleration-amdahls-law .callout-theorem title="The fundamental limit of acceleration (Amdahl's law)"}
 
 Hardware acceleration *does not speed up the entire system*; it speeds only the baseline-time fraction using the accelerated path. For that fraction $p$ and path gain $G_{\text{accel}}$, **Amdahl's law for AI**\index{Amdahl's law!parallel fraction}\index{Parallel Computing!Amdahl's Law} [@amdahl1967] gives the bound in @eq-amdahl.
 $$ \text{Speedup} = \frac{1}{(1 - p) + \frac{p}{G_{\text{accel}}}} $$ {#eq-amdahl}
@@ -373,7 +373,7 @@ Architectural design begins with the physical constraints that forced specializa
 
 ## Hardware Specialization {#sec-hardware-acceleration-evolution-hardware-specialization-fdb7}
 
-When Google deployed its first Tensor Processing Unit (TPUv1) into production data centers alongside NVIDIA K80 GPUs, the comparison highlighted a fundamental efficiency divide. General-purpose processors dedicate substantial silicon area and power budgets to instruction fetching, branch prediction, and cache coherence hardware designed for arbitrary code. For deep learning workloads dominated by regular, dense linear algebra, that control overhead yields poor arithmetic density. When an algorithmic pattern becomes sufficiently dominant and structured, specialized hardware\index{Hardware specialization!evolution} outperforms general-purpose platforms by replacing dynamic control machinery with dedicated arithmetic arrays and software-managed data movement. Google's production inference evaluation quantified this efficiency gap (example \ref{exmp-hw-acceleration-tpuv1-vs-k80-efficiency-shock}).
+When Google deployed its first Tensor Processing Unit (TPUv1) into production data centers alongside NVIDIA K80 GPUs, the comparison exposed a fundamental efficiency divide. General-purpose processors dedicate substantial silicon area and power to instruction fetch, branch prediction, and cache coherence, machinery built for arbitrary code that yields poor arithmetic density on regular, dense linear algebra. When an algorithmic pattern becomes sufficiently dominant and structured, specialized hardware\index{Hardware specialization!evolution} outperforms general-purpose platforms by replacing dynamic control machinery with dedicated arithmetic arrays and software-managed data movement. Google's production inference evaluation quantified this efficiency gap (example \ref{exmp-hw-acceleration-tpuv1-vs-k80-efficiency-shock}).
 
 ::: {#exmp-hw-acceleration-tpuv1-vs-k80-efficiency-shock .callout-example title="The TPUv1 vs. K80 efficiency shock"}
 
@@ -385,25 +385,19 @@ When Google deployed its first Tensor Processing Unit (TPUv1) into production da
 
 :::
 
+In D·A·M terms, this efficiency gain stems from tailoring machine resources to algorithmic structure. The TPU[^fn-tpu-google-origin] replaced hardware caches with software-managed buffers and routed data directly between neighboring arithmetic units, raising data reuse and cutting off-chip traffic. The price is rigidity. Irregular memory access, dynamic control flow, or an unsupported numeric precision stalls a fixed-function data path and leaves expensive silicon idle. Every modern ML accelerator, from DianNao-class designs [@chen2014diannao] to GPUs with Tensor Cores and Apple's Neural Engine, strikes its own balance between specialization and flexibility, following a pattern that began decades before deep learning.
+
 [^fn-tpu-google-origin]: **TPU (tensor processing unit)**\index{TPU!origin}: The first TPU made a deliberately narrow bet, centering the design on a single $256{\times}256$ systolic array for 8-bit matrix multiplication and avoiding much of the control machinery required by a general-purpose core [@jouppi2017]. That trade buys high compute density on dense matrix multiplication at the cost of flexibility. Irregular or branch-heavy code remains a poor fit, and compiler tiling, padding, and layer dimensions determine how fully the array is used.
-
-In D·A·M terms, this efficiency gain stems from tailoring machine resources to algorithmic structure. By replacing hardware caches with software-managed scratchpad buffers and routing data directly between neighboring arithmetic units in a systolic array, specialized architectures maximize arithmetic intensity and minimize off-chip memory traffic. Yet this specialization imposes an architectural trade-off: rigid execution pipelines forfeit flexibility. When workloads introduce irregular memory access, dynamic control flow, or unsupported numeric precisions, fixed-function data paths stall, leaving expensive silicon idle.
-
-Modern ML accelerators—including DianNao-class neural-network accelerators [@chen2014diannao], GPUs with Tensor Cores, Google's TPUs,[^fn-tpu-google-origin] and Apple's Neural Engine—reflect this continuous balancing act between arithmetic specialization and programmable flexibility. Their designs emerge from a historical trajectory in which each era addressed the specific resource bottleneck that constrained scaling at the time.
 
 ### Specialized computing {#sec-hardware-acceleration-specialized-computing-22ce}
 
-Hardware specialization emerges when specific computational patterns become the primary system bottleneck, preventing general-purpose processors from scaling efficiently. This history highlights three recurring limits: slow implementation of scalar floating-point, insufficient throughput for parallel graphics, and poor integration between memory and parallel compute.
+Hardware specialization emerges when one computational pattern becomes the bottleneck that general-purpose processors cannot scale past. The first clear case was floating point\index{Floating-point unit!precision bottleneck}, which late-1970s microprocessors emulated with multi-instruction software routines. The Intel 8087\index{Intel 8087!floating-point coprocessor}\index{Floating-point unit!history} coprocessor (1980) executed those operations directly in hardware [@palmer1980intel8087], and the Intel 486DX (1989) later moved the floating-point unit onto the CPU die itself [@patterson2017hardware]. That cycle, specialization to relieve an acute bottleneck followed by integration once the capability proves universal, recurs in every later era. So does its limit. Dedicated silicon removes the instruction overhead around a dominant operation, but the overall gain is bounded by how much of the run time that operation occupies.
 
-The first phase, the precision bottleneck\index{Floating-point unit!precision bottleneck}, occurred when scientific and engineering applications required floating-point arithmetic on microprocessors with integer-only arithmetic logic units. In the late 1970s, CPUs emulated floating-point operations through multi-instruction software routines that unpacked sign, exponent, and mantissa fields, shifted bits to align binary points, and normalized the output. This software emulation imposed severe scalar instruction overhead for even a single multiplication, motivating the first major wave of hardware specialization: the mathematics coprocessor.
+Graphics supplied the second lesson, throughput over latency. A CPU spends most of its silicon on control logic, branch prediction, and caches that minimize the latency of a single instruction stream, which buys nothing when identical arithmetic must be applied to millions of independent pixels. GPUs\index{GPU!history} reallocated that silicon to dense arrays of arithmetic units, and when unified shader architectures (2006) replaced separate vertex and pixel pipelines with arrays of identical programmable cores, the GPU became a general-purpose parallel processor [@owens2008]. Digital signal processors\index{Digital signal processing!multiply-accumulate units} such as Texas Instruments' TMS32010 (1983) contributed the memory organization. To meet hard real-time deadlines, they replaced caches, whose misses introduce variable latency, with software-managed scratchpads feeding dedicated multiply-accumulate (MAC) data paths [@lyons2011understanding]. ML accelerators inherit both lessons.
 
-The Intel 8087\index{Intel 8087!floating-point coprocessor}\index{Floating-point unit!history} (1980)[^fn-intel-8087-specialization] addressed this bottleneck by executing floating-point instructions directly on dedicated hardware pipelines [@palmer1980intel8087]. Replacing multi-instruction emulation routines with hardwired arithmetic logic established a core systems principle: when an inner loop is dominated by a specific operation, specialized silicon eliminates general-purpose instruction overhead and shifts the execution ceiling.
+The payoff arrived in 2012, when AlexNet\index{AlexNet!GPU deep learning era} [@krizhevsky2012imagenet] won the ImageNet competition by more than ten percentage points after training on two consumer-grade NVIDIA GTX 580 cards with 3 GB of memory each. Convolutional neural networks (CNNs) trained with gradient descent had existed for decades, but CPU throughput kept large-scale training impractical. Dense 2D convolutions mapped directly onto thousands of GPU arithmetic lanes, compressing months of CPU computation into five to six days. In D·A·M terms, the machine constraint had dictated which algorithms were feasible, and aligning the algorithm's parallel structure with throughput-oriented hardware lifted it.
 
-[^fn-intel-8087-specialization]: **Intel 8087**\index{Intel 8087!specialization pattern}: The coprocessor implemented floating-point logic directly in silicon, avoiding the CPU's slow, multi-instruction software emulation for each calculation. Its benefit depended on how much time an application spent in supported floating-point operations, illustrating why specialization helps most when the accelerated work dominates execution.
-
-As specialized functions demonstrated their utility, they followed a recurring pattern of integration. The Intel 486DX (1989) moved the FPU directly onto the CPU die, eliminating off-chip bus communication latency and making high-precision math a standard feature rather than an optional coprocessor [@patterson2017hardware]. This cycle—specialization to resolve an acute bottleneck followed by architectural integration—recurs across hardware eras.
-
-@Fig-timeline traces this progression across five eras, illustrating how recurring computational bottlenecks drove hardware evolution from floating-point coprocessors and digital signal processors to programmable GPUs, streaming media codecs, and deep-learning tensor accelerators. Modern machine learning workloads depend directly on principles established across these eras: dedicating silicon to dominant matrix operations, staging operands in local memories, and minimizing off-chip data movement.
+@Fig-timeline places these milestones in five eras, from floating-point coprocessors and signal processors through GPUs and streaming media engines to deep-learning tensor accelerators. Each era's specialized unit targets a different bottleneck, yet the principles modern accelerators depend on (dedicating silicon to the dominant operation, staging operands in local memory, and minimizing off-chip data movement) were all in place before deep learning arrived.
 
 ::: {#fig-timeline fig-env="figure" fig-pos="htb" fig-cap="**Hardware Specialization Timeline**: Computing architectures evolve through recurring cycles of specialization and integration across five eras. Each era introduces domain-specific hardware to resolve an important memory or arithmetic bottleneck—from off-chip FPUs to GPUs, codecs, and TPU/Tensor Core array units. Many of these capabilities later appear alongside CPUs in broader systems, even when the specialized units remain distinct." fig-alt="Five-column timeline from the 1980s through the 2020s. The columns list floating-point and signal processing (Intel 8087, TMS32010 DSP), 3D graphics and multimedia (early GPUs, GeForce 256), real-time media and network processing (H.264 and MP3 codecs, IXP2800), deep-learning tensor operations (Google TPU v1 and NVIDIA Tensor Cores), and application-specific acceleration (AI engines, SmartNICs, and multi-chip and wafer-scale systems)."}
 
@@ -467,23 +461,11 @@ As specialized functions demonstrated their utility, they followed a recurring p
 
 :::
 
-### Parallel computing and graphics processing {#sec-hardware-acceleration-parallel-computing-graphics-processing-4654}
-
-General-purpose CPUs allocate most of their silicon budget to control logic, branch prediction, and multi-level caches designed to minimize execution latency for a single instruction stream. When a workload exhibits massive, uniform data parallelism—applying identical arithmetic across millions of independent elements—this latency-oriented architecture expends chip area and thermal budget on control structures that do not increase computational throughput. Specialized accelerators resolve this imbalance by reallocating silicon from cache and control to dense arrays of arithmetic logic units (ALUs), prioritizing aggregate throughput over single-thread latency.
-
-Real-time 3D graphics drove this throughput-oriented specialization throughout the 1990s. Early GPUs, such as NVIDIA's GeForce 256\index{NVIDIA!GeForce 256}\index{GPU!history} (1999) with hardware transform and lighting\index{Transform and lighting!hardware acceleration}, were fixed-function pipelines, and their segregated stages caused severe load imbalances: complex geometries left rasterization hardware idle, while dense fragment shading starved vertex pipelines. Programmable shaders (GeForce 3, 2001) and then unified shader architectures (GeForce 8, 2006) resolved the imbalance by replacing segregated functional units with arrays of identical, programmable cores, which turned the GPU into a general-purpose parallel processor capable of dense matrix arithmetic [@owens2008].
-
-Two other domains contributed the memory organization that ML accelerators would later adopt. Digital Signal Processing (DSP)\index{Digital signal processing!multiply-accumulate units} processors such as Texas Instruments' TMS32010 (1983) replaced caches, whose misses introduce variable latency that violates real-time deadlines, with software-managed scratchpads and dedicated multiply-accumulate (MAC) data paths [@lyons2011understanding]. Network processors such as Intel's IXP2800 faced packets arriving every few nanoseconds, so they arranged many parallel cores around tiered on-chip memory to keep data adjacent to compute. Deep learning combined both lessons with the GPU's parallelism. Its dense matrix multiplications and convolutions have high arithmetic intensity and massive data parallelism, and the unified GPU matched them with thousands of parallel ALU lanes backed by wide memory buses, using hardware multithreading to hide off-chip latency.
-
-The practical impact of this architectural alignment became clear in 2012, when AlexNet\index{AlexNet!GPU deep learning era}[^fn-alexnet-gpu-era] [@krizhevsky2012imagenet] won the ImageNet competition by more than ten percentage points. Training was performed on two consumer-grade NVIDIA GTX 580 graphics cards, each with only 3 GB of VRAM. The underlying algorithm—convolutional networks trained with gradient descent—had existed for decades, but CPU compute throughput made large-scale training computationally impractical. By mapping dense 2D convolutions directly to GPU execution units, the authors compressed months of CPU computation into five to six days. In D·A·M terms, the machine constraint had previously dictated which algorithms were feasible; aligning the parallel structure of convolutions with throughput-oriented GPU hardware made deep models practical to train on large datasets.
-
-[^fn-alexnet-gpu-era]: **AlexNet**\index{AlexNet!two-GPU training}: Because Krizhevsky, Sutskever, and Hinton's convolutional neural network (CNN) exceeded single-GPU memory, the authors partitioned the network across two cards and limited communication between them, an early form of model parallelism that foreshadowed systematic tensor and pipeline parallelism [@krizhevsky2012imagenet].
-
 ### Emergence of domain-specific architectures {#sec-hardware-acceleration-emergence-domainspecific-architectures-e56e}
 
-These diverse acceleration patterns converged in a broader architectural shift. The emergence of **domain-specific architectures (DSAs)**\index{DSA!definition}\index{DSA!scaling law breakdown}\index{Domain-Specific Architecture|see{DSA}}[^fn-dsa-domain-efficiency] marks a transition in computer system design, driven by the slowing benefits of traditional scaling [@esmaeilzadeh2011] and the increasing computational demands of specialized workloads. Moore's Law\index{Moore's law!slowdown}[^fn-moores-law-scaling] described a long-running increase in transistor density [@moore1998]. Dennard scaling\index{Dennard Scaling!end of}[^fn-dennard-scaling-power] [@dennard1974] allowed voltage to fall as transistors shrank; its breakdown removed the accompanying path to routine frequency gains at constant power density. Together, these shifts constrained general-purpose performance and efficiency. As @hennessy2019 argued in the 2017 Turing Lecture, the response was a new era of domain-specific solutions optimized for important workloads.
+These patterns converged into a broader architectural shift once general-purpose scaling slowed. Moore's law\index{Moore's law!slowdown}[^fn-moores-law-scaling] describes a long-running increase in transistor density [@moore1998], and for decades Dennard scaling\index{Dennard Scaling!end of} [@dennard1974] let operating voltage fall as transistors shrank, so clock frequencies rose at constant power density and existing software simply ran faster. When leakage current halted voltage scaling in the mid-2000s, frequencies stalled against a thermal wall. Adding cores bought time but ran into Amdahl's Law and **dark silicon**\index{Dark Silicon!specialization driver}, the thermal limit under which only a fraction of a chip's transistors can switch at full speed simultaneously [@esmaeilzadeh2011]. A general-purpose core also spends most of its energy on instruction fetch and decode, branch prediction, speculation, and cache coherence rather than arithmetic; executing one instruction can cost hundreds of picojoules of control energy to perform a floating-point operation that itself costs a few. As @hennessy2019 argued in their Turing Lecture, the response is **domain-specific architectures (DSAs)**\index{DSA!definition}\index{DSA!scaling law breakdown}\index{Domain-Specific Architecture|see{DSA}},[^fn-dsa-domain-efficiency] hardware that gives up some programmability to spend its power budget on the operations an important domain actually performs.
 
-[^fn-dsa-domain-efficiency]: **DSA (domain-specific architecture)**\index{DSA!efficiency trade-off}: Hardware optimized for an application domain, sacrificing some general-purpose programmability for efficiency. Google's TPUv1 won its large performance and performance-per-watt margins (example \ref{exmp-hw-acceleration-tpuv1-vs-k80-efficiency-shock}) by centering its design on a systolic array and software-managed memory [@jouppi2017]. A DSA that excels at dense matrix multiplication may perform worse than a CPU on irregular workloads such as graph traversal, so the workload limits and efficiency gain must justify the software, compiler, and ecosystem cost [@hennessy2019; @patterson2017hardware].
+A DSA wins by specializing every layer of the machine around the workload's invariants. Its data path\index{Data path!customization} is custom-built; matrix units in AI accelerators are often **systolic arrays**\index{Systolic array!definition}, grid-like networks of processing elements that compute and forward data directly to neighboring units, so a value fetched once from on-chip memory is reused across an entire row or column of multiply-accumulate operations instead of returning to a register file after each use. Its memory hierarchy\index{Memory hierarchy!domain-specific} follows the workload's reuse pattern, with software-managed scratchpads and prefetching\index{Prefetching!accelerator optimization} replacing hardware-managed caches for deterministic tensor streams. Its instruction set encodes coarse tensor operations, so one macro-instruction configures thousands of arithmetic units. The same recipe produced smartphone video codecs, genomics aligners, and cryptographic application-specific integrated circuits (ASICs)\index{ASIC!flexibility trade-off} wherever a kernel stabilized [@sullivan2012; @turakhia2018darwin; @bedford_taylor2017].
 
 ```{python}
 #| echo: false
@@ -511,9 +493,7 @@ class SystemsGapRates:
     demand_supply_gap_per_year_mult_str = fmt_multiple(demand_supply_gap_per_year, precision=1, commas=False)
 ```
 
-The scale of this challenge becomes stark in @fig-systems-gap, which plots an illustrative systems gap between model demand and hardware supply, sometimes discussed under the informal label Huang's Law\index{Huang's law!GPU performance scaling}.[^fn-huangs-law-gpu] The normalized scenario assumes GPU supply rises about `{python} SystemsGapRates.gpu_growth_per_year_factor_mult_str` per year while model demand rises about `{python} SystemsGapRates.demand_growth_per_year_factor_mult_str` per year, producing a gap that widens by roughly `{python} SystemsGapRates.demand_supply_gap_per_year_mult_str` each year. Published compute trends motivate the qualitative divergence, while the plotted rates are scenario assumptions rather than a forecast [@amodei2018ai; @epochai2024compute].
-
-[^fn-huangs-law-gpu]: **Huang's law**\index{Huang's law!GPU performance scaling}: The observation that GPU performance for AI workloads has improved through architectural innovations such as Tensor Cores as well as transistor scaling. The normalized figure uses illustrative GPU-supply and model-demand curves to show how unequal growth rates create a widening systems gap; it is not a forecast of either rate [@amodei2018ai; @epochai2024compute; @NVIDIA2020; @choquette2023].
+The pressure to specialize has grown because model demand outruns hardware supply. @Fig-systems-gap plots an illustrative version of this systems gap. The normalized scenario assumes GPU supply rises about `{python} SystemsGapRates.gpu_growth_per_year_factor_mult_str` per year while model demand rises about `{python} SystemsGapRates.demand_growth_per_year_factor_mult_str` per year, producing a gap that widens by roughly `{python} SystemsGapRates.demand_supply_gap_per_year_mult_str` each year. Published compute trends motivate the qualitative divergence, while the plotted rates are scenario assumptions rather than a forecast [@amodei2018ai; @epochai2024compute].
 
 ::: {#fig-systems-gap fig-env="figure" fig-pos="htb" fig-cap="**The Systems Gap**: Relative compute growth (log scale) comparing model demand to hardware supply, normalized to 2012 = 1.0. The gray dotted line (CPU) and blue dashed line (GPU) reflect hardware progress, which lags the exponential red solid line (Model Demand). The purple region is the 'Systems Gap' that must be bridged through parallelism and co-design." fig-alt="Log-scale line chart from 2012 to 2024. Red line (model demand) rises steeply. Blue line (GPU supply) rises moderately. Gray line (CPU trend) rises slowly. A large purple shaded area between red and blue is labeled 'The Systems Gap.'"}
 
@@ -641,109 +621,9 @@ plt.close()
 
 [^fn-moores-law-scaling]: **Moore's law**\index{Moore's law!ML systems consequence}: Gordon Moore's 1965 observation, revised in 1975, that the number of transistors per chip doubles roughly every two years [@moore1998]. It describes density, not performance; performance tracked density only while Dennard scaling held.
 
-[^fn-dennard-scaling-power]: **Dennard scaling**\index{Dennard scaling!power constraint}: The 1974 scaling model held that operating voltage could fall as transistor dimensions shrank, keeping power density approximately constant [@dennard1974]. Its breakdown after about 2005 constrained further clock-frequency growth within a chip's thermal design power; the resulting **dark silicon**\index{Dark Silicon!specialization driver} literature estimated, for modeled advanced nodes and design assumptions, that thermal limits could prevent large fractions of available transistors from operating simultaneously. That fraction is not a universal constant, but the power constraint is durable: specialized units make the active silicon budget more useful by dedicating it to high-value operation classes [@esmaeilzadeh2011].
+[^fn-dsa-domain-efficiency]: **DSA (domain-specific architecture)**\index{DSA!efficiency trade-off}: A DSA that excels at dense matrix multiplication may perform worse than a CPU on irregular workloads such as graph traversal, so its gain on the target domain must justify the software, compiler, and ecosystem cost of a narrower machine [@hennessy2019; @patterson2017hardware].
 
-```{=latex}
-\vspace*{-0.5mm}
-```
-
-The plot is normalized to a 2012 baseline to emphasize relative growth. The purple-shaded region highlights this divergence: the systems gap cannot be closed by process node advances alone, but requires architectural innovation, parallel distribution, and hardware-software co-design.
-
-### The technology S-curve: Why architectures shift {#sec-hardware-acceleration-technology-scurve-must-shift-42e0}
-
-Many computing technologies are described by a lifecycle of ferment (initial slow progress), take-off (rapid growth), and saturation (diminishing returns near physical or economic limits). @Fig-tech-s-curve uses two conceptual S-curves\index{Technology S-Curve!computing paradigms} to express the pattern: as gains from one design approach taper, domain-specific architectures can open a new efficiency curve for workloads with stable computational structure.
-
-::: {#fig-tech-s-curve fig-env="figure" fig-pos="htb" fig-cap="**The Twin S-Curves of Specialized Computing**: This conceptual diagram represents a general-purpose design approach (gray) reaching diminishing returns as a specialized approach (blue) begins a new efficiency curve. It is a schematic of an architectural transition, not a measured historical performance series. Specializing hardware for stable linear-algebra workloads can produce large gains at the cost of general programmability." fig-alt="Conceptual diagram of two overlapping S-curves. A gray curve for a general-purpose approach reaches saturation as a blue curve for domain-specific architectures enters a take-off phase."}
-
-```{python}
-#| echo: false
-#| warning: false
-# ┌─────────────────────────────────────────────────────────────────────────────
-# │ TECHNOLOGY S-CURVE (FIGURE)
-# ├─────────────────────────────────────────────────────────────────────────────
-# │ Context: @fig-tech-s-curve—paradigm lifecycle (ferment, take-off, saturation)
-# │
-# │ Goal: Plot twin S-curves: general-purpose CPUs (saturation) vs DSAs (take-off).
-# │ Show: Overlapping curves; Ferment/Take-off/Saturation phase labels.
-# │ How: Sigmoid curves for years 1980–2030; book_style.setup_plot().
-# │
-# └─────────────────────────────────────────────────────────────────────────────
-# ┌── 1. CANVAS ────────────────────────────────────────────────────────────────
-# │ Plot twin S-curves: general-purpose CPUs (saturation) vs DSAs (take-off).
-import numpy as np
-from binder.tools.figures import style as book_style
-
-fig, ax, COLORS, plt = book_style.setup_plot(figsize=(10, 3.5))
-
-# =============================================================================
-# PLOT: The Twin S-Curves of Modern Computing
-# =============================================================================
-
-# ┌── 2. ARRAYS ────────────────────────────────────────────────────────────────
-years = np.linspace(1980, 2030, 500)
-
-def sigmoid(x, L, k, x0):
-    return L / (1 + np.exp(-k * (x - x0)))
-
-# Curve 1: General Purpose Computing (Moore's Law/Dennard Scaling Era)
-cpu_curve = sigmoid(years, 100, 0.25, 2000)
-
-# Curve 2: Domain Specific Architectures (Accelerator Era)
-accel_curve = sigmoid(years, 10000, 0.35, 2022)
-
-# ┌── 3. RENDER ────────────────────────────────────────────────────────────────
-ax.plot(years, cpu_curve, color=COLORS['grid'], linewidth=3, label='General Purpose (CPU)')
-ax.plot(years, accel_curve, color=COLORS['BlueLine'], linewidth=3, label='Domain Specific (Accelerator)')
-
-# Fill the gap (The Shift)
-mask = (years > 2012) & (accel_curve > cpu_curve)
-ax.fill_between(years, cpu_curve, accel_curve, where=mask, color=COLORS['BlueL'], alpha=0.2)
-
-# ┌── 4. DECORATE ──────────────────────────────────────────────────────────────
-ax.set_yscale('log')
-ax.set_ylim(0.1, 20000)
-ax.set_xlim(1980, 2030)
-
-# Annotations
-ax.text(1990, 5, "Moore's Law\n(Exponential Growth)", color=COLORS['primary'], ha='center', fontsize=8, rotation=25.5, alpha=0.6)
-ax.text(2021, 145, "Dennard Scaling Ends\n(Saturation)", color=COLORS['primary'], ha='center', fontweight='normal', fontsize=9)
-ax.annotate(
-    "The Paradigm Shift\n(Hardware-Software Co-design)",
-    xy=(2012, 99),
-    xytext=(2012, 4.1),
-    arrowprops=dict(arrowstyle='->', lw=1, color=COLORS['RedLine']),
-    fontsize=8,
-    ha='center',
-    fontweight='bold',
-    color=COLORS['RedLine'],
-    bbox=dict(facecolor='white', alpha=0.9, edgecolor='none', pad=2),
-)
-ax.text(2014, 330, "Era of Accelerators\n(Matrix Math focus)", color=COLORS['BlueLine'], ha='center', fontweight='normal', fontsize=9, rotation=35)
-ax.annotate("", xy=(2029, 9000), xytext=(2029, 105), arrowprops=dict(arrowstyle="<->", color=COLORS['primary'], lw=1.5))
-ax.text(2028.5, 900, "The Systems\nGap (~100×)", ha='right', va='center', fontsize=8, fontweight='bold', color=COLORS['primary'])
-
-ax.set_xlabel('Year')
-ax.set_ylabel('Performance/Efficiency (Log Scale)')
-ax.legend(loc='upper left', fontsize=8, frameon=True, facecolor='white', framealpha=0.95, edgecolor='gray', fancybox=True, borderpad=0.6)
-plt.show()
-plt.close()
-```
-
-:::
-
-The routine gains once associated with shrinking transistors have slowed\index{Moore's law!slowdown impact}, while AI model compute demand has expanded faster than general-purpose hardware capacity. Closing this gap cannot be accomplished by waiting for successive CPU process shrinks; it requires architectural changes that restructure how workloads use silicon area, memory bandwidth, and thermal budgets.
-
-During the growth phase of the general-purpose S-curve, semiconductor scaling delivered predictable performance gains to existing software. Under classical Dennard scaling, shrinking transistor dimensions permitted operating voltages to scale down proportionally, keeping power density constant while clock frequencies increased. When Dennard scaling broke down in the mid-2000s, subthreshold leakage currents prevented further voltage reductions, forcing clock frequencies to stall against a thermal dissipation wall. Architects initially responded by adding processor cores, but multicore expansion encountered two physical boundaries: Amdahl's Law and dark silicon—the thermal constraint where only a fraction of a chip's transistors can switch simultaneously at full frequency. Furthermore, general-purpose CPUs expend the vast majority of their energy budget on control overhead—instruction fetch and decode, branch prediction, speculative out-of-order execution, and cache coherence—rather than arithmetic. For regular linear algebra workloads, executing an instruction on a CPU core can consume hundreds of picojoules of control energy to perform a 3-picojoule floating-point operation.
-
-Domain-specific architectures shift to a new efficiency curve by eliminating this control overhead and dedicating silicon to matching data paths. The primary architectural innovation is a customized data path\index{Data path!customization}: matrix multiplication units in AI accelerators, for example, implement **systolic arrays**\index{Systolic array!definition}, grid-like networks of processing elements that compute and forward data directly to neighboring units. Instead of continually writing intermediate results back to register files or caches, a systolic array streams activations and weights across adjacent cells, enabling a value fetched once from on-chip memory to be reused across an entire row or column of multiply-accumulate operations. Once that data path is established, the memory hierarchy\index{Memory hierarchy!domain-specific} can be tailored directly to workload reuse patterns, replacing hardware-managed caches with software-managed scratchpads, prefetching logic\index{Prefetching!accelerator optimization}, and memory controllers designed for deterministic tensor streams.
-
-Domain-specific instruction sets reinforce this physical specialization. Rather than fetching and decoding scalar operations individually, domain-specific instruction sets encode coarse-grained tensor primitives into single macro-instructions that configure thousands of arithmetic units concurrently, amortizing decode and dispatch overhead. Fixed-function circuit blocks bypass software execution entirely for invariant operations such as activation functions and normalization layers. The resulting efficiency stems from unified hardware specialization across every layer: data movement, memory locality, instruction overhead, and circuit implementation all align around identical computational invariants.
-
-The same shift recurs wherever a workload's computational kernel stabilizes. Smartphones decode high-resolution video within milliwatt budgets because dedicated codec circuits for standards such as H.264/AVC and H.265/HEVC deliver order-of-magnitude performance-per-watt gains over software decoding [@sullivan2012]. Genomics accelerators pipeline fixed dynamic-programming alignment kernels in silicon [@turakhia2018darwin], and cryptographic application-specific integrated circuits (ASICs)[^fn-asic-custom-hardware] trade all programmability for efficiency on fixed hashing algorithms [@bedford_taylor2017].
-
-[^fn-asic-custom-hardware]: **ASIC (application-specific integrated circuit)**\index{ASIC!flexibility trade-off}: These circuits achieve their extreme efficiency by implementing a single algorithm directly in silicon, often improving performance-per-watt by $10^3\times$ to $10^5\times$. Examples include cryptographic hashing for blockchain mining and sequence alignment for genomics. The trade-off is total inflexibility: if that core algorithm changes, the ASIC cannot be reprogrammed and becomes obsolete, locking the hardware design to the specific problem version it was built to solve.
-
-These transitions underscore the central principle of modern systems engineering: the era of automatic performance gains from general-purpose scaling is over. For decades, software developers could rely on Moore's Law to accelerate existing software without modifying code structures. With the breakdown of Dennard scaling\index{Dennard Scaling!multi-core revolution}, computational bottlenecks can no longer be resolved by waiting for faster general-purpose cores; they require designing the machine to match the algorithm. In D·A·M terms, the accelerator makes the physical machine constraint explicit. Performance is governed by hardware-software co-design: execution efficiency is determined by how effectively an algorithm's tensor dimensions, memory access patterns, and parallelism map to the specialized physical structures of domain-specific architectures.
+Technology lifecycles\index{Technology S-Curve!computing paradigms} often trace an S-curve of slow ferment, rapid take-off, and saturation near physical or economic limits. General-purpose scaling has entered its saturation phase\index{Dennard Scaling!multi-core revolution}, so waiting for process shrinks will not close a gap of this size. Closing it takes machines designed to match the algorithm, and many such machines working in parallel. In D·A·M terms, the accelerator makes the machine constraint explicit, and execution efficiency depends on how well an algorithm's tensor dimensions, memory access patterns, and parallelism map onto the specialized structures of the hardware.
 
 ```{python}
 #| echo: false
@@ -785,7 +665,7 @@ class CpuMlInefficiency:
 
 ### Machine learning hardware specialization {#sec-hardware-acceleration-machine-learning-hardware-specialization-09c5}
 
-Many important neural-network workloads contain regular tensor operations, substantial data parallelism, and opportunities for reduced precision. Dense matrix multiplications and convolutions are prominent examples because their loop structure exposes repeated operations and predictable reuse. These characteristics have driven specialized hardware architectures that would be ineffective for arbitrary code but can provide substantial gains on matching ML kernels. Other ML operations remain irregular, bandwidth bound, sequential, or too small to fill a wide engine, so the same device need not accelerate every part of a model. The hardware built to exploit the regular portion constitutes a class of devices known as ML accelerators, and the economic trigger for specialization appears when that supported workload is important at fleet scale rather than only in a benchmark.
+Many important neural-network workloads concentrate their work in regular tensor operations, such as dense matrix multiplications and convolutions, with substantial data parallelism, predictable reuse, and tolerance for reduced precision. Other ML operations remain irregular, bandwidth bound, or too small to fill a wide engine, so the device need not accelerate every part of a model. Hardware built to exploit the regular portion forms the class of ML accelerators, and the economic trigger for building one appears when that workload matters at fleet scale rather than only in a benchmark (example \ref{exmp-hw-acceleration-google-tpu-voice-search}).
 
 ::: {#exmp-hw-acceleration-google-tpu-voice-search .callout-example title="The TPU capacity cliff"}
 
@@ -825,7 +705,7 @@ class MlAcceleratorCallout:
     hbm_vs_host_dram_mult_str = fmt_multiple(hbm_vs_host_dram, precision=1, commas=False)
 ```
 
-Machine learning computational requirements reveal limitations in traditional processors. In an illustrative scenario where a reference CPU sustains `{python} CpuMlInefficiency.cpu_utilization_min_str`–`{python} CpuMlInefficiency.cpu_utilization_max_str` of its peak on a neural network workload, the upper endpoint delivers approximately `{python} CpuMlInefficiency.cpu_gflop_per_s_str` (billions of floating-point operations per second). This inefficiency results from architectural mismatches: CPUs optimize for single-thread performance and irregular memory access, while neural networks require massive parallelism and predictable data streams. The memory bandwidth constraint compounds the problem: a single neural network layer may require accessing gigabytes of parameters, overwhelming CPU cache hierarchies designed for smaller working sets.
+A general-purpose CPU is a poor host for this work. In an illustrative scenario where a reference CPU sustains `{python} CpuMlInefficiency.cpu_utilization_min_str`–`{python} CpuMlInefficiency.cpu_utilization_max_str` of its peak on a neural network workload, the upper endpoint delivers approximately `{python} CpuMlInefficiency.cpu_gflop_per_s_str` (billions of floating-point operations per second). CPUs optimize for single-thread performance and irregular memory access, whereas neural networks require massive parallelism and predictable data streams, and a single layer that touches gigabytes of parameters overwhelms cache hierarchies designed for smaller working sets.
 
 ```{python}
 #| echo: false
@@ -863,11 +743,9 @@ class EnergyGapAnchor:
     dram_vs_fp32_mult_str = fmt_multiple(round(dram_vs_fp32), precision=0, commas=False)
 ```
 
-The energy economics of data movement\index{Energy!data movement cost} influence accelerator design. Per event, accessing a 32-bit value from DRAM costs about `{python} EnergyGapAnchor.dram_pj_str` in the 45 nm estimates of @horowitz2014, roughly `{python} EnergyGapAnchor.dram_vs_fp32_mult_str` the `{python} EnergyGapAnchor.fp32_mul_pj_str` of one FP32 multiply, the same ratio @tbl-energy-movement-cost reported for the data pipeline. Exact values vary by technology node and design, but a gap of two orders of magnitude, the energy-movement principle (\ref{pri-energy-movement}), makes data movement a primary optimization target [@sze2017]. This disparity helps explain the progression from repurposed graphics processors to purpose-built neural network accelerators. TPUs and other custom accelerators can sustain high utilization on dense kernels by implementing systolic arrays and other architectures that maximize data reuse while minimizing movement.
+The deeper mismatch is energy\index{Energy!data movement cost}. Per event, accessing a 32-bit value from DRAM costs about `{python} EnergyGapAnchor.dram_pj_str` in the 45 nm estimates of @horowitz2014, roughly `{python} EnergyGapAnchor.dram_vs_fp32_mult_str` the `{python} EnergyGapAnchor.fp32_mul_pj_str` of one FP32 multiply, the same ratio @tbl-energy-movement-cost reported for the data pipeline. Exact values vary by technology node and design, but a gap of two orders of magnitude, the energy-movement principle (\ref{pri-energy-movement}), makes data movement a primary optimization target [@sze2017]. Purpose-built accelerators such as TPUs sustain high utilization on dense kernels because systolic arrays and similar structures maximize data reuse while minimizing movement.
 
-Training and inference\index{Training vs. Inference!accelerator design} present different computational profiles that influence accelerator design. Training computes gradients and updates weights: FP32 and FP16 are standardized binary floating-point formats [@ieee_754_2019]\index{FP16!training precision}\index{FP32!gradient computation}, while mixed-precision training uses lower-precision tensor operations with higher-precision accumulation when accuracy permits [@micikevicius2017mixed]. Backpropagation\index{Backpropagation!memory requirements} also retains or recomputes activations (see @sec-model-training-activation-memory-requirements-f44c), increasing memory demand. Inference requires only the forward path and may use INT8 or INT4 when the model and kernels support it. Interactive inference may prioritize tail latency, while offline or batched inference may prioritize throughput, cost, or energy; accelerator choice follows the actual service objective. These profiles often favor high-capacity, throughput-oriented training systems and energy-efficient inference paths, but batch size and service policy can reverse the apparent preference.[^fn-latency-throughput-hw]
-
-[^fn-latency-throughput-hw]: **Latency vs. throughput in accelerator design**\index{Latency vs. throughput!accelerator design}: Training commonly uses throughput-oriented execution and larger batches to amortize work, while latency-sensitive inference must control single-request and tail latency. This is a service objective, not a universal training/inference divide: batched inference can also be throughput oriented, and small or interactive training loops may care about step latency. Pipeline depth, batching delay, kernel setup, and queueing can make a training-oriented path less suitable for an interactive request even when its peak FLOP/s is higher, so the design must match the workload's actual arrival pattern, batch opportunity, and objective.
+Training and inference\index{Training vs. Inference!accelerator design} load an accelerator differently. Training computes gradients, typically in mixed precision with lower-precision tensor operations and higher-precision accumulation\index{FP16!training precision}\index{FP32!gradient computation} [@micikevicius2017mixed], and backpropagation\index{Backpropagation!memory requirements} retains or recomputes activations (see @sec-model-training-activation-memory-requirements-f44c), raising memory demand. Inference requires only the forward path and may use INT8 or INT4 when the model and kernels support it. The service objective, whether tail latency, throughput, cost, or energy, then decides which accelerator fits.
 
 ::: {#dfn-hw-acceleration-ml-accelerator .callout-definition title="ML accelerator"}
 
@@ -885,7 +763,7 @@ Training and inference\index{Training vs. Inference!accelerator design} present 
 *A DRAM access costs about `{python} EnergyGapAnchor.dram_vs_fp32_mult_str` one FP32 multiply per event; the 0.5 pJ bar is a small, register-adjacent L1 access.*
 :::
 
-Deployment context shapes architectural choices by identifying the binding constraint. In data centers, the constraint is often time-to-result for training massive models. An NVIDIA H100\index{NVIDIA!H100} trades hundreds of watts of power for high throughput [@choquette2023]; whether that trade lowers total cost depends on utilization, rental price, workload scaling, and the electricity rate. Google's TPUv4\index{TPU!data center integration} makes a similar architectural trade, prioritizing throughput through systolic arrays and high-bandwidth memory [@jouppi2023].
+Deployment context decides which constraint binds. In data centers it is often time-to-result for training large models. An NVIDIA H100\index{NVIDIA!H100} trades hundreds of watts of power for high throughput [@choquette2023], and Google's TPUv4\index{TPU!data center integration} makes a similar trade through systolic arrays and high-bandwidth memory [@jouppi2023]; whether either lowers total cost depends on utilization, rental price, workload scaling, and the electricity rate.
 
 ::: {#chk-hw-acceleration-accelerator-gate .callout-checkpoint title="The accelerator gate"}
 
@@ -902,29 +780,13 @@ Use the energy hierarchy to decide when specialization pays.
 
 :::
 
-At the edge, the priority often shifts toward energy per inference and hard latency or power limits, although throughput remains important for continuous camera, audio, or sensor streams. A smartphone camera or always-on audio path operating inside a few-watt budget cannot simply adopt a data center accelerator's high-power memory system. Edge architectures instead reduce movement through local scratchpads, tightly integrated accelerators, dynamic voltage and frequency scaling, and event-driven processing when the workload permits. The same memory-wall principle applies in both settings: data center chips invest in high-bandwidth memory (HBM) capacity and bandwidth, while edge chips depend heavily on proximity and reuse.
-
-No single architecture dominates every ML workload. Edge devices favor energy efficiency and bounded latency, while cloud-scale training values throughput, capacity, and interconnect performance. Cloud inference can emphasize cost per request or tail latency, and an edge device may still need sustained throughput for a real-time stream. Specialized architectures therefore reflect their deployment context, yet all remain subject to the energy and latency costs of moving data.
-
-@Tbl-hw-evolution summarizes these milestones in hardware specialization. Floating-point coprocessors accelerated arithmetic previously implemented in software, early GPUs increased graphics throughput, and media engines showed how stable pipelines could justify fixed-function blocks. AI accelerators combine dense tensor units with memory hierarchies and software support, making integration between data movement and parallel execution a central challenge.
-
-Modern AI acceleration therefore extends beyond the chip. Useful accelerators need framework, compiler, library, driver, and runtime support for graph transformations, kernel selection, fusion, memory scheduling, and deployment across environments from data centers to edge devices. Unsupported operations or surrounding transfers can erase a kernel-level gain.
-
-| Era                               | **Computational pattern**\index{Computational pattern!definition} | **Architecture examples**\index{Architecture examples!definition} | **Characteristics**\index{Characteristics!definition}                                               |
-|:----------------------------------|:------------------------------------------------------------------|:------------------------------------------------------------------|:----------------------------------------------------------------------------------------------------|
-| **1980s**\index{1980s!definition} | Floating-Point & Signal Processing                                | FPU, DSP                                                          | • Single-purpose engines<br>• Focused instruction sets<br>• Coprocessor interfaces                  |
-| **1990s**\index{1990s!definition} | 3D Graphics & Multimedia                                          | GPU, SIMD Units                                                   | • Many identical compute units<br>• Regular data patterns<br>• Wide memory interfaces               |
-| **2000s**\index{2000s!definition} | Real-time Media Coding                                            | Media Codecs, Network Processors                                  | • Fixed-function pipelines<br>• High throughput processing<br>• Power-performance optimization      |
-| **2010s**\index{2010s!definition} | Deep Learning Tensor Operations                                   | TPU, GPU Tensor Cores                                             | • Matrix multiplication units<br>• Massive parallelism<br>• Memory bandwidth optimization           |
-| **2020s**\index{2020s!definition} | Application-Specific Acceleration                                 | ML Engines, Smart NICs, Domain Accelerators                       | • Workload-specific datapaths<br>• Customized memory hierarchies<br>• Application-optimized designs |
-
-: **Hardware Specialization Trends**: Successive computing eras progressively integrate specialized hardware to accelerate prevalent workloads, moving from general-purpose CPUs to domain-specific architectures and ultimately to customizable AI accelerators. Tailoring hardware to computational patterns improves performance and energy efficiency, driving innovation in machine learning systems. {#tbl-hw-evolution tbl-colwidths="[10,27,28,35]"}
+At the edge, the priority shifts toward energy per inference and hard latency or power limits. A smartphone camera or always-on audio path inside a few-watt budget cannot adopt a data center memory system, so edge architectures reduce movement through local scratchpads, tight integration, and dynamic voltage and frequency scaling. Because the binding constraint differs by setting, no single architecture dominates, yet the memory wall governs both. Data center chips buy capacity and bandwidth with high-bandwidth memory (HBM), while edge chips depend on proximity and reuse.
 
 ### The integration bottleneck {#sec-hardware-acceleration-integration-bottleneck-ai-needs-specialized-hardware-0b41}
 
-The evolution from the Intel 8087 numeric coprocessor to modern graphics and AI accelerators reveals a consistent pattern: hardware evolves to fit the algorithm's dominant bottleneck [@palmer1980intel8087; @goodfellow2016deep; @sze2017; @jouppi2017]. Where the 8087 offloaded floating-point arithmetic that overwhelmed general-purpose CPUs in scientific computing, modern AI accelerators target dense matrix multiplications and convolutions. In this domain, provisioning raw arithmetic units is straightforward compared to feeding them with data. Modern AI architectures must resolve an **integration bottleneck**\index{Integration bottleneck!data movement cost}: transporting operands and results through the memory hierarchy rapidly and efficiently enough to sustain thousands of parallel compute units. Specialized silicon delivers substantial performance-per-watt gains over general-purpose processors only when the workload's computational demand concentrates into regular operations that align with physical hardware data paths.
+From the 8087 onward, hardware has evolved to fit the algorithm's dominant bottleneck [@palmer1980intel8087; @sze2017; @jouppi2017], and for dense matrix multiplications and convolutions, provisioning arithmetic units is the easy part. Feeding them is not. Modern AI architectures must resolve an **integration bottleneck**\index{Integration bottleneck!data movement cost}, the problem of transporting operands and results through the memory hierarchy quickly and efficiently enough to sustain thousands of parallel compute units. Specialized silicon delivers its performance-per-watt advantage only when the workload's demand concentrates into regular operations that align with the hardware's data paths.
 
-Three properties of neural-network kernels make this integration bottleneck tractable. First, large matrix multiplications and convolutions expose abundant data parallelism that dense processing-element arrays can exploit concurrently. Second, static or compiled tensor graphs exhibit predictable dataflow, enabling compilers to tile and stage transfers into local scratchpads[^fn-scratchpad-sram-memory] rather than relying exclusively on hardware-managed caches. This grants software explicit control over regular working sets while retaining hardware caches for irregular access. Third, many tensor operations exhibit algorithmic tolerance to reduced precision\index{Quantization!reduced precision tolerance}, allowing supported 8-bit or 4-bit paths to increase compute density and reduce bytes per value [@dally2021; @dally2023]. Conversely, workloads dominated by dynamic control flow, large embedding tables, small tensors, variable shapes, or strict precision requirements violate these assumptions and remain bound by memory latency and irregular access.
+Three properties of neural-network kernels make this integration bottleneck tractable. First, large matrix multiplications and convolutions expose abundant data parallelism that dense processing-element arrays can exploit concurrently. Second, static or compiled tensor graphs exhibit predictable dataflow, enabling compilers to tile and stage transfers into local scratchpads[^fn-scratchpad-sram-memory] rather than relying exclusively on hardware-managed caches. Third, many tensor operations tolerate reduced precision\index{Quantization!reduced precision tolerance}, allowing supported 8-bit or 4-bit paths to increase compute density and reduce bytes per value [@dally2021; @dally2023]. Workloads dominated by dynamic control flow, large embedding tables, small tensors, variable shapes, or strict precision requirements violate these assumptions and remain bound by memory latency and irregular access.
 
 [^fn-scratchpad-sram-memory]: **Scratchpad memory**\index{Scratchpad memory!ML advantage}: When a compiler can determine a tensor kernel's access pattern, it can explicitly stage tiles in fast, software-controlled local memory. This avoids some tag, replacement, and coherence machinery, but transfers, synchronization, banking, and capacity must be scheduled correctly. Scratchpads complement rather than universally replace caches because irregular or shared data may still benefit from hardware management. Google's TPU v1, for example, used a 24 MB software-managed Unified Buffer for intermediate activations, while weights and instructions used other paths [@jouppi2017].
 
@@ -1151,13 +1013,13 @@ fit=(BB1)(DPE1)(DPE4)(B1),yshift=0mm](BB2){};
 
 :::
 
-In the generic design in @fig-accelerator-anatomy, an array of **processing elements**\index{Processing element!accelerator building block} contains units specialized for distinct operation classes: matrix units\index{Tensor Core!matrix multiplication} execute dense matrix multiplication, vector units\index{Vector Unit!element-wise operations} perform element-wise arithmetic, and special function units\index{Special Function Unit!activation functions} approximate transcendental operations such as exponentials and activations. The number, grouping, and vendor nomenclature of these units vary across architectures, but all aim to exploit data-level parallelism across tensor tiles. Some designs arrange units into an explicit 2D systolic grid; others distribute matrix engines among wide parallel compute cores. The schematic represents these functional responsibilities rather than a single vendor's physical layout.
+In the generic design in @fig-accelerator-anatomy, an array of **processing elements**\index{Processing element!accelerator building block} contains units specialized for distinct operation classes: matrix units\index{Tensor Core!matrix multiplication} execute dense matrix multiplication, vector units\index{Vector Unit!element-wise operations} perform element-wise arithmetic, and special function units\index{Special Function Unit!activation functions} approximate transcendental operations such as exponentials and activations. Their number, grouping, and names vary by vendor; some designs arrange them into an explicit 2D systolic grid, and others distribute matrix engines among wide parallel cores.
 
-Complementing the execution units, the memory hierarchy amortizes the latency and energy cost of data transport across multiple tiers. High-bandwidth memory\index{HBM!throughput requirements} provides off-chip capacity and aggregate throughput, while shared on-chip storage and per-element caches or scratchpads reduce off-chip traffic. While specific implementations differ—some relying on hardware-managed caches, others exposing software-managed SRAM, and many combining both—the physical principle is constant: moving a tensor tile across package boundaries consumes orders of magnitude more energy than keeping it on chip. Compilers and runtime kernels must coordinate tile capacity, reuse, prefetching, and double buffering to keep operands staged in fast local memory. Expanding HBM bandwidth raises the off-chip throughput ceiling, but without temporal and spatial reuse in local SRAM, execution units stall waiting for operands. The machine foundations appendix collects reference specifications for modern accelerators, including H100 and TPU v5, and summarizes the latency hierarchy.
+The memory hierarchy amortizes the cost of data transport across tiers. High-bandwidth memory\index{HBM!throughput requirements} provides off-chip capacity and throughput, while shared on-chip storage and per-element caches or scratchpads cut off-chip traffic. Because moving a tensor tile across the package boundary costs orders of magnitude more energy than keeping it on chip, compilers and kernels must coordinate tile capacity, reuse, and prefetching to keep operands staged locally; more HBM bandwidth raises the off-chip ceiling, but without local reuse the execution units still stall. The machine foundations appendix collects reference specifications for modern accelerators, including H100 and TPU v5, and summarizes the latency hierarchy.
 
-The host interface links the accelerator to the host CPU and broader system memory. A host CPU coordinates execution graphs, asynchronous I/O, and unsupported fallback operations, while the accelerator executes dispatched compute kernels. This partition is not absolute: modern accelerators can schedule work queues autonomously, and CPUs can compute tensor operations. In practice, system throughput depends on where each operator runs and the volume of transfers, kernel launches, and synchronization barriers separating them. Direct-memory-access engines and hardware-managed queues can overlap host-device transfers with active execution, but unsupported operators force costly CPU round-trips. The communication boundary between host memory and accelerator storage therefore establishes the effective speedup envelope; kernel execution time matters little if host-device transfers dominate end-to-end latency.
+The host interface links the accelerator to the host CPU, which coordinates execution graphs, asynchronous I/O, and fallback operations while the accelerator executes dispatched kernels. Direct-memory-access engines can overlap host-device transfers with execution, but every unsupported operator forces a CPU round-trip, so the host-accelerator boundary sets the effective speedup envelope. Kernel execution time matters little if transfers, launches, and synchronization dominate end-to-end latency.
 
-The specialization evident in processing elements, vector pipelines, and tiered scratchpads reflects the computational profile of neural networks: models repeatedly invoke a compact set of linear-algebraic and element-wise primitives. Within the D·A·M framework, algorithmic modifications produce wall-clock speedups only when their computational structure and memory access patterns map directly onto these specialized hardware primitives. Algorithmic optimizations that reduce theoretical operations without aligning with hardware data paths leave compute units starved, rendering the claimed gains purely theoretical.
+The specialization evident in processing elements, vector pipelines, and tiered scratchpads reflects the computational profile of neural networks: models repeatedly invoke a compact set of linear-algebraic and element-wise primitives. Within the D·A·M framework, an algorithmic change produces a wall-clock speedup only when its computational structure and memory access pattern map onto these primitives; one that cuts theoretical operations without aligning with the hardware's data paths leaves compute units starved.
 
 ## AI Compute Primitives {#sec-hardware-acceleration-ai-compute-primitives-2c99}
 
@@ -3602,7 +3464,7 @@ These interconnect and memory bounds dictate how neural network architectures ma
 
 ### Model memory pressure {#sec-hardware-acceleration-model-memory-pressure-f95e}
 
-Model architecture determines which memory term binds\index{Model Memory Pressure!architecture-specific}. Multilayer perceptrons (MLPs), convolutional neural networks (CNNs), and transformers exhibit fundamentally different dataflow profiles: some are bound by weight capacity, others by intermediate activation footprint, device memory bandwidth, or host interconnect throughput. Consequently, each workload demands a distinct accelerator memory hierarchy and execution strategy.
+Model architecture determines which memory term binds\index{Model Memory Pressure!architecture-specific}. Multilayer perceptrons (MLPs), CNNs, and transformers exhibit fundamentally different dataflow profiles: some are bound by weight capacity, others by intermediate activation footprint, device memory bandwidth, or host interconnect throughput. Consequently, each workload demands a distinct accelerator memory hierarchy and execution strategy.
 
 The lighthouse models introduced in @tbl-lighthouse-examples ground this analysis: ResNet-50 represents CNN workloads with high spatial reuse and heavy activation footprint, GPT-2 and Llama exemplify transformer memory pressure spanning both parameter capacity and intermediate attention states, DLRM illustrates sparse embedding lookups that stress random-access memory bandwidth rather than dense compute, and MobileNetV2 demonstrates efficiency-optimized architectures where depthwise convolutions trade arithmetic intensity for lower parameter footprint. Their memory characteristics reveal how computational graph structure dictates physical hardware utilization.
 
@@ -4613,89 +4475,45 @@ for i in range(512):
 
 :::
 
-This computation reveals several critical dataflow challenges. The first challenge is the number of memory accesses required. For each output $Z_{ij}$, the computation must fetch an entire row of weights from the weight matrix and a full column of activations from the input matrix. Since the weight matrix contains 512 rows and the input matrix contains 32 columns, this results in repeated memory accesses that place a heavy burden on memory bandwidth.
+Every operand in this loop nest is reused, but along a different loop. Each weight `weights[i, k]` is used once for each of the 32 output columns, each input `input[k, j]` is used once for each of the 512 output rows, and each output `Z[i, j]` accumulates 256 products before it is final. A processing element's local storage holds only a small tile at a time, so the mapping cannot capture all three reuses at once. Fetching from DRAM whichever operand is not held locally, on every use, is what turns a compute-bound kernel into a memory-bound one [@han2016].
 
-The second challenge comes from weight reuse. The same weights are applied to multiple inputs, meaning that an ideal mapping strategy should maximize weight locality to avoid redundant memory fetches. Without proper reuse, the accelerator would waste bandwidth loading the same weights multiple times [@chen2018tvm].
+The central dataflow decision\index{Dataflow!optimization strategies}\index{Data reuse!accelerator optimization} is therefore which operand to keep local. The loop order answers it: whatever the innermost loops touch repeatedly without changing stays resident, and everything else streams. @Lst-stationary_dataflows reorders the same computation three ways, and the three orders are the three classic stationary dataflows.
 
-The third challenge involves the accumulation of intermediate results. Since each element in $Z_{ij}$ requires contributions from 256 different weight-input pairs, partial sums must be stored and retrieved before the final value is computed. If these intermediate values are stored inefficiently, the system will require frequent memory accesses, further increasing bandwidth demands.
-
-One way to mitigate these challenges is to use SIMD and SIMT execution models, which allow multiple values to be fetched in parallel. However, even with these optimizations, data movement remains a bottleneck. The primary bottleneck is not retrieval speed alone, but transfer frequency and placement within the memory hierarchy [@han2016].
-
-Because moving data dominates the energy budget that @fig-energy-hierarchy charts, the single most important goal of an accelerator is to minimize memory access. Dataflow strategies\index{Dataflow!optimization strategies} achieve this by maximizing data reuse\index{Data reuse!accelerator optimization}. The central decision is which data is most valuable to keep local. Accelerators answer that decision by determining which data remains fixed in memory and which data streams dynamically: weight-stationary keeps model parameters local, input-stationary maintains activation data, and output-stationary preserves intermediate results. Each approach trades off different memory access patterns to maximize data reuse and minimize the energy-intensive transfers that constitute the primary bottleneck in AI acceleration.
-
-##### Weight stationary {#sec-hardware-acceleration-weight-stationary-156a}
-
-The weight stationary strategy\index{Weight-stationary!CNN optimization} keeps weights fixed in local memory while input activations and partial sums stream through the system. Each weight is fetched once and reused across every input it touches, which cuts parameter read traffic wherever the same filter or weight tile is applied to many inputs, as in CNNs and batched matrix multiplication. It is the canonical TPU dataflow traced cycle by cycle in @sec-hardware-acceleration-tiling-principle. @Lst-weight_stationary shows the loop order that produces this reuse.
-
-::: {#lst-weight_stationary lst-cap="**Weight Stationary Dataflow**: Weights stay resident in local memory while inputs and partial sums stream through, minimizing parameter read traffic; best for CNNs and matrix multiplications with heavy weight reuse."}
+::: {#lst-stationary_dataflows lst-cap="**Three Stationary Dataflows**: The same matrix multiplication as the naïve loop, reordered three ways; the operand held fixed across the innermost loop is the one fetched once and reused from local storage, while the other two stream."}
 
 ```{.python}
-# Weight Stationary Matrix Multiplication
-# - Weights remain fixed in local memory
-# - Input activations stream through
-# - Partial sums accumulate for final output
+# Weight stationary: hold one weight, stream inputs and partial sums past it
+for i in range(512):
+    for k in range(256):
+        w = weights[i, k]  # fetched once, reused 32 times
+        for j in range(32):
+            Z[i, j] += w * input[k, j]
 
-for weight_block in weights:  # Load and keep weights stationary
-    load_to_local(weight_block)  # Fixed in local storage
-    for input_block in inputs:  # Stream inputs dynamically
-        for output_block in outputs:  # Compute results
-            output_block += compute(weight_block, input_block)
-            # Reuse weights across inputs
+# Output stationary: hold one partial sum, stream weights and inputs past it
+for i in range(512):
+    for j in range(32):
+        acc = 0  # stays in a local accumulator
+        for k in range(256):
+            acc += weights[i, k] * input[k, j]
+        Z[i, j] = acc  # written once
+
+# Input stationary: hold one input, stream weights and partial sums past it
+for k in range(256):
+    for j in range(32):
+        x = input[k, j]  # fetched once, reused 512 times
+        for i in range(512):
+            Z[i, j] += weights[i, k] * x
 ```
 
 :::
 
-The traffic that weight stationary removes reappears on the other two operands. Inputs must be delivered fast enough to keep the resident weights busy, partial sums must accumulate without spilling to memory, and the resident weight tile is bounded by on-chip capacity, so a model whose weights far exceed that capacity must cycle tiles through it. When input or output reuse matters more than weight reuse, the other two strategies offer better trade-offs.
+A weight-stationary\index{Weight-stationary!CNN optimization} dataflow keeps parameters on chip, so each weight crosses the expensive memory boundary once no matter how many inputs it touches. That pays off wherever one filter or weight tile is applied to many inputs, as in convolutions and batched matrix multiplication, and it is the canonical TPU dataflow traced cycle by cycle in @sec-hardware-acceleration-tiling-principle. The saved traffic reappears on the other operands: inputs must arrive fast enough to keep the resident weights busy, and partial sums must move between processing elements as they accumulate. The resident tile is also bounded by on-chip capacity, so a layer whose weights far exceed it must cycle weight tiles through, reloading the inputs for each one.
 
-##### Output stationary {#sec-hardware-acceleration-output-stationary-54e5}
+An output-stationary\index{Output-stationary!partial sum accumulation} dataflow keeps each running sum in a local accumulator until all of its contributions have arrived, so every output is written to memory exactly once [@chen2016eyeriss]. It suits layers with wide fan-in, such as fully connected layers and attention projections, where writing a partial sum out after every step would cost far more than the reads it avoids. The price is two operand streams at once, since both weights and inputs must now be delivered from memory. The naïve loop in @lst-matmul_data_movement already has this order, because its innermost loop runs over $k$ while $i$ and $j$ stay fixed.
 
-Weight stationary keeps weights local and streams inputs through the system. The dominant cost shifts, however, when the bottleneck is not weight loading but the frequent writes of partial sums. In fully connected layers and transformer attention mechanisms, each output element accumulates contributions from hundreds or thousands of weight-input pairs. Writing those intermediate partial sums to external memory after every accumulation step would create a write-bandwidth bottleneck far more severe than the read overhead that weight stationary addresses. The output stationary strategy\index{Output-stationary!partial sum accumulation} inverts the priority: it keeps partial sums fixed in local memory while streaming both weights and input activations through the system, so that each output element is written to external memory only once, after all its contributions have been accumulated [@chen2016eyeriss].
+An input-stationary\index{Input-stationary!dataflow strategy} dataflow keeps an activation tile local while weights stream past it. It pays off when one activation feeds several computations before eviction, as when a transformer token's activation feeds the query, key, and value projections. Its costs mirror weight stationary's, with weights now streaming from memory and partial sums still moving as they accumulate.
 
-In @lst-output_stationary, the accumulator stays in local registers or scratchpad throughout the inner loop; weights and inputs stream in, contribute to the running sum, and are discarded. This approach aligns naturally with systolic arrays, where partial sums can flow along one axis without leaving the chip. The trade-off is that both weights and activations must now stream, so the system must sustain read bandwidth for two operand streams at once, and parallel implementations must synchronize when several processing elements contribute to the same output. Output stationary is therefore most effective where accumulation dominates, as in fully connected layers and attention, and less suitable when input reuse is the critical bottleneck.
-
-::: {#lst-output_stationary lst-cap="**Output Stationary Dataflow**: Partial sums stay resident in local memory while weights and inputs stream through, so each output is written out only once, minimizing accumulation write traffic; best for fully connected layers and attention."}
-
-```{.python}
-# - Partial sums remain in local memory
-# - Weights and input activations stream through dynamically
-# - Final outputs are written only once
-
-for output_block in outputs:  # Keep partial sums stationary
-    accumulator = 0  # Initialize accumulation buffer
-    for weight_block, input_block in zip(weights, inputs):
-        accumulator += compute(weight_block, input_block)
-        # Accumulate partial sums
-    store_output(accumulator)  # Single write to memory
-```
-
-:::
-
-##### Input stationary {#sec-hardware-acceleration-input-stationary-6c7b}
-
-The two strategies examined so far each fix a different operand in local memory: weight stationary fixes weights to reduce read bandwidth for parameters, and output stationary fixes partial sums to reduce write bandwidth for accumulations. The third strategy completes the picture by fixing the remaining operand: input activations\index{Input-stationary!dataflow strategy}. Within a transformer layer, one activation can feed multiple projections or attention heads; the next layer receives a newly computed representation rather than the same token activation. When activation reuse is the dominant memory cost, keeping inputs stationary and streaming weights through the system can reduce energy and bandwidth. @Lst-input_stationary illustrates this approach.
-
-::: {#lst-input_stationary lst-cap="**Input Stationary Dataflow**: Input activations stay resident in local memory while weights stream through, reducing activation read traffic when one activation tile feeds several computations."}
-
-```{.python}
-# - Input activations remain in local memory
-# - Weights stream through dynamically
-# - Partial sums accumulate and are written out
-
-for input_block in inputs:  # Keep input activations stationary
-    load_to_local(input_block)  # Fixed in local storage
-    for weight_block in weights:  # Stream weights dynamically
-        for output_block in outputs:  # Compute results
-            output_block += compute(weight_block, input_block)
-            # Reuse inputs across weights
-```
-
-:::
-
-Here, input activations are loaded once and held fixed in local storage while weights stream through. Partial sums accumulate and are eventually written out, but unlike output-stationary dataflow, the accumulation buffer is not the primary beneficiary of locality; instead, the input activations are.
-
-The trade-off mirrors the other two strategies: weights stream dynamically, requiring sustained read bandwidth from memory, and partial sums require buffering before write-back. Input stationary is most effective when an activation tile feeds multiple projections, attention heads, or gate evaluations before eviction.
-
-Taken together, the three dataflow strategies provide a decision framework rather than a hierarchy of quality. Weight stationary minimizes parameter read traffic, fitting convolutional networks with compact, heavily reused filters. Output stationary minimizes write traffic for accumulations, fitting fully connected layers with wide fan-in. Input stationary minimizes activation read traffic, fitting transformers and large-batch inference with high activation reuse. No single strategy dominates; the optimal choice depends on which tensor dimension provides the highest reuse ratio relative to on-chip storage capacity. Hardware compilers select among these strategies based on workload dimensions and memory hierarchy limits. Convolution-specific designs add a fourth label, row-stationary (as in Eyeriss), but it is a hybrid that keeps rows of inputs and partial sums local when that mapping yields higher reuse than fixing any single operand (@sec-hardware-acceleration-convolutional-neural-networks-3085).
+The three strategies form a decision framework rather than a quality ranking. The right choice is the operand with the highest reuse relative to the on-chip storage it would occupy, which depends on layer dimensions and batch size, so compilers select among them per layer. Convolution-specific designs add a fourth label, row-stationary (as in Eyeriss), a hybrid that keeps rows of inputs and partial sums local when that mapping yields higher reuse than fixing any single operand (@sec-hardware-acceleration-convolutional-neural-networks-3085).
 
 #### Memory-efficient tensor layouts {#sec-hardware-acceleration-memoryefficient-tensor-layouts-e250}
 
@@ -5313,7 +5131,7 @@ Poor scheduling introduces execution bubbles where arithmetic units sit idle wai
 
 With scheduling complete, the final compilation stage translates the scheduled execution plan into target-specific machine instructions. Code generation\index{Code generation!hardware-specific instructions} applies traditional backend compiler passes—instruction selection, register allocation, instruction scheduling, and peephole optimization—tailored to accelerator architectures.
 
-Crucially, instruction selection for ML targets must emit instructions that directly engage specialized matrix ISA extensions. On NVIDIA GPUs, code generators emit PTX instructions such as `mma.sync.aligned` to invoke Tensor Cores directly, as shown in @lst-tensor_core_op. On Intel CPUs with Advanced Matrix Extensions (AMX), the backend targets tile-multiply instructions operating on 2D register tiles. On Arm architectures with the Scalable Matrix Extension (SME), the target is outer-product accumulation across scalable vector tiles. A backend that emits generic floating-point vector instructions instead of these matrix extensions leaves the primary compute engines unutilized, reducing effective throughput by an order of magnitude.
+Instruction selection for ML targets must emit instructions that directly engage specialized matrix ISA extensions. On NVIDIA GPUs, code generators emit PTX instructions such as `mma.sync.aligned` to invoke Tensor Cores directly, as shown in @lst-tensor_core_op. On Intel CPUs with Advanced Matrix Extensions (AMX), the backend targets tile-multiply instructions operating on 2D register tiles. On Arm architectures with the Scalable Matrix Extension (SME), the target is outer-product accumulation across scalable vector tiles. A backend that emits generic floating-point vector instructions instead of these matrix extensions leaves the primary compute engines unutilized, reducing effective throughput by an order of magnitude.
 
 For CPUs and GPUs, compilers emit machine code or optimized assembly; for TPUs, field-programmable gate arrays (FPGAs),[^fn-fpga-reconfigurable-logic] and proprietary NPUs, the output is often an optimized bytecode or binary execution package executed by a specialized hardware runtime.
 

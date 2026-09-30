@@ -172,7 +172,7 @@ Decisions in one row dictate options in the next: architecture choices (depthwis
 
 ## Thirteen Quantitative Principles {#sec-thirteen-quantitative-invariants-0dd2}
 
-When an engineer alters an embedding table layout, doubles batch size, or quantizes an attention layer from FP16 to INT8, the performance outcome is not random; it is governed by physical bounds, empirical trade-offs, and operational feedback. Reasoning quantitatively about this behavior across the entire stack requires rigorous analytical instruments. These **thirteen quantitative principles**\index{Thirteen quantitative principles!framework} deliberately combine exact mathematical bounds, engineering decompositions, fitted empirical models, policy constraints, and design heuristics. @Tbl-thirteen-principles summarizes all thirteen principles across four systems phases. They are not all the same kind of statement. Some are hard bounds (the roofline, Amdahl's Law), some are decompositions (the iron law), some are fitted models (drift, bias feedback), and some are policies (the latency budget). The table's equations identify which is which, and each principle is reliable only within its stated assumptions.
+When an engineer alters an embedding table layout, doubles batch size, or quantizes an attention layer from FP16 to INT8, the performance outcome is not random; it is governed by physical bounds, empirical trade-offs, and operational feedback. Reasoning quantitatively about this behavior across the entire stack requires rigorous analytical instruments. These **thirteen quantitative principles**\index{Thirteen quantitative principles!framework} deliberately combine exact mathematical bounds, engineering decompositions, fitted empirical models, policy constraints, and design heuristics. @Tbl-thirteen-principles summarizes all thirteen principles across four systems phases. They are not all the same kind of statement. Some are hard bounds (the roofline, Amdahl's Law), some are decompositions (the iron law), some are fitted models (drift, bias feedback), and some are policies (the latency budget). Each principle box on the part pages names its kind, and each principle is reliable only within its stated assumptions.
 
 ```{python}
 #| echo: false
@@ -737,7 +737,7 @@ DLRM carries the first half, because every mechanism that erodes trust in learne
 # │          @sec-principles-practice-1005 and the chapter takeaways.
 # │
 # │ Goal: Demonstrate why mean latency is a misleading metric for user experience.
-# │ Show: That p99 latency is 40× the mean in an illustrative LLM chat endpoint.
+# │ Show: That p99 time to first token is 40× the mean in an illustrative LLM chat endpoint.
 # │ How: Divide the scenario's p99 latency by its mean latency.
 # │ Scope: chapter-anchor
 # │
@@ -749,12 +749,12 @@ from mlsysim.core.units import ms
 class TailLatencyRatio:
     """
     Namespace for Tail Latency Ratio Calculation.
-    Scenario: LLM chat endpoint, mean vs. P99 latency driven by long generations.
+    Scenario: LLM chat endpoint, mean vs. P99 time to first token (long prompts, queueing).
     """
 
     # ┌── 1. LOAD (Constants) ───────────────────────────────────────────────
-    mean_latency_ms = 50.0  # scenario assumption: mean response latency
-    p99_latency_ms = 2000.0  # scenario assumption: p99 driven by long generations
+    mean_latency_ms = 50.0  # scenario assumption: mean time to first token
+    p99_latency_ms = 2000.0  # scenario assumption: p99 driven by long prompts and queueing
 
     # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
     ratio = p99_latency_ms / mean_latency_ms
@@ -770,7 +770,7 @@ class TailLatencyRatio:
 
 ### Physical deliverability {.unnumbered}
 
-The Llama 2 70B token analysis above carries the second half. The iron law (principle \ref{pri-iron-law}) splits the cost of one generated token into data movement, compute, and overhead; the silicon contract (principle \ref{pri-silicon-contract}) and the arithmetic intensity law (principle \ref{pri-arithmetic-intensity}) then show which term binds, with batch-one decode at about 1 FLOP/byte, far left of the ridge point, and a memory-transfer bound `{python} ConclusionRoofline.ratio_mult_str` the compute bound. The energy-movement principle (\ref{pri-energy-movement}) implies that the same bytes dominate energy per token, since one DRAM access costs about `{python} EnergyMovementMath.dram_vs_range_mult_str` as much as one arithmetic operation. Batching and quantization raise intensity and cut traffic, and the latency budget (principle \ref{pri-latency-budget}) decides how far batching may go. Consider a large language model (LLM) chat endpoint whose mean response takes `{python} TailLatencyRatio.mean_latency_ms_str` but whose p99, driven by long generations, reaches `{python} TailLatencyRatio.p99_latency_ms_str`, a tail `{python} TailLatencyRatio.conclusion_tail_ratio_mult_str` the mean [@dean2013]. The product commits to the tail quantile, so the batching that improves throughput must stop where it pushes that quantile past its deadline.
+The Llama 2 70B token analysis above carries the second half. The iron law (principle \ref{pri-iron-law}) splits the cost of one generated token into data movement, compute, and overhead; the silicon contract (principle \ref{pri-silicon-contract}) and the arithmetic intensity law (principle \ref{pri-arithmetic-intensity}) then show which term binds, with batch-one decode at about 1 FLOP/byte, far left of the ridge point, and a memory-transfer bound `{python} ConclusionRoofline.ratio_mult_str` the compute bound. The energy-movement principle (\ref{pri-energy-movement}) implies that the same bytes dominate energy per token, since one DRAM access costs about `{python} EnergyMovementMath.dram_vs_range_mult_str` as much as one arithmetic operation. Batching and quantization raise intensity and cut traffic, and the latency budget (principle \ref{pri-latency-budget}) decides how far batching may go. Consider a large language model (LLM) chat endpoint whose mean time to first token is `{python} TailLatencyRatio.mean_latency_ms_str` but whose p99, driven by long prompts and by queueing behind long generations, reaches `{python} TailLatencyRatio.p99_latency_ms_str`, a tail `{python} TailLatencyRatio.conclusion_tail_ratio_mult_str` the mean [@dean2013]. The product commits to the tail quantile, so the batching that improves throughput must stop where it pushes that quantile past its deadline.
 
 ::: {.column-margin}
 ```{=latex}
@@ -781,11 +781,11 @@ The Llama 2 70B token analysis above carries the second half. The iron law (prin
 *Mean latency hides the tail; the selected tail quantile governs the SLO.*
 :::
 
-The two traces use different principles, but they share one discipline: name the binding term, measure it, and budget for it. That discipline is what the bitter lesson demands of engineers. Scale works, but only a system that can afford it and can still be trusted continues to scale. The remaining question is where these constraints bind next, as ML systems spread across heterogeneous deployment targets, confront adversarial conditions, and grow into compositions of many components.
+The two traces use different principles, but they share one discipline: name the binding term, measure it, and budget for it. That discipline is the engineering answer to the bitter lesson. Scale works, but only a system that can afford it and can still be trusted continues to scale. The remaining question is where these constraints bind next, as ML systems spread across heterogeneous deployment targets, confront adversarial conditions, and grow into compositions of many components.
 
 ## Future Directions {#sec-future-directions-01df}
 
-An autonomous vehicle navigating an unfamiliar intersection cannot wait for a cloud round-trip, and its sensors already saturate the local bus it shares with the model; nor can a clinical assistant afford an uncalibrated diagnostic response under distribution shift. The framework is most useful when it forecasts where such physical and statistical constraints bind next. Three areas put the same physics under increasing pressure: deployment across diverse contexts, robustness under adversarial conditions [@goodfellow2015explaining], and societal applications whose failures carry public consequences. A fourth horizon, systems that compose multiple models, tools, and verifiers or grow beyond one machine, extends the same lens rather than replacing it.
+An autonomous vehicle navigating an unfamiliar intersection cannot wait for a cloud round-trip, and its sensor streams compete with the model for the same local bus; nor can a clinical assistant afford an uncalibrated diagnostic response under distribution shift. The framework is most useful when it forecasts where such physical and statistical constraints bind next. Three areas put the same physics under increasing pressure: deployment across diverse contexts, robustness under adversarial conditions [@goodfellow2015explaining], and societal applications whose failures carry public consequences. A fourth horizon, systems that compose multiple models, tools, and verifiers or grow beyond one machine, extends the same lens rather than replacing it.
 
 ### Applying principles to emerging deployment contexts {.unnumbered}
 
@@ -955,7 +955,7 @@ When workloads exceed a single node, the resource boundary moves outward, but bo
 *Fleet scale turns rare component failures into routine system events.*
 :::
 
-Systems engineering demands continuous skepticism: optimizing components in isolation routinely introduces systemic failure modes, creating the architectural pitfalls and common fallacies encountered when translating local benchmark wins into production deployments.
+Systems engineering demands continuous skepticism: optimizing components in isolation routinely introduces systemic failure modes, creating the architectural pitfalls encountered when translating benchmark wins into production. Recognizing these failure patterns prevents costly redeployments.
 
 ## Fallacies and Pitfalls {#sec-fallacies-pitfalls-12ef}
 
@@ -1074,7 +1074,7 @@ ML systems engineering differs from isolated component optimization by reasoning
 
 * **Assumptions matter across implementations**: The thirteen principles turn framework-specific craft into measurable reasoning by combining physical bounds, decompositions, fitted models, requirements, and heuristics. Apply each only within its stated scope.
 * **Trace displaced costs without assuming conservation**: Compression, batching, monitoring, and governance can relocate burdens across data, algorithm, and machine, while good design can remove accidental complexity outright. Measurement distinguishes the two cases.
-* **Boundaries reveal the bottleneck**: In the idealized batch-one, two-H100 model, the memory-transfer lower bound for a Llama 2 70B token is about `{python} ConclusionRoofline.ratio_mult_str` the peak-compute lower bound, and in the illustrative LLM chat endpoint the p99 latency is `{python} TailLatencyRatio.conclusion_tail_ratio_mult_str` the mean. Systems thinking means measuring where physics, traffic, and users bind.
+* **Boundaries reveal the bottleneck**: In the idealized batch-one, two-H100 model, the memory-transfer lower bound for a Llama 2 70B token is about `{python} ConclusionRoofline.ratio_mult_str` the peak-compute lower bound, and in the illustrative LLM chat endpoint the p99 time to first token is `{python} TailLatencyRatio.conclusion_tail_ratio_mult_str` the mean. Systems thinking means measuring where physics, traffic, and users bind.
 * **Both halves of the dual mandate are measurable**: Trustworthy behavior is tracked through drift, skew, and fitted feedback factors; physical deliverability through the iron law, the roofline, and energy per event. Neither is certified once at launch; both are budgets the system must keep meeting.
 
 :::

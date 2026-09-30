@@ -74,7 +74,7 @@ These interfaces determine how infrastructure components partition responsibilit
 
 [^fn-telemetry-mlops-pipeline]: **Telemetry**\index{Telemetry!ML observability}: The feedback path that can make model degradation visible before it becomes a business failure; crashes and error codes expose some software failures, but semantic errors can remain silent in any application. ML systems add distribution shift, which can go undetected without statistical telemetry such as feature distributions, prediction confidence, and drift indicators. Availability metrics alone would not expose this degradation.
 
-Operating this feedback path requires distinguishing MLOps from traditional DevOps, establishing the foundational principles that govern production decisions, and isolating the debt patterns that accumulate when those boundaries fail.
+Operating this feedback path requires distinguishing statistical MLOps from deterministic DevOps. Foundational principles govern production promotion, while proactive architectural boundaries isolate the technical debt patterns that accumulate when interfaces fail.
 
 ## Principles and Foundations {#sec-ml-operations-mlops-3ea3}
 
@@ -722,7 +722,7 @@ Development infrastructure turns the debt patterns diagnosed earlier into enforc
 \endgroup
 ```
 
-These operational components span the boundary between high-level algorithmic abstractions and low-level machine execution. As shown in @fig-ops-layers, the system stack stratifies responsibilities across five tiers: ML models, frameworks, orchestration, infrastructure, and hardware. While models and frameworks express tensor computations mathematically, they remain unaware of cluster state, hardware faults, or input distribution drift. Model orchestration and infrastructure bridge this gap: orchestration manages data lineage, feature computation, and model serving, while infrastructure schedules accelerator resources, manages storage tiers, and collects runtime telemetry to enforce the debt-remediation contracts identified in @tbl-mlops-infrastructure-debt.
+These operational components span the boundary between high-level algorithmic abstractions and low-level machine execution, stratifying responsibilities across five tiers: ML models, frameworks, orchestration, infrastructure, and hardware. While models and frameworks express tensor computations mathematically, they remain unaware of cluster state, hardware faults, or input distribution drift. Model orchestration and infrastructure bridge this gap: orchestration manages data lineage, feature computation, and model serving, while infrastructure schedules accelerator resources, manages storage tiers, and collects runtime telemetry to enforce the debt-remediation contracts identified in @tbl-mlops-infrastructure-debt.
 
 @Fig-ops-layers places each component in one of five tiers of the stack. The rest of this chapter organizes the same components by what each must guarantee. Rather than viewing development infrastructure as an ephemeral catalog of third-party cloud tools and vendor scripts, systems engineering organizes MLOps infrastructure into four durable functional planes. The storage and retrieval plane bridges the physical divide between high-throughput analytical scans (immutable, columnar Parquet files on durable storage for offline training) and low-latency point lookups (in-memory key-value stores for online real-time serving), unified by a shared feature schema. The workflow orchestration plane manages deterministic dependency DAGs that sequence pipeline stages (ingest $\to$ validate $\to$ transform $\to$ train $\to$ evaluate) with execution retry semantics, lineage capture, and scheduled or event-driven triggers. The artifact and lineage ledger maintains immutable, content-addressed cryptographic hashes for dataset snapshots, code commits, container images, and trained weights, tracking end-to-end provenance so any production prediction can be audited back to its exact training inputs. Finally, the compute execution runtime allocates and schedules accelerator hardware, host memory, and CPU cores across training jobs and serving endpoints, enforcing isolation bulkheads and dynamic scaling.
 
@@ -824,7 +824,7 @@ The data dependency debt and training-serving skew analyzed in @sec-ml-operation
 
 Feature stores resolve a fundamental systems tension between batch throughput and online latency by maintaining two synchronized storage tiers behind a unified API. Offline training requires high-throughput sequential reads across terabytes or petabytes of historical logs, which is optimized for columnar storage formats (such as Parquet) hosted on distributed object storage or data warehouses. In contrast, online inference requires sub-millisecond point lookups keyed by entity identifier (such as `user_id`), bounded by strict tail-latency service-level objectives (SLOs). An online store satisfies this access pattern using in-memory or distributed key-value stores (such as Redis or Cassandra). While the underlying physical engines differ to match these access patterns, both read from the same versioned transformation logic.
 
-Historical feature retrieval must strictly enforce point-in-time correctness (preventing temporal data leakage or time travel). In standard software engineering, joining two database tables on a primary key (such as `user_id`) is deterministic and timeless. In machine learning systems, every join must be *temporal*. Suppose an engineer is training a fraud detection model to predict whether a credit card transaction occurring at 14:02 is fraudulent. At 14:05, the bank's automated fraud system flags the card and updates the user's account record in the operational database: `is_account_locked = True`. If the offline training pipeline performs a naive static SQL join between the transactions table and the current users table, the 14:02 transaction will be matched against the 14:05 record, seeing `is_account_locked = True`. The training algorithm quickly discovers that this feature is a near-perfect predictor of fraud. But in live production, when a transaction arrives at 14:02, the account-lock event has not yet occurred. The model encounters `is_account_locked = False`, its learned decision boundary fails, and production accuracy collapses. This contamination is known as *lookahead bias* (or *temporal target leakage*).
+Historical feature retrieval must strictly enforce point-in-time correctness (preventing temporal data leakage or time travel). In standard software engineering, joining two database tables on a primary key (such as `user_id`) is deterministic and timeless. In machine learning systems, every join must be *temporal*. Suppose an engineer is training a fraud detection model to predict whether a credit card transaction occurring at 14:02 is fraudulent. At 14:05, the bank's automated fraud system flags the card and updates the user's account record in the operational database: `is_account_locked = True`. If the offline training pipeline performs a naive static SQL join between the transactions table and the current users table, the 14:02 transaction will be matched against the 14:05 record, seeing `is_account_locked = True`. The training algorithm quickly discovers that this feature is a near-perfect predictor of fraud. In live production, however, when a transaction arrives at 14:02, the account-lock event has not yet occurred. The model encounters `is_account_locked = False`, its learned decision boundary fails, and production accuracy collapses. This contamination is known as *lookahead bias* (or *temporal target leakage*).
 
 A feature store prevents lookahead bias by executing an *as-of join*: for any historical observation timestamp $t_{\text{obs}}$, it scans an immutable, append-only feature change log and reconstructs the exact state of the world as it existed at $t \le t_{\text{obs}}$, strictly blinding the training pipeline to any record written at $t > t_{\text{obs}}$. By automating point-in-time (as-of) joins across timestamped event logs, the feature store enforces temporal causality in training sets while keeping feature definitions unified across offline and online environments.
 
@@ -856,7 +856,7 @@ Training-serving skew\index{Training-serving skew!silent accuracy degradation}\i
 
 A production recommendation system illustrates how feature divergence manifests in deployment. One month after rollout, the model exhibits an 8 percent accuracy degradation despite zero alterations to model code or weights. Comparing feature distributions reveals that `user_session_length` has an empirical mean of 45 minutes in the training set but only 12 minutes in online inference. The failure traces to feature-definition skew: the offline training pipeline calculated wall-clock duration from the initial event to the final event in a session, whereas the online serving path counted only foreground-active time after filtering idle periods. The model learned decision boundaries against a feature distribution that the serving infrastructure never delivers.
 
-Feature stores resolve this discrepancy by centralizing feature logic into a single versioned definition, building upon the data pipelines in @sec-data-engineering. @Lst-feature-store-consistency demonstrates the architecture: training materializes historical features with point-in-time correctness, serving performs real-time point lookups, and both pipelines bind to the identical versioned definition hash rather than independent code paths.
+Feature stores resolve this discrepancy by centralizing feature logic into a single versioned definition, extending the data pipelines in @sec-data-engineering. @Lst-feature-store-consistency demonstrates the architecture: training materializes historical features with point-in-time correctness, serving performs real-time point lookups, and both pipelines bind to the identical versioned definition hash rather than independent code paths.
 
 ::: {#lst-feature-store-consistency lst-cap="**Feature Store Consistency**: Unified retrieval reduces training-serving skew by sharing versioned feature definitions across both pipelines."}
 
@@ -1492,15 +1492,11 @@ Development infrastructure addresses two of the three critical system interfaces
 
 These represent only two-thirds of the operational challenge. A model that passes every validation gate and deploys cleanly can still fail silently in production as input distributions shift. The third critical interface, production-monitoring, requires practices focused not on building models, but on preserving predictive correctness over time.
 
-## Production Operations {#sec-ml-operations-production-operations-b76d}
+## Deployment and Serving {#sec-ml-operations-production-operations-b76d}
 
-*A deployed model has an operational half-life.* While conventional software binaries maintain deterministic correctness as long as underlying hardware invariants hold, machine learning models couple deterministic matrix arithmetic to an external, non-stationary data distribution. As live input features diverge from the training manifold, predictions degrade silently even while cluster health checks—from HTTP response codes to tail latency ($p_{99}$)—remain completely green. Production operations implements the production-monitoring interface to make this silent decay visible and actionable. By pairing progressive traffic routing with runtime drift detection, operational infrastructure isolates failing model versions and triggers mitigation before erroneous inferences propagate to downstream systems.
+A model that passes every offline gate has still not made a single production decision. Between the validated checkpoint and the first user-facing prediction lie packaging, conversion to a serving runtime, staged exposure to live traffic, and a path back if the new version misbehaves, and at each step the artifact users see can drift from the artifact that was evaluated. Deployment transforms a static checkpoint into a versioned, reproducible execution artifact; serving allocates accelerator memory, stages input batches, and schedules compute kernels to satisfy latency SLOs under dynamic request loads. Operations owns the seams between the two: proving that what ships is what was validated, limiting how much traffic a bad version can reach, and keeping rollback fast enough to use.
 
-### Model deployment and serving {#sec-ml-operations-model-deployment-serving-63f2}
-
-Once trained and validated, a model must be integrated into a production environment that delivers predictions at scale. Deployment transforms a static checkpoint into a versioned, reproducible execution artifact; serving allocates accelerator memory, stages input batches, and schedules compute kernels to satisfy latency SLOs under dynamic request loads. Together, these systems operationalize the model within the production software ecosystem.
-
-#### Model deployment {#sec-ml-operations-model-deployment-b9b9}
+### Model deployment {#sec-ml-operations-model-deployment-b9b9}
 
 Consider a fraud detection model that achieves 99.2 percent precision in the development environment. An engineer exports the weights, copies them to a production server, and discovers the model predicts every transaction as legitimate: the production server runs a different version of the feature extraction library, producing inputs the model has never seen. This scenario illustrates why deployment is a systems engineering problem rather than a simple file transfer. Packaging, testing, and tracking ML models\index{Model deployment!packaging and serving} for reliable production deployment requires treating the model weights, runtime dependencies, and preprocessing configuration as a single deployable unit. Containerizing the model artifact and serving runtime[^fn-containerization-ml-deploy] packages user-space dependencies, runtime libraries, and environment variables into an immutable image, enforcing environment parity between development and cluster nodes.
 
@@ -1536,7 +1532,7 @@ Knight Capital shows why every node must be verified to run the intended version
 
 That diagnosis loop must connect directly to the release pipeline. CI/CD integration automates deployment and rollback, but only when rollback is designed as part of the rollout mechanism rather than treated as an emergency script.
 
-##### Rollback strategies and safety mechanisms {#sec-ml-operations-rollback-strategies-safety-mechanisms-7707}
+#### Rollback strategies and safety mechanisms {#sec-ml-operations-rollback-strategies-safety-mechanisms-7707}
 
 Rollback\index{Rollback!strategies, safety mechanisms}[^fn-rollback-ml-deploy] capability is the safety net that enables confident deployment. Without reliable rollback, teams become deployment-averse and slow their iteration velocity. Effective rollback requires planning for three distinct scenarios:
 
@@ -1554,19 +1550,19 @@ The fastest tier, **immediate rollback**\index{Rollback!immediate}, addresses cr
 
 : **Rollback Patterns by Scenario**: Each rollback type requires different infrastructure support and state handling strategies. Immediate rollback demands always-warm standbys; delayed rollback may require data migration procedures. {#tbl-rollback-patterns}
 
-###### Rollback testing {.unnumbered}
+##### Rollback testing {.unnumbered}
 
 Rollback procedures that have never been tested may fail when needed, and the gap is often discovered during an active incident, when cognitive load and time pressure are highest. Failure can stem from configuration dependencies, incompatible state, or unclear ownership. Periodic rollback exercises expose these gaps before they matter. Automated rollback criteria can shorten reaction time, but thresholds must be calibrated to the service and include safeguards against flapping. The restored model must also produce consistent behavior rather than predictions corrupted by stale caches or incompatible feature state. Step-by-step runbooks ensure that the responder need not be the person who designed the deployment.
 
-###### Stateful vs. stateless rollback {.unnumbered}
+##### Stateful vs. stateless rollback {.unnumbered}
 
 ML systems vary in statefulness, which directly governs rollback complexity. For stateless workloads like tabular classification and static regression, rollback requires only swapping model weights or routing traffic back to the prior container, because individual inferences share no execution context. In contrast, stateful models—including sequential recommenders, session-based search rankers, and conversational systems—accumulate transient user state. Reverting such workloads can demand session resets, schema shims for cached context vectors, or explicit state migration; capturing versioned checkpoints at deployment boundaries mitigates this friction, but clean restoration remains an architectural property that requires empirical validation rather than assumption. For instance, two-tower recommendation and search services frequently precalculate and store dense user and item embeddings in low-latency caches; if Model v2 rotates the latent vector space or changes embedding dimensions, those cached vectors become mathematical nonsense to a rolled-back Model v1. A stateful rollback must therefore orchestrate atomic cache invalidation or dual-version namespace switching alongside weight redeployment to prevent scoring queries against incompatible vector spaces. The most complex failure mode arises in systems with feedback loops: when bad predictions pollute downstream feature logs or clickstream training sets during the degraded window, reverting the serving binary leaves contaminated data in the retraining corpus that must be expunged or quarantined before previous behavior is restored.
 
-##### A/B testing for model validation {#sec-ml-operations-ab-testing-model-validation-e480}
+#### A/B testing for model validation {#sec-ml-operations-ab-testing-model-validation-e480}
 
 A/B testing\index{A/B testing!statistical model validation} provides the statistical foundation for deployment decisions by comparing model versions under controlled conditions. Unlike canary deployments (which validate operational stability), A/B tests measure whether a new model improves business outcomes with statistical confidence.
 
-###### Experiment setup and decision rules {.unnumbered}
+##### Experiment setup and decision rules {.unnumbered}
 
 ```{python}
 #| echo: false
@@ -1677,169 +1673,21 @@ To maintain lineage and auditability, teams track model artifacts, including scr
 
 [^fn-ray-distributed-ml]: **Ray**\index{Ray!distributed ML}: A distributed computing framework from UC Berkeley [@moritz2018ray] that provides a unified task and actor interface, backed by a distributed scheduler and fault-tolerant store. The broader MLOps lesson is that fragmented infrastructure creates translation points where preprocessing logic, normalization constants, tokenizer versions, or artifact formats can diverge silently. Shared execution abstractions can reduce that fragmentation, but training-serving skew still requires explicit consistency checks across data, features, and serving code.
 
-#### Model format optimization {#sec-ml-operations-model-format-optimization-c9d6}
+### Validating the serving artifact {#sec-ml-operations-model-format-optimization-c9d6}
 
-An unoptimized PyTorch model in eager mode dispatches operators as discrete kernel launches through the Python interpreter, repeatedly round-tripping intermediate activation tensors through high-bandwidth memory (HBM) and incurring launch overhead that inflates p99 latency well beyond strict SLOs. Format optimization\index{Model Optimization!format conversion} compiles the dynamic computation graph into a static, hardware-tuned intermediate representation that fuses adjacent kernels, folds constant weights, and eliminates dead code. While @sec-model-serving-inference-runtime-selection-5eef and @sec-model-serving-precision-selection-serving-55ba detail the underlying runtimes and numerical precision choices, operationalizing these formats requires governing the conversion and validation workflow.
+The artifact that reaches the serving fleet is rarely the checkpoint that passed evaluation. Before deployment, the model is usually compiled from eager framework code into a static graph for a specific runtime and often lowered in precision; @sec-model-serving-inference-runtime-selection-5eef compares those runtimes and @sec-model-serving-precision-selection-serving-55ba the precision choices. Each conversion buys speed with portability, and each can change what the model computes, so the operational obligation is to prove that the converted artifact still behaves like the model that was validated.
 
-The first operational boundary is representation. Open Neural Network Exchange (ONNX)\index{ONNX!model interchange format} is a widely used interchange format for model portability, but the choice of runtime and execution provider\index{Model Optimization!framework comparison} determines the hardware targets, supported operators, and optimizations available. ONNX Runtime emphasizes a common API across multiple backends, while TensorRT\index{TensorRT!model optimization} specializes execution for NVIDIA GPUs; actual performance must be measured for the target model and hardware. A typical workflow exports a PyTorch model to ONNX, performs graph cleanup (constant folding and dead-code elimination), fuses compatible operators, selects precision, and validates numerical and task-level behavior against the source model at each step. The representative options in @tbl-model-optimization-frameworks differ in portability, hardware scope, and optimization mechanisms.
+That proof must target the failure modes that conversion introduces silently\index{Model Optimization!conversion validation}. Consider a team that deploys an INT8-quantized model after verifying only throughput improvement: classification accuracy drops on rare but high-value edge cases, and the degradation goes undetected for weeks because aggregate metrics remain within SLO bounds. The first validation layer is numerical equivalence, comparing optimized outputs against the original model on a representative test set with application-specific divergence thresholds. That check is necessary but insufficient, because a static calibration slice is not live traffic: rare inputs, out-of-distribution examples, and subgroup-specific cases can expose quantization artifacts that aggregate test metrics hide, so the comparison must be disaggregated by the same cohorts that production monitoring tracks (@sec-ml-operations-production-monitoring-5e1b).
 
-```{=latex}
-\begingroup
-\renewcommand{\arraystretch}{1.3}
-```
+The second layer is operational validation. Memory footprint must be measured at peak runtime utilization, including dynamic allocations during inference, since some optimizations trade increased runtime memory for computational speed. Warm-up behavior varies by runtime: Accelerated Linear Algebra\index{XLA!warm-up compilation} may JIT-compile kernels during initial execution, whereas TensorRT\index{TensorRT!model optimization} selects tactics and builds an engine before deployment; loading that engine can still add startup latency. Runtime version compatibility then closes the loop. Deployment configurations need explicit version pinning\index{Version pinning!inference runtime}, because even a minor runtime upgrade can change kernel selection, and with it both latency and numerical results, in an artifact whose weights never changed. An unpinned runtime is an untracked input to @eq-model-reproducibility.
 
-| **Framework**    | **Source Formats**                             | **Target Hardware**           | **Key Optimizations**                                   |
-|:-----------------|:-----------------------------------------------|:------------------------------|:--------------------------------------------------------|
-| **ONNX Runtime** | PyTorch, TF, Keras, scikit                     | CPU, GPU, NPU                 | Graph optimization, operator fusion, quantization       |
-| **TensorRT**     | ONNX, TF, PyTorch                              | NVIDIA GPU only               | Kernel auto-tuning, precision calibration, layer fusion |
-| **OpenVINO**     | ONNX, TensorFlow/TFLite, PyTorch, PaddlePaddle | Intel CPU, GPU, NPU           | Model compression, async execution, caching             |
-| **TF-TRT**       | TensorFlow                                     | NVIDIA GPU                    | TensorRT integration within TensorFlow graph            |
-| **Core ML**      | TensorFlow, PyTorch                            | Apple Neural Engine, GPU, CPU | Unified format for Apple devices, on-device inference   |
-| **TFLite**       | TensorFlow, Keras                              | Mobile CPU, GPU, Edge TPU     | Quantization, delegate support, model compression       |
+### Inference serving {#sec-ml-operations-inference-serving-3f9a}
 
-: **Model Optimization Frameworks**: Six representative frameworks differ in supported source formats, target hardware, and optimization mechanisms. TensorRT and TF-TRT are NVIDIA-specific, whereas ONNX Runtime and OpenVINO span multiple processor classes. {#tbl-model-optimization-frameworks tbl-colwidths="[15,31,22,32]"}
+The serving system itself (request scheduling, batching, runtime selection, and the latency budget that allocates a p99 SLO across the request path) is the subject of @sec-model-serving, where @sec-model-serving-latency-budget-ef40 shows that model inference is only one slice of end-to-end latency, and often not the largest (principle \ref{pri-latency-budget}). Operations inherits that decomposition as a diagnostic instrument\index{Latency budget!end-to-end analysis}: when p99 regresses, per-stage timings for network, feature retrieval, parsing, inference, and serialization tell the on-call engineer which stage moved, and therefore which fix and which team the incident needs. Without stage-level tracing, every latency regression looks like a model problem, and the reflexive responses of rolling back or quantizing further cannot recover time lost in a feature store or a network hop (principle \ref{pri-amdahl}).
 
-```{=latex}
-\endgroup
-```
+Edge deployment keeps these operational goals (controlled rollout, fast rollback, stage-level telemetry) but changes the constraints under which they must be met, because the devices have limited power, memory, and connectivity.
 
-The durable architectural trade-off is portability versus peak performance: every gain in accelerator throughput is purchased through specialized runtime commitments and operator constraints. Numerical precision forms the second operational boundary. Lowering numerical precision through quantization\index{Quantization!serving optimization} (e.g., from FP32 or FP16 down to INT8 or FP8) doubles arithmetic throughput and relieves memory bandwidth pressure on tensor cores. From an operational perspective, the primary deployment hurdle in quantization is verifying that INT8 or FP8 representations preserve numerical fidelity across live, non-stationary production traffic distributions rather than static calibration slices. The mechanics of post-training quantization (PTQ), quantization-aware training (QAT), and mixed precision appear in @sec-model-compression, with runtime precision selection covered in @sec-model-serving-precision-selection-serving-55ba.
-
-Production deployment of optimized models therefore requires validation that targets the failure modes optimization can introduce silently. Consider a team that deploys an INT8-quantized model after verifying only throughput improvement: classification accuracy drops on rare but high-value edge cases, and the degradation goes undetected for weeks because aggregate metrics remain within SLO bounds. The first validation layer is numerical equivalence, comparing optimized outputs against the original model on a representative test set with application-specific divergence thresholds. That check is necessary but insufficient because rare inputs, out-of-distribution examples, and subgroup-specific cases can expose quantization artifacts that aggregate test metrics hide.
-
-The second layer is operational validation. Memory footprint must be measured at peak runtime utilization, including dynamic allocations during inference, since some optimizations trade increased runtime memory for computational speed. Warm-up behavior varies by runtime: Accelerated Linear Algebra\index{XLA!warm-up compilation} may JIT-compile kernels during initial execution, whereas TensorRT selects tactics and builds an engine before deployment; loading that engine can still add startup latency. Runtime version compatibility then closes the loop: deployment configurations need explicit version pinning because even minor runtime changes can affect both performance characteristics and numerical correctness.
-
-#### Inference serving {#sec-ml-operations-inference-serving-3f9a}
-
-A serialized model artifact on disk produces value only when paired with execution infrastructure that receives network requests, stages inputs, schedules accelerator compute, and returns predictions within strict latency bounds. Operating serving infrastructure at hyperscale—such as the tens of trillions of daily inferences reported across fleet architectures [@hazelwood2018]—demands continuous lifecycle management alongside the formal SLOs detailed in @sec-model-serving.
-
-Production-grade serving frameworks such as TensorFlow Serving [@olston2017tensorflow], NVIDIA Triton Inference Server [@nvidia_triton], and KServe [@kserve] provide standardized mechanisms for deploying, versioning, and scaling models. From an operational perspective, the key decision is which framework best fits the deployment context: TensorFlow Serving for TensorFlow-native workflows, Triton for multi-framework GPU serving, and KServe for Kubernetes-native environments requiring scale-to-zero.
-
-Regardless of which serving paradigm is used (static or dynamic, as detailed in @sec-model-serving-static-vs-dynamic-inference-e864), model inference is often only a fraction of total end-to-end latency\index{Service Level Objective!latency and error rates}. @Sec-model-serving-latency-budget-ef40 develops that accounting in full (principle \ref{pri-latency-budget}); operationally, the decomposed latency budget\index{Latency budget!end-to-end analysis} tells the on-call team whether a regression lies in the model or elsewhere in the request path.
-
-```{python}
-#| echo: false
-#| label: ops-latency-budget-calc
-# ┌─────────────────────────────────────────────────────────────────────────────
-# │ LATENCY BUDGET BREAKDOWN
-# ├─────────────────────────────────────────────────────────────────────────────
-# │ Context: Callout "The Latency Budget" - shows why end-to-end latency is not
-# │          just model inference time.
-# │
-# │ Goal: Contrast model inference time with total end-to-end latency.
-# │ Show: That inference is only 45% of the latency budget, capping speedup potential.
-# │ How: Sum request-lifecycle components and apply Amdahl-style speedup math.
-# │
-# └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import fmt, fmt_usd, check
-from mlsysim.physics import calc_amdahls_speedup
-
-# ┌── LEGO ───────────────────────────────────────────────
-class LatencyBudget:
-    """
-    Namespace for Latency Budget Breakdown.
-    Scenario: Allocating components for a 100 ms p99 SLO.
-    """
-
-    # ┌── 1. LOAD (Constants) ───────────────────────────────────────────────
-    slo_p99 = 100
-
-    network = 15
-    feature_fetch = 25
-    request_parse = 5
-    inference = 45
-    post_proc = 5
-    serialization = 5
-    model_speedup = 2.0
-
-    # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
-    total = network + feature_fetch + request_parse + inference + post_proc + serialization
-    non_inference = total - inference
-    inference_fraction = inference / total
-    end_to_end_speedup = calc_amdahls_speedup(inference_fraction, model_speedup)
-    new_total_after_model_speedup = total / end_to_end_speedup
-
-    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
-    check(total == slo_p99, f"Component budgets sum to {total} ms, but SLO is {slo_p99} ms.")
-    check(round(end_to_end_speedup, 1) == 1.3, f"Expected 2x model speedup to yield about 1.3x end-to-end, got {end_to_end_speedup:.2f}x.")
-
-    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
-    slo_p99_ms_str = fmt_time(slo_p99, 'millisecond', precision=0, commas=False)
-    network_ms_str = fmt_time(network, 'millisecond', precision=0, commas=False)
-    feature_fetch_ms_str = fmt_time(feature_fetch, 'millisecond', precision=0, commas=False)
-    request_parse_ms_str = fmt_time(request_parse, 'millisecond', precision=0, commas=False)
-    inference_ms_str = fmt_time(inference, 'millisecond', precision=0, commas=False)
-    post_proc_ms_str = fmt_time(post_proc, 'millisecond', precision=0, commas=False)
-    serialization_ms_str = fmt_time(serialization, 'millisecond', precision=0, commas=False)
-    non_inference_ms_str = fmt_time(non_inference, 'millisecond', precision=0, commas=False)
-    inference_pct_str = fmt_percent(inference_fraction, precision=0, commas=False, style='prose')
-    # Budget-share column: each component as a fraction of the total budget
-    network_share_pct_str = fmt_percent(round(network / total, 4), precision=0, commas=False, style='symbol')
-    feature_fetch_share_pct_str = fmt_percent(round(feature_fetch / total, 4), precision=0, commas=False, style='symbol')
-    request_parse_share_pct_str = fmt_percent(round(request_parse / total, 4), precision=0, commas=False, style='symbol')
-    inference_share_pct_str = fmt_percent(round(inference / total, 4), precision=0, commas=False, style='symbol')
-    post_proc_share_pct_str = fmt_percent(round(post_proc / total, 4), precision=0, commas=False, style='symbol')
-    serialization_share_pct_str = fmt_percent(round(serialization / total, 4), precision=0, commas=False, style='symbol')
-    model_speedup_mult_str = fmt_multiple(model_speedup, precision=0, commas=False)
-    new_total_after_model_speedup_ms_str = fmt_time(new_total_after_model_speedup, 'millisecond', precision=1, commas=False)
-    end_to_end_speedup_mult_str = fmt_multiple(end_to_end_speedup, precision=1, commas=False)
-```
-
-::: {#psp-ml-ops-latency-budget .callout-perspective title="The latency budget"}
-
-```{=latex}
-\begin{minipage}{1\linewidth}
-\renewcommand{\arraystretch}{1.4}
-```
-
-A service has a `{python} LatencyBudget.slo_p99_ms_str` p99 SLO, and the model inference budget is `{python} LatencyBudget.inference_ms_str`; the remaining `{python} LatencyBudget.non_inference_ms_str` must cover every other stage of the request path. @Tbl-latency-budget-components allocates the budget across the request lifecycle.
-
-| **Component**                                     |                   **Budget Share**                   |                 **p99 Budget**                | **Optimization Lever**                       |
-|:--------------------------------------------------|:----------------------------------------------------:|:---------------------------------------------:|:---------------------------------------------|
-| **Network RTT**\index{Network RTT!latency budget} |    `{python} LatencyBudget.network_share_pct_str`    |    `{python} LatencyBudget.network_ms_str`    | Edge deployment, connection pooling          |
-| **Feature retrieval**                             | `{python} LatencyBudget.feature_fetch_share_pct_str` | `{python} LatencyBudget.feature_fetch_ms_str` | Feature caching, precomputation              |
-| **Request parsing**                               | `{python} LatencyBudget.request_parse_share_pct_str` | `{python} LatencyBudget.request_parse_ms_str` | Binary protocols (gRPC), schema optimization |
-| **Model inference**                               |   `{python} LatencyBudget.inference_share_pct_str`   |   `{python} LatencyBudget.inference_ms_str`   | Quantization, batching, model distillation   |
-| **Postprocessing**                                |   `{python} LatencyBudget.post_proc_share_pct_str`   |   `{python} LatencyBudget.post_proc_ms_str`   | Async processing, result caching             |
-| **Response serialization**                        | `{python} LatencyBudget.serialization_share_pct_str` | `{python} LatencyBudget.serialization_ms_str` | Efficient formats (Protobuf, MessagePack)    |
-
-: **Latency Budget Components**: Representative allocation of a `{python} LatencyBudget.slo_p99_ms_str` p99 SLO across the request lifecycle. Model inference accounts for `{python} LatencyBudget.inference_pct_str` of total latency, leaving the majority to network, feature retrieval, parsing, postprocessing, and serialization. The optimization-lever column shows where each component can be reduced. {#tbl-latency-budget-components tbl-colwidths="[23,15,19,43]"}
-
-```{=latex}
-\end{minipage}
-```
-
-**Systems insight**: Model optimization alone often captures less than 50 percent of the latency opportunity. A model that runs `{python} LatencyBudget.model_speedup_mult_str` faster reduces this example from `{python} LatencyBudget.slo_p99_ms_str` to `{python} LatencyBudget.new_total_after_model_speedup_ms_str`, only `{python} LatencyBudget.end_to_end_speedup_mult_str` end-to-end improvement, because inference is `{python} LatencyBudget.inference_pct_str` of total latency and Amdahl's law (principle \ref{pri-amdahl}) caps the gain from accelerating that fraction alone.
-
-Systems thinking demands end-to-end analysis. Apply the D·A·M taxonomy to diagnose the root cause across Data (feature extraction overhead, serialization cost), Algorithm (too many layers, unoptimized graph), and Machine (memory bandwidth saturation, thermal throttling). Measure end-to-end performance and optimize the binding bottleneck. If feature retrieval exceeds its budget, no amount of model optimization will achieve the SLO.
-
-:::
-
-Beyond the latency budget, operationalizing serving requires selecting infrastructure techniques for the constraint the budget exposed. @Tbl-serving-techniques summarizes representative strategies for ML-as-a-service infrastructure; the organizing question is whether the bottleneck lies in queueing delay, capacity, routing, orchestration overhead, or latency prediction.
-
-```{=latex}
-\begingroup
-\renewcommand{\arraystretch}{1.35}
-```
-
-| **Technique**                                                                      | **Description**                                                     | **Example System**              |
-|:-----------------------------------------------------------------------------------|:--------------------------------------------------------------------|:--------------------------------|
-| **Request scheduling & batching**\index{Batching!request, throughput optimization} | Groups inference requests to improve throughput and reduce overhead | Clipper [@crankshaw2017clipper] |
-| **Instance Selection & Routing**                                                   | Dynamically assigns requests to model variants based on constraints | INFaaS [@romero2021infaas]      |
-| **Predictive Autoscaling**                                                         | Adds capacity ahead of demand spikes to meet latency SLOs           | MArk [@zhang2019mark]           |
-| **Autoscaling**                                                                    | Adjusts model instances to match workload demands                   | INFaaS                          |
-| **Model Orchestration**                                                            | Coordinates execution across model components or pipelines          | AlpaServe [@li2023alpaserve]    |
-| **Execution Time Prediction**                                                      | Forecasts latency to optimize request scheduling                    | Clockwork [@gujarati2020]       |
-
-: **Serving System Techniques**: Scalable ML-as-a-service infrastructure relies on techniques like request scheduling and instance selection to optimize resource utilization and reduce latency under high load. For the underlying queuing theory and batching strategies, see @sec-model-serving. {#tbl-serving-techniques tbl-colwidths="[29,41,30]"}
-
-```{=latex}
-\endgroup
-```
-
-These strategies form the cloud-serving foundation. Edge deployment keeps the same operational goal but changes the constraints: rollback, telemetry, and update control must work on devices with limited power, memory, and connectivity.
-
-#### Edge AI deployment {#sec-ml-operations-edge-ai-deployment-patterns-dc1d}
+### Edge AI deployment {#sec-ml-operations-edge-ai-deployment-patterns-dc1d}
 
 Consider a smoke detector with an ML model for distinguishing cooking smoke from fire. When this model degrades, an engineer cannot simply SSH into the device, roll back to a previous version, and restart. The device sits on someone's ceiling with intermittent Wi-Fi, a coin-cell battery, and 256 KB of memory. Every operational assumption from cloud MLOps (instant rollback, centralized logging, real-time monitoring) must be reimagined.
 
@@ -1864,6 +1712,10 @@ Monitoring requires adaptation to resource-constrained environments: lightweight
 Graceful degradation is the defining operational pattern for edge AI. When thermal limits or battery depletion constrain hardware capacity, edge runtimes must dynamically shed load—downsampling input sample rates, bypassing speculative execution branches, or falling back to shallow heuristic models—to guarantee continuous safe operation.
 
 Getting models into production is only half the operational challenge. A successfully deployed model can still degrade through distribution shift or corrupted upstream features without raising runtime errors. Robust monitoring, incident response, and on-call practices close this loop.
+
+## Production Monitoring {#sec-ml-operations-production-monitoring-5e1b}
+
+*A deployed model has an operational half-life.* While conventional software binaries maintain deterministic correctness as long as underlying hardware invariants hold, machine learning models couple deterministic matrix arithmetic to an external, non-stationary data distribution. As live input features diverge from the training manifold, predictions degrade silently even while cluster health checks—from HTTP response codes to tail latency ($p_{99}$)—remain completely green. Monitoring is where the third critical interface, production-monitoring, makes this silent decay visible and actionable. By pairing progressive traffic routing with runtime drift detection, operational infrastructure isolates failing model versions and triggers mitigation before erroneous inferences propagate to downstream systems.
 
 ### Resource management and monitoring {#sec-ml-operations-resource-management-performance-monitoring-afe7}
 
@@ -1895,7 +1747,7 @@ Provisioning accelerator resources is only the first half of the problem; using 
 
 To understand why standard monitoring tools can be dangerously deceptive, consider the internal execution hierarchy of modern GPUs. An accelerator is partitioned into dozens of independent processing engines called streaming multiprocessors (SMs). Each SM executes instructions in lockstep groups of 32 parallel threads known as *warps*. To achieve high compute efficiency, an SM relies on fast zero-overhead context switching: while one warp waits for operands to arrive from off-chip memory, the hardware warp scheduler immediately swaps in another ready warp to execute instructions on the arithmetic ALUs or Tensor Cores.
 
-However, off-chip HBM is separated from the SMs by physical traces, imposing an access latency of several hundred clock cycles. If an ML inference or training kernel exhibits poor memory locality, uncoalesced memory access, or low arithmetic intensity (such as gathering non-contiguous embedding vectors or executing un-fused elementwise operations), every resident warp on an SM may eventually stall waiting for memory transactions to traverse the bus. During these stall cycles, the arithmetic units sit completely idle. Yet, standard administrative tools such as `nvidia-smi` sample temporal occupancy—reporting 100 percent GPU utilization simply because a kernel is resident and has at least one warp assigned to an SM. The operations dashboard displays a reassuring green gauge, while the underlying silicon is severely starved for data.
+However, off-chip high-bandwidth memory (HBM) is separated from the SMs by physical traces, imposing an access latency of several hundred clock cycles. If an ML inference or training kernel exhibits poor memory locality, uncoalesced memory access, or low arithmetic intensity (such as gathering non-contiguous embedding vectors or executing un-fused elementwise operations), every resident warp on an SM may eventually stall waiting for memory transactions to traverse the bus. During these stall cycles, the arithmetic units sit completely idle. Yet, standard administrative tools such as `nvidia-smi` sample temporal occupancy—reporting 100 percent GPU utilization simply because a kernel is resident and has at least one warp assigned to an SM. The operations dashboard displays a reassuring green gauge, while the underlying silicon is severely starved for data.
 
 Distinguishing compute execution from memory or pipeline stalls requires evaluating SM execution efficiency alongside memory bandwidth and I/O saturation. @Tbl-gpu-utilization-patterns distinguishes these utilization signatures and identifies the corresponding optimization strategy for each:
 
@@ -1941,55 +1793,7 @@ Model serving performance depends critically on GPU memory hierarchy utilization
 
 For large language model (LLM)\index{LLM!KV-cache serving} serving, the KV cache\index{KV cache!LLM serving bottleneck} often becomes the per-node memory bottleneck; @sec-model-serving-memory-kv-cache-d1ea sizes it and shows how PagedAttention manages it [@kwon2023]. Operationally, monitoring KV-cache utilization on each serving node enables capacity planning. Near the memory limit, the scheduler may queue or reject requests, reduce batch size, or shorten the admissible context, each with a different latency or service-quality cost.
 
-##### Cost-per-inference tracking {.unnumbered}
-
-Let $\text{Hourly GPU cost}$ be the billed cost of the serving GPU for one hour and $\text{Inferences per hour}$ its sustained throughput over the same interval. @Eq-inference-cost converts those hardware metrics into business-relevant cost-per-inference\index{Cost per inference!calculation}:
-$$\text{Cost per 1K inferences} = \frac{\text{Hourly GPU cost} \times 1000}{\text{Inferences per hour}}$$ {#eq-inference-cost}
-
-```{python}
-#| echo: false
-#| label: cost-per-inference-calc
-# ┌─────────────────────────────────────────────────────────────────────────────
-# │ COST-PER-INFERENCE CALCULATION
-# ├─────────────────────────────────────────────────────────────────────────────
-# │ Context: "Cost-Per-Inference Tracking" section - translates hardware
-# │          utilization metrics into business-relevant cost metrics.
-# │
-# │ Goal: Convert abstract GPU hourly rates into unit inference costs.
-# │ Show: That unit costs enable tracking efficiency degradation over time.
-# │ How: Calculate cost per 1K inferences based on hourly GPU rates and throughput.
-# │
-# └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import fmt, check
-
-# ┌── LEGO ───────────────────────────────────────────────
-class CostPerInference:
-    """Illustrative cost per 1K inferences for a batched GPU-serving scenario."""
-
-    # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    hourly_gpu_cost = Infrastructure.Pricing.Cloud.GpuTrainingUtilityScenarioPerHour.rate.to(USD / hour).magnitude
-    inferences_per_hour = 50_000
-    batch_size = 1000  # cost denominator: per 1K inferences
-
-    # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    cost_per_inference = hourly_gpu_cost / inferences_per_hour
-    cost_per_batch = cost_per_inference * batch_size
-
-    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
-    check(round(cost_per_batch, 2) == 0.06, f"Cost per 1K should be $0.06, got ${cost_per_batch:.4f}.")
-
-    # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
-    hourly_gpu_cost_str = fmt_usd(hourly_gpu_cost, precision=0, commas=False, per="hour")
-    inferences_per_hour_str = fmt_rate(inferences_per_hour, "inferences/hour", precision=0, commas=True)
-    cost_per_1k_inferences_usd_str = fmt_usd(
-        cost_per_batch,
-        precision=2,
-        commas=False,
-        per="1K inferences",
-    )
-```
-
-For an illustrative GPU at `{python} CostPerInference.hourly_gpu_cost_str` processing `{python} CostPerInference.inferences_per_hour_str`, cost is `{python} CostPerInference.cost_per_1k_inferences_usd_str`. Track this metric over time; changes may reflect pricing, workload mix, or efficiency.
+Utilization and memory telemetry also feed the number the business sees. Cost per inference\index{Cost per inference!operational tracking}, the hourly accelerator bill divided by sustained throughput, is derived in @sec-model-serving-cost-per-inference-27fc; operationally it belongs on the same dashboard as the utilization signatures above, because a rising cost per thousand inferences at constant pricing is often the first visible symptom of efficiency erosion (smaller effective batches, a shift in traffic mix, or a regression that stays inside the latency SLO).
 
 #### Model and infrastructure monitoring {#sec-ml-operations-model-infrastructure-monitoring-3988}
 
@@ -2731,9 +2535,15 @@ Robust production deployments implement cross-monitoring where external watchdog
 
 [^fn-circuit-breaker-ops]: **Circuit breaker pattern**\index{Circuit breaker pattern!ML adaptation}: Automatic failure detection that "opens" when error rates exceed configured thresholds, routing traffic away from failing services. In ML systems, the pattern requires a critical adaptation: prediction accuracy degradation demands different thresholds than service availability failures, because a model returning plausible but incorrect predictions triggers no error signal, leaving the circuit breaker blind to the most dangerous failure mode.
 
+Layered monitoring converts silent degradation into signals. Infrastructure telemetry shows whether the serving path is compute-, memory-, or I/O-bound, drift statistics show that inputs have moved, and delayed outcome metrics confirm whether the movement cost accuracy. A signal is not yet a response, however. Every alert must still be triaged, localized to data, model, or infrastructure, and acted on by someone with the authority and the runbook to act.
+
+## Incident Response and Governance {#sec-ml-operations-incident-response-governance-2c9f}
+
+The ridesharing demand model from the opening of this chapter drew attention only in week eight, and a product manager noticed before any system did. Drift monitoring could have raised the alarm by week four, when accuracy had already fallen to 88 percent, but an alert only relocates the problem. Someone must then decide quickly whether the signal is real, which system caused it, and whether to roll back, and the organization must already have decided which models were allowed to ship and who owns them. Incident response supplies the first set of decisions, governance supplies the second, and the ML Test Score audits whether both are in place before a failure tests them.
+
 ### Incident response and operational practices {#sec-ml-operations-incident-response-operational-practices-6891}
 
-Monitoring and drift detection identify anomalies; incident response, debugging, and structured on-call rotations translate those statistical signals into timely engineering action, forming the operational feedback loop that sustains production reliability.
+Incident response, debugging, and on-call rotation form the human half of the monitoring loop. They turn a statistical signal into an engineering action within a bounded time.
 
 #### Incident response for ML systems {#sec-ml-operations-incident-response-ml-systems-c637}
 
@@ -3154,7 +2964,7 @@ The evaluation partitions production risk across the Data, Algorithm, and Machin
 \endgroup
 ```
 
-Because the composite score is bounded by the minimum category, reliability audits must prioritize the bottleneck subsystem limiting the system score. Investing engineering effort to expand a model test suite from 5 to 6 points while monitoring coverage remains at 1 yields zero gain in overall production safety. Regular audits against this rubric systematically reveal whether reliability risks stem from unvalidated input pipelines, offline-online distribution divergence, or uninstrumented serving paths, directing refactoring effort toward the structural debt that directly threatens production availability.
+Because the composite score is bounded by the minimum category, reliability audits must prioritize the bottleneck subsystem limiting the system score. Investing engineering effort to expand a model test suite from 5 to 6 points while monitoring coverage remains at 1 yields zero gain in overall production safety. Regular audits against this rubric systematically reveal whether reliability risks stem from unvalidated input pipelines, offline-online distribution divergence, or uninstrumented serving paths, directing refactoring effort toward the structural debt that directly threatens production availability—and determining where the organization stands on the path toward operational maturity.
 
 ## Design and Maturity Framework {#sec-ml-operations-system-design-maturity-framework-9901}
 

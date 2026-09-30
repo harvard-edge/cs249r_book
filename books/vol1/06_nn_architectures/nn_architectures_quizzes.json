@@ -3,8 +3,8 @@
     "source_file": "books/vol1/06_nn_architectures/06_nn_architectures.qmd",
     "schema_version": 2,
     "generated_on": "2026-09-01",
-    "total_sections": 12,
-    "sections_with_quizzes": 12,
+    "total_sections": 10,
+    "sections_with_quizzes": 10,
     "sections_without_quizzes": 0
   },
   "sections": [
@@ -475,24 +475,47 @@
       }
     },
     {
-      "section_id": "#sec-network-architectures-architectural-building-blocks-aa3a",
-      "section_title": "Shared Building Blocks",
+      "section_id": "#sec-network-architectures-architecture-selection-framework-a442",
+      "section_title": "What Each Architecture Asks of the Machine",
       "quiz_data": {
         "quiz_needed": true,
         "rationale": {
           "focus_areas": [
-            "Cross-architecture portability of primitives (GEMM, Parameter sharing, Skip connections, Normalization, Gating)",
-            "Skip connections ($\\mathbf{y} = \\mathcal{F}(\\mathbf{x}) + \\mathbf{x}$) and residual Jacobian conditioning ($\\mathbf{J} = \\mathbf{I} + \\mathcal{F}'(\\mathbf{x})$)",
-            "Normalization comparison: BatchNorm (batch/spatial axis, running stats, skew) vs LayerNorm (feature axis, per-sample) vs RMSNorm (root mean square only, no mean centering)",
-            "Gating as a universal routing primitive (LSTMs, Highway Networks, Attention, MoE)",
-            "Synthesis: How modern transformers recombine all building blocks"
+            "Workload profile: parameters, activations, intensity regime, parallel axis, and binding iron-law term per family (prefill vs. decode)",
+            "The energy cost of data movement behind the intensity column",
+            "Portable building blocks and their costs: residual gradient conditioning, BatchNorm vs. LayerNorm",
+            "Decision framework scale-down loop and the wildlife monitoring case study"
           ],
-          "question_strategy": "Open with an MCQ on residual Jacobian mathematical conditioning, compare BatchNorm vs LayerNorm systems trade-offs via SHORT, order the historical emergence and migration of building blocks via ORDER, test RMSNorm simplification via FILL, and analyze why Transformers adopted LayerNorm via MCQ.",
-          "difficulty_progression": "Mathematical residual conditioning -> comparative normalization analysis -> historical building-block evolution -> modern LLM normalization optimization -> architectural synthesis rationale.",
-          "integration": "Builds on backpropagation, gradient propagation, and operator fusion across chapters.",
-          "ranking_explanation": "Tier 1: Explains the reusable engineering primitives that underpin all modern deep learning architectures."
+          "question_strategy": "Open with an MCQ that reads the prefill and decode rows of the workload profile, test the DRAM-vs-arithmetic energy gap behind the intensity column (MCQ), test residual gradient conditioning (MCQ) and BatchNorm vs. LayerNorm systems trade-offs (SHORT), evaluate the decision framework's scale-down loop (TF), and close with the wildlife case study's multi-constraint selection (SHORT).",
+          "difficulty_progression": "Reading the profile -> the physics behind its columns -> portable building blocks -> decision procedure -> a full worked selection.",
+          "integration": "Synthesizes all five architecture families on one machine and turns their costs into a deployment decision.",
+          "ranking_explanation": "Tier 1: The chapter's synthesis section connecting architecture to the iron law and to deployment selection."
         },
         "questions": [
+          {
+            "question_type": "MCQ",
+            "question": "The workload profile gives the transformer two rows, prefill and decode, even though both run the same weights. Which statement correctly explains why the binding iron-law term differs between them at small batch size?",
+            "choices": [
+              "Prefill binds on the data term because it must read the whole prompt from storage, while decode binds on the compute term because each token requires a full forward pass.",
+              "Prefill processes all $S$ prompt tokens as one matrix-matrix product, so each weight is reused across tokens and the compute term binds; decode processes one token at a time as a matrix-vector product, rereading every weight and the KV cache per token, so the data term binds.",
+              "Both phases bind on memory capacity, because the KV cache always exceeds device memory.",
+              "Decode is compute bound because its $\\mathcal{O}(S^2)$ attention scores dominate, while prefill is latency bound because tokens are processed serially."
+            ],
+            "answer": "The correct answer is B. Prefill exposes the sequence dimension as a parallel axis: the prompt's $S$ tokens form a matrix, so each weight loaded from memory is reused $S$ times and arithmetic throughput, $O/(R_{\\text{peak}}\\eta_{\\text{hw}})$, binds. Decode generates tokens serially; at small batch each step is a matrix-vector product that rereads all weights plus the growing KV cache for a single token, so the data term $D_{\\text{vol}}/\\text{BW}$ binds. Choices A and D reverse the regimes, and capacity is a feasibility constraint rather than the term that binds in the common case.",
+            "learning_objective": "Use the architecture workload profile to predict which iron-law term binds for a family in a given execution regime."
+          },
+          {
+            "question_type": "MCQ",
+            "question": "Based on the Horowitz reference energy model the chapter uses, roughly how does the energy required to read a single 32-bit word from off-chip DRAM compare to executing a single FP32 multiply?",
+            "choices": [
+              "They cost about the same, a few picojoules each, because both operations toggle a comparable number of transistors.",
+              "The FP32 multiply costs over $100\\times$ more (~640 pJ) than the DRAM read (~3.7 pJ).",
+              "The DRAM read costs roughly $2\\times$ less than the multiply because DRAM stores charge passively.",
+              "The DRAM read costs over $100\\times$ more (~640 pJ) than the FP32 multiply (~3.7 pJ), so data movement rather than arithmetic dominates the energy of low-reuse workloads."
+            ],
+            "answer": "The correct answer is D. In the reference model, an FP32 multiply costs about 3.7 pJ while fetching a 32-bit operand from off-chip DRAM costs about 640 pJ, a gap of roughly $170\\times$. That gap is why the intensity column of the workload profile is also an energy column: low-reuse rows such as batch-one MLPs and transformer decode are energy-dominated by DRAM traffic, and accelerators invest in on-chip SRAM and scratchpads to capture reuse. The other choices invert or erase the physical gap.",
+            "learning_objective": "Evaluate the energy cost ratio of off-chip DRAM data movement versus floating-point arithmetic and explain its systems consequences."
+          },
           {
             "question_type": "MCQ",
             "question": "In a residual block implementing $\\mathbf{y} = \\mathcal{F}(\\mathbf{x}) + \\mathbf{x}$, how does the additive identity shortcut mathematically condition the layer Jacobian $\\mathbf{J} = \\frac{\\partial \\mathbf{y}}{\\partial \\mathbf{x}}$ during backpropagation to prevent vanishing gradients in 100+ layer networks?",
@@ -512,169 +535,16 @@
             "learning_objective": "Compare Batch Normalization and Layer Normalization across batch-size sensitivity and training-versus-inference execution behavior."
           },
           {
-            "question_type": "ORDER",
-            "question": "Order the historical emergence and cross-architecture migration of deep learning building blocks from earliest innovation to modern synthesis:\n(1) Dense linear operations (GEMM) established as the universal baseline in Multilayer Perceptrons\n(2) Local parameter sharing and spatial weight reuse introduced in Convolutional Neural Networks\n(3) Gating mechanisms (input/forget/output gates) introduced in LSTMs to control signal propagation\n(4) Additive identity skip connections and Batch Normalization introduced in ResNets to enable 100+ layer depth\n(5) Transformers synthesize GEMM projections, skip connections, layer normalization, and attention gating into a unified parallel architecture",
-            "answer": "The correct order is (1) -> (2) -> (3) -> (4) -> (5). Step 1 is (1) Dense GEMM baseline in MLPs (1980s). Step 2 is (2) Local parameter sharing in CNNs (1989/1998). Step 3 is (3) Gating mechanisms in LSTMs (1997). Step 4 is (4) Skip connections in ResNets (2015). Step 5 is (5) Synthesis of all primitives in Transformers (2017).",
-            "learning_objective": "Explain the historical emergence and cross-architecture migration of foundational deep learning building blocks."
-          },
-          {
-            "question_type": "FILL",
-            "question": "Modern efficient large language models (such as the LLaMA family) frequently replace standard LayerNorm with ____, which omits the mean-centering step and scales activations using only the root mean square of feature values, reducing memory reduction passes and improving inference latency.",
-            "answer": "RMSNorm (or root mean square normalization). RMSNorm simplifies LayerNorm by normalizing inputs with their root mean square alone: RMSNorm(x) = x / RMS(x) * gamma, omitting mean calculation.",
-            "learning_objective": "Explain how RMSNorm eliminates mean centering to improve memory reduction efficiency in transformer inference."
-          },
-          {
-            "question_type": "MCQ",
-            "question": "Why did the Transformer architecture adopt Layer Normalization rather than Batch Normalization as its standard normalization building block?",
-            "choices": [
-              "Because Batch Normalization requires $10\\times$ more learnable parameters than Layer Normalization.",
-              "Because Layer Normalization can only run on CPU hardware, matching early NLP training cluster setups.",
-              "Because Transformers process variable-length sequences where batch padding distorts mini-batch statistics, and autoregressive generation requires each sequence position to be normalized independently of batch composition.",
-              "Because the Universal Approximation Theorem forbids using Batch Normalization with multi-head attention mechanisms."
-            ],
-            "answer": "The correct answer is C. In sequence modeling and autoregressive generation, input sentences have variable lengths requiring padding, and inference often runs at small or variable batch sizes. BatchNorm calculates statistics across the batch, which leaks information across sequence elements, suffers from padding distortions, and requires batch-size consistency. LayerNorm normalizes across the hidden feature dimension independently for each token and sample, making it perfectly suited for variable sequence lengths, autoregressive decoding, and distributed training. The claim regarding parameter counts is incorrect because both maintain scale and shift vectors proportional to layer width. The claim of CPU exclusivity is false. The claim regarding the Universal Approximation Theorem is fictitious.",
-            "learning_objective": "Justify why Layer Normalization is chosen over Batch Normalization for sequence-based Transformer architectures."
-          }
-        ]
-      }
-    },
-    {
-      "section_id": "#sec-network-architectures-systemlevel-building-blocks-41c5",
-      "section_title": "Computational Primitives",
-      "quiz_data": {
-        "quiz_needed": true,
-        "rationale": {
-          "focus_areas": [
-            "Core computational primitives (Dense GEMM, Sliding window / Systolic array reuse, Dynamic computation)",
-            "Memory access primitives (Sequential DRAM burst, Strided access, Random access)",
-            "Energy cost of data movement (FP32 MAC ~4.6 pJ vs 32-bit DRAM read ~640 pJ, >100x ratio)",
-            "Data movement primitives (Broadcast, Scatter, Gather, Reduction)",
-            "Hardware design impact (Tensor Cores, Systolic arrays, HBM, Scratchpad SRAM)"
-          ],
-          "question_strategy": "Open with an MCQ on the energy cost ratio of DRAM access vs compute, define the four collective data movement primitives via SHORT, evaluate the im2col memory duplication trade-off via TF, test systolic array concept recall via FILL, compare hardware cache vs scratchpad SRAM via SHORT, and analyze sequential memory access efficiency via MCQ.",
-          "difficulty_progression": "Energy physical reality -> collective communication primitives -> memory-lowering trade-offs -> hardware architectural mechanisms -> on-chip memory management -> memory controller access patterns.",
-          "integration": "Directly bridges mathematical neural network operations with hardware microarchitecture and physical energy constraints.",
-          "ranking_explanation": "Tier 1: Primitives are the lowest-level execution abstractions that dictate hardware design and performance bottlenecks."
-        },
-        "questions": [
-          {
-            "question_type": "MCQ",
-            "question": "Based on Horowitz's reference energy models for CMOS hardware, roughly how does the energy required to read a single 32-bit word from off-chip DRAM compare to executing a single 32-bit floating-point multiply-accumulate (MAC) arithmetic operation?",
-            "choices": [
-              "Off-chip DRAM access requires exactly the same energy as a 32-bit floating-point multiply-accumulate operation (~4.6 pJ each).",
-              "A 32-bit floating-point multiply-accumulate operation requires over $100\\times$ more energy (~640 pJ) than reading from DRAM (~4.6 pJ).",
-              "Off-chip DRAM access requires roughly $2\\times$ less energy than arithmetic because DRAM capacitors store passive electrostatic charge.",
-              "Off-chip DRAM access requires over $100\\times$ more energy (~640 pJ) than executing an FP32 arithmetic operation (~4.6 pJ), making data movement rather than arithmetic the dominant energy cost in memory-heavy workloads."
-            ],
-            "answer": "The correct answer is D. In standard CMOS hardware reference models (such as Horowitz 45 nm), an FP32 multiply-add arithmetic operation consumes approximately 4.6 pJ, while fetching a 32-bit operand across off-chip PCB traces from external DRAM consumes approximately 640 pJ—an energy disparity of $>130\\times$. This fundamental physical reality explains why low-reuse architectures (like batch-1 MLPs) are energy-dominated by memory traffic, and why hardware accelerators invest heavily in on-chip SRAM caches and scratchpads to capture data reuse. The choices claiming equal energy, higher compute energy, or lower DRAM energy completely invert hardware energy physics.",
-            "learning_objective": "Evaluate the energy cost ratio of off-chip DRAM data movement versus floating-point arithmetic and explain its systems consequences."
-          },
-          {
-            "question_type": "SHORT",
-            "question": "Define the four fundamental collective data movement primitives (Broadcast, Scatter, Gather, Reduction) and identify one concrete neural network operation that exemplifies each primitive.",
-            "answer": "1. Broadcast replicates a single value or tensor to all destination units (e.g., sharing a single weight matrix across all batch elements during GEMM). 2. Scatter distributes distinct slices of a tensor to different destinations (e.g., partitioning matrix tiles across accelerator cores or routing tokens to distinct experts in Mixture-of-Experts). 3. Gather collects distributed values from multiple source locations into a single tensor (e.g., looking up non-contiguous embedding vectors from tables or pooling attention keys/values). 4. Reduction combines multiple input values into a single aggregated result through an associative operator like sum or max (e.g., accumulating partial dot products in matrix multiplication, computing softmax row sums, or aggregating gradients across workers).",
-            "learning_objective": "Explain the four fundamental data movement primitives (Broadcast, Scatter, Gather, Reduction) and match each to a neural network operation."
-          },
-          {
-            "question_type": "TF",
-            "question": "The im2col transformation converts a 2D convolution into a standard matrix multiplication (GEMM) without requiring any additional memory or duplicated data buffers in RAM.",
-            "answer": "False. The im2col transformation unfolds overlapping spatial patches into matrix columns, which duplicates interior input pixels up to $K^2$ times (9 times for $3 \\times 3$ filters with stride 1). This trade-off consumes substantial temporary memory in exchange for formatting the computation into a dense, regular GEMM that saturates optimized BLAS libraries and Tensor Cores.",
-            "learning_objective": "Evaluate the memory-duplication trade-off of the im2col transformation in lowering convolutions to GEMM."
-          },
-          {
-            "question_type": "FILL",
-            "question": "Google's Tensor Processing Unit (TPU) accelerates matrix multiplication and 2D convolution by organizing processing elements into a 2D ____ array, where activations and weights flow rhythmically across adjacent hardware registers to maximize data reuse without repeatedly accessing external DRAM.",
-            "answer": "systolic. A systolic array streams data rhythmically through a 2D grid of processing units, capturing high data reuse in hardware registers and minimizing off-chip memory traffic.",
-            "learning_objective": "Explain systolic arrays and how lockstep register dataflow captures data reuse for dense matrix and convolution operations."
-          },
-          {
-            "question_type": "SHORT",
-            "question": "Explain the architectural difference between hardware-managed caches (such as L1/L2 caches in general-purpose CPUs/GPUs) and programmer-controlled scratchpad SRAM in specialized AI accelerators, and explain why scratchpads provide superior energy efficiency and predictable latency for regular neural network tensor workloads.",
-            "answer": "Hardware-managed caches use tag matching, replacement policies (e.g., LRU), and cache coherency protocols implemented in silicon to automatically cache recently accessed addresses at runtime, incurring hardware area and energy overhead on every access. In contrast, scratchpad SRAM is mapped directly into the software address space without cache tags or hardware controllers; the compiler or programmer explicitly orchestrates DMA transfers to move exact tensor tiles into SRAM before computation. Because neural network loop bounds and tensor access patterns are known at compile time, scratchpads eliminate tag-lookup energy overhead, avoid cache conflict misses, and guarantee deterministic, predictable latency.",
-            "learning_objective": "Compare hardware-managed caches against software-controlled scratchpad SRAM in AI accelerators regarding energy efficiency and predictable latency."
-          },
-          {
-            "question_type": "MCQ",
-            "question": "Which memory access pattern is the most energy-efficient and hardware-friendly for memory controllers due to DRAM burst-mode capability and hardware prefetching?",
-            "choices": [
-              "Contiguous sequential memory access, because it maximizes DRAM burst transfer efficiency, cache line utilization, and predictable prefetcher streaming.",
-              "Random pointer-chasing access, because it distributes memory requests across different physical memory banks to avoid bank conflicts.",
-              "Strided access with prime-numbered step sizes, because prime strides prevent cache line collision.",
-              "Scattered indirect gather access, because it minimizes total bytes transferred by reading single scalar floats."
-            ],
-            "answer": "The correct answer is A. Sequential contiguous access allows DRAM to operate in high-throughput burst mode (reading consecutive words along a row buffer without re-opening rows), fills entire cache lines with useful data (maximizing spatial locality), and enables hardware prefetchers to stream upcoming data into L1/L2 caches before it is requested. Random pointer-chasing and scattered indirect gathers cause severe row-buffer misses, uncoalesced memory transfers, and cache thrashing. Strided access with large step sizes wastes memory bandwidth by transferring full cache lines while utilizing only a single word.",
-            "learning_objective": "Classify memory access primitives and justify why sequential contiguous memory access achieves optimal bandwidth and energy efficiency."
-          }
-        ]
-      }
-    },
-    {
-      "section_id": "#sec-network-architectures-architecture-selection-framework-a442",
-      "section_title": "Architecture Selection Framework",
-      "quiz_data": {
-        "quiz_needed": true,
-        "rationale": {
-          "focus_areas": [
-            "Data-to-architecture mapping (Tabular -> MLP, Spatial -> CNN, Sequential -> RNN, Relational -> Transformer, Categorical -> DLRM)",
-            "Computational complexity considerations and hardware mapping strategies",
-            "Algorithmic acceleration via Winograd minimal filtering ($F(2 \\times 2, 3 \\times 3)$ multiplication reduction)",
-            "Iterative Decision Framework flowchart (Data -> Candidates -> Constraints -> Scale Down / Select)",
-            "Wildlife camera monitoring case study (MobileNetV2 0.75 width, INT8, Cortex-A53, 512 MB RAM, <500 ms latency)",
-            "Throughput ceiling calculation (30 FPS ResNet-50 vs 10 TFLOP/s GPU headroom)"
-          ],
-          "question_strategy": "Open with an MCQ on Winograd $F(2 \\times 2, 3 \\times 3)$ multiplication reduction, analyze the wildlife camera case study architecture selection via SHORT, order the 5-step decision framework stages via ORDER, calculate video throughput headroom via SHORT, evaluate the decision framework scale-down loop via TF, and match tabular data to MLPs via MCQ.",
-          "difficulty_progression": "Algorithmic Winograd mechanics -> edge case study multi-constraint analysis -> framework stage sequencing -> throughput headroom arithmetic -> decision tree recovery paths -> data-to-architecture matching.",
-          "integration": "Synthesizes all architectural families, deployment paradigms, and physical system constraints into an actionable decision process.",
-          "ranking_explanation": "Tier 1: Provides the holistic engineering decision framework that connects theory to production deployment."
-        },
-        "questions": [
-          {
-            "question_type": "MCQ",
-            "question": "For computing a $2 \\times 2$ output feature tile with a $3 \\times 3$ convolutional filter, how does the Winograd minimal filtering algorithm $F(2 \\times 2, 3 \\times 3)$ accelerate computation compared to standard direct convolution?",
-            "choices": [
-              "It eliminates all floating-point additions by transforming the convolution into a lookup table in DRAM.",
-              "It reduces the required multiplications from 36 down to 16, achieving a $2.25\\times$ multiplication reduction at the cost of additional transforms and sensitivity to numerical rounding errors.",
-              "It factorizes the $3 \\times 3$ kernel into two $1 \\times 1$ convolutions, halving parameter count.",
-              "It converts the 2D spatial convolution into a 1D recurrent sequence, reducing memory traffic by $9\\times$."
-            ],
-            "answer": "The correct answer is B. Direct convolution of a $2 \\times 2$ output tile with a $3 \\times 3$ filter computes $2 \\times 2 = 4$ output positions, each requiring $3 \\times 3 = 9$ multiplications, totaling $4 \\times 9 = 36$ multiplications. The Winograd algorithm $F(2 \\times 2, 3 \\times 3)$ transforms the $4 \\times 4$ input tile and $3 \\times 3$ filter into the Winograd domain, performs only $4 \\times 4 = 16$ element-wise multiplications, and transforms the result back, yielding a $\\frac{36}{16} = 2.25\\times$ multiplication reduction. The trade-off is increased additions/transformations and susceptibility to numerical rounding errors in low-precision formats. Winograd does not eliminate additions, does not factorize kernels into $1 \\times 1$ convolutions, and does not convert convolutions into RNNs.",
-            "learning_objective": "Explain how the Winograd minimal filtering algorithm F(2x2, 3x3) reduces multiplication count for small convolution kernels and identify its numerical precision trade-offs."
-          },
-          {
-            "question_type": "SHORT",
-            "question": "In the wildlife monitoring edge deployment case study (50 species classification on a 2W battery-powered Cortex-A53 device with 512 MB RAM and a <500 ms latency target), explain why MobileNetV2 (0.75 width multiplier with INT8 quantization) was selected over ResNet-50 and KWS DS-CNN.",
-            "answer": "1. ResNet-50 (~25.6M params, ~8.2 GFLOPs, ~102.4 MB FP32) was rejected because its 8.2 GFLOP compute load and high power draw exceed the 2W solar/battery power envelope and 500 ms latency ceiling on the 2 GOPS Cortex-A53 SoC. 2. KWS DS-CNN (~43K params, ~20 MFLOPs) was rejected because its tiny capacity (designed for 12-class audio keyword spotting) lacks the representational power to separate 50 visual species with 90%+ accuracy. 3. MobileNetV2 (0.75 width multiplier with INT8 quantization) carries ~2.6M params (~2.6 MB INT8 model, ~418 MFLOPs), fitting comfortably in the 512 MB RAM budget with activations (~3.2 MB) and OS buffers (~50 MB), while executing in ~209 ms on the 2 GOPS INT8 engine (~41.8 mJ/inf), well within the <500 ms latency and 2W power budgets.",
-            "learning_objective": "Apply the multi-constraint architecture selection framework to justify selecting MobileNetV2 over ResNet-50 and KWS for an edge deployment."
-          },
-          {
-            "question_type": "ORDER",
-            "question": "Order the five systematic stages of the Architecture Selection Framework when designing an edge or data center ML system:\n(1) Characterize input data structure (spatial, sequential, relational, tabular, categorical) and select candidate architectural families via inductive bias matching\n(2) Analyze physical deployment constraints (connectivity, power budget, latency ceiling, memory capacity, accuracy target)\n(3) Evaluate candidate model variants against hardware throughput and memory limits using roofline and capacity models\n(4) Validate runtime footprints (model weights + activations + OS/workspace buffers) and benchmark latency on target hardware\n(5) Perform deployment risk assessment and implement engineering mitigations (e.g., INT8 quantization, thermal throttling controls, OTA update pipeline)",
-            "answer": "The correct order is (1) -> (2) -> (3) -> (4) -> (5). Step 1 is (1) Data characterization & candidate family identification. Step 2 is (2) Deployment constraint analysis. Step 3 is (3) Candidate evaluation against hardware capacity. Step 4 is (4) Runtime memory & latency validation on target hardware. Step 5 is (5) Risk assessment and mitigation planning.",
-            "learning_objective": "Analyze the five stages of the Architecture Selection Framework from problem definition to hardware validation and risk mitigation."
-          },
-          {
-            "question_type": "SHORT",
-            "question": "In a real-time video inference application requiring 30 FPS processing with ResNet-50 (~8.2 GFLOPs per frame), calculate the sustained compute throughput required. On a mid-range GPU delivering 10 TFLOP/s peak at 50% utilization (5 TFLOP/s effective), calculate the compute headroom factor and explain what happens to this headroom if the team switches to an object detection model requiring 100 GFLOPs per frame.",
-            "answer": "For ResNet-50 at 30 FPS, the sustained throughput required is $30\\text{ frames/s} \\times 8.2\\text{ GFLOPs/frame} = 246\\text{ GFLOP/s} = 0.246\\text{ TFLOP/s}$. On a GPU delivering 5 TFLOP/s effective throughput, the compute headroom factor is $\\frac{5.0\\text{ TFLOP/s}}{0.246\\text{ TFLOP/s}} \\approx 20.3\\times$. If switching to an object detection model requiring 100 GFLOPs/frame, the required sustained throughput jumps to $30\\text{ frames/s} \\times 100\\text{ GFLOPs/frame} = 3{,}000\\text{ GFLOP/s} = 3.0\\text{ TFLOP/s}$. This shrinks the headroom factor from $20.3\\times$ down to $\\frac{5.0}{3.0} \\approx 1.67\\times$, leaving minimal margin for multi-stream video feeds, OS jitter, or batching inefficiencies.",
-            "learning_objective": "Calculate sustained compute throughput for real-time video processing and analyze how model complexity impacts accelerator headroom."
-          },
-          {
             "question_type": "TF",
             "question": "In the systematic Architecture Selection Decision Framework, if a candidate model fails the inference speed or memory budget constraint check on the target device, the engineer must immediately abandon on-device edge execution and route all inference to a cloud data center.",
             "answer": "False. The Architecture Selection Decision Framework provides an iterative 'Scale Down' loop: when a model breaches memory or latency constraints, the team should first apply model compression (such as INT8 quantization, pruning, or structural width multipliers) or evaluate a more efficient architectural variant (such as MobileNet instead of ResNet) before abandoning local edge deployment.",
             "learning_objective": "Explain the iterative scale-down loop in the Architecture Selection Decision Framework when models breach memory or latency ceilings."
           },
           {
-            "question_type": "MCQ",
-            "question": "When matching data characteristics to architecture families, which workload is best suited for a Multilayer Perceptron (MLP) rather than a CNN or Transformer?",
-            "choices": [
-              "A 4K satellite image stream where local texture patterns determine deforestation boundaries.",
-              "A multi-lingual speech audio stream with continuous temporal phoneme transitions.",
-              "A tabular customer credit-risk dataset with 50 heterogeneous, unordered financial indicators (age, income, credit score, debt ratio) where no spatial adjacency or sequential ordering exists.",
-              "A document translation dataset where word meaning depends on complex cross-paragraph attention interactions."
-            ],
-            "answer": "The correct answer is C. Tabular datasets with heterogeneous, independent numerical and categorical features have no spatial locality (swapping column order does not change data semantics) and no sequential temporal ordering. For such unstructured tabular data, MLPs with unrestricted dense feature interactions are the natural match. Satellite imagery requires CNNs to exploit 2D spatial locality. Speech audio requires RNNs or 1D CNNs to capture temporal sequence structure. Document translation requires Transformers to model long-range relational dependencies.",
-            "learning_objective": "Classify input data characteristics (tabular vs spatial vs sequential vs relational) to the appropriate neural network architecture family."
+            "question_type": "SHORT",
+            "question": "In the wildlife monitoring edge deployment case study (50 species classification on a 2W battery-powered Cortex-A53 device with 512 MB RAM and a <500 ms latency target), explain why MobileNetV2 (0.75 width multiplier with INT8 quantization) was selected over ResNet-50 and KWS DS-CNN.",
+            "answer": "1. ResNet-50 (~25.6M params, ~8.2 GFLOPs, ~102.4 MB FP32) was rejected because its 8.2 GFLOP compute load and high power draw exceed the 2W solar/battery power envelope and 500 ms latency ceiling on the 2 GOPS Cortex-A53 SoC. 2. KWS DS-CNN (~200K params, ~20 MFLOPs) was rejected because its tiny capacity (designed for 12-class audio keyword spotting) lacks the representational power to separate 50 visual species with 90%+ accuracy. 3. MobileNetV2 (0.75 width multiplier with INT8 quantization) carries ~2.6M params (~2.6 MB INT8 model, ~418 MFLOPs), fitting comfortably in the 512 MB RAM budget with activations (~12.8 MB) and OS buffers (~50 MB), while executing in ~209 ms on the 2 GOPS INT8 engine (~41.8 mJ/inf), well within the <500 ms latency and 2W power budgets.",
+            "learning_objective": "Apply the multi-constraint architecture selection framework to justify selecting MobileNetV2 over ResNet-50 and KWS for an edge deployment."
           }
         ]
       }
