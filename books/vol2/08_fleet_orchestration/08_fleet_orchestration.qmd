@@ -295,7 +295,7 @@ Fairness requires an outcome metric, not only a quota rule. For job $j$, **slowd
 
 The competing objectives in @fig-fleet-orchestration-scheduling-tradeoffs require an explicit policy choice. Favoring a large unbroken allocation can delay short experiments, while repeatedly admitting short jobs can prevent a large gang from assembling. Resource-share fairness and completion-delay fairness therefore need separate measurements.
 
-::: {#fig-fleet-orchestration-scheduling-tradeoffs fig-env="figure" fig-pos="htb" fig-cap="**Scheduling trade-offs across competing fleet objectives**: A four-way trade-off diamond (Throughput, Latency, Fairness, Cost Efficiency) illustrates the tensions governing cluster scheduling. Throughput favors long, unbroken runs; Latency favors aggressive preemption for interactive jobs; Fairness fragments resources to equalize shares; and Cost Efficiency leverages discounted, interruptible capacity." fig-alt="Trade-off diamond connecting four scheduling objectives: Throughput, Latency, Fairness, and Cost Efficiency, with pairwise tension arrows and policy trade-off descriptions."}
+::: {#fig-fleet-orchestration-scheduling-tradeoffs fig-env="figure" fig-pos="htb" fig-cap="**Scheduling trade-offs across competing fleet objectives**: A four-way trade-off diamond (Throughput, Latency, Fairness, Cost Efficiency) illustrates the tensions governing cluster scheduling. Throughput favors long, unbroken runs; Latency favors aggressive preemption for interactive jobs; Fairness fragments resources to equalize shares; and Cost Efficiency leverages discounted, interruptible capacity." fig-alt="Diamond of four scheduling objectives, throughput at top, cost efficiency at left, fairness at right, and latency at bottom, around a central box reading no Pareto-optimal scheduler exists. Dashed lines join the objectives, with labels naming the cost of favoring each: starves small jobs, fragments large gangs, higher preemption tax, and sacrifices peak utilization."}
 ![](images/svg/scheduling-objectives-conflict.svg)
 
 <!--
@@ -513,7 +513,7 @@ Periodic **defragmentation**\index{Defragmentation!definition} migrates or preem
 
 A third strategy, **over-subscription**\index{Over-subscription!definition}, admits more demand than a capacity dimension can sustain simultaneously, but only where the resource is divisible and the scheduler can bound interference. Average SM utilization does not create fractional whole GPUs: a job that reserves device memory, requires an exclusive CUDA context, or belongs to a rigid gang still occupies its assigned device while kernels are idle. Statistical multiplexing can be safe for explicitly shareable CPU, network, storage, or partitioned GPU capacity when tenants have measured, weakly correlated peaks and enforceable limits. It is unsafe to convert 70 percent average GPU utilization into a 1.4$\times$ device overcommit ratio. Whole-device capacity should instead be recovered through preemption, elastic resizing, or an isolation mechanism such as MIG hardware partitioning or NVIDIA's Multi-Process Service (MPS) whose memory, compute, and fault-sharing contract the scheduler models explicitly.
 
-::: {#fig-fragmentation-problem fig-env="figure" fig-pos="htb" fig-cap="**The fragmentation problem**: The heatmap shows a snapshot of an 8-node cluster (rows) with 8 GPUs each (columns). Different colors represent distinct active jobs, while gray slots represent free GPUs. Although 19 GPUs (roughly 30 percent of capacity) are available globally, they are fragmented across nodes. A new job requiring 8 contiguous GPUs (a full node) cannot be scheduled because no single row is completely empty, illustrating how bin-packing inefficiencies reduce effective cluster capacity." fig-alt="8-by-8 heatmap of cluster GPU allocation. Rows are nodes, columns are GPU slots. Colored cells show jobs; gray shows free. Status panel indicates 19 free GPUs but no contiguous block of 8."}
+::: {#fig-fragmentation-problem fig-env="figure" fig-pos="htb" fig-cap="**The fragmentation problem**: A snapshot of an 8-node cluster (rows) with 8 GPUs each (columns). Blue tones mark slots held by active jobs (labeled J1 to J15); dashed white cells are free. Although 19 GPUs, roughly 30 percent of capacity, are free, every node still holds at least one busy slot, so a job that needs a full node cannot be placed. Fragmentation, not total capacity, sets what the scheduler can admit." fig-alt="Eight-by-eight grid of GPU slots, rows labeled node 0 to node 7 and columns labeled slot 0 to 7. Occupied slots are shaded in blue tones and labeled with job numbers J1 to J15; free slots are white with dashed outlines, scattered across every row. A status box reads 64 total GPUs, 45 allocated, 19 free, and a red note reads that a pending 8-GPU job is blocked because no node has 8 free slots."}
 
 ```{python}
 #| echo: false
@@ -524,24 +524,19 @@ A third strategy, **over-subscription**\index{Over-subscription!definition}, adm
 # │
 # │ Goal: Heatmap of 8×8 cluster; show fragmented free slots; illustrate why
 # │       8-contiguous-GPU job cannot be placed despite 30% free.
-# │ Show: pcolormesh; job colors; gray = free; status text.
-# │ How: row_patterns grid; ListedColormap; matplotlib.
+# │ Show: per-slot grid; muted blue job tones; dashed white = free; red blocked note.
+# │ How: row_patterns grid; Rectangle patches; book_style.setup_plot().
 # │
 # └─────────────────────────────────────────────────────────────────────────────
 # ┌── 1. CANVAS ────────────────────────────────────────────────────────────────
 # │ Heatmap of 8×8 cluster; show fragmented free slots; illustrate why
-import matplotlib.pyplot as plt
-import matplotlib.colors as mcolors
 import matplotlib.patches as mpatches
 import numpy as np
-
-plt.style.use('seaborn-v0_8-whitegrid')
+from binder.tools.figures import style as book_style
 
 # ┌── 2. ARRAYS ────────────────────────────────────────────────────────────────
 n_nodes = 8
 gpus_per_node = Systems.Nodes.DGX_H100.accelerators_per_node
-
-grid = np.zeros((n_nodes, gpus_per_node))
 
 row_patterns = [
     [1, 1, 0, 0, 2, 2, 2, 0],
@@ -560,52 +555,62 @@ free_gpus = total_gpus - allocated_gpus
 allocated_pct = allocated_gpus / total_gpus * 100
 free_pct = free_gpus / total_gpus * 100
 
-fig, ax = plt.subplots(figsize=(10, 5))
+fig, ax, COLORS, plt = book_style.setup_plot(figsize=(10, 5))
 
-cmap_name = 'tab20'
-base_cmap = plt.get_cmap(cmap_name)
-colors = ['#E0E0E0'] + [base_cmap(i / 20) for i in range(20)]
-cmap = mcolors.ListedColormap(colors)
+# Occupied slots: one muted blue tone per job, alternating so adjacent jobs
+# stay distinguishable without borrowing semantic colors. Free slots: white.
+job_tones = ['#5E93BA', '#9CC3DE', '#7AA9CC']
+FREE_FACE, FREE_EDGE = '#FFFFFF', '#94A3B8'
 
 # ┌── 3. RENDER ────────────────────────────────────────────────────────────────
-c = ax.pcolormesh(grid, cmap=cmap, edgecolors='white', linewidth=1.5, vmin=0, vmax=20)
+for r in range(n_nodes):
+    for c in range(gpus_per_node):
+        job = grid[r, c]
+        if job == 0:
+            ax.add_patch(
+                mpatches.Rectangle((c + 0.06, r + 0.06), 0.88, 0.88, facecolor=FREE_FACE, edgecolor=FREE_EDGE, linewidth=1.0, linestyle=(0, (3, 2)))
+            )
+        else:
+            ax.add_patch(mpatches.Rectangle((c, r), 1, 1, facecolor=job_tones[job % 3], edgecolor='white', linewidth=1.5))
+            ax.text(c + 0.5, r + 0.5, f'J{job}', ha='center', va='center', fontsize=7.5, color='#10324A')
 
-ax.invert_yaxis()
+ax.set_xlim(0, gpus_per_node)
+ax.set_ylim(n_nodes, 0)
 
 # ┌── 4. DECORATE ──────────────────────────────────────────────────────────────
-ax.set_title('Cluster Fragmentation State', fontsize=13, pad=10, fontweight='bold')
-ax.set_xlabel('GPU Slot (Local Rank)', fontsize=11)
-ax.set_ylabel('Node ID', fontsize=11)
-
+ax.set_xlabel('GPU Slot (Local Rank)')
+ax.set_ylabel('Node')
 ax.set_xticks(np.arange(gpus_per_node) + 0.5)
 ax.set_xticklabels(np.arange(gpus_per_node))
 ax.set_yticks(np.arange(n_nodes) + 0.5)
 ax.set_yticklabels([f'Node {i}' for i in range(n_nodes)])
-
+ax.tick_params(length=0)
 ax.grid(False)
+for spine in ax.spines.values():
+    spine.set_visible(False)
 
-props = dict(boxstyle='round,pad=0.5', facecolor='white', alpha=0.95, edgecolor='#cccccc')
-status_text = (
-    "SYSTEM STATUS\n"
-    "──────────────\n"
-    f"Total GPUs:  {total_gpus}\n"
-    f"Allocated:   {allocated_gpus} ({allocated_pct:.0f}%)\n"
-    f"Free:        {free_gpus} ({free_pct:.0f}%)\n\n"
-    "PENDING REQUEST\n"
-    "──────────────\n"
-    f"Size: {gpus_per_node} GPUs (1 Node)\n"
-    "Result: BLOCKED\n"
-    "(No contiguous block)"
+props = dict(boxstyle='round,pad=0.6', facecolor='white', edgecolor=COLORS['grid'])
+status_text = f"Total GPUs: {total_gpus}\n" f"Allocated: {allocated_gpus} ({allocated_pct:.0f}%)\n" f"Free: {free_gpus} ({free_pct:.0f}%)"
+ax.text(gpus_per_node + 0.35, 0.1, status_text, fontsize=10, va='top', bbox=props, color=COLORS['primary'])
+
+pending = f"Pending job: {gpus_per_node} GPUs on one node\n" "Blocked: no node has 8 free slots"
+ax.text(
+    gpus_per_node + 0.35,
+    2.9,
+    pending,
+    fontsize=10,
+    va='top',
+    color=COLORS['RedLine'],
+    bbox=dict(boxstyle='round,pad=0.6', facecolor=COLORS['RedFill'], edgecolor=COLORS['RedLine']),
 )
-ax.text(gpus_per_node + 0.5, 0, status_text, fontsize=10, verticalalignment='top', bbox=props, fontfamily='monospace')
 
 legend_patches = [
-    mpatches.Patch(facecolor='#E0E0E0', edgecolor='#999999', label='Free Slot'),
-    mpatches.Patch(facecolor=base_cmap(0.05), edgecolor='white', label='Occupied (Job)'),
+    mpatches.Patch(facecolor=FREE_FACE, edgecolor=FREE_EDGE, linestyle='--', label='Free slot'),
+    mpatches.Patch(facecolor=job_tones[0], edgecolor='white', label='Occupied (one job per tone)'),
 ]
-ax.legend(handles=legend_patches, loc='lower right', bbox_to_anchor=(1.35, 0))
+ax.legend(handles=legend_patches, loc='lower left', bbox_to_anchor=(1.03, 0), frameon=False)
 
-plt.subplots_adjust(right=0.75)
+plt.subplots_adjust(right=0.66)
 
 plt.show()
 plt.close()
@@ -818,7 +823,7 @@ Partial allocation of rigid multi-GPU jobs creates a distributed scheduling fail
 
 The partial-allocation pattern is a hold-and-wait deadlock\index{Deadlock!hold-and-wait}[^fn-deadlock-scheduling-cycle] in which two jobs each hold half the cluster and neither can proceed. The stake is the utilization gain computed at the start of the chapter. Raising the `{python} ClusterEconomicsContext.cluster_size_str`-GPU cluster from `{python} ClusterEconomicsContext.util_low_pct_str` to `{python} ClusterEconomicsContext.util_high_pct_str` utilization is worth about `{python} ClusterEconomicsContext.daily_gain_str` per day, while a deadlock that strands the whole cluster burns `{python} ClusterEconomicsContext.cluster_hourly_cost_str` per hour, so about `{python} ClusterEconomicsContext.deadlock_hours_str` hours of deadlock erase a full day of that gain. Gang scheduling does not create the gain, but it protects it. The implementation guarantee is straightforward: for a job $J$ requesting $N$ GPUs, the scheduler must guarantee that either all $N$ GPUs are allocated atomically, or the job remains in the queue without holding any resources. This binary outcome eliminates deadlock by construction, since a job that holds no resources cannot block other jobs. Implementing this guarantee efficiently, however, is the challenge that defines much of cluster scheduling algorithm design.
 
-[^fn-deadlock-scheduling-cycle]: **Hold-and-wait**: One of the four classical conditions jointly sufficient for deadlock in resource-allocation systems. Gang scheduling removes this condition through atomic allocation, at the cost of reduced packing flexibility.
+[^fn-deadlock-scheduling-cycle]: **Hold-and-wait**\index{Deadlock!Coffman conditions}: One of the four Coffman conditions (mutual exclusion, hold-and-wait, no preemption, and circular wait), all of which must hold for deadlock to occur [@coffman1971]. Gang scheduling removes hold-and-wait through atomic allocation, which is why it prevents this deadlock by construction; the price is reduced packing flexibility.
 
 Naive gang scheduling is wasteful in predictable ways. If the cluster has `{python} ClusterEconomicsContext.gang_held_gpus_str` free GPUs and a job requests `{python} ClusterEconomicsContext.gang_job_gpus_str`, the `{python} ClusterEconomicsContext.gang_held_gpus_str` GPUs sit idle until `{python} ClusterEconomicsContext.gang_missing_gpus_str` more become available, potentially wasting thousands of GPU-hours. Backfill scheduling\index{Backfill Scheduling!conservative backfilling}\index{Gang Scheduling!backfilling} addresses this by identifying jobs in the queue that can fit within the `{python} ClusterEconomicsContext.gang_held_gpus_str` available GPUs without delaying the large job's expected start time, an idea popularized in the ANL/IBM SP scheduling system [@lifka1995anlibm]. A 128-GPU job with an estimated runtime of 2 hours can safely backfill if the `{python} ClusterEconomicsContext.gang_missing_gpus_str` additional GPUs needed by the large job will remain unavailable for at least 2 hours and the backfill job is expected to finish before the large job's reservation. The backfilled job uses resources that would otherwise be idle, improving utilization without violating the large job's scheduling guarantee.
 
@@ -1120,7 +1125,7 @@ Multi-Instance GPU (MIG)\index{MIG!orchestration}[^fn-mig-gpu-isolation] technol
 
 [^fn-mig-gpu-isolation]: **Multi-Instance GPU (MIG)**\index{MIG!GPU isolation}: Introduced with the A100 (2020), MIG partitions a single GPU into up to 7 hardware-isolated instances with dedicated memory controllers, L2 cache slices, and compute units [@NVIDIA2020]. The isolation is enforced at the hardware level, not by time-slicing, reducing noisy-neighbor interference relative to software-only sharing. The trade-off is rigidity: partition profiles cannot change without draining all workloads, making MIG poorly suited for clusters with rapidly shifting workload mixes.
 
-[^fn-noisy-neighbor-etymology]: **Noisy Neighbor**\index{Noisy Neighbor!isolation}: A metaphor from multi-tenant housing where one resident's activity (loud music) disturbs another's peace. In GPU clusters, this occurs when one job's bursty network traffic or memory bus utilization slows down a co-located job on the same node. For distributed training, noisy neighbors are fatal to efficiency because the slowest flow dictates the global AllReduce time.
+[^fn-noisy-neighbor-etymology]: **Noisy Neighbor**\index{Noisy Neighbor!isolation}: In GPU clusters, interference arises when one job's bursty network traffic or memory bus utilization slows down a co-located job on the same node. For distributed training, noisy neighbors are especially costly because the slowest flow sets the global AllReduce time.
 
 | **MIG Profile** |                   **GPU Memory**                   |                      **SM Count**                     | **Typical Workload** |
 |:----------------|:--------------------------------------------------:|:-----------------------------------------------------:|:--------------------:|
@@ -1666,7 +1671,7 @@ class TopologyPlacement:
 
 @Fig-topology-placement compares four placements of a constructed 0.5 GB AllReduce across `{python} TopologyPlacement.n_gpus_str` GPUs. Random placement spreads the group across many racks, so its traffic traverses core switches and completes in an assumed `{python} TopologyPlacement.random_placement_latency_ms_str`. Rack-aware placement keeps the group within one rack but still shares contended paths (`{python} TopologyPlacement.rack_aware_latency_ms_str`). Rail-optimized placement aligns each rank with its dedicated rail of switches (`{python} TopologyPlacement.rail_optimized_latency_ms_str`), and topology-optimal placement puts the whole group on an uncongested leaf with enough endpoint ports (`{python} TopologyPlacement.optimal_latency_ms_str`). The resulting `{python} TopologyPlacement.speedup_mult_str` gap illustrates how to compare placements; the latencies are assumptions, and topology names alone do not establish them.
 
-::: {#fig-topology-placement fig-env="figure" fig-pos="htb" fig-cap="**Topology placement impact**: Assumed AllReduce latency across four placement strategies (Random, Rack-Aware, Rail-Optimized, and Topology-Optimal) for a 0.5 GB gradient sync on 64 GPUs. The assumed latency falls from 120 ms to 25 ms, a 4.8$\times$ ratio. Labels report payload divided by completion time (algorithm throughput), not physical link bandwidth." fig-alt="Bar chart comparing AllReduce latency for Random, Rack-Aware, Rail-Optimized, and Topology-Optimal placement. 4.8× speedup from Random to Topology-Optimal."}
+::: {#fig-topology-placement fig-env="figure" fig-pos="htb" fig-cap="**Topology placement impact**: Assumed AllReduce latency across four placement strategies (Random, Rack-Aware, Rail-Optimized, and Topology-Optimal) for a 0.5 GB gradient sync on 64 GPUs. The assumed latency falls from 120 ms to 25 ms, a 4.8$\times$ ratio. Labels report payload divided by completion time (algorithm throughput), not physical link bandwidth." fig-alt="Bar chart of AllReduce latency for four placement strategies: random at 120 ms in red, rack-aware at 85 ms and rail-optimized at 40 ms in gray, and topology-optimal at 25 ms in green. Each bar is labeled with its latency and algorithm throughput, and an arrow marks a 4.8 times lower latency for topology-optimal placement."}
 
 ```{python}
 #| echo: false
@@ -1678,59 +1683,54 @@ class TopologyPlacement:
 # │ Goal: Bar chart comparing Random, Rack-Aware, Rail-Optimized, Topology-
 # │       Optimal; show 4.8× speedup for 0.5 GB gradient sync on 64 GPUs.
 # │ Show: Four bars with latency (ms) and effective bandwidth labels.
-# │ How: strategies/times; ax.bar; matplotlib.
+# │ How: TopologyPlacement LEGO latencies; ax.bar; book_style.setup_plot().
 # │
 # └─────────────────────────────────────────────────────────────────────────────
 # ┌── 1. CANVAS ────────────────────────────────────────────────────────────────
 # │ Bar chart comparing Random, Rack-Aware, Rail-Optimized, Topology-
-import matplotlib.pyplot as plt
 import numpy as np
-
-plt.style.use('seaborn-v0_8-whitegrid')
+from binder.tools.figures import style as book_style
 
 # ┌── 2. ARRAYS ────────────────────────────────────────────────────────────────
 strategies = ['Random', 'Rack-Aware', 'Rail-Optimized', 'Topology-Optimal']
-times = [120, 85, 40, 25]
+lat = [TopologyPlacement.lat_random, TopologyPlacement.lat_rack, TopologyPlacement.lat_rail, TopologyPlacement.lat_optimal]
+times = [t.to(ms).magnitude for t in lat]
 gradient_payload = 0.5 * GB  # constructed placement scenario, not a measured benchmark
-bandwidths = [(gradient_payload / (t * ms)).to(GB / second).magnitude for t in times]
+bandwidths = [(gradient_payload / t).to(GB / second).magnitude for t in lat]
 
-colors = ['#d62728', '#ff7f0e', '#bcbd22', '#2ca02c']
-
-fig, ax = plt.subplots(figsize=(10, 6))
+fig, ax, COLORS, plt = book_style.setup_plot(figsize=(8, 4.6))
+# Red marks the penalty case, green the target; intermediate strategies stay neutral.
+colors = [COLORS['RedLine'], COLORS['secondary'], COLORS['secondary'], COLORS['GreenLine']]
 
 # ┌── 3. RENDER ────────────────────────────────────────────────────────────────
-bars = ax.bar(strategies, times, color=colors, alpha=0.85, width=0.6, edgecolor='black', linewidth=1)
+bars = ax.bar(strategies, times, color=colors, alpha=0.85, width=0.6)
 
 # ┌── 4. DECORATE ──────────────────────────────────────────────────────────────
-ax.set_ylabel('AllReduce Latency (ms)\n(Lower is Better)', fontsize=12, fontweight='bold')
-ax.set_xlabel('Placement Strategy', fontsize=12, fontweight='bold')
-ax.set_title('Illustrative Topology Placement Scenario\n(64 GPUs, 0.5 GB Gradient Sync)', fontsize=14, pad=15)
-ax.set_ylim(0, 150)
+ax.set_ylabel('AllReduce Latency (ms)')
+ax.set_xlabel('Placement Strategy')
+ax.set_ylim(0, max(times) * 1.3)
+ax.grid(axis='x', visible=False)
 
 for bar, time, bw in zip(bars, times, bandwidths):
-    height = bar.get_height()
     ax.text(
         bar.get_x() + bar.get_width() / 2.0,
-        height + 3,
-        f'{time} ms\n({bw:.1f} GB/s)',
+        bar.get_height() + max(times) * 0.02,
+        f'{time:.0f} ms\n({bw:.1f} GB/s)',
         ha='center',
         va='bottom',
-        fontsize=11,
-        fontweight='bold',
-        color='#333333',
+        fontsize=9.5,
+        color=COLORS['primary'],
     )
 
 ax.annotate(
-    '4.8× Speedup',
-    xy=(2.75, 25),
-    xycoords='data',
-    xytext=(2.5, 50),
+    f'{TopologyPlacement.speedup:.1f}$\\times$ lower latency',
+    xy=(3, times[-1] + max(times) * 0.2),
+    xytext=(2.35, times[0] * 1.05),
     textcoords='data',
-    arrowprops=dict(arrowstyle="->", connectionstyle="arc3,rad=0.2", color='#2ca02c', lw=1.0),
-    fontsize=11,
-    fontweight='normal',
-    color='#2ca02c',
-    bbox=dict(boxstyle="round,pad=0.6", fc="white", ec="#2ca02c", alpha=0.9),
+    ha='left',
+    arrowprops=dict(arrowstyle='->', color=COLORS['GreenLine'], lw=1.0, connectionstyle='arc3,rad=-0.2'),
+    fontsize=10,
+    color=COLORS['GreenLine'],
 )
 
 plt.tight_layout()
@@ -1933,7 +1933,7 @@ Elastic scheduling eliminates this binary choice. The recovery mechanics of elas
 
 Elastic scheduling requires a well-defined contract between the scheduler and the training framework. The scheduler guarantees that resource changes are communicated through defined signals, with sufficient advance notice for graceful adaptation. The framework guarantees that it can handle resource changes without corrupting model state, using the batch size adjustment, learning rate recalibration, and communication group reconstruction mechanisms developed in @sec-fault-tolerance-reliability-reliability-elastic-training-mechanisms-49b1. The worker-membership lifecycle follows the state machine shown in @fig-fleet-orchestration-elastic-state-machine, transitioning workers through provisioning, active training, dynamic rebalancing, and self-healing fault recovery.
 
-::: {#fig-fleet-orchestration-elastic-state-machine fig-env="figure" fig-pos="htb" fig-cap="**Elastic training worker lifecycle and state machine**: The state machine governing dynamic worker membership. Training begins in Pending/Provisioning, transitions through Rendezvous into Active Training, and adapts dynamically via Scale-Up/Rebalance or Draining/Scale-Down while preserving logical job continuity. Worker processes may restart during resizing; recovery requires the application to restore valid training state." fig-alt="State machine diagram illustrating elastic worker states: Pending, Active Training, Scale-Up Rebalance, Draining Scale-Down, and Fault Recovery, connected by rendezvous, resize, and self-heal transitions."}
+::: {#fig-fleet-orchestration-elastic-state-machine fig-env="figure" fig-pos="htb" fig-cap="**Elastic training worker lifecycle and state machine**: The state machine governing dynamic worker membership. Active Training loops on step completion and leaves that state along three paths: idle GPUs trigger Scale Up, a preemption for higher-priority work triggers Scale Down, and a host timeout or ECC error triggers Worker Replace. Each path rebuilds the communication group and returns to Active Training, and a spot reclamation deadline can force a shrinking job straight into replacement. Worker processes may restart during resizing, so recovery requires the application to restore valid training state." fig-alt="State machine with a central active training state that has a step completion self-loop. Solid arrows lead from it to scale up on idle GPUs free, to scale down on preempt or high-priority, and to worker replace on host timeout or ECC. Dashed arrows return to active training labeled group rebuilt, ranks released, and hot spare joined. A red dashed arrow labeled spot 30 s reclaim deadline runs from scale down to worker replace. A banner states that model parameters and optimizer state remain continuous across transitions."}
 ![](images/svg/elastic-training-state-machine.svg)
 
 <!--
@@ -3361,9 +3361,12 @@ Repurposing a GPU from training to serving is not instantaneous. The orchestrato
 
 Inference traffic typically follows a "human curve": low at 3 AM, ramping up at 8 AM, peaking at 2 PM, and tapering off at 10 PM. A smart orchestrator forecasts this curve 30 minutes in advance. At 7:30 AM, it preempts low-priority training jobs (like hyperparameter sweeps) to warm up inference replicas. At 10:30 PM, as traffic drops, it drains inference replicas and releases GPUs back to the training scheduler. @Fig-fleet-orchestration-training-serving-diurnal illustrates this 24-hour diurnal cycle, showing how an orchestrator shifts GPUs between serving and training to recover idle overnight capacity.
 
-::: {#fig-fleet-orchestration-training-serving-diurnal fig-env="figure" fig-pos="htb" fig-cap="**Training vs. serving diurnal GPU capacity shift**: Diurnal serving demand peaks during working hours and troughs overnight. Rather than statically partitioning dedicated clusters, dynamic sharing preempts low-priority training to meet morning serving surges, and returns drained serving GPUs to training overnight, reclaiming millions of dollars in annual cluster capacity." fig-alt="24-hour diurnal timeline showing serving demand rising during daytime and dropping at night, with opportunistic training capacity dynamically expanding into the reclaimed serving envelope."}
+::: {#fig-fleet-orchestration-training-serving-diurnal fig-env="figure" fig-pos="htb" fig-cap="**Training vs. serving diurnal GPU capacity shift**: A schematic 24-hour cycle. Serving demand (green) rises through the morning shift, holds through business hours, and falls after the evening shift; batch training fills the remaining fleet capacity overnight. Because each shift costs minutes of checkpointing and warmup, the orchestrator moves capacity on a forecast schedule rather than chasing short traffic spikes, and it keeps a reserve for unexpected surges. The diurnal GPU shift notebook quantifies the capacity this recovers." fig-alt="Schematic 24-hour timeline of the share of fleet GPUs. A green serving area rises between about 06:00 and 09:00, stays high until about 18:00, and falls by 21:00; the blue area above it is batch training. Red dashed lines mark a morning shift near 08:00 and an evening shift near 20:00, and an orange box notes that switching takes minutes for checkpoint save and weight load. Two cards at right summarize capacity recovery under dynamic sharing and the operational rule with a safety reserve."}
 
-```{=latex}
+![](images/svg/training-serving-diurnal.svg)
+
+<!--
+```{.tikz}
 \begin{tikzpicture}[
     >=Stealth,
     font=\small
@@ -3515,6 +3518,7 @@ Inference traffic typically follows a "human curve": low at 3 AM, ramping up at 
 
 \end{tikzpicture}
 ```
+-->
 
 :::
 
@@ -3810,15 +3814,13 @@ A cluster dashboard shows average GPU utilization stuck at 60 percent, yet devel
 # │ Goal: Plot job wait time vs cluster utilization; show M/M/1-style explosion
 # │       near 100%; Danger Zone >80%; Target 75%.
 # │ Show: Three curves (small/mixed/large jobs); log-scale y; shaded zone.
-# │ How: Convert utilization into M/M/1-style waiting-time curves; matplotlib.
+# │ How: Convert utilization into M/M/1-style waiting-time curves; book_style.setup_plot().
 # │
 # └─────────────────────────────────────────────────────────────────────────────
 # ┌── 1. CANVAS ────────────────────────────────────────────────────────────────
 # │ Plot job wait time vs cluster utilization; show M/M/1-style explosion
 import numpy as np
-import matplotlib.pyplot as plt
-
-plt.style.use('seaborn-v0_8-whitegrid')
+from binder.tools.figures import style as book_style
 
 # ┌── 2. ARRAYS ────────────────────────────────────────────────────────────────
 utilization = np.linspace(0, 0.98, 500)
@@ -3828,7 +3830,7 @@ wait_small = (rho / (1 - rho)) * 1.0
 wait_mixed = (rho / (1 - rho)) * 4.0
 wait_large = (rho / (1 - rho)) * 12.0
 
-fig, ax = plt.subplots(figsize=(10, 6))
+fig, ax, COLORS, plt = book_style.setup_plot(figsize=(8, 5))
 
 # ┌── 3. RENDER ────────────────────────────────────────────────────────────────
 ax.plot(utilization * 100, wait_small, label='Small jobs (average 1 h)', linewidth=2, color='#777777', linestyle=':')
@@ -3838,19 +3840,18 @@ ax.plot(utilization * 100, wait_large, label='Large jobs (average 12 h)', linewi
 target_util = 75
 ax.axvline(x=target_util, color='gray', linestyle='--', alpha=0.7, label='Illustrative headroom (75%)')
 
-ax.axvspan(80, 100, alpha=0.15, color='red', label='Illustrative high-load region')
+ax.axvspan(80, 100, alpha=0.6, color=COLORS['RedFill'], label='Illustrative high-load region')
 
 # ┌── 4. DECORATE ──────────────────────────────────────────────────────────────
-ax.text(82, 350, 'Illustrative\nhigh-load\nregion', color='#8B0000', fontweight='bold')
+ax.text(81.5, 0.14, 'Illustrative\nhigh-load\nregion', color=COLORS['RedLine'], fontweight='bold', va='bottom')
 
 ax.text(73, 0.25, 'Headroom', color='gray', ha='right', va='bottom', rotation=90)
 
 ax.set_yscale('log')
 ax.set_xlim(0, 100)
 ax.set_ylim(0.1, 1000)
-ax.set_xlabel('Offered Service Load / Capacity (%)', fontsize=12)
-ax.set_ylabel('Average Job Wait Time (Hours, Log Scale)', fontsize=12)
-ax.set_title('The Utilization Paradox: Efficiency vs. Latency', fontsize=14, pad=15)
+ax.set_xlabel('Offered Service Load / Capacity (%)')
+ax.set_ylabel('Average Job Wait Time (Hours, Log Scale)')
 ax.legend(loc='upper left', fontsize=8, frameon=True, facecolor='white', framealpha=0.95, edgecolor='gray', fancybox=True, borderpad=0.6)
 ax.grid(True, which="both", ls="-", alpha=0.2)
 ax.minorticks_on()

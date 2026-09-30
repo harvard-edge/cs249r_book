@@ -255,14 +255,15 @@ data = pd.read_csv("vol2/03_network_fabrics/data/bandwidth_trends.csv")
 
 fig, ax, COLORS, plt = viz.setup_plot(figsize=(8, 5))
 _groups = list(dict.fromkeys(data["Technology"]))
-_cmap = plt.get_cmap('viridis', max(len(_groups), 2))
+# Fixed colors matching @fig-bandwidth-hierarchy: NVLink orange, InfiniBand
+# violet, PCIe brown; Ethernet in neutral slate (no viridis yellow).
+_colors = {"NVLink": COLORS["OrangeLine"], "InfiniBand": COLORS["VioletLine"], "Ethernet": "#5E6B73", "PCIe (x16)": COLORS["BrownLine"]}
 for _i, _g in enumerate(_groups):
     _sub = data[data["Technology"] == _g]
-    ax.plot(_sub["Year"], _sub["Bandwidth_Gbps"], color=_cmap(_i), label=str(_g), marker="o", linewidth=2)
+    ax.plot(_sub["Year"], _sub["Bandwidth_Gbps"], color=_colors.get(_g, COLORS["primary"]), label=str(_g), marker="o", linewidth=2)
 ax.set_yscale("log")
 ax.legend(title="Interconnect", frameon=False, fontsize=9)
-ax.set_ylabel("Bandwidth (Gbps)")
-ax.set_title("Network and interconnect bandwidth over time")
+ax.set_ylabel("Bandwidth (Gb/s)")
 ax.grid(True, which="both", ls="--", alpha=0.5)
 ax.yaxis.set_major_formatter(ticker.FuncFormatter(lambda y, _: f"{int(y):,}"))
 
@@ -391,7 +392,7 @@ from binder.tools.figures import style as book_style
 book_style.set_book_style()
 COLORS = book_style.COLORS
 
-fig, (ax, ax_card) = plt.subplots(2, 1, figsize=(7.6, 5.0), gridspec_kw={'height_ratios': [4.2, 0.75]})
+fig, ax = plt.subplots(figsize=(7.6, 4.3))
 
 generations = ['V100\n(2017)', 'A100\n(2020)', 'H100\n(2022)', 'B200\n(2024)']
 x = np.arange(len(generations)) * 1.05
@@ -458,24 +459,7 @@ ax.legend(
     handletextpad=0.4,
 )
 
-# Card subplot
-ax_card.axis('off')
-ax_card.text(
-    0.5,
-    0.5,
-    'Fleet Hierarchy Invariant: Bandwidth Tiers Scale at Different Exponents\n'
-    f'While on-package HBM scales {BandwidthHierarchyData.hbm_growth:.1f}× from V100 to B200, inter-node InfiniBand per port scales '
-    f'{BandwidthHierarchyData.ib_growth:.0f}× and PCIe scales {BandwidthHierarchyData.pcie_growth:.0f}×,\n'
-    'mandating communication avoidance and tensor-parallel locality within the high-bandwidth node boundary.',
-    ha='center',
-    va='center',
-    fontsize=7.2,
-    color=COLORS['primary'],
-    linespacing=1.35,
-    bbox=dict(boxstyle='round,pad=0.55', fc='#F8FAFC', ec=COLORS['grid'], lw=0.9),
-)
-
-plt.subplots_adjust(hspace=0.28)
+plt.tight_layout()
 plt.show()
 plt.close()
 ```
@@ -1840,11 +1824,11 @@ fig, ax = plt.subplots(figsize=(9, 5))
 # ┌── 3. RENDER ────────────────────────────────────────────────────────────────
 ib_beta_label = fmt_bandwidth(beta_ib_q, unit=GB / second, precision=0, commas=False)
 eth_beta_label = fmt_bandwidth(beta_eth_q, unit=GB / second, precision=1, commas=False)
-ax.plot(n, t_ib, label=f'InfiniBand NDR ({alpha_ib*1e6:.1f}us, {ib_beta_label})', color='#006395', linewidth=2.5)
-ax.plot(n, t_eth, label=f'Ethernet RoCE ({alpha_eth*1e6:.1f}us, {eth_beta_label})', color='#CB202D', linewidth=2.5, linestyle='--')
+ax.plot(n, t_ib, label=f'InfiniBand NDR ({alpha_ib*1e6:.1f} µs, {ib_beta_label})', color='#006395', linewidth=2.5)
+ax.plot(n, t_eth, label=f'Ethernet RoCE ({alpha_eth*1e6:.1f} µs, {eth_beta_label})', color='#E67817', linewidth=2.5, linestyle='--')
 
 ax.scatter([n_cross_ib], [t_cross_ib], color='#006395', s=80, zorder=5, edgecolors='white')
-ax.scatter([n_cross_eth], [t_cross_eth], color='#CB202D', s=80, zorder=5, edgecolors='white')
+ax.scatter([n_cross_eth], [t_cross_eth], color='#E67817', s=80, zorder=5, edgecolors='white')
 
 # ┌── 4. DECORATE ──────────────────────────────────────────────────────────────
 # blue
@@ -1864,8 +1848,8 @@ ax.annotate(
     f'Crossover\n~{fmt_memory(n_cross_eth_q, unit=KB, precision=1, commas=False)}',
     xy=(n_cross_eth * 0.9, t_cross_eth * 1.03),
     xytext=(n_cross_eth / 40, t_cross_eth * 5),
-    arrowprops=dict(arrowstyle='->', color='#CB202D'),
-    color='#CB202D',
+    arrowprops=dict(arrowstyle='->', color='#E67817'),
+    color='#E67817',
     fontsize=9,
     ha='center',
     va='top',
@@ -3342,7 +3326,11 @@ A directed cycle in the buffer dependency graph is a necessary condition for a P
 
 $$B_1 \to B_2 \to \dots \to B_k \to B_1$$ {#eq-network-buffer-dependency-cycle}
 
-When each buffer in the cycle fills beyond its configured pause threshold, each port asserts a PFC PAUSE frame to its predecessor. Because no buffer can advance a packet into a paused successor, no buffer can drain, and no port can de-assert its PAUSE signal. The entire cycle freezes permanently.
+When each buffer in the cycle fills beyond its configured pause threshold, each port asserts a PFC PAUSE frame to its predecessor. Because no buffer can advance a packet into a paused successor, no buffer can drain, and no port can de-assert its PAUSE signal. The entire cycle freezes permanently. In a four-switch loop (@fig-pfc-credit-deadlock), the forward dependencies and the PAUSE frames run in opposite directions around the same ring, so every port is simultaneously waiting and blocking.
+
+::: {#fig-pfc-credit-deadlock fig-env="figure" fig-pos="htb" fig-cap="**A PFC credit deadlock**: Four switch queues form the cycle of @eq-network-buffer-dependency-cycle. Follow the solid arrows clockwise: each full buffer holds packets that need space in the next. The dashed PAUSE frames run counterclockwise, so each switch blocks exactly the upstream port it depends on, and no queue can drain until a watchdog drops packets." fig-alt="Four switch boxes arranged in a square, each containing a full red buffer labeled B1 to B4. Solid gray arrows run clockwise from switch 1 to 2 to 3 to 4 and back to 1, labeled B1 to B2, B2 to B3, B3 to B4, and B4 to B1. Dashed red arrows labeled PAUSE run counterclockwise between the same switches. A key at the bottom explains both arrow types."}
+![](images/svg/pfc-credit-deadlock.svg)
+:::
 
 In production AI fabrics, credit deadlocks typically arise from three distinct operational triggers. Transient routing loops during link failures or BGP convergence can leave routing tables across neighboring switches temporarily inconsistent, circulating packets in a multi-hop forwarding loop; while lossy IP networks drop looping packets once their Time-to-Live expires, lossless PFC fabrics instantly saturate intermediate buffers and lock the entire path into an unrecoverable credit cycle. Uncontrolled multicast or broadcast flooding can similarly trigger lockups when flooded packets replicated across all ports overwhelm egress buffers and pause frames loop back into shared switch memory. Finally, non-tree physical links and asymmetric failover paths, such as sibling cross-connects between leaf switches, can violate strict hierarchical routing rules and establish persistent buffer dependency cycles across switch tiers.
 

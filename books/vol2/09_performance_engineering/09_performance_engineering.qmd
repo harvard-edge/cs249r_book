@@ -155,7 +155,7 @@ Verify understanding of system-level performance diagnosis:
 
 The same diagnostic process can be codified as a decision flowchart, mapping each bottleneck to its corresponding optimization technique. The flowchart in @fig-iron-law-flowchart makes the sequencing explicit: rule out I/O, CPU, and communication overheads before classifying the remaining workload as compute-bound or memory-bound.
 
-::: {#fig-iron-law-flowchart fig-env="figure" fig-pos="htb" fig-cap="**Iron law diagnostic flowchart**: A troubleshooting flow that starts from a missed step-time or token-latency target and low accelerator utilization, branches through I/O, CPU, and communication-overhead checks, and classifies the workload as compute-bound or memory-bound at the leaves. Compute-bound paths point to lower-precision arithmetic and to reductions in active work such as MoE routing; memory-bound paths point to operator fusion, tiling, weight quantization, and speculative decoding. Overhead-bound symptoms (host dispatch, communication) are surfaced earlier in the flow and addressed before the final compute/memory classification." fig-alt="Troubleshooting flowchart starting from 'Target is missed', branching through GPU-utilization, I/O, CPU, and communication checks, with two terminal labels: Compute Bound, leading to FP8 arithmetic and MoE routing, and Memory Bound, leading to operator fusion and INT4 or speculative decoding."}
+::: {#fig-iron-law-flowchart fig-env="figure" fig-pos="htb" fig-cap="**Iron law diagnostic flowchart**: A troubleshooting flow that starts from a missed step-time or token-latency target and low accelerator utilization, branches through I/O, CPU, and communication-overhead checks, and classifies the workload as compute-bound or memory-bound at the leaves. Compute-bound paths point to lower-precision arithmetic and to reductions in active work such as MoE routing; memory-bound paths point to operator fusion, tiling, weight quantization, and speculative decoding. Overhead-bound symptoms (data loading, preprocessing, communication) are surfaced earlier in the flow and addressed before the final compute/memory classification." fig-alt="Troubleshooting flowchart starting from a box reading Target is missed. A GPU-utilization check branches right through I/O-bound and CPU-bound checks, whose yes branches lead to data-pipeline remedies and whose final no branch leads to communication overhead. Its no branch leads down to an intensity-versus-ridge check that splits into compute-bound, with FP8 math and MoE routing below it, and memory-bound, with operator fusion and INT4 or speculative decoding below it. Every remedy joins a bus into a Re-profile workload box, and a dashed loop returns to the start."}
 ![](images/svg/diagnostic-flow.svg)
 
 <!--
@@ -479,9 +479,7 @@ The real comparison therefore requires completed throughput and per-request late
 
 ### The memory wall {#sec-performance-engineering-memory-wall-physics}
 
-The efficiency frontier establishes the optimization objective. The physics of memory bandwidth determines where the optimization begins. Many accelerator-based ML performance problems begin with the same observation: memory bandwidth, not compute, is the bottleneck. Consider a single autoregressive decoding step in a large language model. The model reads its full weight matrix from HBM[^fn-hbm-memory-performance] to generate a single token, performing only one or two multiply-accumulate operations per weight loaded.
-
-[^fn-hbm-memory-performance]: **High-bandwidth memory (HBM)**\index{HBM!memory hierarchy}: Vertical stacks of DRAM dies connect through thousands of through-silicon vias, supplying high aggregate bandwidth while remaining far slower and more energy-intensive to access than on-chip SRAM.
+The efficiency frontier establishes the optimization objective. The physics of memory bandwidth determines where the optimization begins. Many accelerator-based ML performance problems begin with the same observation: memory bandwidth, not compute, is the bottleneck. Consider a single autoregressive decoding step in a large language model. The model reads its full weight matrix from HBM\index{HBM!memory hierarchy} to generate a single token, performing only one or two multiply-accumulate operations per weight loaded.
 
 ```{python}
 #| echo: false
@@ -671,147 +669,111 @@ class WideningGap:
 
 @Fig-roofline-model draws the bound for the H100 at its FP8 Tensor Core rate and places four representative workloads on it. Left of the ridge, only more bandwidth or fewer bytes per operation raises a kernel's ceiling; right of it, only a faster or better-utilized datapath helps.
 
-::: {#fig-roofline-model fig-env="figure" fig-pos="htb" fig-cap="**The roofline model**: Achievable performance (y-axis) as a function of arithmetic intensity (x-axis) on a log-log plot. The sloped line represents the memory bandwidth ceiling; the flat line represents the compute ceiling at the labeled precision (FP8 tensor-core throughput on H100, approximately `{python} MemoryWallScenario.h100_fp8_tflop_per_s_str`); their intersection is the ridge point at roughly `{python} MemoryWallScenario.h100_ridge_fp8_str` for FP8. Most transformer inference operations fall in the memory-bound region (left of the ridge point), while large batched GEMMs fall in the compute-bound region (right). The corresponding FP16 ridge point is roughly `{python} WideningGap.h100_ridge_str` FLOP/byte (`{python} WideningGap.h100_peak_flops_str` divided by `{python} WideningGap.h100_bw_str`)." fig-alt="Log-log roofline plot with diagonal memory-bandwidth ceiling and horizontal compute ceiling labeled at FP8 throughput around 2,000 TFLOP/s. Ridge point around 600 FLOP/byte. Four workload markers sit at rising intensity: batch-one decode far below the slope, then long-prompt prefill, transformer training at batch 512, and ResNet convolution training nearest the ridge."}
+::: {#fig-roofline-model fig-env="figure" fig-pos="htb" fig-cap="**The roofline model**: Attainable throughput versus arithmetic intensity on log-log axes for an H100. The blue slope is the HBM bandwidth bound and the orange ceiling is FP8 Tensor Core peak (approximately `{python} MemoryWallScenario.h100_fp8_tflop_per_s_str`); they meet at the ridge point, roughly `{python} MemoryWallScenario.h100_ridge_fp8_str`. Markers place four operations from the workload comparison later in this section at their FP16 intensities: batch-1 decode and unfused attention prefill sit on the slope, while tiled attention prefill and a large GEMM reach the ceiling. Each marker falls on the same side of the ridge at FP16, whose ridge point is roughly `{python} WideningGap.h100_ridge_str` FLOP/byte (`{python} WideningGap.h100_peak_flops_str` divided by `{python} WideningGap.h100_bw_str`)." fig-alt="Log-log roofline plot. A blue diagonal memory-bandwidth line labeled 3.35 TB/s rises to a ridge point near 600 FLOP per byte, where it meets an orange horizontal compute ceiling labeled FP8 peak 2,000 TFLOP/s. The region left of the ridge is labeled memory-bound and the region right of it compute-bound. Four markers: LLM decode at batch 1 and unfused attention prefill on the blue slope; tiled attention prefill and a 4096 by 4096 GEMM on the orange ceiling."}
 ```{=latex}
 \begin{tikzpicture}[
     >=Stealth,
     font=\small
 ]
 
-    % Provide colors if not defined
-    \providecolor{ForestGreen}{RGB}{34,139,34}
-    \providecolor{NavyBlue}{RGB}{20,45,110}
-    \providecolor{Amber}{RGB}{217,119,6}
-    \providecolor{BurntOrange}{RGB}{210,105,30}
-    \providecolor{BrickRed}{RGB}{180,30,30}
-    \providecolor{Crimson}{RGB}{180,30,30}
+    % Semantic roofline palette: blue = memory-bound slope, orange = compute ceiling
+    \providecolor{BlueLine}{HTML}{006395}
+    \providecolor{OrangeLine}{HTML}{E67817}
     \providecolor{SlateGrey}{RGB}{112,128,144}
-    \providecolor{LightGrey}{RGB}{245,247,250}
     \providecolor{BorderGrey}{RGB}{203,213,225}
 
     % =========================================================================
-    % COORDINATE MAPPING
-    % x_canvas = 2.6 * (log10(x) + 0.903)
-    % y_canvas = 1.35 * (log10(y) + 1.0)
-    % Ridge: x = 600 -> x_c = 9.57; y = 2000 -> y_c = 5.81
+    % COORDINATE MAPPING (log-log)
+    % x_canvas = 2.0 * (log10(x) + 1)   for x in [0.1, 10^4] FLOP/byte
+    % y_canvas = 1.1 * (log10(y) + 1)   for y in TFLOP/s
+    % Slope: y = 3.35 x (H100 HBM3); ceiling: 1,979 TFLOP/s FP8.
+    % Ridge: x = 590.7 -> x_c = 7.54; y = 1,979 -> y_c = 4.73
+    % Workload markers use the FP16 intensities of @tbl-arithmetic-intensity
+    % (guarded in the workload-intensity-calc cell):
+    %   decode B=1 ~1 (x_c 2.00), unfused attention prefill ~60 (x_c 5.56),
+    %   tiled attention prefill ~1,024 (x_c 8.02), GEMM 4096^2 ~1,365 (x_c 8.27)
     % =========================================================================
 
-    % Background shading
-    % Memory-bound region (left of ridge at x = 9.57)
-    \fill[Crimson!4!white] (0, 0) rectangle (9.57, 6.2);
+    % Regime shading
+    \fill[BlueLine!5!white] (0, 0) rectangle (7.54, 5.35);
+    \fill[OrangeLine!7!white] (7.54, 0) rectangle (10.2, 5.35);
 
-    % Compute-bound region (right of ridge)
-    \fill[NavyBlue!4!white] (9.57, 0) rectangle (11.5, 6.2);
-
-    % Grid lines (subtle)
-    \foreach \x in {2.35, 4.70, 7.05, 9.40} {
-        \draw[BorderGrey!40, line width=0.5pt] (\x, 0) -- (\x, 6.2);
+    % Grid lines (subtle, one per decade)
+    \foreach \x in {2, 4, 6, 8, 10} {
+        \draw[BorderGrey!60, line width=0.4pt] (\x, 0) -- (\x, 5.35);
     }
-    \foreach \y in {1.35, 2.70, 4.05, 5.40, 5.81} {
-        \draw[BorderGrey!40, line width=0.5pt] (0, \y) -- (11.5, \y);
+    \foreach \y in {1.1, 2.2, 3.3, 4.4} {
+        \draw[BorderGrey!60, line width=0.4pt] (0, \y) -- (10.2, \y);
     }
 
-    % Region Labels (Pills at top)
-    \node[draw=Crimson!60, fill=Crimson!8!white, rounded corners=4pt, line width=0.8pt,
-          inner sep=4pt, font=\scriptsize\bfseries\color{Crimson}]
-        at (2.5, 6.6) {MEMORY-BOUND};
-
-    \node[draw=NavyBlue!60, fill=NavyBlue!8!white, rounded corners=4pt, line width=0.8pt,
-          inner sep=4pt, font=\scriptsize\bfseries\color{NavyBlue!90!black}]
-        at (10.4, 6.6) {COMPUTE-BOUND};
+    % Region labels
+    \node[draw=BlueLine!60, fill=white, rounded corners=4pt, line width=0.7pt,
+          inner sep=3.5pt, font=\scriptsize\bfseries\color{BlueLine}]
+        at (3.0, 5.75) {MEMORY-BOUND};
+    \node[draw=OrangeLine!70, fill=white, rounded corners=4pt, line width=0.7pt,
+          inner sep=3.5pt, font=\scriptsize\bfseries\color{OrangeLine!85!black}]
+        at (8.87, 5.75) {COMPUTE-BOUND};
 
     % Ridge vertical dashed line
-    \draw[dashed, SlateGrey!80, line width=0.9pt, dash pattern=on 4pt off 3pt]
-        (9.57, 0) -- (9.57, 5.81);
+    \draw[SlateGrey!80, line width=0.8pt, dash pattern=on 4pt off 3pt]
+        (7.54, 0) -- (7.54, 4.73);
 
-    % Sloped roofline (Memory BW ceiling)
-    \draw[Crimson, line width=1.8pt] (0, 0.84) -- (9.57, 5.81);
+    % Memory-bandwidth slope and compute ceiling
+    \draw[BlueLine, line width=1.8pt] (0, 0.578) -- (7.54, 4.73);
+    \draw[OrangeLine, line width=1.8pt] (7.54, 4.73) -- (10.2, 4.73);
+    \fill[black!75] (7.54, 4.73) circle (2.4pt);
 
-    % Horizontal roofline (Compute ceiling)
-    \draw[NavyBlue!90!black, line width=1.8pt] (9.57, 5.81) -- (11.2, 5.81);
-
-    % Ridge point circle
-    \fill[NavyBlue!90!black] (9.57, 5.81) circle (2.8pt);
-
-    % Ridge callout box (to the right, below ceiling)
-    \node[draw=SlateGrey!70, fill=white, rounded corners=3pt, line width=0.8pt,
-          inner sep=3.5pt, font=\scriptsize\bfseries\color{black!80}, anchor=west]
-        at (9.75, 5.35) {Ridge $\approx$ 600 FLOP/B};
-
-    % Sloped text: slope = 3.35 TB/s (HBM3 BW ceiling) - compact stacked
-    \node[font=\scriptsize\bfseries\color{Crimson}, rotate=27.4, align=center, anchor=south]
-        at (2.35, 2.45) {slope = 3.35 TB/s\\[1.5pt]{\tiny\color{Crimson!90!black}(HBM3 BW ceiling)}};
-
-    % Compute ceiling text
-    \node[font=\scriptsize\bfseries\color{NavyBlue!90!black}, anchor=south east]
-        at (9.45, 6.0) {2,000 TFLOP/s FP8 Tensor Core ceiling};
+    % Slope and ceiling labels
+    \node[font=\scriptsize\bfseries\color{BlueLine}, rotate=28.8, anchor=south]
+        at (3.2, 2.50) {HBM3 bandwidth: 3.35 TB/s};
+    \node[font=\scriptsize\bfseries\color{OrangeLine!85!black}, anchor=south east]
+        at (10.2, 4.80) {FP8 peak: 2,000 TFLOP/s};
+    \node[font=\scriptsize\bfseries\color{black!75}, anchor=south east]
+        at (7.44, 0.18) {ridge $\approx$ 600 FLOP/B};
 
     % =========================================================================
-    % WORKLOAD POINTS
+    % WORKLOAD POINTS (attainable bound at each intensity)
     % =========================================================================
+    % 1. LLM decode, batch 1 (~1 FLOP/B)
+    \fill[black!75] (2.00, 1.678) circle (2.6pt);
+    \node[font=\scriptsize\color{black!85}, anchor=north west, align=left]
+        at (2.12, 1.55) {LLM decode\\[-1pt]{\tiny\color{black!65}batch 1}};
 
-    % 1. Decode (batch=1)
-    \draw[dashed, SlateGrey!70, line width=0.8pt] (1.95, 1.85) -- (1.95, 1.05);
-    \fill[Crimson] (1.95, 1.05) circle (3pt);
-    \node[font=\tiny\itshape\color{black!60}, anchor=north] at (1.95, 0.95) {peak $\gg$ actual};
-    \node[draw=Crimson!60, fill=white, rounded corners=3pt, line width=0.8pt,
-          inner sep=3.5pt, align=center, anchor=south east] at (2.1, 1.4) {
-        {\scriptsize\bfseries\color{Crimson} Decode}\\[1pt]
-        {\tiny\color{black!70}(batch=1)}
-    };
+    % 2. Attention prefill, unfused (~60 FLOP/B)
+    \fill[black!75] (5.56, 3.635) circle (2.6pt);
+    \node[font=\scriptsize\color{black!85}, anchor=north west, align=left]
+        at (5.68, 3.50) {Attention prefill\\[-1pt]{\tiny\color{black!65}unfused}};
 
-    % 2. Prefill (long prompt)
-    \fill[NavyBlue!90!black] (4.62, 3.25) circle (3pt);
-    \draw[dashed, SlateGrey!60, line width=0.7pt] (4.62, 3.25) -- (4.62, 2.5);
-    \node[draw=SlateGrey!60, fill=white, rounded corners=3pt, line width=0.8pt,
-          inner sep=3.5pt, align=center, anchor=south] at (4.62, 3.55) {
-        {\scriptsize\bfseries\color{black!85} Prefill}\\[1pt]
-        {\tiny\color{black!70}(long prompt)}
-    };
+    % 3. Attention prefill, tiled (~1,024 FLOP/B)
+    \fill[black!75] (8.02, 4.73) circle (2.6pt);
+    \draw[black!50, line width=0.5pt] (8.02, 4.63) -- (8.02, 3.95);
+    \node[font=\scriptsize\color{black!85}, anchor=north, align=center]
+        at (8.02, 3.92) {Attention prefill\\[-1pt]{\tiny\color{black!65}tiled}};
 
-    % 3. Transformer train (B=512)
-    \fill[NavyBlue!90!black] (6.26, 4.09) circle (3pt);
-    \node[draw=SlateGrey!60, fill=white, rounded corners=3pt, line width=0.8pt,
-          inner sep=3.5pt, align=center, anchor=north west] at (6.4, 3.5) {
-        {\scriptsize\bfseries\color{black!85} Transformer}\\[1pt]
-        {\tiny\color{black!70}train (B=512)}
-    };
-
-    % 4. Conv training (ResNet)
-    \fill[NavyBlue!90!black] (8.21, 5.10) circle (3pt);
-    \node[draw=NavyBlue!60, fill=white, rounded corners=3pt, line width=0.8pt,
-          inner sep=3.5pt, align=center, anchor=north west] at (8.3, 4.6) {
-        {\scriptsize\bfseries\color{NavyBlue!90!black} Conv training}\\[1pt]
-        {\tiny\color{black!70}(ResNet)}
-    };
+    % 4. GEMM 4096 x 4096 (~1,365 FLOP/B)
+    \fill[black!75] (8.27, 4.73) circle (2.6pt);
+    \draw[black!50, line width=0.5pt] (8.27, 4.63) -- (8.27, 4.40) -- (9.05, 4.40) -- (9.05, 3.20);
+    \node[font=\scriptsize\color{black!85}, anchor=north, align=center]
+        at (9.05, 3.17) {GEMM\\[-1pt]{\tiny\color{black!65}4096$\times$4096}};
 
     % =========================================================================
     % AXES
     % =========================================================================
-    \draw[->, SlateGrey!90!black, line width=1.0pt] (0, 0) -- (11.8, 0);
-    \draw[->, SlateGrey!90!black, line width=1.0pt] (0, 0) -- (0, 6.6);
+    \draw[->, SlateGrey!90!black, line width=0.9pt] (0, 0) -- (10.5, 0);
+    \draw[->, SlateGrey!90!black, line width=0.9pt] (0, 0) -- (0, 5.5);
 
-    % Y-axis ticks and labels
-    \foreach \y/\val in {0/0.1, 1.35/1, 2.70/10, 4.05/100, 5.40/1{,}000, 5.81/2{,}000} {
-        \draw[SlateGrey!90!black, line width=0.8pt] (0, \y) -- (-0.12, \y);
-        \node[font=\scriptsize\color{black!85}, anchor=east] at (-0.16, \y) {\val};
+    \foreach \y/\val in {0/0.1, 1.1/1, 2.2/10, 3.3/100, 4.4/1{,}000} {
+        \draw[SlateGrey!90!black, line width=0.7pt] (0, \y) -- (-0.1, \y);
+        \node[font=\scriptsize\color{black!85}, anchor=east] at (-0.14, \y) {\val};
+    }
+    \foreach \x/\val in {0/0.1, 2/1, 4/10, 6/100, 8/1{,}000, 10/10{,}000} {
+        \draw[SlateGrey!90!black, line width=0.7pt] (\x, 0) -- (\x, -0.1);
+        \node[font=\scriptsize\color{black!85}, anchor=north] at (\x, -0.14) {\val};
     }
 
-    % X-axis ticks and labels
-    \foreach \x/\val in {0/{1/8}, 2.35/1, 4.70/8, 7.05/64} {
-        \draw[SlateGrey!90!black, line width=0.8pt] (\x, 0) -- (\x, -0.12);
-        \node[font=\scriptsize\color{black!85}, anchor=north] at (\x, -0.16) {\val};
-    }
-
-    % Highlighted Ridge tick (~600)
-    \draw[SlateGrey!90!black, line width=1.0pt] (9.57, 0) -- (9.57, -0.12);
-    \node[draw=SlateGrey!60, fill=white, rounded corners=2pt, line width=0.6pt,
-          font=\tiny\bfseries\color{black!80}, inner sep=2.5pt, anchor=north]
-        at (9.57, -0.18) {$\sim$600};
-
-    % Axis Titles
-    \node[font=\small\bfseries\color{black!90}, rotate=90] at (-1.3, 3.3) {Attainable Throughput (TFLOP/s) --- log scale};
-    \node[font=\small\bfseries\color{black!90}] at (5.6, -0.85) {Arithmetic Intensity (FLOP/byte) $\rightarrow$ log scale};
+    % Axis titles
+    \node[font=\small\bfseries\color{black!90}, rotate=90] at (-1.05, 2.7) {Attainable throughput (TFLOP/s)};
+    \node[font=\small\bfseries\color{black!90}] at (5.1, -0.8) {Arithmetic intensity (FLOP/byte)};
 
 \end{tikzpicture}
 ```
@@ -923,6 +885,11 @@ class WorkloadIntensityCalc:
         "Attention should be memory-bound unfused and in decode, compute-bound when tiled",
     )
     check(attn_decode_gqa_intensity < h100_ridge / 10, "GQA decode attention should stay far below the ridge")
+    # The TikZ roofline in @fig-roofline-model places static markers at these intensities.
+    check(1300 < gemm_intensity < 1430, "Roofline GEMM marker (~1,365 FLOP/B) drifted")
+    check(55 < attn_unfused_intensity < 66, "Roofline unfused-attention marker (~60 FLOP/B) drifted")
+    check(1000 < attn_tiled_intensity < 1050, "Roofline tiled-attention marker (~1,024 FLOP/B) drifted")
+    check(0.9 < decode_intensity_val < 1.1, "Roofline decode marker (~1 FLOP/B) drifted")
 
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
     gemm_intensity_str = fmt_arithmetic_intensity(gemm_flops / gemm_bytes, precision=1, commas=False)
@@ -1093,11 +1060,11 @@ The prefill-decode decomposition has direct implications for system design, as v
 
     % Provide colors if not defined
     \providecolor{ForestGreen}{RGB}{34,139,34}
-    \providecolor{NavyBlue}{RGB}{20,45,110}
+    \providecolor{OrangeLine}{RGB}{20,45,110}
     \providecolor{Amber}{RGB}{217,119,6}
     \providecolor{BurntOrange}{RGB}{210,105,30}
     \providecolor{BrickRed}{RGB}{180,30,30}
-    \providecolor{Crimson}{RGB}{180,30,30}
+    \providecolor{BlueLine}{RGB}{180,30,30}
     \providecolor{SlateGrey}{RGB}{112,128,144}
     \providecolor{LightGrey}{RGB}{245,247,250}
     \providecolor{BorderGrey}{RGB}{203,213,225}
@@ -1111,8 +1078,8 @@ The prefill-decode decomposition has direct implications for system design, as v
     % LEFT PANEL: Prefill Phase
     % =========================================================================
     \node[font=\large\bfseries\color{black!90}] at (3.8, 5.8) {Prefill Phase};
-    \node[draw=NavyBlue!60, fill=NavyBlue!8!white, rounded corners=4pt, line width=0.8pt,
-          inner sep=3.5pt, font=\scriptsize\bfseries\color{NavyBlue!90!black}]
+    \node[draw=OrangeLine!60, fill=OrangeLine!8!white, rounded corners=4pt, line width=0.8pt,
+          inner sep=3.5pt, font=\scriptsize\bfseries\color{OrangeLine!85!black}]
         at (3.8, 5.15) {Compute-Bound};
 
     % Left axis title
@@ -1132,34 +1099,34 @@ The prefill-decode decomposition has direct implications for system design, as v
     \node[font=\scriptsize\bfseries\color{black!85}] at (3.85, -0.45) {Arithmetic Intensity (FLOP/byte) $\rightarrow$};
 
     % Roofline (Left): Ridge at (3.8, 3.4)
-    \draw[Crimson, line width=1.6pt] (0.8, 0) -- (3.8, 3.4);
-    \draw[NavyBlue!90!black, line width=1.6pt] (3.8, 3.4) -- (6.7, 3.4);
+    \draw[BlueLine, line width=1.6pt] (0.8, 0) -- (3.8, 3.4);
+    \draw[OrangeLine!85!black, line width=1.6pt] (3.8, 3.4) -- (6.7, 3.4);
 
     % Ridge point
     \fill[black!85] (3.8, 3.4) circle (2.2pt);
     \node[font=\tiny\bfseries\color{black!80}, anchor=south east] at (3.75, 3.55) {Ridge $\sim$300};
 
     % Roofline labels
-    \node[font=\tiny\bfseries\color{Crimson}, rotate=48, anchor=south] at (2.2, 1.8) {HBM BW ceiling};
-    \node[font=\tiny\bfseries\color{NavyBlue!90!black}, anchor=south west] at (3.9, 3.55) {Compute ceiling};
+    \node[font=\tiny\bfseries\color{BlueLine}, rotate=48, anchor=south] at (2.2, 1.8) {HBM BW ceiling};
+    \node[font=\tiny\bfseries\color{OrangeLine!85!black}, anchor=south west] at (3.9, 3.55) {Compute ceiling};
 
     % Prefill Point (at x = 6.1, y = 3.4)
-    \draw[dashed, NavyBlue!80!black, line width=0.8pt] (6.1, 0) -- (6.1, 3.4);
-    \fill[NavyBlue!90!black] (6.1, 3.4) circle (3.2pt);
-    \draw[NavyBlue!90!black, line width=1.0pt] (6.1, 3.4) circle (5.0pt);
+    \draw[dashed, OrangeLine!85!black, line width=0.8pt] (6.1, 0) -- (6.1, 3.4);
+    \fill[OrangeLine!85!black] (6.1, 3.4) circle (3.2pt);
+    \draw[OrangeLine!85!black, line width=1.0pt] (6.1, 3.4) circle (5.0pt);
 
     % Prefill Callout badge
-    \node[draw=NavyBlue!60, fill=white, rounded corners=3pt, line width=0.8pt,
+    \node[draw=OrangeLine!60, fill=white, rounded corners=3pt, line width=0.8pt,
           inner sep=3.5pt, align=center, anchor=south] at (6.1, 3.9) {
-        {\scriptsize\bfseries\color{NavyBlue!90!black} Prefill Point}\\[1pt]
+        {\scriptsize\bfseries\color{OrangeLine!85!black} Prefill Point}\\[1pt]
         {\tiny\color{black!70}AI $\approx$ 1{,}024 FLOP/B}
     };
 
     % Compute-Limited Card (placed under roofline, perfectly centered)
-    \node[card, draw=NavyBlue!70, fill=white, anchor=center]
+    \node[card, draw=OrangeLine!70, fill=white, anchor=center]
         at (4.4, 1.4) {
-        {\scriptsize\bfseries\color{NavyBlue!90!black} Compute-Limited}\\[2pt]
-        {\tiny\color{NavyBlue!80!black} Tensor Cores saturated.}\\[1pt]
+        {\scriptsize\bfseries\color{OrangeLine!85!black} Compute-Limited}\\[2pt]
+        {\tiny\color{OrangeLine!85!black} Tensor Cores saturated.}\\[1pt]
         {\tiny\color{black!70} Benefit: FP8 Tensor Cores,}\\[1pt]
         {\tiny\color{black!70} FlashAttention-2 tiling.}
     };
@@ -1168,8 +1135,8 @@ The prefill-decode decomposition has direct implications for system design, as v
     % RIGHT PANEL: Decode Phase
     % =========================================================================
     \node[font=\large\bfseries\color{black!90}] at (11.1, 5.8) {Decode Phase};
-    \node[draw=Crimson!60, fill=Crimson!8!white, rounded corners=4pt, line width=0.8pt,
-          inner sep=3.5pt, font=\scriptsize\bfseries\color{Crimson}]
+    \node[draw=BlueLine!60, fill=BlueLine!8!white, rounded corners=4pt, line width=0.8pt,
+          inner sep=3.5pt, font=\scriptsize\bfseries\color{BlueLine}]
         at (11.1, 5.15) {Memory-Bound};
 
     % Axes (Right)
@@ -1186,41 +1153,41 @@ The prefill-decode decomposition has direct implications for system design, as v
     \node[font=\scriptsize\bfseries\color{black!85}] at (11.1, -0.45) {Arithmetic Intensity (FLOP/byte) $\rightarrow$};
 
     % Roofline (Right): Ridge at (11.1, 3.4)
-    \draw[Crimson, line width=1.6pt] (8.1, 0) -- (11.1, 3.4);
-    \draw[NavyBlue!90!black, line width=1.6pt] (11.1, 3.4) -- (14.0, 3.4);
+    \draw[BlueLine, line width=1.6pt] (8.1, 0) -- (11.1, 3.4);
+    \draw[OrangeLine!85!black, line width=1.6pt] (11.1, 3.4) -- (14.0, 3.4);
 
     % Ridge point
     \fill[black!85] (11.1, 3.4) circle (2.2pt);
     \node[font=\tiny\bfseries\color{black!80}, anchor=south east] at (11.0, 3.55) {Ridge $\sim$300};
 
     % Roofline labels
-    \node[font=\tiny\bfseries\color{Crimson}, rotate=48, anchor=south] at (9.6, 1.8) {HBM BW ceiling};
-    \node[font=\tiny\bfseries\color{NavyBlue!90!black}, anchor=south west] at (11.2, 3.55) {Compute ceiling};
+    \node[font=\tiny\bfseries\color{BlueLine}, rotate=48, anchor=south] at (9.6, 1.8) {HBM BW ceiling};
+    \node[font=\tiny\bfseries\color{OrangeLine!85!black}, anchor=south west] at (11.2, 3.55) {Compute ceiling};
 
     % Decode Point (at x = 8.65, y = 0.62)
     \coordinate (dec_pt) at (8.65, 0.62);
-    \draw[dashed, Crimson, line width=0.9pt] (dec_pt |- 8.1, 0) -- (dec_pt) -- (8.65, 3.9);
-    \fill[Crimson] (dec_pt) circle (3.2pt);
+    \draw[dashed, BlueLine, line width=0.9pt] (dec_pt |- 8.1, 0) -- (dec_pt) -- (8.65, 3.9);
+    \fill[BlueLine] (dec_pt) circle (3.2pt);
 
     % Compute Idle Callout (at top of dashed line, y = 3.9, perfectly symmetric with left panel)
-    \node[draw=Crimson!70, fill=white, rounded corners=3pt, line width=0.8pt,
+    \node[draw=BlueLine!70, fill=white, rounded corners=3pt, line width=0.8pt,
           inner sep=3.5pt, align=center, anchor=south] at (8.65, 3.9) {
-        {\scriptsize\bfseries\color{Crimson} Compute Idle}\\[1pt]
+        {\scriptsize\bfseries\color{BlueLine} Compute Idle}\\[1pt]
         {\tiny\color{black!70}HBM-starved}
     };
 
     % Decode Point Callout (right of dot)
-    \node[draw=Crimson!70, fill=white, rounded corners=3pt, line width=0.8pt,
+    \node[draw=BlueLine!70, fill=white, rounded corners=3pt, line width=0.8pt,
           inner sep=3.5pt, align=center, anchor=west] at (8.9, 0.62) {
-        {\scriptsize\bfseries\color{Crimson} Decode Point}\\[1pt]
+        {\scriptsize\bfseries\color{BlueLine} Decode Point}\\[1pt]
         {\tiny\color{black!70}AI $\approx$ 1 FLOP/B}
     };
 
     % Memory-BW Limited Card
-    \node[card, draw=Crimson!70, fill=white, anchor=south west]
+    \node[card, draw=BlueLine!70, fill=white, anchor=south west]
         at (11.2, 1.1) {
-        {\scriptsize\bfseries\color{Crimson} Memory-BW Limited}\\[2pt]
-        {\tiny\color{Crimson!90!black} Weights streamed per token.}\\[1pt]
+        {\scriptsize\bfseries\color{BlueLine} Memory-BW Limited}\\[2pt]
+        {\tiny\color{BlueLine!90!black} Weights streamed per token.}\\[1pt]
         {\tiny\color{black!70} Benefit: INT4 weights,}\\[1pt]
         {\tiny\color{black!70} INT8 KV cache, spec dec.}
     };
@@ -1348,7 +1315,7 @@ The cost is measurable. The PyTorch profiler\index{Profiling!observer effect} ad
 
 Profiling levels are useful only if they guide the drill-down from symptom to intervention. ML system profiling operates at four levels, each providing different granularity and targeting different bottleneck categories. @Fig-optimization-hierarchy makes this drill-down explicit, starting from application-level symptoms and descending toward kernel and hardware-counter evidence.
 
-::: {#fig-optimization-hierarchy fig-env="figure" fig-pos="htb" fig-cap="**The profiling hierarchy**: Diagnosis begins with application-level symptoms, then narrows through framework and kernel evidence to hardware counters. Each lower level trades breadth for the detail needed to isolate a root cause." fig-alt="Four-level profiling hierarchy with hardware counters at the base, followed by kernel profiling, framework profiling, and application profiling at the top. A downward arrow shows diagnosis narrowing from application symptoms toward hardware evidence."}
+::: {#fig-optimization-hierarchy fig-env="figure" fig-pos="htb" fig-cap="**The profiling hierarchy**: Diagnosis begins with application-level symptoms, then narrows through framework and kernel evidence to hardware counters. Each lower level trades breadth for the detail needed to isolate a root cause." fig-alt="Four stacked level cards: level 4 application and fleet profiling at the top, level 3 framework and distributed traces, level 2 kernel timeline and concurrency, and level 1 hardware microarchitecture counters at the bottom. Each card lists metrics, a diagnostic question, and tools. A left column numbers the diagnostic steps observe, isolate, pinpoint, and resolve from top to bottom, and a right column gives each level's scope and time scale, from fleet over hours to SM instructions over microseconds."}
 ![](images/svg/profiling-hierarchy.svg)
 
 <!--
@@ -2224,9 +2191,7 @@ FlashAttention\index{FlashAttention}\index{FlashAttention!I/O-aware design} [@da
 
 The reduction in HBM traffic can be dramatic. For a sequence length of `{python} FlashAttentionSavings.head_n_str`, 64 heads, and head dimension `{python} FlashAttentionSavings.head_d_str` in FP16, the simplified naive estimate writes and reads the score and probability matrices and moves $Q$, $K$, $V$, and output once, totaling approximately `{python} FlashAttentionSavings.naive_gb_str` for the full layer, or `{python} FlashAttentionSavings.naive_head_traffic_mb_str` per head. The idealized FlashAttention lower bound counts one read of $Q$, $K$, and $V$ and one output write, totaling approximately `{python} FlashAttentionSavings.flash_mb_str` for the full layer, or `{python} FlashAttentionSavings.flash_head_traffic_mb_str` per head. The resulting `{python} FlashAttentionSavings.savings_mult_str` ratio is a scenario comparison, not a claim about allocated memory or realized kernel traffic; actual traffic depends on tile reloads and the implementation schedule.
 
-The key insight behind FlashAttention is the online softmax\index{Online Softmax!FlashAttention}\index{FlashAttention!tiled softmax}[^fn-online-softmax-algo] trick, which makes tiling possible for an operation that appears to require global information. Standard softmax computes $\text{softmax}(s_i) = e^{s_i} / \sum_j e^{s_j}$, but for numerical stability it first subtracts the global maximum: $\text{softmax}(s_i) = e^{s_i - m} / \sum_j e^{s_j - m}$ where $m = \max_j s_j$. Finding this global maximum seems to require seeing all scores first, which would force materializing the full $S{\times}S$ matrix.
-
-[^fn-online-softmax-algo]: **Online softmax**\index{Online Softmax!definition}: Here, *online* means that the computation processes data incrementally in one pass rather than requiring the complete input at once.
+The key insight behind FlashAttention is the online softmax\index{Online Softmax!FlashAttention}\index{FlashAttention!tiled softmax} trick, which processes scores incrementally in a single pass and so makes tiling possible for an operation that appears to require global information. Standard softmax computes $\text{softmax}(s_i) = e^{s_i} / \sum_j e^{s_j}$, but for numerical stability it first subtracts the global maximum: $\text{softmax}(s_i) = e^{s_i - m} / \sum_j e^{s_j - m}$ where $m = \max_j s_j$. Finding this global maximum seems to require seeing all scores first, which would force materializing the full $S{\times}S$ matrix.
 
 The online algorithm avoids this by maintaining running statistics that are updated incrementally as each tile is processed. When processing tile $t$, the algorithm executes four steps:
 
@@ -2520,7 +2485,7 @@ Verify understanding of memory-aware attention:
 
 The `{python} FlashAttentionSavings.savings_mult_str` ratio belongs only to its stated traffic scenario. @Fig-flashattention-memory-savings adds the scaling shape: because standard-attention workspace grows quadratically while FlashAttention's running state grows linearly, the advantage widens with sequence length. The plot uses a narrower workspace boundary, so its ratios are not directly comparable to the traffic scenario; the takeaway is that the gap grows, not its exact value at a given length.
 
-::: {#fig-flashattention-memory-savings fig-env="figure" fig-pos="htb" fig-cap="**FlashAttention memory savings**: $\mathcal{O}(S^2) \rightarrow \mathcal{O}(S)$. Standard attention allocates the full $S{\times}S$ score matrix in HBM, while FlashAttention maintains only $\mathcal{O}(S)$ running statistics. The shaded region represents memory freed for KV cache, activations, or larger batch sizes. This auxiliary-memory comparison uses a narrower boundary than the traffic scenario in the text; its point is the widening shape of the gap as context grows, not a headline ratio." fig-alt="Log-log plot of attention memory vs. sequence length. Standard quadratic curve rises steeply; FlashAttention linear curve grows more slowly. Shaded region shows savings, with annotations at 8K and 65K."}
+::: {#fig-flashattention-memory-savings fig-env="figure" fig-pos="htb" fig-cap="**FlashAttention memory savings**: Attention workspace for 32 FP16 heads grows as $\mathcal{O}(S^2)$ when standard attention materializes the $S{\times}S$ score matrix in HBM, but only as $\mathcal{O}(S)$ when FlashAttention keeps running softmax statistics instead. The green gap is memory freed for KV cache, activations, or larger batches, and it widens with every doubling of context. This comparison uses a narrower boundary than the traffic scenario in the text; its point is the shape of the gap, not a headline ratio." fig-alt="Log-log plot of attention workspace in gigabytes versus sequence length from 512 to 128K tokens. A red standard-attention line rises steeply; a blue FlashAttention line rises slowly; the region between them is shaded green. Dashed vertical lines mark 8K and 65K contexts, with callouts reading 4,096 times smaller and 32,768 times smaller."}
 
 ```{python}
 #| echo: false
@@ -2538,11 +2503,9 @@ The `{python} FlashAttentionSavings.savings_mult_str` ratio belongs only to its 
 # ┌── 1. CANVAS ────────────────────────────────────────────────────────────────
 # │ Plot standard attention (S²) vs FlashAttention (S) memory vs seq len;
 import numpy as np
-import matplotlib.pyplot as plt
-from mlsysim.fmt import check
+from binder.tools.figures import style as book_style
 
-plt.style.use('seaborn-v0_8-whitegrid')
-plt.figure(figsize=(10, 6))
+fig, ax, COLORS, plt = book_style.setup_plot(figsize=(10, 5))
 
 # ┌── 2. ARRAYS ────────────────────────────────────────────────────────────────
 S_vals = np.logspace(np.log2(512), np.log2(131072), num=200, base=2.0)
@@ -2554,60 +2517,44 @@ batch_size = 1
 mem_standard = (S_vals**2 * bytes_per_element_fp16 * num_heads * batch_size * byte).to(GB).magnitude
 mem_flash = (S_vals * 4 * num_heads * batch_size * byte).to(GB).magnitude
 
-plt.plot(S_vals, mem_standard, label=r'Standard Attention $\mathcal{O}(S^2)$', color='#CC5500', linewidth=2)
-plt.plot(S_vals, mem_flash, label=r'FlashAttention $\mathcal{O}(S)$', color='#006395', linewidth=2)
-plt.fill_between(S_vals, mem_flash, mem_standard, color='#D1E6F3', alpha=0.6, label='Memory Savings')
-
-plt.xscale('log')
-plt.yscale('log')
-
-plt.xlabel('Sequence Length (S)')
-plt.ylabel('Attention Memory (GB)')
-plt.title(r'FlashAttention Memory Savings: $\mathcal{O}(S^2) \to \mathcal{O}(S)$', fontsize=14)
-
-plt.axvline(x=8192, color='gray', linestyle='--', linewidth=1.5)
-plt.text(
-    8600,
-    plt.ylim()[0] * 1.5,
-    ' Typical LLM context (8K)',
-    rotation=90,
-    verticalalignment='bottom',
-    color='black',
-    bbox=dict(facecolor='white', edgecolor='none', alpha=0.6),
-)
-
 # ┌── 3. RENDER ────────────────────────────────────────────────────────────────
+# Quadratic growth is the threat series (red); the linear FlashAttention
+# workspace is the memory series (blue); the gap is memory returned (green).
+ax.fill_between(S_vals, mem_flash, mem_standard, color=COLORS['GreenFill'], alpha=0.8, label='Memory freed')
+ax.plot(S_vals, mem_standard, label=r'Standard attention, $\mathcal{O}(S^2)$', color=COLORS['RedLine'], linewidth=2.2)
+ax.plot(S_vals, mem_flash, label=r'FlashAttention, $\mathcal{O}(S)$', color=COLORS['BlueLine'], linewidth=2.2)
 
-plt.axvline(x=65536, color='gray', linestyle='--', linewidth=1.5)
-plt.text(
-    69000,
-    plt.ylim()[0] * 1.5,
-    ' Long context (65K)',
-    rotation=90,
-    verticalalignment='bottom',
-    color='black',
-    bbox=dict(facecolor='white', edgecolor='none', alpha=0.6),
-)
+ax.set_xscale('log', base=2)
+ax.set_yscale('log')
+ax.set_xticks([512, 2048, 8192, 32768, 131072])
+ax.set_xticklabels(['512', '2K', '8K', '32K', '128K'])
+ax.set_xlabel('Sequence length $S$ (tokens)')
+ax.set_ylabel('Attention workspace (GB, 32 heads, FP16)')
+y_top = 8e3
+ax.set_ylim(3e-5, y_top)
+
+for n_val, name in [(8192, '8K context'), (65536, '65K context')]:
+    ax.axvline(x=n_val, color=COLORS['primary'], linestyle='--', linewidth=1.0, alpha=0.7)
+    ax.text(n_val * 0.93, y_top * 0.55, name, ha='right', va='top', fontsize=9, color=COLORS['primary'])
 
 def annotate_ratio(n_val):
     ratio = n_val * bytes_per_element_fp16 / 4
     mem_val = (n_val**2 * bytes_per_element_fp16 * num_heads * byte).to(GB).magnitude
-    plt.annotate(
-        f'{int(ratio):,}x Savings',
+    ax.annotate(
+        f'{int(ratio):,}$\\times$ smaller',
         xy=(n_val, mem_val),
-        xytext=(n_val, mem_val * 0.25),
-        arrowprops=dict(facecolor='black', shrink=0.05, width=1, headwidth=6),
+        xytext=(n_val, mem_val * 0.02),
+        arrowprops=dict(arrowstyle='->', color=COLORS['primary'], lw=1.0),
         ha='center',
         va='top',
         fontsize=9,
-        bbox=dict(boxstyle="round,pad=0.4", fc="white", ec="black", lw=0.5),
+        bbox=dict(boxstyle="round,pad=0.3", fc="white", ec=COLORS['grid'], lw=0.6),
     )
 
 annotate_ratio(8192)
 annotate_ratio(65536)
 
-plt.legend(loc='upper left', fontsize=8, frameon=True, facecolor='white', framealpha=0.95, edgecolor='gray', fancybox=True, borderpad=0.6)
-plt.grid(True, which="both", ls="-", alpha=0.7)
+ax.legend(loc='upper left', fontsize=9, frameon=True, facecolor='white', framealpha=0.95, edgecolor=COLORS['grid'])
 plt.tight_layout()
 plt.show()
 plt.close()
@@ -2643,7 +2590,7 @@ The first inference-side precision decision is how to shrink weights while prote
 
 The metadata price stays small across formats\index{Block-wise Quantization!storage overhead}. An INT8 scheme with one FP32 scale per 128 weights adds $32/128 = 0.25$ bits per weight, about 3 percent of its payload, so block-wise scaling isolates outliers without the bandwidth penalty of a higher-precision format. The structural contrast between per-tensor and block-wise quantization is illustrated in @fig-performance-engineering-block-quantization. In per-tensor quantization, a single outlier expands the scaling factor across the entire tensor, quantizing the majority of weights to zero and destroying precision. In block-wise quantization, the outlier's dynamic-range penalty is strictly contained within its local group, preserving high-resolution representation for the surrounding weights.
 
-::: {#fig-performance-engineering-block-quantization fig-env="figure" fig-pos="htb" fig-cap="**Block-wise versus per-tensor quantization**: Under per-tensor scaling (left), an extreme outlier weight forces a wide scale factor that crushes normal weights to zero and destroys precision. Under block-wise quantization (right), weights are partitioned into independent groups, strictly isolating outlier damage to a single block and preserving full INT8 dynamic range across remaining parameters." fig-alt="Side-by-side comparison of per-tensor quantization with crushed precision versus block-wise quantization with localized outlier containment and preserved dynamic range."}
+::: {#fig-performance-engineering-block-quantization fig-env="figure" fig-pos="htb" fig-cap="**Block-wise versus per-tensor quantization**: Under per-tensor scaling (left), one outlier weight sets the scale for the whole tensor, so six of the eight normal weights round to zero. Under block-wise quantization (right), each group of weights gets its own scale: the block without the outlier keeps full INT8 resolution, while the small weights that share the outlier's block are still crushed. Smaller blocks confine the damage further at the cost of more scale metadata." fig-alt="Two side-by-side panels quantize the same eight FP16 weights, one of which is an outlier of 58.7. Left, per-tensor: a single scale of about 0.462 maps six weights to 0, one to 1, and the outlier to 127. Right, block-wise with blocks of four: the first block's scale of about 0.00165 maps its weights to 73, -48, 127, and -91, while the second block, containing the outlier, maps to 127, 0, 1, and 0."}
 ![](images/svg/block-quantization.svg)
 
 <!--
@@ -2932,7 +2879,7 @@ When a post-training recipe misses the quality budget, the precision decision sh
 
 When PTQ fails to meet quality thresholds, QAT provides the remedy by integrating quantization noise directly into the training loop. Simulating low-precision rounding during the forward pass and approximating gradients during the backward pass via the straight-through estimator (STE)[^fn-ste-straight-through] allows the network to adjust its weights to be robust to quantization.
 
-[^fn-ste-straight-through]: **Straight-through estimator (STE)**\index{Straight-Through Estimator!quantization}: Discussed by @bengio2013estimating for hard stochastic neurons, the STE handles a fundamental calculus problem that also appears in quantization: the gradient of a rounding function is zero almost everywhere, making backpropagation through quantized layers impossible by standard rules. The STE passes the upstream gradient through the rounding step as a surrogate gradient, pretending the rounding did not happen. This approximation is useful in practice for training networks with discrete or quantized operations, but it is a heuristic rather than a general convergence guarantee for every QAT setup.
+[^fn-ste-straight-through]: **Straight-through estimator (STE)**\index{Straight-Through Estimator!quantization}: Rounding has zero gradient almost everywhere, so backpropagation through a quantized layer would otherwise stall. The STE, discussed by @bengio2013estimating for hard stochastic neurons, passes the upstream gradient through the rounding step as if rounding had not happened. It is a heuristic that works well in QAT practice, not a convergence guarantee.
 
 The cost is substantial: QAT is effectively a full fine-tuning run, often requiring hundreds of GPU-hours and a distributed training cluster. For a 70B model, this can mean a multi-day multi-GPU job instead of an hours-scale PTQ calibration run. Adapter-based quantized fine-tuning narrows the gap by freezing the low-precision base model and updating only small low-rank adapter matrices rather than all model weights. This hybrid approach offers some of the quality recovery of QAT with a memory footprint small enough to run on much smaller hardware, but it is a task-adaptation remedy rather than a universal replacement for full quantization-aware retraining.
 
@@ -3084,7 +3031,7 @@ The deeper payoff of compilation is spatial, not just arithmetic. A compiler lik
 
 A graph compiler\index{Graph Compilation!pipeline stages} transforms a high-level model definition (Python code) into optimized hardware instructions through a multi-stage pipeline, as shown in @fig-performance-engineering-compilation-pipeline. To visualize this process, consider a standard transformer feed-forward network (FFN) block consisting of a projection, an activation, a second projection, and a layer normalization: `LayerNorm(Linear(GELU(Linear(x))))`. In standard PyTorch eager execution, this sequence triggers four separate kernel launches, each reading from and writing to HBM.
 
-::: {#fig-performance-engineering-compilation-pipeline fig-env="figure" fig-pos="htb" fig-cap="**Deep learning compilation pipeline**: The four-stage lowering flow from eager Python bytecode through graph capture (TorchDynamo), graph-level optimization (AOTAutograd), target-aware operator fusion (TorchInductor), to code generation and autotuned GPU kernel compilation (Triton and cuBLAS)." fig-alt="Four-stage ML compilation pipeline showing graph capture, graph optimization, operator fusion, and code generation lowering high-level code to hardware-optimized GPU kernels."}
+::: {#fig-performance-engineering-compilation-pipeline fig-env="figure" fig-pos="htb" fig-cap="**Deep learning compilation pipeline**: The four-stage lowering flow from eager Python bytecode through graph capture (TorchDynamo), graph-level optimization (AOTAutograd), target-aware operator fusion (TorchInductor), to code generation and autotuned GPU kernel compilation (Triton and cuBLAS)." fig-alt="Four stage cards joined by arrows: graph capture with TorchDynamo, graph optimization with AOTAutograd and FX passes, operator fusion with TorchInductor, and code generation and tuning with Triton, CUTLASS, and cuBLAS. A panel below traces one feed-forward block from Python source through an FX graph node and a fused GEMM-plus-GELU kernel to three tuned kernels in place of four eager launches."}
 ![](images/svg/compilation-pipeline.svg)
 
 <!--
@@ -3610,54 +3557,54 @@ Speculative decoding\index{Speculative Decoding!bandwidth optimization}\index{Sp
 
 The transformation is useful only when the draft model is accurate enough and cheap enough. If too many draft tokens are rejected, the target model still loads its weights but accepts little useful work. If the draft model is too expensive, its own sequential passes consume the time that one-pass verification saved. Batching changes the calculation as well: at large batch sizes the decode phase is already closer to compute-bound, so the marginal benefit of speculation shrinks. This chapter uses speculative decoding to show how an algorithm can alter the performance equation; @sec-inference-scale-speculative-decoding-c438 treats it as a serving policy with admission control and service level agreement (SLA) consequences.
 
-::: {#fig-speculative-decoding fig-env="figure" fig-pos="htb" fig-cap="**Speculative decoding process**: Instead of generating tokens sequentially with the large target model, a small draft model proposes a sequence of $K$ tokens. The target model verifies all $K$ tokens in a single parallel forward pass. Drafted tokens that pass the acceptance test are emitted together; the first rejected token triggers a corrected sample and discards the remaining draft." fig-alt="Timeline comparison of two decoding methods. Top: standard decoding with 4 sequential generation steps. Bottom: speculative decoding with fast draft, parallel verify, then 3 accepted tokens (green) and 1 rejected (pink). Braces show time savings."}
+::: {#fig-speculative-decoding fig-env="figure" fig-pos="htb" fig-cap="**Speculative decoding process**: Instead of generating tokens sequentially with the large target model, a small draft model proposes a sequence of $K$ tokens. The target model verifies all $K$ tokens in a single parallel forward pass. Drafted tokens that pass the acceptance test are emitted together; the first rejected token triggers a corrected sample and discards the remaining draft." fig-alt="Two timelines on a shared time axis. Top: standard decoding with four sequential target-model passes, one per token T1 to T4. Bottom: speculative decoding with a short draft step for T1 to T4 and one target-model verify pass. Below it, tokens T1 to T3 are marked accepted in green, draft T4 is crossed out in pink and replaced by a resampled token T4 prime. A double arrow between the lanes marks the time saved."}
 
 ```{.tikz}
-\begin{tikzpicture}[font=\small\sffamily, scale=0.9, transform shape]
+\begin{tikzpicture}[font=\small\sffamily]
   \definecolor{DraftColor}{HTML}{FCE4CC}
   \definecolor{VerifyColor}{HTML}{D1E6F3}
   \definecolor{AcceptColor}{HTML}{D4EFDF}
   \definecolor{RejectColor}{HTML}{F5D2D5}
 
   \tikzset{
-     stepbox/.style={draw=black!50, rounded corners=2pt, minimum height=0.7cm, font=\scriptsize\sffamily, align=center}
+     stepbox/.style={draw=black!50, rounded corners=2pt, minimum height=0.75cm, inner sep=2pt,
+                     font=\scriptsize\sffamily, align=center, anchor=south west},
+     tokbox/.style={draw=black!50, rounded corners=2pt, minimum height=0.55cm, minimum width=0.62cm,
+                    inner sep=1pt, font=\scriptsize\sffamily, anchor=south west}
   }
 
-  % Baseline
-  \node[anchor=west] (std_title) at (0, 4.35) {\textbf{Standard Decoding} (Sequential)};
-  \draw[->] (0, 3.5) -- (8, 3.5) node[right] {Time};
+  % ---------------------------------------------------------------- Standard
+  \node[anchor=west, font=\small\bfseries\sffamily] at (0, 4.55) {Standard decoding};
+  \node[anchor=west, font=\scriptsize\sffamily\color{black!65}] at (3.05, 4.55) {one token per target-model pass};
+  \foreach \i in {1,...,4} {
+    \node[stepbox, fill=VerifyColor, minimum width=2.1cm] at ({(\i-1)*2.2}, 3.35) {Target model\\token T\i};
+  }
+  \draw[->, black!60] (0, 3.25) -- (9.6, 3.25) node[right, font=\scriptsize\sffamily] {time};
 
-  \node[stepbox, fill=VerifyColor, minimum width=1.5cm] (gen1) at (1, 3.7) {Gen T1};
-  \node[stepbox, fill=VerifyColor, minimum width=1.5cm, right=0.1cm of gen1] (gen2) {Gen T2};
-  \node[stepbox, fill=VerifyColor, minimum width=1.5cm, right=0.1cm of gen2] (gen3) {Gen T3};
-  \node[stepbox, fill=VerifyColor, minimum width=1.5cm, right=0.1cm of gen3] (gen4) {Gen T4};
+  % ------------------------------------------------------------- Speculative
+  \node[anchor=west, font=\small\bfseries\sffamily] at (0, 2.15) {Speculative decoding};
+  \node[anchor=west, font=\scriptsize\sffamily\color{black!65}] at (3.6, 2.15) {draft four tokens, verify them in one pass};
+  \node[stepbox, fill=DraftColor, minimum width=1.3cm] (draft) at (0, 0.95) {Draft\\T1--T4};
+  \node[stepbox, fill=VerifyColor, minimum width=2.1cm] (verify) at (1.4, 0.95) {Target model\\verify T1--T4};
+  \draw[->, black!60] (0, 0.85) -- (9.6, 0.85) node[right, font=\scriptsize\sffamily] {time};
 
-  % Speculative
-  \node[anchor=west] (spec_title) at (0, 2) {\textbf{Speculative Decoding}};
-  \draw[->] (0, 1.5) -- (8, 1.5) node[right] {Time};
+  % Emitted tokens, shown below the axis at the end of the verify pass
+  \node[anchor=east, font=\tiny\sffamily\color{black!70}] at (1.35, 0.33) {emitted};
+  \node[tokbox, fill=AcceptColor] (a1) at (1.45, 0.05) {T1};
+  \node[tokbox, fill=AcceptColor] (a2) at (2.15, 0.05) {T2};
+  \node[tokbox, fill=AcceptColor] (a3) at (2.85, 0.05) {T3};
+  \node[tokbox, fill=RejectColor] (r4) at (3.75, 0.05) {T4};
+  \draw[black!70, line width=0.7pt] ($(r4.south west)+(0.08,0.08)$) -- ($(r4.north east)+(-0.08,-0.08)$);
+  \node[tokbox, fill=VerifyColor] (c4) at (4.75, 0.05) {T4$'$};
+  \draw[->, black!55] (r4.east) -- (c4.west);
+  \node[anchor=north, font=\tiny\sffamily\color{black!70}] at ($(a2.south)+(0,-0.05)$) {accepted};
+  \node[anchor=north, font=\tiny\sffamily\color{black!70}] at ($(r4.south)!0.5!(c4.south)+(0,-0.05)$) {rejected, then resampled};
 
-  % Draft Step
-  \node[stepbox, fill=DraftColor, minimum width=2.0cm] (draft) at (1.2, 1.0) {Draft Model\\Gen [T1..T4]};
-  \node[below, font=\tiny\sffamily] at (draft.south) {Fast, Low latency};
-
-  % Verify Step
-  \node[stepbox, fill=VerifyColor, minimum width=2.0cm, right=0.3cm of draft] (verify) {Target Model\\Verify [T1..T4]};
-  \node[below, font=\tiny\sffamily] at (verify.south) {Parallel Forward Pass};
-
-  % Outcome
-  \node[stepbox, fill=AcceptColor, minimum width=0.5cm] (t1) at (5.0, 1.8) {T1};
-  \node[stepbox, fill=AcceptColor, minimum width=0.5cm, right=0.1cm of t1] (t2) {T2};
-  \node[stepbox, fill=AcceptColor, minimum width=0.5cm, right=0.1cm of t2] (t3) {T3};
-  \node[stepbox, fill=RejectColor, minimum width=0.5cm, right=0.1cm of t3] (t4) {T4};
-
-  \draw[->, thick, black!50] (draft) -- (verify);
-  \draw[->, thick, black!50] (verify) -- (t1.west |- verify.east);
-
-  \node[right=0.2cm of t4, font=\scriptsize\sffamily, align=left] {Accept 3\\Reject 1};
-
-  % Speedup annotation
-  \draw[decorate, decoration={brace, amplitude=5pt}] (0.2, 3.2) -- (6.6, 3.2) node[midway, below=0.2cm, font=\scriptsize\sffamily] {Standard Time};
-  \draw[decorate, decoration={brace, amplitude=5pt}] (0.2, 0.5) -- (4.8, 0.5) node[midway, below=0.2cm, font=\scriptsize\sffamily] {Speculative Time};
+  % --------------------------------------------------------------- Time saved
+  \draw[black!45, dash pattern=on 2pt off 2pt] (3.5, 0.85) -- (3.5, 3.25);
+  \draw[black!45, dash pattern=on 2pt off 2pt] (8.7, 0.85) -- (8.7, 3.25);
+  \draw[<->, black!75, line width=0.6pt] (3.5, 2.75) -- (8.7, 2.75)
+      node[midway, fill=white, inner sep=2pt, font=\scriptsize\sffamily\color{black!85}] {time saved for the same four tokens};
 
 \end{tikzpicture}
 ```
@@ -4039,7 +3986,7 @@ Without overlap, the training step requires `{python} OverlapCalc.step_no_overla
 import numpy as np
 from binder.tools.figures import style as book_style
 
-fig, ax1, COLORS, plt = book_style.setup_plot(figsize=(10, 6))
+fig, ax1, COLORS, plt = book_style.setup_plot(figsize=(10, 5))
 
 # ┌── 2. ARRAYS ────────────────────────────────────────────────────────────────
 gpus = np.array([8, 16, 32, 64, 128, 256, 512, 1024])
@@ -4081,16 +4028,17 @@ ax2.grid(False)
 ax1.set_xlabel('Number of GPUs', fontsize=12)
 ax1.set_ylabel('Step-time contribution (normalized)', fontsize=12)
 ax1.set_xticks(x)
-ax1.set_xticklabels(gpus)
-ax1.set_title('The overlap budget: distributed training scaling', fontsize=14, pad=15)
+ax1.set_xticklabels([f'{g:,}' for g in gpus])
 
 lines, labels = ax1.get_legend_handles_labels()
 lines2, labels2 = ax2.get_legend_handles_labels()
 ax1.legend(
     lines + lines2,
     labels + labels2,
-    loc='upper left',
-    fontsize=8,
+    loc='lower center',
+    bbox_to_anchor=(0.5, 1.01),
+    ncol=4,
+    fontsize=9,
     frameon=True,
     facecolor='white',
     framealpha=0.95,
@@ -4100,7 +4048,8 @@ ax1.legend(
 )
 
 ax1.text(0, compute_budget + 9, 'NVLink\nIntra-node', ha='center', fontsize=9, color='#555')
-ax1.text(6.5, 300, 'InfiniBand\nInter-node', ha='center', fontsize=9, bbox=dict(facecolor='white', boxstyle='round', alpha=0.9, edgecolor='none'))
+ax1.axvline(x=0.5, color=COLORS['primary'], linestyle=':', linewidth=1.0, alpha=0.6)
+ax1.text(1.0, compute_budget + 25, 'InfiniBand\nInter-node', ha='center', fontsize=9, color='#555')
 
 plt.tight_layout()
 plt.show()
@@ -4164,7 +4113,7 @@ Optimization begins by measuring the whole workload\index{Benchmarking!end-to-en
 
 The optimization playbook decision tree is mapped in @fig-performance-engineering-optimization-decision-tree. Profiling classifies the workload into memory-bound, compute-bound, or communication-bound regimes, directing the engineer toward targeted interventions that yield predictable throughput improvements.
 
-::: {#fig-performance-engineering-optimization-decision-tree fig-env="figure" fig-pos="htb" fig-cap="**Optimization playbook decision tree**: Systematic troubleshooting flow beginning with workload profiling and roofline classification, routing into memory-bound, compute-bound, or communication-bound playbooks with expected throughput speedups and iterative re-profiling." fig-alt="Decision tree branching from workload profiling into memory-bound, compute-bound, and communication-bound branches with specific optimization techniques and expected speedups."}
+::: {#fig-performance-engineering-optimization-decision-tree fig-env="figure" fig-pos="htb" fig-cap="**Optimization playbook decision tree**: Profiling and roofline classification route a workload into one of three playbooks. Each column lists candidate interventions for its binding resource and the workloads that typically land there; the engineer applies one intervention, then profiles again before choosing the next." fig-alt="Decision tree from a profiling step and a dominant-constraint step into three columns: memory-bound (high MBU, low MFU), compute-bound (high MFU), and communication-bound (NCCL sync stalls). Each column lists five optimization techniques, such as operator fusion and speculative decoding for memory-bound work, FP8 Tensor Core math for compute-bound work, and compute-communication overlap for communication-bound work, followed by example workloads."}
 ![](images/svg/optimization-decision-tree.svg)
 
 <!--
