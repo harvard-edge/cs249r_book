@@ -130,326 +130,10 @@ class FleetReliabilityRates:
 <span id="sec-fault-tolerance-reliability-reliability-failure-analysis-scale-6b4b"></span>
 :::
 
-Imagine a 10,000-GPU cluster midway through a three-month training run for a new foundation model. The communication layer has done its job, and thousands of devices exchange gradients through AllReduce, AllGather, and AllToAll as if they were one machine. Then the arithmetic of scale catches up. A GPU fails every few hours, and if the system cannot absorb that ordinary physical event, synchronized training halts and millions of dollars of compute sit idle. **Fault tolerance**\index{Fault Tolerance!definition} is the system property that lets distributed execution continue making useful progress when components fail, degrade, or disappear. In the Fleet Stack of @fig-fleet-stack, fault tolerance occupies the Reliability & Control row of the Distribution band, where it protects the progress that parallelism and communication produce. The challenges span the full failure spectrum, from transient bit flips through intermittent aging-related errors to permanent component failures, as @fig-fault-tolerance-failure-spectrum illustrates. The per-category failure rates and the mean time between failures (MTBF) scaling, $\text{MTBF}_{\text{system}} = \text{MTBF}_{\text{component}}/N$, annotated in that figure are previews; later analysis derives the inverse scaling and tabulates the cluster rates. Gray failures and silent data corruption (SDC) add a second axis of difficulty, pairing low detection rates with a high blast radius (see @sec-appdx-reliability-sdc-perturbation for the FP16 exponent bit-flip model and attention softmax perturbation derivation).
+Imagine a 10,000-GPU cluster midway through a three-month training run for a new foundation model. The communication layer has done its job, and thousands of devices exchange gradients through AllReduce, AllGather, and AllToAll as if they were one machine. Then the arithmetic of scale catches up. A GPU fails every few hours, and if the system cannot absorb that ordinary physical event, synchronized training halts and millions of dollars of compute sit idle. **Fault tolerance**\index{Fault Tolerance!definition} is the system property that lets distributed execution continue making useful progress when components fail, degrade, or disappear. In the Fleet Stack of @fig-fleet-stack, fault tolerance occupies the Reliability & Control row of the Distribution band, where it protects the progress that parallelism and communication produce. The challenges span the full failure spectrum, from transient bit flips through intermittent aging-related errors to permanent component failures, as @fig-fault-tolerance-failure-spectrum illustrates. The figure previews how each class changes the fleet's response; the analysis that follows first establishes how often failures arrive at scale, and @tbl-fault_types later ties each class to the evidence that exposes it. Gray failures and silent data corruption (SDC) add a second axis of difficulty, pairing low detection rates with a high blast radius (see @sec-appdx-reliability-sdc-perturbation for the FP16 exponent bit-flip model and attention softmax perturbation derivation).
 
-::: {#fig-fault-tolerance-failure-spectrum fig-env="figure" fig-pos="htb" fig-cap="**The ML failure spectrum**: Reliability challenges at scale span a temporal taxonomy from transient errors (bit flips, single-event upsets) through intermittent errors (aging, marginal components) to permanent errors (stuck-at faults, dead components). Each category demands different detection latency and recovery strategy, and fault tolerance engineering must address all three to maintain fleet-scale throughput." fig-alt="Continuum diagram showing failure characteristics across three categories: Transient, Intermittent, and Permanent. Each category labeled with characteristic frequency and detection profile."}
+::: {#fig-fault-tolerance-failure-spectrum fig-env="figure" fig-pos="htb" fig-cap="**The ML failure spectrum**: Hardware faults ordered by how long they persist. A transient fault leaves nothing to repair, an intermittent fault returns under the load that exposed it, and a permanent fault repeats on every retry. Persistence decides the fleet response, from retry through quarantine to replacement, and fault tolerance engineering must handle all three to keep a fleet making progress." fig-alt="An arrow labeled fault persistence runs from clears on its own to lasts until repaired above three cards: transient, intermittent, and permanent. Each card gives how the fault behaves, a typical cause, and the fleet response, from correct or retry, through drain and stress-test, to replace and restore a checkpoint from before the fault."}
 ![](images/svg/failure-spectrum.svg)
-
-<!--
-```{.tikz}
-\scalebox{0.85}{
-\begin{tikzpicture}[
-  font=\sffamily,
-  >=Stealth
-]
-
-  % Book color palette
-  \providecolor{NavyBlue}{RGB}{20,45,85}
-  \providecolor{SteelBlue}{RGB}{40,90,140}
-  \providecolor{LightBlue}{RGB}{234,241,248}
-  \providecolor{RedLine}{RGB}{185,45,45}
-  \providecolor{RedFill}{RGB}{254,226,226}
-  \providecolor{DarkRed}{RGB}{160,25,25}
-  \providecolor{DarkGreen}{RGB}{20,110,60}
-  \providecolor{GreenLine}{RGB}{35,135,75}
-  \providecolor{GreenFill}{RGB}{240,249,244}
-  \providecolor{OrangeLine}{RGB}{215,105,15}
-  \providecolor{OrangeL}{RGB}{254,243,199}
-  \providecolor{PurpleLine}{RGB}{125,55,185}
-  \providecolor{PurpleFill}{RGB}{243,232,255}
-  \providecolor{SlateLine}{RGB}{85,95,110}
-  \providecolor{SlateFill}{RGB}{241,245,249}
-  \providecolor{CardBorder}{RGB}{215,222,230}
-  \providecolor{CardFill}{RGB}{250,251,253}
-  \providecolor{TextDark}{RGB}{25,35,45}
-  \providecolor{TextMuted}{RGB}{95,105,115}
-
-  % =============================================================
-  % TOP CONTINUUM BANNER
-  % =============================================================
-  \def\hbar{0.18}
-
-  % Titles above bars
-  \node[font=\footnotesize\bfseries, text=DarkGreen, align=center] at (-4.9, 0.52) {Fast Recovery\\(Soft Errors)};
-  \node[font=\footnotesize\bfseries, text=OrangeLine!95!black, align=center] at (0, 0.52) {Marginal / Environmental\\(Intermittent)};
-  \node[font=\footnotesize\bfseries, text=DarkRed, align=center] at (4.9, 0.52) {Permanent Hardware Loss\\(Hard Faults)};
-
-  % Three colored horizontal segments
-  \fill[GreenFill!80!GreenLine] (-7.35, 0.12) rectangle (-2.55, 0.12+\hbar);
-  \fill[OrangeL!85!OrangeLine] (-2.40, 0.12) rectangle (2.40, 0.12+\hbar);
-  \fill[RedFill!80!RedLine] (2.55, 0.12) rectangle (7.35, 0.12+\hbar);
-
-  % Spectrum arrow below
-  \draw[->, line width=0.9pt, SlateLine!70] (-7.35, -0.15) -- (7.35, -0.15);
-  \node[anchor=north, font=\scriptsize\bfseries, text=TextDark] at (0, -0.22)
-    {Increasing blast radius, diagnosis latency, and operational cost $\longrightarrow$};
-
-  % =============================================================
-  % PARAMETERS
-  % =============================================================
-  \def\colW{4.80}
-  \def\colH{10.35}
-  \def\cardW{4.38}
-  \def\topY{-0.85}
-
-  % -------------------------------------------------------------
-  % COLUMN 1: TRANSIENT FAILURES (GREEN)
-  % -------------------------------------------------------------
-  \def\xone{-4.90}
-
-  % Outer container box with clipped header
-  \draw[GreenLine!50, fill=GreenFill!20, line width=0.8pt]
-    (\xone-0.5*\colW, \topY-\colH) rectangle (\xone+0.5*\colW, \topY);
-  \begin{scope}
-    \clip[rectangle] (\xone-0.5*\colW, \topY-\colH) rectangle (\xone+0.5*\colW, \topY);
-    \fill[GreenFill!80!GreenLine] (\xone-0.5*\colW, \topY-1.22) rectangle (\xone+0.5*\colW, \topY);
-    \draw[GreenLine!40, line width=0.6pt] (\xone-0.5*\colW, \topY-1.22) -- (\xone+0.5*\colW, \topY-1.22);
-  \end{scope}
-
-  % Header text
-  \node[align=center] at (\xone, \topY-0.42) {
-    \textbf{\small\textcolor{DarkGreen}{Transient Failures}}
-  };
-  \node[align=center] at (\xone, \topY-0.85) {
-    \scriptsize\bfseries\textcolor{DarkGreen!90!black}{Duration: Microseconds to Milliseconds}
-  };
-
-  % Summary under header
-  \node[anchor=north, align=center, font=\scriptsize, text=TextDark] at (\xone, \topY-1.38) {
-    Single-event upset; occurs once\\
-    then vanishes completely.\\[2pt]
-    \textbf{\textcolor{DarkGreen}{Underlying silicon is undamaged.}}
-  };
-
-  % Card 1: Physical Cause
-  \node[
-    rectangle, draw=GreenLine!35, fill=white, line width=0.6pt,
-    minimum width=\cardW cm, inner sep=4pt, align=center, anchor=north
-  ] at (\xone, \topY-2.48) {
-    \textbf{\scriptsize\textcolor{TextDark}{Physical Cause}}\\[2pt]
-    \tiny\textcolor{TextDark}{Cosmic ray or alpha particle strike}\\
-    \tiny\textcolor{TextDark}{flips bit in DRAM or register latch}
-  };
-
-  % Card 2: Detection Mechanism
-  \node[
-    rectangle, draw=GreenLine!35, fill=white, line width=0.6pt,
-    minimum width=\cardW cm, inner sep=4pt, align=center, anchor=north
-  ] at (\xone, \topY-3.85) {
-    \textbf{\scriptsize\textcolor{DarkGreen}{Detection Mechanism}}\\[2pt]
-    \tiny\textcolor{TextDark}{In-line SECDED ECC parity checks}\\
-    \tiny\textcolor{TextDark}{Immediate hardware signal interrupt}
-  };
-
-  % Card 3: Recovery Strategy
-  \node[
-    rectangle, draw=GreenLine!35, fill=white, line width=0.6pt,
-    minimum width=\cardW cm, inner sep=4pt, align=center, anchor=north
-  ] at (\xone, \topY-5.22) {
-    \textbf{\scriptsize\textcolor{DarkGreen}{Recovery Strategy}}\\[2pt]
-    \tiny\textcolor{TextDark}{Automatic 1-bit hardware scrubbing}\\
-    \tiny\textcolor{TextDark}{Zero application interruption}
-  };
-
-  % Card 4: Scale Rate Container
-  \node[
-    rectangle, draw=GreenLine!45, fill=white, line width=0.7pt,
-    minimum width=\cardW cm, minimum height=3.45cm, anchor=north
-  ] at (\xone, \topY-6.60) {};
-
-  \node[anchor=north, font=\scriptsize\bfseries, text=TextDark] at (\xone, \topY-6.75)
-    {Scale Rate (10K GPUs)};
-  \draw[GreenLine!25, line width=0.5pt] (\xone-1.8, \topY-7.10) -- (\xone+1.8, \topY-7.10);
-
-  \node[align=center] at (\xone, \topY-7.58) {
-    \fontsize{10.5pt}{12pt}\selectfont\textbf{\textcolor{DarkGreen}{\raisebox{0.5pt}{\textasciitilde}1--5 errors / hour}}\\[2.5pt]
-    \tiny\textcolor{TextMuted}{99.9\% masked by hardware ECC}
-  };
-
-  % Sub-card
-  \node[
-    rectangle, draw=GreenLine!50, fill=GreenFill!60, line width=0.6pt,
-    minimum width=3.95cm, inner sep=4pt, align=center, anchor=north
-  ] at (\xone, \topY-8.45) {
-    \textbf{\scriptsize\textcolor{DarkGreen}{Residual Threat:}}\\[2pt]
-    \tiny\textcolor{TextDark}{Double-bit flips halt execution}\\
-    \tiny\textcolor{TextDark}{Silent data corruption (SDC)}
-  };
-
-
-  % -------------------------------------------------------------
-  % COLUMN 2: INTERMITTENT FAILURES (ORANGE)
-  % -------------------------------------------------------------
-  \def\xtwo{0.0}
-
-  % Outer container box with clipped header
-  \draw[OrangeLine!50, fill=OrangeL!18, line width=0.8pt]
-    (\xtwo-0.5*\colW, \topY-\colH) rectangle (\xtwo+0.5*\colW, \topY);
-  \begin{scope}
-    \clip[rectangle] (\xtwo-0.5*\colW, \topY-\colH) rectangle (\xtwo+0.5*\colW, \topY);
-    \fill[OrangeL!85!OrangeLine] (\xtwo-0.5*\colW, \topY-1.22) rectangle (\xtwo+0.5*\colW, \topY);
-    \draw[OrangeLine!40, line width=0.6pt] (\xtwo-0.5*\colW, \topY-1.22) -- (\xtwo+0.5*\colW, \topY-1.22);
-  \end{scope}
-
-  % Header text
-  \node[align=center] at (\xtwo, \topY-0.42) {
-    \textbf{\small\textcolor{OrangeLine!95!black}{Intermittent Failures}}
-  };
-  \node[align=center] at (\xtwo, \topY-0.85) {
-    \scriptsize\bfseries\textcolor{OrangeLine!95!black}{Duration: Seconds to Minutes}
-  };
-
-  % Summary under header
-  \node[anchor=north, align=center, font=\scriptsize, text=TextDark] at (\xtwo, \topY-1.38) {
-    Recurs under specific operating\\
-    conditions (temperature, VDD droop).\\[2pt]
-    \textbf{\textcolor{OrangeLine!95!black}{Disappears on cooldown or idle.}}
-  };
-
-  % Card 1: Physical Cause
-  \node[
-    rectangle, draw=OrangeLine!35, fill=white, line width=0.6pt,
-    minimum width=\cardW cm, inner sep=4pt, align=center, anchor=north
-  ] at (\xtwo, \topY-2.48) {
-    \textbf{\scriptsize\textcolor{TextDark}{Physical Cause}}\\[2pt]
-    \tiny\textcolor{TextDark}{Solder fatigue, loose optical link,}\\
-    \tiny\textcolor{TextDark}{or high-load voltage fluctuation}
-  };
-
-  % Card 2: Detection Mechanism
-  \node[
-    rectangle, draw=OrangeLine!35, fill=white, line width=0.6pt,
-    minimum width=\cardW cm, inner sep=4pt, align=center, anchor=north
-  ] at (\xtwo, \topY-3.85) {
-    \textbf{\scriptsize\textcolor{OrangeLine!95!black}{Detection Mechanism}}\\[2pt]
-    \tiny\textcolor{TextDark}{Loss anomalies, telemetry drift}\\
-    \tiny\textcolor{TextDark}{PCIe link re-training event counters}
-  };
-
-  % Card 3: Recovery Strategy
-  \node[
-    rectangle, draw=OrangeLine!35, fill=white, line width=0.6pt,
-    minimum width=\cardW cm, inner sep=4pt, align=center, anchor=north
-  ] at (\xtwo, \topY-5.22) {
-    \textbf{\scriptsize\textcolor{OrangeLine!95!black}{Recovery Strategy}}\\[2pt]
-    \tiny\textcolor{TextDark}{Task retry, frequency throttling}\\
-    \tiny\textcolor{TextDark}{Cordon and drain suspicious node}
-  };
-
-  % Card 4: Scale Rate Container
-  \node[
-    rectangle, draw=OrangeLine!45, fill=white, line width=0.7pt,
-    minimum width=\cardW cm, minimum height=3.45cm, anchor=north
-  ] at (\xtwo, \topY-6.60) {};
-
-  \node[anchor=north, font=\scriptsize\bfseries, text=TextDark] at (\xtwo, \topY-6.75)
-    {Scale Rate (10K GPUs)};
-  \draw[OrangeLine!25, line width=0.5pt] (\xtwo-1.8, \topY-7.10) -- (\xtwo+1.8, \topY-7.10);
-
-  \node[align=center] at (\xtwo, \topY-7.58) {
-    \fontsize{10.5pt}{12pt}\selectfont\textbf{\textcolor{OrangeLine!95!black}{\raisebox{0.5pt}{\textasciitilde}1--3 faults / day}}\\[2.5pt]
-    \tiny\textcolor{TextMuted}{Most insidious to isolate}
-  };
-
-  % Sub-card
-  \node[
-    rectangle, draw=OrangeLine!50, fill=OrangeL!60, line width=0.6pt,
-    minimum width=3.95cm, inner sep=4pt, align=center, anchor=north
-  ] at (\xtwo, \topY-8.45) {
-    \textbf{\scriptsize\textcolor{OrangeLine!95!black}{Diagnostic Trap:}}\\[2pt]
-    \tiny\textcolor{TextDark}{Node passes idle offline diagnostics}\\
-    \tiny\textcolor{TextDark}{Re-fails immediately under full load}
-  };
-
-
-  % -------------------------------------------------------------
-  % COLUMN 3: PERMANENT FAILURES (RED)
-  % -------------------------------------------------------------
-  \def\xthr{4.90}
-
-  % Outer container box with clipped header
-  \draw[RedLine!50, fill=RedFill!18, line width=0.8pt]
-    (\xthr-0.5*\colW, \topY-\colH) rectangle (\xthr+0.5*\colW, \topY);
-  \begin{scope}
-    \clip[rectangle] (\xthr-0.5*\colW, \topY-\colH) rectangle (\xthr+0.5*\colW, \topY);
-    \fill[RedFill!80!RedLine] (\xthr-0.5*\colW, \topY-1.22) rectangle (\xthr+0.5*\colW, \topY);
-    \draw[RedLine!40, line width=0.6pt] (\xthr-0.5*\colW, \topY-1.22) -- (\xthr+0.5*\colW, \topY-1.22);
-  \end{scope}
-
-  % Header text
-  \node[align=center] at (\xthr, \topY-0.42) {
-    \textbf{\small\textcolor{DarkRed}{Permanent Failures}}
-  };
-  \node[align=center] at (\xthr, \topY-0.85) {
-    \scriptsize\bfseries\textcolor{DarkRed!90!black}{Duration: Forever (Irreversible)}
-  };
-
-  % Summary under header
-  \node[anchor=north, align=center, font=\scriptsize, text=TextDark] at (\xthr, \topY-1.38) {
-    Physical silicon damage or burn;\\
-    component cannot recover on retry.\\[2pt]
-    \textbf{\textcolor{DarkRed}{Requires physical replacement.}}
-  };
-
-  % Card 1: Physical Cause
-  \node[
-    rectangle, draw=RedLine!35, fill=white, line width=0.6pt,
-    minimum width=\cardW cm, inner sep=4pt, align=center, anchor=north
-  ] at (\xthr, \topY-2.48) {
-    \textbf{\scriptsize\textcolor{TextDark}{Physical Cause}}\\[2pt]
-    \tiny\textcolor{TextDark}{Gate dielectric breakdown, short,}\\
-    \tiny\textcolor{TextDark}{or electromigration wire void}
-  };
-
-  % Card 2: Detection Mechanism
-  \node[
-    rectangle, draw=RedLine!35, fill=white, line width=0.6pt,
-    minimum width=\cardW cm, inner sep=4pt, align=center, anchor=north
-  ] at (\xthr, \topY-3.85) {
-    \textbf{\scriptsize\textcolor{DarkRed}{Detection Mechanism}}\\[2pt]
-    \tiny\textcolor{TextDark}{Heartbeat timeout, fatal MCE}\\
-    \tiny\textcolor{TextDark}{PCIe device fallen off bus}
-  };
-
-  % Card 3: Recovery Strategy
-  \node[
-    rectangle, draw=RedLine!35, fill=white, line width=0.6pt,
-    minimum width=\cardW cm, inner sep=4pt, align=center, anchor=north
-  ] at (\xthr, \topY-5.22) {
-    \textbf{\scriptsize\textcolor{DarkRed}{Recovery Strategy}}\\[2pt]
-    \tiny\textcolor{TextDark}{Hot-spare node swap \& resume}\\
-    \tiny\textcolor{TextDark}{RMA hardware component replacement}
-  };
-
-  % Card 4: Scale Rate Container
-  \node[
-    rectangle, draw=RedLine!45, fill=white, line width=0.7pt,
-    minimum width=\cardW cm, minimum height=3.45cm, anchor=north
-  ] at (\xthr, \topY-6.60) {};
-
-  \node[anchor=north, font=\scriptsize\bfseries, text=TextDark] at (\xthr, \topY-6.75)
-    {Scale Rate (10K GPUs)};
-  \draw[RedLine!25, line width=0.5pt] (\xthr-1.8, \topY-7.10) -- (\xthr+1.8, \topY-7.10);
-
-  \node[align=center] at (\xthr, \topY-7.58) {
-    \fontsize{9.3pt}{11pt}\selectfont\textbf{\textcolor{DarkRed}{\raisebox{0.5pt}{\textasciitilde}1 hardware death / 5\,hrs}}\\[2.5pt]
-    \tiny\textcolor{TextMuted}{$\text{MTBF}_{\text{sys}} = \text{MTBF}_{\text{comp}} / N$}
-  };
-
-  % Sub-card
-  \node[
-    rectangle, draw=RedLine!50, fill=RedFill!60, line width=0.6pt,
-    minimum width=3.95cm, inner sep=4pt, align=center, anchor=north
-  ] at (\xthr, \topY-8.45) {
-    \textbf{\scriptsize\textcolor{DarkRed}{Fleet Consequence:}}\\[2pt]
-    \tiny\textcolor{TextDark}{Demands checkpoint rollback}\\
-    \tiny\textcolor{TextDark}{$N+1$ redundancy buffer required}
-  };
-
-\end{tikzpicture}
-}
-```
--->
 
 :::
 
@@ -636,7 +320,7 @@ class YoungDalyCheckpointState:
 
 $T_{\text{write}}$ in distributed ML training is not the time to flush a small process state; it is the time required to transfer FP32 optimizer state (momentum and variance tensors for every trainable parameter) plus model weights to durable storage. For a 70B-parameter model with full Adaptive Moment Estimation (Adam) state, a single resumable checkpoint approaches a terabyte at `{python} YoungDalyCheckpointState.ckpt_bpp_str` bytes per parameter; for the later 175B-parameter running example, it exceeds two terabytes. Compressing $T_{\text{write}}$ therefore requires purpose-built high-bandwidth storage, and $T_{\text{write}}$ itself is the central constraint that determines how tightly the checkpoint interval can be set before I/O overhead displaces productive training compute.
 
-To see the balance, consider an interval between saves. Doubling that interval halves the checkpoint writes per unit of training, but a failure then loses twice as much work on average. Under the constant-rate, rare-failure approximation, failure occurs approximately uniformly within an interval, so the average lost work is half the interval. Minimizing the sum of these opposing costs yields the square-root relation above, the U-shaped trade-off @fig-checkpoint-tradeoff plots for an illustrative 175B-parameter cluster. Its scaling consequence is the one to carry forward. As clusters grow, system MTBF drops, so the optimal interval shrinks, demanding higher-bandwidth storage to keep $T_{\text{write}}$ small before the "checkpoint tax" consumes the cluster's compute capacity. Because the relationship is a square root, halving MTBF tightens the interval by only $\sqrt{2}\approx 1.4\times$, so doubling cluster size does not demand doubling checkpoint I/O bandwidth. @Sec-appdx-reliability-foundations-young-daly derives the approximation and a renewal model for finite checkpoint time; the later checkpointing section applies the formula to this chapter's cluster once its system MTBF is in hand.
+To see the balance, consider an interval between saves. Doubling that interval halves the checkpoint writes per unit of training, but a failure then loses twice as much work on average. Under the constant-rate, rare-failure approximation, failure occurs approximately uniformly within an interval, so the average lost work is half the interval. Minimizing the sum of these opposing costs yields the square-root relation above, the U-shaped trade-off @fig-checkpoint-tradeoff plots for the 175B-parameter running example on this chapter's 10,000-GPU cluster. Its scaling consequence is the one to carry forward. As clusters grow, system MTBF drops, so the optimal interval shrinks, demanding higher-bandwidth storage to keep $T_{\text{write}}$ small before the "checkpoint tax" consumes the cluster's compute capacity. Because the relationship is a square root, halving MTBF tightens the interval by only $\sqrt{2}\approx 1.4\times$, so doubling cluster size does not demand doubling checkpoint I/O bandwidth. @Sec-appdx-reliability-foundations-young-daly derives the approximation and a renewal model for finite checkpoint time; the later checkpointing section applies the formula to this chapter's cluster once its system MTBF is in hand.
 
 ::: {.column-margin .margin-pointer}
 ↩ High-throughput storage hierarchies and parallel checkpoint I/O are analyzed in @sec-data-storage.
@@ -644,70 +328,109 @@ To see the balance, consider an interval between saves. Doubling that interval h
 
 [^fn-young-daly-formula]: **Young-Daly formula**\index{Young-Daly formula!history}: @young1974 derived the first-order optimal checkpoint interval, and @daly2006 independently refined it with tighter second-order bounds.
 
-::: {#fig-checkpoint-tradeoff fig-env="figure" fig-pos="htb" fig-cap="**The checkpoint trade-off**: Checkpoint save overhead decreases with longer intervals, but wasted computation from failures increases. The Young-Daly optimal interval minimizes total overhead. For an illustrative 175B-model cluster (~2.5-minute checkpoint writes, 2-hour MTBF), the optimal interval is approximately 24 minutes. @Sec-fault-tolerance-reliability-reliability-checkpoint-interval-failure-analysis-c28d derives the exact interval for this chapter's 10,000-GPU cluster." fig-alt="Three curves: checkpoint overhead decreasing with interval, rework cost increasing, and total wasted work with minimum at optimal interval around 24 minutes."}
+```{python}
+#| echo: false
+#| label: checkpoint-tradeoff-inputs
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ CHECKPOINT TRADE-OFF INPUTS (LEGO)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @fig-checkpoint-tradeoff and its caption.
+# │
+# │ Goal: Feed the U-curve the same two inputs the Young-Daly notebook uses
+# │       later, so the plotted optimum and the worked interval agree.
+# │ Show: T_write ~24.5 s (175B, 14 B/param, registry write bandwidth);
+# │       full-system MTBF ~3.87 h (GPU + PCIe + shared NIC, 10,000 GPUs);
+# │       tau_opt ~13.8 min.
+# │ How:  Same series-rate composition as the worked MTBF cascade (redundant
+# │       PSUs add no term); tau_opt = sqrt(2 * T_write * MTBF_system).
+# └─────────────────────────────────────────────────────────────────────────────
+import math
+from mlsysim import Models, Systems
+from mlsysim.physics import calc_checkpoint_size
+from mlsysim.fmt import check, fmt_time
+
+class CheckpointTradeoffInputs:
+    # ┌── 1. LOAD (Constants) ──────────────────────
+    ckpt_bytes = calc_checkpoint_size(Models.Language.GPT3.parameters)  # 14 B/param
+    write_bw = float(Systems.Reliability.Recovery.checkpoint_write_bw_gbs) * (GB / second)
+    n_gpus = Systems.Clusters.Training_10K.total_accelerators
+    gpus_per_node = Systems.Nodes.DGX_H100.accelerators_per_node
+    gpu_mttf_h = float(Systems.Reliability.Gpu.mttf_hours)
+    pcie_mttf_h = float(Systems.Reliability.PcieSwitch.mttf_hours)
+    nic_mttf_h = float(Systems.Reliability.Nic.mttf_hours)
+
+    # ┌── 2. EXECUTE (The Compute) ─────────────────
+    t_write_h = (ckpt_bytes / write_bw).to(hour).magnitude
+    rate_per_gpu = 1 / gpu_mttf_h + 1 / pcie_mttf_h + (1 / gpus_per_node) / nic_mttf_h
+    mtbf_h = 1 / (n_gpus * rate_per_gpu)
+    tau_opt_h = math.sqrt(2 * t_write_h * mtbf_h)
+
+    # ┌── 3. GUARD (Invariants) ────────────────────
+    check(22 < t_write_h * 3600 < 27, "175B checkpoint write should be ~24.5 s")
+    check(3.5 < mtbf_h < 4.2, "full-system MTBF should match the worked cascade (~3.87 h)")
+    check(12 < tau_opt_h * 60 < 15, "tau_opt should match the Young-Daly notebook (~13.8 min)")
+
+    # ┌── 4. OUTPUT (Formatting) ───────────────────
+    t_write_s_str = fmt_time(t_write_h * 3600, "second", precision=1, commas=False)
+    mtbf_h_str = fmt_time(mtbf_h, "hour", precision=1, commas=False)
+    tau_opt_min_str = fmt_time(round(tau_opt_h * 60), "minute", precision=0, commas=False)
+    n_gpus_str = fmt(n_gpus, precision=0)
+```
+
+::: {#fig-checkpoint-tradeoff fig-env="figure" fig-pos="htb" fig-cap="**The checkpoint trade-off**: Checkpoint save overhead (dashed blue) falls as the interval lengthens, while expected rework after a failure (dashed red) rises; their sum (solid) is minimized at the Young-Daly interval. The curves use this chapter's 175B running example on its `{python} CheckpointTradeoffInputs.n_gpus_str`-GPU cluster, with a `{python} CheckpointTradeoffInputs.t_write_s_str` checkpoint write and a `{python} CheckpointTradeoffInputs.mtbf_h_str` full-system MTBF, which put the optimum near `{python} CheckpointTradeoffInputs.tau_opt_min_str`. The minimum is shallow, so an interval somewhat off the optimum costs little, while a far shorter or far longer one costs a great deal." fig-alt="Three curves against checkpoint interval in minutes: checkpoint overhead decreasing, rework cost increasing linearly, and total wasted time with a shallow minimum marked near 14 minutes."}
 
 ```{python}
 #| echo: false
 # ┌─────────────────────────────────────────────────────────────────────────────
-# │ CHECKPOINT TAX (FIGURE)
+# │ CHECKPOINT TRADE-OFF (FIGURE)
 # ├─────────────────────────────────────────────────────────────────────────────
-# │ Context: @fig-checkpoint-tradeoff—Young-Daly applied to 175B model
+# │ Context: @fig-checkpoint-tradeoff.
 # │
-# │ Goal: Plot checkpoint overhead, rework cost, total waste vs checkpoint interval tau_ckpt;
-# │       show tau_opt ≈ 24 min for 2.5-min write, 2-hr MTBF.
-# │ Show: Three curves; optimal point annotation.
-# │ How: tau_opt = sqrt(2*T_write*MTBF_system); book_style.set_book_style().
-# │
+# │ Goal: Plot save overhead, expected rework, and their sum vs. interval for
+# │       the chapter's 175B / 10,000-GPU example; mark tau_opt.
+# │ Show: Three curves; optimum annotation near 14 min.
+# │ How:  Inputs from CheckpointTradeoffInputs (no literals); book_style.
 # └─────────────────────────────────────────────────────────────────────────────
-# ┌── 1. CANVAS ────────────────────────────────────────────────────────────────
-# │ Plot checkpoint overhead, rework cost, total waste vs checkpoint interval tau_ckpt;
 import numpy as np
 from binder.tools.figures import style as book_style
 
 fig, ax, COLORS, plt = book_style.setup_plot(figsize=(8, 4.5))
 
-# ┌── 2. ARRAYS ────────────────────────────────────────────────────────────────
-# Parameters: 175B model, ~2.5-min checkpoint write, 2-hour cluster MTBF
-# tau_opt = sqrt(2*T_write*MTBF_system) ≈ 24 min
-mtbf = 2.0  # hours
-t_write = 2.5 / 60.0  # hours (~2.5 min)
+t_write = CheckpointTradeoffInputs.t_write_h
+mtbf = CheckpointTradeoffInputs.mtbf_h
+tau_opt = CheckpointTradeoffInputs.tau_opt_h
 
-tau = np.linspace(0.05, 1.5, 100)
+tau = np.linspace(tau_opt / 6, tau_opt * 4, 300)
 over_ckpt = t_write / tau
 over_rework = tau / (2 * mtbf)
 total_waste = over_ckpt + over_rework
+waste_opt = t_write / tau_opt + tau_opt / (2 * mtbf)
 
-tau_opt = np.sqrt(2 * t_write * mtbf)
-
-# ┌── 3. RENDER ────────────────────────────────────────────────────────────────
-ax.plot(tau * 60, over_ckpt, label='Checkpoint Overhead ($T_{\\text{write}}/\\tau_{\\text{ckpt}}$)', color=COLORS['BlueLine'], linestyle='--')
-
+ax.plot(tau * 60, over_ckpt * 100, label='Checkpoint overhead ($T_{\\text{write}}/\\tau_{\\text{ckpt}}$)', color=COLORS['BlueLine'], linestyle='--')
 ax.plot(
     tau * 60,
-    over_rework,
-    label='Expected Rework ($\\tau_{\\text{ckpt}}/(2\\,\\text{MTBF}_{\\text{system}})$)',
+    over_rework * 100,
+    label='Expected rework ($\\tau_{\\text{ckpt}}/(2\\,\\text{MTBF}_{\\text{system}})$)',
     color=COLORS['RedLine'],
     linestyle='--',
 )
+ax.plot(tau * 60, total_waste * 100, label='Total wasted time', color=COLORS['primary'], linewidth=2.5)
 
-ax.plot(tau * 60, total_waste, label='Total Wasted Work', color=COLORS['primary'], linewidth=2.5)
-
-# —Optimal point ---
-ax.scatter([tau_opt * 60], [np.sqrt(2 * t_write / mtbf)], color=COLORS['GreenLine'], s=40, zorder=5)
-
-# —Annotation ---
+ax.scatter([tau_opt * 60], [waste_opt * 100], color=COLORS['primary'], s=40, zorder=5)
 ax.annotate(
-    f'$\\tau_{{\\text{{opt}}}} \\approx {tau_opt*60:.0f}$ min',
-    xy=(tau_opt * 60, np.sqrt(2 * t_write / mtbf)),
-    xytext=(tau_opt * 60 + 0, 0.4),
-    ha='center',
+    f'$\\tau_{{\\text{{opt}}}} \\approx {tau_opt * 60:.0f}$ min, {waste_opt * 100:.1f}% wasted',
+    xy=(tau_opt * 60, waste_opt * 100),
+    xytext=(tau_opt * 60 + 12, waste_opt * 100 + 7),
+    ha='left',
     arrowprops=dict(arrowstyle='->', color=COLORS['primary'], shrinkB=4, lw=0.75),
     bbox=dict(boxstyle='round,pad=0.25', facecolor='white', edgecolor='#CBD5E1', lw=0.6, alpha=0.95),
 )
 
-ax.set_xlabel('Checkpoint Interval $\\tau_{\\text{ckpt}}$ (minutes)')
-ax.set_ylabel('Fraction of Total Time Wasted')
-ax.set_ylim(0, 1.0)
+ax.set_xlabel('Checkpoint interval $\\tau_{\\text{ckpt}}$ (minutes)')
+ax.set_ylabel('Share of wall time wasted (%)')
+ax.set_xlim(0, tau_opt * 4 * 60)
+ax.set_yticks([0, 5, 10, 15, 20])
+ax.set_ylim(0, 20)
 
 ax.legend(loc='upper right', frameon=True, facecolor='white', edgecolor='#CBD5E1', framealpha=0.95)
 
@@ -1262,348 +985,8 @@ At the nanometer scale of advanced transistors, hardware is not *deterministic*;
 
 Facebook documented a pervasive SDC issue where a hardware fault caused a valid file to be reported as "size zero" during decompression [@dixit2021silent]; the system "worked" without crashing, but data was silently deleted. In ML, the same failure manifests as valid-looking but numerically corrupted gradients, and @fig-sdc-example traces how one flipped bit travels through training state without ever raising an exception.
 
-::: {#fig-sdc-example fig-env="figure" fig-pos="htb" fig-cap="**Silent data corruption propagation**: A hardware bit flip moves left to right from a corrupted tensor value through the backward pass and the optimizer into the model weights, surfacing only at the final stage as degraded model quality. The lower panels contrast a detected error, which traps within milliseconds and restarts from the last checkpoint, with silent corruption, which is saved into checkpoints for hours or days before an evaluation alert fires; the gap between the two timelines is the cost of silence." fig-alt="Five stage boxes in a row linked by red arrows: bit flip, corrupted value, backprop spread, silent weight shift, model degradation. A banner below names the detection gap. Two panels compare a detected error, with fault, trap, and restart dots on a short timeline, against silent data corruption, with corrupt weights saved before a late alert and rollback. A bottom timeline runs from t equals zero to days or weeks."}
+::: {#fig-sdc-example fig-env="figure" fig-pos="htb" fig-cap="**Silent data corruption propagation**: A hardware bit flip moves left to right from one wrong tensor value through the backward pass and the weight update, surfacing only at the final stage as degraded model quality. The two timelines below contrast a detected error, which traps within milliseconds and restarts from the last checkpoint, with silent corruption, which is saved into checkpoints for hours or days before an evaluation alert forces a rollback; the gap between the two is the cost of silence." fig-alt="Five red stage boxes in a row linked by arrows: bit flip in memory or ALU, wrong value in one tensor entry, backward pass taints gradients, weight update commits to weights, quality drops seen at evaluation. Below, two timelines share a time axis marked t equals zero, milliseconds, and hours to days. Detected error: a fault dot, a trap dot, then a green restart from checkpoint box. Silent corruption: a fault dot, a long red dashed box reading corrupt state saved into checkpoints, an alert dot, then a green roll back box."}
 ![](images/svg/sdc-propagation.svg)
-
-<!--
-```{.tikz}
-\scalebox{0.86}{
-\begin{tikzpicture}[
-  font=\sffamily,
-  >=Stealth
-]
-
-  % Book color palette
-  \providecolor{NavyBlue}{RGB}{20,45,85}
-  \providecolor{SteelBlue}{RGB}{40,90,140}
-  \providecolor{LightBlue}{RGB}{234,241,248}
-  \providecolor{RedLine}{RGB}{185,45,45}
-  \providecolor{RedFill}{RGB}{254,226,226}
-  \providecolor{DarkRed}{RGB}{160,25,25}
-  \providecolor{DarkGreen}{RGB}{20,110,60}
-  \providecolor{GreenLine}{RGB}{35,135,75}
-  \providecolor{GreenFill}{RGB}{240,249,244}
-  \providecolor{OrangeLine}{RGB}{215,105,15}
-  \providecolor{OrangeL}{RGB}{254,243,199}
-  \providecolor{PurpleLine}{RGB}{125,55,185}
-  \providecolor{PurpleFill}{RGB}{243,232,255}
-  \providecolor{SlateLine}{RGB}{85,95,110}
-  \providecolor{SlateFill}{RGB}{241,245,249}
-  \providecolor{CardBorder}{RGB}{215,222,230}
-  \providecolor{CardFill}{RGB}{250,251,253}
-  \providecolor{TextDark}{RGB}{25,35,45}
-  \providecolor{TextMuted}{RGB}{95,105,115}
-
-  % =============================================================
-  % TOP ROW: 5 STAGE CARDS
-  % =============================================================
-  \def\cW{2.66}
-  \def\cH{3.30}
-  \def\topY{5.8}
-
-  % Coordinates of the 5 cards:
-  \def\xone{-5.84}
-  \def\xtwo{-2.92}
-  \def\xthr{0.0}
-  \def\xfou{2.92}
-  \def\xfiv{5.84}
-
-  % --- STAGE 1: HARDWARE ---
-  \draw[CardBorder, fill=white, line width=0.7pt]
-    (\xone-0.5*\cW, \topY-\cH) rectangle (\xone+0.5*\cW, \topY);
-  \begin{scope}
-    \clip[rectangle] (\xone-0.5*\cW, \topY-\cH) rectangle (\xone+0.5*\cW, \topY);
-    \fill[RedFill!60] (\xone-0.5*\cW, \topY-0.62) rectangle (\xone+0.5*\cW, \topY);
-    \draw[RedLine!30, line width=0.5pt] (\xone-0.5*\cW, \topY-0.62) -- (\xone+0.5*\cW, \topY-0.62);
-  \end{scope}
-  \node[font=\fontsize{6.5pt}{8pt}\selectfont\bfseries, text=DarkRed] at (\xone, \topY-0.31) {Stage 1 $\cdot$ Hardware};
-  \node[align=center, text width=2.45cm, anchor=north, font=\fontsize{6.2pt}{7.5pt}\selectfont] at (\xone, \topY-0.78) {
-    \textbf{\scriptsize\textcolor{TextDark}{Bit-Flip (SEU)}}\\[4pt]
-    \textcolor{TextMuted}{Cosmic ray strike or voltage droop in ALU}
-  };
-  \node[
-    rectangle, draw=RedLine!50, fill=RedFill!40, line width=0.5pt,
-    minimum width=2.15cm, minimum height=0.42cm, inner sep=1pt, align=center,
-    font=\fontsize{6.0pt}{7pt}\selectfont\bfseries, text=DarkRed
-  ] at (\xone, \topY-2.9) {UNDETECTED};
-
-  % Arrow 1 -> 2
-  \draw[->, line width=1.1pt, DarkRed] (\xone+0.5*\cW+0.04, \topY-1.4) -- (\xtwo-0.5*\cW-0.04, \topY-1.4);
-
-  % --- STAGE 2: TENSOR ---
-  \draw[CardBorder, fill=white, line width=0.7pt]
-    (\xtwo-0.5*\cW, \topY-\cH) rectangle (\xtwo+0.5*\cW, \topY);
-  \begin{scope}
-    \clip[rectangle] (\xtwo-0.5*\cW, \topY-\cH) rectangle (\xtwo+0.5*\cW, \topY);
-    \fill[RedFill!60] (\xtwo-0.5*\cW, \topY-0.62) rectangle (\xtwo+0.5*\cW, \topY);
-    \draw[RedLine!30, line width=0.5pt] (\xtwo-0.5*\cW, \topY-0.62) -- (\xtwo+0.5*\cW, \topY-0.62);
-  \end{scope}
-  \node[font=\fontsize{6.5pt}{8pt}\selectfont\bfseries, text=DarkRed] at (\xtwo, \topY-0.31) {Stage 2 $\cdot$ Tensor};
-  \node[align=center, text width=2.45cm, anchor=north, font=\fontsize{6.2pt}{7.5pt}\selectfont] at (\xtwo, \topY-0.78) {
-    \textbf{\scriptsize\textcolor{TextDark}{Corrupted Value}}\\[4pt]
-    \textcolor{TextMuted}{Exponent bit flips:}\\[2pt]
-    \textcolor{TextDark}{$10^{-5}$ jumps to $10^{20}$}
-  };
-  \node[
-    rectangle, draw=RedLine!50, fill=RedFill!40, line width=0.5pt,
-    minimum width=2.15cm, minimum height=0.42cm, inner sep=1pt, align=center,
-    font=\fontsize{6.0pt}{7pt}\selectfont\bfseries, text=DarkRed
-  ] at (\xtwo, \topY-2.9) {FP EXTREMUM};
-
-  % Arrow 2 -> 3
-  \draw[->, line width=1.1pt, DarkRed] (\xtwo+0.5*\cW+0.04, \topY-1.4) -- (\xthr-0.5*\cW-0.04, \topY-1.4);
-
-  % --- STAGE 3: GRADIENTS ---
-  \draw[CardBorder, fill=white, line width=0.7pt]
-    (\xthr-0.5*\cW, \topY-\cH) rectangle (\xthr+0.5*\cW, \topY);
-  \begin{scope}
-    \clip[rectangle] (\xthr-0.5*\cW, \topY-\cH) rectangle (\xthr+0.5*\cW, \topY);
-    \fill[RedFill!60] (\xthr-0.5*\cW, \topY-0.62) rectangle (\xthr+0.5*\cW, \topY);
-    \draw[RedLine!30, line width=0.5pt] (\xthr-0.5*\cW, \topY-0.62) -- (\xthr+0.5*\cW, \topY-0.62);
-  \end{scope}
-  \node[font=\fontsize{6.5pt}{8pt}\selectfont\bfseries, text=DarkRed] at (\xthr, \topY-0.31) {Stage 3 $\cdot$ Gradients};
-  \node[align=center, text width=2.45cm, anchor=north, font=\fontsize{6.2pt}{7.5pt}\selectfont] at (\xthr, \topY-0.78) {
-    \textbf{\scriptsize\textcolor{TextDark}{Backprop Spread}}\\[4pt]
-    \textcolor{TextMuted}{Single bad cell taints entire backward pass}
-  };
-  \node[
-    rectangle, draw=RedLine!50, fill=RedFill!40, line width=0.5pt,
-    minimum width=2.15cm, minimum height=0.42cm, inner sep=1pt, align=center,
-    font=\fontsize{6.0pt}{7pt}\selectfont\bfseries, text=DarkRed
-  ] at (\xthr, \topY-2.9) {POISON FLUSH};
-
-  % Arrow 3 -> 4
-  \draw[->, line width=1.1pt, DarkRed] (\xthr+0.5*\cW+0.04, \topY-1.4) -- (\xfou-0.5*\cW-0.04, \topY-1.4);
-
-  % --- STAGE 4: OPTIMIZER ---
-  \draw[CardBorder, fill=white, line width=0.7pt]
-    (\xfou-0.5*\cW, \topY-\cH) rectangle (\xfou+0.5*\cW, \topY);
-  \begin{scope}
-    \clip[rectangle] (\xfou-0.5*\cW, \topY-\cH) rectangle (\xfou+0.5*\cW, \topY);
-    \fill[RedFill!60] (\xfou-0.5*\cW, \topY-0.62) rectangle (\xfou+0.5*\cW, \topY);
-    \draw[RedLine!30, line width=0.5pt] (\xfou-0.5*\cW, \topY-0.62) -- (\xfou+0.5*\cW, \topY-0.62);
-  \end{scope}
-  \node[font=\fontsize{6.5pt}{8pt}\selectfont\bfseries, text=DarkRed] at (\xfou, \topY-0.31) {Stage 4 $\cdot$ Optimizer};
-  \node[align=center, text width=2.45cm, anchor=north, font=\fontsize{6.2pt}{7.5pt}\selectfont] at (\xfou, \topY-0.78) {
-    \textbf{\scriptsize\textcolor{TextDark}{Silent Weight Shift}}\\[4pt]
-    \textcolor{TextMuted}{Corrupt gradients are committed to weights}
-  };
-  \node[
-    rectangle, draw=RedLine!50, fill=RedFill!40, line width=0.5pt,
-    minimum width=2.15cm, minimum height=0.42cm, inner sep=1pt, align=center,
-    font=\fontsize{6.0pt}{7pt}\selectfont\bfseries, text=DarkRed
-  ] at (\xfou, \topY-2.9) {CORRUPT STATE};
-
-  % Arrow 4 -> 5
-  \draw[->, line width=1.1pt, DarkRed] (\xfou+0.5*\cW+0.04, \topY-1.4) -- (\xfiv-0.5*\cW-0.04, \topY-1.4);
-
-  % --- STAGE 5: OUTCOME ---
-  \draw[DarkRed, fill=white, line width=0.8pt]
-    (\xfiv-0.5*\cW, \topY-\cH) rectangle (\xfiv+0.5*\cW, \topY);
-  \begin{scope}
-    \clip[rectangle] (\xfiv-0.5*\cW, \topY-\cH) rectangle (\xfiv+0.5*\cW, \topY);
-    \fill[DarkRed] (\xfiv-0.5*\cW, \topY-0.62) rectangle (\xfiv+0.5*\cW, \topY);
-  \end{scope}
-  \node[font=\fontsize{6.5pt}{8pt}\selectfont\bfseries, text=white] at (\xfiv, \topY-0.31) {Stage 5 $\cdot$ Outcome};
-  \node[align=center, text width=2.45cm, anchor=north, font=\fontsize{6.2pt}{7.5pt}\selectfont] at (\xfiv, \topY-0.78) {
-    \textbf{\scriptsize\textcolor{DarkRed}{Model Degradation}}\\[4pt]
-    \textcolor{TextMuted}{Perplexity explosion, gibberish, or NaN loss}
-  };
-  \node[
-    rectangle, draw=DarkRed!70, fill=RedFill!60, line width=0.6pt,
-    minimum width=2.15cm, minimum height=0.42cm, inner sep=1pt, align=center,
-    font=\fontsize{6.0pt}{7pt}\selectfont\bfseries, text=DarkRed
-  ] at (\xfiv, \topY-2.9) {LATE DETECTION};
-
-
-  % =============================================================
-  % MIDDLE BANNER: DETECTION GAP
-  % =============================================================
-  \node[
-    rectangle, draw=OrangeLine!70, fill=OrangeL!35, line width=0.7pt,
-    minimum width=14.4cm, minimum height=0.92cm, inner sep=3pt, align=center
-  ] at (0, 1.8) {
-    \textbf{\scriptsize\textcolor{OrangeLine!95!black}{Detection Gap: Microseconds to Corrupt vs.\ Hours or Days to Discover}}\\[2pt]
-    \fontsize{6.8pt}{8.2pt}\selectfont\textcolor{TextDark}{Hardware fault occurs instantly at $t = 0$; model validation or divergence alarms trigger only after massive compute waste}
-  };
-
-
-  % =============================================================
-  % LOWER PANELS: SIDE BY SIDE COMPARISON
-  % =============================================================
-  \def\pW{7.10}
-  \def\pH{4.40}
-  \def\pY{0.95}
-
-  % -------------------------------------------------------------
-  % PANEL A: DETECTED ERROR (CRASH / EXCEPTION)
-  % -------------------------------------------------------------
-  \def\pAx{-3.67}
-
-  \draw[GreenLine!50, fill=white, line width=0.8pt]
-    (\pAx-0.5*\pW, \pY-\pH) rectangle (\pAx+0.5*\pW, \pY);
-  \begin{scope}
-    \clip[rectangle] (\pAx-0.5*\pW, \pY-\pH) rectangle (\pAx+0.5*\pW, \pY);
-    \fill[GreenFill!80!GreenLine] (\pAx-0.5*\pW, \pY-0.62) rectangle (\pAx+0.5*\pW, \pY);
-    \draw[GreenLine!40, line width=0.5pt] (\pAx-0.5*\pW, \pY-0.62) -- (\pAx+0.5*\pW, \pY-0.62);
-  \end{scope}
-  \node[anchor=west, font=\fontsize{6.2pt}{7.5pt}\selectfont\bfseries, text=DarkGreen] at (\pAx-0.5*\pW+0.2, \pY-0.31)
-    {Panel A: Detected Error (Crash)};
-  \node[anchor=east, font=\fontsize{6.0pt}{7pt}\selectfont\bfseries, text=DarkGreen] at (\pAx+0.5*\pW-0.2, \pY-0.31)
-    {Immediate Recovery};
-
-  % Panel A Content Lines
-  \node[anchor=north west, align=left, text width=6.75cm, font=\fontsize{6.2pt}{8.6pt}\selectfont] at (\pAx-0.5*\pW+0.2, \pY-0.74) {
-    \textbf{\textcolor{TextDark}{Fault Signal:}} \textcolor{TextDark}{OS / driver kernel trap (SIGSEGV, Xid interrupt)}\\[2pt]
-    \textbf{\textcolor{TextDark}{Detection Latency:}} \textbf{\textcolor{DarkGreen}{Immediate ($t \approx 0\text{ ms}$) $\cdot$ Job halted instantly}}\\[2pt]
-    \textbf{\textcolor{TextDark}{Recovery Cost:}} \textcolor{TextDark}{Rollback to iteration N-1 $\cdot$ No bad checkpoints saved}
-  };
-
-  % Panel A Inner Timeline Card
-  \node[
-    rectangle, draw=CardBorder, fill=CardFill, line width=0.6pt,
-    minimum width=6.65cm, minimum height=1.70cm, anchor=south
-  ] at (\pAx, \pY-\pH+0.22) {};
-
-  % Inner Timeline Elements (Panel A)
-  \draw[line width=0.8pt, SlateLine!40] (\pAx-2.8, \pY-3.25) -- (\pAx+0.9, \pY-3.25);
-
-  % Fault node
-  \node[font=\fontsize{6.2pt}{7pt}\selectfont\bfseries, text=DarkRed] at (\pAx-2.3, \pY-2.85) {Fault};
-  \filldraw[draw=DarkRed, fill=DarkRed] (\pAx-2.3, \pY-3.25) circle (2.8pt);
-  \node[font=\fontsize{5.8pt}{7pt}\selectfont, text=TextMuted] at (\pAx-2.3, \pY-3.60) {$t = 0$};
-
-  % Trap node
-  \node[font=\fontsize{6.2pt}{7pt}\selectfont\bfseries, text=DarkGreen] at (\pAx-1.1, \pY-2.85) {Trap};
-  \filldraw[draw=DarkGreen, fill=DarkGreen] (\pAx-1.1, \pY-3.25) circle (2.8pt);
-  \node[font=\fontsize{5.8pt}{7pt}\selectfont, text=TextMuted] at (\pAx-1.1, \pY-3.60) {$+1\text{ ms}$};
-
-  % Restart node
-  \node[font=\fontsize{6.2pt}{7pt}\selectfont\bfseries, text=NavyBlue] at (\pAx+0.4, \pY-2.85) {Restart};
-  \filldraw[draw=NavyBlue, fill=NavyBlue] (\pAx+0.4, \pY-3.25) circle (2.8pt);
-  \node[font=\fontsize{5.8pt}{7pt}\selectfont, text=TextMuted] at (\pAx+0.4, \pY-3.60) {Checkpoint N-1};
-
-  % Resumed box
-  \node[
-    rectangle, draw=DarkGreen, fill=GreenFill!50, line width=0.7pt,
-    minimum width=1.5cm, minimum height=0.55cm, align=center,
-    font=\fontsize{6.5pt}{8pt}\selectfont\bfseries, text=DarkGreen
-  ] at (\pAx+2.15, \pY-3.25) {Resumed};
-  \node[font=\fontsize{5.8pt}{7pt}\selectfont\bfseries, text=DarkGreen] at (\pAx+2.15, \pY-3.70) {Zero Loss};
-
-
-  % -------------------------------------------------------------
-  % PANEL B: SILENT DATA CORRUPTION (SDC)
-  % -------------------------------------------------------------
-  \def\pBx{3.67}
-
-  \draw[RedLine!50, fill=white, line width=0.8pt]
-    (\pBx-0.5*\pW, \pY-\pH) rectangle (\pBx+0.5*\pW, \pY);
-  \begin{scope}
-    \clip[rectangle] (\pBx-0.5*\pW, \pY-\pH) rectangle (\pBx+0.5*\pW, \pY);
-    \fill[RedFill!70] (\pBx-0.5*\pW, \pY-0.62) rectangle (\pBx+0.5*\pW, \pY);
-    \draw[RedLine!30, line width=0.5pt] (\pBx-0.5*\pW, \pY-0.62) -- (\pBx+0.5*\pW, \pY-0.62);
-  \end{scope}
-  \node[anchor=west, font=\fontsize{6.2pt}{7.5pt}\selectfont\bfseries, text=DarkRed] at (\pBx-0.5*\pW+0.2, \pY-0.31)
-    {Panel B: Silent Corruption (SDC)};
-  \node[anchor=east, font=\fontsize{6.0pt}{7pt}\selectfont\bfseries, text=DarkRed] at (\pBx+0.5*\pW-0.2, \pY-0.31)
-    {Prolonged Damage};
-
-  % Panel B Content Lines
-  \node[anchor=north west, align=left, text width=6.75cm, font=\fontsize{6.2pt}{8.6pt}\selectfont] at (\pBx-0.5*\pW+0.2, \pY-0.74) {
-    \textbf{\textcolor{TextDark}{Fault Signal:}} \textcolor{TextDark}{None; kernels return OK, bypassing hardware ECC}\\[2pt]
-    \textbf{\textcolor{TextDark}{Detection Latency:}} \textbf{\textcolor{DarkRed}{Hours to days $\cdot$ Only caught when metric craters}}\\[2pt]
-    \textbf{\textcolor{TextDark}{Recovery Cost:}} \textcolor{TextDark}{Massive rollback; all intervening checkpoints corrupted}
-  };
-
-  % Panel B Inner Timeline Card
-  \node[
-    rectangle, draw=CardBorder, fill=CardFill, line width=0.6pt,
-    minimum width=6.65cm, minimum height=1.70cm, anchor=south
-  ] at (\pBx, \pY-\pH+0.22) {};
-
-  % Inner Timeline Elements (Panel B)
-  \draw[line width=0.8pt, SlateLine!40] (\pBx-2.8, \pY-3.25) -- (\pBx-2.1, \pY-3.25);
-
-  % Fault node
-  \node[font=\fontsize{6.2pt}{7pt}\selectfont\bfseries, text=DarkRed] at (\pBx-2.45, \pY-2.85) {Fault};
-  \filldraw[draw=DarkRed, fill=DarkRed] (\pBx-2.45, \pY-3.25) circle (2.8pt);
-  \node[font=\fontsize{5.8pt}{7pt}\selectfont, text=TextMuted] at (\pBx-2.45, \pY-3.60) {$t = 0$};
-
-  % Corrupt weights bar spanning from -1.95 to +1.0
-  \filldraw[draw=RedLine!70, fill=RedFill!50, line width=0.7pt]
-    (\pBx-1.95, \pY-3.45) rectangle (\pBx+1.0, \pY-3.05);
-  \node[font=\fontsize{5.8pt}{7pt}\selectfont\bfseries, text=DarkRed] at (\pBx-0.47, \pY-3.25)
-    {Corrupt weights saved to storage};
-
-  % Alert node at +1.35
-  \draw[line width=0.8pt, SlateLine!40] (\pBx+1.0, \pY-3.25) -- (\pBx+1.55, \pY-3.25);
-  \node[font=\fontsize{6.2pt}{7pt}\selectfont\bfseries, text=OrangeLine!95!black] at (\pBx+1.35, \pY-2.85) {Alert};
-  \filldraw[draw=OrangeLine, fill=OrangeLine] (\pBx+1.35, \pY-3.25) circle (2.8pt);
-  \node[font=\fontsize{5.8pt}{7pt}\selectfont, text=TextMuted] at (\pBx+1.35, \pY-3.60) {$t + 48\text{ hrs}$};
-
-  % Rollback box at +2.35
-  \node[
-    rectangle, draw=DarkRed, fill=white, line width=0.8pt,
-    minimum width=1.40cm, minimum height=0.55cm, align=center,
-    font=\fontsize{6.5pt}{8pt}\selectfont\bfseries, text=DarkRed
-  ] at (\pBx+2.35, \pY-3.25) {Rollback};
-  \node[font=\fontsize{5.8pt}{7pt}\selectfont\bfseries, text=DarkRed] at (\pBx+2.35, \pY-3.70) {$-$2 days};
-
-
-  % =============================================================
-  % BOTTOM TIMELINE CARD
-  % =============================================================
-  \def\botY{-3.8}
-  \node[
-    rectangle, draw=CardBorder, fill=white, line width=0.7pt,
-    minimum width=14.4cm, minimum height=1.75cm, anchor=north
-  ] (botCard) at (0, \botY) {};
-
-  % Axis line with arrow
-  \draw[->, line width=1.0pt, SlateLine] (-6.2, \botY-0.70) -- (5.8, \botY-0.70)
-    node[right=3pt, font=\scriptsize\bfseries, text=TextDark] {Timeline};
-
-  % Ticks and labels (5 milestones)
-  % 1. t = 0
-  \draw[line width=0.9pt, TextDark] (-5.6, \botY-0.55) -- (-5.6, \botY-0.85);
-  \node[anchor=north, align=center] at (-5.6, \botY-0.90) {
-    \textbf{\scriptsize\textcolor{TextDark}{$\mathbf{t = 0}$}}\\[1.5pt]
-    \tiny\textcolor{TextDark}{Bit flip}
-  };
-
-  % 2. Microseconds
-  \draw[line width=0.9pt, TextDark] (-2.8, \botY-0.55) -- (-2.8, \botY-0.85);
-  \node[anchor=north, align=center] at (-2.8, \botY-0.90) {
-    \textbf{\scriptsize\textcolor{TextDark}{Microseconds}}\\[1.5pt]
-    \tiny\textcolor{TextDark}{Tensor calc}
-  };
-
-  % 3. Seconds
-  \draw[line width=0.9pt, TextDark] (0.0, \botY-0.55) -- (0.0, \botY-0.85);
-  \node[anchor=north, align=center] at (0.0, \botY-0.90) {
-    \textbf{\scriptsize\textcolor{TextDark}{Seconds}}\\[1.5pt]
-    \tiny\textcolor{TextDark}{Backprop / allreduce}
-  };
-
-  % 4. Hours
-  \draw[line width=0.9pt, TextDark] (2.8, \botY-0.55) -- (2.8, \botY-0.85);
-  \node[anchor=north, align=center] at (2.8, \botY-0.90) {
-    \textbf{\scriptsize\textcolor{TextDark}{Hours}}\\[1.5pt]
-    \tiny\textcolor{TextDark}{Bad checkpoint saved}
-  };
-
-  % 5. Days / Weeks
-  \draw[line width=0.9pt, DarkRed] (5.1, \botY-0.55) -- (5.1, \botY-0.85);
-  \node[anchor=north, align=center] at (5.1, \botY-0.90) {
-    \textbf{\scriptsize\textcolor{DarkRed}{Days / Weeks}}\\[1.5pt]
-    \tiny\textcolor{DarkRed}{Eval failure discovered}
-  };
-
-\end{tikzpicture}
-}
-```
--->
 
 :::
 
@@ -1625,303 +1008,8 @@ Google reported that SDC in TPU pods can manifest as sudden, inexplicable spikes
 
 Google addresses this class of failure with system-level mitigation, including spare capacity and sanity checks that can drain suspect chips when loss or gradient monitors flag anomalies (@fig-sdc-controller) [@dean2024mlsys]. This moves reliability from the untrusted component to the system, which verifies the result.
 
-::: {#fig-sdc-controller fig-env="figure" fig-pos="htb" fig-cap="**Hot-spare redundancy**: Google's data-center examples use spare capacity and sanity checking to keep ML training moving despite hardware faults, transitioning work away from suspect resources when monitors flag anomalies. This reactive approach contrasts with running every computation on two or three redundant units and comparing their results. Source: [@dean2024mlsys]." fig-alt="Four-panel sequence: normal training grid, defective machine marked red, SDC checker detecting fault, workload transferred to hot spare while defective unit sent for repair."}
+::: {#fig-sdc-controller fig-env="figure" fig-pos="htb" fig-cap="**Hot-spare failover**: An $N+1$ pool of four active GPUs and one standby spare. When loss or gradient sanity checks flag a suspect GPU and replay implicates it, the job drains that device and resumes on the spare from the last known-good state; the device goes to repair and a healthy unit refills the spare slot. Google's data-center examples use this reactive pattern to keep training moving despite hardware faults, in contrast to running every computation on two or three redundant units and comparing results [@dean2024mlsys]. The standing cost is the idle spare." fig-alt="Three panels left to right, each a row of five GPU slots. Panel 1: G0, G1, and G3 active in blue, G2 outlined in red and labeled suspect, and a dashed green spare S. Panel 2: G2 dashed gray and labeled isolated, and S solid blue and labeled active. Panel 3: a new dashed green spare S prime occupies the G2 slot, labeled new spare, with G2 sent to repair."}
 ![](images/svg/sdc-controller.svg)
-
-<!--
-```{.tikz}
-\scalebox{0.76}{
-\begin{tikzpicture}[
-  font=\sffamily,
-  >=Stealth
-]
-
-  % Book color palette
-  \providecolor{NavyBlue}{RGB}{20,45,85}
-  \providecolor{SteelBlue}{RGB}{40,90,140}
-  \providecolor{LightBlue}{RGB}{234,241,248}
-  \providecolor{RedLine}{RGB}{185,45,45}
-  \providecolor{RedFill}{RGB}{254,226,226}
-  \providecolor{DarkRed}{RGB}{160,25,25}
-  \providecolor{DarkGreen}{RGB}{20,110,60}
-  \providecolor{GreenLine}{RGB}{35,135,75}
-  \providecolor{GreenFill}{RGB}{240,249,244}
-  \providecolor{OrangeLine}{RGB}{215,105,15}
-  \providecolor{OrangeL}{RGB}{254,243,199}
-  \providecolor{PurpleLine}{RGB}{125,55,185}
-  \providecolor{PurpleFill}{RGB}{243,232,255}
-  \providecolor{SlateLine}{RGB}{85,95,110}
-  \providecolor{SlateFill}{RGB}{241,245,249}
-  \providecolor{CardBorder}{RGB}{215,222,230}
-  \providecolor{CardFill}{RGB}{250,251,253}
-  \providecolor{TextDark}{RGB}{25,35,45}
-  \providecolor{TextMuted}{RGB}{95,105,115}
-
-  % 8.0, not 6.75: at 6.75 each panel header's left title and right status
-  % label met in the middle and overlapped (measured 17-25pt of collision).
-  \def\pW{8.00}
-  \def\pH{4.15}
-  \def\hdrH{0.54}
-
-  % Coordinates of the 4 panels:
-  % Top-Left: Phase 1
-  % Top-Right: Phase 2
-  % Bottom-Left: Phase 3
-  % Bottom-Right: Phase 4
-  \def\xL{-4.30}
-  \def\xR{4.30}
-  \def\yT{2.50}
-  \def\yB{-2.50}
-
-  \def\gW{1.10}
-  \def\gH{0.80}
-
-  % =============================================================
-  % PANEL 1: PHASE 1 (TOP-LEFT)
-  % =============================================================
-  \draw[CardBorder, fill=white, line width=0.7pt]
-    (\xL-0.5*\pW, \yT-0.5*\pH) rectangle (\xL+0.5*\pW, \yT+0.5*\pH);
-  \begin{scope}
-    \clip[rectangle] (\xL-0.5*\pW, \yT-0.5*\pH) rectangle (\xL+0.5*\pW, \yT+0.5*\pH);
-    \fill[GreenFill!80!GreenLine] (\xL-0.5*\pW, \yT+0.5*\pH-\hdrH) rectangle (\xL+0.5*\pW, \yT+0.5*\pH);
-    \draw[GreenLine!40, line width=0.5pt] (\xL-0.5*\pW, \yT+0.5*\pH-\hdrH) -- (\xL+0.5*\pW, \yT+0.5*\pH-\hdrH);
-  \end{scope}
-  \node[anchor=west, font=\fontsize{6.2pt}{7.5pt}\selectfont\bfseries, text=DarkGreen] at (\xL-0.5*\pW+0.20, \yT+0.5*\pH-0.27)
-    {Phase 1: Nominal Cluster Training};
-  \node[anchor=east, font=\fontsize{5.5pt}{7.0pt}\selectfont\bfseries, text=DarkGreen] at (\xL+0.5*\pW-0.20, \yT+0.5*\pH-0.27)
-    {4 Active GPUs $\cdot$ 1 Hot Spare};
-
-  % Panel 1: GPU cards row
-  \def\gYt{\yT+0.5*\pH-1.22}
-  \node[draw=GreenLine, fill=GreenFill!70, line width=0.6pt,
-        minimum width=\gW cm, minimum height=\gH cm, align=center, inner sep=1pt] at (\xL-2.50, \gYt) {
-    \textbf{\fontsize{6.2pt}{7.2pt}\selectfont\textcolor{DarkGreen}{GPU 0}}\\[1.5pt]
-    \fontsize{5.0pt}{5.8pt}\selectfont\bfseries\textcolor{DarkGreen}{ACTIVE}
-  };
-  \node[draw=GreenLine, fill=GreenFill!70, line width=0.6pt,
-        minimum width=\gW cm, minimum height=\gH cm, align=center, inner sep=1pt] at (\xL-1.25, \gYt) {
-    \textbf{\fontsize{6.2pt}{7.2pt}\selectfont\textcolor{DarkGreen}{GPU 1}}\\[1.5pt]
-    \fontsize{5.0pt}{5.8pt}\selectfont\bfseries\textcolor{DarkGreen}{ACTIVE}
-  };
-  \node[draw=GreenLine, fill=GreenFill!70, line width=0.6pt,
-        minimum width=\gW cm, minimum height=\gH cm, align=center, inner sep=1pt] at (\xL+0.00, \gYt) {
-    \textbf{\fontsize{6.2pt}{7.2pt}\selectfont\textcolor{DarkGreen}{GPU 2}}\\[1.5pt]
-    \fontsize{5.0pt}{5.8pt}\selectfont\bfseries\textcolor{DarkGreen}{ACTIVE}
-  };
-  \node[draw=GreenLine, fill=GreenFill!70, line width=0.6pt,
-        minimum width=\gW cm, minimum height=\gH cm, align=center, inner sep=1pt] at (\xL+1.25, \gYt) {
-    \textbf{\fontsize{6.2pt}{7.2pt}\selectfont\textcolor{DarkGreen}{GPU 3}}\\[1.5pt]
-    \fontsize{5.0pt}{5.8pt}\selectfont\bfseries\textcolor{DarkGreen}{ACTIVE}
-  };
-  \node[draw=OrangeLine, fill=OrangeL!50, line width=0.7pt,
-        minimum width=\gW cm, minimum height=\gH cm, align=center, inner sep=1pt] at (\xL+2.50, \gYt) {
-    \textbf{\fontsize{5.8pt}{6.8pt}\selectfont\textcolor{OrangeLine!95!black}{Hot Spare}}\\[1.5pt]
-    \fontsize{5.0pt}{5.8pt}\selectfont\bfseries\textcolor{OrangeLine!95!black}{STANDBY}
-  };
-
-  % Panel 1: Lower cards
-  \node[draw=CardBorder, fill=CardFill, line width=0.5pt,
-        minimum width=6.25cm, minimum height=0.68cm, align=center, inner sep=2pt] at (\xL, \yT-0.54) {
-    \textbf{\fontsize{6.0pt}{7.0pt}\selectfont\textcolor{TextDark}{Health Monitor Status}}\\[1.5pt]
-    \fontsize{5.4pt}{6.6pt}\selectfont\textcolor{TextMuted}{Gradient statistics nominal $\cdot$ Loss curve converging smoothly}
-  };
-  \node[draw=GreenLine!60, fill=GreenFill!50, line width=0.6pt,
-        minimum width=6.25cm, minimum height=0.72cm, align=center, inner sep=2pt] at (\xL, \yT-1.55) {
-    \textbf{\fontsize{6.0pt}{7.0pt}\selectfont\textcolor{DarkGreen}{All Checksums \& Inf/NaN Traps Passing}}\\[1.5pt]
-    \fontsize{5.4pt}{6.6pt}\selectfont\textcolor{DarkGreen}{Cross-iteration gradient cosine similarity $> 0.98$}
-  };
-
-
-  % =============================================================
-  % PANEL 2: PHASE 2 (TOP-RIGHT)
-  % =============================================================
-  \draw[RedLine!50, fill=white, line width=0.7pt]
-    (\xR-0.5*\pW, \yT-0.5*\pH) rectangle (\xR+0.5*\pW, \yT+0.5*\pH);
-  \begin{scope}
-    \clip[rectangle] (\xR-0.5*\pW, \yT-0.5*\pH) rectangle (\xR+0.5*\pW, \yT+0.5*\pH);
-    \fill[RedFill!70] (\xR-0.5*\pW, \yT+0.5*\pH-\hdrH) rectangle (\xR+0.5*\pW, \yT+0.5*\pH);
-    \draw[RedLine!30, line width=0.5pt] (\xR-0.5*\pW, \yT+0.5*\pH-\hdrH) -- (\xR+0.5*\pW, \yT+0.5*\pH-\hdrH);
-  \end{scope}
-  \node[anchor=west, font=\fontsize{6.2pt}{7.5pt}\selectfont\bfseries, text=DarkRed] at (\xR-0.5*\pW+0.20, \yT+0.5*\pH-0.27)
-    {Phase 2: SDC Detected \& Quarantined};
-  \node[anchor=east, font=\fontsize{5.5pt}{7.0pt}\selectfont\bfseries, text=DarkRed] at (\xR+0.5*\pW-0.20, \yT+0.5*\pH-0.27)
-    {GPU 2 Anomaly Flagged};
-
-  % Panel 2: GPU cards row
-  \node[draw=GreenLine, fill=GreenFill!70, line width=0.6pt,
-        minimum width=\gW cm, minimum height=\gH cm, align=center, inner sep=1pt] at (\xR-2.50, \gYt) {
-    \textbf{\fontsize{6.2pt}{7.2pt}\selectfont\textcolor{DarkGreen}{GPU 0}}\\[1.5pt]
-    \fontsize{5.0pt}{5.8pt}\selectfont\bfseries\textcolor{DarkGreen}{ACTIVE}
-  };
-  \node[draw=GreenLine, fill=GreenFill!70, line width=0.6pt,
-        minimum width=\gW cm, minimum height=\gH cm, align=center, inner sep=1pt] at (\xR-1.25, \gYt) {
-    \textbf{\fontsize{6.2pt}{7.2pt}\selectfont\textcolor{DarkGreen}{GPU 1}}\\[1.5pt]
-    \fontsize{5.0pt}{5.8pt}\selectfont\bfseries\textcolor{DarkGreen}{ACTIVE}
-  };
-  \node[draw=DarkRed, fill=RedFill!80, line width=1.1pt,
-        minimum width=\gW cm, minimum height=\gH cm, align=center, inner sep=1pt] at (\xR+0.00, \gYt) {
-    \textbf{\fontsize{6.0pt}{6.8pt}\selectfont\textcolor{DarkRed}{GPU 2 \raisebox{0.5pt}{\tiny$\triangle$}}}\\[1.0pt]
-    \fontsize{4.8pt}{5.6pt}\selectfont\bfseries\textcolor{DarkRed}{SDC FLIP}\\[1.0pt]
-    \fontsize{4.4pt}{5.2pt}\selectfont\textcolor{DarkRed}{Quarantined}
-  };
-  \node[draw=GreenLine, fill=GreenFill!70, line width=0.6pt,
-        minimum width=\gW cm, minimum height=\gH cm, align=center, inner sep=1pt] at (\xR+1.25, \gYt) {
-    \textbf{\fontsize{6.2pt}{7.2pt}\selectfont\textcolor{DarkGreen}{GPU 3}}\\[1.5pt]
-    \fontsize{5.0pt}{5.8pt}\selectfont\bfseries\textcolor{DarkGreen}{ACTIVE}
-  };
-  \node[draw=OrangeLine, fill=OrangeL!50, line width=0.7pt,
-        minimum width=\gW cm, minimum height=\gH cm, align=center, inner sep=1pt] at (\xR+2.50, \gYt) {
-    \textbf{\fontsize{5.8pt}{6.8pt}\selectfont\textcolor{OrangeLine!95!black}{Hot Spare}}\\[1.5pt]
-    \fontsize{5.0pt}{5.8pt}\selectfont\bfseries\textcolor{OrangeLine!95!black}{STANDBY}
-  };
-
-  % Panel 2: Lower cards
-  \node[draw=DarkRed!60, fill=RedFill!60, line width=0.6pt,
-        minimum width=6.25cm, minimum height=0.68cm, align=center, inner sep=2pt] at (\xR, \yT-0.54) {
-    \textbf{\fontsize{6.0pt}{7.0pt}\selectfont\textcolor{DarkRed}{Monitor Alert: Invariant Violation}}\\[1.5pt]
-    \fontsize{5.4pt}{6.6pt}\selectfont\textcolor{DarkRed}{Checksum mismatch / activation norm outlier on rank 2}
-  };
-  \node[draw=RedLine!40, fill=RedFill!35, line width=0.5pt,
-        minimum width=6.25cm, minimum height=0.72cm, align=center, inner sep=2pt] at (\xR, \yT-1.55) {
-    \textbf{\fontsize{6.0pt}{7.0pt}\selectfont\textcolor{DarkRed}{Action: Pause Job \& Cordon Rank 2}}\\[1.5pt]
-    \fontsize{5.4pt}{6.6pt}\selectfont\textcolor{DarkRed}{Fencing token invalidated; prevents corrupt weight commit}
-  };
-
-
-  % =============================================================
-  % PANEL 3: PHASE 3 (BOTTOM-LEFT)
-  % =============================================================
-  \draw[OrangeLine!50, fill=white, line width=0.7pt]
-    (\xL-0.5*\pW, \yB-0.5*\pH) rectangle (\xL+0.5*\pW, \yB+0.5*\pH);
-  \begin{scope}
-    \clip[rectangle] (\xL-0.5*\pW, \yB-0.5*\pH) rectangle (\xL+0.5*\pW, \yB+0.5*\pH);
-    \fill[OrangeL!60] (\xL-0.5*\pW, \yB+0.5*\pH-\hdrH) rectangle (\xL+0.5*\pW, \yB+0.5*\pH);
-    \draw[OrangeLine!30, line width=0.5pt] (\xL-0.5*\pW, \yB+0.5*\pH-\hdrH) -- (\xL+0.5*\pW, \yB+0.5*\pH-\hdrH);
-  \end{scope}
-  \node[anchor=west, font=\fontsize{6.2pt}{7.5pt}\selectfont\bfseries, text=OrangeLine!95!black] at (\xL-0.5*\pW+0.20, \yB+0.5*\pH-0.27)
-    {Phase 3: Hot-Spare Dynamic Failover};
-  \node[anchor=east, font=\fontsize{5.5pt}{7.0pt}\selectfont\bfseries, text=OrangeLine!95!black] at (\xL+0.5*\pW-0.20, \yB+0.5*\pH-0.27)
-    {Sub-Minute Resumption};
-
-  % Panel 3: GPU cards row
-  \def\gYb{\yB+0.5*\pH-1.22}
-  \node[draw=GreenLine, fill=GreenFill!70, line width=0.6pt,
-        minimum width=\gW cm, minimum height=\gH cm, align=center, inner sep=1pt] at (\xL-2.50, \gYb) {
-    \textbf{\fontsize{6.2pt}{7.2pt}\selectfont\textcolor{DarkGreen}{GPU 0}}\\[1.5pt]
-    \fontsize{5.0pt}{5.8pt}\selectfont\bfseries\textcolor{DarkGreen}{ACTIVE}
-  };
-  \node[draw=GreenLine, fill=GreenFill!70, line width=0.6pt,
-        minimum width=\gW cm, minimum height=\gH cm, align=center, inner sep=1pt] at (\xL-1.25, \gYb) {
-    \textbf{\fontsize{6.2pt}{7.2pt}\selectfont\textcolor{DarkGreen}{GPU 1}}\\[1.5pt]
-    \fontsize{5.0pt}{5.8pt}\selectfont\bfseries\textcolor{DarkGreen}{ACTIVE}
-  };
-  \node[draw=SlateLine!60, fill=SlateFill!60, dashed, line width=0.7pt,
-        minimum width=\gW cm, minimum height=\gH cm, align=center, inner sep=1pt] at (\xL+0.00, \gYb) {
-    \textbf{\fontsize{6.0pt}{6.8pt}\selectfont\textcolor{TextMuted}{GPU 2}}\\[1.5pt]
-    \fontsize{4.8pt}{5.6pt}\selectfont\bfseries\textcolor{TextMuted}{ISOLATED}
-  };
-  \node[draw=GreenLine, fill=GreenFill!70, line width=0.6pt,
-        minimum width=\gW cm, minimum height=\gH cm, align=center, inner sep=1pt] at (\xL+1.25, \gYb) {
-    \textbf{\fontsize{6.2pt}{7.2pt}\selectfont\textcolor{DarkGreen}{GPU 3}}\\[1.5pt]
-    \fontsize{5.0pt}{5.8pt}\selectfont\bfseries\textcolor{DarkGreen}{ACTIVE}
-  };
-  \node[draw=DarkGreen, fill=GreenFill!80, line width=1.1pt,
-        minimum width=\gW cm, minimum height=\gH cm, align=center, inner sep=1pt] at (\xL+2.50, \gYb) {
-    \textbf{\fontsize{5.8pt}{6.8pt}\selectfont\textcolor{DarkGreen}{Spare GPU}}\\[1.5pt]
-    \fontsize{4.8pt}{5.6pt}\selectfont\bfseries\textcolor{DarkGreen}{PROMOTED}
-  };
-
-  % Panel 3: Lower cards
-  \node[draw=CardBorder, fill=CardFill, line width=0.5pt,
-        minimum width=6.25cm, minimum height=0.68cm, align=center, inner sep=2pt] at (\xL, \yB-0.54) {
-    \textbf{\fontsize{6.0pt}{7.0pt}\selectfont\textcolor{TextDark}{Fast Re-Topology \& State Hydration}}\\[1.5pt]
-    \fontsize{5.4pt}{6.6pt}\selectfont\textcolor{TextMuted}{NCCL communicators re-initialized $\cdot$ Last good shard loaded}
-  };
-  \node[draw=OrangeLine!60, fill=OrangeL!45, line width=0.6pt,
-        minimum width=6.25cm, minimum height=0.72cm, align=center, inner sep=2pt] at (\xL, \yB-1.55) {
-    \textbf{\fontsize{6.0pt}{7.0pt}\selectfont\textcolor{OrangeLine!95!black}{Zero Job Rescheduling Penalty}}\\[1.5pt]
-    \fontsize{5.4pt}{6.6pt}\selectfont\textcolor{OrangeLine!95!black}{Restarts from iteration N-1, 4-GPU ring preserved}
-  };
-
-
-  % =============================================================
-  % PANEL 4: PHASE 4 (BOTTOM-RIGHT)
-  % =============================================================
-  \draw[SteelBlue!50, fill=white, line width=0.7pt]
-    (\xR-0.5*\pW, \yB-0.5*\pH) rectangle (\xR+0.5*\pW, \yB+0.5*\pH);
-  \begin{scope}
-    \clip[rectangle] (\xR-0.5*\pW, \yB-0.5*\pH) rectangle (\xR+0.5*\pW, \yB+0.5*\pH);
-    \fill[LightBlue!70] (\xR-0.5*\pW, \yB+0.5*\pH-\hdrH) rectangle (\xR+0.5*\pW, \yB+0.5*\pH);
-    \draw[SteelBlue!30, line width=0.5pt] (\xR-0.5*\pW, \yB+0.5*\pH-\hdrH) -- (\xR+0.5*\pW, \yB+0.5*\pH-\hdrH);
-  \end{scope}
-  \node[anchor=west, font=\fontsize{6.0pt}{7.5pt}\selectfont\bfseries, text=NavyBlue] at (\xR-0.5*\pW+0.20, \yB+0.5*\pH-0.27)
-    {Phase 4: RMA Repair \& Restore};
-  \node[anchor=east, font=\fontsize{5.5pt}{7.0pt}\selectfont\bfseries, text=NavyBlue] at (\xR+0.5*\pW-0.20, \yB+0.5*\pH-0.27)
-    {N+1 Capacity Restored};
-
-  % Panel 4: GPU cards row
-  \node[draw=GreenLine, fill=GreenFill!70, line width=0.6pt,
-        minimum width=\gW cm, minimum height=\gH cm, align=center, inner sep=1pt] at (\xR-2.50, \gYb) {
-    \textbf{\fontsize{6.2pt}{7.2pt}\selectfont\textcolor{DarkGreen}{GPU 0}}\\[1.5pt]
-    \fontsize{5.0pt}{5.8pt}\selectfont\bfseries\textcolor{DarkGreen}{ACTIVE}
-  };
-  \node[draw=GreenLine, fill=GreenFill!70, line width=0.6pt,
-        minimum width=\gW cm, minimum height=\gH cm, align=center, inner sep=1pt] at (\xR-1.25, \gYb) {
-    \textbf{\fontsize{6.2pt}{7.2pt}\selectfont\textcolor{DarkGreen}{GPU 1}}\\[1.5pt]
-    \fontsize{5.0pt}{5.8pt}\selectfont\bfseries\textcolor{DarkGreen}{ACTIVE}
-  };
-  \node[draw=GreenLine, fill=GreenFill!70, line width=0.6pt,
-        minimum width=\gW cm, minimum height=\gH cm, align=center, inner sep=1pt] at (\xR+0.00, \gYb) {
-    \textbf{\fontsize{6.2pt}{7.2pt}\selectfont\textcolor{DarkGreen}{GPU 2$'$}}\\[1.5pt]
-    \fontsize{5.0pt}{5.8pt}\selectfont\bfseries\textcolor{DarkGreen}{PERM}
-  };
-  \node[draw=GreenLine, fill=GreenFill!70, line width=0.6pt,
-        minimum width=\gW cm, minimum height=\gH cm, align=center, inner sep=1pt] at (\xR+1.25, \gYb) {
-    \textbf{\fontsize{6.2pt}{7.2pt}\selectfont\textcolor{DarkGreen}{GPU 3}}\\[1.5pt]
-    \fontsize{5.0pt}{5.8pt}\selectfont\bfseries\textcolor{DarkGreen}{ACTIVE}
-  };
-  \node[draw=DarkRed!70, fill=RedFill!40, dashed, line width=0.7pt,
-        minimum width=\gW cm, minimum height=\gH cm, align=center, inner sep=1pt] (defNode) at (\xR+2.85, \gYb) {
-    \textbf{\fontsize{5.6pt}{6.6pt}\selectfont\textcolor{DarkRed}{Defective}}\\[1.5pt]
-    \fontsize{4.6pt}{5.4pt}\selectfont\textcolor{DarkRed}{$\to$ RMA Eject}
-  };
-  \draw[->, line width=0.8pt, DarkRed] (defNode.north) -- ++(0, 0.18);
-
-  % Panel 4: Lower cards
-  \node[draw=CardBorder, fill=CardFill, line width=0.5pt,
-        minimum width=6.25cm, minimum height=0.68cm, align=center, inner sep=2pt] at (\xR, \yB-0.54) {
-    \textbf{\fontsize{6.0pt}{7.0pt}\selectfont\textcolor{TextDark}{Background Fleet Provisioning}}\\[1.5pt]
-    \fontsize{5.4pt}{6.6pt}\selectfont\textcolor{TextMuted}{Defective sled out for repair $\cdot$ New spare provisioned}
-  };
-  \node[draw=SteelBlue!50, fill=LightBlue!60, line width=0.6pt,
-        minimum width=6.25cm, minimum height=0.72cm, align=center, inner sep=2pt] at (\xR, \yB-1.55) {
-    \textbf{\fontsize{6.0pt}{7.0pt}\selectfont\textcolor{NavyBlue}{Continuous Production Availability}}\\[1.5pt]
-    \fontsize{5.4pt}{6.6pt}\selectfont\textcolor{NavyBlue}{No human intervention required on critical training path}
-  };
-
-
-  % =============================================================
-  % CONNECTING FLOW ARROWS
-  % =============================================================
-  % 1. Phase 1 -> Phase 2 (Top horizontal)
-  \draw[->, line width=1.1pt, DarkRed]
-    (\xL+0.5*\pW+0.05, \yT) -- (\xR-0.5*\pW-0.05, \yT);
-
-  % 2. Phase 2 -> Phase 3 (Smooth S-curve through center)
-  \draw[->, line width=1.1pt, OrangeLine]
-    (\xR-1.5, \yT-0.5*\pH-0.03) to[out=270, in=90] (\xL+1.5, \yB+0.5*\pH+0.05);
-  \node[fill=white, draw=OrangeLine!40, inner sep=2pt,
-        font=\fontsize{5.6pt}{6.8pt}\selectfont\bfseries, text=OrangeLine!95!black] at (0, 0)
-    {Hot-Spare Failover};
-
-  % 3. Phase 3 -> Phase 4 (Bottom horizontal)
-  \draw[->, line width=1.1pt, SteelBlue]
-    (\xL+0.5*\pW+0.05, \yB) -- (\xR-0.5*\pW-0.05, \yB);
-
-\end{tikzpicture}
-}
-```
--->
 
 :::
 
@@ -1944,244 +1032,8 @@ Verify your understanding of Byzantine failures and SDC:
 
 Silent-corruption detection is the first defense, but the same logic extends to any Byzantine worker whose output remains syntactically valid. These failures are particularly dangerous in distributed training because the standard assumption that workers compute identical gradients for identical data no longer holds. A single Byzantine worker can corrupt the averaged gradient, potentially causing training to diverge or converge to a poor solution. @Fig-failure-types contrasts the straightforward detection of fail-stop failures\index{Fail-stop failure!detection} with the insidious nature of Byzantine corruption.
 
-::: {#fig-failure-types fig-env="figure" fig-pos="htb" fig-cap="**Fail-stop vs. Byzantine failures**: In the fail-stop model (left), a failed worker simply ceases to send messages, which is easily detected by timeouts. In the Byzantine model (right), a failed worker continues to participate but sends incorrect data (for example, corrupted gradients reported as valid), which can poison the global model state if not detected by redundant validation." fig-alt="Side-by-side panels. Left, fail-stop: four workers report to a coordinator over dashed heartbeat lines; worker 2 is gray with a red cross, and its red dotted line is labeled timeout. Right, Byzantine: four workers send gradients to a coordinator; worker 6 is outlined in red, labeled appears healthy and corrupt, and sends a red dashed poisoned gradient that passes the sanity check. A bottom box contrasts absence of signal with presence of signal."}
+::: {#fig-failure-types fig-env="figure" fig-pos="htb" fig-cap="**Fail-stop vs. Byzantine failures**: In the fail-stop model (left), a failed worker simply ceases to send messages, which is easily detected by timeouts. In the Byzantine model (right), a failed worker continues to participate but sends incorrect data (for example, corrupted gradients reported as valid), which can poison the global model state if not detected by redundant validation." fig-alt="Two panels divided by a dashed line. Left, fail-stop: workers W1, W3, and W4 send dashed heartbeat arrows up to a coordinator labeled timeout flags W2; W2 is gray, crossed out in red, labeled crashed, with a dotted line labeled silence. Caption text reads absence of signal is the evidence. Right, Byzantine: workers W5, W7, and W8 send gradient arrows to a coordinator labeled averages all gradients; W6 is outlined in red, labeled looks healthy, and sends a red dashed arrow labeled wrong. Text reads a signal does not prove correctness."}
 ![](images/svg/failure-types.svg)
-
-<!--
-```{.tikz}
-\scalebox{0.9}{
-\begin{tikzpicture}[
-  font=\sffamily,
-  >=Stealth
-]
-
-  % Book color palette
-  \providecolor{NavyBlue}{RGB}{20,45,85}
-  \providecolor{SteelBlue}{RGB}{40,90,140}
-  \providecolor{LightBlue}{RGB}{234,241,248}
-  \providecolor{RedLine}{RGB}{185,45,45}
-  \providecolor{RedFill}{RGB}{254,226,226}
-  \providecolor{DarkRed}{RGB}{160,25,25}
-  \providecolor{DarkGreen}{RGB}{20,110,60}
-  \providecolor{GreenLine}{RGB}{35,135,75}
-  \providecolor{GreenFill}{RGB}{240,249,244}
-  \providecolor{OrangeLine}{RGB}{215,105,15}
-  \providecolor{OrangeL}{RGB}{254,243,199}
-  \providecolor{PurpleLine}{RGB}{125,55,185}
-  \providecolor{PurpleFill}{RGB}{243,232,255}
-  \providecolor{SlateLine}{RGB}{85,95,110}
-  \providecolor{SlateFill}{RGB}{241,245,249}
-  \providecolor{CardBorder}{RGB}{215,222,230}
-  \providecolor{CardFill}{RGB}{250,251,253}
-  \providecolor{TextDark}{RGB}{25,35,45}
-  \providecolor{TextMuted}{RGB}{95,105,115}
-
-  % Panel centers
-  \def\xA{-3.60}
-  \def\xB{3.60}
-
-  % =============================================================
-  % PANEL A: FAIL-STOP FAILURE
-  % =============================================================
-  % Panel Title
-  \node[font=\fontsize{8.5pt}{10pt}\selectfont\bfseries, text=TextDark] (titleA) at (\xA, 5.20)
-    {Panel A: Fail-Stop Failure (Crash Silent)};
-
-  % Coordinator
-  \node[draw=SteelBlue, fill=LightBlue, line width=0.8pt,
-        minimum width=2.80cm, minimum height=0.76cm, align=center, inner sep=2pt] (coordA) at (\xA, 4.30) {
-    \textbf{\fontsize{7.2pt}{8.5pt}\selectfont\textcolor{NavyBlue}{Coordinator}}\\[1.5pt]
-    \fontsize{5.8pt}{7.0pt}\selectfont\textcolor{SteelBlue}{Heartbeat \& Timeout Monitor}
-  };
-
-  % Workers row (Workers 1, 2, 3, 4)
-  \def\wW{1.35}
-  \def\wH{1.10}
-  \def\wY{2.00}
-
-  % Worker 1
-  \node[draw=GreenLine, fill=GreenFill!70, line width=0.6pt,
-        minimum width=\wW cm, minimum height=\wH cm, align=center, inner sep=2pt] (w1) at (\xA-2.25, \wY) {
-    \textbf{\fontsize{6.8pt}{7.8pt}\selectfont\textcolor{DarkGreen}{Worker 1}}\\[2.5pt]
-    \fontsize{5.6pt}{6.6pt}\selectfont\bfseries\textcolor{DarkGreen}{Running}
-  };
-
-  % Worker 2 (Crash-Silent)
-  \node[draw=CardBorder, fill=white, line width=0.6pt,
-        minimum width=\wW cm, minimum height=\wH cm, align=center, inner sep=2pt] (w2) at (\xA-0.75, \wY) {};
-  % Red cross inside top of Worker 2
-  \draw[line width=1.5pt, DarkRed] (\xA-0.75-0.16, \wY+0.38) -- (\xA-0.75+0.16, \wY+0.14);
-  \draw[line width=1.5pt, DarkRed] (\xA-0.75-0.16, \wY+0.14) -- (\xA-0.75+0.16, \wY+0.38);
-  \node[align=center, inner sep=0pt] at (\xA-0.75, \wY-0.20) {
-    \textbf{\fontsize{6.5pt}{7.5pt}\selectfont\textcolor{DarkRed}{Worker 2}}\\[1.5pt]
-    \fontsize{5.2pt}{6.2pt}\selectfont\textcolor{TextMuted}{Silent / Dead}
-  };
-
-  % Worker 3
-  \node[draw=GreenLine, fill=GreenFill!70, line width=0.6pt,
-        minimum width=\wW cm, minimum height=\wH cm, align=center, inner sep=2pt] (w3) at (\xA+0.75, \wY) {
-    \textbf{\fontsize{6.8pt}{7.8pt}\selectfont\textcolor{DarkGreen}{Worker 3}}\\[2.5pt]
-    \fontsize{5.6pt}{6.6pt}\selectfont\bfseries\textcolor{DarkGreen}{Running}
-  };
-
-  % Worker 4
-  \node[draw=GreenLine, fill=GreenFill!70, line width=0.6pt,
-        minimum width=\wW cm, minimum height=\wH cm, align=center, inner sep=2pt] (w4) at (\xA+2.25, \wY) {
-    \textbf{\fontsize{6.8pt}{7.8pt}\selectfont\textcolor{DarkGreen}{Worker 4}}\\[2.5pt]
-    \fontsize{5.6pt}{6.6pt}\selectfont\bfseries\textcolor{DarkGreen}{Running}
-  };
-
-  % Heartbeat signal paths
-  % Outer workers (w1, w4) go higher (y=3.60) and enter coord at outer ports
-  \draw[->, line width=0.8pt, NavyBlue, dash pattern=on 3pt off 2pt]
-    (w1.north) -- (\xA-2.25, 3.60) -- ([xshift=-0.70cm]\xA, 3.60) -- ([xshift=-0.70cm]coordA.south);
-  \node[above, font=\fontsize{5.4pt}{6.4pt}\selectfont\bfseries, text=NavyBlue]
-    at (\xA-1.50, 3.60) {heartbeat};
-
-  \draw[->, line width=0.8pt, NavyBlue, dash pattern=on 3pt off 2pt]
-    (w4.north) -- (\xA+2.25, 3.60) -- ([xshift=0.70cm]\xA, 3.60) -- ([xshift=0.70cm]coordA.south);
-
-  % Inner workers (w2, w3) turn lower (y=3.10) and enter coord at inner ports
-  \draw[line width=0.9pt, DarkRed, dash pattern=on 2pt off 2pt]
-    (w2.north) -- (\xA-0.75, 3.10) -- ([xshift=-0.22cm]\xA, 3.10) -- ([xshift=-0.22cm]coordA.south);
-  \node[below, font=\fontsize{5.4pt}{6.4pt}\selectfont\bfseries, text=DarkRed]
-    at (\xA-0.75, 3.10) {Timeout!};
-
-  \draw[->, line width=0.8pt, NavyBlue, dash pattern=on 3pt off 2pt]
-    (w3.north) -- (\xA+0.75, 3.10) -- ([xshift=0.22cm]\xA, 3.10) -- ([xshift=0.22cm]coordA.south);
-
-  % Status badge (Panel A)
-  \node[draw=OrangeLine!60, fill=OrangeL!50, line width=0.5pt,
-        minimum width=4.4cm, minimum height=0.52cm, align=center, inner sep=2pt]
-        (statusA) at (\xA, 0.90) {
-    \textbf{\fontsize{6.2pt}{7.2pt}\selectfont\textcolor{OrangeLine!95!black}{Missing Heartbeat Detected}}\\[1.5pt]
-    \fontsize{5.4pt}{6.4pt}\selectfont\textcolor{OrangeLine!95!black}{Failure declared immediately on timeout}
-  };
-
-  % Failure Model Card (Panel A)
-  \node[draw=SteelBlue!50, fill=LightBlue!50, line width=0.6pt,
-        minimum width=6.60cm, minimum height=0.85cm, align=center, inner sep=3pt,
-        below=0.24cm of statusA.south] (modelA) {
-    \textbf{\fontsize{6.8pt}{7.8pt}\selectfont\textcolor{NavyBlue}{Failure Model: Fail-Stop Dynamics}}\\[2.5pt]
-    \fontsize{5.8pt}{7.0pt}\selectfont\textcolor{TextDark}{Component stops responding entirely (crash-silent).}\\[1.5pt]
-    \fontsize{5.4pt}{6.6pt}\selectfont\textcolor{TextMuted}{Detection: Lease timeout $\cdot$ Recovery: Replace node + restore checkpoint}
-  };
-
-
-  % =============================================================
-  % PANEL B: BYZANTINE FAILURE
-  % =============================================================
-  % Panel Title
-  \node[font=\fontsize{8.5pt}{10pt}\selectfont\bfseries, text=TextDark] (titleB) at (\xB, 5.20)
-    {Panel B: Byzantine Failure (Arbitrary / Silent Corruption)};
-
-  % Coordinator
-  \node[draw=SteelBlue, fill=LightBlue, line width=0.8pt,
-        minimum width=2.80cm, minimum height=0.76cm, align=center, inner sep=2pt] (coordB) at (\xB, 4.30) {
-    \textbf{\fontsize{7.2pt}{8.5pt}\selectfont\textcolor{NavyBlue}{Coordinator}}\\[1.5pt]
-    \fontsize{5.8pt}{7.0pt}\selectfont\textcolor{SteelBlue}{Receives All Gradients}
-  };
-
-  % Workers row (Workers 5, 6, 7, 8)
-  % Worker 5
-  \node[draw=GreenLine, fill=GreenFill!70, line width=0.6pt,
-        minimum width=\wW cm, minimum height=\wH cm, align=center, inner sep=2pt] (w5) at (\xB-2.25, \wY) {
-    \textbf{\fontsize{6.8pt}{7.8pt}\selectfont\textcolor{DarkGreen}{Worker 5}}\\[2.5pt]
-    \fontsize{5.6pt}{6.6pt}\selectfont\bfseries\textcolor{DarkGreen}{Correct $\nabla$}
-  };
-
-  % Worker 6 (Byzantine / SDC)
-  \node[draw=OrangeLine, fill=OrangeL!50, line width=1.1pt,
-        minimum width=\wW cm, minimum height=\wH cm, align=center, inner sep=2pt] (w6) at (\xB-0.75, \wY) {
-    \textbf{\fontsize{6.5pt}{7.5pt}\selectfont\textcolor{OrangeLine!95!black}{Worker 6}}\\[1.5pt]
-    \fontsize{5.2pt}{6.2pt}\selectfont\textcolor{OrangeLine!95!black}{Appears Healthy!}\\[1.5pt]
-    \fontsize{5.2pt}{6.2pt}\selectfont\bfseries\textcolor{DarkRed}{Corrupt / SDC}
-  };
-
-  % Worker 7
-  \node[draw=GreenLine, fill=GreenFill!70, line width=0.6pt,
-        minimum width=\wW cm, minimum height=\wH cm, align=center, inner sep=2pt] (w7) at (\xB+0.75, \wY) {
-    \textbf{\fontsize{6.8pt}{7.8pt}\selectfont\textcolor{DarkGreen}{Worker 7}}\\[2.5pt]
-    \fontsize{5.6pt}{6.6pt}\selectfont\bfseries\textcolor{DarkGreen}{Correct $\nabla$}
-  };
-
-  % Worker 8
-  \node[draw=GreenLine, fill=GreenFill!70, line width=0.6pt,
-        minimum width=\wW cm, minimum height=\wH cm, align=center, inner sep=2pt] (w8) at (\xB+2.25, \wY) {
-    \textbf{\fontsize{6.8pt}{7.8pt}\selectfont\textcolor{DarkGreen}{Worker 8}}\\[2.5pt]
-    \fontsize{5.6pt}{6.6pt}\selectfont\bfseries\textcolor{DarkGreen}{Correct $\nabla$}
-  };
-
-  % Gradient signal paths (Outer higher, inner lower: zero crossings)
-  % Outer workers (w5, w8) turn higher at y=3.60
-  \draw[->, line width=0.9pt, GreenLine]
-    (w5.north) -- (\xB-2.25, 3.60) -- ([xshift=-0.70cm]\xB, 3.60) -- ([xshift=-0.70cm]coordB.south);
-
-  \draw[->, line width=0.9pt, GreenLine]
-    (w8.north) -- (\xB+2.25, 3.60) -- ([xshift=0.70cm]\xB, 3.60) -- ([xshift=0.70cm]coordB.south);
-
-  % Inner workers (w6, w7) turn lower at y=3.10
-  \draw[->, line width=1.0pt, DarkRed, dash pattern=on 3pt off 2pt]
-    (w6.north) -- (\xB-0.75, 3.10) -- ([xshift=-0.22cm]\xB, 3.10) -- ([xshift=-0.22cm]coordB.south);
-  \node[left, align=right, font=\fontsize{5.2pt}{6.2pt}\selectfont, inner sep=1pt]
-    at (\xB-0.78, 2.85) {
-      \textbf{\textcolor{DarkRed}{Poison $\nabla$}}\\[0.5pt]
-      \fontsize{4.5pt}{5.5pt}\selectfont\textcolor{OrangeLine!95!black}{(passes check)}
-    };
-
-  \draw[->, line width=0.9pt, GreenLine]
-    (w7.north) -- (\xB+0.75, 3.10) -- ([xshift=0.22cm]\xB, 3.10) -- ([xshift=0.22cm]coordB.south);
-
-  % Status badge (Panel B)
-  \node[draw=RedLine!50, fill=RedFill!50, line width=0.5pt,
-        minimum width=4.4cm, minimum height=0.52cm, align=center, inner sep=2pt]
-        (statusB) at (\xB, 0.90) {
-    \textbf{\fontsize{6.2pt}{7.2pt}\selectfont\textcolor{DarkRed}{No Timeout Triggered}}\\[1.5pt]
-    \fontsize{5.4pt}{6.4pt}\selectfont\textcolor{DarkRed}{Corrupted weights invisible to basic heartbeat}
-  };
-
-  % Failure Model Card (Panel B)
-  \node[draw=OrangeLine!50, fill=OrangeL!45, line width=0.6pt,
-        minimum width=6.60cm, minimum height=0.85cm, align=center, inner sep=3pt,
-        below=0.24cm of statusB.south] (modelB) {
-    \textbf{\fontsize{6.8pt}{7.8pt}\selectfont\textcolor{OrangeLine!95!black}{Failure Model: Byzantine / Arbitrary Dynamics}}\\[2.5pt]
-    \fontsize{5.8pt}{7.0pt}\selectfont\textcolor{TextDark}{Component produces faulty outputs but remains responsive.}\\[1.5pt]
-    \fontsize{5.4pt}{6.6pt}\selectfont\textcolor{TextMuted}{Detection: Gradient norms $\cdot$ Recovery: Byzantine agreement / rollback}
-  };
-
-  % Center dashed divider between panels (stops above bottom card)
-  \draw[dashed, SlateLine!40, line width=0.8pt] (0, 5.30) -- (0, -0.65);
-
-  % =============================================================
-  % BOTTOM COMPARISON BAR: CORE ARCHITECTURAL DISTINCTION
-  % =============================================================
-  \node[draw=CardBorder, fill=CardFill, line width=0.7pt,
-        minimum width=13.60cm, minimum height=1.15cm, align=center,
-        below=0.28cm of $(modelA.south)!0.5!(modelB.south)$] (botCard) {};
-
-  \node[font=\fontsize{7.2pt}{8.5pt}\selectfont\bfseries, text=TextDark, anchor=north] at (botCard.north) [yshift=-4pt]
-    {Core Architectural Distinction};
-
-  \draw[CardBorder, line width=0.6pt] ([yshift=-16pt]botCard.north) -- ([yshift=4pt]botCard.south);
-
-  % Left distinction
-  \node[align=center, font=\fontsize{6.0pt}{7.2pt}\selectfont, anchor=center]
-    at ([xshift=-3.40cm, yshift=-4pt]botCard.center) {
-      \textbf{\textcolor{NavyBlue}{Fail-Stop: Absence of signal = failure}}\\[1.5pt]
-      \textcolor{TextDark}{Deterministic timeout detection and lease renewal are sufficient.}
-    };
-
-  % Right distinction
-  \node[align=center, font=\fontsize{6.0pt}{7.2pt}\selectfont, anchor=center]
-    at ([xshift=3.40cm, yshift=-4pt]botCard.center) {
-      \textbf{\textcolor{OrangeLine!95!black}{Byzantine: Presence of signal $\neq$ correctness}}\\[1.5pt]
-      \textcolor{TextDark}{Requires mathematical checksums, outlier rejection, or replicated voting.}
-    };
-
-\end{tikzpicture}
-}
-```
--->
 
 :::
 
@@ -2212,146 +1064,8 @@ Defending against correlated failures\index{Correlated failure!failure domain pr
 
 The nesting of failure domains in @tbl-failure-domains has direct consequences for redundancy placement: placing replicas within the same domain provides zero protection against that domain's failure mode.
 
-::: {#fig-failure-domains fig-env="figure" fig-pos="htb" fig-cap="**Hierarchy of failure domains**: Failure domains are often nested or overlapping. A GPU failure affects one device. A node failure affects `{python} FleetReliabilityRates.node_gpus_str` GPUs. A rack switch failure affects 32--64 GPUs. A power distribution unit (PDU) failure may affect multiple racks. The red rack shows one such correlated failure: a single top-of-rack switch fault removes every GPU it contains, while the neighboring rack is untouched, which is why replicas must span independent domains (for example, different racks or rows)." fig-alt="Nested rectangles: a datacenter contains a PDU and network switch domain, which contains two racks, each holding two eight-GPU nodes. The left rack is outlined in red with a label reading ToR switch fails, and all its GPUs are tinted red; the right rack's GPUs are unaffected. Each level is labeled with its blast radius."}
+::: {#fig-failure-domains fig-env="figure" fig-pos="htb" fig-cap="**Hierarchy of failure domains**: Failure domains are often nested or overlapping. A GPU failure affects one device. A node failure affects `{python} FleetReliabilityRates.node_gpus_str` GPUs. A rack switch failure affects 32--64 GPUs (each rack is drawn with only two of its four to eight nodes). A power distribution unit (PDU) failure may affect multiple racks. The red rack shows one such correlated failure: a single top-of-rack switch fault removes every GPU it contains, while the neighboring rack is untouched, which is why replicas must span independent domains (for example, different racks or rows)." fig-alt="Nested rectangles: a datacenter labeled blast radius all GPUs contains a power and network domain spanning several racks, which contains two racks, each drawn with two of its eight-GPU nodes. The left rack is outlined in red, labeled ToR switch fails and 32 to 64 GPUs, and all its GPU squares are red; the right rack is labeled unaffected and its GPUs are blue."}
 ![](images/svg/failure-domains.svg)
-
-<!--
-```{.tikz}
-\scalebox{0.88}{
-\begin{tikzpicture}[
-  font=\sffamily,
-  >=Stealth
-]
-
-  % Book color palette
-  \providecolor{NavyBlue}{RGB}{20,45,85}
-  \providecolor{SteelBlue}{RGB}{40,90,140}
-  \providecolor{LightBlue}{RGB}{234,241,248}
-  \providecolor{RedLine}{RGB}{185,45,45}
-  \providecolor{RedFill}{RGB}{254,226,226}
-  \providecolor{DarkRed}{RGB}{160,25,25}
-  \providecolor{DarkGreen}{RGB}{20,110,60}
-  \providecolor{GreenLine}{RGB}{35,135,75}
-  \providecolor{GreenFill}{RGB}{240,249,244}
-  \providecolor{OrangeLine}{RGB}{215,105,15}
-  \providecolor{OrangeL}{RGB}{254,243,199}
-  \providecolor{PurpleLine}{RGB}{125,55,185}
-  \providecolor{PurpleFill}{RGB}{243,232,255}
-  \providecolor{SlateLine}{RGB}{85,95,110}
-  \providecolor{SlateFill}{RGB}{241,245,249}
-  \providecolor{CardBorder}{RGB}{215,222,230}
-  \providecolor{CardFill}{RGB}{250,251,253}
-  \providecolor{TextDark}{RGB}{25,35,45}
-  \providecolor{TextMuted}{RGB}{95,105,115}
-
-  % -------------------------------------------------------------
-  % Datacenter Box
-  % -------------------------------------------------------------
-  \draw[line width=0.9pt, draw=SlateLine!60, fill=white]
-    (-7.1, -3.65) rectangle (7.1, 3.85);
-
-  % Datacenter Header & Metadata
-  \node[font=\fontsize{9pt}{11pt}\selectfont\bfseries, text=TextDark] at (0, 3.52) {Datacenter};
-  \node[anchor=north east, align=right, font=\fontsize{6.5pt}{8pt}\selectfont] at (6.90, 3.75) {
-    \textcolor{TextMuted}{MTBF: $\sim$5 yrs} \\
-    \textcolor{DarkRed}{\bfseries Blast: all GPUs}
-  };
-
-  % -------------------------------------------------------------
-  % PDU / Network Switch Domain Box
-  % -------------------------------------------------------------
-  \draw[line width=0.85pt, draw=OrangeLine, fill=OrangeL!20]
-    (-6.8, -3.35) rectangle (6.8, 3.05);
-
-  % PDU Header & Metadata
-  \node[font=\fontsize{8.5pt}{10pt}\selectfont\bfseries, text=OrangeLine!95!black] at (0, 2.78) {PDU / Network Switch Domain};
-  \node[anchor=north east, align=right, font=\fontsize{6.5pt}{8pt}\selectfont] at (6.60, 2.98) {
-    \textcolor{TextMuted}{MTBF: $\sim$2 yrs} \\
-    \textcolor{DarkRed}{\bfseries Blast: 100--500 GPUs}
-  };
-
-  % -------------------------------------------------------------
-  % Racks & Nodes
-  % -------------------------------------------------------------
-  \foreach \rx in {-3.38, 3.38} {
-    % Rack Container
-    \draw[line width=0.85pt, draw=NavyBlue!80, fill=LightBlue!35]
-      (\rx - 3.18, -3.10) rectangle (\rx + 3.18, 2.25);
-
-    % Rack Header & Metadata
-    \node[font=\fontsize{8pt}{9.5pt}\selectfont\bfseries, text=NavyBlue] at (\rx - 0.45, 2.02) {Rack (ToR Switch)};
-    \node[anchor=north east, align=right, font=\fontsize{6pt}{7.5pt}\selectfont] at (\rx + 3.08, 2.18) {
-      \textcolor{TextMuted}{MTBF: $\sim$1 yr} \\
-      \textcolor{DarkRed}{\bfseries Blast: 32--64 GPUs}
-    };
-
-    % Two Nodes inside Rack
-    \foreach \dx in {-1.52, 1.52} {
-      \pgfmathsetmacro{\nx}{\rx + \dx}
-      % Node box
-      \draw[line width=0.75pt, draw=GreenLine, fill=GreenFill]
-        (\nx - 1.43, -1.40) rectangle (\nx + 1.43, 1.45);
-
-      % Node Header & Metadata
-      \node[font=\fontsize{7.5pt}{9pt}\selectfont\bfseries, text=DarkGreen] at (\nx, 1.22) {Node};
-      \node[font=\fontsize{5.5pt}{7pt}\selectfont, text=TextMuted] at (\nx, 0.98) {MTBF: $\sim$6 mo};
-      \node[font=\fontsize{5.5pt}{7pt}\selectfont\bfseries, text=DarkRed] at (\nx, 0.74) {Blast: 8 GPUs};
-
-      % 8 GPUs in 2x4 grid inside Node
-      \foreach \gy in {0.22, -0.38} {
-        \foreach \gx in {-0.93, -0.31, 0.31, 0.93} {
-          \pgfmathsetmacro{\curgx}{\nx + \gx}
-          \draw[line width=0.55pt, draw=SteelBlue!85, fill=LightBlue!85]
-            (\curgx - 0.24, \gy - 0.21) rectangle (\curgx + 0.24, \gy + 0.21);
-          \node[font=\fontsize{4pt}{5pt}\selectfont\bfseries, text=NavyBlue!90] at (\curgx, \gy) {GPU};
-        }
-      }
-
-      % Node bottom caption
-      \node[font=\fontsize{5.5pt}{7pt}\selectfont, text=NavyBlue!85] at (\nx, -1.08) {8 GPUs (MTBF: $\sim$50K hrs)};
-    }
-
-    % Ellipsis and Rack Footnotes
-    \node[font=\fontsize{9pt}{10pt}\selectfont, text=TextMuted] at (\rx, -1.82) {. \ . \ .};
-    \node[font=\fontsize{6.5pt}{8pt}\selectfont, text=TextMuted] at (\rx, -2.22) {4--8 nodes per rack};
-    \node[font=\fontsize{7.5pt}{9pt}\selectfont\bfseries, text=NavyBlue] at (\rx, -2.68) {32--64 GPUs total};
-  }
-
-  % -------------------------------------------------------------
-  % Legend below Datacenter box
-  % -------------------------------------------------------------
-  \def\legY{-4.20}
-  \begin{scope}[shift={(0, \legY)}]
-    % GPU
-    \draw[line width=0.55pt, draw=SteelBlue!85, fill=LightBlue!85]
-      (-4.8, -0.12) rectangle (-4.3, 0.16);
-    \node[anchor=west, font=\fontsize{6.5pt}{8pt}\selectfont, text=TextDark] at (-4.2, 0.02) {GPU};
-
-    % Node
-    \draw[line width=0.75pt, draw=GreenLine, fill=GreenFill]
-      (-2.8, -0.12) rectangle (-2.3, 0.16);
-    \node[anchor=west, font=\fontsize{6.5pt}{8pt}\selectfont, text=TextDark] at (-2.2, 0.02) {Node};
-
-    % Rack
-    \draw[line width=0.85pt, draw=NavyBlue!80, fill=LightBlue!35]
-      (-0.8, -0.12) rectangle (-0.3, 0.16);
-    \node[anchor=west, font=\fontsize{6.5pt}{8pt}\selectfont, text=TextDark] at (-0.2, 0.02) {Rack};
-
-    % PDU / Switch
-    \draw[line width=0.85pt, draw=OrangeLine, fill=OrangeL!20]
-      (1.2, -0.12) rectangle (1.7, 0.16);
-    \node[anchor=west, font=\fontsize{6.5pt}{8pt}\selectfont, text=TextDark] at (1.8, 0.02) {PDU / Switch};
-
-    % Datacenter
-    \draw[line width=0.9pt, draw=SlateLine!60, fill=white]
-      (3.7, -0.12) rectangle (4.2, 0.16);
-    \node[anchor=west, font=\fontsize{6.5pt}{8pt}\selectfont, text=TextDark] at (4.3, 0.02) {Datacenter};
-  \end{scope}
-
-\end{tikzpicture}
-}
-```
--->
 
 :::
 
@@ -2848,30 +1562,30 @@ Error masking [@mohanram2003] is the key boundary in @fig-error-masking-ft [@ko2
 Line/.style={line width=1.0pt,black!50,text=black},
 Box/.style={inner xsep=2pt,
     node distance=0.6,
-    draw=VioletLine,
+    draw=RedLine,
     line width=0.75pt,
-    fill=VioletL!40,
+    fill=RedL!60,
     align=flush center,
     minimum width=25mm, minimum height=9mm
   },
 Box2/.style={inner xsep=2pt,
     node distance=1.4,
-    draw=BlueLine,
+    draw=GreenLine,
     line width=0.75pt,
-    fill=BlueL!40,
+    fill=GreenL0,
     align=flush center,
     minimum width=29mm, minimum height=9mm
   },
 Box3/.style={inner xsep=2pt,
     node distance=1.1,
-    draw=BrownLine,
+    draw=GrayLine,
     line width=0.75pt,
-    fill=BrownL!40,
+    fill=white,
     align=flush left,
     minimum width=55mm, minimum height=9mm
   },
    decision/.style={diamond, minimum width=50mm,node distance=0.6,inner sep=-1ex,
-     minimum height=25mm, align=flush center, draw=GreenLine, fill=green!30}
+     minimum height=25mm, align=flush center, draw=GrayLine, fill=GrayL!50}
 }
 \node[Box](B1){Soft error};
 \node[Box,decision,below=of B1](B2){Corrupted  data \\are read?};
@@ -2945,7 +1659,7 @@ Two recovery objectives, introduced with the reliability evidence of @sec-ft-sof
 Without checkpoints, a cluster that loses power forfeits every gradient update computed over the preceding weeks. Among the components a checkpoint must capture (@sec-fault-tolerance-young-daly), the optimizer state[^fn-adam-state-memory] dominates the payload, and the payload size sets the write time $T_{\text{write}}$ that the interval calculation needs.
 
 ::: {.column-margin}
-![](images/svg/vol2_fault_tolerance_margin_002.svg){width="100%" fig-alt="Stacked checkpoint payload bar where weights occupy one quarter and Adam optimizer state occupies about three quarters."}
+![](images/svg/vol2_fault_tolerance_margin_002.svg){width="100%" fig-alt="Stacked checkpoint payload bar where BF16 weights occupy 14 percent and optimizer state, the FP32 master weights plus Adam moments, occupies 86 percent."}
 
 *Optimizer state, not weights, dominates checkpoint size.*
 :::
@@ -2983,7 +1697,7 @@ class FaultToleranceCheckpointRecap:
 
 The Young-Daly formula stated in @sec-fault-tolerance-young-daly gives the optimal checkpoint interval, $\tau_{\text{opt}} = \sqrt{2 \times T_{\text{write}} \times \text{MTBF}_{\text{system}}}$, but it cannot be applied until both inputs are known. The failure analysis in @sec-fault-tolerance-reliability-reliability-failure-analysis-scale-6b4b supplies the system MTBF term, and the checkpoint payload established earlier in this section supplies $T_{\text{write}}$. With both in hand, the formula stops being abstract and becomes a concrete schedule for the chapter's own cluster.
 
-@Fig-checkpoint-tradeoff used round inputs to convey the shape of that trade-off; the calculation that follows pins the exact interval from this chapter's own computed MTBF and write time.
+@Fig-checkpoint-tradeoff already plotted this cluster's curve; the calculation that follows derives its minimum step by step from the chapter's own computed MTBF and write time.
 
 The worked cascade's 10,000-GPU cluster, roughly ten times the Archetype A reference cluster, supplies both inputs as computed values. That cascade (@sec-fault-tolerance-reliability-reliability-worked-example-cluster-mtbf-calculation-9255) put full-system MTBF, including PCIe and network failures (the redundant power supplies add no term), at `{python} FailureCascadeExample.mtbf_hours_2dp_str`, and the checkpoint payload calculated earlier in this section writes in `{python} FaultToleranceCheckpointRecap.ckpt_write_s_str` (a `{python} FaultToleranceCheckpointRecap.gpt3_ckpt_tb_str` checkpoint at `{python} FaultToleranceCheckpointRecap.aggregate_read_gb_per_s_str`). Substituting these into the Young-Daly formula gives the canonical interval for this cluster.
 
@@ -3019,6 +1733,7 @@ class YoungDalyOptimal:
     # ┌── 3. GUARD ─────────────────────────────────────────
     check(12 < tau_opt.to(minute).magnitude < 15, f"Interval {tau_opt.to(minute).magnitude:.1f}m outside expected range")
     check(hourly_overhead_pct > overhead_pct, "Hourly checkpointing should waste more than optimal")
+    check(abs(tau_opt.to(hour).magnitude / CheckpointTradeoffInputs.tau_opt_h - 1) < 0.01, "notebook interval must match @fig-checkpoint-tradeoff")
     # ┌── 4. OUTPUT ────────────────────────────────────────
     t_write_s_str = fmt_time(t_write, second, precision=None, commas=False)
     mtbf_h_str = fmt_time(mtbf, hour, precision=2, commas=False, style='word')
@@ -3063,193 +1778,8 @@ When assumptions are violated, the optimal interval may shift significantly, but
 
 @Fig-checkpoint-recovery-timeline makes the temporal cost of failures concrete by showing the sequence of events during a training run: productive computation, periodic checkpoints, a failure event, and the recovery process with its associated wasted work.
 
-::: {#fig-checkpoint-recovery-timeline fig-env="figure" fig-pos="htb" fig-cap="**Checkpoint-recovery timeline**: A training run alternates productive compute (blue) with checkpoint writes (orange). When a failure strikes (red lightning bolt), all compute since the last completed checkpoint is lost (red hatching), and the job must then read the checkpoint and restart (red recovery block) before training resumes (green). A failure therefore costs the rework since the last save plus the recovery latency, the two terms the Young-Daly interval trades against write overhead." fig-alt="Horizontal timeline: a blue compute block, an orange checkpoint save block, a red-hatched compute block ending at a red lightning bolt labeled failure, a red recovery block, and a green resume block. Brackets beneath label the checkpoint interval, write time, wasted compute, and recovery cost, above a legend box with the total overhead formula."}
+::: {#fig-checkpoint-recovery-timeline fig-env="figure" fig-pos="htb" fig-cap="**Checkpoint-recovery timeline**: A training run alternates productive compute (blue) with durable checkpoint writes (green). When a failure strikes, all compute since the last completed checkpoint is lost (red hatching), and the job must then read the checkpoint and restart (red) before productive compute resumes. A failure therefore costs the rework since the last save plus the recovery latency; the Young-Daly interval trades the first of these against the write time paid at every checkpoint." fig-alt="Horizontal timeline: a blue compute block, a green save block, a red-hatched block labeled lost that ends at a red vertical line labeled failure, a red recover block, and a second blue compute block. Brackets beneath label the interval tau, T write, rework since save, and T recovery, and a wider bracket reads cost of one failure equals rework plus recovery."}
 ![](images/svg/checkpoint-recovery-timeline.svg)
-
-<!--
-```{.tikz}
-\scalebox{0.88}{
-\begin{tikzpicture}[
-  font=\sffamily,
-  >=Stealth
-]
-
-  % Book color palette
-  \providecolor{NavyBlue}{RGB}{20,45,85}
-  \providecolor{SteelBlue}{RGB}{40,90,140}
-  \providecolor{LightBlue}{RGB}{234,241,248}
-  \providecolor{RedLine}{RGB}{185,45,45}
-  \providecolor{RedFill}{RGB}{254,226,226}
-  \providecolor{DarkRed}{RGB}{160,25,25}
-  \providecolor{DarkGreen}{RGB}{20,110,60}
-  \providecolor{GreenLine}{RGB}{35,135,75}
-  \providecolor{GreenFill}{RGB}{240,249,244}
-  \providecolor{OrangeLine}{RGB}{215,105,15}
-  \providecolor{OrangeL}{RGB}{254,243,199}
-  \providecolor{SlateLine}{RGB}{85,95,110}
-  \providecolor{SlateFill}{RGB}{241,245,249}
-  \providecolor{CardBorder}{RGB}{215,222,230}
-  \providecolor{CardFill}{RGB}{250,251,253}
-  \providecolor{TextDark}{RGB}{25,35,45}
-  \providecolor{TextMuted}{RGB}{95,105,115}
-
-  % =============================================================
-  % TIMELINE AXIS & SEGMENTS
-  % =============================================================
-  \def\axisY{4.6}
-
-  % Horizontal axis line
-  \draw[line width=1.0pt, CardBorder!80!SlateLine] (0.4, \axisY) -- (14.2, \axisY);
-  \draw[->, line width=1.0pt, CardBorder!80!SlateLine] (14.1, \axisY) -- (14.5, \axisY);
-  \node[anchor=south, font=\fontsize{8pt}{9pt}\selectfont\itshape, text=TextMuted] at (14.5, \axisY) {$t$};
-
-  % SEGMENT 1: Productive Compute (x: 0.6 to 4.2)
-  \draw[line width=0.9pt, draw=SteelBlue, fill=LightBlue!70]
-    (0.6, \axisY) rectangle (4.2, \axisY + 0.95);
-  \node[font=\fontsize{8.5pt}{10pt}\selectfont\bfseries, text=NavyBlue] at (2.4, \axisY + 0.62) {Compute};
-  \node[font=\fontsize{6.5pt}{8pt}\selectfont, text=NavyBlue] at (2.4, \axisY + 0.30) {productive training steps};
-
-  % ckpt saved marker 1 (x = 4.2)
-  \draw[dashed, line width=0.8pt, OrangeLine] (4.2, \axisY - 0.15) -- (4.2, \axisY + 1.35);
-  \node[above, font=\fontsize{6.5pt}{7.5pt}\selectfont\itshape, text=OrangeLine!95!black] at (4.2, \axisY + 1.35) {ckpt saved};
-
-  % SEGMENT 2: Checkpoint Save (x: 4.2 to 5.6)
-  \draw[line width=0.9pt, draw=OrangeLine, fill=OrangeL]
-    (4.2, \axisY) rectangle (5.6, \axisY + 0.95);
-  \node[font=\fontsize{8pt}{9.5pt}\selectfont\bfseries, text=OrangeLine!95!black] at (4.9, \axisY + 0.62) {Save};
-  \node[font=\fontsize{6pt}{7.5pt}\selectfont, text=OrangeLine!95!black] at (4.9, \axisY + 0.30) {Checkpoint};
-
-  % ckpt saved marker 2 (x = 5.6)
-  \draw[dashed, line width=0.8pt, OrangeLine] (5.6, \axisY - 0.15) -- (5.6, \axisY + 1.35);
-  \node[above, font=\fontsize{6.5pt}{7.5pt}\selectfont\itshape, text=OrangeLine!95!black] at (5.6, \axisY + 1.35) {ckpt saved};
-
-  % SEGMENT 3: Wasted Compute (x: 5.6 to 8.4)
-  \begin{scope}
-    \clip (5.6, \axisY) rectangle (8.4, \axisY + 0.95);
-    \fill[RedFill!40] (5.6, \axisY) rectangle (8.4, \axisY + 0.95);
-    \foreach \hx in {4.6, 4.9, ..., 9.4}{
-      \draw[line width=0.8pt, RedLine!35] (\hx, \axisY - 0.2) -- (\hx + 1.4, \axisY + 1.2);
-    }
-  \end{scope}
-  \draw[line width=0.9pt, draw=SteelBlue] (5.6, \axisY) rectangle (8.4, \axisY + 0.95);
-  \node[font=\fontsize{8.5pt}{10pt}\selectfont\bfseries, text=SteelBlue!70!black] at (7.0, \axisY + 0.62) {Compute};
-  \node[font=\fontsize{6.5pt}{8pt}\selectfont, text=SteelBlue!70!black] at (7.0, \axisY + 0.30) {productive training steps};
-
-  % FAILURE MARKER (x = 8.65)
-  \draw[dashed, line width=0.8pt, DarkRed] (8.65, \axisY - 0.15) -- (8.65, \axisY + 0.10);
-  % Lightning bolt polygon
-  \filldraw[line width=0.5pt, fill=DarkRed, draw=DarkRed]
-    (8.60, \axisY + 1.45) -- (8.48, \axisY + 0.85) -- (8.62, \axisY + 0.85)
-    -- (8.50, \axisY + 0.08) -- (8.80, \axisY + 0.75) -- (8.66, \axisY + 0.75)
-    -- (8.78, \axisY + 1.45) -- cycle;
-  \node[above, font=\fontsize{7.5pt}{9pt}\selectfont\bfseries, text=DarkRed] at (8.65, \axisY + 1.50) {FAILURE};
-
-  % SEGMENT 4: Recovery / Restart (x: 8.9 to 11.3)
-  \draw[line width=0.9pt, draw=RedLine, fill=RedFill!50]
-    (8.9, \axisY) rectangle (11.3, \axisY + 0.95);
-  \node[font=\fontsize{8.5pt}{10pt}\selectfont\bfseries, text=DarkRed] at (10.1, \axisY + 0.62) {Recovery};
-  \node[font=\fontsize{6pt}{7.5pt}\selectfont, text=DarkRed] at (10.1, \axisY + 0.30) {load checkpoint + restart};
-
-  % training resumes marker (x = 11.3)
-  \draw[dashed, line width=0.8pt, GreenLine] (11.3, \axisY - 0.15) -- (11.3, \axisY + 1.35);
-  \node[above, font=\fontsize{6.5pt}{7.5pt}\selectfont\itshape, text=DarkGreen] at (11.3, \axisY + 1.35) {training resumes};
-
-  % SEGMENT 5: Resume (x: 11.3 to 13.9)
-  \draw[line width=0.9pt, draw=GreenLine, fill=GreenFill]
-    (11.3, \axisY) rectangle (13.9, \axisY + 0.95);
-  \node[font=\fontsize{8.5pt}{10pt}\selectfont\bfseries, text=DarkGreen] at (12.6, \axisY + 0.62) {Resume};
-  \node[font=\fontsize{6.5pt}{8pt}\selectfont, text=DarkGreen] at (12.6, \axisY + 0.30) {training continues};
-
-  % =============================================================
-  % LOWER BRACKETS AND LABELS
-  % =============================================================
-
-  % Bracket 1: Checkpoint Interval (x: 0.6 to 4.2)
-  \draw[line width=0.8pt, SteelBlue]
-    (0.6, \axisY - 0.20) -- (0.6, \axisY - 0.35) -- (2.4, \axisY - 0.35)
-    -- (2.4, \axisY - 0.47) -- (2.4, \axisY - 0.35) -- (4.2, \axisY - 0.35) -- (4.2, \axisY - 0.20);
-  \node[font=\fontsize{7.5pt}{9pt}\selectfont\bfseries, text=SteelBlue] at (2.4, \axisY - 0.68)
-    {Checkpoint interval};
-  \node[font=\fontsize{6.5pt}{8pt}\selectfont, text=SteelBlue] at (2.4, \axisY - 0.98)
-    {(Young-Daly optimal interval)};
-
-  % Bracket 2: Write Time (x: 4.2 to 5.6)
-  \draw[line width=0.8pt, OrangeLine]
-    (4.2, \axisY - 0.20) -- (4.2, \axisY - 0.35) -- (4.9, \axisY - 0.35)
-    -- (4.9, \axisY - 0.47) -- (4.9, \axisY - 0.35) -- (5.6, \axisY - 0.35) -- (5.6, \axisY - 0.20);
-  \node[font=\fontsize{7.5pt}{9pt}\selectfont\bfseries, text=OrangeLine!95!black] at (4.9, \axisY - 0.68)
-    {write time};
-  \node[font=\fontsize{6.5pt}{8pt}\selectfont, text=OrangeLine!95!black] at (4.9, \axisY - 0.98)
-    {I/O overhead};
-
-  % Bracket 3: Wasted Compute (x: 5.6 to 8.4, stepped lower)
-  \draw[dashed, line width=0.8pt, DarkRed]
-    (5.6, \axisY - 0.20) -- (5.6, \axisY - 1.15) -- (7.0, \axisY - 1.15)
-    -- (7.0, \axisY - 1.27) -- (7.0, \axisY - 1.15) -- (8.4, \axisY - 1.15) -- (8.4, \axisY - 0.20);
-  \node[font=\fontsize{7.5pt}{9pt}\selectfont\bfseries, text=DarkRed] at (7.0, \axisY - 1.48)
-    {Wasted Compute};
-  \node[font=\fontsize{6.5pt}{8pt}\selectfont, text=DarkRed] at (7.0, \axisY - 1.78)
-    {(rework since last checkpoint)};
-
-  % Bracket 4: Recovery Cost (x: 8.9 to 11.3)
-  \draw[line width=0.8pt, DarkRed]
-    (8.9, \axisY - 0.20) -- (8.9, \axisY - 0.85) -- (10.1, \axisY - 0.85)
-    -- (10.1, \axisY - 0.97) -- (10.1, \axisY - 0.85) -- (11.3, \axisY - 0.85) -- (11.3, \axisY - 0.20);
-  \node[font=\fontsize{7.5pt}{9pt}\selectfont\bfseries, text=DarkRed] at (10.1, \axisY - 1.18)
-    {Recovery Cost};
-  \node[font=\fontsize{6.5pt}{8pt}\selectfont, text=DarkRed] at (10.1, \axisY - 1.48)
-    {recovery = read + restart};
-
-  % =============================================================
-  % SUMMARY / LEGEND CARD AT BOTTOM
-  % =============================================================
-  \draw[line width=0.7pt, draw=CardBorder, fill=CardFill]
-    (0.6, 0.5) rectangle (14.0, 2.05);
-
-  \node[font=\fontsize{8.5pt}{10pt}\selectfont\bfseries, text=TextDark] at (7.3, 1.82)
-    {Fault Tolerance Cost Components};
-
-  % Legend 4 items
-  \begin{scope}[shift={(1.0, 1.25)}]
-    % Item 1: Productive compute
-    \draw[line width=0.6pt, draw=SteelBlue, fill=LightBlue!70] (0.0, 0.0) rectangle (0.45, 0.25);
-    \node[anchor=west, font=\fontsize{7pt}{8.5pt}\selectfont, text=TextDark] at (0.55, 0.12)
-      {Productive compute};
-
-    % Item 2: Checkpoint I/O overhead
-    \draw[line width=0.6pt, draw=OrangeLine, fill=OrangeL] (3.4, 0.0) rectangle (3.85, 0.25);
-    \node[anchor=west, font=\fontsize{7pt}{8.5pt}\selectfont, text=TextDark] at (3.95, 0.12)
-      {Checkpoint I/O overhead};
-
-    % Item 3: Wasted / rework compute
-    \begin{scope}
-      \clip (6.9, 0.0) rectangle (7.35, 0.25);
-      \fill[RedFill!40] (6.9, 0.0) rectangle (7.35, 0.25);
-      \draw[line width=0.6pt, RedLine!50] (6.7, -0.1) -- (7.5, 0.4);
-      \draw[line width=0.6pt, RedLine!50] (6.9, -0.1) -- (7.7, 0.4);
-    \end{scope}
-    \draw[line width=0.6pt, RedLine] (6.9, 0.0) rectangle (7.35, 0.25);
-    \node[anchor=west, font=\fontsize{7pt}{8.5pt}\selectfont, text=TextDark] at (7.45, 0.12)
-      {Wasted / rework compute};
-
-    % Item 4: Resume
-    \draw[line width=0.6pt, draw=GreenLine, fill=GreenFill] (10.6, 0.0) rectangle (11.05, 0.25);
-    \node[anchor=west, font=\fontsize{7pt}{8.5pt}\selectfont, text=TextDark] at (11.15, 0.12)
-      {Resume};
-  \end{scope}
-
-  % Math formula
-  \node[font=\fontsize{7pt}{8.5pt}\selectfont\itshape, text=TextDark] at (7.3, 0.80)
-    {Total overhead = $T_{\mathrm{write}}/\tau_{\mathrm{ckpt}} + \tau_{\mathrm{ckpt}}/(2\,\mathrm{MTBF}_{\mathrm{system}})$, minimized by Young-Daly};
-
-  % Bottom footer line
-  \node[font=\fontsize{6.5pt}{8pt}\selectfont\itshape, text=TextMuted] at (7.3, 0.15)
-    {Checkpoint must capture all distributed state: model weights, optimizer moments, RNG seeds, dataloader position};
-
-\end{tikzpicture}
-}
-```
--->
 
 :::
 
@@ -3625,223 +2155,8 @@ The decision boundary is the size of the state and the number of writers. Centra
 
 In distributed checkpointing, each worker writes its portion of the checkpoint to a shared filesystem or object storage, as @fig-distributed-checkpoint-architecture contrasts with the centralized approach. A coordinator signals when to checkpoint and confirms completion, but state flows directly from workers to storage without aggregation.
 
-::: {#fig-distributed-checkpoint-architecture fig-env="figure" fig-pos="htb" fig-cap="**Distributed checkpoint architecture**: Centralized vs. sharded checkpoint writes. In the centralized pattern (left), every worker funnels its shard through one coordinator, whose ingress bandwidth and memory bound the write time and whose failure halts the save. In the distributed pattern (right), each worker writes its own shard to local NVMe in parallel and a background process drains the shards to remote object storage, so the blocking write time stays roughly constant as workers are added." fig-alt="Two side-by-side panels. Left: four workers send red arrows into a single coordinator box marked ingress saturated, which writes to shared storage; a box below lists the scalability failures. Right: four workers each write with a green arrow to their own local NVMe drive, and dashed arrows drain the drives to a remote object store; a box below lists the parallel throughput properties."}
+::: {#fig-distributed-checkpoint-architecture fig-env="figure" fig-pos="htb" fig-cap="**Distributed checkpoint architecture**: Centralized vs. sharded checkpoint writes. In the centralized pattern (left), every worker funnels its shard through one coordinator, whose ingress bandwidth and memory bound the write time and whose failure halts the save. In the distributed pattern (right), each worker writes its own shard to local NVMe in parallel and a background process drains the shards to remote object storage, so the blocking write time stays roughly constant as workers are added." fig-alt="Two panels divided by a dashed line. Left, centralized: four workers send red arrows that merge into one coordinator box labeled ingress limit, which writes to shared storage; text below reads write time grows with worker count. Right, distributed: each of four workers writes with a green arrow to its own NVMe drive, and dashed arrows drain the drives to an object store labeled background; text below reads blocking write stays flat as workers grow."}
 ![](images/svg/distributed-checkpoint-architecture.svg)
-
-<!--
-```{.tikz}
-\scalebox{0.82}{
-\begin{tikzpicture}[
-  >=Latex,
-  font=\sffamily
-]
-
-  % Book color palette
-  \providecolor{CardFill}{RGB}{248, 250, 252}
-  \providecolor{CardBorder}{RGB}{226, 232, 240}
-  \providecolor{PanelABorder}{RGB}{239, 68, 68}
-  \providecolor{PanelAFill}{RGB}{254, 242, 242}
-  \providecolor{PanelBBorder}{RGB}{34, 197, 94}
-  \providecolor{PanelBFill}{RGB}{240, 253, 244}
-  \providecolor{WorkerBorder}{RGB}{37, 99, 235}
-  \providecolor{WorkerFill}{RGB}{239, 246, 255}
-  \providecolor{WorkerText}{RGB}{29, 78, 216}
-  \providecolor{CoordBorder}{RGB}{220, 38, 38}
-  \providecolor{CoordFill}{RGB}{254, 226, 226}
-  \providecolor{PFSBorder}{RGB}{217, 119, 6}
-  \providecolor{PFSFill}{RGB}{254, 243, 199}
-  \providecolor{NVMeBorder}{RGB}{22, 163, 74}
-  \providecolor{NVMeFill}{RGB}{220, 252, 231}
-  \providecolor{StoreBorder}{RGB}{180, 83, 9}
-  \providecolor{StoreFill}{RGB}{254, 243, 199}
-  \providecolor{TextDark}{RGB}{30, 41, 59}
-  \providecolor{TextMuted}{RGB}{100, 116, 139}
-  \providecolor{DarkRed}{RGB}{185, 28, 28}
-  \providecolor{RedLine}{RGB}{220, 38, 38}
-  \providecolor{RedFill}{RGB}{254, 226, 226}
-  \providecolor{DarkGreen}{RGB}{21, 128, 61}
-  \providecolor{GreenLine}{RGB}{22, 163, 74}
-  \providecolor{DarkAmber}{RGB}{146, 64, 14}
-  \providecolor{SlateGray}{RGB}{100, 116, 139}
-
-  % =========================================================================
-  % PANEL A: CENTRALIZED COORDINATOR BOTTLENECK
-  % =========================================================================
-
-  % Outer panel container
-  \draw[line width=0.8pt, draw=PanelABorder!50, fill=PanelAFill!20]
-    (0, 0) rectangle (7.4, 12.0);
-
-  % Header
-  \node[font=\fontsize{9pt}{11pt}\selectfont\bfseries, text=DarkRed] at (3.7, 11.55)
-    {Panel A: Centralized Coordinator Bottleneck};
-  \node[font=\fontsize{6.2pt}{7.8pt}\selectfont, text=DarkRed!85!black] at (3.7, 11.18)
-    {All worker state funnels through a single coordinator process};
-  \draw[line width=0.5pt, draw=PanelABorder!35] (0, 10.9) -- (7.4, 10.9);
-
-  % Workers 0..3 (centers at y = 9.8, 8.6, 7.4, 6.2)
-  \foreach \i/\y in {0/9.8, 1/8.6, 2/7.4, 3/6.2} {
-    \draw[line width=0.7pt, draw=WorkerBorder, fill=WorkerFill]
-      (0.35, \y - 0.42) rectangle (1.75, \y + 0.42);
-    \node[font=\fontsize{7.5pt}{9pt}\selectfont\bfseries, text=WorkerText] at (1.05, \y + 0.12)
-      {Worker \i};
-    \node[font=\fontsize{6.2pt}{7.5pt}\selectfont, text=WorkerText] at (1.05, \y - 0.14)
-      {shard \i};
-  }
-
-  % Coordinator Node (height 2.0cm, width 2.6cm, center x=4.05, center y=8.0)
-  \draw[line width=0.9pt, draw=CoordBorder, fill=CoordFill]
-    (2.75, 7.0) rectangle (5.35, 9.0);
-  \node[font=\fontsize{8.5pt}{10pt}\selectfont\bfseries, text=DarkRed] at (4.05, 8.52)
-    {Coordinator};
-  \node[font=\fontsize{6.2pt}{7.5pt}\selectfont\bfseries, text=RedLine] at (4.05, 8.0)
-    {INGRESS SATURATED};
-  \node[font=\fontsize{5.8pt}{7pt}\selectfont, text=TextDark] at (4.05, 7.48)
-    {Single Point of Failure};
-
-  % PFS Node (center x=6.575, center y=8.0)
-  \draw[line width=0.8pt, draw=PFSBorder, fill=PFSFill]
-    (6.0, 7.25) rectangle (7.15, 8.75);
-  \node[font=\fontsize{8pt}{9.5pt}\selectfont\bfseries, text=DarkAmber] at (6.575, 8.35)
-    {PFS};
-  \node[font=\fontsize{6.2pt}{7.5pt}\selectfont, text=DarkAmber] at (6.575, 7.95)
-    {Shared};
-  \node[font=\fontsize{6.2pt}{7.5pt}\selectfont, text=DarkAmber] at (6.575, 7.65)
-    {Storage};
-
-  % Connecting red arrows from workers to coordinator
-  \draw[->, line width=0.8pt, RedLine] (1.75, 9.8) -- (2.25, 9.8) -- (2.25, 8.45) -- (2.75, 8.45);
-  \draw[->, line width=0.8pt, RedLine] (1.75, 8.6) -- (2.50, 8.6) -- (2.50, 8.15) -- (2.75, 8.15);
-  \draw[->, line width=0.8pt, RedLine] (1.75, 7.4) -- (2.50, 7.4) -- (2.50, 7.85) -- (2.75, 7.85);
-  \draw[->, line width=0.8pt, RedLine] (1.75, 6.2) -- (2.25, 6.2) -- (2.25, 7.55) -- (2.75, 7.55);
-
-  % Dashed arrow from coordinator to PFS
-  \draw[->, dashed, line width=0.9pt, RedLine] (5.35, 8.0) -- (6.0, 8.0);
-
-  % Lower card: Centralized Scalability Failure
-  \draw[line width=0.6pt, draw=PanelABorder!50, fill=white]
-    (0.35, 0.4) rectangle (7.05, 5.5);
-
-  % Sub-card header
-  \draw[line width=0.6pt, draw=PanelABorder!50, fill=PanelAFill!80]
-    (0.35, 5.0) rectangle (7.05, 5.5);
-  \node[font=\fontsize{7.5pt}{9pt}\selectfont\bfseries, text=DarkRed] at (3.7, 5.25)
-    {Centralized Scalability Failure};
-
-  % Bullet items with neat spacing
-  \begin{scope}[shift={(0.55, 4.75)}]
-    \node[anchor=north west, inner sep=0, font=\fontsize{5.8pt}{8.5pt}\selectfont, text=TextDark, text width=6.45cm, align=left] at (0, 0) {
-      \textbf{Data Path:} Worker state funnels through one coordinator.\\[4pt]
-      \textbf{Memory Pressure:} Coordinator buffers full checkpoint in memory.\\[4pt]
-      \textbf{NIC Fan-In:} $N$ worker streams saturate single receiver bandwidth.\\[4pt]
-      \textbf{Single Failure Point:} Coordinator crash halts the entire save.
-    };
-  \end{scope}
-
-  % Highlighted growth box
-  \draw[line width=0.6pt, draw=PanelABorder!60, fill=PanelAFill!60]
-    (0.55, 0.6) rectangle (6.85, 2.0);
-  \node[font=\fontsize{6.8pt}{8.5pt}\selectfont\bfseries, text=DarkRed] at (3.7, 1.58)
-    {Write Time Growth: $T_{\mathrm{write}} = O(N \cdot M_{\mathrm{shard}} / B_{\mathrm{coord}})$};
-  \node[font=\fontsize{6pt}{7.8pt}\selectfont, text=TextDark, align=center] at (3.7, 1.05)
-    {1,000 workers at 1 GB/s each\\[1.5pt]
-     $= 1\text{ TB/s}$ coordinator ingress required};
-
-
-  % =========================================================================
-  % PANEL B: DISTRIBUTED SHARDED ARCHITECTURE
-  % =========================================================================
-
-  \begin{scope}[shift={(7.8, 0)}]
-    % Outer panel container
-    \draw[line width=0.8pt, draw=PanelBBorder!50, fill=PanelBFill!20]
-      (0, 0) rectangle (7.4, 12.0);
-
-    % Header
-    \node[font=\fontsize{9pt}{11pt}\selectfont\bfseries, text=DarkGreen] at (3.7, 11.55)
-      {Panel B: Distributed Sharded Architecture};
-    \node[font=\fontsize{6.2pt}{7.8pt}\selectfont, text=DarkGreen!85!black] at (3.7, 11.18)
-      {Each worker saves shard to local NVMe, background async upload};
-    \draw[line width=0.5pt, draw=PanelBBorder!35] (0, 10.9) -- (7.4, 10.9);
-
-    % Workers 0..3
-    \foreach \i/\y in {0/9.8, 1/8.6, 2/7.4, 3/6.2} {
-      \draw[line width=0.7pt, draw=WorkerBorder, fill=WorkerFill]
-        (0.35, \y - 0.42) rectangle (1.65, \y + 0.42);
-      \node[font=\fontsize{7.5pt}{9pt}\selectfont\bfseries, text=WorkerText] at (1.00, \y + 0.12)
-        {Worker \i};
-      \node[font=\fontsize{6.2pt}{7.5pt}\selectfont, text=WorkerText] at (1.00, \y - 0.14)
-        {shard \i};
-    }
-
-    % NVMe 0..3
-    \foreach \i/\y in {0/9.8, 1/8.6, 2/7.4, 3/6.2} {
-      \draw[line width=0.7pt, draw=NVMeBorder, fill=NVMeFill]
-        (2.15, \y - 0.42) rectangle (3.45, \y + 0.42);
-      \node[font=\fontsize{7.5pt}{9pt}\selectfont\bfseries, text=DarkGreen] at (2.80, \y + 0.12)
-        {NVMe \i};
-      \node[font=\fontsize{6pt}{7.5pt}\selectfont, text=DarkGreen] at (2.80, \y - 0.14)
-        {Local SSD};
-
-      % Direct green arrow from Worker to NVMe
-      \draw[->, line width=0.8pt, GreenLine] (1.65, \y) -- (2.15, \y);
-    }
-
-    % Remote Object Store (height 2.0cm, width 2.7cm, center x=5.80, center y=8.0)
-    \draw[line width=0.8pt, draw=StoreBorder, fill=StoreFill]
-      (4.45, 7.0) rectangle (7.15, 9.0);
-    \node[font=\fontsize{7.2pt}{8.5pt}\selectfont\bfseries, text=DarkAmber] at (5.80, 8.52)
-      {Remote Object Store};
-    \node[font=\fontsize{6.2pt}{7.5pt}\selectfont, text=TextDark] at (5.80, 8.02)
-      {S3 / GCS / Ceph};
-    \node[font=\fontsize{6pt}{7.2pt}\selectfont\bfseries, text=DarkAmber] at (5.80, 7.48)
-      {Async Background Drain};
-
-    % Dashed slate gray lines from NVMe to Remote Object Store
-    \draw[->, dashed, line width=0.7pt, SlateGray]
-      (3.45, 9.8) -- (3.95, 9.8) -- (3.95, 8.45) -- (4.45, 8.45);
-    \draw[->, dashed, line width=0.7pt, SlateGray]
-      (3.45, 8.6) -- (4.20, 8.6) -- (4.20, 8.15) -- (4.45, 8.15);
-    \draw[->, dashed, line width=0.7pt, SlateGray]
-      (3.45, 7.4) -- (4.20, 7.4) -- (4.20, 7.85) -- (4.45, 7.85);
-    \draw[->, dashed, line width=0.7pt, SlateGray]
-      (3.45, 6.2) -- (3.95, 6.2) -- (3.95, 7.55) -- (4.45, 7.55);
-
-    % Lower card: Distributed Linear Throughput
-    \draw[line width=0.6pt, draw=PanelBBorder!50, fill=white]
-      (0.35, 0.4) rectangle (7.05, 5.5);
-
-    % Sub-card header
-    \draw[line width=0.6pt, draw=PanelBBorder!50, fill=PanelBFill!80]
-      (0.35, 5.0) rectangle (7.05, 5.5);
-    \node[font=\fontsize{7.5pt}{9pt}\selectfont\bfseries, text=DarkGreen] at (3.7, 5.25)
-      {Distributed Linear Throughput};
-
-    % Bullet items
-    \begin{scope}[shift={(0.55, 4.75)}]
-      \node[anchor=north west, inner sep=0, font=\fontsize{5.8pt}{8.5pt}\selectfont, text=TextDark, text width=6.45cm, align=left] at (0, 0) {
-        \textbf{Data Path:} Each worker writes its own shard in parallel.\\[4pt]
-        \textbf{Zero Contention:} Blocking write runs at local NVMe bandwidth.\\[4pt]
-        \textbf{Async Staging:} Daemon streams local shards to remote store.\\[4pt]
-        \textbf{Atomic Commit:} Coordinator publishes tiny manifest JSON.
-      };
-    \end{scope}
-
-    % Highlighted throughput box
-    \draw[line width=0.6pt, draw=PanelBBorder!60, fill=PanelBFill!60]
-      (0.55, 0.6) rectangle (6.85, 2.0);
-    \node[font=\fontsize{6.8pt}{8.5pt}\selectfont\bfseries, text=DarkGreen] at (3.7, 1.58)
-      {Blocking Write Time: $T_{\mathrm{write}} = O(1)$ constant per worker};
-    \node[font=\fontsize{6pt}{7.8pt}\selectfont, text=TextDark, align=center] at (3.7, 1.05)
-      {1,000 workers at 1 GB/s\\[1.5pt]
-       $= 1\text{ TB/s}$ aggregated parallel cluster bandwidth};
-
-  \end{scope}
-
-\end{tikzpicture}
-}
-```
--->
 
 :::
 
@@ -4207,192 +2522,7 @@ A single failing device (`{python} StragglerTax.straggler_frac_str` of the hardw
 
 ::::
 
-However, killing a slow node and restarting the job implies waiting for a replacement to maintain the original GPU count. When dedicated standby devices are provisioned, an $N+1$ redundancy model can swap in a hot spare (@fig-hot-spare-swap) within seconds, bypassing the prolonged allocation queue. The checkpoint-restart recovery model assumes restoring the same resource allocation: checkpoint, wait for a replacement, restart. Elastic recovery breaks that assumption by allowing the job to continue with fewer workers rather than idling the entire cluster until the original count is restored.
-
-::: {#fig-hot-spare-swap fig-env="figure" fig-pos="htb" fig-cap="**Cluster redundancy and hot spare failover**: In an $N+1$ redundancy scheme (illustrated with 4 active GPUs plus 1 hot spare), failure of a rank triggers rapid seconds-level failover to a synchronized standby device. The comparison table summarizes trade-offs across hot spare, cold spare, and no-spare strategies in terms of state synchronization, recovery latency, and cluster availability." fig-alt="Active training cluster with 4 active GPUs and 1 hot spare showing failover upon GPU failure, followed by a comparison table of hot spare, cold spare, and no-spare recovery latencies and impacts."}
-![](images/svg/hot-spare.svg)
-
-<!--
-```{.tikz}
-\scalebox{0.86}{
-\begin{tikzpicture}[
-  >=Latex,
-  font=\sffamily
-]
-
-  % Book color palette
-  \providecolor{NavyBlue}{RGB}{20,45,85}
-  \providecolor{SteelBlue}{RGB}{40,90,140}
-  \providecolor{LightBlue}{RGB}{234,241,248}
-  \providecolor{RedLine}{RGB}{185,45,45}
-  \providecolor{RedFill}{RGB}{254,226,226}
-  \providecolor{DarkRed}{RGB}{160,25,25}
-  \providecolor{DarkGreen}{RGB}{20,110,60}
-  \providecolor{GreenLine}{RGB}{35,135,75}
-  \providecolor{GreenFill}{RGB}{240,249,244}
-  \providecolor{OrangeLine}{RGB}{215,105,15}
-  \providecolor{OrangeL}{RGB}{254,243,199}
-  \providecolor{CardFill}{RGB}{248, 250, 252}
-  \providecolor{CardBorder}{RGB}{226, 232, 240}
-  \providecolor{TextDark}{RGB}{30, 41, 59}
-  \providecolor{TextMuted}{RGB}{100, 116, 139}
-  \providecolor{DarkAmber}{RGB}{146, 64, 14}
-  \providecolor{TableBorder}{RGB}{226, 232, 240}
-
-  % =========================================================================
-  % TOP CARD: ACTIVE TRAINING CLUSTER (N+1 REDUNDANCY)
-  % =========================================================================
-  \draw[line width=0.8pt, draw=CardBorder, fill=white]
-    (0, 4.6) rectangle (14.6, 9.2);
-
-  % Header
-  \node[anchor=west, font=\fontsize{9pt}{11pt}\selectfont\bfseries, text=TextDark]
-    at (0.4, 8.85) {Active Training Cluster: N+1 Redundancy Scheme};
-  \node[anchor=east, font=\fontsize{7.5pt}{9pt}\selectfont, text=TextMuted]
-    at (14.2, 8.85) {4 Active GPUs + 1 Standby Hot Spare};
-  \draw[line width=0.5pt, draw=CardBorder] (0, 8.55) -- (14.6, 8.55);
-
-  % 5 GPU Nodes (x-centers: 1.7, 4.5, 7.3, 10.1, 12.9)
-  % GPU 0
-  \draw[line width=0.9pt, draw=SteelBlue, fill=LightBlue!40]
-    (0.5, 6.4) rectangle (2.9, 8.2);
-  \node[font=\fontsize{8.5pt}{10pt}\selectfont\bfseries, text=NavyBlue] at (1.7, 7.85) {GPU 0};
-  \node[font=\fontsize{6.5pt}{8pt}\selectfont, text=SteelBlue] at (1.7, 7.48) {Rank 0};
-  \node[draw=GreenLine, fill=GreenFill, font=\fontsize{6pt}{7pt}\selectfont\bfseries, text=DarkGreen, inner xsep=8pt, inner ysep=2pt] at (1.7, 6.85) {ACTIVE};
-
-  % GPU 1
-  \draw[line width=0.9pt, draw=SteelBlue, fill=LightBlue!40]
-    (3.3, 6.4) rectangle (5.7, 8.2);
-  \node[font=\fontsize{8.5pt}{10pt}\selectfont\bfseries, text=NavyBlue] at (4.5, 7.85) {GPU 1};
-  \node[font=\fontsize{6.5pt}{8pt}\selectfont, text=SteelBlue] at (4.5, 7.48) {Rank 1};
-  \node[draw=GreenLine, fill=GreenFill, font=\fontsize{6pt}{7pt}\selectfont\bfseries, text=DarkGreen, inner xsep=8pt, inner ysep=2pt] at (4.5, 6.85) {ACTIVE};
-
-  % GPU 2 (Failed)
-  \draw[line width=0.9pt, draw=RedLine, fill=RedFill!35]
-    (6.1, 6.4) rectangle (8.5, 8.2);
-  \node[font=\fontsize{8.5pt}{10pt}\selectfont\bfseries, text=DarkRed] at (7.3, 7.85) {GPU 2};
-  % Red cross lines over title
-  \draw[line width=0.9pt, DarkRed!70] (6.75, 7.70) -- (7.85, 8.00);
-  \draw[line width=0.9pt, DarkRed!70] (6.75, 8.00) -- (7.85, 7.70);
-  \node[font=\fontsize{6.5pt}{8pt}\selectfont, text=DarkRed] at (7.3, 7.48) {Rank 2 (Fault)};
-  \node[fill=DarkRed, font=\fontsize{6pt}{7pt}\selectfont\bfseries, text=white, inner xsep=8pt, inner ysep=2pt] at (7.3, 6.85) {FAILED};
-
-  % GPU 3
-  \draw[line width=0.9pt, draw=SteelBlue, fill=LightBlue!40]
-    (8.9, 6.4) rectangle (11.3, 8.2);
-  \node[font=\fontsize{8.5pt}{10pt}\selectfont\bfseries, text=NavyBlue] at (10.1, 7.85) {GPU 3};
-  \node[font=\fontsize{6.5pt}{8pt}\selectfont, text=SteelBlue] at (10.1, 7.48) {Rank 3};
-  \node[draw=GreenLine, fill=GreenFill, font=\fontsize{6pt}{7pt}\selectfont\bfseries, text=DarkGreen, inner xsep=8pt, inner ysep=2pt] at (10.1, 6.85) {ACTIVE};
-
-  % Hot Spare
-  \draw[line width=0.9pt, draw=OrangeLine, fill=OrangeL!50]
-    (11.7, 6.4) rectangle (14.1, 8.2);
-  \node[font=\fontsize{8.5pt}{10pt}\selectfont\bfseries, text=DarkAmber] at (12.9, 7.85) {Hot Spare};
-  \node[font=\fontsize{6.5pt}{8pt}\selectfont, text=OrangeLine!85!black] at (12.9, 7.48) {Synchronized};
-  \node[draw=OrangeLine, fill=OrangeL, font=\fontsize{6pt}{7pt}\selectfont\bfseries, text=DarkAmber, inner xsep=6pt, inner ysep=2pt] at (12.9, 6.85) {STANDBY};
-
-  % Curved green failover arrow with broken path around pill node
-  \node[draw=GreenLine, fill=GreenFill!40, line width=0.7pt,
-        font=\fontsize{6.8pt}{8pt}\selectfont\bfseries, text=DarkGreen, inner xsep=7pt, inner ysep=3pt]
-    (failover) at (10.1, 5.40) {Fast Failover (seconds)};
-
-  \draw[dashed, line width=1.1pt, GreenLine]
-    (12.9, 6.25) to[out=230, in=15] (failover.east);
-  \draw[->, dashed, line width=1.1pt, GreenLine]
-    (failover.west) to[out=195, in=335] (7.3, 6.25);
-
-  % =========================================================================
-  % BOTTOM CARD: COMPARISON TABLE
-  % =========================================================================
-  \draw[line width=0.8pt, draw=CardBorder, fill=white]
-    (0, 0.8) rectangle (14.6, 4.3);
-
-  % Table header background
-  \fill[CardFill] (0.05, 3.85) rectangle (14.55, 4.25);
-  \draw[line width=0.5pt, draw=TableBorder] (0, 3.8) -- (14.6, 3.8);
-
-  % Table Column Headers
-  \node[font=\fontsize{7.5pt}{9pt}\selectfont\bfseries, text=TextDark] at (1.7, 4.05) {Strategy};
-  \node[font=\fontsize{7.5pt}{9pt}\selectfont\bfseries, text=TextDark] at (5.5, 4.05) {Standby State};
-  \node[font=\fontsize{7.5pt}{9pt}\selectfont\bfseries, text=TextDark] at (9.0, 4.05) {Recovery Latency};
-  \node[font=\fontsize{7.5pt}{9pt}\selectfont\bfseries, text=TextDark] at (12.3, 4.05) {Training Impact};
-
-  % Row divider lines
-  \draw[line width=0.5pt, draw=TableBorder] (0, 2.8) -- (14.6, 2.8);
-  \draw[line width=0.5pt, draw=TableBorder] (0, 1.8) -- (14.6, 1.8);
-
-  % ROW 1: Hot Spare (center y = 3.3)
-  \draw[line width=0.7pt, draw=GreenLine, fill=GreenFill]
-    (0.4, 2.95) rectangle (3.0, 3.65);
-  \node[font=\fontsize{7.2pt}{8.5pt}\selectfont\bfseries, text=DarkGreen] at (1.7, 3.40) {Hot Spare};
-  \node[font=\fontsize{5.8pt}{7pt}\selectfont, text=DarkGreen] at (1.7, 3.16) {(recommended)};
-
-  \node[font=\fontsize{6.8pt}{8.2pt}\selectfont, text=TextDark] at (5.5, 3.42) {Synchronized with cluster};
-  \node[font=\fontsize{5.8pt}{7pt}\selectfont, text=TextMuted] at (5.5, 3.16) {Receiving state \& ring updates};
-
-  \node[fill=GreenFill!80, font=\fontsize{6.8pt}{8pt}\selectfont\bfseries, text=DarkGreen, inner xsep=8pt, inner ysep=3pt]
-    at (9.0, 3.3) {Seconds};
-
-  \node[font=\fontsize{6.8pt}{8.2pt}\selectfont, text=TextDark] at (12.3, 3.42) {Near-zero interruption};
-  \node[font=\fontsize{5.8pt}{7pt}\selectfont, text=TextMuted] at (12.3, 3.16) {Training continues without reset};
-
-  % ROW 2: Cold Spare (center y = 2.3)
-  \draw[line width=0.7pt, draw=OrangeLine, fill=OrangeL!60]
-    (0.4, 1.95) rectangle (3.0, 2.65);
-  \node[font=\fontsize{7.2pt}{8.5pt}\selectfont\bfseries, text=DarkAmber] at (1.7, 2.40) {Cold Spare};
-  \node[font=\fontsize{5.8pt}{7pt}\selectfont, text=DarkAmber] at (1.7, 2.16) {(idle reserve)};
-
-  \node[font=\fontsize{6.8pt}{8.2pt}\selectfont, text=TextDark] at (5.5, 2.42) {Powered idle hardware};
-  \node[font=\fontsize{5.8pt}{7pt}\selectfont, text=TextMuted] at (5.5, 2.16) {Requires node boot \& rank join};
-
-  \node[fill=OrangeL, font=\fontsize{6.8pt}{8pt}\selectfont\bfseries, text=DarkAmber, inner xsep=8pt, inner ysep=3pt]
-    at (9.0, 2.3) {Minutes};
-
-  \node[font=\fontsize{6.8pt}{8.2pt}\selectfont, text=TextDark] at (12.3, 2.42) {Moderate downtime};
-  \node[font=\fontsize{5.8pt}{7pt}\selectfont, text=TextMuted] at (12.3, 2.16) {Rollback to prior checkpoint};
-
-  % ROW 3: No Spare (center y = 1.3)
-  \draw[line width=0.7pt, draw=RedLine, fill=RedFill!50]
-    (0.4, 0.95) rectangle (3.0, 1.65);
-  \node[font=\fontsize{7.2pt}{8.5pt}\selectfont\bfseries, text=DarkRed] at (1.7, 1.40) {No Spare};
-  \node[font=\fontsize{5.8pt}{7pt}\selectfont, text=DarkRed] at (1.7, 1.16) {(reactive)};
-
-  \node[font=\fontsize{6.8pt}{8.2pt}\selectfont, text=TextDark] at (5.5, 1.42) {Unallocated / absent};
-  \node[font=\fontsize{5.8pt}{7pt}\selectfont, text=TextMuted] at (5.5, 1.16) {Wait for data center RMA/repair};
-
-  \node[fill=RedFill!60, font=\fontsize{6.8pt}{8pt}\selectfont\bfseries, text=DarkRed, inner xsep=7pt, inner ysep=3pt]
-    at (9.0, 1.3) {Hours to Days};
-
-  \node[font=\fontsize{6.8pt}{8.2pt}\selectfont, text=TextDark] at (12.3, 1.42) {Cluster stalled};
-  \node[font=\fontsize{5.8pt}{7pt}\selectfont, text=TextMuted] at (12.3, 1.16) {Idle compute burn across all ranks};
-
-  % =========================================================================
-  % BOTTOM LEGEND
-  % =========================================================================
-  \begin{scope}[shift={(1.5, 0.25)}]
-    % Item 1: Active GPU
-    \draw[line width=0.8pt, draw=SteelBlue, fill=LightBlue!40] (0.0, 0.0) rectangle (0.35, 0.25);
-    \node[anchor=west, font=\fontsize{6.8pt}{8pt}\selectfont, text=TextDark] at (0.45, 0.12) {Active GPU};
-
-    % Item 2: Hot Spare (Standby)
-    \draw[line width=0.8pt, draw=OrangeLine, fill=OrangeL!50] (3.0, 0.0) rectangle (3.35, 0.25);
-    \node[anchor=west, font=\fontsize{6.8pt}{8pt}\selectfont, text=TextDark] at (3.45, 0.12) {Hot Spare (Standby)};
-
-    % Item 3: Failed GPU
-    \draw[line width=0.8pt, draw=RedLine, fill=RedFill!35] (6.7, 0.0) rectangle (7.05, 0.25);
-    \node[anchor=west, font=\fontsize{6.8pt}{8pt}\selectfont, text=TextDark] at (7.15, 0.12) {Failed GPU};
-
-    % Item 4: Failover migration
-    \draw[dashed, line width=1.0pt, GreenLine] (10.0, 0.12) -- (10.6, 0.12);
-    \node[anchor=west, font=\fontsize{6.8pt}{8pt}\selectfont, text=TextDark] at (10.75, 0.12) {Failover migration};
-  \end{scope}
-
-\end{tikzpicture}
-}
-```
--->
-
-:::
+However, killing a slow node and restarting the job implies waiting for a replacement to maintain the original GPU count. When dedicated standby devices are provisioned, an $N+1$ redundancy model can swap in a hot spare (@fig-sdc-controller) within seconds, bypassing the prolonged allocation queue. The alternatives are slower in proportion to how much work stands between the failure and a ready replacement: a cold spare must boot and join the group, which takes minutes, and with no spare at all the job waits hours or days for repair or new capacity. The hot spare buys that speed with devices that sit idle while the fleet is healthy. The checkpoint-restart recovery model assumes restoring the same resource allocation: checkpoint, wait for a replacement, restart. Elastic recovery breaks that assumption by allowing the job to continue with fewer workers rather than idling the entire cluster until the original count is restored.
 
 ::: {#chk-fault-tolerance-detection-vs-recovery .callout-checkpoint title="Tuning detection and recovery"}
 
@@ -4761,205 +2891,8 @@ For a single replica, $A_{\text{single}} = 99\%$ corresponds to 3.65 days of dow
 
 The availability equation says how much redundancy can help; the replication strategy determines what that redundancy costs during normal operation and failover. In active-active replication\index{Replication!active-active replication} (@fig-serving-redundancy, left), all replicas actively serve requests, so capacity is used efficiently but a failed replica immediately increases load on the survivors. In active-passive replication\index{Replication!active-passive replication} (@fig-serving-redundancy, right), a primary serves traffic while standby replicas remain idle but ready, simplifying failover at the cost of unused resources during normal operation.
 
-::: {#fig-serving-redundancy fig-env="figure" fig-pos="htb" fig-cap="**Serving redundancy strategies**: Comparison of active-active vs. active-passive replication. Active-active (left) distributes load across three active replicas, each receiving roughly one-third of traffic, maximizing utilization but requiring capacity headroom to absorb failures. Active-passive (right) routes all traffic to one primary and keeps a warm standby, weights already loaded, ready to take over when the primary fails, simplifying failover logic at the cost of idle capacity." fig-alt="Two panels comparing replication strategies. Left: active-active, a load balancer sends roughly 33 percent of traffic to each of three green active replicas. Right: active-passive, a load balancer sends 100 percent of traffic to a primary node marked with a red failure symbol and has a dashed failover route to a dashed warm standby node. Boxes beneath each panel list benefits and trade-offs."}
+::: {#fig-serving-redundancy fig-env="figure" fig-pos="htb" fig-cap="**Serving redundancy strategies**: Active-active (left) splits traffic across three replicas, each carrying about one-third, which uses every device but requires enough headroom for the survivors to absorb a failed replica's share. Active-passive (right) sends all traffic to one primary and keeps a warm standby with weights already loaded, which simplifies failover at the cost of capacity that serves nothing while the primary is healthy." fig-alt="Two panels divided by a dashed line. Left, active-active: a load balancer splits requests along three arrows labeled one third to replicas 1, 2, and 3; text below reads survivors must absorb a lost replica load. Right, active-passive: a load balancer sends an arrow labeled all traffic to a primary and a dashed arrow labeled on failure to a dashed warm standby box; text below reads standby holds loaded weights but serves nothing."}
 ![](images/svg/serving-redundancy.svg)
-
-<!--
-```{.tikz}
-\scalebox{0.82}{
-\begin{tikzpicture}[
-  >=Latex,
-  font=\sffamily
-]
-
-  % Book color palette
-  \providecolor{NavyBlue}{RGB}{20,45,85}
-  \providecolor{SteelBlue}{RGB}{40,90,140}
-  \providecolor{LightBlue}{RGB}{234,241,248}
-  \providecolor{RedLine}{RGB}{185,45,45}
-  \providecolor{RedFill}{RGB}{254,226,226}
-  \providecolor{DarkRed}{RGB}{160,25,25}
-  \providecolor{DarkGreen}{RGB}{20,110,60}
-  \providecolor{GreenLine}{RGB}{35,135,75}
-  \providecolor{GreenFill}{RGB}{240,249,244}
-  \providecolor{OrangeLine}{RGB}{215,105,15}
-  \providecolor{OrangeL}{RGB}{254,243,199}
-  \providecolor{CardFill}{RGB}{248, 250, 252}
-  \providecolor{CardBorder}{RGB}{226, 232, 240}
-  \providecolor{TextDark}{RGB}{30, 41, 59}
-  \providecolor{TextMuted}{RGB}{100, 116, 139}
-  \providecolor{DarkAmber}{RGB}{146, 64, 14}
-  \providecolor{SlateGray}{RGB}{100, 116, 139}
-
-  % =========================================================================
-  % PANEL A: ACTIVE-ACTIVE SERVING ARCHITECTURE
-  % =========================================================================
-
-  % Outer panel container
-  \draw[line width=0.8pt, draw=CardBorder, fill=white]
-    (0, 0) rectangle (7.4, 11.2);
-
-  % Header
-  \node[anchor=west, font=\fontsize{8.5pt}{10.5pt}\selectfont\bfseries, text=SteelBlue]
-    at (0.35, 10.75) {Panel A: Active-Active};
-  \node[anchor=east, font=\fontsize{7.2pt}{9pt}\selectfont\bfseries, text=SteelBlue]
-    at (7.05, 10.75) {100\% Active};
-  \draw[line width=0.5pt, draw=CardBorder] (0, 10.45) -- (7.4, 10.45);
-
-  % Client Requests Arrow
-  \draw[->, line width=0.9pt, SlateGray] (3.7, 10.3) -- (3.7, 9.7);
-  \node[right, font=\fontsize{6.5pt}{8pt}\selectfont, text=TextMuted] at (3.8, 10.05) {Client Requests};
-
-  % Load Balancer
-  \draw[line width=0.9pt, draw=SteelBlue, fill=LightBlue!40]
-    (2.2, 8.6) rectangle (5.2, 9.7);
-  \node[font=\fontsize{8pt}{9.5pt}\selectfont\bfseries, text=NavyBlue] at (3.7, 9.3) {Load Balancer};
-  \node[font=\fontsize{6pt}{7.5pt}\selectfont, text=SteelBlue] at (3.7, 8.9) {Round-robin / least-load};
-
-  % Outgoing Traffic Arrows (Orthogonal)
-  \draw[->, line width=0.8pt, GreenLine] (2.6, 8.6) -- (2.6, 7.8) -- (1.4, 7.8) -- (1.4, 7.2);
-  \node[above, font=\fontsize{6pt}{7.5pt}\selectfont\bfseries, text=DarkGreen] at (1.85, 7.85) {$\sim$33\%};
-
-  \draw[->, line width=0.8pt, GreenLine] (3.7, 8.6) -- (3.7, 7.2);
-  \node[right, font=\fontsize{6pt}{7.5pt}\selectfont\bfseries, text=DarkGreen] at (3.75, 7.9) {$\sim$33\%};
-
-  \draw[->, line width=0.8pt, GreenLine] (4.8, 8.6) -- (4.8, 7.8) -- (6.0, 7.8) -- (6.0, 7.2);
-  \node[above, font=\fontsize{6pt}{7.5pt}\selectfont\bfseries, text=DarkGreen] at (5.55, 7.85) {$\sim$33\%};
-
-  % 3 Replicas
-  \foreach \i/\x in {1/1.4, 2/3.7, 3/6.0} {
-    \draw[line width=0.8pt, draw=GreenLine, fill=GreenFill]
-      (\x - 0.95, 6.0) rectangle (\x + 0.95, 7.2);
-    \node[font=\fontsize{7.5pt}{9pt}\selectfont\bfseries, text=DarkGreen]
-      at (\x, 6.8) {Replica \i};
-    \node[draw=GreenLine, fill=white, font=\fontsize{5.5pt}{6.5pt}\selectfont\bfseries, text=DarkGreen, inner xsep=4pt, inner ysep=1.5pt]
-      at (\x, 6.32) {ACTIVE};
-  }
-
-  % Egress Responses Bracket
-  \draw[dashed, line width=0.6pt, SlateGray!60]
-    (1.4, 6.0) -- (1.4, 5.6) -- (6.0, 5.6) -- (6.0, 6.0);
-  \node[font=\fontsize{6pt}{7.5pt}\selectfont, text=TextMuted]
-    at (3.7, 5.35) {Unified low-latency egress responses};
-
-  % Card 1: Maximized Hardware Utilization (height 1.8cm)
-  \draw[line width=0.6pt, draw=GreenLine!60, fill=GreenFill!40]
-    (0.35, 3.25) rectangle (7.05, 5.05);
-  \node[anchor=west, font=\fontsize{7.2pt}{8.5pt}\selectfont\bfseries, text=DarkGreen]
-    at (0.55, 4.75) {Maximized Hardware Utilization \& Throughput};
-
-  \begin{scope}[shift={(0.55, 4.45)}]
-    \node[anchor=north west, inner sep=0, font=\fontsize{6.2pt}{9.2pt}\selectfont, text=TextDark, text width=6.2cm] at (0, 0) {
-      \textbf{Capacity:} Zero idle nodes; all replicas host live models.\\[3pt]
-      \textbf{Efficiency:} Maximizes throughput per hardware dollar.
-    };
-  \end{scope}
-
-  % Card 2: Trade-off: Failover Rebalancing (height 2.5cm)
-  \draw[line width=0.6pt, draw=OrangeLine!60, fill=OrangeL!35]
-    (0.35, 0.45) rectangle (7.05, 3.05);
-  \node[anchor=west, font=\fontsize{7.2pt}{8.5pt}\selectfont\bfseries, text=DarkAmber]
-    at (0.55, 2.75) {Trade-off: Failover Rebalancing \& Headroom};
-
-  \begin{scope}[shift={(0.55, 2.45)}]
-    \node[anchor=north west, inner sep=0, font=\fontsize{6.2pt}{9.2pt}\selectfont, text=TextDark, text width=6.2cm] at (0, 0) {
-      \textbf{Surge Impact:} Crashed replica shifts +50\% load to survivors.\\[3pt]
-      \textbf{Headroom Rule:} Keep load $< 70\%$ to avoid tail-latency spikes.\\[3pt]
-      \textbf{Failover Lag:} Health check delay (100--500 ms) causes drops.
-    };
-  \end{scope}
-
-
-  % =========================================================================
-  % PANEL B: ACTIVE-PASSIVE SERVING ARCHITECTURE
-  % =========================================================================
-
-  \begin{scope}[shift={(7.8, 0)}]
-    % Outer panel container
-    \draw[line width=0.8pt, draw=CardBorder, fill=white]
-      (0, 0) rectangle (7.4, 11.2);
-
-    % Header
-    \node[anchor=west, font=\fontsize{8.5pt}{10.5pt}\selectfont\bfseries, text=DarkAmber]
-      at (0.35, 10.75) {Panel B: Active-Passive};
-    \node[anchor=east, font=\fontsize{7.2pt}{9pt}\selectfont\bfseries, text=DarkAmber]
-      at (7.05, 10.75) {Instant Failover};
-    \draw[line width=0.5pt, draw=CardBorder] (0, 10.45) -- (7.4, 10.45);
-
-    % Client Requests Arrow
-    \draw[->, line width=0.9pt, SlateGray] (3.7, 10.3) -- (3.7, 9.7);
-    \node[right, font=\fontsize{6.5pt}{8pt}\selectfont, text=TextMuted] at (3.8, 10.05) {Client Requests};
-
-    % Load Balancer
-    \draw[line width=0.9pt, draw=SteelBlue, fill=LightBlue!40]
-      (2.2, 8.6) rectangle (5.2, 9.7);
-    \node[font=\fontsize{8pt}{9.5pt}\selectfont\bfseries, text=NavyBlue] at (3.7, 9.3) {Load Balancer};
-    \node[font=\fontsize{6pt}{7.5pt}\selectfont, text=SteelBlue] at (3.7, 8.9) {Health probes \& fencing};
-
-    % Primary Traffic Path (Straight Down)
-    \draw[->, line width=1.1pt, GreenLine] (2.35, 8.6) -- (2.35, 7.2);
-    \node[left, font=\fontsize{6.2pt}{7.5pt}\selectfont\bfseries, text=DarkGreen] at (2.25, 7.9) {100\% Traffic};
-
-    % Primary Node
-    \draw[line width=1.0pt, draw=GreenLine, fill=GreenFill]
-      (1.0, 6.0) rectangle (3.7, 7.2);
-    \node[font=\fontsize{8pt}{9.5pt}\selectfont\bfseries, text=DarkGreen] at (2.35, 6.8) {Primary Node};
-    \node[draw=GreenLine, fill=white, font=\fontsize{5.5pt}{6.5pt}\selectfont\bfseries, text=DarkGreen, inner xsep=4pt, inner ysep=1.5pt]
-      at (2.35, 6.32) {ACTIVE (100\%)};
-
-    % Failure marker on Primary Node (top right corner)
-    \filldraw[draw=DarkRed, fill=RedFill!70, line width=0.6pt] (3.7, 7.2) circle (0.20cm);
-    \node[font=\fontsize{7pt}{8pt}\selectfont\bfseries, text=DarkRed] at (3.7, 7.2) {$\times$};
-
-    % Failover Route (Dashed Amber, Orthogonal)
-    \draw[->, dashed, line width=1.0pt, OrangeLine]
-      (4.2, 8.6) -- (4.2, 7.8) -- (5.75, 7.8) -- (5.75, 7.2);
-    \node[above, font=\fontsize{6.2pt}{7.5pt}\selectfont\bfseries, text=DarkAmber] at (5.0, 7.85) {Failover route};
-
-    % Standby Node
-    \draw[dashed, line width=1.0pt, draw=OrangeLine, fill=OrangeL!40]
-      (4.4, 6.0) rectangle (7.1, 7.2);
-    \node[font=\fontsize{8pt}{9.5pt}\selectfont\bfseries, text=DarkAmber] at (5.75, 6.8) {Standby Node};
-    \node[draw=OrangeLine, fill=white, font=\fontsize{5.5pt}{6.5pt}\selectfont\bfseries, text=DarkAmber, inner xsep=4pt, inner ysep=1.5pt]
-      at (5.75, 6.32) {WARM (PROMOTED)};
-
-    % Warm VRAM Sync link (below the line)
-    \draw[dashed, line width=0.6pt, SlateGray!70] (3.7, 6.6) -- (4.4, 6.6);
-    \node[below, font=\fontsize{5.2pt}{6.5pt}\selectfont, text=TextMuted] at (4.05, 6.55) {Warm VRAM};
-
-    % Card 1: Deterministic Failover (height 1.8cm)
-    \draw[line width=0.6pt, draw=SteelBlue!60, fill=LightBlue!30]
-      (0.35, 3.25) rectangle (7.05, 5.05);
-    \node[anchor=west, font=\fontsize{7.2pt}{8.5pt}\selectfont\bfseries, text=NavyBlue]
-      at (0.55, 4.75) {Deterministic Failover \& Strict Isolation};
-
-    \begin{scope}[shift={(0.55, 4.45)}]
-      \node[anchor=north west, inner sep=0, font=\fontsize{6.2pt}{9.2pt}\selectfont, text=TextDark, text width=6.2cm] at (0, 0) {
-        \textbf{Warm Standby:} Weights pre-loaded in VRAM; ready in ms.\\[3pt]
-        \textbf{No Degradation:} Full throughput preserved on failover.
-      };
-    \end{scope}
-
-    % Card 2: Trade-off: Reserved Idle Capacity Cost (height 2.5cm)
-    \draw[line width=0.6pt, draw=OrangeLine!60, fill=OrangeL!35]
-      (0.35, 0.45) rectangle (7.05, 3.05);
-    \node[anchor=west, font=\fontsize{7.2pt}{8.5pt}\selectfont\bfseries, text=DarkAmber]
-      at (0.55, 2.75) {Trade-off: Reserved Idle Capacity Cost};
-
-    \begin{scope}[shift={(0.55, 2.45)}]
-      \node[anchor=north west, inner sep=0, font=\fontsize{6.2pt}{9.2pt}\selectfont, text=TextDark, text width=6.2cm] at (0, 0) {
-        \textbf{Hardware Cost:} 50\% of accelerator capital sits idle.\\[3pt]
-        \textbf{Split-Brain:} Fencing tokens required to prevent dual primary.\\[3pt]
-        \textbf{Critical Use:} Best for safety-critical and medical serving.
-      };
-    \end{scope}
-
-  \end{scope}
-
-\end{tikzpicture}
-}
-```
--->
 
 :::
 
@@ -5283,197 +3216,8 @@ Partial failures turn that nondeterminism into a recovery problem. Unlike single
 
 Observability is useful only when it connects a symptom to an action: shed load, restart a replica, roll back a checkpoint, or degrade gracefully. Suppose a recommendation service suddenly violates its latency SLO while the model replicas still report healthy GPU utilization. Metrics establish the timing and scope of the symptom, traces show which service span is consuming the request budget, and logs explain what happened inside that service at the moment the cascade began. @Fig-observability-three-pillars summarizes those three evidence types, but the operating rule is correlation. No signal is sufficient unless it can be joined to the same request, model version, feature version, and deployment event.
 
-::: {#fig-observability-three-pillars fig-env="figure" fig-pos="htb" fig-cap="**The three pillars of observability**: Diagnosis of fleet failures requires correlating three signal types. Metrics reveal *when* and *where* a problem occurs (for example, GPU utilization drops). Logs provide the *what* through event context (for example, an out-of-memory exception). Traces provide the *why* by linking events across the distributed lifecycle (for example, identifying the request that triggered the memory spike)." fig-alt="Three columns summarize metrics, logs, and traces with infrastructure and ML examples. Arrows feed all three signal types into a correlation and alerting engine that produces threshold alerts, anomaly detection, and root-cause analysis."}
+::: {#fig-observability-three-pillars fig-env="figure" fig-pos="htb" fig-cap="**The three pillars of observability**: Diagnosis of fleet failures requires correlating three signal types. Metrics reveal *when* and *where* a problem occurs (for example, GPU utilization drops). Logs provide the *what* through event context (for example, an out-of-memory exception). Traces provide the *why* by linking events across the distributed lifecycle (for example, identifying the request that triggered the memory spike). The signals become actionable only once they are joined on shared identifiers, which is what lets an operator choose a recovery action." fig-alt="Three boxes labeled metrics, logs, and traces, each with its role and an example: GPU utilization drops, an out-of-memory exception, and the request behind the spike. Arrows lead from all three into a box reading correlate on shared identifiers, listing request, trace, model version, feature version, and deployment, which leads to a recovery action box: shed load, restart replica, roll back, or degrade gracefully."}
 ![](images/svg/observability-three-pillars.svg)
-
-<!--
-```{.tikz}
-\scalebox{0.7}{
-\begin{tikzpicture}[
-    >=Stealth,
-    font=\small\sffamily,
-    colbox/.style={
-        draw=#1!40,
-        fill=#1!4,
-                line width=0.9pt
-    },
-    colheader/.style={
-        draw=#1!40,
-        fill=#1!12,
-                line width=0.8pt,
-        font=\small\sffamily\bfseries,
-        text=#1!90!black,
-        inner sep=4pt
-    },
-    innercard/.style={
-        draw=gray!30,
-        fill=white,
-                line width=0.7pt,
-        inner sep=5pt,
-        align=left
-    },
-    badge/.style={
-                inner sep=2pt,
-        font=\fontsize{7pt}{8pt}\selectfont\bfseries,
-        align=center
-    }
-]
-
-    % Coordinates for the 3 columns
-    % X centers: -5.4, 0.0, 5.4. Width: 5.1cm.
-    % Y bounds: top 4.75, bottom -2.75 -> center 1.0, height 7.5cm
-
-    % =========================================================================
-    % COLUMN 1: METRICS
-    % =========================================================================
-    % col1 background box is drawn after the cards (see the background layer below)
-    \node[colheader=NavyBlue, minimum width=5.6cm] (c1_hdr) at (-6.0, 4.4) {1. METRICS (TIMESERIES)};
-
-    \node[innercard, minimum width=5.5cm] (c1a) [below=3mm of c1_hdr] {
-        {\footnotesize\bfseries\color{NavyBlue!90!black} Hardware Infrastructure}\\[3pt]
-        {\scriptsize\textbf{Compute:} GPU SM \& Tensor Core Util}\\
-        {\scriptsize\textbf{Memory:} HBM3e capacity \& bandwidth}\\
-        {\scriptsize\textbf{Fabric:} NVLink \& RoCEv2 line-rate BW}
-    };
-
-    \node[innercard, minimum width=5.5cm] (c1b) [below=3mm of c1a] {
-        {\footnotesize\bfseries\color{NavyBlue!90!black} Serving Runtime}\\[3pt]
-        {\scriptsize\textbf{Latency:} TTFT \& TPOT (p50, p99)}\\
-        {\scriptsize\textbf{Goodput:} Query error rate, SLA status}\\
-        {\scriptsize\textbf{Queue:} KV cache block allocation \%}
-    };
-
-    \node[innercard, minimum width=5.5cm] (c1c) [below=3mm of c1b] {
-        {\footnotesize\bfseries\color{NavyBlue!90!black} Model Training Dynamics}\\[3pt]
-        {\scriptsize\textbf{Norm:} Gradient L2 norm per worker rank}\\
-        {\scriptsize\textbf{Loss:} Cross-entropy trajectory, perplexity}\\
-        {\scriptsize\textbf{Scale:} Model FLOPs Utilization (MFU \%)}\\
-        {\scriptsize\textbf{Step:} AllReduce time ratio}
-    };
-
-    % =========================================================================
-    % COLUMN 2: LOGS
-    % =========================================================================
-    % col2 background box is drawn after the cards (see the background layer below)
-    \node[colheader=ForestGreen, minimum width=5.6cm] (c2_hdr) at (0, 4.4) {2. LOGS (EVENTS)};
-
-    \node[innercard, minimum width=5.5cm] (c2a) [below=3mm of c2_hdr] {
-        {\footnotesize\bfseries\color{ForestGreen!90!black} Canonical Severity Levels}\\[3pt]
-        \begin{tabular}{@{}l@{\hspace{4pt}}l@{}}
-            \tikz[baseline=-2pt]{\node[badge, fill=gray!20, text=gray!80!black, minimum width=1.0cm] {DEBUG};} & {\fontsize{6.5pt}{8pt}\selectfont Detailed kernel launch telemetry} \\[2pt]
-            \tikz[baseline=-2pt]{\node[badge, fill=RoyalBlue!20, text=RoyalBlue!90!black, minimum width=1.0cm] {INFO};} & {\fontsize{6.5pt}{8pt}\selectfont Checkpoint saved; rendezvous ok} \\[2pt]
-            \tikz[baseline=-2pt]{\node[badge, fill=BurntOrange!25, text=BurntOrange!90!black, minimum width=1.0cm] {WARN};} & {\fontsize{6.5pt}{8pt}\selectfont Thermal throttle; PCIe ECC corrected} \\[2pt]
-            \tikz[baseline=-2pt]{\node[badge, fill=BrickRed!25, text=BrickRed!90!black, minimum width=1.0cm] {ERROR};} & {\fontsize{6.5pt}{8pt}\selectfont NCCL watchdog timeout; CUDA crash} \\[2pt]
-            \tikz[baseline=-2pt]{\node[badge, fill=BrickRed!90!black, text=white, minimum width=1.0cm] {FATAL};} & {\fontsize{6.5pt}{8pt}\selectfont Host kernel panic; power rail trip}
-        \end{tabular}
-    };
-
-    \node[innercard, minimum width=5.5cm] (c2b) [below=3mm of c2a] {
-        {\footnotesize\bfseries\color{ForestGreen!90!black} Structured JSON Schema}\\[3pt]
-        \begin{tikzpicture}
-            \node[fill=gray!6, draw=gray!25, inner sep=4pt, align=left] {
-                \fontsize{7pt}{9pt}\selectfont\ttfamily
-                \{\\
-                \hspace*{0.6em}{\color{NavyBlue}"timestamp"}: {\color{BrickRed}"2026-09-16T..."},\\
-                \hspace*{0.6em}{\color{NavyBlue}"level"}: {\color{BrickRed}"ERROR"},\\
-                \hspace*{0.6em}{\color{NavyBlue}"trace\_id"}: {\color{BrickRed}"tr-89b4f"},\\
-                \hspace*{0.6em}{\color{NavyBlue}"rank"}: {\color{BurntOrange}14}, {\color{NavyBlue}"gpu\_id"}: {\color{BurntOrange}6},\\
-                \hspace*{0.6em}{\color{NavyBlue}"msg"}: {\color{BrickRed}"NCCL commRing stall"},\\
-                \hspace*{0.6em}{\color{NavyBlue}"peer\_host"}: {\color{BrickRed}"worker-082"}\\
-                \}
-            };
-        \end{tikzpicture}
-    };
-
-    % =========================================================================
-    % COLUMN 3: TRACES
-    % =========================================================================
-    % col3 background box is drawn after the cards (see the background layer below)
-    \node[colheader=BurntOrange, minimum width=5.6cm] (c3_hdr) at (6.0, 4.4) {3. TRACES (SPANS)};
-
-    \node[innercard, minimum width=5.5cm] (c3a) [below=3mm of c3_hdr] {
-        {\footnotesize\bfseries\color{BurntOrange!90!black} Core Tracing Primitives}\\[3pt]
-        {\scriptsize\textbf{Trace:} End-to-end directed acyclic path}\\
-        {\scriptsize\textbf{Span:} Individual timed unit of execution}\\
-        {\scriptsize\textbf{Context:} Baggage \& correlation ID}
-    };
-
-    \node[innercard, minimum width=5.5cm] (c3b) [below=3mm of c3a] {
-        {\footnotesize\bfseries\color{BurntOrange!90!black} Inference Request Span Waterfall}\\[4pt]
-        \begin{tikzpicture}
-            % bar 1: api gateway
-            \node[draw=NavyBlue!60, fill=NavyBlue!10, minimum width=4.3cm, minimum height=0.45cm, font=\fontsize{7pt}{8pt}\selectfont\bfseries\color{NavyBlue!90!black}] at (0, 0) {api-gateway (66 ms total)};
-            % bar 2: auth
-            \node[draw=gray!50, fill=gray!12, minimum width=1.7cm, minimum height=0.38cm, font=\fontsize{7pt}{8pt}\selectfont] at (-0.9, -0.55) {auth / rate-limit};
-            % bar 3: feat lookup
-            \node[draw=BurntOrange!50, fill=BurntOrange!12, minimum width=1.5cm, minimum height=0.38cm, font=\fontsize{7pt}{8pt}\selectfont] at (-0.4, -1.05) {feat-lookup};
-            % bar 4: engine generate
-            \node[draw=ForestGreen!60, fill=ForestGreen!10, minimum width=3.3cm, minimum height=0.6cm, align=center] at (0.4, -1.7) {
-                {\fontsize{7pt}{8pt}\selectfont\bfseries\color{ForestGreen!90!black} engine.generate (45 ms)}\\[-2pt]
-                {\fontsize{6pt}{7pt}\selectfont\color{ForestGreen!80!black} prefill: 5ms $\mid$ decode: 40ms}
-            };
-            % bar 5: serializer
-            \node[draw=BrickRed!50, fill=BrickRed!12, minimum width=3.2cm, minimum height=0.38cm, font=\fontsize{7pt}{8pt}\selectfont\color{BrickRed!90!black}] at (0.3, -2.70) {token-stream output serializer};
-        \end{tikzpicture}
-    };
-
-    % =========================================================================
-    % COLUMN BACKGROUND BOXES
-    % =========================================================================
-    % Fitted, not fixed: the three columns hold different amounts of content, so
-    % a shared 7.5cm height left column 2's severity table standing on its own
-    % header. Drawn on the background layer so they sit behind the cards.
-    \begin{pgfonlayer}{background}
-      \node[colbox=NavyBlue,    fit=(c1_hdr)(c1a)(c1b)(c1c), inner sep=4pt] (col1) {};
-      \node[colbox=ForestGreen, fit=(c2_hdr)(c2a)(c2b),      inner sep=4pt] (col2) {};
-      \node[colbox=BurntOrange, fit=(c3_hdr)(c3a)(c3b),      inner sep=4pt] (col3) {};
-    \end{pgfonlayer}
-
-    % =========================================================================
-    % BOTTOM PANEL: CORRELATION ENGINE
-    % =========================================================================
-    \node[draw=gray!40, fill=gray!4, line width=0.9pt, minimum width=15.9cm, minimum height=3.1cm] (bottom_panel) [below=0.85cm of col2] {};
-
-    % =========================================================================
-    % CONNECTING ARROWS TO BOTTOM PANEL
-    % =========================================================================
-    \draw[->, very thick, NavyBlue]    (col1.south) -- (col1.south |- bottom_panel.north);
-    \draw[->, very thick, ForestGreen] (col2.south) -- (col2.south |- bottom_panel.north);
-    \draw[->, very thick, BurntOrange] (col3.south) -- (col3.south |- bottom_panel.north);
-
-    \node[align=center] at ([yshift=-0.55cm] bottom_panel.north) {
-        \textbf{\small Correlation Engine \& Automated Remediation}\\[2pt]
-        {\scriptsize\color{black!70} Cross-signal union: metric latency knee $\to$ error log trace ID $\to$ slow microservice span}
-    };
-
-    % Card 1: Threshold Alerts
-    \node[innercard, minimum width=4.8cm] at ([xshift=-6.0cm, yshift=-1.95cm] bottom_panel.north) {
-        \tikz[baseline=-2.5pt]{\node[draw=NavyBlue!40, fill=NavyBlue!12, font=\scriptsize\bfseries\color{NavyBlue}, minimum width=4.6cm, inner sep=3pt] {Threshold Alerts};}\\[4pt]
-        {\scriptsize\textbf{Static rule:} Loss spike $> 3\sigma$}\\
-        {\scriptsize\textbf{Action:} Pause optimizer step}\\
-        {\scriptsize PagerDuty / OpsGenie dispatch}
-    };
-
-    % Card 2: Anomaly Detection
-    \node[innercard, minimum width=4.8cm] at ([xshift=0cm, yshift=-1.95cm] bottom_panel.north) {
-        \tikz[baseline=-2.5pt]{\node[draw=ForestGreen!40, fill=ForestGreen!12, font=\scriptsize\bfseries\color{ForestGreen!90!black}, minimum width=4.6cm, inner sep=3pt] {Anomaly Detection};}\\[4pt]
-        {\scriptsize\textbf{Algorithm:} Isolation forest on MFU}\\
-        {\scriptsize\textbf{Detection:} Straggler worker node}\\
-        {\scriptsize Early preemption prior to hang}
-    };
-
-    % Card 3: Root-Cause Isolation
-    \node[innercard, minimum width=4.8cm] at ([xshift=6.0cm, yshift=-1.95cm] bottom_panel.north) {
-        \tikz[baseline=-2.5pt]{\node[draw=BurntOrange!40, fill=BurntOrange!15, font=\scriptsize\bfseries\color{BurntOrange!90!black}, minimum width=4.6cm, inner sep=3pt] {Root-Cause Isolation};}\\[4pt]
-        {\scriptsize\textbf{Analysis:} Automated span graph join}\\
-        {\scriptsize\textbf{Output:} Defective switch port ID}\\
-        {\scriptsize Instant cordoning \& failover}
-    };
-
-\end{tikzpicture}
-}
-```
--->
 
 :::
 

@@ -327,7 +327,7 @@ Each rung of the scaling path inherits the previous one's challenges. Single-GPU
 
 The leap to multi-node training adds network communication overhead, fault tolerance requirements, and cluster orchestration\index{Cluster orchestration!distributed training}. Because each stage compounds the previous one's bottlenecks, single-GPU performance must be optimized before scaling out, so inefficiency does not multiply across the fleet. Although frameworks abstract away much of this through sharded data parallelism and communication libraries, implementing distributed training efficiently still demands careful network configuration (InfiniBand tuning, topology-aware routing), infrastructure management through cluster schedulers, and debugging of nonlocal issues such as synchronization hangs and communication bottlenecks. @Fig-3d-parallelism-cube returns to the three partitions that organize this work and combines them into one configuration space.
 
-::: {#fig-3d-parallelism-cube fig-env="figure" fig-pos="htb" fig-cap="**The 3D parallelism cube**: The configuration space decomposes cluster training across three orthogonal axes: tensor parallelism ($t$, intra-layer sharding), pipeline parallelism ($p$, sequential stage partitioning), and data parallelism ($d$, batch replication). Feasible cluster execution requires jointly satisfying model divisibility, per-device memory limits, and hardware network hierarchies to allocate $N = d \times p \times t$ total accelerators." fig-alt="Cube divided into a grid of cells with tensor parallelism along the width, pipeline parallelism along the height, and data parallelism along the depth; one corner cell is shaded and labeled as one GPU per (d, p, t) cell. Cards on the right give the device-count formula, each axis, and its hardware placement."}
+::: {#fig-3d-parallelism-cube fig-env="figure" fig-pos="htb" fig-cap="**The 3D parallelism cube**: The configuration space decomposes cluster training across three orthogonal axes: tensor parallelism ($t$, intra-layer sharding), pipeline parallelism ($p$, sequential stage partitioning), and data parallelism ($d$, batch replication). Each cell is one accelerator, identified by its $(d, p, t)$ coordinate, so the cube holds $N = d \times p \times t$ devices. A feasible point must jointly satisfy model divisibility, per-device memory limits, and the network hierarchy that carries each axis's traffic." fig-alt="Cube divided into a four-by-four-by-four grid of cells with the tensor axis along the width, the pipeline axis along the height, and the data axis along the depth; one front corner cell is shaded and labeled as one GPU per (d, p, t) cell. A label reads N equals d times p times t."}
 ![](images/svg/3d-parallelism-cube.svg)
 
 <!--
@@ -1877,7 +1877,7 @@ ZeRO-2\index{ZeRO-2!gradient sharding} additionally shards gradients. Instead of
 
 ZeRO-3\index{ZeRO-3!parameter sharding} and FSDP\index{FSDP!parameter sharding} shard parameters themselves. Each GPU stores only $1/N$ of the model. Before each layer's forward pass, parameters are gathered via AllGather; after backward pass, gradients are reduced via ReduceScatter, then parameters are discarded (@fig-zero-partitioning). This achieves maximum memory efficiency at the cost of additional communication that FSDP introduces relative to standard DDP.
 
-::: {#fig-zero-partitioning fig-env="figure" fig-pos="htb" fig-cap="**ZeRO state partitioning across GPU ranks**: Memory layout per GPU for 4 workers under standard DDP versus ZeRO stages 1, 2, and 3. ZeRO-1 shards optimizer states ($O/4$), ZeRO-2 adds gradient sharding ($G/4$), and ZeRO-3 partitions all model state ($P/4$, $G/4$, $O/4$)." fig-alt="Matrix diagram comparing state layout across 4 GPUs for Baseline DDP, ZeRO Stage 1, ZeRO Stage 2, and ZeRO Stage 3."}
+::: {#fig-zero-partitioning fig-env="figure" fig-pos="htb" fig-cap="**ZeRO state partitioning across GPU ranks**: Which copy of each training state every GPU holds, for 4 workers. A full-width block is a replicated copy; a subscripted block is that GPU's quarter shard. ZeRO-1 shards optimizer state ($O/4$), ZeRO-2 adds gradients ($G/4$), and ZeRO-3 shards parameters too ($P/4$). The footers give per-worker communication volume relative to DDP: only ZeRO-3 pays more, for the parameter AllGathers." fig-alt="Four panels, DDP, ZeRO-1, ZeRO-2, and ZeRO-3, each with four GPU rows of P, G, and O blocks. DDP rows hold full P, G, and O; ZeRO-1 rows hold full P and G with O shards 0 to 3; ZeRO-2 rows hold full P with G and O shards; ZeRO-3 rows hold P, G, and O shards. Footers read communication volume 1, 1, 1, and 1.5 times."}
 ![](images/svg/zero-partitioning.svg){width="100%"}
 
 <!--
@@ -2216,11 +2216,11 @@ These factors interact, so efficiency cannot be inferred from model size or GPU 
 
 The scaling efficiency analysis shows that the effective parallelism strategy is not determined by the *model architecture alone* but by the *interaction*\index{Parallelism!infrastructure interaction} between the model's communication requirements and the infrastructure's bandwidth hierarchy. Each combination of parallelism strategy and infrastructure topology produces a different scaling efficiency curve, and selecting the wrong combination can waste a significant fraction of the cluster's capacity. The preceding napkin math showed pure data parallelism stalling near `{python} CommScalingMath.scaling_efficiency_str` efficiency at this scale; recovering that lost capacity means mapping each parallelism dimension onto the bandwidth tier that can carry its traffic. @Sec-distributed-training-systems-systems-hybrid-parallelism-12a0 works that combination through three concrete configurations and formalizes it as hierarchy-aware parallelism, once tensor and pipeline parallelism have been developed.
 
-Selecting and combining parallelism strategies therefore leads directly to the traffic they create. Topology is co-designed with the parallelism mapping to maximize scaling efficiency; the next question is how the collective operations themselves shape the step time. AllReduce operations can consume 10--40 percent of total training time in data parallel systems, and this overhead grows with cluster size. BERT-Large on 128 GPUs can experience communication overhead reaching a large fraction of total runtime, while GPT-3-scale models require tensor, pipeline, and data parallelism plus communication overlap to avoid data-parallel gradient synchronization dominating the step.
-
 ::: {.column-margin .margin-pointer}
 ↩ Cluster topology design and physical bisection bandwidth limits are analyzed in @sec-network-fabrics.
 :::
+
+Selecting and combining parallelism strategies therefore leads directly to the traffic they create. Topology is co-designed with the parallelism mapping to maximize scaling efficiency; the next question is how the collective operations themselves shape the step time. AllReduce operations can consume 10--40 percent of total training time in data parallel systems, and this overhead grows with cluster size. BERT-Large on 128 GPUs can experience communication overhead reaching a large fraction of total runtime, while GPT-3-scale models require tensor, pipeline, and data parallelism plus communication overlap to avoid data-parallel gradient synchronization dominating the step.
 
 AllReduce complexity depends on two components: latency $(\alpha)$ and bandwidth $(\beta)$. Ring AllReduce achieves bandwidth-efficient communication with $(N-1)/N$ utilization\index{Ring AllReduce!bandwidth utilization}, while tree-based approaches offer lower latency at $\mathcal{O}(\log N)$ steps\index{Tree AllReduce!latency bound}. The choice depends on message size: tree algorithms win for latency-dominated small messages, ring algorithms win for bandwidth-dominated large gradients. High-performance implementations such as NCCL select ring or tree algorithms by message size and topology; their tree algorithms, for example, chain GPUs within each node over NVLink and build trees across nodes to shorten the inter-node latency path.
 
@@ -2278,7 +2278,7 @@ Distributed training is governed by an extended version of Amdahl's Law\index{Am
 
 @Fig-scaling-tax visualizes this divergence from ideal linear scaling as the scaling tax\index{Scaling tax!communication overhead}, a direct consequence of the scaling efficiency bound (principle \ref{pri-scaling-efficiency}). It shows how communication overhead $(r)$ drags speedup below the ideal line until adding more GPUs yields diminishing returns.
 
-::: {#fig-scaling-tax fig-env="figure" fig-pos="htb" fig-cap="**The scaling tax**: Effective speedup vs. number of GPUs. While ideal scaling (dashed black) is linear, real-world systems pay a 'tax' for communication. Compute-bound models like ResNet (green) scale well because they have high arithmetic intensity. Bandwidth-bound workloads (red) flatten where adding more GPUs yields diminishing returns (efficiency < 50 percent), and LLMs confined to a fast NVLink domain (orange) sit between the two." fig-alt="Line chart of Speedup vs. GPU Count (log-log). Green line (Compute Bound) stays close to the ideal linear diagonal. Red line (Bandwidth Bound) flattens out, showing diminishing returns as GPUs are added."}
+::: {#fig-scaling-tax fig-env="figure" fig-pos="htb" fig-cap="**The scaling tax**: Effective speedup $N/(1+(N-1)r)$ against GPU count on log-log axes, for illustrative communication fractions $r$, the share of the single-device step spent communicating. Ideal scaling (dashed) is linear. Each curve bends away from it and flattens near $1/r$: at 512 GPUs, $r$ = 0.1 percent still delivers about two-thirds of ideal speedup, 1 percent about one-sixth, and 10 percent under 10$\times$ in total. Darker curves carry larger $r$." fig-alt="Log-log line chart of effective speedup against GPU count from 1 to 512. A dashed diagonal marks ideal linear speedup. Three curves for r of 0.1, 1, and 10 percent bend below it and flatten, the darker curves flattening earlier and lower; a label marks the scaling wall on the lowest curve."}
 
 ```{python}
 #| echo: false
@@ -2289,14 +2289,14 @@ from mlsysim.solvers import DistributedModel
 # ├─────────────────────────────────────────────────────────────────────────────
 # │ Context: @fig-scaling-tax—effective speedup vs. communication overhead
 # │
-# │ Goal: Plot speedup = N/(1+(N-1)*r) vs. N for r=0, 0.05, 0.2, 0.5; show
-# │       the scaling wall for the bandwidth-bound curve.
+# │ Goal: Plot speedup = N/(1+(N-1)*r) vs. N for illustrative r=0, 0.001,
+# │       0.01, 0.1; show the scaling wall for the largest r.
 # │ Show: Log-log; ideal vs. three r-values; annotation.
 # │ How: N = [1..512]; speedup formula; book_style.set_book_style().
 # │
 # └─────────────────────────────────────────────────────────────────────────────
 # ┌── 1. CANVAS ────────────────────────────────────────────────────────────────
-# │ Plot speedup = N/(1+(N-1)*r) vs. N for r=0, 0.05, 0.2, 0.5; show
+# │ Plot speedup = N/(1+(N-1)*r) vs. N for illustrative r values
 import matplotlib.pyplot as plt
 import numpy as np
 from binder.tools.figures import style as book_style
@@ -2308,11 +2308,15 @@ COLORS = book_style.COLORS
 fig, ax = plt.subplots(figsize=(8, 5))
 
 N = np.array([1, 2, 4, 8, 16, 32, 64, 128, 256, 512])
+# Illustrative communication fractions r (share of the single-device step
+# spent communicating). One amber ramp (vol2 communication hue), darker as r
+# grows; markers keep the series distinct in grayscale. Red is reserved for
+# faults, so no series uses it.
 scenarios = [
-    {'r': 0.0, 'name': 'Ideal Linear', 'color': 'black', 'style': '--', 'marker': ''},
-    {'r': 0.05, 'name': 'Compute Bound (ResNet)', 'color': COLORS['GreenLine'], 'style': '-', 'marker': 'o'},
-    {'r': 0.20, 'name': 'Balanced (LLM + NVLink)', 'color': COLORS['OrangeLine'], 'style': '-', 'marker': 's'},
-    {'r': 0.50, 'name': 'Bandwidth Bound', 'color': COLORS['RedLine'], 'style': '-', 'marker': '^'},
+    {'r': 0.0, 'name': 'Ideal linear', 'color': 'black', 'style': '--', 'marker': ''},
+    {'r': 0.001, 'name': 'r = 0.1%', 'color': '#f59e0b', 'style': '-', 'marker': 'o'},
+    {'r': 0.01, 'name': 'r = 1%', 'color': '#d97706', 'style': '-', 'marker': 's'},
+    {'r': 0.10, 'name': 'r = 10%', 'color': '#92400e', 'style': '-', 'marker': '^'},
 ]
 
 # ┌── 3. RENDER ────────────────────────────────────────────────────────────────
@@ -2343,8 +2347,8 @@ ax.legend(loc='upper left', fontsize=8)
 # —Annotation ---
 ax.annotate(
     "Scaling wall",
-    xy=(32, 32 / (1 + 31 * 0.47)),
-    xytext=(34, 3.25),
+    xy=(64, 64 / (1 + 63 * 0.10)),
+    xytext=(90, 3.0),
     arrowprops=dict(facecolor=COLORS['BlueLine'], edgecolor=COLORS['BlueLine'], arrowstyle='->', lw=1.0),
     fontsize=9,
     bbox=dict(facecolor='white', alpha=0.8, edgecolor='none', pad=0.5),
@@ -2949,177 +2953,7 @@ class ModelParallelMemoryFacts:
 *Optimizer state, not weights, dominates the per-replica training budget.*
 :::
 
-Memory fit alone does not settle whether a model needs this kind of partition. For a `{python} FrontierTrainingContext.frontier_params_b_str`-parameter model, weights alone occupy `{python} ModelParallelMemoryFacts.weight_gb_str`, or about `{python} ModelParallelMemoryFacts.weight_per_gpu_gb_str` per GPU across a `{python} ModelParallelMemoryFacts.n_gpus_str`-GPU group, one-sixteenth of the `{python} DenseLLMReferenceFacts.cluster_gpus_str`-GPU reference cluster. Full mixed-precision Adam training state is much larger, `{python} ModelParallelMemoryFacts.full_state_gb_str` globally, yet ZeRO-3 across the same `{python} ModelParallelMemoryFacts.n_gpus_str` GPUs reduces it to roughly `{python} ModelParallelMemoryFacts.full_state_per_gpu_gb_str` per GPU before activations, which fits an `{python} DenseLLMReferenceFacts.h100_mem_gb_str` accelerator. ZeRO-3 can therefore make the static state fit, as the notebook below confirms, but it does so by gathering every layer's parameters on every step across the data-parallel fabric, roughly three times the model's parameter bytes per worker per step (@sec-distributed-training-systems-systems-memoryefficient-data-parallelism-zero-fsdp-0e69), and it cannot split an individual layer's computation or activations across devices. Tensor parallelism, illustrated in @fig-model-parallel-flow, addresses both limits by partitioning individual weight matrices across devices; pipeline parallelism partitions layers across stages and is introduced later in @sec-distributed-training-systems-systems-pipeline-parallelism-8748.
-
-::: {#fig-model-parallel-flow fig-env="figure" fig-pos="htb" fig-cap="**Tensor parallelism data flow**: Tensor parallelism column-splits a single weight matrix ($W_0\ldots W_3$) across four GPUs, with each GPU computing a partial output that is recombined through an AllGather. The companion strategy, pipeline parallelism, partitions layers vertically across stages and is shown separately in the layer-block figure. The two strategies are often combined in hybrid 3D parallelism for large models." fig-alt="Single panel showing tensor parallelism: a weight matrix column-split as W0, W1, W2, W3 across four GPUs, with partial outputs combined via AllGather."}
-![](images/svg/model-parallel-flow.svg){width=100%}
-
-<!--
-```{.tikz}
-\scalebox{0.74}{%
-\begin{tikzpicture}[
-  line join=round, line cap=round,
-  font=\small\sffamily,
-  >=Stealth,
-  io card/.style={
-    rectangle,
-    rounded corners=3.5pt,
-    line width=0.7pt,
-    draw=OrangeLine!80,
-    fill=OrangeFill!25,
-    inner sep=6pt,
-    align=center
-  },
-  gpu card/.style={
-    rectangle,
-    rounded corners=3pt,
-    line width=0.65pt,
-    inner sep=4.5pt,
-    align=center,
-    minimum width=3.8cm
-  },
-  y badge/.style={
-    rectangle,
-    rounded corners=2.5pt,
-    line width=0.65pt,
-    draw=GreenLine!70,
-    fill=GreenFill!30,
-    inner sep=3.5pt,
-    align=center,
-    font=\scriptsize\sffamily
-  },
-  info box/.style={
-    rectangle,
-    rounded corners=3.5pt,
-    line width=0.65pt,
-    draw=GrayLine!35,
-    fill=gray!2,
-    inner sep=6pt,
-    align=left
-  }
-]
-
-  % Top Formula Banner
-  \node[rectangle, rounded corners=3.5pt, draw=BlueLine!40, fill=BlueFill!20, line width=0.65pt, inner sep=5pt, font=\small\sffamily, text=TextBlack] at (7.6, 9.4) {
-    \textbf{Column-Parallel Partition:}\quad $\boldsymbol{Y} = \boldsymbol{X} \cdot [\boldsymbol{W}_0 \mid \boldsymbol{W}_1 \mid \boldsymbol{W}_2 \mid \boldsymbol{W}_3] = [\boldsymbol{X}\boldsymbol{W}_0 \mid \boldsymbol{X}\boldsymbol{W}_1 \mid \boldsymbol{X}\boldsymbol{W}_2 \mid \boldsymbol{X}\boldsymbol{W}_3] = [\boldsymbol{Y}_0 \mid \boldsymbol{Y}_1 \mid \boldsymbol{Y}_2 \mid \boldsymbol{Y}_3]$
-  };
-
-  % Input Tensor X
-  \node[io card] (X) at (-0.1, 5.75) {
-    \textbf{\Large\textcolor{OrangeLine!90!black}{X}}\\[2pt]
-    \textbf{\footnotesize Input Activations}\\[4pt]
-    \colorbox{white}{\scriptsize\strut $[B, d]$}
-  };
-
-  % GPU 0
-  \node[gpu card, draw=BlueLine!60, fill=BlueFill!30] (GPU0) at (5.1, 7.7) {
-    \begin{minipage}{3.6cm}
-      \centering
-      \textbf{\scriptsize\textcolor{BlueLine}{GPU 0 $\cdot$ Shard $\boldsymbol{W}_0$}} \hfill \tiny\textcolor{TextBlack!70}{$[d, d/4]$}\\[1.5pt]
-      \footnotesize $\boldsymbol{Y}_0 = \boldsymbol{X} \times \boldsymbol{W}_0$ \hfill \tiny\textcolor{TextBlack!70}{shape $[B, d/4]$}
-    \end{minipage}
-  };
-
-  % GPU 1
-  \node[gpu card, draw=GreenLine!60, fill=GreenFill!30] (GPU1) at (5.1, 6.4) {
-    \begin{minipage}{3.6cm}
-      \centering
-      \textbf{\scriptsize\textcolor{GreenD}{GPU 1 $\cdot$ Shard $\boldsymbol{W}_1$}} \hfill \tiny\textcolor{TextBlack!70}{$[d, d/4]$}\\[1.5pt]
-      \footnotesize $\boldsymbol{Y}_1 = \boldsymbol{X} \times \boldsymbol{W}_1$ \hfill \tiny\textcolor{TextBlack!70}{shape $[B, d/4]$}
-    \end{minipage}
-  };
-
-  % GPU 2
-  \node[gpu card, draw=OrangeLine!60, fill=OrangeFill!30] (GPU2) at (5.1, 5.1) {
-    \begin{minipage}{3.6cm}
-      \centering
-      \textbf{\scriptsize\textcolor{OrangeLine!90!black}{GPU 2 $\cdot$ Shard $\boldsymbol{W}_2$}} \hfill \tiny\textcolor{TextBlack!70}{$[d, d/4]$}\\[1.5pt]
-      \footnotesize $\boldsymbol{Y}_2 = \boldsymbol{X} \times \boldsymbol{W}_2$ \hfill \tiny\textcolor{TextBlack!70}{shape $[B, d/4]$}
-    \end{minipage}
-  };
-
-  % GPU 3
-  \node[gpu card, draw=VioletLine!60, fill=VioletFill!40] (GPU3) at (5.1, 3.8) {
-    \begin{minipage}{3.6cm}
-      \centering
-      \textbf{\scriptsize\textcolor{VioletLine}{GPU 3 $\cdot$ Shard $\boldsymbol{W}_3$}} \hfill \tiny\textcolor{TextBlack!70}{$[d, d/4]$}\\[1.5pt]
-      \footnotesize $\boldsymbol{Y}_3 = \boldsymbol{X} \times \boldsymbol{W}_3$ \hfill \tiny\textcolor{TextBlack!70}{shape $[B, d/4]$}
-    \end{minipage}
-  };
-
-  % Broadcast distribution bus from X to GPUs
-  \coordinate (trunkX) at (2.9, 5.75);
-  \draw[-, line width=1.1pt, BlueLine] (X.east) -- node[midway, above=2.5pt, fill=BlueFill!25, draw=BlueLine!40, rounded corners=2pt, line width=0.5pt, inner sep=2pt, font=\tiny\bfseries\sffamily, text=BlueLine] {Broadcast $\boldsymbol{X}$} (trunkX);
-  \draw[->, line width=0.85pt, BlueLine, shorten >= 2.5pt] (trunkX) |- (GPU0.west);
-  \draw[->, line width=0.85pt, BlueLine, shorten >= 2.5pt] (trunkX) |- (GPU1.west);
-  \draw[->, line width=0.85pt, BlueLine, shorten >= 2.5pt] (trunkX) |- (GPU2.west);
-  \draw[->, line width=0.85pt, BlueLine, shorten >= 2.5pt] (trunkX) |- (GPU3.west);
-
-  % Output Badges Y_i
-  \node[y badge] (Y0) at (7.9, 7.7) {\textbf{\textcolor{GreenD}{$\boldsymbol{Y}_0$}}\\[1pt]\tiny $[B, d/4]$};
-  \node[y badge] (Y1) at (7.9, 6.4) {\textbf{\textcolor{GreenD}{$\boldsymbol{Y}_1$}}\\[1pt]\tiny $[B, d/4]$};
-  \node[y badge] (Y2) at (7.9, 5.1) {\textbf{\textcolor{GreenD}{$\boldsymbol{Y}_2$}}\\[1pt]\tiny $[B, d/4]$};
-  \node[y badge] (Y3) at (7.9, 3.8) {\textbf{\textcolor{GreenD}{$\boldsymbol{Y}_3$}}\\[1pt]\tiny $[B, d/4]$};
-
-  \draw[->, line width=0.75pt, TextBlack!70, shorten >= 2pt, shorten <= 1pt] (GPU0.east) -- (Y0.west);
-  \draw[->, line width=0.75pt, TextBlack!70, shorten >= 2pt, shorten <= 1pt] (GPU1.east) -- (Y1.west);
-  \draw[->, line width=0.75pt, TextBlack!70, shorten >= 2pt, shorten <= 1pt] (GPU2.east) -- (Y2.west);
-  \draw[->, line width=0.75pt, TextBlack!70, shorten >= 2pt, shorten <= 1pt] (GPU3.east) -- (Y3.west);
-
-  % AllGather Collective Node
-  \node[rectangle, rounded corners=3.5pt, line width=0.85pt, draw=GreenLine, fill=GreenFill!25, inner sep=6pt, align=center] (AG) at (11.1, 5.75) {
-    \textbf{\large\textcolor{GreenD}{AllGather}}\\[3pt]
-    \footnotesize\textbf{Concatenate}\\[2pt]
-    \scriptsize $[\boldsymbol{Y}_0 \mid \boldsymbol{Y}_1 \mid \boldsymbol{Y}_2 \mid \boldsymbol{Y}_3]$\\[5pt]
-    \colorbox{white}{\tiny\bfseries\textcolor{GreenD}{\strut via NVLink Mesh}}
-  };
-
-  % Orthogonal fan-in bus routing from Y_i to AllGather
-  \draw[->, line width=0.85pt, GreenLine, shorten >= 2.5pt] (Y0.east) -- ++(0.7, 0) |- ([yshift=14pt]AG.west);
-  \draw[->, line width=0.85pt, GreenLine, shorten >= 2.5pt] (Y1.east) -- ++(0.7, 0) |- ([yshift=5pt]AG.west);
-  \draw[->, line width=0.85pt, GreenLine, shorten >= 2.5pt] (Y2.east) -- ++(0.7, 0) |- ([yshift=-5pt]AG.west);
-  \draw[->, line width=0.85pt, GreenLine, shorten >= 2.5pt] (Y3.east) -- ++(0.7, 0) |- ([yshift=-14pt]AG.west);
-
-  % Output Tensor Y
-  \node[io card] (Y) at (14.4, 5.75) {
-    \textbf{\Large\textcolor{OrangeLine!90!black}{Y}}\\[2pt]
-    \textbf{\footnotesize Output Tensor}\\[4pt]
-    \colorbox{white}{\scriptsize\strut $[B, d] = \boldsymbol{X}\boldsymbol{W}$}
-  };
-
-  \draw[->, line width=0.95pt, TextBlack!70, shorten >= 2.5pt, shorten <= 1pt] (AG.east) -- (Y.west);
-
-  % Bottom Analysis Panels
-  \node[info box, anchor=north west] (BP) at (-0.2, 2.5) {
-    \begin{minipage}{7.2cm}
-      \textbf{\small\textcolor{BlueLine}{Backward Pass: Gradient Synchronization}}\\[4pt]
-      \textbf{\scriptsize Weight Gradients (Local):} \scriptsize $\partial L / \partial \boldsymbol{W}_i = \boldsymbol{X}^T (\partial L / \partial \boldsymbol{Y}_i)$\\[1pt]
-      \tiny\textcolor{TextBlack}{Computed independently on each GPU; requires no collective.}\\[4pt]
-      \textbf{\scriptsize Input Activation Gradients:} \scriptsize $\partial L / \partial \boldsymbol{X} = \sum_i (\partial L / \partial \boldsymbol{Y}_i) \boldsymbol{W}_i^T$\\[1pt]
-      \tiny\textcolor{TextBlack}{Requires an AllReduce (sum) across GPUs to reconstitute $\partial L / \partial \boldsymbol{X}$.}\\[5pt]
-      \centering
-      \tikz\node[draw=RedLine!60, fill=RedFill!30, rounded corners=2pt, line width=0.45pt, inner sep=2pt, font=\tiny\bfseries\sffamily, text=RedLine!90!black]{\strut Forward uses AllGather $\;\cdot\;$ Backward uses AllReduce};
-    \end{minipage}
-  };
-
-  \node[info box, anchor=north east] (HC) at (15.4, 2.5) {
-    \begin{minipage}{7.2cm}
-      \textbf{\small\textcolor{BlueLine}{Hardware \& Interconnect Constraints}}\\[4pt]
-      \textbf{\scriptsize NVLink Intra-Node Requirement:} \scriptsize 600--900 GB/s bandwidth\\[1pt]
-      \tiny\textcolor{TextBlack}{Communication occurs twice per transformer layer (sub-millisecond scale).}\\[4pt]
-      \textbf{\scriptsize Scaling Boundary (TP $\le$ 8):} \scriptsize Confined within single server node\\[1pt]
-      \tiny\textcolor{TextBlack}{Cross-node TP incurs network latency overheads that stall tensor cores.}\\[5pt]
-      \centering
-      \tikz\node[draw=GreenLine!60, fill=GreenFill!30, rounded corners=2pt, line width=0.45pt, inner sep=2pt, font=\tiny\bfseries\sffamily, text=GreenD]{\strut Pair with Row-Parallel linear layer to fuse AllReduce};
-    \end{minipage}
-  };
-
-\end{tikzpicture}%
-}
-```
--->
-
-:::
+Memory fit alone does not settle whether a model needs this kind of partition. For a `{python} FrontierTrainingContext.frontier_params_b_str`-parameter model, weights alone occupy `{python} ModelParallelMemoryFacts.weight_gb_str`, or about `{python} ModelParallelMemoryFacts.weight_per_gpu_gb_str` per GPU across a `{python} ModelParallelMemoryFacts.n_gpus_str`-GPU group, one-sixteenth of the `{python} DenseLLMReferenceFacts.cluster_gpus_str`-GPU reference cluster. Full mixed-precision Adam training state is much larger, `{python} ModelParallelMemoryFacts.full_state_gb_str` globally, yet ZeRO-3 across the same `{python} ModelParallelMemoryFacts.n_gpus_str` GPUs reduces it to roughly `{python} ModelParallelMemoryFacts.full_state_per_gpu_gb_str` per GPU before activations, which fits an `{python} DenseLLMReferenceFacts.h100_mem_gb_str` accelerator. ZeRO-3 can therefore make the static state fit, as the notebook below confirms, but it does so by gathering every layer's parameters on every step across the data-parallel fabric, roughly three times the model's parameter bytes per worker per step (@sec-distributed-training-systems-systems-memoryefficient-data-parallelism-zero-fsdp-0e69), and it cannot split an individual layer's computation or activations across devices. Tensor parallelism addresses both limits by partitioning individual weight matrices across devices (@fig-tensor-parallel-split shows the column-then-row pairing developed in @sec-distributed-training-systems-systems-tensor-parallelism-d76e); pipeline parallelism partitions layers across stages and is introduced in @sec-distributed-training-systems-systems-pipeline-parallelism-8748.
 
 Activations are the other half of the budget. Even a `{python} Gpt3ActivationBudget.seq_len_str`-token sequence through `{python} FrontierTrainingContext.frontier_params_b_str` parameters generates on the order of a terabyte of intermediate activations at a small micro-batch when nothing is recomputed (roughly `{python} Gpt3ActivationBudget.act_unchecked_tb_str` at micro-batch `{python} Gpt3ActivationBudget.micro_batch_str`, as computed earlier), and optimizer sharding does not reduce it; only recomputation, which trades memory for extra FLOPs, or partitioning each layer's work across devices does. Full activation checkpointing brings the same case down to `{python} Gpt3ActivationBudget.act_checkpointed_gb_str`. The following notebook, which uses a single-sequence micro-batch, checks whether ZeRO-3 plus checkpointing then fits the model without any model partitioning.
 
@@ -3246,171 +3080,7 @@ Verify your understanding of model sharding:
 
 ### Model parallelism implementation {#sec-distributed-training-systems-systems-model-parallelism-implementation-0728}
 
-Once the model itself is the object being partitioned, the implementation problem is placement: every cut must save enough memory to justify the activation transfer and idle time it introduces. The first implementation below uses sequential layer groups to expose those dependencies. Tensor splitting, developed afterward, instead executes pieces of the same layer concurrently. @Fig-dist-model-parallelism captures this bidirectional data flow: input data propagates forward through sequentially assigned model partitions while gradients flow backward to update parameters, with intermediate results transferring across device boundaries at each stage.
-
-::: {#fig-dist-model-parallelism fig-env="figure" fig-pos="htb" fig-cap="**Model parallelism data flow**: Model partitions execute sequentially across three devices: input data flows forward through each partition (top path), while gradients propagate backward during the update phase (bottom path). Each device holds a distinct model slice, so intermediate activations and gradients cross device boundaries. The design fits models larger than one device's memory at the cost of sequential dependencies that reduce utilization." fig-alt="Linear flow diagram showing model parallelism: Input Data flows through Model Parts 1-3 on Devices 1-3 to Predictions via forward pass arrows above, with gradient update arrows returning below."}
-
-```{.tikz}
-\scalebox{0.82}{%
-\begin{tikzpicture}[
-  line join=round, line cap=round,
-  font=\small\sffamily,
-  >=Stealth,
-  dev card/.style={
-    draw=BlueLine!70,
-    fill=white,
-    rounded corners=3.5pt,
-    line width=0.7pt,
-    minimum width=2.6cm,
-    minimum height=3.6cm,
-    align=center,
-    font=\sffamily
-  },
-  io box/.style={
-    draw=GrayLine!40,
-    fill=gray!4,
-    rounded corners=3.5pt,
-    line width=0.7pt,
-    minimum width=1.5cm,
-    minimum height=2.2cm,
-    align=center,
-    font=\sffamily
-  },
-  layer block/.style={
-    rectangle,
-    rounded corners=2.5pt,
-    draw=BlueLine!60,
-    fill=BlueFill!25,
-    line width=0.6pt,
-    minimum width=2.3cm,
-    minimum height=0.8cm,
-    align=center,
-    font=\scriptsize\bfseries\sffamily
-  },
-  pass badge/.style={
-    rectangle,
-    rounded corners=2pt,
-    line width=0.5pt,
-    draw=GreenLine!60,
-    fill=GreenFill!25,
-    text=GreenD,
-    font=\tiny\bfseries\sffamily,
-    inner sep=2pt,
-    align=center
-  }
-]
-
-  % ===========================================================
-  % TOP LEGEND / HEADER
-  % ===========================================================
-  \node[draw=GrayLine!35, fill=white, rounded corners=3.5pt, line width=0.65pt, minimum width=14.4cm, minimum height=0.65cm] at (7.2, 5.0) {};
-  \node[anchor=west, font=\footnotesize\bfseries\sffamily, text=BlueLine] (fwd_lbl) at (0.6, 5.0)
-    {Forward Pass: Activations ($a_i \to a_{i+1}$)};
-  \draw[->, BlueLine, line width=1.0pt, shorten >= 2pt] ($(fwd_lbl.east) + (0.2, 0)$) -- ++(0.7, 0);
-
-  \node[anchor=west, font=\footnotesize\bfseries\sffamily, text=OrangeLine!90!black] (bwd_lbl) at (7.6, 5.0)
-    {Backward Pass: Gradients ($\delta_{i+1} \to \delta_i$)};
-  \draw[->, OrangeLine, line width=1.0pt, shorten >= 2pt] ($(bwd_lbl.east) + (0.2, 0)$) -- ++(0.7, 0);
-
-  % ===========================================================
-  % INPUT DATA (x = 1.0)
-  % ===========================================================
-  \node[io box, draw=OrangeLine!60, fill=OrangeFill!20] (in_data) at (0.9, 2.3) {
-    \textbf{\footnotesize Input}\\[2pt]
-    \textbf{\footnotesize Batch $X$}\\[4pt]
-    \tiny Micro-batch $b$\\[1pt]
-    \tiny tokens $s$
-  };
-
-  % ===========================================================
-  % DEVICE 1 (GPU 0, x = 3.65)
-  % ===========================================================
-  \node[dev card] (dev1) at (3.65, 2.3) {};
-  \node[font=\bfseries\footnotesize\sffamily, text=BlueLine] at (3.65, 3.75) {Device 1 (GPU 0)};
-  \node[layer block] at (3.65, 2.7) {Partition 1\\[2pt]\tiny Layers $0 \dots \frac{L}{3}{-}1$};
-  \node[font=\tiny\sffamily, text=TextBlack!70] at (3.65, 1.85) {Weights $W_1$ (BF16)};
-  \node[pass badge] at (3.65, 1.05) {Sequential Relay};
-
-  % ===========================================================
-  % DEVICE 2 (GPU 1, x = 7.2)
-  % ===========================================================
-  \node[dev card] (dev2) at (7.2, 2.3) {};
-  \node[font=\bfseries\footnotesize\sffamily, text=BlueLine] at (7.2, 3.75) {Device 2 (GPU 1)};
-  \node[layer block] at (7.2, 2.7) {Partition 2\\[2pt]\tiny Layers $\frac{L}{3} \dots \frac{2L}{3}{-}1$};
-  \node[font=\tiny\sffamily, text=TextBlack!70] at (7.2, 1.85) {Weights $W_2$ (BF16)};
-  \node[pass badge] at (7.2, 1.05) {Sequential Relay};
-
-  % ===========================================================
-  % DEVICE 3 (GPU 2, x = 10.75)
-  % ===========================================================
-  \node[dev card] (dev3) at (10.75, 2.3) {};
-  \node[font=\bfseries\footnotesize\sffamily, text=BlueLine] at (10.75, 3.75) {Device 3 (GPU 2)};
-  \node[layer block] at (10.75, 2.7) {Partition 3\\[2pt]\tiny Layers $\frac{2L}{3} \dots L{-}1$};
-  \node[font=\tiny\sffamily, text=TextBlack!70] at (10.75, 1.85) {Weights $W_3$ (BF16)};
-  \node[pass badge] at (10.75, 1.05) {Sequential Relay};
-
-  % ===========================================================
-  % OUTPUT PREDICTIONS (x = 13.5)
-  % ===========================================================
-  \node[io box, draw=GrayLine!40, fill=gray!4] (out_pred) at (13.5, 2.3) {
-    \textbf{\footnotesize Loss \&}\\[2pt]
-    \textbf{\footnotesize Output}\\[4pt]
-    \tiny Pred $\hat{Y}$\\[1pt]
-    \tiny Loss $\mathcal{L}$
-  };
-
-  % ===========================================================
-  % FORWARD ARROWS (BLUE, y = 3.3)
-  % ===========================================================
-  \draw[->, line width=0.95pt, BlueLine, shorten >= 2.5pt, shorten <= 2.5pt] (in_data.east |- 0, 3.3) -- (dev1.west |- 0, 3.3)
-    node[midway, above=1pt, font=\tiny\bfseries\sffamily, text=BlueLine] {$X$};
-
-  \draw[->, line width=0.95pt, BlueLine, shorten >= 2.5pt, shorten <= 2.5pt] (dev1.east |- 0, 3.3) -- (dev2.west |- 0, 3.3)
-    node[midway, above=1pt, font=\tiny\bfseries\sffamily, text=BlueLine] {Act $a_1$};
-
-  \draw[->, line width=0.95pt, BlueLine, shorten >= 2.5pt, shorten <= 2.5pt] (dev2.east |- 0, 3.3) -- (dev3.west |- 0, 3.3)
-    node[midway, above=1pt, font=\tiny\bfseries\sffamily, text=BlueLine] {Act $a_2$};
-
-  \draw[->, line width=0.95pt, BlueLine, shorten >= 2.5pt, shorten <= 2.5pt] (dev3.east |- 0, 3.3) -- (out_pred.west |- 0, 3.3)
-    node[midway, above=1pt, font=\tiny\bfseries\sffamily, text=BlueLine] {$\hat{Y}$};
-
-  % ===========================================================
-  % BACKWARD ARROWS (ORANGE, y = 1.35)
-  % ===========================================================
-  \draw[<-, line width=0.95pt, OrangeLine, shorten >= 2.5pt, shorten <= 2.5pt] (dev3.east |- 0, 1.35) -- (out_pred.west |- 0, 1.35)
-    node[midway, below=2pt, font=\tiny\bfseries\sffamily, text=OrangeLine!90!black] {Grad $\delta_3$};
-
-  \draw[<-, line width=0.95pt, OrangeLine, shorten >= 2.5pt, shorten <= 2.5pt] (dev2.east |- 0, 1.35) -- (dev3.west |- 0, 1.35)
-    node[midway, below=2pt, font=\tiny\bfseries\sffamily, text=OrangeLine!90!black] {Grad $\delta_2$};
-
-  \draw[<-, line width=0.95pt, OrangeLine, shorten >= 2.5pt, shorten <= 2.5pt] (dev1.east |- 0, 1.35) -- (dev2.west |- 0, 1.35)
-    node[midway, below=2pt, font=\tiny\bfseries\sffamily, text=OrangeLine!90!black] {Grad $\delta_1$};
-
-  % ===========================================================
-  % BOTTOM ANALYTICAL CARD
-  % ===========================================================
-  \node[
-    draw=GrayLine!35, fill=gray!3, line width=0.6pt,
-    rounded corners=3.5pt,
-    minimum width=14.4cm, inner sep=6pt, anchor=north
-  ] at (7.2, 0.2) {
-    \begin{minipage}{14.0cm}\footnotesize\sffamily
-      \textbf{Model Parallelism Systems Trade-offs: Memory Capacity vs. Sequential Idling}\\[3pt]
-      \begin{tabular}{@{}p{6.8cm}@{\hspace{0.4cm}}p{6.8cm}@{}}
-        \textbf{Capacity Advantage (Scaling Across Memory Wall):} & \textbf{Sequential Idling Tax (Pipeline Bubble):} \\[2pt]
-        $\bullet$ Partitions model parameters ($M/p$) so models exceeding single-device HBM fit in cluster. &
-        $\bullet$ Device $k$ remains idle until device $k-1$ finishes forward pass, leaving $(p-1)/p$ compute idle without pipelining. \\[2pt]
-        $\bullet$ Activation memory stored per stage; peak memory drops as depth per GPU decreases. &
-        $\bullet$ Cross-stage activation handoff incurs interconnect latency ($200\text{ MB/step}$ for 175B model).
-      \end{tabular}
-    \end{minipage}
-  };
-
-\end{tikzpicture}%
-}
-```
-
-:::
+Once the model itself is the object being partitioned, the implementation problem is placement: every cut must save enough memory to justify the activation transfer and idle time it introduces. The first implementation below uses sequential layer groups to expose those dependencies. Tensor splitting, developed afterward, instead executes pieces of the same layer concurrently. @Fig-dist-layers-blocks, drawn for the layer-wise partition below, traces the bidirectional data flow of such a cut: input data propagates forward through sequentially assigned model partitions while gradients flow backward to update parameters, with intermediate results transferring across device boundaries at each stage.
 
 ```{python}
 #| echo: false
@@ -3453,7 +3123,7 @@ Partitioning strategy determines which cost the model pays after memory no longe
 
 Layer-wise partitioning is the least invasive model cut: it saves memory by assigning consecutive layers to separate devices, but it preserves the model's sequential dependence. In transformer architectures, this translates to specific devices managing defined sets of attention and feed-forward blocks. @Fig-dist-layers-blocks demonstrates this partitioning for a 16-layer transformer: four consecutive blocks reside on each of four devices, with forward activations flowing left-to-right and backward gradients propagating right-to-left across the device boundaries.
 
-::: {#fig-dist-layers-blocks fig-env="figure" fig-pos="htb" fig-cap="**Layer-wise model parallelism**: The upper path assigns four consecutive transformer blocks to each of four GPUs, with activation checkpoints at device boundaries. The lower schedule shows forward work in blue, backward work in orange, and hatched pipeline bubbles. Partitioning reduces the weight footprint per GPU to one-quarter of the model, but sequential dependencies leave downstream devices waiting during pipeline fill." fig-alt="A 16-layer transformer is split across four GPUs, with layers 1–4, 5–8, 9–12, and 13–16 assigned to successive devices. Below, a timeline shows staggered blue forward passes, orange backward passes, and hatched idle pipeline bubbles."}
+::: {#fig-dist-layers-blocks fig-env="figure" fig-pos="htb" fig-cap="**Layer-wise model parallelism**: (a) A 16-layer transformer placed four consecutive layers per GPU, cutting each GPU's weight footprint to one-quarter of the model. Forward activations cross each stage boundary left to right; gradients return right to left. (b) Without microbatching, one batch visits the stages in turn, forward (F) and then backward (B) in reverse, in equal schematic time slots, so each GPU works in only 2 of 8 slots. The microbatched schedule in @fig-pipeline-parallelism fills much of that idle time." fig-alt="Panel a: an input box, four GPU cards holding layers 1 to 4, 5 to 8, 9 to 12, and 13 to 16, and a loss box, joined by solid blue forward arrows and dashed amber gradient arrows. Panel b: a four-row, eight-slot timeline in which a single forward cell steps diagonally down from GPU 0 to GPU 3 and a single backward cell steps back up, leaving every other cell empty."}
 ![](images/svg/layer-wise-partitioning.svg)
 
 <!--
@@ -4252,7 +3922,7 @@ Each GPU computes its partition independently. The concatenation in the equation
 $$\mathbf{Y} = \mathbf{X}\mathbf{W} = \mathbf{X}_1 \mathbf{W}_1 + \mathbf{X}_2 \mathbf{W}_2$$
 Each GPU computes a partial sum, and the system pays one AllReduce to combine the partial outputs.
 
-::: {#fig-tensor-parallel-split fig-env="figure" fig-pos="htb" fig-cap="**Matrix partitioning under tensor parallelism**: The first linear layer (for example, QKV) is split column-wise as $[W_1 | W_2]$, and the second (for example, the output projection) is split row-wise as $[W_1 ; W_2]$. This Megatron-LM arrangement passes the intermediate result directly between the two splits and requires one AllReduce after the second layer to sum partial outputs." fig-alt="Two-panel diagram of tensor parallelism. Left: Column Parallel splits weight matrix into columns, GPUs compute independently. Right: Row Parallel splits by rows, requires AllReduce to sum partial results."}
+::: {#fig-tensor-parallel-split fig-env="figure" fig-pos="htb" fig-cap="**Matrix partitioning under tensor parallelism**: A Megatron-LM layer pair on two GPUs, read left to right. The first layer (for example, QKV or the first feed-forward layer) is split by columns, $A = [A_1 | A_2]$, so each GPU computes its own slice $Y_i$ of the replicated input's output. The second layer is split by rows, $B = [B_1 ; B_2]$, so each slice feeds its matching shard on the same GPU without communication. The only collective is the amber AllReduce that sums the partial outputs $Z_1 + Z_2$, leaving the full result on both GPUs." fig-alt="Flow diagram on two GPU lanes. A replicated input X fans out to column-shard boxes Y1 equals X A1 and Y2 equals X A2, each feeding a row-shard box Z1 equals Y1 B1 and Z2 equals Y2 B2 on the same lane, labeled stays local. Both partial sums enter one AllReduce box that outputs Z on both GPUs."}
 ![](images/svg/tensor-parallel-split.svg)
 
 <!--
@@ -4576,7 +4246,7 @@ While tensor parallelism splits dense layers across devices, expert parallelism\
 
 In a distributed setting, experts are partitioned across workers; for example, on an 8-GPU cluster hosting 8 experts, each device hosts a single expert. As @fig-moe-all-to-all-routing illustrates, execution proceeds through a specialized four-stage communication cycle. First, a gating network evaluates each token to select its destination expert. An All-to-All dispatch\index{All-to-All!token dispatch} then routes tokens across the interconnect so that each device receives all tokens assigned to its local expert. Once the expert networks compute their feed-forward transformations on their assigned batches, a matching All-to-All combine\index{All-to-All!token combine} routes the processed tokens back to their originating devices to restore sequence ordering for the subsequent residual connection.
 
-::: {#fig-moe-all-to-all-routing fig-env="figure" fig-pos="htb" fig-cap="**Mixture-of-experts (MoE) AllToAll routing**: Expert parallelism requires a unique \"All-to-All\" communication pattern. Tokens from a local batch are routed by a gating network to experts sharded across the cluster. This involves a global shuffle where every GPU sends tokens to and receives tokens from potentially every other GPU, stressing the cluster's bisection bandwidth." fig-alt="Diagram showing tokens being routed from a gating network to four different experts sharded across multiple GPUs, then returning to the original sequence order."}
+::: {#fig-moe-all-to-all-routing fig-env="figure" fig-pos="htb" fig-cap="**Mixture-of-experts (MoE) AllToAll routing**: Expert parallelism on four ranks, one expert per rank, read left to right. Each rank's gate picks the top-$k$ experts for its tokens; the first All-to-All dispatches every token to the rank that hosts its expert, the experts compute, and a second All-to-All returns the results so each rank can form the gate-weighted sum for its own tokens. In both exchanges every rank may send to every other rank, which is why the pattern stresses the fabric's bisection bandwidth." fig-alt="Five columns: four rank boxes labeled top-k gate, an amber dispatch box in which lines connect every input row to every output row, four blue expert boxes each on its own rank, a second amber All-to-All return box with the same crossing lines, and four rank boxes that combine their tokens."}
 ![](images/svg/moe-all-to-all-routing.svg){width=100%}
 
 <!--
@@ -5415,209 +5085,6 @@ plt.close()
 
 :::
 
-@Fig-3d-parallelism-cube-summary shows the resulting data, pipeline, and tensor groups in a small coordinate-grid example.
-
-::: {#fig-3d-parallelism-cube-summary fig-env="figure" fig-pos="htb" fig-cap="**3D parallelism strategy space**: An 8-GPU configuration fills a $(d,p,t)$ coordinate grid that combines data parallelism (replicas), pipeline parallelism (layer stages), and tensor parallelism (within-layer splits). One training step coordinates $d \times p \times t$ GPUs: tensor groups communicate within every layer, pipeline stages at microbatch boundaries, and data replicas once per optimizer step." fig-alt="Flat 8-GPU coordinate-grid layout with each GPU labeled by its (d, p, t) coordinate showing how the three parallelism axes combine in a concrete configuration."}
-![](images/svg/3d-parallelism.svg)
-
-<!--
-```{.tikz}
-\scalebox{0.70}{%
-\begin{tikzpicture}[
-  line join=round, line cap=round,
-  font=\small\sffamily,
-  >=Stealth,
-  gpu_box/.style={
-    rectangle,
-    rounded corners=3pt,
-    line width=0.65pt,
-    align=center,
-    inner sep=4pt,
-    minimum width=2.0cm,
-    minimum height=1.15cm
-  },
-  stage_box/.style={
-    rectangle,
-    rounded corners=3.5pt,
-    draw=GrayLine!35,
-    fill=white,
-    line width=0.6pt,
-    inner sep=5pt
-  },
-  replica_box/.style={
-    rectangle,
-    rounded corners=4pt,
-    draw=BlueLine!50,
-    dashed,
-    line width=0.75pt,
-    fill=BlueFill!15,
-    inner sep=6pt
-  },
-  info_card/.style={
-    rectangle,
-    rounded corners=3.5pt,
-    draw=GrayLine!35,
-    fill=white,
-    line width=0.65pt,
-    inner sep=6pt
-  },
-  chip/.style={
-    rectangle,
-    rounded corners=2pt,
-    inner sep=2pt,
-    font=\tiny\bfseries\sffamily
-  }
-]
-
-  % -------------------------------------------------------------
-  % BACKGROUND CONTAINERS: REPLICAS & STAGES
-  % -------------------------------------------------------------
-  % Replica 0 (d = 0)
-  \node[replica_box, minimum width=5.0cm, minimum height=4.8cm] (rep0) at (1.2, 2.65) {};
-  \node[above=3pt of rep0.north, font=\bfseries\scriptsize\sffamily, text=BlueLine] {DP Replica 0 ($d=0$)};
-
-  % Replica 0 Stages
-  \node[stage_box, minimum width=4.6cm, minimum height=2.1cm] (s0_d0) at (1.2, 3.75) {};
-  \node[stage_box, minimum width=4.6cm, minimum height=2.1cm] (s1_d0) at (1.2, 1.55) {};
-
-  % Replica 1 (d = 1)
-  \node[replica_box, minimum width=5.0cm, minimum height=4.8cm] (rep1) at (6.6, 2.65) {};
-  \node[above=3pt of rep1.north, font=\bfseries\scriptsize\sffamily, text=BlueLine] {DP Replica 1 ($d=1$)};
-
-  % Replica 1 Stages
-  \node[stage_box, minimum width=4.6cm, minimum height=2.1cm] (s0_d1) at (6.6, 3.75) {};
-  \node[stage_box, minimum width=4.6cm, minimum height=2.1cm] (s1_d1) at (6.6, 1.55) {};
-
-  % -------------------------------------------------------------
-  % 8 GPUS WITH METRICS & TENSOR PARALLEL ARROWS
-  % -------------------------------------------------------------
-  % Replica 0 - Stage 0 (p = 0)
-  \node[gpu_box, draw=BlueLine!70, fill=BlueFill!25] (gpu0) at (0.1, 3.55) {
-    \textbf{\scriptsize\textcolor{BlueLine}{GPU 0}}\\[1pt]
-    \tiny\textcolor{BlueLine!80}{$d{=}0, p{=}0, t{=}0$}
-  };
-  \node[gpu_box, draw=OrangeLine!70, fill=OrangeFill!25] (gpu2) at (2.3, 3.55) {
-    \textbf{\scriptsize\textcolor{OrangeLine!90!black}{GPU 2}}\\[1pt]
-    \tiny\textcolor{OrangeLine!85!black}{$d{=}0, p{=}0, t{=}1$}
-  };
-  \draw[->, line width=0.85pt, OrangeLine, shorten >= 2pt, shorten <= 2pt] ($(gpu0.north) + (0, 0.22)$) -- node[above=1.5pt, font=\bfseries\tiny\sffamily, text=OrangeLine!90!black] {Tensor Parallel ($t$)} ($(gpu2.north) + (0, 0.22)$);
-
-  % Replica 0 - Stage 1 (p = 1)
-  \node[gpu_box, draw=RedLine!70, fill=RedFill!25] (gpu4) at (0.1, 1.35) {
-    \textbf{\scriptsize\textcolor{RedLine!90!black}{GPU 4}}\\[1pt]
-    \tiny\textcolor{RedLine!80}{$d{=}0, p{=}1, t{=}0$}
-  };
-  \node[gpu_box, draw=GreenLine!70, fill=GreenFill!25] (gpu6) at (2.3, 1.35) {
-    \textbf{\scriptsize\textcolor{GreenD}{GPU 6}}\\[1pt]
-    \tiny\textcolor{GreenD}{$d{=}0, p{=}1, t{=}1$}
-  };
-  \draw[->, line width=0.85pt, OrangeLine, shorten >= 2pt, shorten <= 2pt] ($(gpu4.north) + (0, 0.22)$) -- node[above=1.5pt, font=\bfseries\tiny\sffamily, text=OrangeLine!90!black] {Tensor Parallel ($t$)} ($(gpu6.north) + (0, 0.22)$);
-
-  % Replica 1 - Stage 0 (p = 0)
-  \node[gpu_box, draw=BlueLine!70, fill=BlueFill!25] (gpu1) at (5.5, 3.55) {
-    \textbf{\scriptsize\textcolor{BlueLine}{GPU 1}}\\[1pt]
-    \tiny\textcolor{BlueLine!80}{$d{=}1, p{=}0, t{=}0$}
-  };
-  \node[gpu_box, draw=OrangeLine!70, fill=OrangeFill!25] (gpu3) at (7.7, 3.55) {
-    \textbf{\scriptsize\textcolor{OrangeLine!90!black}{GPU 3}}\\[1pt]
-    \tiny\textcolor{OrangeLine!85!black}{$d{=}1, p{=}0, t{=}1$}
-  };
-  \draw[->, line width=0.85pt, OrangeLine, shorten >= 2pt, shorten <= 2pt] ($(gpu1.north) + (0, 0.22)$) -- node[above=1.5pt, font=\bfseries\tiny\sffamily, text=OrangeLine!90!black] {Tensor Parallel ($t$)} ($(gpu3.north) + (0, 0.22)$);
-
-  % Replica 1 - Stage 1 (p = 1)
-  \node[gpu_box, draw=RedLine!70, fill=RedFill!25] (gpu5) at (5.5, 1.35) {
-    \textbf{\scriptsize\textcolor{RedLine!90!black}{GPU 5}}\\[1pt]
-    \tiny\textcolor{RedLine!80}{$d{=}1, p{=}1, t{=}0$}
-  };
-  \node[gpu_box, draw=GreenLine!70, fill=GreenFill!25] (gpu7) at (7.7, 1.35) {
-    \textbf{\scriptsize\textcolor{GreenD}{GPU 7}}\\[1pt]
-    \tiny\textcolor{GreenD}{$d{=}1, p{=}1, t{=}1$}
-  };
-  \draw[->, line width=0.85pt, OrangeLine, shorten >= 2pt, shorten <= 2pt] ($(gpu5.north) + (0, 0.22)$) -- node[above=1.5pt, font=\bfseries\tiny\sffamily, text=OrangeLine!90!black] {Tensor Parallel ($t$)} ($(gpu7.north) + (0, 0.22)$);
-
-  % -------------------------------------------------------------
-  % AXIS ARROWS (PP & DP)
-  % -------------------------------------------------------------
-  % Vertical Pipeline Parallel (p) Axis
-  \draw[->, line width=0.95pt, RedLine, shorten >= 2pt, shorten <= 2pt] (-1.6, 4.8) -- node[above=2pt, rotate=90, font=\bfseries\scriptsize\sffamily, text=RedLine] {Pipeline Parallel ($p$)} (-1.6, 0.5);
-
-  % Horizontal Data Parallel (d) Axis
-  \draw[->, line width=0.95pt, BlueLine, shorten >= 2pt, shorten <= 2pt] (0.1, -0.05) -- node[below=2pt, font=\bfseries\scriptsize\sffamily, text=BlueLine] {Data Parallel ($d$)} (7.7, -0.05);
-
-  % -------------------------------------------------------------
-  % RIGHT: SPECIFICATION & PLACEMENT CARDS
-  % -------------------------------------------------------------
-  \def\xright{13.0}
-
-  % Card 1 Background Container
-  \node[info_card, minimum width=7.0cm, minimum height=3.3cm] (c_strat) at (\xright, 3.4) {};
-
-  % Card 1 Content
-  \node[anchor=north west, font=\scriptsize\sffamily, text=BlueLine, text width=6.4cm, align=left] (t_dp) at ($(c_strat.north west) + (0.3, -0.28)$) {
-    \begin{tikzpicture}[baseline=(c1.base)]
-      \node[chip, draw=BlueLine!60, fill=BlueFill!30, text=BlueLine] (c1) {DP};
-    \end{tikzpicture}\;
-    \textbf{Data Parallel ($d = 2$)}\\[1.5pt]
-    \tiny\textcolor{TextBlack}{Replicate model, shard mini-batch $\cdot$ AllReduce gradients}
-  };
-  \node[below=7pt of t_dp.south west, anchor=north west, font=\scriptsize\sffamily, text=RedLine, text width=6.4cm, align=left] (t_pp) {
-    \begin{tikzpicture}[baseline=(c2.base)]
-      \node[chip, draw=RedLine!60, fill=RedFill!30, text=RedLine!90!black] (c2) {PP};
-    \end{tikzpicture}\;
-    \textbf{\textcolor{RedLine!90!black}{Pipeline Parallel ($p = 2$)}}\\[1.5pt]
-    \tiny\textcolor{TextBlack}{Partition stages (1F1B) $\cdot$ P2P activation \& grad transfer}
-  };
-  \node[below=7pt of t_pp.south west, anchor=north west, font=\scriptsize\sffamily, text=OrangeLine!90!black, text width=6.4cm, align=left] (t_tp) {
-    \begin{tikzpicture}[baseline=(c3.base)]
-      \node[chip, draw=OrangeLine!60, fill=OrangeFill!30, text=OrangeLine!90!black] (c3) {TP};
-    \end{tikzpicture}\;
-    \textbf{Tensor Parallel ($t = 2$)}\\[1.5pt]
-    \tiny\textcolor{TextBlack}{Shard weight matrices (Col/Row) $\cdot$ AllReduce per block}
-  };
-
-  % Card 2: Total Devices Equation
-  \node[
-    rectangle,
-    rounded corners=3.5pt,
-    draw=GreenLine!70,
-    fill=GreenFill!25,
-    line width=0.65pt,
-    align=center,
-    inner sep=5pt,
-    below=7pt of c_strat.south,
-    minimum width=7.0cm
-  ] (c_eq) {
-    \footnotesize\textbf{\textcolor{GreenD}{Total Devices: $N = d \times p \times t = 2 \times 2 \times 2 = 8$ GPUs}}
-  };
-
-  % Card 3: Hardware Placement Rule
-  \node[
-    rectangle,
-    rounded corners=3.5pt,
-    draw=GrayLine!35,
-    fill=gray!2,
-    line width=0.65pt,
-    inner sep=6pt,
-    align=center,
-    below=7pt of c_eq.south,
-    minimum width=7.0cm
-  ] (c_hw) {
-    \textbf{\scriptsize Hardware Placement Hierarchy}\\[3pt]
-    \begin{minipage}{6.4cm}
-      \centering\tiny
-      \textbf{\textcolor{OrangeLine!90!black}{TP (Tensor):}} Intra-node (NVLink $\ge 900\text{ GB/s}$)\\[2pt]
-      \textbf{\textcolor{RedLine!90!black}{PP (Pipeline):}} Inter-node across racks (IB $50\text{ GB/s}$ rail)\\[2pt]
-      \textbf{\textcolor{BlueLine}{DP (Data):}} Cluster-wide across spine fabric ($25\text{--}50\text{ GB/s}$)
-    \end{minipage}
-  };
-
-\end{tikzpicture}%
-}
-```
--->
-
-:::
-
 The three configurations and the worked layout tell one story. Pure data parallelism moves the full `{python} HybridConfigFeasibility.gradient_gb_str` gradient over the slowest tier and reaches only `{python} CommScalingMath.scaling_efficiency_str` scaling efficiency. Keeping tensor parallelism inside the NVLink domain cuts each rank's share of that traffic by the tensor-parallel degree, and pipeline stages cut it again at the price of a bubble. Communication alone does not make a layout feasible, however. Each layout must also hold the full training state, which is why configurations B and C still need optimizer sharding and why the worked layout adds pipeline depth until the persistent state falls to about `{python} HybridMemoryAccounting.full_adam_hybrid_static_gb_str` per device. Hybrid parallelism is therefore the joint solution of a memory constraint, a bandwidth hierarchy, and a batch-size limit, and every axis added to satisfy one of them tightens another. Alignment training tests that joint solution hardest, because it asks one fleet to host several models with different memory and compute profiles at the same time.
 
 ## Multi-Model Training for Alignment and RLHF {#sec-distributed-training-rlhf}
@@ -5680,7 +5147,12 @@ class DistTrainH100Capacity:
 
 ### The multi-model coordination problem {#sec-distributed-training-rlhf-coordination}
 
-Standard pretraining involves one model, one loss function, and one gradient stream. RLHF alignment, by contrast, orchestrates a system of models that interact during every training step. In PPO\index{Proximal policy optimization!model asymmetry}\index{PPO|see{Proximal policy optimization}} [@schulman2017proximal], as used in InstructGPT-style RLHF systems [@ouyang2022instructgpt], four distinct models must operate in concert. @Tbl-rlhf-model-coordination-roles separates those models by role, execution mode, and memory burden.
+Standard pretraining involves one model, one loss function, and one gradient stream. RLHF alignment, by contrast, orchestrates a system of models that interact during every training step. In PPO\index{Proximal policy optimization!model asymmetry}\index{PPO|see{Proximal policy optimization}} [@schulman2017proximal], as used in InstructGPT-style RLHF systems [@ouyang2022instructgpt], four distinct models must operate in concert. @Tbl-rlhf-model-coordination-roles separates those models by role, execution mode, and memory burden. @Fig-rlhf-ppo-step traces how data moves among them in one step: the policy generates responses, three models score them, and the resulting advantages drive gradient updates to the only two models that train.
+
+::: {#fig-rlhf-ppo-step fig-env="figure" fig-pos="htb" fig-cap="**One PPO-style RLHF step**: The policy generates responses to a batch of prompts. The frozen reference model supplies log-probabilities for the KL penalty, the frozen reward model supplies a scalar score, and the trained value model supplies value estimates. The penalized reward and value estimates form advantages, which update the policy and value models. Blue boxes carry gradients and optimizer state; slate boxes run forward passes only, which is the asymmetry that drives placement." fig-alt="Flow diagram. Prompts feed a blue Policy box, whose responses fan out to three boxes: Reference (slate, log-probs for KL), Reward model (slate, scalar score r), and Value model (blue, value estimates). Their outputs merge into an Advantages box labeled r minus beta KL, GAE. A blue return line labeled PPO update feeds back into the Policy and Value boxes. A legend marks blue as trained and slate as frozen."}
+![](images/svg/rlhf-ppo-coordination.svg)
+
+:::
 
 | **Model**                                            | **Role in PPO-style RLHF**                                                        | **Execution mode**                                                | **Memory burden**                                                                                                                                                                                                                                                                                                                                                                                                                                            |
 |:-----------------------------------------------------|:----------------------------------------------------------------------------------|:------------------------------------------------------------------|:-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
