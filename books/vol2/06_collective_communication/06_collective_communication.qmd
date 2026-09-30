@@ -127,9 +127,7 @@ For the initial gradient budget, consider a ring schedule: each worker passes te
 
 :::
 
-For standard synchronous data-parallel\index{Data Parallelism!synchronous SGD} stochastic gradient descent (SGD), gradient synchronization is not a design convenience; it is the mechanism that preserves one shared optimization trajectory. If different GPUs apply different gradient updates to their local copies of the model, the copies diverge. After enough steps, the models on different GPUs represent entirely different functions, and the training process no longer approximates stochastic gradient descent on the global loss. Synchronization ensures that all copies remain identical (within floating-point precision) at every step, preserving the theoretical convergence guarantees of the optimization algorithm via the AllReduce[^fn-allreduce-etymology-primitive] primitive\index{AllReduce!convergence guarantee}.[^fn-parameter-server-bottleneck]
-
-[^fn-parameter-server-bottleneck]: **Parameter Server**\index{Parameter Server!bottleneck}: Google's DistBelief used a parameter-server architecture for large-scale neural-network training, and later parameter-server systems made the server-side bandwidth and consistency trade-offs explicit as worker counts grew [@dean2012large; @li2014]. The collective-communication lesson is that star-like aggregation concentrates traffic in the server tier, whereas peer-to-peer collectives such as Ring AllReduce distribute that traffic so each worker's bandwidth cost can remain bounded.
+For standard synchronous data-parallel\index{Data Parallelism!synchronous SGD} stochastic gradient descent (SGD), gradient synchronization is not a design convenience; it is the mechanism that preserves one shared optimization trajectory. If different GPUs apply different gradient updates to their local copies of the model, the copies diverge. After enough steps, the models on different GPUs represent entirely different functions, and the training process no longer approximates stochastic gradient descent on the global loss. Synchronization ensures that all copies remain identical (within floating-point precision) at every step, preserving the theoretical convergence guarantees of the optimization algorithm via the AllReduce[^fn-allreduce-etymology-primitive] primitive\index{AllReduce!convergence guarantee}.
 
 The volume of data that must be synchronized is proportional to the model size. A model with $P$ parameters stored in BF16 (2 bytes per parameter) generates $2P$ bytes of gradient data per training step per data-parallel replica. For a 70-billion-parameter model, a mid-sized dense model smaller than the 175B-parameter Archetype A reference, this is `{python} GradSyncSignificance.gradient_gb_str` of gradients that every replica must contribute to the reduction and receive back in reduced form; a ring schedule moves nearly twice that volume through each rank.[^fn-ring-allreduce-origin]
 
@@ -452,7 +450,7 @@ class AllReduceCost:
 
 ::: {.column-margin}
 ```{=latex}
-\vspace*{-6mm}
+\vspace*{5mm}
 ```
 ![](images/svg/collective_communication_comm_dominance.svg){width="100%" fig-alt="Two horizontal bars comparing the step's Fleet Law terms at large scale. The communication bar is wide and shaded violet, dominating; the compute bar is a narrow gray sliver."}
 
@@ -858,7 +856,7 @@ $n^* = \alpha \cdot \beta =$ `{python} CriticalMsgSize.alpha_s_sci_math` s $\tim
 :::
 
 ::: {.column-margin}
-![](images/svg/collective_communication_alpha_beta_dominance.svg){width="100%" fig-alt="Two horizontal bars. Top (large message): a wide blue bandwidth segment labeled n over beta, plus a thin gray latency sliver. Bottom (small message): a wide violet latency segment labeled alpha, plus a thin gray sliver. The dominant term flips."}
+![](images/svg/collective_communication_alpha_beta_dominance.svg){width="100%" fig-alt="Two horizontal bars. Top (large message): a wide violet bandwidth segment labeled n over beta, plus a thin light-gray latency sliver. Bottom (small message): a wide dark-gray latency segment labeled alpha, plus a thin light-gray sliver. The dominant term flips."}
 
 *Small messages are latency-bound, large ones bandwidth-bound; the cost reverses.*
 :::
@@ -1437,7 +1435,7 @@ Reduction order introduces a second, numerical contract. Floating-point addition
 
 [^fn-fsdp-memory-sharding]: **FSDP (Fully Sharded Data Parallel)**\index{FSDP!memory trade-off}: PyTorch's fully sharded implementation follows the ZeRO-3 idea of sharding parameters, gradients, and optimizer states across $N$ accelerators [@rajbhandari2020]. The trade-off is communication frequency: full sharding adds layer-level AllGather and ReduceScatter operations instead of relying only on data parallelism's step-level AllReduce, making it more sensitive to the $\alpha$ overhead.
 
-[^fn-dlrm-embedding-alltoall]: **DLRM (Deep Learning Recommendation Model)**\index{DLRM!AllToAll}: Meta's 2019 architecture for click-through rate prediction uses sharded embedding tables and exchanges the resulting sparse lookups across workers. The resulting AllToAll may be startup-bound when each destination receives a fine-grained message, injection- or reception-bound as aggregate payload grows, or fabric-bound under oversubscription, unfavorable routing, or shard-access skew. DLRM therefore supplies a destination-specific traffic pattern, not a universal latency regime.
+[^fn-dlrm-embedding-alltoall]: [offset=6mm] **DLRM (Deep Learning Recommendation Model)**\index{DLRM!AllToAll}: Meta's 2019 architecture for click-through rate prediction uses sharded embedding tables and exchanges the resulting sparse lookups across workers. The resulting AllToAll may be startup-bound when each destination receives a fine-grained message, injection- or reception-bound as aggregate payload grows, or fabric-bound under oversubscription, unfavorable routing, or shard-access skew. DLRM therefore supplies a destination-specific traffic pattern, not a universal latency regime.
 
 The contrast between AllToAll and AllReduce highlights a fundamental difference in how collective operations scale with cluster size.
 
@@ -2105,7 +2103,7 @@ from mlsysim.physics import (
     calc_double_binary_tree_allreduce_time,
 )
 
-plt.style.use('seaborn-v0_8-whitegrid')
+from mlsysim import viz
 
 # ┌── 2. ARRAYS ────────────────────────────────────────────────────────────────
 N = 256
@@ -2141,12 +2139,12 @@ t_ring_ms = t_ring * THOUSAND
 t_tree_ms = t_tree * THOUSAND
 t_dbt_ms = t_dbt * THOUSAND
 
-fig, ax = plt.subplots(figsize=(10, 6))
+fig, ax, COLORS, plt = viz.setup_plot(figsize=(10, 6))
 
 # ┌── 3. RENDER ────────────────────────────────────────────────────────────────
-ax.loglog(message_sizes, t_ring_ms, label='Ring (Bandwidth Optimal)', color='#e74c3c', linewidth=2.5)
-ax.loglog(message_sizes, t_tree_ms, label='Tree (Latency Optimal)', color='#2ecc71', linewidth=2.5, linestyle='--')
-ax.loglog(message_sizes, t_dbt_ms, label='Double Binary Tree (Hybrid)', color='#3498db', linewidth=2.5, linestyle='-.')
+ax.loglog(message_sizes, t_ring_ms, label='Ring (Bandwidth Optimal)', color=COLORS['VioletLine'], linewidth=2.5)
+ax.loglog(message_sizes, t_tree_ms, label='Tree (Latency Optimal)', color=COLORS['GreenLine'], linewidth=2.5, linestyle='--')
+ax.loglog(message_sizes, t_dbt_ms, label='Double Binary Tree (Hybrid)', color=COLORS['BlueLine'], linewidth=2.5, linestyle='-.')
 
 ax.text(
     8e3,
@@ -2163,7 +2161,6 @@ ax.text(
 
 ax.set_xlabel('Message Size (Bytes)', fontsize=12)
 ax.set_ylabel('AllReduce Time (ms)', fontsize=12)
-ax.set_title('AllReduce Algorithm Performance Crossover (N=256)', fontsize=14, pad=15)
 ax.legend(loc='upper left', fontsize=8, facecolor='white', frameon=True)
 ax.grid(True, which="both", ls="-", alpha=0.3)
 
@@ -2340,7 +2337,7 @@ Verify your understanding of Ring vs. Tree AllReduce trade-offs:
 
 :::
 
-[^fn-moe-sparse-routing]: **Mixture-of-Experts (MoE)**\index{MoE!communication}: An architecture where each token activates only a subset of specialized subnetworks (experts), reducing per-token FLOPs while maintaining total model capacity. MoE replaces a uniform dense reduction with destination-specific AllToAll traffic. Fine-grained dispatch can expose startup cost, larger batches can bind injection or reception bandwidth, and oversubscription, routing, or expert skew can make bisection capacity or a hotspot the critical path.
+[^fn-moe-sparse-routing]: **Mixture-of-Experts (MoE)**\index{MoE!communication}: Because each token activates only a few experts, MoE replaces a uniform dense reduction with destination-specific AllToAll traffic. Fine-grained dispatch can expose startup cost, larger batches can bind injection or reception bandwidth, and oversubscription, routing, or expert skew can make bisection capacity or a hotspot the critical path.
 
 ## Hierarchical Communication {#sec-communication-collective-operations-collective-operations-mapping-collectives-topology-3214}
 
@@ -2405,7 +2402,7 @@ A naive flat Ring AllReduce ignores this structure, routing data across InfiniBa
 
 ::: {.column-margin}
 ```{=latex}
-\vspace*{-54mm}
+\vspace*{-40mm}
 ```
 ![](images/svg/vol2_collective_communication_margin_003.svg){width="100%" fig-alt="Three-rung payload ladder showing M, M over 8, and M over 32, with 32x marked as an annotation."}
 
@@ -3934,7 +3931,7 @@ The fleet now has its logic (parallelism) and its traffic patterns (communicatio
 ↪ Checkpointing protocols, failure recovery, and elastic training systems are examined in @sec-fault-tolerance-reliability.
 :::
 
-[^fn-allreduce-etymology-primitive]: **AllReduce**\index{AllReduce!etymology}: A compound term from MPI indicating a Reduce operation (summing data from all nodes to one) followed by a Broadcast (sending the sum to all nodes). Ring-based AllReduce implements this as a sequential ReduceScatter phase followed by an AllGather phase, each taking $N-1$ rounds for $2(N-1)$ rounds total; ranks send and receive concurrently within each round, and every GPU ends with the global sum without a centralized bottleneck.
+[^fn-allreduce-etymology-primitive]: **AllReduce**\index{AllReduce!etymology}: The name comes from MPI and describes the result, not the schedule: a Reduce (combining every rank's data at one root) followed by a Broadcast (returning the combined value to all ranks). Implementing it literally as root-reduce-then-broadcast funnels all traffic through one rank, which is why the algorithms in @sec-communication-collective-operations-collective-operations-ring-allreduce-ffce reach the same result without a root.
 
 ```{python}
 #| echo: false
@@ -3968,7 +3965,7 @@ class FiberDelay:
     delay_ns_str = fmt_time(delay, nanosecond, precision=0, commas=False)
 ```
 
-[^fn-zerocopy-rdma-bypass]: **Zero-Copy Communication**\index{Zero-Copy Communication!RDMA}: RDMA allows the NIC to transfer data directly from the application's memory on one node to the application's memory on another, bypassing the operating system's kernel buffers. GPUDirect RDMA extends the idea to accelerator memory, letting the NIC read gradients directly from the device, so a `{python} GradSyncSignificance.gradient_gb_str` gradient never passes through host DRAM, whereas a staged path writes and then rereads it there (`{python} GradSyncSignificance.gradient_2x_gb_str` of host-memory traffic per send).
+[^fn-zerocopy-rdma-bypass]: **Zero-Copy Communication**\index{Zero-Copy Communication!RDMA}: GPUDirect RDMA lets the NIC read gradients directly from accelerator memory, so a `{python} GradSyncSignificance.gradient_gb_str` gradient never passes through host DRAM, whereas a staged path writes and then rereads it there (`{python} GradSyncSignificance.gradient_2x_gb_str` of host-memory traffic per send).
 
 [^fn-speed-of-light]: **The Speed of Light Constraint**\index{Speed of Light!latency bound}: Light travels through optical fiber at approximately `{python} FiberDelay.v_fiber_km_s_str`, or `{python} FiberDelay.meters_per_us_str` meters per microsecond. In a massive data center where cables between racks span `{python} FiberDelay.cable_m_str` meters, the "wire delay" alone contributes `{python} FiberDelay.delay_ns_str` to every message, a physical limit that no amount of better networking hardware can reduce.
 

@@ -633,7 +633,7 @@ ax.annotate(
     fontweight="bold",
     ha="left",
     va="bottom",
-    xytext=(70, roi_at_100 + 3.0),
+    xytext=(30, roi_at_100 + 3.5),
     arrowprops=dict(arrowstyle="->", color=COLORS["BlueLine"], lw=1.0),
 )
 
@@ -1283,7 +1283,7 @@ Production widens the blast radius from validation traffic to live traffic, so t
 
 The lifecycle closes only when a model can be retired without breaking its consumers. Deprecation identifies dependent systems, provides migration paths and timelines, maintains the old model until migration completes, and archives artifacts for reproducibility and audit. Organizations often underinvest in this final stage, leading to accumulation of zombie models[^fn-zombie-models-waste] that consume resources but provide questionable value. Platform-level lifecycle enforcement helps address this pattern.
 
-[^fn-zombie-models-waste]: **Zombie models**\index{Zombie Models!deprecation}: Production models that continue serving despite being obsolete or superseded. Even a low-traffic model consumes registry, monitoring, dependency-management, and on-call capacity until it is deliberately retired. The operational cost therefore extends beyond compute: zombie models enlarge the dependency graph, making platform-wide upgrades and security patches slower and riskier.
+[^fn-zombie-models-waste]: **Zombie Models**\index{Zombie Models!deprecation}: Production models that continue serving despite being obsolete or superseded. Even a low-traffic model consumes registry, monitoring, dependency-management, and on-call capacity until it is deliberately retired. The operational cost therefore extends beyond compute: zombie models enlarge the dependency graph, making platform-wide upgrades and security patches slower and riskier.
 
 ### Deployment patterns by model count {#sec-ml-operations-scale-deployment-patterns-model-count-e071}
 
@@ -1489,7 +1489,7 @@ The next layer turns shared representations into candidate sets and business sig
 
 :::
 
-As @fig-ecommerce-graph illustrates, a single update to the user embedding model ripples across two direct consumers and two transitive nodes before reaching the business rules layer. Managing this blast radius requires the platform to coordinate verification across multiple boundaries: evaluating every downstream consumer against proposed embeddings before release, planning simultaneous rollouts for coupled components, tracking both direct embedding fidelity and downstream ranking performance, and either maintaining backward-compatible embedding versions or executing synchronized updates across the fleet. While the dependency graph maps affected consumers, a model registry alone cannot preserve the feature values they ingest. Shared features demand versioned definitions, point-in-time correctness, and explicit freshness guarantees, contracts that complete the state a release pipeline must validate.
+As @fig-ecommerce-graph illustrates, a single update to the user embedding model ripples across two direct consumers and then the ranking model before reaching the business rules layer. Managing this blast radius requires the platform to coordinate verification across multiple boundaries: evaluating every downstream consumer against proposed embeddings before release, planning simultaneous rollouts for coupled components, tracking both direct embedding fidelity and downstream ranking performance, and either maintaining backward-compatible embedding versions or executing synchronized updates across the fleet. While the dependency graph maps affected consumers, a model registry alone cannot preserve the feature values they ingest. Shared features demand versioned definitions, point-in-time correctness, and explicit freshness guarantees, contracts that complete the state a release pipeline must validate.
 
 ## Feature Store Operations {#sec-ml-operations-scale-feature-store-operations-2a36}
 
@@ -1769,9 +1769,9 @@ The difference in relative lift between hourly and real-time features is 2.1 per
 
 Training data must use features as they existed at the time of each training example. @Fig-time-travel illustrates the "time travel" problem: a batch job computing `total_clicks_today` at midnight produces a value of 10, but using this to train a model predicting behavior at noon introduces leakage since the true value at noon was only 4. Using current feature values as inputs for historical training examples creates data leakage[^fn-data-leakage-pitfall] that inflates offline metrics but fails in production.
 
-[^fn-data-leakage-pitfall]: **Data Leakage**\index{Data Leakage!feature store risk}: An error where future information contaminates training data. The systems danger is that leakage produces models with spectacular offline metrics (sometimes above 99 percent accuracy) that fail completely in production where future information is unavailable. At feature-store scale, leakage risk multiplies because batch-computed features may embed temporal information invisible to the model team but exploitable by the optimizer, making point-in-time correctness an infrastructure guarantee rather than a per-team responsibility.
+[^fn-data-leakage-pitfall]: **Data Leakage**\index{Data Leakage!feature store risk}: Leakage produces models with excellent offline metrics that fail in production, where the future information they learned to rely on is unavailable. At feature-store scale, leakage risk multiplies because batch-computed features may embed temporal information invisible to the model team but exploitable by the optimizer, making point-in-time correctness an infrastructure guarantee rather than a per-team responsibility.
 
-::: {#fig-time-travel fig-env="figure" fig-pos="htb" fig-cap="**Point-in-time correctness**: A point-in-time join prevents leakage by pairing each training event with feature values as they existed *at the event timestamp*, not with their current values. The resulting example contains only information that would have been available at inference time." fig-alt="Timeline from midnight to midnight with inference event at noon. Blue segments show 4 clicks by noon, 10 total by end. Red curved arrow shows leakage path using future value of 10. Green label shows correct point-in-time value of 4."}
+::: {#fig-time-travel fig-env="figure" fig-pos="htb" fig-cap="**Point-in-time correctness**: A point-in-time join prevents leakage by pairing each training event with feature values as they existed *at the event timestamp*, not with their current values. The resulting example contains only information that would have been available at inference time." fig-alt="Timeline from midnight to midnight with inference event at noon. Four solid click markers fall before noon and six dashed markers after it. A green box below the past side gives the point-in-time value of 4 clicks; a red box below the future side gives the leaked value of 10 clicks, 4 past plus 6 future."}
 ![](images/svg/time-travel.svg)
 
 <!--
@@ -2187,7 +2187,7 @@ A recommendation model's click-through rate (CTR) drops `{python} DataQualityInc
 ```
 ![](images/svg/vol2_ops_scale_margin_004.svg){width="100%" fig-alt="Time ladder comparing a late five-day detection window with a four-hour automated alert window, marked as a 30x gap."}
 
-*Every minute of delayed detection compounds the cost.*
+*Automated alerts cut detection from five days to four hours.*
 :::
 
 The investigation starts with the model symptom and then works backward through the data path. Model metrics\index{Lineage!model metrics} confirm that CTR declined from `{python} DataQualityIncident.ctr_before_pct_str` to `{python} DataQualityIncident.ctr_after_pct_str`, but freshness checks\index{Data!data freshness} show that features still arrive within the `{python} DataQualityIncident.freshness_slo_hr_str` SLO. That weakens the stale-pipeline hypothesis only if source progress, event-time coverage, and the affected entities are also verified; refresh age alone cannot exclude stale inputs. The investigation therefore tests semantic change as well. Distribution analysis then shows the mean of `user_engagement_score`, the shared feature whose redefinition @sec-ml-operations-scale-feature-versioning-lineage-624c used to motivate versioning, shifting from `{python} DataQualityIncident.engagement_before_str` to `{python} DataQualityIncident.engagement_after_str`, a `{python} DataQualityIncident.engagement_decline_pct_str` decline, and lineage tracking\index{Lineage!pipeline tracking}\index{Lineage tracking!provenance} ties the shift to an upstream pipeline version deployed `{python} DataQualityIncident.incident_days_str` earlier. The root cause is not model drift but a feature computation bug in the new pipeline version, the same class of silent semantic change that feature versioning is meant to name before release.
@@ -2925,7 +2925,7 @@ Once rollout coordination preserves version boundaries, the next question is whe
 
 Shadow deployment\index{Shadow deployment!traffic mirroring}\index{Deployment!shadow mode} runs the new model in parallel with production, receiving the same inputs and logging outputs, but not affecting user-visible results (@fig-shadow-deployment). This provides the highest fidelity testing environment short of actual production exposure, enabling detection of issues that escape offline validation.
 
-::: {#fig-shadow-deployment fig-env="figure" fig-pos="htb" fig-cap="**Shadow deployment architecture**: Production traffic is mirrored to the shadow model asynchronously. The router returns the production response to the user immediately, while both responses are logged for offline quality comparison and operational validation." fig-alt="Architecture diagram showing request router splitting traffic to production and shadow models with response logging."}
+::: {#fig-shadow-deployment fig-env="figure" fig-pos="htb" fig-cap="**Shadow and canary deployment**: In shadow deployment (A), the proxy mirrors all production traffic to the candidate asynchronously; users receive only the production response, and both outputs are compared offline. In canary deployment (B), the splitter sends a small weighted slice of live traffic to the candidate and widens that slice in stages, rolling back if SLO or error metrics drift." fig-alt="Two panels. Panel A: live traffic enters a traffic proxy that sends 100 percent to the production model, whose result returns to the user, and a copy to a dashed shadow model, whose response goes to a discard sink; both outputs feed an offline diff box. Panel B: a traffic splitter sends 95 percent to the current model and 5 percent to the canary model, beside a schedule that shifts canary traffic from 5 to 10, 25, 50, and 100 percent over 48 hours with an auto-rollback marker."}
 ![](images/svg/shadow-deployment.svg)
 
 <!--
@@ -3142,7 +3142,7 @@ Shadow deployment\index{Shadow deployment!traffic mirroring}\index{Deployment!sh
 
 Shadow deployment earns its duplicate infrastructure cost when it answers validation questions offline tests cannot. Operational load testing proves the new model can handle full production traffic volume without crashing, leaking memory, or violating latency SLOs.[^fn-slo-three-nines] A model that passes offline validation with small datasets may exhibit memory leaks, performance regressions, or resource contention when processing millions of requests per hour. Shadow deployment catches these operational issues before user impact.
 
-[^fn-slo-three-nines]: **SLO**\index{SLO!reliability target}: A target reliability level; for a model-serving API, "three nines" (99.9 percent) availability allows only 8.7 hours of downtime per year. For latency, a P99 SLO of 200 ms means 99 percent of requests must complete faster than 200 ms. Meeting these targets at scale requires automated scaling and circuit breaking to handle load spikes.
+[^fn-slo-three-nines]: **SLO**\index{SLO!reliability target}: A target reliability level; for a model-serving API, "three nines" (99.9 percent) availability allows only about 8.8 hours of downtime per year. For latency, a P99 SLO of 200 ms means 99 percent of requests must complete faster than 200 ms. Meeting these targets at scale requires automated scaling and circuit breaking to handle load spikes.
 
 Once the shadow path is isolated, the validation signal comes from comparing behavior under real traffic. Output comparison reveals distribution shifts, outlier behavior, and edge cases that aggregate offline metrics hide; for classification models, this might expose systematic shifts in confidence scores, while for recommendation systems it might expose changes in diversity or category distribution. Behavioral validation catches failures on long-tail inputs that appear infrequently in validation sets but thousands of times daily in production traffic. Performance characterization measures actual latency, throughput, and resource consumption, validating capacity assumptions before the model receives user-visible traffic.
 
@@ -3263,9 +3263,9 @@ In an interleaving workflow, both model variants score the full set of candidate
 
   % Split Cohorts
   \node[rectangle, rounded corners=2.5pt, draw=DarkNavy!50, fill=DarkNavy!5, line width=0.6pt, font=\scriptsize\bfseries, text=DarkNavy, minimum width=3.1cm, minimum height=0.55cm] (user_a)
-    at ([xshift=-1.75cm, yshift=-2.2cm]ab_panel.north) {Cohort A (50\% Traffic)};
+    at ([xshift=-1.75cm, yshift=-2.2cm]ab_panel.north) {Cohort A (50\%)};
   \node[rectangle, rounded corners=2.5pt, draw=WarmOchre!50, fill=WarmOchre!6, line width=0.6pt, font=\scriptsize\bfseries, text=WarmOchre, minimum width=3.1cm, minimum height=0.55cm] (user_b)
-    at ([xshift=1.75cm, yshift=-2.2cm]ab_panel.north) {Cohort B (50\% Traffic)};
+    at ([xshift=1.75cm, yshift=-2.2cm]ab_panel.north) {Cohort B (50\%)};
 
   \draw[->, line width=0.85pt, DarkNavy!70, shorten >= 2pt] (traffic_split.south) -- ++(0, -0.3) -| (user_a.north);
   \draw[->, line width=0.85pt, WarmOchre!80, shorten >= 2pt] (traffic_split.south) -- ++(0, -0.3) -| (user_b.north);
@@ -3353,7 +3353,7 @@ Improper statistical practices lead to false positives that waste engineering re
 ```{=latex}
 \vspace*{-10mm}
 ```
-![](images/svg/vol2_ops_scale_margin_002.svg){width="100%" fig-alt="Inverse-square curve showing required sample size rising sharply as the detectable effect gets smaller."}
+![](images/svg/vol2_ops_scale_margin_002.svg){width="100%" fig-alt="Inverse-square curve labeled n proportional to 1 over d squared, with a red dot at the small-effect end high on the curve and a green dot at the large-effect end near the bottom."}
 
 *Detecting smaller effects explodes the required sample size.*
 :::
@@ -3718,7 +3718,7 @@ Telemetry capacity follows the series count, sample rate, bytes per observation,
 Before a training job is allocated to a set of nodes, the scheduler employs automated preflight checks\index{Pre-flight check!node health}\index{Cluster management!pre-flight checks} to verify hardware health. The control plane runs a battery of short, intensive diagnostics: general matrix multiply (GEMM) benchmarks to verify Tensor Core throughput, NCCL AllReduce tests to validate NVLink and InfiniBand bandwidth, and memory stress tests to catch weak HBM bit cells that might produce uncorrectable errors under sustained load. A node that underperforms on any diagnostic is automatically quarantined for repair, and a healthy replacement is substituted before the job launches. This validation process adds 5--10 minutes to job startup time, a negligible cost compared to the hours of wasted computation when a training run crashes mid-flight due to a degraded GPU that passed a simple power-on self-test but fails under sustained arithmetic load.
 
 ::: {.column-margin}
-![](images/svg/vol2_ops_scale_margin_005.svg){width="100%" fig-alt="One slow GPU at an all-reduce barrier delays peers."}
+![](images/svg/vol2_ops_scale_margin_005.svg){width="100%" fig-alt="Two-level fan: one red square links to three violet nodes, and each violet node links to two blue nodes."}
 
 *One slow accelerator stalls every peer at the barrier.*
 :::
@@ -3803,7 +3803,7 @@ class FalseAlarmTax:
 ```
 
 ::: {.column-margin}
-![](images/svg/vol2_ops_scale_margin_003.svg){width="100%" fig-alt="Saturating curve for one minus one minus alpha to the N, approaching near certainty as the number of tests grows."}
+![](images/svg/vol2_ops_scale_margin_003.svg){width="100%" fig-alt="Red saturating curve labeled 1 minus (1 minus alpha) to the N, rising with the number of tests N toward a gray line at 1, annotated near 1."}
 
 *As tests multiply, false alerts become mathematically inevitable.*
 :::
@@ -4424,7 +4424,7 @@ Platform
 
 Each team receives dedicated namespaces with resource quotas, while shared services operate in common namespaces with appropriate access controls. Without controls, one team's demanding workload can degrade performance for others, a failure mode known as the noisy neighbor problem.[^fn-noisy-neighbor-ml] Prevention requires controls at request, rate, priority, and budget boundaries.
 
-[^fn-noisy-neighbor-ml]: **Noisy Neighbor Problem**\index{Noisy Neighbor Problem!definition}\index{Noisy Neighbor!GPU multi-tenancy}: A multi-tenancy failure mode where one tenant's workload degrades performance for co-located tenants. ML workloads are particularly prone to this because training jobs allocate GPU memory greedily; a single job requesting all available HBM on a shared node can starve co-located inference services, causing latency spikes that violate SLOs. GPU memory sharing requires an explicit fit, eviction, offload, or time-sharing policy. Physical partitioning provides one isolation option; it is not the only mechanism, and shared fabric contention may remain.
+[^fn-noisy-neighbor-ml]: **Noisy Neighbor Problem**\index{Noisy Neighbor Problem!definition}\index{Noisy Neighbor!GPU multi-tenancy}: A multi-tenancy failure mode where one tenant's workload degrades performance for co-located tenants. ML workloads are particularly prone to this because training jobs allocate GPU memory greedily; a single job requesting all available HBM on a shared node can starve co-located inference services, causing latency spikes that violate SLOs. Sharing therefore requires an explicit fit, eviction, offload, time-sharing, or partitioning policy, and even physical partitioning leaves shared-fabric contention in place.
 
 To prevent any single tenant from overwhelming shared platform services, four complementary controls govern the request path. Request limits place hard caps on the compute and memory an individual invocation may consume, while rate limiting bounds aggregate query velocity across tenant boundaries. Under heavy cluster contention, priority classes ensure that mission-critical production traffic receives scheduling preference over ad-hoc or batch queries. Finally, burst budgets permit brief, temporary resource overages to accommodate legitimate spikes while preserving long-term fairness across the fleet. Together, these controls make fairness enforceable directly in the data plane rather than relying on after-the-fact operational negotiation.
 
@@ -4757,7 +4757,7 @@ ax.text(
 )
 
 # Axis limits & labels
-ax.set_xlim(-0.5, 34.5)
+ax.set_xlim(-0.5, 35.5)
 ax.set_ylim(0, 94)
 ax.set_xlabel('Cluster Operating Lifetime (Months)')
 ax.set_ylabel('Cumulative Cost ($M)')
@@ -5686,16 +5686,8 @@ categories = [
     'Compliance & Gov.',
 ]
 values = [40, 10, 20, 10, 5, 5, 5, 5]
-colors = [
-    COLORS['BlueLine'],
-    COLORS['BlueL'],
-    COLORS['OrangeLine'],
-    COLORS['OrangeL'],
-    COLORS['VioletLine'],
-    COLORS['VioletL'],
-    COLORS['RedLine'],
-    COLORS['RedL'],
-]
+# Color encodes the one distinction the legend names: visible vs. hidden cost.
+colors = [COLORS['BlueLine']] * 2 + [COLORS['OrangeLine']] * 6
 
 y_pos = np.arange(len(categories))
 
@@ -6580,7 +6572,7 @@ A centralized ML platform team\index{Organizational pattern!centralized platform
   % Header
   \node[anchor=north west, fill=ForestSage!8, draw=ForestSage!30, rounded corners=2pt, line width=0.5pt, inner xsep=6pt, inner ysep=3pt]
     at ([xshift=0.25cm, yshift=-0.25cm]p3.north west) {
-    \textbf{\scriptsize\textcolor{ForestSage!90!black}{HYBRID}} \;\textcolor{ForestSage!40}{$\cdot$}\; \textnormal{\tiny\textcolor{ForestSage!85!black}{Core Substrate + Liaisons}}
+    \textbf{\scriptsize\textcolor{ForestSage!90!black}{HYBRID}} \;\textcolor{ForestSage!40}{$\cdot$}\; \textnormal{\tiny\textcolor{ForestSage!85!black}{Core + Liaisons}}
   };
 
   % Core Platform Node

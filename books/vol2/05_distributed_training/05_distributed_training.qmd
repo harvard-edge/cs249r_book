@@ -299,7 +299,7 @@ Data parallelism is the parallel for-loop\index{Data parallelism!batch loop tran
 
 Whichever loop a strategy unrolls, distributed training[^fn-distbelief-parameter-server] spreads the workload across machines that must coordinate to train a single model. Coordination here means keeping every model shard or replica on a compatible training step. Basic barriers can keep a small research run ordered, but long-running training jobs also need timeout, checkpoint, and recovery mechanisms so one failed worker does not waste days of compute. @Sec-fault-tolerance-reliability examines those reliability engineering challenges in depth.
 
-[^fn-distbelief-parameter-server]: **Distributed training**\index{DistBelief!distributed training}: Google's DistBelief (2012) was an early framework for training neural networks across thousands of machines, but its parameter server architecture\index{Parameter server!centralized synchronization} created bandwidth bottlenecks at central nodes. This limitation drove the shift to decentralized AllReduce patterns\index{AllReduce!decentralized scaling} in successors like Horovod\index{Horovod!gradient all-reduce} and PyTorch\index{PyTorch} DistributedDataParallel (DDP)\index{DDP!gradient bucketing}\index{DistributedDataParallel|see{DDP}}, where replicated data-parallel workers synchronize gradients at cost $2(N-1)/N$ per worker rather than concentrating traffic at a single server [@dean2012large; @sergeev2018horovod; @li2020pytorch; @patarasuk2009].
+[^fn-distbelief-parameter-server]: **Distributed training**\index{DistBelief!distributed training}: Google's DistBelief (2012) was an early framework for training neural networks across thousands of machines, but its parameter server architecture\index{Parameter server!centralized synchronization} created bandwidth bottlenecks at central nodes. This limitation drove the shift to decentralized AllReduce patterns\index{AllReduce!decentralized scaling} in successors like Horovod\index{Horovod!gradient all-reduce} and PyTorch\index{PyTorch} DistributedDataParallel (DDP)\index{DDP!gradient bucketing}\index{DistributedDataParallel|see{DDP}}, where each data-parallel worker sends and receives about $2(N-1)/N$ times the gradient size per step rather than concentrating traffic at a single server [@dean2012large; @sergeev2018horovod; @li2020pytorch; @patarasuk2009].
 
 ```{python}
 #| echo: false
@@ -327,7 +327,7 @@ Each rung of the scaling path inherits the previous one's challenges. Single-GPU
 
 The leap to multi-node training adds network communication overhead, fault tolerance requirements, and cluster orchestration\index{Cluster orchestration!distributed training}. Because each stage compounds the previous one's bottlenecks, single-GPU performance must be optimized before scaling out, so inefficiency does not multiply across the fleet. Although frameworks abstract away much of this through sharded data parallelism and communication libraries, implementing distributed training efficiently still demands careful network configuration (InfiniBand tuning, topology-aware routing), infrastructure management through cluster schedulers, and debugging of nonlocal issues such as synchronization hangs and communication bottlenecks. @Fig-3d-parallelism-cube returns to the three partitions that organize this work and combines them into one configuration space.
 
-::: {#fig-3d-parallelism-cube fig-env="figure" fig-pos="htb" fig-cap="**The 3D parallelism cube**: The configuration space decomposes cluster training across three orthogonal axes: tensor parallelism ($t$, intra-layer sharding), pipeline parallelism ($p$, sequential stage partitioning), and data parallelism ($d$, batch replication). Feasible cluster execution requires jointly satisfying model divisibility, per-device memory limits, and hardware network hierarchies to allocate $N = d \times p \times t$ total accelerators." fig-alt="3D coordinate cube showing Tensor Parallelism on width, Pipeline Parallelism on height, and Data Parallelism on depth, with a highlighted single accelerator coordinate and summary specification cards."}
+::: {#fig-3d-parallelism-cube fig-env="figure" fig-pos="htb" fig-cap="**The 3D parallelism cube**: The configuration space decomposes cluster training across three orthogonal axes: tensor parallelism ($t$, intra-layer sharding), pipeline parallelism ($p$, sequential stage partitioning), and data parallelism ($d$, batch replication). Feasible cluster execution requires jointly satisfying model divisibility, per-device memory limits, and hardware network hierarchies to allocate $N = d \times p \times t$ total accelerators." fig-alt="Cube divided into a grid of cells with tensor parallelism along the width, pipeline parallelism along the height, and data parallelism along the depth; one corner cell is shaded and labeled as one GPU per (d, p, t) cell. Cards on the right give the device-count formula, each axis, and its hardware placement."}
 ![](images/svg/3d-parallelism-cube.svg)
 
 <!--
@@ -579,7 +579,7 @@ The method parallels gradient accumulation\index{Gradient accumulation!single-de
 
 The implementation details matter because the SGD equivalence only holds when each phase preserves the intended aggregate sampling and weighting, complete local gradient contributions, and a single synchronized update. The concrete workflow therefore traces the path from assigning local batches to synchronizing the computed gradients. @Fig-dist-train-data-parallelism traces the five-stage data-parallel execution pipeline, illustrating how identical model replicas ingest disjoint batch shards, compute independent local gradients, and converge at a collective reduction barrier before executing uniform weight updates.
 
-::: {#fig-dist-train-data-parallelism fig-env="figure" fig-pos="htb" fig-cap="**Data parallelism implementation pipeline**: The five-stage workflow for data-parallel training: (1) partition the global batch, (2) assign sharded mini-batches to individual GPUs, (3) compute independent forward and backward passes to produce local gradients $g_i$, (4) execute an AllReduce collective across the cluster to obtain the average gradient $\bar{g}$, and (5) update parameters identically across all devices. This strategy preserves the mathematical semantics of single-device SGD while distributing the compute burden." fig-alt="Five-stage data-parallel workflow diagram showing global batch partitioning, local forward and backward computation across four GPU swimlanes, centralized AllReduce collective synchronization, and synchronized parameter updates."}
+::: {#fig-dist-train-data-parallelism fig-env="figure" fig-pos="htb" fig-cap="**Data parallelism implementation pipeline**: The five-stage workflow for data-parallel training: (1) partition the global batch, (2) assign sharded mini-batches to individual GPUs, (3) compute independent forward and backward passes to produce local gradients $g_i$, (4) execute an AllReduce collective across the cluster to obtain the average gradient $\bar{g}$, and (5) update parameters identically across all devices. This strategy preserves the mathematical semantics of single-device SGD while distributing the compute burden." fig-alt="Five-stage data-parallel workflow diagram showing global batch partitioning, local forward and backward computation across four GPU swimlanes, an AllReduce block that averages the four gradients, and synchronized parameter updates."}
 ![](images/svg/data-parallel-flow.svg)
 
 <!--
@@ -1834,16 +1834,6 @@ ax.text(
     va='center',
 )
 
-ax.annotate(
-    f'Fully Sharded\nState / {_n}\n({_tot[3]:.2f} GB)',
-    xy=(x[3], _tot[3]),
-    xytext=(x[3] + 0.35, 14.0),
-    fontsize=7.5,
-    fontweight='bold',
-    color=COLORS['GreenLine'],
-    arrowprops=dict(arrowstyle='->', color=COLORS['GreenLine'], lw=1.0),
-)
-
 ax.set_ylim(0, 138)
 ax.set_ylabel('Per-GPU Memory Footprint (GB)')
 ax.set_xticks(x)
@@ -2597,9 +2587,9 @@ ax.loglog(normalized_batch, normalized_steps, color=viz.COLORS['BlueLine'], line
 ax.loglog(
     normalized_batch, normalized_samples, color=viz.COLORS['OrangeLine'], linestyle='--', linewidth=2.4, label='Examples processed / minimum examples'
 )
-ax.axvline(1, ymax=0.72, color=viz.COLORS['RedLine'], linestyle=':', linewidth=1.2)
-ax.scatter([1], [2], color=viz.COLORS['RedLine'], zorder=5)
-ax.annotate('Crossover: both costs = 2', xy=(1, 2), xytext=(0.025, 5), arrowprops={'arrowstyle': '->', 'color': viz.COLORS['RedLine']}, fontsize=9)
+ax.axvline(1, ymax=0.72, color=viz.COLORS['primary'], linestyle=':', linewidth=1.2)
+ax.scatter([1], [2], color=viz.COLORS['primary'], zorder=5)
+ax.annotate('Crossover: both costs = 2', xy=(1, 2), xytext=(0.012, 1.55), arrowprops={'arrowstyle': '->', 'color': viz.COLORS['primary']}, fontsize=9)
 ax.set_xlabel(r'Batch size / critical batch size ($B/B^*$)')
 ax.set_ylabel('Normalized cost to the same target quality')
 ax.set_ylim(0.9, 130)
@@ -3362,7 +3352,7 @@ Once the model itself is the object being partitioned, the implementation proble
   % ===========================================================
   % OUTPUT PREDICTIONS (x = 13.5)
   % ===========================================================
-  \node[io box, draw=RedLine!60, fill=RedFill!20] (out_pred) at (13.5, 2.3) {
+  \node[io box, draw=GrayLine!40, fill=gray!4] (out_pred) at (13.5, 2.3) {
     \textbf{\footnotesize Loss \&}\\[2pt]
     \textbf{\footnotesize Output}\\[4pt]
     \tiny Pred $\hat{Y}$\\[1pt]
@@ -4996,9 +4986,7 @@ The dependence runs both ways: a parallelism configuration also determines which
 
 ### The 3D training loop {#sec-distributed-training-systems-systems-hybrid-parallelism-3d-loop}
 
-Training a `{python} FrontierTrainingContext.frontier_params_b_str`-parameter model requires **3D parallelism**\index{3D parallelism!definition}: the coordinated composition of data, pipeline, and tensor parallelism across thousands of devices.[^fn-three-dimensional-parallelism] This approach does not merely sum the benefits of individual parallelism strategies; it composes them geometrically to match the physical topology of the hardware.
-
-[^fn-three-dimensional-parallelism]: **3D parallelism**\index{3D parallelism!etymology}: Named after the three orthogonal axes of decomposition: (1) Data Parallelism (batch), (2) Pipeline Parallelism (depth), and (3) Tensor Parallelism (layer width). Organizations visualize their training fleets as a 3D grid $(d, p, t)$, where the product $N_{\text{total}} = d \times p \times t$ equals the total GPU count. This geometric perspective is essential for balancing the tiered bandwidth constraints of high-bandwidth clusters.
+Training a `{python} FrontierTrainingContext.frontier_params_b_str`-parameter model requires **3D parallelism**\index{3D parallelism!definition}: the coordinated composition of data, pipeline, and tensor parallelism across thousands of devices. This approach does not merely sum the benefits of individual parallelism strategies; it composes them geometrically to match the physical topology of the hardware.
 
 ```{python}
 #| echo: false
@@ -5429,7 +5417,7 @@ plt.close()
 
 @Fig-3d-parallelism-cube-summary shows the resulting data, pipeline, and tensor groups in a small coordinate-grid example.
 
-::: {#fig-3d-parallelism-cube-summary fig-env="figure" fig-pos="htb" fig-cap="**3D parallelism strategy space**: An 8-GPU configuration fills a $(d,p,t)$ coordinate grid that combines data parallelism (replicas), pipeline parallelism (layer stages), and tensor parallelism (within-layer splits). One training step coordinates $d \times p \times t$ GPUs, with communication occurring within layers, at microbatch stage boundaries, and once per optimizer step, respectively." fig-alt="Flat 8-GPU coordinate-grid layout with each GPU labeled by its (d, p, t) coordinate showing how the three parallelism axes combine in a concrete configuration."}
+::: {#fig-3d-parallelism-cube-summary fig-env="figure" fig-pos="htb" fig-cap="**3D parallelism strategy space**: An 8-GPU configuration fills a $(d,p,t)$ coordinate grid that combines data parallelism (replicas), pipeline parallelism (layer stages), and tensor parallelism (within-layer splits). One training step coordinates $d \times p \times t$ GPUs: tensor groups communicate within every layer, pipeline stages at microbatch boundaries, and data replicas once per optimizer step." fig-alt="Flat 8-GPU coordinate-grid layout with each GPU labeled by its (d, p, t) coordinate showing how the three parallelism axes combine in a concrete configuration."}
 ![](images/svg/3d-parallelism.svg)
 
 <!--
