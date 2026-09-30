@@ -4027,11 +4027,18 @@ def fmt_stiffness(
     q = quantity.to(display_unit)
     auto_precision = precision is None
     p = _resolve_display_precision(q.magnitude, precision)
-    unit_str = str(display_unit)
-    if "millimeter" in unit_str or "mm" in unit_str:
-        unit_label = "N/mm"
-    else:
-        unit_label = "N/m"
+    # 2026-09-29: the label was chosen by substring, so kN/m values printed
+    # as "N/m". Build the label from the numerator and denominator prefixes.
+    force_prefixes = (("meganewton", "MN"), ("kilonewton", "kN"), ("millinewton", "mN"), ("newton", "N"))
+    length_prefixes = (("kilometer", "km"), ("millimeter", "mm"), ("micrometer", "µm"), ("centimeter", "cm"), ("meter", "m"))
+    parts = dict(display_unit._units)
+    num = " ".join(k for k, v in parts.items() if v > 0)
+    den = " ".join(k for k, v in parts.items() if v < 0)
+    f_lbl = next((lbl for name, lbl in force_prefixes if name in num), None)
+    l_lbl = next((lbl for name, lbl in length_prefixes if name in den), None)
+    if f_lbl is None or l_lbl is None:
+        raise ValueError(f"fmt_stiffness cannot label unit {display_unit}; pass a force/length unit.")
+    unit_label = f"{f_lbl}/{l_lbl}"
     return fmt_qty(
         q,
         display_unit,

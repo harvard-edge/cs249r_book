@@ -162,7 +162,7 @@ $$I_{\text{pixel}} = \int_{0}^{t_{\text{exp}}} I(t)\,dt$$
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim import *
 from mlsysim.core.units import *
-from mlsysim.fmt import fmt, fmt_latency, fmt_length, fmt_velocity, fmt_frequency, fmt_int, fmt_percent, check
+from mlsysim.fmt import fmt, fmt_latency, fmt_length, fmt_velocity, fmt_frequency, fmt_int, fmt_percent, fmt_display_math, check
 
 RM = Embodied.MobileManipulator.WarehouseMobileManipulator
 AISLE = Embodied.Scenario.WarehouseAisle
@@ -181,6 +181,7 @@ class RollingShutterSkew:
     delta_loc = AISLE.delta_loc  # category: illustrative (along-travel localization allowance)
     side_clearance = AISLE.side_clearance  # category: illustrative
     f_imu = RM.imu.sample_rate  # category: datasheet
+    v_aisle = AISLE.v_aisle.to(meter / second)  # category: chosen (aisle speed, below the derived ceiling)
 
     # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────
     t_exp_half = (t_exp / 2).to(millisecond)
@@ -190,6 +191,8 @@ class RollingShutterSkew:
     skew_over_loc = (skew / delta_loc).to(ureg.dimensionless).magnitude
     lateral = (z_upright * omega_yaw.to(1 / second).magnitude * t_readout.to(second).magnitude).to(ureg.millimeter)
     lateral_share = (lateral / side_clearance).to(ureg.dimensionless).magnitude
+    skew_aisle = (v_aisle * t_readout).to(ureg.millimeter)  # sensitivity: the chosen aisle speed
+    skew_aisle_over_loc = (skew_aisle / delta_loc).to(ureg.dimensionless).magnitude
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(rows == 3040, f"Unexpected navigation-camera row count: {rows}")
@@ -200,6 +203,8 @@ class RollingShutterSkew:
     check(0.45 < skew_over_loc < 0.55, f"Prose says the along-track skew is about half of delta_loc: {skew_over_loc}")
     check(abs(lateral.magnitude - 9.1) < 0.05, f"Unexpected lateral skew from yaw: {lateral}")
     check(0.055 < lateral_share < 0.065, f"Prose says the lateral skew is about 6 percent of the side clearance: {lateral_share}")
+    check(abs(skew_aisle.magnitude - 21.6) < 0.05, f"Unexpected skew at the aisle speed: {skew_aisle}")
+    check(0.4 < skew_aisle_over_loc < 0.45, f"Notebook says the aisle speed still spends over two fifths of delta_loc: {skew_aisle_over_loc}")
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
     rows_str = fmt_int(rows)
@@ -218,24 +223,73 @@ class RollingShutterSkew:
     lateral_pct_str = fmt_percent(lateral_share, precision=1)
     side_clearance_str = fmt_length(side_clearance.to(meter), unit=meter, precision=2)
     f_imu_str = fmt_frequency(f_imu, unit=ureg.hertz, precision=0, commas=True)
+    v_aisle_str = fmt_velocity(v_aisle, unit=meter / second, precision=1)
+    skew_aisle_str = fmt_length(skew_aisle, unit=ureg.millimeter, precision=1)
+    skew_aisle_pct_str = fmt_percent(skew_aisle_over_loc, precision=0)
+
+    # Display arithmetic for nbk-perception-readout-shear (magnitudes, LaTeX units)
+    _tr = fmt(t_readout.magnitude, precision=1)
+    _v = fmt(v.magnitude, precision=1)
+    _z = fmt(z_upright.to(meter).magnitude, precision=2)
+    _w = fmt(omega_yaw.to(radian / second).magnitude, precision=1)
+    _rows = str(fmt_int(rows)).replace(",", "{,}")
+    t_row_math = fmt_display_math(
+        rf"t_{{\text{{row}}}} = \frac{{t_{{\text{{readout}}}}}}{{H}} = \frac{{{_tr}\ \text{{ms}}}}{{{_rows}}} = {fmt(t_row.magnitude, precision=2)}\ \mu\text{{s}}"
+    )
+    skew_math = fmt_display_math(
+        rf"\Delta x = v\,t_{{\text{{readout}}}} = {_v}\ \text{{m/s}} \times {_tr}\ \text{{ms}} = {fmt(skew.magnitude, precision=1)}\ \text{{mm}}, \quad \frac{{\Delta x}}{{\delta_{{\text{{loc}}}}}} = \frac{{{fmt(skew.magnitude, precision=1)}\ \text{{mm}}}}{{{fmt(delta_loc.to(ureg.millimeter).magnitude, precision=0)}\ \text{{mm}}}} = {fmt(skew_over_loc, precision=2)}"
+    )
+    lateral_math = fmt_display_math(
+        rf"\Delta y = z\,\omega\,t_{{\text{{readout}}}} = {_z}\ \text{{m}} \times {_w}\ \text{{rad/s}} \times {_tr}\ \text{{ms}} = {fmt(lateral.magnitude, precision=1)}\ \text{{mm}}, \quad \frac{{{fmt(lateral.magnitude, precision=1)}\ \text{{mm}}}}{{{fmt(side_clearance.to(ureg.millimeter).magnitude, precision=0)}\ \text{{mm}}}} = {fmt(lateral_share, precision=3)}"
+    )
 ```
 
 Because charge accumulates across the whole window, the time the accumulated image represents is the exposure midpoint, $t_{\text{exp}}/2$ after exposure starts and the same interval before it ends. With the navigation camera's `{python} RollingShutterSkew.t_exp_str` exposure at the base's `{python} RollingShutterSkew.v_str` drive limit, the image does not record where the robot *is*. It records where the robot *was* `{python} RollingShutterSkew.t_exp_half_str` earlier, with `{python} RollingShutterSkew.blur_str` of relative translation during the exposure. The exposure is a configured setting, not a property of the sensor. The running machine carries this long exposure as its low-light worst case; a brighter aisle permits a shorter one, and both the blur and the midpoint lag shrink in proportion.
 
 ### Rolling shutter distortion and motion compensation
 
-The exposure window schedule across the pixel array determines the spatial geometry of the image. In a **global shutter**\index{Global shutter!definition} sensor, every pixel photodiode accumulates charge during the identical time interval and transfers the accumulated electrons to shielded storage nodes simultaneously. In a **rolling shutter**\index{Rolling shutter!definition} sensor, silicon area and cost constraints dictate that rows are reset, exposed, and read out sequentially from the top scanline $y = 0$ to the bottom scanline $y = H - 1$. Each successive scanline begins exposure after a row period $t_{\text{row}}$, creating a progressive temporal offset across the image plane:[^fn-hw-rolling-shutter]
+The exposure window schedule across the pixel array determines the spatial geometry of the image. In a **global shutter**\index{Global shutter!definition} sensor, every pixel photodiode accumulates charge during the identical time interval and transfers the accumulated electrons to shielded storage nodes simultaneously. In a **rolling shutter**\index{Rolling shutter!definition} sensor, silicon area and cost constraints dictate that rows are reset, exposed, and read out sequentially from the top scanline $y = 0$ to the bottom scanline $y = H - 1$. Each successive scanline begins exposure after a row period $t_{\text{row}}$, creating a progressive temporal offset across the image plane:
 $$t(y) = t_{\text{start}} + y \cdot t_{\text{row}}$$
 where $t_{\text{start}}$ is the start of exposure for the top row. When the body translates at linear velocity $v$ perpendicular to a vertical feature, scanline $y$ captures it at a spatial displacement:
-$$\Delta x(y) = v \cdot y \cdot t_{\text{row}}$$
-
-[^fn-hw-rolling-shutter]: **Rolling shutter epipolar geometry**\index{Hardware!rolling shutter}: Rolling shutter CMOS image sensors reset, integrate, and read pixel scanlines sequentially across the array rather than exposing all photosites simultaneously. When the camera rotates during this readout interval, straight physical edges project into curved geometric arcs across the image plane. This progressive scanline skew violates rigid multi-view epipolar constraints, which restrict a matched scene point in one view to its corresponding line in the other, causing visual backbones, depth networks, and odometry pipelines to compute spurious feature depths unless continuous-time scanline motion compensation or trajectory interpolation rectifies the frame before feature extraction.
+$$\Delta x(y) = v \cdot y \cdot t_{\text{row}}$$ {#eq-percep-rolling-shutter-skew}
 
 Under rotational motion, rolling shutter distortion becomes non-linear. If the camera undergoes angular rotation at angular velocity vector $\boldsymbol{\omega} = [\omega_x, \omega_y, \omega_z]^T$ (e.g., rapid yaw or pitch during aggressive robot maneuvers), the effective camera attitude changes continuously as scanlines are read. Physically, the camera points in a slightly different direction for every single row. For a scanline at vertical coordinate $y$, the differential rotation relative to the frame start is $\Delta \boldsymbol{\theta}(y) \approx \boldsymbol{\omega} \cdot y \cdot t_{\text{row}}$. This scanline-dependent rotation warps straight physical lines into curves, stretches or compresses the image vertically during pitch, and shears vertical walls into slanted surfaces, as demonstrated by the propeller blade curvature in @fig-rolling-shutter-skew.
 
-Consider the mobile manipulator's navigation camera while the base passes a vertical rack upright at its `{python} RollingShutterSkew.v_str` drive limit. The rolling shutter reads the frame's `{python} RollingShutterSkew.rows_str` rows in $t_{\text{readout}} =$ `{python} RollingShutterSkew.t_readout_str`, so the inter-row interval is $t_{\text{row}} =$ `{python} RollingShutterSkew.t_row_str`. An upright spanning the full height of the frame does not appear vertical in the captured array. The bottom scanline ($y =$ `{python} RollingShutterSkew.last_row_str`) is sampled `{python} RollingShutterSkew.t_readout_str` after the top scanline ($y = 0$), producing a total spatial skew $\Delta x = v\,t_{\text{readout}}$ of `{python} RollingShutterSkew.skew_str`.
+Consider the mobile manipulator's navigation camera while the base passes a vertical rack upright at its `{python} RollingShutterSkew.v_str` drive limit. An upright spanning the full height of the frame does not appear vertical in the captured array, because the bottom scanline ($y =$ `{python} RollingShutterSkew.last_row_str`) is sampled a full readout after the top scanline ($y = 0$). Two distinct errors follow, and they spend different clearances. Travel along the aisle skews the upright along the direction of travel, and yaw while the base turns into the aisle moves it sideways. Notebook \ref{nbk-perception-readout-shear} sizes both.
 
-That skew lies along the direction of travel. The bottom rows see the upright from a camera position `{python} RollingShutterSkew.skew_str` farther down the aisle than the top rows did, so an image treated as an instantaneous rigid projection places the upright's lower half nearer than its upper half. The error therefore belongs with the stopping budget's localization allowance $\delta_{\text{loc}}$, which that budget holds along the direction of travel, and uncorrected it would spend about half of the `{python} RollingShutterSkew.delta_loc_str` allowance. The allowance assumes the skew has been removed before the estimator sees the frame. The side clearance faces a different term. A lateral rolling-shutter error comes from yaw: while the base turns at an illustrative `{python} RollingShutterSkew.omega_yaw_str` rad/s, the camera's bearing rotates by $\omega\,t_{\text{readout}}$ during readout, which at the `{python} RollingShutterSkew.z_upright_str` rack-end distance moves the upright sideways by $z\,\omega\,t_{\text{readout}} =$ `{python} RollingShutterSkew.lateral_str`, about `{python} RollingShutterSkew.lateral_pct_str` percent of the `{python} RollingShutterSkew.side_clearance_str` side clearance. Both terms scale with readout time. A global-shutter sensor, such as the machine's wrist camera, removes them at the cost of pixel area, so shutter type is a selection decision for any camera whose geometry feeds a clearance claim; this machine keeps the rolling-shutter navigation camera as the harder teaching case. Correcting this distortion requires **rolling-shutter motion compensation**\index{Rolling-shutter motion compensation!definition}, geometric unwarping using a camera pose for each scanline. The IMU supplies high-rate (`{python} RollingShutterSkew.f_imu_str`) angular-rate and specific-force measurements, not linear velocity. A state estimator combines those measurements with its initial state, bias and gravity estimates, and other available motion evidence to estimate body pose and velocity. Applying the calibrated body-to-camera extrinsics gives the instantaneous camera pose for each row, which permits scanline rectification before triangulation within the pose estimate's error bounds.
+::: {#nbk-perception-readout-shear .callout-notebook title="The readout shear"}
+
+**Problem**: The base passes a rack upright at its drive limit while turning into the aisle. How far apart does the navigation camera record the upright's top and bottom rows, and what share of the clearance each error spends does it use?
+
+**Variables**:
+
+* Rows $H =$ `{python} RollingShutterSkew.rows_str` and readout $t_{\text{readout}} =$ `{python} RollingShutterSkew.t_readout_str` (Datasheet, full-resolution mode).
+* Drive limit $v =$ `{python} RollingShutterSkew.v_str` (Illustrative).
+* Yaw rate $\omega =$ `{python} RollingShutterSkew.omega_yaw_str` rad/s while turning into the aisle, at the rack-end range $z =$ `{python} RollingShutterSkew.z_upright_str` (Illustrative).
+* Localization allowance $\delta_{\text{loc}} =$ `{python} RollingShutterSkew.delta_loc_str` and side clearance `{python} RollingShutterSkew.side_clearance_str` (Illustrative; @tbl-01-machine-card).
+
+**Math**:
+
+*Row interval.*
+`{python} RollingShutterSkew.t_row_math`
+
+*Along-track skew.* At the last row, @eq-percep-rolling-shutter-skew gives
+`{python} RollingShutterSkew.skew_math`
+
+*Lateral skew.* The bearing rotates by $\omega\,t_{\text{readout}}$ during readout, which moves the upright sideways at range $z$ by
+`{python} RollingShutterSkew.lateral_math`
+
+*Sensitivity.* At the aisle's chosen `{python} RollingShutterSkew.v_aisle_str`, the along-track skew is still `{python} RollingShutterSkew.skew_aisle_str`, `{python} RollingShutterSkew.skew_aisle_pct_str` percent of $\delta_{\text{loc}}$.
+
+**Result**: The bottom rows see the upright from a camera position `{python} RollingShutterSkew.skew_str` farther down the aisle than the top rows did, half of $\delta_{\text{loc}}$. Yaw adds `{python} RollingShutterSkew.lateral_str` sideways, about `{python} RollingShutterSkew.lateral_pct_str` percent of the side clearance.
+
+**Systems insight**: Uncorrected, one readout would spend half of the localization allowance that the stopping budget holds for the whole state estimate, and slowing to aisle speed barely helps. The budget's $\delta_{\text{loc}}$ is therefore valid only if the skew is removed before the estimator sees the frame. The lateral term is small at the rack end, but it grows with range and turn rate, so it belongs in the calibration and timing checks rather than in a budget row.
+
+:::
+
+The along-track error belongs with $\delta_{\text{loc}}$ because an image treated as an instantaneous rigid projection places the upright's lower half nearer than its upper half, and the stopping budget holds that allowance along the direction of travel. Both terms scale with readout time. A global-shutter sensor, such as the machine's wrist camera, removes them at the cost of pixel area, so shutter type is a selection decision for any camera whose geometry feeds a clearance claim; this machine keeps the rolling-shutter navigation camera as the harder teaching case. Correcting this distortion requires **rolling-shutter motion compensation**\index{Rolling-shutter motion compensation!definition}, geometric unwarping using a camera pose for each scanline. The IMU supplies high-rate (`{python} RollingShutterSkew.f_imu_str`) angular-rate and specific-force[^fn-specific-force] measurements, not linear velocity. A state estimator combines those measurements with its initial state, bias and gravity estimates, and other available motion evidence to estimate body pose and velocity. Applying the calibrated body-to-camera extrinsics gives the instantaneous camera pose for each row, which permits scanline rectification before triangulation within the pose estimate's error bounds.
+
+[^fn-specific-force]: **Specific Force**: An accelerometer measures non-gravitational acceleration, $\mathbf{a}-\mathbf{g}$, so a unit resting on the floor reads one $g$ upward and one in free fall reads zero. Dead reckoning must therefore subtract gravity through an attitude estimate, and an attitude error $\theta$ leaks $g\sin\theta$ into horizontal acceleration, which integrates twice into the per-row poses that de-skewing relies on. \index{Inertial measurement unit!specific force}
 
 @Fig-08-rolling-shutter-rows plots that sampling against the row index: each row sees the upright from its own camera position, and each row's exposure smears the scene over its own interval.
 
@@ -317,7 +371,10 @@ plt.show()
 ![](images/jpg/fig08_real_rolling_shutter_skew.jpg){width="85%"}
 :::
 
-The distorted blades in @fig-rolling-shutter-skew show why the correction must precede geometric interpretation. A learned feature extractor can also mistake scanline deformation for object shape; a stereo matcher can lose correspondences when they move off the expected epipolar line. Increasing model capacity does not restore the common capture geometry that those computations assume.
+The distorted blades in @fig-rolling-shutter-skew show why the correction must precede geometric interpretation. A learned feature extractor can also mistake scanline deformation for object shape; a stereo matcher can lose correspondences when they move off the expected epipolar line.[^fn-epipolar-stereo] Increasing model capacity does not restore the common capture geometry that those computations assume.
+
+[^fn-epipolar-stereo]: **Epipolar Line**: For a calibrated camera pair, a point seen in one image can appear in the other only along one line, the projection of the ray from the first camera's center through that point (@sec-perception-error-clearance derives it). Stereo matchers search that line alone, so a rolling-shutter shear that moves a correspondence even one row off it produces a mismatch rather than a slightly worse match. \index{Epipolar geometry!rolling-shutter mismatch}
+
 
 ### Camera calibration
 
@@ -334,8 +391,9 @@ $$\mathbf{r}(u, v) = \mathbf{K}^{-1} \begin{bmatrix} u \\ v \\ 1 \end{bmatrix} =
 # ┌─────────────────────────────────────────────────────────────────────────────
 # │ CAPTURE-TIMING AND ATTITUDE ERROR SCALES AT THE RACK END
 # ├─────────────────────────────────────────────────────────────────────────────
-# │ Context: The bearing-ray paragraph and the hardware-trigger paragraph of
-# │          @sec-perception-transduction-calibration.
+# │ Context: The bearing-ray paragraph of
+# │          @sec-perception-transduction-calibration and the hardware-trigger
+# │          paragraph of @sec-perception-handoff.
 # │
 # │ Goal:    Put machine-scale numbers on timing and attitude errors: travel per
 # │          millisecond of misdating, lateral error per degree at the rack end,
@@ -390,7 +448,7 @@ class CaptureTimingScale:
     dy_per_ms_jitter_str = fmt_length(dy_per_ms_jitter, unit=ureg.millimeter, precision=2)
 ```
 
-Critically, this bearing ray originates at the camera's optical center at the exact instant of photon exposure $t_0$. If downstream planning unprojects $\mathbf{r}(u, v)$ from the robot's *current* pose rather than its historical capture pose, the elapsed observation age $t_{\text{age}}$ translates the ray origin by $\Delta \mathbf{x} = \int_{t_0}^{t_0+t_{\text{age}}} \mathbf{v}(t)\,dt$. The two error sources scale differently on this machine. Each millisecond of unmodeled age moves the ray origin `{python} CaptureTimingScale.dx_per_ms_str` at the `{python} CaptureTimingScale.v_str` drive limit, so the full `{python} RackEndOpeningAge.t_age_str` age is `{python} RackEndOpeningAge.dx_str`. Each degree of attitude error instead moves a point at the `{python} CaptureTimingScale.z_str` rack-end distance `{python} CaptureTimingScale.dy_per_deg_str` sideways, and the lever arm grows with range. Either error can move a rack upright outside the envelope a collision checker tests. Metric depth must therefore come from stereo disparity, a range sensor, or a learned prior, each with its own error, and @sec-perception-error-clearance charges that error against the clearance. Lens distortion is rectified in the image signal processor stage of @tbl-08-latency-budget. The projection's derivation, the distortion model, and Zhang's planar calibration [@zhang2000flexible] are developed in @sec-appendix-systems-vision.
+This bearing ray originates at the camera's optical center at the exact instant of photon exposure $t_0$. If downstream planning unprojects $\mathbf{r}(u, v)$ from the robot's *current* pose rather than its historical capture pose, the elapsed observation age $t_{\text{age}}$ translates the ray origin by $\Delta \mathbf{x} = \int_{t_0}^{t_0+t_{\text{age}}} \mathbf{v}(t)\,dt$. The two error sources scale differently on this machine. Each millisecond of unmodeled age moves the ray origin `{python} CaptureTimingScale.dx_per_ms_str` at the `{python} CaptureTimingScale.v_str` drive limit, so the full `{python} RackEndOpeningAge.t_age_str` age is `{python} RackEndOpeningAge.dx_str`. Each degree of attitude error instead moves a point at the `{python} CaptureTimingScale.z_str` rack-end distance `{python} CaptureTimingScale.dy_per_deg_str` sideways, and the lever arm grows with range. Either error can move a rack upright outside the envelope a collision checker tests. Metric depth must therefore come from stereo disparity, a range sensor, or a learned prior, each with its own error, and @sec-perception-error-clearance charges that error against the clearance. Lens distortion is rectified in the image signal processor stage of @tbl-08-latency-budget. The projection's derivation, the distortion model, and Zhang's planar calibration [@zhang2000flexible] are developed in @sec-appendix-systems-vision.
 
 The camera's relation to the inertial measurement unit must be calibrated in space and in time together [@furgale2013unified]. An extrinsic rotation error $\theta$ misplaces a point at range $z$ by about $z\,\theta$, and the camera's offset from the inertial unit adds lever-arm accelerations (@sec-appendix-control-spatial). An uncalibrated offset $\Delta t$ between exposure and the inertial sample misorients the camera by $\omega\,\Delta t$ while the base turns at angular velocity $\omega$, misplacing the same point by about $z\,\omega\,\Delta t$, so the timing error grows with both turn rate and range. Latching exposure starts and inertial samples on one hardware trigger bounds that offset, leaving a residual that online calibration estimates. Each of these calibrations holds only inside the conditions under which it was fitted, which is why the observation record carries a calibration revision and its validity range.
 
@@ -406,9 +464,11 @@ A practical implementation must resolve the quadrant as well as this ratio. The 
 
 **Active stereo**\index{Active stereo!transduction} adds projected texture to a calibrated camera pair. The cameras match that texture using stereo geometry rather than decoding a known projected pattern. When sunlight suppresses the projector, passive image texture may still support matching; a textureless surface does not become measurable merely because ambient illumination is bright. The range-dependent error calculation in @sec-perception-error-clearance decides whether the resulting depth is adequate for clearance.
 
-### Neuromorphic event cameras: Asynchronous temporal contrast
+### Neuromorphic event cameras and asynchronous temporal contrast
 
-Conventional CMOS sensors integrate photons over a synchronous exposure window, inherently trading motion blur against low-light photon starvation. **Neuromorphic event cameras** (Dynamic Vision Sensors, or DVS)\index{Neuromorphic event cameras!transduction}\index{Event cameras!transduction} abandon discrete frames entirely.
+Conventional CMOS sensors integrate photons over a synchronous exposure window, inherently trading motion blur against low-light photon starvation. **Neuromorphic event cameras** (Dynamic Vision Sensors, or DVS)\index{Neuromorphic event cameras!transduction}\index{Event cameras!transduction}[^fn-neuromorphic-retina] abandon discrete frames entirely [@lichtsteiner2008128; @gallego2022event].
+
+[^fn-neuromorphic-retina]: **Neuromorphic**: Carver Mead coined the term at Caltech for analog circuits that compute the way neural tissue does [@mead1990], and the silicon retina built in his group is the ancestor of the Dynamic Vision Sensor [@lichtsteiner2008128]. Like the retina, each pixel reports change rather than level, so an obstacle that stands still in front of a stationary sensor produces no events and is invisible to it. \index{Neuromorphic engineering!origin}
 
 Each pixel on an event sensor array operates autonomously, containing a logarithmic photodiode, an analog amplifier, and two differential voltage comparators. The pixel continuously monitors the incoming scene radiance $I(u, v, t)$. Whenever the temporal change in logarithmic intensity exceeds a configurable contrast threshold $C_{\text{th}}$, the pixel emits an asynchronous digital event packet $e_k$:
 $$|\Delta \ln I(u, v, t)| = |\ln I(u, v, t) - \ln I(u, v, t_{\text{last}})| \ge C_{\text{th}}$$
@@ -499,7 +559,9 @@ Spatial uncertainty in this unprojected point return decomposes into two distinc
 1. **Radial uncertainty ($\sigma_R$)**: Governed by receiver discriminator timing jitter $\sigma_{\Delta t}$ and pulse rise-time, $\sigma_R = \frac{c}{2} \sigma_{\Delta t}$ remains approximately constant across range until return signal attenuation lowers photon counts near the detection threshold. The datasheet for the machine's OS1-64 gives a one-standard-deviation precision of `{python} LidarSweep.sigma_r_min_str` to `{python} LidarSweep.sigma_r_max_str` beyond 1 m, and separately an accuracy of `{python} LidarSweep.bias_r_str` on diffuse targets [@ouster2025os1]. The second figure bounds the error of the mean, a bias that averaging does not remove.
 2. **Transverse uncertainty ($\sigma_\perp$)**: Governed by optical beam divergence $\delta\theta_{\text{div}}$ and angular encoder quantization $\sigma_\theta$. The laser pulse does not travel as an infinitesimal line, but as an expanding cone. At range $R$, the transverse spot size expands as $\sigma_\perp \approx R \cdot \delta\theta_{\text{div}}$. At $R = 30\,\text{m}$, a $2\,\text{mrad}$ beam divergence illuminates a $60\,\text{mm}$ circular disk, creating mixed returns across surface silhouettes and blurring sharp obstacle edges into spatial uncertainty ellipsoids elongated orthogonal to the line of sight.
 
-Most terrestrial systems operate either at near-infrared wavelengths below $1{,}000\,\text{nm}$, where silicon detectors respond, or at an eye-safe $1{,}550\,\text{nm}$ (permitting higher pulse energies under IEC 60825-1 Class 1 laser regulations). The machine's OS1-64 is of the first kind: it emits at `{python} LidarSweep.wavelength_str` nm as a Class 1 laser product [@ouster2025os1]. Mechanical spinning LiDAR systems rotate an array of 16 to 128 laser diodes and avalanche photodiode (APD) detectors across an internal spindle at $10\text{--}20\,\text{Hz}$ to sweep a $360^\circ$ panoramic point cloud.
+Most terrestrial systems operate either at near-infrared wavelengths below $1{,}000\,\text{nm}$, where silicon detectors respond, or at an eye-safe $1{,}550\,\text{nm}$ (permitting higher pulse energies under IEC 60825-1 Class 1 laser regulations).[^fn-laser-class1] The machine's OS1-64 is of the first kind: it emits at `{python} LidarSweep.wavelength_str` nm as a Class 1 laser product [@ouster2025os1]. Mechanical spinning LiDAR systems rotate an array of 16 to 128 laser diodes and avalanche photodiode (APD) detectors across an internal spindle at $10\text{--}20\,\text{Hz}$ to sweep a $360^\circ$ panoramic point cloud.
+
+[^fn-laser-class1]: **Laser Class 1**: The class of IEC 60825-1 whose emission is safe under all reasonably foreseeable viewing, including through optical instruments [@iec60825part1]. Below about $1{,}400\,\text{nm}$ the eye focuses the beam onto the retina, while at $1{,}550\,\text{nm}$ the cornea and lens absorb it first, so the permitted pulse energy is far higher. Those longer wavelengths need indium gallium arsenide detectors rather than silicon, which makes wavelength a range-versus-cost choice made under a fixed safety ceiling. \index{Laser safety!Class 1}
 
 Just as rolling-shutter CMOS cameras read out scanlines sequentially, a spinning mechanical LiDAR does *not* capture an instantaneous 3D snapshot. A full $360^\circ$ azimuth sweep takes $T_{\text{sweep}} = 1/f_{\text{scan}}$, which is `{python} LidarSweep.t_sweep_str` for the machine's OS1-64 at its configured `{python} LidarSweep.f_scan_str`. If the robot translates at linear velocity $\mathbf{v}$ and rotates at angular velocity $\boldsymbol{\omega}$ during this sweep, point measurements recorded at the beginning of the rotation ($\theta = 0^\circ$) and the end of the rotation ($\theta = 360^\circ$) correspond to distinct spatial poses of the sensor origin. At the `{python} RollingShutterSkew.v_str` drive limit and an illustrative `{python} LidarSweep.omega_yaw_str` rad/s yaw, the base moves `{python} LidarSweep.dx_sweep_str` and turns `{python} LidarSweep.dtheta_sweep_str` mrad (`{python} LidarSweep.dtheta_sweep_deg_str`°) within one sweep. The visible artifact is a seam where the end of the sweep meets its start, and a shear across the cloud: a rack upright seen late in the sweep appears displaced from where the same upright was seen early.
 
@@ -533,7 +595,9 @@ Articulated motion, such as a coworker's swinging limbs, also creates **micro-Do
 
 ### Tactile contact grounding via optical elastomers {#sec-perception-tactile-grounding}
 
-At the gripper, distant range measurements cannot establish contact pressure or slip. The gripper itself may occlude the contact patch. An optical tactile sensor places a compliant, illuminated elastomer on the fingertip and images its deformation from inside the sensor. Surface shading supports a calibrated estimate of local shape; embedded marker motion supplies evidence of shear and incipient slip. Converting those image changes to a contact wrench requires a validated model of the pad, its loading, and its wear.
+At the gripper, distant range measurements cannot establish contact pressure or slip. The gripper itself may occlude the contact patch. An optical tactile sensor[^fn-gelsight-touch] places a compliant, illuminated elastomer on the fingertip and images its deformation from inside the sensor. Surface shading supports a calibrated estimate of local shape; embedded marker motion supplies evidence of shear and incipient slip. Converting those image changes to a contact wrench requires a validated model of the pad, its loading, and its wear.
+
+[^fn-gelsight-touch]: **GelSight**: Adelson's group at MIT turned a reflective elastomer skin and an internal camera into a contact sensor that recovers surface geometry and, from painted markers, shear force [@yuan2017gelsight]. The design makes touch one more image stream, so a tactile frame carries an exposure, a readout, and a calibration of its own and must be dated and qualified like the navigation camera's. \index{Tactile sensing!GelSight}
 
 Tactile evidence can therefore support the contact phase of a grasp, while the camera and range sensors support the approach. The shared obligation is to preserve the acquisition time and calibrated coordinate relation. Neither the modality name nor a dense output array supplies those qualifications.
 
@@ -543,7 +607,7 @@ A frame from the navigation camera lands in host memory as an array of pixel val
 
 ::: {.column-margin}
 ![](images/svg/spa_locator_s.svg){width="100%" fig-alt="S·P·A locator triad highlighting the Sense node."}
-*The Sense node: translating raw electromagnetic and optical energy into timestamped, frame-anchored spatial claims.*
+*The Sense stage: photons become dated, framed claims.*
 :::
 
 The first mandatory property is the **capture timestamp**\index{Capture timestamp!definition} $t_0$, which specifies the temporal midpoint of the physical energy integration window (the effective moment the camera shutter was open or the laser pulse fired). Sensors do not take instantaneous snapshots; a camera integrates photons across an exposure duration, and a mechanical lidar sweeps laser pulses over an azimuth arc across several milliseconds. Downstream state observers and vision-language-action policies require $t_0$ to ground observation tokens into the machine's dynamic equations of motion. The arrival stamp, $t_{\text{recv}}$, marks the moment the operating system kernel completes the direct memory access (DMA) transfer. Half the exposure, readout, transport, and DMA all elapse before that moment, so the arrival offset $\tau_{\text{recv}} = t_{\text{recv}} - t_0$ is never zero, and substituting arrival time for capture time corrupts downstream state estimation and action generation.
@@ -656,6 +720,9 @@ class ExtrinsicErrorBudget:
     check(dy_frame > side_clearance, "Prose says the 1-degree error exceeds the side clearance")
     check(abs(dx_ext.magnitude - 50.0) < 0.05, f"Unexpected extrinsic-shift error: {dx_ext}")
     check(abs(dx_over_loc - 1.0) < 1e-9, "Prose says the extrinsic shift spends all of delta_loc")
+    # margin_clearance_slip_ladder.svg fig-alt hand-types 262 mm, 50 mm and 150 mm.
+    check(round(dy_frame.to(ureg.millimeter).magnitude) == 262, f"Slip-ladder mount rung drifted: {dy_frame}")
+    check(abs(delta_loc.to(ureg.millimeter).magnitude - 50.0) < 1e-9 and abs(side_clearance.to(ureg.millimeter).magnitude - 150.0) < 1e-9, "Slip-ladder reference lines drifted")
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
     theta_frame_str = fmt(theta_frame.to(ureg.degree).magnitude, precision=0)
@@ -673,6 +740,12 @@ The second mandatory property is the **reference frame**\index{Reference frame!d
 
 When perception outputs omit the frame identifier or rely on nominal CAD dimensions rather than calibrated physical extrinsics, small angular offsets create large spatial errors that scale with distance. An uncalibrated pitch or yaw error of $\theta =$ `{python} ExtrinsicErrorBudget.theta_frame_str`° on a sensor detecting an object at range $d =$ `{python} ExtrinsicErrorBudget.d_frame_str` induces a transverse position error $\Delta y \approx d \sin\theta$ of `{python} ExtrinsicErrorBudget.dy_frame_str`, about `{python} ExtrinsicErrorBudget.dy_over_side_mult_str` the `{python} ExtrinsicErrorBudget.side_clearance_str` side clearance the base keeps from the racks, so the planner either steers into the racking or rejects a valid aisle as obstructed.
 
+::: {.column-margin}
+![](images/svg/margin_clearance_slip_ladder.svg){width="100%" fig-alt="Five horizontal bars in millimeters, longest at top: 1 degree mount 262 millimeters, full age 77.4, arrival stamp 39.9, row skew 24.9, trigger stamp 12 millimeters. A dotted slate line marks the 50 millimeter localization allowance and a dashed red line marks the 150 millimeter side clearance; only the mount bar crosses the red line."}
+
+*Timing slips cost tens of millimeters; a `{python} ExtrinsicErrorBudget.theta_frame_str`° mount error costs `{python} ExtrinsicErrorBudget.dy_frame_str`.*
+:::
+
 The third mandatory property is an **uncertainty representation**\index{Uncertainty envelope!definition}, such as covariance $\mathbf{\Sigma}_z$ together with a validated tail or hard error bound when clearance depends on it. Low illumination, atmospheric scattering, specular surfaces, and model error change the residual distribution. A covariance describes second moments, not a region guaranteed to contain the true state. Downstream observers and policy heads can use it to weight sensory innovations against a motion model; an underestimated covariance can pull an estimate toward a spurious measurement and lead to poor downstream commands. Safety decisions must also account for bias, missed detections, and validation limits.
 
 ### Calibrating the coordinate chain {#sec-perception-coordinate-chain}
@@ -683,9 +756,13 @@ A robot's spatial coordinate frames form a **directed acyclic graph (DAG)** of t
 $$\mathbf{p}_{\text{world}}(t_0) = \mathbf{T}_{\text{world}}^{\text{map}} \cdot \mathbf{T}_{\text{map}}^{\text{odom}}(t_0) \cdot \mathbf{T}_{\text{odom}}^{\text{base}}(t_0) \cdot \mathbf{T}_{\text{base}}^{\text{flange}}(t_0) \cdot \mathbf{T}_{\text{flange}}^{\text{cam}} \cdot \mathbf{p}_{\text{cam}}(t_0)$$
 The physical mounting location of the sensor on the kinematic chain dictates how coordinate transforms update across this DAG:
 
-In an **eye-in-hand**\index{Eye-in-hand calibration!definition} configuration, the camera or depth sensor is bolted directly to the manipulator's moving tool flange ($\mathcal{F}_{\text{flange}}$). Moving any preceding joint alters the sensor's optical center relative to the world, requiring continuous forward kinematics updates. Solving for the rigid extrinsic transform $\mathbf{X} = \mathbf{T}_{\text{flange}}^{\text{cam}} \in \text{SE}(3)$ requires executing robot motions across $N \ge 2$ non-parallel rotational axes while observing a stationary fiducial target (such as a ChArUco grid). For two distinct poses $k$ and $k+1$, the closed kinematic loop establishes the classic **hand-eye matrix equation**:
+In an **eye-in-hand**\index{Eye-in-hand calibration!definition} configuration, the camera or depth sensor is bolted directly to the manipulator's moving tool flange ($\mathcal{F}_{\text{flange}}$). Moving any preceding joint alters the sensor's optical center relative to the world, requiring continuous forward kinematics updates. Solving for the rigid extrinsic transform $\mathbf{X} = \mathbf{T}_{\text{flange}}^{\text{cam}} \in \text{SE}(3)$ requires executing robot motions across $N \ge 2$ non-parallel rotational axes while observing a stationary fiducial target (such as a ChArUco grid[^fn-charuco-board]). For two distinct poses $k$ and $k+1$, the closed kinematic loop establishes the classic **hand-eye matrix equation**:[^fn-handeye-origin]
 $$\mathbf{A} \mathbf{X} = \mathbf{X} \mathbf{B}$$
 where $\mathbf{A} = (\mathbf{T}_{\text{base}, k}^{\text{flange}})^{-1} \mathbf{T}_{\text{base}, k+1}^{\text{flange}} \in \text{SE}(3)$ is the relative flange displacement reported by the forward kinematics chain, and $\mathbf{B} = \mathbf{T}_{\text{cam}, k}^{\text{target}} (\mathbf{T}_{\text{cam}, k+1}^{\text{target}})^{-1} \in \text{SE}(3)$ is the relative camera displacement extracted from optical target unprojection.
+
+[^fn-charuco-board]: **ChArUco Board**: A chessboard whose white squares carry uniquely coded ArUco markers. The chessboard corners give subpixel accuracy and the codes identify which corners are in view, so calibration works from partial views of the board, the usual case for a camera on a moving wrist. \index{Calibration!ChArUco target}
+
+[^fn-handeye-origin]: **Hand-Eye Calibration**: The problem was posed as $\mathbf{AX}=\mathbf{XB}$ independently by @shiu1989calibration and @tsai1989new, for cameras bolted to robot wrists. The camera's pose relative to the flange is never measured directly, only inferred from paired motions, so any error in $\mathbf{X}$ enters every grasp the arm plans from that camera, and poorly spread calibration motions leave it weakly determined. \index{Calibration!hand-eye}
 
 In an **eye-to-hand**\index{Eye-to-hand calibration!definition} calibration rig, the camera overlooks the workspace from a body-mounted mast or a stationary overhead beam. The base must remain parked relative to an overhead camera during calibration. Under that condition, the camera-to-base transform remains constant ($\mathbf{X} = \mathbf{T}_{\text{base}}^{\text{cam}} \in \text{SE}(3)$), while the target is affixed to the robot's moving end-effector ($\mathbf{Z} = \mathbf{T}_{\text{flange}}^{\text{target}} \in \text{SE}(3)$). At each joint configuration, let $\mathbf{A}=(\mathbf{T}_{\text{base}}^{\text{flange}})^{-1}$ map base coordinates into the flange frame and $\mathbf{B}=(\mathbf{T}_{\text{cam}}^{\text{target}})^{-1}$ map camera coordinates into the target frame. These are absolute pose transforms for this rig, not the relative motions used above. Both paths then map camera coordinates into the flange frame:
 $$\mathbf{A} \mathbf{X} = \mathbf{Z} \mathbf{B}$$
@@ -751,7 +828,9 @@ Fusing joint kinematics with optical frames also requires temporal alignment acr
 $$\Delta \mathbf{p}_{\text{skew}} = \mathbf{v}_{\text{wrist}} \, dt + (\boldsymbol{\omega}_{\text{wrist}} \times \mathbf{r}_{\text{cam}}) \, dt$$
 At an illustrative wrist linear velocity $v =$ `{python} WristTimestampSkew.v_wrist_str` and angular velocity $\omega =$ `{python} WristTimestampSkew.omega_wrist_str` rad/s with a camera lever arm $r =$ `{python} WristTimestampSkew.r_cam_str`, an unmodeled `{python} WristTimestampSkew.dt_skew_str` skew displaces the observation by `{python} WristTimestampSkew.dp_lin_str` plus `{python} WristTimestampSkew.dp_rot_str`, or `{python} WristTimestampSkew.dp_str`, which misses a grasp whose position tolerance is `{python} WristTimestampSkew.eps_pos_str`. The requirement follows from that tolerance: the skew must stay below $\epsilon_{\text{pos}}/(v + \omega r)$, here `{python} WristTimestampSkew.dt_max_str`, so millisecond-level alignment suffices and microsecond alignment is not required. The usual way to meet it is to stamp both streams on one clock, such as the fieldbus's distributed clock or a PTP-disciplined clock, and interpolate the high-rate joint stream at the camera's exposure midpoint. A hardware strobe into the joint interpolator is one option, not a necessity.
 
-The [REP 105 frame convention](https://reps.openrobotics.org/rep-0105/)\index{Standards!REP 105} names these frames and separates a locally continuous `odom` pose from a globally corrected `map` pose. On the mobile manipulator, $\mathcal{F}_{\text{body}}$ is the base's `base_link`, tracked through the odometric frame `odom`, and the arm's serial chain maps its mounting flange `tool0` through the joint angles back to `base_link`. @Tbl-08-rep105-tree lists the roles and the rule each consumer follows. A local controller consumes a continuous estimate and rejects unexpected transform jumps, and an implementation still has to check transform timestamps and estimator uncertainty.
+The [REP 105 frame convention](https://reps.openrobotics.org/rep-0105/)\index{Standards!REP 105}[^fn-rep-ros] names these frames and separates a locally continuous `odom` pose from a globally corrected `map` pose. On the mobile manipulator, $\mathcal{F}_{\text{body}}$ is the base's `base_link`, tracked through the odometric frame `odom`, and the arm's serial chain maps its mounting flange `tool0` through the joint angles back to `base_link`. @Tbl-08-rep105-tree lists the roles and the rule each consumer follows. A local controller consumes a continuous estimate and rejects unexpected transform jumps, and an implementation still has to check transform timestamps and estimator uncertainty.
+
+[^fn-rep-ros]: **ROS Enhancement Proposal (REP)**: The Robot Operating System records its community conventions as numbered REPs, a process copied from Python's enhancement proposals. REP 105 fixes the meaning of `map`, `odom`, and `base_link` and the continuity each must keep [@meeussen2010rep105], so a frame name written into a record denotes the same physical frame for every consumer that reads it. \index{Standards!ROS Enhancement Proposal}
 
 | Frame         | Parent in this example | Meaning                                     | Consumer rule                                                 |
 |:--------------|:-----------------------|:--------------------------------------------|:--------------------------------------------------------------|
@@ -787,25 +866,26 @@ The calibrated rack-end observation still describes a past scene. Its delivery d
 
 ::: {#dfn-perception-spatial-information-age .callout-definition title="Spatial information age"}
 
-***Spatial information age***\index{Spatial information age!definition}\index{Information age!definition} ($t_{\text{age}}$) is the total elapsed physical time between the physical energy integration midpoint ($t_{\text{exp}}/2$) at the transducer and the downstream consumption of the resulting observation tensor by a policy backbone, state observer, or control loop. It is the capture-to-consumption part of the measurement age that @sec-body-measurement-freshness counts from transduction, and running text calls it observation age.
+***Spatial information age***\index{Spatial information age!definition}\index{Information age!definition} ($t_{\text{age}}$) is the physical time elapsed between the exposure midpoint at the transducer and the consumption of the resulting observation by a policy backbone, state observer, or control loop. It is the capture-to-consumption part of the measurement age that @sec-body-measurement-freshness counts from transduction, and running text calls it observation age.
 
-1.  **Significance**: Because physical mass moves while digital computation executes, sensory latency translates directly into unmodeled spatial displacement (@eq-percep-spatial-displacement):
-    $$\Delta \mathbf{x} = \int_{t_0}^{t_0+t_{\text{age}}} \mathbf{v}(t)\,dt$$ {#eq-percep-spatial-displacement}
-    An illustrative scalar error scale combines travel with first-order stereo and small-angle mounting terms (@eq-percep-unified-uncertainty-envelope):
-    $$\epsilon_{\text{scale}} = \underbrace{\int_{t_0}^{t_0+t_{\text{age}}} \|\mathbf{v}(t)\|\,dt}_{\text{path-length travel}} + \underbrace{\frac{z^2}{fb}\sigma_d}_{\text{stereo depth standard deviation}} + \underbrace{z |\theta_{\text{ext}}|}_{\text{small-angle mounting error scale}}$$ {#eq-percep-unified-uncertainty-envelope}
-    The first term is nonnegative path length, which conservatively bounds the magnitude of net displacement. For a calibrated stereo pair with range $z$, focal length $f$, baseline $b$, and disparity standard deviation $\sigma_d$, the second term is a first-order standard-deviation scale, not a hard bound. The last term approximates mounting error for a small angular offset $\theta_{\text{ext}}$. Their sum is an illustrative scale, not a validated uncertainty envelope. Clearance still requires consistent error directions, calibrated geometry and bias, and validated residual tails or hard bounds (@sec-perception-error-clearance).
-
-2.  **Distinction**: Unlike software pipeline latency (wall-clock duration of a forward pass), observation age accounts for the full physical journey: half the exposure, readout, transport, DMA and queueing, ISP processing, the vision backbone, and dispatch, followed by any additional time until the actual consumer uses the evidence.
-3.  **Common pitfall**: Treating the frame arrival timestamp ($t_{\text{recv}}$) in userspace memory as the observation time ($t_0$). Using arrival time hides upstream capture and transport delays and adds unmodeled phase lag to the feedback controllers that consume the observation.
+1.  **Significance**: Mass keeps moving while the pipeline computes, so age becomes travel (@eq-percep-spatial-displacement) and enters the stopping budget through the pre-brake delay $\tau_{\text{delay}}$. The mobile manipulator's navigation-camera observation is `{python} RackEndOpeningAge.t_age_str` old at dispatch, `{python} RackEndOpeningAge.dx_str` of travel at the `{python} RackEndOpeningAge.v_str` drive limit, before any consumer has read it.
+2.  **Distinction**: Unlike software pipeline latency, the wall-clock duration of a forward pass, observation age counts the full physical journey: half the exposure, readout, transport, DMA and queueing, ISP processing, the vision backbone, and dispatch, followed by any time until the consumer actually uses the evidence.
+3.  **Common pitfall**: A frequent misconception is that the frame's arrival timestamp ($t_{\text{recv}}$) in userspace memory is its observation time ($t_0$). On the navigation camera the arrival stamp hides `{python} ArrivalStampOffset.tau_recv_str` of capture and transport, `{python} ArrivalStampOffset.dx_recv_str` of travel at the drive limit, and the controllers that consume the observation inherit that unmodeled lag.
 
 :::
+
+Charged against the machine's motion, age becomes displacement (@eq-percep-spatial-displacement):
+$$\Delta \mathbf{x} = \int_{t_0}^{t_0+t_{\text{age}}} \mathbf{v}(t)\,dt$$ {#eq-percep-spatial-displacement}
+An illustrative scalar error scale combines that travel with first-order stereo and small-angle mounting terms (@eq-percep-unified-uncertainty-envelope):
+$$\epsilon_{\text{scale}} = \underbrace{\int_{t_0}^{t_0+t_{\text{age}}} \|\mathbf{v}(t)\|\,dt}_{\text{path-length travel}} + \underbrace{\frac{z^2}{fb}\sigma_d}_{\text{stereo depth standard deviation}} + \underbrace{z |\theta_{\text{ext}}|}_{\text{small-angle mounting error scale}}$$ {#eq-percep-unified-uncertainty-envelope}
+The first term is nonnegative path length, which conservatively bounds the magnitude of net displacement. For a calibrated stereo pair with range $z$, focal length $f$, baseline $b$, and disparity standard deviation $\sigma_d$, the second term is a first-order standard-deviation scale, not a hard bound. The last term approximates mounting error for a small angular offset $\theta_{\text{ext}}$. Their sum is an illustrative scale, not a validated uncertainty envelope. Clearance still requires consistent error directions, calibrated geometry and bias, and validated residual tails or hard bounds (@sec-perception-error-clearance).
 
 ### The latency waterfall {#sec-perception-latency-waterfall}
 
 For the selected camera pipeline, we can assemble the **observation age** ($t_{\text{age}}$)\index{Observation age!definition} at dispatch, from capture at the exposure midpoint to dispatch, the publication of the perception record. This is one checkpoint in its continuing physical age. The **latency waterfall**\index{Latency waterfall} below assumes serialized stages; overlapping stages require measuring their combined interval rather than adding their durations:
-$$t_{\text{age}} = \frac{t_{\text{exp}}}{2} + t_{\text{readout}} + t_{\text{transport}} + t_{\text{DMA}} + t_{\text{ISP}} + t_{\text{backbone}} + t_{\text{IPC}}$$
+$$t_{\text{age}} = \frac{t_{\text{exp}}}{2} + t_{\text{readout}} + t_{\text{transport}} + t_{\text{DMA}} + t_{\text{ISP}} + t_{\text{backbone}} + t_{\text{IPC}}$$ {#eq-percep-latency-waterfall}
 
-Crucially, because an embodied robot carries mechanical momentum, observation age is not merely a software scheduling metric—it translates directly into unobserved physical displacement:
+Because an embodied robot carries mechanical momentum, observation age is not merely a software scheduling metric. It translates directly into unobserved physical displacement:
 $$\Delta x_{\text{blind}} = v \cdot t_{\text{age}}$$
 While the perception stack is busy capturing, converting, transferring, and inferring upon a scene, the physical chassis continues to move blind through the workspace at velocity $v$. The stopping ledger adds the later delays, lease expiry, scheduler tick, actuator transport, and response onset, to form $\tau_{\text{delay}} = t_{\text{age}} + T_{\text{lease}} + T_{\text{tick}} + T_{\text{bus}} + T_{\text{act}}$, and for any fully accounted delay the corresponding travel is:
 $$d_{\text{blind}} = v \cdot \tau_{\text{delay}}$$
@@ -868,9 +948,11 @@ class SensorInformationAge:
     delta_loc = AISLE.delta_loc  # category: illustrative
     delta_margin = AISLE.delta_margin  # category: chosen
     d_clear = AISLE.d_clear  # category: illustrative
+    f_frame = camera.frame_rate  # category: datasheet
 
     # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────
     t_exp_half = (t_exp / 2).to(millisecond)
+    t_frame = (1 / f_frame).to(millisecond)
     age_after_exposure = t_exp_half
     age_after_readout = age_after_exposure + t_readout
     age_after_transport = age_after_readout + t_transport
@@ -885,6 +967,8 @@ class SensorInformationAge:
     total_before = calc_safe_stopping_distance(v, t_lease + t_tick + t_bus + t_act, a_brake, delta_loc, delta_margin).to(ureg.millimeter)
     total_after = calc_safe_stopping_distance(v, tau_delay, a_brake, delta_loc, delta_margin).to(ureg.millimeter)
     remaining = (d_clear - total_after).to(ureg.millimeter)
+    dx_frame = (v * t_frame).to(ureg.millimeter)  # checkpoint: one dropped frame of extra age
+    frame_share = (dx_frame / remaining).to(ureg.dimensionless).magnitude
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(abs(tau_age.magnitude - AISLE.perception_age.to(millisecond).magnitude) < 1e-9, f"Waterfall disagrees with AISLE.perception_age: {tau_age}")
@@ -897,6 +981,8 @@ class SensorInformationAge:
     check(abs(total_after.magnitude - 912.9) < 0.05, f"Unexpected running total after row 5: {total_after}")
     check(abs((total_after - total_before - row_age).magnitude) < 1e-6, "Row 5 does not close the running total")
     check(abs(remaining.magnitude - 187.1) < 0.05, f"Unexpected remaining clear distance: {remaining}")
+    check(abs(dx_frame.magnitude - 25.0) < 0.05 and 0.13 < frame_share < 0.14, f"Checkpoint answer drifted: {dx_frame}, {frame_share}")
+    check(t_backbone == max(t_exp_half, t_readout, t_transport, t_dma, t_isp, t_backbone, t_ipc), "Notebook says the backbone is the largest single stage")
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
     t_exp_str = fmt_latency(t_exp, unit=millisecond, precision=0)
@@ -930,6 +1016,7 @@ class SensorInformationAge:
     total_after_str = fmt_length(total_after, unit=ureg.millimeter, precision=1)
     remaining_str = fmt_length(remaining, unit=ureg.millimeter, precision=1)
     d_clear_str = fmt_length(d_clear.to(meter), unit=meter, precision=2)
+    t_frame_str = fmt_latency(t_frame, unit=millisecond, precision=1)
 
     tau_age_display_math = fmt_display_math(
         rf"t_{{\text{{age}}}} = {t_exp_half_str} + {t_readout_str} + {t_transport_str} + {t_dma_str} + {t_isp_str} + {t_backbone_str} + {t_ipc_str} = {tau_age_str}"
@@ -944,34 +1031,41 @@ class SensorInformationAge:
     )
 ```
 
-::: {#nbk-perception-sensor-transduction-latency-spatial-information-age .callout-notebook title="Transduction latency and information age"}
-*The scenario.* The mobile manipulator drives toward a rack end at its drive limit when a person steps out. We sum the navigation camera's observation age $t_{\text{age}}$ from exposure midpoint to observation dispatch and compute the distance the base covers in that time, $\Delta x = v\,t_{\text{age}}$.
+::: {#nbk-perception-sensor-transduction-latency-spatial-information-age .callout-notebook title="Travel before the frame is read"}
 
-**Stage-by-Stage Latency Waterfall**:
+**Problem**: The mobile manipulator drives toward a rack end at its drive limit when a person steps out. How old is the navigation camera's observation of that person when perception dispatches it, and how far has the base traveled by then?
 
-1. *Exposure Integration Midpoint ($t_{\text{exp}}/2$):* The navigation camera's exposure $t_{\text{exp}} =$ `{python} SensorInformationAge.t_exp_str` (chosen low-light setting) $\implies \Delta t_1 =$ `{python} SensorInformationAge.t_exp_half_str`.
-2. *Rolling Shutter Line Readout ($t_{\text{readout}}$):* The rolling readout of the frame contributes $\Delta t_2 =$ `{python} SensorInformationAge.t_readout_str` (datasheet).
-3. *MIPI CSI-2 Serialization & Transport ($t_{\text{transport}}$):* The [Sony IMX477 flyer](https://www.sony-semicon.com/files/62/pdf/p-13_IMX477-AACK_Flyer.pdf) specifies a four-lane option up to $2.1\text{ Gbps/lane}$. The budget assigns $\Delta t_3 =$ `{python} SensorInformationAge.t_transport_str` (illustrative) to residual transport after streaming readout; the value is not frame size divided by peak lane rate.
-4. *DMA Ingress & Kernel V4L2 Buffer Queue ($t_{\text{DMA}}$):* Scatter-gather DRAM write and driver interrupt $\implies \Delta t_4 =$ `{python} SensorInformationAge.t_dma_str` (illustrative).
-5. *Hardware ISP Debayering & Rectification ($t_{\text{ISP}}$):* Dedicated on-chip ISP hardware pass $\implies \Delta t_5 =$ `{python} SensorInformationAge.t_isp_str` (illustrative).
-6. *Vision Backbone Tensor Forward Pass ($t_{\text{backbone}}$):* INT8 quantized Vision Transformer on edge NPU $\implies \Delta t_6 =$ `{python} SensorInformationAge.t_backbone_str` (illustrative).
-7. *Covariance Packaging & Zero-Copy IPC ($t_{\text{IPC}}$):* Shared-memory circular ring buffer dispatch $\implies \Delta t_7 =$ `{python} SensorInformationAge.t_ipc_str` (illustrative).
+**Variables**:
 
-**Total Observation Age**:
+* Exposure $t_{\text{exp}} =$ `{python} SensorInformationAge.t_exp_str` (Chosen low-light setting), so the midpoint lag is $t_{\text{exp}}/2 =$ `{python} SensorInformationAge.t_exp_half_str`; rolling readout $t_{\text{readout}} =$ `{python} SensorInformationAge.t_readout_str` (Datasheet).
+* Residual MIPI CSI-2 transport $t_{\text{transport}} =$ `{python} SensorInformationAge.t_transport_str` (Illustrative). The [Sony IMX477 flyer](https://www.sony-semicon.com/files/62/pdf/p-13_IMX477-AACK_Flyer.pdf) specifies a four-lane option up to $2.1\text{ Gbps/lane}$; the budget assigns only the transport left after streaming readout, not frame size divided by peak lane rate.
+* DMA and driver queue $t_{\text{DMA}} =$ `{python} SensorInformationAge.t_dma_str`, ISP debayering and rectification $t_{\text{ISP}} =$ `{python} SensorInformationAge.t_isp_str`, INT8 vision backbone $t_{\text{backbone}} =$ `{python} SensorInformationAge.t_backbone_str`, and covariance packaging with zero-copy dispatch $t_{\text{IPC}} =$ `{python} SensorInformationAge.t_ipc_str` (all Illustrative).
+* Drive limit $v =$ `{python} SensorInformationAge.v_str` (Illustrative).
+
+**Math**:
+
+*Age at dispatch.* The serial stages of @eq-percep-latency-waterfall sum to
 `{python} SensorInformationAge.tau_age_display_math`
 
-**Displacement at the Drive Limit**:
-
-At the base's drive limit $v =$ `{python} SensorInformationAge.v_str`, holding speed through the age window:
+*Travel.* Holding speed through the age window:
 `{python} SensorInformationAge.dx_display_math`
 
-**Systems Impact**: The base covers this distance before the perception record is available at dispatch. Timestamped pose propagation can place the old observation correctly in the current frame, but no later stage returns the distance already traveled.
+*Sensitivity.* Each further millisecond in any stage adds `{python} CaptureTimingScale.dx_per_ms_str` of travel at the drive limit.
+
+**Result**: The observation is `{python} SensorInformationAge.tau_age_str` old at dispatch, and the base has covered `{python} SensorInformationAge.dx_mm_str`. The backbone is the largest single stage, but exposure and readout alone contribute `{python} SensorInformationAge.age_after_readout_str` before any computation starts.
+
+**Systems insight**: The base covers this distance before the perception record exists. Timestamped pose propagation can place the old observation correctly in the current frame, but no later stage returns the distance already traveled, so $v\,t_{\text{age}}$ enters the stopping budget as a term of its own.
+
 :::
 
 The seven stages of @tbl-08-latency-budget sum to the dispatch age $t_{\text{age}} =$ `{python} SensorInformationAge.tau_age_str`. The existing stopping ledger then adds the active lease and response path of @sec-nervous-cadences:
 `{python} SensorInformationAge.tau_delay_display_math`
 
 This is a **partial delay ledger**, not yet the capture-to-response bound. In the event vocabulary of @tbl-04-event-ledger, this chapter owns the first interval, capture to dispatch; the response terms are the third. The observation keeps aging across the second, while the proposer finishes inference, transfers the candidate, and the permission path admits it. Let $\Delta_{\text{da}}$ denote that interval from perception dispatch to candidate admission, including those stages and their overlap. Since the active lease begins at admission, the full interval for the stalled-proposer case is the displayed subtotal plus $\Delta_{\text{da}}$. @Sec-placement allocates $\Delta_{\text{da}}$ in \ref{nbk-placement-transport-budget}, and the allocation still awaits measurement. That allocation charges the whole inference after dispatch, although its vision stage already lies in the backbone row here, so the sum it produces is conservative; only event timestamps on the loaded machine can establish the nonoverlapping intervals.
+
+::: {.column-margin .margin-pointer}
+↪ @Sec-placement-isolation-decisions allocates $\Delta_{\text{da}}$ for the discrete placement, as a budget still to be qualified.
+:::
 
 @Fig-08-capture-to-brake-strip draws this partial ledger on one clock, with the base travel each interval consumes.
 
@@ -1043,12 +1137,14 @@ The partial running total rises from `{python} SensorInformationAge.total_before
 
 ::: {#chk-percep-spatial-info-age .callout-checkpoint title="Information age and the stopping budget"}
 
-Before propagating visual perception into spatial planning, verify your understanding of how pipeline latency creates unmodeled spatial displacement:
+Observation age is paid in travel before any consumer can react, and no later stage returns it.
 
-- [ ] **Spatial information age**: Can you explain how physical latency from photon exposure to shared-memory dispatch converts directly into unmodeled kinematic displacement, eroding clearance margins before a control policy can react?
-- [ ] **Exposure midpoint vs. arrival timestamp**: Can you describe why treating kernel receive timestamps rather than exposure integration midpoints as the capture epoch adds phase lag that can destabilize closed-loop feedback controllers?
+- [ ] **Spatial information age**: Can you explain how the interval from the exposure midpoint to dispatch converts into travel that erodes the stopping clearance before a policy can react?
+- [ ] **Exposure midpoint vs. arrival timestamp**: Can you explain why dating a frame at DMA completion rather than at its exposure midpoint pairs the observation with the wrong pose?
 - [ ] **Pose propagation from capture time**: Can you explain how propagating the machine's pose forward from an observation's capture time places an old observation correctly in the current frame, and why that propagation cannot return the distance already traveled?
 - [ ] **Observation age in the stopping budget**: Can you explain why the observation-age term $v\,t_{\text{age}}$ adds to the stopping distance, and why the permission path, which never reads the image, cannot shorten it?
+- [ ] **Dropped-frame estimate**: If a dropped frame leaves a proposal resting on the previous frame, one frame period (`{python} SensorInformationAge.t_frame_str`) older, how much travel does that add at the `{python} SensorInformationAge.v_str` drive limit, and what share of the `{python} SensorInformationAge.remaining_str` remainder does it consume?
+
 :::
 
 ### Dating the machine's LiDAR {#sec-perception-lidar-age}
@@ -1259,11 +1355,14 @@ class PhaseMarginAge:
     frac_used_str = fmt(frac_used * 100, precision=1)
 ```
 
-Delay can also make a correction arrive after the motion it was meant to oppose has reversed, so feedback can reinforce the disturbance. Phase margin measures how much additional lag a stable loop can tolerate before that happens. In supporting loop analysis, age spends this margin because a pure delay $t_{\text{age}}$ adds phase lag $\omega t_{\text{age}}$ at frequency $\omega$ without changing gain. Feedback control relies on timely negative feedback to oppose tracking error; when transport and compute latency delay an observation by half an oscillation period, corrective actions arrive in phase with the disturbance rather than opposing it. This phase inversion transforms stabilizing negative feedback into destabilizing positive feedback, driving the robot to chatter, weave across aisles, or oscillate into mechanical resonance. A loop with nominal margin $\text{PM}_{\text{nom}}$ at gain crossover $\omega_c$ therefore exhausts its stability margin once $t_{\text{age}} \ge \text{PM}_{\text{nom}}/\omega_c$, and exposure, processing, transport, permission, and actuator delay all draw on that single ceiling (@sec-appendix-control-zoh). For example, a visual-servoing tracking loop operating at crossover frequency $\omega_c =$ `{python} PhaseMarginAge.omega_c_str` rad/s (about `{python} PhaseMarginAge.f_c_str` Hz) with nominal phase margin $\text{PM}_{\text{nom}} =$ `{python} PhaseMarginAge.pm_nom_deg_str`$^\circ$ (`{python} PhaseMarginAge.pm_nom_rad_str` rad) has a maximum permissible latency ceiling of $\tau_{\max} = \text{PM}_{\text{nom}}/\omega_c =$ `{python} PhaseMarginAge.tau_max_str`. If sensor exposure, transport, and neural inference consume `{python} PhaseMarginAge.t_used_str`, the system depletes `{python} PhaseMarginAge.frac_used_str` percent of its stability margin before motor commands are dispatched, risking underdamped resonance or boundary chatter.
+Delay can also make a correction arrive after the motion it was meant to oppose has reversed, so feedback can reinforce the disturbance. Phase margin measures how much additional lag a stable loop can tolerate before that happens. In supporting loop analysis, age spends this margin because a pure delay $t_{\text{age}}$ adds phase lag $\omega t_{\text{age}}$ at frequency $\omega$ without changing gain. Feedback control relies on timely negative feedback to oppose tracking error; when transport and compute latency delay an observation by half an oscillation period, corrective actions arrive in phase with the disturbance rather than opposing it. This phase inversion transforms stabilizing negative feedback into destabilizing positive feedback, driving the robot to chatter, weave across aisles, or oscillate into mechanical resonance. A loop with nominal margin $\text{PM}_{\text{nom}}$ at gain crossover[^fn-crossover-margin] $\omega_c$ therefore exhausts its stability margin once $t_{\text{age}} \ge \text{PM}_{\text{nom}}/\omega_c$, and exposure, processing, transport, permission, and actuator delay all draw on that single ceiling (@sec-appendix-control-zoh). For example, a visual-servoing tracking loop operating at crossover frequency $\omega_c =$ `{python} PhaseMarginAge.omega_c_str` rad/s (about `{python} PhaseMarginAge.f_c_str` Hz) with nominal phase margin $\text{PM}_{\text{nom}} =$ `{python} PhaseMarginAge.pm_nom_deg_str`$^\circ$ (`{python} PhaseMarginAge.pm_nom_rad_str` rad) has a maximum permissible latency ceiling of $\tau_{\max} = \text{PM}_{\text{nom}}/\omega_c =$ `{python} PhaseMarginAge.tau_max_str`. If sensor exposure, transport, and neural inference consume `{python} PhaseMarginAge.t_used_str`, the system depletes `{python} PhaseMarginAge.frac_used_str` percent of its stability margin before motor commands are dispatched, risking underdamped resonance or boundary chatter.
+
+[^fn-crossover-margin]: **Gain Crossover**: The frequency at which the loop's open-loop gain falls to one; the phase margin introduced in @sec-nervous-time-constants-phase-lag is the distance from $-180^\circ$ measured there. A pure delay changes no gain, so it leaves the crossover where it was and subtracts $\omega_c\,\tau$ radians from the margin at exactly that frequency, which is why a single ceiling $\text{PM}_{\text{nom}}/\omega_c$ bounds every delay the loop carries. \index{Control!gain crossover}
 
 ::: {.column-margin}
 ![](images/svg/margin_phase_margin_erosion_knee.svg){width="100%" fig-alt="Line labeled PM 45 degrees falling linearly with age, with a dot marked 60 milliseconds, crossing a dashed zero line at a red dot marked 78.5 milliseconds; beyond it the line turns red in a light red region labeled chatter."}
-*Past critical perception age, phase margin erodes to zero, triggering closed-loop instability and chatter.*
+
+*Delay spends phase margin linearly; at `{python} PhaseMarginAge.tau_max_str` none remains.*
 :::
 
 The same delay has two consequences: phase lag erodes closed-loop stability margins, while physical travel consumes clearance ($d_{\text{blind}} = v \cdot t_{\text{age}}$). Both checks use the same elapsed interval; counting its two consequences does not justify charging the interval twice in a stopping budget. The capture timestamp, qualified coordinate frame, and error bound make those consequences inspectable. Host ingestion adds another source of waiting: removing a software copy does not remove contention for memory service.
@@ -1276,9 +1375,9 @@ Real-time physical systems avoid this collapse by treating pixel ingestion as a 
 
 ### MIPI CSI-2 DMA ingress and zero-copy buffers
 
-Once analog-to-digital converters on the sensor die digitize the pixel charges, the frame must travel across a physical interconnect to host memory. Camera streams enter the application processor over the MIPI CSI-2\index{MIPI CSI-2!host ingress} bus.[^fn-hw-mipi-csi]
+Once analog-to-digital converters on the sensor die digitize the pixel charges, the frame must travel across a physical interconnect to host memory. Camera streams enter the application processor over the MIPI CSI-2\index{MIPI CSI-2!host ingress} bus.[^fn-mipi-csi2]
 
-[^fn-hw-mipi-csi]: **MIPI CSI-2 bus protocol**\index{Hardware!MIPI CSI-2}: CSI-2 transmits serialized pixel streams over D-PHY or C-PHY lanes to a host receiver and DMA controller. It can avoid a network stack, but transport and queueing delay still depend on sensor mode, lane rate, controller, and competing traffic; see @sec-appendix-systems-ipc.
+[^fn-mipi-csi2]: **MIPI CSI-2 (Mobile Industry Processor Interface, Camera Serial Interface 2)**\index{Hardware!MIPI CSI-2}: The MIPI Alliance's point-to-point camera link streams serialized pixels from the sensor straight to an application processor's receiver and DMA controller, over differential D-PHY lanes or three-wire C-PHY trios, with no network stack between them. That directness is why the camera's transport term in @tbl-08-latency-budget is set by sensor mode and lane rate rather than by protocol processing; see @sec-appendix-systems-ipc.
 
 ::: {#psp-perception-silicon-ingestion-dataflow-architecture .callout-perspective title="Silicon ingestion dataflow architecture"}
 1. **D-PHY / C-PHY physical layer**: Physical lanes serialize pixel packets at the selected sensor and receiver's supported rate; packet headers carry error checks.
@@ -1287,9 +1386,9 @@ Once analog-to-digital converters on the sensor die digitize the pixel charges, 
 4. **Kernel DMA ring buffers**: A Linux `v4l2` driver can map capture buffers into user space.
 :::
 
-Once DMA write completion occurs, the kernel driver issues an interrupt.[^fn-hw-v4l2-dma] To eliminate user-space copies, modern embedded Linux systems export DMA buffers directly through the Linux `dma_buf` subsystem. Rather than following the naive three-copy path (Kernel DMA buffer $\to$ User-space buffer $\to$ Pinned host memory $\to$ GPU VRAM), `dma_buf` allows the hardware Image Signal Processor (ISP), CPU, and GPU to import and share the identical physical DRAM pages through system IOMMU page tables. A zero-copy buffer handoff can eliminate bulk CPU copying, but DMA arbitration, synchronization, queueing, and consumer scheduling still contribute to ingestion latency. Format conversion, layout changes, or device alignment constraints can still require a targeted transform, but the bulk pixel payload never traverses the CPU cache hierarchy. On a system without hardware I/O cache coherency, the buffer handoff must synchronize ownership for the actual consumer. CPU access needs the platform's DMA-to-CPU synchronization; accelerator access needs the appropriate device mapping, completion ordering, and cache maintenance for that device. A CPU-side invalidation alone does not establish that an accelerator will read current pixels. These operations belong in the measured ingestion budget.
+Once DMA write completion occurs, the kernel's capture driver (V4L2, the Linux kernel's video-capture interface) issues an interrupt. To eliminate user-space copies, modern embedded Linux systems export DMA buffers directly through the Linux `dma_buf` subsystem. Rather than following the naive three-copy path (Kernel DMA buffer $\to$ User-space buffer $\to$ Pinned host memory $\to$ GPU VRAM), `dma_buf` allows the hardware Image Signal Processor (ISP), CPU, and GPU to import and share the identical physical DRAM pages through system IOMMU[^fn-iommu-dmabuf] page tables. A zero-copy buffer handoff can eliminate bulk CPU copying, but DMA arbitration, synchronization, queueing, and consumer scheduling still contribute to ingestion latency. Format conversion, layout changes, or device alignment constraints can still require a targeted transform, but the bulk pixel payload never traverses the CPU cache hierarchy. On a system without hardware I/O cache coherency, the buffer handoff must synchronize ownership for the actual consumer. CPU access needs the platform's DMA-to-CPU synchronization; accelerator access needs the appropriate device mapping, completion ordering, and cache maintenance for that device. A CPU-side invalidation alone does not establish that an accelerator will read current pixels. These operations belong in the measured ingestion budget.
 
-[^fn-hw-v4l2-dma]: **Video4Linux2 direct memory access**\index{Hardware!V4L2 DMA}: A V4L2 driver may use scatter-gather or physically contiguous DMA storage and expose a capture buffer through `V4L2_MEMORY_MMAP`, which a compatible `dma_buf` importer can share. See @sec-appendix-systems-ipc.
+[^fn-iommu-dmabuf]: **IOMMU (Input-Output Memory Management Unit)**: The device-side counterpart of the CPU's MMU. It translates the addresses a DMA engine issues through page tables the kernel controls, so the ISP, CPU, and GPU can share one set of physical pages without copying while each device stays confined to its own mappings. A translation miss on that path is one more source of ingestion delay that the measured budget must include. \index{Memory!IOMMU}
 
 Interface selection trades cable reach and integration flexibility against transport, queueing, and copying costs. MIPI CSI-2 supports direct sensor ingress to the SoC; serializer/deserializer links extend that path across the machine; USB adds a host protocol and driver path whose buffering must be measured. The stage budget of @tbl-08-latency-budget locates those costs for the selected MIPI path; another interface needs its own measured stage budget, because an interface name alone does not determine end-to-end latency. Sensor mode, inference workload, and host contention must match the intended deployment.
 
@@ -1360,7 +1459,7 @@ On the mobile manipulator, this burst lands only on the application processor. T
 
 ::: {.column-margin}
 ![](images/svg/margin_renewal_jitter_lease_envelope.svg){width="100%" fig-alt="Two gray horizontal bars labeled renewal due at 50 and latest at 55, both ending left of a dashed red vertical line labeled lease 60 milliseconds, with a light red wash beyond it."}
-*Host contention spends the lease's renewal jitter: a renewal due every `{python} HostContentionAllowance.t_period_str` may arrive `{python} HostContentionAllowance.t_jitter_str` late, and one `{python} HostContentionAllowance.t_lapse_str` late lets the lease lapse.*
+*A renewal may run `{python} HostContentionAllowance.t_jitter_str` late; at `{python} HostContentionAllowance.t_lapse_str` late the lease lapses.*
 :::
 
 A chunk whose inference waits behind the same traffic renews the lease late, and there the lease rule of @sec-nervous-coupled-budget leaves `{python} HostContentionAllowance.t_jitter_str` of renewal jitter above the `{python} HostContentionAllowance.t_period_str` chunk period. Host contention may therefore stretch the chunk policy's `{python} HostContentionAllowance.t_infer_str` inference by at most `{python} HostContentionAllowance.stretch_pct_str` percent, and by less in practice, because the same allowance also holds the proposer's own jitter and the jitter of the board-level link to the microcontroller (@sec-placement-isolation-decisions). A renewal `{python} HostContentionAllowance.t_lapse_str` late lets the lease lapse and stops the machine. With the stated isolation, age checks, and feasible fallback intact, excess contention costs availability: the permission path refuses delay outside the qualified budget. That conclusion depends on those premises, including continued access to valid local evidence.
@@ -1385,11 +1484,11 @@ In a calibrated **rectified stereo rig**\index{Stereo rectification!epipolar lin
 
 When mechanical vibration, chassis twist, or thermal expansion induces uncalibrated relative pitch or roll between cameras, or when rolling-shutter readout shears scanlines during robot rotation, the true physical correspondence shifts vertically off the horizontal epipolar line ($\Delta y \neq 0$). The 1D correlation cost volume fails or locks onto spurious texture matches across adjacent rows, producing severe triangulation outliers. Differentiating the unprojection $z = \frac{f b}{d}$ with respect to disparity gives a negative signed derivative; its magnitude yields the small-error relation (@eq-percep-stereo-uncertainty):
 $$|\delta z| \approx \frac{z^2}{f b} |\delta d|$$ {#eq-percep-stereo-uncertainty}
-where $\delta d$ is a small disparity error.[^fn-math-inverse-depth] If $\delta d$ denotes a disparity standard deviation $\sigma_d$, first-order propagation gives $\sigma_z\approx z^2\sigma_d/(fb)$. Doubling range quadruples this modeled standard deviation at fixed $f$, $b$, and $\sigma_d$. For distant landmarks, an estimator instead carries depth as inverse depth $\rho = 1/z = d / (f b)$. Differentiating with respect to disparity yields:
+where $\delta d$ is a small disparity error. If $\delta d$ denotes a disparity standard deviation $\sigma_d$, first-order propagation gives $\sigma_z\approx z^2\sigma_d/(fb)$. Doubling range quadruples this modeled standard deviation at fixed $f$, $b$, and $\sigma_d$. For distant landmarks, an estimator instead carries depth as inverse depth[^fn-inverse-depth] $\rho = 1/z = d / (f b)$. Differentiating with respect to disparity yields:
 $$\frac{\partial \rho}{\partial d} = \frac{1}{f b} = \text{constant}$$
 Because this derivative is independent of distance, measurement errors in disparity map linearly into inverse depth ($\delta \rho = \frac{1}{f b} \delta d$). This linear mapping provides **inverse-depth metric grounding**\index{Inverse-depth metric grounding!definition}, which can improve numerical conditioning for distant landmarks when the disparity-error model is appropriate. It does not eliminate mismatch outliers or guarantee estimator stability. A pulsed time-of-flight sensor instead estimates $z=c\Delta t/2$; its range error depends on its timing and detection mechanism and may be approximately flat over a specified operating region.
 
-[^fn-math-inverse-depth]: **Inverse-depth parameterization**\index{Mathematics!inverse-depth}: In visual state estimation, parameterizing 3D landmarks by inverse depth ($\rho = 1/z$) makes small disparity perturbations linear in inverse depth. Approximate Gaussian behavior follows only if the disparity residual model supports it; correspondence outliers remain outliers. Under inverse depth, points at optical infinity ($z \to \infty$) exhibit finite variance ($\rho \to 0$). For the rigorous derivation and mathematical formulation, see @sec-appendix-ml-spatial.
+[^fn-inverse-depth]: **Inverse-Depth Parametrization**\index{Mathematics!inverse-depth}: @civera2008inverse introduced it for monocular SLAM, where a newly seen landmark may lie arbitrarily far away. Storing $\rho = 1/z$ lets a point at infinity enter the estimate as $\rho = 0$ with finite variance, where a depth coordinate would need an infinite one, so near and distant landmarks share one well-conditioned representation. The derivation is in @sec-appendix-ml-spatial.
 
 ```{python}
 #| label: calc-perception-stereo-depth-error
@@ -1410,9 +1509,12 @@ Because this derivative is independent of distance, measurement errors in dispar
 # │          one sigma 162.5 mm and 462.5 mm; 10 mm depth bias at 20 m.
 # │ How:     sigma_z = z^2 sigma_d / (f b); |dz| = z |db| / b.
 # └─────────────────────────────────────────────────────────────────────────────
+import math
 from mlsysim import *
 from mlsysim.core.units import *
-from mlsysim.fmt import fmt, fmt_length, check
+from mlsysim.fmt import fmt, fmt_length, fmt_display_math, check
+
+AISLE = Embodied.Scenario.WarehouseAisle
 
 class StereoDepthError:
     """One-sigma stereo depth scale on an illustrative rig, and baseline thermal bias."""
@@ -1426,6 +1528,9 @@ class StereoDepthError:
     db = 0.1 * ureg.millimeter  # category: illustrative (unmodeled baseline change)
     z_thermal = 20.0 * meter  # category: illustrative
     c_ray = 150.0 * ureg.millimeter  # category: illustrative (clearance kept along the viewing ray)
+    z_rack = AISLE.d_clear  # category: illustrative (rack-end clear distance)
+    delta_loc = AISLE.delta_loc  # category: illustrative (localization allowance)
+    side_clearance = AISLE.side_clearance  # category: illustrative
 
     # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────
     sigma_z_near = (z_near**2 * sigma_d_px / (f_px * b)).to(ureg.millimeter)
@@ -1433,12 +1538,21 @@ class StereoDepthError:
     naive_near = (c_ray + sigma_z_near).to(ureg.millimeter)
     naive_far = (c_ray + sigma_z_far).to(ureg.millimeter)
     dz_thermal = (z_thermal * db / b).to(ureg.millimeter)
+    sigma_z_rack = (z_rack**2 * sigma_d_px / (f_px * b)).to(ureg.millimeter)
+    z_star_loc = ((delta_loc * f_px * b / sigma_d_px) ** 0.5).to(meter)  # range where sigma_z = delta_loc
+    z_star_side = ((side_clearance * f_px * b / sigma_d_px) ** 0.5).to(meter)  # range where sigma_z = side clearance
+    z_star_side_half_b = ((side_clearance * f_px * (b / 2) / sigma_d_px) ** 0.5).to(meter)  # checkpoint: halved baseline
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(abs(sigma_z_near.magnitude - 12.5) < 1e-6, f"Unexpected near sigma_z: {sigma_z_near}")
     check(abs(sigma_z_far.magnitude - 312.5) < 1e-6, f"Unexpected far sigma_z: {sigma_z_far}")
     check(abs(sigma_z_far / sigma_z_near - 25.0) < 1e-9, "Depth scale must grow with squared range")
     check(abs(dz_thermal.magnitude - 10.0) < 1e-6, f"Unexpected thermal depth bias: {dz_thermal}")
+    check(abs(sigma_z_rack.magnitude - 3.78) < 0.01, f"Unexpected sigma_z at the rack end: {sigma_z_rack}")
+    check(abs(z_star_loc.magnitude - 4.0) < 1e-6, f"Unexpected delta_loc crossover range: {z_star_loc}")
+    check(abs(z_star_side.magnitude - 6.93) < 0.005, f"Unexpected side-clearance crossover range: {z_star_side}")
+    check(z_rack < z_star_loc < z_star_side < z_far, "Notebook says the rack end sits well inside both crossovers")
+    check(abs(z_star_side_half_b.magnitude - 4.90) < 0.005, f"Checkpoint answer drifted: {z_star_side_half_b}")
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
     b_str = fmt_length(b, unit=meter, precision=2)
@@ -1454,9 +1568,58 @@ class StereoDepthError:
     db_str = fmt_length(db, unit=ureg.millimeter, precision=1)
     z_thermal_str = fmt_length(z_thermal, unit=meter, precision=0)
     dz_thermal_str = fmt_length(dz_thermal, unit=ureg.millimeter, precision=0)
+    z_rack_str = fmt_length(z_rack.to(meter), unit=meter, precision=2)
+    delta_loc_str = fmt_length(delta_loc.to(ureg.millimeter), unit=ureg.millimeter, precision=0)
+    side_clearance_str = fmt_length(side_clearance.to(meter), unit=meter, precision=2)
+    sigma_z_rack_str = fmt_length(sigma_z_rack, unit=ureg.millimeter, precision=1)
+    z_star_loc_str = fmt_length(z_star_loc, unit=meter, precision=1)
+    z_star_side_str = fmt_length(z_star_side, unit=meter, precision=1)
+
+    # Display arithmetic for nbk-perception-stereo-range-wall (magnitudes, LaTeX units)
+    _fb = fmt(f_px * b.to(meter).magnitude, precision=0)  # f b in pixel-meters
+    _sd = fmt(sigma_d_px, precision=1)
+    _zn = fmt(z_near.to(meter).magnitude, precision=0)
+    _zf = fmt(z_far.to(meter).magnitude, precision=0)
+    _ratio = fmt((sigma_z_far / sigma_z_near).to(ureg.dimensionless).magnitude, precision=0)
+    _loc = fmt(delta_loc.to(meter).magnitude, precision=3)
+    _side = fmt(side_clearance.to(meter).magnitude, precision=2)
+    sigma_rack_math = fmt_display_math(
+        rf"\sigma_z = \frac{{z^2 \sigma_d}}{{f b}} = \frac{{({fmt(z_rack.to(meter).magnitude, precision=2)}\ \text{{m}})^2 \times {_sd}\ \text{{px}}}}{{{f_px_str}\ \text{{px}} \times {fmt(b.to(meter).magnitude, precision=2)}\ \text{{m}}}} = {fmt(sigma_z_rack.magnitude, precision=1)}\ \text{{mm}}, \quad \frac{{\sigma_z({_zf}\ \text{{m}})}}{{\sigma_z({_zn}\ \text{{m}})}} = \frac{{{fmt(sigma_z_far.magnitude, precision=1)}}}{{{fmt(sigma_z_near.magnitude, precision=1)}}} = {_ratio}"
+    )
+    crossover_math = fmt_display_math(
+        rf"z^{{*}} = \sqrt{{\frac{{C\,f b}}{{\sigma_d}}}}: \quad \sqrt{{\frac{{{_loc}\ \text{{m}} \times {_fb}\ \text{{px}}\cdot\text{{m}}}}{{{_sd}\ \text{{px}}}}}} = {fmt(z_star_loc.magnitude, precision=1)}\ \text{{m}}, \quad \sqrt{{\frac{{{_side}\ \text{{m}} \times {_fb}\ \text{{px}}\cdot\text{{m}}}}{{{_sd}\ \text{{px}}}}}} = {fmt(z_star_side.magnitude, precision=1)}\ \text{{m}}"
+    )
 ```
 
-To quantify the geometry, assume an illustrative stereo pair (the navigation camera alone recovers only the bearing ray of @eq-percep-bearing-ray) with $b =$ `{python} StereoDepthError.b_str`, $f =$ `{python} StereoDepthError.f_px_str` px, and disparity standard deviation $\sigma_d =$ `{python} StereoDepthError.sigma_d_px_str` px over the tested range. First-order propagation gives $\sigma_z =$ `{python} StereoDepthError.sigma_z_near_str` at `{python} StereoDepthError.z_near_str` and $\sigma_z =$ `{python} StereoDepthError.sigma_z_far_str` at `{python} StereoDepthError.z_far_str` (@fig-08-depth-uncertainty-clearance). Those are **one-standard-deviation scales**, not clearance insets or 99th-percentile bounds. A usable inset requires a tail quantile of the *full spatial residual*, calibrated on the intended sensor, range, texture, motion, and lighting conditions, with systematic bias and missed detections handled separately.
+To quantify the geometry, assume an illustrative stereo pair (the navigation camera alone recovers only the bearing ray of @eq-percep-bearing-ray) and ask how far down the aisle its depth error stays inside the stopping budget's allowances. Notebook \ref{nbk-perception-stereo-range-wall} evaluates @eq-percep-stereo-uncertainty on that rig, and @fig-08-depth-uncertainty-clearance plots the curve.
+
+::: {#nbk-perception-stereo-range-wall .callout-notebook title="The stereo range wall"}
+
+**Problem**: An illustrative stereo pair must place a rack upright for the base's clearance checks. How large is its one-standard-deviation depth scale at the rack end, and at what range does that scale alone consume the localization allowance and then the whole side clearance?
+
+**Variables**:
+
+* Baseline $b =$ `{python} StereoDepthError.b_str`, focal length $f =$ `{python} StereoDepthError.f_px_str` px, and disparity standard deviation $\sigma_d =$ `{python} StereoDepthError.sigma_d_px_str` px over the tested range (Illustrative rig; the running machine carries no depth camera).
+* Rack-end range $z =$ `{python} StereoDepthError.z_rack_str` (Illustrative).
+* Allowances $C$: localization $\delta_{\text{loc}} =$ `{python} StereoDepthError.delta_loc_str` and side clearance `{python} StereoDepthError.side_clearance_str` (Illustrative; @tbl-01-machine-card).
+
+**Math**:
+
+*Depth scale.* At the rack end, and between the figure's two quoted ranges,
+`{python} StereoDepthError.sigma_rack_math`
+
+*Crossover ranges.* Setting $\sigma_z$ equal to an allowance $C$ and solving for range,
+`{python} StereoDepthError.crossover_math`
+
+*Sensitivity.* Five times the range costs twenty-five times the depth scale, so the crossovers move only with the square root of $f b / \sigma_d$.
+
+**Result**: At the rack end, one standard deviation is `{python} StereoDepthError.sigma_z_rack_str`. It equals $\delta_{\text{loc}}$ at `{python} StereoDepthError.z_star_loc_str` and the whole side clearance at `{python} StereoDepthError.z_star_side_str`.
+
+**Systems insight**: Stereo depth error is a range budget. This rig can support the rack-end decision, but a claim about an obstacle several meters down the aisle spends the stopping budget's $\delta_{\text{loc}}$ on one standard deviation alone, before any tail, bias, or timing term, so beyond a few meters the clearance claim must come from a range sensor whose error does not grow with $z^2$, or the speed must fall.
+
+:::
+
+The notebook's values are **one-standard-deviation scales**, not clearance insets or 99th-percentile bounds. A usable inset requires a tail quantile of the *full spatial residual*, calibrated on the intended sensor, range, texture, motion, and lighting conditions, with systematic bias and missed detections handled separately.
 
 A pervasive trap in visual estimation is assuming that measurement errors follow a nominal Gaussian distribution where a $3\sigma$ gate bounds 99.7 percent of all errors. In physical vision, disparity estimation relies on matching pixel patches across stereo images. When scenes contain repetitive textures (such as corrugated warehouse siding), specular reflections from polished concrete floors, or partial occlusions along object silhouettes, correspondence matching produces catastrophic multimodal outliers rather than Gaussian scatter. In real-world robotic environments, 2 to 5 percent of stereo returns represent complete mismatch outliers lying dozens of standard deviations from the true surface. Relying on Gaussian $3\sigma$ bounds without robust loss formulations (such as Huber or Tukey loss) or heavy-tailed empirical quantile validation allows these gross outliers to distort the state estimate, compromising physical clearance. A `{python} StereoDepthError.c_ray_str` clearance kept along the viewing ray to an obstacle therefore cannot be widened to a valid inset of `{python} StereoDepthError.naive_near_str` or `{python} StereoDepthError.naive_far_str` merely by adding one $\sigma_z$. Speed must be reduced or the proposal refused whenever the validated range-error and stopping margins do not fit.
 
@@ -1470,9 +1633,21 @@ Spatial error extends beyond the sensor optical frame. To govern motion, the est
 
 Every physical safety barrier operates by defending a geometric boundary around the machine. For position error vector $\boldsymbol{\epsilon}_{\text{spatial}}$, the triangle inequality gives a conservative relation between nominal and true clearance:
 $$C_{\text{true}} \ge C_{\text{nominal}} - \|\boldsymbol{\epsilon}_{\text{spatial}}\|$$
-For a validated 99th-percentile norm-error quantile, the permission path can choose an **inset clearance**\index{Inset clearance!definition} $C_{\text{inset}}$ (@eq-percep-clearance-inset):
+For a validated 99th-percentile norm-error quantile, the permission path can hold the estimate at a clearance inset $C_{\text{inset}}$ (@eq-percep-clearance-inset):
 $$C_{\text{inset}} = C_{\text{safe}} + \|\boldsymbol{\epsilon}_{\text{spatial}}\|_{P_{99}}$$ {#eq-percep-clearance-inset}
-Here $C_{\text{safe}}$ is the physical clearance the motion must keep, such as the base's side clearance, and the quantile must come from a specified, checked residual distribution for the full spatial error, including calibration bias. Even then it leaves a 1 percent tail under the test distribution; only a justified hard bound on the relevant error, a feasible stopping path, and a permission response within the remaining delay budget would close it. @Fig-08-depth-uncertainty-clearance shows how stereo's growing depth-error scale can require a larger inset at longer range.
+Here $C_{\text{safe}}$ is the physical clearance the motion must keep, such as the base's side clearance, and the quantile must come from a specified, checked residual distribution for the full spatial error, including calibration bias. Even then it leaves a 1 percent tail under the test distribution; only a justified hard bound on the relevant error, a feasible stopping path, and a permission response within the remaining delay budget would close it.
+
+::: {#dfn-perception-clearance-inset .callout-definition title="Clearance inset"}
+
+***Clearance inset***\index{Clearance inset!definition} ($C_{\text{inset}}$) is the separation a consumer holds between an estimated obstacle position and the machine's envelope so that the true obstacle stays at least the required physical clearance away, except with a stated tail probability measured under the conditions of use.
+
+1.  **Significance**: The inset converts measured spatial error into clearance that the motion gives up (@eq-percep-clearance-inset). Every millimeter of qualified error widens the region the permission path treats as occupied, so the planner must slow or route farther away. On the illustrative stereo rig, one standard deviation of depth error alone equals the base's `{python} StereoDepthError.side_clearance_str` side clearance at `{python} StereoDepthError.z_star_side_str`, so there the inset would double the clearance even if the residual tail were no wider than one standard deviation.
+2.  **Distinction**: A covariance describes the second moments of the error an estimator believes it has; the inset rests on residuals measured against ground truth, so it includes the bias and heavy tail that the covariance omits. A 99th-percentile inset is also not a hard bound: it leaves one percent of residuals outside, which only a justified bound on the error or a feasible stop within the remaining delay budget can close.
+3.  **Common pitfall**: A frequent misconception is that a reported covariance, or a depth network's predicted spread, sets the inset. Neither is measured against ground truth, so neither contains the calibration bias and mismatch outliers that the residual campaign of @sec-perception-qualifying-error captures.
+
+:::
+
+@Fig-08-depth-uncertainty-clearance shows how stereo's growing depth-error scale can require a larger inset at longer range.
 
 ::: {#fig-08-depth-uncertainty-clearance fig-env="figure" fig-pos="t" fig-cap="**Depth error scale and clearance inset**: (a) For the illustrative stereo rig, the one-standard-deviation depth scale grows with squared range, from `{python} StereoDepthError.sigma_z_near_str` at `{python} StereoDepthError.z_near_str` to `{python} StereoDepthError.sigma_z_far_str` at `{python} StereoDepthError.z_far_str`; the gray band is the machine LiDAR's datasheet range precision, which stays flat beyond 1 m. (b) A schematic error distribution along the viewing ray. Holding the estimate at $C_{\text{inset}} = C_{\text{safe}} + \|\boldsymbol{\epsilon}\|_{P_{99}}$ keeps the true surface beyond $C_{\text{safe}}$ except in the shaded residual tail, which the quantile leaves and which bias can enlarge." fig-alt="Two panels. Left: a line plot of one-sigma depth error in millimeters against range in meters, a curve rising quadratically with two marked points at 2 and 10 meters, above a flat gray band for the LiDAR precision. Right: a schematic bell-shaped distribution with heavy tails along a distance axis with ticks for body, C safe, and C inset; the estimate sits at the dashed C inset line, an arrow between C safe and C inset is labeled with the 99th-percentile error norm, and the small part of the distribution closer than C safe is shaded red and labeled residual tail and bias."}
 
@@ -1610,9 +1785,9 @@ Because clearance depends on propagated error, downstream planners and the permi
 
 When spatial error is qualified, the permission path can expand the clearance inset, trading speed or workspace for separation. Downstream deterministic safety filters (such as the Control Barrier Functions derived in @sec-enforcement-safe-sets-conditional-permission) enforce forward invariance against this expanded boundary $C_{\text{inset}}$, preserving the physical clearance buffer against sensing and calibration error. A textureless wall, glare, or lost calibration can invalidate that qualification without making a numerical variance literally infinite. The permission path must then refuse motion that depends on the affected claim and select a feasible fallback.
 
-On every frame the producer builds a spatial claim in a fixed order, and any step can end it. It first converts the capture timestamp to the consumer's clock with a bounded synchronization error and computes $t_{\text{age}}$; if age plus clock uncertainty exceeds the refusal threshold, it marks the observation stale, and proposals that need it are refused. At admission and subsequent ticks, the permission path computes the current evidence age from capture time; the dispatch threshold is not the current-age threshold (@sec-perception-observation-contract). For a fresh observation, the producer unprojects each pixel measurement into optical coordinates with a sensor covariance,[^fn-math-unprojection-covariance] and carries point and covariance into the body frame by first-order SE(3) error propagation\index{SE(3) kinematics!error propagation} through the calibrated extrinsics at capture. A consumer that predicts forward must attach its motion-model uncertainty without changing the evidence epoch. Validated residuals, including bias, then set the inset radius, and when no valid bound remains, the affected motion is refused. What leaves perception is a claim $(\mathbf{p}_{\text{body}}, \mathbf{\Sigma}_{\text{body}}, C_{\text{inset}}, t_{\text{age}})$, not a bare coordinate.
+On every frame the producer builds a spatial claim in a fixed order, and any step can end it. It first converts the capture timestamp to the consumer's clock with a bounded synchronization error and computes $t_{\text{age}}$; if age plus clock uncertainty exceeds the refusal threshold, it marks the observation stale, and proposals that need it are refused. At admission and subsequent ticks, the permission path computes the current evidence age from capture time; the dispatch threshold is not the current-age threshold (@sec-perception-observation-contract). For a fresh observation, the producer unprojects each pixel measurement into optical coordinates with a sensor covariance,[^fn-covariance-unprojection] and carries point and covariance into the body frame by first-order SE(3) error propagation\index{SE(3) kinematics!error propagation} through the calibrated extrinsics at capture. A consumer that predicts forward must attach its motion-model uncertainty without changing the evidence epoch. Validated residuals, including bias, then set the inset radius, and when no valid bound remains, the affected motion is refused. What leaves perception is a claim $(\mathbf{p}_{\text{body}}, \mathbf{\Sigma}_{\text{body}}, C_{\text{inset}}, t_{\text{age}})$, not a bare coordinate.
 
-[^fn-math-unprojection-covariance]: **Metric unprojection and covariance propagation**\index{Mathematics!covariance propagation}: First-order propagation maps measurement covariance to $\mathbf{\Sigma}_c = \mathbf{J}_{\text{unproj}}\mathbf{\Sigma}_{\text{meas}}\mathbf{J}_{\text{unproj}}^\top$ and then to $\mathbf{\Sigma}_b = \mathbf{R}_{bc}\mathbf{\Sigma}_c\mathbf{R}_{bc}^\top + \mathbf{\Sigma}_{\text{ext}}$. Its largest eigenvalue gives a principal variance scale, **not** a 99th-percentile error radius. A quantile requires an assumed and calibrated error distribution, including bias; see @sec-appendix-systems-vision.
+[^fn-covariance-unprojection]: **Covariance Propagation**\index{Mathematics!covariance propagation}: First-order propagation maps measurement covariance to $\mathbf{\Sigma}_c = \mathbf{J}_{\text{unproj}}\mathbf{\Sigma}_{\text{meas}}\mathbf{J}_{\text{unproj}}^\top$ in the optical frame and then to $\mathbf{\Sigma}_b = \mathbf{R}_{bc}\mathbf{\Sigma}_c\mathbf{R}_{bc}^\top + \mathbf{\Sigma}_{\text{ext}}$ in the body frame, where the extrinsic term is what a mount shift adds. Its largest eigenvalue gives the principal variance scale, which for stereo points lies along the viewing ray; see @sec-appendix-systems-vision.
 
 That claim describes one measurement at one instant, and perception's responsibility ends with it. Keeping the rack-end range current between sweeps, fusing the LiDAR with a second sensor, joining detections into tracks, and applying a late measurement at its capture epoch are estimation over time. @Sec-perception-state-estimation develops them as the foundation of spatial memory, and every one of them consumes the dated, framed, error-qualified claim built here. What perception must still supply is evidence that the claimed error was measured.
 
@@ -1687,7 +1862,7 @@ Learned models add two things to the metric claims of this section: a label for 
 
 Lifting 2D pixel features into 3D metric space requires combining 2D token embeddings with per-pixel depth distributions. In deep monocular depth networks (such as Depth Anything, MiDaS, or metric depth transformers), models predict dense depth maps from monocular cues. However, single-view depth estimation is inherently ill-posed due to projective scale ambiguity: an infinite family of physical 3D objects with different scales and distances project to identical pixel arrays. Relative-depth models may output scale- or affine-ambiguous predictions, whose conversion to metric depth requires calibration, represented here by $z_{\text{metric}} = s \cdot z_{\text{pred}} + t$ when the model uses that parameterization. Metric-trained heads can directly predict depth in meters, but their units do not certify their error. Either kind of model requires residual validation and can fail silently on unusual geometries, novel textures, or optical illusions (such as a 2D photograph printed on a flat surface).
 
-In bird's-eye-view (BEV) architectures such as Lift-Splat-Shoot [@philion2020lift] (developed in @sec-appendix-ml-bev-lifting), the network predicts a categorical probability distribution over discrete depth bins along each viewing ray. Each 2D feature token is cast outward along its optical sightline ray and 'splatted' into discrete 3D spatial voxel cells weighted by these predicted depth probabilities, transforming disembodied image embeddings into an explicit 3D volumetric representation. Crucially, the resulting spatial uncertainty ellipsoid deforms non-linearly under perspective unprojection through the unprojection Jacobian $\mathbf{J}_{\text{unproj}} = \frac{\partial \mathbf{p}_{\text{cartesian}}}{\partial [u, v, z]^\top}$ (@eq-percep-unproj-covariance):
+In bird's-eye-view (BEV) architectures such as Lift-Splat-Shoot [@philion2020lift] (developed in @sec-appendix-ml-bev-lifting), the network predicts a categorical probability distribution over discrete depth bins along each viewing ray. Each 2D feature token is cast outward along its optical sightline ray and 'splatted' into discrete 3D spatial voxel cells weighted by these predicted depth probabilities, transforming disembodied image embeddings into an explicit 3D volumetric representation. The resulting spatial uncertainty ellipsoid deforms non-linearly under perspective unprojection through the unprojection Jacobian $\mathbf{J}_{\text{unproj}} = \frac{\partial \mathbf{p}_{\text{cartesian}}}{\partial [u, v, z]^\top}$ (@eq-percep-unproj-covariance):
 $$\mathbf{\Sigma}_{\text{cartesian}} = \mathbf{J}_{\text{unproj}} \mathbf{\Sigma}_{\text{ray}} \mathbf{J}_{\text{unproj}}^\top$$ {#eq-percep-unproj-covariance}
 While transverse spatial standard deviation expands linearly with range ($\sigma_\perp \approx \frac{z}{f} \sigma_{\text{px}}$), stereo radial depth standard deviation expands quadratically ($\sigma_z \approx \frac{z^2}{f b} \sigma_d$). This perspective unprojection transforms near-field circular uncertainty disks into highly eccentric, needle-shaped ellipsoids oriented along the camera's sightline, with extreme radial dispersion at long ranges that must be bound before downstream safety filters can certify clearance.
 
@@ -1697,15 +1872,24 @@ Because the depth-bin distributions produced by learned lifting stages are uncal
 **Safety is an invariant of metric clearance, not semantic understanding.** When a slow 2 Hz vision-language foundation model classifies a pathway as "clear aisle" or dismisses an object as a harmless shadow, but a fast 60 Hz depth sensor or occupancy grid detects a physical obstacle return within the stopping envelope, the permission path must honor the qualified occupied-region evidence rather than let semantic confidence erase it. The permission path halts or slows the machine regardless of the semantic model's high confidence. Semantic models propose high-level task goals; qualified metric sensing supplies clearance evidence to the permission path. Neither sensor pipeline itself owns actuator authority.
 :::
 
+::: {#chk-percep-clearance-inset .callout-checkpoint title="Spatial error and the clearance inset"}
+
+A spatial claim is spent from the same clearance as its age, and its error must be measured before it is charged.
+
+- [ ] **Quadratic depth error**: Can you explain why stereo depth error grows with the square of range while a pulsed LiDAR's range precision stays roughly flat?
+- [ ] **Baseline estimate**: If the illustrative rig's `{python} StereoDepthError.b_str` baseline were halved, at what range would one standard deviation of depth error reach the `{python} StereoDepthError.side_clearance_str` side clearance, compared with `{python} StereoDepthError.z_star_side_str` now?
+- [ ] **Covariance vs. clearance inset**: Can you explain why a residual quantile measured against ground truth, not a reported covariance, sets $C_{\text{inset}}$, and what that quantile still leaves uncovered?
+- [ ] **Learned depth vs. metric evidence**: Can you explain why a depth network's predicted spread cannot enter a clearance claim until its residuals are validated, and why qualified metric evidence overrides a semantic label that calls a return a shadow?
+
+:::
+
 Every bound in this section, metric, learned, or temporal, assumes that the sensor behaves as calibrated. Propagation bounds the error of a sensor working as modeled; it says nothing about a sensor that has stopped working that way while still delivering frames at its nominal rate.
 
 ## Perception Failure Modes and Sensor Degradation {#sec-perception-failure-modes}
 
 The navigation camera can fail in two ways that look nothing alike to its consumer. If its serializer link loses lock, the driver raises an error and the frame never arrives. If light through an open dock door saturates the lens as the base turns into an aisle, the camera delivers a complete frame at its nominal rate in which the rack end is a patch of saturated white. Perception failures divide along exactly this line into two operational classes. **Detectable faults**\index{Detectable faults} occur when the physical sensor or the communication transport reports an explicit error condition. A serializer-deserializer link drops a lock (losing clock synchronization), a cyclical redundancy check detects a corrupted payload, a frame buffer overflows, or a transport bus times out. These failures are straightforward to handle since the hardware driver asserts an error flag at the ingestion boundary. Downstream consumers register the missing frame and invalidate stale state estimates, and once the evidence age exceeds its budget the permission path refuses and moves the machine to a validated fallback. In contrast, **silent failures**\index{Silent failure!definition} occur when the sensor hardware and transport pipeline function without error, delivering a fully populated, structurally valid tensor whose numerical values misrepresent the physical world.
 
-Physical degradation of the optical channel is a common source of silent error.[^fn-hw-lidar-drift] When direct sunlight enters an optical aperture, incident photons exceed the physical charge capacity (the "full-well capacity") of the CMOS photodiodes, clamping pixel intensities at their maximum quantization limit (clipping the image to pure white) across large patches of the array. This **dynamic range saturation**\index{Dynamic range saturation} destroys local spatial gradients. Feature extractors, optical flow estimators, and disparity matching algorithms fail because mathematical optimization on a uniform flat field yields zero information, yet the driver emits a valid frame at nominal line rate. Low-light environments introduce the opposite failure mode. As ambient illumination drops, the discrete, random arrival of individual photons (**photon shot noise**\index{Photon shot noise}) and the intrinsic electrical fluctuations of the sensor's amplifier (**sensor read noise**\index{Sensor read noise}) dominate the measurement. The signal-to-noise ratio collapses, causing downstream neural networks to extract geometric features from random noise fluctuations rather than physical scene boundaries. Environmental contaminants on the protective lens or dome window (such as water droplets, airborne dust, or mud splatters) act as irregular refractive elements and optical low-pass filters. They attenuate contrast, distort spatial geometry, and obscure obstacles while the transport bus continues to operate without asserting a single fault flag.
-
-[^fn-hw-lidar-drift]: **Lidar range walk**\index{Hardware!lidar range walk}: Analogous silent degradation occurs in active time-of-flight lidar receivers utilizing Avalanche Photodiodes (APDs) or Single-Photon Avalanche Diodes (SPADs). A strong return from a retroreflective surface rises faster than a weak one, so it crosses a leading-edge discriminator's threshold earlier, an effect called *range walk*. The timing error shortens the calculated round-trip time ($t_{\text{TOF}}$), shifting the apparent obstacle boundary toward the sensor without asserting a hardware fault.
+Physical degradation of the optical channel is a common source of silent error. When direct sunlight enters an optical aperture, incident photons exceed the physical charge capacity (the "full-well capacity") of the CMOS photodiodes, clamping pixel intensities at their maximum quantization limit (clipping the image to pure white) across large patches of the array. This **dynamic range saturation**\index{Dynamic range saturation} destroys local spatial gradients. Feature extractors, optical flow estimators, and disparity matching algorithms fail because mathematical optimization on a uniform flat field yields zero information, yet the driver emits a valid frame at nominal line rate. Low-light environments introduce the opposite failure mode. As ambient illumination drops, the discrete, random arrival of individual photons (**photon shot noise**\index{Photon shot noise}) and the intrinsic electrical fluctuations of the sensor's amplifier (**sensor read noise**\index{Sensor read noise}) dominate the measurement. The signal-to-noise ratio collapses, causing downstream neural networks to extract geometric features from random noise fluctuations rather than physical scene boundaries. Environmental contaminants on the protective lens or dome window (such as water droplets, airborne dust, or mud splatters) act as irregular refractive elements and optical low-pass filters. They attenuate contrast, distort spatial geometry, and obscure obstacles while the transport bus continues to operate without asserting a single fault flag.
 
 Timing and transport anomalies can also corrupt an observation silently. If an unshielded physical interface experiences electromagnetic interference, deserializer bit slips (where the hardware drops or duplicates a bit, misaligning the entire subsequent data stream) can alter payload semantics without invalidating standard packet lengths. More dangerous than a lost packet, because nothing flags it, is an observation delivered with a timestamp that misreports its true capture epoch. If an image sensor captures photons at epoch $t_0$, but a late interrupt handler or an unsynchronized system clock timestamps the resulting memory buffer at $t_0 + \delta t$, the downstream state estimator integrates spatial features under an incorrect body pose. Consider a machine traveling with instantaneous velocity $v$ and linear acceleration $a$ along a given trajectory. When perception suffers an undetected timing desynchronization $\delta t$, the state estimator assigns the detected position of an obstacle to the body coordinates at $t_0 + \delta t$ rather than $t_0$. Over the unmodeled time interval $\delta t$, the physical state estimation error $\Delta p$ between the asserted position and the true position is governed by the kinematic drift relation (@eq-percep-kinematic-drift):
 $$\Delta p = v \cdot \delta t + \frac{1}{2} a \cdot (\delta t)^2$$ {#eq-percep-kinematic-drift}
@@ -1724,16 +1908,18 @@ Physical environments continuously degrade sensory transmission across optical, 
 $$C(d) = C_0 \, e^{-\beta_{\text{atm}} d}$$
 where $C_0$ is intrinsic object contrast, $d$ is metric range, and $\beta_{\text{atm}}$ is the atmospheric extinction coefficient. In dense fog ($\beta_{\text{atm}} \approx 0.05\,\text{m}^{-1}$), apparent contrast decays below the $0.05$ perceptual detection threshold within $60\,\text{meters}$. High-frequency edge gradients dissolve into uniform background luminance, preventing convolutional and transformer backbones from forming valid feature embeddings. Airborne rain introduces high-velocity streak noise across frames, while droplets impacting the protective lens act as irregular refractive microlenses. Each droplet deflects incoming rays, creating severe localized geometric distortion, optical blur, and false object silhouettes.
 
-**High angular velocity motion blur and MTF collapse**: During a yaw rotation or manipulator sweep, a camera center at lever arm $r$ travels a tangential distance set by angular rate $\boldsymbol{\omega}$ and exposure duration:
+**High angular velocity motion blur and MTF collapse**:[^fn-mtf-blur] During a yaw rotation or manipulator sweep, a camera center at lever arm $r$ travels a tangential distance set by angular rate $\boldsymbol{\omega}$ and exposure duration:
 $$\Delta x_{\text{rot}} = r \cdot \|\boldsymbol{\omega}\| \cdot t_{\text{exp}}$$
 For the illustrative wrist-mounted camera at $r = 0.5\,\text{meters}$, $\omega = 3.0\,\text{rad/s}$, and $16\,\text{ms}$ exposure, this travel scale is $\Delta x \approx 24\,\text{mm}$. It is not an image-plane blur width. Scene depth and camera projection determine the image motion due to translation, while attitude change also moves image features even without camera-center translation. Blur can attenuate the gradients used by feature matching, visual odometry, and learned perception; its effect on tracking and learned features requires evaluation over the intended motion and exposure range.
+
+[^fn-mtf-blur]: **Modulation Transfer Function (MTF)**: The fraction of scene contrast an imaging chain passes at each spatial frequency. A uniform blur of length $L$ in the image multiplies it by a sinc that falls to zero at a period of $L$, so detail finer than the blur is erased rather than dimmed, and no network downstream can restore what the exposure removed. \index{Modulation transfer function!motion blur}
 
 **High Dynamic Range (HDR) saturation and blooming**: Auto-exposure handles a change of illumination between scenes, from a shaded aisle to a sunlit yard, by changing $t_{\text{exp}}$ from frame to frame. It cannot handle contrast within one frame. When a robot in a dim aisle faces an open, sunlit loading dock, one exposure must serve both regions, and a setting long enough to resolve the aisle lets the dock's photon flux exceed each photodiode's full-well charge capacity, driving those pixels into deep saturation. HDR sensors extend the range by combining several exposures or several pixel sensitivities, which raises a timing question the record must answer: when the exposures are staggered, each region of the merged image carries a different exposure midpoint, so the capture epoch must name which exposure it dates. Excess photo-generated electrons overflow past barrier implants into adjacent pixel wells (**charge blooming**), wiping out entire array regions into uniform saturated white ($255$). Internal reflections between lens elements create veiling glare and flare streaks, eliminating the spatial contrast required for disparity matching and optical flow.
 
 **LiDAR in airborne particulates, retroreflector blooming, and specular surfaces**: Pulsed time-of-flight LiDAR, at silicon-band near-infrared wavelengths and at $1{,}550\,\text{nm}$ alike, suffers three distinct physical failure mechanisms in industrial and outdoor operation:
 
 1. *Aerosol backscatter clutter*: Emitted laser pulses strike suspended fog droplets and dust particulates, scattering optical power directly back into the receiver during the initial nanoseconds of flight. This generates dense near-field point clutter—often appearing as a solid "phantom wall" within $0.5\text{--}3.0\,\text{meters}$ of the aperture. Downstream spatial clustering algorithms interpret these returns as immediate collision obstacles, triggering false emergency stops. Concurrently, forward beam attenuation depletes pulse energy, truncating effective range by over 70 percent in heavy rain or dense fog.
-2. *Retroreflector detector blooming and range walk*: High-visibility safety vests, barcode placards, and vehicle license plates incorporate retroreflective prismatic surfaces designed to return incoming light directly along the emission axis, far more of it than a diffuse surface returns. The strong pulse causes two distinct errors. **Range walk** is a timing error: a leading-edge discriminator fires when the return crosses a fixed threshold, and a strong, fast-rising pulse crosses it earlier than a weak one, so the range to the vest reads short by an amount that depends on the return's amplitude and that the receiver's intensity correction removes only while the pre-amplifier stays unsaturated. **Blooming** is a spatial error: stray light and electrical crosstalk from the saturating return register in neighboring beams and pixels, surrounding the retroreflector with a halo of phantom points where nothing stands. The machine's datasheet already separates the two cases by quoting a looser accuracy for retroreflective targets than for diffuse ones [@ouster2025os1].
+2. *Retroreflector detector blooming and range walk*: High-visibility safety vests, barcode placards, and vehicle license plates incorporate retroreflective prismatic surfaces designed to return incoming light directly along the emission axis, far more of it than a diffuse surface returns. The strong pulse causes two distinct errors. **Range walk**\index{LiDAR!range walk} is a timing error in the receiver's avalanche photodiodes (APDs) or single-photon avalanche diodes (SPADs): a leading-edge discriminator fires when the return crosses a fixed threshold, and a strong, fast-rising pulse crosses it earlier than a weak one, so the range to the vest reads short by an amount that depends on the return's amplitude and that the receiver's intensity correction removes only while the pre-amplifier stays unsaturated. **Blooming** is a spatial error: stray light and electrical crosstalk from the saturating return register in neighboring beams and pixels, surrounding the retroreflector with a halo of phantom points where nothing stands. The machine's datasheet already separates the two cases by quoting a looser accuracy for retroreflective targets than for diffuse ones [@ouster2025os1].
 3. *Specular surfaces and non-Lambertian forward bounce*: Triangulation sensors, structured light, and LiDAR rely on the physical assumption of diffuse Lambertian scattering. Specular surfaces—including polished warehouse concrete floors, shrink-wrapped palletized freight, metallic shelving, and architectural glass—violate this assumption. Emitted laser pulses undergo specular reflection, leaving at an angle from the surface normal equal to the angle of incidence ($\theta_r = \theta_i$) and so directing light away from the sensor. On wet floors, this creates artificial zero-return dropouts ("puddle black holes"); on glass walls or metal panels, it induces multi-bounce reflections, projecting phantom obstacle points meters behind walls or beneath the floor.
 
 **FMCW radar all-weather resilience**: Operating at $76\text{--}81\,\text{GHz}$, FMCW millimeter-wave radar features a wavelength of $\lambda \approx 3.9\,\text{mm}$—roughly 4,000 times larger than optical laser pulses and substantially larger than fog aerosol droplets ($1\text{--}10\,\mu\text{m}$). Scattering by airborne particles follows Rayleigh scattering physics, where the particle scattering cross-section $\sigma_s$ scales inversely with the fourth power of wavelength:
@@ -1768,7 +1954,7 @@ Whatever record the producer attaches to an observation can expose only the faul
 
 ## The Observation Contract {#sec-perception-observation-contract}
 
-A downstream tracker, policy backbone, or the permission path cannot reconstruct exposure timing, mounting calibration, or record integrity from a raw tensor alone. The perception producer therefore wraps each observation in an observation contract, the sixth record of the book's fifteen-record chain. The observation is unusable without a capture epoch, a clock identifier, a bounded conversion to the permission path's clock, and a calibration inside its validity range, whose revision the frame identifier carries. The consumer refuses a record that lacks any of them before reading the payload. The clock domain and the $\mathcal{H}_1$ age budget come from the handoff record of @sec-nervous-handoffs-matrix, which this record consumes, and perception supplies the capture-side fields that let a consumer check an observation against them.
+A downstream tracker, policy backbone, or the permission path cannot reconstruct exposure timing, mounting calibration, or record integrity from a raw tensor alone. The perception producer therefore wraps each observation in an **observation contract**\index{Observation contract!definition}\index{Perception!observation contract}, the sixth record of the book's fifteen-record chain. The observation is unusable without a capture epoch, a clock identifier, a bounded conversion to the permission path's clock, and a calibration inside its validity range, whose revision the frame identifier carries. The consumer refuses a record that lacks any of them before reading the payload. The clock domain and the $\mathcal{H}_1$ age budget come from the handoff record of @sec-nervous-handoffs-matrix, which this record consumes, and perception supplies the capture-side fields that let a consumer check an observation against them.
 
 ```{python}
 #| label: calc-perception-handoff-sensor-age
@@ -1824,16 +2010,9 @@ class HandoffSensorAge:
     excess_top_str = fmt_latency(excess_top, unit=millisecond, precision=1)
 ```
 
-::: {#dfn-perception-observation-contract .callout-definition title="Observation contract"}
-
-***Observation contract***\index{Observation contract!definition}\index{Perception!observation contract} (the sixth record in the record chain) is the formal cyber-physical specification governing sensory data structures traversing computational boundaries, binding a raw observation tensor or extracted geometric bounding envelope to its exposure midpoint timestamp ($t_{\text{capture}}$), capture clock identifier, synchronization error bound ($\epsilon_{\text{sync}}$), sensor coordinate frame identifier, positive-semidefinite spatial covariance matrix ($\boldsymbol{\Sigma}$), qualified clearance inset ($C_{\text{inset}}$), and hardware health bitmask (@eq-percep-observation-contract-tuple):
+The contract binds a raw observation tensor or an extracted bounding envelope to the fields a consumer needs to check it (@eq-percep-observation-contract-tuple):
 $$\mathcal{O} = \langle t_{\text{capture}}, \text{clock\_id}, \epsilon_{\text{sync}}, \text{frame\_id}, \mathbf{T}_{\text{payload}}, \boldsymbol{\Sigma}, C_{\text{inset}}, \text{mask}_{\text{health}}, \text{crc32} \rangle$$ {#eq-percep-observation-contract-tuple}
-
-1.  **Significance**: Emits dated spatial claims, bounding envelopes ($C_{\text{inset}}$), and covariance matrices ($\boldsymbol{\Sigma}$) to Spatial Memory (@sec-memory, which consumes this contract to emit the spatial belief record) and Trajectory Planning (@sec-planning), allowing downstream observers, policy backbones, and the permission path to compute upper information age, select valid coordinate transforms, and bound spatial error before any claim influences a motion proposal.
-2.  **Distinction**: An observation contract is not an alternative to serialization formats like Protocol Buffers, FlatBuffers, or ROS 2 IDL; it can be serialized using any of them. The distinction lies in semantic invariants: while a transport schema guarantees only data type layout (e.g., float arrays and strings), an observation contract enforces cyber-physical invariants—binding monotonic capture epochs ($t_0$), hardware clock synchronization bounds ($\epsilon_{\text{sync}}$), validated coordinate frame transformations, and bounded spatial error quantiles before any payload data is admitted to the control loop.
-3.  **Common pitfall**: Treating perception output as a pure geometric coordinate $[x, y, z]^\top$ without propagating its spatial covariance or sensor health bitmask, blinding downstream safety filters to sensor occlusion or degraded lighting.
-
-:::
+Here $t_{\text{capture}}$ is the exposure-midpoint timestamp on the capture clock $\text{clock\_id}$, $\epsilon_{\text{sync}}$ bounds the conversion to the permission path's clock, $\text{frame\_id}$ keys the calibrated transform, $\mathbf{T}_{\text{payload}}$ is the tensor or envelope, $\boldsymbol{\Sigma}$ is its spatial covariance, $C_{\text{inset}}$ is the qualified clearance inset, $\text{mask}_{\text{health}}$ carries the health flags, and the checksum covers header and payload. Spatial memory (@sec-memory) consumes the contract to build its spatial belief record, and trajectory planning (@sec-planning) reads its inset, so both can compute an upper age, select a valid transform, and bound spatial error before a claim shapes a proposal. The contract does not replace a serialization format such as Protocol Buffers, FlatBuffers, or ROS 2 IDL, and any of them can carry it. A transport schema guarantees only the layout of the data; the contract adds physical invariants a consumer can check, namely a monotonic capture epoch, a bounded clock conversion, a transform inside its validity range, and a measured error bound. @Tbl-08-observation-record-schema lists the fields with their consumer checks and fills them for the navigation camera.
 
 ```{python}
 #| label: calc-perception-nav-observation-record
@@ -1926,9 +2105,9 @@ For the navigation camera, the **dispatch-local** threshold is `{python} NavObse
 
 Admission requires a separately qualified current-age limit that includes the dispatch-to-admission bound and leaves room for the active lease and physical response. The present partial ledger has not established that limit, so the filled record demonstrates qualified field construction, not an admitted full-speed trajectory. Once $\Delta_{\text{da}}$ is bounded, the engineer can close the stopping calculation or reduce speed to recover margin. Each elapsed interval appears once: if a budget starts at admission, it includes the prior evidence age plus the subsequent lease; if it starts at capture, it accounts for the same timeline without adding those intervals again.
 
-The transform key and calibration revision anchor metric coordinates.[^fn-hw-thermal-drift] The firmware/model digest supports version provenance; `payload_crc32` detects accidental changes to the actual header and payload after serialization. Neither a checksum nor a build hash proves semantic truth, and neither authenticates an adversarial producer without a keyed check.
+The transform key and calibration revision anchor metric coordinates.[^fn-baseline-thermal] The firmware/model digest supports version provenance; `payload_crc32` detects accidental changes to the actual header and payload after serialization. Neither a checksum nor a build hash proves semantic truth, and neither authenticates an adversarial producer without a keyed check.
 
-[^fn-hw-thermal-drift]: **Mechanical thermal expansion**\index{Hardware!thermal expansion}: For a stereo baseline $b =$ `{python} StereoDepthError.b_str` and an unmodeled change $|\delta b| =$ `{python} StereoDepthError.db_str`, first-order geometry gives $|\delta z|/z\approx|\delta b|/b$. At $z =$ `{python} StereoDepthError.z_thermal_str`, the corresponding depth bias is about `{python} StereoDepthError.dz_thermal_str`, assuming focal length and disparity are otherwise unchanged. Temperature compensation must be checked against the actual mount and calibration.
+[^fn-baseline-thermal]: **Stereo Baseline Thermal Drift**\index{Hardware!thermal expansion}: For a stereo baseline $b =$ `{python} StereoDepthError.b_str` and an unmodeled change $|\delta b| =$ `{python} StereoDepthError.db_str`, first-order geometry gives $|\delta z|/z\approx|\delta b|/b$. At $z =$ `{python} StereoDepthError.z_thermal_str`, the corresponding depth bias is about `{python} StereoDepthError.dz_thermal_str`, assuming focal length and disparity are otherwise unchanged. Temperature compensation must be checked against the actual mount and calibration.
 
 In the health bitmask, the lower bits report hardware faults such as synchronization loss or transport errors; intermediate bits report environmental degradation (such as lens saturation or aerosol backscatter); and the upper bits report perceptual validity concerns such as occlusion or out-of-distribution inputs outside the support the evaluation tested. These input-support bits implement the runtime monitor specified in @sec-evaluation-limits. A set safety-critical bit requires refusal of the affected claim.
 
@@ -2033,6 +2212,23 @@ The failures that matter most are the silent ones, from a misdated frame to a sa
 :::
 
 Perception makes useful action possible by locating obstacles, identifying candidate contacts, and measuring range and motion with complementary sensors. Its output is evidence tied to a capture time and geometric frame, one measurement at a time. Once a person passes behind the rack, the machine must turn those measurements into a state, preserve what they support, and account for what could have changed out of view.
+
+## Historical Perspective and Further Reading {#sec-perception-history}
+
+The camera geometry of this chapter came to machine vision from photogrammetry, which calibrated cameras for mapping long before robots carried them. @tsai1987versatile made accurate calibration possible with off-the-shelf television cameras and lenses, and @zhang2000flexible reduced it to showing the camera a printed planar pattern in a few orientations, which turned calibration from a laboratory procedure into a routine step. @hartley2003multiple gathered the multiple-view geometry on which stereo depth and its error rest. Hand-eye calibration [@shiu1989calibration; @tsai1989new] extended the problem to cameras that move with an arm, and @furgale2013unified added time to the unknowns, estimating the camera-to-IMU offset together with the rotation and translation. Each step moved toward the position this chapter takes: a calibration is an estimate with its own error and validity range, not a constant read from a drawing.
+
+The sensors diversified along the same line. The autonomous-driving competitions of the mid-2000s made scanning laser range the default metric sensor for mobile robots [@thrun2006stanley], and the spinning multi-beam LiDAR brought with it the sweep distortion and per-point stamps of @sec-perception-lidar-age. Neuromorphic engineering [@mead1990] produced a pixel that reports change instead of level [@lichtsteiner2008128], and a decade of work on estimation and learning with such sensors [@gallego2022event] showed both their timing advantage and their blindness to a static scene. Time itself became a measured quantity. Agreement among clocks was a distributed-systems problem before it was a sensing one [@lamport1978time], and the Precision Time Protocol [@ieee15882002; @ieee15882019] made hardware time stamping at the network interface the basis of clock agreement among networked sensors, which is what lets the machine's LiDAR stamp every column on a clock the permission path can convert.
+
+The last ingredient is the qualification of error. Conformal prediction [@vovk2005algorithmic] showed that exchangeable calibration residuals give a distribution-free bound with a stated coverage, and @angelopoulos2023gentle made the split-conformal rule used for the clearance inset a routine tool. The observation record joins these lineages: it carries the calibration revision, the clock bound, and the measured tail so that a consumer can check each of them instead of trusting the sensor that produced them.
+
+For further reading, six works cover the chapter's geometry, timing, and error qualification.
+
+- @hartley2003multiple is the standard reference for projection, epipolar geometry, and triangulation, and the source of the stereo error relations in @sec-perception-error-clearance.
+- @szeliski2022computer surveys image formation, calibration, and stereo from the image-processing side, including the lens and sensor effects behind @sec-perception-transduction-calibration.
+- @zhang2000flexible is short and shows how a planar target recovers intrinsics and distortion, the procedure behind every calibration revision the observation record carries.
+- @furgale2013unified estimates spatial and temporal calibration jointly and shows why a camera-to-IMU time offset must be treated as an unknown rather than assumed zero.
+- @gallego2022event reviews event sensing from pixel circuit to algorithms, with the timing and static-scene trade-offs that decide whether an event camera fits a clearance claim.
+- @angelopoulos2023gentle introduces conformal prediction with the exchangeability assumption stated plainly, the assumption a floor refinish or lighting change breaks.
 
 ::: {.callout-chapter-connection title="From sensory photons to spatial memory"}
 Perception delivers dated, qualified measurements, but the person at the rack end does not stay in view between them. @Sec-memory fuses those measurements into an estimated state, carries the estimate and its uncertainty across the gaps, and sets the expiry that lets the permission path refuse a claim once occlusion or age has exhausted the validated motion margin.

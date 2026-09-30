@@ -57,15 +57,7 @@ In most machine learning, the dataset exists before the engineering begins. A te
 
 The warehouse mobile manipulator can enforce its motion limits and still lack the experience needed to open its spring-latched cage door. During a demonstration, an operator requests motion, the permission path checks it, and the body moves against the latch. The sensor log records the outcome of that entire loop. The limit records and the handoff record established by the machine's anatomy therefore become conditions on the data used to teach its learned proposer. Choosing what experience to collect requires understanding how actions change subsequent observations; choosing what to imitate requires separating the requested action from the permitted command and measured response.
 
-::: {.column-margin}
-![](images/svg/spa_locator_s.svg){width="100%" fig-alt="S·P·A locator triad highlighting the Sense node."}
-
-*The Sense axis: harvesting physical experience through multimodal sensory telemetry.*
-:::
-
-A policy trained on the retained demonstrations of a door-opening campaign—clean teleoperated openings of the warehouse mobile manipulator's spring-latched cage door—can still fail at the latch on its first autonomous attempt. One fundamental cause is the shift the machine's own actions create.[^fn-data-causal-loop] Unlike a prediction on a fixed dataset, an executed action in an embodied Markov Decision Process (MDP) changes the body's physical trajectory, camera pose, and contact states, thereby altering the distribution of all subsequent observations ($s_{t+1} \sim P(s \mid s_t, a_t)$).
-
-[^fn-data-causal-loop]: **Causal Boundary**\index{Causal boundary!thermodynamic constraint}: The causal boundary between computation and physics is established in @sec-boundary-causal-boundary. Because state evolution depends on motor actuation, policy actions perturb the distribution of future observations, which breaks the independent and identically distributed (i.i.d.) assumption of disembodied machine learning.
+A policy trained on the retained demonstrations of a door-opening campaign, clean teleoperated openings of the warehouse mobile manipulator's spring-latched cage door, can still fail at the latch on its first autonomous attempt. One cause is the shift the machine's own actions create. Unlike a prediction on a fixed dataset, an executed action in an embodied Markov Decision Process (MDP) changes the body's physical trajectory, camera pose, and contact states, thereby altering the distribution of all subsequent observations ($s_{t+1} \sim P(s \mid s_t, a_t)$).
 
 ::: {#dfn-data-endogenous-covariate-shift .callout-definition title="Endogenous covariate shift"}
 
@@ -81,7 +73,7 @@ This shift is the collection-side face of principle \ref{pri-vol4-endogenous-dri
 
 ### Mechanics of endogenous covariate shift {#sec-data-covariate-shift}
 
-In classical statistical learning theory, empirical risk minimization assumes that samples are drawn independent and identically distributed (i.i.d.) from an exogenous, stationary distribution $\mathcal{D}$. An image classifier that misidentifies a dog as a cat does not alter the pixels of subsequent images in the test set. In passive machine learning, covariate shift is an open-loop observational phenomenon: the marginal input distribution $P(X)$ changes (such as evaluating a vision model trained on sunny daytime driving under rainy nighttime illumination) while the underlying conditional data-generating function $P(Y \mid X)$ remains stationary. Crucially, the model is a passive observer: its predictions $\hat{Y}$ exert zero physical back-action on the data source, and an inference error does not physically mutate subsequent inputs.
+In classical statistical learning theory, empirical risk minimization assumes that samples are drawn independent and identically distributed (i.i.d.) from an exogenous, stationary distribution $\mathcal{D}$. An image classifier that misidentifies a dog as a cat does not alter the pixels of subsequent images in the test set. In passive machine learning, covariate shift is an open-loop observational phenomenon: the marginal input distribution $P(X)$ changes (such as evaluating a vision model trained on sunny daytime driving under rainy nighttime illumination) while the underlying conditional data-generating function $P(Y \mid X)$ remains stationary. The model is a passive observer: its predictions $\hat{Y}$ exert zero physical back-action on the data source, and an inference error does not physically mutate subsequent inputs.
 
 In a physical machine, two distinct mechanisms can change what the learner encounters. The first changes which states the policy visits even when the plant is unchanged; the second changes how the plant responds to an action:
 
@@ -90,9 +82,21 @@ In a physical machine, two distinct mechanisms can change what the learner encou
 
 In embodied control, the policy's actions induce an *endogenous state visitation distribution* $d^\pi(s)$, the fraction of time steps at which a rollout of policy $\pi$ occupies state $s$. When a policy trains via offline behavioral cloning on demonstrations generated by an expert policy $\pi^*$, it minimizes imitation loss over the expert's occupancy distribution $d^{\pi^*}(s)$. During autonomous execution, however, the policy must generate actions under its own induced distribution $d^\pi(s)$. The divergence between $d^{\pi^*}$ and $d^\pi$ can compound errors when the learned policy lacks a recovery action.
 
+::: {#dfn-data-behavioral-cloning .callout-definition title="Behavioral cloning"}
+
+***Behavioral cloning***\index{Behavioral cloning!definition} is imitation learning posed as supervised learning: a policy is fit to map each recorded observation to the action the demonstrator took there, with the loss weighted by the demonstrator's own state occupancy $d^{\pi^*}$.
+
+1.  **Significance**: Training error is measured only on states the demonstrator visited, while deployment cost accrues on the states the learned policy visits. Under a 0–1 action loss the worst-case excess cost can therefore grow with the square of the horizon $T$ rather than linearly, as the next subsection derives.
+2.  **Distinction**: Unlike corrective aggregation, which obtains expert labels at states the learner itself reaches, behavioral cloning never observes the consequences of its own mistakes; unlike reinforcement learning, it needs demonstrations but no reward.
+3.  **Common pitfall**: Reading a low held-out loss as evidence of closed-loop competence. A held-out split drawn from the same demonstrations shares their occupancy, so it cannot contain the states the policy's first error reaches.
+
+:::
+
 ### Recovery and compounding error {#sec-data-curse-dimensionality-recoverability}
 
-Opening the latch from a centered approach and recovering from a sideways slip require different actions. @Fig-05-latch-corridor shows the approach from above. Every retained demonstration moves the gripper forward along a narrow corridor centered on the strike plate, so the archive holds thousands of forward-progress actions. It holds no action that starts from a gripper displaced a few millimeters toward the fixture and returns it to the centerline, because a skilled operator rarely lets the gripper drift there, and a run that did drift was usually stopped or discarded. At such a displaced state no demonstration constrains the policy's output. The **recoverability problem**\index{Recoverability problem} is this missing instruction for returning to the corridor.
+Opening the latch from a centered approach and recovering from a sideways slip require different actions. @Fig-05-latch-corridor shows the approach from above. Every retained demonstration moves the gripper forward along a narrow corridor centered on the strike plate, so the archive holds thousands of forward-progress actions. It holds no action that starts from a gripper displaced a few millimeters toward the fixture and returns it to the centerline, because a skilled operator rarely lets the gripper drift there, and a run that did drift was usually stopped or discarded.[^fn-alvinn-recovery-latch] At such a displaced state no demonstration constrains the policy's output. The **recoverability problem**\index{Recoverability problem} is this missing instruction for returning to the corridor.
+
+[^fn-alvinn-recovery-latch]: **ALVINN (Autonomous Land Vehicle in a Neural Network)**\index{ALVINN!recovery data}: Pomerleau's road-following network learned to steer from a human driver who kept the van centered, so its training images held almost no off-center views [@pomerleau1989alvinn]. His remedy shifted each camera image sideways in software and corrected the steering label to match, synthesizing recovery examples about 20 years before DAgger [@pomerleau1991efficient]. A warp could fill that gap because the missing state was only a viewpoint of a flat road, whereas a gripper displaced toward the fixture also lacks contact forces that no image transform can manufacture, so its recoveries must be demonstrated or collected.
 
 ::: {#fig-05-latch-corridor fig-env="figure" fig-pos="t" fig-cap="**The latch corridor seen from above**: Retained demonstrations supply dense forward-progress actions inside a narrow corridor centered on the strike plate. A gripper displaced toward the fixture sits where the archive holds no demonstration, so nothing in the data specifies the action that returns it to the corridor, and an unconstrained output can carry it farther toward contact." fig-alt="Top-view sketch. A shaded horizontal corridor runs left to right toward a strike plate on the right, with five arrows pointing along its centerline. Above the corridor, a small square marks a displaced gripper. A dashed arrow from the gripper toward the corridor is labeled as the missing return action, and a dashed arrow from the gripper toward a shaded fixture band at the top is labeled as drift into contact."}
 ![](images/svg/fig05_latch_corridor.svg){width="100%"}
@@ -106,26 +110,20 @@ Contrast this result with open-loop supervised prediction: if errors at each ste
 
 The quadratic term describes accumulated task cost, not a trajectory. It does not say that position error grows as $t^2$. Feedback, contact, and saturation shape how a physical deviation evolves; the argument concerns only the cost of time spent in states where the policy lacks a demonstrated correction.
 
-Formally, let $\pi$ be the learned policy, $\pi^*$ the expert, $J$ expected cumulative task cost over $T$ steps, and $\epsilon$ the probability of disagreement on expert-visited states under 0–1 action loss: $\mathbb{E}_{s \sim d^{\pi^*}} [\mathbb{I}(\pi(s) \ne \pi^*(s))] \le \epsilon$. If per-step task cost lies in $[0,1]$, behavioral cloning admits the worst-case bound (@eq-data-quadratic-drift) derived by @ross2010efficient and restated by @ross2011reduction:
+Formally, let $\pi$ be the learned policy, $\pi^*$ the expert, $J$ expected cumulative task cost over $T$ steps, and $\epsilon$ the probability of disagreement on expert-visited states under 0–1 action loss: $\mathbb{E}_{s \sim d^{\pi^*}} [\mathbb{I}(\pi(s) \ne \pi^*(s))] \le \epsilon$. If per-step task cost lies in $[0,1]$, behavioral cloning\index{Behavioral cloning!quadratic error compounding} admits the worst-case bound (@eq-data-quadratic-drift) derived by @ross2010efficient and restated by @ross2011reduction:
 $$J(\pi)-J(\pi^*) \le T^2\epsilon.$$ {#eq-data-quadratic-drift}
 
-The bound can exceed the total cost available in a finite episode. With nonnegative per-step cost at most one, the excess cost is also bounded by $T$, so $\min(T, T^2\epsilon)$ is the useful upper bound. Once the quadratic expression exceeds $T$, it supplies no tighter prediction of failure frequency or physical severity. Its engineering value is to expose the missing recovery assumption, not to predict that every small error causes a collision.[^fn-ai-covariate-shift]
-
-[^fn-ai-covariate-shift]: **Behavioral Cloning Bound**\index{Covariate shift!endogenous feedback}\index{Behavioral cloning!quadratic error compounding}: The bound is a worst case on expected cumulative cost, not a prediction of tracking error; actual drift depends on the plant, task, policy, and safeguards. @Sec-appendix-ml-compounding derives the bound and states its loss and bounded-cost assumptions.
+The bound can exceed the total cost available in a finite episode. With nonnegative per-step cost at most one, the excess cost is also bounded by $T$, so $\min(T, T^2\epsilon)$ is the useful upper bound. Once the quadratic expression exceeds $T$, it supplies no tighter prediction of failure frequency or physical severity. Its engineering value is to expose the missing recovery assumption, not to predict that every small error causes a collision. @Sec-appendix-ml-compounding derives the bound and states its loss and bounded-cost assumptions.
 
 Which horizon dependence applies depends on the loss, the action space, and the closed loop, so @eq-data-quadratic-drift is best read as the classical result for a 0–1 action loss rather than as a law of behavioral cloning. Trained with the logarithmic loss (the negative log-probability the learned policy assigns to the expert's action) on a policy class that contains the expert, behavioral cloning can reach a sample complexity, the number of demonstrations needed for a given excess cost, that does not grow with the horizon, provided cumulative reward is bounded and the policy class is not too rich [@foster2024behavior]. Continuous actions push the other way. Even when the closed loop is exponentially stable, so that the effect of a small perturbation decays at a fixed exponential rate, and the expert is smooth and deterministic, any smooth deterministic imitator can suffer execution error exponentially larger in the horizon than its error on the expert's own states. The escapes are policies that are non-smooth, non-Markovian, or strongly state-dependent in their randomness, as action-chunking and diffusion decoders are, or demonstrations spread widely enough around the expert's path [@simchowitz2025pitfalls]. The latch policy acts in a continuous space, so the question the corridor sketch poses, whether the closed loop pulls a displaced gripper back, is the one on which the modern theory turns.
 
-Recording more nominal expert demonstrations does not resolve endogenous covariate shift. Another thousand hours of clean, centered openings increases sample density along the nominal trajectory, but the empirical support outside the nominal tube remains zero ($d^{\pi^*}(s) = 0$). This is the *nominal demonstration trap*. Gathering physical experience also has a physical price. A web crawler ingests static text with no marginal hardware depreciation, whereas every recorded second of physical robotics telemetry consumes actuator fatigue life, heats motor windings ($dT/dt$), cycles gearbox teeth, and drains the battery.[^fn-data-hardware-wear] In the illustrative campaign below, operator rest, calibration, scene resets, and rejected trials leave less than one quarter of scheduled cell time as retained demonstration data (@sec-data-teleop-costs). Physical demonstration data is scarce and expensive; logging it without accounting for closed-loop dynamics misleads policy training.
-
-[^fn-data-hardware-wear]: **Hardware Fatigue Life**\index{Hardware wear!actuator thermal duty cycle}: Actuator thermal limits and gearbox wear, detailed in @sec-body-actuator-limits and @sec-body-thermal-duty-cycles, change joint friction over a campaign, so a pipeline that assumes stationary plant dynamics meets drift as the collection machine ages.
+Recording more nominal expert demonstrations does not resolve endogenous covariate shift. Another thousand hours of clean, centered openings increases sample density along the nominal trajectory, but the empirical support outside the nominal tube remains zero ($d^{\pi^*}(s) = 0$). This is the *nominal demonstration trap*. Gathering physical experience also has a physical price. A web crawler ingests static text with no marginal hardware depreciation, whereas every recorded second of physical robotics telemetry consumes actuator fatigue life, heats motor windings ($dT/dt$), cycles gearbox teeth, and drains the battery. In the illustrative campaign below, operator rest, calibration, scene resets, and rejected trials leave less than one quarter of scheduled cell time as retained demonstration data (@sec-data-teleop-costs). Physical demonstration data is scarce and expensive; logging it without accounting for closed-loop dynamics misleads policy training.
 
 ::: {.column-margin .margin-pointer}
 ↩ Actuator thermal dissipation ($dT/dt$) and winding damage limits are derived in @sec-body-thermal-duty-cycles.
 :::
 
-A physical command also changes meaning on its way to the actuators. In a machine divided by the proposal boundary,[^fn-data-proposal-permission] the operator's or policy's request is mapped into a setpoint, admitted or modified by the permission path, and answered by the plant with a measured response. Logging only the request trains the policy on demands the plant could never execute, and logging only the response teaches it structural deflection and gear backlash as though they were deliberate human skill.
-
-[^fn-data-proposal-permission]: **Proposal Boundary**\index{Proposal boundary!demonstration data}: The proposal boundary, defined in @sec-boundary-machine-model, separates learned proposals from the permission path that alone may admit them to the actuators (@sec-enforcement). Logging the action on both sides of it keeps permission-path interventions out of the demonstrator's labels.
+A physical command also changes meaning on its way to the actuators. In a machine divided by the proposal boundary (@sec-boundary-machine-model), the operator's or policy's request is mapped into a setpoint, admitted or modified by the permission path, and answered by the plant with a measured response. Logging only the request trains the policy on demands the plant could never execute, and logging only the response teaches it structural deflection and gear backlash as though they were deliberate human skill.
 
 A collection campaign therefore makes two decisions before it records anything: which source will choose the actions, and which of those four forms of each action the dataset will keep as its label.
 
@@ -136,17 +134,17 @@ For the cage-door latch, an operator can guide the arm directly, command it thro
 In a streaming telemetry architecture, physical data sources separate according to who chooses the action and how the control stream enters the ingestion pipeline:
 
 1. In **kinesthetic teaching**, a colocated human demonstrator physically grasps and guides the unpowered or gravity-compensated links of the mechanism. The pipeline logs joint encoder positions at the controller rate without teleoperation transport latency, but the demonstrated motion's bandwidth is set by the human arm, which moves far more slowly than the controller samples, and labor cost scales $1:1$ with demonstrator time. The demonstrator's body also occludes camera fields of view, altering the visual distribution compared to autonomous operation.
-2. In **teleoperation**, a remote operator manipulates an input device to puppet the follower robot across a network fabric.[^fn-hist-goertz-teleop] Interfaces differ in how the operator's motion maps to the robot and in what contact information returns to the operator. Joint-space leader-follower arms such as ALOHA [@zhao2023learning] and GELLO [@wu2023gello] share the follower's joint topology, usually at reduced scale, so leader joint angles copy to the follower without inverse kinematics; tracked spatial controllers and rate-controlled space mice command tool poses or velocities through inverse kinematics; and force-reflecting bilateral arms return measured contact force to the operator's hands. @Tbl-05-teleop-taxonomy compares these interfaces and names the artifact each leaves in the recording.
+2. In **teleoperation**, a remote operator manipulates an input device to puppet the follower robot across a network fabric.[^fn-goertz-force-teleop] Interfaces differ in how the operator's motion maps to the robot and in what contact information returns to the operator. Joint-space leader-follower arms such as ALOHA [@zhao2023learning] and GELLO [@wu2023gello] share the follower's joint topology, usually at reduced scale, so leader joint angles copy to the follower without inverse kinematics; tracked spatial controllers and rate-controlled space mice command tool poses or velocities through inverse kinematics; and force-reflecting bilateral arms return measured contact force to the operator's hands. @Tbl-05-teleop-taxonomy compares these interfaces and names the artifact each leaves in the recording.
 3. In **scripted collection**, a deterministic trajectory generator executes automated motion primitives, such as cubic splines or impedance-governed state machines. Ingestion rates are high and deterministic ($50\text{--}500\text{ Hz}$), but trajectories follow rigid, repetitive manifolds that fail to generate corrective data for off-nominal contacts, jamming when workpiece dimensions deviate by even a millimeter.
 4. In **exploratory collection**, an active neural policy or reinforcement learning agent selects actions to maximize an information-theoretic objective (such as epistemic entropy or intrinsic curiosity). While data throughput matches the robot's maximum control cadence ($50\text{--}100\text{ Hz}$), unbounded exploratory commands risk high-energy collisions, tripping safety enforcers or damaging mechanical gearboxes through repeated high-torque shock loads.
 5. In **autonomous deployment logging**, production policies control the actuators during factory or warehouse operation, streaming multimodal telemetry into local circular buffers in situ. This stream provides zero-marginal-labor data at the full system execution rate ($10\text{--}50\text{ Hz}$ policy, $1\text{ kHz}$ joint servos), but logged states are heavily censored by runtime safety barriers and reflect only nominal operating regimes.
 6. In **robot-free demonstration**, the operator carries a hand-held gripper fitted with a wrist camera and performs the task directly in the environment, as in the Universal Manipulation Interface [@chi2024umi]. Collection consumes neither robot time nor actuator life, and one device can gather data where no robot is installed. The cost moves to the labels. The device records its own trajectory and camera view but no robot's joint commands, so the action must be expressed relative to the gripper's pose and later executed through the target robot's own controller, and the deployed robot's observation and actuation latencies must be matched to the recording (@sec-data-multimodal-time-sync).
 
-[^fn-hist-goertz-teleop]: **Bilateral Teleoperation Lineage**\index{Raymond Goertz!bilateral telemanipulation}: Raymond Goertz built the first bilateral master-slave telemanipulators at Argonne National Laboratory in the late 1940s and 1950s for handling radioactive materials. His linkages reflected force across a physical barrier, because operators without kinesthetic resistance jammed the remote mechanism.
+[^fn-goertz-force-teleop]: **Bilateral Telemanipulation**\index{Raymond Goertz!bilateral telemanipulation}: Raymond Goertz's 1949 master-slave manipulator at Argonne National Laboratory moved tongs behind radiation shielding in exact correspondence with a master handle, and its mechanical linkage returned the forces at the tongs to the operator's hand [@goertz1949master; @hokayem2006bilateral]. Remote manipulation therefore began with contact force inside the loop. A demonstration recorded through an interface that drops that force channel cannot contain the contact corrections the operator would have made by feel.
 
 A seventh source removes the robot entirely. Simulation pipelines avoid hardware wear but replace the physical plant with a numerical model, and simulation now supplies demonstrations in its own right. A generator can adapt a few hundred human demonstrations to new object poses and scene layouts and replay them in simulation to produce tens of thousands more [@mandlekar2023mimicgen], and a policy can be co-trained on simulated and real data at a declared mixing ratio. Such records must identify their source, generator, engine version, and contact parameters, and the scenario ledger must mark any cell that only synthetic experience fills, so that training and diagnosis can distinguish simulator artifacts from measured plant behavior. The provenance those records need is set out under dataset degradation (@sec-data-sim-to-real-artifacts), while @sec-training examines the contact approximations and their consequences for learning.
 
-Because the source determines how the machine interacts with its physical environment, these ingestion streams occupy disjoint state-action manifolds even when executing the identical manipulation task. Consider releasing the warehouse mobile manipulator's cage-door latch. A colocated demonstrator guiding the arm feels the latch bind through direct tactile resistance and immediately modulates wrist compliance. A remote teleoperator watching compressed video streams lacks direct tactile feedback and exhibits step-and-wait hunting, pausing to visually verify strike plate contact. A scripted controller advances along a fixed geometric path at constant velocity, producing an identical, rigid contact force spike on every repetition. An exploratory policy approaches at oblique angles, binding the latch until the safety contact tripwire halts the attempt. These recorded streams are not noisy variations of a single ground-truth trajectory; they are outputs of fundamentally distinct dynamical systems characterized by divergent bandwidths, latencies, and mechanical compliance profiles, as systematized in @tbl-05-sources-taxonomy.
+Because the source determines how the machine interacts with its physical environment, these ingestion streams occupy disjoint state-action manifolds even when executing the identical manipulation task. Consider releasing the warehouse mobile manipulator's cage-door latch. A colocated demonstrator guiding the arm feels the latch bind through direct tactile resistance and immediately modulates wrist compliance. A remote teleoperator watching compressed video streams lacks direct tactile feedback and exhibits step-and-wait hunting, pausing to visually verify strike plate contact. A scripted controller advances along a fixed geometric path at constant velocity, producing an identical, rigid contact force spike on every repetition. An exploratory policy approaches at oblique angles, binding the latch until the safety contact tripwire halts the attempt. These recorded streams are not noisy variations of a single ground-truth trajectory; they are outputs of distinct dynamical systems characterized by divergent bandwidths, latencies, and mechanical compliance profiles, as systematized in @tbl-05-sources-taxonomy.
 
 | Physical Data Source                     | Ingestion Bandwidth & Cadence                                                    | Contact Compliance & Force Awareness                     | Scaling Labor Economics                                     | ODD Boundary Safety Risk                                           |
 |:-----------------------------------------|:---------------------------------------------------------------------------------|:---------------------------------------------------------|:------------------------------------------------------------|:-------------------------------------------------------------------|
@@ -164,9 +162,57 @@ Because the source determines how the machine interacts with its physical enviro
 ⇄ **Contrast:** The display and operator-response delay that paces a teleoperator's step-and-wait motion (@sec-data-teleop-costs) contrasts with the $1\text{ ms}$ permission tick on which each command is checked (@sec-nervous-cadences).
 :::
 
-The cheapest sources in the table also produce the most records, which invites a mistake imported from disembodied machine learning, where empirical scaling laws correlate model performance with raw token count or pretraining sample volume ($N$). In physical telemetry, treating each logged control step as an independent sample is a category error. An edge logger running at $1\text{ kHz}$ generates $3.6\times 10^6$ state-action records per hour, but adjacent records exhibit near-total temporal autocorrelation ($\rho \to 1.0$). Two kinematic records sampled one millisecond apart differ only by sub-millimeter displacements and sensor quantization noise. For a stationary scalar telemetry statistic with geometrically decaying autocorrelation $\rho_k = \rho^k$, as in an AR(1) model, the large-sample *effective sample size* (ESS) for estimating its mean is:
-$$N_{\text{eff}} = N \frac{1 - \rho}{1 + \rho}.$$
-Under this model, $\rho = 0.999$ and $3.6\times 10^6$ records give approximately 1,800 effective observations for that statistic. Lag-1 correlation alone does not determine ESS for a general telemetry process, and ESS is not a count of covered task conditions. Unlike text tokens in large language models, where consecutive tokens represent high-entropy semantic transitions, consecutive high-frequency robot telemetry steps contain virtually zero new information about the task manifold. Autoregressive token volume does not equal physical state-space support. Dataset coverage scales with the number of independent physical episodes, workpiece initializations, lighting conditions, and surface friction coefficients, not with the sampling clock. An archive of 500 episodes spanning diverse geometric and mechanical initial conditions provides substantially broader empirical support than 5,000,000 steps logged across repetitive passes over a single stationary fixture.
+```{python}
+#| label: calc-data-effective-sample-size
+#| echo: false
+#| warning: false
+#| message: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ EFFECTIVE SAMPLE SIZE OF CORRELATED TELEMETRY (LEGO)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @sec-data-collection-sources (effective sample size paragraph)
+# │ Goal:    Show how few independent observations one hour of 1 kHz logging
+# │          holds when adjacent records are almost perfectly correlated.
+# │ Show:    Records per hour; lag-1 correlation; effective sample size.
+# │ How:     N = rate * 1 h; N_eff = N (1 - rho) / (1 + rho) for an AR(1)
+# │          statistic (Thiebaux and Zwiers 1984).
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import *
+from mlsysim.core.units import *
+from mlsysim.fmt import fmt, fmt_int, fmt_sci, fmt_frequency, check
+
+RM = Embodied.MobileManipulator.WarehouseMobileManipulator
+
+class EffectiveSampleSize:
+    """Effective sample size of one hour of permission-tick telemetry."""
+
+    # ┌── 1. LOAD (Constants & Parameters) ─────────────────────────────────
+    f_log = RM.permission_rate  # one record per permission tick; category: datasheet
+    t_log = 1.0 * hour  # category: chosen
+    rho = 0.999  # lag-1 autocorrelation of a slowly varying statistic; category: illustrative
+
+    # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────
+    n_records = (f_log * t_log).to("").magnitude
+    n_eff = n_records * (1.0 - rho) / (1.0 + rho)
+    ratio = n_records / n_eff
+
+    # ┌── 3. GUARD (Assertions) ────────────────────────────────────────────
+    check(abs(n_records - 3.6e6) < 1e-6, "One hour at 1 kHz should be 3.6 million records")
+    check(1790 < n_eff < 1810, "Effective sample size should be about 1,800")
+    check(1000 < ratio < 10000, "Step count should overstate independent samples by three orders of magnitude")
+
+    # ┌── 4. OUTPUT (Format & Export) ────────────────────────────────────────
+    f_log_str = fmt_frequency(f_log, unit=ureg.kilohertz, precision=0)
+    n_records_str = fmt_sci(n_records, precision=1)
+    rho_str = fmt(rho, precision=3)
+    n_eff_str = fmt_int(round(n_eff, -2))
+```
+
+The cheapest sources in the table also produce the most records, which invites a mistake imported from disembodied machine learning, where empirical scaling laws correlate model performance with raw token count or pretraining sample volume ($N$). In physical telemetry, treating each logged control step as an independent sample is a category error. An edge logger running at `{python} EffectiveSampleSize.f_log_str` generates `{python} EffectiveSampleSize.n_records_str` state-action records per hour, but adjacent records exhibit near-total temporal autocorrelation ($\rho \to 1.0$). Two kinematic records sampled one millisecond apart differ only by sub-millimeter displacements and sensor quantization noise. For a stationary scalar telemetry statistic with geometrically decaying autocorrelation $\rho_k = \rho^k$, as in an AR(1) model, the large-sample *effective sample size* (ESS)[^fn-ess-correlated-telemetry] for estimating its mean is:
+$$N_{\text{eff}} = N \frac{1 - \rho}{1 + \rho}.$$ {#eq-data-effective-sample-size}
+Under this model, $\rho =$ `{python} EffectiveSampleSize.rho_str` and `{python} EffectiveSampleSize.n_records_str` records give approximately `{python} EffectiveSampleSize.n_eff_str` effective observations for that statistic. Lag-1 correlation alone does not determine ESS for a general telemetry process, and ESS is not a count of covered task conditions. Unlike text tokens in large language models, where consecutive tokens represent high-entropy semantic transitions, consecutive high-frequency robot telemetry steps contain virtually zero new information about the task manifold. Autoregressive token volume does not equal physical state-space support. Dataset coverage scales with the number of independent physical episodes, workpiece initializations, lighting conditions, and surface friction coefficients, not with the sampling clock. An archive of a few hundred episodes spanning diverse geometric and mechanical initial conditions provides broader empirical support than millions of steps logged across repetitive passes over a single stationary fixture.
+
+[^fn-ess-correlated-telemetry]: **Effective Sample Size**\index{Effective sample size!serially correlated telemetry}: The factor $(1-\rho)/(1+\rho)$ is the variance inflation of the mean of a first-order autoregressive series, the correction climatologists apply to serially correlated weather records before testing a trend [@thiebaux1984interpretation]. At the correlation used here it turns an hour of permission-tick records into about `{python} EffectiveSampleSize.n_eff_str` independent ones, so a step count overstates what a telemetry archive knows by three orders of magnitude before coverage is even considered.
 
 ### Human demonstration idiosyncrasies and mechanical artifacts {#sec-data-human-idiosyncrasies}
 
@@ -183,9 +229,9 @@ Each of these artifacts enters the archive looking like intended behavior. Sourc
 By the time the gripper contacts the strike plate on the cage-door latch, the operator's input motion has transformed into four distinct numerical signals across the system hierarchy (@fig-05-action-taps). Which signal the ingestion pipeline designates as the supervisory target determines what behavioral dynamics the neural policy internalizes. The robot splits its computational architecture across two decoupled processing domains:
 
 - The unprivileged **Linux application processor** executes perception pipelines, handles video frame ingestion, runs teleoperation input mapping, and computes the neural policy forward pass ($\pi_\theta(o_t)$).
-- On the permission side of the causal proposal boundary (@sec-boundary-machine-model), a hard real-time **safety microcontroller (MCU)** runs the joint and permission checks at the chosen $1\text{ kHz}$ cadence. Dedicated motor-drive logic closes the faster field-oriented current loop; its current samples are distinct from the telemetry retained at each permission tick.[^fn-hw-encoder-capture]
+- On the permission side of the causal proposal boundary (@sec-boundary-machine-model), a hard real-time **safety microcontroller (MCU)** runs the joint and permission checks at the chosen $1\text{ kHz}$ cadence. Dedicated motor-drive logic closes the faster field-oriented current loop; its current samples are distinct from the telemetry retained at each permission tick.[^fn-capture-encoder-dma]
 
-[^fn-hw-encoder-capture]: **Hardware Timer Interrupt**\index{Hardware timer interrupt!DMA latching}: On real-time MCUs, encoder counts and current-shunt readings are latched by hardware timers and Direct Memory Access (DMA), which holds sampling jitter to microseconds and keeps timestamp jitter out of numerical differentiation for velocity and acceleration.
+[^fn-capture-encoder-dma]: **Hardware Input Capture**\index{Input capture!DMA latching}: On real-time MCUs, a timer's input-capture unit latches encoder counts and current-shunt conversions at a hardware edge, and Direct Memory Access (DMA) moves them to memory without waiting on software. Sampling jitter stays at microseconds, so the denominator of a numerically differentiated velocity or acceleration carries no scheduling noise.
 
 ### The four-stream action tap tuple {#sec-data-four-stream-action-tap}
 
@@ -208,21 +254,13 @@ The distinction matters when the command and the motion disagree. If a teleopera
 
 At the latch, the opposite ambiguity arises. Contact resistance can bring measured joint velocities to zero ($\dot{\mathbf{q}}_{\text{meas}} \approx \mathbf{0}$) while the motors continue exerting holding torque. Treating that response as a deliberate zero-velocity target loses the distinction between maintaining effort against the latch and choosing to stop. The appropriate imitation target depends on the policy's action interface; the other taps explain how that target became physical motion.
 
-::: {#dfn-data-four-stream-action-tap-tuple .callout-definition title="Four-stream action tap"}
-
-***Four-stream action tap***\index{Four-stream action tap!definition}\index{Action tap!definition} $(a_{\text{req}}, a_{\text{cmd}}, a_{\text{enf}}, a_{\text{meas}})$ is the time-synchronized multi-tier telemetry record that captures an action signal across its four causal transformation stages: unprivileged operator or policy intent ($a_{\text{req}}$), kinematically retargeted setpoint ($a_{\text{cmd}}$), safety-governed command ($a_{\text{enf}}$), and physical plant response ($a_{\text{meas}}$).
-
-1.  **Significance**: Training imitation learning policies on raw requested actions ($a_{\text{req}}$) injects dynamically infeasible commands that trigger safety trips in deployment. Conversely, training on measured responses ($a_{\text{meas}}$) causes the model to imitate mechanical compliance, backlash, and external disturbances rather than intentional control. Logging all four streams disambiguates control intent from permission-path intervention.
-2.  **Distinction**: Unlike classical robot telemetry logs that capture only final motor encoder states or raw teleoperation joystick inputs, the four-stream tap preserves the exact causal filtering stages applied by intermediate software and safety hardware.
-3.  **Common pitfall**: Logging streams without timestamps synchronized in hardware over the IEEE 1588 Precision Time Protocol (PTP), written $t_{\text{PTP}}$. Even a few milliseconds of clock skew between the application processor and the MCU corrupts the temporal alignment between visual observations and corresponding torque actions.
-
-:::
+Together the four taps form the **four-stream action tap**\index{Four-stream action tap!definition}\index{Action tap!definition} $(a_{\text{req}}, a_{\text{cmd}}, a_{\text{enf}}, a_{\text{meas}})$, one action recorded at each of its four causal stages. Keeping all four is what makes any single choice of label interpretable. A policy trained on the request alone learns commands the permission path would have clamped, and one trained on the measured response alone learns the arm's compliance, backlash, and external disturbances as if they were intended control. A log that keeps only the final encoder state or only the operator's input discards exactly the stages at which software and safety hardware changed the command. The tuple is also only as good as its shared clock. The application processor and the MCU must stamp their taps in one hardware-synchronized timebase, such as the IEEE 1588 Precision Time Protocol (PTP), written $t_{\text{PTP}}$, because a few milliseconds of skew between them misaligns each visual observation with the torque it prompted (@sec-data-multimodal-time-sync).
 
 For the latch campaign, we choose the mapped command as the imitation target when it represents an expert request that the permission path accepted unchanged. A modified command remains a separate, attributed intervention; a curated recovery can later supply an expert target at that state. Each training pair joins the observation at its capture time to the expert command issued from the available observation history, with the command response interval recorded separately. The alignment developed below interpolates encoder state to each image's exposure midpoint; that aligns observations, but it does not move a later human decision backward in time.
 
 ### Multi-modal time synchronization and exposure midpoint alignment {#sec-data-multimodal-time-sync}
 
-Recording the right action tap does not settle when each recorded value was physically true. In embodied platforms, sensory modalities operate at radically disparate sampling cadences and physical propagation regimes: cameras integrate photons over exposure windows of $10\text{--}35\text{ ms}$ at $30\text{--}60\text{ Hz}$, 6-axis force-torque sensors stream over SPI or CAN at $100\text{--}500\text{ Hz}$, joint and permission telemetry is retained at the MCU's chosen $1\text{ kHz}$ tick while motor-drive current sampling serves the faster local current loop, and neural policy models dispatch setpoints at $10\text{--}50\text{ Hz}$. A naive data loader that simply latches the latest available sensor sample pairs each action with a camera frame whose exposure was centered $25\text{--}40\text{ ms}$ before the frame arrived in host memory. The resulting policy learns to map historical visual states to present actions, baking artificial phase lag directly into its weights.
+Recording the right action tap does not settle when each recorded value was physically true. In embodied platforms, sensory modalities operate at widely different sampling cadences and physical propagation regimes: cameras integrate photons over exposure windows of $10\text{--}35\text{ ms}$ at $30\text{--}60\text{ Hz}$, 6-axis force-torque sensors stream over SPI or CAN at $100\text{--}500\text{ Hz}$, joint and permission telemetry is retained at the MCU's chosen $1\text{ kHz}$ tick while motor-drive current sampling serves the faster local current loop, and neural policy models dispatch setpoints at $10\text{--}50\text{ Hz}$. A naive data loader that simply latches the latest available sensor sample pairs each action with a camera frame whose exposure was centered $25\text{--}40\text{ ms}$ before the frame arrived in host memory. The resulting policy learns to map historical visual states to present actions, baking artificial phase lag directly into its weights.
 
 ```{python}
 #| label: calc-data-sync-displacement
@@ -257,6 +295,7 @@ class SyncDisplacement:
     v_fast = AISLE.v_latch_high  # category: illustrative
     t_skew_lo = 15.0 * millisecond  # full-frame rolling-shutter skew, fast readout; category: illustrative
     t_skew_hi = 33.0 * millisecond  # full-frame rolling-shutter skew, one 30 Hz frame; category: illustrative
+    clearance_tight = 1.0 * millimeter  # tighter strike plate asked about in the checkpoint; category: illustrative
 
     # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────
     dx_transit = (v_transit * t_lag).to(millimeter)
@@ -267,6 +306,7 @@ class SyncDisplacement:
     lag_max_fast = (clearance / v_fast).to(millisecond)
     dx_skew_transit = (v_transit * t_skew_hi).to(millimeter)
     dx_skew_fast = (v_fast * t_skew_hi).to(millimeter)
+    lag_max_tight = (clearance_tight / v_fast).to(millisecond)  # checkpoint answer; not printed
 
     # ┌── 3. GUARD (Assertions) ────────────────────────────────────────────
     check(abs(dx_transit.magnitude - 17.5) < 1e-9, "Transit displacement should be 17.5 mm")
@@ -274,6 +314,7 @@ class SyncDisplacement:
     check(dx_fast > clearance, "The faster approach should exceed the clearance at this lag")
     check(abs(lag_max_fast.magnitude - 20.0) < 1e-9, "Largest tolerable lag at 0.10 m/s should be 20 ms")
     check(dx_skew_fast > clearance, "Worst-case rolling-shutter skew at 0.10 m/s should exceed the clearance")
+    check(lag_max_tight < t_lag, "The checkpoint's tighter plate should reject the uncompensated lag at the faster approach")
 
     # ┌── 4. OUTPUT (Format & Export) ────────────────────────────────────────
     v_transit_str = fmt_velocity(v_transit, precision=2)
@@ -291,11 +332,105 @@ class SyncDisplacement:
     t_skew_hi_str = fmt_latency(t_skew_hi, unit=millisecond, precision=0)
     dx_skew_transit_str = fmt_length(dx_skew_transit, unit=millimeter, precision=1)
     dx_skew_fast_str = fmt_length(dx_skew_fast, unit=millimeter, precision=1)
+    clearance_tight_str = fmt_length(clearance_tight, unit=millimeter, precision=0)
 ```
 
 To quantify the physical hazard of temporal misalignment, consider the spatial tracking error $\Delta \mathbf{x}_{\text{sync}}$ injected into the dataset when an observation and an action are paired across an uncompensated phase lag $\Delta t_{\text{lag}}$:
-$$\Delta \mathbf{x}_{\text{sync}}(t) = \int_{t - \Delta t_{\text{lag}}}^t \mathbf{v}(\tau)\,d\tau \approx \mathbf{v}(t) \cdot \Delta t_{\text{lag}}.$$
-If a robotic manipulator moves at a nominal transit speed of `{python} SyncDisplacement.v_transit_str`, an uncorrected phase lag of `{python} SyncDisplacement.t_lag_str` pairs each action with a view of the arm `{python} SyncDisplacement.dx_transit_str` behind where it actually was, `{python} SyncDisplacement.transit_over_clearance_mult_str` a `{python} SyncDisplacement.clearance_str` latch clearance. The latch campaign moves far more slowly. At the guarded approach of `{python} SyncDisplacement.v_guarded_str`, the same lag displaces the pairing by `{python} SyncDisplacement.dx_guarded_str`, inside the clearance; at `{python} SyncDisplacement.v_fast_str` it displaces it by `{python} SyncDisplacement.dx_fast_str`, outside it. The clearance tolerates at most `{python} SyncDisplacement.lag_max_guarded_str` of uncompensated lag at the guarded speed and `{python} SyncDisplacement.lag_max_fast_str` at the faster one, so the faster approach cannot be collected without the exposure-midpoint alignment of the four-stage pipeline that follows. When an imitation learning model trains on misaligned pairs, it fits a relationship in which the action appears to precede the visual evidence that prompted it. During closed-loop deployment, that artificial phase lag appears as overshoot, control hunting, and chattering against rigid surfaces.
+$$\Delta \mathbf{x}_{\text{sync}}(t) = \int_{t - \Delta t_{\text{lag}}}^t \mathbf{v}(\tau)\,d\tau \approx \mathbf{v}(t) \cdot \Delta t_{\text{lag}}.$$ {#eq-data-sync-displacement}
+The latch campaign moves far more slowly than an arm in transit, and \ref{nbk-data-pairing-lag} applies @eq-data-sync-displacement at both speeds.
+
+::: {#nbk-data-pairing-lag .callout-notebook title="The pairing lag"}
+
+**Problem**: A logger pairs each action with a camera frame whose exposure midpoint lies an uncompensated `{python} SyncDisplacement.t_lag_str` earlier. Does the resulting pairing error fit the `{python} SyncDisplacement.clearance_str` latch clearance at transit speed and at the latch campaign's two approach speeds, and how much lag can each approach tolerate?
+
+**Variables**:
+
+- Uncompensated lag $\Delta t_{\text{lag}} =$ `{python} SyncDisplacement.t_lag_str` (illustrative; exposure-to-arrival delay of an untimed logger)
+- Latch clearance $c =$ `{python} SyncDisplacement.clearance_str` (illustrative)
+- Transit speed `{python} SyncDisplacement.v_transit_str` (illustrative); guarded approach `{python} SyncDisplacement.v_guarded_str` and faster approach `{python} SyncDisplacement.v_fast_str` (illustrative scenario speeds of the running machine)
+
+**Math**:
+
+1. **Transit**: `{python} SyncDisplacement.v_transit_str` $\times$ `{python} SyncDisplacement.t_lag_str` $=$ `{python} SyncDisplacement.dx_transit_str`, `{python} SyncDisplacement.transit_over_clearance_mult_str` the clearance.
+2. **Guarded approach**: `{python} SyncDisplacement.v_guarded_str` $\times$ `{python} SyncDisplacement.t_lag_str` $=$ `{python} SyncDisplacement.dx_guarded_str`, inside the clearance.
+3. **Faster approach**: `{python} SyncDisplacement.v_fast_str` $\times$ `{python} SyncDisplacement.t_lag_str` $=$ `{python} SyncDisplacement.dx_fast_str`, outside it.
+4. **Lag ceilings**: $\Delta t_{\text{lag,max}} = c/v$, so `{python} SyncDisplacement.clearance_str` $/$ `{python} SyncDisplacement.v_guarded_str` $=$ `{python} SyncDisplacement.lag_max_guarded_str` and `{python} SyncDisplacement.clearance_str` $/$ `{python} SyncDisplacement.v_fast_str` $=$ `{python} SyncDisplacement.lag_max_fast_str`.
+
+**Result**: The same lag is harmless at the guarded approach and disqualifying at the faster one.
+
+**Systems insight**: A timing error becomes a position error at the speed of the motion, just as observation age becomes blind travel $v\,\tau_{\text{delay}}$ in the stopping budget. The faster approach cannot be collected without the exposure-midpoint alignment of the four-stage pipeline that follows.
+
+:::
+
+When an imitation learning model trains on misaligned pairs, it fits a relationship in which the action appears to precede the visual evidence that prompted it. During closed-loop deployment, that artificial phase lag appears as overshoot, control hunting, and chattering against rigid surfaces. @Fig-05-sync-displacement plots the same displacement against the lag for all three speeds.
+
+::: {#fig-05-sync-displacement fig-env="figure" fig-pos="t" fig-cap="**One lag, three verdicts**: Pairing an observation with an action across an uncompensated lag displaces the recorded state by speed times lag. At `{python} SyncDisplacement.t_lag_str` the transit pairing is `{python} SyncDisplacement.dx_transit_str` off, the faster latch approach exceeds the `{python} SyncDisplacement.clearance_str` clearance, and the guarded approach stays inside it. The clearance tolerates at most `{python} SyncDisplacement.lag_max_fast_str` of lag at `{python} SyncDisplacement.v_fast_str` and `{python} SyncDisplacement.lag_max_guarded_str` at `{python} SyncDisplacement.v_guarded_str`; a full-frame rolling-shutter skew alone spans `{python} SyncDisplacement.t_skew_lo_str` to `{python} SyncDisplacement.t_skew_hi_str`." fig-alt="Log-log plot of pairing displacement in millimeters against observation-to-action lag in milliseconds, 1 to 100 ms. Three straight parallel lines: transit at 0.50 meters per second on top, the faster latch approach at 0.10 meters per second, and the guarded approach at 0.03 meters per second at the bottom. A red dashed horizontal line marks the 2 millimeter latch clearance. A dotted vertical line at 35 ms marks the uncompensated lag, with a dot on each line. Red squares where the latch lines cross the clearance are labeled at most 20 ms and at most 66.7 ms. A gray band from 15 to 33 ms marks full-frame rolling-shutter skew."}
+
+```{python}
+#| label: fig-05-sync-displacement
+#| echo: false
+#| warning: false
+#| message: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ OBSERVATION-ACTION LAG AGAINST THE LATCH CLEARANCE (FIGURE)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @fig-05-sync-displacement in @sec-data-multimodal-time-sync,
+# │          after calc-data-sync-displacement.
+# │ Goal:    Show that the same pairing lag is harmless at the guarded approach
+# │          and disqualifying at the faster one.
+# │ Show:    dx = v * lag for the transit and both latch speeds; the latch
+# │          clearance; the 35 ms uncompensated lag; each speed's largest
+# │          tolerable lag; the full-frame rolling-shutter skew band.
+# │ How:     Every value reads SyncDisplacement (no literals).
+# └─────────────────────────────────────────────────────────────────────────────
+import numpy as np
+import matplotlib.pyplot as plt
+from mlsysim import viz
+from mlsysim.fmt import check
+
+S = SyncDisplacement
+ms = lambda q: q.to(millisecond).magnitude
+mm = lambda q: q.to(millimeter).magnitude
+mmps = lambda q: q.to(millimeter / millisecond).magnitude
+c = mm(S.clearance)
+lag = ms(S.t_lag)
+lines = [  # label, speed, role color
+    (f"transit {S.v_transit_str}", mmps(S.v_transit), "#4A5568"),
+    (f"faster latch approach {S.v_fast_str}", mmps(S.v_fast), "#B87333"),
+    (f"guarded latch approach {S.v_guarded_str}", mmps(S.v_guarded), "#007A87"),
+]
+check(abs(mmps(S.v_transit) * lag - mm(S.dx_transit)) < 1e-9, "transit line matches dx_transit")
+check(abs(c / mmps(S.v_fast) - ms(S.lag_max_fast)) < 1e-9, "fast crossing matches lag_max_fast")
+
+fig, ax, COLORS, plt = viz.setup_plot(figsize=(6.4, 3.4))
+t = np.geomspace(1, 100, 400)
+ax.axvspan(ms(S.t_skew_lo), ms(S.t_skew_hi), color="#A0AEC0", alpha=0.18, lw=0)
+ax.text((ms(S.t_skew_lo) * ms(S.t_skew_hi)) ** 0.5, 60, "full-frame\nrolling-shutter skew", fontsize=7.5, color="#4A5568", ha="center", va="top")
+ax.axhline(c, color="#A51C30", lw=1.2, ls=(0, (5, 3)))
+ax.text(1.1, c * 1.1, f"latch clearance {S.clearance_str}", fontsize=8, color="#A51C30", ha="left", va="bottom")
+ax.axvline(lag, color="#1A202C", lw=0.9, ls=(0, (2, 2)))
+ax.text(lag * 1.05, 0.12, f"uncompensated\nlag {S.t_lag_str}", fontsize=7.5, color="#1A202C", va="bottom")
+for lab, v, col in lines:
+    ax.plot(t, v * t, color=col, lw=1.8)
+    ax.plot(lag, v * lag, "o", color=col, ms=5, zorder=5)
+    ax.text(105, v * 100, lab, fontsize=7.5, color=col, va="center")
+for v, lab in ((mmps(S.v_fast), S.lag_max_fast_str), (mmps(S.v_guarded), S.lag_max_guarded_str)):
+    tx = c / v
+    ax.plot(tx, c, "s", color="#A51C30", ms=4.5, zorder=6)
+    ax.text(tx * 1.07, c * 0.86, f"≤ {lab}", fontsize=7.5, color="#A51C30", ha="left", va="top")
+ax.set_yscale("log")
+ax.set_xscale("log")
+ax.set_xlim(1, 100)
+ax.set_ylim(0.1, 100)
+ax.set_xlabel("observation-to-action pairing lag (ms)")
+ax.set_ylabel("pairing displacement (mm)")
+for s in ("top", "right"):
+    ax.spines[s].set_visible(False)
+plt.tight_layout()
+plt.show()
+plt.close()
+```
+:::
 
 #### Hardware timestamps vs. software arrival timestamps {#sec-data-hw-vs-sw-timestamps}
 
@@ -306,23 +441,25 @@ The root of temporal corruption lies in conflating when an optical or electrical
   Host timestamps lag physical reality by $20\text{--}45\text{ ms}$. In an untuned system, operating system scheduling jitter ($\delta_{\text{jitter}} = \pm 5\text{--}15\text{ ms}$), driven by kernel preemption latency, CPU C-state power wake-up transitions, and USB host controller interrupt coalescing (where packets are held in hardware buffers until a threshold count or timer expires), corrupts numerical differentiation. When joint velocities are computed via backward difference:
   $$\dot{\mathbf{q}}_k = \frac{\mathbf{q}_k - \mathbf{q}_{k-1}}{t_k - t_{k-1}},$$
   a nominal $1\text{ kHz}$ sampling interval ($\Delta t = 1.0\text{ ms}$) perturbed by software timestamp jitter $\delta_{\text{jitter}} = \pm 0.5\text{ ms}$ causes the denominator to fluctuate between $0.5\text{ ms}$ and $1.5\text{ ms}$, doubling the inferred velocity at the shorter interval or reducing it by one third at the longer interval for the same measured displacement. If thread preemption reverses packet dequeuing order ($t_k < t_{k-1}$), the computed velocity reverses sign, injecting spurious velocity spikes into the training targets.
-- **Hardware PTP timestamps ($t_{\text{PTP}}$):** Hardware timestamps remove host scheduling delay from the recorded event time. PTP estimates clock offset using a two-way exchange. The reference clock sends at $t_1$ and receives the reply at $t_4$; the remote clock receives at $t_2$ and replies at $t_3$. Under symmetric path delays, the propagation delay and offset are:
+- **Hardware PTP timestamps ($t_{\text{PTP}}$):** Hardware timestamps remove host scheduling delay from the recorded event time. PTP estimates clock offset using a two-way exchange.[^fn-ptp-pairing-bias] The reference clock sends at $t_1$ and receives the reply at $t_4$; the remote clock receives at $t_2$ and replies at $t_3$. Under symmetric path delays, the propagation delay and offset are:
   $$\tau_{\text{prop}} = \frac{(t_4 - t_1) - (t_3 - t_2)}{2}, \qquad \theta_{\text{offset}} = \frac{(t_2 - t_1) - (t_4 - t_3)}{2}.$$
   The symmetric-path assumption matters. Hardware timestamping does not make clock conversion exact, and a network timestamp is not automatically a camera exposure timestamp. The record must retain the capture event, clock identity, and bounded conversion error. @Sec-appendix-systems-ptp develops the exchange and its uncertainty; the collection decision here is whether that uncertainty fits the task's spatial alignment tolerance.
+
+[^fn-ptp-pairing-bias]: **Precision Time Protocol (PTP)**\index{IEEE 1588 Precision Time Protocol!pairing error}: IEEE 1588 was first published in 2002 for test-and-measurement and industrial-automation networks, and its current revision dates from 2019 [@ieee15882019]. It reaches sub-microsecond agreement only when both endpoints timestamp packets in hardware at the network interface. Its weak point is the symmetric-path assumption in the offset formula, because a link whose two directions differ in delay biases the computed offset by half that difference, and every observation-action pairing in the archive inherits the bias.
 
 #### Rolling shutter skew across camera streams {#sec-data-rolling-shutter-skew}
 
 A severe and frequently overlooked visual artifact in physical AI pipelines is **rolling shutter skew**. Low-cost consumer sensors and webcams expose pixel rows sequentially rather than instantaneously. For a sensor with $H$ vertical scanlines and line readout duration $\tau_{\text{line}}$, the exposure midpoint of row $y \in [0, H-1]$ depends linearly on its vertical coordinate:
 $$t_{\text{row}}(y) = t_{\text{start}} + y \cdot \tau_{\text{line}} + \frac{\Delta t_{\text{exp}}}{2}.$$
 Across a full frame, the temporal skew between the top row ($y = 0$) and bottom row ($y = H - 1$) accumulates to:
-$$\Delta t_{\text{skew}} = (H - 1) \cdot \tau_{\text{line}},$$
+$$\Delta t_{\text{skew}} = (H - 1) \cdot \tau_{\text{line}},$$ {#eq-data-rolling-shutter-skew}
 which for common sensors lies between about `{python} SyncDisplacement.t_skew_lo_str` and `{python} SyncDisplacement.t_skew_hi_str`, the upper end being one full frame period at 30 Hz. When the robot arm or camera moves at `{python} SyncDisplacement.v_transit_str`, the bottom of the manipulator in the image is captured while the physical link has moved up to `{python} SyncDisplacement.dx_skew_transit_str` relative to the top of the link in the same frame. Even at the faster latch approach of `{python} SyncDisplacement.v_fast_str`, the worst-case skew moves the gripper `{python} SyncDisplacement.dx_skew_fast_str` within one frame, more than the `{python} SyncDisplacement.clearance_str` clearance. This geometric warping (the "jello effect") deforms straight edges into curved arcs and breaks rigid-body geometry.
 
 Independent rolling shutters can depict the same moving arm at different poses within nominally simultaneous frames. Hardware-triggered global shutters simplify alignment; rolling shutters require a row-time model and a motion bound or correction. Sensor choice must follow the task tolerance rather than a universal requirement for one shutter type.
 
 A collection pipeline can implement the alignment contract in four stages:
 
-1. **Hardware-triggered optical exposure midpoint:** The real-time MCU dispatches hardware GPIO sync pulses or PTP-synchronized trigger packets to every triggerable camera. The rig mixes shutter types: the wrist camera's global shutter exposes all rows together, while the navigation camera and the external cameras' color sensors read out row by row, so their frames also need the row-time model above to assign each row its own midpoint. The camera latches the trigger at $t_{\text{start}}$, and the driver calculates the true optical midpoint $t_{\text{mid}} = t_{\text{start}} + \Delta t_{\text{exp}} / 2$ in hardware PTP clock units ($t_{\text{PTP}}$), avoiding host arrival time as the exposure timestamp.[^fn-hw-camera-trigger]
+1. **Hardware-triggered optical exposure midpoint:** The real-time MCU dispatches hardware GPIO sync pulses or PTP-synchronized trigger packets to every triggerable camera. The rig mixes shutter types: the wrist camera's global shutter exposes all rows together, while the navigation camera and the external cameras' color sensors read out row by row, so their frames also need the row-time model above to assign each row its own midpoint. The camera latches the trigger at $t_{\text{start}}$, and the driver calculates the true optical midpoint $t_{\text{mid}} = t_{\text{start}} + \Delta t_{\text{exp}} / 2$ in hardware PTP clock units ($t_{\text{PTP}}$), avoiding host arrival time as the exposure timestamp.[^fn-trigger-camera-exposure]
 2. **Lock-free time-sorted jitter compensation:** Because network and bus transfers exhibit variable transport delay $\delta_{\text{jitter}}$, incoming sensor packets are stamped with their hardware PTP capture timestamp and inserted into a lock-free, time-sorted jitter ring buffer in shared memory. An asynchronous consumer thread advances a playhead lagging real-time by a fixed, bounded window ($\tau_{\text{jitter}} = 15\text{--}25\text{ ms}$), absorbing transport bursts and re-ordering packets into monotonic hardware timestamp sequence.
 3. **Cubic Hermite kinematic interpolation:** Because joint encoders sample at $1\text{ kHz}$ ($1\text{ ms}$ period) while cameras capture at $30\text{ Hz}$ or $60\text{ Hz}$, the camera midpoint $t_{\text{mid}}$ falls between two discrete MCU telemetry ticks $t_k$ and $t_{k+1}$. The synchronization thread interpolates joint angles $\mathbf{q}(t_{\text{mid}})$ using cubic Hermite splines across the bounding kinematic records $(t_k, \mathbf{q}_k, \dot{\mathbf{q}}_k)$ and $(t_{k+1}, \mathbf{q}_{k+1}, \dot{\mathbf{q}}_{k+1})$:
    $$\mathbf{q}(t_{\text{mid}}) = h_{00}(\lambda) \mathbf{q}_k + h_{10}(\lambda) \Delta t_s \dot{\mathbf{q}}_k + h_{01}(\lambda) \mathbf{q}_{k+1} + h_{11}(\lambda) \Delta t_s \dot{\mathbf{q}}_{k+1},$$
@@ -331,10 +468,21 @@ A collection pipeline can implement the alignment contract in four stages:
 
 The same pairing contract governs deployment. A policy trained on aligned pairs must also be fed aligned observations and have its actions executed when the training data implies. UMI measures each observation stream's latency and aligns all streams to the slowest, usually the camera, then sends commands ahead of time to cover the arm's and gripper's execution latency and discards actions whose execution time has already passed; with latency matching disabled, the same policy's motion became visibly jittery [@chi2024umi]. UMI also expresses actions relative to the gripper's current pose rather than in a fixed robot frame, which removes the dependence on a base calibration and lets one policy run on more than one arm.
 
-[^fn-hw-camera-trigger]: **Hardware optical exposure triggering**: Software USB triggers (such as V4L2 ioctl calls) introduce variable kernel scheduling jitter of $\pm 5\,\text{ms}$. To eliminate temporal uncertainty, high-assurance collection rigs utilize dedicated hardware GPIO or TTL sync pulses generated by the real-time microcontroller. This aligns global shutters across multi-camera rigs to within microseconds.
+[^fn-trigger-camera-exposure]: **Hardware Exposure Triggering**\index{Camera triggering!hardware sync pulse}: A dedicated GPIO or TTL pulse from the real-time microcontroller starts every camera's exposure on the same electrical edge, instead of a software trigger issued through the host's driver stack. Triggered global-shutter cameras then begin exposing within microseconds of one another, which leaves the exposure duration, not the trigger path, as the dominant term in the midpoint timestamp.
 
 ::: {.column-margin .margin-pointer}
 ↪ The capture timestamp, taken in hardware at the exposure midpoint, is defined for every sensor in @sec-perception-handoff.
+:::
+
+::: {#chk-data-action-label-timing .callout-checkpoint title="Action labels and pairing time"}
+
+A training pair is only as trustworthy as the tap it imitates and the time it assigns to each observation.
+
+- [ ] **Clamped request**: A teleoperator requests a motion that the permission path clamps. Which tap does the resulting state transition follow, and where does the record keep the evidence of the clamp?
+- [ ] **Stalled latch**: Measured joint velocity is zero while the motors hold torque against the latch. Why is $a_{\text{meas}}$ the wrong imitation target at that step?
+- [ ] **Unchanged mapped command**: Under what condition can $a_{\text{cmd}}$ serve as the expert target, and what happens to the pair when that condition fails?
+- [ ] **Lag budget**: A tighter strike plate leaves only `{python} SyncDisplacement.clearance_tight_str` of clearance. At the faster approach of `{python} SyncDisplacement.v_fast_str`, what is the largest uncompensated lag the pairing tolerates, and does a logger with the `{python} SyncDisplacement.t_lag_str` lag of \ref{nbk-data-pairing-lag} meet it?
+
 :::
 
 A tap and a timestamp are only as good as the loop that produced them. In teleoperation that loop runs through a human, and the interface between human and machine shapes the recorded dynamics long before the data reaches a model.
@@ -351,14 +499,73 @@ The rig in @fig-05-teleop-rig maps each leader joint directly to the correspondi
 
 ### Human-in-the-loop latency and bilateral passivity breakdown {#sec-data-bilateral-passivity}
 
-Each stage in this distributed loop introduces latency that affects the timing of the correction. In a reference setup with a high-speed camera and a wired local network (illustrative; see the Reader Guide), display processing requires $t_{\text{disp}} = 50\text{ ms}$ across exposure integration, H.264 decoding, and monitor raster refresh. Human visual perception, cognitive motor planning, and neuromuscular transmission introduce an operator response latency of $t_{\text{hum}} = 200\text{ ms}$ for continuous path corrections. Command quantization, packetization, and bus transport to the robot controller add $t_{\text{cmd}} = 10\text{ ms}$. Actuator torque ramp-up and structural inertia impose a mechanical response latency of $t_{\text{mech}} = 80\text{ ms}$ before the robot achieves the commanded acceleration. The **teleoperation round-trip latency** $t_{\text{loop}}$, the time from a contact event to the corrective actuator response, is their sum:
-$$t_{\text{loop}} = t_{\text{disp}} + t_{\text{hum}} + t_{\text{cmd}} + t_{\text{mech}} = 50\text{ ms} + 200\text{ ms} + 10\text{ ms} + 80\text{ ms} = 340\text{ ms}.$$
+```{python}
+#| label: calc-data-teleop-loop-latency
+#| echo: false
+#| warning: false
+#| message: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ TELEOPERATION ROUND-TRIP LATENCY (LEGO)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @sec-data-bilateral-passivity
+# │ Goal:    Sum the four stages of the human-in-the-loop correction and show
+# │          that the operator's own reaction dominates the loop.
+# │ Show:    Display, human, command, and mechanical latencies; their sum; the
+# │          instant the correction is commanded; the human share.
+# │ How:     t_loop = t_disp + t_hum + t_cmd + t_mech. Stage values are the
+# │          chapter's illustrative reference setup (see the Reader Guide).
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import *
+from mlsysim.core.units import *
+from mlsysim.fmt import fmt_latency, fmt_percent, check
 
-When a contact misalignment occurs at time $t$, the operator sees it on the display at $t + 50\text{ ms}$, commands a physical correction at $t + 250\text{ ms}$, and the arm pushes back at $t + 340\text{ ms}$, while the arm keeps moving under momentum and contact forces. A logger that naively pairs the observation $s_t$ with the command issued at the same instant pairs a state with an action chosen for a state $250\text{ ms}$ older. The policy learns that delay as deliberate behavior and over-corrects or oscillates when it runs autonomously at the control rate. The round-trip latency is therefore a property of the dataset, not only of the rig, because it enters every demonstration as phase lag dominated by the operator's own reaction time.
+class TeleopLoopLatency:
+    """Round-trip latency of one teleoperated correction."""
+
+    # ┌── 1. LOAD (Constants & Parameters) ─────────────────────────────────
+    t_disp = 50.0 * millisecond  # exposure, decode, raster refresh; category: illustrative
+    t_hum = 200.0 * millisecond  # perception, planning, neuromuscular; category: illustrative
+    t_cmd = 10.0 * millisecond  # quantization, packetization, bus; category: illustrative
+    t_mech = 80.0 * millisecond  # torque ramp and structural inertia; category: illustrative
+
+    # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────
+    t_loop = (t_disp + t_hum + t_cmd + t_mech).to(millisecond)
+    t_commanded = (t_disp + t_hum).to(millisecond)  # correction commanded after contact
+    hum_share = (t_hum / t_loop).to("").magnitude
+
+    # ┌── 3. GUARD (Assertions) ────────────────────────────────────────────
+    # The display equation in @sec-data-bilateral-passivity hand-types 50 + 200 + 10 + 80 = 340 ms;
+    # margin_teleop_loop_latency_strip.svg fig-alt hand-types the same stage values.
+    check(abs(t_loop.magnitude - 340.0) < 1e-9, "Round-trip latency should be 340 ms")
+    check(abs(t_commanded.magnitude - 250.0) < 1e-9, "Correction should be commanded 250 ms after contact")
+    check(t_hum > t_disp + t_cmd + t_mech, "The operator's reaction should exceed the other stages combined")
+
+    # ┌── 4. OUTPUT (Format & Export) ────────────────────────────────────────
+    t_disp_str = fmt_latency(t_disp, unit=millisecond, precision=0)
+    t_hum_str = fmt_latency(t_hum, unit=millisecond, precision=0)
+    t_cmd_str = fmt_latency(t_cmd, unit=millisecond, precision=0)
+    t_mech_str = fmt_latency(t_mech, unit=millisecond, precision=0)
+    t_loop_str = fmt_latency(t_loop, unit=millisecond, precision=0)
+    t_commanded_str = fmt_latency(t_commanded, unit=millisecond, precision=0)
+    hum_share_str = fmt_percent(hum_share, precision=1)
+```
+
+Each stage in this distributed loop introduces latency that affects the timing of the correction. In a reference setup with a high-speed camera and a wired local network (illustrative; see the Reader Guide), display processing requires $t_{\text{disp}} =$ `{python} TeleopLoopLatency.t_disp_str` across exposure integration, H.264 decoding, and monitor raster refresh. Human visual perception, cognitive motor planning, and neuromuscular transmission introduce an operator response latency of $t_{\text{hum}} =$ `{python} TeleopLoopLatency.t_hum_str` for continuous path corrections. Command quantization, packetization, and bus transport to the robot controller add $t_{\text{cmd}} =$ `{python} TeleopLoopLatency.t_cmd_str`. Actuator torque ramp-up and structural inertia impose a mechanical response latency of $t_{\text{mech}} =$ `{python} TeleopLoopLatency.t_mech_str` before the robot achieves the commanded acceleration. The **teleoperation round-trip latency** $t_{\text{loop}}$, the time from a contact event to the corrective actuator response, is their sum:
+$$t_{\text{loop}} = t_{\text{disp}} + t_{\text{hum}} + t_{\text{cmd}} + t_{\text{mech}} = 50\text{ ms} + 200\text{ ms} + 10\text{ ms} + 80\text{ ms} = 340\text{ ms}.$$ {#eq-data-teleop-loop-latency}
+
+When a contact misalignment occurs at time $t$, the operator sees it on the display `{python} TeleopLoopLatency.t_disp_str` later, commands a physical correction `{python} TeleopLoopLatency.t_commanded_str` after the event, and the arm pushes back after `{python} TeleopLoopLatency.t_loop_str`, while the arm keeps moving under momentum and contact forces. A logger that naively pairs the observation $s_t$ with the command issued at the same instant pairs a state with an action chosen for a state `{python} TeleopLoopLatency.t_commanded_str` older. The policy learns that delay as deliberate behavior and over-corrects or oscillates when it runs autonomously at the control rate. The round-trip latency is therefore a property of the dataset, not only of the rig, because it enters every demonstration as phase lag dominated by the operator's own reaction time, `{python} TeleopLoopLatency.hum_share_str` percent of the loop in this setup.
+
+::: {.column-margin}
+![](images/svg/margin_teleop_loop_latency_strip.svg){width="100%" fig-alt="One horizontal bar divided into the four stages of a teleoperated correction, drawn to scale under a bracket labeled 340 milliseconds loop: display 50 ms, human 200 ms, command 10 ms, and mechanics 80 ms. The human segment is the longest by far."}
+
+*The operator's own reaction is `{python} TeleopLoopLatency.hum_share_str` percent of the `{python} TeleopLoopLatency.t_loop_str` correction loop.*
+:::
 
 Force reflection adds another constraint to the collection interface. In **bilateral teleoperation**, the operator moves the leader while the follower's contact force returns through a delayed link. The work delivered at that port over a cycle is:
 $$\Delta E = \int_0^{T_{\text{cycle}}} F_{\text{contact}}(t - \tau) v(t)\,dt.$$
-The sign depends on the force–velocity phase relationship; delay does not make every interaction unstable. It can compromise the passivity of the coupled system and excite oscillation [@anderson1989bilateral]. Wave variables or passivity controllers address that risk under their stated assumptions (@sec-appendix-control-passivity). For collection, the consequence is a label-fidelity trade-off: filtering that stabilizes force feedback can also attenuate the contact transients the operator needs to demonstrate. Record the feedback and filtering configuration alongside the trajectory.
+The sign depends on the force–velocity phase relationship; delay does not make every interaction unstable. It can compromise the passivity[^fn-passivity-delay-teleop] of the coupled system and excite oscillation [@anderson1989bilateral]. Wave variables or passivity controllers address that risk under their stated assumptions (@sec-appendix-control-passivity). For collection, the consequence is a label-fidelity trade-off: filtering that stabilizes force feedback can also attenuate the contact transients the operator needs to demonstrate. Record the feedback and filtering configuration alongside the trajectory.
+
+[^fn-passivity-delay-teleop]: **Passivity**\index{Passivity!bilateral teleoperation}: A system is passive at a port if it can never return more energy than it has absorbed there. Passive systems joined at a port stay stable whatever their internal details, which is why passivity became the controls tool for coupling a human to a machine. @anderson1989bilateral showed that a delayed communication channel need not be passive and restored passivity for any constant delay with a scattering transformation, and @niemeyer1991stable recast the idea as wave variables. The price is paid in force fidelity at contact, and the demonstrations record that price.
 
 The interface thus filters what a demonstration can express. A force-reflecting leader lets the operator feel binding; a visual-only rate controller encourages short moves and pauses while the operator checks the video. A backdriven joint-space leader such as ALOHA, recorded at $50\text{ Hz}$ [@zhao2023learning], sits between them, conveying the leader's mechanical feel without follower force. With any of these interfaces, operators slow down near contact, because a high-gain loop closed around $t_{\text{loop}}$ would lose its phase margin. @Tbl-05-teleop-taxonomy lists these behaviors as artifacts to check on a given rig rather than as universal ranges.
 
@@ -374,7 +581,7 @@ The interface thus filters what a demonstration can express. A force-reflecting 
 
 ### Ingestion rate and the preservation requirement {#sec-data-telemetry-ingestion-storage}
 
-A teleoperated session ends as an archive, and the collection rig must write every stream the session produces, including all four action taps of \ref{dfn-data-four-stream-action-tap-tuple}, high-rate joint torques, and multi-view video, without losing any of them. Whether it can is rate arithmetic: the sustained write rate of all streams against the write bandwidth of the storage the collection computer carries.
+A teleoperated session ends as an archive, and the collection rig must write every stream the session produces, including all four action taps of @sec-data-four-stream-action-tap, high-rate joint torques, and multi-view video, without losing any of them. Whether it can is rate arithmetic: the sustained write rate of all streams against the write bandwidth of the storage the collection computer carries.
 
 ```{python}
 #| label: calc-data-multi-camera-ingestion
@@ -497,6 +704,11 @@ class MultiCameraIngestionBudget:
     n_axes_str = fmt_int(n_axes)
     f_log_str = fmt_frequency(f_log, unit=ureg.kilohertz, precision=0)
     bytes_per_step_str = fmt_int(bytes_per_step)
+    values_per_axis_str = fmt_int(values_per_axis)
+    bytes_per_value_str = fmt_int(bytes_per_value)
+    bytes_timestamp_str = fmt_int(bytes_timestamp)
+    bytes_px_rgb_str = fmt_int(bytes_per_px_rgb)
+    bytes_px_depth_str = fmt_int(bytes_per_px_depth)
 
     bw_nav_str = fmt_bandwidth(bw_nav, unit=MB / second, precision=2)
     bw_wrist_str = fmt_bandwidth(bw_wrist, unit=MB / second, precision=2)
@@ -519,31 +731,35 @@ class MultiCameraIngestionBudget:
     storage_hour_compressed_str = fmt_memory(storage_hour_compressed, unit=TB, precision=2)
 ```
 
-::: {#nbk-data-ingestion-bandwidth-storage-budgets-multi-camera .callout-notebook title="Multi-camera ingestion and storage budgets"}
-**Question**: What sustained ingestion rate and storage does one teleoperated door-opening session on the warehouse mobile manipulator generate when every camera and every axis is logged raw?
+::: {#nbk-data-ingestion-bandwidth-storage-budgets-multi-camera .callout-notebook title="The cheapest stream"}
 
-**Parameters** (camera geometry is datasheet; logging formats are chosen):
+**Problem**: One teleoperated door-opening session on the warehouse mobile manipulator logs every camera and every axis raw. What sustained write rate and storage does it demand, and what share of the bytes carries the four action taps?
 
-- **Navigation camera:** `{python} MultiCameraIngestionBudget.nav_w_str` by `{python} MultiCameraIngestionBudget.nav_h_str` px at `{python} MultiCameraIngestionBudget.nav_fps_str`, logged as 24-bit RGB ($3\text{ bytes/px}$).
+**Variables** (camera geometry is datasheet; logging formats and shift length are chosen):
+
+- **Navigation camera:** `{python} MultiCameraIngestionBudget.nav_w_str` by `{python} MultiCameraIngestionBudget.nav_h_str` px at `{python} MultiCameraIngestionBudget.nav_fps_str`, logged as 24-bit RGB (`{python} MultiCameraIngestionBudget.bytes_px_rgb_str` bytes/px).
 - **Wrist camera:** `{python} MultiCameraIngestionBudget.wrist_w_str` by `{python} MultiCameraIngestionBudget.wrist_h_str` px at `{python} MultiCameraIngestionBudget.wrist_fps_str`, logged the same way.
-- **External cameras:** `{python} MultiCameraIngestionBudget.n_ext_str` RGB-D cameras viewing the door, color at `{python} MultiCameraIngestionBudget.ext_w_str` by `{python} MultiCameraIngestionBudget.ext_h_str` px and `{python} MultiCameraIngestionBudget.ext_fps_str`, with depth aligned to the color frame as raw `uint16` millimeters ($2\text{ bytes/px}$).
-- **Kinematics:** `{python} MultiCameraIngestionBudget.n_axes_str` axes (two base wheels, seven arm joints) logged at `{python} MultiCameraIngestionBudget.f_log_str`. Each step stores, for every axis, position and velocity (the measured response $a_{\text{meas}}$), measured torque, and the requested, mapped, and enforced commands as 32-bit values, plus one 64-bit timestamp, for `{python} MultiCameraIngestionBudget.bytes_per_step_str` bytes per step.
+- **External cameras:** `{python} MultiCameraIngestionBudget.n_ext_str` RGB-D cameras viewing the door, color at `{python} MultiCameraIngestionBudget.ext_w_str` by `{python} MultiCameraIngestionBudget.ext_h_str` px and `{python} MultiCameraIngestionBudget.ext_fps_str`, with depth aligned to the color frame as raw `uint16` millimeters (`{python} MultiCameraIngestionBudget.bytes_px_depth_str` bytes/px).
+- **Kinematics:** `{python} MultiCameraIngestionBudget.n_axes_str` axes (two base wheels, seven arm joints) logged at `{python} MultiCameraIngestionBudget.f_log_str`. Each step stores, for every axis, `{python} MultiCameraIngestionBudget.values_per_axis_str` values of `{python} MultiCameraIngestionBudget.bytes_per_value_str` bytes (position and velocity, which form the measured response $a_{\text{meas}}$; measured torque; and the requested, mapped, and enforced commands), plus one `{python} MultiCameraIngestionBudget.bytes_timestamp_str`-byte timestamp.
+- **Shift:** `{python} MultiCameraIngestionBudget.shift_hours_str` hours of collection on one machine.
 
-**Calculation**:
+**Math**:
 
-1. **Raw video bandwidth:** the navigation camera streams `{python} MultiCameraIngestionBudget.bw_nav_str` and the wrist camera `{python} MultiCameraIngestionBudget.bw_wrist_str`. The external pair adds `{python} MultiCameraIngestionBudget.bw_ext_rgb_str` of color and `{python} MultiCameraIngestionBudget.bw_ext_depth_str` of depth, `{python} MultiCameraIngestionBudget.bw_ext_str` in all.
-2. **Kinematic bandwidth:** `{python} MultiCameraIngestionBudget.bytes_per_step_str` bytes per step at `{python} MultiCameraIngestionBudget.f_log_str` is `{python} MultiCameraIngestionBudget.bw_kin_str`.
-3. **Total sustained ingestion rate:** the streams sum to `{python} MultiCameraIngestionBudget.bw_total_str`, about `{python} MultiCameraIngestionBudget.bw_total_gb_str`.
-4. **Hourly and shift storage consumption:** uncompressed telemetry accumulates at `{python} MultiCameraIngestionBudget.storage_hour_str` per hour, or `{python} MultiCameraIngestionBudget.storage_shift_str` across a `{python} MultiCameraIngestionBudget.shift_hours_str`-hour collection shift on one machine.
+1. **Kinematic stream**: `{python} MultiCameraIngestionBudget.n_axes_str` $\times$ `{python} MultiCameraIngestionBudget.values_per_axis_str` $\times$ `{python} MultiCameraIngestionBudget.bytes_per_value_str` B $+$ `{python} MultiCameraIngestionBudget.bytes_timestamp_str` B $=$ `{python} MultiCameraIngestionBudget.bytes_per_step_str` B per step, and at `{python} MultiCameraIngestionBudget.f_log_str` that is `{python} MultiCameraIngestionBudget.bw_kin_str`.
+2. **Navigation camera**: `{python} MultiCameraIngestionBudget.nav_w_str` $\times$ `{python} MultiCameraIngestionBudget.nav_h_str` px $\times$ `{python} MultiCameraIngestionBudget.bytes_px_rgb_str` B $\times$ `{python} MultiCameraIngestionBudget.nav_fps_str` $=$ `{python} MultiCameraIngestionBudget.bw_nav_str`. The wrist camera's product is `{python} MultiCameraIngestionBudget.bw_wrist_str`.
+3. **External pair**: `{python} MultiCameraIngestionBudget.n_ext_str` $\times$ `{python} MultiCameraIngestionBudget.ext_w_str` $\times$ `{python} MultiCameraIngestionBudget.ext_h_str` px $\times$ (`{python} MultiCameraIngestionBudget.bytes_px_rgb_str` B $+$ `{python} MultiCameraIngestionBudget.bytes_px_depth_str` B) $\times$ `{python} MultiCameraIngestionBudget.ext_fps_str` $=$ `{python} MultiCameraIngestionBudget.bw_ext_str`, of which `{python} MultiCameraIngestionBudget.bw_ext_rgb_str` is color and `{python} MultiCameraIngestionBudget.bw_ext_depth_str` depth.
+4. **Total and storage**: The streams sum to `{python} MultiCameraIngestionBudget.bw_total_str`, about `{python} MultiCameraIngestionBudget.bw_total_gb_str`; over one hour that is `{python} MultiCameraIngestionBudget.storage_hour_str`, and over the shift `{python} MultiCameraIngestionBudget.storage_shift_str`.
 
-**Systems insight**:
-The navigation camera alone writes `{python} MultiCameraIngestionBudget.nav_over_sata_mult_str` what a SATA SSD sustains (`{python} MultiCameraIngestionBudget.bw_sata_str`). The full session fits within a Gen4 NVMe drive's `{python} MultiCameraIngestionBudget.bw_nvme_str`, but only by consuming storage at `{python} MultiCameraIngestionBudget.storage_hour_str` per hour. Intra-frame video compression at an illustrative `{python} MultiCameraIngestionBudget.compression_mult_str` brings the rate to about `{python} MultiCameraIngestionBudget.bw_compressed_str` (`{python} MultiCameraIngestionBudget.storage_hour_compressed_str` per hour) at the cost of encoder latency and artifacts in the frames the policy will train on. The kinematic stream, which carries all four action taps, is `{python} MultiCameraIngestionBudget.kin_share_str` percent of the bytes. The record that preserves the causal chain is the cheapest stream to log, so a logger that drops data under buffer pressure must never drop it first.
+**Result**: Raw logging needs a sustained `{python} MultiCameraIngestionBudget.bw_total_gb_str` write path, and the kinematic stream is `{python} MultiCameraIngestionBudget.kin_share_str` percent of the bytes.
+
+**Systems insight**: The navigation camera alone writes `{python} MultiCameraIngestionBudget.nav_over_sata_mult_str` what a SATA SSD sustains (`{python} MultiCameraIngestionBudget.bw_sata_str`). The full session fits within a Gen4 NVMe drive's `{python} MultiCameraIngestionBudget.bw_nvme_str`, but only by consuming storage at `{python} MultiCameraIngestionBudget.storage_hour_str` per hour. Intra-frame video compression at an illustrative `{python} MultiCameraIngestionBudget.compression_mult_str` brings the rate to about `{python} MultiCameraIngestionBudget.bw_compressed_str` (`{python} MultiCameraIngestionBudget.storage_hour_compressed_str` per hour) at the cost of encoder latency and artifacts in the frames the policy will train on. The kinematic stream carries all four action taps, so the record that preserves the causal chain is the cheapest stream to log, and a logger that drops data under buffer pressure must never drop it first.
+
 :::
 
 ::: {.column-margin}
-![](images/svg/margin_sensory_ingestion_bandwidth_ladder.svg){width="100%" fig-alt="Horizontal bar ladder of write bandwidth in megabytes per second for an NVMe Gen4 drive, all camera and kinematic streams together, and the navigation camera alone, with a red dashed line at the SATA solid-state drive write ceiling that every bar crosses."}
+![](images/svg/margin_sensory_ingestion_bandwidth_ladder.svg){width="100%" fig-alt="Horizontal bar ladder of write bandwidth in megabytes per second: an NVMe Gen4 drive at 7,000, all camera and kinematic streams together at 3,122, the navigation camera alone at 2,219, and the session compressed eightfold at 390. A red dashed line marks the SATA solid-state drive write ceiling at 550; every raw bar crosses it and only the compressed bar stays below."}
 
-*Multi-camera raw telemetry overwhelms legacy storage interfaces, requiring direct PCIe NVMe logging.*
+*The navigation camera alone writes `{python} MultiCameraIngestionBudget.nav_over_sata_mult_str` what a SATA SSD sustains; only the compressed session fits under it.*
 :::
 
 The rate sets what the rig must sustain; the archive's value depends on what survives. Whatever container and codec a team chooses, and episode formats such as LeRobot's are common [@cadene2024lerobot], the requirement is the same. The archive must preserve all four taps, their timestamps and clock identifiers, missing-sample flags, and provenance through every conversion, and must commit complete records to durable storage before an interruption can lose them. Compression is traded against that requirement rather than chosen for convenience, because a lossy video codec changes the frames the policy will train on. Neither a container name nor successful deserialization establishes that the streams are still physically aligned.
@@ -571,7 +787,7 @@ Raw storage bandwidth bounds how much telemetry an edge rig can physically captu
 import math
 from mlsysim import *
 from mlsysim.core.units import *
-from mlsysim.fmt import fmt_time, fmt_force, fmt_int, check
+from mlsysim.fmt import fmt, fmt_time, fmt_force, fmt_int, fmt_percent, fmt_multiple, check
 
 RM = Embodied.MobileManipulator.WarehouseMobileManipulator
 AISLE = Embodied.Scenario.WarehouseAisle
@@ -593,7 +809,9 @@ class DemonstrationYieldFatigue:
 
     n_campaign_target = 5000  # benchmark target; category: chosen
     n_gear_reversals = 14  # category: illustrative
-    n_cable_flex = 6 + 2  # opening flexes plus return stroke; category: illustrative
+    n_cable_open = 6  # flexes while opening; category: illustrative
+    n_cable_return = 2  # flexes on the return stroke during the re-latch; category: illustrative
+    n_cable_flex = n_cable_open + n_cable_return  # category: derived
     l10_gear_life = 5_000_000  # rated stress cycles; category: illustrative
     l10_cable_life = 200_000  # rated bending cycles; category: illustrative
 
@@ -627,6 +845,7 @@ class DemonstrationYieldFatigue:
     check(cable_cycles == 58824, "Unexpected cumulative cable bends")
     check(abs(f_trip.to(newton).magnitude - 15.0) < 1e-9, "Latch tripwire should be 15 N")
     check(n_campaign_target == 5000, "Campaign target should be 5,000 retained demonstrations")
+    check(cable_fatigue_pct > 10 * gear_fatigue_pct, "The flex cable, not the gear, should bind")
 
     # ┌── 4. OUTPUT (Format & Export) ────────────────────────────────────────
     n_raw_str = fmt_int(n_raw_attempts)
@@ -644,11 +863,53 @@ class DemonstrationYieldFatigue:
     gear_fatigue_pct_str = fmt_percent(gear_fatigue_pct / 100.0, precision=1)
     cable_fatigue_pct_str = fmt_percent(cable_fatigue_pct / 100.0, precision=1)
     f_trip_str = fmt_force(f_trip, precision=0)
+    t_sched_str = fmt_time(t_sched, unit=minute, precision=0)
+    t_motion_str = fmt_time(t_motion, unit=minute, precision=0)
+    t_att_str = fmt_time(t_att, unit=second, precision=0)
+    t_rst_str = fmt_time(t_rst, unit=second, precision=0)
+    t_cyc_str = fmt_time(t_cyc, unit=second, precision=0)
+    failure_pct_str = fmt_percent(failure_rate, precision=0)
+    qa_pct_str = fmt_percent(qa_filter_rate, precision=0)
+    failure_frac_str = fmt(failure_rate, precision=2)
+    qa_frac_str = fmt(qa_filter_rate, precision=2)
+    n_gear_str = fmt_int(n_gear_reversals)
+    n_cable_str = fmt_int(n_cable_flex)
+    n_cable_open_str = fmt_int(n_cable_open)
+    n_cable_return_str = fmt_int(n_cable_return)
+    l_gear_str = fmt_int(l10_gear_life, commas=True)
+    l_cable_str = fmt_int(l10_cable_life, commas=True)
 ```
 
-The useful output is **demonstration yield**\index{Teleoperation!demonstration yield} ($Y_{\text{usable}} = \lfloor T_{\text{motion}} / t_{\text{cyc}} \rfloor \cdot R$), the number of retained trajectory records a scheduled session produces after startup, calibration, operator rest, resets, and quality filtering have taken their share.
+The useful output is **demonstration yield**\index{Teleoperation!demonstration yield}, the number of retained trajectory records a scheduled session produces after startup, calibration, operator rest, resets, and quality filtering have taken their share. With an active motion window $T_{\text{motion}}$, a cycle of one attempt and one reset $t_{\text{cyc}} = t_{\text{att}} + t_{\text{rst}}$, and a net retention rate $R$, the session yields:
+$$Y_{\text{usable}} = \left\lfloor \frac{T_{\text{motion}}}{t_{\text{cyc}}} \right\rfloor R.$$ {#eq-data-demonstration-yield}
+Wear accumulates per physical cycle, not per facility hour, and failed attempts wear a joint as much as retained ones. Each wearing part carries a rated life, often written $L_{10}$: the cycle count at which 10 percent of a population of such parts is expected to have failed.[^fn-l10-rated-campaign] \ref{nbk-data-flex-cable-ceiling} prices one illustrative session of the latch campaign, and the campaign it implies, in both currencies.
 
-Consider one illustrative session of the latch campaign, declared to last $T_{\text{sched}} = 60.0\text{ min}$. Startup, sensor calibration, and mandatory operator rest leave an active motion window of $T_{\text{motion}} = 35.0\text{ min}$. Each attempt is one teleoperated opening of $t_{\text{att}} = 25.0\text{ s}$, followed by a re-latch of the door by its fixture of $t_{\text{rst}} = 15.0\text{ s}$ ($t_{\text{cyc}} = 40.0\text{ s}$), so the session fits `{python} DemonstrationYieldFatigue.n_raw_str` attempts. In-trial failures (20 percent) and post-collection quality filtering (15 percent) give a net retention rate $R = (1 - 0.20)(1 - 0.15) =$ `{python} DemonstrationYieldFatigue.retention_str`, and the session yields `{python} DemonstrationYieldFatigue.n_usable_str` retained episodes, `{python} DemonstrationYieldFatigue.t_yield_str` of validated data. That is a net session fraction, validated trajectory time over scheduled cell time, of `{python} DemonstrationYieldFatigue.yield_pct_str` percent. A target of `{python} DemonstrationYieldFatigue.n_target_str` retained demonstrations therefore costs `{python} DemonstrationYieldFatigue.n_total_str` attempts and `{python} DemonstrationYieldFatigue.t_sched_campaign_str` of scheduled cell time, `{python} DemonstrationYieldFatigue.overhead_factor_mult_str` the demonstration time the campaign keeps (@tbl-05-collection-budget). The assumed rest allocation belongs to this collection schedule; sustained operator performance and retention must be measured on the actual rig. A collection campaign must therefore be budgeted in validated trajectory time and component fatigue life, never in raw facility hours.
+::: {#nbk-data-flex-cable-ceiling .callout-notebook title="The flex-cable ceiling"}
+
+**Problem**: The latch campaign must retain `{python} DemonstrationYieldFatigue.n_target_str` demonstrations. How much scheduled cell time does that cost, and which wrist component's rated life does it spend fastest?
+
+**Variables** (illustrative except the chosen session length and target):
+
+- Session $T_{\text{sched}} =$ `{python} DemonstrationYieldFatigue.t_sched_str` (chosen), leaving an active window $T_{\text{motion}} =$ `{python} DemonstrationYieldFatigue.t_motion_str` after startup, calibration, and operator rest
+- Attempt $t_{\text{att}} =$ `{python} DemonstrationYieldFatigue.t_att_str`, one teleoperated opening; reset $t_{\text{rst}} =$ `{python} DemonstrationYieldFatigue.t_rst_str`, the door re-latched by its fixture
+- In-trial failure rate `{python} DemonstrationYieldFatigue.failure_pct_str` percent; post-collection quality filtering `{python} DemonstrationYieldFatigue.qa_pct_str` percent
+- Wear per attempt: $n_{\text{gear}} =$ `{python} DemonstrationYieldFatigue.n_gear_str` torque reversals of the wrist's strain-wave gear; $n_{\text{cable}} =$ `{python} DemonstrationYieldFatigue.n_cable_str` flex cycles of its internal cable bundle (`{python} DemonstrationYieldFatigue.n_cable_open_str` while opening, `{python} DemonstrationYieldFatigue.n_cable_return_str` on the return stroke)
+- Rated lives $L_{\text{gear}} =$ `{python} DemonstrationYieldFatigue.l_gear_str` stress cycles and $L_{\text{cable}} =$ `{python} DemonstrationYieldFatigue.l_cable_str` bending cycles
+
+**Math**:
+
+1. **Session**: $t_{\text{cyc}} =$ `{python} DemonstrationYieldFatigue.t_att_str` $+$ `{python} DemonstrationYieldFatigue.t_rst_str` $=$ `{python} DemonstrationYieldFatigue.t_cyc_str`, and $\lfloor$ `{python} DemonstrationYieldFatigue.t_motion_str` $/$ `{python} DemonstrationYieldFatigue.t_cyc_str` $\rfloor =$ `{python} DemonstrationYieldFatigue.n_raw_str` attempts, with `{python} DemonstrationYieldFatigue.t_idle_str` left idle.
+2. **Yield** (@eq-data-demonstration-yield): $R = (1 -$ `{python} DemonstrationYieldFatigue.failure_frac_str`$)(1 -$ `{python} DemonstrationYieldFatigue.qa_frac_str`$) =$ `{python} DemonstrationYieldFatigue.retention_str`, so $Y_{\text{usable}} =$ `{python} DemonstrationYieldFatigue.n_raw_str` $\times$ `{python} DemonstrationYieldFatigue.retention_str` $=$ `{python} DemonstrationYieldFatigue.n_usable_str` episodes, `{python} DemonstrationYieldFatigue.t_yield_str` of validated motion, `{python} DemonstrationYieldFatigue.yield_pct_str` percent of the scheduled hour.
+3. **Campaign**: $\lceil$ `{python} DemonstrationYieldFatigue.n_target_str` $/$ `{python} DemonstrationYieldFatigue.retention_str` $\rceil =$ `{python} DemonstrationYieldFatigue.n_total_str` attempts at `{python} DemonstrationYieldFatigue.n_raw_str` per session, or `{python} DemonstrationYieldFatigue.t_sched_campaign_str` of scheduled cell time, `{python} DemonstrationYieldFatigue.overhead_factor_mult_str` the `{python} DemonstrationYieldFatigue.n_target_str` $\times$ `{python} DemonstrationYieldFatigue.t_att_str` of motion the campaign keeps.
+4. **Wear**: `{python} DemonstrationYieldFatigue.n_total_str` $\times$ `{python} DemonstrationYieldFatigue.n_gear_str` $=$ `{python} DemonstrationYieldFatigue.gear_cycles_str` gear cycles, `{python} DemonstrationYieldFatigue.gear_fatigue_pct_str` percent of $L_{\text{gear}}$; `{python} DemonstrationYieldFatigue.n_total_str` $\times$ `{python} DemonstrationYieldFatigue.n_cable_str` $=$ `{python} DemonstrationYieldFatigue.cable_cycles_str` cable bends, `{python} DemonstrationYieldFatigue.cable_fatigue_pct_str` percent of $L_{\text{cable}}$.
+
+**Result**: Less than a quarter of each scheduled hour survives as retained demonstration time, and one campaign spends far more of the cable's rated life than of the gear's.
+
+**Systems insight**: The internal flex cable, not the gear, sets the replacement schedule. Three campaigns on one machine would consume most of its rated life, and an intermittent conductor break corrupts the very sensor streams being recorded. Because every attempt costs wear whether or not it is retained, the retention rate $R$ divides both bills, while a faster reset shortens only the cell time.
+
+:::
+
+The assumed rest allocation belongs to this collection schedule; sustained operator performance and retention must be measured on the actual rig. A collection campaign must therefore be budgeted in validated trajectory time and component fatigue life, never in raw facility hours. @Tbl-05-collection-budget breaks the illustrative session down stage by stage.
 
 ::: {.column-margin}
 ![](images/svg/margin_facility_yield_burndown_envelope.svg){width="100%" fig-alt="Three bars on a shared minute axis for the scheduled session, its active motion window, and the retained demonstration time, with a gray dashed line marking the end of the scheduled session."}
@@ -656,7 +917,11 @@ Consider one illustrative session of the latch campaign, declared to last $T_{\t
 *In this illustrative session, resets and retention losses leave about a quarter of scheduled time as usable demonstrations.*
 :::
 
-Wear accumulates per physical cycle, not per facility hour. In an illustrative wear model of the arm's wrist, the strain-wave gear is rated for $L_{\text{gear}} = 5{,}000{,}000$ stress cycles and the internal cable bundle for $L_{\text{cable}} = 200{,}000$ bending cycles. Each is a rated life, often written $L_{10}$: the cycle count at which 10 percent of a population of such parts is expected to have failed. Finding the handle, releasing the latch, and swinging the door add about $n_{\text{gear}} = 14$ torque reversals and $n_{\text{cable}} = 6$ flex cycles per opening, and the return stroke during the re-latch adds two more flex cycles. Failed attempts wear the joint as much as retained ones, so the bill is paid on all `{python} DemonstrationYieldFatigue.n_total_str` attempts: `{python} DemonstrationYieldFatigue.gear_cycles_str` gear stress cycles, `{python} DemonstrationYieldFatigue.gear_fatigue_pct_str` percent of rated life, and `{python} DemonstrationYieldFatigue.cable_cycles_str` cable bends, `{python} DemonstrationYieldFatigue.cable_fatigue_pct_str` percent of rated life, for one campaign. The internal flex cable, not the gear, sets the replacement schedule. Three campaigns on one machine would consume most of the cable's rated life, and an intermittent conductor break corrupts the very sensor streams being recorded.
+[^fn-l10-rated-campaign]: **$L_{10}$ Rated Life**\index{L10 rated life!collection campaign}: The convention comes from rolling-bearing fatigue theory, where @lundberg1949dynamic modeled the scatter of bearing life as a probability of survival and rated a bearing by the life that 90 percent of a population reaches. A rating chosen that way is a population statistic, not a guarantee for one part. A fleet of ten collection arms, each run to its cable's rated life, should therefore expect about one cable to fail before the budget says it will.
+
+::: {.column-margin .margin-pointer}
+↪ The same per-cycle wear arithmetic prices trial-based learning on the machine in @sec-training-learning-by-trial.
+:::
 
 | Session Stage / Activity         | Allocated Duration ($\Delta t$)         | Wall-Clock Share (\%) | Physical Operation & Control State                                                                             | Hardware Stress & Wear Mechanism                                                                                                                                                  | Net Trajectory Output ($N_{\text{episodes}}$ / $T_{\text{yield}}$) |
 |:---------------------------------|:----------------------------------------|:----------------------|:---------------------------------------------------------------------------------------------------------------|:----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|:-------------------------------------------------------------------|
@@ -685,7 +950,7 @@ An action label exists only because the collecting policy visited that state and
 
 ### Choosing a tractable coverage ledger {#sec-data-curse-dimensionality-recoverability-geometry}
 
-The contact-angle example uses a small grid because it isolates the conditions relevant to a particular task. Extending that strategy to every robot variable creates the **curse of dimensionality in continuous physical interaction**. Consider a mobile manipulator with a 7-DoF arm, a 2-DoF differential base, a 6-axis force-torque sensor at the wrist, and a 6-DoF target workpiece pose. The continuous state space has dimension:
+The contact-angle example uses a small grid because it isolates the conditions relevant to a particular task. Extending that strategy to every robot variable creates the **curse of dimensionality in continuous physical interaction**.[^fn-bellman-coverage-ledger] Consider a mobile manipulator with a 7-DoF arm, a 2-DoF differential base, a 6-axis force-torque sensor at the wrist, and a 6-DoF target workpiece pose. The continuous state space has dimension:
 $$d = 7\text{ (joint angles)} + 7\text{ (joint velocities)} + 2\text{ (wheel speeds)} + 6\text{ (wrench components)} + 6\text{ (workpiece pose)} = 28.$$
 ```{python}
 #| label: calc-data-state-space-coverage
@@ -712,12 +977,14 @@ class StateSpaceCoverage:
     # ┌── 1. LOAD (Constants & Parameters) ─────────────────────────────────
     d = 7 + 7 + 2 + 6 + 6  # joint angles, velocities, wheels, wrench, workpiece pose; category: derived
     bins = 10  # bins per axis; category: illustrative
+    bins_fine = 100  # bins per axis fine enough to guide contact; category: illustrative
     n_fleet = 1000  # robots; category: illustrative
     f_log = 1000.0 * hertz  # category: illustrative
     t_universe = 13.8e9 * year  # age of the universe (Planck 2018, 13.8 Gyr); category: physical constant
 
     # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────
     n_cells = float(bins) ** d
+    n_cells_fine = float(bins_fine) ** d
     n_records = n_fleet * (f_log * t_universe).to("").magnitude
     frac_max = n_records / n_cells
 
@@ -725,6 +992,7 @@ class StateSpaceCoverage:
     check(d == 28, "State dimension should be 28")
     check(4.3e23 < n_records < 4.4e23, "Unexpected record count")
     check(frac_max < 1e-4, "Coverage bound should be far below one percent")
+    check(n_cells == 1e28 and n_cells_fine == 1e56, "Prose hand-types 10^28 and 10^56 cells")
 
     # ┌── 4. OUTPUT (Format & Export) ────────────────────────────────────────
     n_fleet_str = fmt_int(n_fleet, commas=True)
@@ -734,7 +1002,27 @@ class StateSpaceCoverage:
 
 If an engineering team partitions each dimension into a crude $B = 10$ bins ($36^\circ$ per angle bin and $10\text{ N}$ per wrench bin, far too coarse to guide contact tasks whose tolerances are a few millimeters), the discretized state space contains $B^d = 10^{28}$ cells. A fleet of `{python} StateSpaceCoverage.n_fleet_str` robots logging at $1\text{ kHz}$ since the universe began, about 13.8 billion years ago, would hold `{python} StateSpaceCoverage.n_records_str` records, enough to visit at most `{python} StateSpaceCoverage.frac_pct_str` percent of those cells even if every record landed in a different one. At a resolution fine enough to guide contact ($B = 100$ bins per axis), the count grows to $10^{56}$ cells. Brute-force observation cannot cover a continuous physical state space; a ledger must parameterize the task instead.
 
-Measuring coverage against the extremes of the collected values is circular. A collector that logs forces only between $4.0$ and $6.0\text{ N}$ reports complete coverage of that interval. Coverage must instead be evaluated against an external **scenario ledger**\index{Scenario ledger}, a table of the conditions the deployment requires, divided into cells. The scenario ledger is the **operational design domain** (ODD) written down: the object poses, surface conditions, payloads, speeds, and disturbances in which the machine is meant to operate.\index{Operational design domain!definition} Crucially, in high-dimensional continuous systems, a scenario ledger does not attempt to voxelize raw camera pixel arrays or continuous joint spaces, which would trigger an intractable combinatorial explosion. Instead, it parameterizes the low-dimensional task manifold and environmental invariants—such as workpiece pose offsets ($\pm 5\text{ mm}$), surface friction coefficients, approach speeds, lighting variations ($100\text{--}1000\text{ lux}$), and payload masses ($0\text{--}2\text{ kg}$)—grounding verification in concrete physical operational bounds. The join identifies where the dataset contains experience; it does not establish successful learned behavior in those cells. A populated cell still needs suitable supervisory targets, and the trained candidate needs closed-loop evaluation.
+::: {.column-margin}
+![](images/svg/margin_state_grid_coverage_ladder.svg){width="100%" fig-alt="Log-scale ladder of counts: 10 to the 56 cells at 100 bins per axis, 10 to the 28 cells at 10 bins per axis, and 4.35 times 10 to the 23 records from 1,000 robots logging at 1 kilohertz for the age of the universe, a rung too short to reach the coarse grid."}
+
+*A fleet logging since the universe began could visit at most `{python} StateSpaceCoverage.frac_pct_str` percent of even the coarse grid.*
+:::
+
+[^fn-bellman-coverage-ledger]: **Curse of Dimensionality**\index{Curse of dimensionality!coverage ledger}: Bellman coined the phrase for dynamic programming, whose value tables grow exponentially with the number of state variables [@bellman1957dynamic]. A coverage table meets the same wall as a value table, since both assign one entry to every cell of the discretized state. Dynamic programming escaped by approximating the value function over a few features; a coverage ledger escapes the same way, by indexing the few task parameters that decide success rather than the raw state.
+
+Measuring coverage against the extremes of the collected values is circular. A collector that logs forces only between $4.0$ and $6.0\text{ N}$ reports complete coverage of that interval. Coverage must instead be evaluated against the conditions the deployment requires, stated before any data is examined.
+
+::: {#dfn-data-operational-design-domain .callout-definition title="Operational design domain"}
+
+***Operational design domain (ODD)***\index{Operational design domain!definition} is the declared set of conditions (object poses, surface conditions, payloads, speeds, and disturbances) under which a machine is intended to operate, stated independently of any data collected within it.
+
+1.  **Significance**: The ODD is the denominator of every coverage claim. The latch archive of this section fills a single cell of the ledger its door requires, a fraction that no number of repeated episodes can raise, and the evaluation, verification, and release records that follow each claim authority over no more than a declared part of the ODD.
+2.  **Distinction**: The deployment defines the ODD; the collecting policy defines the occupancy. Coverage measured against the extremes of logged values is occupancy restated in ODD vocabulary, and it always looks complete. The **scenario ledger**\index{Scenario ledger} is the ODD divided into cells so that the two can be joined.
+3.  **Common pitfall**: Describing the ODD as the conditions where the machine has already worked rather than where it is meant to work, which lets the archive define its own requirements and hides every known absence.
+
+:::
+
+In high-dimensional continuous systems, a scenario ledger does not attempt to voxelize raw camera pixel arrays or continuous joint spaces, which would trigger an intractable combinatorial explosion. Instead, it parameterizes the low-dimensional task manifold and environmental invariants, such as workpiece pose offsets ($\pm 5\text{ mm}$), surface friction coefficients, approach speeds, lighting variations ($100\text{--}1000\text{ lux}$), and payload masses ($0\text{--}2\text{ kg}$), which grounds verification in concrete physical operational bounds. The join identifies where the dataset contains experience; it does not establish successful learned behavior in those cells. A populated cell still needs suitable supervisory targets, and the trained candidate needs closed-loop evaluation.
 
 The latch corridor of @fig-05-latch-corridor explains why even a tractable ledger must include departures from the nominal path. Repeating a successful motion samples progress along that path; corrective demonstrations supply actions that return the machine after a displacement. The ledger must distinguish those experiences instead of treating repeated nominal runs as coverage of their surroundings.
 
@@ -838,6 +1126,8 @@ Before evaluating policy coverage across an operational design domain, verify yo
 - [ ] **Empirical support vs. validation loss**: Can you explain why an imitation policy can achieve near-zero validation loss on held-out test data while leaving 98 percent of the ODD's required cells unsupported?
 - [ ] **Unsupported states**: What can an unvisited scenario cell establish about policy behavior, and what additional evidence or refusal decision is needed?
 - [ ] **Scenario ledger relational joins**: Can you distinguish populated cells, low-count cells, and unvisited cells when joining telemetry against an operational scenario ledger?
+- [ ] **Ledger growth**: If the latch ledger adds a third approach speed between the two it holds, how many cells does it contain, and how many of them are known absences for the original archive?
+
 :::
 
 Recording more nominal demonstrations along the corridor cannot fill a blind spot. Reaching boundary states takes supervisory takeovers or deliberate perturbation of the demonstrator [@kelly2019hgdagger; @laskey2017dart], and the data they produce raises attribution problems of its own (@sec-data-intervention-recovery).
@@ -901,12 +1191,16 @@ class DataLookbackWindow:
 
 Separating these labels requires locating the **divergence point** where the autonomous policy departed the nominal path, rather than treating takeover as the first error. In a streaming telemetry pipeline, edge loggers maintain a circular rolling ring buffer in locked memory or fast non-volatile storage spanning a fixed lookback window, $\Delta t_{\text{lookback}} =$ `{python} DataLookbackWindow.t_lookback_str`: the design out-of-loop takeover time of @sec-intervention-human-authority, rounded up to whole seconds, because the operator's response alone spans that interval after the divergence has begun. Because memory allocation during emergency events introduces non-deterministic latency, this buffer operates as a zero-allocation, pre-allocated ring buffer populated at the hardware servo tick ($1\text{ kHz}$). When a human safety supervisor hits an override button or an MCU safety enforcer trips a barrier, the pipeline latches the intervention timestamp $t_{\text{takeover}}$ and freezes the preceding ring buffer. An out-of-loop supervisory takeover (@sec-intervention-human-authority budgets its latency) takes longer than the teleoperation loop's continuous correction (@sec-data-teleop-costs); at an illustrative $100\text{ Hz}$ that delay spans many control cycles, all logged under the learner's authority.
 
+::: {.column-margin .margin-pointer}
+↪ The takeover time and the cause of any preemption, which bound the drift window, are logged in the authority record of @sec-intervention-authority-log.
+:::
+
 Detecting $t_{\text{div}}$ in offline ingestion pipelines requires searching backwards in time from the physical override timestamp across this synchronized pre-trigger telemetry buffer:
 $$\begin{aligned}
 \hat{t}_{\text{div}} = \min \Bigl\{ t \in [t_{\text{takeover}} - \Delta t_{\text{lookback}}, t_{\text{takeover}}] \;\Big|\; &\|\mathbf{x}_{\text{plant}}(t) - \mathbf{x}_{\text{ref}}(t)\|_2 > \delta_{\text{tol}} \\
 &\lor\; \text{Tr}(\boldsymbol{\Sigma}_{\pi}(t)) > \sigma_{\text{thresh}}^2 \Bigr\}.
-\end{aligned}$$
-The pipeline scans the lookback window for the first threshold crossing. In structured tasks with nominal motion plans, $\mathbf{x}_{\text{ref}}(t)$ represents the planned kinematic trajectory dispatched by the high-level motion planner. In unstructured contact manipulation where no static reference trajectory exists, divergence detection evaluates residuals against admissible safety envelope boundaries—such as velocity-to-obstacle clearance margins, anomalous contact force derivatives $dF/dt$, or epistemic policy ensemble variance $\text{Tr}(\boldsymbol{\Sigma}_{\pi}(t))$. The detection thresholds are scenario-specific and calibrated to the sensor noise floor.
+\end{aligned}$$ {#eq-data-divergence-point}
+The pipeline scans the lookback window for the first threshold crossing. In structured tasks with nominal motion plans, $\mathbf{x}_{\text{ref}}(t)$ represents the planned kinematic trajectory dispatched by the high-level motion planner. In unstructured contact manipulation where no static reference trajectory exists, divergence detection evaluates residuals against admissible safety envelope boundaries, such as velocity-to-obstacle clearance margins, anomalous contact force derivatives $dF/dt$, or epistemic policy ensemble variance $\text{Tr}(\boldsymbol{\Sigma}_{\pi}(t))$. The detection thresholds are scenario-specific and calibrated to the sensor noise floor.
 
 **Intervention curation**\index{Intervention curation!definition} separates learner commands, expert labels on learner-visited states, and post-takeover recovery at the timestamps the authority record supplies. The takeover instant $t_{\text{takeover}}$ is the commit instant $t_{\text{commit}}$ at which that record ends policy ownership, and @sec-intervention-recovery-eligibility owns the interval boundaries that follow it:
 
@@ -987,15 +1281,11 @@ Collecting expert labels at learner-visited states takes several forms, and the 
 ![](images/svg/fig05_compounding_error_flywheel.svg){width="100%"}
 :::
 
-Training successive policy generations on drift-window learner commands mislabeled as expert actions can create a retraining cascade:
+Training successive policy generations on drift-window learner commands mislabeled as expert actions can create a retraining cascade. In the first generation, a policy with a slight calibration error drifts the arm toward a joint torque limit until a human operator grabs the override pendant. If the second generation is trained with those drift-window commands presented as expert labels, it learns to repeat them at similar off-nominal states, and on this rig that could increase excursions toward the torque limit before a correction. Operators of the third generation may then intervene earlier. The intervention rate can rise while validation loss on the mislabeled archive falls, so the offline metric looks better as physical performance worsens.
 
-1. **Generation 1:** A policy operates with a slight calibration error, causing a robotic arm to drift toward a joint torque limit until a human operator grabs the override pendant.
-2. **Generation 2:** If the drift-window commands are presented as expert labels, the policy learns to repeat them at similar off-nominal states. On this rig, that could increase excursions toward the torque limit before a correction.
-3. **Generation 3:** Operators may then intervene earlier. Intervention rate can rise while validation loss on the mislabeled archive falls, making the offline metric look better as physical performance worsens.
+To detect such a cascade, the permission path logs each takeover or barrier trip as an entry of the authority record\index{Authority record!intervention entry} that @sec-intervention-authority-log builds, and the training pipeline reads that entry.[^fn-edr-takeover-lookback] The entry needs more than a binary flag on video: a pre-trigger buffer long enough for the declared lookback (`{python} DataLookbackWindow.t_lookback_str` in this example), synchronized observations and action taps, a monotonic override timestamp and authority ID, the blend-end and stabilization timestamps that bound the admissible recovery, and the subsequent recovery sequence. Without the pre-trigger evidence, the pipeline cannot locate $t_{\text{div}}$ reliably or separate unsafe learner commands from states eligible for expert relabeling.
 
-To detect such a cascade, the permission path logs each takeover or barrier trip as an entry of the authority record\index{Authority record!intervention entry} that @sec-intervention-authority-log builds, and the training pipeline reads that entry.[^fn-std-iso-records] The entry needs more than a binary flag on video: a pre-trigger buffer long enough for the declared lookback (`{python} DataLookbackWindow.t_lookback_str` in this example), synchronized observations and action taps, a monotonic override timestamp and authority ID, the blend-end and stabilization timestamps that bound the admissible recovery, and the subsequent recovery sequence. Without the pre-trigger evidence, the pipeline cannot locate $t_{\text{div}}$ reliably or separate unsafe learner commands from states eligible for expert relabeling.
-
-[^fn-std-iso-records]: **Fault-Event Logging**\index{Deterministic fault logging!non-volatile ring buffers}: This collection design preserves pre-trigger state, action authority, fault codes, and actuator-current samples across an override, with integrity checks on the stored record. Such telemetry helps distinguish policy drift from hardware or environment faults.
+[^fn-edr-takeover-lookback]: **Event Data Recorder**\index{Event data recorder!pre-trigger buffer}: US vehicle rules under 49 CFR Part 563 require a car's event data recorder to keep a fixed window of samples from before a crash trigger, because the cause of a crash precedes the event that fires the recorder [@nhtsa2024edr]. A takeover has the same shape. The divergence $t_{\text{div}}$ precedes the trigger $t_{\text{takeover}}$, so a collection logger that starts recording at the trigger has already lost the states the curation rules need.
 
 ::: {#chk-data-intervention-curation-bounds .callout-checkpoint title="Intervention curation and error bounds"}
 
@@ -1004,19 +1294,21 @@ Before curating human intervention logs for policy retraining, verify your under
 - [ ] **Takeover vs. divergence timestamps**: Why retain learner-visited drift states for possible expert relabeling while excluding their unsafe learner commands from expert imitation targets?
 - [ ] **Retraining cascade progression**: Can you describe how training successive policy generations on uncurated intervention logs accelerates policy degradation despite improving training metrics?
 - [ ] **Conditional error bounds**: Which assumptions distinguish the behavioral-cloning quadratic worst-case cost bound from DAgger's linear-horizon result?
+- [ ] **Bound threshold**: For an episode twice as long as the `{python} BoundComparison.t_episode_str` comparison, at the same `{python} BoundComparison.f_ctrl_str` control rate, above what per-step error $\epsilon$ does the quadratic bound stop constraining the cost?
+
 :::
 
 Even with expert labels on learner-visited states, the resulting demonstration archive remains tethered to the kinematics and dynamics of the collecting machine. Pooling demonstrations across robot arms, bases, and end-effectors raises the cross-embodiment questions in @sec-data-cross-embodiment.
 
 ## Cross-Embodiment Transfer {#sec-data-cross-embodiment}
 
-Data from one physical machine does not represent a physical task in the abstract. Every recorded trajectory binds the physical characteristics of the collecting hardware into its numerical values—including link lengths, joint velocity limits, sensor optical paths, communication delays, and contact surface compliances. Reusing demonstrations across heterogeneous robots therefore requires establishing explicit contracts between task invariants and embodiment realizations, checking target-task transfer, and resolving topological mismatches. The mobile manipulator meets these questions as soon as its latch campaign looks beyond its own demonstrations to records collected on other arms and grippers.
+Data from one physical machine does not represent a physical task in the abstract. Every recorded trajectory binds the physical characteristics of the collecting hardware into its numerical values, including link lengths, joint velocity limits, sensor optical paths, communication delays, and contact surface compliances. Reusing demonstrations across heterogeneous robots therefore requires establishing explicit contracts between task invariants and embodiment realizations, checking target-task transfer, and resolving topological mismatches. The mobile manipulator meets these questions as soon as its latch campaign looks beyond its own demonstrations to records collected on other arms and grippers.
 
 ### Embodiment contracts and the normalization fallacy {#sec-data-embodiment-contracts}
 
 When an engineer saves an observation-action trace $(o_t, a_t)$, the record does not capture an abstract manipulation skill. It captures the **embodiment contract**\index{Embodiment contract!definition} established between that specific machine and its environment. This contract encompasses the sensor geometry and optical calibration, the sampling period and transport latency of the perception bus, the coordinate frames and kinematic limits of the actuators, the torque-speed saturation curves of the motors (including reflected rotor inertia $N^2 J_{\text{rotor}}$ in geared transmissions, as established in @sec-body-actuator-limits), and the friction and compliance of the contact interface. Altering any parameter in this contract changes the mapping between commanded inputs and physical state transitions. Even when two robots follow an identical Cartesian tool trajectory $\mathbf{x}(t)$, their required actuator torques diverge. Written per joint, Newton's second law for an arm is the manipulator equation:
 $$\boldsymbol{\tau} = \mathbf{M}(\mathbf{q})\ddot{\mathbf{q}} + \mathbf{C}(\mathbf{q}, \dot{\mathbf{q}})\dot{\mathbf{q}} + \mathbf{g}(\mathbf{q}) + \boldsymbol{\tau}_{\text{ext}},$$
-where $\mathbf{q}$ are the joint positions, $\mathbf{M}(\mathbf{q})$ is the configuration-dependent inertia (mass) matrix, $\mathbf{C}$ collects velocity-dependent Coriolis and centrifugal terms, $\mathbf{g}$ is the gravity torque, and $\boldsymbol{\tau}_{\text{ext}}$ is the torque that external contact forces exert about the joints; @sec-planning-rigidbody-dynamics develops it. Every term depends on the machine's link masses, inertias, and gear ratios, which differ fundamentally across embodiments, so the same tool motion demands different torques on each.
+where $\mathbf{q}$ are the joint positions, $\mathbf{M}(\mathbf{q})$ is the configuration-dependent inertia (mass) matrix, $\mathbf{C}$ collects velocity-dependent Coriolis and centrifugal terms, $\mathbf{g}$ is the gravity torque, and $\boldsymbol{\tau}_{\text{ext}}$ is the torque that external contact forces exert about the joints; @sec-planning-rigidbody-dynamics develops it. Every term depends on the machine's link masses, inertias, and gear ratios, which differ across embodiments, so the same tool motion demands different torques on each.
 
 Where the embodiment contract describes one machine, the **cross-embodiment compatibility contract**\index{Cross-embodiment compatibility contract!definition} decides whether records made under one embodiment contract may serve as action targets on another. It specifies the forward kinematics mapping, control rate normalization ($\Delta t$), and actuator effort bounds that keep a force profile or spatial velocity demonstrated on a heavy industrial arm from reaching a lightweight desktop robot unscaled. The large pooled corpora do not supply such a contract. Open X-Embodiment converts each dataset's actions into a coarsely aligned seven-dimensional end-effector action and normalizes each dataset separately, but it deliberately leaves coordinate frames unaligned and lets actions stand for absolute or relative positions or velocities, so the same action vector can induce very different motions on different robots [@open_x_embodiment_collaboration2024open]. The model learns to interpret that vector differently for each embodiment. DROID sidesteps the question by recording a single robot model [@khazatsky2024droid]. Pooled data can therefore help a model without any physical compatibility contract; the contract becomes mandatory when a source record's actions will be executed on the target plant or imitated there as labels.
 
@@ -1166,17 +1458,17 @@ Stratifying episodes by measured temperature, maintenance state, and workpiece c
 
 The collecting policy can change as well as the plant. Over the campaign's `{python} DemonstrationYieldFatigue.t_sched_campaign_str` of scheduled cell time, an operator who began by moving deliberately, with corrective sub-movements and pauses at the strike plate, can develop muscle memory and start rounding corners or swinging the door on momentum. Those demonstrations rely on timing and predictive compensation that must be distinguished from changes in the mechanism. Partitioning the dataset into temporal windows and comparing episode duration, corrective jerk count, command magnitude, and intervention rate exposes changes in collection behavior. The comparison helps determine whether later trajectories add useful skill or introduce a different collection regime that needs separate labels.
 
-Calibration can also change silently between recording runs. File containers such as HDF5, Zarr, or Parquet preserve the stored structure without establishing whether its physical interpretation remains valid. An arm recalibrated or bumped between sessions can acquire different encoder zero offsets or camera extrinsics. A camera mount shifted by even $3\text{ mm}$ moves the workpiece in the image while the array keeps its shape and type. Clock synchronization can drift across controllers in the same way, shifting the pairing between what the arm sees and what it feels by tens of milliseconds (@sec-nervous-deterministic-fieldbuses).[^fn-data-host-timestamps]
+Calibration can also change silently between recording runs. File containers such as HDF5, Zarr, or Parquet preserve the stored structure without establishing whether its physical interpretation remains valid. An arm recalibrated or bumped between sessions can acquire different encoder zero offsets or camera extrinsics. A camera mount shifted by even $3\text{ mm}$ moves the workpiece in the image while the array keeps its shape and type. Clock synchronization can drift across controllers in the same way, shifting the pairing between what the arm sees and what it feels by tens of milliseconds (@sec-nervous-deterministic-fieldbuses).
 
-To expose this silent drift, automated data quality checks rely on **kinematic reprojection verification** (@fig-05-camera-calibration). Let $\mathbf{q} \in \mathbb{R}^n$ denote the joint angles latched from optical encoders at the optical exposure midpoint. Forward kinematics $\mathbf{FK}(\mathbf{q})$ maps these angles to the 3D surface vertices of the robot's links in the base coordinate frame, $\mathbf{p}_{\text{base}} \in \mathbb{R}^3$. The camera's extrinsic spatial transformation $\mathbf{T}_{\text{cam} \leftarrow \text{base}} = \begin{bmatrix} \mathbf{R} & \mathbf{t} \\ \mathbf{0}^T & 1 \end{bmatrix} \in \mathrm{SE}(3)$ maps base coordinates into the camera's optical frame ($\mathbf{p}_{\text{cam}} = \mathbf{R} \mathbf{p}_{\text{base}} + \mathbf{t}$). Under the pinhole camera model parameterized by intrinsic matrix $\mathbf{K} \in \mathbb{R}^{3 \times 3}$, link points project to 2D image pixel coordinates $\mathbf{u} = [u, v]^T$:
+To expose this silent drift, automated data quality checks rely on **kinematic reprojection verification** (@fig-05-camera-calibration). Let $\mathbf{q} \in \mathbb{R}^n$ denote the joint angles latched from optical encoders at the optical exposure midpoint. Forward kinematics $\mathbf{FK}(\mathbf{q})$ maps these angles to the 3D surface vertices of the robot's links in the base coordinate frame, $\mathbf{p}_{\text{base}} \in \mathbb{R}^3$. The camera's extrinsic spatial transformation $\mathbf{T}_{\text{cam} \leftarrow \text{base}} = \begin{bmatrix} \mathbf{R} & \mathbf{t} \\ \mathbf{0}^T & 1 \end{bmatrix} \in \mathrm{SE}(3)$ maps base coordinates into the camera's optical frame ($\mathbf{p}_{\text{cam}} = \mathbf{R} \mathbf{p}_{\text{base}} + \mathbf{t}$). Under the pinhole camera model parameterized by intrinsic matrix $\mathbf{K} \in \mathbb{R}^{3 \times 3}$,[^fn-zhang-calibration-reprojection] link points project to 2D image pixel coordinates $\mathbf{u} = [u, v]^T$:
 $$s \begin{bmatrix} u \\ v \\ 1 \end{bmatrix} = \mathbf{K} \left( \mathbf{R} \, \mathbf{FK}(\mathbf{q}) + \mathbf{t} \right) = \begin{bmatrix} f_x & 0 & c_x \\ 0 & f_y & c_y \\ 0 & 0 & 1 \end{bmatrix} \left( \mathbf{R} \, \mathbf{FK}(\mathbf{q}) + \mathbf{t} \right),$$
 where $s = z_c$ is the optical depth. An automated check run on every recording session evaluates the reprojection residual between the projected link wireframe and the observed physical arm in the image:
-$$\epsilon_{\text{reproj}} = \left\| \mathbf{u}_{\text{observed}} - \pi_{\mathbf{K}}\left( \mathbf{T}_{\text{cam} \leftarrow \text{base}} \, \mathbf{FK}(\mathbf{q}) \right) \right\|_2.$$
+$$\epsilon_{\text{reproj}} = \left\| \mathbf{u}_{\text{observed}} - \pi_{\mathbf{K}}\left( \mathbf{T}_{\text{cam} \leftarrow \text{base}} \, \mathbf{FK}(\mathbf{q}) \right) \right\|_2.$$ {#eq-data-reprojection-residual}
 If mechanical vibration, fastener relaxation, or an accidental impact displaces the camera bracket by even $\Delta \mathbf{t} = 3\text{ mm}$ or tilts it by $\Delta \theta = 0.5^\circ$, the reprojection residual $\epsilon_{\text{reproj}}$ rises from its calibrated level of about a pixel to a residual set by the camera's focal length and working distance, typically far above the check's threshold. While the underlying HDF5 or Zarr arrays remain syntactically flawless, a visual policy trained on these shifted frames learns a corrupted spatial relationship between camera pixels and the end-effector tool center point (TCP). During closed-loop autonomous deployment, the policy generates reaching commands that miss physical targets by the uncompensated calibration shift, converting clean demonstrations into persistent latching jams or collisions with fixtures.
 
-@Fig-05-camera-calibration shows the check in practice, rendering the robot's mesh at the recorded joint angles as a mask over each camera frame. The dataset it comes from shows why the check is needed. DROID calibrated its cameras with a checkerboard during collection, yet an independent camera-to-robot estimator later found that masks rendered with the dataset's stored extrinsics barely overlapped the arm in the episodes it tested [@lu2025ctrnetx]. The DROID team then scored the stored extrinsics by the overlap between rendered and segmented arm masks, kept those that passed, re-estimated others with a tuned version of that estimator, and released improved calibrations for about `{python} StateOfPractice.droid_recal_str` episodes [@khazatsky2024droid]. A calibration failure of exactly the kind this section describes had shipped inside a widely used corpus, invisible to every format check. The provenance record therefore binds every episode to its calibration identifier and clock-health metrics, since a dataset whose trajectories do not share one valid calibration forces the learner to fit conflicting mappings in the same coordinates.
+[^fn-zhang-calibration-reprojection]: **Camera Calibration**\index{Camera calibration!planar target}: In practice $\mathbf{K}$ is estimated from a few views of a planar checkerboard, the method @zhang2000flexible introduced, and the extrinsics come from a separate hand-eye calibration. Both describe one mounting at one time. The reprojection residual is therefore a calibration test repeated every session, not a setup step performed once.
 
-[^fn-data-host-timestamps]: **Host-Assigned Timestamps**\index{IEEE 1588 Precision Time Protocol!distributed clock sync}: Unlike PTP-synchronized Ethernet, buses without hardware timestamping, such as USB and classic CAN, leave the host to assign arrival times, which adds driver latency and scheduling jitter to every sample.
+@Fig-05-camera-calibration shows the check in practice, rendering the robot's mesh at the recorded joint angles as a mask over each camera frame. The dataset it comes from shows why the check is needed. DROID calibrated its cameras with a checkerboard during collection, yet an independent camera-to-robot estimator later found that masks rendered with the dataset's stored extrinsics barely overlapped the arm in the episodes it tested [@lu2025ctrnetx]. The DROID team then scored the stored extrinsics by the overlap between rendered and segmented arm masks, kept those that passed, re-estimated others with a tuned version of that estimator, and released improved calibrations for about `{python} StateOfPractice.droid_recal_str` episodes [@khazatsky2024droid]. A calibration failure of exactly the kind this section describes had shipped inside a widely used corpus, invisible to every format check. The provenance record therefore binds every episode to its calibration identifier and clock-health metrics, since a dataset whose trajectories do not share one valid calibration forces the learner to fit conflicting mappings in the same coordinates.
 
 ::: {#fig-05-camera-calibration fig-env="figure" fig-pos="t" fig-cap="**Camera-to-robot calibration check on DROID scenes**: Randomly chosen DROID scenes with a robot mask rendered from the robot's URDF mesh at the recorded joint angles and projected through each camera's audited calibration, from the dataset's own post-hoc recalibration [@khazatsky2024droid]. Where the mask and the visible arm coincide, the extrinsics are consistent with the joint encoders; a displaced camera shows up as a mask that misses the arm, before any corrupted trajectory reaches the training pipeline. Source: Khazatsky et al., Fig. 13, CC BY 4.0." fig-alt="A seven-by-seven grid of darkened robot workspace photographs from many different rooms. In each, a colored silhouette of the robot arm, rendered from its kinematic model and recorded joint angles, is overlaid on the camera image."}
 ![](images/jpg/fig05_real_camera_calibration.jpg){width="95%"}
@@ -1192,7 +1484,9 @@ Beyond temporal drift on a single robot, two additional corruption mechanisms em
 
 The first is a mismatch between nominally identical rigs, which the fleet meets as soon as a second mobile manipulator records latch demonstrations for the first to learn from. Two arms of the same model can differ in gearbox wear, thermal behavior, or firmware filters. In an illustrative comparison, a new arm shows $0.02^\circ$ of backlash and a worn one $0.35^\circ$ with a $22\text{ ms}$ torque-response lag, and the worn arm's demonstrations carry compensating lead and gain that oscillate on the new one. A record of each arm's embodiment contract (kinematics, actuator serial numbers, firmware versions, and a dynamic model) bound to every file lets ingestion exclude trajectories that fail the target's compatibility contract.
 
-The second is conflating failed attempts with failed recordings. A failed attempt is a complete physical sequence that missed the objective; discarding it creates survivorship bias and strips the dataset of the error states a stabilizing policy needs. A failed recording is a logging fault, such as a dropped packet, a corrupt frame, or a buffer overrun; keeping it without accounting presents irregular sample periods as a constant control interval. Ingestion therefore reconciles every attempt as a retained success, a retained failure, or an excluded recording with its error code. In the latch campaign, an attempt ended by the contact tripwire is a failed attempt and stays in the archive, while a recording whose force channel dropped packets leaves it with its error code.
+The second is conflating failed attempts with failed recordings. A failed attempt is a complete physical sequence that missed the objective; discarding it creates survivorship bias[^fn-wald-survivorship-archive] and strips the dataset of the error states a stabilizing policy needs. A failed recording is a logging fault, such as a dropped packet, a corrupt frame, or a buffer overrun; keeping it without accounting presents irregular sample periods as a constant control interval. Ingestion therefore reconciles every attempt as a retained success, a retained failure, or an excluded recording with its error code. In the latch campaign, an attempt ended by the contact tripwire is a failed attempt and stays in the archive, while a recording whose force channel dropped packets leaves it with its error code.
+
+[^fn-wald-survivorship-archive]: **Survivorship Bias**\index{Survivorship bias!Wald aircraft vulnerability}: During the Second World War, Abraham Wald of Columbia's Statistical Research Group estimated the vulnerability of combat aircraft from the damage on the planes that came back; the planes that were hit in the most vulnerable places were the ones missing from the sample [@mangel1984wald]. A demonstration archive filtered to successes has the same hole. The attempts that reached the failure boundary are exactly the ones absent, so the archive understates how often the boundary is reached and holds no states from it.
 
 A unit contract can fail just as silently, and no format check will notice (\ref{ws-data-mars-climate-orbiter-unit-mismatch}).
 
@@ -1238,23 +1532,15 @@ Consider an illustrative audit of two files from the latch campaign, each holdin
 
 The schema gathers the evidence needed to make those decisions. It preserves the physical origin and timing of each signal, the collection cost, and the conditions represented or missing from the archive. These fields follow from the engineering reasoning above; filling them in does not by itself establish that a trained policy will work in closed loop.
 
-::: {#dfn-data-demonstration-provenance-record .callout-definition title="Demonstration provenance record"}
+The **demonstration provenance record**\index{Demonstration provenance record!definition}\index{Provenance record!physical AI contract} is the immutable, machine-readable record bound to a demonstration archive that links every trajectory to the plant, sensor calibrations, component wear state, four action taps, collection denominators, and scenario-ledger join ($N_{\text{supported}} / N_{\text{req}}$) under which it was acquired. Tensor shapes and loss curves cannot validate a physical dataset. The record states the archive's empirical boundaries, so the policy manifest (@sec-training-policy-manifest) and the safety case (@sec-release-safety-cases-claims) can separate recorded experience from the competence that evaluation must still establish. Datasheets for datasets [@gebru2021datasheets] document how a static corpus was assembled; the provenance record adds what a physical archive needs beyond them, namely wear, permission-path interventions, and tap histories across the causal boundary. It must also travel with the data. A detachable sidecar file separates from its trajectories at the first format conversion, so the record is serialized as an immutable, hashed header in the container's root metadata, such as an MCAP top-level metadata record or a Zarr root attribute dictionary.
 
-***Demonstration provenance record***\index{Demonstration provenance record!definition}\index{Provenance record!physical AI contract} is the immutable, machine-readable contract artifact bound to an embodied demonstration archive that links every recorded trajectory to the specific physical plant, sensor calibrations, component wear state, four-stream action taps, collection denominators, and scenario ledger support join ($N_{\text{supported}} / N_{\text{req}}$) under which it was acquired.
-
-1.  **Significance**: A physical dataset cannot be validated by tensor shapes or loss curves alone. The provenance record establishes the empirical boundaries of the training corpus, so downstream policy manifests (@sec-training-policy-manifest) and safety cases (@sec-release-safety-cases-claims) can distinguish recorded experience from the competence established by evaluation.
-2.  **Distinction**: Unlike static dataset datasheets [@gebru2021datasheets] or open-loop software schemas, the physical provenance record captures closed-loop mechanical wear, permission-path intervention boundaries, and multi-tier action tap histories ($a_{\text{req}}, a_{\text{cmd}}, a_{\text{enf}}, a_{\text{meas}}$) across the causal boundary.
-3.  **Common pitfall**: Treating the provenance record as an optional, detachable sidecar file rather than serializing it as an immutable, cryptographically hashed header embedded directly within the container's root metadata block (such as an MCAP top-level `Metadata` record or a Zarr root `.zattrs` dictionary).
-
-:::
-
-The demonstration provenance record connects physical hardware characterization to policy learning. It carries forward the operating conditions and physical limits of the actuator limit record (@sec-body-actuator-limits), together with the clock domains and timing bounds of the transport handoff record (@sec-nervous-handoffs-matrix). The proposal boundary machine model (@sec-boundary-machine-model) determines whose action each tap records. Collection adds the actual plant and calibration identifiers, wear history, collection denominators, and the scenario support join. The resulting record bounds the experience available to the downstream policy manifest (@sec-training-policy-manifest); the evaluation record (@sec-evaluation) must still establish what the trained policy can do with that experience.
+The record connects physical hardware characterization to policy learning. It carries forward the operating conditions and physical limits of the actuator limit record (@sec-body-actuator-limits), together with the clock domains and timing bounds of the transport handoff record (@sec-nervous-handoffs-matrix). The proposal boundary machine model (@sec-boundary-machine-model) determines whose action each tap records. Collection adds the actual plant and calibration identifiers, wear history, collection denominators, and the scenario support join. The resulting record bounds the experience available to the downstream policy manifest (@sec-training-policy-manifest); the evaluation record (@sec-evaluation) must still establish what the trained policy can do with that experience.
 
 Every trajectory in the training corpus must identify its collection source, collector policy, and execution authority. When data originates from human teleoperation, the record logs the operator identifier, the interface hardware, and the transport timing, such as a 6-DoF leader arm sampled at $100\text{ Hz}$ with $0.8\text{ ms}$ of input jitter. An operator identifier, and every face a camera catches in the aisle, makes the episode a record of people as well as of the plant. The record therefore also states the basis on which each person was recorded, the purposes the episode may serve, and when it must be deleted or de-identified, so that an episode collected to teach the latch is not silently reused to evaluate the operator who demonstrated it (@sec-release-recorded-people). When data originates from an autonomous or mixed controller, the record stores the exact policy checkpoint, the planner version, and the active enforcement configuration, including Cartesian bounding boxes, joint velocity limits, and contact-force clamping thresholds. Trajectories must also record the active retention rule, documenting whether an episode was committed automatically upon task completion, retained after an explicit operator review, or flagged for inclusion as an instructive failure recovery.
 
 A physical machine cannot be identified by a generic model name. The data record specifies the individual plant through its extrinsic and intrinsic sensor calibrations, action contract, motor drive firmware revisions, and component wear state. Replaceable contact surfaces alter the governing dynamics. A gripper fitted with compliant $30\text{ A}$ durometer silicone pads produces different contact compliance and friction from the same gripper fitted with worn $60\text{ A}$ polyurethane pads under identical joint commands. Maintenance milestones, such as cable retensioning, drive belt replacements, gearbox swaps, and camera remounts, are logged directly into the machine state record. If an arm underwent joint recalibration between morning and afternoon collection shifts, the dataset must expose that boundary so downstream training does not attempt to resolve two conflicting kinematic mappings into a single policy.
 
-Collection denominators reconcile every attempt as a retained success, a retained failure, or an excluded recording and expose the time spent resetting the scene. Alongside those counts, the four action taps of \ref{dfn-data-four-stream-action-tap-tuple}, override flags, and exclusion codes preserve the distinction between demonstrated behavior and permission-path intervention.
+Collection denominators reconcile every attempt as a retained success, a retained failure, or an excluded recording and expose the time spent resetting the scene. Alongside those counts, the four action taps of @sec-data-four-stream-action-tap, override flags, and exclusion codes preserve the distinction between demonstrated behavior and permission-path intervention.
 
 The scenario join records dataset-supported cells, meaning cells with retained experience, and known absences. This use of support must remain distinct from evaluated policy support. For the original latch campaign, the record below connects collection cost to coverage; @tbl-05-provenance-schema maps its field groups to the decisions they support.
 
@@ -1344,6 +1630,22 @@ A team projects its bimanual dataset budget from an initial rate of 50 successfu
 
 Physical data engineering chooses experiences and labels together. The latch campaign prices usable demonstrations in scheduled time and component wear, distinguishes expert intent from permission-path correction, and joins the archive against required fixture conditions. In the illustrative budget, less than a quarter of scheduled time survives as retained demonstration motion; that cost makes targeted recovery collection more informative than repeating only the nominal approach. Records also stay bound to the body and calibration that produced them. Normalizing another machine's labels does not make them executable, and a shifted camera or a worn pad changes what an unchanged file means. The provenance record preserves what each archive contains and omits. The stipulated recovery extension shows how to add correctly attributed experience without rewriting the original record. Recovery data has value only where an expert can still undo a mistake: the recoverability constant of the aggregation bound grows without limit at irreversible states, which therefore belong to the permission path rather than to the dataset. Whether a candidate learns the recovery, preserves nominal performance, and merits a wider operating claim remains a training and evaluation decision.
 
+@Tbl-05-key-equations collects the equations that carry these decisions, what each bounds or decides, and where each is derived.
+
+| Equation | What it bounds or decides | Derived in |
+|:---|:---|:---|
+| $J(\pi)-J(\pi^*) \le T^2\epsilon$ | The worst-case excess cost of cloning on expert states under a 0–1 action loss; it says nothing once $\epsilon > 1/T$ | @eq-data-quadratic-drift |
+| $J(\hat{\pi}) \le J(\pi^*) + u\,T\,\epsilon_N + O(1)$ | The cost after aggregating expert labels on learner-visited states, linear in $T$ only while the recoverability constant $u$ stays bounded | @eq-data-dagger-bound |
+| $N_{\text{eff}} = N(1-\rho)/(1+\rho)$ | How many independent observations a serially correlated telemetry stream holds for one statistic | @eq-data-effective-sample-size |
+| $\Delta\mathbf{x}_{\text{sync}} \approx \mathbf{v}\,\Delta t_{\text{lag}}$ | The position error a pairing lag injects, and so the largest lag a task clearance tolerates | @eq-data-sync-displacement |
+| $\Delta t_{\text{skew}} = (H-1)\,\tau_{\text{line}}$ | The time spread across one rolling-shutter frame, which a moving arm turns into shape distortion | @eq-data-rolling-shutter-skew |
+| $t_{\text{loop}} = t_{\text{disp}} + t_{\text{hum}} + t_{\text{cmd}} + t_{\text{mech}}$ | The phase lag a teleoperated demonstration carries between a state and the correction chosen for it | @eq-data-teleop-loop-latency |
+| $Y_{\text{usable}} = \lfloor T_{\text{motion}}/t_{\text{cyc}} \rfloor R$ | Retained demonstrations per scheduled session, and so the cell time and wear a campaign target costs | @eq-data-demonstration-yield |
+| $\hat{t}_{\text{div}}$: first threshold crossing in $[t_{\text{takeover}} - \Delta t_{\text{lookback}},\, t_{\text{takeover}}]$ | Where the masked drift window begins, and whether the lookback reaches back far enough to find it | @eq-data-divergence-point |
+| $\epsilon_{\text{reproj}} = \lVert \mathbf{u}_{\text{observed}} - \pi_{\mathbf{K}}(\mathbf{T}_{\text{cam} \leftarrow \text{base}}\,\mathbf{FK}(\mathbf{q})) \rVert_2$ | Whether a session's camera calibration still agrees with the joint encoders | @eq-data-reprojection-residual |
+
+: **Key equations of physical data**: Each load-bearing equation of the chapter, the limit it bounds or the decision it settles, and the equation where it is derived. {#tbl-05-key-equations tbl-colwidths="[40,42,18]"}
+
 ::: {.callout-takeaways title="Physical data collection and provenance"}
 * **Coverage counts configurations, not samples:** Repeated nominal motions add rows without adding scenario cells, and adjacent control steps are near duplicates. A dataset's reach is its join against a scenario ledger spanning the ODD, never its sample count or the extremes it happened to log.
 * **Validation loss cannot see a coverage gap:** A held-out split shares the collector's occupancy, so near-zero validation loss can coexist with most required cells empty. Only the join against an external ledger exposes the gap.
@@ -1352,6 +1654,133 @@ Physical data engineering chooses experiences and labels together. The latch cam
 * **Data stays bound to the body that collected it:** Camera geometry can be reprojected, but contact wear, compliance, and backlash are baked into force and tactile labels. Data from a changed or different body requires revalidation, and range normalization hides the mismatch rather than removing it.
 * **New experience can expand the claim:** An immutable record describes one archive, not a permanent limit on learning. New recovery data receives new provenance; a wider competence claim requires a trained candidate and closed-loop evidence under the added conditions.
 :::
+
+## Historical Perspective and Further Reading {#sec-data-history}
+
+Demonstration began as remote manipulation. Goertz's master-slave manipulators at Argonne moved tongs behind radiation shielding in exact correspondence with a handle, and the mechanical linkage returned the contact forces to the operator's hand [@goertz1949master]. Once electronics and distance separated the two arms, that force channel became a control problem. @anderson1989bilateral showed that a delayed link can destabilize a bilateral teleoperator and restored passivity for any constant delay, and @niemeyer1991stable recast the remedy as wave variables; @hokayem2006bilateral trace the line from Goertz to these delay-robust schemes. Every collection interface in this chapter sits somewhere on the trade those papers exposed, between a stable loop and faithful contact force, and the demonstrations it records carry that choice.
+
+Learning a controller from those recordings has an equally direct lineage. ALVINN learned to steer a van from a human driver's camera images and met the recovery gap at once, because the driver never let the van drift [@pomerleau1989alvinn; @pomerleau1991efficient]. Robot learning from demonstration grew into a field of its own, organized by how demonstrations are gathered and how a policy is derived from them [@argall2009survey]. @ross2010efficient gave the quadratic bound for cloning on the expert's states, and @ross2011reduction gave the linear bound for aggregating expert labels on the learner's states, conditional on a recoverability constant. Human-gated aggregation and noise injection during collection adapted that result to experts who are people rather than oracles [@kelly2019hgdagger; @laskey2017dart], and the curation rules of @sec-data-intervention-recovery descend from them.
+
+The accounting of coverage borrows from older fields. @bellman1957dynamic named the curse of dimensionality for tables indexed by state, climatologists corrected the sample sizes of serially correlated records [@thiebaux1984interpretation], and Wald's wartime analysis of returning aircraft showed what a sample filtered by survival cannot contain [@mangel1984wald]. Robot learning met all three as datasets grew from single laboratories to pooled corpora collected across many robots and scenes [@walke2023bridgedata; @khazatsky2024droid; @open_x_embodiment_collaboration2024open]. Pooling bought conditions that no single rig could supply. It did not supply a compatibility contract or a record of what each archive leaves out, and dataset documentation [@gebru2021datasheets] was the first attempt at the second. The provenance record of @sec-data-schema extends that documentation to the plant, the action taps, and the known absences.
+
+For further reading, six works trace the lineage from remote manipulation to pooled robot corpora.
+
+- @hokayem2006bilateral surveys bilateral teleoperation from the first mechanical manipulators through passivity-based designs for delay, and explains why force fidelity and stability trade against each other at the collection interface.
+- @pomerleau1991efficient is short and shows the recovery gap in its first practical form, together with the synthetic remedy that worked because the missing states were only viewpoints.
+- @argall2009survey organizes robot learning from demonstration by how data is gathered and how a policy is derived, including the mapping between the demonstrator's body and the robot's that @sec-data-cross-embodiment treats as a contract.
+- @ross2011reduction introduces DAgger and states the recoverability constant on which the linear bound depends. It is the source of @eq-data-dagger-bound.
+- @open_x_embodiment_collaboration2024open describes a pooled corpus from many robots, and is worth reading for what its authors chose not to align as much as for its results.
+- @gebru2021datasheets lists the questions a dataset's documentation should answer. Read against @tbl-05-provenance-schema, it shows which questions a physical archive adds.
+
+## Problems {#sec-data-problems}
+
+```{python}
+#| label: calc-data-problems
+#| echo: false
+#| warning: false
+#| message: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ GIVENS FOR THE END-OF-CHAPTER PROBLEMS (LEGO)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @sec-data-problems.
+# │ Goal:    Hold the givens the problems add to the chapter's cells: the
+# │          compute module's memory, the navigation camera's readout time,
+# │          an illustrative wrist-camera geometry for reprojection, an
+# │          illustrative takeover trace, a chosen per-cell requirement, and
+# │          the transfer source (a bimanual leader-follower arm cell).
+# │          Answers are not printed; the private solution script computes them.
+# │ Show:    64 GiB; 16.6 ms; 900 px, 0.60 m, 3 mm, 0.5 deg, 1.5 px; drift
+# │          window = design out-of-loop takeover; 1.5 s and 6.0 s after takeover;
+# │          2 s short lookback; N_min = 50; ALOHA 14 DoF at 50 Hz, 0.5 kg.
+# │ How:     Registry reads (RM, AISLE, Embodied.Manipulator); other givens are
+# │          labeled illustrative or chosen in the problem text.
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import *
+from mlsysim.core.units import *
+from mlsysim.fmt import fmt, fmt_int, fmt_memory_capacity, fmt_latency, fmt_length, fmt_frequency, fmt_mass, fmt_time, check
+
+RM = Embodied.MobileManipulator.WarehouseMobileManipulator
+AISLE = Embodied.Scenario.WarehouseAisle
+
+class DataProblems:
+    """Givens that the chapter's problems add beyond the worked examples."""
+
+    # ┌── 1. LOAD (Constants & Parameters) ─────────────────────────────────
+    soc_mem = RM.brain_soc.memory.capacity  # category: datasheet
+    nav_readout = RM.nav_camera.readout_time  # category: datasheet
+    f_px = 900.0  # wrist-camera focal length in pixels; category: illustrative
+    z_work = 0.60 * meter  # camera-to-gripper working distance; category: illustrative
+    shift = 3.0 * millimeter  # bracket shift, as in @sec-data-plant-drift; category: illustrative
+    tilt_deg = 0.5  # bracket tilt in degrees, as in @sec-data-plant-drift; category: illustrative
+    thresh_px = 1.5  # session reprojection threshold; category: illustrative
+    t_drift = AISLE.t_takeover_out_of_loop  # category: derived (sourced p90 take-over time + transport)
+    t_stab = 1.5 * second  # stabilization after takeover; category: illustrative
+    t_rec = 6.0 * second  # latch release after takeover; category: illustrative
+    lookback_short = 2.0 * second  # category: illustrative
+    servo = RM.permission_rate  # category: datasheet
+    n_min = 50  # retained demonstrations per ledger cell; category: chosen
+    src = Embodied.Manipulator.ALOHA_Bimanual  # category: literature
+    arm = RM.arm  # category: datasheet
+
+    # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────
+    lookback = AISLE.pre_trigger_window
+    reproj_shift = f_px * (shift / z_work).to("").magnitude  # checked, not printed
+
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(RM.nav_camera.shutter_type == "rolling" and RM.wrist_camera.shutter_type == "global", "Problem 3 assumes a rolling navigation camera and a global-shutter wrist camera")
+    check(t_drift < lookback, "Problem 7: the drift window must fit the design lookback")
+    check(t_drift > lookback_short, "Problem 7: the short lookback must lose the divergence point")
+    check(t_rec > t_stab, "Recovery must end after stabilization")
+    check(reproj_shift > thresh_px, "Problem 6: the 3 mm shift must exceed the threshold")
+    check(n_min > DemonstrationYieldFatigue.n_usable, "Problem 8: one cell should need more than one session")
+    check(src.control_frequency < servo and src.dofs != arm.dofs, "Problem 9 needs a slower, topologically different source")
+
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
+    soc_mem_str = fmt_memory_capacity(soc_mem, unit=GiB, precision=0)
+    nav_readout_str = fmt_latency(nav_readout, unit=millisecond, precision=1)
+    f_px_str = fmt_int(int(f_px))
+    z_work_str = fmt_length(z_work, unit=meter, precision=2)
+    shift_str = fmt_length(shift, unit=millimeter, precision=0)
+    tilt_str = fmt(tilt_deg, precision=1)
+    thresh_str = fmt(thresh_px, precision=1)
+    t_drift_str = fmt_time(t_drift, unit=second, precision=3)
+    t_stab_str = fmt_time(t_stab, unit=second, precision=1)
+    t_rec_str = fmt_time(t_rec, unit=second, precision=0)
+    lookback_short_str = fmt_time(lookback_short, unit=second, precision=0)
+    servo_str = fmt_frequency(servo, unit=ureg.kilohertz, precision=0)
+    n_min_str = fmt_int(n_min)
+    src_dofs_str = fmt_int(src.dofs)
+    src_rate_str = fmt_frequency(src.control_frequency, precision=0)
+    src_payload_str = fmt_mass(src.payload_capacity, unit=kilogram, precision=1)
+    arm_dofs_str = fmt_int(arm.dofs)
+    arm_payload_str = fmt_mass(arm.payload_capacity, unit=kilogram, precision=0)
+```
+
+These problems use the running machine's parameters from this chapter's worked examples, with values marked illustrative standing in for measurements as they do there. Each problem names the decision it requires. The tags give the kind of work, from computation through design to critique, and the learning objectives, counted in order, that it assesses.
+
+1. **[Compute, LO3] The reset tax.** For the session of \ref{nbk-data-flex-cable-ceiling}, a quicker re-latch fixture would halve the `{python} DemonstrationYieldFatigue.t_rst_str` reset, while a better strike-plate guide would instead halve the `{python} DemonstrationYieldFatigue.failure_pct_str` percent in-trial failure rate. For each change alone, use @eq-data-demonstration-yield to recompute the attempts per session, the scheduled cell time for `{python} DemonstrationYieldFatigue.n_target_str` retained demonstrations, and the percent of the flex cable's rated life the campaign consumes. Decide which change to fund when cell time binds, and which when the cable binds.
+
+2. **[Compute, LO5] Sizing the pre-trigger buffer.** The logger of @sec-data-intervention-recovery must hold a `{python} DataLookbackWindow.t_lookback_str` lookback. Size that buffer for the kinematic stream alone (`{python} MultiCameraIngestionBudget.bytes_per_step_str` bytes per step at `{python} MultiCameraIngestionBudget.f_log_str`), for every stream at the raw `{python} MultiCameraIngestionBudget.bw_total_str` of \ref{nbk-data-ingestion-bandwidth-storage-budgets-multi-camera}, and for the session compressed to `{python} MultiCameraIngestionBudget.bw_compressed_str`. Compare each with the `{python} DataProblems.soc_mem_str` memory of the machine's compute module, and decide which streams belong in the locked, pre-allocated ring buffer.
+
+3. **[Compute, LO2] Rolling shutter at the latch.** The navigation camera reads out its rows over `{python} DataProblems.nav_readout_str` (datasheet), while the wrist camera exposes every row at once. Treating that readout as the full-frame skew of @eq-data-rolling-shutter-skew, find the displacement across one navigation frame at `{python} SyncDisplacement.v_transit_str` and at both latch approaches, compare each with the `{python} SyncDisplacement.clearance_str` clearance, and find the fastest approach at which navigation frames can serve as latch observations without a row-time correction.
+
+4. **[Compute, LO1] Effective samples in the latch archive.** Apply @eq-data-effective-sample-size with $\rho =$ `{python} EffectiveSampleSize.rho_str` to the `{python} DemonstrationYieldFatigue.n_target_str` retained demonstrations of `{python} DemonstrationYieldFatigue.t_att_str` each, logged at `{python} EffectiveSampleSize.f_log_str`. Compare the campaign's record count, its effective sample size, its episode count, and the share of the latch scenario ledger it occupies (@fig-05-collector-coverage-ledger). State which of these quantities limits what a policy trained on the archive can do at a displaced strike plate, and why none of the others can reveal that limit.
+
+5. **[Compute, LO1] When the bound says nothing.** A latch attempt lasts `{python} DemonstrationYieldFatigue.t_att_str`. At the illustrative `{python} BoundComparison.f_ctrl_str` control rate of the comparison after @eq-data-dagger-bound, find the horizon $T$, the per-step error above which @eq-data-quadratic-drift is vacuous, and both bounds at $\epsilon =$ `{python} BoundComparison.eps_str` with $u = 1$. Explain why $\epsilon_N$ is not the same quantity as $\epsilon$, and what happens to the comparison if $u$ grows in proportion to $T$.
+
+6. **[Compute, LO7] A bumped bracket in pixels.** A wrist camera with an illustrative focal length of `{python} DataProblems.f_px_str` px views the gripper at an illustrative working distance of `{python} DataProblems.z_work_str`. With the pinhole model of @sec-data-plant-drift, estimate the reprojection residual (@eq-data-reprojection-residual) that a `{python} DataProblems.shift_str` lateral bracket shift produces, and separately a `{python} DataProblems.tilt_str`° tilt. The session check flags residuals above an illustrative `{python} DataProblems.thresh_str` px. Find the smallest lateral shift the check detects, and decide whether it catches a calibration error as large as the latch's `{python} SyncDisplacement.clearance_str` clearance.
+
+7. **[Design, LO5] Curating one takeover.** In an illustrative `latch-recovery-02` episode, the gripper's lateral error first crosses the chosen threshold $\delta_{\text{tol}}$ one design out-of-loop takeover time, `{python} DataProblems.t_drift_str`, before the operator's override at $t_{\text{takeover}}$. The operator's measured stabilization comes `{python} DataProblems.t_stab_str` after takeover, and the latch releases `{python} DataProblems.t_rec_str` after it. The logger ticks at `{python} DataProblems.servo_str`, and the learner issued commands at `{python} BoundComparison.f_ctrl_str`. Lay out the intervals of @fig-05-compounding-error-flywheel on this timeline, count the logged states eligible for expert relabeling and the learner commands to mask, give the length of the admitted expert segment, and check the drift window against the `{python} DataLookbackWindow.t_lookback_str` lookback. Then state what a `{python} DataProblems.lookback_short_str` lookback would lose and how the curation must treat such an episode.
+
+8. **[Design, LO4] A pad-wear axis.** Add a pad-wear axis (new and worn) to the latch ledger of @fig-05-collector-coverage-ledger, and take $N_{\min} =$ `{python} DataProblems.n_min_str` retained demonstrations per cell as a chosen requirement. Assuming the original campaign used new pads throughout, list the supported cells and known absences of the original archive and of its `latch-recovery-02` successor. Using the retained yield per session of \ref{nbk-data-flex-cable-ceiling}, find how many sessions fill one empty cell to $N_{\min}$, and propose the next session, stating which cells remain permission-path territory rather than collection targets.
+
+9. **[Design, LO6] Borrowing from a bimanual arm cell.** A team proposes adding door-opening demonstrations recorded on a bimanual leader-follower arm cell (`{python} DataProblems.src_dofs_str` degrees of freedom across two arms and their grippers, commands at `{python} DataProblems.src_rate_str`, payload `{python} DataProblems.src_payload_str`) to the running machine's latch data. The target arm has `{python} DataProblems.arm_dofs_str` joints, a `{python} DataProblems.arm_payload_str` payload, and a `{python} DataProblems.servo_str` permission tick. Decide which gate of @sec-data-kinematic-topology the records must pass for pretraining and for use as target labels. For target labels, name the action representation that can carry them across, what the target's inverse kinematics must supply that the source never recorded, and the hold lag implied by each side's command period (half the period, @sec-appendix-control-zoh); then classify the approach, contact, and latch-release segments as admitted, relabeled, or rejected.
+
+10. **[Design, LO8] The successor's provenance record.** Write the provenance record for `latch-recovery-02`, filling every field group of @tbl-05-provenance-schema with the chapter's values or an explicit "to be measured". Show how its supported cells and known absences differ from the original record's, what its collection-mode and intervention fields must hold under the curation rules of @sec-data-intervention-recovery, and how it refers to the original archive without rewriting it.
+
+11. **[Critique, LO1, LO4] A large archive with a small loss.** A team presents the cautious collector's archive of @tbl-data-collector-coverage-ledger, with its low held-out loss, as ready for autonomous contact work. Critique the claim: identify what the loss was measured on, what share of the required grid the archive occupies, and which absence mechanisms of @sec-data-intervention-recovery could explain the empty cells. Write three questions the team must answer before any deployment claim, with the evidence each requires.
+
+12. **[Critique, LO3, LO7] A plan budgeted in demonstration time.** A proposal budgets `{python} DemonstrationYieldFatigue.n_target_str` latch demonstrations as `{python} DemonstrationYieldFatigue.n_target_str` $\times$ `{python} DemonstrationYieldFatigue.t_att_str` of operator time and schedules one camera calibration at the start of the campaign. Critique the budget against \ref{nbk-data-flex-cable-ceiling}: compute the planned demonstration time, the scheduled cell time the illustrative session implies, and their ratio, and name the wear the plan omits. Then state which drift a single calibration cannot detect over the campaign's `{python} DemonstrationYieldFatigue.t_sched_campaign_str` of cell time, and what checks the plan must add (@sec-data-plant-drift).
 
 ::: {.callout-chapter-connection title="From demonstrations to policies"}
 Which source of experience can teach a policy the recoveries its demonstrations never showed? The original latch campaign's provenance record contains demonstrations only for the nominal strike plate at the guarded approach and lists every other cell as a known absence. @Sec-training compares the learning regimes that can address the gap and carries the stipulated `latch-recovery-02` archive into a new candidate. Its policy manifest separates the requested evaluation domain from the capability already supported by evidence; @sec-evaluation tests whether the added experience earns a broader claim.

@@ -130,7 +130,8 @@ Each budget becomes a limit established on the assembled machine under declared 
 # ┌─────────────────────────────────────────────────────────────────────────────
 # │ THE PARCEL SORTER'S SENSE-TO-ACTUATION PROFILE (LEGO)
 # ├─────────────────────────────────────────────────────────────────────────────
-# │ Context: the opening and freshness-deadline paragraphs of
+# │ Context: the opening and freshness-deadline paragraphs, the definition, and
+# │          \ref{nbk-body-freshness-deadline} in
 # │          @sec-body-measurement-freshness, @sec-body-latency-pipeline and
 # │          @tbl-02-latency-breakdown. (2026-09-29: the waterfall figure was
 # │          cut; @tbl-04-event-ledger carries the running machine's ledger.)
@@ -138,7 +139,7 @@ Each budget becomes a limit established on the assembled machine under declared 
 # │          the table, and the caption cannot disagree.
 # │ Show:    20 ms deadline (24 mm at 1.2 m/s); stage P50 sum 35.0 ms, P99 sum
 # │          50.0 ms, max sum 80.7 ms; system P99 46.2 ms and P99.9 68.4 ms;
-# │          4.2 cm and 8.2 cm of parcel travel.
+# │          42 mm and 82.1 mm of parcel travel (3.4 times the tolerance).
 # │ How:     Stage sums; travel = v_max * age. Every stage value is
 # │          illustrative: a measured profile of the integrated machine
 # │          replaces it.
@@ -174,6 +175,7 @@ class ParcelLatencyProfile:
     excess_p50 = (travel_p50 - e_max).to(millimeter)
     t_rest_p50 = sum_p50 - stages[2][1] * millisecond  # every stage but the backbone
     f_loop = (1 / t_fresh).to(ureg.hertz)  # the loop rate whose period equals the deadline
+    tail_over_tol = (travel_p999 / e_max).to("dimensionless").magnitude  # tail travel against the tolerance
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(abs(t_fresh.magnitude - 20.0) < 1e-9, f"Freshness deadline drifted: {t_fresh}")
@@ -188,6 +190,8 @@ class ParcelLatencyProfile:
     check(abs(travel_p999.magnitude - 82.08) < 1e-9, f"Tail travel drifted: {travel_p999}")
     check(abs(t_rest_p50.magnitude - 16.5) < 1e-9, f"Non-backbone median share drifted: {t_rest_p50}")
     check(abs(f_loop.magnitude - 50.0) < 1e-9, f"The opener's loop rate drifted: {f_loop}")
+    check(abs(tail_over_tol - 3.42) < 1e-9, f"Tail-to-tolerance ratio drifted: {tail_over_tol}")
+    check(stages[2][1] * millisecond < t_fresh < sum_p50, "The backbone alone must fit the deadline and the chain must not.")
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
     t_fresh_str = fmt_latency(t_fresh, unit=millisecond, precision=0)
@@ -196,14 +200,14 @@ class ParcelLatencyProfile:
     sys_p99_str = fmt_latency(sys_p99, unit=millisecond, precision=1)
     sys_p999_str = fmt_latency(sys_p999, unit=millisecond, precision=1)
     t_backbone_str = fmt_latency(stages[2][1] * millisecond, unit=millisecond, precision=1)
-    travel_p50_cm_str = fmt_length(travel_p50, unit=ureg.centimeter, precision=1)
-    travel_p999_cm_str = fmt_length(travel_p999, unit=ureg.centimeter, precision=1)
     t_rest_p50_str = fmt_latency(t_rest_p50, unit=millisecond, precision=1)
     e_max_str = fmt_length(e_max, unit=millimeter, precision=0)
     v_max_str = fmt_velocity(v_max, unit=meter / second, precision=1)
     travel_p50_mm_str = fmt_length(travel_p50, unit=millimeter, precision=0)
     excess_p50_mm_str = fmt_length(excess_p50, unit=millimeter, precision=0)
     f_loop_str = fmt_frequency(f_loop, unit=ureg.hertz, precision=0)
+    travel_p999_mm_str = fmt_length(travel_p999, unit=millimeter, precision=1)
+    tail_over_tol_str = fmt(tail_over_tol, precision=1)
     # @tbl-02-latency-breakdown cells: stage k (1-6) at P50, P99, and max, in ms;
     # integer-like values print without a dead decimal (house precision guard).
     s1_p50_str, s1_p99_str, s1_max_str = (fmt(x, precision=0 if float(x).is_integer() else 1) for x in stages[0][1:])
@@ -227,9 +231,19 @@ During that entire window, the continuous physical environment continues to evol
 :::
 
 The rate of world-state change dictates how long a measurement remains valid before acting on it introduces intolerable error. Let $e_{\max}$ denote the maximum acceptable error in a tracked state, such as a joint angle or the position of a part on a conveyor, and let $v_{\max}$ denote the fastest credible velocity at which that state can evolve. The freshness deadline $\Delta t_{\text{fresh}}$ is the upper bound on measurement age before a control action based on that measurement becomes invalid, defined by the inequality
-$$\Delta t_{\text{fresh}} \le \frac{e_{\max}}{v_{\max}}$$
+$$\Delta t_{\text{fresh}} \le \frac{e_{\max}}{v_{\max}}$$ {#eq-body-freshness-deadline}
 
-The warehouse that the mobile manipulator serves shows how hard this bound can bite. Upstream of the pick stations, a vision-guided picker on the inbound parcel sorter tracks parcels at a maximum relative velocity $v_{\max} =$ `{python} ParcelLatencyProfile.v_max_str` with a geometric clearance tolerance $e_{\max} =$ `{python} ParcelLatencyProfile.e_max_str`, so its freshness deadline is `{python} ParcelLatencyProfile.t_fresh_str`. If an actuation command reaches the motor based on an image captured `{python} ParcelLatencyProfile.sum_p50_str` earlier, the parcel has displaced by `{python} ParcelLatencyProfile.travel_p50_mm_str`, exceeding the position allowance by `{python} ParcelLatencyProfile.excess_p50_mm_str` and missing the grasp. The sorter's belt is the fast case; the mug riding the mobile manipulator's own pick-station conveyor moves far more slowly, which buys its grasp a longer deadline despite a tighter tolerance, one the five-budget checkpoint later in this chapter asks you to compute. The deadline governs any target that keeps moving while its measurement ages, the parcel and the mug alike. For such a target it limits only motion-induced error, and only while relative velocity is bounded and the initial observation is credible; sensing and estimation errors consume additional tolerance. Conversely, a stationary person standing in an aisle does not move while the observation ages; instead, the robot base moves toward the person, so the observation age converts into unguided vehicular travel before braking begins, which @sec-body-kinetic-momentum charges against the kinetic stopping budget.
+::: {#dfn-body-freshness-deadline .callout-definition title="Freshness deadline"}
+
+***Freshness deadline***\index{Freshness deadline!definition} ($\Delta t_{\text{fresh}}$) is the largest age, counted from the capture of a measurement to the onset of the actuator's response, that the measurement of a moving target may reach before the target's motion alone spends the allowable position error $e_{\max}$ (@eq-body-freshness-deadline).
+
+1.  **Significance**: It converts a spatial tolerance into a time budget that every stage from exposure to torque onset must share. A `{python} ParcelLatencyProfile.e_max_str` tolerance on a target moving at `{python} ParcelLatencyProfile.v_max_str` leaves `{python} ParcelLatencyProfile.t_fresh_str`, the period of a `{python} ParcelLatencyProfile.f_loop_str` loop, for sensing, inference, transport, and current rise together.
+2.  **Distinction**: Unlike an inference-latency budget, which times one stage, the deadline bounds the age at onset; unlike a control-loop period, it is set by the target's speed and the tolerance rather than by the loop rate. When the machine moves toward a stationary obstacle instead, the same age is paid as blind travel $v\,\tau_{\text{delay}}$ in the stopping distance.
+3.  **Common pitfall**: Treating the deadline as a property of the sensor or the model. It changes whenever the target moves faster or the tolerance shrinks, so a pipeline qualified on a slow conveyor can miss on a faster one without any change in its own timing.
+
+:::
+
+The warehouse that the mobile manipulator serves shows how hard this bound can bite. Upstream of the pick stations, a vision-guided picker on the inbound parcel sorter tracks parcels at a maximum relative velocity $v_{\max} =$ `{python} ParcelLatencyProfile.v_max_str` with a geometric clearance tolerance $e_{\max} =$ `{python} ParcelLatencyProfile.e_max_str`, so its freshness deadline is `{python} ParcelLatencyProfile.t_fresh_str`, and \ref{nbk-body-freshness-deadline} below sets that deadline against the ages the sorter's pipeline actually delivers. The sorter's belt is the fast case; the mug riding the mobile manipulator's own pick-station conveyor moves far more slowly, which buys its grasp a longer deadline despite a tighter tolerance, one the five-budget checkpoint later in this chapter asks you to compute. The deadline governs any target that keeps moving while its measurement ages, the parcel and the mug alike. For such a target it limits only motion-induced error, and only while relative velocity is bounded and the initial observation is credible; sensing and estimation errors consume additional tolerance. Conversely, a stationary person standing in an aisle does not move while the observation ages; instead, the robot base moves toward the person, so the observation age converts into unguided vehicular travel before braking begins, which @sec-body-kinetic-momentum charges against the kinetic stopping budget.
 
 ### Transduction physics, quantization noise, and Nyquist limits {#sec-body-sensor-transduction}
 
@@ -253,7 +267,7 @@ Sensor selection spends both error tolerance and time. A sensor must resolve the
 
 A measurement's age is counted from one event, **capture**\index{Capture!event}, the instant of transduction to which the measurement is dated, and not from the moment software first sees the data. Three later events divide the path from capture to force: *dispatch*, when perception publishes the dated record to the proposer; *admission*, when the permission path accepts a proposal built on that record; and *onset*, when braking or driving force at the joint begins to change. @Tbl-04-event-ledger names these four events once and budgets the running machine's intervals between them. For the freshness deadline, only the first and last events matter: the deadline bounds the age at onset.
 
-The parcel sorter's path shows how that age accumulates (@tbl-02-latency-breakdown). From capture to dispatch, the sensor integrates its exposure and reads out its rows over MIPI CSI-2,[^fn-mipi-frame-timestamp] direct memory access (DMA) moves the frame into host memory, and the vision backbone runs. The sorter's policy runs in the same accelerator pass as its backbone, so that stage straddles dispatch. From dispatch to admission, inter-process communication (IPC) carries the proposal to the safety microcontroller. From admission to onset, the EtherCAT fieldbus[^fn-ethercat-cycle-time] delivers the command to the drive, and gate-drive switching builds the stator flux that produces torque. Judged against the `{python} ParcelLatencyProfile.t_fresh_str` freshness deadline, neural inference alone takes only `{python} ParcelLatencyProfile.t_backbone_str` at the median, yet the stages before and after it push the median end-to-end age to `{python} ParcelLatencyProfile.sum_p50_str`, `{python} ParcelLatencyProfile.travel_p50_cm_str` of unguided parcel motion. Under queue congestion and memory bus contention, the $P_{99.9}$ tail reaches `{python} ParcelLatencyProfile.sys_p999_str`, `{python} ParcelLatencyProfile.travel_p999_cm_str` of motion, more than three times the tolerance budget. A benchmark that times only the backbone measures the one stage that fits.
+The parcel sorter's path shows how that age accumulates (@tbl-02-latency-breakdown). From capture to dispatch, the sensor integrates its exposure and reads out its rows over MIPI CSI-2,[^fn-mipi-frame-timestamp] direct memory access (DMA) moves the frame into host memory, and the vision backbone runs. The sorter's policy runs in the same accelerator pass as its backbone, so that stage straddles dispatch. From dispatch to admission, inter-process communication (IPC) carries the proposal to the safety microcontroller. From admission to onset, the EtherCAT fieldbus[^fn-ethercat-cycle-time] delivers the command to the drive, and gate-drive switching builds the stator flux that produces torque. Neural inference is one of six stages on that path, and under queue congestion and memory bus contention the others stretch the tail far more than the backbone does.
 
 [^fn-mipi-frame-timestamp]: **MIPI CSI-2 (Camera Serial Interface 2)**\index{MIPI CSI-2!frame-start timestamp}: The Mobile Industry Processor Interface camera link carries raw frames from the image sensor to the system-on-chip and marks the start and end of each frame with short packets. Latching a hardware timestamp on the frame-start packet ties the frame to a fixed offset from its exposure rather than to the moment software first sees it, which is what lets transduction time, not arrival time, anchor the age budget.
 
@@ -263,7 +277,7 @@ Engineers often compute total latency by summing the $P_{99}$ values of individu
 
 [^fn-math-quantile-convolution]: **Quantile Convolution**\index{Quantile convolution!tail non-additivity}: In general, the quantile of a latency sum differs from the sum of equal-percentile stage quantiles ($Q_p(X + Y) \ne Q_p(X) + Q_p(Y)$). Independence alone does not make their arithmetic sum a worst-case bound. Correlation from shared buses and queues changes the end-to-end tail and must be characterized at the system boundary.
 
-The sorter's stage timings (@tbl-02-latency-breakdown), profiled from capture to onset under continuous inference load, show the gap between the two ways of adding.
+The sorter's stage timings (@tbl-02-latency-breakdown), profiled from capture to onset under continuous inference load, show the gap between the two ways of adding. The table is not a budget: its rows open up the three intervals of @tbl-04-event-ledger to show where the tail comes from, and the running machine's intervals are budgeted only in that ledger.
 
 | Pipeline Stage                     | Physical Mechanism / Contention Source                           |                    $P_{50}$ (ms)                    |                    $P_{99}$ (ms)                    |                       Max (ms)                      |
 |:-----------------------------------|:-----------------------------------------------------------------|:---------------------------------------------------:|:---------------------------------------------------:|:---------------------------------------------------:|
@@ -278,7 +292,30 @@ The sorter's stage timings (@tbl-02-latency-breakdown), profiled from capture to
 
 : **Illustrative sense-to-actuation latency decomposition**: Stage and system-level timings show why the arithmetic sum of stage percentiles is not the end-to-end tail. The example's $P_{99.9}$ of `{python} ParcelLatencyProfile.sys_p999_str` exceeds the parcel sorter's `{python} ParcelLatencyProfile.t_fresh_str` freshness deadline. {#tbl-02-latency-breakdown tbl-colwidths="[26,38,12,12,12]"}
 
-The `{python} ParcelLatencyProfile.sum_p99_str` sum of stage $P_{99}$ values differs from the `{python} ParcelLatencyProfile.sys_p99_str` system percentile, and against the `{python} ParcelLatencyProfile.t_fresh_str` deadline even the `{python} ParcelLatencyProfile.sum_p50_str` median would be late.
+The `{python} ParcelLatencyProfile.sum_p99_str` sum of stage $P_{99}$ values differs from the `{python} ParcelLatencyProfile.sys_p99_str` system percentile because the stages do not reach their tails together. The profile then answers the question the deadline poses, as \ref{nbk-body-freshness-deadline} works it through.
+
+::: {#nbk-body-freshness-deadline .callout-notebook title="The freshness deadline"}
+
+**Problem**: The parcel sorter's picker acts on camera observations of parcels moving on a belt. Does the pipeline of @tbl-02-latency-breakdown deliver those observations within the freshness deadline, and how far does a parcel move at the median and at the tail of the observation age?
+
+**Variables**:
+
+- Grasp tolerance $e_{\max} =$ `{python} ParcelLatencyProfile.e_max_str` (illustrative)
+- Parcel speed $v_{\max} =$ `{python} ParcelLatencyProfile.v_max_str` (illustrative)
+- Median backbone time `{python} ParcelLatencyProfile.t_backbone_str`, median end-to-end age `{python} ParcelLatencyProfile.sum_p50_str`, and $P_{99.9}$ age `{python} ParcelLatencyProfile.sys_p999_str` (illustrative profile of @tbl-02-latency-breakdown)
+
+**Math**:
+
+1. **Deadline**: $\Delta t_{\text{fresh}} = e_{\max}/v_{\max} =$ `{python} ParcelLatencyProfile.e_max_str` $/$ `{python} ParcelLatencyProfile.v_max_str` $=$ `{python} ParcelLatencyProfile.t_fresh_str` (@eq-body-freshness-deadline).
+2. **Backbone alone**: `{python} ParcelLatencyProfile.t_backbone_str` is less than `{python} ParcelLatencyProfile.t_fresh_str`, so the one stage a benchmark times fits.
+3. **Median chain**: `{python} ParcelLatencyProfile.v_max_str` $\times$ `{python} ParcelLatencyProfile.sum_p50_str` $=$ `{python} ParcelLatencyProfile.travel_p50_mm_str` of parcel travel, `{python} ParcelLatencyProfile.excess_p50_mm_str` past the tolerance.
+4. **Tail**: `{python} ParcelLatencyProfile.v_max_str` $\times$ `{python} ParcelLatencyProfile.sys_p999_str` $=$ `{python} ParcelLatencyProfile.travel_p999_mm_str`, `{python} ParcelLatencyProfile.tail_over_tol_str` times the tolerance.
+
+**Result**: Inference meets the deadline, and the pipeline misses it even at its median.
+
+**Systems insight**: The whole path from exposure to torque onset spends the freshness deadline, not the model alone. When the machine instead drives toward a stationary obstacle, the same age is paid as blind travel $v\,\tau_{\text{delay}}$, the first term of the stopping distance that @sec-body-kinetic-momentum sets against the clear distance.
+
+:::
 
 Late feedback can also reinforce a tracking error instead of correcting it,[^fn-delay-loop-stability] but the freshness calculation needs no frequency-domain model: the parcel has already moved beyond the allowed tolerance. The architecture must preserve the observation's physical capture time. Hardware timestamps synchronized through **IEEE 802.1AS**\index{IEEE 802.1AS!hardware timestamping}, the generalized Precision Time Protocol (gPTP),[^fn-gptp-shared-timebase] or capture strobes associated with the **MIPI CSI-2**\index{MIPI CSI-2!sensor readout interface} interface provide a timing reference; the sensor's exposure and readout behavior determine how that reference maps to the measurement. The timestamp then travels with the observation through computation.
 
@@ -360,6 +397,8 @@ class BodyStoppingBudget:
     d_brake_fast = (v_fast**2 / (2 * a_brake)).to(ureg.millimeter)
     brake_growth = (d_brake_fast / d_brake - 1).to("dimensionless")
     d_per_extra = (v * dt_extra).to(ureg.millimeter)
+    brake_extra = (d_brake_fast - d_brake).to(ureg.millimeter)  # braking travel added by the speed step
+    dt_equiv = (brake_extra / v).to(millisecond)  # delay at the drive limit that costs the same distance
     case_body = calc_safe_stopping_distance(v, t_act, a_brake, loc_margin=delta_loc, physical_margin=delta_margin).to(ureg.millimeter)
     case_full = calc_safe_stopping_distance(v, tau_full, a_brake, loc_margin=delta_loc, physical_margin=delta_margin).to(ureg.millimeter)
     case_fast = calc_safe_stopping_distance(v_fast, tau_full, a_brake, loc_margin=delta_loc, physical_margin=delta_margin).to(ureg.millimeter)
@@ -379,6 +418,8 @@ class BodyStoppingBudget:
     check(v_ceiling > v, "The body-only ceiling must exceed the drive limit.")
     check(abs(d_brake_fast.magnitude - 1000.0) < 1e-6, f"Unexpected braking at 2.0 m/s: {d_brake_fast}")
     check(abs(d_per_extra.magnitude - 150.0) < 1e-6, f"Unexpected cost of 100 ms: {d_per_extra}")
+    check(abs(brake_extra.magnitude - 437.5) < 1e-6, f"Unexpected braking added at 2.0 m/s: {brake_extra}")
+    check(abs(dt_equiv.magnitude - 291.667) < 1e-3, f"Unexpected equivalent delay: {dt_equiv}")
     check(abs(tau_full.to(millisecond).magnitude - 133.6) < 1e-6, f"Unexpected tau_delay: {tau_full}")
     check(abs(case_full.magnitude - 912.9) < 1e-6, f"Unexpected full-delay case: {case_full}")
     check(abs(case_fast.magnitude - 1417.2) < 1e-6, f"Unexpected fast case: {case_fast}")
@@ -409,6 +450,8 @@ class BodyStoppingBudget:
     d_brake_fast_str = fmt_length(d_brake_fast, unit=ureg.millimeter, precision=0, commas=True)
     brake_growth_pct_str = fmt_percent(brake_growth.magnitude, precision=1, style="prose")
     d_per_extra_str = fmt_length(d_per_extra, unit=ureg.millimeter, precision=0)
+    brake_extra_str = fmt_length(brake_extra, unit=ureg.millimeter, precision=1)
+    dt_equiv_str = fmt_latency(dt_equiv, unit=millisecond, precision=1)
     case_body_str = fmt_length(case_body, unit=ureg.millimeter, precision=1)
     case_full_str = fmt_length(case_full, unit=ureg.millimeter, precision=1)
     case_fast_str = fmt_length(case_fast, unit=ureg.millimeter, precision=1, commas=True)
@@ -789,13 +832,24 @@ plt.show()
 The bars in @fig-02-stopping-distance separate two design changes. Adding delay at the drive limit consumes part of the remaining clearance; increasing speed also enlarges the braking term quadratically. All three cases are illustrative calculations under the same constant-deceleration model, and their comparison motivates a speed ceiling that changes with available clearance, rather than a fixed speed limit independent of the scene.
 
 For a stationary obstacle detected at distance $D_{\text{clear}}$, such as a person standing at the rack end or a dropped tote, the modeled stopping distance must fit the clear path, $d_{\text{stop}} \le D_{\text{clear}}$. This is the condition that principle \ref{pri-vol4-irreversibility} places on every stop, now with each term of $d_{\text{stop}}$ a limit of this machine. With conservative timing and braking bounds, the permission path can solve this inequality for a ceiling on new velocity proposals $v_{\text{max}}$. The positive root of the quadratic inequality[^fn-math-velocity-root] is:
-$$v_{\text{max}} = -a_{\text{brake}} \tau_{\text{delay}} + \sqrt{(a_{\text{brake}} \tau_{\text{delay}})^2 + 2 a_{\text{brake}} (D_{\text{clear}} - \delta_{\text{loc}} - \delta_{\text{margin}})}$$
+$$v_{\text{max}} = -a_{\text{brake}} \tau_{\text{delay}} + \sqrt{(a_{\text{brake}} \tau_{\text{delay}})^2 + 2 a_{\text{brake}} (D_{\text{clear}} - \delta_{\text{loc}} - \delta_{\text{margin}})}$$ {#eq-body-velocity-ceiling}
 When sensor range degrades or an obstacle enters the trajectory, $D_{\text{clear}}$ contracts and lowers the ceiling, provided the available distance remains nonnegative. At zero available distance the ceiling is zero. If the machine is already moving, however, a zero setpoint cannot remove its current stopping distance; a negative available distance means the admission condition is already violated and requires an emergency response.
 
 [^fn-math-velocity-root]: **Kinematic Velocity Root**\index{Kinematic velocity root!quadratic clearance}: Grouping the constant spatial terms into available physical distance $D_{\text{avail}} = D_{\text{clear}} - \delta_{\text{loc}} - \delta_{\text{margin}}$ yields the quadratic inequality $\frac{1}{2 a_{\text{brake}}} v^2 + \tau_{\text{delay}} v - D_{\text{avail}} \le 0$. Multiplying by $2 a_{\text{brake}}$ produces $v^2 + 2 a_{\text{brake}} \tau_{\text{delay}} v - 2 a_{\text{brake}} D_{\text{avail}} \le 0$. Applying the quadratic formula and taking the positive physical root defines the dynamic velocity ceiling.
 
 ::: {#nbk-body-stopping-distance-budgeting-high-tail-compute .callout-notebook title="The body's stopping distance"}
-**Problem**: The warehouse mobile manipulator, loaded to at most `{python} MachineMomentum.m_loaded_str`, drives toward a rack end at its $v =$ `{python} BodyStoppingBudget.v_str` drive limit, and a person stands in the aisle at the clear distance $D_{\text{clear}} =$ `{python} BodyStoppingBudget.d_clear_str`. The body owns three terms of @eq-body-stopping-distance: braking travel under the credible deceleration $a_{\text{brake}} =$ `{python} BodyStoppingBudget.a_brake_str` (loaded, dry floor); the fixed overhead of the localization bound $\delta_{\text{loc}} =$ `{python} BodyStoppingBudget.delta_loc_str` and the protective clearance $\delta_{\text{margin}} =$ `{python} BodyStoppingBudget.delta_margin_str`; and the brake onset $T_{\text{act}} =$ `{python} BodyStoppingBudget.t_act_str`, which enters $\tau_{\text{delay}}$. How much of the clear distance do these terms use, what speed would they alone permit, and how do speed and added delay change the answer?
+
+**Problem**: The loaded warehouse mobile manipulator drives toward a rack end at its drive limit, and a person stands in the aisle at the clear distance. The body owns three terms of @eq-body-stopping-distance: braking travel, the fixed overhead, and the brake onset that enters $\tau_{\text{delay}}$. How much of the clear distance do these terms use, what speed would they alone permit, and how do speed and added delay change the answer?
+
+**Variables**:
+
+- Loaded mass at most `{python} MachineMomentum.m_loaded_str` (derived upper bound, full tote rack) and drive limit $v =$ `{python} BodyStoppingBudget.v_str` (illustrative)
+- Clear distance $D_{\text{clear}} =$ `{python} BodyStoppingBudget.d_clear_str` (illustrative)
+- Credible deceleration $a_{\text{brake}} =$ `{python} BodyStoppingBudget.a_brake_str` (illustrative; loaded, dry floor)
+- Localization bound $\delta_{\text{loc}} =$ `{python} BodyStoppingBudget.delta_loc_str` (illustrative) and protective clearance $\delta_{\text{margin}} =$ `{python} BodyStoppingBudget.delta_margin_str` (chosen)
+- Brake onset $T_{\text{act}} =$ `{python} BodyStoppingBudget.t_act_str` (illustrative)
+
+**Math**:
 
 **1. Braking travel:**
 For the same credible deceleration, mass cancels from the work-energy balance. The loaded machine's `{python} MachineMomentum.e_k_str` sets the energy the stopping system must absorb or dissipate, while the specified deceleration sets the braking distance. A different payload can change that deceleration and requires a new bound:
@@ -820,7 +874,8 @@ The body alone would permit `{python} BodyStoppingBudget.v_ceiling_str`, above t
 **5. Speed against delay:**
 At a hypothetical `{python} BodyStoppingBudget.v_fast_str`, above the drive limit, the braking term alone grows to `{python} BodyStoppingBudget.d_brake_fast_str`, `{python} BodyStoppingBudget.brake_growth_pct_str` more than at the drive limit. At the drive limit, each additional `{python} BodyStoppingBudget.dt_extra_str` of pre-brake delay adds `{python} BodyStoppingBudget.d_per_extra_str`.
 
-**Architect's Rule of Thumb**: *Never raise a velocity setpoint without re-solving the clearance quadratic.*
+**Systems insight**: Speed is the lever the stopping budget is most sensitive to. The step from `{python} BodyStoppingBudget.v_str` to `{python} BodyStoppingBudget.v_fast_str` adds `{python} BodyStoppingBudget.brake_extra_str` of braking travel, as much distance as `{python} BodyStoppingBudget.dt_equiv_str` of extra pre-brake delay at the drive limit. A velocity setpoint may therefore rise only after the clearance quadratic is solved again, because the braking term of the stopping distance, which the irreversibility test $d_{\text{stop}} \le D_{\text{clear}}$ bounds, grows with the square of the speed it admits.
+
 :::
 
 ### Applying the velocity ceiling {#sec-body-velocity-governor-cbf}
@@ -935,7 +990,7 @@ The voltage and the inductance must share one convention. Line-to-line values, a
 [^fn-foc-field-orientation]: **Field-Oriented Control (FOC)**\index{Field-Oriented Control!current loop limits}: The name describes the method: the drive steers the stator current vector so that it stays at right angles to the rotor's magnetic field, the arrangement that a brushed DC motor's commutator enforces mechanically. An AC machine controlled this way behaves like a DC motor whose torque is set by a single current, $i_q$. That is what lets a policy command torque at all, because its request becomes a current target whose arrival the winding inductance and the voltage headroom then pace.
 
 Headroom limits how fast current can rise; power inverter electronics limit how much current can flow at all. Motor inverters enforce a maximum current ceiling $I_{\text{max}}$ to protect switching MOSFETs from thermal destruction and avoid magnetic saturation in the stator core. When driving a mechanical transmission with gear reduction ratio $N$ and efficiency $\eta$, the ceiling on delivered joint torque is:
-$$\tau_{\text{out, max}} = \eta N K_t I_{\text{max}}$$
+$$\tau_{\text{out, max}} = \eta N K_t I_{\text{max}}$$ {#eq-body-torque-ceiling}
 
 This current ceiling answers the question the stopping budget left open: whether the drives can deliver the assumed deceleration when the permission path demands it. A drive may clamp a request locally while continuing to accept commands; the supervisory path must use available saturation status and measured response rather than treating successful transport as successful actuation. If braking requires more torque than the configured ceiling permits, the deceleration premise fails. Changing drive current limits therefore requires reassessing the stopping limit record (@sec-body-measuring-limits).
 
@@ -1046,7 +1101,7 @@ $$J_{\text{ref}} = N^2 J_{\text{rotor}}$$
 The combined equation of motion for a geared joint driving load inertia $J_{\text{load}}$ with motor torque $\tau_{\text{motor}}$ is:
 $$ \ddot{q} = \frac{N \tau_{\text{motor}}}{J_{\text{load}} + N^2 J_{\text{rotor}}} $$
 Maximizing delivered load acceleration $\ddot{q}$ with respect to transmission ratio $N$, by setting $d\ddot{q}/dN = 0$, gives $J_{\text{load}} = N^2 J_{\text{rotor}}$: acceleration peaks when the reflected rotor inertia equals the load inertia. Solving for $N$ establishes the classical **inertia matching ratio**:[^fn-inertia-impedance-matching]
-$$ N^* = \sqrt{\frac{J_{\text{load}}}{J_{\text{rotor}}}} $$
+$$ N^* = \sqrt{\frac{J_{\text{load}}}{J_{\text{rotor}}}} $$ {#eq-body-inertia-matching}
 
 [^fn-inertia-impedance-matching]: **Inertia Matching**\index{Inertia matching!impedance matching}: At $N^*$ the reflected rotor inertia equals the load inertia, the mechanical twin of impedance matching in a circuit, where a source delivers the most power to a load whose impedance equals its own. The analogy carries the same caveat: the matched ratio maximizes acceleration, not efficiency or safety, so practical arms choose lower ratios to protect gear teeth from shock, keep the joint backdrivable, and raise top speed.
 
@@ -1157,7 +1212,7 @@ Transmission choice must satisfy both the torque requirement and the permitted c
 The torque requirement and the thermal budget meet in one figure of merit for the motor. Copper loss is $P_{\text{loss}} = I^2 R$ and torque is $\tau = K_t I$, so the loss for a given torque is $P_{\text{loss}} = (\tau / K_m)^2$, where the **motor constant**\index{Motor constant!definition} $K_m = K_t / \sqrt{R}$ (in $\text{N}\cdot\text{m}/\sqrt{\text{W}}$) is the torque a motor produces per square root of the heat it dissipates. Motor data sheets publish it [@tq2014ilm], with $R$ the effective loss resistance that @sec-body-thermal-capacity defines. Through a transmission of ratio $N$ and efficiency $\eta$, the motor supplies $\tau_{\text{out}}/(\eta N)$, so
 $$P_{\text{loss}} = \left(\frac{\tau_{\text{out}}}{\eta N K_m}\right)^2, \qquad J_{\text{ref}} = N^2 J_{\text{in}}$$
 where $J_{\text{in}}$ is the inertia at the transmission input, the rotor plus the gear's input stage. Raising $N$ divides the heat by $N^2$ and multiplies the reflected inertia by $N^2$, so for a given motor and gear their product does not depend on the ratio at all:
-$$P_{\text{loss}}\,J_{\text{ref}} = \frac{\tau_{\text{out}}^2\,J_{\text{in}}}{\eta^2 K_m^2}$$
+$$P_{\text{loss}}\,J_{\text{ref}} = \frac{\tau_{\text{out}}^2\,J_{\text{in}}}{\eta^2 K_m^2}$$ {#eq-body-heat-inertia-product}
 The ratio only chooses where the joint sits on this fixed trade between heat and reflected inertia. Improving both at once requires a different motor, one whose $K_m^2/J_{\text{in}}$ is larger. \ref{nbk-body-gear-ratio-cost} prices the trade on the running machine's arm.
 
 ```{python}
@@ -1309,6 +1364,17 @@ For readers using frequency-domain models, mechanical impedance expresses the jo
 $$Z_{\text{out}}(s) = s J_{\text{load}} + B_{\text{joint}} + \left[\frac{1}{s N^2 J_{\text{rotor}} + N^2 B_{\text{motor}}} + \frac{s}{K_{\text{joint}}}\right]^{-1}$$
 The coefficients $B_{\text{joint}}$ and $B_{\text{motor}}$ describe viscous damping. At low frequency the series spring is stiff compared with the rotor, and the output feels $J_{\text{load}} + N^2 J_{\text{rotor}}$, the rigid-joint inertia used in transmission selection. Above the spring's corner frequency the bracketed term approaches $K_{\text{joint}}/s$, and an impact sees $J_{\text{load}}$ and the spring rather than the reflected rotor. That series decoupling is why a compliant transmission or series elastic actuator softens impacts, and why the flexible-joint model of @sec-appendix-control-flexible-joints is needed to predict contact loads.
 
+::: {#chk-body-actuator-limits .callout-checkpoint title="Actuator limits"}
+
+The drives decide whether the stopping premise can be delivered, and the transmission decides what that delivery costs in heat and inertia.
+
+- [ ] **Torque ceiling**: Can you compute the deceleration ceiling of the two hub drives when their current limit is set at the motor's rated current rather than its peak, and explain why a current limit lowered to protect the windings breaks the stopping premise without any software change?
+- [ ] **Current rise**: Can you estimate how long the hub-motor current takes to reach its limit from rest on a depleted pack, and explain why back-EMF at speed helps a braking current but can starve a driving one?
+- [ ] **Inertia matching**: Can you explain why the gear ratio that maximizes link acceleration makes reflected rotor inertia equal load inertia ($N^2 J_{\text{rotor}} = J_{\text{load}}$), and why oversizing the gearbox for static torque lowers dynamic joint acceleration?
+- [ ] **Heat vs. reflected inertia**: Can you explain why, for a given motor and gear, the ratio cannot reduce holding heat and reflected inertia together, and what must change to improve both?
+
+:::
+
 Operating near the resulting current and torque limits has a thermodynamic cost. Every ampere that accelerates rotor inertia or sustains peak torque dissipates $I^2 R$ in the copper, and that heat accumulates in the actuator's thermal mass, bounding how long peak torque can last before the winding insulation ages faster than its rating allows.
 
 ## Thermal Duty Cycles {#sec-body-thermal-duty-cycles}
@@ -1351,7 +1417,7 @@ where $\theta_{JA} = R_{\text{th, wc}} + R_{\text{th, ca}}$ represents the windi
 At thermal steady state ($dT/dt = 0$), heat generation balances heat dissipation to ambient:
 $$P_{\text{loss, ss}} = \frac{T_{\max} - T_{\text{amb}}}{\theta_{JA}}$$
 Substituting the copper loss identity $P_{\text{loss}} = \frac{\tau^2}{K_t^2} R(T_{\max})$ reveals the **continuous thermal torque ceiling**:
-$$\tau_{\text{cont}} = K_t \sqrt{\frac{T_{\max} - T_{\text{amb}}}{R(T_{\max}) \theta_{JA}}}$$
+$$\tau_{\text{cont}} = K_t \sqrt{\frac{T_{\max} - T_{\text{amb}}}{R(T_{\max}) \theta_{JA}}}$$ {#eq-body-continuous-torque}
 **Continuous torque is limited by thermal dissipation, not peak silicon or battery current ratings.** The arm's stand-in motor, for example, is rated for `{python} GearRatioCost.peak_str` peak but only `{python} GearRatioCost.rated_str` continuous, a ratio of `{python} GearRatioCost.peak_over_rated_str` [@tq2014ilm]. A brief torque burst of several seconds causes a rapid transient temperature rise that stays within the insulation rating ($T_{\text{limit}} = 155^\circ\text{C}$) if its peak does. However, sustained holding torque or high-frequency cycling drives the winding toward an asymptotic thermal equilibrium $T_\infty = T_{\text{amb}} + \bar{P}_{\text{loss}} \theta_{JA}$. If that equilibrium exceeds the rating, continuous operation ages the winding insulation far faster than its rated life allows and ends in phase-to-phase short circuits.
 
 ```{python}
@@ -1544,10 +1610,13 @@ This example uses the arm's sourced stand-in joint of \ref{nbk-body-gear-ratio-c
    which gives `{python} ThermalBurst.t_cold_str` from a cold start at ambient and `{python} ThermalBurst.t_hot_str` from a heat-soaked start at $T_{\text{eq}}$.
 
 **Result**: The heat-soaked joint holds the burst `{python} ThermalBurst.hot_cut_pct_str` less time than the cold one, so peak torque cannot be budgeted without tracking thermal history.
+
+**Systems insight**: Peak torque is a stock of heat margin that thermal history spends, not a fixed rating. The admission check $\hat{T}_{\text{wind}} \le T_{\text{limit}}$ must use the current estimate of the winding temperature, and these first-order horizons are optimistic, because the winding hotspot of the two-node model runs ahead of the lumped temperature.
+
 :::
 
 For repeated cycles of period $t_{\text{cycle}} = t_{\text{on}} + t_{\text{off}}$, an engineering ceiling $T_{\max} =$ `{python} ThermalBurst.t_ceiling_str` sets a cycle-average power ceiling $\bar{P}_{\max} = (T_{\max} - T_{\text{amb}})/\theta_{JA} =$ `{python} ThermalBurst.p_avg_max_str`. With peak dissipation during $t_{\text{on}}$ and none during $t_{\text{off}}$, this average-power screen bounds the duty cycle $D_{\text{cycle}} = t_{\text{on}}/t_{\text{cycle}}$ by
-$$D_{\text{cycle}} \le \frac{T_{\max} - T_{\text{amb}}}{P_{\text{peak}} \theta_{JA}}$$
+$$D_{\text{cycle}} \le \frac{T_{\max} - T_{\text{amb}}}{P_{\text{peak}} \theta_{JA}}$$ {#eq-body-duty-screen}
 which here is `{python} ThermalBurst.duty_pct_str`, so a `{python} ThermalBurst.t_on_str` burst calls for a recovery of $t_{\text{off}} = t_{\text{on}}(1 - D_{\text{cycle}})/D_{\text{cycle}} \approx$ `{python} ThermalBurst.t_off_str`. The average does not bound the hottest instant: because heat arrives in seconds during bursts but dissipates over minutes during recovery, the peak transient hotspot temperature during periodic pulsing strictly exceeds the time-averaged calculation,[^fn-math-thermal-peak] reaching `{python} ThermalBurst.t_peak_str` (above the ceiling) before the rise of $R(T)$ adds more. Average-power screening is optimistic, and a burst schedule is certified only against the transient hotspot trajectory.
 
 [^fn-math-thermal-peak]: **Periodic steady-state thermal peak derivation**: In a periodic duty cycle of period $t_{\text{cycle}} = t_{\text{on}} + t_{\text{off}}$, summing the geometric series of heating and cooling exponentials yields the exact periodic peak temperature rise: $\Delta T_{\text{peak}} = P_{\text{peak}}\theta_{JA}\frac{1 - e^{-t_{\text{on}}/\tau_{\text{th}}}}{1 - e^{-t_{\text{cycle}}/\tau_{\text{th}}}}$. As $t_{\text{cycle}} \to 0$, this converges to the average-power screen ($D_{\text{cycle}} P_{\text{peak}}\theta_{JA}$); for finite burst durations, peak winding temperature strictly exceeds the average.
@@ -1847,7 +1916,10 @@ The arm's elbow, the same Panda-class stand-in joint as \ref{nbk-body-thermal-bu
 
 3. **Derating**: At the limit the allowable rise is `{python} StallDerating.dt_max_str`, so the sustainable dissipation is $P_{\max} = \Delta T_{\max}/\theta_{JA} =$ `{python} StallDerating.p_max_str`. At the hot resistance $R(T_{\text{limit}}) \approx$ `{python} StallDerating.r_hot_str`, that allows $I_{\max} = \sqrt{P_{\max}/R} \approx$ `{python} StallDerating.i_max_str` and a hold of $\tau_{\text{hold,max}} = \eta N K_t I_{\max} \approx$ `{python} StallDerating.tau_hold_max_str`.
 
-**Result**: Held without control, the stall drives the winding toward `{python} StallDerating.t_wind_str`, and staying within the insulation rating requires a `{python} StallDerating.derate_pct_str` derating, from `{python} StallDerating.tau_hold_str` to `{python} StallDerating.tau_hold_max_str`. Continuous gravity holding above the qualified continuous torque requires another support mechanism, such as a friction brake or counterweight; holding within that torque can remain electrically sustained under the stated thermal conditions.
+**Result**: Held without control, the stall drives the winding toward `{python} StallDerating.t_wind_str`, and staying within the insulation rating requires a `{python} StallDerating.derate_pct_str` derating, from `{python} StallDerating.tau_hold_str` to `{python} StallDerating.tau_hold_max_str`.
+
+**Systems insight**: At stall the motor does no mechanical work, so every watt it draws becomes heat, and copper's rising resistance makes that heat grow with temperature. Continuous gravity holding above the thermally sustainable torque therefore needs another support mechanism, such as a friction brake or counterweight, in the premise the permission path admits; holding within that torque can remain electrically sustained under the stated thermal conditions.
+
 :::
 
 Delivering the current pulses that generate these thermal loads also stresses the upstream electrical supply, moving the burden from heat in the copper to transient current on the power bus.
@@ -1978,7 +2050,7 @@ Industrial machine stop categories and drive safety functions sequence these sta
 Regenerative deceleration drives the bus toward its opposite boundary, overvoltage, as part of the machine's kinetic energy returns electrically. **Returned braking energy needs an absorption or dissipation path.** A battery cannot be assumed to accept it under every state of charge, temperature, or protection state. If the battery management system disconnects charge input, the remaining bus components must handle the regenerated energy without exceeding their voltage ratings.
 
 Under the conservative assumption that the battery management system has disconnected and the local bus capacitance $C_{\text{bus}}$ must absorb the entire returned kinetic energy $E_{\text{regen}}$ without dissipation, the terminal DC bus voltage rises to:
-$$V_{\text{final}} = \sqrt{V_{\text{initial}}^2 + \frac{2 E_{\text{regen}}}{C_{\text{bus}}}}$$
+$$V_{\text{final}} = \sqrt{V_{\text{initial}}^2 + \frac{2 E_{\text{regen}}}{C_{\text{bus}}}}$$ {#eq-body-regen-voltage}
 where $V_{\text{initial}}$ is the bus voltage when deceleration begins (@sec-appendix-systems derives this energy balance). The worst case is a full pack, the state in which the battery management system refuses further charge.
 
 The capacitor-only endpoint is a screening calculation: if it exceeds a component rating, the stop requires another energy path. A dynamic brake chopper\index{Dynamic brake chopper!regenerative clamp}\index{Overvoltage protection!dynamic braking} switches an absorption resistor across the bus when voltage reaches a chosen clamp threshold. Its resistor must handle both the peak regenerated power and the pulse energy, with enough recovery between stops. The worked bus calculation below sizes the peak-power requirement for the warehouse machine.
@@ -2239,8 +2311,7 @@ class ConveyorFreshness:
 Before measuring these limits on an assembled machine, verify your understanding of the five budgets:
 
 - [ ] **Freshness deadline**: Can you calculate the maximum allowable measurement age for the mug riding the pick-station conveyor at `{python} ConveyorFreshness.v_conv_str`, with a `{python} ConveyorFreshness.r_tol_str` grasp tolerance of which the initial estimate already spends `{python} ConveyorFreshness.e_0_str`, and explain why that age is counted from exposure on the sensor rather than from the start of inference, and why the base's stop for a standing person instead charges age as blind travel?
-- [ ] **Velocity ceiling**: Can you explain why doubling the pre-brake delay expands the stopping distance linearly while doubling travel speed expands the braking term quadratically, and why the admissible speed is the positive root of $d_{\text{stop}} \le D_{\text{clear}}$?
-- [ ] **Inertia matching**: Can you explain why the gear ratio that maximizes link acceleration makes reflected rotor inertia equal load inertia ($N^2 J_{\text{rotor}} = J_{\text{load}}$), and why oversizing the gearbox for static torque lowers dynamic joint acceleration?
+- [ ] **Velocity ceiling**: Can you solve $d_{\text{stop}} \le D_{\text{clear}}$ for the admissible speed on the running machine's numbers, and explain why doubling the pre-brake delay expands the stopping distance linearly while doubling travel speed expands the braking term quadratically?
 - [ ] **Thermal horizons and runaway**: Can you explain why an actuator can produce three times its rated torque for seconds but overheats its winding insulation if held there for minutes, and how the temperature coefficient of copper ($\alpha_{\text{Cu}}$) turns a sustained stall into runaway?
 - [ ] **Rail sag and regeneration**: Can you explain how a coincident compute and drive current step sags a shared rail through resistance, inductance, and capacitor depletion, and why a stop from speed pumps energy back into the bus that a brake chopper must divert?
 
@@ -2313,6 +2384,8 @@ class ZeroFailureBound:
     coef = -math.log(1 - conf)
     p_upper = coef / n_stops
     one_in = round(1 / p_upper, -2)
+    p_target = 1e-4  # category: illustrative (target per-stop failure rate for the checkpoint)
+    target_one_in = round(1 / p_target)
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(abs(coef - 2.9957) < 1e-4, f"Unexpected -ln(0.05): {coef}")
@@ -2323,6 +2396,7 @@ class ZeroFailureBound:
     n_str = fmt_int(n_stops)
     conf_pct_str = fmt_percent(conf, precision=0, style="prose")
     one_in_str = fmt_int(one_in)
+    target_one_in_str = fmt_int(target_one_in)
 ```
 
 The absence of a failure during testing bounds the failure rate statistically; it does not establish safety. If the mobile manipulator completes $n =$ `{python} ZeroFailureBound.n_str` loaded stops without a brownout or an overrun, the data support only a per-stop failure rate below roughly $3/n$ by the Rule of Three[^fn-rule-three-origin] (@sec-evaluation-closed-loop-survival, @eq-eval-rule-of-three), about one stop in `{python} ZeroFailureBound.one_in_str` at `{python} ZeroFailureBound.conf_pct_str` confidence, and only if the trials are independent and stationary: one trial does not influence another, and the failure probability remains unchanged across trials.
@@ -2462,6 +2536,17 @@ The detector element matters most once the machine leaves the test stand, becaus
 **Response**: The ESA inquiry board recommended robust sanity checks in the onboard software, among them that altitude cannot be negative and cannot change from $3.7\text{ km}$ to a negative value in one second, and a design that handles IMU saturation explicitly, for example by inhibiting IMU inputs during parachute deployment.
 
 **Systems lesson**: A physical body cannot transcend the saturation ranges of its sensory transducers. When a sensor's physical limit (a gyroscope's rate ceiling or an accelerometer's dynamic range) is exceeded, a state estimator that integrates the saturated measurement as if it were valid drifts away from the physical state. The saturation duration against which the IMU had been accepted was a limit with conditions, and once descent exceeded them, no detector checked the estimate before it commanded an irreversible action.
+:::
+
+::: {#chk-body-limit-records .callout-checkpoint title="Limit records"}
+
+A limit governs a decision only together with the conditions, evidence, and detector that travel with it.
+
+- [ ] **Uncertainty vs. margin**: Can you distinguish the uncertainty of a measured deceleration from the margin the machine defends, and explain why only a measured or derived value can support that margin?
+- [ ] **Zero-failure bound**: Can you estimate how many failure-free loaded stops would bound the per-stop failure rate below one in `{python} ZeroFailureBound.target_one_in_str` at `{python} ZeroFailureBound.conf_pct_str` confidence, and state the two assumptions about the trials that the bound requires?
+- [ ] **Record conditions**: Can you name the condition of the credible-deceleration record that a lowered drive current limit, the inspected floor, and an arm extended forward would each violate?
+- [ ] **Detector**: Can you explain why the Schiaparelli lander's accepted saturation duration failed as a limit in flight, and which detector in @tbl-02-limit-record plays the missing role for the credible deceleration?
+
 :::
 
 Measured and recorded one at a time, the five limits describe the body budget by budget, each under its own conditions. Which of them binds first depends on the machine and the command.
@@ -2686,6 +2771,23 @@ The five budgets turn a requested maneuver into constraints on measurement age, 
 
 The limit record carries each value with its conditions, uncertainty, margin, detector, and provenance. On the mobile manipulator at its `{python} BodyStoppingBudget.v_str` drive limit, the body's stopping terms spend `{python} BodyStoppingBudget.total_3_str` of the `{python} BodyStoppingBudget.d_clear_str` clear distance. The remaining `{python} BodyStoppingBudget.remaining_str` is a design budget for sensing and computation, the refined stop profile, and tracking uncertainty. Those illustrative values organize the next engineering decisions; measurements on the assembled machine must establish the limits that operation can rely on.
 
+@Tbl-02-key-equations collects the equations that carry these decisions, what each bounds or decides, and where each is derived.
+
+| Equation | What it bounds or decides | Derived in |
+|:---|:---|:---|
+| $\Delta t_{\text{fresh}} \le e_{\max}/v_{\max}$ | The largest observation age before a moving target's own motion spends the position tolerance | @eq-body-freshness-deadline |
+| $d_{\text{stop}} = v\,\tau_{\text{delay}} + \frac{v^2}{2 a_{\text{brake}}} + \delta_{\text{loc}} + \delta_{\text{margin}}$ | Whether the body stops within the clear distance, $d_{\text{stop}} \le D_{\text{clear}}$ | @eq-body-stopping-distance |
+| $v_{\max} = -a_{\text{brake}}\tau_{\text{delay}} + \sqrt{(a_{\text{brake}}\tau_{\text{delay}})^2 + 2 a_{\text{brake}} D_{\text{avail}}}$ | The admissible speed for a given clearance, pre-brake delay, and credible deceleration | @eq-body-velocity-ceiling |
+| $\tau_{\text{out, max}} = \eta N K_t I_{\max}$ | The largest torque the configured current limit allows, and so whether $a_{\text{brake}}$ is deliverable | @eq-body-torque-ceiling |
+| $N^* = \sqrt{J_{\text{load}}/J_{\text{rotor}}}$ | The gear ratio that maximizes joint acceleration for a given motor torque | @eq-body-inertia-matching |
+| $P_{\text{loss}} J_{\text{ref}} = \tau_{\text{out}}^2 J_{\text{in}}/(\eta^2 K_m^2)$ | The fixed trade between holding heat and reflected inertia that the gear ratio cannot escape | @eq-body-heat-inertia-product |
+| $\tau_{\text{cont}} = K_t \sqrt{(T_{\max} - T_{\text{amb}})/(R(T_{\max})\,\theta_{JA})}$ | The torque a winding sustains indefinitely under the declared cooling | @eq-body-continuous-torque |
+| $D_{\text{cycle}} \le (T_{\max} - T_{\text{amb}})/(P_{\text{peak}}\,\theta_{JA})$ | An average-power screen on a burst schedule, optimistic against the transient peak | @eq-body-duty-screen |
+| $V_{\text{source}} - V_{\text{bus}} = R_{\text{bus}} I_{\text{source}} + L_{\text{bus}}\,dI_{\text{source}}/dt$ | Rail droop under a coincident current step, against the undervoltage lockout | @eq-body-droop |
+| $V_{\text{final}} = \sqrt{V_{\text{initial}}^2 + 2 E_{\text{regen}}/C_{\text{bus}}}$ | The capacitor-only bus voltage after a regenerative stop, and so whether a brake chopper is needed | @eq-body-regen-voltage |
+
+: **Key equations of the physical body**: Each load-bearing equation of the chapter, the limit it bounds or the decision it settles, and the equation where it is derived; $D_{\text{avail}} = D_{\text{clear}} - \delta_{\text{loc}} - \delta_{\text{margin}}$. {#tbl-02-key-equations tbl-colwidths="[40,42,18]"}
+
 ::: {.callout-takeaways title="The physical body and invariant budgets"}
 * **Age begins at physical transduction**: The freshness budget spans sensing through physical response, and an end-to-end percentile is not the sum of stage percentiles. Preserve capture time, account for remaining response delay, and refuse a proposal whose evidence will be too old when the actuator responds.
 * **Speed sets the stopping envelope**: Pre-brake travel grows linearly with delay and braking travel quadratically with speed. The clearance quadratic yields a candidate speed ceiling only while the current state, credible deceleration, and selected stopping mechanism satisfy its premises, and the credible deceleration itself must fit under the traction, tip-over, and drive-torque ceilings.
@@ -2709,6 +2811,91 @@ The thermal and electrical budgets descend from electrical-machine engineering. 
 - **Series elastic actuators** [@pratt1995series]. A deliberate compliance that trades control bandwidth for shock tolerance and force sensing, the opposite design choice from a stiff high-ratio joint.
 - **Proprioceptive actuator design** [@wensing2017proprioceptive]. How a large motor behind a low-ratio stage makes motor current a usable contact-force signal, with the thermal and torque-density costs stated.
 - **Learned actuator models** [@hwangbo2019learning]. A demonstration that an actuator network identified from minutes of hardware data closes much of the gap an ideal torque source leaves in simulation.
+
+## Problems {#sec-body-problems}
+
+```{python}
+#| label: body-problems-calc
+#| echo: false
+#| warning: false
+#| message: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ GIVENS FOR THE END-OF-CHAPTER PROBLEMS (LEGO)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @sec-body-problems.
+# │ Goal:    Hold the few givens the problems add to the chapter's cells: the
+# │          strain-wave ratio span, the rotor inertia, the motor's rated
+# │          copper loss, the transfer machine's class profile, and the trial
+# │          count of the critiqued record. Answers are not printed.
+# │ Show:    50:1 and 160:1; 5.6e-6 kg m^2; 22.2 W; 150 kg carrying 500 kg at
+# │          1.8 m/s and 2.5 m/s^2; ten stops.
+# │ How:     Registry reads (Actuators, Embodied.AMR.LogisticsAMR) and the
+# │          earlier cells; every other given is read from its own cell.
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import *
+from mlsysim.core.units import *
+from mlsysim.fmt import fmt_int, fmt_mass, fmt_velocity, fmt_acceleration, fmt_power, fmt_sci_qty, check
+
+RM = Embodied.MobileManipulator.WarehouseMobileManipulator
+
+class BodyProblems:
+    """Givens that the chapter's problems add beyond the worked examples."""
+
+    # ┌── 1. LOAD (Constants & Parameters) ─────────────────────────────────
+    n_sw_low = 50  # category: sourced (low end of one strain-wave catalog series, @tbl-02-mechanical-drives)
+    n_sw_high = 160  # category: sourced (high end of the same series)
+    j_rotor = ReflectedInertia.j_rotor  # category: illustrative (rotor inertia of the 50 g rotor)
+    p_rated = Actuators.FramelessMotor.TQ_ILM70x18.rated_copper_loss  # category: sourced (TQ-RoboDrive data sheet)
+    amr = Embodied.AMR.LogisticsAMR  # category: illustrative (class profile, not a single product)
+    n_critique = 10  # category: illustrative (stops in the critiqued record)
+
+    # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────
+    amr_loaded = (amr.mass + amr.payload_capacity).to(kilogram)
+
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(n_sw_low < ReflectedInertia.n_gear < n_sw_high, "The strain-wave span must bracket the 100:1 example.")
+    check(ReflectedInertia.n_star < n_sw_low, "Problem 5 assumes the matched ratio lies below the strain-wave span.")
+    check(amr.payload_capacity > amr.mass, "Problem 10 needs a payload-dominated machine.")
+    check(amr.max_velocity > RM.base.max_velocity, "Problem 10's base must be faster than the running machine.")
+    check(abs(p_rated.to(ureg.watt).magnitude - 22.22) < 0.01, f"Unexpected rated copper loss: {p_rated}")
+
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
+    n_sw_low_str = fmt_int(n_sw_low)
+    n_sw_high_str = fmt_int(n_sw_high)
+    j_rotor_str = fmt_sci_qty(j_rotor, kilogram * meter**2, precision=1)
+    p_rated_str = fmt_power(p_rated, unit=ureg.watt, precision=1)
+    amr_mass_str = fmt_mass(amr.mass, unit=kilogram, precision=0)
+    amr_payload_str = fmt_mass(amr.payload_capacity, unit=kilogram, precision=0)
+    amr_v_str = fmt_velocity(amr.max_velocity, unit=meter / second, precision=1)
+    amr_a_str = fmt_acceleration(amr.max_acceleration, unit=meter / second**2, precision=1)
+    n_critique_str = fmt_int(n_critique)
+```
+
+These problems use the running machine's parameters from this chapter's worked examples, with values marked illustrative standing in for measurements as they do there. Each problem names the decision it requires. The tags give the kind of work, from computation through design to critique, and the learning objectives, counted in order, that it assesses.
+
+1. **[Compute, LO1] The mug on the conveyor.** The mug on the pick-station conveyor moves at `{python} ConveyorFreshness.v_conv_str`, and the grasp tolerates `{python} ConveyorFreshness.r_tol_str` of position error, of which the initial estimate already spends `{python} ConveyorFreshness.e_0_str`. Find the freshness deadline. Suppose the pick station's pipeline had the parcel sorter's age profile, a median of `{python} ParcelLatencyProfile.sum_p50_str` and a $P_{99.9}$ of `{python} ParcelLatencyProfile.sys_p999_str` (@tbl-02-latency-breakdown). Decide whether the conveyor may keep its speed, and if not, find the fastest conveyor speed the tail age supports.
+
+2. **[Compute, LO2] The full pre-brake delay.** Replace the brake onset of \ref{nbk-body-stopping-distance-budgeting-high-tail-compute} with the full `{python} BodyStoppingBudget.tau_full_str` pre-brake delay that later chapters assemble, keeping the same deceleration, overheads, and `{python} BodyStoppingBudget.d_clear_str` clear distance. Compute the speed ceiling of @eq-body-velocity-ceiling. Then find the largest pre-brake delay at which the `{python} BodyStoppingBudget.v_str` drive limit remains admissible at this clear distance, and state how much delay the later chapters may still add.
+
+3. **[Compute, LO2] The inspected floor.** The inspected floor offers a friction coefficient of `{python} BrakingLimits.mu_insp_str`. Compute its traction ceiling on deceleration with all of the weight on the driven wheels and with the hub motors' rated load share, $\phi_{\text{drive}} \le$ `{python} BrakingLimits.phi_max_str`. For each, find the speed ceiling at the `{python} BodyStoppingBudget.d_clear_str` clear distance with the `{python} BodyStoppingBudget.tau_full_str` delay. Decide what speed the permission path must enforce whenever the machine cannot confirm that it is on the dry floor.
+
+4. **[Compute, LO3] The lowest workable current limit.** The two hub drives ($K_t =$ `{python} BrakingLimits.k_t_str`, rolling radius `{python} BrakingLimits.r_wheel_str`) must decelerate the loaded machine, $m_{\text{eff}} \le$ `{python} BrakingLimits.m_eff_str`, at `{python} BrakingLimits.a_req_str`. Find the smallest drive current limit that supports this deceleration and compare it with the `{python} BrakingLimits.i_max_str` setting and the motor's `{python} BrakingLimits.i_rated_str` rated current. State the current-limit condition the credible-deceleration record must carry.
+
+5. **[Compute, LO3] Matching across the strain-wave range.** For the rotor and link of @sec-body-reflected-rotor-inertia ($J_{\text{rotor}} =$ `{python} BodyProblems.j_rotor_str` and $J_{\text{load}} =$ `{python} ReflectedInertia.j_load_str`, both illustrative), compute $N^*$ from @eq-body-inertia-matching and the fraction of the matched-ratio acceleration delivered at `{python} BodyProblems.n_sw_low_str`:1, `{python} ReflectedInertia.n_gear_str`:1, and `{python} BodyProblems.n_sw_high_str`:1, the span of one strain-wave catalog series (@tbl-02-mechanical-drives). Find the link inertia for which `{python} ReflectedInertia.n_gear_str`:1 would be the matched ratio, and decide which end of the span this link favors.
+
+6. **[Compute, LO5] An aging source.** The drive bus of \ref{nbk-body-dc-bus-power-integrity} carries a coincident `{python} DriveBusIntegrity.di_str` step through `{python} DriveBusIntegrity.r_bus_str` of source resistance. Find the source resistance at which that step, drawn from a depleted `{python} DriveBusIntegrity.v_battery_low_str` pack, pulls the sustained bus voltage to the `{python} DriveBusIntegrity.v_uvlo_str` converter lockout, and the factor by which the resistance may grow from its commissioning value. State the detector the rail's limit record should carry and what it should measure.
+
+7. **[Design, LO3, LO4] A ratio for a continuous hold.** The arm's stand-in joint motor (rated `{python} GearRatioCost.rated_str`, peak `{python} GearRatioCost.peak_str`, rated copper loss `{python} BodyProblems.p_rated_str`) must hold $\tau_{\text{out}} =$ `{python} GearRatioCost.tau_out_str` indefinitely through a gear of efficiency `{python} GearRatioCost.eta_str` (illustrative) and input inertia $J_{\text{in}} =$ `{python} GearRatioCost.j_in_str`. Find the smallest ratio at which the peak torque can hold the load and the smallest at which the holding loss stays within the rated copper loss. Choose a ratio, and state what it costs in reflected inertia against the `{python} GearRatioCost.n_joint_str`:1 joint of \ref{nbk-body-gear-ratio-cost}.
+
+8. **[Design, LO4] A burst schedule that respects the peak.** For the threefold rated-current burst of \ref{nbk-body-thermal-burst-limits}, with the same resistance, thermal capacitance, thermal resistance, and ambient, the average-power screen of @eq-body-duty-screen gave a `{python} ThermalBurst.t_off_str` recovery for `{python} ThermalBurst.t_on_str` bursts, and the first-order periodic peak overshot the `{python} ThermalBurst.t_ceiling_str` ceiling. Using the periodic-peak expression that accompanies @eq-body-duty-screen, find the recovery time that holds the peak at the ceiling and the resulting duty cycle. State what the schedule still needs before it can be admitted.
+
+9. **[Design, LO5] A chopper for a faster base.** A proposal raises the base's speed to the hypothetical `{python} BodyStoppingBudget.v_fast_str`. With the same loaded mass and credible deceleration, and an illustrative `{python} DriveBusIntegrity.regen_pct_str` of the kinetic energy returned to the bus, size the brake chopper: the regenerated energy, the stop's duration, the peak regenerative power, and the largest resistor that holds the `{python} DriveBusIntegrity.v_clamp_str` clamp. Decide whether the `{python} DriveBusIntegrity.r_candidate_str`, `{python} DriveBusIntegrity.p_candidate_str` component chosen for the drive limit still serves.
+
+10. **[Design, LO2, LO5] A payload-dominated base.** A representative industrial logistics mobile robot (an illustrative class profile) has a mass of `{python} BodyProblems.amr_mass_str`, carries up to `{python} BodyProblems.amr_payload_str`, and drives at up to `{python} BodyProblems.amr_v_str`; take its `{python} BodyProblems.amr_a_str` acceleration rating as its credible deceleration. With the running machine's `{python} BodyStoppingBudget.tau_full_str` delay and overheads, find the clear distance it needs at full speed and full payload, the friction coefficient the stop requires, and the peak regenerative power and largest chopper resistor at a `{python} DriveBusIntegrity.v_clamp_str` clamp. Identify which of these results the payload changes and which it leaves unchanged, and state which ceiling on the credible deceleration a heavy payload would erode first.
+
+11. **[Critique, LO6] A limit record from a handful of stops.** A team fills the credible-deceleration record with the mean deceleration of `{python} BodyProblems.n_critique_str` stops of the unloaded base on the laboratory floor, reports `{python} BrakingLimits.a_req_str`, lists no uncertainty and no detector, and labels its provenance "measured." Critique each of the six elements against @tbl-02-limit-record. Quantify the per-stop failure rate those stops support, if none failed, at `{python} ZeroFailureBound.conf_pct_str` confidence, and the number of failure-free stops needed to claim one failure in `{python} ZeroFailureBound.one_in_str`.
+
+12. **[Critique, LO7] Sharing the bus.** A design review proposes powering the safety microcontroller from the converter on the shared drive bus, because the sustained screen leaves `{python} DriveBusIntegrity.margin_low_str` above the lockout from a depleted pack. Evaluate the argument: find the coincident step that would reach the lockout at the commissioning source resistance, name the supply faults the sustained screen cannot cover, and state which budget this chapter found to have the thinnest evidence on the running machine and whether the proposal changes it. Decide whether to accept the proposal.
 
 ::: {.callout-chapter-connection title="From body limits to brain proposals"}
 The **limit records** state how old an observation may be, how far the loaded base travels before stopping, and how much torque, heat, and electrical demand a maneuver may impose under declared conditions. A learned proposer must supply useful actions within those constraints. @Sec-brain examines what its models can produce, how long a new trajectory chunk takes, and how quickly its supporting observations age. Those proposer limits join the body's limits in @sec-nervous, where the permission path derives execution leases and collects the timing assumptions in the handoff record. The Brain supplies proposals; the permission path decides how long any proposal may drive the actuators.

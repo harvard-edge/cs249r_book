@@ -1358,6 +1358,10 @@ class TestDomainFormatters:
         from mlsysim.core.units import meter, newton
 
         assert fmt_stiffness(1500 * (newton / meter), precision=0, commas=True) == "1,500 N/m"
+        # 2026-09-29: kN/m used to print as "N/m" (substring label bug).
+        from mlsysim.core.units import ureg
+        assert fmt_stiffness(12000 * (newton / meter), unit=ureg.kilonewton / meter, precision=0) == "12 kN/m"
+        assert fmt_stiffness(12000 * (newton / meter), unit=newton / ureg.millimeter, precision=0) == "12 N/mm"
         assert fmt_volume(2.5 * (meter**3), precision=1, commas=False) == "2.5 m³"
 
     def test_fmt_robotics_and_kinematics(self):
