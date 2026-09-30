@@ -350,6 +350,14 @@ class EnforcementStoppingBudget:
     total_check = calc_safe_stopping_distance(
         v_drive, tau_delay + ramp_delay, a_brake, loc_margin=delta_loc, physical_margin=delta_margin + eps_track
     ).to(millimeter)
+    # Operands of @eq-enforce-speed-ceiling for the napkin-math notebook
+    tau_eff = (tau_delay + ramp_delay).to(millisecond)
+    d_avail = (d_clear - delta_loc - delta_margin - eps_track).to(millimeter)
+    a_tau = (a_brake * tau_eff).to(meter / second)
+    a_tau_sq = (a_tau**2).to(meter**2 / second**2)
+    two_a_d = (2 * a_brake * d_avail).to(meter**2 / second**2)
+    root_term = ((a_tau_sq + two_a_d) ** 0.5).to(meter / second)
+    ceiling_hand = (root_term - a_tau).to(meter / second)
 
     # Time rows (no distance added)
     # Free-space expiry abreast of the occluded rack end (@eq-mem-free-space-expiry):
@@ -421,6 +429,8 @@ class EnforcementStoppingBudget:
     check(abs(ceiling.magnitude - ceiling_closed.magnitude) < 1e-9, "Numerical ceiling must match the closed form above a^2/j.")
     check(ceiling >= v_plateau, "The ceiling lies in the trapezoidal regime.")
     check(abs(ceiling.magnitude - 1.4367) < 5e-5, "Ceiling is 1.44 m/s.")
+    check(abs(ceiling_hand.magnitude - ceiling.magnitude) < 1e-9, "The notebook's hand arithmetic must reproduce the ceiling.")
+    check(abs(d_avail.magnitude - 910.0) < 1e-9, "Clearance left after the fixed allowances is 910 mm.")
     check(v_aisle < ceiling, "The chosen aisle speed must sit under the ceiling.")
     check(abs(total_aisle.magnitude - 968.9925) < 1e-6, "Budget at 1.3 m/s is 968.99 mm.")
     check(abs(spare.magnitude - 131.0075) < 1e-6, "Spare at 1.3 m/s is 131.01 mm.")
@@ -471,6 +481,16 @@ class EnforcementStoppingBudget:
     a_brake_str = fmt_acceleration(a_brake, precision=0)
     j_brake_str = fmt_jerk(j_brake, precision=2)
     ramp_delay_str = fmt_latency(ramp_delay, unit=millisecond, precision=1)
+    tau_eff_str = fmt_latency(tau_eff, unit=millisecond, precision=1)
+    d_avail_str = fmt_length(d_avail, unit=millimeter, precision=0)
+    d_clear_mm_str = fmt_length(d_clear, unit=millimeter, precision=0, commas=True)
+    overhead_all_str = fmt_length(AISLE.fixed_overhead, unit=millimeter, precision=0)
+    delta_loc_str = fmt_length(delta_loc, unit=millimeter, precision=0)
+    delta_margin_str = fmt_length(delta_margin, unit=millimeter, precision=0)
+    a_tau_str = fmt(a_tau.magnitude, precision=4)
+    a_tau_sq_str = fmt(a_tau_sq.magnitude, precision=4)
+    two_a_d_str = fmt(two_a_d.magnitude, precision=2)
+    root_term_str = fmt(root_term.magnitude, precision=4)
     tau_delay_str = fmt_latency(tau_delay, unit=millisecond, precision=1)
     lease_path_str = fmt_latency(lease_path, unit=millisecond, precision=0)
     t_age_str = fmt_latency(t_age, unit=millisecond, precision=1)
@@ -527,13 +547,49 @@ class EnforcementStoppingBudget:
     spare_value_str = fmt_magnitude(spare, millimeter, precision=2, commas=True)
 ```
 
+With every term of the budget now sized, the stopping envelope can be stated as the object the rest of the chapter defends.
+
+::: {#dfn-enforcement-stopping-envelope .callout-definition title="Stopping envelope"}
+
+***Stopping envelope***\index{Stopping envelope!definition} is the set of plant states, clearance and speed along each direction of travel, from which the resident braking response, begun after the accounted delay, arrests motion before the nearest boundary with the localization, protective, and tracking allowances still reserved.
+
+1.  **Significance**: The envelope turns the irreversibility test $d_{\text{stop}} \le D_{\text{clear}}$ into a speed ceiling. At the rack end the warehouse mobile manipulator's envelope admits at most `{python} EnforcementStoppingBudget.ceiling_str`, below its `{python} EnforcementStoppingBudget.v_drive_str` drive limit.
+2.  **Distinction**: Unlike a geometric keep-out zone, which depends on position alone, the envelope depends on speed, delay, and braking authority, so the same clearance admits a slow approach and refuses a fast one.
+3.  **Common pitfall**: Treating the envelope as fixed. Payload, floor friction, and winding temperature move its boundary, and an envelope computed from a datasheet deceleration overstates it exactly when the machine is loaded.
+
+:::
+
 For the warehouse mobile manipulator, the inset is the base's tracking bound of `{python} EnforcementStoppingBudget.inset_str`, and it is the last distance term the budget receives. At the `{python} EnforcementStoppingBudget.v_drive_str` drive limit, the matched stop suffix of @sec-planning-behavior-seam had already carried the running total to `{python} EnforcementStoppingBudget.run6_str`, past the `{python} EnforcementStoppingBudget.d_clear_str` clear distance at the rack end. The inset brings it to `{python} EnforcementStoppingBudget.run7_str`, `{python} EnforcementStoppingBudget.over7_str` more than the clear distance.
 
 The accounted terms in @eq-enforce-stopping-envelope come from the chapters that own them: the credible deceleration and the fixed overheads by @sec-body-kinetic-momentum, the lease path by @sec-nervous-cadences, the observation age by @sec-perception-transduction-calibration, the stop's shape by @sec-planning-behavior-seam, and the inset here. The $C^2$ stop suffix replaces constant deceleration ($v^2 / 2a_{\text{brake}}$) with jerk-limited S-curve braking at the same peak and a jerk bound of $j_{\max} =$ `{python} EnforcementStoppingBudget.j_brake_str`. Both budget speeds reach the deceleration bound, so by @eq-plan-c2-stopping-suffix the stop adds the travel of half a jerk ramp:
 $$d_{\text{suffix}}(v) = \frac{v^2}{2 a_{\text{brake}}} + v\,\frac{a_{\text{brake}}}{2 j_{\max}}.$$
 The shaped stop spends more clearance than constant-deceleration braking, so the admissible speed must be solved from the finished budget.
 
-Speed is the one term the machine can still choose. With the currently accounted delay $\tau_{\text{delay}} =$ `{python} EnforcementStoppingBudget.tau_delay_str`, the jerk ramps act as `{python} EnforcementStoppingBudget.ramp_delay_str` of extra delay before braking at $a_{\text{brake}}$, so the ceiling is the positive root of a quadratic, `{python} EnforcementStoppingBudget.ceiling_str`. Below $a_{\text{brake}}^2/j_{\max}$ the stop never reaches $a_{\text{brake}}$ and its distance is no longer quadratic in $v$; MLSysIM then solves @eq-enforce-stopping-envelope numerically. We select `{python} EnforcementStoppingBudget.v_aisle_str` as a candidate below that ceiling. The listed terms then total `{python} EnforcementStoppingBudget.total_aisle_str`, leaving `{python} EnforcementStoppingBudget.spare_str` before any unaccounted delay or additional reserve.
+Speed is the one term the machine can still choose. Above $a_{\text{brake}}^2/j_{\max} =$ `{python} EnforcementStoppingBudget.v_plateau_str` the jerk ramps act as $a_{\text{brake}}/2j_{\max}$ of extra delay before braking at $a_{\text{brake}}$, so @eq-enforce-stopping-envelope at equality is a quadratic in $v$ whose positive root is the **speed ceiling**\index{Speed ceiling!stopping envelope}:
+$$v_{\max} = -a_{\text{brake}}\tau' + \sqrt{(a_{\text{brake}}\tau')^2 + 2a_{\text{brake}}D_{\text{avail}}}, \qquad \tau' = \tau_{\text{delay}} + \frac{a_{\text{brake}}}{2j_{\max}}, \qquad D_{\text{avail}} = D_{\text{clear}} - \delta_{\text{loc}} - \delta_{\text{margin}} - \epsilon_{\text{track}}$$ {#eq-enforce-speed-ceiling}
+Below $a_{\text{brake}}^2/j_{\max}$ the stop never reaches $a_{\text{brake}}$ and its distance is no longer quadratic in $v$; MLSysIM then solves @eq-enforce-stopping-envelope numerically. \ref{nbk-enforcement-speed-ceiling} evaluates the root for the warehouse mobile manipulator at the rack end.
+
+::: {#nbk-enforcement-speed-ceiling .callout-notebook title="The ceiling the budget sets"}
+
+**Problem**: The warehouse mobile manipulator approaches the rack end with every stopping term of @tbl-enforcement-stopping-budget accounted except speed. What is the highest speed at which the jerk-limited stop still fits the clear distance, and how much clearance does a candidate aisle speed of `{python} EnforcementStoppingBudget.v_aisle_str` leave?
+
+**Variables**:
+
+* $D_{\text{clear}} =$ `{python} EnforcementStoppingBudget.d_clear_str` (Illustrative; clear distance at the rack end).
+* $\delta_{\text{loc}} + \delta_{\text{margin}} =$ `{python} EnforcementStoppingBudget.delta_loc_str` $+$ `{python} EnforcementStoppingBudget.delta_margin_str` (Illustrative localization bound; chosen protective clearance), and $\epsilon_{\text{track}} =$ `{python} EnforcementStoppingBudget.inset_str` (Illustrative; the qualification target of @sec-enforcement-handoff).
+* $a_{\text{brake}} =$ `{python} EnforcementStoppingBudget.a_brake_str` (Illustrative; credible loaded deceleration on a dry floor) and $j_{\max} =$ `{python} EnforcementStoppingBudget.j_brake_str` (Derived; the peak jerk of the reference $C^2$ polynomial).
+* $\tau_{\text{delay}} =$ `{python} EnforcementStoppingBudget.tau_delay_str` (Derived; observation age plus lease path plus brake onset, excluding $\Delta_{\text{da}}$).
+* Drive limit `{python} EnforcementStoppingBudget.v_drive_str` (Illustrative).
+
+**Math**: The fixed allowances leave $D_{\text{avail}} =$ `{python} EnforcementStoppingBudget.d_clear_mm_str` $-$ `{python} EnforcementStoppingBudget.overhead_all_str` $=$ `{python} EnforcementStoppingBudget.d_avail_str`. The jerk ramps lengthen the delay to $\tau' =$ `{python} EnforcementStoppingBudget.tau_delay_str` $+$ `{python} EnforcementStoppingBudget.ramp_delay_str` $=$ `{python} EnforcementStoppingBudget.tau_eff_str`, so $a_{\text{brake}}\tau' =$ `{python} EnforcementStoppingBudget.a_tau_str` m/s. Under the square root of @eq-enforce-speed-ceiling, $(a_{\text{brake}}\tau')^2 =$ `{python} EnforcementStoppingBudget.a_tau_sq_str` and $2a_{\text{brake}}D_{\text{avail}} =$ `{python} EnforcementStoppingBudget.two_a_d_str` (both in m²/s²), whose sum has root `{python} EnforcementStoppingBudget.root_term_str` m/s; subtracting `{python} EnforcementStoppingBudget.a_tau_str` m/s gives the ceiling. At `{python} EnforcementStoppingBudget.v_aisle_str` the terms of @tbl-enforcement-stopping-budget sum to `{python} EnforcementStoppingBudget.total_aisle_str`, and the remainder divided by the speed is the timing allowance.
+
+**Result**: $v_{\max} =$ `{python} EnforcementStoppingBudget.ceiling_str`, below the `{python} EnforcementStoppingBudget.v_drive_str` drive limit. The candidate aisle speed leaves `{python} EnforcementStoppingBudget.spare_str` of spare, equivalent to `{python} EnforcementStoppingBudget.t_latest_str` of unallocated delay.
+
+**Systems insight**: The irreversibility test $d_{\text{stop}} \le D_{\text{clear}}$, not the motor, sets the speed. The drive limit fails the finished budget, and the ceiling moves only through the terms under the square root and in $\tau'$: clearance, credible deceleration, the fixed allowances, and delay. Every millisecond a later chapter adds to the path spends the `{python} EnforcementStoppingBudget.t_latest_str` allowance, not a new one.
+
+:::
+
+We select `{python} EnforcementStoppingBudget.v_aisle_str` as a candidate below that ceiling. Its `{python} EnforcementStoppingBudget.spare_str` of spare is the only clearance left for any unaccounted delay or additional reserve.
 
 That remainder is small against the failures it must absorb. Were the chunk lease left to the host to honor, a last proposal that kept its authority for `{python} EnforcementStoppingBudget.t_stall_str` instead of the `{python} EnforcementLeaseStop.lease_ms_str` lease would add `{python} EnforcementStoppingBudget.stall_added_str` to the stop and carry the base `{python} EnforcementStoppingBudget.stall_breach_str` past the clear distance at the rack end, which is why the MCU enforces the lease itself (@sec-enforcement-authority-refuse).
 
@@ -1113,9 +1169,28 @@ where $J$ is mechanism inertia and $\tau_{\max}$ is the peak dynamic torque limi
 
 Gravitational and dynamic bias is directionally asymmetric. When motion is against gravity (such as during an upward arm swing), gravitational bias assists motor braking, yielding $\alpha_{\text{net}} = (\tau_{\max} + \tau_{\text{bias}}) / J$. Conversely, when moving in the direction of the bias (a descending arm carrying a payload toward a workstation), gravity opposes deceleration, collapsing braking headroom to $\alpha_{\text{net}} = (\tau_{\max} - \tau_{\text{bias}}) / J$. Because safety certificates must guarantee forward invariance in the worst-case physical direction, the enforcer must evaluate $\alpha_{\text{net}}$ with directional sign awareness, rather than treating braking authority as an isotropic scalar.
 
-Consider the warehouse mobile manipulator's arm carrying the mug from the takeaway conveyor down toward the coworker at the packing station, with the loaded joint descending at an angular velocity $\omega_0 =$ `{python} EnforcementAuthorityLoss.joint_speed_str` $\text{rad/s}$ (the scenario's values are illustrative; see the Reader Guide). The effective link length is $\ell =$ `{python} EnforcementAuthorityLoss.link_length_str`, so the tool point moves at `{python} EnforcementAuthorityLoss.tcp_speed_str`, inside the arm's `{python} EnforcementAuthorityLoss.tcp_limit_str` free-space limit; only the final approach to the coworker's hand runs at the far lower handover speed that @sec-enforcement-telemetry records. The joint inertia with the mug is $J =$ `{python} EnforcementAuthorityLoss.inertia_str`, and the joint's peak torque is $\tau_{\max} =$ `{python} EnforcementAuthorityLoss.torque_limit_str`. With no gravitational bias ($\tau_{\text{bias}} = 0$), the whole peak torque is available for braking, and the angular deceleration is $\alpha_{\text{nom}} = \tau_{\max}/J =$ `{python} EnforcementAuthorityLoss.alpha_nom_str` $\text{rad/s}^2$. The stopping angle from $\omega_0$ is $\Delta \theta_{\text{nom}} = \omega_0^2 / (2 \alpha_{\text{nom}}) =$ `{python} EnforcementAuthorityLoss.angle_nom_str` $\text{rad}$ (`{python} EnforcementAuthorityLoss.angle_nom_deg_str`$^\circ$), which moves the tool point $d_{\text{tool,nom}} = \ell \Delta \theta_{\text{nom}} =$ `{python} EnforcementAuthorityLoss.d_nom_str` along its arc.
+Consider the warehouse mobile manipulator's arm carrying the mug from the takeaway conveyor down toward the coworker at the packing station. The tool point moves at `{python} EnforcementAuthorityLoss.tcp_speed_str`, inside the arm's `{python} EnforcementAuthorityLoss.tcp_limit_str` free-space limit; only the final approach to the coworker's hand runs at the far lower handover speed that @sec-enforcement-telemetry records. \ref{nbk-enforcement-gravity-braking-tax} prices the descent's braking with and without the gravitational bias.
 
-During the descent, however, the arm's own geometry and the mug load the joint with a downward bias of $\tau_{\text{bias}} =$ `{python} EnforcementAuthorityLoss.bias_str`, `{python} EnforcementAuthorityLoss.bias_pct_str` of its peak torque. By @eq-enforce-effective-deceleration, the net torque left for braking is $\tau_{\max} - \tau_{\text{bias}} =$ `{python} EnforcementAuthorityLoss.net_torque_str`, and the angular deceleration falls fourfold to $\alpha_{\text{net}} =$ `{python} EnforcementAuthorityLoss.alpha_eff_str` $\text{rad/s}^2$. The stopping angle grows fourfold to `{python} EnforcementAuthorityLoss.angle_eff_str` $\text{rad}$ (`{python} EnforcementAuthorityLoss.angle_eff_deg_str`$^\circ$), and the tool travels `{python} EnforcementAuthorityLoss.d_eff_str`, an unbudgeted overrun of `{python} EnforcementAuthorityLoss.overrun_str`. If the enforcer evaluates barrier envelopes with the datasheet torque $\tau_{\max}$ rather than the net headroom $\tau_{\max} - \tau_{\text{bias}}$, the real stop runs `{python} EnforcementAuthorityLoss.overrun_str` past the predicted one. Whether that overrun ends on the station surface depends on the clearance at which braking begins, which the barrier of @sec-enforcement-safe-sets-conditional-permission evaluates. The coworker's hand must never come within the arm's biased stop of `{python} EnforcementAuthorityLoss.d_eff_str` plus its blind travel before the handover channel engages. @Fig-12-arm-bias-braking draws the joint and the torque each direction leaves for braking.
+::: {#nbk-enforcement-gravity-braking-tax .callout-notebook title="The gravity braking tax"}
+
+**Problem**: The loaded joint descends toward the packing station at $\omega_0$. How far does the tool point travel before the joint stops when the whole peak torque brakes, and how far when gravity on the arm and mug holds part of it?
+
+**Variables**:
+
+* $\omega_0 =$ `{python} EnforcementAuthorityLoss.joint_speed_str` rad/s and $\ell =$ `{python} EnforcementAuthorityLoss.link_length_str` (Illustrative; the joint speed and effective link length of the scenario, see the Reader Guide).
+* $J =$ `{python} EnforcementAuthorityLoss.inertia_str` (Illustrative; joint inertia with the mug).
+* $\tau_{\max} =$ `{python} EnforcementAuthorityLoss.torque_limit_str` (Datasheet; peak torque of the registered arm's axes 1 to 4).
+* $\tau_{\text{bias}} =$ `{python} EnforcementAuthorityLoss.bias_str`, `{python} EnforcementAuthorityLoss.bias_pct_str` of peak torque (Illustrative; gravity on the arm and mug in the direction of motion).
+
+**Math**: With no bias, $\alpha_{\text{nom}} = \tau_{\max}/J =$ `{python} EnforcementAuthorityLoss.alpha_nom_str` rad/s², the stopping angle is $\omega_0^2/(2\alpha_{\text{nom}}) =$ `{python} EnforcementAuthorityLoss.angle_nom_str` rad (`{python} EnforcementAuthorityLoss.angle_nom_deg_str`$^\circ$), and the tool point travels $\ell\,\Delta\theta =$ `{python} EnforcementAuthorityLoss.d_nom_str`. On the descent, @eq-enforce-effective-deceleration leaves $\tau_{\max} - \tau_{\text{bias}} =$ `{python} EnforcementAuthorityLoss.net_torque_str` for braking, so $\alpha_{\text{net}} =$ `{python} EnforcementAuthorityLoss.alpha_eff_str` rad/s², the stopping angle is `{python} EnforcementAuthorityLoss.angle_eff_str` rad (`{python} EnforcementAuthorityLoss.angle_eff_deg_str`$^\circ$), and the tool travels `{python} EnforcementAuthorityLoss.d_eff_str`.
+
+**Result**: The descending stop is four times the unbiased one, an unbudgeted overrun of `{python} EnforcementAuthorityLoss.overrun_str` for an enforcer that assumes the datasheet torque.
+
+**Systems insight**: Stopping distance scales as $1/\alpha_{\text{net}}$, so a bias that takes `{python} EnforcementAuthorityLoss.bias_pct_str` of the torque quadruples the braking term of $d_{\text{stop}}$ at the same speed. The certificate must use the net authority in the worst direction, not the actuator's rating.
+
+:::
+
+Whether that overrun ends on the station surface depends on the clearance at which braking begins, which the barrier of @sec-enforcement-safe-sets-conditional-permission evaluates. The coworker's hand must never come within the arm's biased stop of `{python} EnforcementAuthorityLoss.d_eff_str` plus its blind travel before the handover channel engages. @Fig-12-arm-bias-braking draws the joint and the torque each direction leaves for braking.
 
 ::: {#fig-12-arm-bias-braking fig-env="figure" fig-pos="t" fig-cap="**Gravity decides how much braking is left**: (a) On the way down, gravity on the arm and mug loads the joint with `{python} EnforcementAuthorityLoss.bias_str` in the direction of motion, against the motor's `{python} EnforcementAuthorityLoss.torque_limit_str` peak. (b) The same motor leaves `{python} EnforcementAuthorityLoss.net_torque_str` for braking on the descent, a quarter of the unbiased case, so the tool stops in `{python} EnforcementAuthorityLoss.d_eff_str` instead of `{python} EnforcementAuthorityLoss.d_nom_str`; moving up, gravity adds to the braking torque. The certificate must use the descending case." fig-alt="Two panels. (a) Sketch of a loaded arm joint: a link runs down and to the right from a pivot to a payload with a gravity arrow m g. A red curved arrow labeled tau bias 65.25 newton meters, gravity, turns clockwise with the descending motion; a green curved arrow labeled tau max 87 newton meters, motor, braking, turns counterclockwise; a black arrow at the payload marks omega, descending. (b) Horizontal bars of torque left for braking: no bias 87.00 newton meters, deceleration 29.00 radians per second squared, tool stops in 19.86 millimeters; descending, with gravity, 21.75 newton meters, 7.25, stops in 79.45 millimeters, in red; ascending, against gravity, 152.25 newton meters, 50.75, stops in 11.35 millimeters, in green."}
 
@@ -1225,7 +1300,7 @@ A Control Barrier Function\index{Control barrier function}, as formulated in @se
 Consider how the stopping envelope, and the actuator authority beneath it, bound permissible motion:
 
 - [ ] **Quadratic envelope scaling**: Can you explain why the stopping budget grows faster than speed, so that the finished budget, rather than the drive limit, sets the aisle speed, and why no planning policy can bypass this kinematic floor?
-- [ ] **Transport lag vs. braking power**: Can you distinguish between the spatial cost of computational transport delay ($v \cdot \tau_{\text{delay}}$) and active braking ($v^2 / 2 a_{\text{brake}}$), identifying which term dominates at low crawling speeds vs. high transit speeds?
+- [ ] **Transport lag vs. braking estimate**: At the `{python} EnforcementStoppingBudget.v_aisle_str` aisle speed, can you compute the clearance spent during $\tau_{\text{delay}}$ ($v\,\tau_{\text{delay}}$) and during constant-deceleration braking ($v^2/2a_{\text{brake}}$), and find the speed below which the delay term dominates?
 - [ ] **Effective deceleration collapse**: Can you describe the physical mechanism that causes stopping distance to quadruple when steady-state gravity consumes `{python} EnforcementAuthorityLoss.bias_pct_str` of peak actuator torque?
 - [ ] **Dynamic safe set contraction**: Can you explain why the permission path must actively shrink the admissible state space when an actuator approaches thermal or electrical saturation, rather than waiting for tracking error to breach a hard limit?
 :::
@@ -1241,10 +1316,20 @@ The stopping budget already defines a physical margin. A control barrier functio
 A **safe set**\index{Safe set} collects the states for which a scalar certificate remains nonnegative. Its boundary has zero margin; its interior has positive margin. For the arm, position and speed must both enter the certificate because the same position can admit a slow approach and reject a fast one:
 $$\mathcal{C} = \{\mathbf{x} \in \mathcal{X} \mid h(\mathbf{x}) \ge 0\}, \quad \partial \mathcal{C} = \{\mathbf{x} \in \mathcal{X} \mid h(\mathbf{x}) = 0\}, \quad \text{Int}(\mathcal{C}) = \{\mathbf{x} \in \mathcal{X} \mid h(\mathbf{x}) > 0\}.$$
 Forward invariance of $\mathcal{C}$ is the physical counterpart to an **inductive loop invariant**:
-$$h(\mathbf{x}_0) \ge 0 \quad \land \quad \dot{h}(\mathbf{x}, \mathbf{u}) \ge -\kappa(h(\mathbf{x})) \quad \implies \quad h(\mathbf{x}_t) \ge 0 \quad \forall t \ge 0.$$
+$$h(\mathbf{x}_0) \ge 0 \quad \land \quad \dot{h}(\mathbf{x}, \mathbf{u}) \ge -\kappa(h(\mathbf{x})) \quad \implies \quad h(\mathbf{x}_t) \ge 0 \quad \forall t \ge 0.$$ {#eq-enforce-forward-invariance}
 The implication is a continuous-time result under the model and feasibility assumptions. Nagumo's theorem[^fn-nagumo-boundary-sampling] [@blanchini1999set] supplies the boundary interpretation: motion at the boundary must point tangent to or into the set. The rate function $\kappa(\cdot)$, an extended class-$\mathcal{K}$ function, increases with margin and vanishes at zero, allowing faster approach deep inside the set and requiring nondecreasing margin at its boundary. Sampling, uncertain state, and delayed torque delivery require additional margins before this argument can describe a physical implementation.
 
 [^fn-nagumo-boundary-sampling]: **Nagumo's Theorem**: @nagumo1942lage proved that, when solutions are unique, a closed set is invariant exactly when at every boundary point the vector field points into the set or along its boundary; viability theory later rediscovered and generalized the result. It is a statement about the continuous-time boundary. A controller that checks it only at its control-tick samples needs the inter-sample buffer of @sec-enforcement-fallacies-pitfalls before the statement describes the machine. \index{Nagumo's theorem!sampled enforcement}
+
+::: {#dfn-enforcement-control-barrier-function .callout-definition title="Control barrier function"}
+
+***Control barrier function***\index{Control barrier function!definition} is a scalar function $h(\mathbf{x})$ of the plant state whose nonnegative region is the safe set $\mathcal{C}$ and whose rate of change the control input can influence, so that admitting only inputs with $\dot{h} \ge -\kappa(h)$ keeps a state that starts in $\mathcal{C}$ inside it (forward invariance, @eq-enforce-forward-invariance) while the model, actuator, and timing assumptions hold.
+
+1.  **Significance**: The function turns a stopping margin into a constraint on the next command. For the descending arm of @sec-enforcement-exhausted-authority its zero set lies where the remaining tool clearance equals the biased stop of `{python} EnforcementAuthorityLoss.d_eff_str`; closer than that, no admissible torque keeps the state in $\mathcal{C}$.
+2.  **Distinction**: A Lyapunov function certifies convergence toward a point; a barrier function certifies that the state never leaves a region. The barrier is the certificate, and the least-change filter of @sec-enforcement-minimal-intervention is one way to enforce it.
+3.  **Common pitfall**: Writing $h$ as raw geometric distance. Distance has relative degree two for torque, so the input has no leverage on $\dot{h}$ at the boundary and the filter acts only after momentum has made contact inevitable; the barrier must carry speed and braking authority, as @sec-enforcement-kinetic-barrier-certificates shows.
+
+:::
 
 ### Kinetic barrier certificates and relative degree {#sec-enforcement-kinetic-barrier-certificates}
 
@@ -1476,21 +1561,9 @@ class EnforcementCycleBudget:
     window_ms_str = fmt_latency(window, unit=millisecond, precision=0)
 ```
 
-For the already-derived torque half-space, the enforcer solves a constrained least-change problem [@ames2016control]. The tracker supplies the nominal effort; the barrier and actuator limits constrain the result. A combined tracking-and-barrier optimization can instead soften tracking convergence when the objectives conflict, as derived in @sec-appendix-control-lyapunov. That additional controller design is not required to implement the filter here:
+For the already-derived torque half-space, the enforcer solves a constrained least-change problem, the **CBF-QP safety filter**\index{CBF-QP safety filter} [@ames2016control]. The tracker supplies the nominal effort; the barrier and actuator limits constrain the result. A combined tracking-and-barrier optimization can instead soften tracking convergence when the objectives conflict, as derived in @sec-appendix-control-lyapunov. That additional controller design is not required to implement the filter here:
 $$\min_{\mathbf{u} \in \mathbb{R}^m} \frac{1}{2}\|\mathbf{u} - \mathbf{u}_{\text{nom}}\|^2 \quad \text{s.t.} \quad \mathbf{a}(\mathbf{x})^\top \mathbf{u} \le b(\mathbf{x}), \quad \mathbf{u}_{\min} \le \mathbf{u} \le \mathbf{u}_{\max}$$ {#eq-enforce-cbf-qp}
 where the half-space normal and threshold are defined by the directional derivatives $\mathbf{a}(\mathbf{x})^\top = -L_g h(\mathbf{x})$ and $b(\mathbf{x}) = L_f h(\mathbf{x}) + \kappa(h(\mathbf{x}))$ derived in @sec-enforcement-kinetic-barrier-certificates, matching the single-axis torque constraint of @eq-enforce-kinetic-torque, and $[\mathbf{u}_{\min}, \mathbf{u}_{\max}]$ represents the verified actuator torque envelope. The selected implementation allocates `{python} EnforcementCycleBudget.qp_us_str` $\mu\text{s}$ to this solve. Dedicated memory and a fixed iteration cap support that target; qualification must establish completion or a timely fallback under the admitted constraint set.
-
-::: {#dfn-enforcement-control-barrier-function-cbf-qp .callout-definition title="Control barrier function safety filter"}
-
-***Control barrier function safety filter***\index{Control barrier function!definition}\index{CBF-QP safety filter!definition} is the constrained optimization filter that projects unverified nominal control proposals $\mathbf{u}_{\text{nom}}$ onto an admissible input set whose constraints preserve the state set $\mathcal{C} = \{\mathbf{x} \mid h(\mathbf{x}) \ge 0\}$ under the stated assumptions, by solving the quadratic program:
-$$\min_{\mathbf{u} \in \mathbb{R}^m} \frac{1}{2}\|\mathbf{u} - \mathbf{u}_{\text{nom}}\|^2 \quad \text{s.t.} \quad L_f h(\mathbf{x}) + L_g h(\mathbf{x}) \mathbf{u} \ge -\kappa(h(\mathbf{x})), \quad \mathbf{u}_{\min} \le \mathbf{u} \le \mathbf{u}_{\max}$$
-that enforces linear braking half-space constraints ($L_f h(\mathbf{x}) + L_g h(\mathbf{x}) \mathbf{u} \ge -\kappa(h(\mathbf{x}))$), leaving candidate inputs that satisfy the safe boundary untouched and minimally projecting violating inputs in control space within the implementation's qualified execution budget.
-
-1.  **Significance**: A CBF-QP filter separates high-level policy innovation from low-level safety enforcement. The learned model is free to explore complex manipulation or navigation strategies, while the deterministic enforcer can preserve a validated viable set while its physical assumptions remain true.
-2.  **Distinction**: Unlike a heuristic clamp that saturates control channels independently (destroying multi-axis coordination), a CBF-QP filter performs an optimal orthogonal projection in control space, minimizing the chosen torque-space distance; it does not automatically preserve a Cartesian path.
-3.  **Common pitfall**: Formulating barrier constraints using raw geometric coordinates without accounting for relative degree ($r = 2$) or braking inertia. If the barrier does not incorporate stopping distance ($\Delta d_{\text{stop}} = v\,\tau_{\text{delay}} + v^2 / 2a_{\text{brake}}$), the filter intervenes too late, after the vehicle's momentum has already made a boundary collision inevitable.
-
-:::
 
 ### Closed-form quadratic programming and torque projection {#sec-enforcement-qp-projection}
 
@@ -1653,6 +1726,8 @@ from mlsysim.fmt import (
     fmt_stiffness,
     fmt_multiple,
     fmt_sci_qty,
+    fmt,
+    fmt_int,
     check,
 )
 
@@ -1691,6 +1766,10 @@ class EnforcementContactForce:
     f_handover_clamped = calc_transient_impact_force(v_handover, m_eff, k_hand).to(newton)
     v_ceiling = calc_transient_contact_speed_limit(f_contact, m_eff, k_hand, human_mass=m_hand).to(meter / second)
     v_ceiling_clamped = calc_transient_contact_speed_limit(f_contact, m_eff, k_hand).to(meter / second)
+    # Notebook operands: sqrt(k_H * mu) for the free and the clamped hand (N per m/s)
+    imp_free = ((k_hand * m_red) ** 0.5).to(newton / (meter / second))
+    imp_clamped = ((k_hand * m_eff) ** 0.5).to(newton / (meter / second))
+    clamp_ratio = (imp_clamped / imp_free).to("dimensionless").magnitude
 
     # ┌── 3. GUARD ──────────────────────────────────────────────────────────
     check(abs(f_cmd.to(newton).magnitude - 39.0) < 1e-9, "Latch force at brake onset, guarded approach, is 39 N.")
@@ -1709,6 +1788,9 @@ class EnforcementContactForce:
     check(abs(v_ceiling.magnitude - 0.2415) < 5e-5, "Free-hand ceiling is 0.24 m/s.")
     check(abs(v_ceiling_clamped.magnitude - 0.0527) < 5e-5, "Clamped-hand ceiling is 0.053 m/s.")
     check(v_ceiling_clamped < v_handover < v_ceiling, "The handover cap sits between the clamped and free-hand ceilings.")
+    check(abs((v_handover * imp_free).to(newton).magnitude - f_handover.magnitude) < 1e-9, "Notebook: v * sqrt(k mu) reproduces the free-hand force.")
+    check(abs((f_contact / imp_clamped).to(meter / second).magnitude - v_ceiling_clamped.magnitude) < 1e-9, "Notebook: F_h / sqrt(k m_eff) reproduces the clamped ceiling.")
+    check(4.0 < clamp_ratio < 5.0, "Clamping multiplies the force by between four and five.")
     # margin_handover_clamp_force_envelope.svg fig-alt hand-types 20.7 N, 94.9 N and the 50 N criterion.
     check(abs(f_contact.to(newton).magnitude - 50.0) < 1e-9, "The handover force criterion is 50 N.")
 
@@ -1739,6 +1821,15 @@ class EnforcementContactForce:
     f_handover_clamped_str = fmt_force(f_handover_clamped, precision=1)
     v_ceiling_str = fmt_velocity(round(v_ceiling.magnitude, 2) * meter / second, unit=meter / second, precision=2)
     v_ceiling_clamped_str = fmt_velocity(round(v_ceiling_clamped.magnitude, 3) * meter / second, unit=meter / second, precision=3)
+    k_hand_nm_str = fmt(k_hand.to(newton / meter).magnitude, precision=0, commas=True)
+    m_red_val_str = fmt(m_red.magnitude, precision=3)
+    m_eff_val_str = fmt(m_eff.to(kilogram).magnitude, precision=0)
+    m_hand_val_str = fmt(m_hand.to(kilogram).magnitude, precision=1)
+    v_handover_val_str = fmt(v_handover.to(meter / second).magnitude, precision=2)
+    f_contact_val_str = fmt(f_contact.to(newton).magnitude, precision=0)
+    imp_free_str = fmt_int(round(imp_free.magnitude))
+    imp_clamped_str = fmt_int(round(imp_clamped.magnitude))
+    clamp_ratio_str = fmt(clamp_ratio, precision=1)
 ```
 
 At the door the quantity that matters is how fast force rises. Against a strike plate of stiffness $k_{\text{latch}}$, an arm approaching at $v_{\text{latch}}$ raises the contact force at $dF/dt = k_{\text{latch}}\,v_{\text{latch}}$, which at the guarded `{python} EnforcementContactForce.v_latch_str` against the `{python} EnforcementContactForce.k_latch_str` plate is `{python} EnforcementContactForce.df_dt_nms_str`. The contact tripwire fires at $F_{\text{trip}} =$ `{python} EnforcementContactForce.f_trip_str`, but the contact loop needs $T_c =$ `{python} EnforcementContactForce.t_contact_str` for detection, command delivery, and torque rise, and the plate keeps compressing by $v_{\text{latch}} T_c$ before deceleration begins. The force at physical braking onset is therefore
@@ -1851,7 +1942,28 @@ The coworker's hand is the opposite case, a contact the task tolerates only up t
 $$F_{\text{unbraked}} = v\,\sqrt{k_H\,\mu}, \qquad \mu = \left(\frac{1}{m_H} + \frac{1}{m_{\text{eff}}}\right)^{-1}$$ {#eq-release-unbraked-force}
 The formulation follows from conservation of momentum and energy. Momentum conservation keeps the pair's common (center-of-mass) motion unchanged through the contact, so only the kinetic energy of the relative motion, $\frac{1}{2}\mu v^2$ for a closing speed $v$, can compress the hand. Equating it to the peak elastic energy stored in the hand, $\frac{1}{2}k_H x_{\max}^2$, gives $x_{\max} = v\sqrt{\mu/k_H}$ and a peak force $F_{\text{unbraked}} = k_H x_{\max}$. For this hand and arm, $\mu$ is `{python} EnforcementContactForce.m_red_str`, because the light hand dominates the sum; a clamped hand is the limit $m_H \to \infty$, in which $\mu$ becomes $m_{\text{eff}}$. Solved for speed at a force criterion $F_h$, the equation gives the channel ceiling $v = F_h/\sqrt{k_H\,\mu}$. The peak follows the assumed masses and stiffness; the model establishes neither an impact duration nor a pressure or injury limit.
 
-At the arm's `{python} EnforcementContactForce.tcp_limit_str` free-space limit even the transient model predicts `{python} EnforcementContactForce.f_tcp_str`, or `{python} EnforcementContactForce.f_ratio_mult_str` the `{python} EnforcementContactForce.f_contact_str` criterion, so the arm cannot enter an unseparated contact at that speed. The two contact cases then bound the handover very differently. For a free hand the criterion admits up to `{python} EnforcementContactForce.v_ceiling_str`, and at the chosen `{python} EnforcementContactForce.v_handover_str` the model predicts `{python} EnforcementContactForce.f_handover_str`, inside the criterion. For a clamped hand it admits only `{python} EnforcementContactForce.v_ceiling_clamped_str`, and the same approach delivers `{python} EnforcementContactForce.f_handover_clamped_str`, which fails. The handover channel is therefore a transient-contact ceiling. It holds only while the handover geometry excludes clamping, with the handover point in free space and no rack upright, tote edge, or link of the arm within reach of the hand along the approach.
+At the arm's `{python} EnforcementContactForce.tcp_limit_str` free-space limit even the transient model predicts `{python} EnforcementContactForce.f_tcp_str`, or `{python} EnforcementContactForce.f_ratio_mult_str` the `{python} EnforcementContactForce.f_contact_str` criterion, so the arm cannot enter an unseparated contact at that speed. At the handover speed the two contact cases bound the approach very differently (\ref{nbk-enforcement-clamped-hand-penalty}).
+
+::: {#nbk-enforcement-clamped-hand-penalty .callout-notebook title="The clamped-hand penalty"}
+
+**Problem**: The arm approaches the coworker's hand at the handover speed. What peak force does @eq-release-unbraked-force predict for a free hand that recoils and for a hand clamped against a rack upright, and what approach speed does the force criterion allow in each case?
+
+**Variables**:
+
+* $m_{\text{eff}} =$ `{python} EnforcementContactForce.m_eff_str` (Derived; the arm's effective mass at the tool center point).
+* $m_H =$ `{python} EnforcementContactForce.m_hand_str` and $k_H =$ `{python} EnforcementContactForce.k_hand_str` (Datasheet; the ISO/TS 15066 hand body model).
+* $v =$ `{python} EnforcementContactForce.v_handover_str` (Chosen; the handover approach under `accept_item`).
+* $F_h =$ `{python} EnforcementContactForce.f_contact_str` (Chosen; the handover force criterion).
+
+**Math**: For a free hand, $\mu = (1/$`{python} EnforcementContactForce.m_hand_val_str` $+ 1/$`{python} EnforcementContactForce.m_eff_val_str`$)^{-1} =$ `{python} EnforcementContactForce.m_red_val_str` kg, and with $k_H =$ `{python} EnforcementContactForce.k_hand_nm_str` N/m the stiffness term is $\sqrt{k_H\mu} =$ `{python} EnforcementContactForce.imp_free_str` N per m/s. The peak force is $v\sqrt{k_H\mu} =$ `{python} EnforcementContactForce.v_handover_val_str` $\times$ `{python} EnforcementContactForce.imp_free_str` $=$ `{python} EnforcementContactForce.f_handover_str`, and the criterion admits $F_h/\sqrt{k_H\mu} =$ `{python} EnforcementContactForce.f_contact_val_str` $/$ `{python} EnforcementContactForce.imp_free_str`, or `{python} EnforcementContactForce.v_ceiling_str`. A clamped hand cannot recoil, so $\mu$ becomes $m_{\text{eff}}$ and $\sqrt{k_H m_{\text{eff}}} =$ `{python} EnforcementContactForce.imp_clamped_str` N per m/s. The same approach then delivers `{python} EnforcementContactForce.v_handover_val_str` $\times$ `{python} EnforcementContactForce.imp_clamped_str` $=$ `{python} EnforcementContactForce.f_handover_clamped_str`, and the criterion admits only `{python} EnforcementContactForce.f_contact_val_str` $/$ `{python} EnforcementContactForce.imp_clamped_str`, or `{python} EnforcementContactForce.v_ceiling_clamped_str`.
+
+**Result**: The free hand sees `{python} EnforcementContactForce.f_handover_str`, inside the criterion; the clamped hand sees `{python} EnforcementContactForce.f_handover_clamped_str`, which fails it.
+
+**Systems insight**: Clamping multiplies the force at any speed by $\sqrt{m_{\text{eff}}/\mu} =$ `{python} EnforcementContactForce.clamp_ratio_str`, because the whole arm-side mass, not the light hand, sets the collision. A speed ceiling derived for a free hand is therefore a geometric premise as much as a kinematic one.
+
+:::
+
+The handover channel is therefore a transient-contact ceiling. It holds only while the handover geometry excludes clamping, with the handover point in free space and no rack upright, tote edge, or link of the arm within reach of the hand along the approach.
 
 ::: {.column-margin}
 ![](images/svg/margin_handover_clamp_force_envelope.svg){width="100%" fig-alt="Two horizontal bars of peak contact force at the handover speed: a free hand at 20.7 newtons, below a red dashed line at the 50 newton criterion, and a clamped hand at 94.9 newtons, in red, past it."}
@@ -1899,6 +2011,17 @@ In this heterogeneous design, the shield executes inside a `{python} Enforcement
 [^fn-activeset-qp-dual]: **Active-Set QP**: An active-set solver guesses which constraints hold with equality, solves the resulting linear system, and adds or drops one constraint per iteration. Dual variants such as that of @goldfarb1983numerically start from the unconstrained optimum, here the nominal command itself, and add only violated constraints, so a proposal that already satisfies every barrier costs almost nothing. The iteration count is bounded by the combinations of the constraint set rather than by a clock, so a fixed iteration cap bounds steps while the time per step must still be measured under interference. \index{Quadratic programming!active-set method}
 
 Stage 5 is also where refusal takes effect. If the chunk lease has expired, the host heartbeat has fallen silent, the shared drive bus reports undervoltage, tracking error $\|e(t)\|$ exceeds $\epsilon_{\text{track}}$, actuator saturation renders the feasible control set empty ($\mathcal{U}_{\text{safe}} = \emptyset$), or an operating-contract detector such as the disturbance observer or the solver deadline trips, the output selector withholds the admitted command, revokes policy authority, and selects the state-matched stop. At standstill, lease or heartbeat expiry selects HOLD only while powered support remains available. Undervoltage instead requires a qualified transition to mechanical restraint before that support expires. In motion, STOP under undervoltage remains conditional on drive survival.
+
+::: {#chk-enforcement-barrier-filter-budget .callout-checkpoint title="Barrier, projection, and cycle budget"}
+
+The barrier fixes which commands preserve the stop; the filter and its cycle decide whether the chosen command arrives in time.
+
+- [ ] **Relative degree**: Can you explain why a barrier on raw distance gives torque no leverage at the boundary, and what the kinetic barrier of @eq-enforce-kinetic-barrier adds to restore it?
+- [ ] **Projection vs. clamp**: Can you explain why clamping each joint separately can leave a coupled half-space violated, while @eq-enforce-cbf-projection satisfies it with the smallest torque change?
+- [ ] **Projection estimate**: Treat the latch approach as a one-dimensional speed command whose half-space is the `{python} EnforcementLatchFilter.v_latch_str` target-ODD ceiling. Can you compute $\lambda^*$ and the admitted speed when the chunk policy proposes `{python} EnforcementLatchFilter.v_latch_high_str`?
+- [ ] **Timing premise**: Which of the five forward-invariance conditions do the declared `{python} EnforcementCycleBudget.wcet_us_str` $\mu\text{s}$ WCET and the `{python} EnforcementCycleBudget.deadline_us_str` $\mu\text{s}$ deadline defend, and what must select the fallback when a cycle overruns?
+
+:::
 
 Every stage of this cycle assumes that the solve returns a feasible command. When saturation empties the admissible torque set, the lease lapses, or the cycle overruns its deadline, projection has nothing to return, and the permission path must already hold a response it can execute without the proposer.
 
@@ -2655,6 +2778,24 @@ When a lease lapses or a checked premise fails, the enforcer selects a fallback 
 
 The enforcement record is where the two strands of records meet. Each entry keeps its evidence category, so the record states what the permission path assumed as plainly as what it checked.
 
+@Tbl-12-key-equations collects the equations the permission path evaluates, each with the decision it supports.
+
+| Equation                                                                                                      | What it bounds or decides                                                                        | Derived in                          |
+|:--------------------------------------------------------------------------------------------------------------|:-------------------------------------------------------------------------------------------------|:------------------------------------|
+| $v\,\tau_{\text{delay}} + d_{\text{suffix}}(v) + \delta_{\text{loc}} + \delta_{\text{margin}} + \epsilon_{\text{track}} \le D_{\text{clear}}$ | Admission: whether the plant, lagging its reference, can still stop inside the clear distance     | @eq-enforce-stopping-envelope       |
+| $v_{\max} = -a_{\text{brake}}\tau' + \sqrt{(a_{\text{brake}}\tau')^2 + 2a_{\text{brake}}D_{\text{avail}}}$     | The speed ceiling the finished budget sets, and the timing allowance left below it                | @eq-enforce-speed-ceiling           |
+| $\alpha_{\text{net}} = (\tau_{\max} - \tau_{\text{bias}})/J$                                                    | Braking authority left when gravity loads the joint in the direction of motion                    | @eq-enforce-effective-deceleration  |
+| $h(\mathbf{x}_0) \ge 0 \land \dot{h} \ge -\kappa(h) \implies h(\mathbf{x}_t) \ge 0$                           | Forward invariance of the safe set under the model, actuator, and timing assumptions              | @eq-enforce-forward-invariance      |
+| $h(D,\omega) = D - \omega^2/2\alpha_{\text{net}}$                                                              | A barrier with relative degree one: remaining clearance minus the cost to stop                   | @eq-enforce-kinetic-barrier         |
+| $\tau \le -\tau_{\text{bias}} + J\alpha_{\text{net}}(\gamma_{\text{cbf}}h/\omega - 1)$                          | The torque half-space a proposal must satisfy on the next tick                                   | @eq-enforce-kinetic-torque          |
+| $\min \tfrac{1}{2}\lVert\mathbf{u} - \mathbf{u}_{\text{nom}}\rVert^2$ s.t. $\mathbf{a}^\top\mathbf{u} \le b$    | The least-change correction of a proposal inside the actuator envelope                            | @eq-enforce-cbf-qp                  |
+| $\mathbf{u}^* = \mathbf{u}_{\text{nom}} - \lambda^*\mathbf{a}$                                                | Closed-form projection onto one active half-space                                                 | @eq-enforce-cbf-projection          |
+| $\dot{E}_{\text{tank}} = \dot{\mathbf{q}}^\top\mathbf{D}_{\text{virt}}\dot{\mathbf{q}} - \mathbf{u}^\top\dot{\mathbf{q}}$ | The work a contact controller may still inject before its energy reserve is spent            | @eq-enforce-energy-tank             |
+| $F_{\text{cmd}} = F_{\text{trip}} + k_{\text{latch}}v_{\text{latch}}T_c$                                       | Contact force already reached when braking begins at the latch                                   | @eq-release-trip-indentation        |
+| $F_{\text{unbraked}} = v\sqrt{k_H\mu}$                                                                         | Peak hand force at an approach speed, and so the handover speed ceiling for a free or clamped hand | @eq-release-unbraked-force          |
+
+: **Key equations of safety enforcement**: Each equation fixes one check or ceiling the permission path applies. Every result holds only while its inputs (delays, braking authority, bias, contact stiffness, and timing) stay inside their qualified bounds. {#tbl-12-key-equations tbl-colwidths="[42,42,16]"}
+
 ::: {.callout-takeaways title="Conditional enforcement and physical stopping"}
 * **Tracking is a bounded premise:** A steady-state error does not bound the transient, so a clearance inset needs a transient bound validated over the full maneuver in the operating envelope.
 * **The finished budget sets the speed:** Blind travel, braking under the resident stop, transient tracking error, and position-estimate error all enter one admission check, so the clear distance, not the drive limit, decides how fast the machine may move.
@@ -2684,6 +2825,141 @@ For further reading, six works trace the ideas from their foundations to current
 - @leveson1993investigating reconstructs the Therac-25 accidents and remains the standard case for why protection against a software fault cannot live only in that software.
 - @ames2019control is a tutorial on control barrier functions and their quadratic-program filters, written by the group that made the filter practical, and the natural next step after @sec-enforcement-minimal-intervention.
 - @hsu2024safetyfilter unifies control barrier functions, reachability, and backup-set filters as safety filters, and discusses how a learned policy can be trained to live with its filter, the question @sec-enforcement-thesis-bends leaves open.
+
+## Problems {#sec-enforcement-problems}
+
+```{python}
+#| label: calc-enforcement-problems
+#| echo: false
+#| warning: false
+#| message: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ END-OF-CHAPTER PROBLEM GIVENS (LEGO)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @sec-enforcement-problems.
+# │ Goal:    Print each problem's givens from the registry and the chapter's
+# │          cells, and guard the property each problem depends on, so a
+# │          changed value cannot silently turn an intended answer around.
+# │ Show:    givens only (answers live in the private instructor solutions):
+# │          a heavier tote's bias share; a stop cap; a mid clearance and a
+# │          stiffer barrier gain; a tightened joint limit; a heavier gripper;
+# │          the fulfillment AMR's registry limits and illustrative aisle; a
+# │          host-rate filter; an added and a halved delay.
+# │ How:     Reuses EnforcementStoppingBudget, EnforcementAuthorityLoss,
+# │          KineticBarrierArm, EnforcementContactForce, EnforcementLeaseStop;
+# │          ceilings via calc_scurve_max_permitted_velocity and
+# │          calc_max_permitted_velocity.
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import *
+from mlsysim.core.units import *
+from mlsysim.physics.robotics import (
+    calc_scurve_max_permitted_velocity,
+    calc_max_permitted_velocity,
+    calc_transient_contact_speed_limit,
+)
+from mlsysim.fmt import fmt, fmt_length, fmt_latency, fmt_velocity, fmt_acceleration, fmt_mass, fmt_percent, fmt_frequency, fmt_torque, check
+
+AISLE = Embodied.Scenario.WarehouseAisle
+AMR = Embodied.AMR.WarehouseAMR
+
+class EnforcementProblems:
+    """Givens for the Chapter 12 problems, with guards on the answers they imply."""
+
+    # ┌── 1. LOAD (Constants & Parameters) ─────────────────────────────────
+    S = EnforcementStoppingBudget
+    L = EnforcementAuthorityLoss
+    bias_heavy = 0.90  # category: illustrative; heavier tote's share of peak torque (P3)
+    stop_cap = 100 * millimeter  # category: illustrative; tool clearance the station allows (P3)
+    clear_mid = 150 * millimeter  # category: illustrative; tool clearance for the barrier (P4)
+    gamma_hi = 20.0 / second  # category: chosen; stiffer barrier gain (P4)
+    u2_limit = 1.5  # N·m; category: illustrative; tightened joint-2 limit (P5)
+    m_eff_heavy = 20.0 * kilogram  # category: illustrative; arm with a heavier gripper (P6)
+    amr_tau = 100 * millisecond  # category: illustrative; AMR pre-brake delay (P8)
+    amr_clear = 0.80 * meter  # category: illustrative; AMR clear distance (P8)
+    amr_loc = 50 * millimeter  # category: illustrative (P8)
+    amr_margin = 100 * millimeter  # category: chosen (P8)
+    amr_eps = 30 * millimeter  # category: illustrative (P8)
+    host_rate = 100 * hertz  # category: illustrative; host-side filter rate (P11)
+    delay_add = 50 * millisecond  # category: illustrative; latency a larger model adds (P12)
+
+    # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────
+    eps2 = 2 * AISLE.eps_track
+    ceiling_eps2 = calc_scurve_max_permitted_velocity(
+        S.d_clear, S.tau_delay, S.a_brake, S.j_brake, loc_margin=S.delta_loc, physical_margin=S.delta_margin + eps2
+    ).to(meter / second)
+    half_spare_da = (0.5 * S.spare / S.v_aisle).to(millisecond)
+    a_amr = AMR.max_acceleration
+    a_amr_loaded = (a_amr * AMR.mass / (AMR.mass + AMR.payload_capacity)).to(meter / second**2)
+    amr_ceiling = calc_max_permitted_velocity(amr_clear, amr_tau, a_amr, loc_margin=amr_loc, physical_margin=amr_margin + amr_eps).to(meter / second)
+    amr_ceiling_loaded = calc_max_permitted_velocity(amr_clear, amr_tau, a_amr_loaded, loc_margin=amr_loc, physical_margin=amr_margin + amr_eps).to(meter / second)
+    ceiling_slow = calc_scurve_max_permitted_velocity(
+        S.d_clear, S.tau_delay + delay_add, S.a_brake, S.j_brake, loc_margin=S.delta_loc, physical_margin=S.delta_margin + S.eps_track
+    ).to(meter / second)
+    ceiling_fast = calc_scurve_max_permitted_velocity(
+        S.d_clear, S.tau_delay - 0.5 * S.t_age, S.a_brake, S.j_brake, loc_margin=S.delta_loc, physical_margin=S.delta_margin + S.eps_track
+    ).to(meter / second)
+    a_desc_heavy = (L.torque_limit * (1 - bias_heavy) / L.inertia).to(1 / second**2)
+    stop_heavy = (L.link_length * L.joint_speed**2 / (2 * a_desc_heavy)).to(millimeter)
+    v_clamped_heavy = calc_transient_contact_speed_limit(AISLE.f_contact_criterion, m_eff_heavy, AISLE.k_contact_human).to(meter / second)
+    t_host = (1 / host_rate).to(millisecond)
+
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(S.v_aisle < ceiling_eps2 < S.ceiling, "P1: a doubled tracking error lowers the ceiling but still admits the aisle speed")
+    check(AISLE.t_dispatch_to_admission > half_spare_da, "P2: the allocated Delta_da spends more than half the spare")
+    check(stop_heavy > 2 * L.d_eff and stop_heavy > stop_cap > L.d_eff, "P3: the heavier tote overruns the stop cap that the mug fits")
+    check(KineticBarrierArm.clear_zero < clear_mid < KineticBarrierArm.clear_far * 2, "P4: the mid clearance lies outside the zero set")
+    check(u2_limit < 2.0, "P5: the tightened limit must cut the unbounded projection's joint-2 torque")
+    check(AISLE.v_handover > v_clamped_heavy, "P6: the heavier gripper still fails the clamped case at the handover speed")
+    check(amr_ceiling < AMR.max_velocity, "P8: the empty AMR is clearance-bound below its drive limit")
+    check(amr_ceiling_loaded < 0.6 * amr_ceiling, "P8: full payload at the same braking force cuts the ceiling by more than 40 percent")
+    check(S.v_aisle < ceiling_slow < S.ceiling < ceiling_fast, "P12: added delay lowers and a halved age raises the ceiling")
+    check((ceiling_fast - S.ceiling) < 0.05 * meter / second, "P12: halving observation age buys under 0.05 m/s")
+
+    # ┌── 4. OUTPUT (Format & Export) ────────────────────────────────────────
+    bias_heavy_str = fmt_percent(bias_heavy, precision=0, style="prose")
+    stop_cap_str = fmt_length(stop_cap, unit=millimeter, precision=0)
+    clear_mid_str = fmt_length(clear_mid, unit=millimeter, precision=0)
+    gamma_hi_str = fmt(gamma_hi.magnitude, precision=0)
+    u2_limit_str = fmt(u2_limit, precision=1)
+    m_eff_heavy_str = fmt_mass(m_eff_heavy, unit=kilogram, precision=0)
+    amr_mass_str = fmt_mass(AMR.mass, unit=kilogram, precision=0)
+    amr_payload_str = fmt_mass(AMR.payload_capacity, unit=kilogram, precision=0, commas=True)
+    amr_vmax_str = fmt_velocity(AMR.max_velocity, precision=1)
+    amr_amax_str = fmt_acceleration(a_amr, precision=0)
+    amr_tau_str = fmt_latency(amr_tau, unit=millisecond, precision=0)
+    amr_clear_str = fmt_length(amr_clear, unit=meter, precision=2)
+    amr_loc_str = fmt_length(amr_loc, unit=millimeter, precision=0)
+    amr_margin_str = fmt_length(amr_margin, unit=millimeter, precision=0)
+    amr_eps_str = fmt_length(amr_eps, unit=millimeter, precision=0)
+    host_rate_str = fmt_frequency(host_rate)
+    delay_add_str = fmt_latency(delay_add, unit=millisecond, precision=0)
+```
+
+Each problem states its givens, which come from the machine card (@tbl-01-machine-card), the aisle scenario behind it, the MLSysIM registry, or this chapter's calculations. A given marked illustrative is an assumption for the exercise, not a measurement. The tag names the kind of work, and the parenthesis names the learning objective the problem assesses.
+
+1. **[Compute]** (Stopping budget and speed ceiling) From the givens of \ref{nbk-enforcement-speed-ceiling}, evaluate @eq-enforce-speed-ceiling without the chapter's intermediate values and confirm the `{python} EnforcementStoppingBudget.ceiling_str` ceiling. Suppose worn drive bearings double the tracking bound to `{python} EnforcementTrackingBound.eps_doubled_str` without the record changing. Compute the ceiling the true bound sets, the spare and timing allowance left at the `{python} EnforcementStoppingBudget.v_aisle_str` aisle speed, and decide whether the aisle speed remains a candidate. State which detector of @sec-enforcement-handoff would expose the change.
+
+2. **[Compute]** (Stopping budget and speed ceiling) At the aisle speed, the budget leaves the `{python} EnforcementStoppingBudget.t_latest_str` timing allowance of @fig-12-capture-to-onset. (a) A reserve policy requires that at least half the spare remain after the dispatch-to-admission travel is charged. What is the largest $\Delta_{\text{da}}$ the policy admits, and does the `{python} EnforcementStoppingBudget.delta_da_str` allocation of @sec-placement-isolation-decisions meet it? (b) If the host, not the MCU, honored the `{python} EnforcementLeaseStop.lease_ms_str` lease, how long could a stalled proposer keep its last command before the stop no longer fits? (c) Why does the `{python} EnforcementLeaseStop.heartbeat_timeout_ms_str` heartbeat timeout not relieve the budget for a proposer that keeps renewing with stale evidence?
+
+3. **[Compute]** (Momentum and contact force) Repeat \ref{nbk-enforcement-gravity-braking-tax} for a heavier tote whose bias takes `{python} EnforcementProblems.bias_heavy_str` of the `{python} EnforcementAuthorityLoss.torque_limit_str` peak torque (illustrative), with the same $J$, $\ell$, and $\omega_0$. Compute the descending and ascending tool stops. The packing station leaves `{python} EnforcementProblems.stop_cap_str` of tool clearance when braking begins (illustrative). What is the largest bias, as a share of peak torque, for which the descending stop fits, and what must the enforcer do with a tote whose bias exceeds it?
+
+4. **[Compute]** (Control barrier function limits) Using the descending-arm barrier of @eq-enforce-kinetic-torque with the values of @sec-enforcement-kinetic-barrier-certificates, (a) find the tool clearance at which the barrier first demands any braking torque, (b) compute the braking it demands at `{python} EnforcementProblems.clear_mid_str`, and (c) recompute the demand at `{python} KineticBarrierArm.clear_far_str` with $\gamma_{\text{cbf}} =$ `{python} EnforcementProblems.gamma_hi_str` $\text{s}^{-1}$. Does a larger gain make the filter intervene earlier or later, and what happens to the zero set?
+
+5. **[Compute]** (Quadratic-program formulation) (a) Write the latch approach of @sec-enforcement-authority-refuse as a one-dimensional instance of @eq-enforce-cbf-projection and compute $\lambda^*$ and the admitted speed. (b) In the two-joint example of @sec-enforcement-qp-projection, tighten joint 2's actuator limit to $\pm$`{python} EnforcementProblems.u2_limit_str` N·m (illustrative). Compute the result of projecting onto the half-space and then clamping, and the solution of @eq-enforce-cbf-qp with both constraints. Compare their torque changes and explain why the enforcer must solve for the intersection.
+
+6. **[Compute]** (Momentum and contact force) (a) From @eq-release-trip-indentation, find the fastest latch approach whose force at brake onset stays at or below the `{python} EnforcementContactForce.f_lim_str` latch limit, and use @eq-release-coupled-indentation to explain why the chunk policy's `{python} EnforcementLatchFilter.v_latch_high_str` proposal, just under that speed, is still refused. (b) A heavier gripper raises the arm's effective mass at the tool center point to `{python} EnforcementProblems.m_eff_heavy_str` (illustrative). Repeat \ref{nbk-enforcement-clamped-hand-penalty} and decide whether the `{python} EnforcementContactForce.v_handover_str` handover cap still holds for a free hand and for a clamped one.
+
+7. **[Design]** (Fallback selection) For each fault, name the detector and its timer, the response of @tbl-12-fallback-hierarchy it selects, and the travel or timing consequence on the warehouse mobile manipulator: (a) an application-processor kernel panic at the aisle speed; (b) a lease lapse while the arm holds a loaded tote at standstill; (c) loss of the MCU's own cycle in motion; (d) a shared-rail undervoltage at the `{python} EnforcementStoppingBudget.ceiling_inspected_str` inspected-floor ceiling. For (c) and (d), state which claim the response cannot carry and what evidence the record must name instead.
+
+8. **[Design]** (Stopping budget; transfer to a fulfillment AMR) The registry's warehouse fulfillment AMR has no arm: `{python} EnforcementProblems.amr_mass_str` of mass, a `{python} EnforcementProblems.amr_payload_str` payload capacity, a `{python} EnforcementProblems.amr_vmax_str` drive limit, and `{python} EnforcementProblems.amr_amax_str` of acceleration. Treat that acceleration as its credible braking deceleration when empty, with a `{python} EnforcementProblems.amr_tau_str` pre-brake delay, a `{python} EnforcementProblems.amr_clear_str` clear distance, $\delta_{\text{loc}} =$ `{python} EnforcementProblems.amr_loc_str`, $\delta_{\text{margin}} =$ `{python} EnforcementProblems.amr_margin_str`, and $\epsilon_{\text{track}} =$ `{python} EnforcementProblems.amr_eps_str`, all illustrative, and constant-deceleration braking. Compute its speed ceiling empty and at full payload with the same braking force. Then design its admission rule: which inputs the permission path must measure at runtime, which it may take as qualified premises, the evidence category each needs before a speed can be released, and how the enforcer should select a speed when the payload is unknown.
+
+9. **[Design]** (Enforcement record) Construct the enforcement record entry for the restricted base configuration of @sec-enforcement-telemetry and the admitted command for one tick of the latch approach in the fields of @tbl-12-admitted-command-schema. Give each numerical field's value, its evidence category, the detector that checks it, and the response a failed check selects. Identify the two premises that no sensor on the machine observes and the record fields that must carry them.
+
+10. **[Critique]** (Unrated checks and certified functions) A team proposes: "Our CBF-QP is formally verified, so we will certify the whole permission path at PL d, remove the safety scanner's protective field, and rely on the vision path for persons at the rack end." Using @tbl-12-certified-functions and @sec-enforcement-certified-functions, identify each claim the proposal would move from a certified function onto an unrated premise, and what a safety software lifecycle would have to cover if the admission checks were rated. State the architecture you would defend instead.
+
+11. **[Critique]** (Tracking, permission, and enforcement; barrier limits) A colleague argues that the chunk policy, trained with a barrier loss, rarely violates the barrier in simulation, so the per-tick filter can move to the host and run at `{python} EnforcementProblems.host_rate_str`. Compute the inter-sample drift buffer of @sec-enforcement-fallacies-pitfalls at the `{python} EnforcementZOHBuffer.v_str` drive limit for the host rate and for the MCU's `{python} EnforcementLeaseStop.loop_rate_str` loop. Then write the rebuttal: what the training objective bounds and what it does not, what the move does to the lease row of @tbl-enforcement-stopping-budget and to independence from the proposer, and which condition of forward invariance fails first.
+
+12. **[Critique]** (Stopping budget and speed ceiling) A vendor claims that a faster perception model will let the machine run its aisle faster. Compute the ceiling when the observation age is halved, when a larger model adds `{python} EnforcementProblems.delay_add_str` of delay, and compare both with the `{python} EnforcementStoppingBudget.ceiling_str` baseline. Assess the claim against @eq-enforce-speed-ceiling: which terms move the ceiling materially, and what evidence would support a faster aisle speed?
 
 ::: {.callout-chapter-connection title="From barrier certificates to SoC placement"}
 Can the learned proposers share a chassis and a memory bus with the permission path without delaying it? The enforcement record declares a worst-case cycle inside the permission deadline on every tick. That deadline is a claim about silicon, and a barrier result holds only while the permission path meets it. In @sec-placement, we partition the learned proposers and the permission path across compute fabrics and name the loaded tests that would show whether memory starvation, clock throttling, or bus contention can delay permission or fallback, recording them in the placement record.

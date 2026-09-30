@@ -83,6 +83,7 @@ from mlsysim.fmt import (
 )
 from mlsysim.physics.robotics import (
     calc_target_evidence_horizon,
+    calc_tracked_evidence_horizon,
     calc_linear_invalidation_horizon,
     calc_latch_contact_stopping_profile,
     calc_contact_force,
@@ -101,6 +102,7 @@ pi0_action_rate = 50.0 * hertz  # category: literature (Black et al. 2024, pi0: 
 d_goal_in = 10.0 * millimeter  # category: illustrative (terminal TCP offset along x, inside case)
 d_goal_out = 20.0 * millimeter  # category: illustrative (terminal TCP offset along x, outside case)
 t_forecast_long = 2.0 * second  # category: illustrative (multi-second planning horizon for the freezing contrast)
+v_drift_check = 50.0 * millimeter / second  # category: illustrative (checkpoint drift speed)
 
 # ┌── 2. EXECUTE: evidence horizons, mug intent lapse, latch contact ───────────
 # Mug on the conveyor: untracked and tracked target-evidence horizons. Both
@@ -108,7 +110,7 @@ t_forecast_long = 2.0 * second  # category: illustrative (multi-second planning 
 grasp_error_budget = (AISLE.grasp_tolerance - AISLE.grasp_initial_error).to(millimeter)
 # Linear root: Ch9's invalidation law T_inv = (E_max - E_0)/r (@eq-mem-linear-horizon).
 tau_ev_untracked = calc_linear_invalidation_horizon(AISLE.grasp_initial_error, AISLE.v_conveyor, AISLE.grasp_tolerance).to(millisecond)
-tau_ev_tracked = ((2 * grasp_error_budget / AISLE.a_conveyor_slip) ** 0.5).to(millisecond)
+tau_ev_tracked = calc_tracked_evidence_horizon(AISLE.grasp_tolerance, AISLE.grasp_initial_error, AISLE.a_conveyor_slip).to(millisecond)  # sqrt(2 (r_tol - e_0) / a_slip); shared with Ch3
 t_intent_period = (1.0 / RM.intent_rate).to(millisecond)
 err_at_intent_period = (AISLE.grasp_initial_error + AISLE.v_conveyor * t_intent_period).to(millimeter)
 err_excess_at_period = (err_at_intent_period - AISLE.grasp_tolerance).to(millimeter)
@@ -117,6 +119,12 @@ err_excess_at_period = (err_at_intent_period - AISLE.grasp_tolerance).to(millime
 t_infer_overrun = (RM.intent_inference_latency - tau_ev_untracked).to(millisecond)
 n_intent_tokens = RM.intent_model.action_dim  # values one intent evaluation decodes (Ch3)
 tau_ev_slow_drift = calc_target_evidence_horizon(AISLE.grasp_tolerance, AISLE.grasp_initial_error, v_drift_slow).to(millisecond)
+# Cadence gap: worst-case evidence age at a model-only renewal is one period plus
+# one inference (@eq-brain-min-supply's T_replan + t_infer), and the drift speed
+# at which that age just fits the error budget is the model's renewal ceiling.
+t_renew_age = (t_intent_period + RM.intent_inference_latency).to(millisecond)
+v_renew_max = (grasp_error_budget / t_renew_age).to(millimeter / second)
+v_renew_pct = (100 * v_renew_max / AISLE.v_conveyor).to(ureg.dimensionless).magnitude
 
 # Dynamic reachability: the TCP speed ceiling bounds the reach inside the tracked
 # horizon, and a proposal farther away fails the transit lower bound.
@@ -153,6 +161,9 @@ d_occ_tracked = (AISLE.v_human_approach * tau_ev_tracked).to(millimeter)
 d_occ_untracked = (AISLE.v_human_approach * tau_ev_untracked).to(millimeter)
 d_occ_long = (AISLE.v_human_approach * t_forecast_long).to(meter)
 occ_to_aisle = (d_occ_long / AISLE.aisle_width).to(ureg.dimensionless).magnitude
+# Freezing crossover: the screening horizon at which the growth term alone
+# reaches the aisle width, so one person's set spans the aisle.
+t_occ_block = (AISLE.aisle_width / AISLE.v_human_approach).to(millisecond)
 
 # ┌── 3. GUARD: canon values quoted in the prose ──────────────────────────────
 check(abs(tau_ev_untracked.magnitude - 60.0) < 1e-6, "Untracked mug horizon is 60 ms")
@@ -192,6 +203,13 @@ check(abs(d_occ_tracked.magnitude - 350.5) < 0.5, "Coworker set grows about 350 
 check(abs(d_occ_long.magnitude - 3.2) < 1e-9, "Coworker set grows 3.2 m over 2 s at the ISO 13855 speed")
 check(occ_to_aisle > 2.0, "A 2 s forecast spans more than twice the aisle width")
 check(abs(d_occ_untracked.magnitude - 96.0) < 1e-6, "Coworker set grows 96 mm over the untracked horizon")
+check(abs(t_renew_age.magnitude - 835.6) < 0.5, "Model-only renewal age is about 836 ms")
+check(abs(v_renew_max.magnitude - 14.36) < 0.05, "Model-only renewal ceiling is about 14.4 mm/s")
+check(v_renew_max < v_drift_slow < AISLE.v_conveyor, "Even the slow-drift case outruns a model-only renewal")
+check(abs(t_occ_block.magnitude - 812.5) < 1e-6, "One person's growth term spans the aisle after 0.81 s")
+check(tau_ev_tracked < t_occ_block < t_forecast_long, "Crossover lies between the tracked horizon and the 2 s forecast")
+check(abs(AISLE.k_latch.to(newton / millimeter).magnitude - 400.0) < 1e-9, "Latch stiffness is 400 N/mm")
+check(abs(delta_x_unbounded.magnitude - 6.0) < 1e-9, "Unbraked stall advances 6 mm")
 # margin_latch_stall_force_ladder.svg fig-alt hand-types 15, 39, 100 and 2,400 N and the 200 ms stall;
 # margin_dynamic_reachability_shortfall_envelope.svg fig-alt hand-types 300 ms, 219 ms and 2 captures.
 check(abs(AISLE.f_latch_tripwire.to(newton).magnitude - 15.0) < 1e-9, "Latch ladder: tripwire label is stale")
@@ -259,6 +277,15 @@ class IntentLeaseArchetypes:
     d_occ_long_str = fmt_length(d_occ_long, unit=meter, precision=1)
     d_occ_untracked_str = fmt_length(d_occ_untracked, unit=millimeter, precision=0)
     aisle_width_str = fmt_length(AISLE.aisle_width, unit=meter, precision=2)
+    t_occ_block_str = fmt_latency(t_occ_block.to(second), unit=second, precision=2)
+    # Cadence gap
+    v_conveyor_mm_str = fmt_velocity(AISLE.v_conveyor, unit=millimeter / second, precision=0)
+    t_renew_age_str = fmt_latency(round(t_renew_age.magnitude) * millisecond, unit=millisecond, precision=0)
+    v_renew_max_str = fmt_velocity(v_renew_max, unit=millimeter / second, precision=1)
+    v_renew_pct_str = fmt(v_renew_pct, precision=1, commas=False)
+    v_drift_check_str = fmt_velocity(v_drift_check, unit=millimeter / second, precision=0)
+    # Latch arithmetic
+    k_latch_str = fmt(AISLE.k_latch.to(newton / millimeter).magnitude, precision=0, commas=False, suffix=" N/mm")
 ```
 
 Grounding is the step at which a learned system's output first names a physical thing the machine may act on. Open-vocabulary detectors, language models, and vision-language-action models now let an operator ask a robot for an object in ordinary words, and the field has moved in a few years from fixed skill libraries to models that emit targets and actions directly. What these models return, however, is a hypothesis: a label, an image region, a coordinate, or a chunk of normalized actions, produced by a training objective that represents neither metric distance, nor contact force, nor the passage of time. On this machine the division of labor is fixed in advance. The Brain proposes, and an independent permission path decides (@sec-boundary-machine-model).
@@ -281,7 +308,17 @@ For the mug, grounding means selecting a physical feature, locating it relative 
 
 The wrench ceiling is where contact mechanics enters. At each contact the Coulomb model admits only forces inside a **friction cone**\index{Friction cone}, $\|\mathbf{f}_t\| \le \mu f_n$, where $f_n$ is the normal squeeze force, $\mathbf{f}_t$ the tangential force, and $\mu$ the friction coefficient. For a two-finger grasp, Nguyen's condition is geometric: the grasp can resist a disturbance in any direction when the line joining the two contact points lies inside both friction cones [@nguyen1988constructing]. The general statement lives in wrench space. The grasp map $G_i$ carries a force $\mathbf{f}_i$ at contact $i$ into the wrench it exerts on the object, the force itself together with its moment $\mathbf{r}_i \times \mathbf{f}_i$ about the object's reference point, where $\mathbf{r}_i$ runs from that point to the contact; the edges of every friction cone, mapped this way, give a finite set of primitive contact wrenches, and the grasp has **force closure**\index{Force closure} when the origin lies in the interior of their convex hull, so that some combination of admissible contact forces balances any disturbance wrench. Ferrari and Canny turned that condition into a quality measure: the radius of the largest origin-centered ball inside the hull, the smallest disturbance wrench the grasp is guaranteed to resist per unit of contact force [@ferrari1992planning]. Force closure is a property of idealized contacts and says nothing about magnitude. The mug grasp also needs finite capacity: the squeeze must hold the mug's weight and transit accelerations while staying below the force that cracks ceramic or spills its contents; @sec-appendix-control-grasp derives the squeeze-force floor from Newton's second law and builds the friction cone and force closure from first principles. Those ceilings are what the proposal requests and the permission path checks.
 
-Connecting words to physical targets is the robotics manifestation of the **symbol grounding problem**\index{Symbol grounding problem} [@harnad1990symbol]: a symbol needs a sensorimotor connection to the physical entity it denotes.[^fn-intent-symbol-grounding] For the mug, that connection is the measured handle frame, its calibration chain, and the interaction limits. A plausible label or generated coordinate supplies none of those bounds by itself. A wrong proposal, a hallucination[^fn-intent-hallucination-containment] in the language-model sense, must remain containable even when the model is confident.
+Connecting words to physical targets is the robotics manifestation of the **symbol grounding problem**\index{Symbol grounding problem} [@harnad1990symbol]: a symbol needs a sensorimotor connection to the physical entity it denotes.[^fn-intent-symbol-grounding] For the mug, that connection is the measured handle frame, its calibration chain, and the interaction limits. A plausible label or generated coordinate supplies none of those bounds by itself. A wrong proposal, a hallucination[^fn-intent-hallucination-containment] in the language-model sense, must remain containable even when the model is confident. A handle frame that carries its calibration chain, its interaction limits, and the date of its evidence is what this chapter calls a grounded affordance.
+
+::: {#dfn-intent-grounded-affordance .callout-definition title="Grounded affordance"}
+
+***Grounded affordance***\index{Grounded affordance!definition}\index{Affordances!grounded} is an affordance expressed in the robot's own frame and units: a feature pose in the base frame, an approach direction, an aperture, and a contact wrench ceiling, each tied to dated sensor evidence through a calibrated measurement chain.
+
+1.  **Significance**: It turns a label into quantities the permission path can check. The mug handle's grounded affordance is a pose that must land inside a `{python} IntentLeaseArchetypes.r_tol_str` task tolerance from evidence with a `{python} IntentLeaseArchetypes.e0_str` initial error, and on the moving belt that evidence stays valid for only `{python} IntentLeaseArchetypes.tau_untracked_str` (@sec-intent-goals-expire).
+2.  **Distinction**: Unlike a detector box or a language label, which says where an object appears or what it is called, a grounded affordance says where and how the gripper may make contact; unlike Gibson's perceptual affordance, it is bound to one gripper's limits and to one capture time.
+3.  **Common pitfall**: Treating a learned grasp score or a confident detection as grounding. Neither carries a metric error bound, a wrench limit, or an evidence epoch, so neither can be admitted or expired.
+
+:::
 
 A symbolic action such as `Grasp(Mug, Handle)` expresses the task, but its preconditions need physical tests. Noisy perception does not directly establish that the handle is clear or the gripper aligned. Here, **motion predicates**\index{Motion predicates!definition} connect those task conditions to measured geometry and contact quantities:
 
@@ -297,21 +334,11 @@ For the mug, set all three semi-axes to the `{python} IntentLeaseArchetypes.r_to
 
 The goal region is a task requirement, not an estimate of where the target lies. The **task tolerance region**\index{Tolerance region!3D spatial}\index{Intent record!spatial tolerance region} specifies how much terminal error the grasp permits; estimator covariance describes uncertainty about the target itself. For the machine's mug grasp, the approved task profile allows `{python} IntentLeaseArchetypes.r_tol_str` of translational error. The proposal must carry a conservative target-error envelope that fits within that tolerance, with the motion check accounting for the remaining tracking error. Enlarging the tolerance to accommodate a poor observation would change the task rather than improve the observation.
 
-Before a candidate affordance is packaged into an intent proposal, something has to propose the grasp. On current mobile manipulators that is usually a **learned 6-DoF grasp generator**\index{Grasp synthesis!learned generators} run on the observed point cloud. Contact-GraspNet predicts grasps anchored at observed surface points in cluttered scenes [@sundermeyer2021contactgraspnet], and AnyGrasp predicts dense grasp sets with quality scores and associates them across frames [@fang2023anygrasp]. The output is a set of candidate grasp poses, each with a learned score. That score estimates success on the generator's training distribution. It is neither an analytic quality such as the Ferrari and Canny radius nor a measured success rate for this handle on this gripper, and only the last of the three is evidence about the machine. The survivors of the generator then face checks it did not perform: an inverse-kinematics solution inside joint limits (a well-conditioned Jacobian says nothing about distance from a joint limit, so joint travel needs its own test), jaw aperture against the handle width, and a collision-free approach corridor. If no candidate survives, or the referent itself is unresolved, the system must not execute its best guess; it returns an explicit **intent grounding refusal**\index{Intent grounding refusal!definition} (`ERR_GROUNDING_AMBIGUITY`).
+Before a candidate affordance is packaged into an intent proposal, something has to propose the grasp. On current mobile manipulators that is usually a **learned 6-DoF grasp generator**\index{Grasp synthesis!learned generators} run on the observed point cloud. Contact-GraspNet predicts grasps anchored at observed surface points in cluttered scenes [@sundermeyer2021contactgraspnet], and AnyGrasp predicts dense grasp sets with quality scores and associates them across frames [@fang2023anygrasp]. The output is a set of candidate grasp poses, each with a learned score. That score estimates success on the generator's training distribution. It is neither an analytic quality such as the Ferrari and Canny radius nor a measured success rate for this handle on this gripper, and only the last of the three is evidence about the machine. The survivors of the generator then face checks it did not perform: an inverse-kinematics solution inside joint limits (a well-conditioned Jacobian says nothing about distance from a joint limit, so joint travel needs its own test), jaw aperture against the handle width, and a collision-free approach corridor. If no candidate survives, or the referent itself is unresolved, the system must not execute its best guess; it returns an explicit **intent grounding refusal**\index{Intent grounding refusal!definition}\index{Refusal!grounding ambiguity} (`ERR_GROUNDING_AMBIGUITY`), a typed rejection of the goal itself. A planning failure finds no collision-free path to a valid goal; a grounding refusal rejects the goal as ambiguous or ungrounded before the planner is invoked, so that no argmax guess over unresolved referents ever reaches trajectory generation.
 
 [^fn-intent-symbol-grounding]: **Symbol Grounding Problem**\index{Symbol Grounding Problem}: @harnad1990symbol compared the problem to learning Chinese from a Chinese-to-Chinese dictionary alone, in which every definition points only to more undefined symbols. A model's text embedding is that dictionary. Only a calibrated camera-to-base chain breaks the circle for the mug, which is why the proposal must carry its evidence record and not just its label.
 
 [^fn-intent-hallucination-containment]: **Hallucination**\index{Safety!hallucination containment}\index{Grounding!semantic containment}: In text generation the word names fluent output that the source does not support [@maynez2020faithfulness]. For a robot the unsupported output is a coordinate, and nothing in its format marks it as unsupported. Containment therefore has to be a check on evidence that the model does not produce.
-
-::: {#dfn-intent-grounding-refusal .callout-definition title="Intent grounding refusal"}
-
-***Intent grounding refusal***\index{Intent grounding refusal!definition}\index{Refusal!grounding ambiguity} is the admission rule whereby an embodied system explicitly rejects semantically ambiguous natural-language directives, returning a typed failure status (`ERR_GROUNDING_AMBIGUITY`) rather than executing ungrounded maximum-likelihood guesses across physical clearance margins.
-
-1.  **Significance**: Rejects a proposal when a task-specific ambiguity test (@sec-intent-failure-modes) fails, before that proposal reaches trajectory generation.
-2.  **Distinction**: Unlike a trajectory planning failure that cannot find a collision-free path to a valid goal, grounding refusal rejects the goal itself as physically ungrounded or ambiguous before the planner is invoked.
-3.  **Common pitfall**: Forcing an argmax token decode or nearest-neighbor guess when candidate referents remain unresolved, driving the physical plant toward an arbitrary or hazardous target.
-
-:::
 
 ### Task operators and geometric samplers {#sec-intent-task-motion}
 
@@ -614,7 +641,7 @@ class AutoRTFilter:
 **Systems lesson**: A learned task filter can improve proposal quality, but it cannot serve as a safety referee. An independent, deterministic permission and fallback path must validate every physical action against real-time plant limits before execution.
 :::
 
-Once the mug candidate has a metric frame and a dated record, alternative proposal sources can use the same interface. The sources in @tbl-10-grounding-paradigms differ in what they make available to the planner. SayCan ranks pretrained skills using semantic relevance and learned value [@ahn2022saycan]; Code as Policies generates scripts that call perception and control interfaces [@liang2023code]. VoxPoser supplies spatial value maps (@fig-10-value-map-composition), while OK-Robot selects candidate grasps (@fig-10-real-open-vocab-grounding). Each can help turn a request into a useful action candidate, but its output still needs current geometric, effort, and timing checks.
+Once the mug candidate has a metric frame and a dated record, the proposal source can change without changing the interface; what changes is how much of the admission evidence the source's output already contains, and so how much the machine must still establish (@tbl-10-grounding-paradigms). A skill ranker such as SayCan hands the planner a skill identifier scored by semantic relevance and learned value [@ahn2022saycan], a code generator such as Code as Policies a script over perception and control calls [@liang2023code], VoxPoser a spatial value map (@fig-10-value-map-composition), and OK-Robot a set of candidate grasps (@fig-10-real-open-vocab-grounding). None of these outputs carries the dated geometry, effort bound, and expiry that admission needs, so the choice among them changes the conversion work, not the check.
 
 Predicting a plausible coordinate or motion script does not establish physical feasibility. A language or action model is trained to make its outputs likely under its training data, and nothing in that objective represents metric distance, rigid-body non-penetration, the arm's Jacobian, or friction. Each of those needs an independent check in a stated frame: a signed-distance query over the robot geometry for clearance, an inverse-kinematics solve with joint-limit and conditioning screens (@sec-appendix-control-kinematics), and a contact model for the wrench the grasp must carry. Contact-rich or non-prehensile proposals, such as sliding, unlatching, or a handover, can also be rolled out in a physics simulator before the arm commits energy, and the verdict is only as good as the simulated geometry, friction, and dynamics. Such checks identify physically plausible interactions for the planner; they do not replace admission of the resulting motion.
 
@@ -730,7 +757,7 @@ In @fig-10-value-map-composition, Huang et al. [-@huang2023voxposer] turn instru
 ![](images/jpg/fig10_real_open_vocab_grounding.jpg){width="95%"}
 :::
 
-In @fig-10-real-open-vocab-grounding, Liu et al. [-@liu2024okrobot] separate language-conditioned object selection from geometric grasp generation. OWL-ViT finds the object, SAM refines its box into a mask, and AnyGrasp proposes grasps over the whole scene, which the mask then filters to the requested referent. The selected pose still requires dated evidence, effort bounds, and expiry before it can support execution.
+@Fig-10-real-open-vocab-grounding shows the same separation of selection from geometry that the four-stage pipeline draws. In OK-Robot, language selects the referent (an OWL-ViT box refined by SAM into a mask), while a geometry-only generator, AnyGrasp, proposes grasps over the whole scene that the mask then filters [@liu2024okrobot]. The selected pose is a Stage 4 candidate and still requires dated evidence, effort bounds, and expiry before it can support execution.
 
 | Proposal source           | Representation sent downstream                          | Early check                                                | Remaining evidence needed                                                                              |
 |:--------------------------|:--------------------------------------------------------|:-----------------------------------------------------------|:-------------------------------------------------------------------------------------------------------|
@@ -761,7 +788,7 @@ class StateOfPractice:
     n_bins_str = fmt_int(n_action_bins)
 ```
 
-Whatever the output head, a VLA's action carries no metric bound. Early VLAs such as RT-1 and OpenVLA discretize each action dimension into `{python} StateOfPractice.n_bins_str` uniform bins over its training range [@brohan2023rt1; @kim2024openvla]. FAST compresses an action chunk with a discrete cosine transform before tokenizing it [@pertsch2025fast], and $\pi_0$ replaces tokens with a flow-matching action expert that outputs continuous chunks [@black2024pi0]. In every case the output is a normalized action inside the training distribution, carrying zero metric clearance to obstacles. Location tokens in vision-language models such as PaliGemma quantize normalized image coordinates instead, and they become a metric pose only through measured depth, the calibration chain, and an uncertainty model whose depth and extrinsic terms can easily dominate the quantization grid.
+Whatever the output head, a VLA's action carries no metric bound, because every head encodes the action relative to its training range rather than to the machine's surroundings. RT-1 and OpenVLA discretize each action dimension into `{python} StateOfPractice.n_bins_str` uniform bins over that range [@brohan2023rt1; @kim2024openvla]; FAST tokenizes a discrete cosine transform of the chunk [@pertsch2025fast]; $\pi_0$ emits continuous chunks from a flow-matching action expert [@black2024pi0]. Each yields a normalized action inside the training distribution and says nothing about clearance to obstacles. Location tokens in vision-language models such as PaliGemma quantize normalized image coordinates instead, and they become a metric pose only through measured depth, the calibration chain, and an uncertainty model whose depth and extrinsic terms can easily dominate the quantization grid.
 
 The mechanisms above are durable; the systems that implement them are not. @Tbl-10-state-of-practice names current instances of each role, with what each emits and what the permission path must still establish without it.
 
@@ -813,7 +840,19 @@ The intent lease bounds how long the high-level target remains justified. Expira
 
 **Problem**: The intent lease for the cage door requests a `{python} IntentLeaseArchetypes.f_trip_str` tripwire and a `{python} IntentLeaseArchetypes.v_latch_str` approach speed against a `{python} IntentLeaseArchetypes.f_lim_str` latch limit. What happens if the arm's authority to keep pressing outlives the contact loop and waits instead on the proposer?
 
-**Math**: The contact itself is derived in @sec-enforcement-intentional-contact. At this approach speed, @eq-release-trip-indentation carries the force to `{python} IntentLeaseArchetypes.f_at_brake_onset_n_str` by the time the `{python} IntentLeaseArchetypes.t_contact_str` contact-loop response issues the brake command, and the stop that follows has only a fraction of a millimeter of compression left to spend. The lease question is the duration term. If unbraked motion instead continues for `{python} IntentLeaseArchetypes.t_stall_arm_str`, a stall shorter than one `{python} IntentLeaseArchetypes.t_intent_period_str` intent period, the gripper advances $\Delta x = v_{\text{latch}}\,\Delta t$, or `{python} IntentLeaseArchetypes.delta_x_unbounded_mm_str`, past first contact, and the plate's linear model gives $F = k_{\text{latch}}\,\Delta x$, or `{python} IntentLeaseArchetypes.f_unbounded_n_str`. Meters per second times seconds give meters, and newtons per meter times meters give newtons.
+**Variables**:
+
+- Tripwire `{python} IntentLeaseArchetypes.f_trip_str` and approach speed $v_{\text{latch}} =$ `{python} IntentLeaseArchetypes.v_latch_str`, the requested ceilings; latch limit `{python} IntentLeaseArchetypes.f_lim_str` (Illustrative)
+- Plate stiffness $k_{\text{latch}} =$ `{python} IntentLeaseArchetypes.k_latch_str` (Illustrative) and contact-loop response `{python} IntentLeaseArchetypes.t_contact_str`
+- Unbraked stall $\Delta t =$ `{python} IntentLeaseArchetypes.t_stall_arm_str` (Illustrative), shorter than one `{python} IntentLeaseArchetypes.t_intent_period_str` intent period
+
+**Math**:
+
+1. **Contact loop**: The contact itself is derived in @sec-enforcement-intentional-contact. At this approach speed, @eq-release-trip-indentation carries the force to `{python} IntentLeaseArchetypes.f_at_brake_onset_n_str` by the time the `{python} IntentLeaseArchetypes.t_contact_str` response issues the brake command, and the stop that follows has only a fraction of a millimeter of compression left to spend.
+2. **Stall travel**: $\Delta x = v_{\text{latch}}\,\Delta t =$ `{python} IntentLeaseArchetypes.v_latch_str` $\times$ `{python} IntentLeaseArchetypes.t_stall_arm_str` $=$ `{python} IntentLeaseArchetypes.delta_x_unbounded_mm_str` past first contact.
+3. **Stall force**: $F = k_{\text{latch}}\,\Delta x =$ `{python} IntentLeaseArchetypes.k_latch_str` $\times$ `{python} IntentLeaseArchetypes.delta_x_unbounded_mm_str` $=$ `{python} IntentLeaseArchetypes.f_unbounded_n_str`.
+
+**Result**: The contact loop brakes at `{python} IntentLeaseArchetypes.f_at_brake_onset_n_str`; a lease that waited on the proposer would let the model predict `{python} IntentLeaseArchetypes.f_unbounded_n_str`.
 
 **Systems insight**: The predicted force lies far past the `{python} IntentLeaseArchetypes.f_lim_str` limit, beyond the point where the spring model applies at all: the latch has failed. The lease therefore does not size the contact stop, which is millisecond work for the contact loop. It carries the two ceilings that make that stop feasible, and it must never leave contact authority waiting on a proposer whose silence is measured in intent periods.
 :::
@@ -846,7 +885,31 @@ When both terms act, the horizon is the positive root of the full quadratic and 
 
 When $r_{\text{tol}}\le e_0$, the target is inadmissible at capture: sensor uncertainty alone exceeds the task clearance, and the controller immediately refuses dependent motion. Even when the horizon is positive, a separate motion-permission check must verify current clearance against total sensing, permission, communication, and brake-onset delay plus physical braking distance, as in @sec-nervous.
 
-For the red mug on the takeaway conveyor, the grounded target moves at `{python} IntentLeaseArchetypes.v_conveyor_str`. A `{python} IntentLeaseArchetypes.r_tol_str` grasp tolerance and `{python} IntentLeaseArchetypes.e0_str` initial error leave a `{python} IntentLeaseArchetypes.tau_untracked_str` target-evidence horizon by the linear root of @eq-intent-evidence-horizon-roots. Stretching the horizon to the `{python} IntentLeaseArchetypes.t_intent_period_str` refresh period of the machine's `{python} IntentLeaseArchetypes.f_intent_str` intent model would let modeled target error reach `{python} IntentLeaseArchetypes.err_at_period_str`, or `{python} IntentLeaseArchetypes.err_excess_str` beyond the tolerance. The intent model cannot refresh the target itself, because even a typical inference, at the computed `{python} IntentLeaseArchetypes.t_intent_infer_str`, outlasts the `{python} IntentLeaseArchetypes.tau_untracked_str` horizon, and a latency tail only adds to it. Extending the target record to `{python} IntentLeaseArchetypes.t_intent_infer_str` solely to hide that delay would leave its estimate outside the declared error envelope for `{python} IntentLeaseArchetypes.t_infer_overrun_str`. The `{python} IntentLeaseArchetypes.tau_untracked_str` limit is an evidence-validity deadline, and only new evidence, checked again against the motion, can extend it; faster compute cannot. Without a qualified tracker the conveyor must slow or pause, or the task must be refused. At `{python} IntentLeaseArchetypes.v_drift_slow_str` drift the same bound gives a `{python} IntentLeaseArchetypes.tau_slow_drift_str` evidence horizon (@fig-10-lease-dynamics-tradeoff).
+For the red mug on the takeaway conveyor, the linear root sets the deadline, and the question is whether the machine's own intent model could ever meet it. Notebook \ref{nbk-brain-conveyor-evidence-horizon} sized the chunk policy against the same horizon; the intent model renews far more slowly.
+
+::: {#nbk-intent-cadence-gap .callout-notebook title="The cadence gap"}
+
+**Problem**: The conveyor carries the mug at `{python} IntentLeaseArchetypes.v_conveyor_str`. Can the `{python} IntentLeaseArchetypes.f_intent_str` intent model keep the target inside its tolerance by re-proposing it, and how slowly would the belt have to run for a model-only renewal to suffice?
+
+**Variables**:
+
+- Grasp tolerance $r_{\text{tol}} =$ `{python} IntentLeaseArchetypes.r_tol_str` and initial handle error $e_0 =$ `{python} IntentLeaseArchetypes.e0_str` (Illustrative)
+- Belt speed $v_{\text{drift}} =$ `{python} IntentLeaseArchetypes.v_conveyor_mm_str` (Illustrative)
+- Intent period $T_{\text{period}} =$ `{python} IntentLeaseArchetypes.t_intent_period_str` (Chosen, `{python} IntentLeaseArchetypes.f_intent_str`) and inference $t_{\text{infer}} =$ `{python} IntentLeaseArchetypes.t_intent_infer_str` (Derived, \ref{nbk-brain-intent-model-latency})
+
+**Math**:
+
+1. **Horizon** (@eq-intent-evidence-horizon-roots): $\tau_{\text{ev}} =$ (`{python} IntentLeaseArchetypes.r_tol_str` $-$ `{python} IntentLeaseArchetypes.e0_str`) $/$ `{python} IntentLeaseArchetypes.v_conveyor_mm_str` $=$ `{python} IntentLeaseArchetypes.tau_untracked_str`.
+2. **Error at one period**: `{python} IntentLeaseArchetypes.e0_str` $+$ `{python} IntentLeaseArchetypes.v_conveyor_mm_str` $\times$ `{python} IntentLeaseArchetypes.t_intent_period_str` $=$ `{python} IntentLeaseArchetypes.err_at_period_str`, `{python} IntentLeaseArchetypes.err_excess_str` past the tolerance. Inference alone overruns the horizon by `{python} IntentLeaseArchetypes.t_intent_infer_str` $-$ `{python} IntentLeaseArchetypes.tau_untracked_str` $=$ `{python} IntentLeaseArchetypes.t_infer_overrun_str`.
+3. **Renewal ceiling**: A model-only renewal arrives up to $T_{\text{period}} + t_{\text{infer}} =$ `{python} IntentLeaseArchetypes.t_renew_age_str` after its capture, so the drift it can keep up with is (`{python} IntentLeaseArchetypes.r_tol_str` $-$ `{python} IntentLeaseArchetypes.e0_str`) $/$ `{python} IntentLeaseArchetypes.t_renew_age_str` $=$ `{python} IntentLeaseArchetypes.v_renew_max_str`.
+
+**Result**: The model alone could renew the target only on a belt running at `{python} IntentLeaseArchetypes.v_renew_pct_str` percent of its speed; even the `{python} IntentLeaseArchetypes.v_drift_slow_str` settling drift, with its `{python} IntentLeaseArchetypes.tau_slow_drift_str` horizon (@fig-10-lease-dynamics-tradeoff), is too fast for it.
+
+**Systems insight**: $\tau_{\text{ev}}$ is set by tolerance and drift, not by compute, and only a renewal whose period plus latency fits inside it can carry authority forward. Stretching the record to cover inference would leave the estimate outside its declared envelope for `{python} IntentLeaseArchetypes.t_infer_overrun_str`. Without a qualified local tracker, the conveyor must slow or pause, or the task must be refused.
+
+:::
+
+The `{python} IntentLeaseArchetypes.tau_untracked_str` limit is an evidence-validity deadline, and only new evidence, checked again against the motion, can extend it; faster compute cannot.
 
 A qualified local tracker changes the arithmetic. It re-measures the mug on every frame and follows the conveyor's velocity, so the conveyor speed no longer drives the error. The same `{python} IntentLeaseArchetypes.e0_str` initial error is still charged against the tolerance, which leaves `{python} IntentLeaseArchetypes.err_budget_str` for the residual slip of `{python} IntentLeaseArchetypes.a_slip_str`, an illustrative worst-case bound, to consume. Against that budget, residual slip alone sets the tracked evidence horizon that @sec-brain-cognitive-pipeline solves, `{python} IntentLeaseArchetypes.tau_tracked_str`. The tracker renews that evidence at its own rate, so the tracker's period plus latency is what must fit inside the horizon. The intent model only re-confirms which mug is meant, and each renewal it sends carries the tracker's fresh evidence rather than the frame the model last read. Whichever horizon applies caps the intent lease on this target (@sec-intent-lease).
 
@@ -1029,13 +1092,23 @@ A reachability screen also protects the planner's compute budget. If a target ca
 To avoid spending the planning budget on an already impossible request, the admission layer first applies two lower-cost checks. Their execution and evidence-query budgets still require qualification:
 
 1. **Static Workspace Manifold Check ($\mathbf{T}_{\text{target}} \in \mathcal{W}$):** Geometric workspace analysis defines the closed spatial manifold $\mathcal{W} \subset SE(3)$ of reachable end-effector configurations given link dimensions, joint travel limits, and mounting geometry [@craig2005introduction; @lynch2017modern].[^fn-math-workspace-manifold] An analytical reachability check evaluates whether the target $SE(3)$\index{SE(3)} pose $\mathbf{T}_{\text{target}}$ resides inside this workspace manifold $\mathcal{W}$, while an occupancy lookup in spatial memory confirms that the target volume does not intersect persistent static obstacles.
-2. **Dynamic Reachability Transit Check:** For a terminal move supported by one evidence record, even if a target lies inside the static workspace manifold $\mathcal{W}$, it may be physically unreachable within the finite window during which its sensor evidence remains valid. **Dynamic reachability**\index{Dynamic reachability} is the condition that the end effector can transition from its measured state $(\mathbf{p}_0, \mathbf{v}_0)$ to the target pose within the remaining window $t_{\text{intent\_exp}} - t_{\text{now}}$ while respecting its velocity, acceleration, jerk, and thermal torque limits.
+2. **Dynamic Reachability Transit Check:** For a terminal move supported by one evidence record, even if a target lies inside the static workspace manifold $\mathcal{W}$, it may be physically unreachable within the finite window during which its sensor evidence remains valid. The check asks whether the end effector can get from its measured state $(\mathbf{p}_0, \mathbf{v}_0)$ to the target pose within the remaining window $t_{\text{intent\_exp}} - t_{\text{now}}$ while respecting its velocity, acceleration, jerk, and thermal torque limits.
 
 Whatever continuous trajectory profile the actuators follow, no physical move covers distance $d = \|\mathbf{p}_{\text{target}} - \mathbf{p}_0\|$ faster than its maximum speed ceiling allows. Here both $\mathbf{p}$ terms are translation vectors in the same Cartesian frame, not full $SE(3)$ poses; orientation feasibility requires a separate check. For terminal completion before the current expiry, a necessary condition is:
 $$\frac{d}{v_{\max}} \le t_{\text{intent\_exp}} - t_{\text{now}}.$$ {#eq-intent-dynamic-reachability-bound}
 Actuator acceleration limits, jerk ceilings, and motor torque-speed curves only lengthen the required transit time. A proposal that violates this inequality cannot promise terminal completion in that window. A request for an intermediate guarded segment may remain feasible if its executed motion and fallback fit the current authority and its continuation requires newly admitted evidence. @Sec-appendix-control-reachability derives triangular and trapezoidal transit bounds and explains how jerk limits change the complete-move check.
 
-The scalar lower bound is an early rejection test, not a path solver. It avoids optimizing a terminal request that is already too late, while leaving acceleration, obstacles, and stopping reserve to the fuller motion check. No rejection fraction or execution-time bound follows from the inequality alone.
+The scalar lower bound is an early rejection test, not a path solver. It avoids optimizing a terminal request that is already too late, while leaving acceleration, obstacles, and stopping reserve to the fuller motion check. No rejection fraction or execution-time bound follows from the inequality alone. What the inequality screens is a property of the target and its evidence together, not of the target alone.
+
+::: {#dfn-intent-dynamic-reachability .callout-definition title="Dynamic reachability"}
+
+***Dynamic reachability***\index{Dynamic reachability!definition} is the property that the end effector can move from its measured state to a target pose, within its velocity, acceleration, jerk, and thermal limits, before the evidence supporting that target expires.
+
+1.  **Significance**: It prices a target in time as well as space. At the arm's `{python} IntentLeaseArchetypes.v_tcp_str` TCP limit, @eq-intent-dynamic-reachability-bound allows at most `{python} IntentLeaseArchetypes.d_reach_tracked_str` of travel inside the mug's `{python} IntentLeaseArchetypes.tau_tracked_str` tracked evidence window, so a handle `{python} IntentLeaseArchetypes.d_target_str` away is dynamically unreachable on one capture even though it lies well inside the workspace.
+2.  **Distinction**: Static reachability asks whether any joint configuration reaches the pose, a question of geometry alone. Dynamic reachability adds the clock, and unlike the occupancy screen of @sec-intent-dynamic-forecasting, which bounds where a person might be, it bounds where the robot can get in time.
+3.  **Common pitfall**: Answering an unreachable-in-time target by stretching its evidence deadline. Only fresh evidence renews the window; the remedy is a staged approach whose segments each fit their own evidence and fallback.
+
+:::
 
 ::: {.column-margin .margin-pointer}
 ↪ Admissible goal regions specify the boundary conditions for spline generation in @sec-planning-continuous-trajectories.
@@ -1075,7 +1148,31 @@ A candidate transit corridor $\mathcal{T}_{\text{robot}}(\Delta t)$ can be scree
 $$\mathcal{T}_{\text{robot}}(\Delta t) \cap \mathcal{R}_k(\Delta t) = \emptyset \quad \forall \Delta t \in [0, t_{\text{intent\_exp}} - t_{\text{now}}], \;\; \forall k$$ {#eq-intent-dynamic-exclusion}
 If a candidate corridor intersects an expanding set, the early screen can return `ERR_DYNAMIC_OCCUPANCY_CONFLICT` and request a different corridor or a yield. The refusal diagnostic returns the earliest predicted conflict time $\Delta t_{\text{conflict}}$ and the conflicting actor identifier $\text{ID}_k$. Passing this screen does not establish a collision-free trajectory: the planner must supply the timed motion, and the permission path must check its swept volume and stopping reserve against evidence that remains valid.
 
-On the machine the growth term is easy to size. Over the mug's `{python} IntentLeaseArchetypes.tau_tracked_str` tracked evidence horizon, a coworker at the ISO 13855 speed can move `{python} IntentLeaseArchetypes.d_occ_tracked_str`. Over a `{python} IntentLeaseArchetypes.t_forecast_long_str` planning horizon the same term reaches `{python} IntentLeaseArchetypes.d_occ_long_str`, more than twice the `{python} IntentLeaseArchetypes.aisle_width_str` aisle width, so one person's set blocks the aisle. That is the root of the **freezing robot problem**\index{Freezing robot problem}. Trautman and Krause showed that when a planner predicts each person independently and lets that uncertainty grow, the predicted occupancy of a crowd covers every path, and the robot stops even though people would make room for it [@trautman2010unfreezing]. Three choices reduce unnecessary conservatism, and none permits shrinking a physically justified bound merely to obtain motion:
+On the machine the growth term is easy to size, and its size depends almost entirely on the horizon the screen chooses.
+
+::: {#nbk-intent-freezing-radius .callout-notebook title="The freezing radius"}
+
+**Problem**: A coworker walks in the `{python} IntentLeaseArchetypes.aisle_width_str` aisle while the arm screens its corridor. How far can the growth term of @eq-intent-forward-occupancy carry that person's set over the mug's evidence horizons and over a `{python} IntentLeaseArchetypes.t_forecast_long_str` planning horizon, and beyond what horizon does one person's set alone span the aisle?
+
+**Variables**:
+
+- Approach speed $v_h =$ `{python} IntentLeaseArchetypes.v_h_str` (Datasheet, ISO 13855 design value)
+- Evidence horizons `{python} IntentLeaseArchetypes.tau_untracked_str` untracked and `{python} IntentLeaseArchetypes.tau_tracked_str` tracked (Derived, @eq-intent-evidence-horizon-roots); planning horizon `{python} IntentLeaseArchetypes.t_forecast_long_str` (Illustrative)
+- Aisle width $w =$ `{python} IntentLeaseArchetypes.aisle_width_str` (Illustrative)
+
+**Math**:
+
+1. **Evidence horizons**: `{python} IntentLeaseArchetypes.v_h_str` $\times$ `{python} IntentLeaseArchetypes.tau_untracked_str` $=$ `{python} IntentLeaseArchetypes.d_occ_untracked_str`, and `{python} IntentLeaseArchetypes.v_h_str` $\times$ `{python} IntentLeaseArchetypes.tau_tracked_str` $=$ `{python} IntentLeaseArchetypes.d_occ_tracked_str`.
+2. **Planning horizon**: `{python} IntentLeaseArchetypes.v_h_str` $\times$ `{python} IntentLeaseArchetypes.t_forecast_long_str` $=$ `{python} IntentLeaseArchetypes.d_occ_long_str`.
+3. **Crossover**: The growth term reaches the aisle width when $v_h\,\Delta t = w$, at $\Delta t =$ `{python} IntentLeaseArchetypes.aisle_width_str` $/$ `{python} IntentLeaseArchetypes.v_h_str` $=$ `{python} IntentLeaseArchetypes.t_occ_block_str`.
+
+**Result**: Over the evidence horizons the set grows by centimeters to decimeters; past `{python} IntentLeaseArchetypes.t_occ_block_str` a single person's set covers the full aisle before the body envelope and tracking terms are even added.
+
+**Systems insight**: The screening horizon, not the person, decides whether the robot can move. A forecast that runs well past the evidence horizon charges the corridor for motion the machine will never execute on that evidence, and in a narrow aisle it refuses every corridor.
+
+:::
+
+A set that outgrows the aisle is the root of the **freezing robot problem**\index{Freezing robot problem}. Trautman and Krause showed that when a planner predicts each person independently and lets that uncertainty grow, the predicted occupancy of a crowd covers every path, and the robot stops even though people would make room for it [@trautman2010unfreezing]. Three choices reduce unnecessary conservatism, and none permits shrinking a physically justified bound merely to obtain motion:
 
 1. *Short receding horizons:* Screening over the evidence horizon rather than seconds ahead keeps the growth term near `{python} IntentLeaseArchetypes.d_occ_tracked_str` instead of meters. The forecast must still cover the entire executed prefix and the physical fallback, including response delay and deceleration; shortening the lease does not shorten an actor's possible motion while the robot stops.
 2. *Re-centering on fresh evidence:* A qualified tracker re-centers each set on new measurements ($t_0 \leftarrow t_{\text{fresh}}$), resetting the growth term and the propagated covariance, provided its accuracy and latency support the required bound.
@@ -1223,6 +1320,17 @@ In @fig-10-dynamic-reachability-cones the sets are centered on the coworker's la
 
 The crossing corridor fails when its predicted swept volume intersects the coworker's expanding region. The resulting diagnostic asks for a detour or yield; a newly proposed route still needs its own timed check. A coasting track can widen the exclusion region as evidence ages. Terminating its software track does not make the occluded space free, so the unknown-space policy remains in force until new observations justify a different claim.
 
+::: {#chk-intent-evidence-windows-reach .callout-checkpoint title="Evidence windows and reach"}
+
+A target is admissible only while its evidence lasts, and every early screen in this section is sized by that window.
+
+- [ ] **Evidence-horizon estimate**: Suppose the mug drifts at `{python} IntentLeaseArchetypes.v_drift_check_str` instead of riding the belt, with the same `{python} IntentLeaseArchetypes.r_tol_str` tolerance and `{python} IntentLeaseArchetypes.e0_str` initial error. Can you compute the untracked evidence horizon and decide whether the `{python} IntentLeaseArchetypes.f_intent_str` intent model could renew it without a tracker?
+- [ ] **Transit bound**: Can you explain why a terminal move inside the static workspace can still fail admission, and what a staged approach changes about it and what it cannot change?
+- [ ] **Occupancy vs. reachability**: Which question does a forward occupancy set answer that dynamic reachability does not, and why does screening over the evidence horizon rather than seconds ahead keep the robot from freezing?
+- [ ] **Stretched deadlines**: Why can neither a faster intent model nor a longer requested lease extend a target whose evidence has expired?
+
+:::
+
 Reachability and corridor filters reject some impossible requests before planning. The survivors remain candidates, carrying the target bounds and obstacle evidence needed for the full motion check. The next distinction is between failures these physical checks can expose and errors in task meaning that they cannot settle.
 
 ## Intent Grounding Failure Modes and Their Checks {#sec-intent-failure-modes}
@@ -1343,7 +1451,7 @@ Verify your understanding of how a proposal is refused or admitted, and how the 
 
 - [ ] **Ambiguity refusal**: Why does this station's singulation rule refuse a pick window holding two candidates, and why must that test run on a confident proposal as well as an uncertain one?
 - [ ] **Wrong-object premise**: Which premise about the grasped object remains outside the permission path even when every coordinate, reachability, and force check passes, and where does the machine carry that premise instead?
-- [ ] **Evidence horizon**: Can you explain why the evidence horizon of an intent lease is bounded by task tolerance and target drift rather than by the reasoning model's period, and why inflating it to hide tail inference latency leaves motion on an obsolete target?
+- [ ] **Expiry bound**: Can you name which term of @eq-intent-lease-expiry-bound only fresh evidence can extend, which one a silent host triggers, and which one a change in speed or clearance forces the MCU to recompute?
 - [ ] **Clock domain**: Why must the MCU convert the belief record's evidence epoch into its own monotonic clock, with a bounded conversion error, before checking age and the requested expiry?
 - [ ] **Fallback selection**: Can you explain why the MCU must select a feasible approved hold, deceleration, or torque-disable response from the measured load state rather than obey the proposal's requested terminal mode?
 
@@ -1415,6 +1523,19 @@ The red mug on the conveyor makes the multi-rate cadence constraint concrete. It
 
 Refusal is a first-class outcome. A request whose referent is ambiguous fails the calibrated prediction set and this station's singulation rule; a terminal request that cannot finish on its evidence fails the transit bound; a corridor that enters a coworker's forward occupancy set fails the early screen, which runs over the evidence horizon rather than seconds ahead so that it does not freeze the robot in a narrow aisle; each rejection returns a diagnostic the proposer can act on. Symbolic task plans, including those a language model writes, enter the same way, as operators whose preconditions become motion predicates. The wrong-object case marks the limit of physical verification: a confident grounding to the wrong entity passes every coordinate, reachability, and force check, and that premise needs its own task evidence and operator oversight.
 
+@Tbl-10-key-equations collects the equations that carry these decisions, what each bounds or decides, and where each is derived.
+
+| Equation | What it bounds or decides | Derived in |
+|:---|:---|:---|
+| $\lVert\mathbf{p} - \mathbf{p}_{\text{target}}\rVert_{\mathbf{E}} \le 1,\ \angle(\mathbf{R}, \mathbf{R}_{\text{target}}) \le \theta_{\text{tol}}$ | Whether a terminal pose lies in the goal set, and so completes the task | @eq-intent-goal-set-se3 |
+| $\mathcal{C} = \{\, i : c_i \ge 1 - \hat{q} \,\}$ | The calibrated candidate set: a singleton admits the referent, a larger set triggers a grounding refusal | @eq-intent-conformal-set |
+| $\tau_{\text{ev}} = (r_{\text{tol}} - e_0)/v_{\text{drift}}$; $\tau_{\text{ev,tracked}} = \sqrt{2(r_{\text{tol}} - e_0)/a_{\text{slip}}}$ | How long target evidence stays inside the task tolerance, untracked and under a tracker | @eq-intent-evidence-horizon-roots |
+| $d/v_{\max} \le t_{\text{intent\_exp}} - t_{\text{now}}$ | Whether a terminal move can finish on its current evidence; a necessary condition only | @eq-intent-dynamic-reachability-bound |
+| $\lVert\mathbf{p} - \hat{\mathbf{p}}_k\rVert \le r_k + v_h \Delta t + k_\sigma \sigma_{\text{track}}(\Delta t)$ | Where a moving person could be, and so which corridors the early screen refuses | @eq-intent-forward-occupancy |
+| $t_{\text{intent\_exp}} = \min(t_{\text{evidence}} + \tau_{\text{ev}},\ t_{\text{adm}} + T_{\text{admin}},\ t_{\text{stop\_deadline}})$ | When target-tracking authority lapses: evidence decay, host silence, or stopping clearance, whichever comes first | @eq-intent-lease-expiry-bound |
+
+: **Key equations of grounded intent**: Each load-bearing equation of the chapter, the limit it bounds or the decision it settles, and the equation where it is derived. {#tbl-10-key-equations tbl-colwidths="[42,40,18]"}
+
 ::: {.callout-takeaways title="Grounded intent at the proposal boundary"}
 * **A lease grants a target, never a path:** The Brain supplies a target, evidence epoch, error envelope, task tolerances, and requested expiry, and it writes no actuator setpoints. The permission path admits a target and effort ceilings that expire at the earliest of the evidence horizon, the lease ceiling, and the stop deadline.
 * **The intent lease emits verified goal sets:** The eighth record in the record chain binds admitted affordance frames, validated motion predicates, and geometric goal regions into an immutable record consumed by trajectory planners.
@@ -1440,6 +1561,118 @@ For further reading, six works trace the ideas this chapter composes.
 - @angelopoulos2023gentle is a practical introduction to conformal prediction, with the coverage argument and its exchangeability assumption stated plainly, as @eq-intent-conformal-set uses them.
 - @ren2023robots applies conformal prediction sets to a language-model planner, turning calibrated ambiguity into a request for help, the producer-side refusal of @sec-intent-four-stage-pipeline.
 - @trautman2010unfreezing names the freezing robot problem and shows why independent forecasts that grow with time block every path in a crowd, the trade-off behind the forward occupancy screen of @sec-intent-dynamic-forecasting.
+
+## Problems {#sec-intent-problems}
+
+```{python}
+#| label: calc-intent-problems
+#| echo: false
+#| warning: false
+#| message: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ GIVENS FOR THE END-OF-CHAPTER PROBLEMS (LEGO)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @sec-intent-problems.
+# │ Goal:    Hold the givens the problems add to the chapter's cells: goal-set
+# │          offsets, three candidate scores, terminal move lengths, a corridor
+# │          offset and body envelope, the arm's stop and clearance (the values
+# │          @sec-planning's arm example uses), an administrative lease and
+# │          admission delay, and the transfer machine (a fixed Franka-class
+# │          arm cell). Answers are not printed; the private solution script
+# │          computes them.
+# │ Show:    (8, 10, 4) mm, r_z = 5 mm; scores 0.55, 0.50, 0.12, eps = 0.05;
+# │          150/300/450 mm; 0.65 m and 0.25 m; 5.0 m/s^2, 300 mm; 100 and
+# │          250 ms, 30 ms; Panda 7 DoF, 3 kg, 1.7 m/s, 600 mm.
+# │ How:     Registry reads (RM, AISLE, Embodied.Manipulator.Panda); other
+# │          givens are labeled illustrative or chosen in the problem text.
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import *
+from mlsysim.core.units import *
+from mlsysim.fmt import fmt, fmt_int, fmt_latency, fmt_length, fmt_velocity, fmt_acceleration, fmt_frequency, fmt_mass, check
+
+RM = Embodied.MobileManipulator.WarehouseMobileManipulator
+AISLE = Embodied.Scenario.WarehouseAisle
+CELL = Embodied.Manipulator.Panda
+
+
+class IntentProblems:
+    """Givens that the chapter's problems add beyond the worked examples."""
+
+    # ┌── 1. LOAD (Constants & Parameters) ─────────────────────────────────
+    off = (8.0, 10.0, 4.0)  # mm, terminal TCP offset; category: illustrative
+    r_z_tight = 5.0 * millimeter  # tightened depth semi-axis; category: illustrative
+    scores = (0.55, 0.50, 0.12)  # two mugs and a jar; category: illustrative
+    eps_tight = 0.05  # allowed miscoverage; category: chosen
+    moves = (150.0, 300.0, 450.0)  # mm, terminal move lengths; category: illustrative
+    d_gap = 0.65 * meter  # corridor centerline to coworker; category: illustrative
+    r_body = 0.25 * meter  # body envelope r_k; category: illustrative
+    a_arm = 5.0 * meter / second**2  # arm stop deceleration, as in @sec-planning; category: illustrative
+    d_arm_clear = 300.0 * millimeter  # arm swept-volume clearance, as in @sec-planning; category: illustrative
+    t_admin = 100.0 * millisecond  # administrative lease; category: illustrative
+    t_admin_long = 250.0 * millisecond  # category: illustrative
+    t_adm_delay = 30.0 * millisecond  # capture to admission; category: illustrative
+    v_cell = CELL.cartesian_velocity_limit  # category: datasheet
+    d_tray = 600.0 * millimeter  # fixed-cell move; category: illustrative
+    conf_skip = 0.99  # proposed skip threshold; category: illustrative
+
+    # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────
+    t_arm_onset = (AISLE.t_tick + AISLE.t_bus + AISLE.t_brake_onset).to(millisecond)
+    d_arm_stop = (RM.tcp_speed_limit * t_arm_onset + RM.tcp_speed_limit**2 / (2 * a_arm)).to(millimeter)
+
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(d_arm_stop < d_arm_clear, "Problem 6: the arm stop must fit its clearance")
+    check(t_admin_long > t_admin, "Problem 6 needs a longer administrative lease")
+    check(abs(sum(scores) - 1.17) < 1e-9, "Problem 3 scores changed")
+    check(d_gap > r_body, "Problem 5: corridor lies outside the body envelope")
+    check(abs(v_cell.to(meter / second).magnitude - 1.7) < 1e-9, "Problem 9: FER Cartesian limit changed")
+    check(CELL.dofs == 7, "Problem 9 assumes a 7-joint arm")
+
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
+    off_x_str, off_y_str, off_z_str = (fmt_length(v * millimeter, unit=millimeter, precision=0) for v in off)
+    r_z_tight_str = fmt_length(r_z_tight, unit=millimeter, precision=0)
+    s1_str, s2_str, s3_str = (fmt(v, precision=2, commas=False) for v in scores)
+    eps_tight_str = fmt(eps_tight, precision=2, commas=False)
+    m1_str, m2_str, m3_str = (fmt_length(v * millimeter, unit=millimeter, precision=0) for v in moves)
+    d_gap_str = fmt_length(d_gap, unit=meter, precision=2)
+    r_body_str = fmt_length(r_body, unit=meter, precision=2)
+    a_arm_str = fmt_acceleration(a_arm, unit=meter / second**2, precision=0)
+    d_arm_clear_str = fmt_length(d_arm_clear, unit=millimeter, precision=0)
+    t_admin_str = fmt_latency(t_admin, unit=millisecond, precision=0)
+    t_admin_long_str = fmt_latency(t_admin_long, unit=millisecond, precision=0)
+    t_adm_delay_str = fmt_latency(t_adm_delay, unit=millisecond, precision=0)
+    chunk_rate_str = fmt_frequency(RM.chunk_rate, unit=hertz, precision=0)
+    v_cell_str = fmt_velocity(v_cell, unit=meter / second, precision=1)
+    cell_dofs_str = fmt_int(CELL.dofs)
+    cell_payload_str = fmt_mass(CELL.payload_capacity, unit=kilogram, precision=0)
+    d_tray_str = fmt_length(d_tray, unit=millimeter, precision=0)
+    conf_skip_str = fmt(conf_skip, precision=2, commas=False)
+```
+
+These problems use the running machine's parameters from this chapter's worked examples, with values marked illustrative standing in for measurements as they do there. Each problem names the decision it requires. The tags give the kind of work, from computation through design to critique, and the learning objectives, counted in order, that it assesses.
+
+1. **[Compute, LO3] Two drifts at once.** A tracker cancels most of the belt's velocity but leaves an illustrative residual of `{python} IntentLeaseArchetypes.v_drift_slow_str` on top of the `{python} IntentLeaseArchetypes.a_slip_str` slip bound. With the mug's `{python} IntentLeaseArchetypes.r_tol_str` tolerance and `{python} IntentLeaseArchetypes.e0_str` initial error, find the evidence horizon as the positive root of the full error-growth quadratic and compare it with each root of @eq-intent-evidence-horizon-roots alone. Then find the slip bound, with no residual velocity, at which the tracked horizon would cover a model-only renewal, one `{python} IntentLeaseArchetypes.t_intent_period_str` period plus one `{python} IntentLeaseArchetypes.t_intent_infer_str` inference. Decide whether tightening the tracker's slip qualification is a realistic way to let the intent model renew the target itself.
+
+2. **[Compute, LO1] Inside the goal set.** A terminal TCP lands `{python} IntentProblems.off_x_str`, `{python} IntentProblems.off_y_str`, and `{python} IntentProblems.off_z_str` from the handle target along $x$, $y$, and $z$. Using @eq-intent-goal-set-se3 with all three semi-axes at the `{python} IntentLeaseArchetypes.r_tol_str` grasp tolerance, decide whether the position half of the test passes. Repeat with the depth semi-axis tightened to `{python} IntentProblems.r_z_tight_str`, and state what the task profile must still supply before the full goal-set test can pass.
+
+3. **[Compute, LO4] Two mugs and a jar.** The detector keeps three boxes in the pick window with illustrative scores of `{python} IntentProblems.s1_str`, `{python} IntentProblems.s2_str`, and `{python} IntentProblems.s3_str`. Normalize them, compute their entropy in nats against the three-candidate maximum, and apply @eq-intent-conformal-set with the stipulated $\hat{q} =$ `{python} ConformalAmbiguity.q_hat_str`. Decide whether the producer admits or refuses, and name the box a top-1 selection would have sent. Then give the rank of $\hat{q}$ among `{python} ConformalAmbiguity.n_cal_str` calibration scores at $\epsilon =$ `{python} IntentProblems.eps_tight_str`, and state what the tighter $\epsilon$ buys and costs.
+
+4. **[Compute, LO5] Terminal or staged.** The arm moves at the `{python} IntentLeaseArchetypes.v_tcp_str` TCP limit. For terminal moves of `{python} IntentProblems.m1_str`, `{python} IntentProblems.m2_str`, and `{python} IntentProblems.m3_str`, apply @eq-intent-dynamic-reachability-bound against the tracked `{python} IntentLeaseArchetypes.tau_tracked_str` and untracked `{python} IntentLeaseArchetypes.tau_untracked_str` windows. For each move rejected as a terminal promise, give the minimum number of fresh captures a staged approach needs, and the number of `{python} IntentProblems.chunk_rate_str` chunk renewals its transit floor spans. Explain why the passing moves are admitted only as candidates.
+
+5. **[Compute, LO5] Sizing the corridor screen.** A candidate corridor's centerline passes `{python} IntentProblems.d_gap_str` from a coworker's last measured position, and the declared body envelope is an illustrative $r_k =$ `{python} IntentProblems.r_body_str`. Ignoring the tracking term, find the longest screening horizon at @eq-intent-forward-occupancy's `{python} IntentLeaseArchetypes.v_h_str` for which the centerline stays outside the set, and decide whether the corridor passes a screen over the tracked evidence horizon and over a `{python} IntentLeaseArchetypes.t_forecast_long_str` forecast. With $r_k$ included, find the horizon beyond which one person's set spans the `{python} IntentLeaseArchetypes.aisle_width_str` aisle, and compare it with the freezing radius of \ref{nbk-intent-freezing-radius}.
+
+6. **[Compute, LO2, LO3] Which deadline binds.** Evaluate @eq-intent-lease-expiry-bound for the mug. Admission happens an illustrative `{python} IntentProblems.t_adm_delay_str` after capture, the administrative lease is an illustrative `{python} IntentProblems.t_admin_str`, and the arm moves at `{python} IntentLeaseArchetypes.v_tcp_str` with the `{python} IntentLeaseArchetypes.t_arm_onset_str` revocation-to-brake-onset delay, a constant `{python} IntentProblems.a_arm_str` stop deceleration, and a `{python} IntentProblems.d_arm_clear_str` swept-volume clearance (the illustrative arm values of @sec-planning). Compute the stopping distance and $t_{\text{stop\_deadline}}$ from @sec-intent-lease's formula, then $t_{\text{intent\_exp}}$ and its binding term, all measured from capture, for the untracked and the tracked record. Repeat with a `{python} IntentProblems.t_admin_long_str` administrative lease, and name the deadline that binds in each of the four cases.
+
+7. **[Design, LO6] A lease that survives a kernel panic.** Specify the Safety MCU's lease timer: the fields it latches at admission, the clock it counts on and how it converts the belief record's evidence epoch into that clock, what a renewal must present to rearm it, and the action on expiry. Show that the timer revokes authority when the application processor panics mid-reach. Then list which delay terms remain in the stopping budget after expiry, and compute the travel the `{python} IntentLeaseArchetypes.t_arm_onset_str` onset alone adds at the TCP limit.
+
+8. **[Design, LO1] From operator to predicates for the place step.** Write the STRIPS-style operator `place(mug, tote)` that follows the pick, with its preconditions, add list, and delete list (@eq-intent-strips-successor). Following @tbl-10-operator-predicates, map each precondition and effect to a motion predicate or geometric certificate, the check that discharges it, and where it is checked. Identify the fact a symbolic planner asserts that only a measured contact or force residual can confirm.
+
+9. **[Design, LO2, LO5] Transfer to a fixed arm cell.** A fixed Franka-class arm cell (`{python} IntentProblems.cell_dofs_str` joints, `{python} IntentProblems.cell_payload_str` payload, a published `{python} IntentProblems.v_cell_str` Cartesian speed limit) picks glass vials from a stationary kitting tray; a typical move is `{python} IntentProblems.d_tray_str`. Write the intent lease for one vial pick, field by field, following @tbl-10-intent-specification-contract. Decide what bounds the evidence term when the target does not drift, which term of @eq-intent-lease-expiry-bound you expect to bind, what the transit floor of a typical move is, and why this cell, unlike the mug, must request an item-specific wrench ceiling.
+
+10. **[Design, LO4] An independent singulation check.** Design the station's candidate-counting check for the pick window: its evidence source, its qualified coverage, the cases it must route to a manual pick (touching objects, transparent items), and its latency against the tracked evidence horizon. State precisely what the check cannot establish, and which record in the book carries that premise forward.
+
+11. **[Critique, LO4] Skipping the check on confident detections.** A teammate proposes skipping the singulation check whenever the detector's score exceeds `{python} IntentProblems.conf_skip_str`, to save latency. Critique the proposal with the glass-jar case of @sec-intent-request-to-proposal and the per-box scoring of @sec-intent-four-stage-pipeline: what the rule would admit, why a high score is neither a calibrated probability nor a uniqueness test, and what a calibrated prediction set can and cannot replace.
+
+12. **[Critique, LO3, LO6] A renewal that changes nothing.** A log shows a renewal with a higher sequence number, a later issue time, the same target pose, and the same evidence epoch as the lease it renews. Trace it through the five-stage admission sequence of @sec-intent-lease, name the stage that rejects it and the diagnostic it should return, and critique a controller that dates renewals by packet arrival: how long could it hold authority over the conveyor mug, and what does @fig-10-intent-lease-lifecycle say happens to the timer?
 
 ::: {.callout-chapter-connection title="From intent leases to trajectory planning"}
 The intent lease fixes the target region, effort ceilings, and evidence deadline. It leaves the path unresolved. @Sec-planning constructs a timed motion and a matched stopping continuation within those bounds, recording them in the trajectory record. The independent permission path must admit that complete proposal before execution; a valid goal alone cannot establish that the moving machine can stop.

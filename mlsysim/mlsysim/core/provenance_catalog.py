@@ -694,7 +694,7 @@ UNITREE_H1_HUMANOID = _est(
     notes=(
         "Verified: about 47 kg, 3.3 m/s moving speed, 360 N*m maximum joint "
         "torque (knee), M107 joint motors. The page lists 5 degrees of freedom "
-        "per leg and 4 per arm, 18 in total, not the stored 19. Standard compute "
+        "per leg and 4 per arm, 18 in total (stored value corrected from 19 on 2026-09-29). Standard compute "
         "is an Intel Core i5 plus Core i7 with Orin NX optional, not the stored "
         "Jetson AGX Orin. Unsourced MLSysIM estimates: 30 kg payload_capacity "
         "(no H1 payload is listed), 1000 Hz control_frequency, 800 W "
@@ -702,6 +702,21 @@ UNITREE_H1_HUMANOID = _est(
     ),
     url="https://www.unitree.com/h1/",
     verified="2026-09-15",
+)
+
+UNITREE_H1_COM_HEIGHT_ESTIMATE = _est(
+    "prov:unitree-h1-com-height-estimate",
+    "Unitree H1 standing center-of-mass height (MLSysIM estimate, not a datasheet value)",
+    notes=(
+        "Illustrative estimate, 0.9 m. The Unitree H1 product page (checked "
+        "2026-09-29) lists a height of about 180 cm and thigh and calf lengths "
+        "of 400 mm each, but states no center-of-mass height. 0.9 m places the "
+        "CoM near hip height, about half the stature, the usual inverted-pendulum "
+        "height for an adult-scale biped. Replace with a value computed from the "
+        "vendor URDF link masses or a measured CoM if one is published."
+    ),
+    url="https://www.unitree.com/h1/",
+    verified="2026-09-29",
 )
 
 UBER_ATG_VOLVO_XC90 = _lit(

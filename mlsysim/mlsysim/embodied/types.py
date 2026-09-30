@@ -39,7 +39,17 @@ class EmbodiedPlatform(BaseModel):
     joint_jerk_limits: Optional[tuple[Quantity, ...]] = None
     joint_torque_rate_limit: Optional[Quantity] = None                # same on every joint
     cartesian_velocity_limit: Optional[Quantity] = None               # commanded TCP translation
+    # Standing center-of-mass height above the support surface (legged/bipedal
+    # platforms; the inverted-pendulum length z_c). None where not applicable.
+    com_height: Optional[Quantity] = None
     metadata: Metadata = Field(default_factory=Metadata)
+
+    @field_validator("com_height", mode="after")
+    @classmethod
+    def _validate_com_height(cls, v):
+        if v is None:
+            return v
+        return require_dimensionality(v, ureg.meter, "com_height")
 
     @field_validator("upper_arm_length", "forearm_length", mode="after")
     @classmethod

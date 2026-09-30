@@ -56,11 +56,15 @@ class Humanoids(Registry):
         mass=47.0 * ureg.kg,
         payload_capacity=30.0 * ureg.kg,
         max_velocity=3.3 * (ureg.meter / ureg.second),
-        dofs=19,
+        dofs=18,  # 5 per leg + 4 per arm, per the cited product page (was 19; fixed 2026-09-29)
         control_frequency=1000.0 * ureg.Hz,
         nominal_power=800.0 * ureg.watt,
         transmission="High-torque M107 joint motors (360 N·m)",
         compute_soc=Hardware.Edge.JetsonAGXOrin,
+        com_height=sourced_qty(  # illustrative estimate, not a datasheet value (added 2026-09-29)
+            0.9 * ureg.meter, pc.UNITREE_H1_COM_HEIGHT_ESTIMATE,
+            name="Unitree H1 standing center-of-mass height (estimate)",
+        ),
         metadata=Metadata(provenance=pc.UNITREE_H1_HUMANOID),
     )
 

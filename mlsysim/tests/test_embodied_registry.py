@@ -59,6 +59,17 @@ def test_embodied_registry_provenance():
         assert platform.metadata.provenance.ref != ""
 
 
+def test_humanoid_com_height_is_an_explicit_estimate():
+    """Unitree H1 CoM height is an MLSysIM estimate (the product page states none)."""
+    from mlsysim.core.provenance import ProvenanceKind
+    h1 = Embodied.Humanoid.Unitree_H1
+    assert h1.com_height.to("m").magnitude == pytest.approx(0.9)
+    assert h1.com_height.provenance.kind == ProvenanceKind.ESTIMATE
+    assert h1.com_height.provenance.notes
+    assert Embodied.Humanoid.Atlas.com_height is None
+    assert Embodied.Quadruped.Spot.com_height is None
+
+
 def test_hardware_embodied_drive_thor():
     thor = Hardware.Embodied.DriveThor
     assert thor.name == "NVIDIA DRIVE Thor"
@@ -157,6 +168,7 @@ from mlsysim.physics.robotics import (
     calc_free_space_expiry,
     calc_max_permitted_velocity,
     calc_target_evidence_horizon,
+    calc_tracked_evidence_horizon,
     calc_transient_contact_speed_limit,
     calc_transient_impact_force,
 )
@@ -593,8 +605,10 @@ def test_chunk_schedule_keeps_lease_and_evidence_arguments():
     """The renewal still fits the 60 ms lease with 5 ms jitter; the chunk outlasts the conveyor horizon."""
     assert _RM.chunk_period + 5 * ureg.millisecond < _AISLE.t_lease
     # tracked evidence horizon under residual slip: sqrt(2 (r_tol - e_0) / a_slip)
-    tau_ev = ((2 * (_AISLE.grasp_tolerance - _AISLE.grasp_initial_error)
-               / _AISLE.a_conveyor_slip) ** 0.5).to("ms")
+    tau_ev = calc_tracked_evidence_horizon(
+        _AISLE.grasp_tolerance, _AISLE.grasp_initial_error, _AISLE.a_conveyor_slip
+    )
+    assert tau_ev.to("ms").magnitude == pytest.approx(219.09, abs=5e-3)
     assert _RM.chunk_schedule["open_loop_span"] < tau_ev < _RM.chunk_schedule["chunk_span"]
 
 

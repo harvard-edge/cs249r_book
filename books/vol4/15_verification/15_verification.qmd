@@ -95,7 +95,10 @@ The **digital twin delusion**\index{Digital twin delusion!simulation limits}[^fn
 # │       the spare (100.8 ms, about three-quarters of the pre-brake subtotal);
 # │       a late-onset F1 trace's signed and normalized margins; the SoC's share
 # │       of the bus transient (1.6 A of 70 A); the discrepancy a spare-sized
-# │       simulated margin tolerates (0.131 in a 1 m position norm).
+# │       simulated margin tolerates (0.131 in a 1 m position norm); the visible
+# │       arithmetic of the reference-event notebook (217.1 mm between the capture-
+# │       referenced subtotal and the F1 oracle) and the supply-headroom notebook
+# │       (headroom vanishes near 129 mOhm); checkpoint givens (a 90 ms onset).
 # │ How: the jerk-limited S-curve stop (calc_scurve_stop_distance / _time,
 # │      calc_scurve_max_permitted_velocity) with the jerk bound taken as the
 # │      reference C2 polynomial's peak jerk at the drive limit, as in
@@ -125,11 +128,22 @@ from mlsysim.fmt import (
     fmt_mass,
     fmt_percent,
     fmt_power,
+    fmt_int,
+    fmt_resistance,
+    fmt_display_math,
     check,
 )
 
 RM = Embodied.MobileManipulator.WarehouseMobileManipulator
 AISLE = Embodied.Scenario.WarehouseAisle
+
+def _num(q, unit, p):
+    # Plain magnitude for the notebooks' visible arithmetic (no thousands separator inside math);
+    # integer-like values print without a decimal, others at precision p
+    x = q.to(unit).magnitude
+    if abs(x - round(x)) < 1e-9:
+        return fmt_int(round(x), commas=False)
+    return fmt(x, precision=p, commas=False)
 
 class RackEndVerification:
     """Oracle bounds and envelope points for fault injection at the rack end."""
@@ -174,6 +188,7 @@ class RackEndVerification:
         1.0 * meter / second
     )  # restricted-mode aisle speed on inspected floors, below the inspected-floor ceiling; scenario assumption; category: chosen
     late_onset = 30 * millisecond  # example late powered deceleration onset (STL margin); scenario assumption; category: illustrative
+    chk_onset = 90 * millisecond  # checkpoint given: a measured onset after the last valid renewal; scenario assumption; category: illustrative
     soc_power = RM.brain_soc.tdp_max  # category: datasheet (application SoC maximum module power)
     converter_eff = RM.drive_bus_converter_efficiency  # category: datasheet (typical converter efficiency)
     drive_current_limit = RM.drive_current_limit  # category: chosen (per-motor datasheet peak)
@@ -231,6 +246,26 @@ class RackEndVerification:
     # Normalized by chosen scales equal to the bounds themselves
     rho_onset_n = float((rho_onset / onset_bound).to("dimensionless").magnitude)
     rho_dist_n = float((rho_dist / f1_aisle_stop_bound).to("dimensionless").magnitude)
+    # Notebook nbk-verification-reference-event-gap: both sums term by term
+    f1_preonset_aisle = (v_aisle * onset_bound).to(millimeter)
+    capture_preonset = (v_aisle * tau_delay).to(millimeter)
+    age_travel = (v_aisle * t_age).to(millimeter)
+    ref_gap = (budget - f1_aisle_stop_bound).to(millimeter)
+    late_equiv = (ref_gap / v_aisle).to(millisecond)  # onset slip the distance predicate alone would absorb
+    sfx_v2 = (v_aisle**2 / (2 * a_brake)).to(meter)  # d_suffix, braking term (@eq-plan-c2-stopping-suffix)
+    sfx_jerk = (v_aisle * a_brake / (2 * j_brake)).to(meter)  # d_suffix, jerk-ramp term
+    sfx_v2_r = (v_restricted**2 / (2 * a_insp)).to(meter)
+    sfx_jerk_r = (v_restricted * a_insp / (2 * j_brake)).to(meter)
+    speed_cut = 1.0 - float((v_restricted / v_aisle).to("dimensionless").magnitude)
+    oracle_cut = 1.0 - float((f1_stop_bound / f1_aisle_stop_bound).to("dimensionless").magnitude)
+    # Notebook nbk-verification-supply-headroom: stop time T = v/a + a/j from the inspected-floor ceiling
+    tstop_va = (ceiling_insp / a_insp).to(millisecond)
+    tstop_aj = (a_insp / j_brake).to(millisecond)
+    r_cross = ((bus_low - bus_uvlo) / i_rail).to(ureg.milliohm)  # source resistance at which the transient alone reaches lockout
+    step_ratio = float((i_cross / i_rail).to("dimensionless").magnitude)
+    # Checkpoint given: onset and pre-braking travel of a late F1 onset
+    chk_rho = (onset_bound - chk_onset).to(millisecond)
+    chk_extra = (v_aisle * (chk_onset - onset_bound)).to(millimeter)
     # Shared-bus sag attribution: the application SoC's maximum draw from the depleted bus
     soc_current = (soc_power / (bus_low * converter_eff)).to(ureg.ampere)
     drive_peak = (drive_current_limit * drive_wheels).to(ureg.ampere)
@@ -305,6 +340,18 @@ class RackEndVerification:
     )
     # margin_floor_friction_ceiling_knee.svg fig-alt hand-types mu 0.12 and 1.3 m/s (0.204, 1.44, 1.23 guarded above)
     check(abs(mu_insp - 0.12) < 1e-9 and abs(v_aisle.to(meter / second).magnitude - 1.3) < 1e-9, "Knee fig-alt: mu 0.12, aisle 1.3 m/s.")
+    # Reference-event notebook: the closed-form stop matches the MLSysIM S-curve, and the
+    # capture-referenced subtotal exceeds the F1 oracle by exactly age travel plus the two margins
+    check(abs((sfx_v2 + sfx_jerk).to(millimeter).magnitude - c2_distance.magnitude) < 1e-6, "d_suffix = v^2/2a + v a/2j at 1.3 m/s.")
+    check(abs((sfx_v2_r + sfx_jerk_r).to(millimeter).magnitude - f1_c2.magnitude) < 1e-6, "d_suffix = v^2/2a + v a/2j at 1.0 m/s.")
+    check(v_restricted > a_insp**2 / j_brake and v_aisle > a_brake**2 / j_brake, "Both stops reach the deceleration plateau.")
+    check(abs(ref_gap.magnitude - (age_travel + delta_loc + delta_margin).to(millimeter).magnitude) < 1e-6, "Gap = age travel + delta_loc + delta_margin.")
+    check(abs(ref_gap.magnitude - 217.08) < 5e-3 and 2 * onset_bound < late_equiv < 2.1 * onset_bound, "The 217.1 mm gap hides about twice the onset bound.")
+    check(abs(speed_cut - 0.231) < 5e-4 and abs(oracle_cut - 0.163) < 5e-4, "A 23 percent slower point shortens the oracle 16 percent.")
+    check(abs((tstop_va + tstop_aj - stop_insp_ceiling).magnitude) < 1e-6, "Stop time T = v/a + a/j at the inspected ceiling.")
+    check(abs(r_cross.magnitude - 128.571) < 5e-3 and 2.0 < step_ratio < 2.2, "Headroom vanishes near 129 mOhm; the crossing step is about twice the transient.")
+    check(float((rho_dist / eps_track).to("dimensionless").magnitude) < rho_onset_n, "Checkpoint: with the 40 mm inset as distance scale, distance sets the combined score.")
+    check(abs(chk_rho.magnitude + 8.0) < 1e-9 and abs(chk_extra.magnitude - 10.4) < 1e-6, "Checkpoint: 90 ms onset misses by 8 ms and adds 10.4 mm.")
 
     # ┌── 4. OUTPUT (Format & Export) ────────────────────────────────────────
     v_aisle_str = fmt_velocity(v_aisle, precision=1)
@@ -371,6 +418,62 @@ class RackEndVerification:
     soc_share_pct_str = fmt_percent(soc_share, precision=1, style="prose")
     eps_gap_max_str = fmt(eps_gap_max, precision=3)
     queue_exhaust_pct_str = fmt_percent(queue_exhaust_ratio, precision=1, style="prose")
+    # Notebook, checkpoint, and definition strings
+    j_brake_str = fmt(j_brake.magnitude, precision=2)
+    eps_track_str = fmt_length(eps_track, unit=millimeter, precision=0)
+    delta_loc_str = fmt_length(delta_loc, unit=millimeter, precision=0)
+    delta_margin_str = fmt_length(delta_margin, unit=millimeter, precision=0)
+    ref_gap_str = fmt_length(ref_gap, unit=millimeter, precision=1)
+    age_travel_str = fmt_length(age_travel, unit=millimeter, precision=1)
+    late_equiv_str = fmt_latency(round(late_equiv.magnitude) * millisecond, unit=millisecond, precision=0)  # displayed as "about"
+    speed_cut_pct_str = fmt_percent(speed_cut, precision=1, style="prose")
+    oracle_cut_pct_str = fmt_percent(oracle_cut, precision=1, style="prose")
+    chk_onset_str = fmt_latency(chk_onset, unit=millisecond, precision=0)
+    bus_r_str = fmt_resistance(bus_r, unit=ureg.milliohm, precision=0)
+    brake_engage_str = fmt_latency(brake_engage_max, unit=millisecond, precision=0)
+    holdup_margin_str = fmt_latency(holdup_margin, unit=millisecond, precision=1)
+    r_cross_str = fmt_resistance(round(r_cross.magnitude) * ureg.milliohm, unit=ureg.milliohm, precision=0)  # displayed as "about"
+    _ms, _mm, _mps, _mps2 = millisecond, millimeter, meter / second, meter / second**2
+    onset_math = fmt_display_math(
+        rf"t_{{\text{{onset}}}} \le T_{{\text{{lease}}}} + T_{{\text{{tick}}}} + T_{{\text{{bus}}}} + T_{{\text{{act}}}}"
+        rf" = {_num(t_lease, _ms, 0)} + {_num(t_tick, _ms, 0)} + {_num(t_bus, _ms, 0)} + {_num(t_act, _ms, 0)}"
+        rf" = {_num(onset_bound, _ms, 0)}\ \text{{ms}}"
+    )
+    suffix_math = fmt_display_math(
+        rf"d_{{\text{{suffix}}}}(v) = \frac{{v^2}}{{2a_{{\text{{brake}}}}}} + \frac{{v\,a_{{\text{{brake}}}}}}{{2j_{{\max}}}}"
+        rf" = \frac{{{_num(v_aisle, _mps, 1)}^2}}{{2 \times {_num(a_brake, _mps2, 1)}}}"
+        rf" + \frac{{{_num(v_aisle, _mps, 1)} \times {_num(a_brake, _mps2, 1)}}}{{2 \times {j_brake_str}}}"
+        rf" = {_num(sfx_v2, meter, 4)} + {_num(sfx_jerk, meter, 4)} = {_num(sfx_v2 + sfx_jerk, meter, 4)}\ \text{{m}}"
+    )
+    f1_math = fmt_display_math(
+        rf"d_{{\text{{F1}}}}(v) = {_num(v_aisle, _mps, 1)} \times {_num(onset_bound, _ms, 0)} + {_num(c2_distance, _mm, 1)} + {_num(eps_track, _mm, 0)}"
+        rf" = {_num(f1_preonset_aisle, _mm, 1)} + {_num(c2_distance, _mm, 1)} + {_num(eps_track, _mm, 0)}"
+        rf" = {_num(f1_aisle_stop_bound, _mm, 1)}\ \text{{mm}}"
+    )
+    capture_math = fmt_display_math(
+        rf"v\,\tau_{{\text{{delay}}}} + d_{{\text{{suffix}}}} + \delta_{{\text{{loc}}}} + \delta_{{\text{{margin}}}} + \epsilon_{{\text{{track}}}}"
+        rf" = {_num(v_aisle, _mps, 1)} \times {_num(tau_delay, _ms, 1)} + {_num(c2_distance, _mm, 1)} + {_num(delta_loc, _mm, 0)} + {_num(delta_margin, _mm, 0)} + {_num(eps_track, _mm, 0)}"
+        rf" = {_num(budget, _mm, 1)}\ \text{{mm}}"
+    )
+    gap_math = fmt_display_math(
+        rf"{_num(budget, _mm, 1)} - {_num(f1_aisle_stop_bound, _mm, 1)} = {_num(v_aisle, _mps, 1)} \times {_num(t_age, _ms, 1)} + {_num(delta_loc, _mm, 0)} + {_num(delta_margin, _mm, 0)}"
+        rf" = {_num(age_travel, _mm, 1)} + {_num(delta_loc + delta_margin, _mm, 0)} = {_num(ref_gap, _mm, 1)}\ \text{{mm}}"
+    )
+    restricted_math = fmt_display_math(
+        rf"d_{{\text{{F1}}}}({_num(v_restricted, _mps, 1)}) = {_num(v_restricted, _mps, 1)} \times {_num(onset_bound, _ms, 0)}"
+        rf" + \left(\frac{{{_num(v_restricted, _mps, 1)}^2}}{{2 \times {_num(a_insp, _mps2, 3)}}} + \frac{{{_num(v_restricted, _mps, 1)} \times {_num(a_insp, _mps2, 3)}}}{{2 \times {j_brake_str}}}\right)\text{{m}}"
+        rf" + {_num(eps_track, _mm, 0)} = {_num(f1_preonset, _mm, 1)} + {_num(f1_c2, _mm, 1)} + {_num(eps_track, _mm, 0)} = {_num(f1_stop_bound, _mm, 1)}\ \text{{mm}}"
+    )
+    sag_math = fmt_display_math(
+        rf"V_{{\min}} = V_{{\text{{low}}}} - I\,R = {_num(bus_low, ureg.volt, 1)} - {_num(i_rail, ureg.ampere, 0)} \times {_num(bus_r, ureg.ohm, 3)}"
+        rf" = {_num(bus_min, ureg.volt, 1)}\ \text{{V}}, \qquad I_{{\text{{cross}}}} = \frac{{V_{{\text{{low}}}} - V_{{\text{{UVLO}}}}}}{{R}}"
+        rf" = \frac{{{_num(bus_low, ureg.volt, 1)} - {_num(bus_uvlo, ureg.volt, 0)}}}{{{_num(bus_r, ureg.ohm, 3)}}} = {_num(i_cross, ureg.ampere, 0)}\ \text{{A}}"
+    )
+    holdup_math = fmt_display_math(
+        rf"t_{{\text{{set}}}} = (T_{{\text{{tick}}}} + T_{{\text{{bus}}}} + T_{{\text{{act}}}}) + \left(\frac{{v}}{{a}} + \frac{{a}}{{j_{{\max}}}}\right) + t_{{\text{{engage}}}}"
+        rf" = {_num(flag_onset, _ms, 0)} + \left(\frac{{{_num(ceiling_insp, _mps, 3)}}}{{{_num(a_insp, _mps2, 3)}}} + \frac{{{_num(a_insp, _mps2, 3)}}}{{{j_brake_str}}}\right)\text{{s}} + {_num(brake_engage_max, _ms, 0)}"
+        rf" = {_num(flag_onset, _ms, 0)} + {_num(tstop_va, _ms, 1)} + {_num(tstop_aj, _ms, 1)} + {_num(brake_engage_max, _ms, 0)} = {_num(flag_to_set, _ms, 1)}\ \text{{ms}}"
+    )
 ```
 
 Consider the warehouse mobile manipulator running its aisle at `{python} RackEndVerification.v_aisle_str` (chosen; see the Reader Guide) toward a rack end where a person may step out. Its proposer can stop renewing commands while the base keeps moving. The authority record specifies who should take over, but that specification does not show that the permission path survives the fault or that the brakes respond in time; only a trial that creates the failure and measures the response through to physical motion can show it. The machine's compute stack partitions high-bandwidth neural inference from deterministic safety. An application system-on-chip (SoC) with an embedded accelerator executes the unprivileged vision-language-action chunk policy, while a lockstep safety microcontroller executes the deterministic runtime enforcer. The safety microcontroller commands the base-drive inverters across a hard real-time fieldbus (CAN-FD or EtherCAT), a network whose cyclic frames arrive on a fixed schedule. Both processors draw from the shared `{python} RackEndVerification.bus_nominal_str` drive bus that powers the motors: the application SoC through a converter, and the safety microcontroller through an isolated converter and a held-up permission rail of its own.
@@ -380,7 +483,7 @@ Weeks of clean operational runs at that speed say little about four physical har
 1. **Proposer Stall (F1):** The neural chunk policy on the application processor renews its capability lease and then suffers a thread deadlock, driver freeze, or thermal throttling stall;
 2. **Stale Observation (F2):** A camera frame or depth tensor arrives at the permission path with an aged or corrupted hardware timestamp after buffering in an ISP queue or direct memory access (DMA) ring;
 3. **Lost Fieldbus Frames (F3):** Electromagnetic interference (EMI) from inverter switching induces a burst of dropped or corrupted EtherCAT/CAN-FD frames between the safety MCU and drive actuators; and
-4. **Drive-Bus Droop & Feed Loss (F4a/F4b):** Motor acceleration current drawn through the pack and harness resistance sags the shared `{python} RackEndVerification.bus_nominal_str` drive bus toward the `{python} RackEndVerification.bus_uvlo_str` lockout of the converter that feeds the application processor, and a supply fault or a larger step carries it below.
+4. **Drive-Bus Droop & Feed Loss (F4a/F4b):** A supply fault carries the shared `{python} RackEndVerification.bus_nominal_str` drive bus below the `{python} RackEndVerification.bus_uvlo_str` lockout of the converter that feeds the application processor (F4a), or the permission path's own held-up rail loses its feed (F4b).
 
 These failure modes organize the planned physical and authority campaign: physical faults F1–F4 and authority transfer faults A1–A4 (formalized in @tbl-15-fault-classification). The lease catches a stall, the evidence-epoch check catches a stale capture time, the drive's fieldbus watchdog catches dropped communication cycles, and the permission path's undervoltage monitor, operating on an electrically isolated, held-up power rail, catches a brownout of the shared drive bus. Each fault is injected at the rack end, alongside the four supervisory authority faults (A1–A4) handed over from @sec-intervention-authority-log, and every stopping trial is scored against formal temporal and distance bounds derived from the machine's physical stopping budget.
 
@@ -396,11 +499,21 @@ The base's stopping claim and the arm's latch-force claim require separate envel
 
 ## The Operating Envelope {#sec-verification-operating-envelope}
 
-The **operating envelope**\index{Operating envelope!definition} pairs the target operational design domain (ODD, @sec-evaluation-what-measured) with the machine's internal execution conditions. The same aisle and payload can produce a different response under memory contention, a low supply voltage, or a hot drive. A trial therefore names both the external conditions and the internal load under which its claim must hold.
+The operating envelope pairs the target operational design domain (ODD, @sec-evaluation-what-measured) with the machine's internal execution conditions. The same aisle and payload can produce a different response under memory contention, a low supply voltage, or a hot drive. A trial therefore names both the external conditions and the internal load under which its claim must hold.
 
 For the mobile manipulator, the envelope is a set of declared points rather than one nominal condition: the `{python} RackEndVerification.v_aisle_str` aisle speed; payloads of zero and the `{python} RackEndVerification.payload_str` rack capacity; floor friction of at least `{python} RackEndVerification.mu_min_str`, the value the `{python} RackEndVerification.a_brake_str` credible deceleration needs, on dry aisles, and of at least `{python} RackEndVerification.mu_insp_str` on floors under the site's inspection regime; and ambient temperatures from `{python} RackEndVerification.ambient_lo_str` to `{python} RackEndVerification.ambient_hi_str`. For inspected floors the envelope declares a restricted point at `{python} RackEndVerification.v_restricted_str`, the candidate restricted configuration whose friction premise the enforcement record states (@sec-enforcement-telemetry), and trials there use a test floor whose measured friction sits at the `{python} RackEndVerification.mu_insp_str` qualification value, so that the stop they exercise is the one friction bounds.
 
 Each point is paired with the machine's internal execution state: application-processor load up to its peak neural inference burst, the drive bus anywhere from its `{python} RackEndVerification.bus_low_str` depleted point to its `{python} RackEndVerification.bus_nominal_str` nominal, EtherCAT/CAN-FD transmission jitter, memory crossbar contention, and the safety microcontroller's thermal state. The campaign also challenges the `{python} RackEndVerification.v_takeover_str` moving-takeover candidate with its `{python} RackEndVerification.t_takeover_str` takeover interval. This is a rejected rack-end candidate, not an admitted operating mode: @sec-intervention-authority-transitions requires the local stop first when that transition cannot preserve the stopping envelope.
+
+::: {#dfn-verification-operating-envelope .callout-definition title="Operating envelope"}
+
+***Operating envelope***\index{Operating envelope!definition} is the declared set of external conditions and internal execution states, each point stated with its units and tolerances, over which a machine's protective claim must hold and at which every trial of that claim is run.
+
+1.  **Significance**: The envelope decides which terms of $d_{\text{stop}} \le D_{\text{clear}}$ a trial exercises. For the running machine, the `{python} RackEndVerification.v_aisle_str` aisle speed sits below the `{python} RackEndVerification.ceiling_dry_str` ceiling on a dry floor and above the `{python} RackEndVerification.ceiling_insp_str` ceiling on an inspected one, so the same speed is inside the envelope on one floor and outside it on the other.
+2.  **Distinction**: The operational design domain describes the world the proposer meets. The operating envelope adds the machine's own state, such as processor load, the `{python} RackEndVerification.bus_low_str` to `{python} RackEndVerification.bus_nominal_str` drive bus, and bus traffic, because the same aisle produces a different response when the supply is depleted or the memory bus is saturated.
+3.  **Common pitfall**: A frequent misconception is that an envelope is a box of independent ranges, so that testing each range at its extremes covers it. Two values that are each in range can combine into a point outside the envelope, and the boundary must be tested at those coupled corners.
+
+:::
 
 An operating envelope is distinct from the larger **survival envelope**\index{Survival envelope!definition} that encloses it. Inside the operating envelope the learned policy and the tracking controllers regulate the process. When a disturbance, a sensor failure, or a compute stall pushes the machine across that boundary, nominal regulation is conceded, and the objective becomes bringing the body to a bounded, safe state before structural limits are breached. For the mobile manipulator, the survival envelope must be established for each selected response and machine state (@sec-enforcement-fallback-ladder). The normal resident stop uses powered deceleration and applies holding brakes at standstill. Torque inhibit is a different response and does not inherit that stopping-distance budget. Beyond it lies structural failure, where stored kinetic energy ($E_k = \frac{1}{2} m v^2$) exceeds what the hardware can dissipate before physical impact.
 
@@ -415,7 +528,49 @@ Two conditional oracle bounds follow. Before a trial, its record must establish 
 :::
 
 1. **Powered Deceleration Onset Deadline:** Powered deceleration onset must come no later than `{python} RackEndVerification.onset_bound_str` after the last valid renewal, traversing the lease path of @sec-nervous-cadences: the `{python} RackEndVerification.t_lease_str` lease, one `{python} RackEndVerification.t_tick_str` tick of the permission loop, one `{python} RackEndVerification.t_bus_str` bus cycle, and `{python} RackEndVerification.t_act_str` from delivered stop command to powered deceleration onset. (The power-rail faults of F4 take their onset from the undervoltage flag instead).
-2. **Stopping Distance Bound:** The physical stop, measured by external optical ground-truth instruments independent of the machine, must end within the distance allowed from the same event the fault is referenced to. The `{python} RackEndVerification.budget_str` subtotal starts at the qualified observation's exposure midpoint and omits dispatch-to-admission delay. It is not a bound from an arbitrary target appearance. An appearance-referenced trial must independently timestamp the physical appearance and the first usable capture, charge the intervening travel together with dispatch-to-admission travel, and precommit a full bound against the clearance measured at appearance. A capture-referenced trial instead uses clearance and external position at capture; neither trial may score a physical pass from the incomplete subtotal. A stalled proposer offers no target appearance, so its stop, like its onset, is measured from the last valid renewal: the travel during the `{python} RackEndVerification.onset_bound_str` before powered deceleration onset, the resident stop, and the tracking inset give `{python} RackEndVerification.f1_aisle_stop_bound_str` at the aisle speed.
+2. **Stopping Distance Bound:** The physical stop, measured by external optical ground-truth instruments independent of the machine, must end within the distance allowed from the same event the fault is referenced to. The `{python} RackEndVerification.budget_str` subtotal starts at the qualified observation's exposure midpoint and omits dispatch-to-admission delay. It is not a bound from an arbitrary target appearance. An appearance-referenced trial must independently timestamp the physical appearance and the first usable capture, charge the intervening travel together with dispatch-to-admission travel, and precommit a full bound against the clearance measured at appearance. A capture-referenced trial instead uses clearance and external position at capture; neither trial may score a physical pass from the incomplete subtotal. A stalled proposer offers no target appearance, so its stop, like its onset, is measured from the last valid renewal.
+
+Measured from that event, the two F1 predicates are (@eq-verification-f1-oracle):
+$$t_{\text{onset}} \le T_{\text{lease}} + T_{\text{tick}} + T_{\text{bus}} + T_{\text{act}}, \qquad d_{\text{F1}}(v) = v\,(T_{\text{lease}} + T_{\text{tick}} + T_{\text{bus}} + T_{\text{act}}) + d_{\text{suffix}}(v) + \epsilon_{\text{track}}$$ {#eq-verification-f1-oracle}
+Here $t_{\text{onset}}$ is the measured interval from the last valid renewal to powered deceleration onset, $d_{\text{F1}}(v)$ bounds the measured travel from that renewal to rest, $d_{\text{suffix}}(v)$ is the jerk-limited resident stop of @eq-plan-c2-stopping-suffix, and $\epsilon_{\text{track}}$ is the tracking inset. The design budget's pre-brake subtotal $\tau_{\text{delay}}$ begins earlier, at capture, and its sum also carries the localization and planning margins. Notebook \ref{nbk-verification-reference-event-gap} evaluates both sums at the rack end.
+
+::: {#nbk-verification-reference-event-gap .callout-notebook title="The reference-event gap"}
+
+**Problem**: A proposer stall at the aisle speed is scored from the last valid renewal. What onset and travel bounds follow from the lease path and the resident stop, and how far below the capture-referenced subtotal of the design budget do they sit?
+
+**Variables**:
+
+* $v =$ `{python} RackEndVerification.v_aisle_str` (Chosen) and $D_{\text{clear}} =$ `{python} RackEndVerification.d_clear_str` (Illustrative; @tbl-01-machine-card).
+* $T_{\text{lease}} =$ `{python} RackEndVerification.t_lease_str` and $T_{\text{tick}} =$ `{python} RackEndVerification.t_tick_str` (Chosen); $T_{\text{bus}} =$ `{python} RackEndVerification.t_bus_str` and $T_{\text{act}} =$ `{python} RackEndVerification.t_act_str` (Illustrative).
+* $a_{\text{brake}} =$ `{python} RackEndVerification.a_brake_str` (Illustrative; stands in for a measured loaded deceleration) and $j_{\max} =$ `{python} RackEndVerification.j_brake_str` m/s³ (Derived; the reference stop polynomial's peak jerk).
+* $\epsilon_{\text{track}} =$ `{python} RackEndVerification.eps_track_str` and $\delta_{\text{loc}} =$ `{python} RackEndVerification.delta_loc_str` (Illustrative); $\delta_{\text{margin}} =$ `{python} RackEndVerification.delta_margin_str` (Chosen); evidence age $t_{\text{age}} =$ `{python} RackEndVerification.t_age_str` (Derived; @sec-perception-transduction-calibration).
+
+**Math**:
+
+*Onset bound.*
+`{python} RackEndVerification.onset_math`
+
+*Resident stop* (@eq-plan-c2-stopping-suffix).
+`{python} RackEndVerification.suffix_math`
+
+*F1 oracle from the last valid renewal* (@eq-verification-f1-oracle).
+`{python} RackEndVerification.f1_math`
+
+*Capture-referenced subtotal*, which leaves `{python} RackEndVerification.spare_str` of the clear distance.
+`{python} RackEndVerification.capture_math`
+
+*The gap between them.*
+`{python} RackEndVerification.gap_math`
+
+*Sensitivity.* At the restricted point on the inspected floor, friction caps the deceleration at `{python} RackEndVerification.a_insp_str`:
+`{python} RackEndVerification.restricted_math`
+A speed `{python} RackEndVerification.speed_cut_pct_str` lower shortens the oracle by only `{python} RackEndVerification.oracle_cut_pct_str`, because the weaker deceleration gives back most of the saving.
+
+**Result**: F1 passes only if powered deceleration begins within `{python} RackEndVerification.onset_bound_str` and the base travels at most `{python} RackEndVerification.f1_aisle_stop_bound_str` from the last valid renewal, `{python} RackEndVerification.ref_gap_str` less than the capture-referenced subtotal.
+
+**Systems insight**: The two sums share the stop and differ only in their reference event. The subtotal adds `{python} RackEndVerification.age_travel_str` of evidence-age travel and two margins that protect a target position, and a stalled proposer has no target. Scored against the subtotal, the distance predicate would accept a powered onset about `{python} RackEndVerification.late_equiv_str` late, twice the whole onset bound, so a trial keeps $d_{\text{stop}} \le D_{\text{clear}}$ honest only when it is scored from the event its fault disturbs.
+
+:::
 
 The partial budget beneath both bounds reproduces the design record's arithmetic; it is a conditional oracle input, not measured timing closure. A trial must therefore record successful admission times, continuing evidence age, and physical response onset, because the nominal proposal cadence alone does not establish renewal before expiry. The lease begins at successful admission, so the renewal campaign must qualify the maximum interval between successful admissions that @sec-nervous-cadences requires (@eq-nervous-lease-rule), under load and with rejected proposals, rather than measuring only proposer dispatch.
 
@@ -467,7 +622,17 @@ A campaign runs every injection under one fixed protocol, so that a verdict foll
 
 ## Fault Oracles and Acceptance {#sec-verification-oracles-acceptance}
 
-The F1 trace must establish both timely onset and bounded travel; a stopped base alone establishes neither. Without an oracle fixed in advance, engineers judge time-series plots after the run from gross symptoms, such as whether Joule heating\index{Joule heating!component failure} melted a phase wire or a controller threw an unhandled exception, and the test becomes an anecdote. An **oracle**\index{Oracle!definition} is the predicate, defined in full before the run, that scores a trial against its claim.
+The F1 trace must establish both timely onset and bounded travel; a stopped base alone establishes neither. Without an oracle fixed in advance, engineers judge time-series plots after the run from gross symptoms, such as whether Joule heating\index{Joule heating!component failure} melted a phase wire or a controller threw an unhandled exception, and the test becomes an anecdote.
+
+::: {#dfn-verification-test-oracle .callout-definition title="Test oracle"}
+
+***Test oracle***\index{Test oracle!definition}\index{Oracle!definition} is the predicate, fixed in full before a trial runs, that compares each independently witnessed quantity of the trace with its bound from a declared reference event and returns the trial's verdict.
+
+1.  **Significance**: For F1 the oracle is two predicates from the last valid renewal, powered onset within `{python} RackEndVerification.onset_bound_str` and travel within `{python} RackEndVerification.f1_aisle_stop_bound_str` at the aisle speed. Each carries a signed margin in its own unit, which is what lets a near miss inform the next trial and lets a search steer toward small margins.
+2.  **Distinction**: A pass criterion read from a plot after the run is chosen with the outcome in view; an oracle is precommitted. It also differs from the design budget it is derived from, whose `{python} RackEndVerification.budget_str` subtotal starts at capture and protects a target position that a stalled proposer does not have.
+3.  **Common pitfall**: A frequent misconception is that a base stopped short of the rack has passed. A stop inside the `{python} RackEndVerification.d_clear_str` clear distance can hide an onset past its deadline, or a stop made by a path the claim does not name, such as a tripped breaker that dropped drive power.
+
+:::
 
 ### Four-verdict test oracles and forensic integrity {#sec-verification-four-verdicts}
 
@@ -481,7 +646,7 @@ The precommitted record fixes the physical predicates, physical units and any no
 
 A **fault record**\index{Fault record!definition} binds a fixed header to the independently retained trace. The header holds the fields every trial shares. Its identity fields name the trial and its claim, the envelope point, the injected fault by mode, magnitude, and target, and a digest of the precommitted oracle. Its outcome fields carry the measured detection and takeover times, the signed margin for the claim, the verdict status, the digest of the evidence bundle, and a signature over the header. The variable trace stays in the bundle.
 
-The planned F1 record at the envelope's restricted point, `{python} RackEndVerification.v_restricted_str` on an inspected floor, with the rack loaded to `{python} RackEndVerification.payload_str`, specifies those fields (@tbl-15-f1-record). As for every stall, the distance oracle is referenced to the last valid renewal. The travel during the `{python} RackEndVerification.onset_bound_str` before powered deceleration onset, the resident stop on a floor of friction `{python} RackEndVerification.mu_insp_str`, and the tracking inset together give `{python} RackEndVerification.f1_stop_bound_str`, shorter than the `{python} RackEndVerification.budget_restricted_str` capture-referenced subtotal at that speed. The latter includes earlier evidence age and fixed geometric allowances, omits dispatch-to-admission travel, and cannot be substituted for F1's renewal-referenced oracle or for an appearance-referenced bound. @Fig-15-reference-events places the three reference events on one time axis and shows which intervals each bound counts.
+The planned F1 record at the envelope's restricted point, `{python} RackEndVerification.v_restricted_str` on an inspected floor, with the rack loaded to `{python} RackEndVerification.payload_str`, specifies those fields (@tbl-15-f1-record). As for every stall, the distance oracle is referenced to the last valid renewal. On a floor of friction `{python} RackEndVerification.mu_insp_str`, @eq-verification-f1-oracle gives `{python} RackEndVerification.f1_stop_bound_str` (the sensitivity line of \ref{nbk-verification-reference-event-gap}), shorter than the `{python} RackEndVerification.budget_restricted_str` capture-referenced subtotal at that speed. The latter includes earlier evidence age and fixed geometric allowances, omits dispatch-to-admission travel, and cannot be substituted for F1's renewal-referenced oracle or for an appearance-referenced bound. @Fig-15-reference-events places the three reference events on one time axis and shows which intervals each bound counts.
 
 ::: {#fig-15-reference-events fig-env="figure" fig-pos="t" fig-cap="**Three reference events, three bounds**: One stop on a time axis from capture, with the dispatch-to-admission interval drawn at the `{python} RackEndVerification.t_spare_str` that would spend the spare. The renewal-referenced F1 oracle counts only the `{python} RackEndVerification.onset_bound_str` lease path and the stop. The capture-referenced subtotal adds the `{python} RackEndVerification.t_age_str` evidence age but not the dispatch-to-admission interval. An appearance-referenced bound would need both that interval and the unwitnessed appearance-to-capture interval, and no value for it exists yet." fig-alt="Horizontal time axis from capture, 0 to 300 milliseconds, with events marked: appearance before capture on a hatched interval labeled unmeasured and not to scale, capture at 0, dispatch at 51.6 ms with an upper value of 51.8, a red hatched dispatch-to-admission interval to the last valid renewal at about 152 ms labeled 100.8 ms spends the spare, lease expiry 60 ms later, a shaded onset allowance, and onset 82 ms after renewal, followed by a stop of 931 ms to rest at 1.3 m/s. Below, three bars: renewal-referenced, starting at the last valid renewal, 751.9 mm at 1.3 m/s and 629.6 mm at 1.0 m/s; capture-referenced, solid from capture to dispatch, dotted across the dispatch-to-admission interval, then solid, 969.0 mm at 1.3 m/s and 831.2 mm at 1.0 m/s; and appearance-referenced, starting with a hatched segment at appearance, labeled as needing a witnessed appearance-to-capture interval and a dispatch-to-admission bound, with no value yet."}
 
@@ -644,6 +809,22 @@ A single aggregate percentage hides where the campaign never went. A machine tha
 
 Repeated trials count only where something varies. A deterministic fault script run five hundred times on a digital bench, with fixed initial conditions, register states, clock dividers, and inputs, executes the same branch sequence every time and says no more than one run. On the test aisle, repetition samples floor friction, asynchronous interrupt arrivals, bus arbitration, and the phase between the sensor clock and the inference cycle, so it measures the spread and tail of the response-time distribution.
 
+::: {#chk-verification-oracles-verdicts .callout-checkpoint title="Oracles, verdicts, and reference events"}
+
+An F1 result carries meaning only through the oracle, reference event, and verdict rule fixed before the run.
+
+**Scoring a trial**
+
+- [ ] **Verdict assignment**: Can you score three trials, one in which the injector dropped the fault packet before it reached the transceiver, one in which the logger crashed while the base stopped short of the rack, and one in which every predicate held on independent witnesses, and name the record fields each trial leaves unavailable?
+- [ ] **Reference event**: Can you explain why the F1 distance oracle starts at the last valid renewal and leaves out the evidence age and the two margins that the capture-referenced subtotal carries?
+- [ ] **Repetition vs. variation**: Can you explain why five hundred runs of a deterministic bench script count as one trial, while repeated runs on the test aisle sample a distribution?
+
+**Estimating a margin**
+
+- [ ] **Onset estimate**: A trial at `{python} RackEndVerification.v_aisle_str` records powered deceleration onset `{python} RackEndVerification.chk_onset_str` after the last valid renewal, with the lease expiring and the stop command issuing on time. Can you estimate the onset margin, the extra travel before braking begins, and whether the trial can pass even though the base stops well short of the rack?
+
+:::
+
 ## Extending the Trial to the Envelope {#sec-verification-extending-trial}
 
 The F1 record specifies one experiment and honestly leaves its outcome empty. A campaign must extend that experiment across the coupled conditions in the operating envelope and derive different injections for the other claims.
@@ -762,7 +943,34 @@ A stall just after renewal exercises almost the full remaining lease; a stall ne
 
 Each row of @tbl-15-fault-classification injects one disturbance, yet a machine in operation rarely meets one at a time. Combining rows at random would multiply the list without finding the combinations that matter, so coupled disturbances are enumerated from shared causes instead. The test ledger of the placement record (@sec-placement-hardware-allocation) names every resource that the permission path shares with the learned workloads, and each shared rail, clock, or bus becomes one compound fault, injected at the cause rather than at its symptoms.
 
-For the running machine, the declared transient at the depleted point leaves the illustrative bus at `{python} RackEndVerification.bus_min_str`, `{python} RackEndVerification.bus_margin_str` above the converter lockout; only a `{python} RackEndVerification.i_cross_str` step or a supply fault reaches the lockout, so F4a injects the dip rather than the load alone. A compound trial must measure the delivered waveform and the effects on the proposer, sensors, drive logic, and independent witnesses. It cannot infer simultaneous resets or frozen frames from the commanded load alone.
+On the running machine the clearest shared cause is the drive bus, which feeds the drives directly and the application processor through a converter, while the permission path runs from its own held-up rail. Notebook \ref{nbk-verification-supply-headroom} sizes both F4 trials from the machine's supply values.
+
+::: {#nbk-verification-supply-headroom .callout-notebook title="The supply headroom"}
+
+**Problem**: At the depleted point, can the drive transient alone carry the shared bus below the lockout of the converter that feeds the application processor, and how much of the permission rail's hold-up does the longest stop the enforcer can admit spend?
+
+**Variables**:
+
+* Depleted bus $V_{\text{low}} =$ `{python} RackEndVerification.bus_low_str` and converter lockout $V_{\text{UVLO}} =$ `{python} RackEndVerification.bus_uvlo_str` (Datasheet).
+* Source and harness resistance $R =$ `{python} RackEndVerification.bus_r_str` (Illustrative; needs a measured value) and drive transient $I =$ `{python} RackEndVerification.i_rail_str` (Illustrative).
+* Rail hold-up `{python} RackEndVerification.rail_holdup_str` (Chosen) and spring-brake engagement $t_{\text{engage}} =$ `{python} RackEndVerification.brake_engage_str` (Illustrative).
+* Longest admitted stop: from the `{python} RackEndVerification.ceiling_insp_str` inspected-floor ceiling at $a =$ `{python} RackEndVerification.a_insp_str` (Derived from the floor friction) with $j_{\max} =$ `{python} RackEndVerification.j_brake_str` m/s³ (Derived).
+
+**Math**:
+
+*F4a, sag under the transient and the step that reaches lockout.*
+`{python} RackEndVerification.sag_math`
+
+*F4b, flag to brakes set*, with the stop time of @eq-plan-c2-stopping-suffix.
+`{python} RackEndVerification.holdup_math`
+
+**Result**: The transient leaves `{python} RackEndVerification.bus_margin_str` of headroom above the lockout, and reaching it takes a `{python} RackEndVerification.i_cross_str` step, more than twice the transient. The `{python} RackEndVerification.rail_holdup_str` hold-up outlasts the `{python} RackEndVerification.flag_to_set_str` from flag to brakes set by `{python} RackEndVerification.holdup_margin_str`.
+
+**Systems insight**: Neither trial can rest on the commanded load. F4a must step the supply itself, because the drive's own current cannot reach the lockout, and F4b must open the feed during the longest stop the enforcer admits, since a shorter stop passes on hold-up the claim never needed. The headroom rests on an illustrative resistance and would vanish near `{python} RackEndVerification.r_cross_str`, about twice that value, so the source resistance measured under load is the first number the supply campaign must supply.
+
+:::
+
+A compound trial must measure the delivered waveform and the effects on the proposer, sensors, drive logic, and independent witnesses. It cannot infer simultaneous resets or frozen frames from the commanded load alone.
 
 A droop on a shared rail can slow the enforcer, freeze a sensor at a plausible value, and reset the logger in the same interval. A burst on a shared bus ages observations while it delays the permission path's own reads and the heartbeat that would reveal the delay. A fault in a shared clock skews the timestamps of every record that crosses the proposal boundary at once, so freshness checks pass on data that is already old. The oracle for a compound fault therefore checks the protective response against its deadline and also checks that the evidence needed to judge that response survived the same cause; the pitfalls in @sec-verification-fallacies-pitfalls show both failing together. A shared cause that the ledger does not name cannot be enumerated this way, which is why the forward analysis of the physical machine remains a separate source of faults.
 
@@ -776,21 +984,11 @@ The gap depends on what the simulator represents. A physics simulation that omit
 
 1. **Computation takes zero virtual time:** The simulator pauses the simulation clock while the policy executes, treating heavy neural forward passes as instantaneous and decoupling inference latency from physical velocity ($d = v \tau_{\text{delay}}$).
 2. **Memory bandwidth is infinite:** Tensors pass across shared in-memory references, omitting the shared-memory contention, cache evictions, and DMA serialization stalls that characterize an edge SoC.
-3. **Power rails are infinitely stiff:** Supplies are modeled as constant voltages ($V = \text{const}$), ignoring the source and harness resistance that sags the drive bus by $\Delta V = I R$ when drive current steps (@sec-body-power-integrity), the inductive spikes of fast current edges, and the brownout resets either can cause.
+3. **Power rails are infinitely stiff:** Supplies are modeled as constant voltages ($V = \text{const}$), ignoring the $\Delta V = I R$ sag of the drive bus under a current step (@sec-body-power-integrity; sized for this machine in \ref{nbk-verification-supply-headroom}), the inductive spikes of fast current edges, and the brownout resets either can cause.
 4. **Clocks are perfectly synchronized:** The simulation advances via a single discrete time-step ($\Delta t$), eliminating real-world clock drift, interrupt jitter, and transceiver races between the neural host and the safety microcontroller.
 5. **Contact mechanics are simplified:** Contact solvers approximate Coulomb friction, with linearized friction cones or with soft and convex relaxations that permit small creep under static load [@todorov2014convex], and usually omit the difference between static and kinetic friction, tire slip dynamics, and brake-lining glazing under repeated stops.
 
-Each qualification environment closes, breaks, or substitutes different links of the loop running from sensing through inference, buses, drives, and plant. Consequently, evaluation environments do not form a strict linear hierarchy: a higher rung cannot subsume a lower one. Each yields a distinct category of evidence while remaining fundamentally blind to the physical mechanisms outside its boundary (@fig-15-qualification-ladder).
-
-::: {#dfn-verification-four-stage-qualification-ladder .callout-definition title="Four-stage qualification ladder"}
-
-***Four-stage qualification ladder***\index{Four-stage qualification ladder!definition}\index{Qualification ladder!definition} is the structured progression of cyber-physical evaluation environments that closes, breaks, or substitutes specific arcs in the causal loop to balance combinatorial test throughput against physical and temporal execution fidelity. Its four stages are Software-in-the-Loop (SIL), Processor-in-the-Loop (PIL), Hardware-in-the-Loop (HIL), and in-situ physical fault rigs.
-
-1.  **Significance**: No single test environment can validate a physical AI system. Software simulators allow parallel combinatorial sweeps but omit target silicon bus contention and material wear; physical rigs expose authentic mechanics and electrical transients but cannot execute destructive fault sweeps at scale.
-2.  **Distinction**: Unlike a cumulative testing staircase where higher rungs subsume lower ones, each qualification rung exercises a different, partly overlapping set of causal mechanisms while remaining blind to others.
-3.  **Common pitfall**: Assuming that passing extensive Software-in-the-Loop (SIL) simulation implies safety on embedded hardware. SIL abstracts away microcontroller clock drift, DMA bus lockups, interrupt jitter, and power supply voltage sag.
-
-:::
+Each qualification environment closes, breaks, or substitutes different links of the loop running from sensing through inference, buses, drives, and plant. The **qualification ladder**\index{Qualification ladder!definition}\index{Four-stage qualification ladder!definition} orders four such environments, software-in-the-loop (SIL), processor-in-the-loop (PIL), hardware-in-the-loop (HIL), and physical fault rigs, by how much of that loop is real, and therefore by falling trial throughput. The order is not a hierarchy of evidence, because a higher rung cannot subsume a lower one. Each yields a distinct category of evidence while remaining blind to the physical mechanisms outside its boundary (@fig-15-qualification-ladder), so extensive SIL passes say nothing about the clock drift, DMA stalls, interrupt jitter, or supply sag of the embedded hardware.
 
 ### Causal loop fidelity across the four rungs {#sec-verification-qualification-rungs}
 
@@ -880,6 +1078,17 @@ A **closed-loop property**\index{Neural network verification!closed-loop propert
 
 High-dimensional reachability, nonlinear contact, and hybrid switching can make analysis of the permission path itself expensive or conservative. Those limits do not make every useful proof impossible. They favor a smaller, explicit permission claim whose premises can be challenged independently on the target hardware.
 
+::: {#chk-verification-rung-choice .callout-checkpoint title="Rung choice and the reach of a proof"}
+
+A rung, like a proof, supports only the mechanisms it contains.
+
+- [ ] **Rung selection**: For F2 (a frame held at the image signal processor), F3 (lost fieldbus frames), and an actuator jam, can you name the lowest rung that contains the causal mechanism and one mechanism that rung still idealizes away?
+- [ ] **Agreement between rungs**: Can you explain why a SIL pass and a HIL pass on the same scenario support only the mechanisms both rungs represent?
+- [ ] **Replay vs. shadow operation**: Can you explain why neither trace replay nor shadow operation shows the physical consequence of the candidate's command?
+- [ ] **Proof scope**: Can you explain why a closed-loop reachability proof can reach the permission path but not the vision-language-action proposer, and list the premises such a proof leaves to physical test?
+
+:::
+
 ## Fault Injection on Hardware {#sec-verification-hardware-fault-injection}
 
 A fault injected in simulation tests only the modeled response. On the machine, contention on a shared bus, clock drift between microcontrollers, DMA stalls, and voltage drop across inductive drivers decide whether an intervention executes in time, and a simulator that has not represented and validated those effects leaves them outside its evidence. On an embodied machine, fault injection must therefore pass through the compute, communication, and power substrate. Injection happens on target hardware, through the real transceivers, timers, shared buses, and enforcement path, while an independent containment rig protects the test facility.
@@ -904,7 +1113,7 @@ Testing the two-processor implementation\index{Two-processor implementation!faul
 - **Stale Observation Injection (F2):** An inline FPGA interceptor latches a navigation-camera frame at the image signal processor, or suppresses encoder updates, while preserving the original hardware timestamp. Detector assertion, powered deceleration onset, and wheel speed are measured on independent instruments.
 - **Expired Lease Revocation (F1):** The test framework lets the proposer renew once and then suppresses every later renewal. Lease expiry, revocation on the enforcer's next `{python} RackEndVerification.t_tick_str` tick, and powered deceleration onset are each measured on their own wire and clock.
 - **Lost-Frame Injection (F3):** A fieldbus disturbance node drops or corrupts EtherCAT frames at a drive's slave port while the base cruises, and the master's working-counter check[^fn-ethercat-working-counter] is the first detector that can see the loss. Each lost `{python} RackEndVerification.t_bus_str` cycle costs `{python} RackEndVerification.per_ms_str` of travel at the aisle speed.
-- **Drive-Bus Droop and Feed-Loss Injection (F4a, F4b):** A programmable supply standing in for the pack at its `{python} RackEndVerification.bus_low_str` depleted point carries the `{python} RackEndVerification.i_rail_str` transient of hard drive acceleration with the application SoC at full load, then steps the drive bus below the `{python} RackEndVerification.bus_uvlo_str` converter lockout, because the load alone stops short of the lockout (@sec-verification-compound-faults), while the permission path runs on the isolated, held-up rail that @sec-enforcement-fallback-ladder sizes and the placement record carries (@sec-placement-hardware-allocation). An independent digitizer records the permission-path heartbeat, and powered deceleration onset is timed from the undervoltage flag. F4b opens the permission rail's feed during the longest stop the enforcer can admit on an inspected floor, the resident stop from its `{python} RackEndVerification.ceiling_insp_str` ceiling. Independent measurements must also establish surviving drive authority and energy absorption throughout the powered stop. Logic hold-up alone leaves that premise open. A reset of the permission path is `FAIL` in either trial, whatever the stopping distance, because a stop that power loss hands to the spring brakes mid-motion is not the stop the claim budgets.
+- **Drive-Bus Droop and Feed-Loss Injection (F4a, F4b):** A programmable supply standing in for the pack at its `{python} RackEndVerification.bus_low_str` depleted point carries the `{python} RackEndVerification.i_rail_str` transient of hard drive acceleration with the application SoC at full load, then steps the drive bus below the `{python} RackEndVerification.bus_uvlo_str` converter lockout, which the load alone cannot reach (\ref{nbk-verification-supply-headroom}), while the permission path runs on the isolated, held-up rail that @sec-enforcement-fallback-ladder sizes and the placement record carries (@sec-placement-hardware-allocation). An independent digitizer records the permission-path heartbeat, and powered deceleration onset is timed from the undervoltage flag. F4b opens the permission rail's feed during the longest stop the enforcer can admit on an inspected floor, the resident stop from its `{python} RackEndVerification.ceiling_insp_str` ceiling. Independent measurements must also establish surviving drive authority and energy absorption throughout the powered stop. Logic hold-up alone leaves that premise open. A reset of the permission path is `FAIL` in either trial, whatever the stopping distance, because a stop that power loss hands to the spring brakes mid-motion is not the stop the claim budgets.
 - **Handover Stall Injection (A3):** The testbed freezes the remote assistant's input during `PEND` and drops the acknowledgment frames at both speeds, and both fallback dispatch and physical onset at the drive are timed independently. The waiting allowance bounds dispatch; onset must also satisfy the allocated command-to-response interval.
 
 [^fn-ethercat-working-counter]: **EtherCAT Working Counter**\index{EtherCAT!working counter}: Each slave that successfully processes a datagram increments a counter carried in the frame as it passes, so the value that returns to the master states how many addressed devices actually read or wrote their data. A dropped frame never returns and a corrupted one returns with a short count, both within the cycle in which they were sent, which is why F3 can be detected at the master one bus cycle after the loss instead of waiting for a drive's communication watchdog to expire.
@@ -947,7 +1156,7 @@ class VerificationRigFigure:
     # Guard-only class: it pins the values drawn in the figure; no prose outputs.
 ```
 
-::: {#fig-15-f1-test-rig fig-env="figure" fig-pos="t" fig-cap="**The machine under test and its witnesses**: Each fault enters at a physical interface of the production machine, F1 at the proposer, F2 on the camera link, F3 on the fieldbus, and F4a and F4b on the supply, and every event the oracle scores is recorded by an instrument on its own clock and supply. The drive transient alone sags the depleted bus to `{python} RackEndVerification.bus_min_str`, still `{python} RackEndVerification.bus_margin_str` above the `{python} RackEndVerification.bus_uvlo_str` lockout, so F4a must step the supply itself; F4b opens the permission rail's feed, whose `{python} RackEndVerification.rail_holdup_str` hold-up must outlast the `{python} RackEndVerification.flag_to_set_str` from flag to brakes set." fig-alt="Block diagram in two frames. The left frame, the machine under test, holds a camera feeding an application SoC running the chunk policy, a board link carrying proposals down to a safety microcontroller running the permission path at 1 kHz, a fieldbus down to the base drives, and torque down to the loaded base on the test floor. On the left, a drive bus at 47.7 V feeds the drives directly and the SoC through a converter with a 33 V lockout; an isolated converter with a 2.0 s held-up rail feeds the microcontroller. Red badges mark injection points F1 at the SoC, F2 on the camera link, F3 on the fieldbus, F4a at the drive bus with a sag to 37.8 V, 4.8 V above lockout and a 150 A step to cross, and F4b at the isolated converter with 1,313 ms from flag to brakes set. The right frame, independent witnesses on their own clock and supply, holds a reference clock with trigger line, a logic analyzer, a fieldbus sniffer, current probes, encoders with a high-speed camera, and a rail digitizer, each tapped by a dashed line from the matching point on the machine."}
+::: {#fig-15-f1-test-rig fig-env="figure" fig-pos="t" fig-cap="**The machine under test and its witnesses**: Each fault enters at a physical interface of the production machine, F1 at the proposer, F2 on the camera link, F3 on the fieldbus, and F4a and F4b on the supply, and every event the oracle scores is recorded by an instrument on its own clock and supply. F4a steps the supply itself, because the drive transient alone leaves the depleted bus above the converter lockout, and F4b opens the permission rail's feed, whose hold-up must outlast the time from flag to brakes set (\ref{nbk-verification-supply-headroom})." fig-alt="Block diagram in two frames. The left frame, the machine under test, holds a camera feeding an application SoC running the chunk policy, a board link carrying proposals down to a safety microcontroller running the permission path at 1 kHz, a fieldbus down to the base drives, and torque down to the loaded base on the test floor. On the left, a drive bus at 47.7 V feeds the drives directly and the SoC through a converter with a 33 V lockout; an isolated converter with a 2.0 s held-up rail feeds the microcontroller. Red badges mark injection points F1 at the SoC, F2 on the camera link, F3 on the fieldbus, F4a at the drive bus with a sag to 37.8 V, 4.8 V above lockout and a 150 A step to cross, and F4b at the isolated converter with 1,313 ms from flag to brakes set. The right frame, independent witnesses on their own clock and supply, holds a reference clock with trigger line, a logic analyzer, a fieldbus sniffer, current probes, encoders with a high-speed camera, and a rail digitizer, each tapped by a dashed line from the matching point on the machine."}
 ![](images/svg/fig15_f1_test_rig.svg){width="95%"}
 :::
 
@@ -956,6 +1165,118 @@ class VerificationRigFigure:
 Camera capture, proposal generation, permission ticks, and fieldbus cycles run on different clocks. A reproducible test records the disturbance's phase relative to each relevant event. Sweeping those phases challenges races that an injection at one fixed phase cannot reach; searching them does not establish that the worst case has been found.
 
 Consider F2 on the hardware. The navigation camera stamps each frame at capture, and the frame's age at dispatch is budgeted at `{python} RackEndVerification.t_age_str` (@sec-perception-transduction-calibration). At `{python} RackEndVerification.v_aisle_str` the base covers `{python} RackEndVerification.per_ms_str` in every millisecond, so an unaccounted delay spends the reserve directly. The `{python} RackEndVerification.upper_age_str` upper-age value applies at dispatch; the evidence continues aging during admission and execution. A per-tick test must use the remaining stopping budget and the active command's validity, not reset age at dispatch or reuse that dispatch threshold as a universal live limit. Left undetected for `{python} RackEndVerification.t_spare_str`, it consumes all `{python} RackEndVerification.spare_str`. Neither the camera's datasheet readout time nor the timestamp on a single frame establishes how quickly the permission path notices. A measured $P_{99}$ detection time leaves the worst case unbounded (@sec-nervous-deterministic-fieldbuses), so the containment claim needs a detection bound justified over the declared compute-load, bus-load, and thermal envelope.
+
+```{python}
+#| label: calc-verify-clock-drift
+#| echo: false
+#| warning: false
+#| message: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ CLOCK-CONVERSION DRIFT AGAINST THE F2 BOUND (LEGO)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: hardware fault-injection section, @eq-verification-clock-drift.
+# │ Goal: Show how quickly oscillator drift between the application processor
+# │       and the safety microcontroller spends the 0.2 ms clock-conversion
+# │       bound that F2's refusal threshold rests on, and what a sync blackout costs.
+# │ Show: 200 ppm worst relative rate; bound consumed after 1 s unsynchronized;
+# │       20 us per 100 ms sync period; 80 us over a four-period blackout, 95 us
+# │       with one sigma of jitter; 100 us after a fifth missed period.
+# │ How: drift = rate x elapsed time; allowance = RackEndVerification.eps_sync.
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim.core.units import microsecond, millisecond, second
+from mlsysim.fmt import fmt_int, fmt_latency, check
+
+class ClockDriftVerification:
+    """Oscillator drift between the two processors, tested against the clock-conversion bound."""
+
+    # ┌── 1. LOAD (Constants & Parameters) ─────────────────────────────────
+    ppm_ap = 100  # application-processor oscillator limit, ppm; scenario assumption; category: illustrative
+    ppm_mcu = 50  # safety-microcontroller oscillator limit, ppm; scenario assumption; category: illustrative
+    ppm_thermal = 50  # separately bounded thermal contribution, ppm; scenario assumption; category: illustrative
+    t_sync = 100 * millisecond  # healthy sync period; scenario assumption; category: chosen
+    n_blackout = 4  # sync periods between two good frames (three dropped); scenario assumption; category: illustrative
+    sigma_jitter = 15 * microsecond  # observed sync jitter, one standard deviation; scenario assumption; category: illustrative
+    eps_sync = RackEndVerification.eps_sync  # clock-conversion bound of the observation contract; category: derived
+
+    # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────
+    ppm_total = ppm_ap + ppm_mcu + ppm_thermal
+    rate = ppm_total * microsecond / second  # worst relative drift rate
+    t_consume = (eps_sync / rate).to(second)
+    drift_period = (rate * t_sync).to(microsecond)
+    t_blackout = (n_blackout * t_sync).to(millisecond)
+    drift_blackout = (rate * t_blackout).to(microsecond)
+    one_sigma = (drift_blackout + sigma_jitter).to(microsecond)
+    drift_fifth = (rate * (n_blackout + 1) * t_sync).to(microsecond)
+    fifth_share = float((drift_fifth / eps_sync).to("dimensionless").magnitude)
+
+    # ┌── 3. GUARD (Assertions) ────────────────────────────────────────────
+    check(ppm_total == 200, "Worst relative rate must be 200 ppm.")
+    check(abs(t_consume.magnitude - 1.0) < 1e-9, "Drift alone must consume the 0.2 ms bound after 1 s.")
+    check(abs(drift_blackout.magnitude - 80.0) < 1e-9, "Four-period blackout must drift 80 us.")
+    check(one_sigma < eps_sync.to(microsecond), "The one-sigma scenario must sit inside the conversion bound.")
+    check(abs(fifth_share - 0.5) < 1e-9, "A fifth missed period must spend half the bound.")
+    # margin_sync_blackout_drift_envelope.svg fig-alt hand-types 80, 95, 100, and 200 us
+    check(
+        abs(one_sigma.to(microsecond).magnitude - 95.0) < 1e-9 and abs(drift_fifth.to(microsecond).magnitude - 100.0) < 1e-9,
+        "Clock-envelope fig-alt: 95 us one-sigma, 100 us fifth period.",
+    )
+
+    # ┌── 4. OUTPUT (Format & Export) ────────────────────────────────────────
+    ppm_ap_str = fmt_int(ppm_ap)
+    ppm_mcu_str = fmt_int(ppm_mcu)
+    ppm_thermal_str = fmt_int(ppm_thermal)
+    ppm_total_str = fmt_int(ppm_total)
+    t_consume_str = fmt_latency(t_consume, unit=second, precision=0)
+    t_sync_str = fmt_latency(t_sync, unit=millisecond, precision=0)
+    drift_period_str = fmt_latency(drift_period, unit=microsecond, precision=0)
+    t_blackout_str = fmt_latency(t_blackout, unit=millisecond, precision=0)
+    drift_blackout_str = fmt_latency(drift_blackout, unit=microsecond, precision=0)
+    sigma_jitter_str = fmt_latency(sigma_jitter, unit=microsecond, precision=0)
+    one_sigma_str = fmt_latency(one_sigma, unit=microsecond, precision=0)
+    drift_fifth_str = fmt_latency(drift_fifth, unit=microsecond, precision=0)
+```
+
+### Distributed clock drift and synchronization blackouts {#sec-verification-clock-drift-sync}
+
+Testing distributed loops exposes clock-conversion risk even when each processor meets its local schedule. F2's refusal threshold rests on the `{python} RackEndVerification.eps_sync_str` bound for converting a capture stamp to the safety microcontroller's clock, and that bound is itself a claim to test. Take illustrative oscillator limits of ±`{python} ClockDriftVerification.ppm_ap_str` ppm on the application processor and ±`{python} ClockDriftVerification.ppm_mcu_str` ppm on the safety microcontroller, plus a separately bounded `{python} ClockDriftVerification.ppm_thermal_str` ppm thermal contribution that those specifications do not include. The worst relative rate is then `{python} ClockDriftVerification.ppm_total_str` ppm, and drift alone would consume the `{python} RackEndVerification.eps_sync_str` bound after `{python} ClockDriftVerification.t_consume_str` without resynchronization. A healthy `{python} ClockDriftVerification.t_sync_str` sync period limits that drift contribution to `{python} ClockDriftVerification.drift_period_str`; network and conversion error must be budgeted separately.
+
+Suppose two good sync frames arrive `{python} ClockDriftVerification.t_blackout_str` apart while the three scheduled frames between them are dropped. The blackout lasts four sync periods, and the bounded drift contribution grows to `{python} ClockDriftVerification.drift_blackout_str`. If the observed synchronization jitter has standard deviation $\sigma_{\text{jitter}}$ = `{python} ClockDriftVerification.sigma_jitter_str`, adding one sigma to the drift rate $r_{\text{drift}}$ times the blackout $T_{\text{blackout}}$ gives
+$$\Delta t_{\text{one-sigma scenario}}=r_{\text{drift}}\,T_{\text{blackout}}+\sigma_{\text{jitter}}$$ {#eq-verification-clock-drift}
+or `{python} ClockDriftVerification.one_sigma_str`. The one-sigma value in @eq-verification-clock-drift is not a hard bound; a deterministic deadline needs a justified jitter envelope and a clock-conversion test. A fifth elapsed period, with four intervening sync frames dropped, gives `{python} ClockDriftVerification.drift_fifth_str` of drift alone, before jitter, half the `{python} RackEndVerification.eps_sync_str` bound on which F2's threshold rests. If clock drift and synchronization jitter combine to breach that bound, two symmetric physical failure modes jeopardize the machine. On one hand, a completely fresh camera frame may appear artificially aged when evaluated against the safety microcontroller's drifted clock, causing the enforcer to falsely reject valid proposals and trip an unprompted emergency stop, stranding the base in an active warehouse aisle. On the other hand, a dangerously delayed observation may appear falsely fresh, duping the permission path into executing proposals computed from obsolete obstacle coordinates while the loaded base cruises at `{python} RackEndVerification.v_aisle_str` toward a closed aisle gate.
+
+::: {.column-margin}
+![](images/svg/margin_sync_blackout_drift_envelope.svg){width="100%" fig-alt="Bars of clock-conversion drift against a dashed 200 microsecond bound: 80 microseconds after a four-period sync blackout, 95 microseconds with one sigma of jitter added, and 100 microseconds after a fifth period."}
+
+*Five missed sync periods spend half the clock-conversion bound.*
+:::
+
+Every injection on the hardware ends with the same obligation. The detector that fired, the moment of refusal, the takeover at the drive, and the physical outcome are measured on instruments the fault cannot reach, on one reference clock, and a trial that loses any of them has not shown what it set out to show. The hardware campaign therefore produces records rather than a pass count, each binding one trial to its claim, its envelope point, its builds, and its evidence.
+
+::: {.column-margin .margin-pointer}
+↪ Hardware-in-the-loop stress results furnish the evidentiary warrants for safety cases in @sec-release-safety-cases-claims.
+:::
+
+## Searching Beyond the First Trial {#sec-verification-search-campaign}
+
+The F1 specification establishes a reproducible question, witness, and verdict rule. Finding less obvious failures requires varying the conditions and measuring how close each run comes to its limits. These searches prioritize tests; they do not replace the coverage record.
+
+### Signal temporal logic and quantitative robustness {#sec-verification-stl-robustness}
+
+Temporal logic entered program verification when @pnueli1977temporal used it to specify how a program's states must unfold over time, not only what the program computes. **Signal Temporal Logic (STL)** carries the idea to dense time and real-valued signals, combining physical predicates with real-time conditions such as always remaining within a distance bound or eventually stopping before a deadline [@maler2004monitoring] (@sec-appendix-ml-stl). These requirements admit **quantitative robustness semantics**\index{Quantitative robustness semantics!definition} [@fainekos2009robustness]. Instead of a simple binary pass/fail boolean flag, robustness is a continuous real-valued metric $\rho(\phi, s, t) \in \mathbb{R}$ that measures *how far* a real-valued signal trajectory $s: \mathbb{R}_{\ge 0} \to \mathbb{R}^n$ remains from violating or satisfying a temporal requirement $\phi$ at time $t$.
+
+For an atomic physical predicate $\pi \equiv (f(s(t)) \ge 0)$ (such as spatial clearance $d(t) - d_{\text{safe}} \ge 0$), quantitative robustness evaluates the signed predicate margin: $\rho(\pi, s, t) = f(s(t))$. Across temporal horizons, safety invariants evaluate worst-case (minimum) margin, while eventual deadlines evaluate the best-case (maximum):
+$$\rho(\square_{[0, T]} \phi, s, 0) = \min_{t \in [0, T]} \rho(\phi, s, t), \qquad \rho(\lozenge_{[0, \tau]} \phi, s, 0) = \max_{t \in [0, \tau]} \rho(\phi, s, t).$$ {#eq-verification-stl-recursive-robustness}
+Here $\square_{[0,T]}$ reads "always on $[0,T]$" and $\lozenge_{[0,\tau]}$ reads "eventually within $\tau$."
+
+The sign and magnitude of $\rho$ in @eq-verification-stl-recursive-robustness establish an immediate operational interpretation:
+$$\rho > 0 \implies \text{satisfied with positive margin } \rho, \qquad \rho < 0 \implies \text{violated with shortfall depth } |\rho|.$$
+For example, if the clearance margin is $\rho = +0.15\,\text{m}$, the minimum clearance along the trajectory exceeded the required clearance by 15 centimeters; if $\rho = -0.04\,\text{m}$, the machine breached the specified clearance by 4 centimeters, and whether contact occurred depends on how that clearance was defined.
+
+This value margin is **space robustness**\index{Space robustness}: how far the signal's value could move before the verdict changes. It does not measure lateness. A deadline violation is a margin in time, and **time robustness**\index{Time robustness} is a separate semantics that asks how far the signal could shift in time before the verdict changes [@donze2010robust]. The two answer different questions and should not be mixed inside one formula. For F1 the simplest correct treatment keeps the onset deadline outside the STL formula, as a scalar predicate on the measured onset time, and scores the distance requirement with space robustness.
+
+The F1 oracle therefore has two parts. Powered deceleration must begin within `{python} RackEndVerification.onset_bound_str` of the last successful lease renewal, and travel from that same event must remain within `{python} RackEndVerification.f1_aisle_stop_bound_str` at the aisle speed, a space-robustness predicate on position. A different reference event requires a different distance bound.
+
+For a numerical illustration, take one F1 trace at the aisle speed whose powered deceleration onset comes `{python} RackEndVerification.late_onset_str` late, at `{python} RackEndVerification.onset_late_str` after the last valid renewal. The onset margin against the `{python} RackEndVerification.onset_bound_str` bound is `{python} RackEndVerification.rho_onset_str`. The base covers `{python} RackEndVerification.late_extra_str` more before braking begins, so travel from renewal to rest reaches `{python} RackEndVerification.travel_late_str` and the distance margin against the `{python} RackEndVerification.f1_aisle_stop_bound_str` oracle is `{python} RackEndVerification.rho_dist_str`. Both predicates fail, and the record reports both in their own units. A minimum taken across milliseconds and millimeters means nothing, so combining them into one score with `min` requires each margin first to be divided by a predeclared positive scale in its own unit; the record keeps the raw margins and the scales, so that the combined verdict remains physically interpretable. With scales chosen equal to the bounds themselves, the normalized margins are `{python} RackEndVerification.rho_onset_n_str` for onset and `{python} RackEndVerification.rho_dist_n_str` for distance, so the onset predicate sets the combined score. A different choice of scales would change which predicate dominates, which is why the scales are fixed before the trial. These values are model arithmetic on a stipulated trace, not measurements.
 
 ::: {#fig-15-hardware-fault-injection fig-env="figure" fig-pos="t" fig-cap="**One F1 trace against its oracle**: Model timelines, not measurements, of the channels an F1 trial must witness at `{python} RackEndVerification.v_aisle_str`, timed from the last valid renewal. The execution lease expires at `{python} RackEndVerification.t_lease_str`, the next permission tick commands the stop, the fieldbus delivers it, and powered deceleration must begin by `{python} RackEndVerification.onset_bound_str`; a proposal probed after expiry is refused. The dashed trace brakes `{python} RackEndVerification.late_onset_str` late, so its onset margin is `{python} RackEndVerification.rho_onset_str` and its `{python} RackEndVerification.travel_late_str` of travel overruns the `{python} RackEndVerification.f1_aisle_stop_bound_str` oracle by `{python} RackEndVerification.rho_dist_str`." fig-alt="Two stacked panels sharing time after the last valid renewal. The upper panel, from 0 to 130 milliseconds, shows five logic channels, each labeled with its witness instrument: proposer renewals with a pulse at 0, a task-killed mark just after it, and a refused probe at 65 ms; the execution lease high until it expires at 60 ms; the stop command rising at the next tick, 61 ms; the drive frame rising at 62 ms; and powered deceleration rising at the 82 ms bound in green, with a dashed red trace rising at 112 ms and a 30 ms onset margin marked between them. A shaded onset allowance spans 62 to 82 ms. The lower panel, from 0 to about 1,200 ms, shows base speed falling in an S-curve from 1.3 m/s to rest at 1,013 ms for the green trace, 751.9 mm of travel, and at 1,043 ms for the dashed red trace, 790.9 mm and a margin of minus 39 mm."}
 
@@ -1119,119 +1440,7 @@ plt.show()
 
 :::
 
-The traces in @fig-15-hardware-fault-injection are the running machine's F1 contract drawn to scale, not measurements. Each channel comes from a different instrument, so a trial that fails can show where it failed: a lease that expired on time and a stop command issued on the next tick, followed by a late onset, place the fault in the fieldbus or the drive rather than in the permission path.
-
-```{python}
-#| label: calc-verify-clock-drift
-#| echo: false
-#| warning: false
-#| message: false
-# ┌─────────────────────────────────────────────────────────────────────────────
-# │ CLOCK-CONVERSION DRIFT AGAINST THE F2 BOUND (LEGO)
-# ├─────────────────────────────────────────────────────────────────────────────
-# │ Context: hardware fault-injection section, @eq-verification-clock-drift.
-# │ Goal: Show how quickly oscillator drift between the application processor
-# │       and the safety microcontroller spends the 0.2 ms clock-conversion
-# │       bound that F2's refusal threshold rests on, and what a sync blackout costs.
-# │ Show: 200 ppm worst relative rate; bound consumed after 1 s unsynchronized;
-# │       20 us per 100 ms sync period; 80 us over a four-period blackout, 95 us
-# │       with one sigma of jitter; 100 us after a fifth missed period.
-# │ How: drift = rate x elapsed time; allowance = RackEndVerification.eps_sync.
-# └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.core.units import microsecond, millisecond, second
-from mlsysim.fmt import fmt_int, fmt_latency, check
-
-class ClockDriftVerification:
-    """Oscillator drift between the two processors, tested against the clock-conversion bound."""
-
-    # ┌── 1. LOAD (Constants & Parameters) ─────────────────────────────────
-    ppm_ap = 100  # application-processor oscillator limit, ppm; scenario assumption; category: illustrative
-    ppm_mcu = 50  # safety-microcontroller oscillator limit, ppm; scenario assumption; category: illustrative
-    ppm_thermal = 50  # separately bounded thermal contribution, ppm; scenario assumption; category: illustrative
-    t_sync = 100 * millisecond  # healthy sync period; scenario assumption; category: chosen
-    n_blackout = 4  # sync periods between two good frames (three dropped); scenario assumption; category: illustrative
-    sigma_jitter = 15 * microsecond  # observed sync jitter, one standard deviation; scenario assumption; category: illustrative
-    eps_sync = RackEndVerification.eps_sync  # clock-conversion bound of the observation contract; category: derived
-
-    # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────
-    ppm_total = ppm_ap + ppm_mcu + ppm_thermal
-    rate = ppm_total * microsecond / second  # worst relative drift rate
-    t_consume = (eps_sync / rate).to(second)
-    drift_period = (rate * t_sync).to(microsecond)
-    t_blackout = (n_blackout * t_sync).to(millisecond)
-    drift_blackout = (rate * t_blackout).to(microsecond)
-    one_sigma = (drift_blackout + sigma_jitter).to(microsecond)
-    drift_fifth = (rate * (n_blackout + 1) * t_sync).to(microsecond)
-    fifth_share = float((drift_fifth / eps_sync).to("dimensionless").magnitude)
-
-    # ┌── 3. GUARD (Assertions) ────────────────────────────────────────────
-    check(ppm_total == 200, "Worst relative rate must be 200 ppm.")
-    check(abs(t_consume.magnitude - 1.0) < 1e-9, "Drift alone must consume the 0.2 ms bound after 1 s.")
-    check(abs(drift_blackout.magnitude - 80.0) < 1e-9, "Four-period blackout must drift 80 us.")
-    check(one_sigma < eps_sync.to(microsecond), "The one-sigma scenario must sit inside the conversion bound.")
-    check(abs(fifth_share - 0.5) < 1e-9, "A fifth missed period must spend half the bound.")
-    # margin_sync_blackout_drift_envelope.svg fig-alt hand-types 80, 95, 100, and 200 us
-    check(
-        abs(one_sigma.to(microsecond).magnitude - 95.0) < 1e-9 and abs(drift_fifth.to(microsecond).magnitude - 100.0) < 1e-9,
-        "Clock-envelope fig-alt: 95 us one-sigma, 100 us fifth period.",
-    )
-
-    # ┌── 4. OUTPUT (Format & Export) ────────────────────────────────────────
-    ppm_ap_str = fmt_int(ppm_ap)
-    ppm_mcu_str = fmt_int(ppm_mcu)
-    ppm_thermal_str = fmt_int(ppm_thermal)
-    ppm_total_str = fmt_int(ppm_total)
-    t_consume_str = fmt_latency(t_consume, unit=second, precision=0)
-    t_sync_str = fmt_latency(t_sync, unit=millisecond, precision=0)
-    drift_period_str = fmt_latency(drift_period, unit=microsecond, precision=0)
-    t_blackout_str = fmt_latency(t_blackout, unit=millisecond, precision=0)
-    drift_blackout_str = fmt_latency(drift_blackout, unit=microsecond, precision=0)
-    sigma_jitter_str = fmt_latency(sigma_jitter, unit=microsecond, precision=0)
-    one_sigma_str = fmt_latency(one_sigma, unit=microsecond, precision=0)
-    drift_fifth_str = fmt_latency(drift_fifth, unit=microsecond, precision=0)
-```
-
-### Distributed clock drift and synchronization blackouts {#sec-verification-clock-drift-sync}
-
-Testing distributed loops exposes clock-conversion risk even when each processor meets its local schedule. F2's refusal threshold rests on the `{python} RackEndVerification.eps_sync_str` bound for converting a capture stamp to the safety microcontroller's clock, and that bound is itself a claim to test. Take illustrative oscillator limits of ±`{python} ClockDriftVerification.ppm_ap_str` ppm on the application processor and ±`{python} ClockDriftVerification.ppm_mcu_str` ppm on the safety microcontroller, plus a separately bounded `{python} ClockDriftVerification.ppm_thermal_str` ppm thermal contribution that those specifications do not include. The worst relative rate is then `{python} ClockDriftVerification.ppm_total_str` ppm, and drift alone would consume the `{python} RackEndVerification.eps_sync_str` bound after `{python} ClockDriftVerification.t_consume_str` without resynchronization. A healthy `{python} ClockDriftVerification.t_sync_str` sync period limits that drift contribution to `{python} ClockDriftVerification.drift_period_str`; network and conversion error must be budgeted separately.
-
-Suppose two good sync frames arrive `{python} ClockDriftVerification.t_blackout_str` apart while the three scheduled frames between them are dropped. The blackout lasts four sync periods, and the bounded drift contribution grows to `{python} ClockDriftVerification.drift_blackout_str`. If the observed synchronization jitter has standard deviation $\sigma_{\text{jitter}}$ = `{python} ClockDriftVerification.sigma_jitter_str`, adding one sigma to the drift rate $r_{\text{drift}}$ times the blackout $T_{\text{blackout}}$ gives
-$$\Delta t_{\text{one-sigma scenario}}=r_{\text{drift}}\,T_{\text{blackout}}+\sigma_{\text{jitter}}$$ {#eq-verification-clock-drift}
-or `{python} ClockDriftVerification.one_sigma_str`. The one-sigma value in @eq-verification-clock-drift is not a hard bound; a deterministic deadline needs a justified jitter envelope and a clock-conversion test. A fifth elapsed period, with four intervening sync frames dropped, gives `{python} ClockDriftVerification.drift_fifth_str` of drift alone, before jitter, half the `{python} RackEndVerification.eps_sync_str` bound on which F2's threshold rests. If clock drift and synchronization jitter combine to breach that bound, two symmetric physical failure modes jeopardize the machine. On one hand, a completely fresh camera frame may appear artificially aged when evaluated against the safety microcontroller's drifted clock, causing the enforcer to falsely reject valid proposals and trip an unprompted emergency stop, stranding the base in an active warehouse aisle. On the other hand, a dangerously delayed observation may appear falsely fresh, duping the permission path into executing proposals computed from obsolete obstacle coordinates while the loaded base cruises at `{python} RackEndVerification.v_aisle_str` toward a closed aisle gate.
-
-::: {.column-margin}
-![](images/svg/margin_sync_blackout_drift_envelope.svg){width="100%" fig-alt="Bars of clock-conversion drift against a dashed 200 microsecond bound: 80 microseconds after a four-period sync blackout, 95 microseconds with one sigma of jitter added, and 100 microseconds after a fifth period."}
-
-*Five missed sync periods spend half the clock-conversion bound.*
-:::
-
-Every injection on the hardware ends with the same obligation. The detector that fired, the moment of refusal, the takeover at the drive, and the physical outcome are measured on instruments the fault cannot reach, on one reference clock, and a trial that loses any of them has not shown what it set out to show. The hardware campaign therefore produces records rather than a pass count, each binding one trial to its claim, its envelope point, its builds, and its evidence.
-
-::: {.column-margin .margin-pointer}
-↪ Hardware-in-the-loop stress results furnish the evidentiary warrants for safety cases in @sec-release-safety-cases-claims.
-:::
-
-## Searching Beyond the First Trial {#sec-verification-search-campaign}
-
-The F1 specification establishes a reproducible question, witness, and verdict rule. Finding less obvious failures requires varying the conditions and measuring how close each run comes to its limits. These searches prioritize tests; they do not replace the coverage record.
-
-### Signal temporal logic and quantitative robustness {#sec-verification-stl-robustness}
-
-Temporal logic entered program verification when @pnueli1977temporal used it to specify how a program's states must unfold over time, not only what the program computes. **Signal Temporal Logic (STL)** carries the idea to dense time and real-valued signals, combining physical predicates with real-time conditions such as always remaining within a distance bound or eventually stopping before a deadline [@maler2004monitoring] (@sec-appendix-ml-stl). These requirements admit **quantitative robustness semantics**\index{Quantitative robustness semantics!definition} [@fainekos2009robustness]. Instead of a simple binary pass/fail boolean flag, robustness is a continuous real-valued metric $\rho(\phi, s, t) \in \mathbb{R}$ that measures *how far* a real-valued signal trajectory $s: \mathbb{R}_{\ge 0} \to \mathbb{R}^n$ remains from violating or satisfying a temporal requirement $\phi$ at time $t$.
-
-For an atomic physical predicate $\pi \equiv (f(s(t)) \ge 0)$ (such as spatial clearance $d(t) - d_{\text{safe}} \ge 0$), quantitative robustness evaluates the signed predicate margin: $\rho(\pi, s, t) = f(s(t))$. Across temporal horizons, safety invariants evaluate worst-case (minimum) margin, while eventual deadlines evaluate the best-case (maximum):
-$$\rho(\square_{[0, T]} \phi, s, 0) = \min_{t \in [0, T]} \rho(\phi, s, t), \qquad \rho(\lozenge_{[0, \tau]} \phi, s, 0) = \max_{t \in [0, \tau]} \rho(\phi, s, t).$$ {#eq-verification-stl-recursive-robustness}
-Here $\square_{[0,T]}$ reads "always on $[0,T]$" and $\lozenge_{[0,\tau]}$ reads "eventually within $\tau$."
-
-The sign and magnitude of $\rho$ in @eq-verification-stl-recursive-robustness establish an immediate operational interpretation:
-$$\rho > 0 \implies \text{satisfied with positive margin } \rho, \qquad \rho < 0 \implies \text{violated with shortfall depth } |\rho|.$$
-For example, if the clearance margin is $\rho = +0.15\,\text{m}$, the minimum clearance along the trajectory exceeded the required clearance by 15 centimeters; if $\rho = -0.04\,\text{m}$, the machine breached the specified clearance by 4 centimeters, and whether contact occurred depends on how that clearance was defined.
-
-This value margin is **space robustness**\index{Space robustness}: how far the signal's value could move before the verdict changes. It does not measure lateness. A deadline violation is a margin in time, and **time robustness**\index{Time robustness} is a separate semantics that asks how far the signal could shift in time before the verdict changes [@donze2010robust]. The two answer different questions and should not be mixed inside one formula. For F1 the simplest correct treatment keeps the onset deadline outside the STL formula, as a scalar predicate on the measured onset time, and scores the distance requirement with space robustness.
-
-The F1 oracle therefore has two parts. Powered deceleration must begin within `{python} RackEndVerification.onset_bound_str` of the last successful lease renewal, and travel from that same event must remain within `{python} RackEndVerification.f1_aisle_stop_bound_str` at the aisle speed, a space-robustness predicate on position. A different reference event requires a different distance bound.
-
-For a numerical illustration, take one F1 trace at the aisle speed whose powered deceleration onset comes `{python} RackEndVerification.late_onset_str` late, at `{python} RackEndVerification.onset_late_str` after the last valid renewal. The onset margin against the `{python} RackEndVerification.onset_bound_str` bound is `{python} RackEndVerification.rho_onset_str`. The base covers `{python} RackEndVerification.late_extra_str` more before braking begins, so travel from renewal to rest reaches `{python} RackEndVerification.travel_late_str` and the distance margin against the `{python} RackEndVerification.f1_aisle_stop_bound_str` oracle is `{python} RackEndVerification.rho_dist_str`. Both predicates fail, and the record reports both in their own units. A minimum taken across milliseconds and millimeters means nothing, so combining them into one score with `min` requires each margin first to be divided by a predeclared positive scale in its own unit; the record keeps the raw margins and the scales, so that the combined verdict remains physically interpretable. With scales chosen equal to the bounds themselves, the normalized margins are `{python} RackEndVerification.rho_onset_n_str` for onset and `{python} RackEndVerification.rho_dist_n_str` for distance, so the onset predicate sets the combined score. A different choice of scales would change which predicate dominates, which is why the scales are fixed before the trial. These values are model arithmetic on a stipulated trace, not measurements.
+@Fig-15-hardware-fault-injection draws this trace against its oracle, channel by channel. Each channel comes from a different instrument, so a trial that fails can show where it failed: a lease that expired on time and a stop command issued on the next tick, followed by a late onset, place the fault in the fieldbus or the drive rather than in the permission path.
 
 Robustness transforms verification into **temporal logic falsification as adversarial optimization**\index{Temporal logic falsification!definition}. In classical machine learning, adversarial attacks such as the fast gradient sign method (FGSM) [@goodfellow2015explaining] and projected gradient descent (PGD) [@madry2018towards] search for an input perturbation $\delta$ within an $\epsilon$-ball ($\|\delta\|_\infty \le \epsilon$) that maximizes task loss: $\max_{\|\delta\|_\infty \le \epsilon} \mathcal{L}(f(x + \delta), y)$. In cyber-physical verification, temporal logic falsification is the continuous dynamic equivalent: rather than perturbing static feature vectors, an adversarial optimizer searches over initial condition spaces and time-varying physical disturbance trajectories within a bounded physical disturbance budget to minimize quantitative STL robustness. The robustness score acts directly as the adversarial falsification loss.
 
@@ -1265,6 +1474,8 @@ Before executing automated falsification against physical AI policies, verify yo
 - [ ] **Quantitative robustness interpretation**: Can you explain how Signal Temporal Logic replaces binary pass/fail assertions with a signed predicate margin, and how its units and reference limit determine the meaning of a negative score?
 - [ ] **Adversarial optimization of disturbance trajectories**: Can you describe how black-box optimizers leverage quantitative robustness scores to discover worst-case combinations of latency, noise, and friction?
 - [ ] **Test invalidation vs. failure criteria**: Can you distinguish between an execution that falsifies a safety invariant and an invalid trial where testbed preconditions or fault injection mechanisms failed?
+- [ ] **Normalization scale estimate**: For the late F1 trace of @sec-verification-stl-robustness, suppose the record had fixed the distance scale at the `{python} RackEndVerification.eps_track_str` tracking inset while keeping the `{python} RackEndVerification.onset_bound_str` onset scale. Can you estimate both normalized margins and say which predicate would then set the combined score?
+
 :::
 
 Search returns candidate counterexamples and measured margins. When a candidate comes from simulation, using it in a physical claim requires an account of the discrepancy between the modeled and actual trajectories.
@@ -1306,19 +1517,20 @@ A list of adversarial trials is not yet an estimate of operational risk. The sam
 # │ ZERO-MISS INJECTION COUNTS FOR A SAMPLED FAULT POPULATION (LEGO)
 # ├─────────────────────────────────────────────────────────────────────────────
 # │ Context: fault-manifest section and @nbk-verification-hardware-fault-injection-coverage-mean-time.
-# │ Show: Zero-miss injections needed to put a one-sided upper limit on the miss probability.
+# │ Show: Zero-miss injections needed to put a one-sided upper limit on the miss probability,
+# │       and the coverage (98.98 and 99.90 percent) and injection counts (293 and 2,935)
+# │       that the notebook's illustrative FIT rates and chosen targets imply.
 # │ How: n = ceil(ln(1 - C) / ln(1 - p)), the zero-failure sizing of @sec-evaluation-trial-limits.
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim.physics.robotics import calc_zero_failure_sample_size
-from mlsysim.fmt import fmt_percent, fmt_int, check
+import math
+from mlsysim.fmt import fmt, fmt_percent, fmt_int, fmt_display_math, check
 
 class InjectedPopulationTrials:
     """Zero-miss injection counts for a declared fault population."""
 
     # ┌── 1. LOAD (Constants & Parameters) ─────────────────────────────────
     confidence = 0.95  # category: chosen
-    p_miss_1 = 0.01  # target upper limit on miss probability; category: chosen
-    p_miss_2 = 0.001  # tighter target upper limit; category: chosen
     # Component fault rates for the coverage notebook, in FIT (faults per 1e9 h)
     fit_sensors = 1500  # scenario assumption; category: illustrative
     fit_compute = 1000  # scenario assumption; category: illustrative
@@ -1328,47 +1540,75 @@ class InjectedPopulationTrials:
     fit_target_2 = 10  # tighter unmitigated-rate target; category: chosen
 
     # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────
-    n_1 = calc_zero_failure_sample_size(1.0 - p_miss_1, confidence=confidence)
-    n_2 = calc_zero_failure_sample_size(1.0 - p_miss_2, confidence=confidence)
     fit_raw = fit_sensors + fit_compute + fit_power + fit_gate
     c_diag_1 = 1.0 - fit_target_1 / fit_raw  # required coverage: lambda_raw (1 - C) <= target
     c_diag_2 = 1.0 - fit_target_2 / fit_raw
+    # Injections that demonstrate each coverage: miss probability p = 1 - C_diag
+    n_cov_1 = calc_zero_failure_sample_size(c_diag_1, confidence=confidence)
+    n_cov_2 = calc_zero_failure_sample_size(c_diag_2, confidence=confidence)
+    n_cov_1_exact = math.log(1.0 - confidence) / math.log(c_diag_1)
+    rule3_1 = 3.0 * fit_raw / fit_target_1  # the rule-of-three approximation 3/p
+    rule3_2 = 3.0 * fit_raw / fit_target_2
 
     # ┌── 3. GUARD (Assertions) ────────────────────────────────────────────
-    check(n_1 == 299, "Unexpected zero-miss count for a 1 percent limit")
-    check(n_2 == 2995, "Unexpected zero-miss count for a 0.1 percent limit")
     check(fit_raw == 9800, "Component fault rates must sum to 9,800 FIT")
     check(c_diag_1 < c_diag_2 < 1.0, "A tighter target must need more coverage")
+    check(n_cov_1 == 293 and n_cov_2 == 2935, "Coverage counts drifted from 293 and 2,935.")
+    check(abs(n_cov_1 - rule3_1) < 2 and abs(n_cov_2 - rule3_2) < 6, "The counts sit within a few injections of 3/p.")
 
     # ┌── 4. OUTPUT (Format & Export) ────────────────────────────────────────
     confidence_pct_str = fmt_percent(confidence, precision=0)
-    p_miss_1_pct_str = fmt_percent(p_miss_1, precision=0)
-    p_miss_2_pct_str = fmt_percent(p_miss_2, precision=1)
-    n_1_str = fmt_int(n_1, commas=True)
-    n_2_str = fmt_int(n_2, commas=True)
     fit_sensors_str = fmt_int(fit_sensors, commas=True)
     fit_compute_str = fmt_int(fit_compute, commas=True)
     fit_power_str = fmt_int(fit_power, commas=True)
     fit_gate_str = fmt_int(fit_gate, commas=True)
-    fit_raw_str = fmt_int(fit_raw, commas=True)
     fit_target_1_str = fmt_int(fit_target_1)
     fit_target_2_str = fmt_int(fit_target_2)
-    c_diag_1_pct_str = fmt_percent(c_diag_1, precision=4)
-    c_diag_2_pct_str = fmt_percent(c_diag_2, precision=4)
+    c_diag_1_pct2_str = fmt_percent(c_diag_1, precision=2)
+    c_diag_2_pct2_str = fmt_percent(c_diag_2, precision=2)
+    n_cov_1_str = fmt_int(n_cov_1, commas=True)
+    n_cov_2_str = fmt_int(n_cov_2, commas=True)
+    rule3_2_str = fmt_int(round(rule3_2), commas=True)
+    raw_math = fmt_display_math(
+        rf"\lambda_{{\text{{raw}}}} = {fit_sensors} + {fit_compute} + {fit_power} + {fit_gate} = {fit_raw}\ \text{{FIT}}, \qquad"
+        rf" C_{{\text{{diag}}}} \ge 1 - \frac{{\lambda_{{\text{{target}}}}}}{{\lambda_{{\text{{raw}}}}}} = 1 - \frac{{{fit_target_1}}}{{{fit_raw}}} = {fmt(c_diag_1, precision=4)}"
+    )
+    count_math = fmt_display_math(
+        rf"n \ge \frac{{\ln(1 - C)}}{{\ln C_{{\text{{diag}}}}}} = \frac{{\ln {fmt(1.0 - confidence, precision=2)}}}{{\ln {fmt(c_diag_1, precision=4)}}}"
+        rf" = {fmt(n_cov_1_exact, precision=1)} \;\Rightarrow\; n = {n_cov_1}, \qquad \frac{{3}}{{p}} = \frac{{3 \lambda_{{\text{{raw}}}}}}{{\lambda_{{\text{{target}}}}}} = \frac{{3 \times {fit_raw}}}{{{fit_target_1}}} = {round(rule3_1)}"
+    )
 ```
 
-When $n$ independent Bernoulli trials sampled from the declared fault distribution have zero missed mitigations, the result sets a one-sided upper confidence limit on the miss probability for that distribution. The count is the zero-failure sizing of @sec-evaluation-trial-limits, applied to an injected fault population rather than to runs of a policy. At `{python} InjectedPopulationTrials.confidence_pct_str` percent confidence, a `{python} InjectedPopulationTrials.p_miss_1_pct_str` percent limit requires `{python} InjectedPopulationTrials.n_1_str` zero-miss injections and a `{python} InjectedPopulationTrials.p_miss_2_pct_str` percent limit requires `{python} InjectedPopulationTrials.n_2_str`. To infer a FIT-weighted hardware coverage (\ref{nbk-verification-hardware-fault-injection-coverage-mean-time} defines the FIT rate and the weights $\lambda_i$), injections must represent the raw-fault weights $\lambda_i$ or use a justified stratified weighting and per-stratum analysis.[^fn-math-zero-failure]
+When $n$ independent Bernoulli trials sampled from the declared fault distribution have zero missed mitigations, the result sets a one-sided upper confidence limit on the miss probability for that distribution. The count is the zero-failure sizing of @sec-evaluation-trial-limits, applied to an injected fault population rather than to runs of a policy. It bounds the miss probability at $p$ with confidence $C$ once $(1-p)^n \le 1 - C$, which at `{python} InjectedPopulationTrials.confidence_pct_str` percent takes roughly $3/p$ zero-miss injections. To infer a FIT-weighted hardware coverage (\ref{nbk-verification-hardware-fault-injection-coverage-mean-time} defines the FIT rate and the weights $\lambda_i$), injections must represent the raw-fault weights $\lambda_i$ or use a justified stratified weighting and per-stratum analysis.[^fn-math-zero-failure]
 
 [^fn-math-zero-failure]: **Trial sampling and aging**\index{Zero-failure testing!independence}: The binomial count assumes independent, identically distributed Bernoulli outcomes under the declared injection distribution; it does not require Poisson event arrivals. Repeated heating, wear, or contact changes can break independence and require a state-stratified test design.
 
 The bound applies only when the injection outcomes meet the declared independence and sampling assumptions. Repeated stops heat the drive windings ($I^2R$)\index{Joule heating!fault coupling} and the brake lining, change their resistance and friction, and couple later trials to earlier ones. A campaign run on a dry aisle at room temperature cannot establish a limit for an inspected floor or for the envelope's `{python} RackEndVerification.ambient_lo_str` end.
 
-::: {#nbk-verification-hardware-fault-injection-coverage-mean-time .callout-notebook title="Fault coverage under declared assumptions"}
-**Scenario:** Assume component fault rates $\lambda_i$ sum to $\lambda_{\text{raw}}$ = `{python} InjectedPopulationTrials.fit_raw_str` FIT, where one FIT is one fault per $10^9$ operating hours. The four illustrative contributions are sensors `{python} InjectedPopulationTrials.fit_sensors_str`, compute `{python} InjectedPopulationTrials.fit_compute_str`, transceivers and power management `{python} InjectedPopulationTrials.fit_power_str`, and gate drivers `{python} InjectedPopulationTrials.fit_gate_str` FIT. Let $C_{\text{diag}}$ be the fraction of these faults whose hazardous effect is successfully mitigated, weighted by the applicable fault rates. Then
-$$\lambda_{\text{unmitigated}}=\lambda_{\text{raw}}(1-C_{\text{diag}}).$$
-A target rate $\lambda_{\text{target}}$ therefore needs $C_{\text{diag}}\ge1-\lambda_{\text{target}}/\lambda_{\text{raw}}$, which is `{python} InjectedPopulationTrials.c_diag_1_pct_str` percent for a chosen `{python} InjectedPopulationTrials.fit_target_1_str` FIT target and `{python} InjectedPopulationTrials.c_diag_2_pct_str` percent for a `{python} InjectedPopulationTrials.fit_target_2_str` FIT target.
+::: {#nbk-verification-hardware-fault-injection-coverage-mean-time .callout-notebook title="The coverage count"}
 
-Zero-miss counts such as `{python} InjectedPopulationTrials.n_1_str` injections for a `{python} InjectedPopulationTrials.p_miss_1_pct_str` percent limit hold only for a fault population sampled in proportion to its $\lambda_i$ weights. Uniform injections across unequal-rate components estimate a different distribution unless outcomes are weighted and each stratum has adequate evidence. A test must record which mode was injected, whether it was detected, and whether the plant actually reached its allowed state.
+**Problem**: Illustrative component fault rates and a chosen ceiling on the unmitigated rate fix the diagnostic coverage the machine needs. How many zero-miss injections, sampled in proportion to those rates, would demonstrate that coverage?
+
+**Variables**:
+
+* Component fault rates $\lambda_i$ in FIT, one fault per $10^9$ operating hours (Illustrative): sensors `{python} InjectedPopulationTrials.fit_sensors_str`, compute `{python} InjectedPopulationTrials.fit_compute_str`, transceivers and power management `{python} InjectedPopulationTrials.fit_power_str`, and gate drivers `{python} InjectedPopulationTrials.fit_gate_str`.
+* Target unmitigated rate $\lambda_{\text{target}} =$ `{python} InjectedPopulationTrials.fit_target_1_str` FIT, with a stricter `{python} InjectedPopulationTrials.fit_target_2_str` FIT alternative, at confidence $C =$ `{python} InjectedPopulationTrials.confidence_pct_str` percent (Chosen).
+* Diagnostic coverage $C_{\text{diag}}$, the $\lambda_i$-weighted fraction of faults whose hazardous effect is mitigated, so that $\lambda_{\text{unmitigated}} = \lambda_{\text{raw}}(1 - C_{\text{diag}})$ and a single injection misses with probability $p = 1 - C_{\text{diag}}$.
+
+**Math**:
+
+*Required coverage.*
+`{python} InjectedPopulationTrials.raw_math`
+
+*Injections to demonstrate it*, from the zero-failure count of @sec-evaluation-trial-limits.
+`{python} InjectedPopulationTrials.count_math`
+
+*Sensitivity.* The count scales as $3\lambda_{\text{raw}}/\lambda_{\text{target}}$, so the `{python} InjectedPopulationTrials.fit_target_2_str` FIT target needs `{python} InjectedPopulationTrials.c_diag_2_pct2_str` percent coverage and `{python} InjectedPopulationTrials.n_cov_2_str` injections, against a rule-of-three estimate of `{python} InjectedPopulationTrials.rule3_2_str`.
+
+**Result**: A `{python} InjectedPopulationTrials.fit_target_1_str` FIT target needs `{python} InjectedPopulationTrials.c_diag_1_pct2_str` percent coverage, which `{python} InjectedPopulationTrials.n_cov_1_str` zero-miss injections demonstrate at `{python} InjectedPopulationTrials.confidence_pct_str` percent confidence.
+
+**Systems insight**: The rate target, not the length of the fault list, sets the size of the campaign, and every tenfold tightening costs ten times the injections. The count holds only for injections drawn in proportion to $\lambda_i$. Uniform injections across unequal-rate components estimate a different distribution unless outcomes are weighted and each stratum has adequate evidence, and each injection must record which mode was injected, whether it was detected, and whether the plant reached its allowed state.
+
 :::
 
 Operating hours cannot close what the injections leave open. A zero-event test cannot reach the hazard rates a release claim needs (the exposure wall of @sec-evaluation-trial-limits), so the fault record carries what was never injected as prominently as what passed. It lists every parameter combination omitted because of bench limits, sensor bandwidth, or destructive-test cost, and an untested region therefore cannot reach the safety case of @sec-release as a verified margin.
@@ -1670,7 +1910,22 @@ This practice introduces **survivorship bias**\index{Survivorship bias!verificat
 
 The rack-end stopping claim begins as a distance and timing budget. Verification makes it testable by declaring the envelope points at which it must hold, including the coupled corners that one-variable sweeps miss, and by specifying for each fault the negated condition, the injection point, the expected detector, the bounded response, and an independent witness. A stalled proposer is therefore tested through powered deceleration onset and travel to rest, measured from the last valid renewal, even when its host heartbeat remains alive. An oracle fixed before the run scores each trial as `PASS`, `FAIL`, `INVALID`, or `UNOBSERVABLE`, and coverage is reported per dimension rather than as one percentage.
 
-The fault list comes from inverting the design records, from working forward through the physical machine, from the authority cases, from shared causes that couple faults, and from adversaries who induce disturbances at the transducers or steer the learned proposer through its instruction and camera inputs, attacks that test the proposal boundary directly. Each fault goes to the qualification rung that contains its mechanism, because a simulator cannot sag a bus it does not model, and formal proof reaches the small permission path rather than the learned proposer. On hardware, injectors sit at the physical interfaces and every scored event is recorded on instruments that share neither clock nor supply with the machine. Signed temporal margins then direct search toward small margins, and a simulated margin transfers only after the sim-to-real discount. Importance sampling turns runs concentrated near failure into an operational rate only when the proposal is declared and every run is weighted, and tail models support only the claims their assumptions justify. A counterexample can reject a claim; failure to find one leaves the unsearched region open. The fault records carry that distinction into release, each beside its claim.
+The fault list comes from inverting the design records, from working forward through the physical machine, from the authority cases, from shared causes that couple faults, and from adversaries who induce disturbances at the transducers. Proposer-injection attacks, adversarial instructions on the task channel or patches and signs in the camera view, steer the learned proposer without touching a bus or sensor and so test the proposal boundary directly. The permission path cannot see what steered a proposal and catches it only when the motion breaches a measured limit, so a trial scores on the physical oracle and records every wrong action that stayed inside the envelope as a coverage deficit. Each fault goes to the qualification rung that contains its mechanism, because a simulator cannot sag a bus it does not model, and formal proof reaches the small permission path rather than the learned proposer. On hardware, injectors sit at the physical interfaces and every scored event is recorded on instruments that share neither clock nor supply with the machine. Signed temporal margins then direct search toward small margins, and a simulated margin transfers only after the sim-to-real discount. Importance sampling turns runs concentrated near failure into an operational rate only when the proposal is declared and every run is weighted, and tail models support only the claims their assumptions justify. A counterexample can reject a claim; failure to find one leaves the unsearched region open. The fault records carry that distinction into release, each beside its claim.
+
+Eight relations carry the chapter's quantitative argument, and @tbl-15-key-equations records what each bounds or decides.
+
+| Equation                                                                                                                                                  | What it bounds or decides                                                                                                                              | Derived                                                    |
+|:----------------------------------------------------------------------------------------------------------------------------------------------------------|:-------------------------------------------------------------------------------------------------------------------------------------------------------|:-----------------------------------------------------------|
+| $t_{\text{onset}} \le T_{\text{lease}} + T_{\text{tick}} + T_{\text{bus}} + T_{\text{act}}$, and $d_{\text{F1}}(v) = v\,(T_{\text{lease}} + T_{\text{tick}} + T_{\text{bus}} + T_{\text{act}}) + d_{\text{suffix}}(v) + \epsilon_{\text{track}}$ | F1's two precommitted predicates, measured from the last valid renewal; the capture-referenced budget subtotal cannot stand in for them                 | @eq-verification-f1-oracle                                 |
+| $\lambda_{\text{unmitigated}} = \lambda_{\text{raw}}(1 - C_{\text{diag}})$, $\;n \ge \ln(1-C)/\ln C_{\text{diag}}$                                          | The diagnostic coverage a rate target demands, and the zero-miss injections, sampled in proportion to the fault rates, that demonstrate it              | \ref{nbk-verification-hardware-fault-injection-coverage-mean-time} |
+| $\Delta t = r_{\text{drift}}\,T_{\text{blackout}} + \sigma_{\text{jitter}}$                                                                                | How much of the clock-conversion bound behind F2's refusal threshold a synchronization blackout spends                                                 | @eq-verification-clock-drift                               |
+| $\rho(\square_{[0,T]}\phi) = \min_t \rho(\phi, s, t)$, $\;\rho(\lozenge_{[0,\tau]}\phi) = \max_t \rho(\phi, s, t)$                                          | The signed margin of a trace against a temporal requirement, the score a falsifier drives toward zero                                                  | @eq-verification-stl-recursive-robustness                  |
+| $\min_{\theta_0, \mathbf{p}} \rho(\phi, s(\theta_0, w(\mathbf{p})), 0)$ subject to $\lVert w \rVert_\infty \le \Delta_w$                                   | The worst initial state and realizable disturbance a search can find; a search that finds none certifies nothing                                      | @eq-verification-adversarial-falsification                 |
+| $\rho_{\text{real}} \ge \rho_{\text{sim}} - L_\phi\,\epsilon_{\text{gap}}$                                                                                 | The physical margin a simulated margin guarantees, given a discrepancy bound justified over the claimed conditions                                     | @eq-verification-robustness-discount                       |
+| $\hat{P}_F = \frac{1}{N}\sum_i \mathbb{1}[x_i \in F]\,w(x_i)$, $\;x_i \sim q$                                                                              | An operational failure rate from runs concentrated near failure, valid only with a declared $p$, a proposal that covers the failure set, and the weights | @eq-verification-importance-sampling                       |
+| $z_{T, \text{sim}} + L_\phi\,\epsilon_{\text{gap}} \le d_{\text{clear}} - d_{\text{budget}}$                                                               | Whether a discounted tail estimate fits inside the physical reserve; a necessary check, not a release rule                                             | @eq-verification-evt-release-condition                     |
+
+: **Key equations of adversarial verification**: The relations that turn a stopping budget into precommitted predicates, size a fault-injection campaign, and limit what search, simulation, and rare-event statistics can claim, with the place each is derived. {#tbl-15-key-equations tbl-colwidths="[40,42,18]"}
 
 ::: {.column-margin .margin-pointer}
 ↪ Untested operational regimes identified during falsification feed the epistemic boundary analysis in @sec-frontier-epistemic-limits.
@@ -1703,6 +1958,147 @@ For further reading, six works trace the lineage from dependability testing to v
 - @owen2013monte treats importance sampling and its diagnostics with care, including the effective sample size and the ways a proposal can fail without any warning in the draws.
 - @corso2021survey organizes black-box safety validation by what each method returns: a counterexample, the most likely failure, or a failure probability.
 - @kochenderfer2026validation develops falsification, failure-probability estimation, reachability, and runtime monitoring as one algorithmic treatment of a declared system and property.
+
+## Problems {#sec-verification-problems}
+
+```{python}
+#| label: calc-verify-problems
+#| echo: false
+#| warning: false
+#| message: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ END-OF-CHAPTER PROBLEM GIVENS (LEGO)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @sec-verification-problems.
+# │ Goal:    Print each problem's givens from the registry and the chapter's
+# │          cells, and guard the property each problem depends on, so a
+# │          registry change cannot silently turn an intended answer around.
+# │ Show:    givens only (answers live in the private instructor solutions):
+# │          a 1.2 m/s dry-floor point; a 95 ms / 790 mm trace; a 0.5 percent
+# │          miss limit and 500 bench runs; 50 mm and 150 mm transfer bounds;
+# │          a 25 percent drift share; a 10 ms mean queue delay; the Unitree H1
+# │          top speed of 3.3 m/s; a supplier's 98 percent of 5,000 trials.
+# │ How:     Reuses RackEndVerification, ClockDriftVerification, and
+# │          RareEventOvershoot; recomputes each guarded property with the
+# │          MLSysIM S-curve, zero-failure, and importance-sampling helpers.
+# └─────────────────────────────────────────────────────────────────────────────
+import math
+from mlsysim import Embodied
+from mlsysim.core.units import ureg, millisecond, microsecond, second, meter, millimeter
+from mlsysim.physics.robotics import calc_scurve_stop_distance, calc_zero_failure_sample_size
+from mlsysim.physics import (
+    calc_monte_carlo_sample_size,
+    calc_importance_sampling_exponential,
+    calc_cross_entropy_exponential_proposal,
+)
+from mlsysim.fmt import fmt, fmt_int, fmt_latency, fmt_length, fmt_velocity, fmt_percent, check
+
+H1 = Embodied.Humanoid.Unitree_H1
+
+class VerificationProblems:
+    """Givens for the Chapter 15 problems, with guards on the answers they imply."""
+
+    # ┌── 1. LOAD (Constants & Parameters) ─────────────────────────────────
+    R = RackEndVerification  # category: derived; the chapter's oracle cell
+    v_p1 = 1.2 * meter / second  # category: illustrative (problem given: a new dry-floor envelope point)
+    p2_onset = 95 * millisecond  # category: illustrative (problem given: a stipulated trial outcome)
+    p2_travel = 790 * millimeter  # category: illustrative (problem given: a stipulated trial outcome)
+    p4_miss = 0.005  # category: illustrative (problem given: miss-probability limit)
+    p4_bench = 500  # category: illustrative (problem given: deterministic bench runs)
+    gap_a = 50 * millimeter  # category: illustrative (problem given: a validated discrepancy bound)
+    gap_b = 150 * millimeter  # category: illustrative (problem given: a larger discrepancy bound)
+    p6_share = 0.25  # category: illustrative (problem given: share of the clock-conversion bound)
+    p7_mean = 10 * millisecond  # category: illustrative (problem given: mean queue delay)
+    v_h1 = H1.max_velocity.to(meter / second)  # category: datasheet (registry: Unitree H1 top speed)
+    vendor_n = 5000  # category: illustrative (problem given: a supplier's trial count)
+    vendor_pass = 0.98  # category: illustrative (problem given: a supplier's pass fraction)
+
+    # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────
+    # P1: F1 oracle and capture-referenced subtotal at the new point
+    sfx_p1 = calc_scurve_stop_distance(v_p1, R.a_brake, R.j_brake).to(millimeter)
+    f1_p1 = (v_p1 * R.onset_bound + sfx_p1 + R.eps_track).to(millimeter)
+    sub_p1 = (v_p1 * R.tau_delay + sfx_p1 + R.overhead).to(millimeter)
+    # P2: margins of the stipulated trace against the aisle-speed oracle
+    rho_on_p2 = (R.onset_bound - p2_onset).to(millisecond)
+    rho_d_p2 = (R.f1_aisle_stop_bound - p2_travel).to(millimeter)
+    late_share_p2 = (R.v_aisle * (p2_onset - R.onset_bound)).to(millimeter)
+    # P3: nominal-bus step to lockout; longest stop the hold-up covers; fastest inspected-floor stop that fits
+    i_cross_nom = ((R.bus_nominal - R.bus_uvlo) / R.bus_r).to(ureg.ampere)
+    t_stop_max = (R.rail_holdup - R.flag_onset - R.brake_engage_max).to(millisecond)
+    v_hold_max = (R.a_insp * (t_stop_max - R.a_insp / R.j_brake)).to(meter / second)
+    # P4: zero-miss count
+    n_p4 = calc_zero_failure_sample_size(1.0 - p4_miss, confidence=0.95)
+    # P5: discounted margins with L_phi = 1 in a 1 m position norm
+    rho_real_a = (R.spare - gap_a).to(millimeter)
+    rho_real_b = (R.spare - gap_b).to(millimeter)
+    # P6: longest sync period whose four-period drift stays within the share
+    rate = ClockDriftVerification.rate
+    t_sync_max = (p6_share * R.eps_sync / (ClockDriftVerification.n_blackout * rate)).to(millisecond)
+    # P7: importance sampling at the new mean
+    ce7 = calc_cross_entropy_exponential_proposal(RareEventOvershoot.t_exhaust, p7_mean, RareEventOvershoot.elite_share)
+    is7 = calc_importance_sampling_exponential(RareEventOvershoot.t_exhaust, p7_mean, ce7["proposal_mean"])
+    p_f7 = is7["failure_probability"]
+    n_mc7 = calc_monte_carlo_sample_size(p_f7, RareEventOvershoot.rel_err)
+    n_is7 = is7["relative_variance"] / RareEventOvershoot.rel_err**2
+    # P8: humanoid pre-onset travel and the lease that would match the warehouse machine
+    pre_h1 = (v_h1 * R.onset_bound).to(millimeter)
+    lease_h1 = (R.f1_preonset_aisle / v_h1 - (R.onset_bound - R.t_lease)).to(millisecond)
+    # P11: the trials the pass fraction leaves unexplained
+    vendor_other = round(vendor_n * (1 - vendor_pass))
+
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(f1_p1 < sub_p1 < R.d_clear, "P1: the oracle must sit below a subtotal that fits the clear distance.")
+    check(abs((sub_p1 - f1_p1).magnitude - (v_p1 * R.t_age + R.delta_loc + R.delta_margin).to(millimeter).magnitude) < 1e-6, "P1: gap is age travel plus the two margins.")
+    check(rho_on_p2.magnitude < 0 and rho_d_p2.magnitude < 0 and late_share_p2 < -rho_d_p2, "P2: both margins fail and the late onset explains only part of the overrun.")
+    check(i_cross_nom > R.i_cross > R.i_rail, "P3: the nominal bus needs a larger step than the depleted one.")
+    check(v_hold_max > R.v_drive, "P3: the hold-up covers any stop up to the drive limit, so it does not bind.")
+    check(n_p4 == 598 and abs(n_p4 - 3 / p4_miss) < 3, "P4: 598 injections, close to 3/p = 600.")
+    check(rho_real_a.magnitude > 0 > rho_real_b.magnitude, "P5: the smaller bound keeps a guaranteed margin; the larger does not.")
+    check(abs(t_sync_max.magnitude - 62.5) < 1e-9 and t_sync_max < ClockDriftVerification.t_sync, "P6: 62.5 ms, shorter than the healthy period.")
+    check(1e-5 < p_f7 < 1e-4 and n_is7 < n_mc7 / 100, "P7: a far likelier failure that importance sampling still estimates much faster.")
+    check(pre_h1 > 2.5 * R.f1_preonset_aisle and lease_h1 < R.chunk_period, "P8: the humanoid needs a lease shorter than the chunk period.")
+    check(vendor_other == 100, "P11: 100 trials not accounted as passes.")
+
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
+    v_p1_str = fmt_velocity(v_p1, precision=1)
+    p2_onset_str = fmt_latency(p2_onset, unit=millisecond, precision=0)
+    p2_travel_str = fmt_length(p2_travel, unit=millimeter, precision=0)
+    p4_miss_pct_str = fmt_percent(p4_miss, precision=1)
+    p4_bench_str = fmt_int(p4_bench)
+    gap_a_str = fmt_length(gap_a, unit=millimeter, precision=0)
+    gap_b_str = fmt_length(gap_b, unit=millimeter, precision=0)
+    p6_share_pct_str = fmt_percent(p6_share, precision=0)
+    p7_mean_str = fmt_latency(p7_mean, unit=millisecond, precision=0)
+    v_h1_str = fmt_velocity(v_h1, precision=1)
+    vendor_n_str = fmt_int(vendor_n, commas=True)
+    vendor_pass_pct_str = fmt_percent(vendor_pass, precision=0)
+```
+
+Each problem states its givens, which come from the machine card (@tbl-01-machine-card), from this chapter's calculations, or from the MLSysIM registry. A given marked illustrative is an assumption for the exercise, not a measurement, and a stipulated trial outcome is an exercise input, never a result of the machine. The tag names the kind of work, and the parenthesis names the learning objective the problem assesses.
+
+1. **[Compute]** (Stopping oracles) Declare a new envelope point at `{python} VerificationProblems.v_p1_str` on a dry floor (illustrative). Using @eq-verification-f1-oracle, compute F1's onset and distance oracles there, then the capture-referenced subtotal of the design budget and the spare it leaves of the `{python} RackEndVerification.d_clear_str` clear distance. Which terms of the subtotal does the oracle omit, and for each one, what fault would have to be under test for that term to belong in the oracle?
+
+2. **[Compute]** (Temporal margins) An F1 trial at `{python} RackEndVerification.v_aisle_str` records powered deceleration onset `{python} VerificationProblems.p2_onset_str` after the last valid renewal and `{python} VerificationProblems.p2_travel_str` of travel from that renewal to rest (a stipulated outcome). Compute both signed margins against the aisle-speed oracle, the normalized margins with the bounds themselves as scales, and the verdict. How much of the distance overrun does the late onset explain, and which instruments of @fig-15-f1-test-rig would you examine for the remainder?
+
+3. **[Compute]** (Hardware injection) For F4a, find the current step that would carry the drive bus from its `{python} RackEndVerification.bus_nominal_str` nominal to the `{python} RackEndVerification.bus_uvlo_str` lockout through the `{python} RackEndVerification.bus_r_str` source resistance, and compare it with the step needed at the depleted point (\ref{nbk-verification-supply-headroom}). For F4b, find the longest stop the `{python} RackEndVerification.rail_holdup_str` hold-up can cover after the `{python} RackEndVerification.flag_onset_str` onset and the `{python} RackEndVerification.brake_engage_str` brake engagement, and the highest inspected-floor speed whose jerk-limited stop fits it. Decide whether the hold-up or the `{python} RackEndVerification.v_drive_str` drive limit binds, and what the F4b trial must therefore measure.
+
+4. **[Compute]** (Transfer and rare events) How many zero-miss injections bound the miss probability at `{python} VerificationProblems.p4_miss_pct_str` percent with `{python} InjectedPopulationTrials.confidence_pct_str` percent confidence? Compare the count with the rule-of-three estimate. A team counts `{python} VerificationProblems.p4_bench_str` runs of one deterministic fault script on a digital bench (illustrative) toward that total. State how many independent trials those runs are worth and what must vary between repetitions for them to count.
+
+5. **[Compute]** (Transfer and rare events) A simulated F1 stop at the aisle speed ends with the whole `{python} RackEndVerification.spare_str` reserve intact. With the distance predicate in meters and a 1 m position scale ($L_\phi = 1$), find the physical margin that @eq-verification-robustness-discount guarantees if the justified discrepancy bound is `{python} VerificationProblems.gap_a_str` and if it is `{python} VerificationProblems.gap_b_str` (both illustrative). The smaller bound was measured on an unloaded, cool machine. State what the record may claim for loaded, thermally throttled trials, and what paired measurement would extend it.
+
+6. **[Compute]** (Hardware injection) With the illustrative oscillator limits of @sec-verification-clock-drift-sync, a worst relative rate of `{python} ClockDriftVerification.ppm_total_str` ppm, find the longest sync period that keeps the drift over a four-period blackout within `{python} VerificationProblems.p6_share_pct_str` percent of the `{python} RackEndVerification.eps_sync_str` clock-conversion bound. Does the healthy `{python} ClockDriftVerification.t_sync_str` period meet it? Decide whether to shorten the period or to budget a larger share of the bound, and describe the F2 trial that would expose a wrong choice.
+
+7. **[Compute]** (Transfer and rare events) Repeat the rack-end example of @sec-verification-importance-sampling with a mean queue delay of `{python} VerificationProblems.p7_mean_str` (illustrative). Compute the operational probability that a stop overshoots the reserve, the plain Monte Carlo runs for `{python} RareEventOvershoot.rel_err_pct_str` relative error, the zero-failure count, and the runs an exponential cross-entropy proposal needs. Which estimate would you run, and what measurement must replace the assumed delay distribution before any of these numbers enters a fault record?
+
+8. **[Compute]** (Stopping oracles, transfer to a humanoid) A Unitree H1 humanoid, whose registry top speed is `{python} VerificationProblems.v_h1_str`, runs the same permission path with the same lease path. Compute its travel before powered onset and compare it with the warehouse machine's at the aisle speed and with the `{python} RackEndVerification.d_clear_str` clear distance. What lease would hold that travel to the warehouse value, and is such a lease compatible with the `{python} RackEndVerification.chunk_period_str` chunk period? The registry carries no stopping deceleration for the H1. Name the measurement that must supply $d_{\text{suffix}}$ before a distance oracle can be written, and the assumption of the warehouse machine that the humanoid breaks.
+
+9. **[Design]** (Fault derivation) Write the five-element chain for a new fault: the LiDAR's timestamp clock freezes while its point clouds keep arriving in well-formed packets. Name the negated condition, the physical injection point, the detector the design should already contain, the bounded response, and a pass condition with its reference event and independent witness. State which rung of the qualification ladder must run the trial, and why a lower one cannot.
+
+10. **[Design]** (Qualification environments) For F2, F3, the actuator jam, A3, and the proposer-injection row of @tbl-15-fault-classification, choose the lowest rung that contains the causal mechanism and name one mechanism that rung still idealizes away. For each trial, state which elements of the causal loop its report must list as physically real, simulated, replayed, bypassed, or unobserved.
+
+11. **[Critique]** (Fault records) A supplier reports that `{python} VerificationProblems.vendor_pass_pct_str` percent of `{python} VerificationProblems.vendor_n_str` fault trials passed (illustrative) and asks for the figure to enter the release case. Write the review. State which verdict counts and coverage dimensions must accompany the figure, what the trials that did not pass could conceal, and why a pass fraction is not a failure-probability estimate.
+
+12. **[Critique]** (Transfer and rare events) An engineer fits a generalized Pareto distribution with negative shape to the overshoots a simulated falsification campaign found, and reports its finite endpoint as the maximum stopping overshoot, well inside the `{python} RackEndVerification.spare_str` reserve. Give the reasons the endpoint cannot fill the F1 record's outcome field, and specify what the campaign would need, in sampling, weighting, fit uncertainty, and transfer, before a return level could be checked against the reserve with @eq-verification-evt-release-condition.
 
 ::: {.callout-chapter-connection title="From verification to release decisions"}
 Verification hands release the fault records and the coverage gaps they expose. For each claim, they bind the relevant qualification manifests and fault records, together with any sim-to-real bounds ($\epsilon_{\text{gap}}$) or tail estimates on which the claim relies. They distinguish measured margins, conditional estimates, and regimes no trial reaches. No record yet carries a measured verdict, so none says whether the machine may drive the aisle. @Sec-release takes these fault records, together with the authority, placement, and evaluation records, and evaluates which claims they support, which operational verdict follows (`UNCOND`, `COND`, or `REFUSE`), and which standing conditions must govern deployment.

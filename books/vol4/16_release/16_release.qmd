@@ -45,7 +45,7 @@ A successful trial shows what a machine did under the conditions it happened to 
 - Join task-success, cycle-time, and intervention evidence to the physical measurements and restrictions supporting a conditional release
 - Specify standing-condition cadences and validated responses separately from the execution leases that bound individual action chunks
 - Diagnose unsupported warrants, hidden contextual assumptions, and compound defeaters through adversarial review of a release argument
-- Design a cryptographically sealed release manifest that binds upstream engineering records by digest and fails closed on any mismatch
+- Specify the records a release manifest binds by digest and the conditions under which its gate refuses motion
 - Determine which claims a policy or software update reopens, and why shadow operation cannot substitute for closed-loop qualification
 
 :::
@@ -71,21 +71,11 @@ The release case is scoped to service at one site. The signed fault records of @
 ## The Deployment Authorization Criterion {#sec-release-question}
 
 At a rack end, the base must stop inside the available clearance. During handover, the arm must stay within the assessed contact-force limit. Both claims depend on the response arriving before its deadline. These requirements give release authorization testable physical criteria:
-$$d_{\text{stop}}(v, \tau_{\text{delay}}, a_{\text{brake}}, \delta_{\text{loc}}, \epsilon_{\text{track}}) \le D_{\text{clear}}, \quad F_{\text{contact}}(v, m_{\text{eff}}, k_h) \le F_{\text{limit}}, \quad T_{\text{exec}} \le T_{\text{deadline}}.$$
+$$d_{\text{stop}}(v, \tau_{\text{delay}}, a_{\text{brake}}, \delta_{\text{loc}}, \epsilon_{\text{track}}) \le D_{\text{clear}}, \quad F_{\text{contact}}(v, m_{\text{eff}}, k_h) \le F_{\text{limit}}, \quad T_{\text{exec}} \le T_{\text{deadline}}.$$ {#eq-release-authorization-criterion}
 
 Each criterion is a physical inequality, so release authorization cannot rest on intuition, demonstrations, or aggregate benchmark scores. It requires an auditable argument that links each inequality to measured observation ages, worst-case execution time bounds, braking and contact trials, and a validated fallback. The inequalities also inherit the individual machine's calibration, its sensor transforms, joint offsets, and torque constants, so a lost or drifted calibration invalidates a stopping budget even when no software has changed.
 
 For the warehouse mobile manipulator, the release question is whether evidence satisfies these criteria for each of its three tasks inside a scoped operating envelope. The release case names the assessed physical bounds, the specified hardware fault model, and the validated permission and fallback ladder. It can support a revocable grant of tracking authority while those physical conditions hold; it cannot infer protection against uncharacterized or unmodeled hazards from finite test runs (\ref{dfn-release-goal-structured-safety-case}).
-
-::: {#dfn-release-goal-structured-safety-case .callout-definition title="Claim-argument-evidence safety case"}
-
-***Claim-argument-evidence safety case***\index{Claim-argument-evidence safety case!definition}\index{Safety case!physical AI} is the auditable, structured assurance argument for a specified physical machine, operating envelope, hazard criteria, and fault model, linking top-level safety claims to concrete empirical evidence through explicit engineering warrants.
-
-1.  **Significance**: Transforms subjective, informal deployment confidence into an auditable, machine-readable argument graph, a directed acyclic graph (DAG) that connects top-level physical invariance claims to concrete empirical evidence across the entire cyber-physical stack.
-2.  **Distinction**: Unlike stateless software unit tests or static model validation scorecards, a physical safety case explicitly links operational design domain capability tokens, hardware fault-injection ledgers, sensor extrinsic calibration invariants, and deterministic runtime enforcer tripwires to argue, with stated confidence, that residual risk is acceptable for the named envelope.
-3.  **Common pitfall**: Treating the safety case as a retrospective bureaucratic checklist completed after development, rather than an executable architectural contract that actively gates release manifests and runtime motor authority.
-
-:::
 
 ```{python}
 #| label: calc-release-contact-premises
@@ -198,7 +188,7 @@ class EnforcementContactForce:
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim import *
 from mlsysim.core.units import *
-from mlsysim.fmt import fmt, fmt_velocity, fmt_length, fmt_mass, fmt_force, fmt_latency, check
+from mlsysim.fmt import fmt, fmt_velocity, fmt_length, fmt_mass, fmt_force, fmt_latency, fmt_acceleration, check
 from mlsysim.physics.robotics import calc_c2_stop_suffix, calc_scurve_max_permitted_velocity
 
 # ┌── 1. LOAD: the running machine and its site ─────────────────────────────────
@@ -231,6 +221,8 @@ check(abs(mu_min - 0.204) < 5e-4, "Friction floor is 0.204")
 check(mu_min < AISLE.mu_dry, "Dry concrete exceeds the friction floor")
 check(mu_min > AISLE.mu_inspected_floor, "Inspected floor requires speed restriction")
 check(abs(v_inspected_ceiling.magnitude - 1.2309) < 5e-5, "Restricted ceiling on inspected floors is 1.23 m/s")
+check(abs(a_inspected.to(meter / second**2).magnitude - 1.1768) < 5e-5, "Inspected-floor deceleration mu*g is 1.18 m/s^2")
+check(a_inspected < AISLE.a_brake, "The inspected floor, not the brake, caps the deceleration")
 check(v_restricted < v_inspected_ceiling, "Chosen restricted mode sits under its ceiling")
 check(abs(v_handover_ceiling.magnitude - 0.2415) < 5e-5, "Transient (free-hand) handover ceiling is 0.24 m/s")
 check(AISLE.v_handover < v_handover_ceiling, "Chosen handover speed sits under its transient ceiling")
@@ -276,6 +268,9 @@ class ReleaseEnvelope:
     mu_inspected_str = fmt(AISLE.mu_inspected_floor, precision=2)
     mu_oil_str = fmt(AISLE.mu_oil_film, precision=2)
     v_inspected_ceiling_str = fmt_velocity(round(v_inspected_ceiling.magnitude, 2) * meter / second, unit=meter / second, precision=2)
+    a_inspected_str = fmt_acceleration(a_inspected, unit=meter / second**2, precision=2)
+    g_str = fmt_acceleration(g_std, unit=meter / second**2, precision=2)
+    a_brake_str = fmt_acceleration(AISLE.a_brake, unit=meter / second**2, precision=0)
     v_restricted_str = fmt_velocity(v_restricted, unit=meter / second, precision=0)
     d_clear_str = fmt_length(AISLE.d_clear, unit=meter, precision=2)
     v_latch_str = fmt_velocity(AISLE.v_latch_approach, unit=meter / second, precision=2)
@@ -359,6 +354,7 @@ from mlsysim.fmt import (
     fmt_velocity,
     fmt_percent,
     fmt_sci_qty,
+    fmt_jerk,
     check,
 )
 from mlsysim.physics.robotics import (
@@ -398,6 +394,16 @@ _qa = (AISLE.v_aisle / (2 * j_brake)).to(second**2)
 _qc = (AISLE.v_aisle**2 / 2).to(meter**2 / second**2)
 a_break_even = ((braking_room - (braking_room**2 - 4 * _qa * _qc) ** 0.5) / (2 * _qa)).to(meter / second**2)
 a_shortfall = ((AISLE.a_brake - a_break_even) / AISLE.a_brake).to("dimensionless").magnitude
+# Notebook terms (nbk-release-aisle-spare): the two S-curve pieces, the delay
+# split, and the dispatch-to-admission allocation Delta_da charged against the
+# partial spare (the same allocation @sec-enforcement charges).
+d_brake_quad = (AISLE.v_aisle**2 / (2 * AISLE.a_brake)).to(millimeter)
+d_brake_jerk = (AISLE.v_aisle * AISLE.a_brake / (2 * j_brake)).to(millimeter)
+t_renewal_to_onset = (AISLE.t_lease + AISLE.t_tick + AISLE.t_bus + AISLE.t_brake_onset).to(millisecond)
+delta_da = AISLE.t_dispatch_to_admission.to(millisecond)  # category: illustrative (allocation of @sec-placement-isolation-decisions)
+travel_da = (AISLE.v_aisle * delta_da).to(millimeter)
+reserve_aisle = (spare_aisle - travel_da).to(millimeter)
+t_reserve = (reserve_aisle / AISLE.v_aisle).to(millisecond)
 
 # ┌── 3. GUARD: canon values quoted in the prose ────────────────────────────────
 check(abs(m_eff.to(kilogram).magnitude - 12.0) < 1e-9, "Effective contact mass is 12.0 kg")
@@ -426,6 +432,16 @@ check(
 )
 check(abs(a_break_even.magnitude - 1.386) < 5e-4, "Break-even deceleration is 1.386 m/s^2")
 check(abs(a_shortfall - 0.307) < 5e-4, "A 31 percent deceleration shortfall fills the spare")
+check(AISLE.v_aisle >= AISLE.a_brake**2 / j_brake, "Aisle stop is in the trapezoidal regime, so the two-term S-curve form applies")
+check(abs((d_brake_quad + d_brake_jerk - c2_braking).to(millimeter).magnitude) < 1e-6, "The two S-curve pieces sum to the braking term")
+check(abs(d_brake_quad.magnitude - 422.5) < 5e-3 and abs(d_brake_jerk.magnitude - 182.8125) < 5e-3, "S-curve pieces 422.5 and 182.8 mm")
+check(abs(AISLE.tau_delay.to(millisecond).magnitude - 133.6) < 1e-9, "Pre-brake delay 133.6 ms")
+check(abs((AISLE.perception_age + t_renewal_to_onset - AISLE.tau_delay).to(millisecond).magnitude) < 1e-9, "Delay = age + renewal-to-onset")
+check(abs(braking_room.to(millimeter).magnitude - 736.32) < 5e-3, "Braking room 736.3 mm")
+check(abs(travel_da.magnitude - 82.304) < 5e-3, "Delta_da travel 82.3 mm at 1.3 m/s")
+check(abs(reserve_aisle.magnitude - 48.7036) < 5e-3, "Reserve 48.7 mm after Delta_da")
+check(abs(t_reserve.magnitude - 37.464) < 5e-3, "Reserve 37.5 ms at aisle speed")
+check(0 < reserve_aisle < spare_aisle, "Delta_da leaves a positive but smaller reserve")
 
 # ┌── 4. OUTPUT: rendered values ────────────────────────────────────────────────
 class BiomechanicalImpactEnvelope:
@@ -446,6 +462,24 @@ class BiomechanicalImpactEnvelope:
     a_brake_str = fmt_acceleration(AISLE.a_brake, unit=meter / second**2, precision=0)
     a_break_even_str = fmt_acceleration(a_break_even, unit=meter / second**2, precision=2)
     a_shortfall_pct_str = fmt_percent(round(a_shortfall, 2), precision=0, style="prose")
+    # Notebook strings (nbk-release-aisle-spare)
+    tau_delay_str = fmt_latency(AISLE.tau_delay, unit=millisecond, precision=1)
+    t_age_str = fmt_latency(AISLE.perception_age, unit=millisecond, precision=1)
+    t_renewal_to_onset_str = fmt_latency(t_renewal_to_onset, unit=millisecond, precision=0)
+    j_brake_str = fmt_jerk(j_brake, unit=meter / second**3, precision=2)
+    d_reaction_str = fmt_length(d_reaction, unit=millimeter, precision=1)
+    d_brake_quad_str = fmt_length(d_brake_quad, unit=millimeter, precision=1)
+    d_brake_jerk_str = fmt_length(d_brake_jerk, unit=millimeter, precision=1)
+    d_braking_str = fmt_length(c2_braking, unit=millimeter, precision=1)
+    d_loc_str = fmt_length(AISLE.delta_loc, unit=millimeter, precision=0)
+    d_track_str = fmt_length(AISLE.eps_track, unit=millimeter, precision=0)
+    d_margin_str = fmt_length(AISLE.delta_margin, unit=millimeter, precision=0)
+    d_clear_mm_str = fmt_length(AISLE.d_clear, unit=millimeter, precision=0)
+    braking_room_str = fmt_length(braking_room, unit=millimeter, precision=1)
+    delta_da_str = fmt_latency(delta_da, unit=millisecond, precision=1)
+    travel_da_str = fmt_length(travel_da, unit=millimeter, precision=1)
+    reserve_str = fmt_length(reserve_aisle, unit=millimeter, precision=1)
+    t_reserve_str = fmt_latency(t_reserve, unit=millisecond, precision=1)
     # Budget terms for the margin envelope (generator reads the quantities)
     d_reaction = d_reaction
     d_braking = c2_braking.to(millimeter)
@@ -459,9 +493,37 @@ class BiomechanicalImpactEnvelope:
 
 The contact criteria arrive as premises from the enforcement record rather than as calculations release performs. @Sec-enforcement-intentional-contact derives the peak force of an unbraked elastic contact with the coworker's hand (@eq-release-unbraked-force) from the ISO/TS 15066 hand body model[^fn-std-isots15066-biomech] and the arm's effective mass, and the release case takes its results as stated. At the arm's `{python} BiomechanicalImpactEnvelope.v_tcp_str` free-space limit even the transient model predicts `{python} BiomechanicalImpactEnvelope.f_tcp_str`, or `{python} BiomechanicalImpactEnvelope.f_ratio_mult_str` the `{python} BiomechanicalImpactEnvelope.f_limit_str` criterion, so no unseparated contact is admissible at that speed without a stronger, measured protection argument. For a free hand, which recoils, the criterion admits approach speeds up to `{python} BiomechanicalImpactEnvelope.v_handover_ceiling_str`, and the chosen `{python} BiomechanicalImpactEnvelope.v_handover_str` produces `{python} BiomechanicalImpactEnvelope.f_handover_str`. For a hand clamped against a rack upright or the arm, it admits only `{python} BiomechanicalImpactEnvelope.v_handover_ceiling_clamped_str`, and the same approach delivers `{python} BiomechanicalImpactEnvelope.f_handover_clamped_str`, which fails. The handover claim is therefore a transient-contact claim, and release inherits two premises with it: that the body model and effective mass describe this contact, and that the handover geometry excludes clamping. Neither is established by the force calculation; both are premises the release case must evidence.
 
-[^fn-std-isots15066-biomech]: **ISO/TS 15066 Values as Case Criteria**\index{ISO/TS 15066!case criterion}: The document supplies a body model and body-region force and pressure data for transient and quasi-static contact [@isots15066], and its requirements for collaborative applications now sit in ISO 10218-2:2025 [@iso10218part2]. The `{python} BiomechanicalImpactEnvelope.f_limit_str` handover criterion is none of those tabulated values and is not an injury boundary. The site assessment chooses it for one body region, contact type, and geometry, so a change to any of the three reopens the claim instead of inheriting its margin.
+[^fn-std-isots15066-biomech]: **ISO/TS 15066 Values as Case Criteria**\index{ISO/TS 15066!case criterion}: The document supplies a body model and body-region force and pressure data for transient and quasi-static contact [@isots15066]. ISO 10218-2:2025 incorporates the collaborative-application requirements formerly published as ISO/TS 15066; ISO/TS 15066:2016 itself remains published and is under revision [@iso10218part2]. The `{python} BiomechanicalImpactEnvelope.f_limit_str` handover criterion is none of those tabulated values and not an injury boundary; the site assessment chooses it for one body region, contact type, and geometry, so a change to any of the three reopens the claim instead of inheriting its margin.
 
-The base's claim is a budget rather than a single force, and the delay components this chapter must evidence are the lease path and the observation age that its claims name. At the `{python} BiomechanicalImpactEnvelope.v_aisle_str` aisle speed, the partial budget before dispatch-to-admission delay (@tbl-enforcement-stopping-budget) is `{python} BiomechanicalImpactEnvelope.budget_str` against the `{python} BiomechanicalImpactEnvelope.d_clear_str` clear distance, leaving a critical spare of only `{python} BiomechanicalImpactEnvelope.spare_str`. That spare must first pay for dispatch-to-admission work, which the illustrative calculation has not yet charged. Remaining reserve must cover the other required uncertainties; it is not all available as extra waiting time. An unbudgeted pipeline delay of `{python} BiomechanicalImpactEnvelope.t_spare_str` spends that partial spare entirely; this is not an additional full handover allowance once admission work and required reserve are charged (@sec-intervention-authority-transitions). The same partial spare is exhausted if loaded braking reaches only `{python} BiomechanicalImpactEnvelope.a_break_even_str` under the same jerk bound, a deceleration shortfall of `{python} BiomechanicalImpactEnvelope.a_shortfall_pct_str` below the `{python} BiomechanicalImpactEnvelope.a_brake_str` the budget assumes. A stopping claim whose inputs are unmeasured cannot demonstrate that its spare survives these real-world compounding errors.
+The base's claim is a budget rather than a single force, and the delay components this chapter must evidence are the lease path and the observation age that its claims name. The budget is @eq-enforce-stopping-envelope with the jerk-limited stop of @sec-planning-c2-stopping-suffix as its braking term (@tbl-enforcement-stopping-budget), and what matters for release is how much clear distance it leaves unspent (\ref{nbk-release-aisle-spare}).
+
+::: {#nbk-release-aisle-spare .callout-notebook title="The aisle spare"}
+
+**Problem**: At the `{python} BiomechanicalImpactEnvelope.v_aisle_str` aisle speed, how much of the `{python} BiomechanicalImpactEnvelope.d_clear_str` clear distance does the stopping budget leave unspent, what error in a single input would spend it, and how much remains once dispatch-to-admission work is charged?
+
+**Variables**:
+
+- Aisle speed $v =$ `{python} BiomechanicalImpactEnvelope.v_aisle_str` (Chosen); clear distance $D_{\text{clear}} =$ `{python} BiomechanicalImpactEnvelope.d_clear_str` (Illustrative, standing in for a site survey)
+- Pre-brake delay $\tau_{\text{delay}} =$ `{python} BiomechanicalImpactEnvelope.tau_delay_str` (Derived from illustrative terms: `{python} BiomechanicalImpactEnvelope.t_age_str` observation age plus `{python} BiomechanicalImpactEnvelope.t_renewal_to_onset_str` from the last valid renewal to brake onset)
+- Credible deceleration $a_{\text{brake}} =$ `{python} BiomechanicalImpactEnvelope.a_brake_str` (Illustrative) and jerk bound $j =$ `{python} BiomechanicalImpactEnvelope.j_brake_str` (Derived, @sec-planning-c2-stopping-suffix)
+- Allowances $\delta_{\text{loc}} =$ `{python} BiomechanicalImpactEnvelope.d_loc_str` and $\epsilon_{\text{track}} =$ `{python} BiomechanicalImpactEnvelope.d_track_str` (Illustrative); margin $\delta_{\text{margin}} =$ `{python} BiomechanicalImpactEnvelope.d_margin_str` (Chosen)
+- Dispatch-to-admission allocation $\Delta_{\text{da}} =$ `{python} BiomechanicalImpactEnvelope.delta_da_str` (Illustrative allocation, @sec-placement-isolation-decisions)
+
+**Math**:
+
+1. **Reaction**: $v\,\tau_{\text{delay}} =$ `{python} BiomechanicalImpactEnvelope.v_aisle_str` $\times$ `{python} BiomechanicalImpactEnvelope.tau_delay_str` $=$ `{python} BiomechanicalImpactEnvelope.d_reaction_str`.
+2. **Braking**: Because $v \ge a_{\text{brake}}^2/j$, the stop reaches full deceleration, and $v^2/(2a_{\text{brake}}) + v\,a_{\text{brake}}/(2j) =$ `{python} BiomechanicalImpactEnvelope.d_brake_quad_str` $+$ `{python} BiomechanicalImpactEnvelope.d_brake_jerk_str` $=$ `{python} BiomechanicalImpactEnvelope.d_braking_str`.
+3. **Spare**: `{python} BiomechanicalImpactEnvelope.d_reaction_str` $+$ `{python} BiomechanicalImpactEnvelope.d_braking_str` $+$ `{python} BiomechanicalImpactEnvelope.d_loc_str` $+$ `{python} BiomechanicalImpactEnvelope.d_track_str` $+$ `{python} BiomechanicalImpactEnvelope.d_margin_str` $=$ `{python} BiomechanicalImpactEnvelope.budget_str`, leaving `{python} BiomechanicalImpactEnvelope.d_clear_mm_str` $-$ `{python} BiomechanicalImpactEnvelope.budget_str` $=$ `{python} BiomechanicalImpactEnvelope.spare_str`.
+4. **One input wrong**: As extra delay, `{python} BiomechanicalImpactEnvelope.spare_str` $/$ `{python} BiomechanicalImpactEnvelope.v_aisle_str` $=$ `{python} BiomechanicalImpactEnvelope.t_spare_str`. As weaker braking, setting step 2 equal to the `{python} BiomechanicalImpactEnvelope.braking_room_str` braking room gives $a =$ `{python} BiomechanicalImpactEnvelope.a_break_even_str`, a `{python} BiomechanicalImpactEnvelope.a_shortfall_pct_str` shortfall.
+5. **Admission charged**: $v\,\Delta_{\text{da}} =$ `{python} BiomechanicalImpactEnvelope.v_aisle_str` $\times$ `{python} BiomechanicalImpactEnvelope.delta_da_str` $=$ `{python} BiomechanicalImpactEnvelope.travel_da_str`, leaving a reserve of `{python} BiomechanicalImpactEnvelope.reserve_str`, or `{python} BiomechanicalImpactEnvelope.t_reserve_str` at aisle speed.
+
+**Result**: The budget spends all but `{python} BiomechanicalImpactEnvelope.spare_str` of the clear distance before admission work, and all but `{python} BiomechanicalImpactEnvelope.reserve_str` after it.
+
+**Systems insight**: The stopping claim $d_{\text{stop}} \le D_{\text{clear}}$ is decided by the few centimeters the budget leaves unspent, not by the meter it uses. Every illustrative premise of the base's claim draws on that reserve, so a `{python} BiomechanicalImpactEnvelope.a_shortfall_pct_str` optimism in the deceleration alone would spend more than all of it.
+
+:::
+
+The reserve must also cover the other required uncertainties, so it is not all available as extra waiting time, and it is not an additional full handover allowance (@sec-intervention-authority-transitions). A stopping claim whose inputs are unmeasured cannot show that this reserve survives the compounding errors of a real machine.
 
 ::: {.column-margin}
 ![](images/svg/margin_aisle_budget_spare_envelope.svg){width="100%" fig-alt="One horizontal stacked bar in millimeters: reaction travel of 173.7 millimeters, braking of 605.3 millimeters, then allowances of 50 for localization, 40 for tracking, and 100 millimeters of physical margin, followed by a dashed box for the 131.0 millimeters spare that ends at a red line marking the 1.10 meters clear distance."}
@@ -480,6 +542,16 @@ A photograph of a clear aisle cannot establish that the loaded base stops inside
 A safety case is reviewable only if its structure is written down in a form another engineer can check link by link. Two notations are in common use, and they describe the same structure. The **claim-argument-evidence (CAE)**\index{Claim-argument-evidence!notation} framework separates three things: the *claim*, an assertion about the machine that is either true or false; the *argument*, the reasoning that connects the claim to what was measured; and the *evidence*, the retained measurements themselves [@bishop1998methodology; @bloomfield2014building]. **Goal Structuring Notation (GSN)**\index{Goal Structuring Notation!elements} draws the same structure as a graph, in which goals (claims) decompose through strategies (arguments) into solutions (evidence items), and context and assumption nodes state the conditions under which each link holds [@kelly1998arguing; @kelly2004goal]. The fault records of @sec-verification-contract-matrix enter the graph as solutions, each under the claim its header names. Release uses the notation to decide, so the safety case of \ref{dfn-release-goal-structured-safety-case}\index{Claim-argument-evidence safety case!argument structure} now carries a verdict. Its structure descends from Stephen Toulmin's analysis of arguments[^fn-toulmin-argument-anatomy] [@toulmin1958uses], and ANSI/UL 4600 requires a goal-based safety case of this kind for autonomous products [@ul4600; @koopman2023ul4600]. Published industrial cases exist; Waymo's, for its driverless ride-hailing service, argues the absence of unreasonable risk from layered, dynamic, and credible perspectives on safety, and it argues separately that its acceptance criteria are sufficient and that their evaluation is credible [@favaro2023building]. Its top-level claim $C_0$ names a testable physical property, such as keeping the base's stopping distance within surveyed clearance ($d_{\text{stop}} \le D_{\text{clear}}$) or limiting contact force ($F_{\text{contact}} \le F_{\text{limit}}$). Supporting claims identify the conditions needed for that result, and evidence records support those claims. Representing these links as a directed acyclic graph (DAG) makes their dependencies explicit: the reviewer can follow a claim toward its supporting observations without circular reasoning. The graph also records the operating assumptions under which each link holds.
 
 [^fn-toulmin-argument-anatomy]: **Toulmin's Argument Anatomy**\index{Toulmin, Stephen!argument model}: *The Uses of Argument* splits practical reasoning into claim, data, warrant, backing, qualifier, and rebuttal. Safety cases kept that anatomy. Evidence plays the data, stated confidence plays the qualifier, and the rebuttal becomes the defeater that adversarial review hunts for (@sec-release-adversarial-review).
+
+::: {#dfn-release-goal-structured-safety-case .callout-definition title="Claim-argument-evidence safety case"}
+
+***Claim-argument-evidence safety case***\index{Claim-argument-evidence safety case!definition}\index{Safety case!physical AI} is a structured argument that a named machine, in a stated operating envelope and under a stated fault model, meets explicit physical criteria, written as claims that decompose through stated arguments into retained evidence.
+
+1.  **Significance**: It makes a release decision checkable one link at a time. For the warehouse machine, the three inequalities of @eq-release-authorization-criterion become six claims whose leaves are individual premises, and a reviewer can find the one premise, such as a braking deceleration no loaded trial has measured, on which the verdict turns.
+2.  **Distinction**: A test report or benchmark score records what happened under the conditions sampled. A safety case states why that evidence supports a claim about conditions the machine has not yet met, and names the assumptions under which the reasoning stops holding.
+3.  **Common pitfall**: A frequent misconception is that the case is paperwork assembled after development for a regulator. It is written with the design, and in this book's architecture its verdict decides what the permission path lets the machine do.
+
+:::
 
 The structural integrity of this engineering assertion DAG hinges on strictly distinguishing evidence from demonstration. A **demonstration**\index{Demonstration!vs. evidence} is a record of successful task execution over an uncharacterized test distribution, such as a long run of clean door openings with the strike plate always at its nominal position or a thousand collision-free warehouse aisle transits. It measures mean performance but bounds neither the tail nor the failure modes outside the sampled trajectory. In contrast, evidence is a falsifiable, calibrated artifact with quantified uncertainty bounds, such as an execution-time distribution captured on a logic analyzer together with the separate analysis supporting a worst-case execution time (WCET) bound, loaded vehicle stopping trials across degraded friction regimes, or a hardware-in-the-loop (HIL) fault-injection trace that drives the machine to the physical boundary of its envelope. Evidence requirements follow the claim: nominal trials can support performance in their sampled conditions, and calibration records can support the measured sensor geometry. Neither must stress every physical boundary to be useful. A worst-response or envelope-boundary claim needs the additional coverage, uncertainty analysis, and warrant that establish that stronger result.
 
@@ -606,9 +678,15 @@ class ReleaseArgumentConfidence:
     p_two_legs_str = fmt(round(p_two_legs, 2), precision=2)
 ```
 
-A safety case is not an aggregate scorecard in which strength in one branch compensates for a deficit in another. High accuracy on an object recognition benchmark does not offset an uncharacterized latency tail on the CAN-FD bus, nor does extensive policy simulation offset missing brake-wear data. When every child claim is *required*, the argument is conjunctive, and it is no stronger than its weakest required premise. It is usually weaker, because doubt about independent premises accumulates. If each of `{python} ReleaseArgumentConfidence.n_premises_str` required premises holds with confidence `{python} ReleaseArgumentConfidence.p_premise_str`, the conjunction holds with only about `{python} ReleaseArgumentConfidence.p_conjunction_str`, below every one of them. The base's stopping claim is conjunctive in this sense: clear distance, credible deceleration, brake onset, observation age, and the localization and tracking allowances all enter one budget, and a failed warrant in any of them invalidates the root claim however well the others are evidenced. The adjudicator therefore looks not at the volume of supporting artifacts but at the least supported required premise, and at how many premises share the claim.
+A safety case is not an aggregate scorecard in which strength in one branch compensates for a deficit in another. High accuracy on an object recognition benchmark does not offset an uncharacterized latency tail on the CAN-FD bus, nor does extensive policy simulation offset missing brake-wear data. When every child claim is *required*, the argument is conjunctive, and it is no stronger than its weakest required premise. It is usually weaker, because doubt about independent premises accumulates. For $n$ independent required premises held with confidences $p_1, \dots, p_n$, confidence in the claim $C$ is their product:
+$$P(C) = \prod_{i=1}^{n} p_i.$$ {#eq-release-conjunctive-confidence}
 
-The rule has one principled exception. An argument can support a claim through two *independent* legs, either of which suffices, so that the claim fails only if both fail [@bloomfield2003multilegged]. If each of two independent legs holds with confidence `{python} ReleaseArgumentConfidence.p_leg_str`, the claim holds with about `{python} ReleaseArgumentConfidence.p_two_legs_str`, above either leg. The book's architecture is built as such an argument for the hazards the enforcer monitors. The policy's evaluation evidence is one leg, and the independent permission path that admits each proposal is the other, so a policy error alone does not violate the stopping or contact invariant. The exception rests entirely on independence.[^fn-diverse-legs-independence] C5 of @tbl-16-cae-scorecard is the claim that the two legs share no processor, memory channel, power rail, or sensor stream whose failure defeats both; if C5 fails, the legs collapse into a single conjunction. The enforcer leg is itself conjunctive in its physical premises, so C1 to C4 must each hold for it to stand. Diverse legs protect a claim against policy error; they never excuse a missing brake or timing premise.
+If each of `{python} ReleaseArgumentConfidence.n_premises_str` required premises holds with confidence `{python} ReleaseArgumentConfidence.p_premise_str`, the conjunction holds with only about `{python} ReleaseArgumentConfidence.p_conjunction_str`, below every one of them. The base's stopping claim is conjunctive in this sense: clear distance, credible deceleration, brake onset, observation age, and the localization and tracking allowances all enter one budget, and a failed warrant in any of them invalidates the root claim however well the others are evidenced. The adjudicator therefore looks not at the volume of supporting artifacts but at the least supported required premise, and at how many premises share the claim.
+
+The rule has one principled exception. An argument can support a claim through two *independent* legs, either of which suffices, so that the claim fails only if both fail [@bloomfield2003multilegged]. In general, for $m$ legs that fail independently, held with confidences $p_1, \dots, p_m$, the claim holds unless all of them fail:
+$$P(C) = 1 - \prod_{j=1}^{m} (1 - p_j).$$ {#eq-release-multilegged-confidence}
+
+If each of two independent legs holds with confidence `{python} ReleaseArgumentConfidence.p_leg_str`, the claim holds with about `{python} ReleaseArgumentConfidence.p_two_legs_str`, above either leg. The book's architecture is built as such an argument for the hazards the enforcer monitors. The policy's evaluation evidence is one leg, and the independent permission path that admits each proposal is the other, so a policy error alone does not violate the stopping or contact invariant. The exception rests entirely on independence.[^fn-diverse-legs-independence] C5 of @tbl-16-cae-scorecard is the claim that the two legs share no processor, memory channel, power rail, or sensor stream whose failure defeats both; if C5 fails, the legs collapse into a single conjunction. The enforcer leg is itself conjunctive in its physical premises, so C1 to C4 must each hold for it to stand. Diverse legs protect a claim against policy error; they never excuse a missing brake or timing premise.
 
 [^fn-diverse-legs-independence]: **Independence of Diverse Legs**\index{Design diversity!common-mode failure}: When independently written versions of one program were run on the same inputs, they failed together far more often than independent failure predicts, and the experiment rejected the independence hypothesis statistically [@knight1986experimental]. Diversity in design does not by itself give independence in failure. C5 must therefore test the shared processor, rail, and sensor paths rather than assume that the two legs fail independently.
 
@@ -843,6 +921,16 @@ The map also fixes how far this book's own vocabulary reaches. The verdicts, the
 
 Every row of @tbl-16-cae-scorecard ends in an adjudication, and the release decision resolves the whole assertion DAG into one of three verdicts: **unconditional operation**\index{Verdicts!unconditional operation}, **conditional operation**\index{Verdicts!conditional operation}, or **refusal to operate**\index{Verdicts!refusal to operate}. In this book's architecture, these verdicts are not informal administrative labels or advisory certificates; they are signed capability descriptors loaded into the real-time safety microcontroller before motor power stages are energized. No standard requires that mechanism (@sec-release-standards-map); it is one way to make the verdict govern the running machine. The first verdict, unconditional operation (`UNCOND`), authorizes tracking proposals across the full operating envelope named in a signed release manifest while its standing conditions remain verified. Each hazard claim in that case requires empirical evidence for the specified physical plant, payload distribution, operational design domain, and fault set. Brake thermal capacity, stopping clearance, and tracking-error bounds must be qualified for that envelope (@sec-body-thermal-duty-cycles), and independent permission checks must stand wherever learned proposals can reach actuators (@sec-boundary-causal-boundary). The verdict does not eliminate residual or newly discovered hazards; it authorizes operation only under the assessed claims and requires detection and withdrawal within the qualified response budget when a physical premise fails.
 
+::: {#dfn-release-verdict .callout-definition title="Release verdict"}
+
+***Release verdict***\index{Release verdict!definition} is the signed decision that sets how much authority a named machine's permission path may grant: `UNCOND` for the full assessed operating envelope, `COND` for a separately evidenced restricted envelope, or `REFUSE` when any required premise is missing, contradicted, or unknown, in each case only while its standing conditions hold.
+
+1.  **Significance**: It turns the weakest premise of the argument into the machine's operating limit on $d_{\text{stop}} \le D_{\text{clear}}$. On this book's illustrative evidence every claim carries an unknown premise, so the warehouse machine's verdict is `REFUSE`; a stipulated set of loaded stopping and floor records would support a `COND` at `{python} ReleaseEnvelope.v_restricted_str` on inspected floors, below the `{python} ReleaseEnvelope.v_inspected_ceiling_str` partial ceiling.
+2.  **Distinction**: A test result reports how one trial went, and a degraded mode is a runtime fallback the machine enters on its own. A verdict is decided before operation, names the envelope and the evidence it rests on, and never moves the proposal boundary: under every verdict the permission path still admits each action.
+3.  **Common pitfall**: A frequent misconception is that `COND` relabels a full case with a known hole. A restricted envelope needs its own evidence and limits; a missing premise in the full case leaves that case refused.
+
+:::
+
 ### Authorization boundaries and access restrictions {#sec-release-verdicts-ssm}
 
 The second verdict, conditional operation (`COND`), applies when empirical evidence supports the stated hazard claims within a restricted operating subset but lacks valid warrants for the full envelope. In the running machine, `COND` selects a pre-validated safety configuration, in the way safety controllers and protective scanners switch between validated field sets[^fn-scanner-field-sets] and speed-monitoring cases. Its restricted kinematic thresholds ($v_{\max} \le v_{\text{restricted}}$, $a_{\max} \le a_{\text{restricted}}$) and spatial geofences were assessed as a configuration before release; the verdict selects them and never writes arbitrary parameters. The signing and loading mechanics are collected in @sec-appendix-systems-release-protocol. Whereas a conditional verdict (`COND`) is an offline, predeployment contract that restricts the machine's operating envelope until re-adjudication, a degraded mode is an online runtime fallback invoked when an active subsystem experiences transient loss of telemetry or sensor redundancy. Release then enforces physical, kinematic, or environmental boundaries that exclude unverified hazard states, such as de-rated joint velocities, a restricted illumination range, or a physical barrier that keeps humans outside the manipulator's workspace. Where contact force cannot be bounded for unseparated co-presence, a restricted case may require an assessed physical cell and validated access interlocks (@fig-16-real-robot-safety-cell), verified so the protective stop completes before a human can breach the hazardous volume.
@@ -861,7 +949,7 @@ Every quantitative condition attached to a release verdict names the operational
 ↩ Deterministic fallback coverage supporting conditional release verdicts builds on @sec-enforcement-fallback-ladder.
 :::
 
-The inspected-floor condition follows the same rule. Where the site's inspection regime certifies a friction coefficient of only `{python} ReleaseEnvelope.mu_inspected_str`, the credible deceleration falls to what that friction supports, and the budget that admits `{python} ReleaseEnvelope.v_ceiling_str` on surveyed floors admits only `{python} ReleaseEnvelope.v_inspected_ceiling_str`. A visual inspection alone cannot establish this lower friction bound: transparent oil remains below it. The site must qualify the friction assessment and the cleaning, spill-isolation, and access procedures that preserve the assessed floor state between checks. If that regime cannot exclude the film over the authorized interval, reduced speed does not rescue the case; the aisle remains refused.
+The inspected-floor condition follows the same rule. Where the site's inspection regime certifies a friction coefficient of only `{python} ReleaseEnvelope.mu_inspected_str`, the credible deceleration falls to what that friction supports, $\mu g =$ `{python} ReleaseEnvelope.mu_inspected_str` $\times$ `{python} ReleaseEnvelope.g_str` $=$ `{python} ReleaseEnvelope.a_inspected_str` against the `{python} ReleaseEnvelope.a_brake_str` the dry-floor budget assumes, and the budget that admits `{python} ReleaseEnvelope.v_ceiling_str` on surveyed floors admits only `{python} ReleaseEnvelope.v_inspected_ceiling_str`. A visual inspection alone cannot establish this lower friction bound: transparent oil remains below it. The site must qualify the friction assessment and the cleaning, spill-isolation, and access procedures that preserve the assessed floor state between checks. If that regime cannot exclude the film over the authorized interval, reduced speed does not rescue the case; the aisle remains refused.
 
 The third verdict, refusal to operate (`REFUSE`), is the mandatory outcome whenever the safety case contains missing warrants, uncharacterized tail latencies, incomplete fault-injection coverage, or unmonitored failure modes. For systems where torque removal causes harm (such as upright bipedal humanoids falling under gravity), `REFUSE` cannot simply drop motor currents to zero; it must mandate an assessed, powered descent or seated hold. If the enforcer's worst-case execution time under the placement's load has never been measured against its `{python} ReleaseClaims.deadline_str` deadline, or the fault set omitted the common-cause tests the placement names, the hazard remains unquantified and cannot support release. Refusal is likewise required when a physical measurement contradicts the model behind a budget term, such as loaded stopping trials that decelerate below the `{python} BiomechanicalImpactEnvelope.a_brake_str` the budget assumes.
 
@@ -997,6 +1085,12 @@ travel_per_ms = (AISLE.v_aisle * (1 * millisecond)).to(millimeter)
 v_degraded = (degraded_fraction * AISLE.v_aisle).to(meter / second)
 t_renewal_to_onset = (AISLE.t_lease + AISLE.t_tick + AISLE.t_bus + AISLE.t_brake_onset).to(millisecond)
 t_monitor_response = (AISLE.t_tick + AISLE.t_bus + AISLE.t_brake_onset).to(millisecond)  # enforcer-detected premise
+# Notebook (nbk-release-silent-proposer-window): travel to brake onset on each
+# route, and the flag latency at which the monitored route stops no sooner.
+d_silent = (AISLE.v_aisle * t_renewal_to_onset).to(millimeter)
+d_monitored = (AISLE.v_aisle * t_monitor_response).to(millimeter)
+t_flag_crossover = (t_renewal_to_onset - t_monitor_response).to(millisecond)
+d_saved = (d_silent - d_monitored).to(millimeter)
 
 # ┌── 3. GUARD ──────────────────────────────────────────────────────────────────
 check(abs(e_k_loaded.magnitude - 310.96) < 0.01, "Loaded kinetic energy at 1.3 m/s")
@@ -1008,6 +1102,10 @@ check(abs(t_monitor_response.magnitude - 22.0) < 1e-9, "Enforcer tick + bus + br
 check(abs(AISLE.t_lease.to(millisecond).magnitude - 60.0) < 1e-9, "Chunk lease 60 ms")
 check(abs(AISLE.t_bus.to(millisecond).magnitude - 1.0) < 1e-9, "Bus transfer 1 ms")
 check(abs(AISLE.t_brake_onset.to(millisecond).magnitude - 20.0) < 1e-9, "Brake onset 20 ms")
+check(abs(d_silent.magnitude - 106.6) < 1e-9, "Silent proposer: 106.6 mm to brake onset")
+check(abs(d_monitored.magnitude - 28.6) < 1e-9, "Monitored premise, immediate flag: 28.6 mm")
+check(abs(t_flag_crossover.magnitude - 60.0) < 1e-9, "Flag-latency crossover equals the 60 ms lease")
+check(abs(d_saved.magnitude - 78.0) < 1e-9, "Monitoring saves at most 78.0 mm")
 
 # ┌── 4. OUTPUT ─────────────────────────────────────────────────────────────────
 class ReleaseBlindTravel:
@@ -1020,6 +1118,12 @@ class ReleaseBlindTravel:
     t_renewal_to_onset_str = fmt_latency(t_renewal_to_onset, unit=millisecond, precision=0)
     t_monitor_response_str = fmt_latency(t_monitor_response, unit=millisecond, precision=0)
     t_lease_str = fmt_latency(AISLE.t_lease, unit=millisecond, precision=0)
+    t_bus_str = fmt_latency(AISLE.t_bus, unit=millisecond, precision=0)
+    t_onset_str = fmt_latency(AISLE.t_brake_onset, unit=millisecond, precision=0)
+    d_silent_str = fmt_length(d_silent, unit=millimeter, precision=1)
+    d_monitored_str = fmt_length(d_monitored, unit=millimeter, precision=1)
+    t_flag_crossover_str = fmt_latency(t_flag_crossover, unit=millisecond, precision=0)
+    d_saved_str = fmt_length(d_saved, unit=millimeter, precision=0)
     # Response windows for the margin strip (generator reads the quantities)
     t_lease = AISLE.t_lease.to(millisecond)
     t_tick = AISLE.t_tick.to(millisecond)
@@ -1033,7 +1137,31 @@ The response to an unevaluable premise follows from the physical consequence of 
 
 The action lease bounds how long an admitted chunk can execute without renewal. It is not renewed by asserting that every environmental premise has been remeasured on each tick. The permission path checks current local evidence and the signed validity of slower site and maintenance records. A proposer delay becomes lost service only while that path and its fallback remain independent and valid.
 
-Standing conditions that affect motion need an enforcement path with a measured detection and response budget. In the architecture of @sec-enforcement, the independent enforcer\index{Safety enforcer!hardware interlock} checks proposals and monitored premises before issuing actuator permission. The machine's permission path decides on a `{python} ReleaseBlindTravel.t_tick_str` tick. Its `{python} ReleaseBlindTravel.t_renewal_to_onset_str` bound from the last valid renewal to brake onset covers a proposer that stops renewing. Once a failure flag is locally available to the enforcer, the tick, bus transfer, and physical response onset contribute `{python} ReleaseBlindTravel.t_monitor_response_str` in the illustrative budget. Any delay from the physical failure to that flag is additional and must be qualified; the local response subtotal cannot stand for the full detection-to-stop chain. When a premise is unknown or false, the enforcer revokes tracking and commands the rung of the fallback ladder that suits the plant's state (@sec-enforcement-fallback-ladder), and the signed release case must include that stop choice and its measured timing.
+Standing conditions that affect motion need an enforcement path with a measured detection and response budget. In the architecture of @sec-enforcement, the independent enforcer\index{Safety enforcer!hardware interlock} checks proposals and monitored premises before issuing actuator permission, and the machine's permission path decides on a `{python} ReleaseBlindTravel.t_tick_str` tick. A failure reaches it by one of two routes. A proposer that stops renewing is caught only when its lease lapses, while a monitored premise is caught when its failure flag arrives, and the two routes cost different travel (\ref{nbk-release-silent-proposer-window}).
+
+::: {#nbk-release-silent-proposer-window .callout-notebook title="The silent-proposer window"}
+
+**Problem**: The base runs the aisle at `{python} ReleaseBlindTravel.v_aisle_str`. How far does it travel before brake onset when the proposer falls silent, how far when a monitored premise fails and its flag reaches the enforcer at once, and how late may that flag arrive before monitoring stops the base no sooner than the lease would?
+
+**Variables**:
+
+- Aisle speed $v =$ `{python} ReleaseBlindTravel.v_aisle_str` (Chosen), so `{python} ReleaseBlindTravel.travel_per_ms_str` of travel per millisecond
+- Chunk lease `{python} ReleaseBlindTravel.t_lease_str` and permission tick `{python} ReleaseBlindTravel.t_tick_str` (Chosen); bus transfer `{python} ReleaseBlindTravel.t_bus_str` and brake onset `{python} ReleaseBlindTravel.t_onset_str` (Illustrative)
+- Flag latency $\delta_{\text{flag}}$ from the physical failure to a flag the enforcer can read (Unknown; the detector's qualification must bound it)
+
+**Math**:
+
+1. **Silent proposer**: `{python} ReleaseBlindTravel.t_lease_str` $+$ `{python} ReleaseBlindTravel.t_tick_str` $+$ `{python} ReleaseBlindTravel.t_bus_str` $+$ `{python} ReleaseBlindTravel.t_onset_str` $=$ `{python} ReleaseBlindTravel.t_renewal_to_onset_str`, and `{python} ReleaseBlindTravel.v_aisle_str` $\times$ `{python} ReleaseBlindTravel.t_renewal_to_onset_str` $=$ `{python} ReleaseBlindTravel.d_silent_str`.
+2. **Monitored premise, immediate flag**: `{python} ReleaseBlindTravel.t_tick_str` $+$ `{python} ReleaseBlindTravel.t_bus_str` $+$ `{python} ReleaseBlindTravel.t_onset_str` $=$ `{python} ReleaseBlindTravel.t_monitor_response_str`, and `{python} ReleaseBlindTravel.v_aisle_str` $\times$ `{python} ReleaseBlindTravel.t_monitor_response_str` $=$ `{python} ReleaseBlindTravel.d_monitored_str`.
+3. **Crossover**: $\delta_{\text{flag}} +$ `{python} ReleaseBlindTravel.t_monitor_response_str` $=$ `{python} ReleaseBlindTravel.t_renewal_to_onset_str` at $\delta_{\text{flag}} =$ `{python} ReleaseBlindTravel.t_flag_crossover_str`, the length of the lease itself.
+
+**Result**: Monitoring can save up to `{python} ReleaseBlindTravel.d_saved_str` of travel, but only for a flag that arrives within `{python} ReleaseBlindTravel.t_flag_crossover_str` of the failure; a slower flag stops the base no sooner than waiting out the lease.
+
+**Systems insight**: The `{python} ReleaseBlindTravel.t_monitor_response_str` local subtotal is not a detection-to-stop time. The term that decides whether a monitored premise protects clearance is $\delta_{\text{flag}}$, which the illustrative budget does not bound, so the release case must qualify it for each monitored premise; every millisecond of it carries the base another `{python} ReleaseBlindTravel.travel_per_ms_str` toward whatever the failed premise was protecting against.
+
+:::
+
+When a premise is unknown or false, the enforcer revokes tracking and commands the rung of the fallback ladder that suits the plant's state (@sec-enforcement-fallback-ladder), and the signed release case must include that stop choice and its measured timing.
 
 ::: {.column-margin}
 ![](images/svg/margin_silent_proposer_response_strip.svg){width="100%" fig-alt="Two horizontal timelines in milliseconds. Silent proposer: a 60-millisecond lease, 2 milliseconds of tick and bus transfer, and 20 milliseconds of brake onset, 82 milliseconds in total. Monitored premise: the same 2 milliseconds and 20 milliseconds, 22 milliseconds in total."}
@@ -1123,6 +1251,18 @@ v_ceiling = calc_scurve_max_permitted_velocity(AISLE.d_clear, AISLE.tau_delay, A
 )
 t_renewal_to_onset = (AISLE.t_lease + AISLE.t_tick + AISLE.t_bus + AISLE.t_brake_onset).to(millisecond)
 f_handover = EnforcementContactForce.f_handover
+# Checkpoint estimate (chk-release-refusal-and-path-to-cond): a loaded trial whose
+# low tail falls short of a_brake. The answer is not printed; the guard keeps the
+# item's premise (the reserve after Delta_da turns negative) true.
+a_trial = 1.6 * meter / second**2  # category: illustrative (hypothetical low-tail loaded deceleration)
+reserve_trial = (
+    AISLE.d_clear
+    - AISLE.v_aisle * AISLE.tau_delay
+    - calc_scurve_stop_distance(AISLE.v_aisle, a_trial, j_brake)
+    - overhead_loc
+    - AISLE.delta_margin
+    - AISLE.v_aisle * AISLE.t_dispatch_to_admission
+).to(millimeter)
 
 # ┌── 3. GUARD: canon values quoted in the prose and the table ──────────────────
 check(abs(f_cmd_lo.magnitude - 39.0) < 1e-9, "Latch force at brake command, guarded approach")
@@ -1143,6 +1283,8 @@ a_arm_ratio = (a_arm_hi / a_arm_lo).to("dimensionless").magnitude
 # margin_arm_stop_demand_ladder.svg fig-alt hand-types 3, 9.8 and 400 m/s^2; caption says over a hundredfold
 check(abs(a_arm_ratio - 135.6) < 0.1, "The unsupported approach needs about 136 times the guarded arm stop")
 check(abs(g_std.magnitude - 9.80665) < 1e-9, "Standard gravity 9.8 m/s^2")
+check(AISLE.v_aisle >= a_trial**2 / j_brake, "Checkpoint trial stop stays in the trapezoidal regime")
+check(reserve_trial.magnitude < 0 < spare_aisle.magnitude, "Checkpoint: a 1.6 m/s^2 low tail leaves no reserve once Delta_da is charged")
 
 # ┌── 4. OUTPUT: rendered values ────────────────────────────────────────────────
 class ReleaseWorkedVerdict:
@@ -1184,6 +1326,7 @@ class ReleaseWorkedVerdict:
     v_restricted_str = fmt_velocity(v_restricted, unit=meter / second, precision=0)
     v_aisle_str = fmt_velocity(AISLE.v_aisle, unit=meter / second, precision=1)
     a_arm_ratio_str = fmt_int(round(a_arm_ratio))
+    a_trial_str = fmt_acceleration(a_trial, unit=meter / second**2, precision=1)
     # Arm-stop demands for the margin ladder (generator reads the quantities)
     a_arm_lo = a_arm_lo
     a_arm_hi = a_arm_hi
@@ -1247,6 +1390,7 @@ Before approving a conditional release of the machine, verify your understanding
 - [ ] **Premise vs. arithmetic**: Can you explain why the calculated latch force at physical braking onset is not in doubt while the door branch of C1 is still refused?
 - [ ] **Unsupported approach**: Can you use @eq-release-trip-indentation and @eq-release-coupled-indentation to show why the operating envelope admits only the guarded door approach?
 - [ ] **Refusal as a deliverable**: Can you name, for one refused claim, the measurement that would lift it and the restriction that would remain after a supporting result?
+- [ ] **Measured-deceleration estimate**: Suppose loaded stopping trials put the low tail of the deceleration at `{python} ReleaseWorkedVerdict.a_trial_str` under the same jerk bound. Can you rerun \ref{nbk-release-aisle-spare} at `{python} ReleaseWorkedVerdict.v_aisle_str` and decide whether that aisle speed can still be signed once $\Delta_{\text{da}}$ is charged?
 :::
 
 ## Adversarial Review {#sec-release-adversarial-review}
@@ -1333,7 +1477,7 @@ A case that survives adversarial review has had its warrants attacked, but its v
 
 ## The Release Manifest {#sec-release-manifest}
 
-A release verdict is formally codified in the **release manifest** (\ref{dfn-release-safety-case-dossier}), the fourteenth record in the record chain. The manifest seals the Goal Structuring Notation assurance argument and the signed operational design domain invariants together with the evidence they rest on. It is the immutable wire-level artifact that binds the fault records to the signed verdict of the lead systems adjudicator and refuses motion whenever the running images, hardware attestation, or empirical evidence no longer match its digests.[^fn-hw-crypto-manifest]
+A release verdict is formally codified in the **release manifest**\index{Release manifest!definition}\index{Release contract!release manifest}, the fourteenth record in the record chain: the signed, tamper-evident record that binds the upstream engineering records, the argument graph, the operating-envelope limits, and the standing conditions to the adjudicator's verdict by digest. The manifest seals the Goal Structuring Notation assurance argument and the signed operational design domain invariants together with the evidence they rest on. It is the immutable wire-level artifact that binds the fault records to the signed verdict of the lead systems adjudicator and refuses motion whenever the running images, hardware attestation, or empirical evidence no longer match its digests.[^fn-hw-crypto-manifest]
 
 The release manifest connects the engineering decisions made throughout the book. Each upstream record states a boundary or supplies evidence that the release argument must evaluate; recording or signing it does not by itself establish the claim. The manifest binds the reviewed versions of these records into the argument graph:
 
@@ -1342,17 +1486,7 @@ The release manifest connects the engineering decisions made throughout the book
 3. **Perception, belief, and planning:** The observation contract (@sec-perception-observation-contract) carrying observation-age and synchronization bounds; the spatial belief record (@sec-memory-handoff) carrying spatial estimates, uncertainty, and validity conditions; the intent lease (@sec-intent-handoff) recording the grounded goal and tolerances; and the trajectory record (@sec-planning-trajectory-contract) carrying the motion, seam conditions, deadlines, and stopping continuation for validation.
 4. **Deterministic containment, execution, and verification:** The enforcement record (@sec-enforcement-admitted-command-schema), whose admitted commands report the runtime command selected by the enforcer, distinct from the signed enforcement contract that configures its barriers and fallback rules; the placement record (@sec-placement-hardware-allocation) recording resource allocation and qualification premises; the authority record (@sec-intervention-authority-log) recording authority-transfer decisions and outcomes; and the fault records (@sec-verification-fault-manifest) recording tested coverage and unresolved gaps.
 
-To these upstream contracts, the release manifest adds the claim root, the GSN argument digest, binary image hashes (covering neural weights, the enforcer's logic in both nominal and restricted configurations, and the real-time kernel), sensor calibration references, the adjudicator's signed verdict, non-negotiable standing conditions, a lifecycle wear budget of operating hours and cycles, and a calendar expiry. Evidence links must resolve to these exact reviewed record digests, committed under one evidence root in the manner of a hash tree [@merkle1988digital], before hardware root-of-trust gates permit motor power stages to energize.
-
-::: {#dfn-release-safety-case-dossier .callout-definition title="Release manifest"}
-
-***Release manifest***\index{Release manifest!definition}\index{Release contract!release manifest} is the signed, tamper-evident record binding all upstream physical AI engineering records into an immutable operational release claim, consisting of the Goal Structuring Notation argument graph, operational design domain invariants, standing conditions, and the digests and signed verdict that seal them.
-
-1.  **Significance**: Functions as the capstone release contract of the physical AI architecture, establishing legal and physical custody across the Brain's policy weights and evaluation records, the Nervous System's deterministic timing budgets, the Body's kinodynamic limits, and the fault records of verification.
-2.  **Distinction**: Unlike static software release notes, an empirical test summary, or an advisory compliance certificate, a release manifest binds high-level operational claims to concrete empirical evidence, enforces hardware root-of-trust attestation, and mandates non-negotiable standing conditions that withdraw tracking within the qualified detection and response budget when evidence expires.
-3.  **Common pitfall**: Treating the release manifest as a retrospective administrative artifact assembled for regulatory sign-off, rather than a living cyber-physical contract whose digests and standing conditions are actively validated by real-time safety monitors before energizing motor windings.
-
-:::
+To these upstream contracts, the release manifest adds the claim root, the GSN argument digest, binary image hashes (covering neural weights, the enforcer's logic in both nominal and restricted configurations, and the real-time kernel), sensor calibration references, the adjudicator's signed verdict, non-negotiable standing conditions, a lifecycle wear budget of operating hours and cycles, and a calendar expiry. Evidence links must resolve to these exact reviewed record digests, committed under one evidence root in the manner of a hash tree [@merkle1988digital], before hardware root-of-trust gates permit motor power stages to energize. Release notes or a compliance certificate describe a release after the fact; the manifest is checked by the machine itself before its motors are energized, and its standing conditions withdraw tracking within the qualified detection and response budget when the evidence behind them expires.
 
 ::: {.column-margin .margin-pointer}
 ↪ **Byte layout:** The release manifest's fields, types, and digests are given in @sec-appendix-systems-wire-release.
@@ -1603,6 +1737,21 @@ Release decides which physical claims the evidence licenses for a named machine,
 
 The adjudicator resolves the case into `UNCOND`, `COND`, or `REFUSE`, and standing conditions withdraw the grant when a premise becomes false or unknown. One of those premises is administrative rather than physical: every record that identifies a person declares its purpose, retention period, and readers, and an access and retention audit suspends any use outside them (@sec-release-recorded-people). On this book's illustrative inputs every claim carries an ungrounded premise, so the verdict is `REFUSE`, while a stipulated branch shows which evidence would support restricted service. Adversarial review attacks the argument before signature and must recur in service. The signed manifest binds the verdict to the reviewed records by digest and fails closed on any mismatch, and every later update returns through the same argument, because shadow operation cannot test the physical consequences of a candidate's own actions.
 
+@Tbl-16-key-equations collects the equations the release argument rests on, what each bounds or decides, and where each is derived.
+
+| Equation | What it bounds or decides | Derived in |
+|:---|:---|:---|
+| $d_{\text{stop}} \le D_{\text{clear}},\ F_{\text{contact}} \le F_{\text{limit}},\ T_{\text{exec}} \le T_{\text{deadline}}$ | The three physical criteria every release claim must evidence: stopping, contact, and timing | @eq-release-authorization-criterion |
+| $v\,\tau_{\text{delay}} + d_{\text{suffix}}(v) + \delta_{\text{loc}} + \delta_{\text{margin}} + \epsilon_{\text{track}} \le D_{\text{clear}}$ | The base's stopping budget, whose unspent reserve every premise of the stopping claim draws on | @eq-enforce-stopping-envelope |
+| $F_{\text{unbraked}} = v\sqrt{k_H\,\mu}$ | The peak transient handover force ($\mu$ here is the hand-arm reduced mass), and so the handover speed the contact criterion admits | @eq-release-unbraked-force |
+| $F_{\text{cmd}} = F_{\text{trip}} + k_{\text{latch}}\,v_{\text{latch}}\,T_c$ | The latch force already reached when the arm begins to brake | @eq-release-trip-indentation |
+| $F_{\text{cmd}}/k_{\text{latch}} + v_{\text{latch}}^2/(2a_{\text{arm}}) \le F_{\text{lim}}/k_{\text{latch}}$ | The arm deceleration the door branch must evidence, and so the admissible approach speed | @eq-release-coupled-indentation |
+| $T \ge 3.0/\lambda$ | The failure-free exposure a trial record needs, and why an inductive warrant cannot carry a catastrophic hazard claim alone | @eq-eval-exposure-wall |
+| $P(C) = \prod_{i} p_i$ | Confidence in a claim that needs every one of its independent premises; the weakest-link rule | @eq-release-conjunctive-confidence |
+| $P(C) = 1 - \prod_{j} (1 - p_j)$ | Confidence in a claim that any one of several independent legs supports; valid only while C5 holds | @eq-release-multilegged-confidence |
+
+: **Key equations of deployment release**: Each load-bearing equation of the chapter, the limit it bounds or the decision it settles, and the equation where it is derived. The stopping, contact, latch, and exposure equations are derived in earlier chapters, and release takes their results as premises. {#tbl-16-key-equations tbl-colwidths="[42,40,18]"}
+
 ::: {.callout-takeaways title="Deployment release and safety cases"}
 
 * **The envelope bounds the claim:** A release claim covers only the speeds, payloads, floors, clearances, and contact cases for which empirical evidence was gathered. Every dimension of the operational design domain requires an active runtime monitor or an enforced site operating regime.
@@ -1633,6 +1782,118 @@ For further reading, six works trace the ideas this chapter composes.
 - @knight1986experimental reports the multiversion experiment that rejected independent failure among diverse versions, the evidence behind treating independence as a claim to be tested.
 - @vaughan1996challenger reconstructs the Challenger launch decision and names the normalization of deviance, the erosion that safety performance indicators exist to catch.
 - @koopman2016challenges names inductive learning among the five challenges that an autonomous system poses to conventional validation, and proposes phased deployment under relaxed scenarios, a monitor and actuator pair that separates autonomy from the safety function, and fault injection, the same three moves this chapter's release makes.
+
+## Problems {#sec-release-problems}
+
+```{python}
+#| label: calc-release-problems
+#| echo: false
+#| warning: false
+#| message: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ GIVENS FOR THE END-OF-CHAPTER PROBLEMS (LEGO)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @sec-release-problems.
+# │ Goal:    Hold the givens the problems add to the chapter's cells: a
+# │          stricter handover criterion, an intermediate latch approach and a
+# │          demonstrated arm stop, per-premise confidences, a rescue-rate
+# │          bound, and two transfer machines (a heavy warehouse AMR and a
+# │          biped). Answers are not printed; the private solution script
+# │          computes them.
+# │ Show:    30 N; 0.05 m/s and 1 g; 0.98 over six premises, 0.95 target;
+# │          1 percent at 95 percent confidence; the Warehouse Fulfillment AMR
+# │          (300 kg, 1,000 kg payload, 1.5 m/s, 2.0 m/s^2) and a 47 kg biped.
+# │ How:     Registry reads (RM, AISLE, Embodied.AMR.WarehouseAMR,
+# │          Embodied.Humanoid.Unitree_H1) and the contact premises of
+# │          calc-release-contact-premises; other givens are labeled
+# │          illustrative or chosen in the problem text.
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import *
+from mlsysim.core.units import *
+from mlsysim.fmt import fmt, fmt_force, fmt_mass, fmt_velocity, fmt_acceleration, fmt_stiffness, fmt_percent, check
+
+RM = Embodied.MobileManipulator.WarehouseMobileManipulator
+AISLE = Embodied.Scenario.WarehouseAisle
+AMR = Embodied.AMR.WarehouseAMR
+BIPED = Embodied.Humanoid.Unitree_H1
+
+
+class ReleaseProblems:
+    """Givens that the chapter's problems add beyond the worked examples."""
+
+    # ┌── 1. LOAD (Constants & Parameters) ─────────────────────────────────
+    f_crit_strict = 30.0 * newton  # stricter handover criterion; category: illustrative
+    v_latch_mid = 0.05 * meter / second  # intermediate latch approach; category: illustrative
+    a_arm_demo = (1 * ureg.standard_gravity).to(meter / second**2)  # demonstrated arm stop of 1 g; category: illustrative
+    p_premise = 0.98  # per-premise confidence; category: illustrative
+    p_target = 0.95  # claim-level confidence target; category: chosen
+    rescue_bound = 0.01  # rescue interventions per delivery; category: illustrative
+    alpha_sig = 0.05  # one minus the confidence level; category: chosen
+    m_hand = AISLE.m_contact_human  # category: datasheet (ISO/TS 15066 hand body model)
+    k_hand = AISLE.k_contact_human  # category: datasheet (ISO/TS 15066 hand body model)
+    m_eff = RM.arm_effective_contact_mass  # category: derived
+    amr_mass = AMR.mass  # category: datasheet (registry)
+    amr_payload = AMR.payload_capacity  # category: datasheet (registry)
+    amr_v = AMR.max_velocity  # category: datasheet (registry)
+    amr_a = AMR.max_acceleration  # category: datasheet (registry drive rating, standing in for a loaded stop)
+    biped_mass = BIPED.mass  # category: datasheet (registry)
+
+    # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────
+    f_crit_ratio = (f_crit_strict / AISLE.f_contact_criterion).to("dimensionless").magnitude
+
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(f_crit_strict < AISLE.f_contact_criterion, "Problem 2: the stricter criterion sits below the chosen 50 N")
+    check(AISLE.v_latch_approach < v_latch_mid < AISLE.v_latch_high, "Problem 3: the approach lies between the two cases")
+    check(0 < p_premise < 1 and 0 < p_target < 1, "Problem 5: confidences are fractions")
+    check(abs(amr_mass.to(kilogram).magnitude - 300.0) < 1e-9, "Problem 9: AMR mass changed")
+    check(abs(amr_payload.to(kilogram).magnitude - 1000.0) < 1e-9, "Problem 9: AMR payload changed")
+    check(abs(amr_v.to(meter / second).magnitude - 1.5) < 1e-9, "Problem 9: AMR speed changed")
+    check(abs(amr_a.to(meter / second**2).magnitude - 2.0) < 1e-9, "Problem 9: AMR deceleration changed")
+    check(abs(biped_mass.to(kilogram).magnitude - 47.0) < 1e-9, "Problem 10: biped mass changed")
+
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
+    f_crit_strict_str = fmt_force(f_crit_strict, precision=0)
+    v_latch_mid_str = fmt_velocity(v_latch_mid, unit=meter / second, precision=2)
+    a_arm_demo_str = fmt_acceleration(a_arm_demo, unit=meter / second**2, precision=1)
+    p_premise_str = fmt(p_premise, precision=2, commas=False)
+    p_target_str = fmt(p_target, precision=2, commas=False)
+    rescue_bound_str = fmt_percent(rescue_bound, precision=0, style="prose")
+    conf_str = fmt_percent(1 - alpha_sig, precision=0, style="prose")
+    m_hand_str = fmt_mass(m_hand, unit=kilogram, precision=1)
+    k_hand_str = fmt_stiffness(k_hand, unit=ureg.kilonewton / meter, precision=0)
+    m_eff_str = fmt_mass(m_eff, unit=kilogram, precision=0)
+    amr_mass_str = fmt_mass(amr_mass, unit=kilogram, precision=0)
+    amr_payload_str = fmt_mass(amr_payload, unit=kilogram, precision=0, commas=True)
+    amr_v_str = fmt_velocity(amr_v, unit=meter / second, precision=1)
+    amr_a_str = fmt_acceleration(amr_a, unit=meter / second**2, precision=0)
+    biped_mass_str = fmt_mass(biped_mass, unit=kilogram, precision=0)
+```
+
+These problems use the running machine's parameters from this chapter's worked examples, with values marked illustrative standing in for measurements as they do there. Each problem names the decision it requires. The tags give the kind of work, from computation through design to critique, and the learning objectives, counted in order, that it assesses.
+
+1. **[Compute, LO2] The restricted speed on an inspected floor.** On a route the site certifies only to $\mu \ge$ `{python} ReleaseEnvelope.mu_inspected_str`, the credible deceleration is $\mu g$ rather than the dry-floor `{python} ReleaseEnvelope.a_brake_str`. Using the budget of \ref{nbk-release-aisle-spare} with the same delay, allowances, clear distance, and jerk bound, compute the partial budget and spare at the restricted `{python} ReleaseEnvelope.v_restricted_str`, then charge the `{python} BiomechanicalImpactEnvelope.delta_da_str` dispatch-to-admission allocation and report the reserve in millimeters and in milliseconds at that speed. Decide whether the selected speed passes this screen, and name the premises of claim C3 that the screen leaves unsupported.
+
+2. **[Compute, LO1] A stricter handover criterion.** A site assessment adopts an illustrative `{python} ReleaseProblems.f_crit_strict_str` handover criterion in place of the chosen `{python} ReleaseEnvelope.f_contact_str`, for the same body region and the same hand body model ($m_H =$ `{python} ReleaseProblems.m_hand_str`, $k_H =$ `{python} ReleaseProblems.k_hand_str`) against the arm's `{python} ReleaseProblems.m_eff_str` effective mass. Using @eq-release-unbraked-force, find the free-hand and clamped speed ceilings, and decide whether a handover at `{python} ReleaseEnvelope.v_handover_str` can still be signed. Name the allowances that must separate the signed speed from the free-hand ceiling (@sec-release-verdicts-ssm).
+
+3. **[Compute, LO1] A door approach between the two cases.** The arm approaches the cage latch at an illustrative `{python} ReleaseProblems.v_latch_mid_str`, between the guarded `{python} ReleaseEnvelope.v_latch_str` and the unsupported `{python} ReleaseEnvelope.v_latch_high_str`, with the chapter's latch stiffness `{python} ReleaseWorkedVerdict.k_latch_str`, tripwire `{python} ReleaseWorkedVerdict.f_trip_str`, contact-loop response `{python} ReleaseWorkedVerdict.t_contact_str`, and `{python} ReleaseWorkedVerdict.f_latch_limit_str` limit. Using @eq-release-trip-indentation and @eq-release-coupled-indentation, compute the force at brake onset, the compression left, and the arm deceleration the stop needs. Then find the fastest approach that an illustrative demonstrated arm stop of `{python} ReleaseProblems.a_arm_demo_str` (1 g) keeps under the limit, and decide what the door row of @tbl-16-odd-invariants may sign.
+
+4. **[Compute, LO5] How dark before the spare is gone.** Use the lighting model of @sec-release-contextual-assumptions: the navigation camera's nominal exposure is `{python} ReleaseLowLight.t_exp_nominal_str`, and an image's age is timed from mid-exposure. Find the factor by which a dim aisle must lengthen the exposure for the added age alone to consume the `{python} BiomechanicalImpactEnvelope.spare_str` partial spare at `{python} ReleaseLowLight.v_aisle_str`, and the factor that consumes the `{python} BiomechanicalImpactEnvelope.reserve_str` reserve left after $\Delta_{\text{da}}$. Explain why the admission age check turns either case into lost service rather than lost clearance, and state the contextual assumption the case must now name.
+
+5. **[Compute, LO1, LO2] Where confidence is lost.** The base's stopping claim rests on six required premises (clear distance, credible deceleration, brake onset, observation age, localization, tracking). With each held at an illustrative confidence of `{python} ReleaseProblems.p_premise_str`, apply @eq-release-conjunctive-confidence, and find the uniform per-premise confidence the claim needs to reach a chosen `{python} ReleaseProblems.p_target_str`. Then apply @eq-release-multilegged-confidence to two independent legs at `{python} ReleaseArgumentConfidence.p_leg_str` each, and give the confidence if C5 fails and the two legs must both hold. Decide which evidence would raise the stopping claim more: a seventh supporting artifact for an already strong premise, or a measurement of the weakest one.
+
+6. **[Design, LO4] Standing conditions for the handover.** Write the standing-condition ledger for the mug handover, the C1c branch of @fig-16-argument-graph. Give one row per relied-on premise (the hand body model, the no-clamping geometry, the signed `{python} ReleaseEnvelope.v_handover_str` TCP speed, the contact-force sensing calibration, the `accept_item` acknowledgment, and the grounding of the mug), with columns for detector or procedure, cadence, owner, response on false, and response on unknown. Where this book sets no interval, write "chosen by the site from the failure mechanism" and state which mechanism.
+
+7. **[Design, LO3] The capability packet in numbers.** The site owner requires that rescue interventions occur on fewer than `{python} ReleaseProblems.rescue_bound_str` of deliveries, demonstrated at `{python} ReleaseProblems.conf_str` confidence. Using @eq-eval-zero-failure-sample-size, compute the number of consecutive rescue-free deliveries of the restricted configuration that the packet needs. Write the acceptance rule, including the trial population, the denominators, and how a rescue is distinguished from an ordinary protective clamp. Then explain why passing it adds no support to any of C1 to C6.
+
+8. **[Design, LO6, LO7] A new manifest for the retrained candidate.** For the retrained mug-delivery policy of @sec-release-deployment-lifecycle, list the manifest fields that change, the upstream records that must be regenerated, and the records that may be reused, with the premise that licenses each reuse. Then use @tbl-16-release-authorization to state the gate result in three cases: the policy image digest does not match; calibration is stale and no separately signed `COND` covers it; calibration is stale and a separately signed `COND` does. Explain why an unchanged enforcer binary does not show an unchanged containment argument.
+
+9. **[Design, LO2, LO4] Transfer to a heavy warehouse AMR.** A Warehouse Fulfillment AMR from the registry weighs `{python} ReleaseProblems.amr_mass_str`, carries up to `{python} ReleaseProblems.amr_payload_str`, and is rated to `{python} ReleaseProblems.amr_v_str` and `{python} ReleaseProblems.amr_a_str`. Suppose it shares the running machine's delay chain, allowances, `{python} ReleaseEnvelope.d_clear_str` clear distance, and $\Delta_{\text{da}}$. Treat the rated deceleration as the loaded stop, with constant deceleration (which understates a jerk-limited stop), and compute the budget, the partial spare, and the reserve at full speed, and the kinetic energy at full load against the running machine's `{python} ReleaseBlindTravel.e_k_str`. Decide which of the running machine's premises this machine's release cannot inherit, and which measurement its release case needs first.
+
+10. **[Design, LO4] Refusal for a machine that falls.** A `{python} ReleaseProblems.biped_mass_str` biped from the registry works the same aisle. Specify what `REFUSE` must command before the machine stands and after it is upright, the claim and evidence that the upright response itself requires, and the standing conditions whose failure withdraws the permit to walk before the arrest response stops working (\ref{capstone-release-humanoid-crucible}).
+
+11. **[Critique, LO5] Three passing diagnostics.** For the compound defeater of @sec-release-adversarial-review, a team argues that containment holds because the lens transmission stays above its `{python} ReleaseCompoundDefeater.transmission_str` alarm, the mount deflection stays below `{python} ReleaseCompoundDefeater.mount_limit_str` degrees, and the SerDes error counters stay below their alarm. Write the adversarial review: which claim each anomaly attacks, why individually passing diagnostics do not establish containment, what combined-error evidence would, and which subsystem owns each fix.
+
+12. **[Critique, LO7] Agreement in shadow mode.** A team reports near-zero $\Delta u_t$ over many shadow-mode hours for a retrained policy that doubles the model's size, keeps the enforcer binary unchanged, and requests `UNCOND`. Critique the request: which claims the change reopens and why, what counterfactual divergence means for the reported agreement, why the sign of $\Delta B_t$ is not a verdict, and what closed-loop qualification and a restricted canary case must show before a new manifest can be signed.
 
 ::: {.callout-chapter-connection title="From release to engineering judgment"}
 What can the completed engineering argument support, and what must change to expand it? The actual textbook record remains refused; the stipulated branch supports a useful restricted mission with explicit friction, access, identity, and response premises. More trials with unchanged sensors cannot make transparent oil directly observable, but a qualified detector, a maintained exclusion regime, or a differently bounded task can change the argument. The conclusion, @sec-frontier, brings the book's engineering capabilities together and assigns each remaining premise an owner, restriction, and closure test.

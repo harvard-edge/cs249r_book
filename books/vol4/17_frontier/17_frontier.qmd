@@ -176,6 +176,7 @@ class PackagingCell:
     temperature_trip = Q_(105, ureg.degC)  # scenario assumption: selected sensor threshold
     stall_timeout = 400 * ureg.ms  # scenario assumption: selected stall-detection timeout
     bus_trip = 60 * ureg.volt  # scenario assumption: selected inverter overvoltage threshold
+    deceleration_check = 12 * ureg.meter / ureg.second**2  # scenario assumption: a lower qualified braking bound (checkpoint estimate)
 
     # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────────
     delay = exposure + processing + bus + onset
@@ -198,6 +199,11 @@ class PackagingCell:
     energy_nom = calc_kinetic_energy(mass, v_nom)
     energy_clamp = calc_kinetic_energy(mass, v_clamp)
     energy_reduction = (1 - energy_clamp / energy_nom).to(ureg.dimensionless).magnitude
+    # Operands of the positive root, shown in the notebook
+    a_tau = (deceleration * delay).to(ureg.meter / ureg.second)
+    two_a_d = (2 * deceleration * stop_budget).to(ureg.meter**2 / ureg.second**2)
+    root_term = ((a_tau**2 + two_a_d) ** 0.5).to(ureg.meter / ureg.second)
+    v_ceiling_check = calc_max_permitted_velocity(clearance, delay, deceleration_check, physical_margin=reserve).to(ureg.meter / ureg.second)
 
     # ┌── 3. GUARD (Invariants) ────────────────────────────────────────────────
     # 2026-09-28: pin the complete hypothetical budget and the claimed reserve.
@@ -217,6 +223,9 @@ class PackagingCell:
     check(v_ceiling_half_decel < v_clamp, "At half the braking bound the 0.5 m/s mode no longer fits.")
     check(abs(energy_nom.to(joule).magnitude - 13.5) < 1e-9, "Nominal translational energy must be 13.5 J.")
     check(abs(energy_clamp.to(joule).magnitude - 1.5) < 1e-9, "Restricted translational energy must be 1.5 J.")
+    check(abs(a_tau.magnitude - 0.96) < 1e-9 and abs(two_a_d.magnitude - 1.35) < 1e-9, "Root operands must be 0.96 m/s and 1.35 m²/s².")
+    check(abs((root_term - a_tau - v_ceiling).magnitude) < 1e-9, "The shown root minus a*tau must equal the ceiling.")
+    check(abs(v_ceiling_check.magnitude - 0.5242) < 5e-4 and v_ceiling_check > v_clamp, "At 12 m/s² the ceiling (0.52 m/s) must still admit the 0.5 m/s mode.")
 
     # ┌── 4. OUTPUT (Formatting) ───────────────────────────────────────────────
     mass_str = fmt_qty(mass, unit=ureg.kg, precision=0)
@@ -252,17 +261,38 @@ class PackagingCell:
     temperature_trip_str = fmt_temperature(temperature_trip, precision=0)
     stall_timeout_str = fmt_latency(stall_timeout, unit=ureg.ms, precision=0)
     bus_trip_str = fmt_voltage(bus_trip, precision=0)
+    a_tau_str = fmt_velocity(a_tau, precision=2)
+    two_a_d_str = fmt_qty(two_a_d, unit=ureg.meter**2 / ureg.second**2, precision=2)
+    root_term_str = fmt_velocity(root_term, precision=2)
+    deceleration_check_str = fmt_acceleration(deceleration_check, precision=0)
 ```
 
-Because the carriage's momentum is already committed, the permission path must act before the carriage consumes its clearance. We can test a candidate design using hypothetical inputs, not measurements of an installed cell. The carriage and loaded tray have a combined moving mass of `{python} PackagingCell.mass_str` and travel at `{python} PackagingCell.v_nom_str` toward a gate whose fixed stop line is `{python} PackagingCell.clearance_str` away when the hazardous closure begins. Assume constant speed until braking begins and a braking deceleration of at least `{python} PackagingCell.deceleration_str` thereafter. The latter is a proposed bound to qualify under load, pad wear, and rail conditions, not a motor's peak rating.
+Because the carriage's momentum is already committed, the permission path must act before the carriage consumes its clearance. We can test a candidate design with hypothetical inputs rather than measurements of an installed cell, using the stopping model of @sec-body.
 
-The delay budget must cover the entire interval from that closure to effective braking. Allocate `{python} PackagingCell.exposure_str` to obtaining a usable image, including frame phase and exposure; `{python} PackagingCell.processing_str` to transfer, inference, scheduling, and admission; `{python} PackagingCell.bus_str` to command delivery; and `{python} PackagingCell.onset_str` to brake buildup. These assumed upper bounds sum to `{python} PackagingCell.delay_str`. With $v$ the carriage speed, $\tau_{\text{delay}}$ this complete delay, and $a_{\text{brake}}$ the assumed deceleration, the stopping model is
-$$d_{\text{stop}} = v\tau_{\text{delay}} + \frac{v^2}{2a_{\text{brake}}}.$$
-At nominal speed, delay travel alone is `{python} PackagingCell.blind_nom_str`, already greater than the clearance. Braking adds `{python} PackagingCell.brake_nom_str`, giving a total of `{python} PackagingCell.stop_nom_str` and a deficit of `{python} PackagingCell.deficit_str`. Under these assumptions the carriage reaches the gate before braking even begins.
+::: {#nbk-frontier-packaging-delay-wall .callout-notebook title="The delay wall"}
 
-A candidate transport mode follows from the same model. Reserving `{python} PackagingCell.reserve_str` for uncertainty and residual clearance leaves a stopping budget of `{python} PackagingCell.stop_budget_str`. Setting $d_{\text{stop}}$ equal to that budget, $d_{\text{budget}}$, and solving for the positive root gives the speed ceiling
-$$v_{\max} = -a_{\text{brake}}\tau_{\text{delay}} + \sqrt{(a_{\text{brake}}\tau_{\text{delay}})^2 + 2a_{\text{brake}}\,d_{\text{budget}}},$$
-which is `{python} PackagingCell.v_ceiling_str` for these inputs. The candidate mode admits `{python} PackagingCell.v_clamp_str`, below that ceiling. At that speed, delay travel falls to `{python} PackagingCell.blind_clamp_str` and braking distance to `{python} PackagingCell.brake_clamp_str`. Their sum, `{python} PackagingCell.stop_clamp_str`, leaves `{python} PackagingCell.remaining_str` before the stop line, exceeding the allocated reserve. Translational kinetic energy, $E_k = mv^2/2$, falls from `{python} PackagingCell.energy_nom_str` to `{python} PackagingCell.energy_clamp_str`, a reduction of `{python} PackagingCell.energy_reduction_str`. The slower mode is therefore worth qualifying. @Fig-17-packaging-cell places the three machine classes on one track and draws both stops against the same stop line.
+**Problem**: The loaded carriage travels at `{python} PackagingCell.v_nom_str` toward a gate whose fixed stop line is `{python} PackagingCell.clearance_str` away when the hazardous closure begins, at constant speed until braking begins. Can it stop short of the line, and if not, what is the fastest speed whose stop fits once a `{python} PackagingCell.reserve_str` reserve is held back?
+
+**Variables**:
+
+- Moving mass of carriage and loaded tray $m$ = `{python} PackagingCell.mass_str` and nominal speed $v$ = `{python} PackagingCell.v_nom_str` (Illustrative)
+- Clearance `{python} PackagingCell.clearance_str`, less `{python} PackagingCell.reserve_str` reserved for uncertainty and residual clearance, leaves a stopping budget $d_{\text{budget}}$ = `{python} PackagingCell.stop_budget_str` (Illustrative)
+- Braking lower bound $a_{\text{brake}}$ = `{python} PackagingCell.deceleration_str` after the delay (Illustrative; a bound to qualify under load, pad wear, and rail conditions, not a motor's peak rating)
+- Delay from closure to full braking $\tau_{\text{delay}}$: `{python} PackagingCell.exposure_str` to a usable image, including frame phase and exposure, `{python} PackagingCell.processing_str` for transfer, inference, scheduling, and admission, `{python} PackagingCell.bus_str` for command delivery, and `{python} PackagingCell.onset_str` for brake buildup, in all `{python} PackagingCell.delay_str` (Illustrative upper bounds)
+
+**Math**:
+
+1. **Nominal stop** (@eq-body-stopping-distance, margins held in the reserve): $d_{\text{stop}} = v\tau_{\text{delay}} + v^2/2a_{\text{brake}}$ = `{python} PackagingCell.v_nom_str` $\times$ `{python} PackagingCell.delay_str` $+$ (`{python} PackagingCell.v_nom_str`)$^2/(2 \times$ `{python} PackagingCell.deceleration_str`) = `{python} PackagingCell.blind_nom_str` $+$ `{python} PackagingCell.brake_nom_str` = `{python} PackagingCell.stop_nom_str`, a deficit of `{python} PackagingCell.deficit_str`.
+2. **Speed ceiling** (@eq-body-velocity-ceiling with $d_{\text{budget}}$ as the available distance): $a_{\text{brake}}\tau_{\text{delay}}$ = `{python} PackagingCell.a_tau_str` and $2a_{\text{brake}}d_{\text{budget}}$ = `{python} PackagingCell.two_a_d_str`, and the square root of (`{python} PackagingCell.a_tau_str`)$^2$ $+$ `{python} PackagingCell.two_a_d_str` is `{python} PackagingCell.root_term_str`. The positive root is $v_{\max}$ = `{python} PackagingCell.root_term_str` $-$ `{python} PackagingCell.a_tau_str` = `{python} PackagingCell.v_ceiling_str`.
+3. **Candidate mode** at `{python} PackagingCell.v_clamp_str`, below the ceiling: `{python} PackagingCell.blind_clamp_str` of delay travel $+$ `{python} PackagingCell.brake_clamp_str` of braking = `{python} PackagingCell.stop_clamp_str`, leaving `{python} PackagingCell.remaining_str` before the stop line. Translational energy $E_k = mv^2/2$ falls from `{python} PackagingCell.energy_nom_str` to `{python} PackagingCell.energy_clamp_str`, a reduction of `{python} PackagingCell.energy_reduction_str`.
+
+**Result**: At nominal speed the carriage reaches the gate before braking even begins. The budget admits at most `{python} PackagingCell.v_ceiling_str`, and the `{python} PackagingCell.v_clamp_str` candidate keeps more than the allocated reserve.
+
+**Systems insight**: At these speeds delay travel, not braking, exhausts the clearance. The `{python} PackagingCell.delay_str` chain alone carries the nominal carriage `{python} PackagingCell.blind_nom_str`, farther than the stop line, so the condition $d_{\text{stop}} \le D_{\text{clear}}$ of principle \ref{pri-vol4-irreversibility} is met first by lowering speed or shortening the chain from closure to braking. The carriage's speed limit belongs to that whole chain, not to its brake.
+
+:::
+
+The slower mode is therefore worth qualifying. @Fig-17-packaging-cell places the three machine classes on one track and draws both stops against the same stop line.
 
 ```{python}
 #| label: calc-frontier-packaging-figure
@@ -338,6 +368,17 @@ The cell turns a physical task into a connected set of engineering decisions. St
 
 The audit also carries beyond the three machine classes of @sec-boundary-three-classes to process systems, where the irreversible quantity is stored energy or delivered flow. Consider a learned proposer that sets a dosing valve feeding a tank. The first law's question becomes what volume or energy has already left the source. A shutoff command arriving after delay $\tau_{\text{delay}}$ at flow rate $Q$ still admits roughly $Q\tau_{\text{delay}}$ plus the volume that passes while the valve closes, which is the stopping model with volume in place of distance. Stored energy changes the fallback as well. A pressurized accumulator or a hot vessel keeps its energy after control power is removed, so, as for a balancing humanoid, de-energizing the controller is not by itself a safe state, and the qualified fallback must name where that energy goes. The second, third, and fourth laws then apply unchanged. The proposer's evaluation must sample the flow regimes that the restriction admits, a permission path must be able to close the valve within the delivered-volume budget, and release rests on premises such as valve closing time and sensor lag that the process data sheet or a measurement must supply.
 
+::: {#chk-frontier-packaging-transfer .callout-checkpoint title="Transferring the four-law audit"}
+
+The packaging cell reused the book's method on a machine it never discussed, and every verdict it reached was tied to a premise that must still be measured.
+
+- [ ] **Speed-ceiling estimate**: Suppose load testing qualifies the carriage's braking bound at only `{python} PackagingCell.deceleration_check_str`, with the same `{python} PackagingCell.delay_str` delay and `{python} PackagingCell.stop_budget_str` stopping budget. Can you estimate the new ceiling from the positive root and decide whether the `{python} PackagingCell.v_clamp_str` mode still fits?
+- [ ] **Machine classes**: For the carriage, the insertion head, and the drive, can you name the machine class, the irreversible state it can produce, and the physical bound that governs it?
+- [ ] **Derated evaluation**: Why does a speed restriction imposed after training open an evaluation gap for the vision proposer, and what are the two ways to close it before release?
+- [ ] **Sign-off verdict**: What evidence would move autonomous package sign-off from refused to supported, and why can more glare images for the vision model not supply it?
+
+:::
+
 ## The Epistemic Frontier {#sec-frontier-epistemic-limits}
 
 The packaging cell's camera can support a transport proposal without establishing that a hidden tab engaged. The warehouse machine's navigation sensors likewise support motion without establishing floor traction. These are epistemic limits: limits on what the available observations and argument justify. Additional training can improve a proposal, but the engineer must identify whether the next claim needs new experience or a physical measurement the current inputs do not contain.
@@ -396,6 +437,7 @@ class OilFilm:
     n_contrast = 1000  # category: illustrative (a smaller zero-miss campaign, for contrast)
     confidence = 0.95  # category: chosen (one-sided confidence level)
     t_detect = 100 * ms  # category: chosen (film-detector sensing and inference latency, for the range condition)
+    mu_check = 0.15  # category: illustrative (a measured floor, for the checkpoint estimate)
 
     # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────────
     mu_min = (a_brake / g).to(ureg.dimensionless).magnitude
@@ -412,6 +454,12 @@ class OilFilm:
     t_latest = (spare_aisle / v_aisle).to(ms)
     reserve_da = (t_latest - delta_da).to(ms)  # timing allowance left after the Delta_da allocation
     stop_oil = (v_aisle * tau_delay + calc_scurve_stop_distance(v_aisle, a_oil, j_brake) + overhead).to(ureg.meter)
+    # Visible terms of the finished budget (trapezoidal regime: v^2/2a + v a/2j, @sec-enforcement-stopping-envelopes)
+    v_tau = (v_aisle * tau_delay).to(ureg.millimeter)
+    brake_dry = (v_aisle**2 / (2 * a_dry)).to(ureg.millimeter)
+    ramp_dry = (v_aisle * a_dry / (2 * j_brake)).to(ureg.millimeter)
+    brake_oil = (v_aisle**2 / (2 * a_oil)).to(ureg.millimeter)
+    ramp_oil = (v_aisle * a_oil / (2 * j_brake)).to(ureg.millimeter)
 
     # ceilings: the largest speed whose finished budget fits the clear distance
     margin_loc = AISLE.delta_loc + AISLE.eps_track
@@ -459,6 +507,10 @@ class OilFilm:
     check(abs(d_brake_aisle.magnitude - 605.3125) < 1e-6, f"S-curve stop from 1.3 m/s should cover 605.31 mm, got {d_brake_aisle}.")
     check(abs(t_overreserve.magnitude - 465.625) < 1e-6, f"Time form over-reserves 465.6 ms, got {t_overreserve}.")
     check(d_overreserve > spare_aisle, "The time form's over-reservation exceeds the whole spare margin.")
+    check(v_aisle > a_dry**2 / j_brake and v_aisle > a_oil**2 / j_brake, "Both stops must be in the trapezoidal regime for the shown terms.")
+    check(abs((v_tau + brake_dry + ramp_dry + overhead - budget_aisle).to(ureg.millimeter).magnitude) < 1e-6, "Shown dry terms must sum to the budget.")
+    check(abs((v_tau + brake_oil + ramp_oil + overhead - stop_oil).to(ureg.millimeter).magnitude) < 1e-6, "Shown film terms must sum to the film budget.")
+    check(mu_check * g < a_brake and mu_check > mu_insp, "The checkpoint floor must bind and lie above the inspected floor.")
     check(abs(p_miss_contrast - 0.002991) < 5e-7, f"1,000 zero-miss trials should bound the miss rate at 0.002991, got {p_miss_contrast}.")
     # margin_friction_floor_deceleration_knee.svg fig-alt hand-types 2 m/s², 0.204, 0.60, 0.12, 1.18, 0.05 and 0.49
     check(abs(a_brake.to(ureg.meter / ureg.second**2).magnitude - 2.0) < 1e-9, f"Credible deceleration should be 2 m/s², got {a_brake}.")
@@ -497,20 +549,55 @@ class OilFilm:
     t_brake_equiv_str = fmt_latency(t_brake_equiv, unit=ms, precision=1)
     t_overreserve_str = fmt_latency(t_overreserve, unit=ms, precision=1)
     d_overreserve_str = fmt_length(d_overreserve, unit=ureg.millimeter, precision=1)
+    g_str = fmt_acceleration(g, precision=2)
+    tau_delay_str = fmt_latency(tau_delay, unit=ms, precision=1)
+    j_brake_str = fmt_qty(j_brake, unit=ureg.meter / ureg.second**3, precision=2)
+    overhead_str = fmt_length(overhead, unit=ureg.millimeter, precision=0)
+    v_tau_str = fmt_length(v_tau, unit=ureg.millimeter, precision=1)
+    brake_dry_str = fmt_length(brake_dry, unit=ureg.millimeter, precision=1)
+    ramp_dry_str = fmt_length(ramp_dry, unit=ureg.millimeter, precision=1)
+    brake_oil_str = fmt_length(brake_oil, unit=ureg.millimeter, precision=1)
+    ramp_oil_str = fmt_length(ramp_oil, unit=ureg.millimeter, precision=1)
+    mu_check_str = fmt(mu_check, precision=2)
 ```
 
 The release decision of @sec-release-safety-cases-claims already met this premise. Its claim C3, braking traction, was refused on the book's own evidence and handed to this chapter as an open premise. The machine's credible deceleration is the smaller of what its selected braking response delivers and what the floor interface supplies:[^fn-amontons-coulomb-friction]
-$$a = \min(a_{\text{brake}}, \mu g).$$
-The `{python} OilFilm.a_brake_str` credible deceleration that @sec-body-kinetic-momentum established requires a physical friction coefficient of at least $\mu \ge$ `{python} OilFilm.mu_min_str`. Dry industrial concrete, at an illustrative $\mu$ of `{python} OilFilm.mu_dry_str`, supplies far more traction, so the selected braking response binds and governs deceleration. The clear hydraulic film, at $\mu$ = `{python} OilFilm.mu_oil_str` (both coefficients illustrative; see the Reader Guide), supplies only `{python} OilFilm.a_oil_str`, and the tire-floor interface binds. At the candidate `{python} OilFilm.v_aisle_str` aisle speed, the known-component budget of @tbl-enforcement-stopping-budget, `{python} OilFilm.budget_aisle_str` on a dry floor, grows on the film to `{python} OilFilm.stop_oil_str` against a `{python} OilFilm.d_clear_str` clear distance. These calculations omit the dispatch-to-admission interval, which @sec-placement allocates but no loaded measurement yet confirms; that interval adds travel and reduces every derived speed ceiling. Even this incomplete budget already excludes the film.
+$$a = \min(a_{\text{brake}}, \mu g).$$ {#eq-frontier-credible-deceleration}
+The friction term is the ceiling that the driven wheels meet in @fig-02-braking-fbd, and on the film it is the term that binds.
 
-[^fn-amontons-coulomb-friction]: **Amontons–Coulomb Friction**\index{Friction coefficient!Amontons–Coulomb}: The classical laws of sliding friction make the friction force proportional to the normal load and independent of the apparent contact area, which is what lets a single coefficient $\mu$ describe a contact. @bowden1950friction traced the law to the small true area of contact, whose shear strength sets $\mu$, and showed that a lubricant film only molecules thick can lower it several-fold. The coefficient therefore belongs to the pair of surfaces and whatever lies between them, not to the floor alone, and the braking premise needs a measurement at the tire-floor interface that no camera viewing the floor supplies.
+::: {#nbk-frontier-friction-floor .callout-notebook title="The friction floor"}
+
+**Problem**: A clear hydraulic film lies across the aisle. Does the finished dry-floor stop from the candidate `{python} OilFilm.v_aisle_str` aisle speed still fit the rack end's `{python} OilFilm.d_clear_str` clear distance?
+
+**Variables**:
+
+- Credible deceleration $a_{\text{brake}}$ = `{python} OilFilm.a_brake_str` (Illustrative, @sec-body-kinetic-momentum) and $g$ = `{python} OilFilm.g_str` (Measured constant)
+- Floor friction $\mu$ = `{python} OilFilm.mu_dry_str` on dry industrial concrete and `{python} OilFilm.mu_oil_str` under the film (both Illustrative; see the Reader Guide)
+- Aisle speed $v$ = `{python} OilFilm.v_aisle_str` (Chosen) and clear distance $D_{\text{clear}}$ = `{python} OilFilm.d_clear_str` (Illustrative)
+- Known-component terms of @tbl-enforcement-stopping-budget: pre-brake delay $\tau_{\text{delay}}$ = `{python} OilFilm.tau_delay_str`, jerk bound $j_{\max}$ = `{python} OilFilm.j_brake_str`, and fixed overheads of `{python} OilFilm.overhead_str` (all Derived)
+
+**Math**:
+
+1. **Friction floor** (@eq-frontier-credible-deceleration): The brake binds only while $\mu \ge a_{\text{brake}}/g$ = `{python} OilFilm.a_brake_str` $/$ `{python} OilFilm.g_str` = `{python} OilFilm.mu_min_str`. Dry concrete clears it; the film does not, so $a = \mu g$ = `{python} OilFilm.mu_oil_str` $\times$ `{python} OilFilm.g_str` = `{python} OilFilm.a_oil_str`.
+2. **Dry-floor budget**: Delay travel $v\tau_{\text{delay}}$ $+$ braking $v^2/2a$ $+$ jerk-ramp travel $va/2j_{\max}$ $+$ overheads = `{python} OilFilm.v_tau_str` $+$ `{python} OilFilm.brake_dry_str` $+$ `{python} OilFilm.ramp_dry_str` $+$ `{python} OilFilm.overhead_str` = `{python} OilFilm.budget_aisle_str`.
+3. **Film budget**: The same terms at $a$ = `{python} OilFilm.a_oil_str` give `{python} OilFilm.v_tau_str` $+$ `{python} OilFilm.brake_oil_str` $+$ `{python} OilFilm.ramp_oil_str` $+$ `{python} OilFilm.overhead_str` = `{python} OilFilm.stop_oil_str`.
+
+**Result**: On the film the stop grows from `{python} OilFilm.budget_aisle_str` to `{python} OilFilm.stop_oil_str`, far past the `{python} OilFilm.d_clear_str` clear distance, and this budget still omits the dispatch-to-admission interval.
+
+**Systems insight**: Below $\mu$ = `{python} OilFilm.mu_min_str` the floor, not the brake or the timing, sets the deceleration, and the braking term grows as $1/\mu$. Faster admission can recover only the `{python} OilFilm.v_tau_str` of delay travel, so no improvement in the permission path restores the dry-floor mode on the film. Only a restriction or a measurement at the tire-floor interface can keep $d_{\text{stop}} \le D_{\text{clear}}$.
+
+:::
+
+The calculation omits the dispatch-to-admission interval, which @sec-placement allocates but no loaded measurement yet confirms; that interval adds travel and reduces every derived speed ceiling. Even this incomplete budget already excludes the film.
+
+[^fn-amontons-coulomb-friction]: **Amontons-Coulomb Friction**\index{Friction coefficient!Amontons-Coulomb}: The classical laws of sliding friction make the friction force proportional to the normal load and independent of the apparent contact area, which is what lets a single coefficient $\mu$ describe a contact. @bowden1950friction traced the law to the small true area of contact, whose shear strength sets $\mu$, and showed that a lubricant film only molecules thick can lower it several-fold. The coefficient therefore belongs to the pair of surfaces and whatever lies between them, not to the floor alone, and the braking premise needs a measurement at the tire-floor interface that no camera viewing the floor supplies.
 
 The friction premise did not become open only when the fluid leaked onto the concrete. The candidate normal operating mode of @sec-enforcement-stopping-envelopes rested on that unmeasured floor on every aisle, including dry ones. Completing the timing evidence would not establish traction, and establishing traction would not complete the timing evidence.
 
 ::: {.column-margin}
 ![](images/svg/margin_friction_floor_deceleration_knee.svg){width="100%" fig-alt="Plot of credible deceleration against floor friction coefficient. An amber line rises from the origin to 2 meters per second squared at a dashed vertical line marked μ 0.204, then runs flat. The region left of the dashed line is shaded and labeled floor binds; the flat part is labeled brake binds. A dot on the flat part marks dry μ 0.60. On the rising part, an amber dot marks the inspected floor, μ 0.12, at 1.18, and a red dot marks the film, μ 0.05, at 0.49."}
 
-*Below μ = `{python} OilFilm.mu_min_str`, the floor, not the brake, sets the deceleration.*
+*Below $\mu$ = `{python} OilFilm.mu_min_str`, the floor, not the brake, sets the deceleration.*
 :::
 
 The oil film tests the architecture at the interface between measurement and permission. An independent enforcer can reject a proposal that violates the measured stopping envelope; it cannot establish the friction premise merely by executing faster. The drive still regulates motor current and therefore torque (@sec-body-electrical-time-constants), but commanded torque supplies useful deceleration only through the tire-floor contact. The architecture therefore needs a supported restriction or an additional measurement at that interface, not another layer of inference.
@@ -610,7 +697,7 @@ class ArchitecturalShieldDilution:
 
     p_brain_sci_str = fmt_sci(p_proposal_limit, precision=0)
     n_brain_sci_str = fmt_sci(n_brain_hours.magnitude, precision=2)
-    t_test_days_str = fmt(t_test_days, precision=3)
+    t_test_days_str = fmt(t_test_days, precision=1)
     p_system_conditional_sci_str = fmt_sci(p_system_conditional, precision=3)
     c_required_str = fmt(c_required_cycle, precision=7)
     test_overrun_days_str = fmt(test_overrun_days, precision=1)
@@ -618,6 +705,18 @@ class ArchitecturalShieldDilution:
     n_coverage_joint_str = fmt_int(n_coverage_joint, commas=True)
     p_proposal_upper_joint_sci_str = fmt_sci(p_proposal_upper_joint, precision=3)
     p_system_joint_sci_str = fmt_sci(p_system_joint, precision=3)
+    # Operands shown in the notebook's Math lines
+    fleet_units_str = fmt_int(fleet_units)
+    t_cycle_days_str = fmt(t_cycle_days, precision=0)
+    hours_per_day_str = fmt(hours_per_day, precision=0)
+    neg_ln_alpha_str = fmt(-math.log(alpha), precision=3)
+    neg_ln_alpha_half_str = fmt(-math.log(alpha / 2.0), precision=3)
+    c_shield_str = fmt(c_shield_assumed, precision=4)
+    one_minus_c_sci_str = fmt_sci(1.0 - c_shield_assumed, precision=0)
+    p_target_sci_str = fmt_sci(p_target, precision=0)
+    confidence_pct_str = fmt_percent(confidence, precision=0, style="prose")
+    confidence_split_pct_str = fmt_percent(confidence_split, precision=1, style="prose")
+    alpha_str = fmt(alpha, precision=2)
 ```
 
 ::: {.column-margin .margin-pointer}
@@ -634,50 +733,48 @@ A shield argument is *conditional*. Observed system incidents already reflect th
 $$\lambda_{\mathrm{system},h} \le \lambda_{\mathrm{proposal},h}(1-c_h)+\lambda_{\mathrm{other}}$$ {#eq-frontier-shielded-hazard}
 All three terms are rates per operating hour, and $c_h$ is a probability. The limits show what the shield can and cannot buy. At $c_h = 1$ the system rate falls to $\lambda_{\mathrm{other}}$ alone, and at $c_h = 0$ the shield adds nothing and the proposer's own rate passes through. The relation restates the safety-filter architecture of @sec-enforcement, which runtime assurance introduced as a verified fallback beside an unverified controller [@sha2001using; @hsu2024safetyfilter], in the units of a hazard rate.
 
-The relation rests on four premises. The first is a valid **counterfactual oracle**\index{Counterfactual oracle!definition}, an adjudication procedure that labels whether a raw proposal would have been hazardous had it executed without the shield; without one, $\lambda_{\mathrm{proposal},h}$ cannot be counted. The others are timely detection, actuator authority, and a justified treatment of correlated failures.[^fn-multiversion-coincident-failures] The last is the one most often assumed away. The product $\lambda_{\mathrm{proposal},h}(1-c_h)$ treats a miss as independent of the conditions that produced the hazardous proposal, yet the occluded frame that leads the policy to propose a bad action can also degrade the shield's state estimate. Common cause of that kind is not an additive term in $\lambda_{\mathrm{other}}$; it lowers $c_h$ exactly where it matters, so $c_h$ must be measured on the distribution of states in which the policy errs, not on a generic seeded set. The relation gives no credit for an oil film or a weakened latch that the shield cannot observe, and no release follows from the arithmetic until each premise is supported.
-
-[^fn-multiversion-coincident-failures]: **Coincident Failures of Diverse Versions**\index{Common-cause failure!shield coverage}: Software fault tolerance met this premise first. @knight1986experimental had independently written versions of one program run on the same inputs and found that they failed together far more often than an independence model predicts, so the model was rejected. A shield and a proposer that share an observation stream are less diverse than two independently written programs, and the product $\lambda_{\mathrm{proposal},h}(1-c_h)$ needs a measured common-cause term rather than an assumed zero.
+The relation rests on four premises. The first is a valid **counterfactual oracle**\index{Counterfactual oracle!definition}, an adjudication procedure that labels whether a raw proposal would have been hazardous had it executed without the shield; without one, $\lambda_{\mathrm{proposal},h}$ cannot be counted. The others are timely detection, actuator authority, and a justified treatment of correlated failures\index{Common-cause failure!shield coverage}. The last is the one most often assumed away. It is the independence premise that claim C5 of the release argument had to test rather than assume, because independently written versions of one program fail together far more often than independence predicts (@sec-release-contextual-assumptions). The product $\lambda_{\mathrm{proposal},h}(1-c_h)$ treats a miss as independent of the conditions that produced the hazardous proposal, yet the occluded frame that leads the policy to propose a bad action can also degrade the shield's state estimate. Common cause of that kind is not an additive term in $\lambda_{\mathrm{other}}$; it lowers $c_h$ exactly where it matters, so $c_h$ must be measured on the distribution of states in which the policy errs, not on a generic seeded set. The relation gives no credit for an oil film or a weakened latch that the shield cannot observe, and no release follows from the arithmetic until each premise is supported.
 
 Evaluating this conditional hazard decomposition requires bounding the unshielded proposal arrival rate $\lambda_{\mathrm{proposal},h}$ from empirical telemetry logs before applying shield credit. Under a stationary Poisson model with zero observed hazardous proposals, this bound is the rule of three [@hanley1983nothing] of @sec-evaluation-closed-loop-survival (@eq-eval-rule-of-three) with proposal-hours in place of trials. For $T$ hours of adjudicated log and significance $\alpha$, the one-sided upper bound on the rate is $-\ln\alpha/T$, which is about $3/T$ at 95 percent confidence:
 
-::: {#nbk-frontier-fleet-exposure-and-shielded-decomposition .callout-notebook title="A conditional shield calculation"}
+::: {#nbk-frontier-fleet-exposure-and-shielded-decomposition .callout-notebook title="The coverage bill"}
 
-**Problem**: In an illustrative scenario, one hundred robots keep a fully adjudicated proposal log for one 90-day cycle, judged by a validated counterfactual oracle, and the log records no hazardous proposal. If a named shield's interception coverage for that hazard class were independently established at $c=0.9999$, would the modeled residual meet the $10^{-9}\text{ h}^{-1}$ system target?
+**Problem**: In an illustrative scenario, a fleet keeps a fully adjudicated proposal log for one release cycle, judged by a validated counterfactual oracle, and the log records no hazardous proposal. If a named shield's interception coverage for that hazard class were independently established, would the modeled residual of @eq-frontier-shielded-hazard meet the system target, and what evidence would it take to show that it does?
 
-**Proposal bound**: Under a stationary Poisson model, zero hazardous proposals in `{python} ArchitecturalShieldDilution.n_proposal_sci_str` proposal-hours give a one-sided 95 percent upper bound of `{python} ArchitecturalShieldDilution.p_proposal_upper_sci_str` $\text{h}^{-1}$.
+**Variables**:
 
-**Residual**: With hardware and common-cause residual set to zero for this calculation, @eq-frontier-shielded-hazard gives `{python} ArchitecturalShieldDilution.p_system_conditional_sci_str` $\text{h}^{-1}$, **above** the target. The coverage the target requires is at least `{python} ArchitecturalShieldDilution.c_required_str`.
+- System target $\lambda_{\text{target}}$ = `{python} ArchitecturalShieldDilution.p_target_sci_str` $\text{h}^{-1}$ (Illustrative)
+- Proposal log $T$ = `{python} ArchitecturalShieldDilution.fleet_units_str` units $\times$ `{python} ArchitecturalShieldDilution.t_cycle_days_str` days $\times$ `{python} ArchitecturalShieldDilution.hours_per_day_str` h = `{python} ArchitecturalShieldDilution.n_proposal_sci_str` proposal-hours with zero hazardous proposals (Illustrative)
+- Class-specific coverage $c_h$ = `{python} ArchitecturalShieldDilution.c_shield_str` and $\lambda_{\text{other}}$ = 0 (Illustrative; the hardware and common-cause term is set to zero for this calculation)
+- Confidence `{python} ArchitecturalShieldDilution.confidence_pct_str`, significance $\alpha$ = `{python} ArchitecturalShieldDilution.alpha_str` (Chosen)
 
-**Required proposal evidence**: At $c=0.9999$ the proposal-rate bound must fall to `{python} ArchitecturalShieldDilution.p_brain_sci_str` $\text{h}^{-1}$. Zero adjudicated hazardous proposals would then require `{python} ArchitecturalShieldDilution.n_brain_sci_str` proposal-hours, or `{python} ArchitecturalShieldDilution.t_test_days_str` days for 100 units, `{python} ArchitecturalShieldDilution.test_overrun_days_str` days beyond the cycle.
+**Math**:
 
-**Coverage evidence**: The coverage $c=0.9999$ is itself a claim. Bounding it at 95 percent confidence takes `{python} ArchitecturalShieldDilution.n_coverage_str` seeded hazardous proposals of that class with no miss, drawn from the states in which the policy errs. Two separate 95 percent bounds also do not make a 95 percent statement about their product. The probability that at least one of two bounds fails is at most the sum of their failure probabilities, so stating the residual at a joint 95 percent confidence requires each bound at 97.5 percent (the Bonferroni split), which raises the proposal bound to `{python} ArchitecturalShieldDilution.p_proposal_upper_joint_sci_str` $\text{h}^{-1}$, the coverage campaign to `{python} ArchitecturalShieldDilution.n_coverage_joint_str` trials, and the modeled residual to `{python} ArchitecturalShieldDilution.p_system_joint_sci_str` $\text{h}^{-1}$.
+1. **Proposal bound** (rule of three with hours in place of trials): $-\ln\alpha / T$ = `{python} ArchitecturalShieldDilution.neg_ln_alpha_str` $/$ `{python} ArchitecturalShieldDilution.n_proposal_sci_str` h = `{python} ArchitecturalShieldDilution.p_proposal_upper_sci_str` $\text{h}^{-1}$.
+2. **Residual**: `{python} ArchitecturalShieldDilution.p_proposal_upper_sci_str` $\times$ `{python} ArchitecturalShieldDilution.one_minus_c_sci_str` $+$ 0 = `{python} ArchitecturalShieldDilution.p_system_conditional_sci_str` $\text{h}^{-1}$, **above** the target. Meeting it at this bound needs $c_h \ge 1 -$ `{python} ArchitecturalShieldDilution.p_target_sci_str` $/$ `{python} ArchitecturalShieldDilution.p_proposal_upper_sci_str` = `{python} ArchitecturalShieldDilution.c_required_str`.
+3. **Proposal evidence at the assumed coverage**: The bound must fall to `{python} ArchitecturalShieldDilution.p_target_sci_str` $/$ `{python} ArchitecturalShieldDilution.one_minus_c_sci_str` = `{python} ArchitecturalShieldDilution.p_brain_sci_str` $\text{h}^{-1}$, which takes `{python} ArchitecturalShieldDilution.neg_ln_alpha_str` $/$ `{python} ArchitecturalShieldDilution.p_brain_sci_str` = `{python} ArchitecturalShieldDilution.n_brain_sci_str` proposal-hours, or `{python} ArchitecturalShieldDilution.t_test_days_str` days for the fleet, `{python} ArchitecturalShieldDilution.test_overrun_days_str` days beyond the cycle.
+4. **Coverage evidence**: Bounding $c_h$ itself takes $\ln$ `{python} ArchitecturalShieldDilution.alpha_str` $/ \ln$ `{python} ArchitecturalShieldDilution.c_shield_str` = `{python} ArchitecturalShieldDilution.n_coverage_str` seeded hazardous proposals of that class with no miss, drawn from the states in which the policy errs.
+5. **Joint confidence**: The probability that at least one of two bounds fails is at most the sum of their failure probabilities, so a joint `{python} ArchitecturalShieldDilution.confidence_pct_str` statement needs each bound at `{python} ArchitecturalShieldDilution.confidence_split_pct_str` (the Bonferroni split). The proposal bound becomes `{python} ArchitecturalShieldDilution.neg_ln_alpha_half_str` $/$ `{python} ArchitecturalShieldDilution.n_proposal_sci_str` h = `{python} ArchitecturalShieldDilution.p_proposal_upper_joint_sci_str` $\text{h}^{-1}$, the coverage campaign `{python} ArchitecturalShieldDilution.n_coverage_joint_str` trials, and the residual `{python} ArchitecturalShieldDilution.p_system_joint_sci_str` $\text{h}^{-1}$.
 
-**Systems insight**: A shield changes the system claim only for hazard classes it can detect and intercept in time. Proposal frequency, conditional interception coverage, hardware faults, and common-cause failures need separate evidence, and the confidence of the combined claim must be budgeted across them. Oil or material failure outside the shield's sensing coverage stays in the residual-claims register.
+**Result**: The modeled residual misses the target even with the common-cause term set to zero. Supporting the claim takes both a proposal log longer than the release cycle and tens of thousands of seeded interceptions, and the confidence of the combined claim must be budgeted across them.
+
+**Systems insight**: A shield changes the system claim only for hazard classes it can detect and intercept in time. Proposal frequency, conditional interception coverage, hardware faults, and common-cause failures need separate evidence. Oil or material failure outside the shield's sensing coverage stays in the residual-claims register.
+
 :::
 
 The calculation uses the exposure model already established in @sec-evaluation-trial-limits and the filter developed in @sec-enforcement. It does not establish new evidence for either. Formal verification has the same obligation to state its scope: a certificate concerns the declared model, observations, disturbances, and timing (@sec-verification-formal-limits). When a premise remains unsupported, the release needs an operating response with an owner.
 
 ### A residual-claims register {#sec-frontier-residual-claims-register}
 
-Refusing claim C3 did not remove the friction premise from the machine. The **residual-claims register**\index{Residual-claims register!definition} consumes the upstream release manifest of @sec-release-manifest and keeps each open premise attached to an operating restriction. Without that link, a later model update could restore an unsupported mode while leaving its physical premise unresolved.
+Refusing claim C3 did not remove the friction premise from the machine. The **residual-claims register**\index{Residual-claims register!definition}\index{Contracts!residual claims} is the fifteenth and last record of the record chain (@sec-appendix-systems-record-register). It consumes the upstream release manifest of @sec-release-manifest and keeps each open premise attached to an operating restriction. Without that link, a later model update could restore an unsupported mode while leaving its physical premise unresolved.
 
-Each entry identifies the missing physical observable, active containment or operating restriction, accountable owner, and predeclared empirical closure test. These components give principle \ref{pri-vol4-evidence-bounds-authority} an operational consequence. Authority remains restricted until evidence supports changing the entry; recording a caveat alone does not protect the machine.
-
-::: {#dfn-frontier-residual-claims-register .callout-definition title="Residual-claims register"}
-
-***Residual-claims register***\index{Residual-claims register!definition}\index{Contracts!residual claims} is the fifteenth record in the record chain, consuming the release manifest to record every open or unsupported physical premise and mapping each to its missing physical observable, active operating restriction, accountable human owner, and predeclared empirical closure test.
-
-1.  **Significance**: Prevents unsupported physical premises from vanishing into uncalibrated software optimism, holding machine authority to a restricted operating envelope until evidence supports a revised claim.
-2.  **Distinction**: Unlike a static hazard log or bug tracker, the residual-claims register is an offline, machine-readable deployment record whose authorized limits feed runtime checks and whose standing conditions bind site operations.
-3.  **Common pitfall**: Treating open safety premises as speculative engineering debt to be resolved in future releases without derating operational speed or restricting the physical operating domain today.
-
-:::
+Each entry identifies the missing physical observable, active containment or operating restriction, accountable owner, and predeclared empirical closure test. These components give principle \ref{pri-vol4-evidence-bounds-authority} an operational consequence. Unlike a hazard log or a bug tracker, the register is a machine-readable deployment record. Its authorized limits feed runtime checks, and its standing conditions bind site operations. Authority remains restricted until evidence supports changing the entry; recording a caveat alone, or deferring the premise to a later release without derating speed or narrowing the domain today, does not protect the machine.
 
 An engineer must define the **missing observable**\index{Missing observable!definition} in terms of the physical claim. An "out-of-distribution latent state" does not specify what a detector must measure or when intervention must occur. An unmeasured friction coefficient or latch strength does. That description lets the team choose between adding sensing, establishing a physical bound, and restricting the task, then state what evidence would justify the choice.
 
 The oil film gives the mobile manipulator its first entry. The premise is that every aisle floor supplies a friction coefficient of at least `{python} OilFilm.mu_min_str`, the value its credible deceleration needs. The missing observable is the friction beneath a clear film, which the navigation camera and the lidar cannot tell from dry concrete. The stop from the aisle speed that fits the clear distance on a dry floor overruns it on the film, so a speed limit the entry imposes can hold only on floors whose friction is measured or controlled.
 
-An open entry requires an **operational response**\index{Operational response!definition}. For the aisles, the separately supported release can permit a restricted mode of `{python} OilFilm.v_restricted_str` on floors under the site's inspection regime. In the stipulated restricted-service branch, qualified friction assessment, cleaning, spill isolation, and access controls support $\mu \ge$ `{python} OilFilm.mu_insp_str`, which gives a credible deceleration of `{python} OilFilm.a_insp_str` and a known-component ceiling of `{python} OilFilm.ceiling_insp_str`. That floor is an illustrative value set below the dry-floor coefficient to admit residual contamination; a released entry takes it from friction measurements on the served routes under the inspection regime, which this example does not have. In the actual illustrative records, the restricted mode remains a candidate until the complete timing budget, including dispatch-to-admission work and required reserve, supports it. The stipulated branch assumes that supporting evidence. A route that the inspection regime does not cover is excluded, or the machine is withheld from it.
+An open entry requires an **operational response**\index{Operational response!definition}. For the aisles, the separately supported release can permit a restricted mode of `{python} OilFilm.v_restricted_str` on floors under the site's inspection regime. In the stipulated restricted-service branch, qualified friction assessment, cleaning, spill isolation, and access controls support $\mu \ge$ `{python} OilFilm.mu_insp_str`, which gives a credible deceleration of `{python} OilFilm.a_insp_str` and a known-component ceiling of `{python} OilFilm.ceiling_insp_str`, the dashed curve of @fig-12-stopping-vs-speed. That floor is an illustrative value set below the dry-floor coefficient to admit residual contamination; a released entry takes it from friction measurements on the served routes under the inspection regime, which this example does not have. In the actual illustrative records, the restricted mode remains a candidate until the complete timing budget, including dispatch-to-admission work and required reserve, supports it. The stipulated branch assumes that supporting evidence. A route that the inspection regime does not cover is excluded, or the machine is withheld from it.
 
 The restricted mode needs an owner able to keep its physical premises true. Site operations owns this entry through its spill procedure for pallet-jack routes, which sets the inspection interval and names the condition that withdraws permission. The signed speed limit on the permission path enforces the restriction, but a claim about friction cannot be maintained by a speed setting alone.
 
@@ -722,13 +819,13 @@ The proposed detectors would support broader online claims only after qualificat
 A floor-film detector can change the friction claim only if its coverage, false alarms, and response timing support the intended route. These are task-specific acceptance criteria, not universal detector thresholds. The known-component stopping calculation leaves `{python} OilFilm.spare_aisle_str` at the candidate normal aisle speed, equivalent to `{python} OilFilm.t_latest_str` of added delay; the `{python} OilFilm.delta_da_str` dispatch-to-admission allocation leaves `{python} OilFilm.reserve_da_str` of it before the required reserve is preserved. This is an upper limit on unallocated time, not a qualified detector budget. It also cannot establish protection against a person who continues approaching throughout the stop.
 
 The floor-film detector faces an even stricter form of the same test. Its forward detection distance, less the travel incurred during its own sensing and inference latency, must cover the dry-floor stop to the film's leading edge:
-$$d_{\text{detect}} \ge v\,t_{\text{detect}} + d_{\text{budget}}(v),$$
+$$d_{\text{detect}} \ge v\,t_{\text{detect}} + d_{\text{budget}}(v),$$ {#eq-frontier-film-detection-range}
 where $d_{\text{budget}}(v)$ is the finished dry-floor budget of @tbl-enforcement-stopping-budget. With a chosen detector latency of `{python} OilFilm.t_detect_str` at `{python} OilFilm.v_aisle_str`, the detector must report the film at least `{python} OilFilm.d_detect_min_str` ahead. That is essentially the rack end's whole `{python} OilFilm.d_clear_str` clear distance, because the chosen latency consumes almost all of the `{python} OilFilm.t_latest_str` computed above, and it leaves far too little for the `{python} OilFilm.delta_da_str` dispatch-to-admission allocation. A classification report that arrives once the drive wheels have already crossed onto the film leaves an incomplete stopping budget already at `{python} OilFilm.stop_oil_str` against the `{python} OilFilm.d_clear_str` clear distance. A classification received after that point supports incident diagnosis, but it cannot safeguard the action already taken.
 
 #### Observational indistinguishability and the action deadline {#sec-frontier-observational-indistinguishability-sub}
 
 The fundamental physical limit of runtime detection arises from observational indistinguishability. Consider two physical states of the world, $S_A$ and $S_B$. In state $S_A$, a commanded actuator trajectory $u(t)$ is completely safe. In state $S_B$, the identical trajectory $u(t)$ causes catastrophic structural fracture or human injury, requiring the permission path to intervene and command an immediate stop. What bounds the response is distance, not time. Braking changes the trajectory, so the harm point is a place. Let $d_{\text{rem}}$ be the distance remaining to it when the distinguishing observation arrives. The stop completes short of it only if
-$$d_{\text{rem}} \ge v\,(t_{\text{enforce}} + t_{\text{actuation}}) + d_{\text{brake}}(v),$$
+$$d_{\text{rem}} \ge v\,(t_{\text{enforce}} + t_{\text{actuation}}) + d_{\text{brake}}(v),$$ {#eq-frontier-action-deadline}
 the same stopping model the book has used since @sec-body, with $d_{\text{brake}}(v)$ the selected stop's braking distance. Dividing by the approach speed turns it into a deadline on the observation time, $t_{\text{deadline}} = t_{\text{harm}} - t_{\text{enforce}} - t_{\text{actuation}} - d_{\text{brake}}(v)/v$, where $t_{\text{harm}}$ is the time the unchanged trajectory would reach the harm point. A tempting time-domain version subtracts the full braking duration $t_{\text{brake}}$ instead of $d_{\text{brake}}/v$, as if the machine kept its speed until it stopped. For the aisle's jerk-limited stop from `{python} OilFilm.v_aisle_str`, the stop lasts `{python} OilFilm.t_brake_aisle_str` but covers only the distance of `{python} OilFilm.t_brake_equiv_str` at constant speed, so the time form over-reserves `{python} OilFilm.t_overreserve_str`, or `{python} OilFilm.d_overreserve_str` of travel, more than the whole `{python} OilFilm.spare_aisle_str` spare. Contact adds its own coupled model: once the tool touches a stiff latch, force rather than position sets the deadline (@sec-enforcement-intentional-contact).
 
 ::: {.column-margin}
@@ -737,7 +834,19 @@ the same stopping model the book has used since @sec-body, with $d_{\text{brake}
 *Charging the full stop time over-reserves several times the entire spare.*
 :::
 
-If the telemetry history $y(t)$ is identical for $S_A$ and $S_B$ until $t_{\text{deadline}}$ for every admissible input the machine could apply, no algorithm operating on those observations can distinguish the benign state from the hazardous one, and a state-specific response before that deadline is ruled out. The qualifier matters. Distinguishability depends on the input, as nonlinear observability makes precise [@hermann1977nonlinear], and an engineer can sometimes choose an input that separates the states. That choice is **active probing**\index{Active probing}, the idea behind auxiliary signal design[^fn-auxiliary-signal-design] for failure detection [@campbell2004auxiliary]: a controlled pull on the latch below the contact ceiling, or a small torque pulse on a known patch of floor, turns a hidden premise into an observation. Its cost is time and a small, bounded excitation that must itself fit the envelope. Where no admissible probe separates the states in time, a conservative action chosen for both states or a passive mechanical limit may still protect them, if its own clearance and force assumptions are valid.
+If the telemetry history $y(t)$ is identical for $S_A$ and $S_B$ until $t_{\text{deadline}}$ for every admissible input the machine could apply, no algorithm operating on those observations can distinguish the benign state from the hazardous one, and a state-specific response before that deadline is ruled out. That condition earns a name, because every hidden premise in this chapter is an instance of it.
+
+::: {#dfn-frontier-observational-indistinguishability .callout-definition title="Observational indistinguishability"}
+
+***Observational indistinguishability***\index{Observational indistinguishability!definition} is the condition in which two physical states that require different responses produce the same observation history, under every input the machine may admissibly apply, until the deadline by which a state-specific response must begin.
+
+1.  **Significance**: It turns an observation limit into a stopping-budget violation. The deadline is set by @eq-frontier-action-deadline, so if the film and the dry floor look identical until the remaining distance falls below $v\,(t_{\text{enforce}} + t_{\text{actuation}}) + d_{\text{brake}}(v)$, no response chosen on that evidence can keep $d_{\text{stop}} \le D_{\text{clear}}$ for the hazardous state.
+2.  **Distinction**: Noise and weak detectors obscure information that more data or a better model can recover; indistinguishability means the information is absent from the channel. Unlike classical unobservability, which asks whether a state can ever be reconstructed, it is tied to a deadline and to the inputs the machine may apply.
+3.  **Common pitfall**: A frequent misconception is that a more capable classifier on the same channel will eventually separate the states. Identical histories give every classifier identical inputs, so only a new channel, a designed probe, or a response valid in both states changes the outcome.
+
+:::
+
+The qualifier *every admissible input* matters. Distinguishability depends on the input, as nonlinear observability makes precise [@hermann1977nonlinear], and an engineer can sometimes choose an input that separates the states. Choosing such an input is **active probing**\index{Active probing!definition}, the deliberate application of a small, bounded input that makes the two states produce different observations before the deadline. It is the idea behind auxiliary signal design[^fn-auxiliary-signal-design] for failure detection [@campbell2004auxiliary]. A controlled pull on the latch below the contact ceiling, or a small torque pulse on a known patch of floor, turns a hidden premise into an observation. Its cost is time and a small, bounded excitation that must itself fit the envelope. Where no admissible probe separates the states in time, a conservative action chosen for both states or a passive mechanical limit may still protect them, if its own clearance and force assumptions are valid.
 
 [^fn-auxiliary-signal-design]: **Auxiliary Signal Design**\index{Auxiliary signal design!active fault detection}: The multimodel method computes a small test input that guarantees the normal model and each declared failure model produce different outputs within a fixed test horizon, despite bounded disturbances [@campbell2004auxiliary]. A probe can therefore rule out only the failures someone wrote down as models, which is why the hidden premise must first be named in the register. The input bound and the horizon map onto this chapter's budgets, since the probe must fit the force envelope and the separation must arrive before $t_{\text{deadline}}$.
 
@@ -868,6 +977,17 @@ The quasi-static bound assumes the drive keeps braking. If the response is to re
 
 The latch, the floor film, and the packaging tab end in the same place. Where a premise cannot be observed before the deadline, the engineer chooses among a probe, a conservative action, a passive limit, a proof test, and a narrower claim by the claim each supports and the evidence needed to maintain it. Each choice also names the evidence that would lift it, and that evidence is what the next capability must buy.
 
+::: {#chk-frontier-hidden-premises .callout-checkpoint title="Premises no sensor reports"}
+
+The warehouse machine's hardest limits are premises its own telemetry cannot check, and each one needs an entry, a restriction, and a response chosen before the deadline.
+
+- [ ] **Friction estimate**: A friction survey measures an aisle at $\mu$ = `{python} OilFilm.mu_check_str`. Given the `{python} OilFilm.a_brake_str` braking bound, can you compute the credible deceleration from @eq-frontier-credible-deceleration and say whether the brake or the floor binds?
+- [ ] **Register entry**: For the weakened door latch, can you state the four components of its register entry, the missing observable, the restriction, the owner, and the closure test?
+- [ ] **Shield credit**: Why does @eq-frontier-shielded-hazard give no credit against the oil film, and which term would the film enter?
+- [ ] **Hidden-state responses**: When two states stay indistinguishable until the deadline, which responses remain, and which of them does the series spring at the latch represent?
+
+:::
+
 ## Choosing the Next Capability {#sec-frontier-assumptions-change}
 
 The packaging cell's restricted transport and refused sign-off lead to different research investments. Faster proposal serving may improve throughput; a qualified engagement measurement may support autonomous sign-off. Each advance needs a predeclared task result and a test of the premise it changes. Improvement within an existing envelope and evidence for expanding that envelope are related but distinct outcomes.
@@ -943,7 +1063,7 @@ Accountability extends past product safety for the same reason. Conformity under
 
 The book's third law, that a learned proposal is not permission, becomes a legal requirement for machinery sold in the European Union. The Machinery Regulation, whose dates and scope the standards map of @sec-release-standards-map sets out, lists safety components "with fully or partially self-evolving behaviour using machine learning approaches ensuring safety functions," and machinery that embeds them, among the categories whose conformity a notified body must assess (Annex I, Part A) [@eu2023machinery]. Its essential requirements add the operational half: the limits of safety functions are established in the manufacturer's risk assessment, and no setting or rule the machine generates, including during a learning phase, may change where the change could lead to a hazardous situation (Annex III, section 1.2.1).
 
-Read against this book's architecture, the regulation draws the proposal boundary in law. The question it turns on is whether a learned component ensures a safety function. A learned proposer whose output reaches the actuators only through an independent permission path with fixed, signed limits does not. The safety functions are then carried by safety-rated parts that contain no learned component: the drive functions and safety scanner of @tbl-12-certified-functions, and the safety MCU's lease-expiry watchdog, which commands STO or SS1 on the drives when permission lapses. The admission checks that shape each proposal, such as the barrier projection and the feasibility and freshness tests, are not claimed as a safety function, and their limits are set by the risk assessment rather than learned. A learned component that does ensure one, such as a learned person detector used as the protective function or a policy whose commands reach the drives without independent admission, falls under Annex I, Part A and needs third-party assessment. The architecture therefore helps decide the conformity route, though for a particular machine that reading rests with the manufacturer's risk assessment and, for Part A categories, the notified body. The residual-claims register records what section 1.2.1 asks for, the declared limits with the evidence behind them and the conditions under which an update may not change them. How a notified body will assess a learned component whose behavior depends on its training data remains open as of 2026, and the last problem below returns to it.
+Read against this book's architecture, the regulation draws the proposal boundary in law. The question it turns on is whether a learned component ensures a safety function. A learned proposer whose output reaches the actuators only through an independent permission path with fixed, signed limits does not. The safety functions are then carried by safety-rated parts that contain no learned component: the drive functions and safety scanner of @tbl-12-certified-functions, and the safety MCU's lease-expiry watchdog, which commands STO or SS1 on the drives when permission lapses. The admission checks that shape each proposal, such as the barrier projection and the feasibility and freshness tests, are not claimed as a safety function, and their limits are set by the risk assessment rather than learned. A learned component that does ensure one, such as a learned person detector used as the protective function or a policy whose commands reach the drives without independent admission, falls under Annex I, Part A and needs third-party assessment. The architecture therefore helps decide the conformity route, though for a particular machine that reading rests with the manufacturer's risk assessment and, for Part A categories, the notified body. The residual-claims register records what section 1.2.1 asks for, the declared limits with the evidence behind them and the conditions under which an update may not change them. How a notified body will assess a learned component whose behavior depends on its training data remains open as of 2026, and the last open problem of @sec-frontier-four-open-challenges returns to it.
 
 ### Match the experiment to the missing evidence {#sec-frontier-four-gap-classes}
 
@@ -1024,6 +1144,143 @@ For further reading, six works trace the ideas this chapter joins.
 - @hsu2024safetyfilter surveys safety filters across control barrier functions, reachability, and Simplex-style switching, and makes explicit the coverage premises the shield calculation of @sec-frontier-shield-dilution prices.
 - @campbell2004auxiliary develops active failure detection by designed test inputs, the method behind probing a hidden premise before the action deadline.
 - @koopman2022how works through how an autonomous system's safety target can be set, argued, and measured, the release question this chapter leaves as owned, open entries.
+
+## Problems {#sec-frontier-problems}
+
+```{python}
+#| label: calc-frontier-problems
+#| echo: false
+#| warning: false
+#| message: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ GIVENS FOR THE END-OF-CHAPTER PROBLEMS (LEGO)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @sec-frontier-problems.
+# │ Goal:    Hold the givens the problems add to the chapter's cells: a
+# │          certified gate-sensor response and a trial carriage speed, a shift
+# │          log, a film arrival rate and hazard allocation, a common-cause
+# │          term, traffic and trial costs on the restricted routes, a dosing
+# │          valve (the process-system transfer machine), and a retraining set.
+# │          Answers are not printed; the private solution script computes them.
+# │ Show:    8 ms, 1.0 m/s; 1,000 / 880 / 874 / 95 / 93 / 25 / 12 / 8 moves;
+# │          2e-3 and 1e-6 per hour, 1 percent; 2e-10 per hour; 40 legs/h,
+# │          16 h/day, 10 min/trial; 2 L/s, 150 ms, 400 ms, 0.5 L; 10,000 images.
+# │ How:     Every value is illustrative or chosen and is labeled so in the
+# │          problem text; guards pin the relations the problems rely on.
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import *
+from mlsysim.core.units import liter, minute
+
+
+class FrontierProblems:
+    """Givens that the chapter's problems add beyond the worked examples."""
+
+    # ┌── 1. LOAD (Constants & Parameters) ─────────────────────────────────
+    t_sensor = 8 * ureg.ms  # category: illustrative (certified gate-sensor response time)
+    v_trial = 1.0 * ureg.meter / ureg.second  # category: illustrative (trial carriage speed)
+    n_moves = 1000  # category: illustrative (tote moves in one shift)
+    n_clean = 880  # category: illustrative (every proposal admitted unchanged)
+    n_clean_done = 874  # category: illustrative
+    n_corrected = 95  # category: illustrative (least-change correction, no stop)
+    n_corrected_done = 93  # category: illustrative
+    n_stopped = 25  # category: illustrative (protective stop)
+    n_stopped_resumed = 12  # category: illustrative (resumed and delivered)
+    n_stopped_takeover = 8  # category: illustrative (delivered after human takeover)
+    lam_film = 2e-3  # per operating hour; category: illustrative (films reaching the path)
+    lam_alloc = 1e-6  # per hour; category: illustrative (hazard budget allocated to the entry)
+    p_miss_relaxed = 0.01  # category: chosen (tenfold relaxation of the 0.1 percent bound)
+    lam_other = 2e-10  # per hour; category: illustrative (hardware and common-cause term)
+    legs_per_hour = 40  # category: illustrative (restricted-route traffic)
+    hours_per_day = 16  # category: illustrative (operating hours)
+    trial_time = 10 * minute  # category: illustrative (machine time per seeded-film trial)
+    q_valve = 2.0  # liters per second; category: illustrative (dosing flow)
+    t_valve_delay = 150 * ureg.ms  # category: illustrative (detection to close command)
+    t_valve_close = 400 * ureg.ms  # category: illustrative (linear full closing time)
+    v_headroom = 0.5 * liter  # category: illustrative (tank headroom above high level)
+    n_images = 10_000  # category: illustrative (proposed wet-floor retraining set)
+
+    # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────
+    _P = PackagingCell
+    brake_chain = (_P.bus + _P.onset).to(ureg.ms)
+    tau_sensor = (t_sensor + brake_chain).to(ureg.ms)
+    v_sensor_ceiling = calc_max_permitted_velocity(_P.clearance, tau_sensor, _P.deceleration, physical_margin=_P.reserve).to(ureg.meter / ureg.second)
+    tau_trial_max = ((_P.stop_budget - v_trial**2 / (2 * _P.deceleration)) / v_trial).to(ureg.ms)
+    v_delivered = q_valve * (t_valve_delay + t_valve_close / 2).to(ureg.second).magnitude  # liters
+
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(n_clean + n_corrected + n_stopped == n_moves, "Problem 3: the shift log must account for every move.")
+    check(n_stopped_resumed + n_stopped_takeover < n_stopped, "Problem 3: some stopped moves must be abandoned.")
+    check(v_sensor_ceiling < v_trial < _P.v_nom, "Problem 1: the sensor ceiling must fall below the trial speed.")
+    check(tau_trial_max < brake_chain, "Problem 1: the trial speed must be infeasible with the brake chain unchanged.")
+    check(lam_alloc / lam_film < OilFilm.p_miss_target, "Problem 4: the derived bound must be stricter than the chosen one.")
+    check(lam_other < p_target, "Problem 5: the common-cause term must leave room under the target.")
+    check(v_delivered > v_headroom.to(liter).magnitude, "Problem 7: nominal flow must overfill the headroom.")
+
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
+    t_sensor_str = fmt_latency(t_sensor, unit=ureg.ms, precision=0)
+    v_trial_str = fmt_velocity(v_trial, precision=0)
+    n_moves_str = fmt_int(n_moves, commas=True)
+    n_clean_str = fmt_int(n_clean)
+    n_clean_done_str = fmt_int(n_clean_done)
+    n_corrected_str = fmt_int(n_corrected)
+    n_corrected_done_str = fmt_int(n_corrected_done)
+    n_stopped_str = fmt_int(n_stopped)
+    n_stopped_resumed_str = fmt_int(n_stopped_resumed)
+    n_stopped_takeover_str = fmt_int(n_stopped_takeover)
+    lam_film_sci_str = fmt_sci(lam_film, precision=0)
+    lam_alloc_sci_str = fmt_sci(lam_alloc, precision=0)
+    p_miss_relaxed_pct_str = fmt_percent(p_miss_relaxed, precision=0, style="prose")
+    lam_other_sci_str = fmt_sci(lam_other, precision=0)
+    legs_per_hour_str = fmt_int(legs_per_hour)
+    hours_per_day_str = fmt_int(hours_per_day)
+    trial_time_str = fmt_latency(trial_time, unit=minute, precision=0)
+    q_valve_str = fmt(q_valve, precision=0)
+    t_valve_delay_str = fmt_latency(t_valve_delay, unit=ureg.ms, precision=0)
+    t_valve_close_str = fmt_latency(t_valve_close, unit=ureg.ms, precision=0)
+    v_headroom_str = fmt_water(v_headroom, unit=liter, precision=1)
+    n_images_str = fmt_int(n_images, commas=True)
+```
+
+These problems ask for the transfer the chapter demonstrated. They use the running machine's values and the packaging cell's scenario inputs, with values marked illustrative standing in for measurements as they do in the worked examples, and each names the decision it requires. The tags give the kind of work, from computation through design to critique, and the learning objectives, counted in order, that each assesses. @Tbl-17-key-equations collects the equations the problems draw on, what each bounds or decides, and where it is derived.
+
+\Needspace{16\baselineskip}
+
+| Equation                                                                                                                           | What it bounds or decides                                                   | Where derived                                               |
+|:-----------------------------------------------------------------------------------------------------------------------------------|:----------------------------------------------------------------------------|:------------------------------------------------------------|
+| $d_{\text{stop}} = v\tau_{\text{delay}} + v^2/2a_{\text{brake}}$                                                                   | Whether a mode's stop fits its clearance, and whether delay or braking dominates | @eq-body-stopping-distance                                  |
+| $v_{\max} = -a_{\text{brake}}\tau_{\text{delay}} + \sqrt{(a_{\text{brake}}\tau_{\text{delay}})^2 + 2a_{\text{brake}}d_{\text{budget}}}$ | The speed ceiling a stopping budget admits                                  | @eq-body-velocity-ceiling; jerk ramps in @eq-enforce-speed-ceiling |
+| $a = \min(a_{\text{brake}}, \mu g)$                                                                                                | Whether the brake or the floor binds, and the friction floor $a_{\text{brake}}/g$ | @eq-frontier-credible-deceleration                          |
+| $\lambda_{\text{system},h} \le \lambda_{\text{proposal},h}(1-c_h) + \lambda_{\text{other}}$                                        | What a shield adds to a hazard-rate claim, and the coverage the claim needs | @eq-frontier-shielded-hazard                                |
+| $n = \lceil \ln\alpha / \ln(1-p) \rceil$                                                                                           | Failure-free trials that bound a miss or false-accept probability $p$       | @eq-eval-zero-failure-sample-size                           |
+| $d_{\text{detect}} \ge v\,t_{\text{detect}} + d_{\text{budget}}(v)$                                                                | The range at which a detector must report a hazard ahead of the machine     | @eq-frontier-film-detection-range                           |
+| $d_{\text{rem}} \ge v\,(t_{\text{enforce}} + t_{\text{actuation}}) + d_{\text{brake}}(v)$                                          | The latest point at which a distinguishing observation can still help       | @eq-frontier-action-deadline                                |
+| $F_{\text{trip}} + k_{\text{eq}}\,\Delta x_{\text{driven}} \le F_{\text{floor}}$                                                   | The stiffness of a passive element that bounds contact force               | @eq-frontier-passive-compliance                             |
+
+: **Key equations of the chapter**: Each equation the chapter applies to the warehouse machine or the packaging cell, what it bounds or decides, and where the book derives it. The first two and the zero-failure count are derived in earlier chapters and reused here; the others are stated in this chapter. {#tbl-17-key-equations tbl-colwidths="[42,36,22]"}
+
+1. **[Compute, LO3] A certified gate sensor.** @sec-frontier-packaging-cell-study noted that on a production cell a safety-rated gate sensor feeding SS1 replaces the camera-triggered stop. Suppose its illustrative certified response time of `{python} FrontierProblems.t_sensor_str` replaces the image and processing allocations, while the `{python} PackagingCell.bus_str` command delivery, the `{python} PackagingCell.onset_str` brake buildup, the `{python} PackagingCell.deceleration_str` braking bound, and the `{python} PackagingCell.stop_budget_str` stopping budget are unchanged. Compute the new carriage ceiling. Decide whether any sensor could admit an illustrative trial speed of `{python} FrontierProblems.v_trial_str` with the brake chain unchanged, and find the braking bound that would admit the `{python} PackagingCell.v_nom_str` nominal speed even with zero delay. Name the investment the cell's throughput goal therefore calls for.
+
+2. **[Compute, LO3, LO5] How far the inspected floor may fall.** The oil-film entry admits a `{python} OilFilm.v_restricted_str` restricted mode on floors inspected to $\mu \ge$ `{python} OilFilm.mu_insp_str`. With the finished budget of \ref{nbk-frontier-friction-floor}, the same delay, jerk bound, and overheads, find the friction coefficient below which that mode no longer fits the `{python} OilFilm.d_clear_str` clear distance. State the margin the inspection regime keeps below `{python} OilFilm.mu_insp_str`, and write the acceptance criterion a friction survey of a served route must meet for the entry to keep admitting the mode.
+
+3. **[Compute, LO4] Three outcomes from one shift.** An illustrative shift log for the warehouse machine records `{python} FrontierProblems.n_moves_str` tote moves. In `{python} FrontierProblems.n_clean_str`, every proposal was admitted unchanged, and `{python} FrontierProblems.n_clean_done_str` of those were delivered. In `{python} FrontierProblems.n_corrected_str`, the permission path applied a least-change speed correction without stopping, and `{python} FrontierProblems.n_corrected_done_str` were delivered. In `{python} FrontierProblems.n_stopped_str`, a protective stop occurred; `{python} FrontierProblems.n_stopped_resumed_str` resumed and were delivered, `{python} FrontierProblems.n_stopped_takeover_str` were delivered only after a human takeover, and the rest were abandoned. Compute raw proposer autonomy, whole-machine task success with and without the takeover-assisted deliveries, and the protective-response rate. Compare them with a single count that treats every intervention as a failure, and decide whether the next improvement belongs in learning, integration, or the protective response.
+
+4. **[Compute, LO5, LO6] Deriving the miss bound.** The register chose a `{python} OilFilm.p_miss_target_pct_str` miss bound for the floor-film detector. Derive one instead. Suppose the site's spill logs show films reaching the machine's path at an illustrative `{python} FrontierProblems.lam_film_sci_str` per operating hour on the served routes, and the site allocates this entry an illustrative hazard budget of `{python} FrontierProblems.lam_alloc_sci_str` per hour. Find the miss probability the detector must meet and the failure-free trials that bound it at `{python} OilFilm.confidence_pct_str` confidence. Compare the result with the chosen bound and with a relaxation to `{python} FrontierProblems.p_miss_relaxed_pct_str`, stating the residual film-hazard rate each leaves against the allocation.
+
+5. **[Compute, LO6] Coverage with a common-cause term.** Repeat the residual step of \ref{nbk-frontier-fleet-exposure-and-shielded-decomposition} with an illustrative hardware and common-cause term $\lambda_{\text{other}}$ = `{python} FrontierProblems.lam_other_sci_str` $\text{h}^{-1}$ instead of zero. Find the coverage the target now requires at the `{python} ArchitecturalShieldDilution.confidence_pct_str` proposal bound and the seeded-trial campaign that bounds that coverage, then repeat both at the Bonferroni split. State the value of $\lambda_{\text{other}}$ above which no coverage meets the target, and what kind of evidence must then change.
+
+6. **[Compute, LO6] When to buy the closure test.** @sec-frontier-deployment-economics priced the oil-film restriction per `{python} RestrictionCost.leg_str` aisle leg. On the restricted routes the machine runs an illustrative `{python} FrontierProblems.legs_per_hour_str` legs per operating hour for `{python} FrontierProblems.hours_per_day_str` hours a day, and each seeded-film trial of the `{python} OilFilm.n_closure_str`-trial closure campaign costs an illustrative `{python} FrontierProblems.trial_time_str` of machine time. Express the restriction's daily cost and the campaign's cost in machine-hours, find the break-even period, and repeat it for half the traffic. Name the site data the comparison still needs before the campaign is bought.
+
+7. **[Compute, LO3] Transfer to a dosing valve.** The process-system case of @sec-frontier-packaging-cell-study has a learned proposer setting a dosing valve that feeds a tank. The illustrative flow is `{python} FrontierProblems.q_valve_str` liters per second, the delay from the high-level event to the close command is `{python} FrontierProblems.t_valve_delay_str`, and the valve closes linearly over `{python} FrontierProblems.t_valve_close_str`, passing on average half its full flow while closing. The tank holds `{python} FrontierProblems.v_headroom_str` of headroom above its high level. Compute the volume delivered after the event, the highest flow whose delivered volume fits the headroom, and that ceiling if either the closing time or the delay were halved. Then decide what the valve must do when control power is lost, and what the qualified fallback must name if the feed line is pressurized.
+
+8. **[Design, LO3, LO5] A humanoid at a tote wall.** A humanoid picks totes from a wall shelf and walks them to a cart across a floor shared with people. Apply the scope test of @sec-boundary and the four-law audit of @sec-frontier-four-law-audit-protocol. Deliver a verdict table with columns for claim, premise, status (one of the Reader Guide's five), and verdict, with rows for walking transport, tote pickup, and the response to lost permission, and write at least two residual-claims entries. No numbers are supplied, so label every assumed input as chosen or illustrative. Explain why the warehouse machine's stop-and-hold fallback does not transfer (@sec-frontier-four-open-challenges) and what your table must therefore refuse.
+
+9. **[Design, LO5, LO6] Register entries for the packaging cell.** Write residual-claims entries for tab engagement under glare and for winding thermal duty. For each, give the missing observable, the operating restriction, the accountable owner, and a predeclared closure test, and classify it by gap class (@sec-frontier-four-gap-classes). For the thermal entry, name the measurements that the selected `{python} PackagingCell.temperature_trip_str` trip and `{python} PackagingCell.stall_timeout_str` stall timeout do not supply, and state what a closure test must show about insulation aging rather than instantaneous temperature.
+
+10. **[Critique, LO1] Retraining on wet floors.** A team proposes closing the oil-film entry by retraining the navigation model on `{python} FrontierProblems.n_images_str` labeled images of wet floors. Critique the proposal with \ref{nbk-frontier-friction-floor} and the third fallacy of @sec-frontier-fallacies-pitfalls. Identify the claim the retraining could support, the claim it cannot, and what the closure test in @tbl-17-claims-register would still require before the restriction lifts.
+
+11. **[Critique, LO2] Capable enough to drive the actuators.** A vendor argues that its next cross-embodiment policy halves the hazardous-proposal rate of the current one, so the independent permission path can be removed and the policy's commands sent to the drives directly. Critique the argument with @eq-frontier-shielded-hazard and @sec-frontier-thesis-in-law. Determine what the residual becomes when the shield is removed, what evidence the halving itself would need against the exposure wall, and which conformity route the changed architecture would enter under the Machinery Regulation.
+
+12. **[Critique, LO5] Ranking operators by takeovers.** A site manager proposes ranking operators by the takeover counts in the machine's authority log and tying a bonus to the ranking. Critique the proposal with @sec-frontier-workforce-accountability. Explain what a takeover count measures besides the operator, which obligations the EU AI Act attaches to such a system, and how the record's declared purpose, owner, and readers should govern the authority log's use.
 
 ## Summary {#sec-frontier-summary}
 

@@ -122,16 +122,6 @@ The separation of rates lets the tracking controller consume admitted references
 
 [^fn-plan-action-chunking]: **Action chunking representations**\index{Action chunking!architectures}\index{Policy learning!temporal horizons}: ACT and Diffusion Policy, the 2023-era chunk policies, carry no boundary-derivative constraints. Real-time chunking [@black2025realtime] conditions each new chunk on the actions already committed, which makes a consistent join more likely without guaranteeing one, so the planner still proposes a transition bridge across each replanning seam and the permission path checks it before admission.
 
-::: {#dfn-planning-kinodynamic-feasibility-envelope .callout-definition title="Kinodynamic feasibility envelope"}
-
-***Kinodynamic feasibility envelope***\index{Kinodynamic feasibility envelope!definition}\index{Feasibility!kinodynamic} is the subset of state space from which a physical machine can track a candidate trajectory while strictly satisfying simultaneous actuator torque limits, velocity ceilings, and jerk bounds, with position, velocity, and acceleration continuous across segment seams, without exceeding mechanical stopping margins.
-
-1.  **Significance**: Geometric collision freedom is necessary but insufficient for physical execution; an arm may follow a collision-free path that nonetheless demands motor torques exceeding continuous thermal ratings or produces accelerations that tip an underactuated base. The envelope states the conditions under which the model predicts trackable motion; runtime sensing and actuator checks must still validate them.
-2.  **Distinction**: Unlike pure kinematic reachability (which evaluates whether the robot's linkages can attain a spatial configuration), kinodynamic feasibility incorporates time parameterization, actuator force and torque limits, reflected inertia, and mechanical braking runways.
-3.  **Common pitfall**: Checking feasibility only at discrete waypoints. Interpolation splines between sample points can produce intra-sample velocity overshoots and torque spikes that breach motor limits even when every individual waypoint passes validation.
-
-:::
-
 The self-contained proposal must carry its seam state, continuous through acceleration ($C^2$),[^fn-plan-c2-spline] its deadlines, and a stopping suffix checked within clearance ($d_{\text{stop}} \le d_{\text{clear}}$). The safety microcontroller (MCU) admits that content through its independent permission path across the proposal boundary (@sec-boundary-machine-model) and keeps the stopping continuation in protected memory before it is needed.
 
 ::: {.column-margin .margin-pointer}
@@ -601,13 +591,13 @@ class PlanningReplacementLedger:
     t_sum_str = fmt_latency(t_sum, unit=millisecond, precision=1)
 ```
 
-The scheduling quantity is **replacement latency** $L$: elapsed time from the capture of the observation a new proposal rests on to the admission of that proposal. In the event vocabulary of @tbl-04-event-ledger, $L$ runs from capture to admission, so it is the sum of two intervals that other chapters derive, the capture-to-dispatch age $t_{\text{age}}$ of @sec-perception-latency-waterfall and the dispatch-to-admission interval $\Delta_{\text{da}}$ that @sec-placement-isolation-decisions allocates:
+The scheduling quantity is **replacement latency**\index{Replacement latency!definition} $L$: elapsed time from the capture of the observation a new proposal rests on to the admission of that proposal. In the event vocabulary of @tbl-04-event-ledger, $L$ runs from capture to admission, so it is the sum of two intervals that other chapters derive, the capture-to-dispatch age $t_{\text{age}}$ of @sec-perception-latency-waterfall and the dispatch-to-admission interval $\Delta_{\text{da}}$ that @sec-placement-isolation-decisions allocates:
 $$L = \underbrace{t_{\text{age}}}_{\text{capture}\,\to\,\text{dispatch}} + \underbrace{\Delta_{\text{da}}}_{\text{dispatch}\,\to\,\text{admission}}, \qquad \Delta_{\text{da}} = t_{\text{infer}} + t_{\text{link}} + t_{\text{deser}} + t_{\text{validate}} + t_{\text{activate}} + t_{\text{wait}}$$ {#eq-plan-replacement-latency}
 On the running machine the observation is `{python} PlanningReplacementLedger.t_age_str` old at dispatch. The allocation of $\Delta_{\text{da}}$, `{python} PlanningReplacementLedger.t_da_str`, charges the chunk policy's `{python} PlanningReplacementLedger.t_infer_str` inference in full, `{python} PlanningReplacementLedger.t_validate_str` of whole-plan validation, and the board link, deserialization, activation, and wait for the next permission tick, which brings $L$ to `{python} PlanningReplacementLedger.t_sum_str`. Charging the whole inference after dispatch counts its vision stage twice, since that stage already lies in $t_{\text{age}}$, so the allocated $L$ is conservative. When stages overlap or share contention, a sum of stage percentiles is not a percentile of the sum (@sec-body-measurement-freshness), so the horizon is sized from the end-to-end distribution of $L$ measured between capture and admission timestamps.
 
 Validation is the planner's own term in that sum. The `{python} PlanningReplacementLedger.t_validate_str` allowance is a separate admission workload, not work silently placed inside a millisecond permission tick. Admission needs bounded staging memory, the candidate and stop coefficients, and qualified local clearance evidence; the host's full scene map need not reside on the MCU. Scheduling must preserve per-tick enforcement while admission proceeds and refresh the seam check before activation. @Sec-placement must allocate and qualify that work and memory under interference. Every term is an illustrative allocation, so neither $L$ nor its parts are measured bounds; both intervals remain explicit qualification obligations.
 
-Prediction length and execution length are separate choices. A prediction horizon $H\Delta t$ describes how far the proposer looks ahead; the **executed prefix** is the portion used before a checked replacement takes over. Increasing the predicted horizon supplies candidate motion beyond the next renewal, but does not grant permission to execute all of it. The running machine still targets admitted renewal every `{python} PlanningLeaseRule.t_renew_str`, with expiry at `{python} PlanningLeaseRule.t_lease_str` after the last admission. Target evidence can expire sooner.
+Prediction length and execution length are separate choices. A prediction horizon $H\Delta t$ describes how far the proposer looks ahead; the **executed prefix**\index{Executed prefix!definition} is the portion used before a checked replacement takes over. Increasing the predicted horizon supplies candidate motion beyond the next renewal, but does not grant permission to execute all of it. The running machine still targets admitted renewal every `{python} PlanningLeaseRule.t_renew_str`, with expiry at `{python} PlanningLeaseRule.t_lease_str` after the last admission. Target evidence can expire sooner.
 
 Compute amortization depends on how often inference runs, not merely on how many future setpoints it returns. Executing a longer prefix can reduce request frequency, but also delays task correction from new observations. Predicting farther while preserving the same renewal cadence does not by itself reduce inference duty. Protective response remains governed by the independent permission path and its measured response delay. Horizon selection therefore compares useful task performance, renewal throughput, evidence age, and fallback frequency under the declared workload; no universal optimal horizon follows from buffer length alone.
 
@@ -666,15 +656,47 @@ class PlanningMissionExposure:
 
     # ┌── 4. OUTPUT (Formatting) ───────────────────
     f_replan_str = fmt_frequency(f_replan)
+    t_mission_str = fmt_latency(t_mission, unit=second)
     n_handoff_str = fmt_int(n_handoff, commas=False)
     n_late_str = fmt_int(n_late)
+    p_late_math = fmt_math(f"p={fmt(p_late, precision=2)}")
+    eps_mission_math = fmt_math(rf"\epsilon_{{\mathrm{{mission}}}}={sci_latex(eps_mission, precision=0)}")
+    late_math = fmt_math(rf"Kp={n_handoff}\times{fmt(p_late, precision=2)}={fmt_int(n_late)}")
+    eps_ratio_math = fmt_math(rf"{fmt(p_late, precision=2)}/({sci_latex(eps_handoff, precision=1)})\approx{sci_latex(p_late / eps_handoff, precision=0)}")
     k_math = fmt_math(f"K={n_handoff}")
     p_all_math = fmt_math(rf"(0.99)^{{{n_handoff}}}\approx{sci_latex(p_all, precision=0)}")
     eps_math = fmt_math(rf"\epsilon\le\epsilon_{{\mathrm{{mission}}}}/K\approx{sci_latex(eps_handoff, precision=1)}")
     q_math = fmt_math(rf"P_{{{fmt(q_pct, precision=5, commas=False)}}}")
 ```
 
-The component sum in @eq-plan-replacement-latency is an elapsed replacement path, not an absolute timestamp. Consider a generic replanner, slower than this machine's chunk renewal, that makes `{python} PlanningMissionExposure.k_math` handoffs in a ten-minute mission at `{python} PlanningMissionExposure.f_replan_str`. If each handoff independently has a $0.01$ chance of exceeding a $P_{99}$ budget, the expected number of late handoffs is `{python} PlanningMissionExposure.n_late_str` and the probability that *all* arrive on time is `{python} PlanningMissionExposure.p_all_math`. Correlated contention clusters misses, which breaks the independence this arithmetic assumes. Allocating a mission exceedance target $\epsilon_{\mathrm{mission}}=10^{-3}$ equally gives a per-handoff target `{python} PlanningMissionExposure.eps_math` by the union bound. The corresponding `{python} PlanningMissionExposure.q_math` is a **design quantile target**, a risk allocation rather than an observed latency. A deployment either supports it with representative load testing and a conservative bound, or accepts a higher fallback rate.
+The component sum in @eq-plan-replacement-latency is an elapsed replacement path, not an absolute timestamp, and its tail matters because a mission repeats it. A mission of $K$ handoffs fails its timing target if any one of them is late. Allocating a mission exceedance target $\epsilon_{\mathrm{mission}}$ equally across the handoffs bounds the exceedance each may have, by the union bound:
+
+$$\epsilon \le \frac{\epsilon_{\mathrm{mission}}}{K}$$ {#eq-plan-union-bound}
+
+::: {#nbk-planning-handoff-exposure-wall .callout-notebook title="The handoff exposure wall"}
+
+**Problem**: A generic replanner, slower than this machine's chunk renewal, meets a $P_{99}$ replacement budget on each handoff. Over a ten-minute mission, how likely is it that every handoff arrives on time, and what per-handoff tail must the design target instead?
+
+**Variables**:
+
+- Mission length `{python} PlanningMissionExposure.t_mission_str` and replanning rate `{python} PlanningMissionExposure.f_replan_str` (illustrative)
+- Per-handoff exceedance of the $P_{99}$ budget, `{python} PlanningMissionExposure.p_late_math` (definitional)
+- Mission exceedance target `{python} PlanningMissionExposure.eps_mission_math` (chosen)
+- Independent misses (assumption)
+
+**Math**:
+
+1. **Handoff count**: `{python} PlanningMissionExposure.t_mission_str` $\times$ `{python} PlanningMissionExposure.f_replan_str` gives `{python} PlanningMissionExposure.k_math`, and `{python} PlanningMissionExposure.late_math` handoffs are expected late.
+2. **Every handoff on time**: `{python} PlanningMissionExposure.p_all_math`.
+3. **Design tail** (@eq-plan-union-bound): `{python} PlanningMissionExposure.eps_math`, the `{python} PlanningMissionExposure.q_math` quantile, deeper than the $P_{99}$ budget by `{python} PlanningMissionExposure.eps_ratio_math`.
+
+**Result**: A mission almost never completes with every handoff inside a $P_{99}$ budget, and the tail a mission target implies lies more than four orders of magnitude deeper.
+
+**Systems insight**: The quantile a design must target is set by how many handoffs a mission makes, not by the per-handoff budget, and it lies beyond what a test campaign of practical size observes. A late handoff must therefore cost service, never clearance. The resident stop, not the latency tail, keeps $d_{\text{stop}} \le d_{\text{clear}}$.
+
+:::
+
+The per-handoff quantile is a **design quantile target**\index{Design quantile target!definition}, a risk allocation rather than an observed latency. Correlated contention clusters misses, which breaks the independence this arithmetic assumes. A deployment either supports the target with representative load testing and a conservative bound, or accepts a higher fallback rate.
 
 ::: {.column-margin}
 ![](images/svg/margin_handoff_exceedance_ladder.svg){width="100%" fig-alt="Three horizontal bars on a log scale of exceedance probability per handoff: the P99 budget at 0.01, the mission target at 0.001, and the per-handoff design target at 3.3 times 10 to the minus 7."}
@@ -934,6 +956,16 @@ Before turning from replacement timing to the feasibility of the motion itself, 
 
 A candidate trajectory is a geometric and timed proposal, not permission to move. While high-level planners navigate the configuration space $\mathcal{C}_{\text{free}}$, physical actuators operate under strict electromotive, thermal, and structural constraints. Kinodynamic feasibility bridges geometric intent and physical reality by ensuring that every reference trajectory respects actuator torque ratings, velocity limits, and transmission dynamics before setpoints are dispatched.
 
+::: {#dfn-planning-kinodynamic-feasibility-envelope .callout-definition title="Kinodynamic feasibility envelope"}
+
+***Kinodynamic feasibility envelope***\index{Kinodynamic feasibility envelope!definition}\index{Feasibility!kinodynamic} is the set of initial states from which the machine can track a candidate trajectory, including its seams and its stop, while every joint stays within its position, velocity, acceleration, jerk (the rate of change of acceleration), torque, and current limits.
+
+1.  **Significance**: Collision freedom is necessary but not sufficient. At the `{python} PlanningTwoLinkArm.v_tool_str` TCP limit, a collision-free reach in the arm's weakest direction at a right-angle elbow already asks one joint for `{python} PlanningTwoLinkArm.qd_one_good_str` against a `{python} PlanningTwoLinkArm.qd_max_str` limit, so the geometry passes while the timing fails. The envelope states where the model predicts trackable motion; admission and runtime checks must still confirm it.
+2.  **Distinction**: Kinematic reachability asks whether the linkage can attain a configuration at all. Kinodynamic feasibility adds time: the derivatives a timing implies, the torque the manipulator equation turns them into, the inertia the drive reflects, and the distance the stop consumes.
+3.  **Common pitfall**: Checking feasibility only at discrete waypoints. The interpolant between samples can overshoot a velocity limit or step a torque even when every sample passes.
+
+:::
+
 ### Rigid-body dynamics and continuous collision evaluation {#sec-planning-rigidbody-dynamics}
 
 In classical kinematic motion planning, a trajectory was deemed valid if its spatial swept volume did not intersect obstacle volumes in $\mathcal{C}_{\text{free}}$. In Physical AI systems operating under momentum, however, kinematic reachability is necessary but wholly insufficient. A path can be geometrically clear of obstacles while remaining physically unexecutable: it may demand actuator torques that saturate motor inverters, induce accelerations that tip an underactuated mobile base, or drive current slew rates that trip overcurrent protection. Full **kinodynamic feasibility** requires simultaneous satisfaction of configuration-space obstacle clearance and time-domain dynamical constraints.
@@ -1039,17 +1071,7 @@ In precision robotic joints utilizing high-ratio strain-wave gearing[^fn-strain-
 
 [^fn-strain-wave-gearing]: **Strain-wave (harmonic) gearing**\index{Strain-wave gearing!origin}: In the mechanism @musser1959strain patented, an elliptical wave generator flexes a thin toothed cup, the flexspline, so that it meshes with a rigid ring carrying two more teeth, and each turn of the generator advances the cup by only that difference. The result is a high reduction in one compact stage with almost no backlash. The flexspline is also the joint's main compliance, so the same gearing that multiplies rotor inertia by $N_g^2$ supplies the compliant coupling of the two-inertia model below.
 
-Carrying a full mug makes the role of acceleration changes tangible. Speed alone does not predict spilling: acceleration, jerk, cup geometry, and liquid motion all matter, and @sec-planning-c2-stopping-suffix sizes the mug's deceleration limit. Enforcing $C^2$ continuity removes reference acceleration steps across segment boundaries, while bounding **jerk**\index{Jerk!definition} ($j=\dot a=\dddot x$) limits how rapidly that acceleration changes. Neither property alone guarantees payload retention or transmission life.
-
-::: {#dfn-planning-c-jerk-spline-seam .callout-definition title="C² spline seam"}
-
-A ***$C^2$ spline seam***\index{C2 spline seam@$C^2$ spline seam!definition} is a trajectory junction that enforces continuity through the second time derivative (position, velocity, and acceleration) between adjoining motion segments.
-
-1.  **Significance**: Prevents instantaneous acceleration steps across trajectory chunks, bounding the inertial torque spike $\tau_{\text{step}} = J_{\text{eff}} \Delta\ddot{q}$ demanded from actuators.
-2.  **Distinction**: Distinct from $C^1$ continuity (which matches position and velocity but permits acceleration jumps) and $C^0$ continuity (which matches position but can leave a velocity step).
-3.  **Common pitfall**: Assuming $C^2$ continuity guarantees torque feasibility; while acceleration is continuous, interior velocities, accelerations, or jerks within the blending bridge may still violate physical actuator or clearance limits.
-
-:::
+Carrying a full mug makes the role of acceleration changes tangible. Speed alone does not predict spilling: acceleration, jerk, cup geometry, and liquid motion all matter, and @sec-planning-c2-stopping-suffix sizes the mug's deceleration limit. A junction that matches position, velocity, and acceleration is a **$C^2$ spline seam**\index{C2 spline seam@$C^2$ spline seam!definition}. It removes the reference acceleration step, and with it the torque step $\Delta\tau = J_{\text{eff}}\Delta\ddot q$, while bounding **jerk**\index{Jerk!definition} ($j=\dot a=\dddot x$) limits how rapidly that acceleration changes. Neither property alone guarantees payload retention or transmission life, and a bridge that is continuous at both ends can still exceed a velocity, jerk, torque, or clearance limit in its interior.
 
 The transmission shapes the response to what the drive delivers. For a two-inertia model with load inertia $J_L$, reflected motor inertia $J_{\text{ref}}=N_g^2J_{\text{rotor}}$ (@sec-body-actuator-limits), and coupling stiffness $k_\theta$, the antiresonance and resonance frequencies of this model [@li2024optimal] are $\frac{1}{2\pi}\sqrt{k_\theta/J_L}$ and $\frac{1}{2\pi}\sqrt{k_\theta(1/J_L+1/J_{\text{ref}})}$. In the arm's strain-wave joints, reflected rotor inertia and a compliant transmission can amplify a sharp reference change, so admission needs the joint's identified, load-dependent modes and checks bridge extrema, torque, and drive limits against them. No frequency, stiffness, or jerk range transfers between products without measured parameters.
 
@@ -1156,8 +1178,122 @@ class PlanningSeamInertia:
     t_blend_str = fmt_latency(t_blend, unit=millisecond)
 ```
 
-::: {#nbk-planning-seam-acceleration-jump-reflected-inertia-torque .callout-notebook title="Seam acceleration and torque requests"}
-For a Panda-class strain-wave joint, a CSG-25-50 gear driven by a TQ-RoboDrive ILM 70x18 motor (Franka does not publish the Panda's joint internals, so the example pairs published parts of that torque class), reflected rotor inertia is `{python} PlanningSeamInertia.j_reflected_str`. Correcting a `{python} PlanningSeamInertia.delta_omega_str` reference velocity gap in one `{python} PlanningSeamInertia.dt_tick_str` tick asks for `{python} PlanningSeamInertia.tau_step_str` of inertial torque. Datasheet ratings give `{python} PlanningSeamInertia.tau_rated_str` rated continuous and `{python} PlanningSeamInertia.tau_peak_rated_str` repeated peak torque; this one-tick **request** falls below the rated limit. A symmetric $C^2$ velocity blend over `{python} PlanningSeamInertia.t_blend_str` has `{python} PlanningSeamInertia.tau_mean_str` mean and `{python} PlanningSeamInertia.tau_peak_str` peak inertial torque, a `{python} PlanningSeamInertia.reduction_mult_str` peak-request reduction. Total torque still includes load, gravity, friction, and control response; it needs a full peak and thermal check.
+```{python}
+#| label: calc-planning-quintic-bridge
+#| echo: false
+#| warning: false
+#| message: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ THE SEAM BRIDGE SOLVED AS A QUINTIC: COEFFICIENTS, JERK, AND TORQUE RATE
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: nbk-planning-seam-acceleration-jump-reflected-inertia-torque,
+# │          @sec-planning-quintic-splines, chk-plan-seam-feasibility.
+# │
+# │ Goal:    Instantiate eq-plan-quintic-spline-matrix and eq-plan-quintic-jerk
+# │          for the seam notebook's bridge, and screen the one-tick step and
+# │          the bridge against the arm's torque-rate limit.
+# │ Show:    a3 = 80 rad/s^3, a4 = -800 rad/s^4, a5 = 0; peak acceleration
+# │          6.0 rad/s^2; peak jerk 480 rad/s^3; torque rate 88.1 N m/s
+# │          (8.8 percent of 1,000 N m/s); one-tick step 36,700 N m/s (36.7x);
+# │          halving T: 2.2 N m, 1,920 rad/s^3, 352.3 N m/s.
+# │ How:     Zero boundary accelerations and an endpoint on chunk B's
+# │          reference (position residual dw T / 2); the 3x3 system is solved
+# │          numerically and guarded against its closed form. Torque rate is
+# │          J_refl x jerk (rigid reflected inertia only); the FER torque-rate
+# │          limit (franka2023robot) is applied to the stand-in joint, as in
+# │          calc-planning-time-parameterization.
+# └─────────────────────────────────────────────────────────────────────────────
+import numpy as np
+from mlsysim import *
+from mlsysim.core.units import ureg, millisecond, second, newton, meter, radian, kilogram
+from mlsysim.fmt import check, fmt, fmt_int, fmt_latency, fmt_torque, fmt_torque_rate, fmt_percent, fmt_multiple, fmt_angle, fmt_math
+
+RM = Embodied.MobileManipulator.WarehouseMobileManipulator
+
+class PlanningQuinticBridge:
+    """The seam notebook's C2 bridge as a quintic, with its peak jerk and torque rate."""
+
+    # ┌── 1. LOAD (Constants) ──────────────────────
+    d_omega = PlanningSeamInertia.delta_omega  # category: illustrative; reference velocity gap
+    t_b = PlanningSeamInertia.t_blend  # category: illustrative; bridge duration
+    dt_tick = PlanningSeamInertia.dt_tick  # category: chosen; servo tick
+    j_refl = PlanningSeamInertia.j_reflected  # category: derived; N^2 J_rotor of the stand-in joint
+    tau_step = PlanningSeamInertia.tau_step  # category: derived; one-tick inertial request
+    tau_bridge = PlanningSeamInertia.tau_blend_peak  # category: derived; bridge peak inertial torque
+    taud_max = RM.arm.joint_torque_rate_limit  # category: datasheet; FER torque-rate limit, registry (franka2023robot)
+    t_short = 10 * millisecond  # category: illustrative; compressed bridge in chk-plan-seam-feasibility
+
+    # ┌── 2. EXECUTE (The Compute) ─────────────────
+    _T = t_b.to(second).magnitude
+    _dw = d_omega.to(radian / second).magnitude
+    _A = np.array([[_T**3, _T**4, _T**5], [3 * _T**2, 4 * _T**3, 5 * _T**4], [6 * _T, 12 * _T**2, 20 * _T**3]])
+    _rhs = np.array([_dw * _T / 2, _dw, 0.0])  # position, velocity, acceleration residuals
+    a3, a4, a5 = (float(c) for c in np.linalg.solve(_A, _rhs))
+    pos_res = (_dw * _T / 2) * radian
+    acc_mid = 1.5 * _dw / _T  # rad/s^2 at mid-bridge
+    j_peak = abs(6 * a3)  # rad/s^3 at both ends
+    _j_end = abs(6 * a3 + 24 * a4 * _T + 60 * a5 * _T**2)
+    _jm2 = j_refl.to(kilogram * meter**2).magnitude
+    tau_rate_bridge = (_jm2 * j_peak) * newton * meter / second
+    tau_rate_step = (tau_step / dt_tick).to(newton * meter / second)
+    step_over_limit = (tau_rate_step / taud_max).to("dimensionless").magnitude
+    bridge_share = (tau_rate_bridge / taud_max).to("dimensionless").magnitude
+    tau_half = 2 * tau_bridge
+    j_half = 4 * j_peak
+    tau_rate_half = 4 * tau_rate_bridge
+
+    # ┌── 3. GUARD (Invariants) ────────────────────
+    check(abs(a3 - _dw / _T**2) < 1e-6 and abs(a4 + _dw / (2 * _T**3)) < 1e-3 and abs(a5) < 1e-3, "quintic coefficients disagree with the closed form")
+    check(abs(a3 - 80.0) < 1e-6 and abs(a4 + 800.0) < 1e-3, "quintic coefficients changed")
+    check(abs(_j_end - j_peak) < 1e-6, "bridge jerk no longer symmetric at the ends")
+    check(abs(_jm2 * acc_mid - tau_bridge.to(newton * meter).magnitude) < 1e-9, "quintic peak torque disagrees with the seam cell")
+    check(abs(j_peak - 480.0) < 1e-6, "bridge peak jerk changed")
+    check(abs(tau_rate_bridge.magnitude - 88.08) < 0.01, "bridge torque rate changed")
+    check(abs(tau_rate_step.magnitude - 36700.0) < 5.0, "one-tick torque rate changed")
+    check(step_over_limit > 30 and bridge_share < 0.1, "torque-rate verdicts changed")
+    check(tau_rate_half < taud_max, "half-duration bridge no longer inside the torque-rate limit")
+    _k_short = (t_b / t_short).to("dimensionless").magnitude
+    check(tau_rate_bridge * _k_short**2 > taud_max, "checkpoint: compressed bridge no longer exceeds the torque-rate limit")
+
+    # ┌── 4. OUTPUT (Formatting) ───────────────────
+    a3_math = fmt_math(rf"a_3=\Delta\dot q/T^2={fmt(a3, precision=0)}\ \mathrm{{rad/s^3}}")
+    a4_math = fmt_math(rf"a_4=-\Delta\dot q/(2T^3)={fmt(a4, precision=0)}\ \mathrm{{rad/s^4}}")
+    pos_res_str = fmt_angle(pos_res, precision=3)
+    acc_mid_str = fmt_int(acc_mid, suffix=" rad/s²")
+    j_peak_str = fmt(j_peak, precision=0, suffix=" rad/s³")
+    tau_rate_bridge_str = fmt_torque_rate(tau_rate_bridge, precision=1)
+    taud_max_str = fmt_torque_rate(taud_max, precision=0, commas=True)
+    bridge_share_str = fmt_percent(bridge_share, precision=1, style="prose")
+    tau_rate_step_str = fmt_torque_rate(tau_rate_step, precision=0, commas=True)
+    step_over_mult_str = fmt_multiple(step_over_limit, precision=1)
+    tau_half_str = fmt_torque(tau_half, precision=1)
+    j_half_str = fmt(j_half, precision=0, commas=True, suffix=" rad/s³")
+    tau_rate_half_str = fmt_torque_rate(tau_rate_half, precision=1)
+    t_short_str = fmt_latency(t_short, unit=millisecond)
+```
+
+::: {#nbk-planning-seam-acceleration-jump-reflected-inertia-torque .callout-notebook title="The seam spike"}
+
+**Problem**: At a replanning seam the incoming chunk's reference runs `{python} PlanningSeamInertia.delta_omega_str` faster than the active one. Should the joint close that gap in one servo tick or over a $C^2$ bridge, and what does each ask of the drive?
+
+**Variables**:
+
+- Joint: a CSG-25-50 strain-wave gear driven by a TQ-RoboDrive ILM 70x18 motor, a Panda-class stand-in because Franka does not publish the Panda's joint internals (datasheet parts); reflected rotor inertia $J_{\text{eff}} = N_g^2 J_{\text{rotor}} =$ `{python} PlanningSeamInertia.j_reflected_str` (derived; link and payload inertia excluded)
+- Ratings `{python} PlanningSeamInertia.tau_rated_str` rated and `{python} PlanningSeamInertia.tau_peak_rated_str` repeated peak (datasheet); the arm's torque-rate limit `{python} PlanningQuinticBridge.taud_max_str` (datasheet)
+- Velocity gap $\Delta\dot q =$ `{python} PlanningSeamInertia.delta_omega_str` (illustrative) and servo tick $T_c =$ `{python} PlanningSeamInertia.dt_tick_str` (chosen)
+- Bridge duration $T =$ `{python} PlanningSeamInertia.t_blend_str` (illustrative), zero acceleration at both ends, ending on chunk B's reference, a position residual $\Delta\dot q\,T/2 =$ `{python} PlanningQuinticBridge.pos_res_str` (chosen)
+
+**Math**:
+
+1. **One tick** (@eq-plan-seam-torque): $J_{\text{eff}}\,\Delta\dot q/T_c =$ `{python} PlanningSeamInertia.tau_step_str`, below the rating. Reaching it within the tick needs at least `{python} PlanningSeamInertia.tau_step_str` per `{python} PlanningSeamInertia.dt_tick_str`, or `{python} PlanningQuinticBridge.tau_rate_step_str`, `{python} PlanningQuinticBridge.step_over_mult_str` the torque-rate limit.
+2. **Quintic bridge** (@eq-plan-quintic-spline-matrix): With zero boundary accelerations the system gives $a_5 = 0$, `{python} PlanningQuinticBridge.a4_math`, and `{python} PlanningQuinticBridge.a3_math`.
+3. **Bridge peaks**: Acceleration peaks at mid-bridge at $1.5\,\Delta\dot q/T =$ `{python} PlanningQuinticBridge.acc_mid_str`, a torque of `{python} PlanningSeamInertia.tau_peak_str`. Jerk (@eq-plan-quintic-jerk) peaks at both ends at $6a_3 =$ `{python} PlanningQuinticBridge.j_peak_str`, a torque rate $J_{\text{eff}}\,j$ of `{python} PlanningQuinticBridge.tau_rate_bridge_str`, `{python} PlanningQuinticBridge.bridge_share_str` of the limit.
+4. **Half the duration**: Peak torque scales as $1/T$ and jerk as $1/T^2$, so a bridge half as long needs `{python} PlanningQuinticBridge.tau_half_str`, `{python} PlanningQuinticBridge.j_half_str`, and `{python} PlanningQuinticBridge.tau_rate_half_str`, still inside the limit.
+
+**Result**: The one-tick step passes a torque check and asks for `{python} PlanningQuinticBridge.step_over_mult_str` the torque-rate limit; the bridge passes both with a `{python} PlanningSeamInertia.reduction_mult_str` smaller torque peak.
+
+**Systems insight**: At a seam, torque magnitude is the wrong screen; the rate at which torque must change is what the drive refuses, and for a bridge that rate grows as $1/T^2$. A bridge compressed to fit a late admission therefore pays in jerk quadratically, and the admission check must evaluate the compressed bridge again rather than inherit the nominal one's pass. Link, payload, gravity, and friction torque still come on top and need their own peak and thermal checks.
+
 :::
 
 ::: {#fig-11-action-chunk-seam-continuity fig-env="figure" fig-pos="t" fig-cap="**Seam demand and checked bridge**: Both columns close the same `{python} PlanningSeamInertia.delta_omega_str` reference velocity gap on the notebook's strain-wave joint, with torque drawn to one scale against its datasheet ratings. The one-tick step (left) asks the reflected rotor inertia for `{python} PlanningSeamInertia.tau_step_str`, below the `{python} PlanningSeamInertia.tau_rated_str` rating, so the arithmetic alone does not reject it; the drive's own discontinuity check does. The `{python} PlanningSeamInertia.t_blend_str` $C^2$ bridge (right) peaks at `{python} PlanningSeamInertia.tau_peak_str`, but its interior jerk, full joint torque, and response still require checking." fig-alt="Two columns of stacked plots against time in milliseconds around a trajectory seam. Top row: reference velocity relative to chunk A. On the left it steps from zero to 0.2 radians per second within one millisecond; on the right an S-shaped bridge rises over 50 milliseconds before chunk B continues. Bottom row: inertial torque request on a shared scale with dashed lines for the rated torque of 51 and the repeated peak of 127 newton-meters. On the left a one-millisecond pulse reaches 36.7 newton-meters; on the right a low hump peaks at 1.1 newton-meters."}
@@ -1348,6 +1484,8 @@ class PlanningTimeParam:
     v_peak_jerk = _move["peak_velocity"].to(rad / ureg.second)
     t_extra = (t_jerk - t_opt).to(millisecond)
     extra_ratio = (t_extra / t_opt).to("dimensionless").magnitude
+    t_ramp = (a_bind.magnitude / j_bound.magnitude) * ureg.second  # a / j, one jerk ramp
+    t_hold = (t_jerk / 2 - t_ramp).to(millisecond)  # x in D = a x (x + a/j), T = 2 (x + a/j)
 
     # ┌── 3. GUARD (Invariants) ────────────────────
     check(abs(a_up.magnitude - 40.16) < 0.01, "upward torque-limited acceleration changed")
@@ -1375,6 +1513,8 @@ class PlanningTimeParam:
     t_jerk_str = fmt_latency(t_jerk, unit=millisecond, precision=1)
     t_extra_str = fmt_latency(t_extra, unit=millisecond, precision=1)
     extra_pct_str = fmt_percent(extra_ratio, precision=1, style="prose")
+    t_ramp_str = fmt_latency(t_ramp.to(millisecond), unit=millisecond, precision=1)
+    t_hold_str = fmt_latency(t_hold, unit=millisecond, precision=1)
     ruckig_mean_str = fmt_latency(ruckig_mean, unit=microsecond, precision=1)
     ruckig_worst_str = fmt_latency(ruckig_worst, unit=microsecond)
     ruckig_dofs_str = fmt_int(ruckig_dofs)
@@ -1384,7 +1524,18 @@ class PlanningTimeParam:
 
 **Problem**: The shoulder lifts the rated payload at full planar reach through `{python} PlanningTimeParam.d_q_str`, from rest to rest. How fast can it swing, and what does the fastest timing ask of the drive?
 
-**Math**: Near horizontal the payload's gravity torque stays close to `{python} PlanningOneJointDynamics.tau_grav_str`. The `{python} PlanningOneJointDynamics.tau_max_str` joint limit leaves `{python} PlanningTimeParam.a_up_str` of upward acceleration and `{python} PlanningTimeParam.a_dn_str` of braking on the `{python} PlanningOneJointDynamics.j_eff_str` inertia, an asymmetry that gravity creates. The arm's published `{python} PlanningTimeParam.qdd_max_str` acceleration limit for this joint is tighter than both, so it binds in both directions [@franka2023robot]. Take the joint angle itself as the path parameter ($s = q$, measured from the start). In the phase plane the accelerating curve $\dot s^2 = 2 a s$ meets the braking curve at mid-swing, where speed peaks at `{python} PlanningTimeParam.v_peak_str`, below the `{python} PlanningTimeParam.qd_max_str` velocity limit. The time-optimal swing takes `{python} PlanningTimeParam.t_opt_str`. At the switch point the commanded acceleration reverses from $+a$ to $-a$, a torque step of `{python} PlanningTimeParam.tau_step_str`. The arm's interface limits torque rate to `{python} PlanningTimeParam.taud_max_str`, so that change needs at least `{python} PlanningTimeParam.t_step_str`, which bounds jerk at `{python} PlanningTimeParam.j_bound_str` for this inertia. A rest-to-rest profile that respects the jerk bound takes `{python} PlanningTimeParam.t_jerk_str`.
+**Variables**:
+
+- Swing $\Delta q =$ `{python} PlanningTimeParam.d_q_str` (illustrative), with the joint angle itself as the path parameter ($s = q$, measured from the start)
+- Inertia $J_{\text{eff}} =$ `{python} PlanningOneJointDynamics.j_eff_str` and payload gravity torque $\tau_g =$ `{python} PlanningOneJointDynamics.tau_grav_str`, held at its horizontal value (derived, payload only)
+- Joint limits: torque $\tau_{\max} =$ `{python} PlanningOneJointDynamics.tau_max_str`, acceleration `{python} PlanningTimeParam.qdd_max_str`, velocity `{python} PlanningTimeParam.qd_max_str`, torque rate $\dot\tau_{\max} =$ `{python} PlanningTimeParam.taud_max_str` (datasheet [@franka2023robot])
+
+**Math**:
+
+1. **Binding acceleration**: The torque limit allows $(\tau_{\max}-\tau_g)/J_{\text{eff}} =$ `{python} PlanningTimeParam.a_up_str` upward and $(\tau_{\max}+\tau_g)/J_{\text{eff}} =$ `{python} PlanningTimeParam.a_dn_str` braking, an asymmetry that gravity creates. The published `{python} PlanningTimeParam.qdd_max_str` is tighter than both, so it binds in both directions.
+2. **Time-optimal swing**: The accelerating curve $\dot s^2 = 2as$ meets the braking curve at mid-swing, where speed peaks at $\sqrt{a\,\Delta q} =$ `{python} PlanningTimeParam.v_peak_str`, below the velocity limit. The swing takes $2\sqrt{\Delta q/a} =$ `{python} PlanningTimeParam.t_opt_str`.
+3. **Switch-point step**: Acceleration reverses from $+a$ to $-a$, a torque step $2J_{\text{eff}}a =$ `{python} PlanningTimeParam.tau_step_str`, which needs at least `{python} PlanningTimeParam.t_step_str` at the torque-rate limit. That limit bounds jerk at $\dot\tau_{\max}/J_{\text{eff}} =$ `{python} PlanningTimeParam.j_bound_str`.
+4. **Jerk-limited swing**: A rest-to-rest double-S profile with no cruise covers $\Delta q = a\,x\,(x + a/j)$ in $T = 2(x + a/j)$, where $ax$ is the peak speed. With $a/j =$ `{python} PlanningTimeParam.t_ramp_str`, the swing needs $x =$ `{python} PlanningTimeParam.t_hold_str` and takes `{python} PlanningTimeParam.t_jerk_str`.
 
 **Systems insight**: Respecting the torque rate costs `{python} PlanningTimeParam.t_extra_str`, `{python} PlanningTimeParam.extra_pct_str` of the swing, and removes every torque step. For the payload alone, torque was not the binding limit; the published kinematic limits were, and identified link inertia would narrow the torque margin. A parameterization must carry every bound that can bind, and the time-optimal answer without a jerk bound is not executable.
 
@@ -1489,7 +1640,25 @@ The time-optimal answer is exactly what the seam analysis forbids. Every switch 
 
 The same jerk-limited profile, computed from whatever state the joint is in, answers both the seam and the stop. An **online trajectory generator**\index{Online trajectory generation} takes the current position, velocity, and acceleration of each axis together with a target state, and returns the time-optimal profile that respects per-axis velocity, acceleration, and jerk bounds [@kroger2010online]. Ruckig [@berscheid2021jerk] solves this for arbitrary target states as a sequence of constant-jerk phases, analytically for most profile types and with a bounded polynomial root solver for the rest; its authors measured a mean of `{python} PlanningTimeParam.ruckig_mean_str` and a worst case of `{python} PlanningTimeParam.ruckig_worst_str` for `{python} PlanningTimeParam.ruckig_dofs_str` axes on a desktop processor, fast enough to recompute every control cycle. The contrast with the fixed-duration quintic of @sec-planning-quintic-splines is the point. The quintic chooses $T_{\mathrm{blend}}$ first and may then violate a limit, so the checker must evaluate its extrema and reject it. An online generator chooses the duration so that its kinematic limits hold by construction. The S-curve stop of @sec-planning-c2-stopping-suffix is such a profile with its target at rest.
 
-Construction does not make the output permission. The generator guarantees only the limits it was configured with. Per-axis velocity, acceleration, and jerk bounds say nothing about the coupled torque of @eq-plan-rigidbody-dynamics, the swept clearance, or the age of the evidence that located the target, and a wrong configuration or a generator defect violates exactly the property the construction claims. The measured timing belongs to a desktop processor, not to the safety MCU. A time-optimal parameterization or an online profile is therefore a better proposal, one that should pass admission more often, and the permission path still checks it. Even a candidate that passes every internal and seam check must still provide for a replacement that never arrives.
+Construction does not make the output permission. The generator guarantees only the limits it was configured with. Per-axis velocity, acceleration, and jerk bounds say nothing about the coupled torque of @eq-plan-rigidbody-dynamics, the swept clearance, or the age of the evidence that located the target, and a wrong configuration or a generator defect violates exactly the property the construction claims. The measured timing belongs to a desktop processor, not to the safety MCU. A time-optimal parameterization or an online profile is therefore a better proposal, one that should pass admission more often, and the permission path still checks it.
+
+::: {#chk-plan-seam-feasibility .callout-checkpoint title="Followable motion and the seam"}
+
+A collision-free candidate becomes followable only after its joint rates, its seams, and its timing fit the body's limits.
+
+**Mapping and sampling**
+
+- [ ] **Singularity cost**: Can you explain why the `{python} PlanningTwoLinkArm.v_tool_str` TCP limit bounds no joint speed near a straightened elbow, and what damped least squares gives up to bound the inverse-kinematics step there?
+- [ ] **Contracted limit**: Can you say why two velocity samples inside their limit can bracket an interior over-speed, and when the smaller reserve of a jerk-bounded interpolant may be used?
+
+**Pricing the seam**
+
+- [ ] **Bridge estimate**: If the `{python} PlanningSeamInertia.t_blend_str` bridge of \ref{nbk-planning-seam-acceleration-jump-reflected-inertia-torque} must shrink to `{python} PlanningQuinticBridge.t_short_str` to fit a late admission, estimate its peak inertial torque and peak torque rate, and decide whether it still fits the arm's `{python} PlanningQuinticBridge.taud_max_str` torque-rate limit.
+- [ ] **Executable timing**: Why does the time-optimal swing ask the drive for a step it refuses, and what does a jerk bound cost the shoulder swing in time?
+
+:::
+
+Even a candidate that passes every internal and seam check must still provide for a replacement that never arrives.
 
 ## Behavior at the Seam {#sec-planning-behavior-seam}
 
@@ -1503,6 +1672,18 @@ The two deadlines call for two different stops:
 
 -   **Matched stop suffix (planned termination at $t = t_{\mathrm{commit}}$):** A pre-computed, jerk-limited $C^2$ slowdown along the admitted path, anchored specifically at the nominal state expected at $t_{\mathrm{commit}}$, certified at admission to satisfy $d_{\text{stop}} \le d_{\text{clear}}$. If no successor is admitted before the earlier admission cutoff, the controller dispatches the stop early enough that the body smoothly transfers to this pre-latched suffix at commitment, decelerating to rest without requiring runtime replanning.
 -   **State-matched fallback (reactive termination at $t < t_{\mathrm{commit}}$):** If the high-rate chunk lease lapses, the parent intent expires, or a runtime safety monitor detects an unmodeled obstacle or torque fault *before* reaching $t_{\mathrm{commit}}$, the robot cannot use the matched stop suffix (which is anchored at the future state $t_{\mathrm{commit}}$). Instead, the MCU selects or constructs a validated state-matched fallback from current state estimates $(q, \dot{q}, \ddot{q})$ within reserved clearance. Encoder-derived velocity and acceleration have their own error bounds; bounded polynomial evaluation does not eliminate sensing, dispatch, or actuator response delay.
+
+Both are instances of one object that every admitted trajectory must carry.
+
+::: {#dfn-planning-stopping-suffix .callout-definition title="Stopping suffix"}
+
+***Stopping suffix***\index{Stopping suffix!definition} is the bounded continuation, checked and latched with a trajectory at admission, that brings the machine from a declared entry state to rest along the already-checked path, within the clearance that remains and without further input from the proposer.
+
+1.  **Significance**: It is the term that makes $d_{\text{stop}} \le d_{\text{clear}}$ checkable before motion begins. From the arm's `{python} PlanningLeaseRule.v_arm_str` TCP limit, the worked suffix travels `{python} PlanningLeaseRule.arm_stop_dist_str` of the `{python} PlanningLeaseRule.d_arm_clear_str` clearance, so the stop alone claims nearly half the room before any response delay is charged.
+2.  **Distinction**: The matched suffix is anchored at the nominal state expected at $t_{\mathrm{commit}}$; the state-matched fallback is built from the measured state when authority ends earlier. Both are controlled stops along the checked path, unlike a drive inhibit or brake, whose motion is not planned.
+3.  **Common pitfall**: Treating the last nominal setpoint, or a hold at the final position, as the stop. A hold is not a deceleration profile, and a suffix sized with constant deceleration understates the distance any drive that ramps its deceleration will travel.
+
+:::
 
 For the running mug reach, a stalled proposer expires the shared lease `{python} PlanningLeaseRule.t_lease_str` after the last admission. The MCU then requests its state-matched fallback; physical onset follows the separately budgeted response delay. All timeout checks use the MCU monotonic clock. The longer-lease comparison isolates the geometric limit: even with tracking evidence continually renewed, the controller must dispatch the matched stop early enough to begin at commitment. A host progress report changes neither cutoff. Both stops also inherit the seam's continuity requirement, and that requirement fixes their shape and therefore their length.
 
@@ -1676,7 +1857,98 @@ class PlanningC2Stop:
 
 In the alternate longer-lease arm case, the blend deadline is `{python} PlanningC2Stop.t_blend_str`, matched commitment `{python} PlanningC2Stop.t_commit_str`, nominal setpoint end `{python} PlanningC2Stop.t_plan_exp_str`, and stop end `{python} PlanningC2Stop.t_stop_end_str`, so the stop lasts `{python} PlanningC2Stop.t_arm_stop_str`. At the arm's `{python} PlanningC2Stop.v_arm_str` Tool Center Point (TCP) speed limit, the S-curve suffix with a `{python} PlanningC2Stop.a_arm_peak_str` deceleration bound and a `{python} PlanningC2Stop.j_arm_str` jerk bound travels `{python} PlanningC2Stop.arm_stop_dist_str`, against `{python} PlanningC2Stop.arm_poly_dist_str` for the polynomial of @eq-plan-c2-polynomial-stop with the same peaks. Clearance is last checked at the blend deadline, so the cruise from `{python} PlanningC2Stop.t_blend_str` to physical brake onset at `{python} PlanningC2Stop.t_commit_str` is charged against that clearance and uses `{python} PlanningC2Stop.arm_cruise_str`; the full `{python} PlanningC2Stop.arm_total_str` leaves `{python} PlanningC2Stop.arm_margin_str` of the `{python} PlanningC2Stop.d_arm_clear_str` obstacle clearance. Sensing and model error must still come out of that geometric margin. The stated `{python} PlanningC2Stop.t_commit_str` is **physical suffix onset**, so the MCU must close replacement admission and pretrigger any communication or actuator delay $\delta$ by that instant minus $\delta$. If it does not, add $v_c\delta$ of travel and shift the stop end; the `{python} PlanningC2Stop.arm_margin_str` margin is then smaller. Nominal setpoints end at `{python} PlanningC2Stop.t_plan_exp_str` while MCU STOP continues to `{python} PlanningC2Stop.t_stop_end_str`, and the case assumes that fresh target evidence keeps TRACK valid until stop dispatch (@sec-planning-goal-to-trajectory).
 
-A stall on this machine never reaches commitment. One permission tick, one bus cycle, and brake onset, `{python} PlanningLeaseRule.t_dispatch_str` together, put the arm's stop onset `{python} PlanningLeaseRule.t_lease_path_str` after the last admission, or `{python} PlanningLeaseRule.d_lease_path_str` of travel at the TCP limit. The illustration charges the registered base onset allowance conservatively to the arm; qualification must establish the arm's actual response. From zero-acceleration cruise the S-curve matches the arm at whatever instant it starts, and it slows the tool along the path already checked, so the state-matched fallback travels the same `{python} PlanningLeaseRule.arm_stop_dist_str` as the matched stop suffix. The renewal-to-onset path therefore uses `{python} PlanningLeaseRule.lease_total_str` of the `{python} PlanningLeaseRule.d_arm_clear_str` clearance and leaves `{python} PlanningLeaseRule.lease_margin_str`. The alternate schedule leaves `{python} PlanningLeaseRule.commit_margin_str` measured from its later clearance check; the two margins have different evidence epochs. The `{python} PlanningLeaseRule.t_alt_admission_cutoff_str` alternate admission cutoff is an absolute schedule offset; it is not a maximum lease duration justified by the running case's clearance at admission. That lease must fit its own evidence age, response travel, stop, and uncertainty reserve.
+A stall on this machine never reaches commitment, because the chunk lease lapses first. From zero-acceleration cruise the S-curve matches the arm at whatever instant it starts, and it slows the tool along the path already checked, so the state-matched fallback travels the same distance as the matched stop suffix.
+
+```{python}
+#| label: calc-planning-stall-runway
+#| echo: false
+#| warning: false
+#| message: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ THE STALL RUNWAY: LEASE PATH PLUS S-CURVE STOP FOR THE ARM
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: nbk-planning-stall-runway in @sec-planning-c2-stopping-suffix.
+# │
+# │ Goal:    Put the arm's stall arithmetic on the page: response path, the
+# │          S-curve branch test and its two terms, and the remaining margin.
+# │ Show:    60 + 1 + 1 + 20 = 82 ms, 82 mm; a^2/j = 0.375 m/s < 1.0 m/s;
+# │          100 + 37.5 = 137.5 mm in 200 + 75 = 275 ms; 219.5 of 300 mm,
+# │          80.5 mm left; response path 59.6 percent of the stop; the margin
+# │          equals 80.5 ms of further lease at the TCP limit.
+# │ How:     Reads PlanningLeaseRule; the two S-curve terms are
+# │          eq-plan-c2-stopping-suffix and are guarded against
+# │          calc_scurve_stop_distance / calc_scurve_stop_time.
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim.core.units import ureg, millisecond
+from mlsysim.fmt import check, fmt_latency, fmt_length, fmt_velocity, fmt_acceleration, fmt_jerk, fmt_percent
+
+class PlanningStallRunway:
+    """Worked stall case for the arm: lease path, S-curve stop, and margin."""
+
+    # ┌── 1. LOAD (Constants) ──────────────────────
+    LR = PlanningLeaseRule  # category: derived; calc-planning-lease-rule
+    v = LR.v_arm  # category: chosen; TCP limit, registry
+    a = LR.a_arm_stop  # category: illustrative; arm stop deceleration bound
+    j = LR.j_arm_stop  # category: derived; reference polynomial's peak jerk
+
+    # ┌── 2. EXECUTE (The Compute) ─────────────────
+    v_thresh = (a**2 / j).to(ureg.meter / ureg.second)
+    d_brake = (v**2 / (2 * a)).to(ureg.millimeter)
+    d_ramp = (v * a / (2 * j)).to(ureg.millimeter)
+    t_brake = (v / a).to(millisecond)
+    t_ramp = (a / j).to(millisecond)
+    path_share = (LR.d_lease_path / LR.arm_stop_dist).to("dimensionless").magnitude
+    t_margin = (LR.lease_margin / v).to(millisecond)
+
+    # ┌── 3. GUARD (Invariants) ────────────────────
+    check(v >= v_thresh, "arm stop no longer reaches the deceleration bound (plateau branch)")
+    check(abs((d_brake + d_ramp - LR.arm_stop_dist).to(ureg.millimeter).magnitude) < 1e-9, "S-curve terms disagree with calc_scurve_stop_distance")
+    check(abs((t_brake + t_ramp - LR.t_arm_stop).to(millisecond).magnitude) < 1e-9, "S-curve times disagree with calc_scurve_stop_time")
+    check(abs(d_brake.magnitude - 100.0) < 1e-9 and abs(d_ramp.magnitude - 37.5) < 1e-9, "stall-runway stop terms changed")
+    check(abs(path_share - 82.0 / 137.5) < 1e-9, "response-path share changed")
+    check(abs(t_margin.magnitude - 80.5) < 1e-9, "margin in lease milliseconds changed")
+
+    # ┌── 4. OUTPUT (Formatting) ───────────────────
+    t_tick_str = fmt_latency(LR.t_tick.to(millisecond), unit=millisecond)
+    t_bus_str = fmt_latency(LR.t_bus.to(millisecond), unit=millisecond)
+    t_onset_str = fmt_latency(LR.t_onset.to(millisecond), unit=millisecond)
+    a_str = fmt_acceleration(a)
+    j_str = fmt_jerk(j, precision=1)
+    v_thresh_str = fmt_velocity(v_thresh, precision=3)
+    d_brake_str = fmt_length(d_brake, unit=ureg.millimeter)
+    d_ramp_str = fmt_length(d_ramp, unit=ureg.millimeter, precision=1)
+    t_brake_str = fmt_latency(t_brake, unit=millisecond)
+    t_ramp_str = fmt_latency(t_ramp, unit=millisecond)
+    t_stop_str = fmt_latency(LR.t_arm_stop, unit=millisecond)
+    path_share_str = fmt_percent(path_share, precision=1, style="prose")
+    t_margin_str = fmt_latency(t_margin, unit=millisecond, precision=1)
+```
+
+::: {#nbk-planning-stall-runway .callout-notebook title="The stall runway"}
+
+**Problem**: The proposer stalls while the arm reaches at its TCP limit, and no replacement is admitted. How much of the obstacle clearance does the arm use between its last admission and rest, and how much remains?
+
+**Variables**:
+
+- Chunk lease $t_{\mathrm{lease}} =$ `{python} PlanningLeaseRule.t_lease_str` (chosen); permission tick `{python} PlanningStallRunway.t_tick_str` (derived) and bus cycle `{python} PlanningStallRunway.t_bus_str` (illustrative); onset `{python} PlanningStallRunway.t_onset_str` (illustrative, the base's registered brake onset charged conservatively to the arm)
+- Speed $v =$ `{python} PlanningLeaseRule.v_arm_str` (chosen, TCP limit)
+- Deceleration bound $a_{\max} =$ `{python} PlanningStallRunway.a_str` (illustrative) and jerk bound $j_{\max} =$ `{python} PlanningStallRunway.j_str` (derived, the peak jerk of @eq-plan-c2-polynomial-stop at the same peak)
+- Clearance $d_{\text{clear}} =$ `{python} PlanningLeaseRule.d_arm_clear_str` (illustrative)
+
+**Math**:
+
+1. **Response path**: `{python} PlanningLeaseRule.t_lease_str` $+$ `{python} PlanningStallRunway.t_tick_str` $+$ `{python} PlanningStallRunway.t_bus_str` $+$ `{python} PlanningStallRunway.t_onset_str` $=$ `{python} PlanningLeaseRule.t_lease_path_str` from last admission to stop onset, which is `{python} PlanningLeaseRule.d_lease_path_str` at $v$.
+2. **Branch test** (@eq-plan-c2-stopping-suffix): $a_{\max}^2/j_{\max} =$ `{python} PlanningStallRunway.v_thresh_str`, below $v$, so the stop reaches $a_{\max}$.
+3. **Stop**: $v^2/2a_{\max} + v\,a_{\max}/2j_{\max} =$ `{python} PlanningStallRunway.d_brake_str` $+$ `{python} PlanningStallRunway.d_ramp_str` $=$ `{python} PlanningLeaseRule.arm_stop_dist_str`, in $v/a_{\max} + a_{\max}/j_{\max} =$ `{python} PlanningStallRunway.t_brake_str` $+$ `{python} PlanningStallRunway.t_ramp_str` $=$ `{python} PlanningStallRunway.t_stop_str`.
+4. **Clearance**: `{python} PlanningLeaseRule.d_lease_path_str` $+$ `{python} PlanningLeaseRule.arm_stop_dist_str` $=$ `{python} PlanningLeaseRule.lease_total_str` of `{python} PlanningLeaseRule.d_arm_clear_str`.
+
+**Result**: The stall leaves `{python} PlanningLeaseRule.lease_margin_str` of geometric margin, before sensing and model reserves.
+
+**Systems insight**: The travel before the stop begins is `{python} PlanningStallRunway.path_share_str` of the stop itself, and at this speed every millisecond of lease costs a millimeter. The remaining margin equals only `{python} PlanningStallRunway.t_margin_str` of further lease, so the lease length is a term of $d_{\text{stop}} \le d_{\text{clear}}$ exactly as the deceleration bound is.
+
+:::
+
+Qualification must establish the arm's actual response in place of the charged onset allowance. The alternate schedule leaves `{python} PlanningLeaseRule.commit_margin_str` measured from its later clearance check; the two margins have different evidence epochs. The `{python} PlanningLeaseRule.t_alt_admission_cutoff_str` alternate admission cutoff is an absolute schedule offset; it is not a maximum lease duration justified by the running case's clearance at admission. That lease must fit its own evidence age, response travel, stop, and uncertainty reserve.
 
 ```{python}
 #| label: calc-planning-mug-spill
@@ -1766,7 +2038,7 @@ Such a state has a precise definition. Classical path planning treats obstacle a
 [^fn-ics-viability-kernel]: **Inevitable collision states and viability**\index{Viability kernel!inevitable collision states}: Within the free states, the complement of the ICS set is what @aubin1991viability calls the viability kernel, the states from which some admissible control keeps the system inside its constraints forever. Planning must therefore keep the commitment state inside that kernel, not merely outside the obstacle, and against static obstacles a verified stop to rest is the witness that it is there.
 
 The commitment deadline $t_{\mathrm{commit}}$ and the certified stopping suffix are co-designed precisely so that the machine initiates braking *before* its dynamic state enters an Inevitable Collision State $\text{ICS}(\mathcal{X}_{\text{obs}})$. If an action chunk's stopping suffix requires distance $d_{\text{stop}} > d_{\text{clear}}$, that suffix cannot justify admitting the chunk. Failure of this particular stop does not establish that every admissible maneuver collides, as the definition of an inevitable collision state requires. The architecture nevertheless refuses the proposal because it lacks the independently executable stop on which its permission depends. The safety microcontroller therefore enforces the hard admission invariant:
-$$d_{\text{stop}}(t_{\mathrm{commit}}) \le d_{\text{clear}}(t_{\mathrm{commit}})$$
+$$d_{\text{stop}}(t_{\mathrm{commit}}) \le d_{\text{clear}}(t_{\mathrm{commit}})$$ {#eq-plan-commitment-invariant}
 If the controller delays braking past commitment in the hope that an overdue neural replanner will deliver an evasive path, physical momentum can carry the machine into an ICS from which no admissible control input can prevent impact.
 
 ::: {#dfn-planning-inevitable-collision-state .callout-definition title="Inevitable collision state"}
@@ -2384,6 +2656,25 @@ Whether the body can follow a candidate is a separate question from whether the 
 
 The running machine's `{python} PlanningLeaseRule.t_lease_str` lease stops a stalled proposal stream through a state-matched response, leaving an illustrative `{python} PlanningLeaseRule.lease_margin_str` before sensing and model uncertainty. The alternate longer-lease case teaches a different limit: replacement admission closes by `{python} PlanningLeaseRule.t_alt_admission_cutoff_str` to permit physical stop onset at `{python} PlanningArmTimeline.t_commit_str`. Both cases preserve the same obligation to reserve response travel and the entire stop. On the base, even the jerk-limited S-curve, the shortest stop the load tolerates, raises the drive-limit stopping budget to `{python} PlanningC2Stop.total_new_str`, beyond the `{python} PlanningC2Stop.d_clear_str` rack-end clearance, making the runtime speed decision unavoidable.
 
+@Tbl-11-key-equations collects the equations that carry these decisions, what each bounds or decides, and where each is derived.
+
+| Equation | What it bounds or decides | Derived in |
+|:---|:---|:---|
+| $\Delta\mathbf{q}_\lambda = \mathbf{J}^T(\mathbf{J}\mathbf{J}^T+\lambda^2\mathbf{I})^{-1}\Delta\mathbf{x}$ | The inverse-kinematics step near a singularity, capped at $v/(2\lambda)$ at the price of tool error | @eq-plan-dls-ik |
+| $L = t_{\text{age}} + \Delta_{\text{da}}$ | Replacement latency from capture to admission, which the renewal schedule must absorb | @eq-plan-replacement-latency |
+| $\epsilon \le \epsilon_{\mathrm{mission}}/K$ | The per-handoff tail that a mission target implies, far beyond $P_{99}$ | @eq-plan-union-bound |
+| $T_{\mathrm{record}} \ge T_{\mathrm{request}} + Q_{1-\epsilon}(L) + T_{\mathrm{reserve}} + T_{\mathrm{stop}}$ | The time a record must cover, stop included | @eq-plan-action-chunk-horizon |
+| $\boldsymbol{\tau} = \mathbf{M}\ddot{\mathbf{q}} + \mathbf{C}\dot{\mathbf{q}} + \mathbf{g} - \mathbf{J}^T\mathbf{F}_{\text{ext}}$ | The torque a planned motion demands, evaluated by inverse dynamics at admission | @eq-plan-rigidbody-dynamics |
+| $\lvert\dot q_k\rvert \le v_{\max} - \tfrac{1}{2}a_{\max}T_s$ | A sampled velocity limit that still holds between samples | @eq-plan-contracted-velocity-limit |
+| $\tau_{\mathrm{request}} = J_{\mathrm{eff}}\,\Delta\dot q/T_c$ | The torque a seam's velocity step asks of the reflected inertia | @eq-plan-seam-torque |
+| $j(t) = 6a_3 + 24a_4t + 60a_5t^2$ | The jerk of a quintic bridge, whose extrema the checker evaluates in closed form | @eq-plan-quintic-jerk |
+| $V_{\mathrm{bus}} \ge L\,dI_q/dt + RI_q + K_b\omega$ | Whether the drive has the voltage for the current slew a bridge demands | @eq-plan-inverter-headroom |
+| $\boldsymbol{\tau} = \mathbf{a}(s)\ddot s + \mathbf{b}(s)\dot s^2 + \mathbf{c}(s)$ | The path accelerations the torque limits allow, and so the fastest timing of a path | @eq-plan-path-torque |
+| $d_{\text{stop}} = v^2/2a_{\max} + v\,a_{\max}/2j_{\max}$ | The shortest stop within deceleration and jerk bounds, above the plateau speed $a_{\max}^2/j_{\max}$ | @eq-plan-c2-stopping-suffix |
+| $d_{\text{stop}}(t_{\mathrm{commit}}) \le d_{\text{clear}}(t_{\mathrm{commit}})$ | Whether a trajectory may be admitted at all | @eq-plan-commitment-invariant |
+
+: **Key equations of trajectory planning**: Each load-bearing equation of the chapter, the limit it bounds or the decision it settles, and the equation where it is derived. {#tbl-11-key-equations tbl-colwidths="[40,42,18]"}
+
 ::: {.callout-takeaways title="Timed motion and independent stopping"}
 
 * **Prediction is not execution authority**: A long predicted path can support short, repeatedly checked prefixes. Renewal cadence determines request throughput; target evidence retains its own capture-based age.
@@ -2414,6 +2705,146 @@ For further reading, six works trace the lineage from classical planning to lear
 - @kroger2010online sets out online trajectory generation, computing a limit-respecting profile from whatever state the robot is in at each control cycle.
 - @lynch2017modern develops configuration space, kinematics, dynamics, time scaling, and motion planning in one notation, and is the natural companion to @sec-appendix-control-kinematics.
 - @chi2024diffusionpolicy describes diffusion policies, including receding-horizon execution of predicted action sequences, the proposer whose seams and stops this chapter checks.
+
+## Problems {#sec-planning-problems}
+
+```{python}
+#| label: calc-planning-problems
+#| echo: false
+#| warning: false
+#| message: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ GIVENS FOR THE END-OF-CHAPTER PROBLEMS (LEGO)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @sec-planning-problems.
+# │
+# │ Goal:    Hold the givens the problems add to the chapter's cells and guard
+# │          each problem's intended answer, which the text does not print.
+# │ Show:    the machine's 20 Hz renewal; faster validation and inference;
+# │          FER joint-2 acceleration and jerk limits; an accelerating incoming
+# │          chunk and a 25 ms bridge; the logistics AMR's limits; a late
+# │          arrival at 270 ms and a 20 ms compressed bridge.
+# │ How:     Registry reads (WarehouseMobileManipulator, WarehouseAisle,
+# │          AMR.LogisticsAMR, FramelessMotor.TQ_ILM70x18) plus the earlier
+# │          cells; answers recomputed in the private solutions.
+# └─────────────────────────────────────────────────────────────────────────────
+import math
+import numpy as np
+from mlsysim import *
+from mlsysim.core.units import ureg, millisecond, second
+from mlsysim.fmt import (
+    check, fmt, fmt_frequency, fmt_latency, fmt_velocity, fmt_acceleration, fmt_length,
+    fmt_torque_constant, fmt_inductance, fmt_voltage, fmt_int, MarkdownStr,
+)
+
+RM = Embodied.MobileManipulator.WarehouseMobileManipulator
+AISLE = Embodied.Scenario.WarehouseAisle
+AMR = Embodied.AMR.LogisticsAMR
+MOTOR = Actuators.FramelessMotor.TQ_ILM70x18
+
+class PlanningProblems:
+    """Givens that the chapter's problems add beyond the worked examples."""
+
+    # ┌── 1. LOAD (Constants) ──────────────────────
+    f_renew = RM.chunk_rate  # category: chosen; chunk renewal rate, registry
+    t_validate_fast = 5 * millisecond  # category: illustrative; faster whole-plan validation (P2)
+    t_infer_fast = 20 * millisecond  # category: illustrative; faster chunk inference (P2)
+    qdd2 = RM.arm.joint_acceleration_limits[1]  # category: datasheet; FER joint 2, registry (franka2023robot)
+    jerk2 = RM.arm.joint_jerk_limits[1]  # category: datasheet; FER joint 2, registry (franka2023robot)
+    qdd_in = 2.0 * ureg.radian / second**2  # category: illustrative; incoming chunk's acceleration at the seam (P5)
+    t_bridge_short = 25 * millisecond  # category: illustrative; bridge duration (P5)
+    kt_motor = MOTOR.torque_constant  # category: datasheet; TQ-RoboDrive ILM 70x18, registry
+    l_motor = MOTOR.terminal_inductance  # category: datasheet
+    v_motor = MOTOR.rated_voltage  # category: datasheet
+    n_gear = Actuators.PandaClassJoint.CSG_25_50_ILM70x18.gear_ratio  # category: datasheet
+    v_amr = AMR.max_velocity  # category: illustrative; logistics AMR drive limit, registry
+    a_amr = AMR.max_acceleration  # category: illustrative; used as its braking bound (P7)
+    f_amr = AMR.control_frequency  # category: illustrative; registry
+    t_arrival = 270 * millisecond  # category: illustrative; late candidate on the alternate schedule (P9)
+    t_bridge_late = 20 * millisecond  # category: illustrative; compressed bridge (P9)
+
+    # ┌── 2. EXECUTE (Compute) ─────────────────────
+    # Intended answers, guarded here and recomputed in the private solutions.
+    _K = round((PlanningMissionExposure.t_mission * f_renew).to("dimensionless").magnitude)
+    _t_test_h = (3 * _K / PlanningMissionExposure.eps_mission / f_renew).to(ureg.hour).magnitude
+    _L = PlanningReplacementLedger.t_sum
+    _renew = PlanningLeaseRule.t_renew
+    _inflight = math.ceil((_L / _renew).to("dimensionless").magnitude)
+    _inflight_inf = math.ceil(((_L - PlanningReplacementLedger.t_infer + t_infer_fast) / _renew).to("dimensionless").magnitude)
+    _inflight_val = math.ceil(((_L - PlanningReplacementLedger.t_validate + t_validate_fast) / _renew).to("dimensionless").magnitude)
+    _s = PlanningTwoLinkArm.sig_bad
+    _v = PlanningTwoLinkArm.v_tool.to(ureg.meter / second).magnitude
+    _lam = math.sqrt(_s * _v / PlanningTwoLinkArm.qd_max.magnitude - _s**2)
+    _T = t_bridge_short.to(second).magnitude
+    _dw = PlanningSeamInertia.delta_omega.to(ureg.radian / second).magnitude
+    _A = np.array([[_T**3, _T**4, _T**5], [3 * _T**2, 4 * _T**3, 5 * _T**4], [6 * _T, 12 * _T**2, 20 * _T**3]])
+    _c3, _c4, _c5 = np.linalg.solve(_A, np.array([_dw * _T / 2, _dw, qdd_in.magnitude]))
+    _ts = np.linspace(0, _T, 20001)
+    _a_pk = float(np.max(np.abs(6 * _c3 * _ts + 12 * _c4 * _ts**2 + 20 * _c5 * _ts**3)))
+    _j_pk = max(abs(6 * _c3), abs(6 * _c3 + 24 * _c4 * _T + 60 * _c5 * _T**2))
+    _v_fit = calc_scurve_max_permitted_velocity(PlanningLeaseRule.d_arm_clear, PlanningLeaseRule.t_lease_path, PlanningLeaseRule.a_arm_stop, PlanningLeaseRule.j_arm_stop)
+    _j_amr = calc_c2_stop_suffix(v_amr, a_amr)["peak_jerk"]
+    _d_amr = calc_scurve_stop_distance(v_amr, a_amr, _j_amr)
+    _v_amr_fit = calc_scurve_max_permitted_velocity(AISLE.d_clear, AISLE.tau_delay, a_amr, _j_amr, AISLE.delta_loc, AISLE.delta_margin)
+    _t_done = t_arrival + PlanningReplacementLedger.t_validate
+
+    # ┌── 3. GUARD (Invariants) ────────────────────
+    check(_K == 12000 and abs(_t_test_h - 500.0) < 1e-6, "Problem 1 handoffs or test duration")
+    check((_inflight, _inflight_val, _inflight_inf) == (3, 3, 2), "Problem 2 requests in flight")
+    check(abs(_lam - 0.1071) < 2e-3, "Problem 3 damping length")
+    check(jerk2 <= 4 * qdd2 / (1 * millisecond) and jerk2 > 4 * qdd2 / RM.chunk_step, "Problem 4 jerk condition at the two periods")
+    check(_a_pk > qdd2.magnitude and _j_pk * PlanningSeamInertia.j_reflected.magnitude < RM.arm.joint_torque_rate_limit.magnitude, "Problem 5 verdicts")
+    check(_v_fit > PlanningTwoLinkArm.v_tool, "Problem 6: clearance no longer above the TCP limit")
+    check(_v_amr_fit < v_amr and _d_amr > v_amr**2 / (2 * a_amr), "Problem 7 derate")
+    check(_t_done > PlanningLeaseRule.t_alt_admission_cutoff, "Problem 9: validation no longer misses the cutoff")
+    check(PlanningLeaseRule.t_alt_admission_cutoff > t_arrival > PlanningArmTimeline.t_blend, "Problem 9 arrival order")
+
+    # ┌── 4. OUTPUT (Formatting) ───────────────────
+    f_renew_str = fmt_frequency(f_renew)
+    t_validate_fast_str = fmt_latency(t_validate_fast, unit=millisecond)
+    t_infer_fast_str = fmt_latency(t_infer_fast, unit=millisecond)
+    qdd2_str = fmt(qdd2.magnitude, precision=1, suffix=" rad/s²")
+    jerk2_str = fmt(jerk2.magnitude, precision=0, commas=True, suffix=" rad/s³")
+    qdd_in_str = fmt(qdd_in.magnitude, precision=0, suffix=" rad/s²")
+    t_bridge_short_str = fmt_latency(t_bridge_short, unit=millisecond)
+    kt_motor_str = fmt_torque_constant(kt_motor, precision=3)
+    l_motor_str = fmt_inductance(l_motor, precision=2)
+    v_motor_str = fmt_voltage(v_motor, precision=0)
+    n_gear_str = fmt_int(n_gear)
+    amr_name_str = MarkdownStr(AMR.name)
+    v_amr_str = fmt_velocity(v_amr, precision=1)
+    a_amr_str = fmt_acceleration(a_amr, precision=1)
+    f_amr_str = fmt_frequency(f_amr)
+    tau_delay_str = fmt_latency(AISLE.tau_delay.to(millisecond), unit=millisecond, precision=1)
+    delta_loc_str = fmt_length(AISLE.delta_loc, unit=ureg.millimeter)
+    delta_margin_str = fmt_length(AISLE.delta_margin, unit=ureg.millimeter)
+    t_arrival_str = fmt_latency(t_arrival, unit=millisecond)
+    t_bridge_late_str = fmt_latency(t_bridge_late, unit=millisecond)
+```
+
+These problems use the running machine's parameters from this chapter's worked examples, with values marked illustrative standing in for measurements as they do there. Each problem names the decision it requires. The tags give the kind of work, from computation through design to critique, and the learning objectives, counted in order, that each problem assesses.
+
+1. **[Compute, LO1] Exposure at the machine's own cadence.** Repeat \ref{nbk-planning-handoff-exposure-wall} for this machine, which renews its chunk at `{python} PlanningProblems.f_renew_str`, over the same `{python} PlanningMissionExposure.t_mission_str` mission and `{python} PlanningMissionExposure.eps_mission_math`. Find the handoff count, the expected late handoffs against a $P_{99}$ budget, and the per-handoff design target of @eq-plan-union-bound. Using the zero-failure bound of @sec-evaluation-closed-loop-survival, estimate how many hours of loaded operation would be needed to demonstrate that target by test. Decide whether the target should be established by test or made harmless by design, and name the assumption of the calculation most likely to fail in service.
+
+2. **[Compute, LO1] Requests in flight and evidence age.** With the `{python} PlanningReplacementLedger.t_sum_str` replacement latency and the `{python} PlanningLeaseRule.t_renew_str` renewal period, find the smallest number of replacement requests that must be in flight to sustain the renewal cadence, assuming each stage has the capacity overlap requires. Repeat with whole-plan validation cut from `{python} PlanningReplacementLedger.t_validate_str` to `{python} PlanningProblems.t_validate_fast_str`, and separately with inference cut from `{python} PlanningReplacementLedger.t_infer_str` to `{python} PlanningProblems.t_infer_fast_str`. Then find the age of the oldest observation behind any executed setpoint just before the next admission, and just before a lease lapse, and the tool travel at the `{python} PlanningTwoLinkArm.v_tool_str` TCP limit that rests on that evidence. Decide which of the two speedups is worth pursuing, and why neither changes what an executed prefix may rely on.
+
+3. **[Compute, LO2] Damping for the joint limit.** At the `{python} PlanningTwoLinkArm.q2_bad_str`° elbow of @fig-11-two-link-singularity, find the damping length $\lambda$ at which the damped weakest-direction command for a `{python} PlanningTwoLinkArm.v_tool_str` request (@eq-plan-dls-ik) just meets the `{python} PlanningTwoLinkArm.qd_max_str` joint limit, and the fraction of the requested tool motion it then realizes. Apply the same $\lambda$ at the `{python} PlanningTwoLinkArm.q2_good_str`° elbow and compare the realized fraction with that of the chapter's `{python} PlanningDLSStep.lam_str`. Find also the tool speed the exact inverse allows at the straightened elbow within the joint limit. Decide between a fixed large damping, damping that grows only near the singularity, and slowing the tool.
+
+4. **[Compute, LO3] The contracted limit at two sample periods.** The arm's shoulder joint has a `{python} PlanningProblems.qdd2_str` acceleration limit, a `{python} PlanningTwoLinkArm.qd_max_str` velocity limit, and a `{python} PlanningProblems.jerk2_str` jerk limit. Using @eq-plan-contracted-velocity-limit, find the velocity reserve for a checker sampling at the `{python} PlanningOpeningMachine.f_track_str` loop and at the `{python} PlanningArmTimeline.t_period_str` setpoint period, each as a share of the velocity limit. For each period, decide whether the published jerk limit entitles the checker to the smaller reserve of a jerk-bounded interpolant.
+
+5. **[Compute, LO3, LO4] A bridge into an accelerating chunk.** Repeat the quintic of \ref{nbk-planning-seam-acceleration-jump-reflected-inertia-torque}, keeping the `{python} PlanningSeamInertia.delta_omega_str` velocity gap, chunk A's zero acceleration, and the $\Delta\dot q\,T/2$ position residual, but let the incoming chunk accelerate at `{python} PlanningProblems.qdd_in_str` at its join and shorten the bridge to `{python} PlanningProblems.t_bridge_short_str`. Solve @eq-plan-quintic-spline-matrix for $a_3$, $a_4$, $a_5$, locate the jerk extrema of @eq-plan-quintic-jerk, and find the peak acceleration, the peak torque rate on the reflected inertia, and the drive's current slew and $L\,dI_q/dt$ from the motor's `{python} PlanningProblems.kt_motor_str` torque constant through the `{python} PlanningProblems.n_gear_str`:1 gear (ignore gear losses), `{python} PlanningProblems.l_motor_str` winding inductance, and `{python} PlanningProblems.v_motor_str` rating. Check each against the joint's `{python} PlanningProblems.qdd2_str` acceleration limit, the `{python} PlanningQuinticBridge.taud_max_str` torque-rate limit, and @eq-plan-inverter-headroom. Decide which limit binds, and propose a bridge duration that passes all three.
+
+6. **[Compute, LO5] Half speed and the speed that fits.** Repeat \ref{nbk-planning-stall-runway} with the arm moving at half its TCP limit, keeping the deceleration and jerk bounds. Then find the highest speed whose lease path and S-curve stop fit the `{python} PlanningLeaseRule.d_arm_clear_str` clearance. Decide whether the clearance, the joint limits of @fig-11-two-link-singularity, or neither sets the arm's `{python} PlanningTwoLinkArm.v_tool_str` TCP limit.
+
+7. **[Design, LO5] A logistics AMR at the rack end.** The `{python} PlanningProblems.amr_name_str` in the registry has a `{python} PlanningProblems.v_amr_str` drive limit and a `{python} PlanningProblems.a_amr_str` acceleration limit and closes its control loop at `{python} PlanningProblems.f_amr_str`. Assume it brakes at that acceleration limit, takes its jerk bound from @eq-plan-c2-polynomial-stop at its drive limit, and inherits the aisle's `{python} PlanningProblems.tau_delay_str` pre-brake delay, `{python} PlanningProblems.delta_loc_str` localization term, and `{python} PlanningProblems.delta_margin_str` margin (all illustrative). Compute its constant-deceleration, S-curve, and polynomial stops from the drive limit and its complete budget against the `{python} PlanningC2Stop.d_clear_str` rack-end clear distance. Find the highest speed that fits with the jerk bound held fixed, and decide whether to derate the AMR, lengthen its perception horizon, or measure a jerk tolerance first, stating what each choice would require.
+
+8. **[Design, LO7] Choosing a generator for the conveyor reach.** The reach around the conveyor guard must be renewed every `{python} PlanningLeaseRule.t_renew_str`, the chunk policy's inference takes `{python} PlanningReplacementLedger.t_infer_str` at P99, and admission allows `{python} PlanningReplacementLedger.t_validate_str` for whole-plan validation. Propose a pipeline from the generators of @sec-planning-paradigms: sampling-based search with time parameterization, optimization such as the projection of @eq-plan-kinodynamic-projection, learned chunks, and an online jerk-limited generator whose reported worst case is `{python} PlanningTimeParam.ruckig_worst_str` on a desktop processor. For each stage, state whether it runs on the proposal side or on the permission path, what it guarantees by construction, and which check of this chapter it leaves to admission. Decide what the MCU must run itself.
+
+9. **[Design, LO4, LO6, LO8] A late candidate on the alternate schedule.** On the alternate schedule of @fig-11-seam-timeline-fallback, a candidate arrives at `{python} PlanningProblems.t_arrival_str`, after the `{python} PlanningArmTimeline.t_replace_min_str` preferred admission and before the `{python} PlanningLeaseRule.t_alt_admission_cutoff_str` cutoff, and needs the full `{python} PlanningReplacementLedger.t_validate_str` validation. Decide whether the MCU can admit it, and find the latest arrival it could admit. For a candidate that does arrive in time, fill the trajectory record's lineage, timing, seam, and content fields (@sec-planning-trajectory-contract), marking which differ from the record it replaces, and check whether a bridge compressed to `{python} PlanningProblems.t_bridge_late_str` still passes the torque-rate limit of \ref{nbk-planning-seam-acceleration-jump-reflected-inertia-torque}.
+
+10. **[Critique, LO6] Waiting for a nearly finished plan.** A teammate proposes that the MCU extend the alternate schedule's commitment whenever the host reports that inference is 90 percent complete. Using the `{python} PlanningC2Stop.arm_margin_str` commitment margin and the `{python} PlanningC2Stop.t_wait_str` counterfactual of @sec-planning-c2-stopping-suffix, find the clearance lost, and the longest delay the margin could absorb at the TCP limit before sensing and model reserves. Explain, with @eq-plan-commitment-invariant and the definition of an inevitable collision state, why a progress report cannot justify any extension, and state what the proposal would have to change instead.
+
+11. **[Critique, LO3, LO7] A chattering but valid policy.** A diffusion-policy proposer's chunks all pass per-sample position and velocity limits, yet after an hour of conveyor picking the shoulder drive derates on temperature and the gearbox shows early wear. A colleague concludes that the checker is correct and the drive is undersized. Critique the conclusion. Name the checks of this chapter that would catch the cause, state whether each runs at admission, at activation, or on every tick, and state the evidence that would distinguish a thermal budget problem from a seam or chatter problem.
 
 ::: {.callout-chapter-connection title="From admitted plans to per-tick permission"}
 This chapter admits whole proposals. The MCU checks a complete trajectory and its matched stop before the admission cutoff and latches the stop in protected memory. Admission judges the plan against a reachable state envelope, and activation checks the current estimate against that envelope, yet while the plan runs the plant can lag its reference, an obstacle can appear, and an actuator can saturate. @Sec-enforcement checks each tick against live state, insets the stopping distance by the tracking error the controller can bound, and owns the fallback ladder whose stop rung plays this chapter's resident stop. That inset completes the spatial terms accounted for here and yields a candidate aisle speed. Operating permission still requires complete capture-to-admission timing, positive stopping reserve, and qualification of the response under the declared conditions.
