@@ -1411,12 +1411,12 @@ def ch13_dispatch_admission_envelope():
 # Chapter 14: Supervisory Intervention
 # ─────────────────────────────────────────────────────────────────────────────
 
-@margin("14_intervention", "margin_four_phase_handshake_strip", "sequence-strip", status="preface",
+@margin("14_intervention", "margin_four_phase_handshake_strip", "sequence-strip", status="ready",
         sources=("InterventionTimeoutBudget.t_request", ".t_acknowledge", ".tick", ".t_confirm", ".t_handshake"))
 def ch14_handshake_strip():
     # Commit is one control tick (AISLE.t_handshake sums the four phases).
     # 2026-09-29 margins pass: cut from the chapter (redundant with
-    # @tbl-14-handshake-protocol); still the preface gallery's strip sample.
+    # @tbl-14-handshake-protocol); preface gallery swapped it for the takeover-allowance envelope in the final sweep; kept ready for reuse.
     B = lego("14_intervention", "InterventionTimeoutBudget")
     ms = lambda q: mag(q, "millisecond")
     phases = [("Request", ms(B.t_request)), ("Ack", ms(B.t_acknowledge)),

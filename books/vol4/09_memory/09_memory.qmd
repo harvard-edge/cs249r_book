@@ -1099,7 +1099,6 @@ To bound the total collision workload in @eq-mem-query-latency-budget, the worke
 $$t_{\text{query}} \le \frac{T_{\text{reflex\_budget}}}{N_{\text{hulls}}},$$
 which for the worked case is `{python} RepresentationQuery.t_reflex_str` over `{python} RepresentationQuery.n_hulls_str` hulls, or `{python} RepresentationQuery.t_query_str` per query.
 
-
 A time allocation becomes a design constraint once it is expressed in the unit the hardware spends, memory reads. The permission controller streams its local SRAM at `{python} RepresentationQuery.sram_bw_str`, so the `{python} RepresentationQuery.t_query_str` allocation covers at most `{python} RepresentationQuery.reads_budget_str` reads of an 8-byte cell per hull query, before any arithmetic, cache effect, or contention; qualification on the deployed controller must still measure the real bound (@sec-placement). Against that ceiling, the representations differ less in speed than in which question one read answers (@tbl-09-representation-queries). An **occupancy grid**\index{Occupancy grid}[^fn-occupancy-grid-sonar] stores, per cell, whether that cell is occupied [@elfes1989using; @moravec1985high]; certifying that a sphere hull of radius `{python} RepresentationQuery.r_hull_str` keeps its protective clearance means reading every cell within `{python} RepresentationQuery.reach_str` of its center, $\frac{4}{3}\pi\left((r_{\text{hull}}+\delta_{\text{margin}})/r\right)^3$ cells at pitch $r$. A hierarchical **octree** such as OctoMap [@hornung2013octomap] answers the same point query after descending the tree, one dependent read per level, so near surfaces, where pruning cannot merge cells, the scan costs its cell count times the tree depth. A **truncated signed distance field (TSDF)**\index{Truncated signed distance field} stores the distance to the nearest surface along the sensor ray, clamped at a truncation distance of a few voxels [@curless1996volumetric]; one read answers only whether a surface lies within that truncation, so "farther than the truncation" never certifies a clearance larger than it. A **Euclidean signed distance field (ESDF)**\index{Euclidean signed distance field} stores the straight-line distance to the nearest obstacle [@oleynikova2017voxblox; @millane2024nvblox], so one interpolated lookup, `{python} RepresentationQuery.esdf_reads_str` corner reads, certifies clearance for an entire sphere: the hull passes when the distance at its center exceeds $r_{\text{hull}} + \delta_{\text{margin}}$ plus the geometric error. Rendering representations answer the second question. A 3D Gaussian splatting (3DGS) scene fits anisotropic Gaussians to a photometric loss [@kerbl20233d], and a neural radiance field integrates learned density along camera rays; neither stores a conservative distance, and collision checking on splats requires an added assumption that the fitted ellipsoids enclose the physical surface [@chen2025splatnav]. Their parameterizations are collected in @sec-appendix-ml-3dgs, and the occupancy and TSDF update equations in @sec-appendix-ml-voxels.
 
 [^fn-occupancy-grid-sonar]: **Occupancy Grid**: Moravec and Elfes built the first grids at Carnegie Mellon to fuse returns from wide-beam sonar, whose single echo cannot say where across its beam the reflector lies [@moravec1985high]. Each cell therefore holds accumulated evidence rather than geometry, and a cell no return has reached stays at its prior. The representation was designed for sensors too coarse to vouch for what they did not touch, which is why a permission-grade grid must keep unknown distinct from free. \index{Occupancy grid!sonar origin}
@@ -1399,16 +1398,16 @@ What a map can certify comes from how a range return updates it. Traversing the 
 
 Because negative evidence renews only the cells a ray crossed (@fig-09-ray-update-epochs), a map's publication time dates none of its cells. The manifest in @tbl-09-schema-volumetric-belief therefore carries cell evidence epochs alongside occupancy. For the worked local snapshot, checking a hull includes the supporting cells' evidence and unknown-space status within the allocated query time. A freshly copied distance value with expired source cells cannot establish clearance. The manifest travels with the bounded snapshot as well as the host map; the isolated controller does not traverse the full host store.
 
-| Map field                                 | Unit or type                         | Meaning and consumer check                                                                                          |
-|:------------------------------------------|:-------------------------------------|:--------------------------------------------------------------------------------------------------------------------|
-| `voxel_grid_origin`, `voxel_resolution_m` | m; m                                 | Spatial anchor and pitch; match the active frame and calibration                                                    |
-| `pose_graph_revision`                     | integer                              | Revision of the pose graph that placed the cells; a loop closure that changes it re-anchors or expires the snapshot |
-| `map_update_epoch`                        | capture-clock ns                     | Last map publication/update; **not** freshness of every cell                                                        |
-| `cell_evidence_epoch`                     | capture-clock ns per cell            | Last physical observation for that cell; never refreshed by prediction or unrelated map updates                     |
-| `free_space_sweep_epoch`                  | capture-clock ns per occupancy cell  | Last valid observed free ray through that cell                                                                      |
-| `cell_state`                              | free, unknown, or expired per cell   | Set explicitly, never inferred from allocation; unknown and expired read as obstacles                               |
-| `clock_conversion`, `sync_error_ns`       | mapping; ns                          | Convert capture epochs to the consumer's monotonic clock with bounded error                                         |
-| `query_latency_budget_us`                 | $\mu\text{s}$ (at most `{python} RepresentationQuery.t_query_str`) | Bound collision and distance gradient query time to preserve the `{python} RepresentationQuery.f_tick_str` permission loop                           |
+| Map field                                 | Unit or type                                                       | Meaning and consumer check                                                                                                 |
+|:------------------------------------------|:-------------------------------------------------------------------|:---------------------------------------------------------------------------------------------------------------------------|
+| `voxel_grid_origin`, `voxel_resolution_m` | m; m                                                               | Spatial anchor and pitch; match the active frame and calibration                                                           |
+| `pose_graph_revision`                     | integer                                                            | Revision of the pose graph that placed the cells; a loop closure that changes it re-anchors or expires the snapshot        |
+| `map_update_epoch`                        | capture-clock ns                                                   | Last map publication/update; **not** freshness of every cell                                                               |
+| `cell_evidence_epoch`                     | capture-clock ns per cell                                          | Last physical observation for that cell; never refreshed by prediction or unrelated map updates                            |
+| `free_space_sweep_epoch`                  | capture-clock ns per occupancy cell                                | Last valid observed free ray through that cell                                                                             |
+| `cell_state`                              | free, unknown, or expired per cell                                 | Set explicitly, never inferred from allocation; unknown and expired read as obstacles                                      |
+| `clock_conversion`, `sync_error_ns`       | mapping; ns                                                        | Convert capture epochs to the consumer's monotonic clock with bounded error                                                |
+| `query_latency_budget_us`                 | $\mu\text{s}$ (at most `{python} RepresentationQuery.t_query_str`) | Bound collision and distance gradient query time to preserve the `{python} RepresentationQuery.f_tick_str` permission loop |
 
 : **Volumetric belief manifest and cell evidence**: The map header describes layout, pose-graph revision, query latency budget, and update time, while cell-local acquisition epochs and states determine whether the particular path region is fresh. The consumer treats unobserved or expired cells as unknown unless a separately validated policy permits traversal. {#tbl-09-schema-volumetric-belief tbl-colwidths="[26,22,52]"}
 
@@ -2128,7 +2127,9 @@ class ExpiryCheckpoint:
     t_new = ((cw_e_max_new - MachineExpiryRoots.cw_e0) / MachineExpiryRoots.cw_v).to(millisecond)
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
-    check(t_new < LatchSlotBelief.t_exp < MachineExpiryRoots.cw_t_exp, f"Tighter tolerance must move the coworker row ahead of the latch row: {t_new}")
+    check(
+        t_new < LatchSlotBelief.t_exp < MachineExpiryRoots.cw_t_exp, f"Tighter tolerance must move the coworker row ahead of the latch row: {t_new}"
+    )
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
     cw_e_max_new_str = fmt_length(cw_e_max_new, unit=ureg.millimeter, precision=0)
@@ -2184,7 +2185,9 @@ class MemoryBiasDrift:
     drift_rate = 0.2 * newton / minute  # category: illustrative (thermoelastic bias drift)
     span = 15 * minute  # category: illustrative (drift interval)
     t_excite = 40 * millisecond  # category: illustrative (deliberate contact break)
-    f_sample = Embodied.MobileManipulator.WarehouseMobileManipulator.arm.control_frequency  # category: datasheet (sampled at the arm's joint-control rate)
+    f_sample = (
+        Embodied.MobileManipulator.WarehouseMobileManipulator.arm.control_frequency
+    )  # category: datasheet (sampled at the arm's joint-control rate)
 
     # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────────
     shift = (drift_rate * span).to(newton)
@@ -2293,7 +2296,10 @@ class MemoryFrozenTransform:
     check(abs(err.magnitude - 20.0) < 1e-9, "Tracking error is 20 mm.")
     check(err > e_grasp, "The frozen-transform error must exceed the grasp tolerance.")
     # margin_frozen_transform_chain.svg fig-alt hand-types 10 ms, 1,000 Hz, 5 ms, 20 mm, and 100 ms
-    check(t_loss.magnitude == 10 and abs(f_repub.magnitude - 1000) < 1e-9 and tau_max.magnitude == 5 and t_window.magnitude == 100, "Margin fig-alt values are stale.")
+    check(
+        t_loss.magnitude == 10 and abs(f_repub.magnitude - 1000) < 1e-9 and tau_max.magnitude == 5 and t_window.magnitude == 100,
+        "Margin fig-alt values are stale.",
+    )
 
     # ┌── 4. OUTPUT (Formatting) ───────────────────────────────────────────────
     t_repub_str = fmt_int(t_repub.to(millisecond).magnitude)
@@ -2357,22 +2363,22 @@ The transitions enforce strict physical invariants across the spatial cache:
 
 \Needspace{28\baselineskip}
 
-| Field                              | Example record value                                                                                                                            | Consumer check                                                                                         |
-|:-----------------------------------|:------------------------------------------------------------------------------------------------------------------------------------------------|:-------------------------------------------------------------------------------------------------------|
-| Entity and quantity                | Gripper finger relative to the latch-release slot, lateral offset from the slot centerline                                                      | Match the target entity and task quantity                                                              |
-| Value and SI unit                  | Lateral offset, stored in meters; the bounds below are shown in millimeters for reading                                                         | Decode as meters, not millimeters or force                                                             |
-| Frame                              | `latch_slot` frame, with the transform revision of the wrist-camera calibration                                                                 | Resolve a time-valid transform chain                                                                   |
-| Evidence epoch                     | $t_0$, the last wrist-camera capture before the finger occludes the slot, on the wrist camera's capture clock                                   | Preserve across prediction and republishing                                                            |
-| Estimate epoch                     | Latest propagation of the offset, on the same capture clock                                                                                     | Date the propagated estimate; do not renew evidence                                                    |
-| Clock conversion                   | Versioned $t_{\text{MCU}}=a t_{\text{capture}}+b$, error at most `{python} LatchSlotBelief.eps_sync_str` (@sec-perception-observation-contract) | Refuse if conversion expires; add error to upper age                                                   |
-| Initial error                      | $E_0$ = `{python} LatchSlotBelief.e0_str`                                                                                                       | Check the initial bound against calibration                                                            |
-| Growth law                         | `{python} LatchSlotBelief.growth_law_math`                                                                                                      | Compare at evidence age with the slot tolerance                                                        |
-| Validity region                    | Arm acceleration and contact mode unchanged since $t_0$; drift and disturbance bounds above validated within this region                        | Expire immediately on a mode or residual-bound violation                                               |
-| Expiry                             | $t_0$ + `{python} LatchSlotBelief.t_exp_str`, where the growth law reaches the `{python} LatchSlotBelief.e_max_str` slot tolerance              | Refuse dependent proposals at expiry; reserve time for an earlier physical response                    |
-| Provenance                         | Wrist-camera observation ID, calibration revision, estimator build hash                                                                         | Match approved sources; hash is version provenance, not payload integrity                              |
-| Lifecycle                          | `VALID` at capture, `DEGRADED` once the finger occludes the slot, `EXPIRED` at $t_0$ + `{python} LatchSlotBelief.t_exp_str`                     | Never restore `VALID` without fresh physical evidence                                                  |
-| Map cell evidence, when applicable | Not used by this record; a map belief such as the rack-end cross aisle carries a per-cell capture epoch and free/occupied/unknown state         | Check **every** cell used by the candidate path; unknown stays unknown                                 |
-| Collision query budget             | $t_{\text{query}} \le$ `{python} RepresentationQuery.t_query_str` (qualified local clearance and required gradient lookup)                                                  | Qualify at most `{python} RepresentationQuery.t_query_str` per local query and the full collision workload within its allocation |
+| Field                              | Example record value                                                                                                                            | Consumer check                                                                                                                   |
+|:-----------------------------------|:------------------------------------------------------------------------------------------------------------------------------------------------|:---------------------------------------------------------------------------------------------------------------------------------|
+| Entity and quantity                | Gripper finger relative to the latch-release slot, lateral offset from the slot centerline                                                      | Match the target entity and task quantity                                                                                        |
+| Value and SI unit                  | Lateral offset, stored in meters; the bounds below are shown in millimeters for reading                                                         | Decode as meters, not millimeters or force                                                                                       |
+| Frame                              | `latch_slot` frame, with the transform revision of the wrist-camera calibration                                                                 | Resolve a time-valid transform chain                                                                                             |
+| Evidence epoch                     | $t_0$, the last wrist-camera capture before the finger occludes the slot, on the wrist camera's capture clock                                   | Preserve across prediction and republishing                                                                                      |
+| Estimate epoch                     | Latest propagation of the offset, on the same capture clock                                                                                     | Date the propagated estimate; do not renew evidence                                                                              |
+| Clock conversion                   | Versioned $t_{\text{MCU}}=a t_{\text{capture}}+b$, error at most `{python} LatchSlotBelief.eps_sync_str` (@sec-perception-observation-contract) | Refuse if conversion expires; add error to upper age                                                                             |
+| Initial error                      | $E_0$ = `{python} LatchSlotBelief.e0_str`                                                                                                       | Check the initial bound against calibration                                                                                      |
+| Growth law                         | `{python} LatchSlotBelief.growth_law_math`                                                                                                      | Compare at evidence age with the slot tolerance                                                                                  |
+| Validity region                    | Arm acceleration and contact mode unchanged since $t_0$; drift and disturbance bounds above validated within this region                        | Expire immediately on a mode or residual-bound violation                                                                         |
+| Expiry                             | $t_0$ + `{python} LatchSlotBelief.t_exp_str`, where the growth law reaches the `{python} LatchSlotBelief.e_max_str` slot tolerance              | Refuse dependent proposals at expiry; reserve time for an earlier physical response                                              |
+| Provenance                         | Wrist-camera observation ID, calibration revision, estimator build hash                                                                         | Match approved sources; hash is version provenance, not payload integrity                                                        |
+| Lifecycle                          | `VALID` at capture, `DEGRADED` once the finger occludes the slot, `EXPIRED` at $t_0$ + `{python} LatchSlotBelief.t_exp_str`                     | Never restore `VALID` without fresh physical evidence                                                                            |
+| Map cell evidence, when applicable | Not used by this record; a map belief such as the rack-end cross aisle carries a per-cell capture epoch and free/occupied/unknown state         | Check **every** cell used by the candidate path; unknown stays unknown                                                           |
+| Collision query budget             | $t_{\text{query}} \le$ `{python} RepresentationQuery.t_query_str` (qualified local clearance and required gradient lookup)                      | Qualify at most `{python} RepresentationQuery.t_query_str` per local query and the full collision workload within its allocation |
 
 : **Spatial belief record**: Value, unit, entity, frame, two epochs, clock conversion, error model, validity region, expiry, query latency budget, provenance, and lifecycle travel together as the seventh record in the record chain. A later estimate epoch dates the represented state, not a new measurement, and cannot extend expiry past $t_0 + T_{\text{inv}}$. {#tbl-09-invalidation-epochs tbl-colwidths="[23,39,38]"}
 
@@ -2434,15 +2440,11 @@ class MugHandleBelief:
     t_left_str = fmt_latency(t_left, unit=millisecond, precision=1)
     t_latest_str = fmt_latency(t_latest, unit=millisecond, precision=1)
     _ms = lambda q, p=1: fmt_magnitude(q, millisecond, precision=p)
-    age_math = fmt_display_math(
-        rf"\Delta t_{{\text{{upper}}}} = {_ms(t_use, 0)} + {_ms(eps_sync)} = {_ms(age_upper)}\ \text{{ms}}"
-    )
+    age_math = fmt_display_math(rf"\Delta t_{{\text{{upper}}}} = {_ms(t_use, 0)} + {_ms(eps_sync)} = {_ms(age_upper)}\ \text{{ms}}")
     use_math = fmt_display_math(
         rf"E = {fmt_magnitude(e0, ureg.millimeter, precision=0)}\ \text{{mm}} + {fmt_magnitude(v_conv, ureg.millimeter / millisecond, precision=1)}\ \text{{mm/ms}} \times {_ms(age_upper)}\ \text{{ms}} = {fmt_magnitude(e_use, ureg.millimeter, precision=2)}\ \text{{mm}} \le {fmt_magnitude(e_max, ureg.millimeter, precision=0)}\ \text{{mm}}"
     )
-    left_math = fmt_display_math(
-        rf"{_ms(t_exp, 0)} - {_ms(age_upper)} = {_ms(t_left)}\ \text{{ms}}"
-    )
+    left_math = fmt_display_math(rf"{_ms(t_exp, 0)} - {_ms(age_upper)} = {_ms(t_left)}\ \text{{ms}}")
 ```
 
 The same form carries the belief that @sec-intent builds on, the pose of the mug's handle as the mug rides the takeaway conveyor toward the arm. Its frame is the robot base frame, its evidence epoch is the last wrist-camera capture of the handle, converted under the same `{python} LatchSlotBelief.eps_sync_str` clock bound, and its initial error is `{python} MugHandleBelief.e0_str`. Its growth law differs in kind from the finger's. The belt carries the mug at no more than `{python} MugHandleBelief.v_conv_str`, a bound on speed rather than on force, so the error grows linearly from its initial value, the case of @eq-mem-linear-horizon, and reaches the `{python} MugHandleBelief.e_max_str` grasp tolerance at $t_0$ + `{python} MugHandleBelief.t_exp_str`. Its validity region is the belt running forward within that speed with the mug seated on it, so a knock that tips or lifts the mug, or a belt that overspeeds or reverses, expires the record at once, whatever time remains. A qualified tracker that renews the record on every frame replaces that belt-drift law with one bounded by the belt's residual slip (@sec-intent-goals-expire).
@@ -2513,7 +2515,9 @@ class SkewedRecords:
     skew = 20.0 * millisecond  # category: illustrative (acquisition-time gap between the two records)
     v_drive = RackEndBelief.v_drive  # category: illustrative (drive limit, as in the rack-end cell)
     v_h = RackEndBelief.v_h  # category: datasheet (ISO 13855 walking speed)
-    t_vision = Embodied.MobileManipulator.WarehouseMobileManipulator.chunk_inference_latency  # category: illustrative (chunk-policy P99 inference incl. vision)
+    t_vision = (
+        Embodied.MobileManipulator.WarehouseMobileManipulator.chunk_inference_latency
+    )  # category: illustrative (chunk-policy P99 inference incl. vision)
     f_imu = Embodied.MobileManipulator.WarehouseMobileManipulator.imu.sample_rate  # category: datasheet (base IMU sample rate)
     f_base = Embodied.MobileManipulator.WarehouseMobileManipulator.base.control_frequency  # category: illustrative (base drive-controller rate)
 
@@ -2541,7 +2545,7 @@ class SkewedRecords:
 
 **Pitfall**: *Evaluating spatial clearance between moving bodies using asynchronous timestamps.*
 
-In distributed robotics architectures and multi-sensor ML pipelines, visual perception models (such as Vision Transformers processing high-resolution camera streams) carry tens of milliseconds of end-to-end pipeline latency spanning CMOS readout, PCIe direct memory access (DMA) transport, and neural forward passes; on the mobile manipulator, the chunk policy's camera-to-proposal path alone is budgeted at `{python} SkewedRecords.t_vision_str` at $P_{99}$. Meanwhile, the base's IMU streams at `{python} SkewedRecords.f_imu_str` and its drive controller updates at `{python} SkewedRecords.f_base_str`. If an autonomous base drives toward a rack end at its `{python} RackEndBelief.v_drive_str` drive limit while a coworker walks toward the base at the `{python} RackEndBelief.v_h_str` walking-speed bound, the two close at `{python} SkewedRecords.v_close_str`. For this timing example, stipulate record ages of `{python} SkewedRecords.skew_str` and $0\text{ ms}$ at evaluation, and assign both the `{python} RackEndBelief.t_exp_ahead_str` aisle-ahead expiry window. Both pass that age check; an acquisition-time difference alone would not establish either age. Comparing their positions directly combines different physical epochs\index{Timestamp!asynchronous}. Charging both speed bounds over the entire `{python} SkewedRecords.skew_str` gap gives a conservative common-time displacement envelope of `{python} SkewedRecords.d_skew_str`, exceeding the `{python} SkewedRecords.slack_str` clearance slack. This envelope is not the exact error of the mixed pair: with one record current, its displacement contribution is zero, and the other contribution depends on which body has the older record. The example shows why freshness alone cannot establish clearance; it does not establish a safe encounter with a moving person. The controller must propagate each estimate to a common evaluation time, carrying its own age and growth bound, or impose a qualified skew limit from the available clearance. **Individually fresh records measured at disparate epochs cannot establish joint clearance between moving bodies.**
+In distributed robotics architectures and multi-sensor ML pipelines, visual perception models (such as Vision Transformers processing high-resolution camera streams) carry tens of milliseconds of end-to-end pipeline latency spanning CMOS readout, PCIe direct memory access (DMA) transport, and neural forward passes; on the mobile manipulator, the chunk policy's inference pass alone, vision encoder included, is budgeted at an illustrative `{python} SkewedRecords.t_vision_str` at $P_{99}$, before sensor readout and transport are counted. Meanwhile, the base's IMU streams at `{python} SkewedRecords.f_imu_str` and its drive controller updates at `{python} SkewedRecords.f_base_str`. If an autonomous base drives toward a rack end at its `{python} RackEndBelief.v_drive_str` drive limit while a coworker walks toward the base at the `{python} RackEndBelief.v_h_str` walking-speed bound, the two close at `{python} SkewedRecords.v_close_str`. For this timing example, stipulate record ages of `{python} SkewedRecords.skew_str` and $0\text{ ms}$ at evaluation, and assign both the `{python} RackEndBelief.t_exp_ahead_str` aisle-ahead expiry window. Both pass that age check; an acquisition-time difference alone would not establish either age. Comparing their positions directly combines different physical epochs\index{Timestamp!asynchronous}. Charging both speed bounds over the entire `{python} SkewedRecords.skew_str` gap gives a conservative common-time displacement envelope of `{python} SkewedRecords.d_skew_str`, exceeding the `{python} SkewedRecords.slack_str` clearance slack. This envelope is not the exact error of the mixed pair: with one record current, its displacement contribution is zero, and the other contribution depends on which body has the older record. The example shows why freshness alone cannot establish clearance; it does not establish a safe encounter with a moving person. The controller must propagate each estimate to a common evaluation time, carrying its own age and growth bound, or impose a qualified skew limit from the available clearance. **Individually fresh records measured at disparate epochs cannot establish joint clearance between moving bodies.**
 
 **Architect's countermeasure:** Project all moving candidate bounds to a unified evaluation epoch using their validated velocity bounds, or bound maximum allowable timestamp skew from the worst-case closing velocity and available clearance margin.
 
@@ -2583,14 +2587,14 @@ Fresh-looking records can still mislead. Frozen transforms hide stale evidence, 
 
 Seven relations carry the chapter's quantitative argument, and @tbl-09-key-equations records each with the decision it settles and the place it is derived.
 
-| Equation | What it bounds or decides | Derived |
-|:---|:---|:---|
-| $\mathbf{P}_{k\mid k-1} = \mathbf{F}\,\mathbf{P}_{k-1\mid k-1}\mathbf{F}^\top + \mathbf{Q}$ | How far prediction alone widens the estimate's uncertainty between measurements | @eq-percep-kf-predict |
-| $\mathbf{G}_k = \mathbf{P}_{k\mid k-1}\mathbf{H}^\top\mathbf{S}_k^{-1}$, $\;\mathbf{P}_{k\mid k} = (\mathbf{I} - \mathbf{G}_k\mathbf{H})\,\mathbf{P}_{k\mid k-1}$ | How much a dated measurement moves and narrows the estimate; valid only when the measurement is applied at its capture epoch | @eq-percep-kf-update |
-| $d_{M}^2 = \boldsymbol{\nu}^\top \mathbf{S}^{-1} \boldsymbol{\nu} \le \gamma_{\text{gate}}$ | Whether a detection may be associated with a track; the same statistic, averaged, tests whether the covariance is honest | @eq-percep-mahalanobis-gate |
-| $\sum_{k=1}^{N_{\text{hulls}}} t_{\text{query}}(\mathbf{x}_k) \le T_{\text{reflex\_budget}}$ | The per-query time, and hence the memory reads, a clearance lookup may spend inside the permission tick | @eq-mem-query-latency-budget |
-| $M_{\text{dense}} = (V_{\text{ws}}/r^3)\,S_{\text{voxel}}$ | Whether a map or snapshot fits its memory at a given pitch | @eq-mem-footprint-dense |
-| $E(\Delta t) = E_0 + v_{\text{drift}}\Delta t + \tfrac{1}{2}a_{\text{dist}}(\Delta t)^2$ | The bounded error of a belief propagated without new evidence | @eq-mem-occlusion-expansion |
+| Equation                                                                                                                                                                  | What it bounds or decides                                                                                                                               | Derived                                                 |
+|:--------------------------------------------------------------------------------------------------------------------------------------------------------------------------|:--------------------------------------------------------------------------------------------------------------------------------------------------------|:--------------------------------------------------------|
+| $\mathbf{P}_{k\mid k-1} = \mathbf{F}\,\mathbf{P}_{k-1\mid k-1}\mathbf{F}^\top + \mathbf{Q}$                                                                               | How far prediction alone widens the estimate's uncertainty between measurements                                                                         | @eq-percep-kf-predict                                   |
+| $\mathbf{G}_k = \mathbf{P}_{k\mid k-1}\mathbf{H}^\top\mathbf{S}_k^{-1}$, $\;\mathbf{P}_{k\mid k} = (\mathbf{I} - \mathbf{G}_k\mathbf{H})\,\mathbf{P}_{k\mid k-1}$         | How much a dated measurement moves and narrows the estimate; valid only when the measurement is applied at its capture epoch                            | @eq-percep-kf-update                                    |
+| $d_{M}^2 = \boldsymbol{\nu}^\top \mathbf{S}^{-1} \boldsymbol{\nu} \le \gamma_{\text{gate}}$                                                                               | Whether a detection may be associated with a track; the same statistic, averaged, tests whether the covariance is honest                                | @eq-percep-mahalanobis-gate                             |
+| $\sum_{k=1}^{N_{\text{hulls}}} t_{\text{query}}(\mathbf{x}_k) \le T_{\text{reflex\_budget}}$                                                                              | The per-query time, and hence the memory reads, a clearance lookup may spend inside the permission tick                                                 | @eq-mem-query-latency-budget                            |
+| $M_{\text{dense}} = (V_{\text{ws}}/r^3)\,S_{\text{voxel}}$                                                                                                                | Whether a map or snapshot fits its memory at a given pitch                                                                                              | @eq-mem-footprint-dense                                 |
+| $E(\Delta t) = E_0 + v_{\text{drift}}\Delta t + \tfrac{1}{2}a_{\text{dist}}(\Delta t)^2$                                                                                  | The bounded error of a belief propagated without new evidence                                                                                           | @eq-mem-occlusion-expansion                             |
 | $T_{\text{inv}} = \inf\{\Delta t \ge 0 : E(\Delta t) \ge E_{\max}\}$, free space: $T_{\text{inv}} = (d_{\text{free}} - \delta_{\text{loc}} - \delta_{\text{margin}})/v_h$ | The deadline after which a belief supports no motion; for free space, how long remembered emptiness lasts at a given depth from the unobserved boundary | @eq-mem-invalidation-horizon, @eq-mem-free-space-expiry |
 
 : **Key equations of spatial memory**: The seven relations behind the chapter's estimation, representation, and expiry decisions, with the place each is derived. {#tbl-09-key-equations tbl-colwidths="[42,40,18]"}
@@ -2707,8 +2711,15 @@ class MemoryProblems:
     t_frame = (1 / RM.nav_camera.frame_rate).to(millisecond)
     t_conf_max = ((n_confirm - 1) * t_frame).to(millisecond)
     # P4: lever-arm staleness
-    e4 = (LatchTransformStaleness.e0 + LatchTransformStaleness.e_trans + lever_new * LatchTransformStaleness.omega * LatchTransformStaleness.dt / ureg.radian).to(ureg.millimeter)
-    lever_max = ((LatchTransformStaleness.e_max - LatchTransformStaleness.e0 - LatchTransformStaleness.e_trans) / (LatchTransformStaleness.omega / ureg.radian * LatchTransformStaleness.dt)).to(meter)
+    e4 = (
+        LatchTransformStaleness.e0
+        + LatchTransformStaleness.e_trans
+        + lever_new * LatchTransformStaleness.omega * LatchTransformStaleness.dt / ureg.radian
+    ).to(ureg.millimeter)
+    lever_max = (
+        (LatchTransformStaleness.e_max - LatchTransformStaleness.e0 - LatchTransformStaleness.e_trans)
+        / (LatchTransformStaleness.omega / ureg.radian * LatchTransformStaleness.dt)
+    ).to(meter)
     # P5: correction spacing
     d_corr_cal = (loc_share * OdometryDrift.delta_loc / OdometryDrift.eps_cal).to(meter)
     d_corr_uncal = (loc_share * OdometryDrift.delta_loc / OdometryDrift.eps_uncal).to(meter)
@@ -2722,7 +2733,7 @@ class MemoryProblems:
     # P9: horizons with a_dist changed; depth that survives the dispatch age
     d9 = (RackEndBelief.delta_loc + RackEndBelief.delta_margin + RackEndBelief.v_h * RackEndBelief.t_age).to(ureg.millimeter)
     # P10: along-path meeting time for the AMR and the warehouse machine
-    reach = (RackEndBelief.d_clear - RackEndBelief.delta_loc - RackEndBelief.delta_margin)
+    reach = RackEndBelief.d_clear - RackEndBelief.delta_loc - RackEndBelief.delta_margin
     t10_amr = (reach / (AMR.max_velocity + RackEndBelief.v_h)).to(millisecond)
     t10_rm = (reach / (AISLE.v_aisle + RackEndBelief.v_h)).to(millisecond)
     # P11: bounds at the timeout
@@ -2736,15 +2747,24 @@ class MemoryProblems:
     check(nees_obs > nees_hi, "P2: the observed mean NEES must fall above the band.")
     check(n_runs < n_min < 200, f"P2: resolving 1.3 must need more runs than the campaign has: {n_min}")
     check(t_conf_max > AISLE.perception_age, "P3: worst-case confirmation must exceed the frame age.")
-    check(e4 > LatchTransformStaleness.e_max and lever_max < LatchTransformStaleness.lever, "P4: the longer tool must fail one stale frame, and so must today's.")
+    check(
+        e4 > LatchTransformStaleness.e_max and lever_max < LatchTransformStaleness.lever,
+        "P4: the longer tool must fail one stale frame, and so must today's.",
+    )
     check(d_corr_uncal < d_corr_cal < AISLE.aisle_length, "P5: even calibrated, corrections must come more than once per aisle.")
     check(d_closure > RackEndBelief.delta_loc, "P5: the closure must exceed the localization bound.")
-    check(RepresentationQuery.rows[10]['occ_reads'] < reads6 < RepresentationQuery.rows[5]['occ_reads'], "P6: 10 cm occupancy must still fit, 5 cm must not.")
+    check(
+        RepresentationQuery.rows[10]['occ_reads'] < reads6 < RepresentationQuery.rows[5]['occ_reads'],
+        "P6: 10 cm occupancy must still fit, 5 cm must not.",
+    )
     check(0.1 < share7 < 0.2, f"P7: two fine streams should take 10-20 percent of peak: {share7}")
     check(0 * millisecond < t8a < RackEndBelief.t_exp_ahead, "P8: the near cell must expire first.")
     check(RackEndBelief.side_clearance < d9 < RackEndBelief.d_clear, "P9: the surviving depth must lie between the side clearance and D_clear.")
     check(t10_amr < t10_rm and t10_amr > AISLE.perception_age, "P10: the faster AMR meets the boundary sooner, but after dispatch.")
-    check(e11_latch > LatchSlotBelief.e_max and e11_cw > MachineExpiryRoots.cw_e_max and t_timeout < RackEndBelief.t_exp_ahead, "P11: the timeout must over-admit the latch and coworker and under-admit the aisle.")
+    check(
+        e11_latch > LatchSlotBelief.e_max and e11_cw > MachineExpiryRoots.cw_e_max and t_timeout < RackEndBelief.t_exp_ahead,
+        "P11: the timeout must over-admit the latch and coworker and under-admit the aisle.",
+    )
     check(e12 < MemoryFrozenTransform.err, "P12: a capture-epoch check must bound the frozen-transform error well below the publish-time error.")
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
@@ -2770,29 +2790,17 @@ class MemoryProblems:
 Each problem states its givens, which come from the running machine's registry values or the chapter's own calculations. A given marked illustrative is an assumption for the exercise, not a measurement. The tag names the kind of work, and the parenthesis names the learning objective the problem assesses.
 
 1. **[Compute]** (Estimator predict and update) On a wet floor the odometry speed error doubles to `{python} MemoryProblems.sigma_v_new_str` m/s (illustrative). Starting from the same `{python} AisleKalman.sigma_prior_str` prior and `{python} AisleKalman.dt_str` sweep, recompute the predicted standard deviation, the LiDAR gain and posterior, and the stereo gain and fused standard deviation with the chapter's sensor precisions. Then apply the arrival-stamped stereo range of @fig-08-kalman-predict-update, whose pose sits `{python} AisleKalman.bias_misdate_str` along the aisle, and express the resulting bias in reported standard deviations. Does poorer odometry make the dating error easier or harder to see in the reported variance, and which defect should the team fix first?
-
 2. **[Compute]** (Estimator consistency) A qualification campaign runs `{python} MemoryProblems.n_runs_str` ground-truth runs on the scalar rack-end distance and finds a mean NEES of `{python} MemoryProblems.nees_obs_str` (illustrative). Compute the 95 percent acceptance band, state the verdict, and say whether the filter's clearance claims are too wide or too narrow. How many runs would be needed before a mean NEES of `{python} MemoryProblems.nees_test_str` falls outside the band, and what does that count imply for a campaign that wants to detect mild overconfidence?
-
 3. **[Compute]** (Tracking and occupancy) The tracker confirms identity by a `{python} MemoryProblems.m_confirm_str`-of-`{python} MemoryProblems.n_confirm_str` rule on the navigation camera. Give the shortest and longest confirmation intervals after the first detection, and the base's travel at its `{python} RackEndBelief.v_drive_str` drive limit over the `{python} RackEndBelief.t_age_str` frame age plus the longest interval. Compare it with the travel charged to a consumer that acts on the occupied region from the first frame. Which consumers may wait for confirmation, and which may not?
-
 4. **[Compute]** (Transform composition) A longer tool puts the fingertip `{python} MemoryProblems.lever_new_str` beyond the wrist (illustrative). Using the chapter's latch-slot values, compute the finger error after one stale wrist-camera frame on a hand-composed chain, and the longest lever arm for which one stale frame still fits the `{python} LatchTransformStaleness.e_max_str` slot. What does the same-time composition of the belief's growth law give over one frame with the longer tool, and why does the lever arm drop out?
-
 5. **[Compute]** (Localization drift) The site allots `{python} MemoryProblems.loc_share_str` of the `{python} OdometryDrift.delta_loc_str` localization bound to odometry drift between map corrections (chosen). With the UMBmark rates of @fig-09-odometry-drift, find the longest distance between corrections, calibrated and uncalibrated, and the calibrated interval in seconds at the `{python} OdometryDrift.v_aisle_str` aisle speed. A loop closure then moves the supporting poses by `{python} MemoryProblems.d_closure_str` (illustrative). What happens to a snapshot copied before the closure whose cells still pass every age check, and what must the host do?
-
 6. **[Design]** (Representation choice) With the arm extended the machine needs `{python} MemoryProblems.n_hulls_new_str` sphere hulls (illustrative) inside the same `{python} MemoryProblems.t_reflex_str` collision-checking allocation of @eq-mem-query-latency-budget. Recompute the per-query time and read budget on the permission controller, and decide which representation and pitch of @tbl-09-representation-queries and @fig-09-memory-3d-representation-pareto still certify a hull. For your choice, give the snapshot storage and the quantization error charged against the `{python} RackEndBelief.delta_margin_str` protective clearance, and name the measurement that would qualify the query bound.
-
 7. **[Compute]** (Representation cost) The host adds a second depth camera and integrates both at the `{python} MemoryProblems.pitch_fine_str` manipulation pitch (`{python} MemoryProblems.n_streams_str` streams, illustrative). Using @eq-mem-dram-bandwidth and the chapter's stream parameters, compute the naive ray-marching traffic and its share of the host's peak DRAM bandwidth, and the dense-grid footprint of the chapter's workcell at that pitch and at 2 cm. Decide which one forces a design change, and what the change is.
-
 8. **[Design]** (Negative evidence and cell epochs) A scan down the aisle crosses cells `{python} MemoryProblems.d_cell_a_str`, `{python} MemoryProblems.d_cell_b_str`, and `{python} RackEndBelief.d_clear_str` from the unobserved cross-aisle boundary and ends on a tote face; the cross aisle itself stays hidden. Specify the fields each cell carries and the update the return applies to cells before, at, and behind the tote. Compute when each crossed cell reverts from free to unknown by @eq-mem-free-space-expiry, and state what a later map publication does to those deadlines.
-
 9. **[Compute]** (Belief expiry) Recompute the latch-slot horizon of @fig-uncertainty-growth with the disturbance bound doubled and then halved (chosen), and the ratio of each horizon to the chapter's. Explain why the change is not proportional. Then find the smallest free-space depth at which the rack-end claim still survives the frame's `{python} RackEndBelief.t_age_str` dispatch age, and say what that depth means for where along the aisle memory helps at all.
-
 10. **[Compute]** (Belief expiry, transfer to a logistics AMR) An autonomous mobile robot without an arm approaches the same rack end at its `{python} MemoryProblems.amr_v_str` registry drive limit, with the warehouse machine's localization bound and protective clearance. A hull that advances toward the unobserved boundary while that boundary erodes toward the hull meets it sooner than the static root of @eq-mem-free-space-expiry. Derive the time at which a hull starting `{python} RackEndBelief.d_clear_str` from the boundary loses its certified depth for the AMR and for the warehouse machine at its `{python} OdometryDrift.v_aisle_str` aisle speed, and subtract the frame age. Then give the largest record skew each machine tolerates under the conservative envelope of the skewed-records pitfall. Which registry value does the AMR still lack before its stop can be checked against this interval?
-
 11. **[Critique]** (Belief expiry) A teammate proposes one `{python} MemoryProblems.t_timeout_str` staleness timeout for every belief, arguing that it is simpler to qualify than four growth laws. Using @tbl-09-belief-decay-horizons, compute each row's error bound at the timeout and whether the timeout over-admits or under-admits that belief. Write the critique, and state what a per-belief expiry costs the team in exchange.
-
 12. **[Critique]** (Diagnosing silent failures) A vendor states that its tracker's innovation monitor catches both frozen transforms and sensor bias drift. For the frozen-transform timeline of @sec-memory-failure-modes, compute the error the publish-time check admits after `{python} MemoryFrozenTransform.t_window_str` ms and the largest error a `{python} MemoryFrozenTransform.tau_max_str` ms age check on the capture epoch would admit. For the strain-gauge case, give the innovation during the drift and the number of samples the `{python} MemoryBiasDrift.t_excite_str` ms contact break provides at `{python} MemoryBiasDrift.f_sample_str` Hz. Critique the claim, naming for each failure the check that actually exposes it and the lifecycle state it should force.
-
 
 ::: {.callout-chapter-connection title="From valid beliefs to bounded goals"}
 What may a valid belief authorize? Memory rules only on validity. It can say that a remembered object lies within a stated bound until a stated deadline, but it cannot say what the machine should do about that object. In the intent layer, a human goal, taking the mug from the conveyor, becomes an intent lease that consumes the belief record of the mug's handle, carries that belief's evidence epoch forward as its own evidence time, caps its expiry at that belief's horizon, and grants a bounded target with effort limits, never a path, for no longer than the evidence beneath it supports.

@@ -7,7 +7,7 @@ Domain modules:
 """
 
 from ._units import _ensure_unit
-from .constants import SPEED_OF_LIGHT_FIBER_KM_S
+from .constants import SPEED_OF_LIGHT_FIBER_KM_S, INSULATION_CLASS_F_LIMIT
 from .networking import calc_network_latency_ms
 from .performance import (
     dTime,
@@ -180,6 +180,7 @@ __all__ = [
     # Physical constants (book LEGO cells use `from mlsysim import *`, which
     # only sees names listed here — audit fix 2026-06-06).
     "SPEED_OF_LIGHT_FIBER_KM_S",
+    "INSULATION_CLASS_F_LIMIT",
     "calc_network_latency_ms",
     "dTime",
     "calc_training_time",

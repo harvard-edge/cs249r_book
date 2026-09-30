@@ -42,7 +42,7 @@ Most deployed robots keep a person in reserve for the situations their learned p
 
 - Specify operator permissions through capability matrices that bind each authenticated role's operations to physical channels, preemption tiers, and clearance-derived deadlines
 - Select a state-dependent local fallback that remains physically feasible while human intervention is pending
-- Size the chunk lease and the manual lease against their modes' stopping reserves and available fallback mechanisms
+- Evaluate the inherited chunk lease and the chosen manual lease against their modes' stopping reserves and available fallback mechanisms
 - Calculate the latest fallback time and takeover speed ceilings from human reaction latency and remaining physical stopping clearance
 - Design authority handshakes that keep one owner on each actuator output and size fixed-endpoint $C^2$ command blends within each channel's rate limit
 - Formulate the four temporal intervals of causal intervention masking to isolate policy drift, enforcer blends, and human stabilization in imitation learning datasets
@@ -74,7 +74,7 @@ The chapter's central question is how authority can change hands on a moving mac
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim import *
 from mlsysim.core.units import meter, second, millisecond
-from mlsysim.fmt import fmt_velocity, fmt_length, fmt_latency, check
+from mlsysim.fmt import fmt_velocity, fmt_length, fmt_latency, fmt_frequency, check
 
 RM = Embodied.MobileManipulator.WarehouseMobileManipulator
 AISLE = Embodied.Scenario.WarehouseAisle
@@ -86,6 +86,8 @@ class InterventionSharedAuthorityScene:
     v = AISLE.v_aisle  # category: chosen
     t_pause = AISLE.t_takeover_out_of_loop  # category: derived (sourced p90 take-over time + transport)
     d_clear = AISLE.d_clear  # category: illustrative
+    permission_rate = RM.permission_rate  # category: chosen
+    tick = AISLE.t_tick  # category: chosen (from RM.permission_rate)
 
     # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────
     travel = (v * t_pause).to(meter)
@@ -94,6 +96,8 @@ class InterventionSharedAuthorityScene:
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(abs(travel.magnitude - 5.8045) < 5e-4, f"travel during the pause: {travel}")
     check(travel > 5 * d_clear, "The pause must carry the machine more than five times the clear distance.")
+    check(abs((tick * permission_rate).to("").magnitude - 1.0) < 1e-9, "The permission tick is one period of the permission loop.")
+    check(abs(tick.to(millisecond).magnitude - 1.0) < 1e-9, "Canon: 1 kHz permission loop, 1 ms tick.")
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
     v_str = fmt_velocity(v, unit=meter / second, precision=1)
@@ -101,6 +105,8 @@ class InterventionSharedAuthorityScene:
     travel_str = fmt_length(travel, unit=meter, precision=1)
     d_clear_str = fmt_length(d_clear, unit=meter, precision=2)
     chunk_lease_str = fmt_latency(AISLE.t_lease, unit=millisecond, precision=0)
+    permission_rate_str = fmt_frequency(permission_rate, precision=0)
+    tick_str = fmt_latency(tick, unit=millisecond, precision=0)
 ```
 
 On the warehouse mobile manipulator the constraint is immediate. When a pallet blocks an aisle, the machine needs a remote assistant to take over, yet at its chosen `{python} InterventionSharedAuthorityScene.v_str` aisle speed a `{python} InterventionSharedAuthorityScene.t_pause_str` pause before braking, the sourced out-of-loop takeover time of @sec-intervention-reaction-drift, would carry it `{python} InterventionSharedAuthorityScene.travel_str`, more than five times its `{python} InterventionSharedAuthorityScene.d_clear_str` rack-end clear distance. An operator request reaches a machine that is already moving under an admitted command; it cannot erase momentum or make an actuator respond instantaneously. The arbiter, the permission path's source-selection step, must decide who may propose the next command, and the enforcer, its admission check, must admit or reject it; both run deterministically on the safety microcontroller (MCU). The plant must still have enough clearance to execute the chosen stop. An abrupt setpoint switch requests an instantaneous torque step that the motor drives, gearboxes, and payload must absorb. A delayed switch can exhaust stopping room even when both the learned policy and the human controller are individually well behaved.
@@ -117,7 +123,7 @@ The state-dependent fallback of @sec-enforcement-fallback-ladder governs every s
 
 Autonomous and manual proposal rights have separate leases. The autonomous action-chunk lease remains the running machine's lease from @sec-nervous-cadences; the manual session receives a clearance-budgeted manual lease. Rejecting an invalid replacement does not revoke an active command whose own evidence, state, and lease remain valid. Expiry or loss of those premises invokes the applicable local fallback.
 
-The permission path resolves split-brain command contention through a source arbiter and **exclusive actuator-output ownership**. In this chapter's $1\text{ kHz}$ controller, commit revokes the policy's logical proposal token and latches its last approved reference; the enforcer remains the sole actuator writer before, during, and after the transition. CAN arbitration can serialize traffic from several senders without establishing which sender has control authority. The hazard is that validly transmitted but conflicting commands reach the same actuator. Qualified output gating and source selection must prevent that conflict. In continuous dynamics, the enforcer executes a bumpless transfer (a command handoff with no step in the actuator reference, @sec-intervention-bumpless-transfer) between the checked endpoints under the channel's command-rate and measured plant limits.
+The permission path resolves split-brain command contention through a source arbiter and **exclusive actuator-output ownership**. In this chapter's `{python} InterventionSharedAuthorityScene.permission_rate_str` controller, commit revokes the policy's logical proposal token and latches its last approved reference; the enforcer remains the sole actuator writer before, during, and after the transition. CAN arbitration can serialize traffic from several senders without establishing which sender has control authority. The hazard is that validly transmitted but conflicting commands reach the same actuator. Qualified output gating and source selection must prevent that conflict. In continuous dynamics, the enforcer executes a bumpless transfer (a command handoff with no step in the actuator reference, @sec-intervention-bumpless-transfer) between the checked endpoints under the channel's command-rate and measured plant limits.
 
 Intervention events also reach the core machine learning lifecycle. A rescued episode logged without its handover instant looks like an expert demonstration of the very near-failure states that made the rescue necessary. @Sec-data-intervention-recovery explains why the learner-visited states before a takeover are worth keeping and why the learner's commands there are not; the learning methods that consume interventions, from DAgger [@ross2011reduction] to its human-gated successors (@sec-intervention-recovery-eligibility), all need to know which controller owned each sample. This requires the chapter's formal deliverable, the **authority record**\index{Authority record} (the twelfth record in the record chain), to preserve the complete evidentiary trace from before the takeover. Its per-tick authority log therefore timestamps every authority transition on the safety microcontroller's clock. The commit instant ends policy ownership; the subsequent enforcer blend and reviewed human recovery remain distinct intervals.
 
@@ -133,15 +139,15 @@ The remote assistant who clears a blocked aisle and the coworker who takes an it
 
 Sheridan also describes the supervisor's work as five steps in sequence: plan the task off-line, teach the plan to the computer, monitor the automatic action, intervene when it fails or the goal changes, and learn from the episode [@sheridan2021supervisory]. This chapter engineers the fourth step and records the evidence the fifth needs. His taxonomy of levels, by contrast, assigns one level to a whole task. The mobile manipulator needs a level per channel and per instant. During a takeover the arm can sit near the manual end of the scale while the base still runs at the automatic end, and the enforcer holds the automatic end on every channel throughout, because it admits the operator's commands exactly as it admits the policy's. That split is where supervisory control becomes a systems problem. Levels that differ across channels are what a supervisor can lose track of, the mode confusion of @sec-intervention-failure-modes, so every level change must be committed and announced per channel.
 
-Naming the operations separates intervention from **safety enforcement**\index{Safety enforcement}, two mechanisms that system architectures routinely conflate. Enforcement withholds permission from a candidate action proposed by a learned model, modifying, clamping, or projecting the setpoint while leaving the machine under autonomous control. Intervention transfers authority away from the model to an external entity, terminating autonomous operation and giving the supervisor the right to propose, while every command still passes the permission path. An **enforcement filter**\index{Enforcement filter} sits in the fast inner control loop ($1\text{ kHz}$ / $\le 1\text{ ms}$) to prevent the policy from demanding an over-current maneuver or violating a barrier certificate [@ames2019control] during nominal tracking, respecting the actuator thermal limits established in @sec-body-five-budgets and the kinodynamic feasibility boundaries from @sec-planning-kinodynamic-feasibility. An intervention mechanism strips the policy of its proposal token when an operational boundary is breached or an operator demands control. A system equipped with enforcement but lacking intervention cannot be redirected when human intent changes or external conditions fall outside the policy design envelope, leading to conservative deadlock when barrier constraints collapse the feasible control set. Conversely, a system equipped with intervention but lacking enforcement permits a lagging operator to drive the plant into structural failure during nominal manual operation. @Tbl-14-enforcement-vs-intervention summarizes the architectural boundaries between these two protective mechanisms without changing the selected physical fallback.
+Naming the operations separates intervention from **safety enforcement**\index{Safety enforcement}, two mechanisms that system architectures routinely conflate. Enforcement withholds permission from a candidate action proposed by a learned model, modifying, clamping, or projecting the setpoint while leaving the machine under autonomous control. Intervention transfers authority away from the model to an external entity, terminating autonomous operation and giving the supervisor the right to propose, while every command still passes the permission path. An **enforcement filter**\index{Enforcement filter} sits in the fast inner control loop (`{python} InterventionSharedAuthorityScene.permission_rate_str` / $\le$ `{python} InterventionSharedAuthorityScene.tick_str`) to prevent the policy from demanding an over-current maneuver or violating a barrier certificate [@ames2019control] during nominal tracking, respecting the actuator thermal limits established in @sec-body-five-budgets and the kinodynamic feasibility boundaries from @sec-planning-kinodynamic-feasibility. An intervention mechanism strips the policy of its proposal token when an operational boundary is breached or an operator demands control. A system equipped with enforcement but lacking intervention cannot be redirected when human intent changes or external conditions fall outside the policy design envelope, leading to conservative deadlock when barrier constraints collapse the feasible control set. Conversely, a system equipped with intervention but lacking enforcement permits a lagging operator to drive the plant into structural failure during nominal manual operation. @Tbl-14-enforcement-vs-intervention summarizes the architectural boundaries between these two protective mechanisms without changing the selected physical fallback.
 
-| Dimension            | Enforcement filter                                                                  | Intervention state machine                                      |
-|:---------------------|:------------------------------------------------------------------------------------|:----------------------------------------------------------------|
-| Primary trigger      | Invariant boundary approach ($\dot{h} + \gamma_{\text{cbf}} h < 0$) or torque limit | Human takeover assertion, monotonic lease timeout, or ODD exit  |
-| Authority holder     | Autonomous policy retains proposal rights; enforcer modifies setpoints              | Authority transferred to external entity or fallback controller |
-| Execution loop       | Fast inner control loop ($1\text{ kHz}$ / $\le 1\text{ ms}$)                        | Same permission tick; protocol exchange spans multiple ticks    |
-| Safety lease role    | Enforces continuous barrier satisfaction on admitted commands                       | Lease expiry invokes the state-dependent validated fallback     |
-| Typical failure mode | Feasible set collapse; conservative deadlock or oscillation                         | Opposing commands cancel, mode confusion, or late human reaction |
+| Dimension            | Enforcement filter                                                                                                                                     | Intervention state machine                                       |
+|:---------------------|:-------------------------------------------------------------------------------------------------------------------------------------------------------|:-----------------------------------------------------------------|
+| Primary trigger      | Invariant boundary approach ($\dot{h} + \gamma_{\text{cbf}} h < 0$) or torque limit                                                                    | Human takeover assertion, monotonic lease timeout, or ODD exit   |
+| Authority holder     | Autonomous policy retains proposal rights; enforcer modifies setpoints                                                                                 | Authority transferred to external entity or fallback controller  |
+| Execution loop       | Fast inner control loop (`{python} InterventionSharedAuthorityScene.permission_rate_str` / $\le$ `{python} InterventionSharedAuthorityScene.tick_str`) | Same permission tick; protocol exchange spans multiple ticks     |
+| Safety lease role    | Enforces continuous barrier satisfaction on admitted commands                                                                                          | Lease expiry invokes the state-dependent validated fallback      |
+| Typical failure mode | Feasible set collapse; conservative deadlock or oscillation                                                                                            | Opposing commands cancel, mode confusion, or late human reaction |
 
 : **Architectural boundaries of safety enforcement and supervisory intervention**: Enforcement operates in-loop as an active constraint on proposed actions; intervention transitions authority between discrete proposers. {#tbl-14-enforcement-vs-intervention tbl-colwidths="[20,40,40]"}
 
@@ -861,7 +867,6 @@ class InterventionTakeoverLadder:
 
 @Tbl-14-teleop-stability prices each sourced response time. Every row adds the `{python} InterventionTakeoverLadder.t_comm_str` console term to the human response, adds the total to $\tau_{\text{delay}}$, and solves the finished stopping budget for the largest speed at which the machine still stops inside the rack-end clear distance. Before charging the missing admission delay, the ceiling falls from `{python} InterventionTakeoverLadder.mhp_ceiling_str` for an attending operator who meets the expected stimulus at the nominal pace to `{python} InterventionTakeoverLadder.p99_ceiling_str` for the slowest percentile of takeover conditions, and no row fits at the `{python} InterventionTakeoverLadder.v_str` aisle speed. Two facts dominate the table. Expectation matters more than the console, because moving from an expected to a surprising stimulus costs more speed than the whole console term does. The tail matters more than the average, because a speed chosen for the mean take-over time is overrun by every condition slower than the mean.
 
-
 Each ceiling is the positive root of a quadratic. Above the speed $a_{\text{brake}}^2/j_{\max}$, the resident stop of @eq-plan-c2-stopping-suffix is $v^2/(2a_{\text{brake}}) + v\,a_{\text{brake}}/(2j_{\max})$, so setting the finished budget with the takeover added equal to the clear distance gives $v^2/(2a_{\text{brake}}) + b\,v - (D_{\text{clear}} - \delta) = 0$, whose positive root is the takeover speed ceiling:
 $$v_{\max}(T_{\Sigma}) = a_{\text{brake}}\left[\sqrt{b^2 + \frac{2\,(D_{\text{clear}}-\delta)}{a_{\text{brake}}}} - b\right],\qquad b = \tau_{\text{delay}} + T_{\Sigma} + \frac{a_{\text{brake}}}{2j_{\max}}.$$ {#eq-intervention-speed-ceiling}
 The term $b$ collects every interval during which the machine still moves at $v$: its own delay, the human's, and the half jerk ramp before full braking. Below $a_{\text{brake}}^2/j_{\max}$ the stop never reaches full deceleration and the cubic branch of @eq-plan-c2-stopping-suffix applies instead, which is why the table's slower rows come from the solver rather than from this root.
@@ -917,7 +922,9 @@ class InterventionCeilingRoot:
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(abs(v_max.magnitude - InterventionTakeoverBudget.ceil_in.magnitude) < 1e-9, "Root must equal the solver's in-loop ceiling.")
-    check(abs(v_max_da.magnitude - AISLE.v_takeover_in_loop_ceiling.magnitude) < 1e-9, "Root with Delta_da must equal the registry's charged ceiling.")
+    check(
+        abs(v_max_da.magnitude - AISLE.v_takeover_in_loop_ceiling.magnitude) < 1e-9, "Root with Delta_da must equal the registry's charged ceiling."
+    )
     check(v_max > v_knee, "The design in-loop row must sit on the quadratic branch.")
     check(InterventionTakeoverBudget.ceil_ool < v_knee, "The out-of-loop row must sit on the cubic branch.")
     check(v_rigid < v_aisle, "Even instantaneous braking must not admit the aisle speed.")
@@ -1324,7 +1331,7 @@ Each edge in @tbl-14-authority-state-matrix names its guard and deadline, its si
 | Handover-Pending, Blend, or Human-Manual → Fallback | Timeout, stale lease, or invalid state                                                                  | The permission path executes the validated HOLD or STOP rung and records it                                               | Re-arm only after validated recovery procedure             |
 | Any state → Protective                              | Independent protective input or qualified critical fault                                                | Safety circuit/controller selects plant-specific protective stop                                                          | Validated brake or hold, not torque removal alone          |
 
-: **Authority state machine transition matrix**: Each row names the single actuator owner and the state-dependent fallback. The example uses a $1\text{ ms}$ arbiter tick. The `BLEND` state interpolates only latched, checked endpoints, under enforcer ownership. {#tbl-14-authority-state-matrix tbl-colwidths="[16,28,31,25]"}
+: **Authority state machine transition matrix**: Each row names the single actuator owner and the state-dependent fallback. The example uses a `{python} InterventionSharedAuthorityScene.tick_str` arbiter tick. The `BLEND` state interpolates only latched, checked endpoints, under enforcer ownership. {#tbl-14-authority-state-matrix tbl-colwidths="[16,28,31,25]"}
 
 ### The four-phase atomic handshake protocol {#sec-intervention-handshake-protocol}
 
@@ -1354,7 +1361,7 @@ Each heartbeat packet carries a strictly increasing 64-bit sequence counter $k$,
 $$\Delta t_{\text{heartbeat}} = t_{\text{local}} - t_k.$$
 These fields are the black-channel measures of the functional-safety fieldbus profiles [@iec61784-3-2021], carried over a wireless link: the sequence counter detects repetition and loss, the timestamp and the lease stand in for the watchdog that detects delay, and the tag adds the authentication that an open link needs against masquerade. @Sec-nervous-supervisory-timers maps the proposal header onto the same measures. A heartbeat may renew authority only while its conservative age remains within the configured freshness window. The active lease still expires on the local clock at its accepted deadline; late or stale traffic cannot move that deadline. The autonomous chunk likewise follows its admitted local expiry. A packet that fails authentication is rejected and cannot renew the lease; it does not itself revoke still-valid authority. The existing timeout continues to run. At expiry, the microcontroller revokes the operator's supervisory token, drops into `FALLBACK` (the state-dependent validated response), and autonomously executes the validated holding or stopping profile. After a lease lapse, the state machine blocks any return to $\text{Autonomous}$ or $\text{Human-Manual}$ until explicit system reset conditions are met: the machine must come to a complete mechanical standstill, clear all diagnostic fault registers, and complete a fresh, authenticated four-phase re-admission handshake from rest.
 
-When multiple control sources propose commands, the permission path resolves source selection through a fixed priority hierarchy, a descendant of the layered priorities of subsumption architectures [@brooks1986robust] used here for source selection rather than behavior, evaluated deterministically every $1\text{ ms}$ control cycle, below the proposal boundary of @sec-boundary-machine-model. The independent enforcer admits, modifies, or rejects the selected candidate under its configured physical limits. In $\text{Human-Manual}$ with an active lease, the human proposal takes precedence over a learned proposal, but remains subject to the enforcer's barrier certificates and current limits. In $\text{Autonomous}$, the learned policy may propose actions for admission. Fixed-state arbitration takes bounded work per tick in this design ($\mathcal{O}(1)$ complexity); it eliminates runtime negotiation or dynamic bargaining between proposers.
+When multiple control sources propose commands, the permission path resolves source selection through a fixed priority hierarchy, a descendant of the layered priorities of subsumption architectures [@brooks1986robust] used here for source selection rather than behavior, evaluated deterministically every `{python} InterventionSharedAuthorityScene.tick_str` control cycle, below the proposal boundary of @sec-boundary-machine-model. The independent enforcer admits, modifies, or rejects the selected candidate under its configured physical limits. In $\text{Human-Manual}$ with an active lease, the human proposal takes precedence over a learned proposal, but remains subject to the enforcer's barrier certificates and current limits. In $\text{Autonomous}$, the learned policy may propose actions for admission. Fixed-state arbitration takes bounded work per tick in this design ($\mathcal{O}(1)$ complexity); it eliminates runtime negotiation or dynamic bargaining between proposers.
 
 The runtime intervention interface joins the four-phase handshake to an arbiter with bounded timeouts and explicit fallback transitions (@fig-14-authority-handshake-fsm).
 
@@ -1523,7 +1530,10 @@ class InterventionBlendBudget:
     check(abs(d_over_res.to(millimeter).magnitude - 82.35) < 5e-3, f"blended stop beyond the resident stop: {d_over_res}")
     check(d_over_res.magnitude > 0, "A stop through the blend must be longer than the resident stop.")
     # margin_blended_stop_distance_envelope.svg fig-alt hand-types 140.6, 246.1, 328.4 mm
-    check(round(d_ideal.to(millimeter).magnitude, 1) == 140.6 and round(d_res.to(millimeter).magnitude, 1) == 246.1, f"stops in the fig-alt: {d_ideal}, {d_res}")
+    check(
+        round(d_ideal.to(millimeter).magnitude, 1) == 140.6 and round(d_res.to(millimeter).magnitude, 1) == 246.1,
+        f"stops in the fig-alt: {d_ideal}, {d_res}",
+    )
     check(excess_in.magnitude > d_over_res.to(millimeter).magnitude, "Reserve use must cover at least the final excess.")
     check(abs(arm_blend.magnitude - 37.5) < 1e-9, f"arm blend window: {arm_blend}")
     check(arm_budget.magnitude == 38, f"arm blend in whole ticks: {arm_budget}")
@@ -1717,7 +1727,7 @@ To verify a transfer, record the command profile, motor current, encoder motion,
 
 The two panels distinguish the command's mathematical continuity from the plant's measured response. Removing the step bounds the requested rate under the stated endpoint assumptions; it does not establish that the drive tracks the command or that the load remains stable. Those measurements decide whether the selected blend window is acceptable.
 
-The enforcer's $1\text{ kHz}$ loop gathers the four-phase handshake, integrator pre-biasing, and the $C^2$ quintic blend into one protocol on the safety microcontroller. Each tick it samples plant state, stopping reserve, protective inputs, and the active execution lease. It commits an ownership change only on the qualified commit tick that follows a verified acknowledgment, blends only between latched endpoints and checks every blended candidate before dispatch, and falls back on a lapsed lease or a failed clearance check.
+The enforcer's `{python} InterventionSharedAuthorityScene.permission_rate_str` loop gathers the four-phase handshake, integrator pre-biasing, and the $C^2$ quintic blend into one protocol on the safety microcontroller. Each tick it samples plant state, stopping reserve, protective inputs, and the active execution lease. It commits an ownership change only on the qualified commit tick that follows a verified acknowledgment, blends only between latched endpoints and checks every blended candidate before dispatch, and falls back on a lapsed lease or a failed clearance check.
 
 ::: {.column-margin .margin-pointer}
 ↪ **Protocol:** The enforcer's cadence, memory and write invariants, and per-state execution steps are given in @sec-appendix-systems-authority-protocol.
@@ -1995,7 +2005,7 @@ That record must preserve both sides of the causal boundary (@sec-boundary-causa
 
 [^fn-std-edr-baseline]: **Event Data Recorder Baseline**\index{Event data recorder!sampling baseline}: A passenger-vehicle event data recorder keeps `{python} InterventionRecordBaselines.edr_old_window_str` of pre-crash data at `{python} InterventionRecordBaselines.edr_old_rate_str`, a requirement that rises for vehicles built from September 2027 to `{python} InterventionRecordBaselines.edr_new_window_str` at `{python} InterventionRecordBaselines.edr_new_rate_str`, still one sample per `{python} InterventionRecordBaselines.edr_new_period_str`, or `{python} InterventionRecordBaselines.edr_ticks_str` permission ticks [@nhtsa2024edr]. The data storage system that UN Regulation No. 157 requires of an automated lane-keeping system records each activation, override, and transition demand so that investigators can tell who was driving, but its timestamps need only be accurate to within `{python} InterventionRecordBaselines.dssad_accuracy_str`, or `{python} InterventionRecordBaselines.dssad_ticks_str` permission ticks [@unece2021r157]. Neither regulated recorder can order a takeover against a contact inside one control cycle, which is why the machine logs its own per-tick record.
 
-The $1\text{ kHz}$ deterministic control loop records a structured authority and action tuple every single cycle, with declared loss handling. The minimal **evidence tuple**\index{Evidence tuple} takes the form:
+The `{python} InterventionSharedAuthorityScene.permission_rate_str` deterministic control loop records a structured authority and action tuple every single cycle, with declared loss handling. The minimal **evidence tuple**\index{Evidence tuple} takes the form:
 $$\langle t_{\text{MCU}}, S_{\text{auth}}, \mathbf{x}_{\text{state}}, \mathbf{u}_{\text{prop}}, \mathbf{u}_{\text{enf}}, \mathbf{u}_{\text{act}}, \text{ID}_{\text{operator}}, T_{\text{lease,rem}}\rangle$$
 This tuple records both sides of the proposal-permission boundary (@sec-boundary-machine-model):
 
@@ -2261,7 +2271,9 @@ class InterventionFixedWindowPitfall:
     check(abs(budget.magnitude - 968.99) < 5e-3, f"finished budget at the aisle speed: {budget}")
     # margin_fixed_window_stop_envelope.svg fig-alt hand-types 500 ms, 1619 mm, 307 mm, 1100 mm
     check(round(d_stop.magnitude) == 1619 and round(d_stop_crawl.magnitude) == 307, f"window stops: {d_stop}, {d_stop_crawl}")
-    check(round(window.to(millisecond).magnitude) == 500 and round(d_clear.to(millimeter).magnitude) == 1100, "window and clear distance in the fig-alt")
+    check(
+        round(window.to(millisecond).magnitude) == 500 and round(d_clear.to(millimeter).magnitude) == 1100, "window and clear distance in the fig-alt"
+    )
     check(abs(v_crawl.to(meter / second).magnitude - 0.15) < 1e-9, f"crawl speed in the fig-alt: {v_crawl}")
     check(overrun.magnitude > 0, "The window must overrun the clear distance at the aisle speed.")
     check(t_latest_crawl > window, "The same window must fit at the crawl.")
@@ -2495,7 +2507,7 @@ On the mobile manipulator at its `{python} InterventionSummaryWaiting.v_str` ais
 
 When communication stalls or software faults occur, role-specific execution leases bound authority and invoke the validated fallback without awaiting high-level software. The autonomous chunk lease and the `{python} InterventionTimeoutBudget.manual_lease_str` manual lease each have to fit the stopping budget for the active mode. Network commands reach the enforcer only after capability and authentication checks, whose computational cost makes rate limiting ahead of the verifier essential, while trusted protective wiring bypasses the network entirely.
 
-Transferring control from an active policy takes time, because replacing an admitted policy setpoint with a different human target in one $1\text{ ms}$ cycle requests a torque step. The $C^2$ bumpless authority transfer ramp\index{C2 bumpless transfer ramp@$C^2$ bumpless authority transfer ramp} instead varies an authority parameter $\alpha(t)$ smoothly from zero to one between latched command endpoints. The ramp's sampled implementation must respect command-rate limits and the stopping reserve of @sec-enforcement-stopping-envelopes. An optional force-reflecting console needs a separate passivity and physical-limit argument for its delayed feedback loop.
+Transferring control from an active policy takes time, because replacing an admitted policy setpoint with a different human target in one `{python} InterventionSharedAuthorityScene.tick_str` cycle requests a torque step. The $C^2$ bumpless authority transfer ramp\index{C2 bumpless transfer ramp@$C^2$ bumpless authority transfer ramp} instead varies an authority parameter $\alpha(t)$ smoothly from zero to one between latched command endpoints. The ramp's sampled implementation must respect command-rate limits and the stopping reserve of @sec-enforcement-stopping-envelopes. An optional force-reflecting console needs a separate passivity and physical-limit argument for its delayed feedback loop.
 
 In the illustrative design, a base command blend lasts `{python} InterventionBlendBudget.T_budget_str` at any speed, because its jerk bound belongs to the load. At the `{python} InterventionBlendBudget.v0_str` in-loop takeover speed a braking blend does not fit the clearance that remains, and no smoothed braking transition under the same bounds could beat the resident stop, so the base receives the resident stop while the arm blends over `{python} InterventionBlendBudget.arm_budget_str`. Execution remains conditional on qualification of the complete delay, rounded profile, and state-matched stopping reserve. The enforcer must monitor that reserve and the plant response at every blended tick.
 
@@ -2503,18 +2515,17 @@ The **authority record** makes each intervention forensically reviewable. It bin
 
 For model training, the pre-commit interval is a **policy-owned** segment even when a human is deciding to intervene. Retain its learner-visited states, unsafe proposals, and authority flags as failure evidence and, where an automated expert can label them, as relabeling candidates; exclude unsafe policy commands from expert imitation targets. The post-commit blend is enforcer-owned transition data. Only reviewed post-transfer human recovery states and actions that meet the task's validity criteria should become demonstrations.
 
-
 @Tbl-14-key-equations collects the equations the chapter's design decisions rest on, each with the quantity it bounds.
 
-| Equation                                                                                                                                  | What it bounds or decides                                                                              | Derived in                                  |
-|:------------------------------------------------------------------------------------------------------------------------------------------|:-------------------------------------------------------------------------------------------------------|:--------------------------------------------|
-| $T_{\Sigma} = T_{\text{sensory}} + T_{\text{cognitive}} + T_{\text{motor}} + T_{\text{comm}}$                                             | The takeover delay a person and a console add before any command changes                               | @eq-intervention-reaction-floor             |
-| $v(T_{\text{wait}} + \tau_{\text{delay}}) + d_{\text{suffix}}(v) + \delta \le D_{\text{clear}}$                                           | Whether the machine can still stop after waiting $T_{\text{wait}}$ at speed $v$                        | @eq-intervention-stopping-inequality        |
-| $T_{\text{latest}} = (D_{\text{clear}} - \delta - d_{\text{suffix}}(v))/v - \tau_{\text{delay}}$                                          | The latest fallback dispatch after a handover request; a fixed timeout is clipped to it                | @eq-intervention-latest-fallback            |
-| $v_{\max} = a_{\text{brake}}\bigl[\sqrt{b^2 + 2(D_{\text{clear}}-\delta)/a_{\text{brake}}} - b\bigr]$                                     | The highest speed at which a takeover with delay $T_{\Sigma}$ may be requested                         | @eq-intervention-speed-ceiling              |
-| $t - t_{\text{refresh}} < T_{\text{lease}}$ or $T_{\text{lease,man}}$                                                                     | Whether a proposer still holds authority; expiry invokes the validated local response                  | @eq-intervention-lease-age                  |
-| $\alpha(u) = 10u^3 - 15u^4 + 6u^5$ with $\tau_{\text{blend}} \ge 1.875\,\lVert\Delta \mathbf a\rVert/j_{\text{allowable}}$                | The shortest bumpless blend between two latched commands within a rate ceiling                         | @eq-intervention-quintic-smoothstep and @eq-intervention-blend-window |
-| $\mathcal L = \mathbb E\bigl[\sum_t \mathcal M(t)\,\ell(\pi_\theta(\mathbf x_t), \mathbf u^*(t))\bigr]$                                  | Which logged samples train the next policy, and with which target                                      | @eq-intervention-causal-masking-loss        |
+| Equation                                                                                                                   | What it bounds or decides                                                               | Derived in                                                            |
+|:---------------------------------------------------------------------------------------------------------------------------|:----------------------------------------------------------------------------------------|:----------------------------------------------------------------------|
+| $T_{\Sigma} = T_{\text{sensory}} + T_{\text{cognitive}} + T_{\text{motor}} + T_{\text{comm}}$                              | The takeover delay a person and a console add before any command changes                | @eq-intervention-reaction-floor                                       |
+| $v(T_{\text{wait}} + \tau_{\text{delay}}) + d_{\text{suffix}}(v) + \delta \le D_{\text{clear}}$                            | Whether the machine can still stop after waiting $T_{\text{wait}}$ at speed $v$         | @eq-intervention-stopping-inequality                                  |
+| $T_{\text{latest}} = (D_{\text{clear}} - \delta - d_{\text{suffix}}(v))/v - \tau_{\text{delay}}$                           | The latest fallback dispatch after a handover request; a fixed timeout is clipped to it | @eq-intervention-latest-fallback                                      |
+| $v_{\max} = a_{\text{brake}}\bigl[\sqrt{b^2 + 2(D_{\text{clear}}-\delta)/a_{\text{brake}}} - b\bigr]$                      | The highest speed at which a takeover with delay $T_{\Sigma}$ may be requested          | @eq-intervention-speed-ceiling                                        |
+| $t - t_{\text{refresh}} < T_{\text{lease}}$ or $T_{\text{lease,man}}$                                                      | Whether a proposer still holds authority; expiry invokes the validated local response   | @eq-intervention-lease-age                                            |
+| $\alpha(u) = 10u^3 - 15u^4 + 6u^5$ with $\tau_{\text{blend}} \ge 1.875\,\lVert\Delta \mathbf a\rVert/j_{\text{allowable}}$ | The shortest bumpless blend between two latched commands within a rate ceiling          | @eq-intervention-quintic-smoothstep and @eq-intervention-blend-window |
+| $\mathcal L = \mathbb E\bigl[\sum_t \mathcal M(t)\,\ell(\pi_\theta(\mathbf x_t), \mathbf u^*(t))\bigr]$                    | Which logged samples train the next policy, and with which target                       | @eq-intervention-causal-masking-loss                                  |
 
 : **Key equations of supervisory intervention**: Each equation fixes one quantity a takeover design must declare. The kinematic relations assume the jerk-limited resident stop and a constant speed while the machine waits; the ceiling's closed form holds only above $a_{\text{brake}}^2/j_{\max}$. The delays inside them must be measured on the site's operators, console, and link. {#tbl-14-key-equations tbl-colwidths="[44,40,16]"}
 
@@ -2612,7 +2623,9 @@ class InterventionProblems:
         return ((_d - calc_scurve_stop_distance(v, _a, _j)) / v - _tau).to(millisecond)
 
     def _ceiling(t, *, _tau=tau, _a=a, _j=j):
-        return calc_scurve_max_permitted_velocity(AISLE.d_clear, _tau + t, _a, _j, AISLE.delta_loc + AISLE.eps_track, AISLE.delta_margin).to(meter / second)
+        return calc_scurve_max_permitted_velocity(AISLE.d_clear, _tau + t, _a, _j, AISLE.delta_loc + AISLE.eps_track, AISLE.delta_margin).to(
+            meter / second
+        )
 
     t_latest_p1 = _t_latest(v_p1)  # P1
     v_knee = (a**2 / j).to(meter / second)
@@ -2635,10 +2648,12 @@ class InterventionProblems:
     # P7: jog lease.
     lease_jog = ((gap_jog - d_arm_stop) / v_jog - tau).to(millisecond)
     v_jog_max = ((gap_jog - d_arm_stop) / (tau + InterventionTimeoutBudget.manual_lease)).to(millimeter / second)
+
     # P8: AMR ceilings with a constant-deceleration stop.
     def _amr(t, *, _a=a_amr, _d=d_amr - delta_amr, _tau=tau_amr):
         bb = (_tau + t).to(second)
         return (_a * ((bb**2 + 2 * _d / _a) ** 0.5 - bb)).to(meter / second)
+
     amr_in = _amr(t_in)
     amr_ool = _amr(t_ool)
     amr_wait_share = (amr_in * (tau_amr + t_in) / (d_amr - delta_amr)).to("").magnitude
@@ -2659,13 +2674,19 @@ class InterventionProblems:
     check(lease_max_in > InterventionTimeoutBudget.manual_lease, "P4: the chosen manual lease must fit at the slow-down")
     check(lease_max_crawl > lease_max_in, "P4: the crawl leaves room for a longer lease")
     check(abs(arm_window.magnitude - 50.0) < 1e-9, "P5: 20 N m at 750 N m/s needs 50 ms")
-    check(0 < lease_jog.magnitude < InterventionTimeoutBudget.manual_lease.magnitude, "P7: the jog gap admits a lease shorter than the 100 ms manual lease")
+    check(
+        0 < lease_jog.magnitude < InterventionTimeoutBudget.manual_lease.magnitude,
+        "P7: the jog gap admits a lease shorter than the 100 ms manual lease",
+    )
     check(v_jog_max < v_jog, "P7: the 100 ms lease needs a slower jog")
     check(amr_ool < amr_in < v_amr, "P8: both AMR takeovers need a slow-down")
     check(amr_wait_share < 0.5, "P8: braking, not waiting, dominates the AMR budget at its in-loop ceiling")
     check(_amr(0 * second) > v_amr, "P8: the AMR alone must stop inside its clear distance at cruise")
     check(n4 > 0 and n1 == 4465 and n2 == 38, "P9: interval tick counts")
-    check(travel_log_aisle.magnitude > 0.99 * InterventionTakeoverBudget.spare.magnitude, "P10: one logged sample at aisle speed spans about the whole spare")
+    check(
+        travel_log_aisle.magnitude > 0.99 * InterventionTakeoverBudget.spare.magnitude,
+        "P10: one logged sample at aisle speed spans about the whole spare",
+    )
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
     v_p1_str = fmt_velocity(v_p1, unit=meter / second, precision=0)
@@ -2687,25 +2708,15 @@ class InterventionProblems:
 Each problem states its givens, which come from the machine card (@tbl-01-machine-card), the aisle scenario behind it, or this chapter's calculations. A given marked illustrative is an assumption for the exercise, not a measurement. The tag names the kind of work, and the parenthesis names the learning objective the problem assesses. Unless a problem says otherwise, use the finished stopping budget of \ref{nbk-intervention-operator-takeover-budget-spatial-clearance-margin} with its jerk-limited resident stop.
 
 1. **[Compute]** (Latest fallback time) The mobile manipulator requests a takeover at `{python} InterventionProblems.v_p1_str` (illustrative). (a) Compute $T_{\text{latest}}$ from @eq-intervention-latest-fallback, check first that the speed lies on the quadratic branch of the resident stop, and give the tick-rounded dispatch on the `{python} InterventionTimeoutBudget.tick_str` permission clock. (b) With the `{python} InterventionTimeoutBudget.config_str` configured ceiling, what is $T_{\text{timeout}}$? (c) Does the `{python} InterventionTimeoutBudget.t_in_str` in-loop takeover fit, before and after charging the `{python} InterventionAdmissionAllocation.delta_da_str` allocation of $\Delta_{\text{da}}$? Decide whether the machine may request an in-loop takeover at this speed.
-
 2. **[Compute]** (Speed ceilings) Using @eq-intervention-speed-ceiling, compute by hand the ceiling for the expected-brake-signal row of @tbl-14-teleop-stability (`{python} InterventionTakeoverLadder.expected_human_str` plus the `{python} InterventionTakeoverLadder.t_comm_str` console term) and check it against the table. Repeat for the surprise row (`{python} InterventionTakeoverLadder.surprise_human_str`). Show that the quadratic root for the surprise row falls below $a_{\text{brake}}^2/j_{\max}$, so it is not a valid answer, and find the true ceiling by solving the cubic branch of @eq-plan-c2-stopping-suffix numerically. What does the switch of branch tell you about which term dominates the budget at low speed?
-
 3. **[Compute]** (Latest fallback time; admission allocation) The in-loop slow-down of `{python} InterventionTimeoutBudget.v_in_str` was derived with the unmeasured `{python} InterventionAdmissionAllocation.delta_da_str` allocation charged. (a) What is the largest $\Delta_{\text{da}}$ it can pay after the in-loop takeover, and what is it once the `{python} InterventionTimeoutBudget.manual_lease_str` manual lease has replaced the `{python} InterventionAssistantSession.chunk_lease_str` chunk lease? (b) A loaded measurement returns $\Delta_{\text{da}} =$ `{python} InterventionProblems.dda_measured_str` (illustrative). Recompute the in-loop ceiling, round it down to the `{python} InterventionAdmissionAllocation.v_step_str` speed step, and state the new slow-down and what it costs in aisle throughput.
-
 4. **[Compute]** (Lease sizing) Find the largest manual lease whose excess over the `{python} InterventionAssistantSession.chunk_lease_str` chunk lease still fits (a) at the `{python} InterventionTimeoutBudget.v_in_str` slow-down after the in-loop takeover and the allocated $\Delta_{\text{da}}$, and (b) at the `{python} InterventionAssistantSession.v_crawl_str` crawl after the `{python} InterventionAssistantSession.t_ool_str` out-of-loop takeover and the same allocation. Note that the crawl lies below $a_{\text{brake}}^2/j_{\max}$. Compare both with the chosen `{python} InterventionTimeoutBudget.manual_lease_str` lease and argue whether one lease should serve both modes.
-
 5. **[Compute]** (Handshakes and bumpless transfer) (a) From @eq-intervention-quintic-smoothstep, derive the peak slope factor 1.875 and the bound of @eq-intervention-blend-window. (b) An arm joint's torque command must change by `{python} InterventionProblems.arm_delta_str` (illustrative) under the `{python} InterventionBlendBudget.arm_rate_str` torque-rate ceiling. Find $\tau_{\text{blend}}$ in whole permission ticks, and the torque rate a one-tick step would request instead. (c) Explain why the base's `{python} InterventionBlendBudget.T_budget_str` window is the same at every speed, and why at the in-loop request speed the base receives the resident stop rather than a blend.
-
 6. **[Compute]** (Operator permissions; authentication) At the aisle speed, charge the allocated $\Delta_{\text{da}}$ against $T_{\text{latest}}$. (a) What is the widest freshness window whose replay displacement still fits the remaining spare? (b) How many `{python} InterventionAuthBudget.t_sig_str` Ed25519 verifications fit in that remainder, and how many forged signed requests queued ahead of a genuine veto push it past its deadline? (c) Repeat (a) at the `{python} InterventionTimeoutBudget.v_in_str` slow-down after the in-loop takeover, and state which speed should set the window a site configures.
-
 7. **[Design]** (Operator permissions; state-dependent fallback; lease sizing) Write the capability-matrix entry for a maintenance technician who may jog one arm joint with the base locked, at the `{python} InterventionProblems.v_jog_str` manual reduced speed of @fig-14-teach-pendant, with the tool center point `{python} InterventionProblems.gap_jog_str` from a fixture and an arm stop of `{python} InterventionProblems.d_arm_stop_str` from that speed (both illustrative). Give its channels, preemption tier, deadline source, authentication, enabling-device condition, and fallback for the arm and for the base. Size the manual lease with the machine's $\tau_{\text{delay}}$, find the jog speed at which the `{python} InterventionTimeoutBudget.manual_lease_str` manual lease would fit instead, and choose between the two.
-
 8. **[Design]** (Speed ceilings; state-dependent fallback; transfer to an AMR) A towing autonomous mobile robot pulls a cart train at `{python} InterventionProblems.v_amr_str` and brakes at a constant `{python} InterventionProblems.a_amr_str`, with `{python} InterventionProblems.d_amr_str` of clear distance, `{python} InterventionProblems.delta_amr_str` of fixed allowances, and a `{python} InterventionProblems.tau_amr_str` pre-brake delay (all illustrative). Using @eq-intervention-speed-ceiling with $j_{\max} \to \infty$, compute its request-speed ceilings for the in-loop and out-of-loop design takeovers of this chapter, and the share of the budget spent waiting at the in-loop ceiling. Design its takeover policy (slow-down, crawl, or stop first) and name the assumption of the mobile manipulator that the towing robot breaks.
-
 9. **[Design]** (Causal intervention masking) An out-of-loop takeover of the arm commits `{python} InterventionPreTriggerWindow.t_ool_str` after the policy diverges, the arm blends for `{python} InterventionBlendBudget.arm_budget_str`, the operator's commands satisfy the stabilization criterion `{python} InterventionProblems.t_stab_str` after the blend ends, and the logged episode ends `{python} InterventionProblems.t_episode_str` after the divergence (both illustrative). At the `{python} InterventionBlendBudget.tick_str` permission tick, count the ticks in each interval and assign $\mathcal M(t)$ and $\mathbf u^*(t)$ to each, first with no automated expert and then with a privileged-state planner that can label interval 1. Then place the same episode under HG-DAgger and under Sirius's fixed `{python} InterventionLearningEvidence.sirius_window_str` window (@tbl-14-intervention-learning), and state which ticks each method treats differently from the causal mask.
-
 10. **[Critique]** (Authority record) An incident log from a takeover at the aisle speed records $\mathbf u_{\text{act}}$ and $S_{\text{auth}}$ at `{python} InterventionProblems.log_rate_str`, the rate of a regulated vehicle recorder, and nothing else. Compute the travel between logged samples at the aisle speed and compare it with the `{python} InterventionTakeoverBudget.spare_str` spare. List the incident questions this log cannot answer (who proposed the command that struck the rack, whether the enforcer modified it, whether authority had lapsed, whether the takeover committed before contact), and specify the minimum record that answers each.
-
 11. **[Critique]** (Operator permissions; latest fallback time) A vendor proposes a fixed `{python} InterventionFixedWindowPitfall.window_str` takeover timeout for every speed and an Ed25519 signature on every packet with no rate limiter. Quantify both failure modes at the aisle speed: the overrun of the clear distance when the window is waited out, and the number of forged requests that push a genuine veto past $T_{\text{latest}}$. Then state the design you would accept instead and the numbers that justify it.
 
 ::: {.callout-chapter-connection title="From authority revocation to verification"}

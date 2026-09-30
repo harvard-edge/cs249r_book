@@ -106,7 +106,7 @@ The mobile manipulator must keep checking clearance while its proposal model com
 # │      scenario; the three enforcer sub-costs are chapter-local.
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim import *
-from mlsysim.core.units import microsecond, millisecond, second, hertz
+from mlsysim.core.units import nanosecond, microsecond, millisecond, second, hertz
 from mlsysim.fmt import fmt_int, fmt_latency, fmt_frequency, fmt_percent, check
 
 RM = Embodied.MobileManipulator.WarehouseMobileManipulator
@@ -189,6 +189,8 @@ class PlacementMachine:
     wcet_str = fmt_latency(wcet, unit=microsecond, precision=0)
     wcet_margin_str = fmt_latency(wcet_margin, unit=microsecond, precision=0)
     deadline_str = fmt_latency(deadline, unit=microsecond, precision=0)
+    tick_ns_str = fmt_int(tick, unit=nanosecond)  # placement-record field nominal_period_ns
+    deadline_ns_str = fmt_int(deadline, unit=nanosecond)  # placement-record field hard_deadline_ns
     self_watchdog_str = fmt_latency(self_watchdog, unit=millisecond, precision=0)
     rail_holdup_str = fmt_latency(rail_holdup, unit=second, precision=0)
     renewal_jitter_str = fmt_latency(renewal_jitter, unit=millisecond, precision=0)
@@ -1688,8 +1690,8 @@ The record must connect configuration claims to hardware evidence. Register read
 |:-----------------------------|:---------------------------------------------|:-----------------------------------------------------------------------------------|:-----------------------------------------------------------------------------------------------------------------|
 | `execution_domain_id`        | `uint64_t` (enum)                            | Explicit domain topology; confirms physical silicon segregation                    | `0x04` (selected dedicated dual-core lockstep MCU; qualification pending)                                        |
 | `privilege_and_ring`         | `uint64_t` (privilege)                       | Record target-specific privilege and memory-protection configuration               | Proposer: Unprivileged Linux; Enforcer: Bare-Metal MPU                                                           |
-| `nominal_period_ns`          | `uint32_t` (ns)                              | Enforcer tick $T_{\text{tick}}$; matches enforcement record `loop_period_ns`       | `{python} PlacementMachine.tick_str` ($1{,}000{,}000\,\text{ns}$)                                                |
-| `hard_deadline_ns`           | `uint32_t` (ns)                              | Physical deadline $D_{\text{enf}}$; matches enforcement record `deadline_ns`       | `{python} PlacementMachine.deadline_str` ($400{,}000\,\text{ns}$)                                                |
+| `nominal_period_ns`          | `uint32_t` (ns)                              | Enforcer tick $T_{\text{tick}}$; matches enforcement record `loop_period_ns`       | `{python} PlacementMachine.tick_str` (`{python} PlacementMachine.tick_ns_str` ns)                                |
+| `hard_deadline_ns`           | `uint32_t` (ns)                              | Physical deadline $D_{\text{enf}}$; matches enforcement record `deadline_ns`       | `{python} PlacementMachine.deadline_str` (`{python} PlacementMachine.deadline_ns_str` ns)                        |
 | `unloaded_observed_max_ns`   | `uint64_t` (ns)                              | Largest cycle without load; must satisfy $t_{\text{unloaded}} \le C_{\text{wcet}}$ | `0xFFFFFFFFFFFFFFFF` (pending; illustrative estimate `{python} PlacementMachine.unloaded_str` belongs in ledger) |
 | `loaded_observed_max_ns`     | `uint64_t` (ns)                              | Peak response under adversarial stress; all ones until qualified                   | `0xFFFFFFFFFFFFFFFF` (Awaiting empirical test ledger)                                                            |
 | `shared_axi_channel_qos`     | `uint64_t` (QoS mask)                        | Bus QoS configuration plus measured or justified service bound                     | Selected TCM-local bus; topology and access bounds pending verification                                          |
@@ -1698,7 +1700,7 @@ The record must connect configuration claims to hardware evidence. Register read
 | `enforcement_record_digest`  | `uint8_t[32]` (SHA-256)                      | Cryptographic link to upstream enforcement record                                  | SHA-256 digest of @tbl-appendix-systems-wire-enforcement                                                         |
 | `test_ledger_digest`         | `uint8_t[32]` (SHA-256)                      | Cryptographic link to full factorial stress campaign ledger                        | Unset until a test ledger exists                                                                                 |
 
-: **Placement record header**: Concrete fields defining the physical compute, memory, thermal, and electrical bounds for deterministic safety enforcement. Loaded observed maximum must remain at or below declared WCET ($C_{\text{wcet}} = 250\,\mu\text{s}$) under full cognitive stress. {#tbl-13-deployment-envelope-schema tbl-colwidths="[22,18,34,26]"}
+: **Placement record header**: Concrete fields defining the physical compute, memory, thermal, and electrical bounds for deterministic safety enforcement. Loaded observed maximum must remain at or below declared WCET, $C_{\text{wcet}} =$ `{python} PlacementMachine.wcet_str`, under full cognitive stress. {#tbl-13-deployment-envelope-schema tbl-colwidths="[22,18,34,26]"}
 
 The record has two parts. A compact header holds the configuration values and the observed maxima, and it carries the digest of an external test ledger. The ledger holds what does not fit a fixed layout: inventories, the latency distributions and sample counts behind each maximum, test conditions, mitigations, and open limits.
 
@@ -1869,15 +1871,15 @@ The observation contract, belief record, intent lease, trajectory record, enforc
 
 Seven relations carry the chapter's quantitative argument, and @tbl-13-key-equations records each with the decision it settles and the place it is derived.
 
-| Equation | What it bounds or decides | Derived |
-|:---|:---|:---|
-| $t_{\text{queue}} = \sum_{k \in \mathcal{Q}} B_k/\text{BW}_{\text{peak}} + N_{\text{conflicts}}(t_{\text{RP}} + t_{\text{RCD}})$ | How long a safety read waits behind a FIFO backlog on shared DRAM; a bound exists only if the controller limits the backlog or lets the read pass | @eq-placement-dram-queuing |
-| $f \le \dfrac{C_{\text{wcet}}/t_{\text{unloaded}} - 1}{S - 1}$ | The largest share of the tick that may stall on shared-cache misses slowed by $S$ before the loaded tick crosses the declared bound | @eq-placement-stall-share |
-| $\Delta V_{\text{droop}} = L_{\text{pkg}}\,dI/dt + \Delta I\,R_{\text{pkg}}$ | The first-order rail disturbance a current step imposes on a controller sharing its supply | @eq-placement-droop |
-| $T_j(t) = T_{j,\text{target}} + (T_{j,\text{start}} - T_{j,\text{target}})\,e^{-t/\tau_{\text{th}}}$ | How long a throttled clock persists after the load stops, and so how many ticks a shared thermal path exposes | @eq-placement-cooling-recovery |
-| $\lvert T_{\text{feed}} - T_{\text{period}} \rvert \le (c_{\max} - c_{\min}) + J_{\text{phase}}$ | The service window a windowed watchdog must accept from a healthy tick, which sets its early and late trip points | @eq-placement-watchdog-window |
-| $t_{\text{enf}} = t_{\text{iso}} + I_{\text{shared}},\ t_{\text{iso}} \le C_{\text{wcet}} < D_{\text{enf}} < T_{\text{tick}}$ | The falsification threshold: a loaded cycle above $C_{\text{wcet}}$ refutes the placement's claim that proposal-side load adds no interference | @eq-placement-falsification-threshold |
-| $t_{\text{net}}^{\text{tail}} + t_{\text{proc}}^{\text{tail}} \le W$ | Whether an off-board result can renew the lease or become an admitted chunk | @eq-placement-offload-window |
+| Equation                                                                                                                         | What it bounds or decides                                                                                                                         | Derived                               |
+|:---------------------------------------------------------------------------------------------------------------------------------|:--------------------------------------------------------------------------------------------------------------------------------------------------|:--------------------------------------|
+| $t_{\text{queue}} = \sum_{k \in \mathcal{Q}} B_k/\text{BW}_{\text{peak}} + N_{\text{conflicts}}(t_{\text{RP}} + t_{\text{RCD}})$ | How long a safety read waits behind a FIFO backlog on shared DRAM; a bound exists only if the controller limits the backlog or lets the read pass | @eq-placement-dram-queuing            |
+| $f \le \dfrac{C_{\text{wcet}}/t_{\text{unloaded}} - 1}{S - 1}$                                                                   | The largest share of the tick that may stall on shared-cache misses slowed by $S$ before the loaded tick crosses the declared bound               | @eq-placement-stall-share             |
+| $\Delta V_{\text{droop}} = L_{\text{pkg}}\,dI/dt + \Delta I\,R_{\text{pkg}}$                                                     | The first-order rail disturbance a current step imposes on a controller sharing its supply                                                        | @eq-placement-droop                   |
+| $T_j(t) = T_{j,\text{target}} + (T_{j,\text{start}} - T_{j,\text{target}})\,e^{-t/\tau_{\text{th}}}$                             | How long a throttled clock persists after the load stops, and so how many ticks a shared thermal path exposes                                     | @eq-placement-cooling-recovery        |
+| $\lvert T_{\text{feed}} - T_{\text{period}} \rvert \le (c_{\max} - c_{\min}) + J_{\text{phase}}$                                 | The service window a windowed watchdog must accept from a healthy tick, which sets its early and late trip points                                 | @eq-placement-watchdog-window         |
+| $t_{\text{enf}} = t_{\text{iso}} + I_{\text{shared}},\ t_{\text{iso}} \le C_{\text{wcet}} < D_{\text{enf}} < T_{\text{tick}}$    | The falsification threshold: a loaded cycle above $C_{\text{wcet}}$ refutes the placement's claim that proposal-side load adds no interference    | @eq-placement-falsification-threshold |
+| $t_{\text{net}}^{\text{tail}} + t_{\text{proc}}^{\text{tail}} \le W$                                                             | Whether an off-board result can renew the lease or become an admitted chunk                                                                       | @eq-placement-offload-window          |
 
 : **Key equations of workload placement**: The relations behind the chapter's contention, thermal, supervision, falsification, and offload decisions, with the place each is derived. {#tbl-13-key-equations tbl-colwidths="[40,42,18]"}
 
@@ -1970,7 +1972,9 @@ class PlacementProblems:
     window_p7 = 40 * hour  # category: illustrative (P7: test window)
     loaded_max_p8 = 231 * microsecond  # category: illustrative (P8: campaign maximum)
     unloaded_max_p8 = 142 * microsecond  # category: illustrative (P8: unloaded maximum)
-    z_c_p9 = Embodied.Humanoid.Unitree_H1.com_height  # category: illustrative (P9: humanoid CoM height; registry estimate, as in @sec-nervous-coupled-budget)
+    z_c_p9 = (
+        Embodied.Humanoid.Unitree_H1.com_height
+    )  # category: illustrative (P9: humanoid CoM height; registry estimate, as in @sec-nervous-coupled-budget)
     p999_p10 = 180 * microsecond  # category: illustrative (P10: vendor P99.9)
     n_ticks_p10 = 1_000_000  # category: illustrative (P10: vendor trace length)
     util_p11 = 0.30  # category: illustrative (P11: average LPDDR utilization)
@@ -1978,9 +1982,14 @@ class PlacementProblems:
     # ┌── 2. EXECUTE ────────────────────────────────────────────────────────
     def _backlogs(bandwidth, conflicts):
         r = calc_axi_fifo_contention(
-            tile_bytes=LR.tile_bytes, camera_bytes=LR.camera_bytes, telemetry_bytes=LR.telemetry_bytes,
-            safety_read_bytes=LR.snapshot_bytes, transaction_bytes=LR.transaction_bytes,
-            bandwidth=bandwidth, bank_switches=conflicts, bank_switch_time=LR.bank_switch_time,
+            tile_bytes=LR.tile_bytes,
+            camera_bytes=LR.camera_bytes,
+            telemetry_bytes=LR.telemetry_bytes,
+            safety_read_bytes=LR.snapshot_bytes,
+            transaction_bytes=LR.transaction_bytes,
+            bandwidth=bandwidth,
+            bank_switches=conflicts,
+            bank_switch_time=LR.bank_switch_time,
             compute_time=LR.compute_after_sense,
         )
         q, o = r["queue_fifo"], r["own_read"]
@@ -2032,11 +2041,19 @@ class PlacementProblems:
     check(abs(v_ind_p3.magnitude - 45.0) < 1e-6 and abs(v_res_p3.magnitude - 48.0) < 1e-6, "P3: 45 mV inductive, 48 mV resistive.")
     check(stretch_p3 < DR.delay_expansion_pct, "P3: the slower step stretches gate delay less.")
     check(ticks_p4 == 1014 and theta_max_p4 < TH.theta_ja, "P4: 1,014 ticks at 90 °C; the scenario's resistance exceeds the no-trip limit.")
-    check(abs(t_lower_p5.magnitude - 790.0) < 1e-6 and abs(t_upper_p5.magnitude - 1210.0) < 1e-6, f"P5: feed window drifted: [{t_lower_p5}, {t_upper_p5}]")
+    check(
+        abs(t_lower_p5.magnitude - 790.0) < 1e-6 and abs(t_upper_p5.magnitude - 1210.0) < 1e-6,
+        f"P5: feed window drifted: [{t_lower_p5}, {t_upper_p5}]",
+    )
     check(abs(z_c_p9.to(meter).magnitude - 0.9) < 1e-9, f"P9: humanoid CoM height drifted: {z_c_p9}")
-    check(t_fast_p5 < t_lower_p5 and PM.self_watchdog > t_upper_p5, "P5: a doubled clock trips the lower bound; the 5 ms timeout sits beyond the window.")
+    check(
+        t_fast_p5 < t_lower_p5 and PM.self_watchdog > t_upper_p5,
+        "P5: a doubled clock trips the lower bound; the 5 ms timeout sits beyond the window.",
+    )
     check(TR.delta_da < TR.t_ceiling and delta_da_p6 < TR.t_ceiling, "P6: the heavier validation still fits the ceiling.")
-    check(t_full_p7 > window_p7 and ticks_half_p7 < n_ticks_p7, "P7: the full factorial overruns the window, and so does a half fraction at 10^7 ticks.")
+    check(
+        t_full_p7 > window_p7 and ticks_half_p7 < n_ticks_p7, "P7: the full factorial overruns the window, and so does a half fraction at 10^7 ticks."
+    )
     check(loaded_max_p8 < PM.wcet and unloaded_max_p8 < loaded_max_p8, "P8: the illustrative campaign passes.")
     check(ratio_p9 > 7 and TH.ticks_exposed > 2000, "P9: the hangover spans more than seven fall timescales.")
     check(abs(rate_hr_p10 - 10.8) < 1e-9, "P10: 3e-6 per tick at 1 kHz is 10.8 per hour.")
@@ -2061,25 +2078,15 @@ class PlacementProblems:
 Each problem states its givens, which come from the running machine's registry values, the chapter's own calculations, or the problem itself. A given marked illustrative is an assumption for the exercise, not a measurement. The tag names the kind of work, and the parenthesis names the learning objective the problem assesses.
 
 1. **[Compute]** (Contention mechanisms) Return to notebook \ref{nbk-placement-loaded-read} on the rejected shared die. Using @eq-placement-dram-queuing, recompute the number of backlogs the sense allowance, the declared worst-case execution time, and the deadline each absorb if row conflicts per backlog rise from `{python} PlacementLoadedRead.bank_switches_str` to `{python} PlacementProblems.conflicts_p1_str` (illustrative). Repeat with the original conflicts but half the `{python} PlacementLoadedRead.bandwidth_str` GB/s peak bandwidth. Which change costs more, and what does the comparison say about whether a controller's timing parameters or its bandwidth deserve the placement evidence?
-
 2. **[Compute]** (Contention mechanisms) A profile of the enforcer on candidate (b) attributes `{python} PlacementProblems.f_stall_p2_str` percent of its `{python} PlacementMachine.unloaded_str` unloaded tick to shared-cache misses (illustrative). Using @eq-placement-stall-share, find the smallest interference slowdown $S$ that pushes the loaded tick past the declared `{python} PlacementMachine.wcet_str`, and the smallest that pushes it past the `{python} PlacementMachine.deadline_str` deadline. Compute the loaded tick at the measured MSHR-class `{python} PlacementInterference.s_mshr_mult_str` and at the writeback-buffer attack's `{python} PlacementInterference.s_wb_mult_str`. Which claims survive each, and what must a qualification of candidate (b) supply before either number can be trusted?
-
 3. **[Compute]** (Power and reset coupling) Recompute the droop of @eq-placement-droop and the gate-delay stretch of the alpha-power model for the chapter's package parameters when the `{python} InductivePDNVoltageDroop.delta_i_str` A current step rises in `{python} PlacementProblems.t_rise_p3_str` ns (illustrative) instead of `{python} InductivePDNVoltageDroop.t_rise_str` ns. Explain why the resistive term does not change, and state which quantity a rail qualification must therefore bound besides the slew rate.
-
 4. **[Compute]** (Thermal coupling) Using the scenario of notebook \ref{nbk-placement-thermal-hangover}, compute the throttled interval and the number of exposed ticks if the governor restored the clock at `{python} PlacementProblems.t_clear_p4_str`$\,^{\circ}\text{C}$ (illustrative) instead of `{python} RejectedPlacementThrottle.t_clear_str`$\,^{\circ}\text{C}$. Then find the largest junction-to-ambient resistance for which continuous inference at `{python} RejectedPlacementThrottle.p_load_str` W never reaches the trip threshold. Which change would you ask for, and what does a higher clearance threshold cost the governor?
-
 5. **[Compute]** (Watchdog sizing) The stress campaign on the discrete microcontroller records a shortest completion $c_{\min} =$ `{python} PlacementProblems.c_min_p5_str` and an inter-tick jitter bound $J_{\text{phase}} =$ `{python} PlacementProblems.j_phase_p5_str` (both illustrative), with $c_{\max}$ the declared `{python} PlacementMachine.wcet_str`. Using @eq-placement-watchdog-window, compute the feed interval's range. Would the window's lower bound catch a clock fault that doubles the core's speed and its tick timer together? The upper trip stays at the `{python} PlacementMachine.self_watchdog_str` self-watchdog timeout: how far does the base travel at `{python} PlacementTransport.v_aisle_str` m/s before a dead enforcer is detected, and why must that travel be charged to a separately qualified fault response?
-
 6. **[Design]** (Selecting a remedy) Memory pressure on the application processor tempts the team into two remedies: halving the chunk rate, and replacing whole-plan validation with a heavier check that takes `{python} PlacementProblems.t_validate_p6_str` (illustrative) instead of `{python} PlacementTransport.t_validate_str`. Using the `{python} PlacementMachine.lease_str` lease and `{python} PlacementMachine.renewal_jitter_str` renewal-jitter allowance, find the slowest admissible chunk period and decide whether halving the rate is admissible. For the heavier check, recompute $\Delta_{\text{da}}$ with notebook \ref{nbk-placement-transport-budget} and the reserve it leaves under the `{python} PlacementTransport.t_ceiling_str` ceiling, and find the largest validation time the ceiling admits. Recommend one remedy and state its price.
-
 7. **[Design]** (Stress campaign) Write the factorial matrix for the loaded test of the discrete microcontroller placement with `{python} PlacementProblems.n_factors_p7_str` two-level factors: the four of @sec-placement-testing-separation and one claimant hosted on the microcontroller itself, such as a saturated board link. At `{python} PlacementSeparationBudget.trace_s_str` ($10^7$ ticks) per cell, how long does the full campaign take, and how many ticks per cell fit a half fraction in a `{python} PlacementProblems.window_p7_str` h test window (illustrative)? State which paired loads a half fraction must keep, and write the predeclared falsification criterion.
-
 8. **[Design]** (Placement record) The campaign of problem 7 passes, recording an unloaded maximum of `{python} PlacementProblems.unloaded_max_p8_str` and a loaded maximum of `{python} PlacementProblems.loaded_max_p8_str` (both illustrative). Fill the fields of @tbl-13-deployment-envelope-schema that these results support, mark the fields that remain unset and why, and list the untested conditions the ledger must carry. Which claim does the loaded maximum support, and which does it leave unproven?
-
 9. **[Design]** (Dependent-failure inventory, transfer to a humanoid) A humanoid's balance supervisor ticks at `{python} PlacementMachine.tick_str` and would run on candidate (b) under the thermal scenario of notebook \ref{nbk-placement-thermal-hangover}. With a center-of-mass height of `{python} PlacementProblems.z_c_p9_str` (illustrative, as in @sec-nervous-coupled-budget), compute the fall timescale $\sqrt{z_c/g}$, the throttled interval in units of that timescale, and the factor by which an unrecovered lean grows over it. Explain why the wheeled machine's fallback, braking to rest, does not exist here, rank the rows of @tbl-13-placement-candidates the biped cannot leave shared, and choose a placement.
-
 10. **[Critique]** (Stress campaign) A vendor reports "P99.9 enforcement latency `{python} PlacementProblems.p999_p10_str` over $10^6$ ticks" for a shared-die design and claims it satisfies the declared `{python} PlacementMachine.wcet_str`. Compute how long the trace ran at `{python} PlacementMachine.tick_str` per tick, how many ticks lie above the reported percentile with their values unreported, and, taking zero exceedances in $n$ trials to bound the per-trial probability at about $3/n$ with 95 percent confidence, how many exceedances per hour the trace could not exclude even had its maximum been below the bound. Write the critique and name what the report must add.
-
 11. **[Critique]** (Contention mechanisms, selecting a remedy) A colleague argues that because average LPDDR utilization stays under `{python} PlacementProblems.util_p11_str` percent (illustrative), the enforcer can share the application SoC's memory controller. Refute the argument with the numbers of notebook \ref{nbk-placement-loaded-read} and @eq-placement-stall-share, then propose the cheapest remedy from @tbl-13-replacement-decisions that would bound the wait, and state the residual vulnerability it leaves.
 
 ::: {.callout-chapter-connection title="From compute placement to intervention"}

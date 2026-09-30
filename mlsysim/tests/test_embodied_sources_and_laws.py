@@ -198,3 +198,13 @@ def test_argument_confidence():
     assert calc_multilegged_confidence([0.9]) == pytest.approx(0.9)
     with pytest.raises(ValueError):
         calc_conjunctive_confidence([])
+
+
+def test_insulation_class_f_limit_is_iec60085_155c():
+    """IEC 60085:2007 thermal class 155 (F); read by the vol4 body and training chapters."""
+    import mlsysim
+    from mlsysim.core.units import ureg
+
+    limit = mlsysim.INSULATION_CLASS_F_LIMIT
+    assert abs(limit.to(ureg.degC).magnitude - 155.0) < 1e-9
+    assert abs(limit.to(ureg.kelvin).magnitude - 428.15) < 1e-9
