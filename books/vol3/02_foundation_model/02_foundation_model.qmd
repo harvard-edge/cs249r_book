@@ -78,7 +78,7 @@ The call that returns `read_file("src/pool.py")` involves three responsibilities
 
 :::
 
-### A request the student can inspect
+### Messages and tool definitions {#sec-vol3-foundation-model-messages-tool-definitions}
 
 The runtime presents the repair task through role-tagged messages\index{Model invocation contract!messages and roles}. A `system` message supplies application instructions, a `user` message states the request, and an `assistant` message records earlier model output. A `tool` message carries an observation from an operation the runtime invoked. The role places content in the model's input; whether that content is true, and whether it may change the task contract, is settled elsewhere.
 
@@ -130,7 +130,7 @@ Here, `kind` determines how to interpret the payload. The normalized `status` re
 ![](images/svg/model_call_surface.svg)
 :::
 
-### From proposal to the next observation
+### Proposals and observations {#sec-vol3-foundation-model-proposals-observations}
 
 To act on the returned request, the runtime first checks invocation status and payload form. It then checks the proposed file access against the task's current authority before invoking the tool. Advertising `read_file` authorizes no particular path: the authorization check decides whether this path lies inside the permitted workspace, and tool execution happens outside the model call.
 
@@ -158,7 +158,7 @@ The request and response records expose the boundary needed for a useful model c
 
 Returning the connection-pool source and a compiler diagnostic can make the next repair request much longer than the first. Counting the files or measuring the visible text in characters does not tell the runtime whether the request fits. Role delimiters, tool definitions, paths, and source text all contribute to the sequence the model receives. The relevant budget is the token count of that complete representation, measured using the model's tokenizer and input format.
 
-### Tokens in the serialized request
+### Tokens in the serialized request {#sec-vol3-foundation-model-serialized-request-tokens}
 
 A **tokenizer**\index{Tokenizer!definition}\index{Tokenization|see{Tokenizer}} maps text into identifiers from a finite vocabulary. Subword methods represent frequent fragments compactly while breaking unfamiliar words and identifiers into smaller pieces [@sennrich2016subword]. **Byte-pair encoding**\index{Byte-pair encoding!definition}[^fn-bpe-compression-origin] learns repeated combinations of smaller units; other tokenizers use different segmentation rules, and some learn them directly from raw text without assuming word boundaries [@kudo2018sentencepiece]. A token may represent a word, part of a word, whitespace, punctuation, or a combination of these. Token boundaries therefore need not coincide with the boundaries of a source-code identifier or a JSON field.
 
@@ -176,7 +176,7 @@ Message structure contributes to that count as well. The service formats the rol
 
 The same discipline applies to output. A compact tool request can consume fewer generated tokens than a long explanation that contains the same request, but the count depends on the requested representation. A shorter representation earns its savings only when it preserves the distinctions the runtime needs; dropping the path or an error variant to save tokens weakens the interface.
 
-### Reserving room for generation
+### Output headroom {#sec-vol3-foundation-model-output-headroom}
 
 Let $S$ be the fully represented input length, $S_{\max}$ the **context window**\index{Context window!definition}, the combined limit on input and generated tokens that one call may hold, and $K_{\max}$ the reserved generation allowance, or **output headroom**\index{Output headroom!definition}\index{Context window!output headroom}. For an interface that accounts for input and generated tokens in one window, admission requires
 
@@ -234,7 +234,7 @@ Appending a tool observation beyond that headroom invalidates the admission calc
 
 An admitted request can still exhaust its output allowance. The runtime then keeps the complete candidate and the available fragment distinct: a partial payload remains useful for diagnosis, and parseability does not make it complete. The invocation contract in @sec-vol3-foundation-model-contract turns that distinction into a status-first handling rule.
 
-### Multimodal input accounting
+### Multimodal input accounting {#sec-vol3-foundation-model-multimodal-accounting}
 
 Suppose the repair task also includes an image of a failing diagnostic display. The model's image processing, not the text tokenizer, determines the image's representation, and the interface's accounting determines its context charge. A vision encoder may divide an image into patches [@dosovitskiy2021image], but resizing, tiling, or a later projection or pooling stage can make the number of context positions differ from the patch count.
 
@@ -256,7 +256,7 @@ Token accounting gives the runtime an admission test for the whole request and a
 
 The request fixes the messages and available tool descriptions, but it does not fix the response. In the repair task, the model might propose `read_file` with one path, choose a different path, or return an explanation instead. Understanding how that response is generated helps the designer choose output limits and sampling settings. It also explains why repeating a request is different from replaying a recorded response.
 
-### Conditional token selection
+### Conditional token selection {#sec-vol3-foundation-model-conditional-token-selection}
 
 An autoregressive model generates a sequence by conditioning each next-token distribution on the input and the tokens already generated, the formulation that neural language modeling adopted from its start [@bengio2003neural]. Let $x_{1:S}$ denote the input tokens and $y_{1:K}$ an output sequence. Its conditional probability factors as
 
@@ -278,7 +278,7 @@ Because each generated token extends a dependent sequence, output length is the 
 
 [^fn-speculative-decoding-equivalence]: **Speculative Decoding**: A small draft model proposes several tokens, and the target model scores them all in one pass; a modified rejection-sampling rule accepts each drafted token with a probability that makes the accepted sequence distributed exactly as if the target model had sampled alone, as two groups showed independently [@leviathan2023fast; @chen2023accelerating]. The guarantee is distributional, not bitwise: it changes how many hardware passes an output costs, not which outputs are possible, so it neither adds nor removes the replay caveats discussed later in this section. \index{Speculative decoding!distribution preservation}
 
-### Sampling controls
+### Sampling controls {#sec-vol3-foundation-model-sampling-controls}
 
 For positive **temperature**\index{Temperature (sampling)!definition}[^fn-sampling-temperature-origin] $\tau_{\text{temp}}$, softmax converts the logits into next-token probabilities:
 
@@ -393,7 +393,7 @@ Now return to unit temperature and apply top-$p$ with $p =$ `{python} LogitScali
 
 :::
 
-### Repetition and replay
+### Repetition and replay {#sec-vol3-foundation-model-repetition-replay}
 
 Greedy selection removes sampling randomness at a given logit vector, but that does not make an entire served call reproducible. The same visible request can encounter a different model revision or numerical implementation. Changes in floating-point evaluation[^fn-float-reduction-order] can alter closely ranked logits, and an early token difference changes subsequent conditioning. A fixed sampling seed, where supported, similarly constrains a random-number process without fixing every other part of the service. Reproducibility is a property of a specified execution environment and interface contract, not a consequence of temperature alone. A production incident shows how far the serving path can move the output while the request stays the same.
 
@@ -454,7 +454,7 @@ The repair agent returns a complete request to `read_file` with `path` set to `s
 
 The same distinction applies when the response contains a patch rather than an inspection request. A patch can parse, compile, and pass a sequential test while leaving the reported race condition intact. Each result answers a narrower question than whether the repair satisfies the task contract. Candidate verification must preserve those questions instead of collapsing them into a single notion of validity.
 
-### Likelihood and the property being checked
+### Likelihood and checked properties {#sec-vol3-foundation-model-likelihood-checked-properties}
 
 The next-token probabilities describe the model's conditional distribution over continuations. Whether a generated path exists, whether the caller may read it, and whether a code change preserves required behavior depend instead on the current environment and the task contract. A familiar-looking path can receive substantial model probability even when it names an obsolete file.
 
@@ -466,7 +466,7 @@ These distinctions give the runtime a reason to keep generated content separate 
 
 [^fn-complete-mediation-handler]: **Complete Mediation**: One of the design principles that @saltzer1975 set out for protection systems: every access to every object is checked against current authority at the moment of access, not remembered from an earlier decision. The tool handler applies the same rule to a model's proposal, so a path validated when the request was composed is checked again when the read executes, closing the gap in which the grant or the file could have changed. \index{Complete mediation!tool handler}
 
-### Self-review and external evidence
+### Self-review and external evidence {#sec-vol3-foundation-model-self-review-evidence}
 
 Asking the model to review its patch can reveal an inconsistency or produce a better candidate. The review is another generation step, drawn from the same model and often from the same incomplete context, so it can reuse the generator's mistaken assumption; a different prompt does not make their errors independent. Measurements of self-correction without external feedback bear this out: on reasoning tasks, models asked to review their own answers rarely improved them and sometimes made them worse [@huang2024cannot].
 
@@ -536,7 +536,7 @@ A sound checker for the exact property drives $\epsilon_{\text{FA}}$ to zero und
 
 :::
 
-### A pipeline of scoped checks
+### A pipeline of scoped checks {#sec-vol3-foundation-model-scoped-check-pipeline}
 
 The runtime can reject inexpensive structural failures before allocating resources to behavioral evaluation. Ordering the stages by cost saves work; each stage still answers its own question rather than a stronger version of the previous one. @Tbl-verification-layers separates the claims supported by common checks from the claims that still require another mechanism.
 
@@ -568,7 +568,7 @@ The request and response artifacts from the invocation boundary supply that reco
 
 :::
 
-### Formal request specification
+### Formal request specification {#sec-vol3-foundation-model-request-specification}
 
 At the generation interface, the bounded request can be represented by the tuple
 
@@ -586,7 +586,7 @@ Resource enforcement also has a local boundary. A host-side receive limit bounds
 
 [^fn-rpc-unknown-outcome]: **Remote Call Semantics**: Remote procedure call designers met this ambiguity first. In the design @birrell1984rpc describe, a call that returns normally executed exactly once, but a call that ends in a failure report may have executed once or not at all, because the caller cannot tell a lost request from a lost reply. A model call inherits the same gap: a timed-out generation may still have run to completion and been billed, which is why `TRANSPORT_FAILURE` records an unknown remote outcome rather than a call that never happened. \index{Remote procedure call!unknown outcome}
 
-### The normalized status envelope
+### The normalized status envelope {#sec-vol3-foundation-model-status-envelope}
 
 The runtime represents the observed outcome using the **normalized status envelope**\index{Normalized status envelope!definition}
 
@@ -639,7 +639,7 @@ def completed_candidate(envelope):
 
 Diagnostic retention uses a separate path with its own size and access limits. It can record the partial bytes and the observed stop reason to explain a failure. Repairing a fragment by adding guessed arguments or delimiters creates a new candidate with no evidence of completion, so it never inherits the original call's status.
 
-### Streaming and cancellation
+### Streaming and cancellation {#sec-vol3-foundation-model-streaming-cancellation}
 
 **Streaming**\index{Streaming!definition} delivers response content before generation finishes. A delivery chunk may contain part of a token's decoded text, several tokens, or a protocol event; the runtime must follow the service's framing contract rather than assume one chunk equals one token. Incremental inspection can discover a prefix that cannot satisfy the requested format and allow the runtime to stop waiting for unusable output. An unfinished prefix can still be valid, so the monitor asks whether the prefix can still be completed, not whether it is complete.
 
@@ -711,7 +711,7 @@ The repair agent proposes reading `src/pool.py` through `read_file(path)`, but i
 
 :::
 
-### Legal prefixes and completed structures
+### Legal prefixes and completed structures {#sec-vol3-foundation-model-legal-prefixes}
 
 The constraint engine tracks the structure of the text generated so far. After the prefix `{"path":`, a schema requiring a string permits whitespace and then a string value, but not an unquoted boolean value. After `{"path":"src/`, the output is still a legal prefix[^fn-viable-prefix-lr] because additional characters can complete the path and close the object. It is not yet a valid complete JSON object. The distinction between a prefix that can continue and a string that can end is the basis of constrained decoding.
 
@@ -739,7 +739,7 @@ Completion requires an additional condition. The parser must reach an accepting 
 
 Suppose the service reaches its output ceiling while generating the arguments, after `{"path":"src/po`. The prefix remains compatible with the schema, but the envelope has `status: TRUNCATED`, and `payload` contains only the unfinished proposal. The runtime cannot dispatch it as a completed `tool_request`, even if a repair parser could add quotes and braces. Those inserted characters would create a different candidate without completing the original invocation. A fragment may still be retained for diagnosis under the status-first handling rule. Grammar constraints do not override the quarantining rule of invariant closure (principle \ref{pri-invariant-closure}).
 
-### What the structural guarantee covers
+### Scope of the structural guarantee {#sec-vol3-foundation-model-structural-guarantee-scope}
 
 A complete object can satisfy the grammar and still name the wrong file. For the repair task, the arguments `{"path":"src/pool.py"}` may have the expected field and string type, yet the file may no longer exist, its contents may have changed, or the task may lack permission to read it. The mask has constrained a representation, not observed the repository or granted access. @Tbl-vol3-verification-dimensions separates the claims needed before the system can treat the proposal as useful work.
 
@@ -758,7 +758,7 @@ Schema design also determines whether the model can express missing information.
 
 The model can still misuse these alternatives: it can emit a fabricated path when `unknown` is available, or claim an error that did not occur. The runtime must interpret each variant according to the task contract and obtain missing observations where appropriate. The schema makes uncertainty expressible; external evidence determines whether the response is justified.
 
-### Learned formatting and runtime constraints
+### Learned formatting and runtime constraints {#sec-vol3-foundation-model-learned-formatting-constraints}
 
 Training can make a model more likely to select an appropriate tool and express its arguments in the required format [@schick2023toolformer]. Runtime masking addresses a different question: which output strings remain possible during this invocation. Learned formatting changes the model's scores; masking restricts their support. The two mechanisms can operate together because a model trained to produce tool requests can still have its argument tokens constrained during generation.
 
@@ -783,7 +783,7 @@ The repair agent can ask for a localized change or for the entire modified file.
 
 Input length and output length affect different parts of execution. Processing a supplied prompt exposes many known token positions to parallel computation, whereas autoregressive generation follows a dependent sequence of choices. The service's implementation and current load determine the realized rates. Output length is therefore the first latency control to examine, while a long prompt with a short reply, or a congested queue, can shift the elapsed time elsewhere.
 
-### Measuring call latency
+### Call latency decomposition {#sec-vol3-foundation-model-call-latency-decomposition}
 
 For the runtime, a call begins when it starts preparing the request and ends when the normalized response is ready for handling. Within this boundary, preparation covers context assembly, serialization, and request transfer; queueing covers waits for service capacity; **prefill**\index{Prefill!definition} processes the supplied context in one pass over all its positions; **decode**\index{Decode!definition} generates output tokens one dependent step at a time; and postprocessing completes response transfer, normalization, and initial parsing. A nonoverlapping accounting of those intervals gives
 
@@ -795,7 +795,7 @@ The first generated token requires particular care. A conventional prefill pass 
 
 An output limit bounds the amount the service may generate, not how quickly it will do so, since queueing can consume the deadline before much generation occurs. Measurements must therefore name the model configuration, context and output lengths, cache conditions, and serving load. The same sequential agent can share a server batch with other clients, since serving systems admit and retire requests at the granularity of single decode steps [@yu2022orca]. Dependence between its own turns does not imply that the physical serving batch has size one.
 
-### A bounded per-call estimate
+### Per-call work estimate {#sec-vol3-foundation-model-per-call-work-estimate}
 
 ```{python}
 #| label: lego-call-price
@@ -944,7 +944,7 @@ The estimate charges each input token once at the input allowance and reserves o
 
 For the first repair turn, a prompt of `{python} CallPrice.s0_str` tokens contributes `{python} CallPrice.call1_pre_str`, while a reply of `{python} CallPrice.k_turn_str` tokens contributes `{python} CallPrice.call1_dec_str`. The sum is `{python} CallPrice.call1_total_str`: output is `{python} CallPrice.call1_tok_pct_str` of the call's tokens and `{python} CallPrice.call1_out_pct_str` of its estimated work, so shortening the output moves the estimate far more than removing the same number of input tokens. A cheaper call pays only when it still produces an adequate candidate, so required evidence stays in the prompt.
 
-### Multi-turn trajectory cost accumulation
+### Multi-turn trajectory cost accumulation {#sec-vol3-foundation-model-trajectory-cost-accumulation}
 
 A short reply can still lead to a large input workload across a trajectory. Suppose the runtime retains an append-only transcript and supplies that complete transcript on every call. If the first prompt has $S_{\text{base}}$ tokens and each turn appends $\Delta$ tokens of model output and tool results, a trajectory with horizon $H$ turns supplies
 
@@ -1065,7 +1065,7 @@ The repair agent needs to change the connection-pool locking logic, but its outp
 
 A high parse rate alone cannot settle that choice. A complete replacement may parse correctly but arrive after the invocation deadline; a compact edit may arrive promptly but fail to match its target. Neither outcome supplies an accepted repair. The comparison must retain the call's completion status, account for the resources consumed, and test the resulting artifact against the same acceptance criteria.
 
-### Separating interface choices
+### Interface design dimensions {#sec-vol3-foundation-model-interface-design-dimensions}
 
 Representation granularity determines how much of the desired change the model must describe. A whole-file representation returns the new contents, including unchanged regions. A localized edit returns a target and a change relative to an existing version. An anchored search-and-replace edit, for example, supplies source text to locate and the text that should replace it. If the source text is absent or matches several locations, the runtime cannot infer a unique intended mutation from that representation alone. Rewriting the whole file avoids that particular anchor requirement, but still needs a check that it is replacing the intended version and preserving unrelated content.
 
@@ -1073,7 +1073,7 @@ Serialization is a separate choice. Either representation can use JSON: one obje
 
 The constraint method adds another independent decision. A model can learn a response format, receive examples of that format, or generate under a grammar mask; learned formatting and masking can coexist. The completed-language guarantee from @sec-vol3-foundation-model-grammar-constrained covers form under its stated assumptions; whether an edit's search text occurs in the file, and whether the replacement repairs the defect, need their own evidence. Measuring one of these choices while changing the others produces a comparison of complete interface designs, not evidence that one serialization or constraint method caused the difference.
 
-### Comparing at a matched budget
+### Matched-budget comparison {#sec-vol3-foundation-model-matched-budget-comparison}
 
 For our repair, each trial begins from the same source snapshot and task description. The comparison fixes the model configuration, the information available about the defect, the allowed operations, and the acceptance checks. It also gives each interface the same resource ceilings and retry policy. The instructions and payloads may have different token counts because those differences are part of the design being evaluated. Equal budgets mean equal limits and accounting rules, not identical resource consumption.
 
@@ -1092,7 +1092,7 @@ The accounting boundary must be explicit. An invocation deadline ends at the nor
 
 Serving conditions also belong in the comparison record. Queueing, cached prefixes, and concurrent traffic can change elapsed time without changing the payload format. Repeated trials under stated conditions reveal that variation; one favorable timing does not establish deadline reliability, because in shared services the rare slow response, not the typical one, sets how often a deadline is missed [@dean2013tail]. The immediate design decision is whether the representation leaves enough budget to produce and assess useful candidates. Broader experimental design and uncertainty estimates belong in @sec-vol3-evaluation.
 
-### A deadline-constrained representation choice
+### A deadline-constrained representation choice {#sec-vol3-foundation-model-deadline-representation-choice}
 
 The per-token accounting model makes the cost of unchanged output visible before a benchmark is run, and it attributes the difference to granularity rather than to JSON or delimiters.
 
