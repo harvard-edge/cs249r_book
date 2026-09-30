@@ -129,3 +129,82 @@ def test_lpddr5_6400_timings():
     assert t.t_rcd.to("ns").magnitude == pytest.approx(15 * 1.25)
     assert t.t_rp.to("ns").magnitude == pytest.approx(15 * 1.25)
     assert t.metadata.provenance.id == "prov:lpddr5-6400-timings"
+
+
+# ── Partial-slowdown stretch (Amdahl read as a slowdown) ────────────────────
+def test_partial_slowdown_stretch_and_breakeven():
+    from mlsysim.physics import calc_amdahls_speedup, calc_partial_slowdown_stretch, calc_stall_share_breakeven
+
+    assert calc_partial_slowdown_stretch(0.1, 21.0) == pytest.approx(3.0)
+    assert calc_partial_slowdown_stretch(0.1, 21.0) == pytest.approx(1 / calc_amdahls_speedup(0.1, 1 / 21.0))
+    f = calc_stall_share_breakeven(250 / 135, 21.0)
+    assert f == pytest.approx((250 / 135 - 1) / 20)
+    assert calc_partial_slowdown_stretch(f, 21.0) == pytest.approx(250 / 135)
+    assert calc_stall_share_breakeven(2.0, 1.0) == 1.0
+    assert calc_stall_share_breakeven(50.0, 2.0) == 1.0  # capped: the whole task may be slowed
+
+
+# ── Importance sampling and the cross-entropy method (exponential tail) ─────
+def test_monte_carlo_sample_size():
+    from mlsysim.physics import calc_monte_carlo_sample_size
+
+    assert calc_monte_carlo_sample_size(0.01, 0.1) == pytest.approx(0.99 / (0.01 * 0.01))
+
+
+def test_importance_sampling_exponential_reduces_to_plain_mc():
+    from mlsysim.physics import calc_importance_sampling_exponential
+
+    # Proposal equal to the operational model: w = 1, ESS per draw 1, and the
+    # relative variance is the Bernoulli (1 - p) / p.
+    r = calc_importance_sampling_exponential(20.0, 5.0, 5.0)
+    p = math.exp(-4.0)
+    assert r["failure_probability"] == pytest.approx(p)
+    assert r["ess_per_draw"] == pytest.approx(1.0)
+    assert r["relative_variance"] == pytest.approx((1 - p) / p)
+    assert r["proposal_failure_share"] == pytest.approx(p)
+    with pytest.raises(ValueError):
+        calc_importance_sampling_exponential(20.0, 5.0, 2.0)  # eta >= 2 lam: infinite variance
+
+
+def test_cross_entropy_and_optimal_exponential_proposal():
+    from mlsysim.core.units import ureg
+    from mlsysim.physics import (
+        calc_cross_entropy_exponential_proposal,
+        calc_importance_sampling_exponential,
+        calc_optimal_exponential_proposal_mean,
+    )
+
+    gamma, m0 = 100.775 * ureg.ms, 5.0 * ureg.ms
+    ce = calc_cross_entropy_exponential_proposal(gamma, m0, 0.1)
+    assert ce["n_levels"] == 4
+    assert ce["levels"][0].to("ms").magnitude == pytest.approx(-5.0 * math.log(0.1))
+    assert ce["proposal_mean"].to("ms").magnitude == pytest.approx(105.775)
+    opt = calc_optimal_exponential_proposal_mean(gamma, m0)
+    rv_ce = calc_importance_sampling_exponential(gamma, m0, ce["proposal_mean"])["relative_variance"]
+    rv_opt = calc_importance_sampling_exponential(gamma, m0, opt)["relative_variance"]
+    assert rv_opt <= rv_ce < rv_opt * 1.001
+    # The optimum is a stationary point: nearby proposals do no better.
+    for bump in (0.98, 1.02):
+        assert calc_importance_sampling_exponential(gamma, m0, opt * bump)["relative_variance"] > rv_opt
+
+
+# ── Confidence in a structured safety argument ──────────────────────────────
+def test_argument_confidence():
+    from mlsysim.physics import calc_conjunctive_confidence, calc_multilegged_confidence
+
+    assert calc_conjunctive_confidence([0.99] * 10) == pytest.approx(0.99**10)
+    assert calc_conjunctive_confidence([0.99] * 10) < 0.99
+    assert calc_multilegged_confidence([0.9, 0.9]) == pytest.approx(0.99)
+    assert calc_multilegged_confidence([0.9]) == pytest.approx(0.9)
+    with pytest.raises(ValueError):
+        calc_conjunctive_confidence([])
+
+
+def test_insulation_class_f_limit_is_iec60085_155c():
+    """IEC 60085:2007 thermal class 155 (F); read by the vol4 body and training chapters."""
+    import mlsysim
+    from mlsysim.core.units import ureg
+
+    limit = mlsysim.INSULATION_CLASS_F_LIMIT
+    assert abs(limit.to(ureg.degC).magnitude - 155.0) < 1e-9
+    assert abs(limit.to(ureg.kelvin).magnitude - 428.15) < 1e-9

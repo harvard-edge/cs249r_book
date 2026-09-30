@@ -53,6 +53,8 @@ from mlsysim.physics.robotics import (
     calc_teleop_ingestion_budget,
     calc_tsdf_voxel_grid_budget,
     calc_target_evidence_horizon,
+    calc_tracked_evidence_horizon,
+    calc_watchdog_feed_window,
     calc_intent_drift_lease,
     calc_process_thermal_runaway_lease,
     calc_c2_effective_deceleration,
@@ -825,3 +827,28 @@ def test_chunk_renewal_schedule_rejects_overrun_and_short_chunk():
         calc_chunk_renewal_schedule(Q_("25 Hz"), Q_("20 ms"), 16, Q_("40 ms"))
     with pytest.raises(ValueError, match="shorter than"):
         calc_chunk_renewal_schedule(Q_("20 Hz"), Q_("25 ms"), 3, Q_("40 ms"))
+
+
+def test_tracked_evidence_horizon_constant_acceleration():
+    # tau_ev = sqrt(2 (r_tol - e_0) / a_slip); 9 mm margin at 0.375 m/s^2 -> 219.09 ms
+    tau = calc_tracked_evidence_horizon(Q_("15 mm"), Q_("6 mm"), Q_("0.375 m/s^2"))
+    assert tau.to("ms").magnitude == pytest.approx(219.089, rel=1e-4)
+    # the drift a_slip tau^2 / 2 consumes exactly the margin
+    drift = (0.5 * Q_("0.375 m/s^2") * tau**2).to("mm")
+    assert drift.magnitude == pytest.approx(9.0, rel=1e-9)
+    with pytest.raises(ValueError):
+        calc_tracked_evidence_horizon(Q_("6 mm"), Q_("6 mm"), Q_("0.375 m/s^2"))
+    with pytest.raises(ValueError):
+        calc_tracked_evidence_horizon(Q_("15 mm"), Q_("6 mm"), Q_("0 m/s^2"))
+
+
+def test_watchdog_feed_window_bounds():
+    # 1 ms tick, completions in [60, 250] us, 20 us phase jitter -> spread 210 us, [790, 1210] us
+    w = calc_watchdog_feed_window(Q_("1 ms"), Q_("60 us"), Q_("250 us"), Q_("20 us"))
+    assert w["spread"].to("us").magnitude == pytest.approx(210.0)
+    assert w["t_lower"].to("us").magnitude == pytest.approx(790.0)
+    assert w["t_upper"].to("us").magnitude == pytest.approx(1210.0)
+    with pytest.raises(ValueError):
+        calc_watchdog_feed_window(Q_("1 ms"), Q_("300 us"), Q_("250 us"), Q_("20 us"))
+    with pytest.raises(ValueError):
+        calc_watchdog_feed_window(Q_("100 us"), Q_("0 us"), Q_("250 us"), Q_("20 us"))

@@ -1045,6 +1045,48 @@ def calc_watchdog_lease_bound(
     }
 
 
+def calc_watchdog_feed_window(period, completion_min, completion_max, phase_jitter):
+    """
+    Calculate the feed-interval range a windowed watchdog must accept from a healthy tick.
+
+    If a controller feeds once after each successful tick, the watchdog measures
+    the interval between feeds. With the completion offset from tick start in
+    [c_min, c_max] and the tick-start phase jitter bounded by J_phase,
+
+    Equation:
+        spread = (c_max - c_min) + J_phase
+        T_feed in [T_period - spread, T_period + spread]
+
+    The early (T_lower) and late (T_upper) trip points are configured around this
+    range; the late-trip response must still fit a separately derived fault
+    budget.
+
+    Source: interval between successive completions of a periodic task whose
+    completion offsets are bounded (difference of two bounded offsets plus the
+    release jitter); derived here.
+
+    Returns
+    -------
+    dict
+        spread, t_lower, t_upper (all in microseconds).
+    """
+    validate_positive(period, "period")
+    validate_nonnegative(completion_min, "completion_min")
+    validate_nonnegative(phase_jitter, "phase_jitter")
+    if completion_max < completion_min:
+        raise ValueError("completion_max must be >= completion_min.")
+
+    spread = (completion_max - completion_min + phase_jitter).to(ureg.microsecond)
+    t_lower = (period - spread).to(ureg.microsecond)
+    if t_lower.magnitude <= 0:
+        raise ValueError(f"Feed spread {spread} consumes the whole period {period}.")
+    return {
+        "spread": spread,
+        "t_lower": t_lower,
+        "t_upper": (period + spread).to(ureg.microsecond),
+    }
+
+
 def calc_phase_lag_total(
     crossover_frequency,
     sample_period,
@@ -2162,6 +2204,50 @@ def calc_target_evidence_horizon(
     v_drift = drift_velocity.to(ureg.meter / ureg.second)
     tau = (r_tol - sig) / v_drift
     return tau.to(ureg.millisecond)
+
+
+def calc_tracked_evidence_horizon(tolerance_radius, initial_error, slip_acceleration):
+    """
+    Calculate the tracked target-evidence horizon under residual slip acceleration.
+
+    A tracker that follows a moving target removes its steady velocity, so the
+    remaining error growth comes from a bounded residual acceleration a_slip.
+    A segment executed open-loop for a time T then drifts by a_slip T^2 / 2;
+    setting that drift equal to the error margin r_tol - e_0 gives
+
+    Equation:
+        tau_ev = sqrt(2 (r_tol - e_0) / a_slip)
+
+    This is the constant-acceleration counterpart of
+    ``calc_target_evidence_horizon`` (constant drift velocity, a_slip = 0).
+    Like that function it is not a stopping-time bound.
+
+    Source: first-passage time of a constant-acceleration displacement
+    (d = a T^2 / 2, solved for T at d = r_tol - e_0); kinematics, derived here.
+
+    Parameters
+    ----------
+    tolerance_radius : Quantity
+        Defended task spatial tolerance radius r_tol (e.g. mm).
+    initial_error : Quantity
+        Initial target-error allowance e_0; must be >= 0 and < tolerance_radius.
+    slip_acceleration : Quantity
+        Bounded residual target acceleration a_slip after tracking (m/s^2).
+
+    Returns
+    -------
+    Quantity
+        Tracked evidence horizon in milliseconds.
+    """
+    validate_positive(tolerance_radius, "tolerance_radius")
+    validate_nonnegative(initial_error, "initial_error")
+    validate_positive(slip_acceleration, "slip_acceleration")
+
+    margin = (tolerance_radius - initial_error).to(ureg.meter)
+    if margin.magnitude <= 0:
+        raise ValueError("initial_error must be strictly less than tolerance_radius.")
+    a = slip_acceleration.to(ureg.meter / ureg.second**2)
+    return ((2 * margin / a) ** 0.5).to(ureg.millisecond)
 
 
 def calc_linear_invalidation_horizon(initial_error, error_growth_rate, error_limit):

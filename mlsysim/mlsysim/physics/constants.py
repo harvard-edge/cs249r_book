@@ -22,3 +22,12 @@ WATER_SPECIFIC_HEAT = 4180 * ureg.joule / (ureg.kilogram * ureg.kelvin)  # liqui
 THERMAL_CONDUCTIVITY_AIR = 0.026 * ureg.watt / (ureg.meter * ureg.kelvin)
 THERMAL_CONDUCTIVITY_WATER = 0.6 * ureg.watt / (ureg.meter * ureg.kelvin)
 THERMAL_CONDUCTIVITY_COPPER = 400 * ureg.watt / (ureg.meter * ureg.kelvin)
+
+# --- Insulation thermal class (added 2026-09-29) ----------------------------
+# Class F (155) of IEC 60085:2007, "Electrical insulation - Thermal evaluation
+# and designation": the hot-spot temperature at which an electrical insulation
+# system reaches its rated life. A rating of the insulation standard, not of any
+# product; motor data sheets state the class, and the book's thermal budgets
+# (vol4 body and training chapters) read the limit from here.
+# Source: IEC 60085:2007, Table 1 (thermal class 155, letter designation F).
+INSULATION_CLASS_F_LIMIT = ureg.Quantity(155.0, ureg.degC)

@@ -7,13 +7,15 @@ Domain modules:
 """
 
 from ._units import _ensure_unit
-from .constants import SPEED_OF_LIGHT_FIBER_KM_S
+from .constants import SPEED_OF_LIGHT_FIBER_KM_S, INSULATION_CLASS_F_LIMIT
 from .networking import calc_network_latency_ms
 from .performance import (
     dTime,
     calc_training_time,
     calc_training_time_days,
     calc_amdahls_speedup,
+    calc_partial_slowdown_stretch,
+    calc_stall_share_breakeven,
     calc_strong_scaling_speedup,
     calc_universal_scalability_law,
     calc_usl_optimal_concurrency,
@@ -69,6 +71,12 @@ from .statistics import (
     calc_population_stability_index,
     calc_two_proportion_sample_size,
     calc_constraint_propagation_factor,
+    calc_monte_carlo_sample_size,
+    calc_importance_sampling_exponential,
+    calc_optimal_exponential_proposal_mean,
+    calc_cross_entropy_exponential_proposal,
+    calc_conjunctive_confidence,
+    calc_multilegged_confidence,
 )
 from .agents import (
     calc_trajectory_step_time,
@@ -120,6 +128,7 @@ from .robotics import (
     calc_action_chunk_streaming_amortization,
     calc_chunk_renewal_schedule,
     calc_watchdog_lease_bound,
+    calc_watchdog_feed_window,
     calc_phase_lag_total,
     calc_canfd_frame_bits,
     calc_canfd_bus_utilization,
@@ -150,6 +159,7 @@ from .robotics import (
     calc_tsdf_voxel_grid_budget,
     calc_target_evidence_horizon,
     calc_linear_invalidation_horizon,
+    calc_tracked_evidence_horizon,
     calc_free_space_expiry,
     calc_scurve_rest_to_rest_time,
     calc_quasistatic_spill_acceleration,
@@ -170,11 +180,14 @@ __all__ = [
     # Physical constants (book LEGO cells use `from mlsysim import *`, which
     # only sees names listed here — audit fix 2026-06-06).
     "SPEED_OF_LIGHT_FIBER_KM_S",
+    "INSULATION_CLASS_F_LIMIT",
     "calc_network_latency_ms",
     "dTime",
     "calc_training_time",
     "calc_training_time_days",
     "calc_amdahls_speedup",
+    "calc_partial_slowdown_stretch",
+    "calc_stall_share_breakeven",
     "calc_strong_scaling_speedup",
     "calc_universal_scalability_law",
     "calc_usl_optimal_concurrency",
@@ -219,6 +232,12 @@ __all__ = [
     "calc_vla_inference_latency",
     "calc_queue_latency_mmc",
     "calc_population_stability_index",
+    "calc_monte_carlo_sample_size",
+    "calc_importance_sampling_exponential",
+    "calc_optimal_exponential_proposal_mean",
+    "calc_cross_entropy_exponential_proposal",
+    "calc_conjunctive_confidence",
+    "calc_multilegged_confidence",
     "calc_two_proportion_sample_size",
     "calc_constraint_propagation_factor",
     "calc_trajectory_step_time",
@@ -266,6 +285,7 @@ __all__ = [
     "calc_action_chunk_streaming_amortization",
     "calc_chunk_renewal_schedule",
     "calc_watchdog_lease_bound",
+    "calc_watchdog_feed_window",
     "calc_phase_lag_total",
     "calc_canfd_frame_bits",
     "calc_canfd_bus_utilization",
@@ -296,6 +316,7 @@ __all__ = [
     "calc_tsdf_voxel_grid_budget",
     "calc_target_evidence_horizon",
     "calc_linear_invalidation_horizon",
+    "calc_tracked_evidence_horizon",
     "calc_free_space_expiry",
     "calc_scurve_rest_to_rest_time",
     "calc_quasistatic_spill_acceleration",

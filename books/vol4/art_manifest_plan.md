@@ -197,7 +197,7 @@ Volume IV: Physical AI Systems
 - [x] **`fig12_stopping_envelope_phase_plane.svg`** (Type A): Phase plane $(x, \dot{x})$ showing safe set $\mathcal{C}$, viability boundary, and maximum emergency deceleration envelope.
 - [x] **`fig12_canonical_fallback_ladder.svg`** (Type A): Active figure showing state-dependent filtering, powered hold, controlled stop, and drive torque inhibit as alternatives with different prerequisites. The older `fig12_fallback_ladder.svg` is unreferenced legacy art and must not be reused.
 - [x] **`fig12_sto_safety_circuit.svg`** (Type A): Illustrative dual-contact emergency-stop path to safety relays and drive STO inputs, with a separate optional brake. Performance level, isolation, and physical stopping time require application-specific validation.
-- [x] **`fig12_real_laser_scanner.jpg`** (Type B): Authentic industrial safety laser scanner (SICK microScan3) showing programmable protective fields.
+- [x] **`fig12_real_laser_scanner.jpg`** (Type B): Photograph of a SICK planar 2D laser scanner (not identified as a safety-rated model; it shows no fields). Björn Heller, Wikimedia Commons, CC BY-SA 3.0 DE; credit carried in the caption.
 
 #### Chapter 13: Placement
 *Focus: Heterogeneous SoCs, Linux-RTOS boundaries, memory bus contention, cache partitioning.*

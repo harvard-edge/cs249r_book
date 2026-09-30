@@ -25,6 +25,11 @@ def replace_exact(file_path: Path, target: str, replacement: str, description: s
     print(f"✓ Injected: {description} in {file_path.name}")
 
 def main():
+    # 2026-09-29 (MARGIN-GEN): one-shot injector, already applied. Its blocks carry
+    # stale fig-alt values and orphaned figures; re-running would reinsert them.
+    # Place new margin figures by hand per generate_margin_figures.py's docstring.
+    if "--i-know-this-is-stale" not in sys.argv:
+        sys.exit("inject_margin_figures.py is retired; see generate_margin_figures.py")
     print(f"Injecting margin figures into Volume IV chapters under {VOL4_ROOT}...")
 
     # =========================================================================

@@ -59,6 +59,17 @@ def test_embodied_registry_provenance():
         assert platform.metadata.provenance.ref != ""
 
 
+def test_humanoid_com_height_is_an_explicit_estimate():
+    """Unitree H1 CoM height is an MLSysIM estimate (the product page states none)."""
+    from mlsysim.core.provenance import ProvenanceKind
+    h1 = Embodied.Humanoid.Unitree_H1
+    assert h1.com_height.to("m").magnitude == pytest.approx(0.9)
+    assert h1.com_height.provenance.kind == ProvenanceKind.ESTIMATE
+    assert h1.com_height.provenance.notes
+    assert Embodied.Humanoid.Atlas.com_height is None
+    assert Embodied.Quadruped.Spot.com_height is None
+
+
 def test_hardware_embodied_drive_thor():
     thor = Hardware.Embodied.DriveThor
     assert thor.name == "NVIDIA DRIVE Thor"
@@ -157,6 +168,7 @@ from mlsysim.physics.robotics import (
     calc_free_space_expiry,
     calc_max_permitted_velocity,
     calc_target_evidence_horizon,
+    calc_tracked_evidence_horizon,
     calc_transient_contact_speed_limit,
     calc_transient_impact_force,
 )
@@ -337,6 +349,73 @@ def test_running_machine_chosen_speeds_sit_under_their_ceilings():
         _AISLE.f_contact_criterion, _RM.arm_effective_contact_mass, _AISLE.k_contact_human)
     assert _AISLE.enforcer_wcet < _AISLE.enforcer_deadline < _AISLE.t_tick
     assert _RM.control_rail_battery_low < _RM.control_rail_nominal
+
+
+def test_dispatch_to_admission_allocation():
+    """Delta_da: inference + 4 KiB over 25 MHz + 2 + 18 + 1 ms + one tick (Ch13, Ch14)."""
+    assert _AISLE.t_board_link.to("ms").magnitude == pytest.approx(4096 * 8 / 25e6 * 1e3)
+    assert _AISLE.t_dispatch_to_admission.to("ms").magnitude == pytest.approx(63.31072, abs=1e-9)
+    parts = (_RM.chunk_inference_latency + _AISLE.t_board_link + _AISLE.t_chunk_deserialize
+             + _AISLE.t_plan_validate + _AISLE.t_plan_activate + _AISLE.t_tick)
+    assert _AISLE.t_dispatch_to_admission.to("ms").magnitude == pytest.approx(parts.to("ms").magnitude)
+
+
+def test_capture_to_brake_onset_event_ledger():
+    """One ledger (2026-09-29): capture -> dispatch -> admission -> brake onset (Ch4, Ch8, Ch11, Ch13)."""
+    L = _AISLE.t_capture_to_admission.to("ms").magnitude
+    assert L == pytest.approx(51.6 + 63.31072, abs=1e-9)
+    assert L == pytest.approx((_AISLE.perception_age + _AISLE.t_dispatch_to_admission).to("ms").magnitude)
+    after = _AISLE.t_admission_to_brake_onset.to("ms").magnitude
+    assert after == pytest.approx(82.0, abs=1e-9)
+    total = _AISLE.t_capture_to_brake_onset.to("ms").magnitude
+    assert total == pytest.approx(L + after)
+    # tau_delay is the ledger without Delta_da; the ledger closes on it exactly.
+    assert total == pytest.approx((_AISLE.tau_delay + _AISLE.t_dispatch_to_admission).to("ms").magnitude)
+    # Validation sits inside Delta_da once; L must not re-add it.
+    assert _AISLE.t_plan_validate < _AISLE.t_dispatch_to_admission
+
+
+def test_in_loop_takeover_speed_is_derived_under_the_charged_ceiling():
+    """The in-loop slow-down is the Delta_da-charged ceiling rounded down to the resolution."""
+    ceiling = _scurve_ceiling(_AISLE.t_takeover_in_loop + _AISLE.t_dispatch_to_admission)
+    assert _AISLE.v_takeover_in_loop_ceiling.to(_MPS).magnitude == pytest.approx(ceiling)
+    assert ceiling == pytest.approx(0.7970, abs=5e-5)
+    v = _AISLE.v_takeover_in_loop.to(_MPS).magnitude
+    step = _AISLE.v_takeover_resolution.to(_MPS).magnitude
+    assert v == pytest.approx(0.75)
+    assert v < ceiling < v + step
+    # The retired 0.8 m/s would miss: it sits above the charged ceiling.
+    assert 0.8 > ceiling
+
+
+def test_safety_scanner_and_sensor_error_fields():
+    s = _RM.safety_scanner
+    assert s.response_time.to("ms").magnitude == pytest.approx(80.0)
+    assert s.protective_field_range.to("m").magnitude == pytest.approx(5.7)
+    assert s.iec61496_type == "Type 3" and s.performance_level.startswith("PL d")
+    assert s.metadata.provenance.id == "prov:keyence-sz-v32"
+    imu = _RM.imu
+    assert imu.gyro_noise_density.to("deg/s/Hz**0.5").magnitude == pytest.approx(0.014)
+    assert imu.gyro_zero_rate_offset.to("deg/s").magnitude == pytest.approx(1.0)
+    assert imu.accel_noise_density.to("m/s**2/Hz**0.5").magnitude == pytest.approx(160e-6 * 9.80665)
+    assert imu.accel_zero_g_offset.to("m/s**2").magnitude == pytest.approx(0.020 * 9.80665)
+    assert _RM.lidar.laser_wavelength.to("nm").magnitude == pytest.approx(865.0)
+
+
+def test_lpddr5_analog_minima_round_up_to_clocked_timings():
+    import math
+    t = Hardware.Tech.Memory.LPDDR5_6400
+    assert t.t_rcd_min.to("ns").magnitude == pytest.approx(18.0)
+    assert t.t_rp_min.to("ns").magnitude == pytest.approx(18.0)
+    assert t.t_rpab_min.to("ns").magnitude == pytest.approx(21.0)
+    assert t.channel_width.to("bit").magnitude == pytest.approx(16)
+    tck = t.t_ck.to("ns").magnitude
+    assert math.ceil(t.t_rcd_min.to("ns").magnitude / tck) * tck == pytest.approx(t.t_rcd.to("ns").magnitude)
+
+
+def test_iso_13855_provenance_is_2024_edition():
+    prov = _AISLE.v_human_approach.provenance
+    assert "13855:2024" in prov.ref and prov.url.endswith("80590.html")
 
 
 def test_lockstep_mcu_clock_rate():
@@ -526,8 +605,10 @@ def test_chunk_schedule_keeps_lease_and_evidence_arguments():
     """The renewal still fits the 60 ms lease with 5 ms jitter; the chunk outlasts the conveyor horizon."""
     assert _RM.chunk_period + 5 * ureg.millisecond < _AISLE.t_lease
     # tracked evidence horizon under residual slip: sqrt(2 (r_tol - e_0) / a_slip)
-    tau_ev = ((2 * (_AISLE.grasp_tolerance - _AISLE.grasp_initial_error)
-               / _AISLE.a_conveyor_slip) ** 0.5).to("ms")
+    tau_ev = calc_tracked_evidence_horizon(
+        _AISLE.grasp_tolerance, _AISLE.grasp_initial_error, _AISLE.a_conveyor_slip
+    )
+    assert tau_ev.to("ms").magnitude == pytest.approx(219.09, abs=5e-3)
     assert _RM.chunk_schedule["open_loop_span"] < tau_ev < _RM.chunk_schedule["chunk_span"]
 
 

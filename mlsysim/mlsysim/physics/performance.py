@@ -71,6 +71,49 @@ def calc_amdahls_speedup(p, s):
     return 1 / ((1 - p) + (p / s))
 
 
+def calc_partial_slowdown_stretch(stall_fraction, slowdown):
+    """
+    Stretch of a task when only a fraction of its time is slowed down.
+
+    Equation:
+        stretch = (1 - f) + f * S
+
+    Amdahl's law read as a slowdown: a fraction ``f`` of the unloaded time
+    (for example, time stalled on shared-cache misses) runs ``S`` times
+    slower under interference while the rest is unchanged. The loaded time
+    is ``t_unloaded * stretch``. Equal to ``1 / calc_amdahls_speedup(f, 1/S)``.
+
+    Source: Amdahl, "Validity of the single processor approach to achieving
+    large scale computing capabilities," AFIPS Spring Joint Computer
+    Conference, 1967 (fixed-fraction model, applied to a slowdown).
+    """
+    validate_range(stall_fraction, 0.0, 1.0, "stall_fraction")
+    validate_at_least(slowdown, 1.0, "slowdown")
+    return (1.0 - stall_fraction) + stall_fraction * slowdown
+
+
+def calc_stall_share_breakeven(allowed_stretch, slowdown):
+    """
+    Largest slowed fraction of a task that keeps it within an allowed stretch.
+
+    Equation:
+        f_max = (C / t_unloaded - 1) / (S - 1)
+
+    The inverse of ``calc_partial_slowdown_stretch``: with a budget ``C``
+    (a declared WCET or deadline) and unloaded time ``t_unloaded``, the
+    allowed stretch is ``C / t_unloaded``; a slowed share above ``f_max``
+    crosses the budget. Capped at 1 (the whole task may be slowed).
+
+    Source: Amdahl 1967 fixed-fraction model, solved for the fraction
+    (see ``calc_partial_slowdown_stretch``).
+    """
+    validate_at_least(allowed_stretch, 1.0, "allowed_stretch")
+    validate_at_least(slowdown, 1.0, "slowdown")
+    if slowdown == 1.0:
+        return 1.0
+    return min(1.0, (allowed_stretch - 1.0) / (slowdown - 1.0))
+
+
 def calc_strong_scaling_speedup(num_devices, communication_fraction):
     """
     Strong scaling speedup with communication fraction overhead.

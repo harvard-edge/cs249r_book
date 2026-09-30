@@ -36,7 +36,7 @@ _NOT_INPUTS = {
     # Composite components: their used fields are listed individually.
     "RM.base", "RM.arm", "RM.brain_soc", "RM.permission_mcu", "RM.nav_camera",
     "RM.wrist_camera", "RM.lidar", "RM.imu", "RM.intent_model", "RM.chunk_model",
-    "RM.drive_unit",
+    "RM.drive_unit", "RM.safety_scanner",
     # A decoding mode, not a number; the intent-latency row carries its effect.
     "RM.intent_parallel_decode",
     # Legacy 24 V control-rail fields that no calculation reads since the

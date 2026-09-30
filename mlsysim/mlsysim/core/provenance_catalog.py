@@ -568,16 +568,20 @@ LOCKSTEP_SAFETY_MCU_REFERENCE = _est(
 
 ISO_13855_APPROACH_SPEED = _ds(
     "prov:iso-13855-approach-speed",
-    "ISO 13855:2010 walking approach speed K = 1600 mm/s, applied over the whole "
+    "ISO 13855:2024 walking approach speed K = 1600 mm/s, applied over the whole "
     "stopping time T in S = K*T + C",
-    "https://www.iso.org/standard/42845.html",
-    verified="2026-09-21",
+    "https://www.iso.org/standard/80590.html",
+    verified="2026-09-29",
     notes=(
-        "ISO 13855:2010 (Safety of machinery: positioning of safeguards with respect "
-        "to the approach speeds of parts of the human body); the URL is that edition. "
-        "The standard's text is paywalled, so the value was checked against secondary "
-        "sources that quote it, not the standard itself, and not against the 2024 "
-        "edition."
+        "ISO 13855:2024 (Safety of machinery: positioning of safeguards with respect "
+        "to the approach of the human body), third edition, published 2024-11; it "
+        "replaced ISO 13855:2010 (iso.org/standard/42845), withdrawn 2024-11-22 "
+        "(both iso.org pages read via 2025 Wayback captures, 2026-09-29). The "
+        "1600 mm/s value was checked against secondary sources quoting the 2010 "
+        "edition. Carry-forward note: the 2024 abstract says its approach-speed "
+        "values are 'time tested and proven in practical experience', which indicates "
+        "K = 1600 mm/s carries forward, but the value has not been read from the "
+        "2024 text (paywalled); confirm before print."
     ),
 )
 
@@ -589,8 +593,9 @@ ISO_TS_15066_HAND_BODY_MODEL = _ds(
     verified="2026-09-29",
     notes=(
         "ISO/TS 15066:2016 (Robots and robotic devices: collaborative robots), "
-        "Annex A, whose collaborative-application content ISO 10218-2:2025 "
-        "absorbed. The standard is paywalled; the values were checked against "
+        "Annex A. ISO 10218-2:2025 incorporates the collaborative-application "
+        "requirements formerly published as ISO/TS 15066; ISO/TS 15066:2016 itself "
+        "remains published and is under revision. The standard is paywalled; the values were checked against "
         "Kirschner, Mansfeld, Abdolshah, and Haddadin, 'ISO/TS 15066: How "
         "Different Interpretations Affect Risk Assessment' (arXiv:2203.02706, "
         "2022), which reproduces TS Appendix A (hand m_h = 0.6 kg, "
@@ -689,7 +694,7 @@ UNITREE_H1_HUMANOID = _est(
     notes=(
         "Verified: about 47 kg, 3.3 m/s moving speed, 360 N*m maximum joint "
         "torque (knee), M107 joint motors. The page lists 5 degrees of freedom "
-        "per leg and 4 per arm, 18 in total, not the stored 19. Standard compute "
+        "per leg and 4 per arm, 18 in total (stored value corrected from 19 on 2026-09-29). Standard compute "
         "is an Intel Core i5 plus Core i7 with Orin NX optional, not the stored "
         "Jetson AGX Orin. Unsourced MLSysIM estimates: 30 kg payload_capacity "
         "(no H1 payload is listed), 1000 Hz control_frequency, 800 W "
@@ -697,6 +702,21 @@ UNITREE_H1_HUMANOID = _est(
     ),
     url="https://www.unitree.com/h1/",
     verified="2026-09-15",
+)
+
+UNITREE_H1_COM_HEIGHT_ESTIMATE = _est(
+    "prov:unitree-h1-com-height-estimate",
+    "Unitree H1 standing center-of-mass height (MLSysIM estimate, not a datasheet value)",
+    notes=(
+        "Illustrative estimate, 0.9 m. The Unitree H1 product page (checked "
+        "2026-09-29) lists a height of about 180 cm and thigh and calf lengths "
+        "of 400 mm each, but states no center-of-mass height. 0.9 m places the "
+        "CoM near hip height, about half the stature, the usual inverted-pendulum "
+        "height for an adult-scale biped. Replace with a value computed from the "
+        "vendor URDF link masses or a measured CoM if one is published."
+    ),
+    url="https://www.unitree.com/h1/",
+    verified="2026-09-29",
 )
 
 UBER_ATG_VOLVO_XC90 = _lit(
@@ -762,7 +782,9 @@ OUSTER_OS1_64 = _ds(
         "64-channel digital LiDAR, 10 or 20 Hz rotation. Range precision 0.5-3 cm "
         "(1 sigma, beyond 1 m, 1024 @ 10 Hz); range accuracy +/-2.5 cm Lambertian; "
         "data latency < 10 ms (stored as nominal_latency); PTP / gPTP / PPS "
-        "accuracy < 1 ms; internal clock 10 ppm drift; power 14-20 W. The Rev7 "
+        "accuracy < 1 ms; internal clock 10 ppm drift; power 14-20 W; laser "
+        "wavelength 865 nm, Class 1 eye-safe per IEC/EN 60825-1:2014 (re-read "
+        "2026-09-29). The Rev7 "
         "sheet gives range as 170 m (80 percent target) and 90 m (10 percent), so "
         "the stored 120 m max_range needs source; nominal_power 18 W sits in the "
         "14-20 W band."
@@ -771,10 +793,35 @@ OUSTER_OS1_64 = _ds(
 
 BOSCH_BMI088 = _ds(
     "prov:bosch-bmi088",
-    "Bosch Sensortec BMI088 High-Performance 6-Axis Inertial Measurement Unit Datasheet",
-    "https://www.bosch-sensortec.com/products/motion-sensors/imus/bmi088/",
-    verified="2026-09-18",
-    notes="Automotive and robotics grade 6-DoF IMU with 1000 Hz gyroscope and 1600 Hz accelerometer update rates.",
+    "Bosch Sensortec BMI088 Data Sheet, document BST-BMI088-DS000-19, revision 1.9 (January 2024)",
+    "https://www.bosch-sensortec.com/media/boschsensortec/downloads/datasheets/bst-bmi088-ds001.pdf",
+    verified="2026-09-29",
+    notes=(
+        "Automotive and robotics grade 6-DoF IMU with 1000 Hz gyroscope and 1600 Hz "
+        "accelerometer update rates. Typical values read from the PDF 2026-09-29: "
+        "Table 4 (accelerometer) output noise density 160 ug/sqrt(Hz) on X and Y "
+        "(190 on Z), zero-g offset 20 mg (nominal supplies, 25 C, +/-6 g range); "
+        "Table 5 (gyroscope) zero-rate offset +/-1 deg/s (25 C, offset cancellation "
+        "off), output noise 0.1 deg/s rms at 47 Hz bandwidth (0.014 deg/s/sqrt(Hz)). "
+        "Bias instability and angle random walk are not given."
+    ),
+)
+
+KEYENCE_SZ_V32 = _ds(
+    "prov:keyence-sz-v32",
+    "Keyence SZ-V Series Safety Laser Scanner, specifications (SZ-V32)",
+    "https://www.keyence.com/products/safety/laser-scanner/sz-v/specs/",
+    verified="2026-09-29",
+    notes=(
+        "Representative certified AMR safety scanner, not the only choice. Read "
+        "2026-09-29: IEC 61496-3 Type 3 AOPDDR; EN ISO 13849-1:2015 PL d, "
+        "Category 3; scan angle 190 deg. Protection zone for 70/150 mm objects: "
+        "8.4 m (standard mode), 5.7 m (high-speed mode); for 30 mm objects 2.9 m / "
+        "2.0 m. Response time (ON to OFF): 160-1280 ms standard mode, 80-640 ms "
+        "high-speed mode (2 to 16 scans); network variants add 6 ms (PROFIsafe) or "
+        "10 ms (CIP Safety). The registry stores the high-speed-mode values for "
+        "70/150 mm objects (5.7 m, 80 ms), the mode a moving base would use."
+    ),
 )
 
 HARMONIC_DRIVE_CSG = _ds(
@@ -1479,7 +1526,12 @@ LPDDR5_6400_TIMINGS = _ds(
         "Checked at ramulator2 main 72427a1bba (2026-09-02). BG mode, CKR 4:1: "
         "t_RCD = t_RP(per bank) = 15 x 1.25 ns = 18.75 ns. The JEDEC standard is "
         "not read directly (jedec.org access), so the values rest on the "
-        "simulator's encoding of JESD209-5C Table 339/340."
+        "simulator's encoding of JESD209-5C Table 339/340. The analog minima "
+        "t_RCD,min = t_RPpb,min = 18 ns and t_RPab,min = 21 ns, and the x16 "
+        "(16-bit) channel width, agree with a second independent encoding: "
+        "coreboot util/spd_tools/src/spd_gen/lp5.go (TRCDMinNs = 18, "
+        "TRPPBMinNs = 18, TRPABMinNs = 21, 'Table 372 from JESD209-5B'; channel "
+        "widths 8 or 16 bits), read 2026-09-29."
     ),
 )
 

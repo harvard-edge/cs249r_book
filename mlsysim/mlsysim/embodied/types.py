@@ -7,7 +7,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 from ..core.units import ureg
 from ..core.types import Quantity, Metadata, require_dimensionality
 from ..hardware.types import HardwareNode
-from ..sensors.types import CameraSensor, LiDARSensor, IMUSensor
+from ..sensors.types import CameraSensor, LiDARSensor, IMUSensor, SafetyLaserScanner
 from ..models.types import EmbodiedWorkload
 from ..actuators.types import WheelHubMotor
 
@@ -39,7 +39,17 @@ class EmbodiedPlatform(BaseModel):
     joint_jerk_limits: Optional[tuple[Quantity, ...]] = None
     joint_torque_rate_limit: Optional[Quantity] = None                # same on every joint
     cartesian_velocity_limit: Optional[Quantity] = None               # commanded TCP translation
+    # Standing center-of-mass height above the support surface (legged/bipedal
+    # platforms; the inverted-pendulum length z_c). None where not applicable.
+    com_height: Optional[Quantity] = None
     metadata: Metadata = Field(default_factory=Metadata)
+
+    @field_validator("com_height", mode="after")
+    @classmethod
+    def _validate_com_height(cls, v):
+        if v is None:
+            return v
+        return require_dimensionality(v, ureg.meter, "com_height")
 
     @field_validator("upper_arm_length", "forearm_length", mode="after")
     @classmethod
@@ -140,6 +150,9 @@ class MobileManipulatorPlatform(BaseModel):
     wrist_camera: CameraSensor
     lidar: LiDARSensor
     imu: IMUSensor
+    # Certified protective-field sensor for persons in the path (ISO 3691-4);
+    # separate from the perception LiDAR, which carries no safety rating.
+    safety_scanner: Optional[SafetyLaserScanner] = None
     intent_model: EmbodiedWorkload
     chunk_model: EmbodiedWorkload
     intent_rate: Quantity                   # Hz
@@ -483,6 +496,13 @@ class EmbodiedSiteScenario(BaseModel):
     enforcer_unloaded: Quantity
     enforcer_wcet: Quantity
     enforcer_deadline: Quantity
+    # dispatch-to-admission terms after the proposer's inference (the total is
+    # the t_dispatch_to_admission property)
+    chunk_wire_bytes: Quantity            # serialized chunk with header and evidence epoch
+    board_link_clock: Quantity            # board-link (SPI) clock, one bit per clock
+    t_chunk_deserialize: Quantity
+    t_plan_validate: Quantity             # whole-plan validation on the safety MCU
+    t_plan_activate: Quantity
     # site geometry, people, and floor
     v_human_approach: Quantity
     d_clear: Quantity
@@ -528,7 +548,9 @@ class EmbodiedSiteScenario(BaseModel):
     t_handshake_request: Quantity         # four-phase protocol budgets (commit is one tick)
     t_handshake_acknowledge: Quantity
     t_handshake_confirm: Quantity
-    v_takeover_in_loop: Quantity
+    # The in-loop slow-down is derived (v_takeover_in_loop property): the
+    # Delta_da-charged in-loop ceiling rounded down to this resolution.
+    v_takeover_resolution: Quantity
     v_takeover_out_of_loop: Quantity
     # coincident current transient on the shared control rail (inference burst
     # plus drive motors climbing the cage-door threshold)
@@ -554,11 +576,22 @@ class EmbodiedSiteScenario(BaseModel):
         "t_takeover_driving_p50", "t_takeover_driving_mean", "t_takeover_driving_p90",
         "t_takeover_driving_p99", "t_video_glass_to_glass", "t_handshake_request",
         "t_handshake_acknowledge", "t_handshake_confirm",
+        "t_chunk_deserialize", "t_plan_validate", "t_plan_activate",
         mode="after",
     )
     @classmethod
     def _validate_time(cls, v, info):
         return require_dimensionality(v, ureg.second, info.field_name)
+
+    @field_validator("chunk_wire_bytes", mode="after")
+    @classmethod
+    def _validate_bytes(cls, v, info):
+        return require_dimensionality(v, ureg.byte, info.field_name)
+
+    @field_validator("board_link_clock", mode="after")
+    @classmethod
+    def _validate_clock(cls, v, info):
+        return require_dimensionality(v, _HZ, info.field_name)
 
     @field_validator("heartbeat_rate", mode="after")
     @classmethod
@@ -567,7 +600,7 @@ class EmbodiedSiteScenario(BaseModel):
 
     @field_validator(
         "v_human_approach", "v_aisle", "v_latch_approach", "v_latch_high", "v_conveyor",
-        "v_handover", "v_takeover_in_loop", "v_takeover_out_of_loop",
+        "v_handover", "v_takeover_resolution", "v_takeover_out_of_loop",
         mode="after",
     )
     @classmethod
@@ -671,6 +704,99 @@ class EmbodiedSiteScenario(BaseModel):
     def t_takeover_out_of_loop(self):
         """Design out-of-loop takeover: 90th-percentile condition-mean take-over time plus transport."""
         return (self.t_takeover_driving_p90 + self.t_takeover_transport).to(ureg.second)
+
+    @property
+    def t_board_link(self):
+        """Serialization of one chunk over the board link: 8 B / f_link."""
+        bits = self.chunk_wire_bytes.to(ureg.bit).magnitude
+        return (bits / self.board_link_clock).to(ureg.millisecond)
+
+    @property
+    def t_dispatch_to_admission(self):
+        """Allocated dispatch-to-admission interval Delta_da of the discrete placement.
+
+        Proposer inference charged in full after dispatch (conservative), board-link
+        serialization, deserialization, whole-plan validation, activation, and the
+        wait for the next permission tick. An allocation to qualify, not a
+        measurement.
+
+        Source: additive stage budget; stage allowances are the scenario's
+        illustrative values, inference is the machine's registry latency.
+        """
+        return (self.machine.chunk_inference_latency + self.t_board_link
+                + self.t_chunk_deserialize + self.t_plan_validate + self.t_plan_activate
+                + self.t_tick).to(ureg.millisecond)
+
+    # ── The capture-to-brake-onset event ledger (2026-09-29) ─────────────────
+    # Four events (capture, dispatch, admission, brake onset) bound three
+    # intervals. One interval, one owner: perception_age (capture to dispatch),
+    # t_dispatch_to_admission (dispatch to admission), and
+    # t_admission_to_brake_onset (admission to brake onset for a stalled
+    # proposer). The replacement latency and the full pre-brake interval are
+    # sums of those, never separate stage lists.
+
+    @property
+    def t_capture_to_admission(self):
+        """Replacement latency L: capture (exposure midpoint) to admission.
+
+        perception_age + t_dispatch_to_admission. The inference inside Delta_da
+        is charged in full after dispatch, so the vision backbone already in
+        perception_age is counted twice; the sum is conservative.
+
+        Source: sum of the two registry intervals; an allocation to qualify,
+        not a measurement.
+        """
+        return (self.perception_age + self.t_dispatch_to_admission).to(ureg.millisecond)
+
+    @property
+    def t_admission_to_brake_onset(self):
+        """Stalled-proposer response after admission: lease, one tick, one bus cycle, brake onset.
+
+        Source: the lease-path terms of tau_delay; the lease starts at admission.
+        """
+        return (self.t_lease + self.t_tick + self.t_bus
+                + self.t_brake_onset).to(ureg.millisecond)
+
+    @property
+    def t_capture_to_brake_onset(self):
+        """Full pre-brake interval, capture to brake onset, for a stalled proposer.
+
+        t_capture_to_admission + t_admission_to_brake_onset, which equals
+        tau_delay + t_dispatch_to_admission (tau_delay stops short of Delta_da).
+
+        Source: sum of the three registry intervals.
+        """
+        return (self.t_capture_to_admission
+                + self.t_admission_to_brake_onset).to(ureg.millisecond)
+
+    @property
+    def v_takeover_in_loop_ceiling(self):
+        """Highest slow-down speed whose in-loop takeover, charged with Delta_da, still fits.
+
+        S-curve ceiling (calc_scurve_max_permitted_velocity) with pre-brake delay
+        tau_delay + T_takeover,in + Delta_da, the credible deceleration, the
+        stipulated jerk bound of the reference stop, and the localization,
+        tracking, and protective margins.
+        """
+        from ..physics.robotics import calc_c2_stop_suffix, calc_scurve_max_permitted_velocity
+
+        j_brake = calc_c2_stop_suffix(self.machine.base.max_velocity, self.a_brake)["peak_jerk"]
+        return calc_scurve_max_permitted_velocity(
+            self.d_clear,
+            self.tau_delay + self.t_takeover_in_loop + self.t_dispatch_to_admission,
+            self.a_brake, j_brake, self.delta_loc + self.eps_track, self.delta_margin,
+        ).to(_MPS)
+
+    @property
+    def v_takeover_in_loop(self):
+        """Slow-down before an in-loop takeover request.
+
+        The Delta_da-charged in-loop ceiling rounded down to v_takeover_resolution,
+        so the chosen speed always sits below the ceiling by less than one step.
+        """
+        step = self.v_takeover_resolution.to(_MPS).magnitude
+        ceiling = self.v_takeover_in_loop_ceiling.to(_MPS).magnitude
+        return (math.floor(ceiling / step) * step) * _MPS
 
     @property
     def pre_trigger_window(self):

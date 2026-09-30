@@ -47,7 +47,7 @@ CLOSED_DOMAIN_FMT = re.compile(
     r"fmt_water|fmt_water_rate|fmt_water_intensity|fmt_token_rate|"
     r"fmt_temperature|fmt_temperature_rate|fmt_decibel|fmt_illuminance|"
     r"fmt_force|fmt_force_rate|fmt_mass|fmt_angular_velocity|"
-    r"fmt_torque|fmt_torque_rate|fmt_torque_constant|fmt_velocity|fmt_acceleration|"
+    r"fmt_torque|fmt_torque_rate|fmt_torque_constant|fmt_motor_constant|fmt_velocity|fmt_acceleration|"
     r"fmt_voltage|fmt_current|fmt_resistance|fmt_jerk|fmt_inertia|fmt_frequency|"
     r"fmt_thermal_resistance|fmt_heat_capacity|fmt_density|fmt_mass_flow|fmt_mass_flow_rate|"
     r"fmt_volumetric_flow|fmt_flow_rate|fmt_charge|fmt_battery_capacity|fmt_angle|fmt_inductance|fmt_capacitance|fmt_power_rate|"

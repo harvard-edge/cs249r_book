@@ -59,7 +59,7 @@ CANONICAL_STR_CALL = re.compile(
     r"|fmt_decibel|fmt_illuminance|fmt_temperature|fmt_temperature_rate"
     r"|fmt_arithmetic_intensity|fmt_compute_efficiency|fmt_length"
     r"|fmt_carbon_intensity|fmt_water|fmt_water_rate|fmt_water_intensity"
-    r"|fmt_frequency|fmt_acceleration|fmt_velocity|fmt_torque|fmt_torque_rate|fmt_torque_constant|fmt_force|fmt_force_rate|fmt_mass|fmt_angular_velocity|fmt_jerk"
+    r"|fmt_frequency|fmt_acceleration|fmt_velocity|fmt_torque|fmt_torque_rate|fmt_torque_constant|fmt_motor_constant|fmt_force|fmt_force_rate|fmt_mass|fmt_angular_velocity|fmt_jerk"
     r"|fmt_inertia|fmt_voltage|fmt_current|fmt_resistance"
     r"|fmt_thermal_resistance|fmt_heat_capacity|fmt_density|fmt_mass_flow|fmt_mass_flow_rate"
     r"|fmt_volumetric_flow|fmt_flow_rate|fmt_charge|fmt_battery_capacity|fmt_angle|fmt_inductance|fmt_capacitance|fmt_power_rate"
@@ -139,7 +139,7 @@ FMT_FAMILY_USE = re.compile(
     r"|fmt_decibel|fmt_illuminance|fmt_temperature|fmt_temperature_rate"
     r"|fmt_arithmetic_intensity|fmt_compute_efficiency|fmt_length"
     r"|fmt_carbon_intensity|fmt_water|fmt_water_rate|fmt_water_intensity"
-    r"|fmt_frequency|fmt_acceleration|fmt_velocity|fmt_torque|fmt_torque_rate|fmt_torque_constant|fmt_force|fmt_force_rate|fmt_mass|fmt_angular_velocity|fmt_jerk"
+    r"|fmt_frequency|fmt_acceleration|fmt_velocity|fmt_torque|fmt_torque_rate|fmt_torque_constant|fmt_motor_constant|fmt_force|fmt_force_rate|fmt_mass|fmt_angular_velocity|fmt_jerk"
     r"|fmt_inertia|fmt_voltage|fmt_current|fmt_resistance"
     r"|fmt_thermal_resistance|fmt_heat_capacity|fmt_density|fmt_mass_flow|fmt_mass_flow_rate"
     r"|fmt_volumetric_flow|fmt_flow_rate|fmt_charge|fmt_battery_capacity|fmt_angle|fmt_inductance|fmt_capacitance|fmt_power_rate"
@@ -187,7 +187,7 @@ _MLSYSIM_STAR_FALLBACK = frozenset({
     "fmt_resistance", "fmt_sci", "fmt_sci_flops", "fmt_sci_qty", "fmt_specific_heat",
     "fmt_stiffness", "fmt_temperature", "fmt_temperature_rate", "fmt_text",
     "fmt_thermal_resistance", "fmt_time", "fmt_time_range", "fmt_token_rate", "fmt_tokens",
-    "fmt_torque", "fmt_torque_constant", "fmt_torque_rate", "fmt_unit", "fmt_usd",
+    "fmt_motor_constant", "fmt_torque", "fmt_torque_constant", "fmt_torque_rate", "fmt_unit", "fmt_usd",
     "fmt_usd_range", "fmt_val", "fmt_velocity", "fmt_voltage", "fmt_volume",
     "fmt_volumetric_flow", "fmt_water", "fmt_water_intensity", "fmt_water_rate",
 })
