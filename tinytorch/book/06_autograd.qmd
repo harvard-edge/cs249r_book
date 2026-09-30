@@ -98,7 +98,7 @@ Handwritten derivative formulas work for the four-weight example, but every chan
 
 ### One rule per operation
 
-In the opening example, increasing $y$ by a small amount increases $L=y+x$ by the same amount. The derivative of $L$ with respect to $y$ is therefore $1$. Through the path $y=x^2$, the derivative of $y$ at $x=3$ is $6$, giving a contribution $1 \times 6$ to the derivative of $L$. This multiplication is the **chain rule**. When $L$ depends on $x$ only through $y$,
+In production frameworks like PyTorch and JAX, automatic differentiation decomposes complex neural network graphs into modular, isolated operations registered with their own vector-Jacobian products (VJPs). This modular decoupling ensures the runtime engine never needs global knowledge of the network architecture to propagate exact gradients backward. In the opening example, increasing $y$ by a small amount increases $L=y+x$ by the same amount. The derivative of $L$ with respect to $y$ is therefore $1$. Through the path $y=x^2$, the derivative of $y$ at $x=3$ is $6$, giving a contribution $1 \times 6$ to the derivative of $L$. This multiplication is the **chain rule**. When $L$ depends on $x$ only through $y$,
 
 $$\frac{\partial L}{\partial x} = \frac{\partial L}{\partial y} \cdot \frac{\partial y}{\partial x}.$$
 
@@ -120,7 +120,7 @@ For the chapter's concrete input $A=[1,2]$ and incoming gradient $G=[1,1]$, $A^T
 
 ### Reverse order
 
-During the forward pass each result is computed from earlier results, so the tensors and operations form a graph with a direction (from inputs toward the loss) and no cycles (a tensor cannot depend on something computed after it). Reverse mode starts at the loss, where the gradient is trivially $\partial L / \partial L = 1$, and moves toward the inputs.[^fn-reverse-mode-efficiency]
+Modern deep learning frameworks universally rely on reverse-mode automatic differentiation because neural networks optimize a single scalar objective over millions of trainable parameters. Propagating cotangents backward from the scalar loss to leaf inputs computes every parameter gradient in a single reverse sweep, avoiding the prohibitive $O(N)$ passes required by forward-mode differentiation. During the forward pass each result is computed from earlier results, so the tensors and operations form a graph with a direction (from inputs toward the loss) and no cycles (a tensor cannot depend on something computed after it). Reverse mode starts at the loss, where the gradient is trivially $\partial L / \partial L = 1$, and moves toward the inputs.[^fn-reverse-mode-efficiency]
 
 [^fn-reverse-mode-efficiency]: **Forward-mode versus reverse-mode AD**: For a function $f: \mathbb{R}^N \to \mathbb{R}^M$, forward-mode automatic differentiation propagates tangent vectors with cost proportional to the number of inputs $N$. Reverse-mode automatic differentiation propagates cotangent vectors with cost proportional to the number of outputs $M$. Because deep neural networks optimize a single scalar loss ($M=1$) over millions of parameters ($N \gg 1$), reverse-mode AD computes all $N$ parameter gradients in a single backward pass ($O(1)$ sweeps), whereas forward-mode would require $N$ separate forward passes.
 
@@ -128,7 +128,7 @@ The order matters. A tensor's backward rule turns the gradient at that tensor in
 
 ### Used twice means add
 
-When a tensor feeds two operations, the loss depends on it along two paths, and the multivariable chain rule says the total derivative is the sum over paths:
+Architectural motifs like residual skip connections in ResNets and shared projection weights in Transformers routinely fan out a single tensor into multiple downstream consumers. To correctly evaluate the multivariable chain rule across such diamond dependencies, the autograd engine must accumulate incoming cotangent vectors into a shared buffer rather than overwriting them. When a tensor feeds two operations, the loss depends on it along two paths, and the multivariable chain rule says the total derivative is the sum over paths:
 
 $$\frac{\partial L}{\partial x} = \sum_{k} \frac{\partial L}{\partial y_k} \frac{\partial y_k}{\partial x},$$
 
@@ -205,7 +205,7 @@ What each node needs in order to send a gradient back to its inputs is the other
 
 ### The broadcast obligation: reducing gradients
 
-For a concrete bias addition, let the activation batch be `[[1, 2, 3], [4, 5, 6]]` with shape `(2, 3)` and the bias be `[10, 20, 30]` with shape `(3,)`. Forward returns `[[11, 22, 33], [14, 25, 36]]`. NumPy broadcasting reuses each bias entry across rows without requiring an explicitly tiled bias array; the addition still creates a result, and TinyTorch wraps it in its own float32 storage. An upstream gradient `[[1, 2, 3], [4, 5, 6]]` must therefore give the bias `[5, 7, 9]`, summing the two uses of each entry.
+In framework tensor runtimes, operations like layer bias additions and channel scaling expand lower-dimensional tensors across batch axes via zero-copy broadcasting. Because forward broadcasting implicitly replicates parameter values across multiple output coordinates, the backward pass incurs an obligation to sum incoming gradients across those broadcasted axes to recover the parameter's original shape. For a concrete bias addition, let the activation batch be `[[1, 2, 3], [4, 5, 6]]` with shape `(2, 3)` and the bias be `[10, 20, 30]` with shape `(3,)`. Forward returns `[[11, 22, 33], [14, 25, 36]]`. NumPy broadcasting reuses each bias entry across rows without requiring an explicitly tiled bias array; the addition still creates a result, and TinyTorch wraps it in its own float32 storage. An upstream gradient `[[1, 2, 3], [4, 5, 6]]` must therefore give the bias `[5, 7, 9]`, summing the two uses of each entry.
 
 If the framework blindly pushed that gradient into the bias, two things would break. First, the shapes would mismatch, crashing the first elementwise update. Second, and worse, the bias gradient would fail to accumulate the contributions from every example in the batch. By the multivariable chain rule, because $b_j$ was added to every row $i$ of the output, its total gradient is the sum across the batch:
 
@@ -251,7 +251,7 @@ The same requirement applies to the loss rules from @sec-losses. For example, bi
 
 ### Walking the graph backward
 
-The records are in place. What is left is the call the training loop of @sec-training will make once per step, `loss.backward()`, which has to visit every record and leave every leaf holding its gradient.
+In production runtimes like PyTorch's C++ autograd engine (`torch::autograd::Engine`), backward execution coordinates dependencies across complex acyclic computation graphs. By executing nodes in reverse topological order, the engine guarantees that all downstream consumers finish depositing their cotangent contributions before an upstream node evaluates its vector-Jacobian product. The records are in place. What is left is the call the training loop of @sec-training will make once per step, `loss.backward()`, which has to visit every record and leave every leaf holding its gradient.
 
 A tempting walk combines recursion with a visited set. Start at the loss, run its rule, and immediately recurse into each unvisited input. On the straight chain in the worked trace below that gives the right answer, which is what makes it dangerous. For `x = 2`, let `h = x * 2` and `L = h * 3 + h * 4`. The two branches contribute $3$ and $4$ at `h`; its multiply must send $(3+4) \times 2 = 14$ to `x`. If a recursive walk reaches `h` through the first branch and immediately runs its rule, it sends only $3 \times 2 = 6$. When the second branch arrives, the visited set suppresses another traversal of `h`, losing the remaining $8$. Dropping the visited set while propagating the total `.grad` causes a different error: the later traversal also resends the first contribution. No error, a wrong number, and a model that trains a little worse than it should.
 

@@ -94,7 +94,7 @@ Suppose an accelerator has a peak compute throughput of $P_{\text{peak}} = 100\t
 
 ### Two costs, two rates
 
-Every operation a model performs has two costs. It does some number of floating-point operations, call it $F$. It also moves some number of bytes, $Q$, between memory and the processor: weights read in, activations read in, results written out. The machine, in turn, has two rates. It can perform at most $P_{\text{peak}}$ FLOPs per second, and it can move at most $B_{\text{peak}}$ bytes per second between memory and the processor, its memory bandwidth.
+In production runtimes and hardware profilers like NVIDIA Nsight and PyTorch Profiler, diagnosing why an execution kernel is slow begins by decomposing execution into two independent physical limits: processor math throughput and bus data transfer. Because modern accelerators execute math orders of magnitude faster than off-chip DRAM can deliver data, an operator's execution time is governed by which resource starves first. Every operation a model performs has two costs. It does some number of floating-point operations, call it $F$. It also moves some number of bytes, $Q$, between memory and the processor: weights read in, activations read in, results written out. The machine, in turn, has two rates. It can perform at most $P_{\text{peak}}$ FLOPs per second, and it can move at most $B_{\text{peak}}$ bytes per second between memory and the processor, its memory bandwidth.
 
 The arithmetic alone needs at least $F / P_{\text{peak}}$ seconds. Moving the bytes needs at least $Q / B_{\text{peak}}$ seconds. Both must finish, so elapsed time cannot be less than the larger of those lower bounds. The idealized model allows arithmetic and transfers to overlap; incomplete overlap or extra work makes execution slower:
 
@@ -109,7 +109,7 @@ For a large weight matrix and a small number of rows, the weight reads can domin
 
 ### Arithmetic intensity and the roofline
 
-Their ratio summarizes the balance between these costs. **Arithmetic intensity** is the FLOPs an operation performs per byte it moves:
+In production performance analysis, tools like NVIDIA Nsight Compute and Intel Advisor evaluate kernel efficiency by plotting operations onto the **Roofline model**. By comparing floating-point work against the memory traffic required by an operator, this diagnostic framework reveals whether execution is bottlenecked by the memory bus or by compute pipelines. Their ratio summarizes the balance between these costs. **Arithmetic intensity** is the FLOPs an operation performs per byte it moves:
 
 $$I = \frac{F}{Q} \quad \text{(FLOPs per byte)}$$
 
@@ -129,7 +129,7 @@ The illustrative machine in @fig-roofline-model has a peak of 1,000 GFLOP/s and 
 
 ### Why a Linear layer's intensity grows with its row count
 
-Apply the definition to the layer that dominates every model in this book. A Linear layer with $n$ inputs, $m$ outputs, and $R$ rows does $F = 2Rnm$ FLOPs. It reads $4nm$ bytes of weights (four per float32), reads $4Rn$ bytes of input, and writes $4Rm$ bytes of output. When $R$ is small compared to $n$ and $m$, the weights dominate the bytes:
+In modern LLM serving engines such as vLLM and TensorRT-LLM, batching requests is the primary mechanism used to transform memory-bandwidth-bound matrix-vector operations into compute-bound matrix multiplications. By sharing the cost of streaming massive weight matrices from DRAM across multiple input tokens simultaneously, serving systems dramatically improve hardware utilization. Apply the definition to the layer that dominates every model in this book. A Linear layer with $n$ inputs, $m$ outputs, and $R$ rows does $F = 2Rnm$ FLOPs. It reads $4nm$ bytes of weights (four per float32), reads $4Rn$ bytes of input, and writes $4Rm$ bytes of output. When $R$ is small compared to $n$ and $m$, the weights dominate the bytes:
 
 $$I \;\approx\; \frac{2Rnm}{4nm} \;=\; \frac{R}{2}$$
 
@@ -155,7 +155,7 @@ Per block, the projection weights total $12 d^2 = 196{,}608$ floats, or about $7
 
 ### Measuring instead of assuming
 
-The roofline needs an operation count $F$, a traffic estimate $Q$, and applicable machine ceilings. Layer shapes supply the first. For an isolated matrix multiply, counting each input and weight read once and each output write once gives a useful traffic model. For a whole model, parameter storage plus boundary activations does not suffice: intermediate arrays add transfers, embedding lookups touch selected rows, and caches, smaller and faster storage levels that retain recently used data, may serve repeated reads without accessing main memory.
+While static analytical models predict execution bounds under idealized assumptions, production profilers in PyTorch and JAX rely on empirical execution traces to capture hardware realities like cache hierarchy effects and runtime launch overheads. Measuring wall-clock latency alongside memory allocations is critical to verify whether an operator actually achieves the bandwidth or compute ceilings predicted by theory. The roofline needs an operation count $F$, a traffic estimate $Q$, and applicable machine ceilings. Layer shapes supply the first. For an isolated matrix multiply, counting each input and weight read once and each output write once gives a useful traffic model. For a whole model, parameter storage plus boundary activations does not suffice: intermediate arrays add transfers, embedding lookups touch selected rows, and caches, smaller and faster storage levels that retain recently used data, may serve repeated reads without accessing main memory.
 
 A timer supplies elapsed time $T$, from which $F/T$ is an achieved compute rate. Dividing the modeled $Q$ by $T$ gives a rate under that traffic assumption. A row-count sweep can reveal patterns consistent with bandwidth or compute limits, but it does not automatically measure either hardware peak. The worked trace keeps the observed times and the assumed roofline separate.
 
@@ -173,7 +173,7 @@ Begin at `Profiler.profile_forward_pass(model, input_tensor)`, the entry point t
 
 ### Counting parameters and bytes
 
-Parameter storage determines whether a model can fit in memory before any input is processed. For a `Linear(3, 2)` like the last layer of @sec-layers's parameter ledger, eight float32 parameters occupy $8 \times 4 = 32$ bytes. Counting the arrays also avoids omissions when a model contains biases, normalization parameters, or lookup tables in addition to weight matrices.
+In deployment frameworks and model registries like Hugging Face and PyTorch, static parameter accounting is the first diagnostic performed to verify that a network's weights will fit within an accelerator's VRAM budget. Inspecting tensor metadata across the module hierarchy establishes this static resident memory footprint before allocating transient activation buffers or key-value caches. Parameter storage determines whether a model can fit in memory before any input is processed. For a `Linear(3, 2)` like the last layer of @sec-layers's parameter ledger, eight float32 parameters occupy $8 \times 4 = 32$ bytes. Counting the arrays also avoids omissions when a model contains biases, normalization parameters, or lookup tables in addition to weight matrices.
 
 The architecture provides a useful independent check, but the framework can count the arrays it already owns. Each parameter is a `Tensor` around a NumPy array, and `.data.size` gives its element count. The model's `parameters()` method collects those tensors, so the main path is a sum over that list.
 
@@ -187,7 +187,7 @@ The byte calculation assumes float32 storage and multiplies the element count by
 
 ### Counting FLOPs
 
-Operation counts answer a different question from parameter counts. That `Linear(3, 2)` has six weights whether the input contains one row or four, but its matrix-product work grows from twelve FLOPs to forty-eight. A count computed before execution makes that distinction visible without paying for a timed forward pass.
+Production profiling utilities like DeepSpeed's FLOP profiler, PyTorch's `FlopCounterMode`, and `fvcore` inspect computational graph shapes to quantify the algorithmic work required by a forward pass independently of hardware runtime. This symbolic accounting enables engineers to calculate operational intensity and estimate compute costs across varying batch sizes and context lengths before executing expensive training or inference runs. Operation counts answer a different question from parameter counts. That `Linear(3, 2)` has six weights whether the input contains one row or four, but its matrix-product work grows from twelve FLOPs to forty-eight. A count computed before execution makes that distinction visible without paying for a timed forward pass.
 
 Counting each multiplication as it executes would add work to the operation under study. Instead, the profiler reads shapes. A Linear matrix product costs $2 \times \text{rows} \times \text{in} \times \text{out}$ under the multiply-plus-add convention. This is a conventional estimate: it omits the bias addition and treats every dot-product term as one multiplication plus one addition. In a transformer block, the two attention matrix products add $4 B S^2 D$ FLOPs for batch $B$, sequence length $S$, and embedding width $D$. The GPT counter omits embeddings, normalization, activations, softmax, and residual additions; these can still consume time and memory.
 

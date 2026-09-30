@@ -101,7 +101,7 @@ Treating a latency measurement as a sample from a probability distribution requi
 
 ### Warmup
 
-For a sustained inference comparison, the distribution of interest is steady state, the cost once the model is loaded and running. An application concerned with startup must measure cold latency separately. Cold runs come from a different distribution, one that includes setup, and mixing the two corrupts every summary statistic. The fix is to run the model several times and discard those initial timings, so that the retained list is drawn purely from the steady-state distribution.[^fn-dvfs-thermal-soaking]
+Standard machine learning benchmarking suites, including MLPerf Inference and PyTorch's benchmark utilities, mandate dedicated warmup iterations before recording any performance metrics. Untimed warm iterations prime CPU instruction caches, trigger memory pool allocations, and settle processor dynamic frequency scaling (DVFS) so measurements reflect steady-state execution rather than one-time runtime overheads. For a sustained inference comparison, the distribution of interest is steady state, the cost once the model is loaded and running. An application concerned with startup must measure cold latency separately. Cold runs come from a different distribution, one that includes setup, and mixing the two corrupts every summary statistic. The fix is to run the model several times and discard those initial timings, so that the retained list is drawn purely from the steady-state distribution.[^fn-dvfs-thermal-soaking]
 
 [^fn-dvfs-thermal-soaking]: **DVFS and thermal settling**: Modern processors utilize Dynamic Voltage and Frequency Scaling (DVFS) to balance power and thermals. Under standard operating system balanced governors, processors boot from low idle frequencies (such as 800 MHz) and take tens of milliseconds to ramp to peak turbo clocks. Conversely, sustained execution heats the die and triggers thermal throttling that lowers clocks by 15% to 30%. Rigorous systems benchmarks lock hardware governors to performance mode and run continuous thermal-soak iterations prior to recording measurements.
 
@@ -114,7 +114,7 @@ For a sustained inference comparison, the distribution of interest is steady sta
 *Latency distribution anatomy: tail percentiles $P_{95}$ and $P_{99}$ capture system stalls that the mean obscures.*
 :::
 
-After warmup, run the model $N$ times and keep every timing $t_1, \dots, t_N$. Two summaries are familiar. The **mean** $\bar{t}$ is the sum divided by $N$, and the **standard deviation** $s$ measures how far a typical timing sits from the mean:
+In production serving environments governed by strict Service Level Objectives (SLOs), performance is characterized by complete latency distributions rather than isolated average timings. Systems noise from operating system scheduling, memory allocator stalls, and shared bus contention produces a heavy right-skewed tail that single-number arithmetic means obscure. After warmup, run the model $N$ times and keep every timing $t_1, \dots, t_N$. Two summaries are familiar. The **mean** $\bar{t}$ is the sum divided by $N$, and the **standard deviation** $s$ measures how far a typical timing sits from the mean:
 
 $$\bar{t} = \frac{1}{N} \sum_{i=1}^N t_i, \qquad s = \sqrt{\frac{1}{N - 1} \sum_{i=1}^N (t_i - \bar{t})^2}$$
 
@@ -133,7 +133,7 @@ When $p$ percent of the way through the list falls between two entries, TinyTorc
 
 ### How many runs
 
-A percentile is only as trustworthy as the number of samples behind it. $P_{99}$ describes an event that happens once per hundred runs, so twenty runs can easily miss that upper tail entirely. An interpolated percentile still exists, but provides little evidence about a rare event. The Napkin Math below turns that intuition into a concrete sample count.
+Rigorous benchmarking standards, such as those established by MLPerf, enforce minimum trial counts to ensure statistical confidence when characterizing high percentiles. Estimating tail metrics like $P_{99}$ or $P_{99.9}$ from too few iterations yields erratic results that fail to capture rare hardware and operating system hiccups. A percentile is only as trustworthy as the number of samples behind it. $P_{99}$ describes an event that happens once per hundred runs, so twenty runs can easily miss that upper tail entirely. An interpolated percentile still exists, but provides little evidence about a rare event. The Napkin Math below turns that intuition into a concrete sample count.
 
 ::: {#nbk-benchmarking-sample-size-tail-latencies .callout-notebook title="Napkin Math: Sample Size Requirements for P99 Tail Latency"}
 A run exceeds the true 99th percentile with probability $p = 0.01$. The chance that $N$ runs contain no such event is $(1 - p)^N$, so the chance of seeing at least one is $1 - (1 - p)^N$. Asking for a 95 percent chance of catching at least one tail event gives
@@ -147,7 +147,7 @@ Round up to **299 runs** to meet the inequality. This calculation concerns obser
 
 ### Throughput
 
-Latency is the cost of one request. **Throughput** is how many samples the model finishes per second, which is what matters when requests arrive in batches. Over the measured window it is total samples over total time, with $B$ the batch size and the timings in milliseconds:
+While interactive consumer applications demand low latency, production serving infrastructure and training pipelines optimize primarily for system throughput to maximize hardware utilization and operational economics. Benchmarking harnesses measure this dimension to understand how batching saturates memory bandwidth and matrix cores under sustained load. Latency is the cost of one request. **Throughput** is how many samples the model finishes per second, which is what matters when requests arrive in batches. Over the measured window it is total samples over total time, with $B$ the batch size and the timings in milliseconds:
 
 $$\text{Throughput} = \frac{N \cdot B}{\sum_{i=1}^N t_i} \times 1000 \quad \text{samples per second}$$
 
@@ -157,7 +157,7 @@ The formula is a special case of **Little's law**, which relates three averages 
 
 ### Fairness
 
-One more rule follows from the same model. A comparison is fair only when both sides are measured under the same conditions, which means the same input, the same machine, the same warmup and run counts, and the same statistic on each side. Comparing a median against a mean, or a warm run against a cold one, yields a ratio that reflects the measurement flaw rather than true model performance.
+In systems evaluation, valid comparative claims—such as benchmarking an optimized kernel against an un-fused baseline—require strict isolation of experimental variables. Confounding factors like disparate batch dimensions, differing numerical precisions, or mismatched hardware frequency states invalidate empirical speedup ratios. One more rule follows from the same model. A comparison is fair only when both sides are measured under the same conditions, which means the same input, the same machine, the same warmup and run counts, and the same statistic on each side. Comparing a median against a mean, or a warm run against a cold one, yields a ratio that reflects the measurement flaw rather than true model performance.
 
 ::: {.callout-tip title="Pause & Predict: The Mean vs Median Latency Trap"}
 Suppose you record 20 benchmark runs of a model forward pass. Exactly 19 iterations finish in 1.0 ms each, but iteration 14 experiences an operating system context switch and takes 21.0 ms. What is the mean latency across the 20 runs? What is the median ($P_{50}$)? If a client requires an SLA of $P_{99} \le 5.0\text{ ms}$, does this service pass or fail?

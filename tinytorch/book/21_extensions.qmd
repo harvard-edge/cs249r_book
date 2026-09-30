@@ -73,7 +73,7 @@ TinyTorch exposes four native extension points that correspond to the four funda
 
 ### Repository Architecture: Core versus Extensions
 
-To preserve stability, TinyTorch enforces a strict structural separation between the core standard library and the extensions ecosystem:
+Industrial frameworks like PyTorch and JAX decouple their core computational engines from domain-specific libraries to maintain stability while enabling ecosystem velocity. Isolating stable autograd primitives from rapidly evolving kernel optimizations prevents experimental features from compromising foundational runtime guarantees. To preserve stability, TinyTorch enforces a strict structural separation between the core standard library and the extensions ecosystem:
 
 ```text
 tinytorch/
@@ -106,7 +106,7 @@ The `tinytorch/core/` and `tinytorch/perf/` directories contain the standard lib
 
 ### The Extension Contract and Starter Template
 
-To ensure that every extension functions harmoniously with the rest of the framework, all extensions adhere to the four-part **Extension Contract**:
+Extensible systems enforce formal architectural contracts to integrate external plugins without destabilizing core dispatch pipelines or causing opaque runtime crashes. Establishing explicit invariants for memory layout, autograd propagation, and device availability ensures modular components interoperate reliably across heterogeneous backends. To ensure that every extension functions harmoniously with the rest of the framework, all extensions adhere to the four-part **Extension Contract**:
 
 1. **Systems Framing:** Every extension must clearly state the physical resource bottleneck it resolves (e.g., DRAM capacity, memory bandwidth, vector register utilization, or floating-point underflow).
 2. **Tensor and NumPy Interoperability:** Functions must accept either a TinyTorch `Tensor` or a raw NumPy `ndarray`. When passed a `Tensor`, the function must return a `Tensor` (preserving the computation graph if differentiable). When passed a NumPy array, it must return a NumPy array.
@@ -158,6 +158,8 @@ Each extension establishes:
 
 ### Extension 1: Parameter-Efficient Fine-Tuning (LoRA)
 
+In modern generative AI deployments, Low-Rank Adaptation (LoRA) is the standard mechanism for fine-tuning foundation models without duplicating massive parameter sets for each downstream task. By freezing pre-trained checkpoints and training only compact rank-decomposition matrices, systems can serve hundreds of task-specific adapters concurrently from a single shared base model.
+
 **The Systems Bottleneck:** Fine-tuning large language models by updating all parameters encounters a severe memory wall. Modern adaptive optimizers such as Adam maintain two 32-bit floating-point state tensors per parameter: the first moment vector $m_t$ (momentum) and the second raw moment vector $v_t$ (variance). Each parameter requires 8 bytes of optimizer state, plus 4 bytes for the stored gradient, plus 4 bytes for the weight itself, totaling 16 bytes per parameter. For a 7-billion parameter model, storing Adam optimizer states alone consumes $7 \times 10^9 \times 8 = 56\text{ GB}$ of memory, far exceeding consumer GPU memory before a single activation is allocated.
 
 **Architectural Strategy:** Low-Rank Adaptation (LoRA) freezes the pre-trained weight matrix $W_0 \in \mathbb{R}^{d \times k}$ by setting `requires_grad=False`. It decomposes the weight update $\Delta W$ into the product of two small, low-rank matrices $A \in \mathbb{R}^{d \times r}$ and $B \in \mathbb{R}^{r \times k}$, where the rank $r \ll \min(d, k)$:
@@ -194,6 +196,8 @@ Suppose you fine-tune a 7-billion parameter language model in 16-bit precision u
 
 ### Extension 2: Activation Checkpointing
 
+Pioneered in frontier training systems like Megatron-LM and DeepSpeed, activation checkpointing is an essential systems primitive for scaling context lengths and model depths on memory-constrained GPUs. By selectively discarding intermediate forward tensors and recomputing them on-demand during the backward pass, frameworks trade minor redundant arithmetic for substantial memory footprint reductions.
+
 **The Systems Bottleneck:** In deep networks, the autograd tape saves intermediate tensor activations produced by every forward layer to evaluate gradient chain rules during backpropagation. For an $L$-layer transformer with sequence length $T$ and hidden dimension $D$, activation memory scales linearly with depth: $O(L \cdot T \cdot D)$. On long sequences or deep architectures, activation memory quickly dwarfs parameter storage and causes out-of-memory (OOM) crashes during training.
 
 **Architectural Strategy:** Activation Checkpointing (or gradient recomputation) discards intermediate forward activations from memory. The forward pass runs inside a `no_grad()` context, caching only the input boundary tensors between major layer blocks. During backpropagation, the forward pass for each block is recomputed dynamically from the cached boundary tensors. By dividing an $L$-layer network into $\sqrt{L}$ segments, activation memory scaling drops from $O(L)$ to $O(\sqrt{L})$, trading a 33% increase in compute for an 80% reduction in peak activation memory.
@@ -225,6 +229,8 @@ Suppose you fine-tune a 7-billion parameter language model in 16-bit precision u
 
 ### Extension 3: Mixed-Precision Loss Scaling
 
+Automated mixed-precision engines, such as PyTorch AMP and NVIDIA Apex, rely on dynamic loss scaling to enable fast 16-bit training on hardware Tensor Cores. Because half-precision floating-point formats possess limited exponent ranges, multiplying the loss by a scaling factor shifts vanishingly small backward gradients away from the zero-underflow boundary.
+
 **The Systems Bottleneck:** Training deep models in 16-bit floating-point (FP16) halves memory consumption and doubles compute throughput. However, IEEE 754 half-precision float16 allocates only 5 bits for the exponent, providing an exponent range of $[-14, 15]$. Its smallest positive normalized number is $2^{-14} \approx 6.1 \times 10^{-5}$, and its absolute minimum subnormal representation is $2^{-24} \approx 5.96 \times 10^{-8}$. Backpropagation gradients in deep neural networks often fall below $10^{-5}$. In raw FP16, these small gradient values silently underflow to exact zero, extinguishing parameter updates and causing training to diverge.
 
 **Architectural Strategy:** Loss scaling multiplies the scalar loss by a large constant factor $S$ (e.g., $S = 65,536 = 2^{16}$) immediately before calling `.backward()`. By the linearity of differentiation:
@@ -250,6 +256,8 @@ $$\nabla_\theta \mathcal{L} = \frac{1}{S} \nabla_\theta (S \cdot \mathcal{L})$$
 ---
 
 ### Extension 4: Graph Capture and Fusion Compiler
+
+Modern machine learning compilers, including PyTorch Inductor and Google XLA, trace eager execution graphs into static Intermediate Representations to eliminate redundant memory round-trips. By collapsing multi-step elementwise sequences into fused execution kernels, the compiler keeps intermediate values pinned in hardware registers rather than spilling them across the memory bus.
 
 **The Systems Bottleneck:** In dynamic, define-by-run execution, every mathematical operator is an isolated function call that reads its operands from DRAM, computes results in registers, and writes the output tensor back to DRAM. Consider an elementwise chain such as:
 $$y = (x + \text{bias}) \cdot \text{scale}$$
@@ -285,6 +293,8 @@ If `bias` and `scale` are full-size arrays of $N$ elements, this sequence reads 
 
 *Source Code Mapping: the extensions live in `tinytorch/extensions/` and are written directly rather than exported from `src/`.*
 :::
+
+High-performance numerical linear algebra libraries and edge runtimes like llama.cpp achieve near-theoretical CPU compute ceilings by targeting hardware SIMD vector units directly. By restructuring matrix traversals to match memory cache hierarchies and register widths (such as Intel AVX2 or ARM NEON), native kernels overcome interpreter overhead and saturate processor compute capacity.
 
 **The Systems Bottleneck:** Python is an interpreted language. Executing matrix multiplication using naive triple-nested Python loops incurs catastrophic bytecode evaluation overhead:
 
@@ -386,6 +396,8 @@ Notice the critical systems lesson: rewriting `z ** 3` as `z * z * z` in NumPy y
 ---
 
 ### Extension 7: Hardware Accelerator Offloading (MPS & Triton)
+
+Modern deep learning runtimes scale beyond general-purpose CPUs by targeting specialized parallel accelerators, utilizing backend frameworks like Apple Metal Performance Shaders (MPS) and OpenAI Triton. Maximizing accelerator efficiency requires balancing high-throughput parallel compute against the latency of host-device synchronization and memory bus transfers.
 
 **The Systems Bottleneck:** Specialized hardware accelerators (such as Apple Silicon GPUs or NVIDIA GPUs) provide massive parallel throughput. However, moving data to and from the accelerator incurs data transfer latency and bus transfer overhead.
 

@@ -79,7 +79,7 @@ So the need is concrete. We want a loss for classification that avoids preventab
 
 ### A loss is one number, and lower is better
 
-A loss function compares predictions with targets and returns an error score. The losses here are nonnegative, with smaller values indicating better agreement. MSE can reach zero exactly; classification loss approaches zero as the probability of the correct answer approaches one. For regression, where the target is a number, the natural choice is **mean squared error**:
+Every supervised training pipeline—from continuous noise prediction in diffusion models to coordinate regression in robotics—culminates in an objective function that quantifies task performance. By reducing multidimensional batch predictions into a single scalar value, this objective defines the scalar potential that drives reverse-mode gradient updates. A loss function compares predictions with targets and returns an error score. The losses here are nonnegative, with smaller values indicating better agreement. MSE can reach zero exactly; classification loss approaches zero as the probability of the correct answer approaches one. For regression, where the target is a number, the natural choice is **mean squared error**:
 
 $$\mathcal{L}_{\text{MSE}} = \frac{1}{N} \sum_{i=1}^{N} (\hat{y}_i - y_i)^2$$
 
@@ -89,7 +89,7 @@ Here $N$ is the number of predictions, $\hat{y}_i$ is the model's $i$-th predict
 
 ### Cross-entropy scores the probability of the right answer
 
-For classification the model outputs a vector $\mathbf{z} = [z_1, \dots, z_C]$ of $C$ raw scores, one per class. These are the **logits**, and they can be any real numbers. To read them as probabilities we apply the **softmax** function:
+The ubiquitous objective powering language model pre-training (such as next-token prediction in GPT and LLaMA) and multi-class image classification is **cross-entropy loss**. Grounded in maximum likelihood estimation, it applies an increasingly steep gradient penalty as the probability assigned to the ground-truth target approaches zero. For classification the model outputs a vector $\mathbf{z} = [z_1, \dots, z_C]$ of $C$ raw scores, one per class. These are the **logits**, and they can be any real numbers. To read them as probabilities we apply the **softmax** function:
 
 $$p_i = \frac{e^{z_i}}{\sum_{j=1}^{C} e^{z_j}}$$
 
@@ -121,7 +121,7 @@ Before deriving the max-shift stabilization, consider what happens when evaluati
 
 ### The fix: shift before you exponentiate
 
-Softmax has a property that saves it. Multiply the numerator and denominator by the same constant $e^{-c}$ and nothing changes:
+Production deep learning runtimes (such as PyTorch's native ATen kernels and Triton fused-softmax operators) protect classification objectives against floating-point overflow using the **max-subtraction trick**. Because single-precision IEEE 754 float32 overflows to $+\infty$ for any exponent exceeding $88.72$, evaluating raw logits in deep networks would routinely crash training with $\text{NaN}$ values. Softmax has a property that saves it. Multiply the numerator and denominator by the same constant $e^{-c}$ and nothing changes:
 
 $$p_i = \frac{e^{z_i}}{\sum_j e^{z_j}} = \frac{e^{-c} \, e^{z_i}}{e^{-c} \sum_j e^{z_j}} = \frac{e^{z_i - c}}{\sum_j e^{z_j - c}}$$
 
@@ -129,7 +129,7 @@ So we may subtract any constant $c$ from every logit before exponentiating, and 
 
 ### Take the logarithm before you divide
 
-The loss never needs the probabilities themselves; it needs $\log p_t$. Taking the logarithm of the shifted softmax turns the division into a subtraction:
+High-performance deep learning systems never compute cross-entropy by chaining separate Softmax, division, and logarithm operations; instead, they execute a single fused **Log-Softmax** routine. This algebraic fusion eliminates intermediate DRAM round-trips while preventing small probabilities from underflowing to zero, which would cause downstream logarithms to evaluate to $-\infty$. The loss never needs the probabilities themselves; it needs $\log p_t$. Taking the logarithm of the shifted softmax turns the division into a subtraction:
 
 $$\log p_i = (z_i - c) - \log \sum_{j=1}^{C} e^{z_j - c}$$
 

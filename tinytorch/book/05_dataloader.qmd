@@ -150,7 +150,7 @@ The listings use the copying `Tensor` constructor from @sec-tensors. Reading a r
 
 ### The dataset contract
 
-Start with what the rest of the framework needs from a dataset. The training loop we write in @sec-training says `for x, y in loader`, and it should say exactly that whether the samples are ten rows in a Python list, sixty thousand handwritten digits in one array in RAM, or ten million JPEG files on disk that each have to be decoded. The model, the loss, and the loop must not change when the data does.
+In production frameworks like PyTorch, the map-style `Dataset` abstraction cleanly decouples data storage and sample retrieval from downstream batching and model execution. By exposing a uniform key-value retrieval interface, it allows the surrounding runtime to interact identically with in-memory arrays, compressed disk archives, or remote object stores. Start with what the rest of the framework needs from a dataset. The training loop we write in @sec-training says `for x, y in loader`, and it should say exactly that whether the samples are ten rows in a Python list, sixty thousand handwritten digits in one array in RAM, or ten million JPEG files on disk that each have to be decoded. The model, the loss, and the loop must not change when the data does.
 
 The naive design bakes the data source into the loader, so a loader for in-memory arrays and a loader for image folders become two classes with two copies of the batching logic. So the contract is two methods, `__len__` and `__getitem__`, and nothing else, and Module 05 writes it down as an abstract base class so that forgetting one of them fails at construction rather than in the middle of an epoch.
 
@@ -164,7 +164,7 @@ Look at what `__getitem__` costs. `tensor.data[idx]` is NumPy row indexing, whic
 
 ### Collation
 
-Now the other side of the contract. `Linear.forward` from @sec-layers computes `x.matmul(W)`, and its input needs a batch dimension. Our loader produces a contiguous array, with row $i$ at positions $iD$ through $iD + D - 1$ and element strides $(D, 1)$. NumPy can multiply strided arrays too; the need here is to assemble separate sample buffers into one array. What the dataset hands us is $B$ separate small tensors, each in its own buffer. Four samples drawn as 7, 8, 1, 5 live in four unrelated allocations. No stride trick makes four buffers look like one $(4, 2)$ tensor.
+Modern accelerators and BLAS libraries achieve peak throughput only when operating on contiguous memory buffers, yet individual dataset samples reside in scattered, non-adjacent heap allocations. PyTorch delegates this packing step to `collate_fn`, which aggregates individual sample tuples into dense, row-major batch tensors ready for vectorized GEMM execution. Now the other side of the contract. `Linear.forward` from @sec-layers computes `x.matmul(W)`, and its input needs a batch dimension. Our loader produces a contiguous array, with row $i$ at positions $iD$ through $iD + D - 1$ and element strides $(D, 1)$. NumPy can multiply strided arrays too; the need here is to assemble separate sample buffers into one array. What the dataset hands us is $B$ separate small tensors, each in its own buffer. Four samples drawn as 7, 8, 1, 5 live in four unrelated allocations. No stride trick makes four buffers look like one $(4, 2)$ tensor.
 
 ::: {.column-margin}
 ![](assets/images/diagrams/05_dataloader-margin-collation.svg){width="100%" fig-alt="Batch collation memory layout showing four scattered sample buffers in heap memory packed into a single contiguous row-major batch array."}
@@ -184,7 +184,7 @@ Collation allocates a buffer and places each sample's values in its row. `np.sta
 
 ### The loader
 
-The last piece owns the order. @sec-training's loop is going to read `for epoch in range(E): for x, y in loader:` and expect two things from that inner line, a fresh shuffle when enabled and one batch at a time.
+In production deep learning pipelines, `DataLoader` serves as the runtime orchestrator that bridges static datasets to execution hardware, managing index permutations and batch dispatch. By yielding batches lazily via an iterator instead of materializing all batches in memory upfront, it bounds memory consumption while providing fresh pseudo-random shuffles across epochs. The last piece owns the order. @sec-training's loop is going to read `for epoch in range(E): for x, y in loader:` and expect two things from that inner line, a fresh shuffle when enabled and one batch at a time.
 
 The naive way to get batches is to build them all up front, shuffle the dataset once, cut it into $\lceil N/B \rceil$ tensors, and hand back the list. That list is a second copy of the whole dataset sitting next to the first, another 47 million floats in the 60,000 by 784 case, and it has to be rebuilt every epoch. The naive way to get a random order is worse. Draw $N$ indices at random with replacement and roughly a third of the samples never come up in that epoch, because the chance that a particular index is missed in $N$ draws tends to $1/e$ as $N$ grows.
 
@@ -258,7 +258,7 @@ The short batch exposes a contract that the training loop must preserve. If the 
 
 ### A transform belongs at sample lookup
 
-Up to this point, datasets have supplied flat feature vectors of shape $(D,)$ collated into $(B, D)$ batches. Perception tasks, by contrast, operate on multi-dimensional tensors like images with spatial dimensions and color channels. An image adds axes to the same contract. In a channels-last image, shape `(2, 3, 2)` means two rows, three columns, and two values per pixel. Flipping horizontally must reverse the three columns while keeping each pixel's two values together. Shape alone cannot identify the channel axis: the same tuple could describe two channels of height three and width two. The explicit `layout="HWC"` argument resolves that ambiguity.
+In vision and multimodal pipelines, data augmentation libraries such as `torchvision.transforms` apply stochastic alterations—like flips, crops, and color jitter—on the fly rather than expanding dataset size on disk. Executing these operations inside sample lookup ensures that the network encounters unique, randomly perturbed views of each sample across different training epochs without ballooning memory footprint. Up to this point, datasets have supplied flat feature vectors of shape $(D,)$ collated into $(B, D)$ batches. Perception tasks, by contrast, operate on multi-dimensional tensors like images with spatial dimensions and color channels. An image adds axes to the same contract. In a channels-last image, shape `(2, 3, 2)` means two rows, three columns, and two values per pixel. Flipping horizontally must reverse the three columns while keeping each pixel's two values together. Shape alone cannot identify the channel axis: the same tuple could describe two channels of height three and width two. The explicit `layout="HWC"` argument resolves that ambiguity.
 
 ```python
 from tinytorch.core.dataloader import RandomHorizontalFlip, RandomCrop, Compose

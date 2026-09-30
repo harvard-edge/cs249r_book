@@ -111,7 +111,7 @@ Why must `optimizer.zero_grad()` strictly precede `loss.backward()`, and why mus
 
 ### Five steps, and why the order is forced
 
-Each step of the loop reads state that the previous step wrote, and that dependency is what pins the order down.
+In production deep learning frameworks like PyTorch, the iterative training loop orchestrates a strict dataflow state machine that synchronizes tensors across memory allocations, autodiff graphs, and optimizer states. Because each phase depends directly on the uncorrupted buffers produced by its immediate predecessor, executing these operations out of sequence introduces catastrophic silent failures such as updating on stale gradients or differentiating through mutated weights. Each step of the loop reads state that the previous step wrote, and that dependency is what pins the order down.
 
 | Step | Call | Reads | Writes |
 | :--- | :--- | :--- | :--- |
@@ -129,7 +129,7 @@ The contract is about which computation an update represents. *Every optimizer s
 
 ### What the loop remembers
 
-The five steps handle one batch. Around them sit two more loops, one over the batches in a dataset (one pass is an epoch) and one over epochs. The `Trainer` owns the state that outlives a single batch: how many epochs and optimizer steps have completed, the current learning rate, and a history of losses for plotting. It stores `training_mode` and, at the start of each pass, calls `set_training_mode` from @sec-layers, which sets `training` on the model and on every layer stored inside it. A Dropout layer whose `training` argument is omitted falls back to that flag, so it follows the pass whether it sits in a `Sequential` or in a hand-written model. The `_forward` helper also passes the mode explicitly to models whose `forward` signature accepts `training`, such as `Sequential`.
+Production training frameworks like PyTorch Lightning and Hugging Face Accelerate separate the ephemeral computational graph of an individual mini-batch from the persistent lifecycle state of the broader training run. Maintaining this explicit boundary ensures that transient forward activations are promptly garbage-collected while global step counters, learning rate schedules, and layer execution modes persist intact across epochs. The five steps handle one batch. Around them sit two more loops, one over the batches in a dataset (one pass is an epoch) and one over epochs. The `Trainer` owns the state that outlives a single batch: how many epochs and optimizer steps have completed, the current learning rate, and a history of losses for plotting. It stores `training_mode` and, at the start of each pass, calls `set_training_mode` from @sec-layers, which sets `training` on the model and on every layer stored inside it. A Dropout layer whose `training` argument is omitted falls back to that flag, so it follows the pass whether it sits in a `Sequential` or in a hand-written model. The `_forward` helper also passes the mode explicitly to models whose `forward` signature accepts `training`, such as `Sequential`.
 
 The model and optimizer retain the parameter objects; the optimizer also retains its update buffers. The Trainer holds references to those collaborators, rather than creating a second set of weights. Batch counters and sample sums are local to one `train_epoch` call, while `epoch`, `step`, and `history` remain on the Trainer when that call returns. These different lifetimes explain both accumulation and the checkpoint boundary.
 
@@ -147,7 +147,7 @@ The first two pieces stand alone. The Trainer then needs a model with `forward()
 
 ### The schedule
 
-With $\eta = 0.1$, a gradient of $2$ moves a weight by $0.2$ under plain SGD. With $\eta = 0.01$, the same gradient moves it by $0.02$. A schedule changes this multiplier as training progresses without changing the optimizer's update rule. It can allow larger early updates and smaller later ones; whether that helps depends on the objective and the chosen endpoints.
+In modern large-scale model training—from foundation transformers to vision backbones—dynamic learning rate schedulers like cosine annealing (`torch.optim.lr_scheduler.CosineAnnealingLR`) are essential for convergence. Rather than holding step sizes fixed, schedulers adjust the optimization rate dynamically to encourage broad exploratory steps early in training before smoothly decaying to facilitate precise settling into sharp minima. With $\eta = 0.1$, a gradient of $2$ moves a weight by $0.2$ under plain SGD. With $\eta = 0.01$, the same gradient moves it by $0.02$. A schedule changes this multiplier as training progresses without changing the optimizer's update rule. It can allow larger early updates and smaller later ones; whether that helps depends on the objective and the chosen endpoints.
 
 `CosineSchedule` connects a maximum rate to a minimum rate along half a cosine wave over $T$ epochs:
 
@@ -161,7 +161,7 @@ The guard at the top of `get_lr` returns the floor once `epoch >= total_epochs`.
 
 ### Clipping
 
-Suppose two parameter tensors have gradients $[3,4]$ and $[0,12]$. Their separate lengths are $5$ and $12$. Clipping each independently to length $2.5$ multiplies the first by $0.5$ and the second by about $0.2083$, changing their relative contributions. The combined gradient points in a different direction.
+Standard practice in training Transformers and recurrent networks, gradient clipping (`torch.nn.utils.clip_grad_norm_`) guards training stability against sudden gradient explosions when navigating sharp loss cliffs. By computing the joint Euclidean norm across all model parameters and rescaling them proportionally when that norm exceeds a maximum threshold, the runtime constrains update magnitude while preserving the composite gradient's directional geometry. Suppose two parameter tensors have gradients $[3,4]$ and $[0,12]$. Their separate lengths are $5$ and $12$. Clipping each independently to length $2.5$ multiplies the first by $0.5$ and the second by about $0.2083$, changing their relative contributions. The combined gradient points in a different direction.
 
 Global clipping treats the gradients as one long vector. Its length is $13$, so one coefficient, $2.5/13$, scales every entry. For plain SGD without momentum or decay, this also bounds the update length by the learning rate times $2.5$. For Adam or momentum SGD, the clipping operation bounds the current gradient; the optimizer's stored state still participates in the eventual update. The global norm is
 
@@ -239,7 +239,7 @@ The returned loss uses a separate denominator: total samples in the epoch. `tota
 
 ### Evaluation
 
-A binary classifier returning probabilities `[[0.9], [0.1]]` for labels `[[1], [0]]` predicts both labels correctly. Taking `argmax` over each one-column row would instead return zero twice. Evaluation therefore needs a metric appropriate to the loss, as well as a forward pass that leaves the training state undisturbed.
+In production deep learning pipelines, validation loops evaluate model generalization by executing forward passes under strict inference semantics (`model.eval()` and `torch.no_grad()`). This operational dual switch deactivates stochastic training behaviors like dropout while disabling autograd tape recording to eliminate unnecessary activation memory overhead. A binary classifier returning probabilities `[[0.9], [0.1]]` for labels `[[1], [0]]` predicts both labels correctly. Taking `argmax` over each one-column row would instead return zero twice. Evaluation therefore needs a metric appropriate to the loss, as well as a forward pass that leaves the training state undisturbed.
 
 `evaluate` sets `training_mode` to `False` and calls `set_training_mode(self.model, False)`, which clears `training` on the model and every layer stored inside it, then calls `_forward` and `loss_fn.forward` inside `no_grad()`. The first change disables dropout in any model, `Sequential` or hand-written; the second prevents autograd from retaining a graph for a backward pass that will never occur. These are separate controls. Turning off recording alone does not turn off dropout.
 
@@ -257,7 +257,7 @@ There is no backward or optimizer update, so existing parameter gradients and we
 
 ### Checkpoints
 
-After two Adam updates, restoring only the weights discards the moment estimates and their ages. The next call to `step()` then follows a different trajectory even on identical data. A **checkpoint** preserves the state needed to continue the supported computation: parameters, optimizer state and hyperparameters, schedule settings, clipping configuration, mode, counters, and history. (The word is unrelated to the activation checkpointing of @sec-autograd, which trades recomputation for memory inside one backward pass.)
+In large-scale distributed training runs that span days or weeks across hardware clusters, robust checkpointing (`torch.save`) is essential for fault tolerance against node preemption and hardware failures. Resuming an interrupted run without altering optimization dynamics requires serializing not merely model weights, but the complete state machine—including optimizer moment accumulators, step counters, and scheduler phases. After two Adam updates, restoring only the weights discards the moment estimates and their ages. The next call to `step()` then follows a different trajectory even on identical data. A **checkpoint** preserves the state needed to continue the supported computation: parameters, optimizer state and hyperparameters, schedule settings, clipping configuration, mode, counters, and history. (The word is unrelated to the activation checkpointing of @sec-autograd, which trades recomputation for memory inside one backward pass.)
 
 The naive save is `open(path, 'wb')` followed by `pickle.dump`. Opening for writing truncates the old file to zero bytes first, then the new bytes stream in over the next seconds, and a training job is exactly the kind of process that gets killed during those seconds. A kill that lands mid-write leaves a truncated file that `pickle.load` rejects, and the previous checkpoint is already gone, because the open destroyed it. The crash the checkpoint existed to protect against has now cost the run and the checkpoint together.
 
