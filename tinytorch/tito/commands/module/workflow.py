@@ -127,7 +127,9 @@ def record_module_export(project_root: Path, module_name: str) -> None:
     records = load_export_records(project_root)
     records[number] = {
         "module": module_name,
-        "notebook": str(notebook.relative_to(project_root)),
+        # POSIX form, so the record reads the same on every OS (Windows CI
+        # caught backslashes, 2026-09-30).
+        "notebook": notebook.relative_to(project_root).as_posix(),
         "sha256": fingerprint,
         "exported_at": datetime.now().isoformat(),
     }
