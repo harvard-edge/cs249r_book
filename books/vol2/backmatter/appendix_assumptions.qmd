@@ -438,7 +438,7 @@ Network specifications define how fast data moves, but they say nothing about ho
 #| label: appendix-reliability-constants
 from mlsysim.core import units
 from mlsysim.fmt import MarkdownStr, fmt, fmt_int, fmt_memory, fmt_params, fmt_rate, fmt_time, fmt_unit, fmt_val
-from mlsysim.physics import calc_checkpoint_size, calc_mtbf_cluster
+from mlsysim.physics import calc_checkpoint_size, calc_mtbf_cluster, calc_mtbf_node
 
 def _fmt_plain(val, unit_str=""):
     """Format a plain scalar with an explicit unit string. Returns (MarkdownStr, MarkdownStr)."""
@@ -458,13 +458,19 @@ class ReliabilityConstants:
         Systems.Reliability.Recovery.checkpoint_write_bw_gbs, "GB/s"
     )
     dgx_h100_gpus_per_node_str, dgx_h100_gpus_per_node_unit_str = _fmt_plain(Systems.Nodes.DGX_H100.accelerators_per_node, "GPUs/node")
-    pcie_switches_per_node = 1  # scenario assumption: no sourced per-node PCIe-switch count in the DGX datasheet
-    node_mttf_hours = 1 / (
-        Systems.Nodes.DGX_H100.accelerators_per_node / Systems.Reliability.Gpu.mttf_hours
-        + Systems.Nodes.DGX_H100.nics_per_node / Systems.Reliability.Nic.mttf_hours
-        + Systems.Nodes.DGX_H100.series_psus / Systems.Reliability.Psu.mttf_hours  # 0: 4+2 redundant PSUs
-        + pcie_switches_per_node / Systems.Reliability.PcieSwitch.mttf_hours
-        + Systems.Nodes.DGX_H100.accelerators_per_node / Systems.Reliability.Hbm.mttf_hours
+    # Same series composition as the MTBF cascade (appendix_reliability.qmd):
+    # GPUs + NICs + series PSUs (0 for the 4+2 redundant supply).
+    node_mttf_hours = (
+        calc_mtbf_node(
+            Systems.Reliability.Gpu.mttf_hours,
+            Systems.Nodes.DGX_H100.accelerators_per_node,
+            Systems.Reliability.Nic.mttf_hours,
+            Systems.Nodes.DGX_H100.nics_per_node,
+            Systems.Reliability.Psu.mttf_hours,
+            Systems.Nodes.DGX_H100.series_psus,
+        )
+        .to(hour)
+        .magnitude
     )
     node_mttf_hours_str = fmt_time(node_mttf_hours, 'hour', precision=1, commas=True)
     node_nics_str = fmt(Systems.Nodes.DGX_H100.nics_per_node, precision=0, commas=False)
@@ -510,7 +516,7 @@ At fleet scale, component failures are not exceptional events but statistical ce
 | Top-of-rack switch MTTF            | `{python} ReliabilityConstants.tor_switch_mttf_hours_str`  |  `{python} ReliabilityConstants.tor_switch_mttf_hours_unit_str` |
 | Optical cable and transceiver MTTF |    `{python} ReliabilityConstants.cable_mttf_hours_str`    |    `{python} ReliabilityConstants.cable_mttf_hours_unit_str`    |
 
-: **Component Mean Time To Failure**: Steady-state MTTF anchors from [@kokolis2025; @zu2024tpuv4; @barroso2019]. Combined DGX H100 node MTTF $\approx$ `{python} ReliabilityConstants.node_mttf_hours_str` (`{python} ReliabilityConstants.node_mttf_days_str`) for `{python} ReliabilityConstants.dgx_h100_gpus_per_node_str` GPUs with their HBM, `{python} ReliabilityConstants.node_nics_str` NICs, and one PCIe switch. The node's `{python} ReliabilityConstants.node_psus_str` PSUs run `{python} ReliabilityConstants.node_psus_required_str`+`{python} ReliabilityConstants.node_psus_redundant_str` redundant, so no single PSU failure stops it and they add no term. The MTBF cascade in @sec-appdx-reliability-foundations-mtbf-cascade models only GPUs and NICs, so its node interval is longer. {#tbl-fleet-mttf}
+: **Component Mean Time To Failure**: Steady-state MTTF anchors from [@kokolis2025; @zu2024tpuv4; @barroso2019]. Combined DGX H100 node MTBF $\approx$ `{python} ReliabilityConstants.node_mttf_hours_str` (`{python} ReliabilityConstants.node_mttf_days_str`) for `{python} ReliabilityConstants.dgx_h100_gpus_per_node_str` GPUs and `{python} ReliabilityConstants.node_nics_str` NICs in series, the same node composition as the MTBF cascade in @sec-appdx-reliability-foundations-mtbf-cascade. The node's `{python} ReliabilityConstants.node_psus_str` PSUs run `{python} ReliabilityConstants.node_psus_required_str`+`{python} ReliabilityConstants.node_psus_redundant_str` redundant, so no single PSU failure stops it and they add no term. The PCIe switch and HBM rows are node components that series model leaves out, and the top-of-rack switch and cable rows are network failures outside the node. Counting any of them would shorten the interval between interruptions a job sees. {#tbl-fleet-mttf}
 
 ### Recovery time assumptions {.unnumbered}
 
@@ -837,7 +843,7 @@ MFU measures useful model FLOP/s divided by hardware peak FLOP/s over a stated m
 
 ### Scaling efficiency {.unnumbered}
 
-Scaling efficiency $\eta_{\text{scaling}} = T_1/(N \times T_N)$ measures how much of the added compute actually reduces training time. @Tbl-fleet-scaling lists illustrative efficiency tiers aligned with published large language model (LLM) training at scale [@chowdhery2022palm; @jiang2024megascale], workload and fabric dependent.
+Scaling efficiency $\eta_{\text{scaling}} = T_1/(N \times T_N)$ measures how much of the added compute actually reduces training time. @Tbl-fleet-scaling lists the tiers the book plans with. From 256 GPUs up they are MLSysIM's modeled values for the 175B reference job at a fixed GPT-3 global batch, from the sweep behind @fig-fleet-orchestration-scaling-efficiency-curve extended to 8,192 GPUs, and the 32-GPU tier is a book convention, since one tensor- and pipeline-parallel replica of that job needs 64 GPUs. Production systems retain more at scale by training with a larger global batch and, where they pipeline, by interleaving stages. Published large language model (LLM) training runs built this way report near-linear scaling on thousands of accelerators [@jiang2024megascale; @chowdhery2022palm].
 
 | **Assumption**                  |                      **Value**                       |                          **Unit**                         |
 |:--------------------------------|:----------------------------------------------------:|:---------------------------------------------------------:|
@@ -846,7 +852,7 @@ Scaling efficiency $\eta_{\text{scaling}} = T_1/(N \times T_N)$ measures how muc
 | Scaling efficiency (1,024 GPUs) | `{python} CapacityConstants.scaling_eff_1024gpu_str` | `{python} CapacityConstants.scaling_eff_1024gpu_unit_str` |
 | Scaling efficiency (8,192 GPUs) | `{python} CapacityConstants.scaling_eff_8192gpu_str` | `{python} CapacityConstants.scaling_eff_8192gpu_unit_str` |
 
-: **Scaling Efficiency by Cluster Size**: Illustrative $\eta_{\text{scaling}}$ tiers from [@chowdhery2022palm; @jiang2024megascale]. At `{python} CapacityConstants.frontier_8k_nominal_gpus_str` GPUs, `{python} CapacityConstants.scaling_eff_8192_effective_gpus_str` effective GPUs of `{python} CapacityConstants.frontier_8k_nominal_gpus_str` nominal. {#tbl-fleet-scaling}
+: **Scaling Efficiency by Cluster Size**: Planning $\eta_{\text{scaling}}$ tiers. The 256- to 8,192-GPU values are MLSysIM's model of the 175B reference job at a fixed global batch, and the 32-GPU value is a book convention. At `{python} CapacityConstants.frontier_8k_nominal_gpus_str` GPUs, `{python} CapacityConstants.scaling_eff_8192_effective_gpus_str` effective GPUs of `{python} CapacityConstants.frontier_8k_nominal_gpus_str` nominal. {#tbl-fleet-scaling}
 
 ### Overhead budgets {.unnumbered}
 
@@ -985,25 +991,26 @@ class AssumptionsSummaryRecap:
 
 The catalog below maps each appendix section to its source category and primary literature references, providing a transparent audit trail for the book's numerical constants. See @tbl-fleet-assumption-provenance-catalog for the full table.
 
-| **Appendix section**                | **Source type**                   | **Primary references**                                                          |
-|:------------------------------------|:----------------------------------|:--------------------------------------------------------------------------------|
-| H100 recap                          | Vendor datasheet peak             | [@choquette2023]                                                                |
-| Reference workload (Archetype A)    | Book convention                   | GPT-3-class dense model; byte widths from the notation conventions              |
-| Cluster tiers                       | Book convention                   | [@kokolis2025] (scale context)                                                  |
-| Network fabrics                     | Vendor specs; InfiniBand standard | [@nvidia2017gpu; @NVIDIA2020; @choquette2023; @infiniband2000spec]              |
-| Reliability (MTTF)                  | Fleet studies                     | [@kokolis2025; @zu2024tpuv4; @barroso2019]                                      |
-| Recovery times                      | Design assumptions                | [@young1974; @daly2006]                                                         |
-| Communication ($\alpha$-$\beta$)    | Fabric specs; training at scale   | [@infiniband2000spec; @jiang2024megascale]                                      |
-| AllReduce model                     | Algorithm identity                | [@gibiansky2017baidu]                                                           |
-| Sustainability (PUE/WUE/rack power) | Industry surveys                  | [@davis2022uptime; @thegreengrid2007pue]                                        |
-| Carbon intensity                    | Grid statistics                   | [@iea2024emissionsFactors; @canada2026emissionFactors]                          |
-| Cloud economics                     | Illustrative rates                | Editorial (2024–2025 order of magnitude)                                        |
-| MFU and scaling efficiency          | Published LLM training            | [@chowdhery2022palm; @narayanan2021; @pope2023efficiently; @jiang2024megascale] |
-| Overhead budgets                    | Book convention                   | Editorial engineering targets                                                   |
-| Unit conventions                    | Decimal SI; book notation         | Editorial                                                                       |
+| **Appendix section**                | **Source type**                   | **Primary references**                                             |
+|:------------------------------------|:----------------------------------|:-------------------------------------------------------------------|
+| H100 recap                          | Vendor datasheet peak             | [@choquette2023]                                                   |
+| Reference workload (Archetype A)    | Book convention                   | GPT-3-class dense model; byte widths from the notation conventions |
+| Cluster tiers                       | Book convention                   | [@kokolis2025] (scale context)                                     |
+| Network fabrics                     | Vendor specs; InfiniBand standard | [@nvidia2017gpu; @NVIDIA2020; @choquette2023; @infiniband2000spec] |
+| Reliability (MTTF)                  | Fleet studies                     | [@kokolis2025; @zu2024tpuv4; @barroso2019]                         |
+| Recovery times                      | Design assumptions                | [@young1974; @daly2006]                                            |
+| Communication ($\alpha$-$\beta$)    | Fabric specs; training at scale   | [@infiniband2000spec; @jiang2024megascale]                         |
+| AllReduce model                     | Algorithm identity                | [@gibiansky2017baidu]                                              |
+| Sustainability (PUE/WUE/rack power) | Industry surveys                  | [@davis2022uptime; @thegreengrid2007pue]                           |
+| Carbon intensity                    | Grid statistics                   | [@iea2024emissionsFactors; @canada2026emissionFactors]             |
+| Cloud economics                     | Illustrative rates                | Editorial (2024–2025 order of magnitude)                           |
+| MFU                                 | Published LLM training            | [@chowdhery2022palm; @narayanan2021; @pope2023efficiently]         |
+| Scaling efficiency                  | MLSysIM model; book convention    | Context: [@jiang2024megascale; @chowdhery2022palm]                 |
+| Overhead budgets                    | Book convention                   | Editorial engineering targets                                      |
+| Unit conventions                    | Decimal SI; book notation         | Editorial                                                          |
 
 : **Fleet Assumption Provenance Catalog**: Quick map from appendix section to source class and bibliography. {#tbl-fleet-assumption-provenance-catalog tbl-colwidths="[28,22,50]"}
 
 ## Summary {.unnumbered}
 
-This appendix is the book's shared fleet-scale assumption sheet. Every napkin-math estimate in the chapters should trace to a row in the tables above, and @tbl-fleet-assumption-provenance-catalog records whether that row comes from a datasheet, a fleet study, an illustrative rate, or a book convention. Reliability rows set the failure clock, with failure a steady-state condition at `{python} AssumptionsSummaryRecap.training_10k_gpus_str` or more GPUs (@sec-appdx-reliability-foundations models it in depth). Communication rows decide whether synchronous training is viable, and the `{python} AssumptionsSummaryRecap.tcp_ndr_latency_ratio_mult_str` startup-latency gap between InfiniBand NDR and TCP explains why training clusters favor RDMA fabrics. Sustainability rows expose location as a lever, since grid carbon intensity differs by `{python} AssumptionsSummaryRecap.carbon_low_high_ratio_mult_str` between Norway and Poland. Capacity rows bridge peak hardware to useful throughput. At `{python} AssumptionsSummaryRecap.frontier_8k_gpus_str` GPUs, about `{python} AssumptionsSummaryRecap.scaling_eff_8192_pct_str` of ideal scaling is realized, and the listed overheads consume about `{python} AssumptionsSummaryRecap.overhead_total_pct_str` of wall time. When a deployment differs in fabric, region, MFU, or cluster size, substitute its values and re-evaluate the corresponding formulas.
+This appendix is the book's shared fleet-scale assumption sheet. Every napkin-math estimate in the chapters should trace to a row in the tables above, and @tbl-fleet-assumption-provenance-catalog records whether that row comes from a datasheet, a fleet study, an MLSysIM model, an illustrative rate, or a book convention. Reliability rows set the failure clock, with failure a steady-state condition at `{python} AssumptionsSummaryRecap.training_10k_gpus_str` or more GPUs (@sec-appdx-reliability-foundations models it in depth). Communication rows decide whether synchronous training is viable, and the `{python} AssumptionsSummaryRecap.tcp_ndr_latency_ratio_mult_str` startup-latency gap between InfiniBand NDR and TCP explains why training clusters favor RDMA fabrics. Sustainability rows expose location as a lever, since grid carbon intensity differs by `{python} AssumptionsSummaryRecap.carbon_low_high_ratio_mult_str` between Norway and Poland. Capacity rows bridge peak hardware to useful throughput. At `{python} AssumptionsSummaryRecap.frontier_8k_gpus_str` GPUs, about `{python} AssumptionsSummaryRecap.scaling_eff_8192_pct_str` of ideal scaling is realized for the reference job at a fixed batch, and the listed overheads consume about `{python} AssumptionsSummaryRecap.overhead_total_pct_str` of wall time. When a deployment differs in fabric, region, MFU, or cluster size, substitute its values and re-evaluate the corresponding formulas.

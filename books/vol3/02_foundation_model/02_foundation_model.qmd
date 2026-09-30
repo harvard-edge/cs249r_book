@@ -26,7 +26,7 @@
 
 _Why does a capable model still need a precise contract around every call?_
 
-A model can propose a useful repair and still return it too late, stop before the edit is complete, or express it in a form the runtime cannot use. Fluency does not reveal which of these failures occurred. The surrounding system needs to know what information the call received, whether generation completed, and what resources it consumed before it can assess the proposal. Confusing a clean stop with a finished task or a well-formed object with a permitted action carries the error into every later turn. The call contract makes these distinctions explicit without requiring the model to enforce its own limits. Within the H·S·A lens, this boundary separates a supplied context from carried state, a generated proposal from delegated authority, and one bounded invocation from the trajectory's continuing horizon.
+Every capability an agent adds, from memory and tools to retries, evaluation, and learning from its own trajectories, is assembled from model calls, so whatever a single call leaves ambiguous is inherited by all of them. A call can produce a sound proposal and still arrive after its deadline, stop before the edit is finished, or express the change in a form the runtime cannot apply, and fluent output reveals none of these conditions. Treating the model as an oracle that either answers or fails hides the distinctions that matter most: what the call was shown, whether generation finished, what it consumed, and what it merely proposed. Taking the call seriously turns it into an interface with a contract, closer to a remote request across an unreliable boundary than to a question put to an expert. The engineering question then changes from whether the model is capable enough to what each response establishes and what must still be checked before anything in the world changes. That shift moves reliability out of the model's weights and into the surrounding system, where it can be measured, budgeted, and enforced. It moves cost there as well, because every trajectory is a sum of calls whose price depends on how each request is shaped. Within the H·S·A lens, the single call is the origin: one bounded turn, no carried state, and no authority of its own, the baseline from which every later exposure is measured.
 
 ::: {.content-visible when-format="pdf"}
 
@@ -38,7 +38,7 @@ A model can propose a useful repair and still return it too late, stop before th
 
 - Explain the separate responsibilities of the foundation model, inference service, and agent runtime
 - Construct a token-bounded request containing task messages, advertised tools, and generation limits
-- Explain how sampling affects candidate generation without treating a greedy selection rule as an invocation replay guarantee
+- Calculate how temperature and nucleus truncation reshape the candidate distribution without establishing correctness
 - Diagnose response outcomes using completion status, structural validity, permission checks, and task evidence
 - Distinguish the guarantees of grammar-constrained decoding from learned formatting and correct task values
 - Estimate call latency and repeated-input work under explicit serving and prefix-reuse assumptions
@@ -46,7 +46,7 @@ A model can propose a useful repair and still return it too late, stop before th
 
 :::
 
-## The Model Invocation Boundary {#sec-vol3-foundation-model-role}
+## One Turn of the Repair Loop {#sec-vol3-foundation-model-introduction}
 
 ::: {.column-margin}
 ![](images/svg/hsa_locator_origin.svg){width="100%" fig-alt="H·S·A locator with all three axes gray and only the origin dot highlighted in purple."}
@@ -56,7 +56,15 @@ A model can propose a useful repair and still return it too late, stop before th
 
 The repair agent (\ref{lhs-vol3-repair-agent}) needs to inspect the connection-pool implementation before proposing a change. A model call can return `read_file("src/pool.py")`, but that response neither reads the file nor proves that the path exists. The runtime must recognize a proposed tool request, decide whether the task permits it, and supply the resulting observation to a later call. Interleaving a model's proposed actions with the observations they return is the loop that ReAct established for language-model agents [@yao2023react]; this chapter examines one turn of that loop.
 
-Three responsibilities participate in the call. The foundation model[^fn-foundation-model-term] computes a distribution over possible continuations of the supplied input. The **inference service**\index{Inference service!definition} evaluates the model, applies supported generation settings, and reports the response and invocation outcome. The agent runtime chooses the request, manages the task's remaining resources, and decides how to handle the returned candidate. The three may share one machine, one process, or one privilege domain; their interfaces still keep generated content apart from the decision to act on it.
+Experience with prompting and token generation describes that turn from the side of a person reading the reply. In a chat window, the person notices a reply cut off mid-sentence, judges whether a suggested command is sensible, and waits as long as the answer takes. An agent removes that reader. The runtime receives the same response as data and must settle, with no judgment of its own, whether the request fit the model's input limit, whether generation finished or stopped at an output ceiling, whether a well-formed tool request names a target the task permits, and how much time and money the call consumed. The text of the reply answers none of these questions, and a runtime that infers them from the text will eventually apply a truncated patch or read a path outside its workspace.
+
+This chapter builds the call contract that answers those questions explicitly. The contract specifies the request the runtime sends (messages, advertised tools, and limits on generation), the record the service returns (what kind of payload arrived, whether generation completed, and what it consumed), the checks the runtime applies before acting on a proposal, and an estimate of what each call costs in latency and in repeated input. It assumes nothing about the model's reliability. It records what each call established, so that the runtime decides what happens next.
+
+The sections follow one call from request to price. @Sec-vol3-foundation-model-role separates the responsibilities of the model, the inference service, and the runtime, and traces the inspection request to the observation it produces. @Sec-vol3-foundation-model-tokenization counts what that request occupies in the model's input, and @sec-vol3-foundation-model-autoregressive shows how the reply is generated one token at a time and what sampling settings change. The next three sections ask what a returned candidate can be trusted for: what checks on it establish (@sec-vol3-foundation-model-continuations), how a status record reports whether a finished candidate exists at all (@sec-vol3-foundation-model-contract), and what constraining generation to a grammar guarantees (@sec-vol3-foundation-model-grammar-constrained). @Sec-vol3-foundation-model-cost then prices a call and the trajectory built from calls, and @sec-vol3-foundation-model-interface-design compares two representations of the same edit under a matched budget.
+
+## The Model Invocation Boundary {#sec-vol3-foundation-model-role}
+
+The call that returns `read_file("src/pool.py")` involves three responsibilities. The foundation model[^fn-foundation-model-term] computes a distribution over possible continuations of the supplied input. The **inference service**\index{Inference service!definition} evaluates the model, applies supported generation settings, and reports the response and invocation outcome. The agent runtime chooses the request, manages the task's remaining resources, and decides how to handle the returned candidate. The three may share one machine, one process, or one privilege domain; their interfaces still keep generated content apart from the decision to act on it.
 
 [^fn-foundation-model-term]: **Foundation Model**: @bommasani2021opportunities coined the term for a model trained on broad data at scale and then adapted to a wide range of downstream tasks, and warned that the resulting homogenization lets the model's defects pass to every system built on it. For agents the warning is concrete: every runtime that calls the same model and serving path inherits the same failure modes at once, which is why the runtime, not the model, holds the checks. \index{Foundation model!term origin}
 
@@ -72,7 +80,7 @@ Three responsibilities participate in the call. The foundation model[^fn-foundat
 
 ### A request the student can inspect
 
-The runtime presents the repair task through role-tagged messages\index{Model invocation!messages and roles}. A `system` message supplies application instructions, a `user` message states the request, and an `assistant` message records earlier model output. A `tool` message carries an observation from an operation the runtime invoked. The role places content in the model's input; whether that content is true, and whether it may change the task contract, is settled elsewhere.
+The runtime presents the repair task through role-tagged messages\index{Model invocation contract!messages and roles}. A `system` message supplies application instructions, a `user` message states the request, and an `assistant` message records earlier model output. A `tool` message carries an observation from an operation the runtime invoked. The role places content in the model's input; whether that content is true, and whether it may change the task contract, is settled elsewhere.
 
 The same request advertises the tool names and argument shapes that the model may propose. In @lst-vol3-model-request, the runtime offers a file-reading operation with one required string argument. The abbreviated schema describes the interface, and the runtime enforces the allowed workspace separately.
 
@@ -152,7 +160,7 @@ Returning the connection-pool source and a compiler diagnostic can make the next
 
 ### Tokens in the serialized request
 
-A **tokenizer**\index{Tokenizer!definition}\index{Tokenization!model requests} maps text into identifiers from a finite vocabulary. Subword methods represent frequent fragments compactly while breaking unfamiliar words and identifiers into smaller pieces [@sennrich2016subword]. **Byte-pair encoding**\index{Byte-pair encoding!definition}[^fn-bpe-compression-origin] learns repeated combinations of smaller units; other tokenizers use different segmentation rules, and some learn them directly from raw text without assuming word boundaries [@kudo2018sentencepiece]. A token may represent a word, part of a word, whitespace, punctuation, or a combination of these. Token boundaries therefore need not coincide with the boundaries of a source-code identifier or a JSON field.
+A **tokenizer**\index{Tokenizer!definition}\index{Tokenization|see{Tokenizer}} maps text into identifiers from a finite vocabulary. Subword methods represent frequent fragments compactly while breaking unfamiliar words and identifiers into smaller pieces [@sennrich2016subword]. **Byte-pair encoding**\index{Byte-pair encoding!definition}[^fn-bpe-compression-origin] learns repeated combinations of smaller units; other tokenizers use different segmentation rules, and some learn them directly from raw text without assuming word boundaries [@kudo2018sentencepiece]. A token may represent a word, part of a word, whitespace, punctuation, or a combination of these. Token boundaries therefore need not coincide with the boundaries of a source-code identifier or a JSON field.
 
 [^fn-bpe-compression-origin]: **Byte-Pair Encoding (BPE)**: The algorithm began as a data-compression scheme that repeatedly replaces the most frequent pair of adjacent bytes with an unused symbol [@gage1994bpe]; @sennrich2016subword repurposed the same merge rule to build open vocabularies for neural translation. Because the merges are learned from the training corpus's frequencies, the token cost of a string reflects how common it was in that corpus, so an unusual identifier or path can split into more tokens than a common word of the same length, and the runtime must count rather than estimate. \index{Byte-pair encoding!compression origin}
 
@@ -695,7 +703,7 @@ The repair agent proposes reading `src/pool.py` through `read_file(path)`, but i
 
 ::: {#dfn-grammar-constrained-decoding .callout-definition title="Grammar-constrained decoding"}
 
-***Grammar-constrained decoding***\index{Grammar-constrained decoding!definition}\index{Logit masking!grammar constraint definition} restricts next-token selection to tokens whose decoded text preserves a legal prefix of a specified output language.
+***Grammar-constrained decoding***\index{Grammar-constrained decoding!definition}\index{Logit masking!definition} restricts next-token selection to tokens whose decoded text preserves a legal prefix of a specified output language.
 
 1. **Significance**: Correct masking can exclude structural errors during generation, provided the constraint implementation covers the required grammar and completion reaches an accepting state.
 2. **Distinction**: Post-generation validation checks an existing output; constrained decoding changes which tokens the generator may select. Neither operation establishes whether a well-formed proposal is appropriate or authorized.
@@ -930,7 +938,7 @@ Dividing the two floors cancels the model size:
 
 $$\frac{t_{\text{decode}}}{t_{\text{prefill}}} \approx \frac{R_{\text{peak}} \, b}{2 \, \text{BW}}$$ {#eq-vol3-fm-floor-ratio}
 
-The reference configuration uses a dense model with `{python} CallPrice.params_str` parameters and 8-bit weights on one accelerator. @Eq-vol3-fm-token-floors gives an input allowance of `{python} CallPrice.t_pre_us_str` per prompt token and an output allowance of `{python} CallPrice.t_dec_ms_str` per generated token, so @eq-vol3-fm-floor-ratio puts one output token at about `{python} CallPrice.ratio_str` prompt tokens. That ratio is why output length governs latency (principle \ref{pri-vol3-memory-bandwidth-decoding}). It holds for weight-dominated, unbatched decode against peak-rate prefill, and it is not a measured service rate or a price ratio; @sec-vol3-appendix-inference-roofline derives both floors and states their conditions.
+The reference configuration uses a dense model with `{python} CallPrice.params_str` parameters and 8-bit weights on one accelerator. @Eq-vol3-fm-token-floors gives an input allowance of `{python} CallPrice.t_pre_us_str` per prompt token and an output allowance of `{python} CallPrice.t_dec_ms_str` per generated token, so @eq-vol3-fm-floor-ratio puts one output token at about `{python} CallPrice.ratio_str` prompt tokens. That ratio is why output length governs latency (principle \ref{pri-vol3-memory-bandwidth-decoding})\index{Principle!output-bound latency}. It holds for weight-dominated, unbatched decode against peak-rate prefill, and it is not a measured service rate or a price ratio; @sec-vol3-appendix-inference-roofline derives both floors and states their conditions.
 
 The estimate charges each input token once at the input allowance and reserves one output allowance for each generated token. This is a coarse work budget, not the timestamp decomposition above: the input allowance excludes token delivery, while the output allowance includes a slot for the first token even though a conventional prefill pass can already supply its distribution. It omits queueing, transfers, attention-dependent work, and implementation overhead. It also assumes ordinary generation without speculative acceleration, and a server that batches independent requests, spreads a model across accelerators, or reuses prior computation changes the realized relationship between token count and time. The estimate is therefore useful for comparing output volumes, not for certifying a deadline, which requires latency measured under the conditions in which the task will run.
 
@@ -950,7 +958,7 @@ prompt tokens in total. The quadratic term in @eq-vol3-trajectory-resend follows
 *Re-sent input grows with the square of the horizon; prefix reuse keeps fresh prefill linear.*
 :::
 
-Repeated input need not mean repeated computation. **Prefix caching**\index{Prefix caching!economics} reuses previously computed KV state for a compatible, unchanged beginning of a request [@zheng2024sglang]. Reuse requires that the relevant model configuration and encoded prefix match and that the cached state remain available. Changing an early instruction or tool definition can invalidate reuse from the changed position onward. Unchanged visible text is insufficient if its encoded representation or other model inputs differ.
+Repeated input need not mean repeated computation. **Prefix caching**\index{Prefix cache!economics} reuses previously computed KV state for a compatible, unchanged beginning of a request [@zheng2024sglang]. Reuse requires that the relevant model configuration and encoded prefix match and that the cached state remain available. Changing an early instruction or tool definition can invalidate reuse from the changed position onward. Unchanged visible text is insufficient if its encoded representation or other model inputs differ.
 
 For a simple comparison, assume the service reuses each earlier prompt prefix but processes the entire newly appended suffix again. That suffix includes the previous model response as well as the tool observation. Across all turns, the number of prompt tokens requiring fresh prefill is then $S_{\text{base}}+(H-1)\Delta$. This accounting deliberately excludes reuse of the previous response's generated KV state; retaining that state can avoid reprocessing those output tokens too. The worked estimate keeps these assumptions fixed so the saving follows from one identifiable change.
 
@@ -1172,6 +1180,22 @@ Each correction preserves a boundary between observations. Resource use describe
 
 The repair agent's model call reads a bounded representation of the task and returns a candidate with an invocation outcome. Messages, advertised tools, generation limits, and sampling settings define the request; they do not transfer the runtime's authority to the model. The response contract preserves the distinction between a final-answer candidate, a tool proposal, and an incomplete or failed generation. The runtime still owns the decision to authorize an effect and the evidence required to accept a result, the division of responsibility that the invariant closure principle (\ref{pri-invariant-closure}) fixes for every later chapter.
 
+@Tbl-vol3-foundation-model-key-equations collects the relations that decide whether a call is admitted, what its candidate distribution looks like, what a passing check leaves unresolved, and where a call's time and a trajectory's input go.
+
+| Equation                                                                                                                                                          | What it bounds or decides                                                                       | Where derived                                  |
+|:------------------------------------------------------------------------------------------------------------------------------------------------------------------|:------------------------------------------------------------------------------------------------|:-----------------------------------------------|
+| $S \le S_{\max} - K_{\max}$                                                                                                                                       | Whether a fully serialized request is admitted with its output headroom intact                  | @sec-vol3-foundation-model-tokenization        |
+| $\Pr(y_{1:K} \mid x_{1:S}) = \prod_{t=1}^{K} \Pr(y_t \mid x_{1:S}, y_{1:t-1})$                                                                                    | The order of dependent choices, which makes each output token a sequential step                 | @eq-autoregressive-factorization               |
+| $\Pr(y_t = v \mid x_{1:S}, y_{<t}) \propto \exp\left(z_{t, v} / \tau_{\text{temp}}\right)$                                                                        | How temperature trades candidate diversity against concentration without changing the top token | @eq-temperature-softmax                        |
+| $p_{t, i} \propto \exp(z_{t, i})$ for $i \in \mathcal{V}_{\text{valid}}(q_t)$, else $0$                                                                           | Which continuations a grammar mask leaves drawable; form only, under the enforced grammar       | @sec-vol3-foundation-model-grammar-constrained |
+| $\Pr(\text{Defective} \mid \text{PASS}) = \frac{\epsilon_{\text{FA}} \epsilon}{\epsilon_{\text{FA}} \epsilon + \Pr(\text{PASS} \mid \text{Valid})(1 - \epsilon)}$ | Residual defect share among candidates a fallible checker passes                                | @sec-vol3-foundation-model-continuations       |
+| $T_{\text{call}} = T_{\text{prep}} + T_{\text{queue}} + T_{\text{prefill}} + T_{\text{decode}} + T_{\text{post}}$                                                 | Which measured interval to shrink when a call is slow                                           | @eq-vol3-call-latency                          |
+| $t_{\text{prefill}} \approx 2P/R_{\text{peak}}$, $\; t_{\text{decode}} \ge Pb/\text{BW}$                                                                          | Per-token work floors for prompt processing and unbatched generation                            | @eq-vol3-fm-token-floors                       |
+| $t_{\text{decode}}/t_{\text{prefill}} \approx R_{\text{peak}} b / (2\,\text{BW})$                                                                                 | How many prompt tokens one output token costs, independent of model size                        | @eq-vol3-fm-floor-ratio                        |
+| $S_{\text{sent}} = H S_{\text{base}} + \Delta \frac{H(H-1)}{2}$; fresh prefill $S_{\text{base}} + (H-1)\Delta$ under prefix reuse                                 | Quadratic re-sent input of an append-only trajectory, and the linear work prefix reuse leaves   | @eq-vol3-trajectory-resend                     |
+
+: **Key equations of the model call**: Each relation holds only under the assumptions stated where it is derived, such as a combined input-and-output window, weight-dominated unbatched decode, or a reusable prefix that stays resident. {#tbl-vol3-foundation-model-key-equations tbl-colwidths="[40,38,22]"}
+
 ::: {.callout-takeaways title="A model call is a bounded proposal interface"}
 
 * **Budget the representation the service receives**: Count the serialized request with the applicable tokenizer and reserve output headroom. Context capacity, service limits, and elapsed time constrain different aspects of the same call; none can be inferred from character count alone.
@@ -1198,6 +1222,64 @@ For further reading, six works cover the lineage from classical systems to the m
 - @pope2023efficiently models Transformer inference analytically and separates the compute-bound and memory-bound phases. It grounds the per-token floors used in this chapter's cost estimates.
 - @willard2023outlines shows how a grammar is compiled against a token vocabulary so that masking costs little per step. It makes the structural guarantee of constrained decoding concrete enough to implement.
 - @bommasani2021opportunities surveys what the foundation-model paradigm enables and what it concentrates. Its discussion of homogenization explains why checks outside the model matter for every system that shares one.
+
+## Exercises {#sec-vol3-foundation-model-exercises}
+
+All quantities below are hypothetical problem givens, chosen to be round, and describe no particular model, accelerator, or service. Where a problem uses the per-token work floors of @eq-vol3-fm-token-floors, take them as allowances in the chapter's sense: they exclude queueing, transfer, attention-dependent work, and serving overhead.
+
+**1. Admitting a request with a long observation (Basic).** A repair call runs against an interface with a combined context window $S_{\max} = 32{,}768$ tokens, and the runtime reserves $K_{\max} = 4{,}096$ tokens of output headroom. System instructions and tool definitions serialize to 3,200 tokens and the retained conversation to 18,000. The newest tool observation, a test log, was estimated at 9,500 tokens by dividing its 38,000 characters by four.
+
+(a) Compute $S$, the input ceiling, and whether the request is admitted. If not, find the largest observation that fits with the reservation unchanged.
+(b) A teammate proposes halving $K_{\max}$ instead of shortening the log. Does the request then fit? Past proposals in this workload have run to 3,000 output tokens; state what the smaller reservation risks and which status the runtime would then record.
+(c) The model's tokenizer reports the log as 11,400 tokens, because indentation and escaped quotation marks split into many short tokens. Recompute both options, and state which measurement the runtime must take before any admission decision.
+
+**2. Where a call's time goes (Basic).** A dense model with $P = 40$ billion parameters stores 8-bit weights ($b = 1$ byte) on an accelerator with peak rate $R_{\text{peak}} = 1{,}000$ TFLOP/s and memory bandwidth $\text{BW} = 4$ TB/s.
+
+(a) Compute $t_{\text{prefill}}$, $t_{\text{decode}}$, and their ratio.
+(b) The first repair turn sends a 12,000-token prompt and generates a 300-token reply. Compute the prefill and decode allowances, the share of estimated work spent generating, and the share of tokens that are output.
+(c) Two optimizations are proposed: trimming 3,000 tokens of retrieved documentation from the prompt, or a terser proposal format that halves the reply. Compute the work each saves and choose one. Then say how 4-bit weights ($b = 0.5$) would change the floor ratio and whether they change your choice.
+
+**3. How much diversity a setting buys (Basic).** At one decision point a model's logits over four candidate tokens are $\mathbf{z}_t = [8, 7, 5, 2]$, and a later selection stage wants a first token that differs from the top-scoring one so that it has a genuine alternative to compare.
+
+(a) At $\tau_{\text{temp}} = 1$, compute the four probabilities and the set retained by top-$p$ sampling with $p = 0.90$, with its renormalized probabilities.
+(b) Compute the probability that one draw differs from the top token under (i) top-$p$ at unit temperature and (ii) untruncated sampling at $\tau_{\text{temp}} = 0.5$. How many independent draws does each setting need so that at least one differs from the top token with probability at least 0.9?
+(c) An engineer concludes that the lower temperature is the "more accurate" setting because the top token receives more mass. Explain what the calculation does and does not show, and name what should choose the setting.
+
+**4. Paying for an append-only history (Intermediate).** A repair trajectory runs $H = 40$ turns with $S_{\text{base}} = 10{,}000$ tokens and appends $\Delta = 2{,}000$ tokens per turn; each call generates 250 tokens. Hypothetical prices per million tokens are \$3 for uncached input, \$0.30 for cached input, and \$15 for output.
+
+(a) Compute the total prompt tokens supplied, the fresh-prefill tokens under prompt-prefix reuse (@sec-vol3-foundation-model-cost), and the total output tokens. Repeat the first two for $H = 80$ and report each growth factor.
+(b) Compute the trajectory's dollar cost with no reuse and with every reused prefix billed as cached input. What share of the dollars is input in each case?
+(c) A developer adds the current timestamp to the first line of the system prompt so the model knows the time. Compute the new cost, explain the mechanism, and redesign the request so the model still receives the time.
+
+**5. Ordering fallible checks (Intermediate).** Suppose 25 percent of generated connection-pool patches violate the required concurrency property. Checker A (compile and unit tests) passes defective patches with $\epsilon_{\text{FA}} = 0.5$ and valid ones with probability 0.9, at \$0.02 per run. Checker B (a concurrency stress test) has $\epsilon_{\text{FA}} = 0.2$ and passes valid patches with probability 0.8, at \$0.30 per run. The task contract tolerates at most 5 percent defective patches among those accepted.
+
+(a) Compute $\Pr(\text{Defective} \mid \text{PASS})$ for A alone and for B alone. Does either meet the contract?
+(b) Assume the two checkers' verdicts are conditionally independent given a patch's validity. Compute the residual for requiring both, the fraction of candidates accepted, and the expected checking cost per candidate when A runs first and B runs only on A's passes, and when B runs first.
+(c) Measurement shows that among defective patches that pass A, B passes 40 percent rather than 20 percent, because both miss races that the unit tests never schedule. Recompute the residual, state whether the pipeline still meets the contract, and propose one change to the checking design that attacks the correlation rather than adding another run of either checker.
+
+**6. Reject early, or never emit (Intermediate).** A tool-calling service handles 10,000 proposals a day with prompts of 8,000 tokens and replies averaging 400 tokens, at $t_{\text{prefill}} = 80$ µs and $t_{\text{decode}} = 10$ ms per token. Of these proposals, 6 percent violate the argument schema; the violation first appears at decode step 40 on average, and such a response otherwise runs 600 tokens before stopping. Every failed attempt is followed by one retry, which you may assume succeeds. Three designs are proposed: validate after completion; validate the stream and cancel at the first illegal token (@sec-vol3-foundation-model-contract); or grammar-constrained decoding, which removes schema violations but adds 0.3 ms of mask work to every generated token.
+
+(a) For each design, compute the latency a failed first attempt adds before its retry can start, and the expected added latency per proposal.
+(b) Compute the daily decode time the service spends on failed attempts under post-hoc validation and under streaming validation with an honored cancel. How does the second figure change if the service ignores cancellation, and which of the runtime's guarantees survive?
+(c) Find the per-token mask overhead at which grammar-constrained decoding ties streaming validation on expected latency. Then argue which design to ship, naming one property none of the three establishes.
+
+**7. The same method, a different binding term (Intermediate; second lighthouse).** The research agent (\ref{lhs-vol3-research-agent}) answers one question with 8 parallel workers. Each worker makes $H = 12$ calls, starts from $S_{\text{base}} = 6{,}000$ tokens, and on every turn appends a 5,000-token retrieved page plus its own 100-token output, so $\Delta = 5{,}100$. Use the floors and prices of problems 2 and 4, and ignore prefix reuse throughout.
+
+(a) Compute the prompt tokens supplied per worker and across the question, the output tokens across the question, and input's share of the uncached dollars.
+(b) For a worker's final call, compute the prefill and decode allowances. Which term of @eq-vol3-call-latency binds, and how does that compare with the repair agent's first turn in this chapter?
+(c) One proposal copies the repair agent's lever and halves every output to 50 tokens. Another keeps each retrieved page in full only for the call that reads it and replaces it afterward with a 400-token note. Compute the dollars each saves per question and choose one. What constraint of this lighthouse does neither calculation address?
+
+**8. Choosing a representation when the deadline moves (Advanced).** A repair call starts from 9,000 context tokens, with the floors of problem 2 and the prices of problem 4. A whole-file response adds 300 instruction tokens and generates 1,200 output tokens; 98 percent apply to the expected version, and 60 percent of those pass the repair checks. A localized edit adds 100 instruction tokens and generates 120; 85 percent identify an applicable target, and 55 percent of those pass. Every attempt, whatever its outcome, also incurs a \$0.05 check charge.
+
+(a) Under an invocation deadline of 10 s, which representations can produce an eligible candidate?
+(b) The deadline relaxes to 20 s. Compute $\mathbb{E}[C_{\text{attempt}}]$, $p_{\text{acc}}$, and $C_{\text{eff}}$ (@eq-vol3-cost-per-accepted-task) for each design, and the estimated model time per accepted repair. Which design wins on each measure?
+(c) Find the applicability rate at which the localized edit ties the whole-file design on $C_{\text{eff}}$. Then critique the benchmark: which of the two measures should decide for an agent whose trajectory has a wall-clock budget, what could raise the localized design's applicability without lengthening its output, and what single measurement would you add before choosing?
+
+**9. A truncated command at the irreversible end (Advanced; second lighthouse).** The remediation agent (\ref{lhs-vol3-remediation-agent}) proposes 5,000 shell commands a month under an output allowance of 512 tokens, generated at $t_{\text{decode}} = 10$ ms per token. Of these calls, 2 percent end `TRUNCATED`. Of the truncated fragments, 40 percent still parse as a complete command, as when `--replicas=12` stops after `--replicas=1`. Executing a parseable fragment causes a wrong production change with probability 0.5, and each wrong change costs \$20,000 to detect and reverse.
+
+(a) Compute the expected wrong changes and loss per month for a runtime that dispatches anything that parses, and for one that applies the quarantining rule of @sec-vol3-foundation-model-contract.
+(b) For a truncated call, a blind retry at the same allowance truncates again with probability 0.9; a retry at a doubled allowance truncates with probability 0.1. Treating retries as independent and charging each attempt its full allowance as an upper bound, compute the expected attempts and decode time until a completed candidate under each policy.
+(c) A colleague proposes a "repair parser" that closes truncated fragments so they can proceed without a retry. Critique the proposal using this lighthouse's binding constraint, and redesign the runtime's handling of `TRUNCATED` for this agent, stating what evidence a completed command still needs before it may execute.
 
 ::: {.callout-chapter-connection title="From one candidate to deliberate computation"}
 

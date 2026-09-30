@@ -24,9 +24,9 @@
 \mlagentstack{0}{0}{100}{0}{0}{0}
 \end{marginfigure}
 
-_How can an agent remain controllable while its model and tools are busy?_
+_Why must the decision to continue an agent live outside the model that proposes its next step?_
 
-A trajectory can obey every tool contract and still spend its allowance without finishing. It can wait on a valid test job while an operator needs to pause it, or compete for service with a task whose user is waiting. None of these decisions can depend on the model reaching a convenient stopping point. The runtime needs a current account of what the trajectory is doing, what it may do next, and what it still owes for work already started. Keeping that account outside the model makes intervention possible without confusing a request to stop with proof that every effect has ended. The harness uses it to govern continuation across calls and waits. In the H·S·A lens, this supervision bounds horizon exposure while preserving the state and authority obligations that earlier actions created.
+A single model call ends on its own, returning control to a caller that decides what happens next. An agent removes that natural stopping point. Its loop proposes one step after another, and every step can be well formed and within its per-call limits while the run as a whole exhausts its allowance, holds resources through long waits, or keeps acting after an operator has asked it to stop. Systems that treat the loop as a thin wrapper around the model discover this late, when a pause has nowhere to take effect or a spending limit written into the prompt holds on most turns and breaks on the run that matters. Taking continuation seriously moves authority out of the model. The runtime must keep its own account of what the run is doing, what it has started but not finished, and what it may still spend, and every further step must pass a check against that account that the model can neither skip nor rewrite. That account must also keep stopping distinct from finishing, because a request to halt does not undo work already in flight or cancel the charges it will bring. Everything built above the loop, from crash recovery to evaluation and cost accounting, assumes such a supervisor exists and that its record is true. In H·S·A terms, the harness is where horizon exposure is bounded, and it must bound that exposure without releasing the state and authority obligations that earlier actions created.
 
 ::: {.content-visible when-format="pdf"}
 
@@ -37,16 +37,16 @@ A trajectory can obey every tool contract and still spend its allowance without 
 ::: {.callout-learning-objectives}
 
 - Design a runtime-owned trajectory record that tracks live plans, grants, consumption, and outstanding obligations
-- Construct guarded lifecycle transitions that distinguish current observation eligibility from unresolved external effects
-- Apply external control requests without dispatching incomplete output or mistaking cancellation for settlement
-- Explain which resources asynchronous waiting releases and which remain owned by the trajectory
-- Design an approval lifecycle with expiry, current-condition checks, and guarded dispatch or refusal
-- Allocate shared service fairly while distinguishing provider quotas and capacity from trajectory budgets
-- Enforce bounded-liability budget admission and choose ceilings using measured task outcomes and costs
+- Construct guarded state transitions that keep stale observations out of the next turn while preserving unresolved effects
+- Calculate how long a control request waits for a turn boundary, and apply pause, cancel, or kill without dispatching incomplete output
+- Explain which resources an asynchronous wait releases and which the trajectory still owns and pays for
+- Design an approval gate with expiry and dispatch-time rechecks, and size the resources its held trajectories retain
+- Allocate shared model-call service by weighted deficit round-robin while keeping provider quotas separate from trajectory budgets
+- Apply bounded-liability admission before dispatch and select a budget ceiling by cost per accepted task
 
 :::
 
-## From an Agent Loop to a Supervised Trajectory {#sec-vol3-controlplane-need}
+## Continuation Needs a Supervisor {#sec-vol3-harness-overview}
 
 ::: {.column-margin}
 ![](images/svg/hsa_locator_h.svg){width="100%" fig-alt="H·S·A locator triad with the Horizon axis highlighted."}
@@ -54,9 +54,19 @@ A trajectory can obey every tool contract and still spend its allowance without 
 *The horizon exposure, bounded by a harness that keeps control outside the model.*
 :::
 
-### The anatomy of an unmanaged loop {#sec-vol3-harness-unmanaged-loop}
-
 The connection-pool repair (\ref{lhs-vol3-repair-agent}) has produced candidate `r18`, and a test job is still running against a fixed snapshot of that revision. An operator requests a pause for inspection. Meanwhile, an independent interactive task is waiting for service, and the repair trajectory is approaching its budget. The test job can finish correctly and the next model reply can be well formed, yet neither event answers whether the repair should continue now. That decision depends on the operator's request, current task state, shared capacity, and the allowance left after accounting for work already started.
+
+The components built so far each manage part of this situation. The tool layer tracks job handles and the repeat contract of every operation (@sec-vol3-tool-calling), and the sandbox bounds execution and workspace lifetime (@sec-vol3-sandboxes). Each governs one call or one resource; none decides whether the trajectory as a whole may take another step. That decision cannot be handed to the model either. An instruction to pause or to stay under a limit is honored turn by turn, and horizon compounding (@eq-vol3-horizon-compounding) turns even a high per-turn compliance rate into a visible share of long trajectories that break it at least once. The operator needs a current status without reconstructing the transcript, the scheduler needs to tell waiting work from work eligible to run, and the dispatch path needs current grants and the remaining allowance. All three decisions draw on one account of the trajectory, and a loop that keeps its state in the message list has no place to hold it.
+
+This chapter builds the agent harness, the runtime component that owns the loop for one trajectory. The model proposes the next step, and the harness decides whether that step runs now, later, or never, using a record that only the runtime writes. Two disciplines recur throughout. The first is that every new model call or tool dispatch passes one admission check, against current control requests, grants, capacity, and remaining allowance, at the moment it would start. The second is that no pause, timeout, or cancellation counts as proof that work already started has ended or that its charge is known; such work keeps a named owner until evidence settles it.
+
+The chapter first follows one repair turn through the harness to show the division of labor, then builds the parts in the order the decisions need them. The trajectory record (@sec-vol3-controlplane-acb) gives the runtime its account of the run, and guarded trajectory states (@sec-vol3-controlplane-statemachine) fix how that account may change. Control actions (@sec-vol3-controlplane-signals) let an operator pause, cancel, or kill a run at the next safe boundary. Supervised waiting (@sec-vol3-controlplane-yielding) and approval gates (@sec-vol3-controlplane-hitl) keep that control while the run waits on a job or a person. Scheduling (@sec-vol3-controlplane-scheduling) shares model service among many trajectories, and budgets (@sec-vol3-controlplane-accounting) bound what any one of them may consume. Throughout, the record lives on a running host; keeping it through a host failure is the work of @sec-vol3-durable-execution.
+
+## From an Agent Loop to a Supervised Trajectory {#sec-vol3-controlplane-need}
+
+Setting the loop beside the harness shows what supervision adds, and following one turn of the repair through the harness shows how the work divides.
+
+### The anatomy of an unmanaged loop {#sec-vol3-harness-unmanaged-loop}
 
 A deliberately minimal implementation calls the model, dispatches its proposed tools, appends their replies, and repeats until the model ends its turn, the interleaving of reasoning and actions that ReAct established for language models [@yao2023react]. Without separately accessible control state and admission checks, it has nowhere to apply the pause while the test runs or to withhold another paid call. A loop or coroutine can implement a harness; supervision adds explicit state and rules that every continuation path respects. @Fig-vol3-controlplane-arch sets that loop beside the same loop running inside a harness.
 
@@ -66,7 +76,7 @@ A deliberately minimal implementation calls the model, dispatches its proposed t
 
 :::
 
-Tool calling, containment, and security already manage responsibilities that span time, including job handles, workspace leases, credential expiry, and unresolved effects. The harness brings those responsibilities together for one trajectory. An operator needs a current status without reconstructing the transcript; a scheduler needs to distinguish waiting work from work eligible to run; a dispatch path needs current grants and remaining allowance. These decisions share a runtime-owned record. The model may receive budget information and may cooperate with a pause request, while enforcement stays with the runtime, as invariant closure requires (principle \ref{pri-invariant-closure}).
+Job handles, workspace leases, credential expiry, and unresolved effects are each managed by the component that created them. Panel (b) brings those responsibilities together for one trajectory in a runtime-owned record that the operator, the scheduler, and the dispatch path all consult. The model may receive budget information and may cooperate with a pause request, while enforcement stays with the runtime, as invariant closure requires (principle \ref{pri-invariant-closure}).
 
 ::: {#dfn-agent-harness .callout-definition title="Agent harness"}
 
@@ -382,7 +392,7 @@ A new user instruction also needs this discipline. Adding “change the target f
 
 ### Termination and remaining obligations
 
-Kill requests invoke enforcement without waiting for model cooperation or a completed reply, as trajectory-level encapsulation requires (principle \ref{pri-vol3-trajectory-encapsulation}). The controller can stop local execution, revoke mediated access, or fence obsolete workers on the paths its execution boundary controls. The sandbox lifetime contract in @sec-vol3-sandboxes-pooling-reset determines which processes, descendants, channels, and resources that enforcement covers. Remote work and already open handles lie outside a local kill and need their own evidence.
+Kill requests invoke enforcement without waiting for model cooperation or a completed reply, as trajectory-level encapsulation requires (principle \ref{pri-vol3-trajectory-encapsulation})\index{Principle!trajectory-level encapsulation}. The controller can stop local execution, revoke mediated access, or fence obsolete workers on the paths its execution boundary controls. The sandbox lifetime contract in @sec-vol3-sandboxes-pooling-reset determines which processes, descendants, channels, and resources that enforcement covers. Remote work and already open handles lie outside a local kill and need their own evidence.
 
 Finalization therefore records confirmed termination separately from unresolved effects and charges, which keep their owner under the settlement rule. The operation's repeat contract, established in @sec-vol3-tool-calling-idempotency, determines whether another attempt is safe, and settlement comes before any retry (principle \ref{pri-vol3-exactly-once-settlement}); an identifier alone cannot answer what the interrupted attempt did.
 
@@ -1084,19 +1094,35 @@ A model that honors a freeze or a budget notice on `{python} InstructionHold.p_f
 ## Summary {#sec-vol3-agent-harness-summary}
 []{#sec-vol3-controlplane-summary}
 
-The repair trajectory's outstanding test, pause request, competing interactive work, and remaining allowance require a common supervisory record. The record holds control state and references to the live plan, evidence, grants, resources, and unresolved operations. Guarded transitions turn that description into a policy for continuing, waiting, approving, pausing, or finalizing without letting model output update its own authority.
+An agent loop has no natural place to stop, so the decision to continue must belong to a component the model cannot talk its way past. The harness is that component, and it reduces every supervisory question to two tests applied against one runtime-owned record. The first asks, at the moment new work would start, whether current control, grants, capacity, and reserved allowance still permit it. The second asks, whenever the run stops waiting for something, whether evidence has actually settled it or whether the obligation must keep an owner. Pauses, approvals, fair scheduling, and budget ceilings are that pair of tests applied to different decisions.
 
-The mechanisms work together at admission. A ready trajectory still needs current grants, available service, and sufficient reserved allowance. A returned result must be authenticated and correlated before it changes the record, and only currently eligible evidence reaches the next model context. Waiting and terminal scheduling states leave retained resources and unsettled effects in place. The harness makes those obligations inspectable and assigns responsibility for them.
+The price of this discipline is small, a short lock and a few extra fields per transition. Its absence is costly in ways the model's behavior hides: an instruction that holds on almost every turn still breaks across long trajectories, a spend check admits calls the allowance cannot cover, and a released reservation lets a trajectory overshoot its ceiling after the fact.
+
+@Tbl-vol3-agent-harness-key-equations collects the relations the chapter uses to decide whether a trajectory may continue, how long control waits, and how shared service and allowance are divided.
+
+| Equation                                                                                                                                                                    | What it bounds or decides                                                                                                                    | Where derived                        |
+|:----------------------------------------------------------------------------------------------------------------------------------------------------------------------------|:---------------------------------------------------------------------------------------------------------------------------------------------|:-------------------------------------|
+| $t_{\text{boundary}} \approx K_{\max} \times (\text{time per generated token})$                                                                                             | How long a control request waits if it waits for a reply to end; streaming cancellation removes the dependence on $K_{\max}$                 | @sec-vol3-controlplane-signals       |
+| $\text{actual} + \text{reserved} + \text{proposed liability} + \text{finalization reserve} \leq \text{allowance}$                                                           | Admits a new operation only if every cumulative dimension still fits with work in flight and final checks funded                             | @eq-vol3-bounded-liability-admission |
+| $\text{liability} = p_{\text{in}}\, n_{\text{in}} + p_{\text{out}}\, K_{\max}$                                                                                              | A model call's reservation at the undiscounted input rate and full output allowance, before any charge is known                              | @sec-vol3-controlplane-accounting    |
+| $C^{(k)} = C^{(k-1)} + p_{\text{in}} n_{\text{in}}^{(k)} + p_{\text{cache}} n_{\text{cache}}^{(k)} + p_{\text{out}} n_{\text{out}}^{(k)} + \sum_j c_{\text{tool}}(t_{k,j})$ | Settled cost after turn $k$ from disjoint billed categories; what eventually replaces the reservations                                       | @sec-vol3-harness-metered-accounting |
+| $\mathbf{B} = \langle H_{\max}, N_{\max}, T_{\max}, C_{\max} \rangle$, indicator $\max_i (\text{used}_i / \text{allowance}_i)$                                              | Separate ceilings on turns, tokens, elapsed time, and dollars; the largest used fraction steers intervention, while admission tests each one | @sec-vol3-harness-staged-escalation  |
+| $\text{calls per round} = w \times \text{quantum} / (n_{\text{in}} + K_{\max})$                                                                                             | Class weights fix shares of the scheduling charge; request size then sets call rate and turn latency under deficit round-robin               | @sec-vol3-controlplane-scheduling    |
+| $L = \lambda W$                                                                                                                                                             | Mean trajectories held in `AWAITING_APPROVAL`, and so the retained resources or delayed effects that review latency costs                    | @sec-vol3-controlplane-hitl          |
+| $\Pr(\text{success}) = (1-\epsilon)^{H}$                                                                                                                                    | How often a per-turn instruction fails across a trajectory, which is why controls sit at the dispatch boundary                               | @eq-vol3-horizon-compounding         |
+| $C_{\text{eff}} = \mathbb{E}[C_{\text{attempt}}]/p_{\text{acc}}$                                                                                                            | Chooses a budget ceiling by charging failed and exhausted attempts to the accepted tasks                                                     | @eq-vol3-cost-per-accepted-task      |
+
+: **Key Equations of the Agent Harness**: The admission inequality is the enforced bound; the other relations size its inputs, price the waits it supervises, and choose the ceiling it enforces. {#tbl-vol3-agent-harness-key-equations tbl-colwidths="[42,40,18]"}
 
 ::: {.callout-takeaways title="Control lives outside the model"}
 
-* **Keep the live plan and control record distinct from claims**: The runtime owns identity, state, grants, budgets, and pending work, while referencing bulky context and artifacts. Proposed plan revisions require validation; marking a step complete does not supply evidence that its intended effect occurred.
-* **Guard continuation without discarding unsettled work**: States determine which transitions and admissions are permitted. Reject stale direct observations, but preserve authenticated evidence for effect and charge settlement.
-* **Separate control arrival from enforced admission**: The supervisor records outside requests and blocks new work at guarded boundaries. Cancellation quarantines incomplete output; pause holds continuation. Resume rechecks current conditions, and remote termination requires evidence beyond a local stop request.
-* **Release workers while accounting for waiting resources**: An asynchronous wait can free a worker while the trajectory retains context, workspace leases, approvals, and outstanding liabilities. Correlated events update the record before the declared result policy makes continuation eligible.
-* **Hold approval through a complete decision lifecycle**: Required approval binds to the represented action, but dispatch also needs unexpired authority, current preconditions, capacity, and budget. Denial before dispatch differs from an unknown result afterward; neither a digest nor approval supplies effect deduplication.
-* **Separate fair service from lifetime affordability**: Scheduling chooses among eligible calls using declared service units and provider quota rules. Fairness, capacity, and task budgets answer different questions; admission must satisfy all applicable gates rather than treating one as a substitute for another.
-* **Reserve liability before spending and measure ceiling choices**: Actual consumption, outstanding reservations, and newly bounded work must fit the allowance while preserving finalization resources. Settle from usage evidence, retain unknown charges, and compare candidate budgets using task acceptance and full costs.
+* **An instruction is not a control**: A freeze honored on `{python} InstructionHold.p_follow_str` of turns holds across a `{python} InstructionHold.turns_str`-turn trajectory only `{python} InstructionHold.p_hold_str` of the time. A check at the dispatch boundary holds on every turn, because it evaluates the proposed operation rather than the model's intent.
+* **Control that waits for the model waits too long**: A pause checked only when a reply ends can wait about `{python} BoundaryWait.t_wait_str` for one `{python} BoundaryWait.k_max_str`-token allowance, even with no queueing. Turn boundaries and streaming cancellation make control independent of how long the model generates.
+* **Stopping is not settling**: A pause, timeout, or cancellation withdraws a result's right to enter the next turn, but it neither ends the operation nor refunds its charge. Only authenticated, correlated evidence settles either, and until then the obligation keeps a named owner.
+* **Waiting frees workers, not obligations**: An asynchronous wait or an approval hold releases a worker while the trajectory keeps its workspace, cached state, reservations, and deadline. By Little's law, review latency multiplies directly into held trajectories and the resources they retain.
+* **Fairness, quota, and affordability are separate gates**: Class weights fix shares of the scheduling charge, so request size rather than weight sets how often a class runs. Provider quotas bound shared service, and only the lifetime budget bounds what one task may consume.
+* **A budget is a ceiling only if it counts work in flight**: A spend check saw `{python} Admission.spend_headroom_str` of headroom where bounded-liability admission, counting the unsettled test and the finalization reserve, saw `{python} Admission.true_headroom_str`. Reserving before dispatch is what turns a budget report into a bound.
+* **Choose the ceiling by cost per accepted task**: A cap looks cheap when failed and exhausted attempts drop out of the count. Charging them to the accepted tasks, and treating differences within measurement error as ties, is what connects the harness's ceiling to evaluation and to the economics of running agents at scale.
 
 :::
 
@@ -1118,6 +1144,42 @@ For further reading:
 - **Shreedhar and Varghese, "Efficient Fair Queuing Using Deficit Round Robin"** [@shreedhar1995efficient]: a short, rigorous paper showing how carried credit makes fairness cheap when work items differ in size.
 - **Bainbridge, "Ironies of Automation"** [@bainbridge1983ironies]: a brief classic on why human oversight of reliable automation fails, worth reading before designing any approval gate.
 - **Yang et al., "SWE-agent: Agent-Computer Interfaces Enable Automated Software Engineering"** [@yang2024sweagent]: a concrete account of the commands and feedback a repair agent's loop runs through, useful for seeing where a harness's responsibilities begin.
+
+## Exercises {#sec-vol3-agent-harness-exercises}
+
+Every given below is a hypothetical problem input, not a measurement of a particular model, provider, or service. Prices are in dollars per million tokens unless stated otherwise. Each problem asks for a number and then for the decision the number supports.
+
+1. **Where a pause lands (Basic).** A repair harness checks `pending_control` only when a model reply ends. Generation takes 20 ms per output token with no queueing, and each call's output allowance is $K_{\max} = 8{,}000$ tokens. The operator requirement is that a pause stop new admission within 15 s of its request.
+
+   Compute the worst-case wait before the pause takes effect, and the largest $K_{\max}$ that meets the requirement without streaming cancellation. The repair's patches need up to 3,000 output tokens, and each call carries a 40,000-token context. If $K_{\max}$ is lowered to meet the requirement, how many calls does one patch take, and how many extra input tokens, at \$3 per million, does it cost to resend the context? The serving service acknowledges a streaming cancellation within 2 s. Decide between the lower cap and streaming cancellation, and state what the pause must still leave in the ledger for a test job already running.
+
+2. **Admission after settlement (Basic).** A repair trajectory has a \$5.00 allowance, \$4.05 of settled spend, a \$0.25 reservation on an unsettled test job, and a \$0.40 finalization reserve. The next model call carries 80,000 input tokens and $K_{\max} = 2{,}000$, at \$2 per million input tokens and \$10 per million output tokens.
+
+   Use @eq-vol3-bounded-liability-admission to decide whether the call is admitted, and compare the spend-check headroom. The call settles with 20,000 uncached input tokens, 60,000 cached input tokens at \$0.20 per million, and 900 output tokens. How much reservation does settlement release? The reply proposes paid tool calls bounded at \$0.10 each; how many can the harness admit? A defective harness had instead released the test job's reservation when its wait timed out. How many tool calls would it admit, and by how much would the finalization reserve fall short once the test's full \$0.25 charge arrives?
+
+3. **Workspaces held in escrow (Basic).** Review requests for repair submissions arrive at 12 per hour, and reviewers take 45 minutes on average to decide. Each held trajectory keeps a workspace lease of 4 GB, and the pool reserves 24 GB for held workspaces.
+
+   Use Little's law to compute the mean number of held trajectories and the memory they retain. What mean decision time would fit the reserved pool? An alternative snapshots each workspace to storage on entering `AWAITING_APPROVAL`, keeping 0.25 GB resident, and restores it in 40 s at dispatch. Compute its resident memory and the restore delay as a fraction of the mean decision time. Recommend one design, and explain why a pool sized from the mean alone would still fail after an incident that produces a burst of review requests.
+
+4. **Three classes under deficit round-robin (Intermediate).** A harness schedules three classes with quantum 10,000 charge tokens per unit weight per round: support calls (weight 4; 3,000 input tokens and a 500-token output allowance), repair calls (weight 2; 30,000 and 4,000), and maintenance calls (weight 1; 60,000 and 4,000). One round takes 2 s.
+
+   Compute each class's share of the scheduling charge, its long-run calls per round, and the rounds of credit one call needs. What is the mean interval between maintenance calls in seconds? An engineer caps every class's carried credit at 50,000 tokens to limit bursts. Determine which class stops running and why. To shorten maintenance turns, one proposal raises the maintenance weight to 3; another compacts maintenance inputs to 20,000 tokens. Compute the rounds per call and the support class's charge share under each proposal, and choose the one that leaves support service unchanged.
+
+5. **Sizing a dollar ceiling for cache misses (Intermediate).** A repair trajectory runs 25 turns with a 10,000-token base prompt, 2,000 tokens appended per turn, and 300 output tokens per turn; each call's output allowance is 4,000 tokens. Prices are \$3 per million uncached input tokens, \$0.30 per million cached input tokens, and \$15 per million output tokens, and each turn's earlier prefix is billed as cached input.
+
+   Use @eq-vol3-trajectory-resend to compute the total input tokens, and the settled cost with and without prefix reuse. The team set $C_{\max} = \$1.00$ from the cached bill with a \$0.15 finalization reserve, and the harness reserves each call at the undiscounted input rate and full output allowance. After 24 cached turns, is the 25th call admitted, and with what headroom? A long approval wait evicts the cache before one turn, so that turn's whole input is billed uncached and later turns hit the cache again. Compute the extra charge for an eviction before the 6th turn and before the 24th turn, and state how many of each the trajectory can absorb before the 25th call is refused. What $C_{\max}$ guarantees admission of all 25 calls if every turn misses? Recommend how to size the ceiling.
+
+6. **Which allowance binds the research agent (Intermediate).** The research agent (\ref{lhs-vol3-research-agent}) starts from a 6,000-token base prompt, appends 12,000 tokens of bounded page observations per turn, and generates 400 output tokens per turn with a 2,000-token output allowance. Each turn takes 45 s. Its budget is $\mathbf{B} = \langle 40 \text{ turns},\ 1.5 \text{ million tokens},\ 1{,}800 \text{ s},\ \$3.00 \rangle$, where the token meter counts cached input in full, and prices match problem 5.
+
+   Admitting a turn requires its input plus its output allowance to fit the remaining token allowance. Find the last admitted turn, and compute the used fraction of every dimension at that point with prefix reuse. Which allowance binds, and how does that differ from the repair trajectory of notebook \ref{nbk-10-multi-dimensional-accounting-and-prefix-cache}? A compaction policy runs after every fifth turn: a compaction call reads the full context and writes 2,000 tokens, and the context then restarts from the base prompt plus an 8,000-token summary. Find how many turns the agent now completes before a turn or compaction is refused. Compare this with the token allowance needed to reach 30 turns without compaction. Decide between compaction and a larger $N_{\max}$, naming the evidence a summary of untrusted pages must keep by reference.
+
+7. **Choosing a ceiling from a trial (Advanced).** A generous-budget run of 100 repair tasks, capped at \$10, gives the following outcomes: 30 tasks accepted at about \$0.50 each, 25 at about \$1.50, 15 at about \$3.00, and 5 at about \$6.00; the remaining 25 never reached acceptance and spent the full \$10. Assume that under a lower cap a task that the generous run accepted at or below the cap is still accepted at the same cost, and every other task spends exactly the cap.
+
+   Compute the accepted count and cost per accepted task (@eq-vol3-cost-per-accepted-task) for caps of \$1, \$2, \$4, and \$10. A colleague proposes \$10 because it maximizes acceptance; critique the proposal. Treating the acceptance count as binomial and ignoring cost variance, estimate the relative standard error of $C_{\text{eff}}$ at each cap, and decide whether the two lowest-cost caps are distinguishable with 100 tasks. How many tasks would bring the relative error to 3 percent at the \$2 cap's acceptance fraction? Finally, explain why a policy that steers or compacts near its cap must be tested as a policy, and why these numbers cannot simply be read from the generous run for it.
+
+8. **Settling timed-out test jobs (Advanced).** Each repair trajectory dispatches six test jobs to a metered runner that charges \$0.01 per second and enforces a 90 s cap. The harness waits 30 s per job, and 70 percent of jobs finish within the wait at an average of 20 s; the rest run on, averaging 60 s in total. The trajectory allowance is $C_{\max} = \$4.00$. The current harness releases a job's whole reservation when its wait times out and books nothing until the charge arrives.
+
+   Compute each job's bounded liability, the expected late charge per trajectory that the defective harness leaves uncovered, the worst case, and both as fractions of $C_{\max}$. Under the settlement rule, how much allowance does a timed-out job hold beyond its eventual charge, on average, while it runs? The runner also supports confirmed cancellation, which stops a job within 5 s and reports its final usage. Compute the charge and the released reservation for a job canceled at its timeout, and the expected test cost per trajectory under "cancel at timeout" and "let it run." Redesign the timeout policy for the repair agent, stating which evidence releases each reservation and what a canceled job's missing result costs the repair.
 
 ::: {.callout-chapter-connection title="From a live record to a durable one"}
 

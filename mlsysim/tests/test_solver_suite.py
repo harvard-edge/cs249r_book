@@ -1107,6 +1107,12 @@ class TestReliabilityModel:
         result = ReliabilityModel().solve(Systems.Clusters.Training_1K, 720)
         assert result.fleet_mtbf.m_as("hour") == pytest.approx(4687.5 / 128, rel=1e-3)
 
+    def test_redundant_psus_drop_out_for_dgx_a100_fleet(self):
+        """DGX A100 PSUs are 3+3 redundant (pc.DGX_A100_USER_GUIDE_POWER), so the
+        128-node A100 tier has fleet MTBF 4,687.5 h / 128 = 36.62 h (was 33.48 h)."""
+        result = ReliabilityModel().solve(Systems.Clusters.Training_1K_A100, 720)
+        assert result.fleet_mtbf.m_as("hour") == pytest.approx(4687.5 / 128, rel=1e-3)
+
     def test_larger_cluster_higher_failure_prob(self):
         """Larger cluster should have higher failure probability for the same job."""
         solver = ReliabilityModel()

@@ -103,6 +103,12 @@ class Nodes(Registry):
         accelerators_per_node=8,
         intra_node_bw=Hardware.Cloud.A100.nvlink.bandwidth_per_direction,
         nics_per_node=8,
+        # Power (added 2026-09-29): pc.DGX_A100_USER_GUIDE_POWER -- six 3 kW PSUs in
+        # 3+3 redundancy, 6.5 kW max.
+        psus_per_node=6,
+        psu_redundancy=3,
+        psu_rating=3.0 * kilowatt,
+        max_power=6.5 * kilowatt,
         metadata=Metadata(provenance=pc.DGX_GPUS_PER_HOST),
     )
     DGX_B200 = Node(
@@ -111,6 +117,12 @@ class Nodes(Registry):
         accelerators_per_node=8,
         intra_node_bw=Hardware.Cloud.B200.nvlink.bandwidth_per_direction,
         nics_per_node=8,
+        # Power (added 2026-09-29): pc.DGX_B200_USER_GUIDE_POWER -- six 3.3 kW PSUs in
+        # 5+1 redundancy, 14.3 kW max.
+        psus_per_node=6,
+        psu_redundancy=1,
+        psu_rating=3.3 * kilowatt,
+        max_power=14.3 * kilowatt,
         metadata=Metadata(provenance=pc.DGX_GPUS_PER_HOST),
     )
     Kempner_H100_4GPU = Node(
