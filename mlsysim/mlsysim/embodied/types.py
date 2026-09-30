@@ -496,6 +496,8 @@ class EmbodiedSiteScenario(BaseModel):
     enforcer_unloaded: Quantity
     enforcer_wcet: Quantity
     enforcer_deadline: Quantity
+    enforcer_blocking: Quantity           # longest tick-masking section in lower-priority code (B)
+    enforcer_interference: Quantity       # timer and bus-interrupt work per response window (I)
     # dispatch-to-admission terms after the proposer's inference (the total is
     # the t_dispatch_to_admission property)
     chunk_wire_bytes: Quantity            # serialized chunk with header and evidence epoch
@@ -569,7 +571,7 @@ class EmbodiedSiteScenario(BaseModel):
     @field_validator(
         "t_brake_onset", "t_lease", "t_bus", "t_transport", "t_dma", "t_isp", "t_backbone",
         "t_ipc", "heartbeat_timeout", "mcu_self_watchdog", "enforcer_unloaded",
-        "enforcer_wcet", "enforcer_deadline", "t_contact_response",
+        "enforcer_wcet", "enforcer_deadline", "enforcer_blocking", "enforcer_interference", "t_contact_response",
         "t_human_perceptual", "t_human_perceptual_slow", "t_human_cognitive",
         "t_human_cognitive_slow", "t_human_motor", "t_human_motor_slow",
         "t_brake_response_expected", "t_brake_response_unexpected", "t_brake_response_surprise",

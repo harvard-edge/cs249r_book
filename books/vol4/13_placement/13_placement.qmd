@@ -98,6 +98,11 @@ The mobile manipulator must keep checking clearance while its proposal model com
 # │       enforcer tick on the discrete safety MCU.
 # │ Show: 135 µs unloaded = 40 + 80 + 15 µs = 54,000 cycles at 400 MHz, against
 # │       a declared 250 µs WCET and a chosen 400 µs deadline in the 1 ms tick.
+# │       Ch4's response budget (@eq-nervous-response-budget) also charges
+# │       50 µs of blocking and 40 µs of interference, so the tick's own
+# │       execution, shared-hardware interference included, must fit
+# │       400 - 90 = 310 µs, and the declared WCET leaves 60 µs for
+# │       shared-hardware interference.
 # │       The permission path's isolated rail holds up for 2 s (a selected
 # │       premise recorded here; decided in Ch2, sized in Ch12). The 5 ms
 # │       renewal-jitter allowance tolerates at most a 12.5 percent stretch of
@@ -116,11 +121,9 @@ class PlacementMachine:
     # ┌── 1. LOAD ───────────────────────────────────────────────────────────
     chunk_rate = RM.chunk_rate  # category: chosen
     chunk_inference = RM.chunk_inference_latency  # category: illustrative (P99, vision included)
-    chunk_horizon = RM.chunk_horizon  # category: chosen
     permission_rate = RM.permission_rate  # category: chosen
     mcu_clock = RM.permission_mcu.compute.clock_rate  # category: illustrative (reference class)
     tick = AISLE.t_tick  # category: chosen
-    t_bus = AISLE.t_bus  # category: illustrative
     lease = AISLE.t_lease  # category: chosen
     unloaded = AISLE.enforcer_unloaded  # category: illustrative
     wcet = AISLE.enforcer_wcet  # category: chosen (declared, not measured)
@@ -131,6 +134,13 @@ class PlacementMachine:
     sense = 40 * microsecond  # scenario assumption; category: illustrative (encoders, IMU, evidence epoch)
     constraint = 80 * microsecond  # scenario assumption; category: illustrative
     write = 15 * microsecond  # scenario assumption; category: illustrative (drive-frame staging)
+    # Blocking B and interference I from the MCU's own lower- and higher-priority
+    # work: the scenario bounds of Ch4's TickResponseBudget (notebook
+    # nbk-nervous-response-margin), mirrored here because a chapter cannot import
+    # another chapter's LEGO cell. Keep equal to Ch4; promotion to the aisle
+    # scenario in MLSysIM is pending.
+    blocking = AISLE.enforcer_blocking  # category: illustrative (Ch4 B, scenario bound; registry)
+    interference = AISLE.enforcer_interference  # category: illustrative (Ch4 I, scenario bound; registry)
 
     # ┌── 2. EXECUTE ────────────────────────────────────────────────────────
     chunk_period = (1 / chunk_rate).to(millisecond)
@@ -138,6 +148,9 @@ class PlacementMachine:
     unloaded_sum = (sense + constraint + write).to(microsecond)
     unloaded_slack = (deadline - unloaded).to(microsecond)
     wcet_margin = (deadline - wcet).to(microsecond)
+    b_plus_i = (blocking + interference).to(microsecond)
+    exec_ceiling = (deadline - b_plus_i).to(microsecond)  # t_enf ceiling under the full response budget
+    shared_allowance = (exec_ceiling - wcet).to(microsecond)  # I_shared the declared WCET leaves before the deadline
     unloaded_cycles = (unloaded * mcu_clock).to("dimensionless").magnitude
     min_chunk_rate = (1 / lease).to(hertz)
     compute_after_sense = (constraint + write).to(microsecond)
@@ -154,6 +167,12 @@ class PlacementMachine:
         abs(wcet.to(microsecond).magnitude - 250.0) < 1e-9 and abs(deadline.to(microsecond).magnitude - 400.0) < 1e-9,
         "Canon: 250 µs WCET, 400 µs deadline.",
     )
+    check(
+        abs(blocking.to(microsecond).magnitude - 50.0) < 1e-9 and abs(interference.to(microsecond).magnitude - 40.0) < 1e-9,
+        "Mirror of Ch4 TickResponseBudget: B = 50 µs, I = 40 µs.",
+    )
+    check(abs(exec_ceiling.magnitude - 310.0) < 1e-9 and abs(shared_allowance.magnitude - 60.0) < 1e-9, "400 - 90 = 310 µs; 310 - 250 = 60 µs.")
+    check(wcet < exec_ceiling, "The declared WCET fits the full response budget.")
     check(abs(chunk_slack.to(millisecond).magnitude - 10.0) < 1e-9, "The 40 ms chunk inference leaves 10 ms of the 50 ms period.")
     # margin_coupling_timescale_ladder.svg fig-alt hand-types 1 millisecond
     check(abs(tick.to(millisecond).magnitude - 1.0) < 1e-9, "Canon: 1 ms permission tick.")
@@ -172,11 +191,9 @@ class PlacementMachine:
     chunk_period_str = fmt_latency(chunk_period, unit=millisecond, precision=0)
     chunk_inference_str = fmt_latency(chunk_inference, unit=millisecond, precision=0)
     chunk_slack_str = fmt_latency(chunk_slack, unit=millisecond, precision=0)
-    chunk_horizon_str = fmt_int(chunk_horizon)
     permission_rate_str = fmt_frequency(permission_rate, precision=0)
     mcu_clock_str = fmt_frequency(mcu_clock, precision=0)
     tick_str = fmt_latency(tick, unit=millisecond, precision=0)
-    t_bus_str = fmt_latency(t_bus, unit=millisecond, precision=0)
     lease_str = fmt_latency(lease, unit=millisecond, precision=0)
     min_chunk_rate_str = fmt_frequency(min_chunk_rate, precision=1)
     sense_str = fmt_latency(sense, unit=microsecond, precision=0)
@@ -188,6 +205,11 @@ class PlacementMachine:
     unloaded_slack_str = fmt_latency(unloaded_slack, unit=microsecond, precision=0)
     wcet_str = fmt_latency(wcet, unit=microsecond, precision=0)
     wcet_margin_str = fmt_latency(wcet_margin, unit=microsecond, precision=0)
+    blocking_str = fmt_latency(blocking, unit=microsecond, precision=0)
+    interference_str = fmt_latency(interference, unit=microsecond, precision=0)
+    b_plus_i_str = fmt_latency(b_plus_i, unit=microsecond, precision=0)
+    exec_ceiling_str = fmt_latency(exec_ceiling, unit=microsecond, precision=0)
+    shared_allowance_str = fmt_latency(shared_allowance, unit=microsecond, precision=0)
     deadline_str = fmt_latency(deadline, unit=microsecond, precision=0)
     tick_ns_str = fmt_int(tick, unit=nanosecond)  # placement-record field nominal_period_ns
     deadline_ns_str = fmt_int(deadline, unit=nanosecond)  # placement-record field hard_deadline_ns
@@ -221,7 +243,7 @@ The full scene map remains on the application processor. The permission path rec
 
 The supply design places the microcontroller, drive logic, and spring-brake coils on the isolated rail of @sec-body-archetype-matrix, with a selected local hold-up of `{python} PlacementMachine.rail_holdup_str` and no proposal-side load. Qualification must show that motor and accelerator transients on the common battery do not reset this path. That store supports logic and brake release during the selected stop; it does not supply traction power. The powered deceleration of @sec-enforcement-fallback-ladder additionally requires a surviving drive-energy path and a qualified destination for regenerative energy. Loss of either premise invokes a separately qualified fault response, not the normal stopping-distance claim.
 
-On the unloaded machine the computational budgets appear generous. Illustrative sub-costs on the safety microcontroller put reading the encoders, the IMU, and the proposal's evidence epoch at `{python} PlacementMachine.sense_str`, evaluating the constraints at `{python} PlacementMachine.constraint_str`, and staging the admitted setpoints for the drive frame at `{python} PlacementMachine.write_str`. The enforcer's unloaded cycle totals `{python} PlacementMachine.unloaded_str`, which at the microcontroller's `{python} PlacementMachine.mcu_clock_str` clock is `{python} PlacementMachine.unloaded_cycles_str` cycles. Against the `{python} PlacementMachine.deadline_str` deadline, the unloaded path leaves `{python} PlacementMachine.unloaded_slack_str` of slack, and the declared worst-case execution time of `{python} PlacementMachine.wcet_str`, the selected budget of @sec-enforcement-minimal-intervention, still leaves `{python} PlacementMachine.wcet_margin_str`. On the application processor, the chunk policy's `{python} PlacementMachine.chunk_inference_str` inference leaves `{python} PlacementMachine.chunk_slack_str` of its `{python} PlacementMachine.chunk_period_str` period. These sub-costs form the simplified interference example below, not an integrated execution measurement. The local spatial-query allocation of @sec-memory must also fit the cyclic budget. Qualification must measure the complete cycle, identifying which query costs are included in constraint evaluation and adding any that are separate; neither the unloaded sum nor the query allocation alone establishes the declared bound.
+On the unloaded machine the computational budgets appear generous. Illustrative sub-costs on the safety microcontroller put reading the encoders, the IMU, and the proposal's evidence epoch at `{python} PlacementMachine.sense_str`, evaluating the constraints at `{python} PlacementMachine.constraint_str`, and staging the admitted setpoints for the drive frame at `{python} PlacementMachine.write_str`. The enforcer's unloaded cycle totals `{python} PlacementMachine.unloaded_str`, which at the microcontroller's `{python} PlacementMachine.mcu_clock_str` clock is `{python} PlacementMachine.unloaded_cycles_str` cycles. Against the `{python} PlacementMachine.deadline_str` deadline, the unloaded path leaves `{python} PlacementMachine.unloaded_slack_str` of slack, and the declared worst-case execution time of `{python} PlacementMachine.wcet_str`, the selected budget of @sec-enforcement-minimal-intervention, still leaves `{python} PlacementMachine.wcet_margin_str`. That slack does not all belong to the shared hardware. The response bound of @eq-nervous-response-budget also charges the tick for blocking by lower-priority code and for interference from the microcontroller's own higher-priority interrupts, `{python} PlacementMachine.blocking_str` and `{python} PlacementMachine.interference_str` in notebook \ref{nbk-nervous-response-margin}. A loaded tick therefore meets its deadline only while its own execution, including any delay that shared hardware adds, stays within the deadline less those `{python} PlacementMachine.b_plus_i_str`, `{python} PlacementMachine.exec_ceiling_str`, and on the declared bound the shared hardware may add at most `{python} PlacementMachine.shared_allowance_str`. Every deadline comparison in this chapter charges that full budget. On the application processor, the chunk policy's `{python} PlacementMachine.chunk_inference_str` inference leaves `{python} PlacementMachine.chunk_slack_str` of its `{python} PlacementMachine.chunk_period_str` period. These sub-costs form the simplified interference example below, not an integrated execution measurement. The local spatial-query allocation of @sec-memory must also fit the cyclic budget. Qualification must measure the complete cycle, identifying which query costs are included in constraint evaluation and adding any that are separate; neither the unloaded sum nor the query allocation alone establishes the declared bound.
 
 ### Shared microarchitectural failure domains and cyber-physical attack surfaces
 
@@ -479,14 +501,15 @@ where $\mathcal{Q}$ holds the transactions ahead of the read, $B_k$ is each one'
 # │ Context: @sec-placement-resource-contention, @sec-placement-fallacies-pitfalls
 # │
 # │ Goal: Charge a FIFO backlog on shared DRAM to the machine's 40 µs sense
-# │       allowance and 400 µs deadline, to show why the bound is a property of
+# │       allowance and 400 µs deadline (less Ch4's 90 µs of blocking and
+# │       interference, so 310 µs of execution), to show why the bound is a property of
 # │       the memory controller rather than of the workload.
 # │ Show: one backlog of 88 transactions (360,448 bytes) plus three 37.5 ns row
 # │       conflicts waits 1.879 µs at the application SoC's 204 GB/s; a 4 KiB
 # │       snapshot then reads in 1.899 µs, inside the 40 µs allowance, which
 # │       absorbs 21 such backlogs; the declared 250 µs WCET is crossed after
 # │       more than 82 backlogs (155 µs read), refuting the declared bound,
-# │       while the deadline holds until more than 162 (305 µs read); priority
+# │       while the deadline holds until more than 114 (215 µs read); priority
 # │       bypass cuts the read to 0.04 µs. Confined to one of 16 channels, a
 # │       backlog takes 28.4 µs: the allowance absorbs 1, the WCET 5. Bandwidth
 # │       queueing alone is a weak threat under interleaving;
@@ -509,6 +532,7 @@ class PlacementLoadedRead:
     sense = PlacementMachine.sense  # category: illustrative (sense allowance)
     compute_after_sense = PlacementMachine.compute_after_sense  # category: illustrative (80 + 15 µs)
     deadline = PlacementMachine.deadline  # category: chosen
+    exec_ceiling = PlacementMachine.exec_ceiling  # category: derived (deadline less Ch4's blocking and interference)
     wcet = PlacementMachine.wcet  # category: chosen (declared WCET, the falsification threshold)
     tile_bytes = 256 * 1024  # category: illustrative (weight tile)
     camera_bytes = 64 * 1024  # category: illustrative
@@ -542,7 +566,7 @@ class PlacementLoadedRead:
     own_read = result["own_read"].to(microsecond)
     loaded_read = (queue + own_read).to(microsecond)
     sense_left = (sense - loaded_read).to(microsecond)
-    read_ceiling = (deadline - compute_after_sense).to(microsecond)
+    read_ceiling = (exec_ceiling - compute_after_sense).to(microsecond)
     wcet_read_ceiling = (wcet - compute_after_sense).to(microsecond)
     backlogs_wcet = math.floor(((wcet_read_ceiling - own_read) / queue).to("dimensionless").magnitude)
     backlogs_sense = math.floor(((sense - own_read) / queue).to("dimensionless").magnitude)
@@ -571,8 +595,11 @@ class PlacementLoadedRead:
     check(abs(bandwidth.to("GB/s").magnitude - 204.0) < 1e-9, "The application SoC's registry bandwidth is 204 GB/s.")
     check(abs(queue.magnitude - 1.8794) < 5e-4, "360,448 bytes at 204 GB/s plus three 37.5 ns conflicts is 1.879 µs.")
     check(loaded_read < sense, "One backlog fits inside the sense allowance.")
-    check(abs(read_ceiling.magnitude - 305.0) < 1e-9, "The deadline leaves 305 µs for the read after 95 µs of compute.")
-    check(backlogs_sense == 21 and backlogs_deadline == 162, "The sense allowance absorbs 21 backlogs, the deadline 162.")
+    check(
+        abs(read_ceiling.magnitude - 215.0) < 1e-9,
+        "The deadline, less 90 µs of blocking and interference, leaves 215 µs for the read after 95 µs of compute.",
+    )
+    check(backlogs_sense == 21 and backlogs_deadline == 114, "The sense allowance absorbs 21 backlogs, the full-budget deadline 114.")
     check(abs(wcet_read_ceiling.magnitude - 155.0) < 1e-9 and backlogs_wcet == 82, "The declared WCET leaves 155 µs for the read, 82 backlogs.")
     check(bypass_read < own_read * 3, "Priority bypass leaves one in-flight transaction ahead of the read.")
     check(n_channels == 16, "A 256-bit interface of 16-bit LPDDR5 channels has 16 channels.")
@@ -583,6 +610,8 @@ class PlacementLoadedRead:
     sense_us_str = fmt(sense.to(microsecond).magnitude, precision=0)
     compute_after_sense_str = fmt_latency(compute_after_sense, unit=microsecond, precision=0)
     deadline_str = fmt_latency(deadline, unit=microsecond, precision=0)
+    b_plus_i_str = PlacementMachine.b_plus_i_str
+    exec_ceiling_str = PlacementMachine.exec_ceiling_str
     n_tx_str = fmt_int(result["queued_transactions"])
     tile_tx_str = fmt_int(result["tile_transactions"])
     backlog_bytes_str = fmt_int(backlog_bytes)
@@ -613,11 +642,11 @@ class PlacementLoadedRead:
 
 **Variables**:
 
-* Sense allowance `{python} PlacementLoadedRead.sense_str` and `{python} PlacementLoadedRead.compute_after_sense_str` of constraint evaluation and drive-frame write (Illustrative sub-costs), declared worst-case execution time $C_{\text{wcet}} =$ `{python} PlacementLoadedRead.wcet_str` and deadline $D_{\text{enf}} =$ `{python} PlacementLoadedRead.deadline_str` (Chosen).
+* Sense allowance `{python} PlacementLoadedRead.sense_str` and `{python} PlacementLoadedRead.compute_after_sense_str` of constraint evaluation and drive-frame write (Illustrative sub-costs), declared worst-case execution time $C_{\text{wcet}} =$ `{python} PlacementLoadedRead.wcet_str` and deadline $D_{\text{enf}} =$ `{python} PlacementLoadedRead.deadline_str` (Chosen), of which blocking and interference on the microcontroller take `{python} PlacementLoadedRead.b_plus_i_str` (Illustrative, @eq-nervous-response-budget).
 * Peak DRAM bandwidth $\text{BW}_{\text{peak}} =$ `{python} PlacementLoadedRead.bandwidth_str` GB/s (Datasheet), served at that aggregate rate because the controller interleaves addresses across all channels (Illustrative premise).
 * One backlog ahead of the read: a weight tile (`{python} PlacementLoadedRead.tile_tx_str` transactions), a camera transfer, and a telemetry record, `{python} PlacementLoadedRead.n_tx_str` transactions and `{python} PlacementLoadedRead.backlog_bytes_str` bytes, with `{python} PlacementLoadedRead.bank_switches_str` same-bank row conflicts (Illustrative), each costing $t_{\text{RP}} + t_{\text{RCD}} =$ `{python} PlacementLoadedRead.bank_switch_str` ns (Datasheet). The snapshot itself is `{python} PlacementLoadedRead.snapshot_bytes_str` bytes (Illustrative).
 
-**Math**: By @eq-placement-dram-queuing, one backlog waits `{python} PlacementLoadedRead.backlog_bytes_str` B $/$ `{python} PlacementLoadedRead.bandwidth_str` GB/s $+$ `{python} PlacementLoadedRead.bank_switches_str` $\times$ `{python} PlacementLoadedRead.bank_switch_str` ns $=$ `{python} PlacementLoadedRead.queue_str` $\mu\text{s}$, and the snapshot then reads in `{python} PlacementLoadedRead.own_read_str` $\mu\text{s}$. The number of backlogs $n$ that fit a read ceiling $R$ is $\lfloor (R - t_{\text{own}})/t_{\text{queue}} \rfloor$. The sense allowance gives $\lfloor ($ `{python} PlacementLoadedRead.sense_us_str` $-$ `{python} PlacementLoadedRead.own_read_str` $)/$ `{python} PlacementLoadedRead.queue_str` $\rfloor =$ `{python} PlacementLoadedRead.backlogs_sense_str`. The declared bound leaves `{python} PlacementLoadedRead.wcet_read_ceiling_str` for the read after the `{python} PlacementLoadedRead.compute_after_sense_str` of later work, so it is crossed beyond `{python} PlacementLoadedRead.backlogs_wcet_str` backlogs; the deadline leaves `{python} PlacementLoadedRead.read_ceiling_str` and is crossed beyond `{python} PlacementLoadedRead.backlogs_deadline_str`. With validated priority bypass, only the one in-flight transaction waits ahead, and the read takes `{python} PlacementLoadedRead.bypass_read_str` $\mu\text{s}$.
+**Math**: By @eq-placement-dram-queuing, one backlog waits `{python} PlacementLoadedRead.backlog_bytes_str` B $/$ `{python} PlacementLoadedRead.bandwidth_str` GB/s $+$ `{python} PlacementLoadedRead.bank_switches_str` $\times$ `{python} PlacementLoadedRead.bank_switch_str` ns $=$ `{python} PlacementLoadedRead.queue_str` $\mu\text{s}$, and the snapshot then reads in `{python} PlacementLoadedRead.own_read_str` $\mu\text{s}$. The number of backlogs $n$ that fit a read ceiling $R$ is $\lfloor (R - t_{\text{own}})/t_{\text{queue}} \rfloor$. The sense allowance gives $\lfloor ($ `{python} PlacementLoadedRead.sense_us_str` $-$ `{python} PlacementLoadedRead.own_read_str` $)/$ `{python} PlacementLoadedRead.queue_str` $\rfloor =$ `{python} PlacementLoadedRead.backlogs_sense_str`. The declared bound leaves `{python} PlacementLoadedRead.wcet_read_ceiling_str` for the read after the `{python} PlacementLoadedRead.compute_after_sense_str` of later work, so it is crossed beyond `{python} PlacementLoadedRead.backlogs_wcet_str` backlogs; the deadline, less blocking and interference, leaves `{python} PlacementLoadedRead.exec_ceiling_str` for the tick and `{python} PlacementLoadedRead.read_ceiling_str` for the read, and is crossed beyond `{python} PlacementLoadedRead.backlogs_deadline_str`. With validated priority bypass, only the one in-flight transaction waits ahead, and the read takes `{python} PlacementLoadedRead.bypass_read_str` $\mu\text{s}$.
 
 **Result**: Between `{python} PlacementLoadedRead.backlogs_wcet_str` and `{python} PlacementLoadedRead.backlogs_deadline_str` backlogs, the tick still meets its deadline but exceeds $C_{\text{wcet}}$. No execution in isolation can exceed the declared bound, so such a cycle shows that shared memory has added an interference term the placement did not budget, and it refutes the placement's timing premise even though this tick was on time.
 
@@ -627,7 +656,7 @@ class PlacementLoadedRead:
 
 @Fig-13-loaded-tick draws the notebook's thresholds on the tick's own time axis. Each row is one tick with a given number of backlogs queued ahead of the snapshot read, so the reader can see how much traffic separates the sense allowance, the declared bound, and the deadline, and how much less it takes when the backlog shares the snapshot's channel.
 
-::: {#fig-13-loaded-tick fig-env="figure" fig-pos="t" fig-cap="**How many backlogs one tick absorbs**: Each row is one permission tick on the rejected shared-die placement, drawn to scale on the 1 ms period, with the FIFO wait for queued backlogs ahead of the snapshot read followed by the `{python} PlacementLoadedRead.compute_after_sense_str` of constraint evaluation and drive-frame write. With addresses interleaved across the interface, `{python} PlacementLoadedRead.backlogs_sense_str` backlogs fit the sense allowance, `{python} PlacementLoadedRead.backlogs_wcet_str` the declared bound, and `{python} PlacementLoadedRead.backlogs_deadline_str` the deadline; confined to one channel, `{python} PlacementLoadedRead.backlogs_wcet_1ch_str` already reach the declared bound. Every row still ends well inside the period, which is why the declared bound, not the period, is the test the placement must pass." fig-alt="Horizontal bar chart on a time axis from 0 to 1,000 microseconds with five rows. The top row is the unloaded tick: a 40 microsecond sense read and 95 microseconds of constraint evaluation and write, ending at 135. Below it, rows with 21, 82, and 162 queued backlogs show a hatched memory wait growing until the tick ends near 135, 250, and 400 microseconds. The bottom row, with 5 backlogs confined to one memory channel, ends near 237 microseconds. Vertical lines mark the end of the sense allowance at 40, the declared worst-case execution time at 250, the deadline at 400, and the next tick at 1,000 microseconds."}
+::: {#fig-13-loaded-tick fig-env="figure" fig-pos="t" fig-cap="**How many backlogs one tick absorbs**: Each row is one permission tick on the rejected shared-die placement, drawn to scale on the 1 ms period, with the FIFO wait for queued backlogs ahead of the snapshot read followed by the `{python} PlacementLoadedRead.compute_after_sense_str` of constraint evaluation and drive-frame write. With addresses interleaved across the interface, `{python} PlacementLoadedRead.backlogs_sense_str` backlogs fit the sense allowance, `{python} PlacementLoadedRead.backlogs_wcet_str` the declared bound, and `{python} PlacementLoadedRead.backlogs_deadline_str` the deadline once blocking and interference on the microcontroller take their `{python} PlacementLoadedRead.b_plus_i_str`; confined to one channel, `{python} PlacementLoadedRead.backlogs_wcet_1ch_str` already reach the declared bound. Every row still ends well inside the period, which is why the declared bound, not the period, is the test the placement must pass." fig-alt="Horizontal bar chart on a time axis from 0 to 1,000 microseconds with five rows. The top row is the unloaded tick: a 40 microsecond sense read and 95 microseconds of constraint evaluation and write, ending at 135. Below it, rows with 21, 82, and 114 queued backlogs show a hatched memory wait growing until the tick ends near 135, 250, and 309 microseconds. The bottom row, with 5 backlogs confined to one memory channel, ends near 237 microseconds. Vertical lines mark the end of the sense allowance at 40, the declared worst-case execution time at 250, the deadline at 400, and the next tick at 1,000 microseconds; a shaded band from 310 to 400 microseconds is reserved for blocking and interference."}
 
 ```{python}
 #| echo: false
@@ -640,8 +669,9 @@ class PlacementLoadedRead:
 # │
 # │ Goal: Show the notebook's backlog thresholds on one tick's time axis.
 # │ Show: the unloaded tick, then the tick at the largest backlog count that
-# │       keeps each bound (sense allowance, declared WCET, deadline), and
-# │       the one-channel case at the WCET, against the 1 ms period.
+# │       keeps each bound (sense allowance, declared WCET, deadline less
+# │       Ch4's blocking and interference), and the one-channel case at the
+# │       WCET, against the 1 ms period; the band before the deadline is B + I.
 # │ How: PlacementMachine sub-costs and PlacementLoadedRead's FIFO model
 # │      (calc_axi_fifo_contention); no new inputs.
 # └─────────────────────────────────────────────────────────────────────────────
@@ -663,6 +693,7 @@ def us(q):
 
 sense, compute = us(PM.sense), us(LR.compute_after_sense)
 wcet, deadline, tick = us(PM.wcet), us(PM.deadline), us(PM.tick)
+ceiling = us(PM.exec_ceiling)
 q, own = us(LR.queue), us(LR.own_read)
 q1, own1 = us(LR.queue_1ch), us(LR.own_read_1ch)
 
@@ -681,7 +712,7 @@ ends = [w + r + c for _, w, r, c in rows]
 check(abs(ends[0] - us(PM.unloaded)) < 1e-9, "The unloaded row is the 135 µs tick.")
 check(rows[1][1] + rows[1][2] <= sense, "The sense row's read fits the sense allowance.")
 check(ends[2] <= wcet < ends[2] + q, "The WCET row is the largest backlog count within the declared bound.")
-check(ends[3] <= deadline < ends[3] + q, "The deadline row is the largest backlog count within the deadline.")
+check(ends[3] <= ceiling < ends[3] + q, "The deadline row is the largest backlog count within the deadline less blocking and interference.")
 check(ends[4] <= wcet < ends[4] + q1, "The one-channel row is the largest count within the declared bound.")
 check(max(ends) < tick, "Every row ends inside the 1 ms period.")
 
@@ -694,10 +725,12 @@ for y, (lab, w, r, c), end in zip(ys, rows, ends):
     ax.barh(y, r, left=w, height=0.56, color=C["BlueLine"], edgecolor=C["BlueLine"], lw=0.8, zorder=3)
     ax.barh(y, c, left=w + r, height=0.56, color=C["OrangeL"], edgecolor=C["OrangeLine"], lw=0.8, zorder=3)
     x_lab = end + 10
-    for x_line in (wcet, deadline):
+    for x_line in (wcet, ceiling, deadline):
         if end <= x_line < end + 60:
             x_lab = x_line + 8
     ax.text(x_lab, y, f"{end:.0f} µs", ha="left", va="center", fontsize=9, color=C["primary"], zorder=4)
+ax.axvspan(ceiling, deadline, color=C["RedL"], alpha=0.45, lw=0, zorder=1)
+ax.text((ceiling + deadline) / 2, len(rows) - 0.35, "blocking +\ninterference", ha="center", va="bottom", fontsize=8, color=C["RedLine"])
 for x, lab, col, ls in [
     (sense, "sense\nallowance", C["BlueLine"], (0, (2, 2))),
     (wcet, "declared\nWCET", C["primary"], (0, (5, 3))),
@@ -747,12 +780,14 @@ plt.show()
 # │       shared-cache interference on embedded multicores, and find the
 # │       memory-stall share of the tick at which each measured slowdown
 # │       crosses the declared WCET.
-# │ Show: WCET / unloaded = 1.85x, deadline / unloaded = 2.96x; measured MSHR
+# │ Show: WCET / unloaded = 1.85x, (deadline - B - I) / unloaded = 310/135
+# │       = 2.30x under Ch4's full response budget; measured MSHR
 # │       contention 21x (Valsan et al. 2016, with cache partitioning) and
 # │       writeback-buffer DoS >300x (Bechtel and Yun 2019). If a stall share
 # │       f of the 135 µs tick is slowed by S, the WCET holds only for
 # │       f <= (1.85 - 1) / (S - 1): 4.3 percent at 21x, 0.28 percent at 300x.
-# │ How: registry WCET, deadline, and unloaded tick; slowdowns are published
+# │ How: registry WCET, deadline, and unloaded tick, with Ch4's blocking and
+# │      interference (PlacementMachine.exec_ceiling); slowdowns are published
 # │      measurements on other platforms (not the Orin), used as multipliers;
 # │      calc_stall_share_breakeven (Amdahl's fixed-fraction model read as a
 # │      slowdown) for the break-even shares.
@@ -766,18 +801,19 @@ class PlacementInterference:
     unloaded = PlacementMachine.unloaded  # category: illustrative (registry)
     wcet = PlacementMachine.wcet  # category: chosen (declared)
     deadline = PlacementMachine.deadline  # category: chosen
+    exec_ceiling = PlacementMachine.exec_ceiling  # category: derived (deadline less Ch4's blocking and interference)
     s_mshr = 21.0  # category: measured (Valsan, Yun, Farshchi, RTAS 2016: up to 21x WCET increase, MSHR contention, cache partitioned)
     s_wb = 300.0  # category: measured (Bechtel and Yun, RTAS 2019: >300x on a dedicated core; lower bound of the reported range)
 
     # ┌── 2. EXECUTE ────────────────────────────────────────────────────────
     stretch_wcet = (wcet / unloaded).to("dimensionless").magnitude
-    stretch_deadline = (deadline / unloaded).to("dimensionless").magnitude
+    stretch_deadline = (exec_ceiling / unloaded).to("dimensionless").magnitude  # full response budget
     f_mshr = calc_stall_share_breakeven(stretch_wcet, s_mshr)
     f_wb = calc_stall_share_breakeven(stretch_wcet, s_wb)
     f_mshr_deadline = calc_stall_share_breakeven(stretch_deadline, s_mshr)
 
     # ┌── 3. GUARD ──────────────────────────────────────────────────────────
-    check(abs(stretch_wcet - 250 / 135) < 1e-9 and abs(stretch_deadline - 400 / 135) < 1e-9, "250/135 and 400/135.")
+    check(abs(stretch_wcet - 250 / 135) < 1e-9 and abs(stretch_deadline - 310 / 135) < 1e-9, "250/135 and (400 - 90)/135.")
     check(s_mshr > stretch_deadline and s_wb > 100 * stretch_wcet, "Measured slowdowns exceed the tick's absorbable stretch.")
     check(abs(f_mshr - 0.0426) < 5e-4 and abs(f_wb - 0.00285) < 5e-5, "Break-even stall shares: 4.3 and 0.28 percent.")
     check(abs(calc_partial_slowdown_stretch(f_mshr, s_mshr) - stretch_wcet) < 1e-9, "At the break-even share the tick lands exactly on the WCET.")
@@ -793,7 +829,7 @@ class PlacementInterference:
     f_mshr_deadline_pct_str = fmt_percent(f_mshr_deadline, precision=1)
 ```
 
-The notebook's arithmetic makes the shared die look safe, and that impression is the danger. The permission tick can absorb a stretch of its unloaded `{python} PlacementMachine.unloaded_str` cycle by a factor of `{python} PlacementInterference.stretch_wcet_str` before it crosses the declared worst-case execution time, and by `{python} PlacementInterference.stretch_deadline_str` before it crosses the deadline. Bandwidth queueing at the SoC's full rate does not come close. Two other mechanisms do, and both live in the shared cache rather than in DRAM.
+The notebook's arithmetic makes the shared die look safe, and that impression is the danger. The permission tick can absorb a stretch of its unloaded `{python} PlacementMachine.unloaded_str` cycle by a factor of `{python} PlacementInterference.stretch_wcet_str` before it crosses the declared worst-case execution time, and by `{python} PlacementInterference.stretch_deadline_str` before it crosses the deadline, once blocking and interference on the microcontroller take their `{python} PlacementMachine.b_plus_i_str`. Bandwidth queueing at the SoC's full rate does not come close. Two other mechanisms do, and both live in the shared cache rather than in DRAM.
 
 A non-blocking cache tracks each outstanding miss in a *miss status holding register* (MSHR) and parks each dirty line it evicts in a *writeback buffer* until DRAM accepts it. Both structures are small and shared by every core behind the cache. When a streaming co-runner keeps them full, each miss of the victim core waits until an entry drains, so the victim's delay grows with its own miss count times the aggressor's drain time, not with the bytes it reads. Partitioning cache capacity does not help, because the partition divides the lines and leaves the MSHRs and the writeback buffer shared. Measured on commercial embedded multicores, MSHR contention raised a task's worst-case execution time by up to `{python} PlacementInterference.s_mshr_mult_str` with the cache partitioned [@valsan2016taming], and a deliberate attack on the writeback buffer slowed a victim on a dedicated core by more than `{python} PlacementInterference.s_wb_mult_str`, partitioned or not [@bechtel2019denial]. DRAM adds its own multiplier on top. An analytical bound for commercial controllers shows that each of the victim's requests can wait behind every request that other cores may place ahead of it in the same bank, a number set by queue depth and the reordering window rather than by average bandwidth [@kim2014bounding].
 
@@ -913,10 +949,15 @@ class PlacementCheckpointEstimates:
     f_check = calc_stall_share_breakeven(stretch_wcet, s_check)
     over_wcet = (t_loaded_check - wcet).to(microsecond)
     under_deadline = (deadline - t_loaded_check).to(microsecond)
+    under_full_budget = (PlacementMachine.exec_ceiling - t_loaded_check).to(microsecond)  # after Ch4's blocking and interference
 
     # ┌── 3. GUARD ──────────────────────────────────────────────────────────
     check(abs(f_check - (250 / 135 - 1) / 9) < 1e-9, "Break-even share at 10x is (250/135 - 1)/9, about 9.5 percent.")
-    check(wcet < t_loaded_check < deadline, "The checkpoint cycle lies between the WCET and the deadline.")
+    check(
+        wcet < t_loaded_check < PlacementMachine.exec_ceiling,
+        "The checkpoint cycle lies between the WCET and the deadline less blocking and interference.",
+    )
+    check(abs(under_full_budget.magnitude - 10.0) < 1e-9, "300 µs plus 90 µs of blocking and interference leaves 10 µs of the 400 µs deadline.")
 
     # ┌── 4. OUTPUT ─────────────────────────────────────────────────────────
     s_check_mult_str = fmt_multiple(s_check, precision=0)
@@ -956,8 +997,10 @@ The permission core can slow down after the proposal workload has stopped, becau
 # │       cluster of the application SoC: a thermal governor halves that
 # │       cluster's clock and the tick overruns its deadline for seconds.
 # │ Show: a cluster sized to the declared 250 µs WCET at 1.2 GHz needs 3.0e5
-# │       cycles (300,000); throttled to 600 MHz it takes 500 µs, past the 400 µs deadline
-# │       (25% overrun) and past the WCET that falsifies independence; 2.18 s of
+# │       cycles (300,000); throttled to 600 MHz it takes 500 µs, and with Ch4's
+# │       90 µs of blocking and interference its response of 590 µs overruns the
+# │       400 µs deadline by 190 µs (nominal: 340 µs, 60 µs of slack); it also
+# │       passes the WCET that falsifies independence; 2.18 s of
 # │       hysteresis spans 2,175 ticks.
 # │ How: WCET, deadline, and tick from the aisle scenario; cluster clocks and
 # │      the thermal model are scenario inputs for the rejected design.
@@ -976,6 +1019,7 @@ class RejectedPlacementThrottle:
     tick = AISLE.t_tick  # category: chosen
     wcet = AISLE.enforcer_wcet  # category: chosen (declared, not measured)
     deadline = AISLE.enforcer_deadline  # category: chosen
+    b_plus_i = PlacementMachine.b_plus_i  # category: illustrative (Ch4's blocking + interference, @eq-nervous-response-budget)
     f_nom = 1.20 * ureg.gigahertz  # scenario assumption; category: illustrative (shared-die cluster)
     f_throt = 600 * ureg.megahertz  # scenario assumption; category: illustrative (governor halves the clock)
     tau_th = 8.0 * second  # scenario assumption; category: illustrative
@@ -992,8 +1036,10 @@ class RejectedPlacementThrottle:
     n_cycles = (wcet * f_nom).to("dimensionless").magnitude  # cluster sized to meet the declared WCET
     t_exec = (n_cycles / f_nom).to(microsecond)
     t_exec_throt = (n_cycles / f_throt).to(microsecond)
-    slack = (deadline - t_exec).to(microsecond)
-    overrun = (t_exec_throt - deadline).to(microsecond)
+    t_resp = (t_exec + b_plus_i).to(microsecond)  # full response bound, nominal clock
+    t_resp_throt = (t_exec_throt + b_plus_i).to(microsecond)  # full response bound, throttled clock
+    slack = (deadline - t_resp).to(microsecond)
+    overrun = (t_resp_throt - deadline).to(microsecond)
     overrun_ratio = (overrun / deadline).to("dimensionless").magnitude
     t_target = t_ambient + p_base * theta_ja  # °C, baseline equilibrium
     t_rise_load = p_load * theta_ja  # K, steady-state rise under continuous inference
@@ -1010,9 +1056,15 @@ class RejectedPlacementThrottle:
         abs(t_exec.magnitude - 250.0) < 1e-9 and abs(t_exec_throt.magnitude - 500.0) < 1e-9,
         "Nominal 250 µs and throttled 500 µs.",
     )
-    check(t_exec < deadline < t_exec_throt < tick, "The nominal tick meets the deadline; the throttled tick misses it inside the 1 ms period.")
+    check(
+        t_resp < deadline < t_resp_throt < tick, "The nominal response meets the deadline; the throttled response misses it inside the 1 ms period."
+    )
+    check(
+        abs(slack.magnitude - 60.0) < 1e-9 and abs(overrun.magnitude - 190.0) < 1e-9,
+        "Nominal 340 µs leaves 60 µs; throttled 590 µs overruns by 190 µs.",
+    )
     check(t_exec_throt > wcet, "The throttled tick exceeds the declared WCET, the falsification threshold.")
-    check(abs(overrun_ratio - 0.25) < 1e-9, "The throttled tick overruns the 400 µs deadline by 25%.")
+    check(abs(overrun_ratio - 0.475) < 1e-9, "The throttled response overruns the 400 µs deadline by 47.5%.")
     check(abs(t_target - 53.0) < 1e-9, "Baseline equilibrium 45 °C + 4.0 W x 2.0 K/W = 53 °C.")
     check(abs(t_steady_load - 97.0) < 1e-9 and t_steady_load > t_start, "26 W x 2.0 K/W = 52 K over 45 °C is 97 °C, above the 95 °C trip.")
     check(abs(t_recov.magnitude - 2.18) < 5e-3, "Recovery from 95 to 85 °C takes about 2.18 s.")
@@ -1033,7 +1085,10 @@ class RejectedPlacementThrottle:
     t_exec_throt_str = fmt_latency(t_exec_throt, unit=microsecond, precision=0)
     slack_str = fmt_latency(slack, unit=microsecond, precision=0)
     overrun_str = fmt_latency(overrun, unit=microsecond, precision=0)
-    overrun_pct_str = fmt_percent(overrun_ratio, precision=0)
+    overrun_pct_str = fmt_percent(overrun_ratio, precision=1)
+    b_plus_i_str = fmt_latency(b_plus_i, unit=microsecond, precision=0)
+    t_resp_str = fmt_latency(t_resp, unit=microsecond, precision=0)
+    t_resp_throt_str = fmt_latency(t_resp_throt, unit=microsecond, precision=0)
     t_recov_str = fmt_latency(t_recov, unit=second, precision=2)
     t_trip_str = fmt_latency(t_trip, unit=second, precision=1)
     c_th_str = fmt(c_th, precision=0)
@@ -1075,9 +1130,9 @@ where $T_{j,\text{start}}$ is the junction temperature when throttling begins, $
 * $T_{\text{amb}} =$ `{python} RejectedPlacementThrottle.t_ambient_str`$\,^{\circ}\text{C}$, $\theta_{\text{JA}} =$ `{python} RejectedPlacementThrottle.theta_ja_str` K/W, and $\tau_{\text{th}} =$ `{python} RejectedPlacementThrottle.tau_th_str` s (Illustrative; conduction-cooled bay).
 * $P_{\text{base}} =$ `{python} RejectedPlacementThrottle.p_base_str` W for the permission loop with idle and memory power, and $P_{\text{load}} =$ `{python} RejectedPlacementThrottle.p_load_str` W with continuous proposal inference (Illustrative).
 * $T_{\text{trip}} =$ `{python} RejectedPlacementThrottle.t_start_str`$\,^{\circ}\text{C}$ and $T_{\text{clear}} =$ `{python} RejectedPlacementThrottle.t_clear_str`$\,^{\circ}\text{C}$ (Illustrative governor thresholds).
-* $f_{\text{nom}} =$ `{python} RejectedPlacementThrottle.f_nom_str`, halved to $f_{\text{throt}} =$ `{python} RejectedPlacementThrottle.f_throt_str` (Illustrative); the tick is sized to $C_{\text{wcet}} =$ `{python} RejectedPlacementThrottle.wcet_str` at $f_{\text{nom}}$ inside the `{python} RejectedPlacementThrottle.deadline_str` deadline and the `{python} RejectedPlacementThrottle.tick_str` tick (Chosen).
+* $f_{\text{nom}} =$ `{python} RejectedPlacementThrottle.f_nom_str`, halved to $f_{\text{throt}} =$ `{python} RejectedPlacementThrottle.f_throt_str` (Illustrative); the tick is sized to $C_{\text{wcet}} =$ `{python} RejectedPlacementThrottle.wcet_str` at $f_{\text{nom}}$ inside the `{python} RejectedPlacementThrottle.deadline_str` deadline and the `{python} RejectedPlacementThrottle.tick_str` tick (Chosen), with `{python} RejectedPlacementThrottle.b_plus_i_str` of blocking and interference charged as in @eq-nervous-response-budget (Illustrative).
 
-**Math**: The steady states are $T_{j,\text{target}} =$ `{python} RejectedPlacementThrottle.t_ambient_str` $+$ `{python} RejectedPlacementThrottle.p_base_str` $\times$ `{python} RejectedPlacementThrottle.theta_ja_str` $=$ `{python} RejectedPlacementThrottle.t_target_str`$\,^{\circ}\text{C}$ and $T_{\text{load}} =$ `{python} RejectedPlacementThrottle.t_ambient_str` $+$ `{python} RejectedPlacementThrottle.p_load_str` $\times$ `{python} RejectedPlacementThrottle.theta_ja_str` $=$ `{python} RejectedPlacementThrottle.t_steady_load_str`$\,^{\circ}\text{C}$, above the trip. Rising from the baseline, the junction trips after $\tau_{\text{th}} \ln[(T_{\text{load}} - T_{j,\text{target}})/(T_{\text{load}} - T_{\text{trip}})] =$ `{python} RejectedPlacementThrottle.tau_th_str` $\ln[($ `{python} RejectedPlacementThrottle.t_steady_load_str` $-$ `{python} RejectedPlacementThrottle.t_target_str` $)/($ `{python} RejectedPlacementThrottle.t_steady_load_str` $-$ `{python} RejectedPlacementThrottle.t_start_str` $)] =$ `{python} RejectedPlacementThrottle.t_trip_str`. The tick needs $N = C_{\text{wcet}} f_{\text{nom}} =$ `{python} RejectedPlacementThrottle.n_cycles_str` cycles, which at `{python} RejectedPlacementThrottle.f_throt_str` take `{python} RejectedPlacementThrottle.t_exec_throt_str`, `{python} RejectedPlacementThrottle.overrun_str` past the deadline. By @eq-placement-cooling-recovery the clock returns after $t_{\text{recov}} =$ `{python} RejectedPlacementThrottle.tau_th_str` $\ln[($ `{python} RejectedPlacementThrottle.t_start_str` $-$ `{python} RejectedPlacementThrottle.t_target_str` $)/($ `{python} RejectedPlacementThrottle.t_clear_str` $-$ `{python} RejectedPlacementThrottle.t_target_str` $)] =$ `{python} RejectedPlacementThrottle.t_recov_str`, which spans `{python} RejectedPlacementThrottle.ticks_exposed_str` ticks of `{python} RejectedPlacementThrottle.tick_str`.
+**Math**: The steady states are $T_{j,\text{target}} =$ `{python} RejectedPlacementThrottle.t_ambient_str` $+$ `{python} RejectedPlacementThrottle.p_base_str` $\times$ `{python} RejectedPlacementThrottle.theta_ja_str` $=$ `{python} RejectedPlacementThrottle.t_target_str`$\,^{\circ}\text{C}$ and $T_{\text{load}} =$ `{python} RejectedPlacementThrottle.t_ambient_str` $+$ `{python} RejectedPlacementThrottle.p_load_str` $\times$ `{python} RejectedPlacementThrottle.theta_ja_str` $=$ `{python} RejectedPlacementThrottle.t_steady_load_str`$\,^{\circ}\text{C}$, above the trip. Rising from the baseline, the junction trips after $\tau_{\text{th}} \ln[(T_{\text{load}} - T_{j,\text{target}})/(T_{\text{load}} - T_{\text{trip}})] =$ `{python} RejectedPlacementThrottle.tau_th_str` $\ln[($ `{python} RejectedPlacementThrottle.t_steady_load_str` $-$ `{python} RejectedPlacementThrottle.t_target_str` $)/($ `{python} RejectedPlacementThrottle.t_steady_load_str` $-$ `{python} RejectedPlacementThrottle.t_start_str` $)] =$ `{python} RejectedPlacementThrottle.t_trip_str`. The tick needs $N = C_{\text{wcet}} f_{\text{nom}} =$ `{python} RejectedPlacementThrottle.n_cycles_str` cycles, which at `{python} RejectedPlacementThrottle.f_throt_str` take `{python} RejectedPlacementThrottle.t_exec_throt_str`. With blocking and interference the response grows from `{python} RejectedPlacementThrottle.t_resp_str` to `{python} RejectedPlacementThrottle.t_resp_throt_str`, `{python} RejectedPlacementThrottle.overrun_str` past the deadline. By @eq-placement-cooling-recovery the clock returns after $t_{\text{recov}} =$ `{python} RejectedPlacementThrottle.tau_th_str` $\ln[($ `{python} RejectedPlacementThrottle.t_start_str` $-$ `{python} RejectedPlacementThrottle.t_target_str` $)/($ `{python} RejectedPlacementThrottle.t_clear_str` $-$ `{python} RejectedPlacementThrottle.t_target_str` $)] =$ `{python} RejectedPlacementThrottle.t_recov_str`, which spans `{python} RejectedPlacementThrottle.ticks_exposed_str` ticks of `{python} RejectedPlacementThrottle.tick_str`.
 
 **Result**: After about `{python} RejectedPlacementThrottle.t_trip_str` of continuous inference, every tick for the next `{python} RejectedPlacementThrottle.t_recov_str` overruns its deadline by `{python} RejectedPlacementThrottle.overrun_pct_str` percent, whether or not the proposer is still busy.
 
@@ -1087,7 +1142,7 @@ where $T_{j,\text{start}}$ is the junction temperature when throttling begins, $
 
 The recovery time is a lower bound: a chassis warmed by a long shift raises the baseline the junction relaxes toward, and the slow poles then stretch the recovery. A shared-die design would need a separately timed fallback active for every one of the exposed ticks. @Fig-13-thermal-hysteresis draws both halves of that result on their own time axes: the seconds-long cooldown and the microsecond overrun it holds in place.
 
-::: {#fig-13-thermal-hysteresis fig-env="figure" fig-pos="t" fig-cap="**A cooldown that outlasts the load**: Left, the junction relaxes from the `{python} RejectedPlacementThrottle.t_start_str`$\,^{\circ}\text{C}$ trip threshold toward its `{python} RejectedPlacementThrottle.t_target_str`$\,^{\circ}\text{C}$ baseline along @eq-placement-cooling-recovery, falling fastest at the moment the load stops and flattening afterward; the clock stays halved until the curve crosses `{python} RejectedPlacementThrottle.t_clear_str`$\,^{\circ}\text{C}$ at `{python} RejectedPlacementThrottle.t_recov_str`. Right, one tick drawn to scale: the same work that fits the deadline at `{python} RejectedPlacementThrottle.f_nom_str` overruns it by `{python} RejectedPlacementThrottle.overrun_str` at `{python} RejectedPlacementThrottle.f_throt_str`, on every one of the `{python} RejectedPlacementThrottle.ticks_exposed_str` ticks inside the cooldown. The scenario is stipulated, not measured." fig-alt="Two panels. Left: junction temperature versus time in seconds, an exponential cooling curve starting at 95 degrees Celsius at time zero, steepest at the start and flattening toward a 53 degree baseline, with dashed horizontal lines at 95 and 85 degrees; the interval until the curve crosses 85 degrees at 2.18 seconds is shaded and labeled 600 megahertz. Right: a horizontal time axis from 0 to 1,000 microseconds with two bars; the nominal bar at 1.2 gigahertz ends at 250 microseconds, and the throttled bar at 600 megahertz runs to 500 microseconds, its last 100 microseconds past a vertical deadline line at 400 microseconds."}
+::: {#fig-13-thermal-hysteresis fig-env="figure" fig-pos="t" fig-cap="**A cooldown that outlasts the load**: Left, the junction relaxes from the `{python} RejectedPlacementThrottle.t_start_str`$\,^{\circ}\text{C}$ trip threshold toward its `{python} RejectedPlacementThrottle.t_target_str`$\,^{\circ}\text{C}$ baseline along @eq-placement-cooling-recovery, falling fastest at the moment the load stops and flattening afterward; the clock stays halved until the curve crosses `{python} RejectedPlacementThrottle.t_clear_str`$\,^{\circ}\text{C}$ at `{python} RejectedPlacementThrottle.t_recov_str`. Right, one tick drawn to scale, with `{python} RejectedPlacementThrottle.b_plus_i_str` of blocking and interference after the execution: the same work that meets the deadline at `{python} RejectedPlacementThrottle.f_nom_str` overruns it by `{python} RejectedPlacementThrottle.overrun_str` at `{python} RejectedPlacementThrottle.f_throt_str`, on every one of the `{python} RejectedPlacementThrottle.ticks_exposed_str` ticks inside the cooldown. The scenario is stipulated, not measured." fig-alt="Two panels. Left: junction temperature versus time in seconds, an exponential cooling curve starting at 95 degrees Celsius at time zero, steepest at the start and flattening toward a 53 degree baseline, with dashed horizontal lines at 95 and 85 degrees; the interval until the curve crosses 85 degrees at 2.18 seconds is shaded and labeled 600 megahertz. Right: a horizontal time axis from 0 to 1,000 microseconds with two bars, each an execution segment followed by a hatched 90 microsecond block for blocking and interference. The nominal bar at 1.2 gigahertz executes for 250 microseconds and ends at 340, 60 microseconds before a vertical deadline line at 400; the throttled bar at 600 megahertz executes for 500 microseconds and ends at 590, its last 190 microseconds past the deadline."}
 
 ```{python}
 #| echo: false
@@ -1101,7 +1156,8 @@ The recovery time is a lower bound: a chassis warmed by a long shift raises the 
 # │ Goal: Show the cooldown's first-order shape and the overrun it sustains.
 # │ Show: left, T_j(t) = T_target + (T_trip - T_target) e^(-t/tau_th) from the
 # │       trip to past the clear crossing; right, the nominal and throttled
-# │       tick on a linear 0-1 ms axis with the deadline.
+# │       tick on a linear 0-1 ms axis with the deadline, each execution
+# │       followed by Ch4's blocking and interference (full response budget).
 # │ How: every value from RejectedPlacementThrottle (eq-placement-cooling-recovery).
 # └─────────────────────────────────────────────────────────────────────────────
 import numpy as np
@@ -1121,6 +1177,7 @@ t_recov = R.t_recov.to(second).magnitude
 T0, Tc, Tb = R.t_start, R.t_clear, R.t_target
 nom = R.t_exec.to(microsecond).magnitude
 thr = R.t_exec_throt.to(microsecond).magnitude
+bi = R.b_plus_i.to(microsecond).magnitude
 dl = R.deadline.to(microsecond).magnitude
 tick = R.tick.to(microsecond).magnitude
 
@@ -1165,16 +1222,19 @@ ax1.set_ylabel("Junction temperature (°C)")
 
 rows = [(1, nom, f"nominal, {R.f_nom_str}"), (0, thr, f"throttled, {R.f_throt_str}")]
 for y, dur, lab in rows:
-    inside = min(dur, dl)
-    ax2.barh(y, inside, left=0, height=0.5, color=C["BlueL"], edgecolor=C["BlueLine"], lw=1.0, zorder=3)
-    if dur > dl:
-        ax2.barh(y, dur - dl, left=dl, height=0.5, color=C["RedL"], edgecolor=C["RedLine"], lw=1.0, zorder=3)
+    # (start, end, hatch): execution, then blocking + interference; red past the deadline
+    for a, b, hatch in ((0.0, dur, None), (dur, dur + bi, "////")):
+        for lo, hi, late in ((a, min(b, dl), False), (max(a, dl), b, True)):
+            if hi > lo:
+                fill, edge = (C["RedL"], C["RedLine"]) if late else ((C["BlueL"], C["BlueLine"]) if hatch is None else ("white", C["BlueLine"]))
+                ax2.barh(y, hi - lo, left=lo, height=0.5, color=fill, edgecolor=edge, hatch=hatch, lw=1.0, zorder=3)
     ax2.text(8, y + 0.36, lab, ha="left", va="bottom", fontsize=9, color=C["primary"])
 ax2.text(nom / 2, 1, f"{nom:.0f} µs", ha="center", va="center", fontsize=9, color=C["primary"], zorder=4)
-ax2.annotate("", xy=(dl, 1), xytext=(nom, 1), arrowprops=dict(arrowstyle="<->", color=C["GreenLine"], lw=0.9), zorder=4)
-ax2.text((nom + dl) / 2, 1 - 0.08, f"slack\n{R.slack_str}", ha="center", va="top", fontsize=9, color=C["GreenLine"])
+ax2.text(nom + bi / 2, 1 + 0.36, "B + I", ha="center", va="bottom", fontsize=8.5, color=C["BlueLine"])
+ax2.annotate("", xy=(dl, 1), xytext=(nom + bi, 1), arrowprops=dict(arrowstyle="<->", color=C["GreenLine"], lw=0.9), zorder=4)
+ax2.text((nom + bi + dl) / 2, 1 - 0.3, f"slack\n{R.slack_str}", ha="center", va="top", fontsize=9, color=C["GreenLine"])
 ax2.text(dl / 2, 0, f"{dl:.0f} µs to the deadline", ha="center", va="center", fontsize=9, color=C["primary"], zorder=4)
-ax2.text(thr + 12, 0, f"+{R.overrun_str} overrun", ha="left", va="center", fontsize=9, color=C["RedLine"], zorder=4)
+ax2.text(thr + bi + 12, 0, f"+{R.overrun_str} overrun", ha="left", va="center", fontsize=9, color=C["RedLine"], zorder=4)
 ax2.axvline(dl, color=C["RedLine"], lw=1.2, zorder=5)
 ax2.text(dl + 10, 1.62, f"deadline, {R.deadline_str}", ha="left", va="bottom", fontsize=9, color=C["RedLine"])
 ax2.axvline(tick, color=C["grid"], lw=1.2, ls=(0, (4, 3)), zorder=2)
@@ -1578,7 +1638,10 @@ class PlacementSeparationBudget:
     check(abs(renewal_to_onset.magnitude - 82.0) < 1e-9, "Canon: renewal-to-onset bound is 82 ms.")
     check((trace_h, trace_min, trace_sec) == (2, 46, 40), "10^7 ticks at 1 ms span 2 h 46 min 40 s.")
     check(cold_max < wcet, "The cold trace stays under the declared WCET.")
-    check(warm_p99 > wcet and warm_p999 < deadline < warm_max, "The loaded trace breaks the declared WCET and its maximum crosses the deadline.")
+    check(
+        warm_p99 > wcet and warm_p99 + PlacementMachine.b_plus_i > deadline,
+        "The loaded P99 breaks the declared WCET and, with Ch4's blocking and interference, the deadline.",
+    )
 
     # ┌── 4. OUTPUT ─────────────────────────────────────────────────────────
     wcet_str = fmt_latency(wcet, unit=microsecond, precision=0)
@@ -1616,7 +1679,7 @@ where $t_{\text{iso}}$ is the time the same path would take with nothing else co
 
 [^fn-math-wcet-anomalies]: **Microarchitectural Timing Anomalies**\index{Timing anomalies!worst-case execution time}\index{Worst-case execution time!timing anomalies}: A local speedup, such as a cache hit where a miss was expected, can reorder later resource use and lengthen the whole execution [@lundqvist1999timing]. The effect was first shown on dynamically scheduled processors, but in-order pipelines with caches or shared resources can exhibit it too [@wilhelm2008worst], so assuming the local worst case at every step does not always yield the global worst case. Measurements alone and an in-order core alone therefore do not establish a hard bound.
 
-Any overrun, however small, invalidates the declared timing premise. It need not cause a collision on that tick; it requires revisiting every stopping or renewal margin that relied on the violated bound before continuing to claim that guarantee. The deadline comparisons in this chapter charge the tick alone. The response bound of @eq-nervous-response-budget also adds blocking and interference from the microcontroller's own higher-priority work, and on a shared die $I_{\text{shared}}$ comes on top of both, so the backlog and throttle counts at which the rejected examples still meet their deadline are upper limits.
+Any overrun, however small, invalidates the declared timing premise. It need not cause a collision on that tick; it requires revisiting every stopping or renewal margin that relied on the violated bound before continuing to claim that guarantee. The deadline comparisons in this chapter charge the full response bound of @eq-nervous-response-budget, $t_{\text{enf}} + B + I \le D_{\text{enf}}$, with $I_{\text{shared}}$ inside $t_{\text{enf}}$ on top of the blocking $B$ and interference $I$ from the microcontroller's own work. On the declared bound, shared hardware may add at most `{python} PlacementMachine.shared_allowance_str` before the deadline falls, and the backlog, stall-share, and throttle comparisons of the rejected examples are computed against that full budget.
 
 The distance at stake in one tick is small, which makes the bound easy to undervalue. The numerical comparison uses a subtotal that excludes the dispatch-to-admission interval $\Delta_{\text{da}}$, which is allocated, not yet measured; it does not establish a qualified operating speed. Under its stated premises, the subtotal in @tbl-enforcement-stopping-budget requires `{python} PlacementSeparationBudget.budget_str` at the `{python} PlacementSeparationBudget.v_aisle_str` aisle speed, `{python} PlacementSeparationBudget.spare_str` inside the `{python} PlacementSeparationBudget.d_clear_str` clear distance, and one missed tick adds only $v\,T_{\text{tick}} =$ `{python} PlacementSeparationBudget.missed_tick_str`. The displayed spare must still absorb travel during the `{python} PlacementTransport.delta_da_str` allocated to $\Delta_{\text{da}}$ in \ref{nbk-placement-transport-budget}, leaving `{python} PlacementTransport.reserve_d_str` of reserve, and placement must qualify that allocation independently of the per-tick bound. Within the local response, the ledger counts one $T_{\text{tick}}$; contention without a bound can instead create a stall of unknown length.
 
@@ -1654,7 +1717,7 @@ Coupling mechanisms compound across physical, electrical, and logical domains. T
 
 On the rejected shared-die placement, the pair the matrix exists to catch is specific. A person steps out at a rack end, and the permission path takes its refusal branch toward the stop rung, a cold path through uncached code. At the same instant the application processor, having flagged the same anomaly, starts a diagnostic memory dump over the shared direct memory access fabric. A test suite that exercises refusal and diagnostic logging separately passes both and never measures the pair, because the two subsystems contend for one memory controller only when they run together.
 
-Consider an illustrative $10^7$-tick stress trace for the rejected placement, the permission path on a real-time cluster of the application SoC. At one tick per `{python} PlacementSeparationBudget.tick_str`, the trace spans `{python} PlacementSeparationBudget.trace_s_str`, or `{python} PlacementSeparationBudget.trace_h_str` h `{python} PlacementSeparationBudget.trace_min_str` min `{python} PlacementSeparationBudget.trace_sec_str` s, before reset or setup time. The cold trace has $P_{50}=$ `{python} PlacementSeparationBudget.cold_p50_str`, $P_{99}=$ `{python} PlacementSeparationBudget.cold_p99_str`, and stipulated maximum `{python} PlacementSeparationBudget.cold_max_str`; the warm, loaded trace has $P_{50}=$ `{python} PlacementSeparationBudget.warm_p50_str`, $P_{99}=$ `{python} PlacementSeparationBudget.warm_p99_str`, $P_{99.9}=$ `{python} PlacementSeparationBudget.warm_p999_str`, and stipulated maximum `{python} PlacementSeparationBudget.warm_max_str`. The loaded $P_{99}$ already exceeds the `{python} PlacementSeparationBudget.wcet_str` declared bound, and the maximum crosses the `{python} PlacementSeparationBudget.deadline_str` deadline, so such a trace would refute that placement. No trial is reported here.
+Consider an illustrative $10^7$-tick stress trace for the rejected placement, the permission path on a real-time cluster of the application SoC. At one tick per `{python} PlacementSeparationBudget.tick_str`, the trace spans `{python} PlacementSeparationBudget.trace_s_str`, or `{python} PlacementSeparationBudget.trace_h_str` h `{python} PlacementSeparationBudget.trace_min_str` min `{python} PlacementSeparationBudget.trace_sec_str` s, before reset or setup time. The cold trace has $P_{50}=$ `{python} PlacementSeparationBudget.cold_p50_str`, $P_{99}=$ `{python} PlacementSeparationBudget.cold_p99_str`, and stipulated maximum `{python} PlacementSeparationBudget.cold_max_str`; the warm, loaded trace has $P_{50}=$ `{python} PlacementSeparationBudget.warm_p50_str`, $P_{99}=$ `{python} PlacementSeparationBudget.warm_p99_str`, $P_{99.9}=$ `{python} PlacementSeparationBudget.warm_p999_str`, and stipulated maximum `{python} PlacementSeparationBudget.warm_max_str`. The loaded $P_{99}$ already exceeds the `{python} PlacementSeparationBudget.wcet_str` declared bound, and with the `{python} PlacementMachine.b_plus_i_str` of blocking and interference it also exceeds the `{python} PlacementSeparationBudget.deadline_str` deadline, so such a trace would refute that placement. No trial is reported here.
 
 Had the trace passed, its ticks would show only that observed interference stayed below the threshold in the tested states. A report gives the latency distribution, observed maximum, sample count, duration, and unexercised conditions, including supply degradation, electromagnetic interference, and aging.[^fn-transistor-aging-guardband]
 
@@ -1666,7 +1729,7 @@ A failed interference test returns the allocation to the relevant remedy: bound 
 
 A placement claim is only as strong as the test that could have refuted it. Check that you can state that test precisely:
 
-- [ ] **Threshold arithmetic**: A loaded campaign on a shared-die candidate records one cycle of `{python} PlacementCheckpointEstimates.t_loaded_check_str`. By how much does it exceed the declared `{python} PlacementMachine.wcet_str`, how much of the `{python} PlacementMachine.deadline_str` deadline does it leave, and which claim does it refute?
+- [ ] **Threshold arithmetic**: A loaded campaign on a shared-die candidate records one cycle of `{python} PlacementCheckpointEstimates.t_loaded_check_str`. By how much does it exceed the declared `{python} PlacementMachine.wcet_str`, how much of the `{python} PlacementMachine.deadline_str` deadline does it leave once blocking and interference are charged, and which claim does it refute?
 - [ ] **Isolation and interference**: Can you explain why a loaded cycle below the declared worst-case execution time does not show that the shared hardware added no interference?
 - [ ] **Method follows placement**: Can you explain why static analysis can bound the tick on the discrete microcontroller but not on a commercial multicore die?
 - [ ] **Paired loads**: Can you explain why the refusal branch must be timed while the application processor dumps diagnostics, rather than in separate tests?
@@ -1847,7 +1910,7 @@ A separate core can still stop when a host-controlled reset asserts or slow when
 
 **Fallacy**: *Low average memory bus utilization guarantees bounded read latency for real-time safety tasks.*\index{Memory bandwidth!worst-case execution time}\index{Tightly coupled memory}
 
-Average utilization leaves the arrival order and longest queue unspecified. In the illustrative timing counterexample, a `{python} PlacementFallacyMargins.read_tail_str` read leaves `{python} PlacementFallacyMargins.after_read_str` before the `{python} PlacementFallacyMargins.deadline_str` deadline, less than the `{python} PlacementFallacyMargins.compute_after_sense_str` needed for evaluation and staging. A service bound, qualified bypass, or independent local memory addresses that failure; a low average does not.
+Average utilization leaves the arrival order and longest queue unspecified. In the illustrative timing counterexample, a `{python} PlacementFallacyMargins.read_tail_str` read leaves `{python} PlacementFallacyMargins.after_read_str` before the `{python} PlacementFallacyMargins.deadline_str` deadline, less than the `{python} PlacementFallacyMargins.compute_after_sense_str` needed for evaluation and staging even before blocking and interference are charged. A service bound, qualified bypass, or independent local memory addresses that failure; a low average does not.
 
 :::
 
@@ -2034,10 +2097,10 @@ class PlacementProblems:
     rate_hr_p10 = (3 / n_ticks_p10) * (hour / PM.tick).to("dimensionless").magnitude
 
     # ┌── 3. GUARD ──────────────────────────────────────────────────────────
-    check((ns_p1a, nw_p1a, nd_p1a) == (18, 73, 144), "P1: nine conflicts leave 18, 73, 144 backlogs.")
-    check((ns_p1b, nw_p1b, nd_p1b) == (10, 42, 83), "P1: half bandwidth leaves 10, 42, 83 backlogs.")
+    check((ns_p1a, nw_p1a, nd_p1a) == (18, 73, 102), "P1: nine conflicts leave 18, 73, 102 backlogs (deadline under the full response budget).")
+    check((ns_p1b, nw_p1b, nd_p1b) == (10, 42, 58), "P1: half bandwidth leaves 10, 42, 58 backlogs (deadline under the full response budget).")
     check(s_wcet_p2 < PlacementInterference.s_mshr < s_dl_p2, "P2: 21x crosses the WCET but not the deadline at 5 percent.")
-    check(PM.wcet < t_21_p2 < PM.deadline, "P2: the tick lands between the WCET and the deadline.")
+    check(PM.wcet < t_21_p2 < PM.exec_ceiling, "P2: the tick lands between the WCET and the deadline less blocking and interference.")
     check(abs(v_ind_p3.magnitude - 45.0) < 1e-6 and abs(v_res_p3.magnitude - 48.0) < 1e-6, "P3: 45 mV inductive, 48 mV resistive.")
     check(stretch_p3 < DR.delay_expansion_pct, "P3: the slower step stretches gate delay less.")
     check(ticks_p4 == 1014 and theta_max_p4 < TH.theta_ja, "P4: 1,014 ticks at 90 °C; the scenario's resistance exceeds the no-trip limit.")
@@ -2077,8 +2140,8 @@ class PlacementProblems:
 
 Each problem states its givens, which come from the running machine's registry values, the chapter's own calculations, or the problem itself. A given marked illustrative is an assumption for the exercise, not a measurement. The tag names the kind of work, and the parenthesis names the learning objective the problem assesses.
 
-1. **[Compute]** (Contention mechanisms) Return to notebook \ref{nbk-placement-loaded-read} on the rejected shared die. Using @eq-placement-dram-queuing, recompute the number of backlogs the sense allowance, the declared worst-case execution time, and the deadline each absorb if row conflicts per backlog rise from `{python} PlacementLoadedRead.bank_switches_str` to `{python} PlacementProblems.conflicts_p1_str` (illustrative). Repeat with the original conflicts but half the `{python} PlacementLoadedRead.bandwidth_str` GB/s peak bandwidth. Which change costs more, and what does the comparison say about whether a controller's timing parameters or its bandwidth deserve the placement evidence?
-2. **[Compute]** (Contention mechanisms) A profile of the enforcer on candidate (b) attributes `{python} PlacementProblems.f_stall_p2_str` percent of its `{python} PlacementMachine.unloaded_str` unloaded tick to shared-cache misses (illustrative). Using @eq-placement-stall-share, find the smallest interference slowdown $S$ that pushes the loaded tick past the declared `{python} PlacementMachine.wcet_str`, and the smallest that pushes it past the `{python} PlacementMachine.deadline_str` deadline. Compute the loaded tick at the measured MSHR-class `{python} PlacementInterference.s_mshr_mult_str` and at the writeback-buffer attack's `{python} PlacementInterference.s_wb_mult_str`. Which claims survive each, and what must a qualification of candidate (b) supply before either number can be trusted?
+1. **[Compute]** (Contention mechanisms) Return to notebook \ref{nbk-placement-loaded-read} on the rejected shared die. Using @eq-placement-dram-queuing, recompute the number of backlogs the sense allowance, the declared worst-case execution time, and the deadline (less blocking and interference) each absorb if row conflicts per backlog rise from `{python} PlacementLoadedRead.bank_switches_str` to `{python} PlacementProblems.conflicts_p1_str` (illustrative). Repeat with the original conflicts but half the `{python} PlacementLoadedRead.bandwidth_str` GB/s peak bandwidth. Which change costs more, and what does the comparison say about whether a controller's timing parameters or its bandwidth deserve the placement evidence?
+2. **[Compute]** (Contention mechanisms) A profile of the enforcer on candidate (b) attributes `{python} PlacementProblems.f_stall_p2_str` percent of its `{python} PlacementMachine.unloaded_str` unloaded tick to shared-cache misses (illustrative). Using @eq-placement-stall-share, find the smallest interference slowdown $S$ that pushes the loaded tick past the declared `{python} PlacementMachine.wcet_str`, and the smallest that pushes it past the `{python} PlacementMachine.deadline_str` deadline once blocking and interference take their `{python} PlacementMachine.b_plus_i_str`. Compute the loaded tick at the measured MSHR-class `{python} PlacementInterference.s_mshr_mult_str` and at the writeback-buffer attack's `{python} PlacementInterference.s_wb_mult_str`. Which claims survive each, and what must a qualification of candidate (b) supply before either number can be trusted?
 3. **[Compute]** (Power and reset coupling) Recompute the droop of @eq-placement-droop and the gate-delay stretch of the alpha-power model for the chapter's package parameters when the `{python} InductivePDNVoltageDroop.delta_i_str` A current step rises in `{python} PlacementProblems.t_rise_p3_str` ns (illustrative) instead of `{python} InductivePDNVoltageDroop.t_rise_str` ns. Explain why the resistive term does not change, and state which quantity a rail qualification must therefore bound besides the slew rate.
 4. **[Compute]** (Thermal coupling) Using the scenario of notebook \ref{nbk-placement-thermal-hangover}, compute the throttled interval and the number of exposed ticks if the governor restored the clock at `{python} PlacementProblems.t_clear_p4_str`$\,^{\circ}\text{C}$ (illustrative) instead of `{python} RejectedPlacementThrottle.t_clear_str`$\,^{\circ}\text{C}$. Then find the largest junction-to-ambient resistance for which continuous inference at `{python} RejectedPlacementThrottle.p_load_str` W never reaches the trip threshold. Which change would you ask for, and what does a higher clearance threshold cost the governor?
 5. **[Compute]** (Watchdog sizing) The stress campaign on the discrete microcontroller records a shortest completion $c_{\min} =$ `{python} PlacementProblems.c_min_p5_str` and an inter-tick jitter bound $J_{\text{phase}} =$ `{python} PlacementProblems.j_phase_p5_str` (both illustrative), with $c_{\max}$ the declared `{python} PlacementMachine.wcet_str`. Using @eq-placement-watchdog-window, compute the feed interval's range. Would the window's lower bound catch a clock fault that doubles the core's speed and its tick timer together? The upper trip stays at the `{python} PlacementMachine.self_watchdog_str` self-watchdog timeout: how far does the base travel at `{python} PlacementTransport.v_aisle_str` m/s before a dead enforcer is detected, and why must that travel be charged to a separately qualified fault response?
