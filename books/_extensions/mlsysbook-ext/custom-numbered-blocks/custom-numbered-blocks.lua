@@ -299,8 +299,19 @@ local function Meta_findChapterNumber(meta)
   else -- not a book
     fbx.in_part_principles = false
     fbx.xreffile ="._"..processedfile.."_xref.json"
-    fbx.chapno = ""
-    fbx.unnumbered = true
+    -- The HTML editions build as `type: website`, which carries no book
+    -- metadata, so callouts were numbered from a constant prefix (0.x or 1.x
+    -- in every chapter). Chapter files are named NN_slug, and NN is the
+    -- chapter's number in the PDF, so take the prefix from it. (2026-09-29)
+    local nn = pandoc.path.filename(processedfile):match("^(%d%d)_")
+    if nn then
+      fbx.chapno = tostring(tonumber(nn))
+      fbx.unnumbered = false
+      fbx.site_chapno = true
+    else
+      fbx.chapno = ""
+      fbx.unnumbered = true
+    end
   end
 end
 
@@ -589,7 +600,7 @@ local function Pandoc_prefix_count(doc)
   -- do evt later: non numeric chapernumbers
   local secno = 0
   local prefix = "0"
-  if fbx.ishtmlbook then prefix = fbx.chapno end
+  if fbx.ishtmlbook or fbx.site_chapno then prefix = fbx.chapno end
   -- PDF: part-principles files have no H1 at start; use part index so we get 1.1, 1.2; 2.1, 2.2; etc.
   if ispdf and fbx.in_part_principles and fbx.chapno and fbx.chapno ~= "" then prefix = fbx.chapno end
 
@@ -609,7 +620,7 @@ local function Pandoc_prefix_count(doc)
   for i, blk in ipairs(doc.blocks) do
 --    print(prefix.."-"..i.." "..blk.t.."\n")
 
-    if blk.t=="Header" and not fbx.ishtmlbook then
+    if blk.t=="Header" and not fbx.ishtmlbook and not fbx.site_chapno then
       if (blk.level == 1) then -- increase prefix
          local header_text = str(blk.content):gsub("^%s+", ""):gsub("%s+$", "")
          local appendix_prefix = fbx.appendix_headers and fbx.appendix_headers[blk.identifier]
