@@ -128,31 +128,40 @@ Each budget becomes a limit established on the assembled machine under declared 
 #| warning: false
 #| message: false
 # ┌─────────────────────────────────────────────────────────────────────────────
-# │ THE PARCEL SORTER'S SENSE-TO-ACTUATION PROFILE (LEGO)
+# │ THE PICK STATION'S FRESHNESS DEADLINE AND AGE PROFILE (LEGO)
 # ├─────────────────────────────────────────────────────────────────────────────
-# │ Context: the opening and freshness-deadline paragraphs, the definition, and
-# │          \ref{nbk-body-freshness-deadline} in
-# │          @sec-body-measurement-freshness, @sec-body-latency-pipeline and
-# │          @tbl-02-latency-breakdown. (2026-09-29: the waterfall figure was
-# │          cut; @tbl-04-event-ledger carries the running machine's ledger.)
-# │ Goal:    Hold the illustrative stage profile in one place so the prose,
-# │          the table, and the caption cannot disagree.
-# │ Show:    20 ms deadline (24 mm at 1.2 m/s); stage P50 sum 35.0 ms, P99 sum
+# │ Context: the opening and freshness-deadline paragraphs, the definition,
+# │          \ref{nbk-body-freshness-deadline}, @tbl-02-latency-breakdown,
+# │          the freshness item of \ref{chk-body-bus-droop-regen}, and the
+# │          first problem of @sec-body-problems. (2026-09-29: the waterfall
+# │          figure was cut; @tbl-04-event-ledger carries the running
+# │          machine's ledger. 2026-09-30: re-anchored from an upstream parcel
+# │          sorter to the running machine's pick-station conveyor.)
+# │ Goal:    Hold the conveyor's deadline and the illustrative stage profile in
+# │          one place so the prose, the table, the notebook, the checkpoint,
+# │          and the problem cannot disagree.
+# │ Show:    0.20 m/s conveyor, 15 mm grasp tolerance less 3 mm initial error
+# │          = 12 mm, so a 60 ms deadline; stage P50 sum 35.0 ms, P99 sum
 # │          50.0 ms, max sum 80.7 ms; system P99 46.2 ms and P99.9 68.4 ms;
-# │          42 mm and 82.1 mm of parcel travel (3.4 times the tolerance).
-# │ How:     Stage sums; travel = v_max * age. Every stage value is
-# │          illustrative: a measured profile of the integrated machine
-# │          replaces it.
+# │          7 mm of mug travel at the median (5 mm inside the tolerance) and
+# │          13.7 mm at P99.9 (1.7 mm past it).
+# │ How:     Delta t_fresh = (r_tol - e_0) / v_conv from AISLE; stage sums;
+# │          travel = v_conv * age. Every stage value is illustrative: a
+# │          measured profile of the integrated machine replaces it.
 # └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import *
 from mlsysim.core.units import *
 from mlsysim.fmt import fmt, fmt_latency, fmt_length, fmt_velocity, fmt_frequency, check
 
-class ParcelLatencyProfile:
-    """Illustrative stage and end-to-end ages for the parcel-sorter picker."""
+AISLE = Embodied.Scenario.WarehouseAisle
+
+class GraspLatencyProfile:
+    """Freshness deadline for the conveyor mug and an illustrative capture-to-onset profile."""
 
     # ┌── 1. LOAD (Constants & Parameters) ─────────────────────────────────
-    e_max = 24.0 * millimeter  # category: illustrative (grasp tolerance)
-    v_max = 1.2 * meter / second  # category: illustrative (parcel speed)
+    v_conv = AISLE.v_conveyor  # category: illustrative (pick-station conveyor speed)
+    r_tol = AISLE.grasp_tolerance  # category: chosen (grasp tolerance)
+    e_0 = AISLE.grasp_initial_error  # category: illustrative (initial estimate error)
     # (name, P50, P99, max) in ms; category: illustrative (not a measured profile)
     stages = [
         ("1–2. Exposure and readout", 11.2, 16.6, 16.7),
@@ -166,48 +175,59 @@ class ParcelLatencyProfile:
     sys_p999 = 68.4 * millisecond  # category: illustrative (system-level tail)
 
     # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────
-    t_fresh = (e_max / v_max).to(millisecond)
+    e_max = (r_tol - e_0).to(millimeter)  # the tolerance the mug's motion may spend
+    t_fresh = (e_max / v_conv).to(millisecond)
+    t_backbone = stages[2][1] * millisecond
     sum_p50 = sum(s[1] for s in stages) * millisecond
     sum_p99 = sum(s[2] for s in stages) * millisecond
     sum_max = sum(s[3] for s in stages) * millisecond
-    travel_p50 = (v_max * sum_p50).to(millimeter)
-    travel_p999 = (v_max * sys_p999).to(millimeter)
-    excess_p50 = (travel_p50 - e_max).to(millimeter)
-    t_rest_p50 = sum_p50 - stages[2][1] * millisecond  # every stage but the backbone
-    f_loop = (1 / t_fresh).to(ureg.hertz)  # the loop rate whose period equals the deadline
-    tail_over_tol = (travel_p999 / e_max).to("dimensionless").magnitude  # tail travel against the tolerance
+    travel_p50 = (v_conv * sum_p50).to(millimeter)
+    travel_p999 = (v_conv * sys_p999).to(millimeter)
+    margin_p50 = (e_max - travel_p50).to(millimeter)
+    excess_p999 = (travel_p999 - e_max).to(millimeter)
+    t_rest_p50 = sum_p50 - t_backbone  # every stage but the backbone
+    f_backbone = (1 / t_backbone).to(ureg.hertz)  # the loop rate a backbone benchmark suggests
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
-    check(abs(t_fresh.magnitude - 20.0) < 1e-9, f"Freshness deadline drifted: {t_fresh}")
+    check(abs(v_conv.to(meter / second).magnitude - 0.20) < 1e-9, f"Unexpected conveyor speed: {v_conv}")
+    check(abs(r_tol.to(millimeter).magnitude - 15.0) < 1e-9, f"Unexpected grasp tolerance: {r_tol}")
+    check(abs(e_0.to(millimeter).magnitude - 3.0) < 1e-9, f"Unexpected initial error: {e_0}")
+    check(abs(t_fresh.magnitude - 60.0) < 1e-9, f"Conveyor freshness deadline must be 60 ms: {t_fresh}")
     check(abs(sum_p50.magnitude - 35.0) < 1e-9, f"P50 stage sum drifted: {sum_p50}")
     check(abs(sum_p99.magnitude - 50.0) < 1e-9, f"P99 stage sum drifted: {sum_p99}")
     check(abs(sum_max.magnitude - 80.7) < 1e-9, f"Max stage sum drifted: {sum_max}")
     check(sys_p99 < sum_p99, "The system P99 must differ from (here, sit below) the stage-P99 sum.")
     check(
-        abs(travel_p50.magnitude - 42.0) < 1e-9 and abs(excess_p50.magnitude - 18.0) < 1e-9,
-        "The freshness paragraph states 42 mm of travel, 18 mm past the tolerance.",
+        abs(travel_p50.magnitude - 7.0) < 1e-9 and abs(margin_p50.magnitude - 5.0) < 1e-9,
+        "The notebook states 7 mm of median travel, 5 mm inside the tolerance.",
     )
-    check(abs(travel_p999.magnitude - 82.08) < 1e-9, f"Tail travel drifted: {travel_p999}")
+    check(
+        abs(travel_p999.magnitude - 13.68) < 1e-9 and abs(excess_p999.magnitude - 1.68) < 1e-9,
+        f"Tail travel drifted: {travel_p999}",
+    )
     check(abs(t_rest_p50.magnitude - 16.5) < 1e-9, f"Non-backbone median share drifted: {t_rest_p50}")
-    check(abs(f_loop.magnitude - 50.0) < 1e-9, f"The opener's loop rate drifted: {f_loop}")
-    check(abs(tail_over_tol - 3.42) < 1e-9, f"Tail-to-tolerance ratio drifted: {tail_over_tol}")
-    check(stages[2][1] * millisecond < t_fresh < sum_p50, "The backbone alone must fit the deadline and the chain must not.")
+    check(
+        t_backbone < sum_p50 < sys_p99 < t_fresh < sys_p999,
+        "The backbone, the median chain, and the P99 fit the deadline; the P99.9 tail must not.",
+    )
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
+    v_conv_str = fmt_velocity(v_conv, unit=meter / second, precision=2)
+    r_tol_str = fmt_length(r_tol, unit=millimeter, precision=0)
+    e_0_str = fmt_length(e_0, unit=millimeter, precision=0)
+    e_max_str = fmt_length(e_max, unit=millimeter, precision=0)
     t_fresh_str = fmt_latency(t_fresh, unit=millisecond, precision=0)
     sum_p50_str = fmt_latency(sum_p50, unit=millisecond, precision=0)
     sum_p99_str = fmt_latency(sum_p99, unit=millisecond, precision=0)
     sys_p99_str = fmt_latency(sys_p99, unit=millisecond, precision=1)
     sys_p999_str = fmt_latency(sys_p999, unit=millisecond, precision=1)
-    t_backbone_str = fmt_latency(stages[2][1] * millisecond, unit=millisecond, precision=1)
+    t_backbone_str = fmt_latency(t_backbone, unit=millisecond, precision=1)
     t_rest_p50_str = fmt_latency(t_rest_p50, unit=millisecond, precision=1)
-    e_max_str = fmt_length(e_max, unit=millimeter, precision=0)
-    v_max_str = fmt_velocity(v_max, unit=meter / second, precision=1)
     travel_p50_mm_str = fmt_length(travel_p50, unit=millimeter, precision=0)
-    excess_p50_mm_str = fmt_length(excess_p50, unit=millimeter, precision=0)
-    f_loop_str = fmt_frequency(f_loop, unit=ureg.hertz, precision=0)
+    margin_p50_mm_str = fmt_length(margin_p50, unit=millimeter, precision=0)
     travel_p999_mm_str = fmt_length(travel_p999, unit=millimeter, precision=1)
-    tail_over_tol_str = fmt(tail_over_tol, precision=1)
+    excess_p999_mm_str = fmt_length(excess_p999, unit=millimeter, precision=1)
+    f_backbone_str = fmt_frequency(f_backbone, unit=ureg.hertz, precision=1)
     # @tbl-02-latency-breakdown cells: stage k (1-6) at P50, P99, and max, in ms;
     # integer-like values print without a dead decimal (house precision guard).
     s1_p50_str, s1_p99_str, s1_max_str = (fmt(x, precision=0 if float(x).is_integer() else 1) for x in stages[0][1:])
@@ -222,7 +242,7 @@ class ParcelLatencyProfile:
     sys_p99_num_str = fmt(sys_p99.magnitude, precision=0 if float(sys_p99.magnitude).is_integer() else 1)
 ```
 
-Software benchmarks in machine learning frequently report latency as isolated accelerator execution time (e.g., `{python} ParcelLatencyProfile.t_backbone_str` for a vision backbone on an edge neural processing unit, or NPU), creating the dangerous illusion of a responsive `{python} ParcelLatencyProfile.f_loop_str` control loop. In physical AI systems, however, that compute kernel is only one intermediate stage in an end-to-end silicon-to-plant dataflow pipeline. A measurement decays continuously from the instant of physical transduction; what governs physical behavior is its total age when torque actually appears at the joint. That physical age spans the interval from the moment photons strike a photodiode array, magnetic flux passes a Hall sensor, or strain deflects a piezoresistor to the moment motor inverter switches build stator magnetic flux that changes link acceleration. If a perception policy evaluates an obstacle bounding box in `{python} ParcelLatencyProfile.t_backbone_str`, but exposure integration, sensor readout, PCIe transport, kernel scheduling, fieldbus dispatch, and motor electrical current rise add another `{python} ParcelLatencyProfile.t_rest_p50_str` at the median, the true physical age of the observation when the joint accelerates is `{python} ParcelLatencyProfile.sum_p50_str`, and its tail runs longer still.
+Software benchmarks in machine learning frequently report latency as isolated accelerator execution time (e.g., `{python} GraspLatencyProfile.t_backbone_str` for a vision backbone on an edge neural processing unit, or NPU), creating the dangerous illusion of a responsive `{python} GraspLatencyProfile.f_backbone_str` control loop. In physical AI systems, however, that compute kernel is only one intermediate stage in an end-to-end silicon-to-plant dataflow pipeline. A measurement decays continuously from the instant of physical transduction; what governs physical behavior is its total age when torque actually appears at the joint. That physical age spans the interval from the moment photons strike a photodiode array, magnetic flux passes a Hall sensor, or strain deflects a piezoresistor to the moment motor inverter switches build stator magnetic flux that changes link acceleration. If a perception policy evaluates an obstacle bounding box in `{python} GraspLatencyProfile.t_backbone_str`, but exposure integration, sensor readout, PCIe transport, kernel scheduling, fieldbus dispatch, and motor electrical current rise add another `{python} GraspLatencyProfile.t_rest_p50_str` at the median, the true physical age of the observation when the joint accelerates is `{python} GraspLatencyProfile.sum_p50_str`, and its tail runs longer still.
 
 During that entire window, the continuous physical environment continues to evolve unobserved. In distributed data systems, read-after-write consistency windows govern whether a client acts on stale or linearized state. In Physical AI, the physical plant is an autonomous, unpausable concurrent writer: world state $\mathbf{x}(t)$ evolves along continuous trajectories at velocity $\mathbf{v}(t)$. An observation age $t_{\text{age}}$ converts directly into unobserved physical displacement $\Delta x \approx \int_0^{t_{\text{age}}} v(t)\,dt$. High-speed machines inevitably act on historical state.
 
@@ -237,13 +257,13 @@ $$\Delta t_{\text{fresh}} \le \frac{e_{\max}}{v_{\max}}$$ {#eq-body-freshness-de
 
 ***Freshness deadline***\index{Freshness deadline!definition} ($\Delta t_{\text{fresh}}$) is the largest age, counted from the capture of a measurement to the onset of the actuator's response, that the measurement of a moving target may reach before the target's motion alone spends the allowable position error $e_{\max}$ (@eq-body-freshness-deadline).
 
-1.  **Significance**: It converts a spatial tolerance into a time budget that every stage from exposure to torque onset must share. A `{python} ParcelLatencyProfile.e_max_str` tolerance on a target moving at `{python} ParcelLatencyProfile.v_max_str` leaves `{python} ParcelLatencyProfile.t_fresh_str`, the period of a `{python} ParcelLatencyProfile.f_loop_str` loop, for sensing, inference, transport, and current rise together.
+1.  **Significance**: It converts a spatial tolerance into a time budget that every stage from exposure to torque onset must share. A `{python} GraspLatencyProfile.e_max_str` tolerance on a target moving at `{python} GraspLatencyProfile.v_conv_str` leaves `{python} GraspLatencyProfile.t_fresh_str` for sensing, inference, transport, and current rise together.
 2.  **Distinction**: Unlike an inference-latency budget, which times one stage, the deadline bounds the age at onset; unlike a control-loop period, it is set by the target's speed and the tolerance rather than by the loop rate. When the machine moves toward a stationary obstacle instead, the same age is paid as blind travel $v\,\tau_{\text{delay}}$ in the stopping distance.
 3.  **Common pitfall**: Treating the deadline as a property of the sensor or the model. It changes whenever the target moves faster or the tolerance shrinks, so a pipeline qualified on a slow conveyor can miss on a faster one without any change in its own timing.
 
 :::
 
-The warehouse that the mobile manipulator serves shows how hard this bound can bite. Upstream of the pick stations, a vision-guided picker on the inbound parcel sorter tracks parcels at a maximum relative velocity $v_{\max} =$ `{python} ParcelLatencyProfile.v_max_str` with a geometric clearance tolerance $e_{\max} =$ `{python} ParcelLatencyProfile.e_max_str`, so its freshness deadline is `{python} ParcelLatencyProfile.t_fresh_str`, and \ref{nbk-body-freshness-deadline} below sets that deadline against the ages the sorter's pipeline actually delivers. The sorter's belt is the fast case; the mug riding the mobile manipulator's own pick-station conveyor moves far more slowly, which buys its grasp a longer deadline despite a tighter tolerance, one the five-budget checkpoint later in this chapter asks you to compute. The deadline governs any target that keeps moving while its measurement ages, the parcel and the mug alike. For such a target it limits only motion-induced error, and only while relative velocity is bounded and the initial observation is credible; sensing and estimation errors consume additional tolerance. Conversely, a stationary person standing in an aisle does not move while the observation ages; instead, the robot base moves toward the person, so the observation age converts into unguided vehicular travel before braking begins, which @sec-body-kinetic-momentum charges against the kinetic stopping budget.
+The running machine meets this bound at its pick station, where the arm takes a mug from a moving conveyor. The belt carries the mug at up to $v_{\text{conv}} =$ `{python} GraspLatencyProfile.v_conv_str`, and the grasp tolerates $r_{\text{tol}} =$ `{python} GraspLatencyProfile.r_tol_str` of position error, of which the initial estimate of the handle already spends $e_0 =$ `{python} GraspLatencyProfile.e_0_str`. The mug's motion may therefore spend only $e_{\max} = r_{\text{tol}} - e_0 =$ `{python} GraspLatencyProfile.e_max_str`, with $v_{\max} = v_{\text{conv}}$, and \ref{nbk-body-freshness-deadline} below sets the resulting deadline against the ages a camera-to-joint pipeline actually delivers. The deadline governs any target that keeps moving while its measurement ages, the mug on the belt among them. For such a target it limits only motion-induced error, and only while relative velocity is bounded and the initial observation is credible; sensing and estimation errors consume additional tolerance, as $e_0$ does here. Conversely, a stationary person standing in an aisle does not move while the observation ages; instead, the robot base moves toward the person, so the observation age converts into unguided vehicular travel before braking begins, which @sec-body-kinetic-momentum charges against the kinetic stopping budget.
 
 ### Transduction physics, quantization noise, and Nyquist limits {#sec-body-sensor-transduction}
 
@@ -267,7 +287,7 @@ Sensor selection spends both error tolerance and time. A sensor must resolve the
 
 A measurement's age is counted from one event, **capture**\index{Capture!event}, the instant of transduction to which the measurement is dated, and not from the moment software first sees the data. Three later events divide the path from capture to force: *dispatch*, when perception publishes the dated record to the proposer; *admission*, when the permission path accepts a proposal built on that record; and *onset*, when braking or driving force at the joint begins to change. @Tbl-04-event-ledger names these four events once and budgets the running machine's intervals between them. For the freshness deadline, only the first and last events matter: the deadline bounds the age at onset.
 
-The parcel sorter's path shows how that age accumulates (@tbl-02-latency-breakdown). From capture to dispatch, the sensor integrates its exposure and reads out its rows over MIPI CSI-2,[^fn-mipi-frame-timestamp] direct memory access (DMA) moves the frame into host memory, and the vision backbone runs. The sorter's policy runs in the same accelerator pass as its backbone, so that stage straddles dispatch. From dispatch to admission, inter-process communication (IPC) carries the proposal to the safety microcontroller, the separate real-time controller that runs the permission path (@sec-boundary-machine-model). From admission to onset, the EtherCAT fieldbus[^fn-ethercat-cycle-time] delivers the command to the drive, and gate-drive switching builds the stator flux that produces torque. Neural inference is one of six stages on that path, and under queue congestion and memory bus contention the others stretch the tail far more than the backbone does.
+An illustrative camera-to-joint pipeline shows how that age accumulates (@tbl-02-latency-breakdown). From capture to dispatch, the sensor integrates its exposure and reads out its rows over MIPI CSI-2,[^fn-mipi-frame-timestamp] direct memory access (DMA) moves the frame into host memory, and the vision backbone runs. In this pipeline the policy runs in the same accelerator pass as the backbone, so that stage straddles dispatch. From dispatch to admission, inter-process communication (IPC) carries the proposal to the safety microcontroller, the separate real-time controller that runs the permission path (@sec-boundary-machine-model). From admission to onset, the EtherCAT fieldbus[^fn-ethercat-cycle-time] delivers the command to the drive, and gate-drive switching builds the stator flux that produces torque. Neural inference is one of six stages on that path, and under queue congestion and memory bus contention the others stretch the tail far more than the backbone does.
 
 [^fn-mipi-frame-timestamp]: **MIPI CSI-2 (Camera Serial Interface 2)**\index{MIPI CSI-2!frame-start timestamp}: The Mobile Industry Processor Interface camera link carries raw frames from the image sensor to the system-on-chip and marks the start and end of each frame with short packets. Latching a hardware timestamp on the frame-start packet ties the frame to a fixed offset from its exposure rather than to the moment software first sees it, which is what lets transduction time, not arrival time, anchor the age budget.
 
@@ -277,47 +297,47 @@ Engineers often compute total latency by summing the $P_{99}$ values of individu
 
 [^fn-math-quantile-convolution]: **Quantile Convolution**\index{Quantile convolution!tail non-additivity}: In general, the quantile of a latency sum differs from the sum of equal-percentile stage quantiles ($Q_p(X + Y) \ne Q_p(X) + Q_p(Y)$). Independence alone does not make their arithmetic sum a worst-case bound. Correlation from shared buses and queues changes the end-to-end tail and must be characterized at the system boundary.
 
-The sorter's stage timings (@tbl-02-latency-breakdown), profiled from capture to onset under continuous inference load, show the gap between the two ways of adding. The table is not a budget: its rows open up the three intervals of @tbl-04-event-ledger to show where the tail comes from, and the running machine's intervals are budgeted only in that ledger.
+The pipeline's stage timings (@tbl-02-latency-breakdown), an illustrative profile from capture to onset under continuous inference load, show the gap between the two ways of adding. The table is not a budget: its rows open up the three intervals of @tbl-04-event-ledger to show where the tail comes from, and the running machine's intervals are budgeted only in that ledger.
 
-| Pipeline Stage                     | Physical Mechanism / Contention Source                           |                    $P_{50}$ (ms)                    |                    $P_{99}$ (ms)                    |                       Max (ms)                      |
-|:-----------------------------------|:-----------------------------------------------------------------|:---------------------------------------------------:|:---------------------------------------------------:|:---------------------------------------------------:|
-| **1–2. Sensor Exposure & Readout** | $60\text{ Hz}$ rolling shutter exposure midpoint                 |      `{python} ParcelLatencyProfile.s1_p50_str`     |      `{python} ParcelLatencyProfile.s1_p99_str`     |      `{python} ParcelLatencyProfile.s1_max_str`     |
-| **3–4. Host Transport & DMA**      | PCIe DMA transfer into host memory                               |      `{python} ParcelLatencyProfile.s2_p50_str`     |      `{python} ParcelLatencyProfile.s2_p99_str`     |      `{python} ParcelLatencyProfile.s2_max_str`     |
-| **5. Vision Backbone & Policy**    | Onboard accelerator inference (memory throttling tail)           |      `{python} ParcelLatencyProfile.s3_p50_str`     |      `{python} ParcelLatencyProfile.s3_p99_str`     |      `{python} ParcelLatencyProfile.s3_max_str`     |
-| **6. OS Scheduling & IPC**         | Kernel preemption and mailbox hand-off to safety microcontroller |      `{python} ParcelLatencyProfile.s4_p50_str`     |      `{python} ParcelLatencyProfile.s4_p99_str`     |      `{python} ParcelLatencyProfile.s4_max_str`     |
-| **7. Fieldbus Transmission**       | Deterministic EtherCAT cyclic packet exchange                    |      `{python} ParcelLatencyProfile.s5_p50_str`     |      `{python} ParcelLatencyProfile.s5_p99_str`     |      `{python} ParcelLatencyProfile.s5_max_str`     |
-| **8. Actuator Current Rise**       | Gate driver switching and stator flux buildup                    |      `{python} ParcelLatencyProfile.s6_p50_str`     |      `{python} ParcelLatencyProfile.s6_p99_str`     |      `{python} ParcelLatencyProfile.s6_max_str`     |
-| **Arithmetic Stage Sum**           | Sum of each column's stage values; not an end-to-end quantile    | **`{python} ParcelLatencyProfile.sum_p50_num_str`** | **`{python} ParcelLatencyProfile.sum_p99_num_str`** | **`{python} ParcelLatencyProfile.sum_max_num_str`** |
-| **End-to-End Age**                 | System-level profile, capture to onset                           | **`{python} ParcelLatencyProfile.sum_p50_num_str`** | **`{python} ParcelLatencyProfile.sys_p99_num_str`** | **`{python} ParcelLatencyProfile.sum_max_num_str`** |
+| Pipeline Stage                     | Physical Mechanism / Contention Source                           |                   $P_{50}$ (ms)                    |                   $P_{99}$ (ms)                    |                      Max (ms)                      |
+|:-----------------------------------|:-----------------------------------------------------------------|:--------------------------------------------------:|:--------------------------------------------------:|:--------------------------------------------------:|
+| **1–2. Sensor Exposure & Readout** | $60\text{ Hz}$ rolling shutter exposure midpoint                 |     `{python} GraspLatencyProfile.s1_p50_str`      |     `{python} GraspLatencyProfile.s1_p99_str`      |     `{python} GraspLatencyProfile.s1_max_str`      |
+| **3–4. Host Transport & DMA**      | PCIe DMA transfer into host memory                               |     `{python} GraspLatencyProfile.s2_p50_str`      |     `{python} GraspLatencyProfile.s2_p99_str`      |     `{python} GraspLatencyProfile.s2_max_str`      |
+| **5. Vision Backbone & Policy**    | Onboard accelerator inference (memory throttling tail)           |     `{python} GraspLatencyProfile.s3_p50_str`      |     `{python} GraspLatencyProfile.s3_p99_str`      |     `{python} GraspLatencyProfile.s3_max_str`      |
+| **6. OS Scheduling & IPC**         | Kernel preemption and mailbox hand-off to safety microcontroller |     `{python} GraspLatencyProfile.s4_p50_str`      |     `{python} GraspLatencyProfile.s4_p99_str`      |     `{python} GraspLatencyProfile.s4_max_str`      |
+| **7. Fieldbus Transmission**       | Deterministic EtherCAT cyclic packet exchange                    |     `{python} GraspLatencyProfile.s5_p50_str`      |     `{python} GraspLatencyProfile.s5_p99_str`      |     `{python} GraspLatencyProfile.s5_max_str`      |
+| **8. Actuator Current Rise**       | Gate driver switching and stator flux buildup                    |     `{python} GraspLatencyProfile.s6_p50_str`      |     `{python} GraspLatencyProfile.s6_p99_str`      |     `{python} GraspLatencyProfile.s6_max_str`      |
+| **Arithmetic Stage Sum**           | Sum of each column's stage values; not an end-to-end quantile    | **`{python} GraspLatencyProfile.sum_p50_num_str`** | **`{python} GraspLatencyProfile.sum_p99_num_str`** | **`{python} GraspLatencyProfile.sum_max_num_str`** |
+| **End-to-End Age**                 | System-level profile, capture to onset                           | **`{python} GraspLatencyProfile.sum_p50_num_str`** | **`{python} GraspLatencyProfile.sys_p99_num_str`** | **`{python} GraspLatencyProfile.sum_max_num_str`** |
 
-: **Illustrative sense-to-actuation latency decomposition**: Stage and system-level timings show why the arithmetic sum of stage percentiles is not the end-to-end tail. The example's $P_{99.9}$ of `{python} ParcelLatencyProfile.sys_p999_str` exceeds the parcel sorter's `{python} ParcelLatencyProfile.t_fresh_str` freshness deadline. {#tbl-02-latency-breakdown tbl-colwidths="[26,38,12,12,12]"}
+: **Illustrative sense-to-actuation latency decomposition**: Stage and system-level timings show why the arithmetic sum of stage percentiles is not the end-to-end tail. The example's $P_{99.9}$ of `{python} GraspLatencyProfile.sys_p999_str` exceeds the `{python} GraspLatencyProfile.t_fresh_str` freshness deadline of the mug on the pick-station conveyor, although its median fits. {#tbl-02-latency-breakdown tbl-colwidths="[26,38,12,12,12]"}
 
-The `{python} ParcelLatencyProfile.sum_p99_str` sum of stage $P_{99}$ values differs from the `{python} ParcelLatencyProfile.sys_p99_str` system percentile because the stages do not reach their tails together. The profile then answers the question the deadline poses, as \ref{nbk-body-freshness-deadline} works it through.
+The `{python} GraspLatencyProfile.sum_p99_str` sum of stage $P_{99}$ values differs from the `{python} GraspLatencyProfile.sys_p99_str` system percentile because the stages do not reach their tails together. The profile then answers the question the deadline poses, as \ref{nbk-body-freshness-deadline} works it through.
 
 ::: {#nbk-body-freshness-deadline .callout-notebook title="The freshness deadline"}
 
-**Problem**: The parcel sorter's picker acts on camera observations of parcels moving on a belt. Does the pipeline of @tbl-02-latency-breakdown deliver those observations within the freshness deadline, and how far does a parcel move at the median and at the tail of the observation age?
+**Problem**: The arm grasps a mug riding the pick-station conveyor, acting on camera observations of the handle. Suppose the grasp path had the illustrative age profile of @tbl-02-latency-breakdown. Does it deliver those observations within the freshness deadline, and how far does the mug move at the median and at the tail of the observation age?
 
 **Variables**:
 
-- Grasp tolerance $e_{\max} =$ `{python} ParcelLatencyProfile.e_max_str` (illustrative)
-- Parcel speed $v_{\max} =$ `{python} ParcelLatencyProfile.v_max_str` (illustrative)
-- Median backbone time `{python} ParcelLatencyProfile.t_backbone_str`, median end-to-end age `{python} ParcelLatencyProfile.sum_p50_str`, and $P_{99.9}$ age `{python} ParcelLatencyProfile.sys_p999_str` (illustrative profile of @tbl-02-latency-breakdown)
+- Grasp tolerance $r_{\text{tol}} =$ `{python} GraspLatencyProfile.r_tol_str`, of which the initial estimate spends $e_0 =$ `{python} GraspLatencyProfile.e_0_str` (illustrative)
+- Conveyor speed $v_{\max} = v_{\text{conv}} =$ `{python} GraspLatencyProfile.v_conv_str` (illustrative)
+- Median backbone time `{python} GraspLatencyProfile.t_backbone_str`, median end-to-end age `{python} GraspLatencyProfile.sum_p50_str`, and $P_{99.9}$ age `{python} GraspLatencyProfile.sys_p999_str` (illustrative profile of @tbl-02-latency-breakdown)
 
 **Math**:
 
-1. **Deadline**: $\Delta t_{\text{fresh}} = e_{\max}/v_{\max} =$ `{python} ParcelLatencyProfile.e_max_str` $/$ `{python} ParcelLatencyProfile.v_max_str` $=$ `{python} ParcelLatencyProfile.t_fresh_str` (@eq-body-freshness-deadline).
-2. **Backbone alone**: `{python} ParcelLatencyProfile.t_backbone_str` is less than `{python} ParcelLatencyProfile.t_fresh_str`, so the one stage a benchmark times fits.
-3. **Median chain**: `{python} ParcelLatencyProfile.v_max_str` $\times$ `{python} ParcelLatencyProfile.sum_p50_str` $=$ `{python} ParcelLatencyProfile.travel_p50_mm_str` of parcel travel, `{python} ParcelLatencyProfile.excess_p50_mm_str` past the tolerance.
-4. **Tail**: `{python} ParcelLatencyProfile.v_max_str` $\times$ `{python} ParcelLatencyProfile.sys_p999_str` $=$ `{python} ParcelLatencyProfile.travel_p999_mm_str`, `{python} ParcelLatencyProfile.tail_over_tol_str` times the tolerance.
+1. **Deadline**: $e_{\max} = r_{\text{tol}} - e_0 =$ `{python} GraspLatencyProfile.e_max_str`, so $\Delta t_{\text{fresh}} = e_{\max}/v_{\max} =$ `{python} GraspLatencyProfile.e_max_str` $/$ `{python} GraspLatencyProfile.v_conv_str` $=$ `{python} GraspLatencyProfile.t_fresh_str` (@eq-body-freshness-deadline).
+2. **Backbone alone**: `{python} GraspLatencyProfile.t_backbone_str` is less than `{python} GraspLatencyProfile.t_fresh_str`, so the one stage a benchmark times fits with room to spare.
+3. **Median chain**: `{python} GraspLatencyProfile.v_conv_str` $\times$ `{python} GraspLatencyProfile.sum_p50_str` $=$ `{python} GraspLatencyProfile.travel_p50_mm_str` of mug travel, `{python} GraspLatencyProfile.margin_p50_mm_str` inside the tolerance.
+4. **Tail**: `{python} GraspLatencyProfile.v_conv_str` $\times$ `{python} GraspLatencyProfile.sys_p999_str` $=$ `{python} GraspLatencyProfile.travel_p999_mm_str`, `{python} GraspLatencyProfile.excess_p999_mm_str` past the tolerance.
 
-**Result**: Inference meets the deadline, and the pipeline misses it even at its median.
+**Result**: Inference and the median chain both meet the deadline, and the tail misses it: more than one grasp in a thousand acts on a handle that has already left the tolerance.
 
-**Systems insight**: The whole path from exposure to torque onset spends the freshness deadline, not the model alone. When the machine instead drives toward a stationary obstacle, the same age is paid as blind travel $v\,\tau_{\text{delay}}$, the first term of the stopping distance that @sec-body-kinetic-momentum sets against the clear distance.
+**Systems insight**: The whole path from exposure to torque onset spends the freshness deadline, not the model alone, and its tail, not its median, decides whether the grasp holds. When the machine instead drives toward a stationary obstacle, the same age is paid as blind travel $v\,\tau_{\text{delay}}$, the first term of the stopping distance that @sec-body-kinetic-momentum sets against the clear distance.
 
 :::
 
-Late feedback can also reinforce a tracking error instead of correcting it,[^fn-delay-loop-stability] but the freshness calculation needs no frequency-domain model: the parcel has already moved beyond the allowed tolerance. The architecture must preserve the observation's physical capture time. Hardware timestamps synchronized through **IEEE 802.1AS**\index{IEEE 802.1AS!hardware timestamping}, the generalized Precision Time Protocol (gPTP),[^fn-gptp-shared-timebase] or capture strobes associated with the **MIPI CSI-2**\index{MIPI CSI-2!sensor readout interface} interface provide a timing reference; the sensor's exposure and readout behavior determine how that reference maps to the measurement. The timestamp then travels with the observation through computation.
+Late feedback can also reinforce a tracking error instead of correcting it,[^fn-delay-loop-stability] but the freshness calculation needs no frequency-domain model: at the tail the mug has already moved beyond the allowed tolerance. The architecture must preserve the observation's physical capture time. Hardware timestamps synchronized through **IEEE 802.1AS**\index{IEEE 802.1AS!hardware timestamping}, the generalized Precision Time Protocol (gPTP),[^fn-gptp-shared-timebase] or capture strobes associated with the **MIPI CSI-2**\index{MIPI CSI-2!sensor readout interface} interface provide a timing reference; the sensor's exposure and readout behavior determine how that reference maps to the measurement. The timestamp then travels with the observation through computation.
 
 At admission, the permission path compares the observation's age since capture, $t_{\text{age}} = t_{\text{now}} - t_{\text{transduction}}$, with the freshness deadline, reserving the time from admission to onset that is still to come. If $t_{\text{age}} > \Delta t_{\text{fresh}}$, it refuses that proposal. An already active command may continue only while its own evidence and permission remain valid; otherwise the path invokes a qualified fallback within the remaining physical margin [@brooks1986robust]. Refusing a stale replacement and ending valid ongoing motion are separate decisions.
 
@@ -2293,55 +2313,11 @@ The mobile manipulator's lithium-ion pack feeds a `{python} DriveBusIntegrity.v_
 *The bus must stay between the `{python} DriveBusIntegrity.v_uvlo_str` lockout and the clamp; an unclamped stop reaches `{python} DriveBusIntegrity.v_final_str`.*
 :::
 
-```{python}
-#| label: body-conveyor-freshness-calc
-#| echo: false
-#| warning: false
-#| message: false
-# ┌─────────────────────────────────────────────────────────────────────────────
-# │ FRESHNESS DEADLINE FOR THE MUG ON THE CONVEYOR (LEGO)
-# ├─────────────────────────────────────────────────────────────────────────────
-# │ Context: the freshness item of \ref{chk-body-bus-droop-regen}.
-# │ Goal:    Give the moving target the freshness deadline applies to on the
-# │          running machine: the mug on the pick-station conveyor.
-# │ Show:    0.20 m/s, 15 mm grasp tolerance, 3 mm of it spent by the initial
-# │          estimate; the answer (not printed) is (15 - 3) / 0.20 = 60 ms.
-# │ How:     Delta t_fresh = e_max / v_max with e_max = r_tol - e_0, from AISLE.
-# └─────────────────────────────────────────────────────────────────────────────
-from mlsysim import *
-from mlsysim.core.units import *
-from mlsysim.fmt import fmt_length, fmt_velocity, check
-
-AISLE = Embodied.Scenario.WarehouseAisle
-
-class ConveyorFreshness:
-    """Freshness deadline for the mug riding the pick-station conveyor."""
-
-    # ┌── 1. LOAD (Constants & Parameters) ─────────────────────────────────
-    v_conv = AISLE.v_conveyor  # category: illustrative (conveyor speed)
-    r_tol = AISLE.grasp_tolerance  # category: chosen (grasp tolerance)
-    e_0 = AISLE.grasp_initial_error  # category: illustrative (initial estimate error)
-
-    # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────
-    dt_fresh = ((r_tol - e_0) / v_conv).to(millisecond)
-
-    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
-    check(abs(v_conv.to(meter / second).magnitude - 0.20) < 1e-9, f"Unexpected conveyor speed: {v_conv}")
-    check(abs(r_tol.to(ureg.millimeter).magnitude - 15.0) < 1e-9, f"Unexpected grasp tolerance: {r_tol}")
-    check(abs(e_0.to(ureg.millimeter).magnitude - 3.0) < 1e-9, f"Unexpected initial error: {e_0}")
-    check(abs(dt_fresh.magnitude - 60.0) < 1e-9, f"Conveyor freshness deadline must be 60 ms: {dt_fresh}")
-
-    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
-    v_conv_str = fmt_velocity(v_conv, unit=meter / second, precision=2)
-    r_tol_str = fmt_length(r_tol, unit=ureg.millimeter, precision=0)
-    e_0_str = fmt_length(e_0, unit=ureg.millimeter, precision=0)
-```
-
 ::: {#chk-body-bus-droop-regen .callout-checkpoint title="The five physical budgets"}
 
 Before measuring these limits on an assembled machine, verify your understanding of the five budgets:
 
-- [ ] **Freshness deadline**: Can you calculate the maximum allowable measurement age for the mug riding the pick-station conveyor at `{python} ConveyorFreshness.v_conv_str`, with a `{python} ConveyorFreshness.r_tol_str` grasp tolerance of which the initial estimate already spends `{python} ConveyorFreshness.e_0_str`, and explain why that age is counted from exposure on the sensor rather than from the start of inference, and why the base's stop for a standing person instead charges age as blind travel?
+- [ ] **Freshness deadline**: Can you calculate the maximum allowable measurement age for the mug riding the pick-station conveyor at `{python} GraspLatencyProfile.v_conv_str`, with a `{python} GraspLatencyProfile.r_tol_str` grasp tolerance of which the initial estimate already spends `{python} GraspLatencyProfile.e_0_str`, and explain why that age is counted from exposure on the sensor rather than from the start of inference, and why the base's stop for a standing person instead charges age as blind travel?
 - [ ] **Velocity ceiling**: Can you solve $d_{\text{stop}} \le D_{\text{clear}}$ for the admissible speed on the running machine's numbers, and explain why doubling the pre-brake delay expands the stopping distance linearly while doubling travel speed expands the braking term quadratically?
 - [ ] **Thermal horizons and runaway**: Can you explain why an actuator can produce three times its rated torque for seconds but overheats its winding insulation if held there for minutes, and how the temperature coefficient of copper ($\alpha_{\text{Cu}}$) turns a sustained stall into runaway?
 - [ ] **Rail sag and regeneration**: Can you explain how a coincident compute and drive current step sags a shared rail through resistance, inductance, and capacitor depletion, and why a stop from speed pumps energy back into the bus that a brake chopper must divert?
@@ -2904,7 +2880,7 @@ class BodyProblems:
 
 These problems use the running machine's parameters from this chapter's worked examples, with values marked illustrative standing in for measurements as they do there. Each problem names the decision it requires. The tags give the kind of work, from computation through design to critique, and the learning objectives, counted in order, that it assesses.
 
-1. **[Compute, LO1] The mug on the conveyor.** The mug on the pick-station conveyor moves at `{python} ConveyorFreshness.v_conv_str`, and the grasp tolerates `{python} ConveyorFreshness.r_tol_str` of position error, of which the initial estimate already spends `{python} ConveyorFreshness.e_0_str`. Find the freshness deadline. Suppose the pick station's pipeline had the parcel sorter's age profile, a median of `{python} ParcelLatencyProfile.sum_p50_str` and a $P_{99.9}$ of `{python} ParcelLatencyProfile.sys_p999_str` (@tbl-02-latency-breakdown). Decide whether the conveyor may keep its speed, and if not, find the fastest conveyor speed the tail age supports.
+1. **[Compute, LO1] Repairing the mug's tail.** In \ref{nbk-body-freshness-deadline}, the mug on the pick-station conveyor moves at `{python} GraspLatencyProfile.v_conv_str`, the grasp tolerates `{python} GraspLatencyProfile.r_tol_str` of position error, of which the initial estimate already spends `{python} GraspLatencyProfile.e_0_str`, and the illustrative profile's $P_{99.9}$ age of `{python} GraspLatencyProfile.sys_p999_str` carries the mug past the tolerance (@tbl-02-latency-breakdown). Find three repairs, each of which alone brings the tail within the freshness deadline: the fastest conveyor speed, the largest initial-estimate error at the current speed, and the longest $P_{99.9}$ age the pipeline may deliver. Decide which repair the pick station should adopt, and name the subsystem that owns it.
 2. **[Compute, LO2] The full pre-brake delay.** Replace the brake onset of \ref{nbk-body-stopping-distance-budgeting-high-tail-compute} with the full `{python} BodyStoppingBudget.tau_full_str` pre-brake delay that later chapters assemble, keeping the same deceleration, overheads, and `{python} BodyStoppingBudget.d_clear_str` clear distance. Compute the speed ceiling of @eq-body-velocity-ceiling. Then find the largest pre-brake delay at which the `{python} BodyStoppingBudget.v_str` drive limit remains admissible at this clear distance, and state how much delay the later chapters may still add.
 3. **[Compute, LO2] The inspected floor.** The inspected floor offers a friction coefficient of `{python} BrakingLimits.mu_insp_str`. Compute its traction ceiling on deceleration with all of the weight on the driven wheels and with the hub motors' rated load share, $\phi_{\text{drive}} \le$ `{python} BrakingLimits.phi_max_str`. For each, find the speed ceiling at the `{python} BodyStoppingBudget.d_clear_str` clear distance with the `{python} BodyStoppingBudget.tau_full_str` delay. Decide what speed the permission path must enforce whenever the machine cannot confirm that it is on the dry floor.
 4. **[Compute, LO3] The lowest workable current limit.** The two hub drives ($K_t =$ `{python} BrakingLimits.k_t_str`, rolling radius `{python} BrakingLimits.r_wheel_str`) must decelerate the loaded machine, $m_{\text{eff}} \le$ `{python} BrakingLimits.m_eff_str`, at `{python} BrakingLimits.a_req_str`. Find the smallest drive current limit that supports this deceleration and compare it with the `{python} BrakingLimits.i_max_str` setting and the motor's `{python} BrakingLimits.i_rated_str` rated current. State the current-limit condition the credible-deceleration record must carry.

@@ -222,6 +222,8 @@ SPECS: tuple[DataSheetSpec, ...] = (
        ILLUSTRATIVE, "us", 0),
     _S("t_enf_wcet", NERVOUS, "Permission check, declared WCET", "AISLE.enforcer_wcet", CHOSEN, "us", 0),
     _S("t_enf_deadline", NERVOUS, "Permission check deadline", "AISLE.enforcer_deadline", CHOSEN, "us", 0),
+    _S("t_enf_blocking", NERVOUS, "Permission check, blocking allowance", "AISLE.enforcer_blocking", ILLUSTRATIVE, "us", 0),
+    _S("t_enf_interference", NERVOUS, "Permission check, interference allowance", "AISLE.enforcer_interference", ILLUSTRATIVE, "us", 0),
     _S("chunk_bytes", NERVOUS, "Serialized chunk size", "AISLE.chunk_wire_bytes", ILLUSTRATIVE, "byte", 0,
        "Waypoints, header, and evidence epoch"),
     _S("f_link", NERVOUS, "Board-link clock", "AISLE.board_link_clock", ILLUSTRATIVE, "MHz", 0,

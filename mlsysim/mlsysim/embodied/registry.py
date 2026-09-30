@@ -349,6 +349,8 @@ class SiteScenarios(Registry):
         enforcer_unloaded=135.0 * ureg.microsecond,            # illustrative
         enforcer_wcet=250.0 * ureg.microsecond,                # chosen (declared)
         enforcer_deadline=400.0 * ureg.microsecond,            # chosen
+        enforcer_blocking=50.0 * ureg.microsecond,             # illustrative (scenario bound; promoted from Ch4/Ch13 cells 2026-09-30)
+        enforcer_interference=40.0 * ureg.microsecond,         # illustrative (scenario bound; promoted from Ch4/Ch13 cells 2026-09-30)
         # Dispatch-to-admission stages after inference (2026-09-29; were literals in
         # three chapter cells). All illustrative allowances; the total is the
         # t_dispatch_to_admission property (63.31 ms).

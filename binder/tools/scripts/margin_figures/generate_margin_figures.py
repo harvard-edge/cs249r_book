@@ -1372,7 +1372,7 @@ def ch13_stall_share_knee():
     ax.text(s_m * 0.8, f_m * 0.55, f"{s_m:.0f}×: {f_m:.1f}%", color=RED, fontsize=4.5, ha="right", va="top")
     ax.text(s_b * 0.8, f_b * 0.55, f"{s_b:.0f}×: {f_b:.2f}%", color=RED, fontsize=4.5, ha="right", va="top")
     ax.text(2.4, 16, "WCET", color=RED, fontsize=4.4, ha="left", va="top")
-    ax.text(S[-1], fd[-1] * 1.5, "deadline", color=NEUTRAL, fontsize=4.4, ha="right", va="bottom")
+    ax.text(S[-1], fd[-1] * 5.0, "deadline", color=NEUTRAL, fontsize=4.4, ha="right", va="bottom")  # 2026-09-30: lifted clear of both curves after the deadline curve moved to the full response budget (310/135)
     ax.text(40, 30, "bound refuted", color=RED, fontsize=4.5, ha="center", va="center")
     ax.text(np.sqrt(S[0] * S[-1]), 0.035, "slowdown S (log)", color=INK, fontsize=4.3, ha="center", va="bottom")
     ax.text(2.12, 0.5, "stall share (log)", color=INK, fontsize=4.3, ha="left", va="center", rotation=90)
