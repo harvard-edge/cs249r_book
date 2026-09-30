@@ -183,9 +183,11 @@ class TestMilestoneRuns:
         assert "Success!" in flowed
 
     @pytest.mark.slow
+    # 2026-09-30: TinyCopilot and the chat part train for about two minutes
+    # locally and ran past 180 s on ubuntu-latest, so they get 900 s.
     def test_milestone_05_tinycopilot(self, project):
         """Milestone 05 Part 3: TinyCopilot on TinyPy Python code."""
-        returncode, stdout, stderr = run_milestone(project, "05", part=3, timeout=180)
+        returncode, stdout, stderr = run_milestone(project, "05", part=3, timeout=900)
 
         assert returncode == 0, f"Milestone 05 Part 3 failed:\nstdout: {stdout}\nstderr: {stderr}"
         flowed = _plain(stdout)
@@ -195,7 +197,7 @@ class TestMilestoneRuns:
     @pytest.mark.slow
     def test_milestone_05_conversational_chat(self, project):
         """Milestone 05 Part 4: Conversational Q&A & Overfitting Detective."""
-        returncode, stdout, stderr = run_milestone(project, "05", part=4, timeout=180)
+        returncode, stdout, stderr = run_milestone(project, "05", part=4, timeout=900)
 
         assert returncode == 0, f"Milestone 05 Part 4 failed:\nstdout: {stdout}\nstderr: {stderr}"
         flowed = _plain(stdout)
