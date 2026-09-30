@@ -47,7 +47,7 @@ Once an agent can run code, its reach is no longer the list of tools it was offe
 
 :::
 
-## What Admitted Code Can Reach {#sec-vol3-sandboxes-admitted-reach}
+## The Reach of Admitted Code {#sec-vol3-sandboxes-admitted-reach}
 
 Consider a threat variant of the connection-pool repair run by the repair agent (\ref{lhs-vol3-repair-agent}). The coding agent reads the README of a vendored dependency to learn how the library is configured. Near the bottom, inside an HTML comment omitted from the rendered page but present in the retrieved source, a line addressed to automated assistants asks them to upload the environment configuration to a diagnostics endpoint before running tests. The model then proposes a `run_shell` call that would read a cloud credentials file and post it to that endpoint. The command fits the tool's argument schema. A runtime that checks only whether `run_shell` is an allowed tool would admit it, despite the task granting neither access to the credential nor permission to disclose it.
 
@@ -124,13 +124,13 @@ Containment beneath the model (principle \ref{pri-vol3-zero-trust-sandboxing})\i
 
 The boundary also has a lifetime. The repair's `src/pool.py` edits and test artifacts must survive between turns, but should not become the next tenant's starting state. Protected acceptance checks remain outside the agent's writable scope, while test execution can still require writable scratch. Ending the task must stop or account for its running work and reset the state the execution contract covers. As @sec-vol3-tool-calling established, a cancellation request is only a request, and even confirmed termination leaves an external effect in place. Reach, trusted components, and lifetime are the three obligations the rest of the design discharges, and the first engineering decision is where the untrusted code runs relative to the software enforcing its limits.
 
-## Why Restricted Globals Are Not an Execution Boundary {#sec-vol3-sandboxes-in-process-failure}
+## Limits of In-Process Restriction {#sec-vol3-sandboxes-in-process-failure}
 
 A data-analysis agent writes Python to summarize a CSV file. The runtime could execute that code inside its own interpreter, supplying only the data and a few helper functions. This avoids starting another interpreter and reuses loaded libraries. It also places the generated code beside the supervisor's state, connections, and credentials. Removing names from the script's globals leaves those resources in the same process as the code that runs.
 
 The distinction is between restricting an interface and enforcing an execution boundary. The tool checks from @sec-vol3-tool-calling admit a request to analyze the CSV; the arbitrary code inside that request still executes with the supervisor's reach.
 
-### Names are not the reachable object graph
+### The reachable object graph {#sec-vol3-sandboxes-object-graph}
 
 Suppose the runtime supplies a small Python helper named `total` and an empty builtins dictionary. The intended interface permits summing a list. In ordinary Python, however, a user-defined function also exposes a reference to the global namespace in which it was defined. The illustrative failure in @lst-vol3-sandbox-escape reaches that namespace through the allowed helper, without importing a module or calling `globals()`.
 
@@ -160,7 +160,7 @@ The reason is a result, not a matter of diligence. By Rice's theorem [@rice1953c
 
 Restricted languages remain useful. A purpose-built expression evaluator can accept a limited set of operations over supplied values, and a validated bytecode runtime can enforce restrictions on memory and host calls. Those designs need their own implementation and resource guarantees. They should not be confused with evaluating arbitrary Python after deleting entries from a globals dictionary.
 
-### Native libraries share the supervisor's failure domain
+### Native libraries and the failure domain {#sec-vol3-sandboxes-native-libraries}
 
 The analysis may call a native library to parse an image, manipulate an array, or execute a numerical kernel. If that library runs inside the supervisor process, its memory accesses occur in the same address space as the interpreter and control state. A memory-safety defect can corrupt that shared state or terminate the process. If a defect permits arbitrary native execution, the attacker can attempt operations under the process's existing credentials and controls.
 
@@ -168,7 +168,7 @@ This is a process-level failure. System calls from the compromised process still
 
 The practical question is which components must remain correct for confinement to hold. In-process evaluation can make the interpreter, exposed helper objects, native dependencies, and supervisor state part of the same failure domain. Restricting a script's names leaves those dependencies in place.
 
-### Shared authority and shared resources
+### Shared authority and shared resources {#sec-vol3-sandboxes-shared-authority}
 
 The code also inherits the execution context in which its operations run. Reachable open files, database clients, or network connections may convey authority never intended for the analysis task. Moving execution to another process separates address spaces while leaving that authority intact: a worker running under the developer's identity can still open the developer's files, and inherited handles preserve access even when names are hidden. The runtime must decide which identities, handles, files, and communication channels the worker receives.
 
@@ -211,7 +211,7 @@ A ***capability***\index{Capability!definition} is an unforgeable reference that
 
 : **Ambient and capability-based authority**: The two models differ in where authority comes from and how it is passed on, which decides whether a tool process can be steered into using authority the task never received. {#tbl-vol3-ambient-vs-capability tbl-colwidths="[20,40,40]"}
 
-### Represent and enforce a scoped grant
+### Scoped grants {#sec-vol3-sandboxes-scoped-grants}
 
 A capability may be a protected handle checked by a runtime or kernel, or a token verified by a service; it need not be a string visible to the model at all. Either way, the implementation prevents the holder from fabricating broader rights or substituting another task's reference.
 
@@ -246,7 +246,7 @@ On Linux, the supervisor can act as a policy compiler. It verifies the grant, th
 
 [^fn-interposition-race-window]: **Check-Then-Use Races**\index{System-call interposition!races}: Early user-level sandboxes confined untrusted helper programs by intercepting each system call and checking its arguments [@goldberg1996secure]. @garfinkel2003traps catalogued why that design is fragile: a path argument lives in memory the confined process controls, so another thread can change it after the check and before the kernel reads it, and a filter that imperfectly replicates kernel semantics misses indirect routes to the same resource. Checking the resolved object inside the kernel at the moment of use closes that window, which is what an in-kernel access-control module such as Landlock does.
 
-### Attenuate delegated authority
+### Attenuation of delegated authority {#sec-vol3-sandboxes-attenuation}
 
 **Attenuation**\index{Attenuation!definition} derives a grant that permits no more than its parent. Writing $\mathcal{A}(\Gamma)$ for the accesses allowed by a grant, the relation requires
 
@@ -284,7 +284,7 @@ This relation constrains derived authority; a trajectory can still move from ins
 
 The useful question is therefore “which grants and resource handles can this worker still exercise?”, a stronger test than “is the child narrower?” It applies equally to a helper process inside one trajectory and to a delegated agent, since coordination leaves the meaning of authority unchanged.
 
-### End authority deliberately
+### Expiry and revocation {#sec-vol3-sandboxes-expiry-revocation}
 
 An expiry states when a grant stops authorizing new use. Closing an open file descriptor, stopping a running process, and cancelling a request another service already accepted are separate actions, so revocation needs an enforcement mechanism, such as a mediated reference whose current status is checked on each use, together with control over ongoing work where policy requires it.
 
@@ -341,7 +341,7 @@ A **shared-kernel container**\index{Shared-kernel container!definition} confines
 
 A **user-space kernel**\index{User-space kernel!definition} interposes another implementation of the application's operating-system interface. For example, gVisor's Sentry reimplements the Linux system-call interface in a memory-safe user-space process, never passes an application's call through to the host, and obtains underlying services through a restricted set of host calls [@google2019gvisor]. Its original design routed file opens through a separate proxy, the Gofer, so the Sentry held no host file descriptors of its own. A 2023 revision lets the Gofer donate descriptors for the container's mounts, after which the Sentry opens files relative to them under seccomp and namespace restrictions [@gvisor2023directfs]. The trusted path changed while the product name did not, which is why an envelope is specified by its configuration rather than its name. Applications depend on the interfaces that this implementation supports, so compatibility must be checked against the actual toolchain. This adds a mediation boundary in front of the host kernel; the exposed resources still need their own constraints.
 
-### A separate guest kernel
+### Separate guest kernels {#sec-vol3-sandboxes-guest-kernels}
 
 A **microVM**\index{MicroVM!definition} places a guest kernel and its applications behind a hardware-virtualization boundary\index{Sandbox!hardware virtualization} managed by a virtual machine monitor (VMM). Application system calls normally reach the guest kernel; host interaction goes through the configured virtualization and I/O interfaces. Gaining control of the guest kernel is therefore different from gaining control of the host. The protection depends on the monitor, hypervisor, hardware, and exposed device and host-service interfaces, including defects in them and misuse of the I/O they permit.
 
@@ -369,7 +369,7 @@ A **bytecode sandbox**\index{Bytecode sandbox!definition}[^fn-sfi-origin-sandbox
 
 This option is useful when the workload can target the supported format and needs only a small set of host operations. A parser given an input buffer and an output interface need not receive filesystem or network access. Supplying a broad host import would expand its reach again. The runtime, compiler, and imported functions remain part of the protection's trusted implementation; execution time and memory growth still need limits.
 
-### Where the system-call cost falls {#sec-vol3-sandboxes-syscall-tax}
+### The system-call tax {#sec-vol3-sandboxes-syscall-tax}
 
 The four envelopes differ not only in what they share but in where each request for an operating-system service is handled, and that decides both compatibility and cost. Every mediated call pays up to three terms, the envelope's **system-call tax**\index{System-call tax!definition}:
 
@@ -390,7 +390,7 @@ $T_{\text{trap}}$ is the cost of crossing a privilege boundary, $T_{\text{filter
 
 The contrast that matters for coding agents is between the middle two rows. Builds, package installs, version-control operations, and test runners issue many system calls for clocks, files, memory, and processes. A user-space kernel intercepts every one of them, while a microVM guest executes them inside its own kernel and exits to the host only when it touches a virtual device. A 2019 case study of one user-space kernel found simple system calls, and file opens routed through its file proxy in particular, markedly slower than in a shared-kernel container [@young2019true]. System-call-heavy work therefore tends to favor a container or a microVM over a user-space kernel, and pure in-memory computation pays almost nothing in a bytecode sandbox. The magnitudes depend on the processor, kernel, and implementation, so the table predicts where to measure, not what the measurement will be.
 
-### Match the boundary to the workload {#sec-vol3-sandboxes-envelope-choice}
+### Envelope selection {#sec-vol3-sandboxes-envelope-choice}
 
 @Tbl-vol3-isolation-taxonomy summarizes the decision. Start costs are orders of magnitude for typical configurations, not measurements of a particular product, and the last column is the default assignment produced by the rule that follows.
 
@@ -484,7 +484,7 @@ class EnvelopeAmortization:
 
 :::
 
-### Device access extends the boundary {#sec-vol3-sandboxes-gpu}
+### Accelerator and device access {#sec-vol3-sandboxes-gpu}
 
 If the repair or analysis needs an accelerator, the device joins the boundary decision. The design must identify which driver and device interfaces the workload can reach, how device memory and compute capacity are assigned, which failures can affect neighboring tenants, and how device state is reset before reassignment. A remote accelerator service can replace direct device access with a narrower request interface, but its service-side isolation and admission controls then become part of the system contract.
 
@@ -498,7 +498,7 @@ The repair needs files to outlive individual tool calls. An edit produces candid
 
 That policy identifies the source baseline, the task's private modifications, permitted scratch space, and outputs eligible for retention. Arbitrary generated commands run in a designated task workspace, never in the developer's ordinary checkout, and for this repair the source edits and build artifacts live there. Protected acceptance checks and their trusted reporting machinery remain outside the agent's writable scope, while their scratch output stays writable.
 
-### Share a base, keep modifications private
+### Copy-on-write provisioning {#sec-vol3-sandboxes-cow-provisioning}
 
 A full private copy is a simple way to provision a workspace, but repeatedly copying an unchanged repository and toolchain can be expensive. Copy-on-write separates the unchanged base from modifications made by each task. The runtime pins the base version and exposes a task-specific writable view. Reads use unchanged base contents; a modification acquires private storage according to the implementation's copying rules, and tasks sharing a base never see each other's modifications.
 
@@ -512,7 +512,7 @@ A **layered filesystem**\index{Layered filesystem!definition} illustrates the me
 
 Copy-on-write is a storage choice; keeping tasks out of each other's private storage and off the base remains the envelope's job. A microVM may use a private disk snapshot instead of a host-mounted overlay, and which data and caches are actually shared, down to whether guests share one host page-cache copy, depends on that arrangement.
 
-### Price the first modification
+### Cost of the first modification {#sec-vol3-sandboxes-first-modification}
 
 Copy-on-write moves some copying from provisioning to mutation. Its granularity therefore matters. A file-level scheme may copy a whole large fixture before a small in-place change. A block-level scheme can preserve unchanged blocks while allocating private storage for affected blocks. Filesystem cloning can also share extents where supported. These alternatives change the work performed, but none universally makes cloning constant-time or a one-byte edit a one-byte device write.
 
@@ -593,7 +593,7 @@ The design response follows the workload. Keep large immutable fixtures read-onl
 
 Private storage still needs limits. Bound allocated bytes and file counts, account for retained logs and caches, and govern I/O work alongside the execution limits already established. A quota failure must reach the tool result as a resource failure, not a successful but mysteriously incomplete artifact. Per-workspace quotas also need host-level admission and capacity accounting: many individually bounded workspaces can exhaust a shared pool.
 
-### Own the workspace lifetime {#sec-vol3-sandboxes-lease}
+### Workspace leases {#sec-vol3-sandboxes-lease}
 
 A **workspace lease**\index{Workspace lease!definition} binds the workspace to its task, owner, permitted operations, and lifetime. The runtime records which envelope, jobs, and access channels can use it. This permits the repair's edits and selected caches to remain available across turns without silently making them available to the next tenant. A new process can receive the same workspace under that lease; a new unrelated task requires its own authorized state.
 
@@ -611,7 +611,7 @@ Controlled artifact export governs one path out of the workspace; code running i
 
 Return to the injected README with credential brokering in place. The command cannot read the broker's credential from the guest, but it can still read source files needed for the repair. Sending those files to an unintended recipient would disclose information without escaping the workspace or stealing a key. **Egress control**\index{Egress control!definition} governs the channels through which executing code communicates outside its envelope. It must constrain the actual communication path, not depend on the code choosing to use a preferred client.
 
-### Enforce the path outside the guest
+### Enforcement outside the guest {#sec-vol3-sandboxes-egress-enforcement}
 
 A task that needs no external communication can run without an outbound network path. A task that must fetch dependencies or source needs a narrower arrangement. The runtime can expose a task-scoped service adapter, or permit access through a controlled network gateway. In either case, code inside the sandbox must not be able to reach the same external resources through an unchecked alternative.
 
@@ -623,7 +623,7 @@ Setting `HTTP_PROXY` or `HTTPS_PROXY` configures only the clients that honor tho
 ![](images/svg/network_egress_defense_in_depth.svg)
 :::
 
-### Separate destination, operation, and data
+### Destination, operation, and data scopes {#sec-vol3-sandboxes-egress-scopes}
 
 Permission to contact a service answers only one part of the disclosure question. A source-hosting service may offer repository reads, pushes, issue comments, and public uploads under the same hostname. Permission to fetch the task's repository covers that one operation, and even a permitted operation can carry information the task should not send. @Tbl-vol3-egress-filtering separates these decisions.
 
@@ -639,7 +639,7 @@ The host-owned source-service adapter introduced with credential brokering is on
 
 A general-purpose proxy offers less semantic structure. If it relays encrypted traffic without inspecting its contents, it cannot enforce rules about hidden methods, paths, headers, or bodies. A design that inspects those fields or injects an authorization header needs a supported arrangement, such as a host-owned adapter making the request or a proxy that terminates and reestablishes TLS. The latter changes the trust and compatibility requirements for clients, including clients that pin certificates.
 
-### Keep name resolution inside the policy
+### Name resolution and local destinations {#sec-vol3-sandboxes-name-resolution}
 
 An approved name must lead to an approved connection. A destination check made before a separate, uncontrolled DNS lookup can approve one address while the client later reaches another. The mediator must bind its destination decision to the addresses actually used, cover enabled address families, and reject resolved targets outside the permitted scope. Redirects likewise require a new destination decision, or must be disabled when that decision cannot be enforced.
 
@@ -649,7 +649,7 @@ DNS is itself an outbound channel.[^fn-confinement-problem-lampson] If a guest c
 
 [^fn-confinement-problem-lampson]: **The Confinement Problem**\index{Confinement problem}: @lampson1973note posed the problem of running a borrowed program so that it cannot leak its caller's data, and observed that a program can signal through channels never intended for communication, such as its use of shared resources. Name lookups are such a channel for a guest whose web requests are blocked. Confinement has to account for every externally observable effect of the code, and a rate limit narrows a channel's bandwidth without closing it.
 
-### Recognize disclosure through a permitted channel
+### Disclosure through permitted channels {#sec-vol3-sandboxes-permitted-disclosure}
 
 Suppose the repair task may submit a bounded diagnostic report to an approved internal service. The runtime correctly confines execution, contacts the approved destination, and invokes the permitted report operation. An injected instruction nevertheless causes the agent to include private source code in the report. Every containment boundary can work as specified while the report discloses information beyond the task's intended scope.
 

@@ -200,7 +200,7 @@ For the repair agent, retaining state during the integration test is one such li
 
 The repair agent's next request can grow when the integration test returns a log. The serving operator must provide space for that additional KV state without knowing the final length of every concurrent request. The footprint calculation gives the bytes needed for tokens already processed. An allocation policy determines how much additional memory is reserved, whether a growing request must move, and when released capacity can serve another request.
 
-### Reservation and growth
+### Reservation and growth {#sec-vol3-kv-cache-reservation-growth}
 
 The simplest policy, **static reservation**\index{Static reservation!definition}, allocates a contiguous buffer for the configured token cap at admission. The request then grows within its cap without reallocating, and the unused remainder of the buffer is unavailable to every other request for as long as the reservation lives. The reservation covers KV capacity only; activations and runtime buffers draw on separate memory.
 
@@ -260,7 +260,7 @@ Suppose the request population finishes at a hypothetical mean length of `{pytho
 
 A second policy grows a contiguous allocation as tokens arrive. When adjacent capacity is unavailable, the allocator obtains a larger buffer, copies the initialized entries, and releases the old one, holding both allocations during the copy. Contiguous here means one range in the allocator's address space. Accelerators translate addresses in hardware, so the restriction comes from an allocator and attention kernel that require each sequence's KV tensor to occupy one such range.
 
-### Two kinds of unused capacity
+### Two kinds of unused capacity {#sec-vol3-kv-cache-unused-capacity}
 
 Unused slots inside a reservation are **internal fragmentation**\index{Internal fragmentation!definition}; free capacity split into extents too small for a contiguous request is **external fragmentation**\index{External fragmentation!definition}. The distinction comes from storage allocation for multiprogrammed computers[^fn-fragmentation-internal-external] [@randell1969fragmentation]. @Tbl-vol3-kv-fragmentation-taxonomies separates them because each has a different remedy: releasing slack cures the first, and changing the allocation granularity cures the second.
 
@@ -291,7 +291,7 @@ When the integration-test log extends the repair context, the serving engine nee
 
 :::
 
-### Mapping tokens to blocks
+### Token-to-block mapping {#sec-vol3-kv-cache-token-block-mapping}
 
 Consider an illustrative block size of four tokens, chosen to make the mapping visible rather than to recommend a production setting. A ten-token prefix occupies logical blocks 0, 1, and 2. Its block table is `[3, 7, 9]`: positions 0–3 reside in physical block 3, positions 4–7 in block 7, and positions 8–9 in the first two slots of block 9. Physical IDs are labels in the allocator's pool, not token positions or memory addresses.
 
@@ -303,7 +303,7 @@ For any token position, the kernel identifies its logical block by integer divis
 
 Within a pool of interchangeable fixed-size blocks, any free block satisfies a new block request, so paging removes external fragmentation at the block granularity. The remaining waste is metadata, temporary buffers, and the unused slots of each sequence's final block.
 
-### Block size and tail waste
+### Block size and tail waste {#sec-vol3-kv-cache-block-size-tail}
 
 The final block may contain uninitialized slots, the **tail waste**\index{Tail waste!definition} $\Delta_{\text{tail}}$. If a block holds $p$ tokens, $0 \leq \Delta_{\text{tail}} \leq p-1$, with a mean of $(p-1)/2$ when sequence lengths have uniformly distributed remainders modulo $p$; a length divisible by $p$ wastes nothing.
 
@@ -429,7 +429,7 @@ class PagedWaste:
 
 The tail bounds become an expected waste once a length distribution is stated. Model final lengths as exponential with the hypothetical mean of `{python} StaticReservation.mean_final_tokens_str` tokens, capped at the `{python} StaticReservation.s_max_str`-token limit used for static reservation. Under that assumption, `{python} PhysicalBlockSizing.small_tokens_str`-token blocks leave `{python} PagedWaste.frag_small_str` of allocated KV memory unused and `{python} PhysicalBlockSizing.large_tokens_str`-token blocks leave `{python} PagedWaste.frag_large_str`. Dividing the pool that admitted `{python} StaticReservation.reservations_str` full-cap reservations by the expected paged allocation gives about `{python} PagedWaste.fit_paged_str` sequences, roughly `{python} PagedWaste.gain_mult_str` as many. That is the payoff of paging. Allocation tracks the tokens a sequence has actually produced rather than the cap it might reach. The count is a mean under the stated length model; the resident count fluctuates with the lengths actually present.
 
-### Sharing a prefix without sharing its future writes
+### Copy-on-write prefix sharing {#sec-vol3-kv-cache-cow-prefix-sharing}
 
 ```{python}
 #| label: kv-fork-copy-calc
@@ -507,7 +507,7 @@ In the connection-pool repair, the call that reads the integration-test result m
 
 :::
 
-### Compatibility before reuse
+### Prefix compatibility {#sec-vol3-kv-cache-prefix-compatibility}
 
 For the causal full-attention model used here, reusable state corresponds to an exact input prefix, not a passage with similar meaning. Matching token IDs is only the first test: the state must also belong to compatible model weights, adapters, positions, attention masks, and other computation settings. Where an input contains images or other nontext data, matching placeholder tokens is insufficient; the underlying model inputs must match as well. A serving system must identify these dependencies in its cache key or otherwise enforce them before reuse.
 
@@ -515,7 +515,7 @@ Compatibility, availability, and permission answer different questions. Compatib
 
 These conditions are also separate from whether an observation remains appropriate for the task. Changing the repository from r17 to r18 does not alter tensors already computed for an unchanged prompt describing r17. Those tensors may remain numerically compatible with that old prompt even though the prompt no longer supplies the evidence needed to judge r18. The selection policy in @sec-vol3-context-engineering determines which evidence to include. Once the caller refreshes or replaces that evidence in the serialized input, prefix matching stops at the first changed token, and freshness is restored by the input rather than by the cache.
 
-### Finding usable prefix state
+### Radix prefix lookup {#sec-vol3-kv-cache-radix-lookup}
 
 A **radix prefix cache**\index{Radix prefix cache!definition} indexes token sequences with a compressed prefix tree,[^fn-radix-patricia-trie] whose edges may represent several tokens rather than one. Following matching edges from the root identifies a common prefix and the associated KV storage [@zheng2024sglang]. The service must then obtain usable ownership of that storage before eviction can reclaim it. Lookup cost grows with the length of the request prefix it examines. A hash index of blocks keyed by their contents and preceding prefix supports the same reuse contract.
 
@@ -525,7 +525,7 @@ The match must extend from the beginning of the input. A repeated passage after 
 
 Block boundaries create a policy choice without changing what compatibility means. Return to the illustrative ten-token prefix in four-token blocks `[3, 7, 9]`. The two full blocks hold eight tokens, and block `9` holds two initialized entries. A service that supports partial-tail reuse can preserve all ten tokens and copy those two entries to a private tail before a divergent append, as in the preceding sharing example. A service that caches only complete blocks instead reuses eight tokens and prefills the remaining two. Both policies are correct: one pays for tail handling, the other repeats a small amount of computation.
 
-### Retention and eviction under pressure
+### Retention and eviction under pressure {#sec-vol3-kv-cache-retention-eviction}
 
 A finished request releases its active claim on KV state while the cache may keep its own claim, so dormant cached blocks remain occupied storage in case another request reuses them. The service's retention policy decides whether the next turn finds that state ready, must restore it, or must recompute it.
 
@@ -543,7 +543,7 @@ This prefix-closed residency rule is a serving simplification. Freeing a prefix 
 
 Retention therefore trades occupied capacity against the work a future hit would avoid. Recency is imperfect evidence: a recently created speculative branch may never run again, while an older shared prefix may serve many requests. A better eviction score weighs expected reuse times reconstruction cost against uniquely reclaimable storage, and the workload sets the weights.
 
-### Measuring reuse and exposing the contract
+### Prefix hit rate and the reuse contract {#sec-vol3-kv-cache-hit-rate-contract}
 
 Potential token matches overstate the benefit when state is unavailable, sharing is disallowed, or the service rounds reuse down to a block boundary. Measure tokens actually served from reusable KV state. Over a specified set of requests, define the **token-weighted prefix hit rate**\index{Prefix hit rate!definition} as
 
@@ -641,13 +641,13 @@ Shortening the observation reduces that work. Once the request reaches the serve
 
 [^fn-iteration-level-scheduling]: **Iteration-Level Scheduling**: Request-level batching fixes a batch until its longest member finishes, so a short request waits for a long one and a new arrival waits for the whole batch. Scheduling at the granularity of one model iteration lets finished requests leave and new ones join between steps [@yu2022orca]. Chunked prefill depends on that granularity: without it, there is no boundary at which a chunk and a set of decodes can be combined. \index{Iteration-level scheduling!chunked prefill}
 
-### Preserving the causal computation
+### Causal correctness across chunks {#sec-vol3-kv-cache-causal-chunks}
 
 For the causal attention used here, processing a later chunk requires the compatible per-layer KV state for the earlier prefix. Each query in the active chunk can attend to preceding tokens and to its own position, but not to later tokens in that chunk or in the remainder of the prompt. The engine preserves token positions and the causal mask while extending the stored state. It reads earlier keys and values rather than recomputing their projections from the beginning.
 
 Chunking therefore changes the execution schedule and preserves the causal computation, up to floating-point differences across kernels and batch arrangements. It has a cost: later chunks re-read earlier attention state, and smaller steps add scheduling and kernel-launch overhead.
 
-### Choosing how much work to admit
+### The per-iteration token budget {#sec-vol3-kv-cache-token-budget}
 
 A simple scheduler gives each iteration a **token budget**\index{Token budget!chunked prefill} $C_{\text{budget}}$. With ordinary autoregressive decoding, each selected decode request contributes one new token position, and each selected prefill contributes the number of positions in its next chunk. An iteration that admits prefill chunks of $c_i$ tokens and a set $\mathcal{D}$ of decode requests must satisfy
 
@@ -724,7 +724,7 @@ We can evaluate the trade-off by replaying the same arrival trace under differen
 
 Smaller chunks offer more frequent scheduling opportunities but delay prompt completion and add overhead. Larger chunks improve execution efficiency while making other requests wait longer. The budget is therefore an operating choice: set it to the largest chunk whose iteration time still meets the inter-token target of the ongoing streams.
 
-### Separating prefill and decode placement {#sec-vol3-kvcache-disaggregated}
+### Prefill-decode disaggregation {#sec-vol3-kvcache-disaggregated}
 
 Chunking shares execution time on a worker. **Prefill-decode disaggregation**\index{Prefill-decode disaggregation!definition} instead assigns the two phases to different workers, so that their resources and parallelism can be chosen separately [@patel2024; @zhong2024distserve]. The two techniques compose: a separated prefill worker can still process prompts in chunks.
 
@@ -738,7 +738,7 @@ Chunking determines how an active request shares compute. Whether that request's
 
 Return to the earlier integration-test wait, before its log arrives. The serving policy stipulated at the start of this chapter retains the repair's compatible attention state on the accelerator. Once the request no longer needs active computation, the serving operator chooses a **paused-state policy**\index{Paused-state policy!definition}: keep the state, move it elsewhere, or drop it and reconstruct it when needed. Serving research on tool-augmented generation analyzed these same three options, as preserve, swap, and discard, and chose among them per request by the accelerator memory each would waste [@abhyankar2024infercept]. The choice trades accelerator capacity against storage, transfer, and computation at resumption. Memory is a resource bound, and invariant closure places resource bounds in the runtime below the model (principle \ref{pri-invariant-closure}), so the serving system owns the pause decision.
 
-### What can actually be reclaimed
+### Reclaimable state {#sec-vol3-kv-cache-reclaimable-state}
 
 The relevant size is the physical allocation the policy can release. Prefix blocks shared with an active sibling stay allocated after the paused trajectory drops its reference, and a block being read, written, or copied stays unavailable until the operation completes. The uniquely reclaimable storage is what remains, and every pause-policy calculation starts from it.
 
@@ -746,7 +746,7 @@ Moving state requires both space at the destination and a safe handoff. The runt
 
 Dropping KV loses computation, and it loses no information as long as the inputs survive. Reconstruction needs the exact token sequence and the applicable model, adapter, position, mask, and multimodal configuration; a conversation summary is no substitute. It starts from any compatible prefix still available and processes the rest again. A hosted caller has these choices only as far as the service exposes them.
 
-### Comparing keep, move, and drop
+### Keep, move, and drop policies {#sec-vol3-kv-cache-keep-move-drop}
 
 The policies in @tbl-vol3-reclamation-policies differ in which resource carries the paused trajectory.
 
@@ -762,7 +762,7 @@ Keep state when the pool has spare capacity and a likely return needs low restor
 
 Storage beyond host memory is a further destination for long waits such as a human approval, worthwhile when the probability of reuse justifies its capacity, transfer, and retrieval costs. Serving systems for multi-turn conversations keep a hierarchy of host memory and disk for this purpose, prefetching a session's state layer by layer so that retrieval overlaps computation [@gao2024cachedattention], and cluster-scale designs pool the host memory and solid-state storage of many nodes into one KV store [@qin2024mooncake]. A serialized KV copy remains derived computation; the durable record of the task's inputs, actions, and evidence lives in the runtime's own records.
 
-### A bounded comparison during the test wait
+### A bounded comparison during the test wait {#sec-vol3-kv-cache-test-wait-comparison}
 
 ```{python}
 #| label: kv-paused-state-choice-calc
@@ -879,7 +879,7 @@ The same comparison applies at every context length and wait. @Fig-vol3-swapping
 ![](images/svg/break_even_swapping_tradeoff.svg)
 :::
 
-### Uncertain returns and competing transfers
+### Uncertain returns and competing transfers {#sec-vol3-kv-cache-uncertain-returns}
 
 A test can finish earlier than predicted, fail quickly, or run longer. Early completion exposes unfinished restoration. An early prefetch followed by a late return occupies accelerator memory again while no generation occurs. If the trajectory never resumes, the inward copy was unnecessary. A policy therefore needs a forecast of the return-time distribution and an acceptable restoration delay, beyond the average wait and an isolated copy time.
 
@@ -1224,7 +1224,7 @@ class ResidencyByArchetype:
 
 :::
 
-### Telemetry that explains pressure {#sec-vol3-kv-telemetry-metrics}
+### KV pool telemetry {#sec-vol3-kv-telemetry-metrics}
 
 Allocated occupancy alone cannot distinguish useful caching from impending allocation failure. A nearly full pool of discardable dormant prefixes may accept a new request after cheap reclamation. The same occupancy with all blocks pinned by active work leaves little room for growth. @Tbl-vol3-kv-pool-states separates the physical states needed to interpret that difference.
 

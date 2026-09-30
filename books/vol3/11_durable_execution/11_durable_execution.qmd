@@ -46,7 +46,7 @@ An agent that works for minutes or hours will eventually outlive the process run
 
 :::
 
-## A Worker Fails Mid-Trajectory {#sec-vol3-persistence-need}
+## Worker Failure Mid-Trajectory {#sec-vol3-persistence-need}
 
 ::: {.column-margin}
 ![](images/svg/hsa_locator_hs.svg){width="100%" fig-alt="H·S·A locator with the Horizon and State axes highlighted in purple and Authority in gray."}
@@ -66,7 +66,7 @@ The trajectory log comes first, with the events a replacement needs to rebuild t
 
 A durable record is durable only against particular failures, so the repair's runtime must say which failures it promises to survive before it writes anything. It declares a **failure domain**\index{Failure domain!definition}, the set of failures its storage tolerates: a process crash with intact storage, replacement of a worker with access to the same durable volume, or permanent loss of that volume. Each case demands a stronger copy than the one before it. The repair serves as this chapter's crash worksheet, and its failure domain is the strongest of the three: the acknowledged history and every artifact recovery needs survive loss of both the worker and its local volume, and a replacement worker can reach them. Every durability claim in the worksheet is made against this contract.
 
-### The log as recorded evidence
+### The log as recorded evidence {#sec-vol3-durable-execution-log-evidence}
 
 The record the next worker needs cannot come from the dead worker's memory or from a fresh model call, so the runtime keeps a separate history of what happened.
 
@@ -98,7 +98,7 @@ Here $j$ indexes the selected log boundary, not the turn index $t$. With fixed r
 
 The log also differs from the model's context. Context assembly selects what the next invocation receives, and compaction can replace earlier observations with a summary. The log keeps the delivered inputs and recorded decisions that the chosen reconstruction or replay contract requires; for a bounded observation, that means the bounded bytes the model saw rather than everything the tool produced. Reconstruction returns exactly what the log kept. A retained summary yields the summary, and a retained hash verifies bytes only while the bytes survive.
 
-### Events that preserve the control contract
+### The log event schema {#sec-vol3-durable-execution-event-schema}
 
 A log is useful only if its events preserve the information needed by the next owner. @Tbl-vol3-durable-log-schema groups the event families by that purpose. These are logical records, not a requirement to issue a separate storage write for each row or field. A compound admission can record its authorization, reservation, and intent together, provided reconstruction preserves their relationship and dispatch respects the durability barrier.
 
@@ -139,7 +139,7 @@ Recording the admitted request durably before sending it is **write-ahead loggin
 
 :::
 
-### State what the acknowledgment survives
+### Acknowledgment and the failure domain {#sec-vol3-durable-execution-ack-failure-domain}
 
 Suppose the repair's worker appends the `test_r18` intent with `write()`, sees the call return, and dispatches the test. The host then loses power. A returned `write()` means only that the kernel has copied the bytes into its page cache, and those dirty pages vanish before writeback. The replacement finds no intent for a test that is running. The append was durable against one failure, a process crash, and not against the one that happened, so every durability claim names the failure it survives.
 
@@ -161,7 +161,7 @@ Each step up the hierarchy needs a stronger barrier. Dirty pages in the page cac
 
 The implementation must specify which failures its persistence operation covers, how errors are reported, and how a replacement identifies the complete acknowledged history; storage technology implements that contract but does not state it. @Sec-vol3-appendix-systems-boundaries compares atomicity, isolation, and durability and supplies a boundary test for separating one store's commitment from effects at other endpoints. If the acknowledgment fails or its status is uncertain, the runtime holds the dispatch and resolves the append through the store's contract. Storage unavailability therefore delays useful work, whereas sending first would remove the evidence needed to govern that work after a failure.
 
-### Extend live admission across a crash
+### Durable admission ordering {#sec-vol3-durable-execution-admission-ordering}
 
 @Sec-vol3-controlplane-statemachine established the live admission decision: validate the completed proposal, check current authority and control state, register its identity, and reserve bounded liability before releasing the request. Durability adds an acknowledged history of that decision and the exact intended operation. For an attempt that proceeds to dispatch and later produces an observation, the ordering is
 
@@ -181,7 +181,7 @@ Admission and control stay coordinated while the barrier is pending. A pause or 
 
 Model calls need durable identity and liability too. A reply is recorded only after generation, yet an interrupted invocation can incur charges even when its output is lost. A lost reply stays lost. A new sample is a separately admitted invocation, and any downstream effect requires that invocation's own completed, validated proposal.
 
-### Classify the evidence, not just the event name
+### Recovery evidence and the completeness rule {#sec-vol3-durable-execution-completeness-rule}
 
 After the crash, the worker may treat a missing intent as evidence only after it establishes that it holds the complete authoritative history the failure domain promises. We call this the **completeness rule**\index{Completeness rule!definition}. An asynchronously copied replica cannot satisfy it, because nothing in the copy shows that it holds the last acknowledged intent. @Tbl-vol3-durable-recovery-states distinguishes the cases the rule permits.
 
@@ -205,7 +205,7 @@ Database write-ahead logging forces a change's log record to stable storage befo
 
 When evidence stays insufficient, the ledger keeps an owner for reconciliation or an authorized handoff, through timeouts, pauses, and terminal continuations alike. Independent work proceeds under its own guards while dependent mutations wait. @Sec-vol3-failure-recovery develops the response to established effects that need repair.
 
-### Share a barrier without dividing its latency
+### Group commit {#sec-vol3-durable-execution-group-commit}
 
 A harness running many trajectories now pays one durable acknowledgment per dispatch, and under the worksheet's contract each one is a network round trip to a replica quorum. **Group commit**\index{Group commit!definition}[^fn-group-commit-origin] lets several ready records share one durable acknowledgment [@dewitt1984]. The coordinator gathers a batch, performs the storage operation required by the failure contract, and releases only the records covered by its successful acknowledgment. Each trajectory still satisfies the same intent-before-dispatch ordering.
 
@@ -286,7 +286,7 @@ The durable intent tells the replacement worker that the `r18` test may have sta
 
 A **checkpoint**\index{Checkpoint!definition} binds a recoverable record snapshot and its required workspace and artifacts to an exact committed log position. It shortens reconstruction by replacing a long prefix with a compatible snapshot. This is different from the compact progress record used to assemble model context, because a useful summary cannot replace file contents, pending-operation identity, or accounting evidence.
 
-### Publish a consistent recovery boundary
+### Consistent recovery boundaries {#sec-vol3-durable-execution-recovery-boundaries}
 
 Let the checkpoint boundary $j_{\text{ckpt}}$ be a log position, like the boundary $j$ of the fold, so it identifies a committed log prefix rather than a model turn. A checkpoint manifest names that boundary, the record snapshot, the workspace snapshot, required artifact references, their integrity information, and the format and reducer versions needed to interpret them. The record includes actual consumption, outstanding reservations, control and approval status, and unresolved operations with their owners, and those duties persist while no worker executes the trajectory.
 
@@ -302,7 +302,7 @@ In the crash worksheet, the checkpoint at $j_{\text{ckpt}}$ names the record sna
 
 For a different suffix that changes workspace files, the recovery data must include the base identity, ordered replacements or reconstructible patches, deletions, relevant metadata, and integrity checks; a result code, or a hash whose bytes are gone, does not qualify. If the record refers to a newer candidate whose delta is missing, the runtime reports that state as unavailable rather than pairing the record with the older workspace. Regenerating artifacts is new execution governed by the repair and admission policies developed in @sec-vol3-failure-recovery.
 
-### Choose the snapshot representation
+### Full and incremental snapshots {#sec-vol3-durable-execution-snapshot-representation}
 
 A full snapshot and an incremental representation can satisfy the same contract while spending resources differently. @Tbl-vol3-snapshot-models identifies the measurements that matter. Restore time grows with state size for a full snapshot and with chain length for deltas.
 
@@ -379,7 +379,7 @@ For a hypothetical `{python} SnapshotBytes.turns_str`-turn trajectory whose stat
 
 Periodic consolidation can shorten an incremental chain, but the replacement base must be published before dependent material is retired. Retention also depends on the promised inspection horizon, since a snapshot sufficient for current recovery need not support replay of every older turn. The retention section returns to that distinction.
 
-### Price reconstruction rather than lost model turns
+### Checkpoint cadence {#sec-vol3-durable-execution-checkpoint-cadence}
 
 Checkpoint cadence trades capture overhead against the work of reconstructing the suffix. When the required events and workspace deltas survive, that suffix costs reading, validating, folding, and restoring recorded state, not model calls. New model calls begin only after reconstruction and guarded resume.
 
@@ -582,7 +582,7 @@ The replacement worker finds the repair's checkpoint at $j_{\text{ckpt}}$, bindi
 
 **Resume**\index{Resume!definition} establishes a usable continuation from surviving records under current ownership and policy. It begins by validating authoritative availability, then acquires ownership, restores compatible state, reconciles outstanding obligations, and checks new admission. Reconstruction supplies history, and each later step grants or withholds permission. A step whose evidence or authority is unavailable leaves the trajectory held.
 
-### Establish availability and current ownership
+### Availability and ownership {#sec-vol3-durable-execution-availability-ownership}
 
 The worker first identifies the authoritative committed log prefix and the checkpoint artifacts it needs, and it applies the completeness rule of @sec-vol3-persistence-wal before reading any absence as evidence. If it cannot establish prefix completeness or retrieve a required artifact, it reports reconstruction unavailable rather than treating the gap as an empty history.
 
@@ -596,13 +596,13 @@ The old worker may have been partitioned rather than destroyed, and after its ow
 
 Fencing has a narrower scope than effect settlement. A gateway can reject a new dispatch from the old owner while a request it previously forwarded remains in flight. The new worker therefore preserves `operation_id=test_r18` and the earlier attempt's evidence. Passing the new ownership check authorizes new dispatches, not a repeat of that operation, and a gateway's pending/complete map cannot make its record atomic with an independent endpoint's effect.
 
-### Restore compatible state through the suffix
+### State restoration {#sec-vol3-durable-execution-state-restoration}
 
 Under current ownership, the worker loads the published checkpoint and reconstructs both the record and workspace through the selected committed prefix. The reducer applies recorded decisions rather than sampling earlier model calls again. Workspace reconstruction applies the corresponding recorded deltas or retrieves the required immutable artifact versions, under the delta requirements of @sec-vol3-persistence-checkpointing.
 
 In the crash worksheet, the suffix advances the control record, usage, and pending-operation ledger but leaves `ws_r18` unchanged, so the reconstructed record still references `ws_r18` and now carries the unsettled `test_r18` intent and reservation. The handle `job_tests_18` is recoverable only if the executor's acknowledgment was durably recorded.
 
-### Reconcile effects, charges, and held decisions
+### Effect and charge reconciliation {#sec-vol3-durable-execution-effect-reconciliation}
 
 Outstanding operations need a durable return path independent of the failed worker. A result inbox can retain authenticated evidence indexed by trajectory, logical operation, and attempt identity, with executor identity and source scope available for validation. The current settlement owner records admissible evidence in the log and `operation_ledger`. Receipt alone does not establish settlement, and a pending status, timeout, or partial result retains the corresponding uncertainty.
 
@@ -612,7 +612,7 @@ The same evidence discipline preserves the budget. Reconstruct `actual_consumpti
 
 Control and approval history remain effective during this reconciliation. A recovered `PAUSED` trajectory stays held, and a terminal continuation stays terminal. A favorable approval can still await dispatch capacity in `AWAITING_APPROVAL`, while a stale, expired, or withdrawn approval stays void on every worker. Authenticated late results may settle an operation even after pause, timeout, or terminal continuation, but they update the operation ledger rather than an obsolete turn. The current owner revalidates relevant facts before staging them for a subsequent context.
 
-### Admit the next continuation
+### Continuation admission {#sec-vol3-durable-execution-continuation-admission}
 
 The recovered history explains earlier decisions; current conditions govern the next one. The harness checks the task and plan dependencies, grants, approval status, available capacity, and budget before admitting work. Actual consumption plus outstanding reservations, proposed bounded liability, and the protected finalization reserve must fit the applicable cumulative allowance. The ordinary-work deadline is checked separately. Its expiry does not authorize a new exploratory call merely because money remains; finalization uses its declared time and resource allowance.
 
@@ -688,7 +688,7 @@ The first two modes share one structural change from live execution, shown in @f
 ![](images/svg/fig-vol3-replay-mode.svg)
 :::
 
-### Inspect the recorded projection
+### Projection reconstruction {#sec-vol3-durable-execution-projection-reconstruction}
 
 Folding the log applies recorded decisions; today's authorization policy never re-decides yesterday's proposals. Starting from `record_R_ckpt`, the compatible suffix reconstructs the selected record through its captured admission, reservation, intent, and outcome events. If the suffix ends after `ToolIntent` with no settling evidence, the projection retains an unresolved operation.
 
@@ -704,7 +704,7 @@ Historical inspection can also retrieve the immutable input manifest for a parti
 
 :::
 
-### Test the harness against captured inputs
+### Harness regression replay {#sec-vol3-durable-execution-harness-regression-replay}
 
 **Harness regression replay**\index{Harness regression replay!definition} runs the harness code itself against captured inputs, rather than folding its recorded decisions. The test supplies captured model replies, tool observations, control events, and the other inputs that the tested logic consumes. At its declared boundary, this includes relevant clock values, generated identifiers, configuration, policy, and event scheduling. The capture need not model an entire machine, but omitted inputs limit the comparison. Operating-system debuggers rest on the same idea, logging the nondeterministic inputs of a run so that it can be replayed and stepped backward [@king2005debugging].
 
@@ -718,7 +718,7 @@ For example, a retained test case can supply an authenticated late result after 
 
 Changing harness code or policy may intentionally change the decisions. The comparison must therefore state which outputs should remain equal and which new behavior is expected. A mismatch can reveal a regression, an intended change, or insufficient capture, so equality is one expected outcome among several. Recorded-input tests skip fresh model and tool execution but still spend computation, storage reads, and setup, and they cover only the supplied cases.
 
-### Start a counterfactual branch
+### Counterfactual branches {#sec-vol3-durable-execution-counterfactual-branches}
 
 A counterfactual asks what would happen after changing a prompt, model, policy, or observation rule. It receives a new branch identity linked to the parent log boundary, records the change, and restores the corresponding workspace and environment fixtures. For the crash worksheet, a branch from $j_{\text{ckpt}}$ uses `ws_r18` and fixtures compatible with that boundary. Restoring only source files while using today's changed dependencies would introduce an additional experimental change.
 
@@ -732,7 +732,7 @@ A regression replay of the repair reaches the recorded targeted-test result for 
 
 A **divergence point**\index{Divergence point!definition} is the first observable mismatch under a declared comparison: between recorded and reconstructed state, between old and revised harness behavior on captured inputs, or between a recording and a new execution. The comparison must identify its boundary and expected equivalence. Two serialized requests may differ in an irrelevant diagnostic field while representing the same permitted operation; different source revisions are not interchangeable merely because their test commands match. A turn number alone is too coarse when context assembly, model generation, authorization, and tool dispatch all occur within that turn.
 
-### Compare the earliest recorded boundary
+### Boundary-by-boundary comparison {#sec-vol3-durable-execution-boundary-comparison}
 
 Begin at a compatible checkpoint or initial state and compare corresponding events in their recorded order. Use invocation and operation identities to align the comparison, preserving any concurrency ordering that the replay contract requires. At each boundary, compare the available inputs, the configured transformation, and its recorded output. @Tbl-vol3-nondeterminism-mitigation organizes the evidence by the first boundary at which a mismatch appears, not by cause.
 
@@ -749,7 +749,7 @@ Suppose the retained test observation says that `r18` passed one targeted check 
 
 Localization is only as fine as the surviving evidence: a surviving digest hides the omitted text, and a surviving final answer alone hides every earlier boundary. The report should identify the last comparable boundary and the next missing evidence, rather than assign the failure to whichever component appears last in the trace.
 
-### Separate localization from explanation
+### Localization and explanation {#sec-vol3-durable-execution-localization-explanation}
 
 A context digest checks the integrity of the recorded bytes it covers and nothing outside them. Equal digests leave decoding parameters, tool schemas outside the hashed content, model revisions, and provider configuration unverified, and even a complete visible request leaves hosted-service internals unspecified. Different digests establish a difference in the hashed input, which is one candidate explanation among several. Inspect the retained content and its provenance before interpreting either result.
 
@@ -774,7 +774,7 @@ These comparisons depend on which events, delivered inputs, and artifacts remain
 
 The repair can be reconstructed from the checkpoint at $j_{\text{ckpt}}$ and its required suffix while those records and artifacts remain available. An event that names a deleted `ws_r18` restores nothing, and retaining every compiler message is useless if the durable intent for `test_r18` is gone. Retention therefore begins with the recovery promise, not with a choice of storage format.
 
-### Retain what each promise requires
+### Retention lifetimes {#sec-vol3-durable-execution-retention-lifetimes}
 
 The runtime needs separate lifetimes for current recovery, historical replay, and optional diagnostics. Current recovery requires a compatible published checkpoint, the complete committed suffix needed to reconstruct the selected record and workspace, and the artifacts those steps depend on. The outstanding operation also needs its identity, attempts, evidence, reservations, and settlement owner. Those duties can outlive the trajectory's terminal scheduling state. Historical replay may require earlier checkpoints, delivered model inputs, recorded replies, and runtime inputs that current recovery no longer needs. Diagnostics may additionally retain raw output that the model never received.
 
@@ -782,7 +782,7 @@ These sets overlap, and each needs its own lifetime. A retention policy should n
 
 For the crash worksheet, `record_R_ckpt`, `ws_r18`, and the committed suffix through the `ToolIntent` for operation `test_r18`, attempt `attempt1`, are recovery inputs. The missing result remains unknown. An unrelated diagnostic tail can be deleted without affecting reconstruction under a contract that never uses it; deleting `ws_r18` ends reconstruction, because asking the model to produce the patch again would be new execution rather than restoration of that candidate.
 
-### Separate bulky payloads without losing dependencies
+### Content-addressed payload storage {#sec-vol3-durable-execution-payload-storage}
 
 A log can keep event envelopes small by storing large payloads separately. **Content-addressed payload storage**\index{Content-addressed storage!definition}[^fn-venti-content-address] uses a content digest to identify stored bytes and check retrieved content. An event can reference the payload's digest, byte length, format, and storage location while retaining the exact bounded observation delivered to the model and its omission metadata. If the delivered observation is itself stored separately, that object becomes a required dependency too.
 
@@ -800,7 +800,7 @@ Separating payloads from envelopes also makes the retention bill easy to price, 
 # ┌─────────────────────────────────────────────────────────────────────────────
 # │ RETENTION COST OF RECOVERY AND REPLAY INPUTS (LEGO)
 # ├─────────────────────────────────────────────────────────────────────────────
-# │ Context: "Separate bulky payloads without losing dependencies" and the
+# │ Context: "Content-addressed payload storage" and the
 # │          retention notebook that follows it.
 # │
 # │ Goal: Price a year of recovery-and-replay retention for one trajectory.
@@ -872,7 +872,7 @@ class RetentionCost:
 
 :::
 
-### Prune against a declared boundary
+### Log compaction {#sec-vol3-durable-execution-log-compaction}
 
 Once the checkpoint at $j_{\text{ckpt}}$ is published, the repair no longer needs the events before it to recover, because `record_R_ckpt` and `ws_r18` stand in for them. **Log compaction**\index{Log compaction!definition} retires such an older prefix once a newer published checkpoint preserves the selected state and every dependency required by the *current recovery* contract, including unresolved operations. The suffix must still connect to the checkpoint's exact committed boundary. Before pruning, verify that the replacement checkpoint and its artifacts are durable within the failure domain and that no retained historical replay or other obligation still requires the older material.
 
@@ -880,7 +880,7 @@ Compaction preserves current recovery and shortens the replay interval. Once an 
 
 Context compaction is another operation. A recorded `Compacted` event preserves the summary used by later calls, while the lifetime of its historical inputs follows the recovery, replay, and evidence policies just defined. Optional telemetry can follow a sampling policy developed in @sec-vol3-evaluation; recovery-required events and artifacts must remain complete within their required lifetime.
 
-### Implement the storage contract {#sec-vol3-persistence-engine-design}
+### The storage engine contract {#sec-vol3-persistence-engine-design}
 
 A storage layer can quietly break every promise above. Suppose ingestion retries a batch after a lost acknowledgment, and the retried batch carries the `test_r18` timeout `ToolResult` under an identity that already holds later success evidence. A uniqueness constraint would accept one and silently drop the other. Ingestion must instead compare the immutable envelope and payload with the stored event under the declared encoding. An identical retry acknowledges the existing record, and a conflicting payload is an integrity or coordination error, not a duplicate to ignore. The later evidence belongs in a new event whose meaning is checked against the operation ledger, and deduplicating an event insertion never deduplicates an external effect.
 
