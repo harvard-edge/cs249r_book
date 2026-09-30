@@ -114,7 +114,7 @@ Every extension in `tinytorch.extensions` is a complete, self-contained systems 
 | **LoRA** | `LoRALinear(in, out, rank)` | Optimizer State Memory Wall | Freezes base weights ($W_0$) and trains rank-$r$ adapters ($A, B$), cutting Adam state memory by >98%. |
 | **Activation Checkpointing** | `checkpoint(fn, *args)` | Activation Memory Scaling ($O(N)$) | Drops forward activations and recomputes them during backward pass, reducing scaling to $O(\sqrt{N})$. |
 | **Mixed Precision Loss Scaler** | `LossScaler(scale)` | IEEE 754 float16 Gradient Underflow | Scales loss by $2^{16}$ before backprop and unscales gradients before optimizer step, preserving small signals. |
-| **Graph Capture & Fusion** | `compile_graph(fn, *args)` | DRAM Memory Bus Round-Trips | Traces define-by-run tape into AST and emits fused single-loop kernel, eliminating 40% of DRAM traffic. |
+| **Graph Capture & Fusion** | `compile_graph(fn, *args)` | DRAM Memory Bus Round-Trips | Traces define-by-run ops into one Python expression string; NumPy operators still allocate intermediates. A true fused loop would cut DRAM traffic 33.3% for full-size operands (240 → 160 MB), or 50% if operands are broadcast scalars. |
 | **SIMD GEMM** | `simd_matmul(a, b)` | Python Interpreter Bytecode Overhead | Cache-blocked C++ loop via `ctypes` with AVX2/NEON vectorization and OpenMP, delivering a $170\times$ speedup. |
 | **Fused Bias + GELU** | `simd_fused_bias_gelu(x, bias)` | Activation Memory Bandwidth | Fused C++ loop computing $x + \text{bias} \rightarrow \text{GELU}$ in registers, achieving an $8.6\times$ speedup over unfused code. |
 | **Apple MPS GEMM** | `mps_matmul(a, b)` | Single-Threaded CPU Throughput | Offloads GEMM to Apple GPU via Metal Performance Shaders; $6\times$ faster than CPU at $N = 4096$. |
@@ -125,7 +125,7 @@ Every extension in `tinytorch.extensions` is a complete, self-contained systems 
 ## Extension Walkthroughs & Systems Impact
 
 :::{.callout-tip title="Full Implementations and Mathematical Proofs: Chapter 21"}
-For the complete reference implementations, mathematical derivations, and step-by-step code traces of each extension, see **Chapter 21: Extensions** in the companion textbook [*TinyTorch: From Tensors to Transformers*](https://mlsysbook.ai/tinytorch/assets/downloads/TinyTorch-Book.pdf). For runnable hardware kernels (C++ SIMD, Apple Metal MPS, OpenAI Triton), see [Milestone 07: Custom GPU Kernels](milestones/07_kernels.qmd).
+For the complete reference implementations, mathematical derivations, and step-by-step code traces of each extension, see **Chapter 21: Extending TinyTorch** in the companion textbook [*TinyTorch: From Tensors to Transformers*](https://mlsysbook.ai/tinytorch/assets/downloads/TinyTorch-Book.pdf). For runnable hardware kernels (C++ SIMD, Apple Metal MPS, OpenAI Triton), see [Milestone 07: Custom Kernels](milestones/07_kernels.qmd).
 :::
 
 ### 1. Parameter-Efficient Fine-Tuning (LoRA)
@@ -140,7 +140,7 @@ For the complete reference implementations, mathematical derivations, and step-b
 | :--- | ---: | ---: | ---: | ---: |
 | Full Fine-Tuning | 67,108,864 | 268.4 MB | 536.9 MB | Reference (0.0%) |
 | LoRA ($r = 16$) | 327,680 | 1.3 MB | 2.6 MB | 99.5% |
-| LoRA ($r = 8$) | 163,840 | 0.65 MB | 1.31 MB | 99.7% |
+| LoRA ($r = 8$) | 163,840 | 0.66 MB | 1.31 MB | 99.8% |
 | LoRA ($r = 4$) | 81,920 | 0.33 MB | 0.66 MB | 99.9% |
 
 ---
@@ -261,19 +261,19 @@ Before measuring execution time, you must guarantee numerical correctness. Never
    )
    ```
 
-2. **Synthetic Micro-benchmarks:** Use the built-in profiling tools from `tinytorch.perf.benchmarking` (`Timer` and `MemoryTracker`) to isolate the operator across power-of-two shapes ($N \in \{128, 256, 512, 1024, 2048\}$):
+2. **Synthetic Micro-benchmarks:** Use `precise_timer` from `tinytorch.perf.benchmarking` to time the operator, and Python's `tracemalloc` (the tool Module 14's `Profiler` uses) to measure its peak memory, across power-of-two shapes ($N \in \{128, 256, 512, 1024, 2048\}$):
    ```python
-   from tinytorch.perf.benchmarking import (
-       Timer,
-       MemoryTracker,
-   )
+   import tracemalloc
+   from tinytorch.perf.benchmarking import precise_timer
 
-   tracker = MemoryTracker()
-   with Timer() as t, tracker:
+   tracemalloc.start()
+   with precise_timer() as t:
        y = my_extension_op(x)
+   _, peak = tracemalloc.get_traced_memory()
+   tracemalloc.stop()
 
-   print(f"Latency:  {t.elapsed_ms:.2f} ms")
-   print(f"Peak RAM: {tracker.peak_mb:.2f} MB")
+   print(f"Latency:  {t.elapsed * 1000:.2f} ms")
+   print(f"Peak RAM: {peak / 2**20:.2f} MB")
    ```
    Quantify execution speedup, memory reduction, and arithmetic intensity.
 
@@ -286,13 +286,13 @@ Isolated micro-benchmarks do not capture end-to-end training dynamics, cache con
    - *Target Extensions:* Custom activations, loss scalers, or optimizers.
    - *Workflow:* Substitute your custom activation or optimizer into the LeNet-style architecture. Train on the TinyDigits classification task and compare epoch training time and final validation accuracy against standard SGD/Adam.
 2. **Milestone 5: Generative Transformers (TinyShakespeare):**
-   - *Script:* `milestones/05_2017_transformer/02_vaswani_attention.py`
+   - *Script:* `milestones/05_2017_transformer/01_tinygpt_shakespeare.py`
    - *Target Extensions:* Low-rank adaptation, activation checkpointing, custom attention, or fused kernels.
    - *Workflow for LoRA:* Freeze the pre-trained GPT weights and replace attention projection layers with `LoRALinear`. Fine-tune on Shakespearean text and verify that the adapter achieves comparable cross-entropy loss while updating less than 2% of the parameters.
-   - *Workflow for Activation Checkpointing:* Wrap each `TransformerBlock` in `checkpoint()`. Measure peak activation memory using `MemoryTracker` to prove you can double the batch size without triggering out-of-memory errors.
+   - *Workflow for Activation Checkpointing:* Wrap each `TransformerBlock` in `checkpoint()`. Measure peak activation memory with `tracemalloc` to prove you can double the batch size without triggering out-of-memory errors.
 3. **Milestone 6: Standardized MLPerf Inference:**
    - *Module:* `tinytorch.perf.benchmarking`
-   - *Workflow:* Run `mlperf_run_standard_benchmark(model, dataloader)` to evaluate your optimized model against standardized MLPerf latency percentiles ($p_{50}, p_{90}, p_{99}$), sustained throughput, and memory consumption.
+   - *Workflow:* Create `MLPerf()` and call its `run_standard_benchmark(model, benchmark_name, test_inputs=..., labels=...)` to evaluate your optimized model against standardized MLPerf latency percentiles ($p_{50}, p_{90}, p_{99}$), sustained throughput, and memory consumption.
 
 ### Tier 3: Custom Datasets and Pipeline Ingestion
 
@@ -321,13 +321,13 @@ To evaluate an extension on your own domain-specific problem, plug your raw data
    ```
 
 2. **Text Corpora:** Pass raw text to `Tokenizer` from `tinytorch.core.tokenization` to construct tokenized input-target sequences for autoregressive language modeling.
-3. **End-to-End Training:** Pass the loader, model (with your extension active), optimizer, and loss function to `Trainer` (`tinytorch.core.training.Trainer`). Run `trainer.fit(epochs=5)` and log training throughput and loss progression.
+3. **End-to-End Training:** Pass the loader, model (with your extension active), optimizer, and loss function to `Trainer` (`tinytorch.core.training.Trainer`). Call `trainer.train_epoch(loader)` once per epoch and log training throughput and loss progression.
 
 ---
 
 ## Building on the Foundations: Next-Level Extensions
 
-These are just some examples. The extensions we gave you cover a bunch of different things, and we try to cover things that you can improve on. Rather than attempting massive, disconnected projects, the most effective way to deepen your systems mastery is to build directly on the canonical extension points introduced in this chapter.
+The projects below build directly on the four extension points above; each deepens one of the shipped extensions rather than starting a disconnected project.
 
 If you want to extend TinyTorch, the interfaces are intentionally clean and minimalist:
 
@@ -369,7 +369,7 @@ Each project below takes a real systems bottleneck and demonstrates how you can 
   $$O_i^{\text{new}} = \text{diag}(e^{m_i - m_i^{\text{new}}}) O_i + e^{S_i - m_i^{\text{new}}} V_j$$
   Once all column blocks have been processed, normalize the output accumulator by dividing each row by its final running sum:
   $$O_i^{\text{final}} = \text{diag}(l_i^{\text{final}})^{-1} O_i$$
-  In the backward pass, recompute the attention weights on-the-fly from the cached $Q, K, V$ blocks, completely eliminating the $O(S^2)$ memory footprint. Benchmark your tiled attention function against stock `attention.py` across sequence lengths $S \in \{512, 1024, 2048, 4096\}$ using `MemoryTracker` and `Timer`.
+  In the backward pass, recompute the attention weights on-the-fly from the cached $Q, K, V$ blocks, completely eliminating the $O(S^2)$ memory footprint. Benchmark your tiled attention function against stock `attention.py` across sequence lengths $S \in \{512, 1024, 2048, 4096\}$ using `tracemalloc` and `precise_timer`.
 
 ### Hardware Simulation and Memory Tracing (ScaleSim Integration)
 
@@ -386,7 +386,7 @@ Each project below takes a real systems bottleneck and demonstrates how you can 
 * **The Project:** Build an end-to-end data systems extension modeled after the TinyVerse dataset architecture:
   1. **Contiguous Binary Layouts:** Package training samples into contiguous memory-mapped serialization buffers (`.pkl` / `.npy` / flat binary) to allow instantaneous, zero-copy batch slicing directly into `Tensor` without CPython object allocation overhead.
   2. **Closed-World Algorithmic Curricula:** Hand-curate and programmatically generate closed-world, syntactically dense micro-corpora (such as `TinyPy` algorithms or `TinyTalks` concept Q&A) sized under 100 KB that saturate single-core CPU training in under 60 seconds without third-party network downloads.
-  3. **Compiler-in-the-Loop Evaluation:** Author a live verification hook that streams generated model tokens directly into Python's `ast.parse()` compiler, tracking the **AST Validity Rate (%)** as a strict compiler gate rather than relying solely on loss. Evaluate this data pipeline against Milestone 05 Part 3 to verify 100% syntactically valid code generation.
+  3. **Compiler-in-the-Loop Evaluation:** Author a live verification hook that streams generated model tokens directly into Python's `ast.parse()` compiler, tracking the **AST Validity Rate (%)** as a strict compiler gate rather than relying solely on loss. Evaluate this data pipeline against Milestone 05 Part 3, which scores greedy completions only for prompts whose function names never appear in training and requires at least 1 of 7 to be syntactically valid.
 
 ---
 
@@ -397,8 +397,8 @@ Adding a new extension to TinyTorch follows an explicit five-step protocol:
 1. **Identify the Boundary:** Map your optimization to `Function` (autograd math/recomputation), `Layer` (adapters/primitives), `Optimizer` (gradients/moments), or C-ABI `ctypes` / GPU runtime (silicon).
 2. **Copy the Template:** Duplicate `tinytorch/extensions/template.py` as your base (e.g. `tinytorch/extensions/kv_cache.py`).
 3. **Implement the Contract:** Satisfy the Golden Invariants: handle both `Tensor` and `np.ndarray`, define backward passes for differentiable operations, and fall back transparently to NumPy if hardware compilers or libraries are missing.
-4. **Author Unit Tests:** Create a matching test file in `tinytorch/tests/extensions/` (e.g. `tests/extensions/test_kv_cache.py`). Verify numerical parity against an un-optimized or baseline reference (`np.allclose(out, ref, atol=1e-5)`):
+4. **Author Unit Tests:** Create a matching test file in `tests/extensions/` (e.g. `tests/extensions/test_kv_cache.py`). Verify numerical parity against an un-optimized or baseline reference (`np.allclose(out, ref, atol=1e-5)`):
    ```bash
-   python -m pytest tinytorch/tests/extensions/test_kv_cache.py -v
+   python -m pytest tests/extensions/test_kv_cache.py -v   # from your tinytorch folder
    ```
 5. **Register Public Symbols & Open a PR:** Add your public functions and classes to `__all__` in `tinytorch/extensions/__init__.py`, then share your extension with the TinyTorch community on GitHub!

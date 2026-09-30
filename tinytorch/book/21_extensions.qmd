@@ -8,7 +8,7 @@
 
 ## The Core Framework and the Extensibility Dilemma
 
-Across Chapters 1 through 20, the preceding modules constructed a complete, self-contained deep learning framework from bare silicon concepts up to modern generative AI:
+Across Modules 01 through 20 (@sec-tensors through @sec-capstone), the preceding chapters constructed a complete, self-contained deep learning framework from bare silicon concepts up to modern generative AI:
 
 - An n-dimensional array abstraction with arbitrary striding and slicing (@sec-tensors)
 - A reverse-mode automatic differentiation tape with topological backpropagation (@sec-autograd)
@@ -33,7 +33,7 @@ A natural question arises: *Why study and build systems extensions in TinyTorch 
 
 The answer lies in the classic pedagogical tradition of operating systems education: from John Lions' legendary commentary on Unix 6th Edition, to Andrew Tanenbaum's Minix, to MIT's xv6.
 
-When Linus Torvalds wanted to understand how an operating system truly manages physical hardware, he did not begin by modifying a commercial monolith. He studied Minix, a compact microkernel operating system written by Tanenbaum specifically for teaching. Minix was small enough to be held in a single person's head, yet real enough to demonstrate preemptive scheduling, memory paging, and system calls. That tactile understanding gave Linus the foundational mental model to author the initial Linux kernel.
+When Linus Torvalds wanted to understand how an operating system truly manages physical hardware, he did not begin by modifying a commercial monolith. He studied Minix, a compact microkernel operating system written by Tanenbaum specifically for teaching. Minix was small enough to be held in a single person's head, yet real enough to demonstrate preemptive scheduling, memory management, and system calls. That tactile understanding gave Linus the foundational mental model to author the initial Linux kernel.
 
 Years later, when MIT redesigned its operating systems curriculum (6.828 / 6.1810), it chose xv6, a modern reimplementation of Unix 6th Edition in 10,000 lines of clean ANSI C. When teaching virtual memory and process scheduling, MIT does not ask students to modify the production Linux kernel. Linux contains over 30 million lines of C, thousands of hardware drivers, lock-less read-copy-update (RCU) primitives, and deep architecture-specific macros. Attempting to implement a simple copy-on-write page allocator in Linux forces a student to spend 90% of their time fighting macro definitions, build harnesses, and kernel ABI wrappers before manipulating a page table. In xv6, the abstraction boundaries are razor-sharp: a student can implement copy-on-write or a priority scheduler in 40 lines of clear C and inspect every page table manipulation directly in physical memory.
 
@@ -46,7 +46,7 @@ TinyTorch is the Minix and xv6 of deep learning systems:
 - A `Layer` has exactly two methods: `forward` and `parameters()`.
 - An `Optimizer` is a clean iterator over parameter tensors.
 
-Implementing Low-Rank Adaptation (LoRA) in TinyTorch requires only 25 lines of Python to reveal how frozen base weights and trainable low-rank adapters interact with the autograd tape. Writing an AVX2 SIMD GEMM kernel or an Apple MPS dispatch wrapper passes memory addresses across a simple C foreign function interface (FFI) without layers of framework obfuscation, exposing the unadorned reality of the hardware memory subsystem, CPU vector registers, and cache hierarchy.
+Implementing Low-Rank Adaptation (LoRA) in TinyTorch requires about 30 lines of Python to reveal how frozen base weights and trainable low-rank adapters interact with the autograd tape. Writing a SIMD GEMM kernel passes memory addresses across a simple C foreign function interface (FFI) without layers of framework obfuscation; the Apple GPU path, by contrast, borrows PyTorch's MPS backend. The FFI path exposes the unadorned reality of the hardware memory subsystem, CPU vector registers, and cache hierarchy.
 
 ---
 
@@ -69,7 +69,7 @@ TinyTorch exposes four native extension points that correspond to the four funda
 
 2. **The Architectural Boundary (`Layer`):** Subclassing `Layer` introduces custom architectural primitives, freezes pre-trained weight matrices by toggling `requires_grad=False`, and exposes low-rank adapter parameters to the optimizer (as in LoRA).
 3. **The Training Dynamics Boundary (`Optimizer`):** Interfacing with `optimizer.params` enables custom gradient transformations, loss scaling for mixed-precision arithmetic, gradient clipping, and advanced update rules (such as Lion or Muon).
-4. **The Silicon Boundary (Backend FFI):** Extracting contiguous memory pointers from `Tensor.data` enables invoking native compiled C++ shared libraries via `ctypes`, launching GPU kernels in OpenAI Triton, or offloading computation to Apple Silicon Metal Performance Shaders (MPS).
+4. **The Silicon Boundary (Backend FFI):** Extracting contiguous memory pointers from `Tensor.data` enables invoking native compiled C++ shared libraries via `ctypes`, launching GPU kernels in OpenAI Triton, or offloading computation to the Apple Silicon GPU through PyTorch's MPS backend (which requires `torch`).
 
 ### Repository Architecture: Core versus Extensions
 
@@ -102,7 +102,7 @@ tinytorch/
 └── tests/extensions/   # Parity test suite
 ```
 
-The `tinytorch/core/` and `tinytorch/perf/` directories contain the standard library built in Chapters 1 through 20. The `tinytorch/extensions/` directory is the open workshop: every optimization lives as an isolated, importable Python or C++ module that plugs into the core boundaries without modifying core source files.
+The `tinytorch/core/` and `tinytorch/perf/` directories contain the standard library exported by Modules 01 through 19; Module 20 exports to `tinytorch/olympics.py`. The `tinytorch/extensions/` directory is the open workshop: every optimization lives as an isolated, importable Python or C++ module that plugs into the core boundaries without modifying core source files.
 
 ### The Extension Contract and Starter Template
 
@@ -152,7 +152,7 @@ Each extension establishes:
 1. **The Systems Bottleneck:** The physical hardware constraint being hit.
 2. **Architectural Strategy:** How the extension bypasses the constraint.
 3. **The Implementation:** The actual source code.
-4. **The Empirical Scorecard:** Immediate quantitative metrics verifying the efficiency gain.
+4. **The Scorecard:** Quantitative metrics for the efficiency gain, labeled as measured on a stated machine or as analytical counts.
 
 ---
 
@@ -161,8 +161,8 @@ Each extension establishes:
 **The Systems Bottleneck:** Fine-tuning large language models by updating all parameters encounters a severe memory wall. Modern adaptive optimizers such as Adam maintain two 32-bit floating-point state tensors per parameter: the first moment vector $m_t$ (momentum) and the second raw moment vector $v_t$ (variance). Each parameter requires 8 bytes of optimizer state, plus 4 bytes for the stored gradient, plus 4 bytes for the weight itself, totaling 16 bytes per parameter. For a 7-billion parameter model, storing Adam optimizer states alone consumes $7 \times 10^9 \times 8 = 56\text{ GB}$ of memory, far exceeding consumer GPU memory before a single activation is allocated.
 
 **Architectural Strategy:** Low-Rank Adaptation (LoRA) freezes the pre-trained weight matrix $W_0 \in \mathbb{R}^{d \times k}$ by setting `requires_grad=False`. It decomposes the weight update $\Delta W$ into the product of two small, low-rank matrices $A \in \mathbb{R}^{d \times r}$ and $B \in \mathbb{R}^{r \times k}$, where the rank $r \ll \min(d, k)$:
-$$h = x W_0 + \Delta W x = x W_0 + x A B$$
-Because $W_0$ is frozen, the autograd engine allocates gradients and Adam optimizer states solely for $A$ and $B$, drastically reducing memory consumption while retaining full adaptation capacity.
+$$h = x W_0 + x \Delta W = x W_0 + x A B$$
+Because $W_0$ is frozen, the autograd engine allocates gradients and Adam optimizer states solely for $A$ and $B$, drastically reducing optimizer-state memory while restricting each update to rank $r$.
 
 ::: {.column-margin}
 ![](assets/images/diagrams/21_extensions-margin-lora.svg){width="100%" fig-alt="LoRA low-rank adapter decomposition diagram contrasting frozen base weight W0 with trainable factor matrices A and B, showing over 98 percent Adam optimizer memory reduction."}
@@ -178,17 +178,17 @@ Because $W_0$ is frozen, the autograd engine allocates gradients and Adam optimi
 Suppose you fine-tune a 7-billion parameter language model in 16-bit precision using the Adam optimizer. Each parameter requires 2 bytes for the weight, 2 bytes for the gradient, and 8 bytes for Adam moment states ($m_t$ and $v_t$ in FP32), totaling 12 bytes of training state per parameter (84 GB). If you freeze all base weights and attach a LoRA adapter with rank $r=16$ affecting 0.2% of the parameters (14 million parameters), how much memory do the frozen base weights require? How much memory do the LoRA parameters and their optimizer states require? What is the total reduction in training memory state?
 :::
 
-**The Empirical Scorecard:** Consider a standard transformer feedforward projection layer ($d_{\text{in}} = 4096, d_{\text{out}} = 16384$, totaling 67.1 million parameters). @tbl-lora-memory details the parameter counts and memory footprints across adapter ranks compared to full fine-tuning.
+**The Analytical Scorecard:** Consider a standard transformer feedforward projection layer ($d_{\text{in}} = 4096, d_{\text{out}} = 16384$, totaling 67.1 million parameters). @tbl-lora-memory details the parameter counts and memory footprints across adapter ranks compared to full fine-tuning.
 
-| Configuration | Trainable Parameters | Weight Memory | Adam State Memory | Memory Reduction |
+| Configuration | Trainable Parameters | Trainable Weight Memory | Adam State Memory | Memory Reduction |
 | :--- | ---: | ---: | ---: | ---: |
 | Full Fine-Tuning | 67,108,864 | 268.4 MB | 536.9 MB | Reference (0.0%) |
 | LoRA ($r = 64$) | 1,310,720 | 5.2 MB | 10.5 MB | 98.0% |
 | LoRA ($r = 16$) | 327,680 | 1.3 MB | 2.6 MB | 99.5% |
-| LoRA ($r = 8$) | 163,840 | 0.65 MB | 1.31 MB | 99.7% |
+| LoRA ($r = 8$) | 163,840 | 0.66 MB | 1.31 MB | 99.8% |
 | LoRA ($r = 4$) | 81,920 | 0.33 MB | 0.66 MB | 99.9% |
 
-: **Memory footprint of full fine-tuning versus LoRA on a 4096 × 16384 projection layer.** Storing Adam optimizer states (8 bytes per parameter) dominates full fine-tuning; LoRA reduces optimizer state overhead by more than 98%. {#tbl-lora-memory tbl-colwidths="[26,22,18,20,14]"}
+: **Memory footprint of full fine-tuning versus LoRA on a 4096 × 16384 projection layer.** Counted, not measured. Storing Adam optimizer states (8 bytes per parameter) dominates full fine-tuning; LoRA reduces trainable-weight and optimizer-state memory by more than 98%. The frozen base weight (268.4 MB) stays resident in every row. {#tbl-lora-memory tbl-colwidths="[26,22,18,20,14]"}
 
 ---
 
@@ -208,16 +208,16 @@ Suppose you fine-tune a 7-billion parameter language model in 16-bit precision u
 
 {{< include _listings/21_extensions/checkpoint.qmd >}}
 
-**The Empirical Scorecard:** @tbl-checkpoint-scaling compares activation memory consumption for a 32-layer transformer model ($T = 2048, D = 4096$) with and without activation checkpointing.[^fn-activation-checkpointing-sqrt]
+**The Analytical Scorecard:** @tbl-checkpoint-scaling models activation memory for transformers of increasing depth $L$ ($T = 2048, D = 4096$) with and without activation checkpointing. It assumes 1.05 GB of saved activations per layer and a boundary tensor of $T \cdot D \cdot 4 = 33.6$ MB, so $\sqrt{L}$ segments hold $M = \sqrt{L}\,b + (L/\sqrt{L})\,A$.[^fn-activation-checkpointing-sqrt]
 
 | Layer Depth ($L$) | Standard Forward Memory | Checkpointed Memory | Compute Overhead | Peak Memory Saved |
 | ---: | ---: | ---: | ---: | ---: |
-| 8 Layers | 8.4 GB | 2.1 GB | +33.3% | 75.0% |
-| 16 Layers | 16.8 GB | 3.2 GB | +33.3% | 81.0% |
-| 32 Layers | 33.6 GB | 6.2 GB | +33.3% | 81.5% |
-| 64 Layers | 67.2 GB | 8.8 GB | +33.3% | 86.9% |
+| 8 Layers | 8.4 GB | 3.06 GB | +33.3% | 63.5% |
+| 16 Layers | 16.8 GB | 4.33 GB | +33.3% | 74.2% |
+| 32 Layers | 33.6 GB | 6.13 GB | +33.3% | 81.8% |
+| 64 Layers | 67.2 GB | 8.67 GB | +33.3% | 87.1% |
 
-: **Activation memory scaling under activation checkpointing ($T = 2048, D = 4096$, float32).** Standard training scales linearly $O(L)$; checkpointing scales sublinearly $O(\sqrt{L})$ with uniform segments. {#tbl-checkpoint-scaling tbl-colwidths="[18,24,22,18,18]"}
+: **Modeled activation memory under activation checkpointing ($T = 2048, D = 4096$, float32).** Standard training scales linearly $O(L)$; checkpointing scales sublinearly $O(\sqrt{L})$ with uniform segments. {#tbl-checkpoint-scaling tbl-colwidths="[18,24,22,18,18]"}
 
 [^fn-activation-checkpointing-sqrt]: **Activation checkpointing trade-offs**: In an $L$-layer neural network, standard autograd retains $L$ activation tensors in memory, scaling as $\mathcal{O}(L)$. Checkpointing segments the model into $k$ subgraphs of length $m = L / k$, storing only the boundary activations. Minimizing total peak memory $M(k) = k + L / k$ yields an optimal segment length $k^* = L^{1/2}$, cutting peak memory from $\mathcal{O}(L)$ to $\mathcal{O}(L^{1/2})$. The cost is exactly one extra forward pass per segment during backpropagation, adding a deterministic $33\%$ computational overhead.
 
@@ -236,16 +236,16 @@ $$\nabla_\theta \mathcal{L} = \frac{1}{S} \nabla_\theta (S \cdot \mathcal{L})$$
 
 {{< include _listings/21_extensions/LossScaler.qmd >}}
 
-**The Empirical Scorecard:** @tbl-loss-scaler-underflow shows the numerical behavior of small backpropagation gradients in unscaled FP16 versus scaled FP16.
+**The Numerical Scorecard:** @tbl-loss-scaler-underflow shows the IEEE 754 rounding behavior of small backpropagation gradients in unscaled FP16 versus scaled FP16.
 
 | True Gradient Magnitude ($\nabla \mathcal{L}$) | Raw FP16 Result | Status | Scaled ($S = 65536$) FP16 | Unscaled Gradient | Error |
 | :--- | :--- | :--- | :--- | :--- | :--- |
 | $1.0 \times 10^{-3}$ | $1.000 \times 10^{-3}$ | Preserved | $65.536$ | $1.000 \times 10^{-3}$ | 0.0% |
-| $5.0 \times 10^{-5}$ | $4.998 \times 10^{-5}$ | Subnormal precision loss | $3.2768$ | $5.000 \times 10^{-5}$ | 0.0% |
-| $1.0 \times 10^{-7}$ | $0.0$ | **Silent underflow to zero** | $0.006554$ | $1.000 \times 10^{-7}$ | 0.0% |
+| $5.0 \times 10^{-5}$ | $5.001 \times 10^{-5}$ | Subnormal precision loss | $3.2768$ | $5.000 \times 10^{-5}$ | 0.0% |
+| $1.0 \times 10^{-7}$ | $1.192 \times 10^{-7}$ | Subnormal, 19% error | $0.006554$ | $1.000 \times 10^{-7}$ | 0.0% |
 | $2.0 \times 10^{-9}$ | $0.0$ | **Silent underflow to zero** | $0.000131$ | $2.000 \times 10^{-9}$ | 0.0% |
 
-: **Numerical stability of gradient propagation under IEEE 754 float16.** Unscaled FP16 rounds values below $5.96 \times 10^{-8}$ to zero; loss scaling preserves gradients across four additional orders of magnitude. {#tbl-loss-scaler-underflow tbl-colwidths="[24,18,22,18,18]"}
+: **Numerical stability of gradient propagation under IEEE 754 float16.** Unscaled FP16 rounds values below about $2.98 \times 10^{-8}$ (half the smallest subnormal) to zero; loss scaling preserves gradients across four additional orders of magnitude. {#tbl-loss-scaler-underflow tbl-colwidths="[24,18,22,18,18]"}
 
 ---
 
@@ -257,24 +257,24 @@ In eager execution, two separate kernel invocations occur:
 
 1. $t = x + \text{bias}$ (reads $x$ and $\text{bias}$, writes intermediate tensor $t$ to DRAM)
 2. $y = t \cdot \text{scale}$ (reads intermediate tensor $t$ and $\text{scale}$, writes output $y$ to DRAM)
-For an array of $N$ elements, this sequence transfers $5N$ floating-point words (20 bytes per element) across the memory bus. Because modern processor ALUs compute far faster than memory buses can transfer bytes, eager execution is severely memory-bandwidth bound.
+If `bias` and `scale` are full-size arrays of $N$ elements, this sequence reads $4N$ floating-point words ($x$, $\text{bias}$, $t$, $\text{scale}$) and writes $2N$ ($t$, $y$), 24 bytes per element across the memory bus. Because modern processor ALUs compute far faster than memory buses can transfer bytes, eager execution is severely memory-bandwidth bound.
 
 **Architectural Strategy:** A graph compiler intercepts the dynamic define-by-run tape and traces it into a static Intermediate Representation (IR) Abstract Syntax Tree (AST). It then fuses adjacent elementwise operations into a single combined kernel loop (@fig-compiler-fusion). In the fused loop, the intermediate sum $t = x + \text{bias}$ remains in a CPU or GPU register and is multiplied by $\text{scale}$ immediately, writing to DRAM only once.
 
 ![**Lowering and fusing an elementwise computation graph.** Eager execution materializes the intermediate sum $t$ in DRAM; the fusion compiler collapses the AST into a single loop, eliminating DRAM traffic.](assets/images/diagrams/21_compiler-lowering-fusion.svg){#fig-compiler-fusion width="100%" fig-alt="Compilation lowering diagram showing AST capture and fusion into a single loop."}
 
-**The Implementation:** `compile_graph` traces symbolic `TracedNode` objects to emit fused kernel source code:
+**The Implementation:** `compile_graph` traces symbolic `TracedNode` objects into a single Python expression string. It demonstrates graph capture; the emitted function still runs NumPy operators, which allocate the intermediate:
 
 {{< include _listings/21_extensions/compile_graph.qmd >}}
 
-**The Empirical Scorecard:** @tbl-fusion-traffic compares DRAM memory transactions between eager define-by-run execution and fused compilation for the two-operation elementwise chain ($N = 10^7$ float32 elements, 40 MB tensor size).
+**The Analytical Scorecard:** @tbl-fusion-traffic counts DRAM transfers for eager define-by-run execution and for a hypothetical fused loop that keeps $t$ in registers, on the two-operation elementwise chain ($N = 10^7$ float32 elements, 40 MB per full-size tensor). It assumes `bias` and `scale` are full-size arrays.
 
 | Execution Strategy | DRAM Reads | DRAM Writes | Total DRAM Traffic | Bandwidth Saved |
 | :--- | :--- | :--- | ---: | ---: |
-| Eager Define-by-Run | $x, \text{bias}, t$ (120 MB) | $t, y$ (80 MB) | 200 MB | Reference (0.0%) |
-| Fused Single Loop | $x, \text{bias}, \text{scale}$ (80 MB) | $y$ (40 MB) | 120 MB | **40.0% reduction** |
+| Eager Define-by-Run | $x, \text{bias}, t, \text{scale}$ (160 MB) | $t, y$ (80 MB) | 240 MB | Reference (0.0%) |
+| Fused Single Loop | $x, \text{bias}, \text{scale}$ (120 MB) | $y$ (40 MB) | 160 MB | **33.3% reduction** |
 
-: **DRAM memory traffic comparison for an elementwise chain.** Kernel fusion eliminates intermediate tensor materialization, reducing DRAM bandwidth requirements by 40%. {#tbl-fusion-traffic tbl-colwidths="[26,26,20,16,12]"}
+: **DRAM traffic counts for an elementwise chain with full-size operands.** A fused loop removes the write and reread of $t$, 80 MB of 240 MB, a 33% reduction. If `bias` and `scale` are broadcast scalars, eager traffic is 160 MB and fused traffic 80 MB, a 50% reduction. The Python function that `compile_graph` emits still materializes $t$. {#tbl-fusion-traffic tbl-colwidths="[26,26,20,16,12]"}
 
 ---
 
@@ -300,7 +300,7 @@ def matmul_loops(A, B):
     return C
 ```
 
-On a 128 × 128 product, this loop runs at just 0.12 GFLOP/s. For a standard 1024 × 1024 matrix ($2 \times 1024^3 \approx 2.15\text{ billion FLOPs}$), Python would take approximately 17 seconds. In contrast, NumPy's underlying BLAS library computes it in 1.33 ms.
+On a 128 × 128 product, this loop runs at just 0.12 GFLOP/s. For a standard 1024 × 1024 matrix ($2 \times 1024^3 \approx 2.15\text{ billion FLOPs}$), Python would take approximately 18 seconds. In contrast, NumPy's underlying BLAS library computes it in 1.33 ms.
 
 **Architectural Strategy:** To bridge this gap, `simd_matmul` bypasses the Python interpreter via `ctypes` FFI:
 
@@ -342,13 +342,13 @@ The C++ kernel performs tiled, vectorized matrix multiplication:
 
 | Implementation | Time | GFLOP/s | Speedup vs. Python |
 | :--- | ---: | ---: | ---: |
-| `matmul_loops`, Python (scaled from 128 × 128) | 33.9 ms | 0.12 | $1.0\times$ (Baseline) |
+| `matmul_loops`, Python (scaled from 128 × 128) | ≈17.9 s | 0.12 | $1.0\times$ (Baseline) |
 | C++ kernel, vectorizer switched off | 336 ms | 6.4 | $53\times$ |
-| `simd_matmul` (Vectorized C++) | 99.4 ms | 21.6 | **$170\times$** |
+| `simd_matmul` (Vectorized C++) | 99.4 ms | 21.6 | **$180\times$** |
 | `tiled_matmul` (NumPy blocks, @sec-acceleration) | 18.5 ms | 116 | $967\times$ |
 | `np.matmul` (Accelerate / BLAS) | 1.33 ms | 1,611 | $13,425\times$ |
 
-: **Matrix multiply, 1024 × 1024, on one Apple M5 Max.** Single-threaded execution; outputs agree to within float32 rounding. {#tbl-extensions-gemm tbl-colwidths="[46,18,18,18]"}
+: **Matrix multiply, 1024 × 1024, on one Apple M5 Max.** `simd_matmul` built without libomp (one thread); `np.matmul` used Accelerate's default threading. Speedups are ratios of GFLOP/s; outputs agree to within float32 rounding. {#tbl-extensions-gemm tbl-colwidths="[46,18,18,18]"}
 
 Compiling the loop gains a factor of 50 over Python, and auto-vectorization adds another factor of 3.4. Notice that vendor BLAS (`np.matmul`) remains 75 times faster than the basic tiled kernel: tuned production libraries employ register-level micro-kernels and memory packing to keep sub-blocks resident in CPU registers rather than reloading from L1 cache.
 
@@ -360,7 +360,7 @@ Compiling the loop gains a factor of 50 over Python, and auto-vectorization adds
 $$y = \text{GELU}(x + \text{bias})$$
 In NumPy, `x + bias` writes the full intermediate tensor to DRAM and GELU reads it back. For memory-bound elementwise operations, DRAM memory bus bandwidth limits execution throughput.
 
-**Architectural Strategy:** The C++ kernel `simd_fused_bias_gelu` fuses the bias addition, polynomial approximation, and hyperbolic tangent into a single pass over memory. Each element is loaded from $X$, added to the corresponding bias column, transformed through the polynomial approximation, and written directly to the output array. The intermediate sum $x + \text{bias}$ resides exclusively in processor registers.
+**Architectural Strategy:** The C++ kernel `simd_fused_bias_gelu` fuses the bias addition, polynomial approximation, and hyperbolic tangent into a single pass over memory. Each element is loaded from $X$, added to the corresponding bias column, transformed through the polynomial approximation, and written directly to the output array. The intermediate sum $x + \text{bias}$ resides exclusively in processor registers. The listing calls scalar `std::tanh`; on macOS the build adds `-fveclib=Accelerate`, which lets the compiler substitute a vector tanh. That flag is the difference between the 22.1 ms and 3.06 ms rows, so the $8.6\times$ gain may not carry over to a build without a vector tanh, such as a default Linux build.
 
 **The Implementation:**
 
@@ -391,7 +391,7 @@ Notice the critical systems lesson: rewriting `z ** 3` as `z * z * z` in NumPy y
 
 **Architectural Strategy:**
 
-1. **Apple MPS GEMM:** Uses Metal Performance Shaders (`mps_matmul`) on Apple Silicon unified memory.
+1. **Apple MPS GEMM:** Runs `mps_matmul` through PyTorch's MPS backend (requires `torch`) on the Apple Silicon GPU, not through a C FFI.
 2. **OpenAI Triton Fused GELU:** Uses SPMD block-level GPU kernel programming (`triton_fused_gelu`) for NVIDIA GPUs.
 
 **The Implementation:**
@@ -451,7 +451,7 @@ Authoring a new systems extension requires rigorous verification of correctness,
   └─ Macro-benchmark on Milestone 4 (CNN) & 5 (GPT)
      ▲
 [ Tier 1: Micro-benchmarking ]
-  └─ Unit parity (pytest) & isolated latency (Timer)
+  └─ Unit parity (pytest) & isolated latency (precise_timer)
 ```
 
 ### Tier 1: Numerical Correctness and Synthetic Micro-benchmarks
@@ -466,19 +466,17 @@ Before measuring execution time, numerical correctness must be certified. An inc
    )
    ```
 
-2. **Synthetic Micro-benchmarks:** Use the built-in profiling tools from `tinytorch.perf.benchmarking` (`Timer` and `MemoryTracker`) to isolate the operator across power-of-two shapes ($N \in \{128, 256, 512, 1024, 2048\}$):
+2. **Synthetic Micro-benchmarks:** Use @sec-benchmarking's `precise_timer` (for latency) and @sec-profiling's `Profiler.measure_memory` (for traced peak allocation) to isolate the operator across power-of-two shapes ($N \in \{128, 256, 512, 1024, 2048\}$):
    ```python
-   from tinytorch.perf.benchmarking import (
-       Timer,
-       MemoryTracker,
-   )
+   from tinytorch.perf.benchmarking import precise_timer
+   from tinytorch.perf.profiling import Profiler
 
-   tracker = MemoryTracker()
-   with Timer() as t, tracker:
+   with precise_timer() as t:
        y = my_extension_op(x)
+   print(f"Latency:     {t.elapsed * 1000:.2f} ms")
 
-   print(f"Latency:  {t.elapsed_ms:.2f} ms")
-   print(f"Peak RAM: {tracker.peak_mb:.2f} MB")
+   mem = Profiler().measure_memory(model, (1, 1024))
+   print(f"Peak traced: {mem['peak_memory_mb']:.2f} MB")
    ```
    Quantify execution speedup, memory reduction, and arithmetic intensity.
 
@@ -494,10 +492,10 @@ Isolated micro-benchmarks do not capture end-to-end training dynamics, cache con
    - *Scripts:* `milestones/05_2017_transformer/01_tinygpt_shakespeare.py` (prose), `03_tinycopilot.py` (Python code)
    - *Target Extensions:* Low-rank adaptation, activation checkpointing, custom attention, compiler gating, or fused kernels.
    - *Workflow for LoRA:* Freeze the pre-trained GPT weights and replace attention projection layers with `LoRALinear`. Fine-tune on Shakespearean text or Python code and verify that the adapter achieves comparable cross-entropy loss while updating less than 2% of the parameters.
-   - *Workflow for Activation Checkpointing:* Wrap each `TransformerBlock` in `checkpoint()`. Measure peak activation memory using `MemoryTracker` to demonstrate that batch size can be doubled without triggering out-of-memory errors.
-3. **Milestone 6: Standardized MLPerf Inference:**
+   - *Workflow for Activation Checkpointing:* Wrap each `TransformerBlock` in `checkpoint()`. Measure traced peak memory with `Profiler.measure_memory` to demonstrate that batch size can be doubled without triggering out-of-memory errors.
+3. **Classroom MLPerf-style check (@sec-benchmarking):**
    - *Module:* `tinytorch.perf.benchmarking`
-   - *Workflow:* Run `mlperf_run_standard_benchmark(model, dataloader)` to evaluate the optimized model against standardized MLPerf latency percentiles ($p_{50}, p_{90}, p_{99}$), sustained throughput, and memory consumption.
+   - *Workflow:* Run `MLPerf().run_standard_benchmark(model, "keyword_spotting", test_inputs=inputs, labels=labels)` to report $p_{50}$, $p_{90}$ (gated), and $p_{99}$ latency, inferences per second, and accuracy against a classroom threshold.
 
 ### Tier 3: Custom Datasets and Pipeline Ingestion
 
@@ -526,7 +524,7 @@ Evaluating an extension on domain-specific workloads integrates directly with Ti
    ```
 
 2. **Text Corpora:** Pass raw text to `Tokenizer` from `tinytorch.core.tokenization` to construct tokenized input-target sequences for autoregressive language modeling.
-3. **End-to-End Training:** Pass the loader, model (with the active extension), optimizer, and loss function to `Trainer` (`tinytorch.core.training.Trainer`). Executing `trainer.fit(epochs=5)` logs training throughput and loss progression.
+3. **End-to-End Training:** Pass the loader, model (with the active extension), optimizer, and loss function to `Trainer` (`tinytorch.core.training.Trainer`). Calling `trainer.train_epoch(loader)` once per epoch, and `trainer.evaluate(val_loader)` after it, reports loss and accuracy.
 
 ---
 
@@ -568,17 +566,17 @@ Each project below addresses a real systems bottleneck and demonstrates how to r
 
 ### FlashAttention and SRAM-Aware Tiling
 
-* **Systems Limitation:** Standard attention (@sec-attention) evaluates $O = \text{softmax}(Q K^T / \sqrt{d_k}) V$ by materializing the full intermediate $S \times S$ attention score matrix in high-bandwidth memory (DRAM). For a sequence length of $S = 4096$ with 32 heads, storing the attention score and weight matrices requires hundreds of megabytes per batch in DRAM. The operation is severely memory-bandwidth bound: the processor spends most of its execution cycles reading and writing the $S \times S$ matrix across the memory bus rather than performing floating-point math.
+* **Systems Limitation:** Standard attention (@sec-attention) evaluates $O = \text{softmax}(Q K^T / \sqrt{d_k}) V$ by materializing the full intermediate $S \times S$ attention score matrix in high-bandwidth memory (DRAM). For a sequence length of $S = 4096$ with 32 heads, storing the attention score and weight matrices requires about 4 GB per sequence in float32. The operation is severely memory-bandwidth bound: the processor spends most of its execution cycles reading and writing the $S \times S$ matrix across the memory bus rather than performing floating-point math.
 * **The Project:** Implement a custom `FlashAttentionFunction` subclassing `Function`. Tile the $Q, K, V$ matrices into blocks ($B_r \times d$ and $B_c \times d$) sized to fit entirely inside fast on-chip memory (CPU L1/L2 cache or GPU shared memory). Instead of materializing the $S \times S$ matrix, use the **online softmax** algorithm (maintaining running maximum scalars $m_i$ and running sum scalars $l_i$ per row block) to incrementally update the output accumulator $O_i$ as column blocks of $K$ and $V$ stream through:
   $$m_i^{\text{new}} = \max(m_i, \max(S_i)), \quad l_i^{\text{new}} = e^{m_i - m_i^{\text{new}}} l_i + \sum e^{S_i - m_i^{\text{new}}}$$
   $$O_i^{\text{new}} = \text{diag}(e^{m_i - m_i^{\text{new}}}) O_i + e^{S_i - m_i^{\text{new}}} V_j$$
   Once all column blocks have been processed, normalize the output accumulator by dividing each row by its final running sum:
   $$O_i^{\text{final}} = \text{diag}(l_i^{\text{final}})^{-1} O_i$$
-  In the backward pass, recompute the attention weights on-the-fly from the cached $Q, K, V$ blocks, completely eliminating the $O(S^2)$ memory footprint. Benchmark the tiled attention function against stock `attention.py` across sequence lengths $S \in \{512, 1024, 2048, 4096\}$ using `MemoryTracker` and `Timer`.
+  In the backward pass, recompute the attention weights on-the-fly from the cached $Q, K, V$ blocks, completely eliminating the $O(S^2)$ memory footprint. Benchmark the tiled attention function against stock `attention.py` across sequence lengths $S \in \{512, 1024, 2048, 4096\}$ using `precise_timer` and `Profiler.measure_memory`.
 
 ![**FlashAttention SRAM-aware tiling vs. standard attention DRAM wall**: Standard attention incurs multiple high-latency DRAM round-trips to materialize the full $S \times S$ score and weight matrices. FlashAttention partitions $Q, K, V$ into small SRAM-sized blocks ($B_r, B_c \ll S$) and employs online softmax updates directly in on-chip fast memory, completely eliminating the $O(S^2)$ DRAM memory footprint.](assets/images/diagrams/21_flashattention-sram-tiling.svg){#fig-flashattention-sram-tiling width="100%" fig-alt="Diagram contrasting standard attention DRAM memory wall with FlashAttention SRAM online softmax accumulation."}
 
-### Hardware Simulation and Memory Tracing (ScaleSim Integration)
+### Hardware Simulation and Memory Tracing (SCALE-Sim Integration)
 
 * **Systems Limitation:** Profiling on a host CPU or GPU measures total runtime, but cannot answer architectural design questions: How many multiply-accumulate (MAC) units in a 2D systolic array are actually utilized? Would doubling the on-chip SRAM buffer eliminate DRAM stall cycles? What array aspect ratio ($128 \times 128$ vs $256 \times 64$) achieves optimal utilization for a specific model?
 
@@ -588,11 +586,11 @@ Each project below addresses a real systems bottleneck and demonstrates how to r
 *2D Systolic Wavefront: Processing elements stream activation and weight operands in rhythmic lock-step, achieving peak compute density with $2N - 1$ cycle latency.*
 :::
 
-* **The Project:** Build an architectural memory-tracing extension that interfaces TinyTorch with **ScaleSim** (Systolic Array Memory and Cycle Simulator) or an equivalent cycle-accurate hardware simulator:
+* **The Project:** Build an architectural memory-tracing extension that interfaces TinyTorch with **SCALE-Sim** (Systolic CNN Accelerator Simulator) or an equivalent cycle-accurate hardware simulator:
   1. Author a tracer hook or custom `SimulatedLinear` layer that intercepts GEMM operations in TinyTorch models.
   2. For every matrix multiplication $Y = X W$, extract the target dimensions $(M, K, N)$ and generate memory read/write address request streams for matrices $A$, $B$, and $C$.
-  3. Export a ScaleSim-compatible workload topology file listing layer dimensions and dataflows (e.g., Weight Stationary `WS`, Output Stationary `OS`, or Input Stationary `IS`).
-  4. Run the ScaleSim simulation from Python via `subprocess` to obtain cycle counts, buffer hit rates, and DRAM bandwidth requirements. Compare the simulated cycles and bandwidth stalls of `TinyGPT` projections across different array dimensions ($32 \times 32$ edge accelerator vs $128 \times 128$ datacenter systolic array).
+  3. Export a SCALE-Sim-compatible workload topology file listing layer dimensions and dataflows (e.g., Weight Stationary `WS`, Output Stationary `OS`, or Input Stationary `IS`).
+  4. Run the SCALE-Sim simulation from Python via `subprocess` to obtain cycle counts, buffer hit rates, and DRAM bandwidth requirements. Compare the simulated cycles and bandwidth stalls of `TinyGPT` projections across different array dimensions ($32 \times 32$ edge accelerator vs $128 \times 128$ datacenter systolic array).
 
 ### The Data Systems Extension: Offline Micro-Datasets and Compiler Gating (TinyVerse)
 
@@ -600,7 +598,7 @@ Each project below addresses a real systems bottleneck and demonstrates how to r
 * **The Project:** Build an end-to-end data systems extension modeled after the TinyVerse dataset architecture:
   1. **Contiguous Binary Layouts:** Package training samples into contiguous memory-mapped serialization buffers (`.pkl` / `.npy` / flat binary) to allow instantaneous, zero-copy batch slicing directly into `Tensor` without CPython object allocation overhead.
   2. **Closed-World Algorithmic Curricula:** Hand-curate and programmatically generate closed-world, syntactically dense micro-corpora (such as `TinyPy` algorithms or `TinyTalks` concept Q&A) sized under 100 KB that saturate single-core CPU training in under 60 seconds without third-party network downloads.
-  3. **Compiler-in-the-Loop Evaluation:** Author a live verification hook that streams generated model tokens directly into Python's `ast.parse()` compiler, tracking the **AST Validity Rate (%)** as a strict compiler gate rather than relying solely on loss. Evaluate this data pipeline against Milestone 05 Part 3 (TinyCopilot, `03_tinycopilot.py`) to verify 100% syntactically valid code generation.
+  3. **Compiler-in-the-Loop Evaluation:** Author a live verification hook that streams generated model tokens directly into Python's `ast.parse()` compiler, tracking the **AST Validity Rate (%)** as a strict compiler gate rather than relying solely on loss. Evaluate this data pipeline against Milestone 05 Part 3 (TinyCopilot, `03_tinycopilot.py`), scoring only prompts absent from the training text so the rate measures learned syntax rather than recall.
 
 ---
 
@@ -645,8 +643,8 @@ The extensions ecosystem expands TinyTorch beyond its core 20 modules into the r
 - `LoRALinear` freezes base weights and trains rank-$r$ adapters, reducing Adam optimizer state memory by more than 98%.
 - `checkpoint` drops intermediate forward activations and recomputes them during backpropagation, reducing peak activation memory scaling from $O(L)$ to $O(\sqrt{L})$.
 - `LossScaler` shifts gradient values into the normalized exponent range of IEEE 754 float16, preventing catastrophic gradient underflow during mixed-precision training.
-- `compile_graph` traces define-by-run computation graphs into an AST and generates fused loops, eliminating 40% of DRAM memory bandwidth traffic.
-- `simd_matmul` and `simd_fused_bias_gelu` pass raw memory pointers across `ctypes` to compiled C++ kernels, leveraging cache tiling and CPU SIMD vector registers to deliver up to a $170\times$ speedup over interpreted Python and an $8.6\times$ speedup over unfused activations.
+- `compile_graph` traces define-by-run computation into a single fused Python expression, the capture step that a fusion compiler lowers into one loop; for the example chain such a loop would remove a third of DRAM traffic with full-size operands, or half with broadcast scalars.
+- `simd_matmul` and `simd_fused_bias_gelu` pass raw memory pointers across `ctypes` to compiled C++ kernels, leveraging cache tiling and CPU SIMD vector registers to deliver up to a $180\times$ speedup over interpreted Python and an $8.6\times$ speedup over unfused activations.
 - `mps_matmul` and `triton_fused_gelu` demonstrate hardware accelerator offloading, validating through napkin math why arithmetic intensity ($n/6$ FLOP/byte) dictates when offloading pays for data transfer costs.
 
 The central lesson of this chapter is the empirical invariant of systems engineering: **an optimization is only verified when its numerical outputs match a trusted reference and its performance is measured directly on target hardware.**

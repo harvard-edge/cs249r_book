@@ -22,7 +22,7 @@ TAPES_DIR = Path(__file__).resolve().parent / "tapes"
 DEMOS_DIR = Path(__file__).resolve().parent.parent / "assets" / "images" / "demos"
 
 TAPE_TITLES = {
-    "01_install_and_run": "tinytorch · install & run",
+    "01_install_and_run": "tinytorch · install & first module",
     "02_modules_mastery": "tinytorch · module status",
     "03_tinygpt_chat": "tinytorch · tinygpt chat",
     "04_tinycopilot": "tinytorch · tinycopilot",
@@ -145,6 +145,162 @@ def create_window_template(term_w: int, term_h: int, title: str) -> tuple[Path, 
     return tpl_path, term_x, term_y
 
 
+# Chapter cards: one label per phase, shown in the top-right pill. Phases come
+# from the recording itself: setup runs until the first fast-forwarded
+# stretch, the fast stretch is training, then generation/scoring runs until
+# the final hold, and the hold (END_HOLD_SECONDS) shows the result. Tapes with
+# no entry here (or no fast stretch) get no chapter cards.
+TAPE_CHAPTERS = {
+    "04_tinycopilot": ["Building YOUR TinyGPT", "Training YOUR transformer",
+                       "Completing prompts it never saw", "Result"],
+    "03_tinygpt_chat": ["Building YOUR TinyGPT", "Training on 64 Q&A pairs",
+                        "Answering + overfitting check", "Result"],
+}
+
+# ---------------------------------------------------------------------------
+# Playback speed-up for long, quiet stretches (e.g. a progress bar during
+# training). The run itself is never shortened: frames are sub-sampled for
+# playback only, and a "⏩ N× speed" badge is drawn while it plays fast.
+# ---------------------------------------------------------------------------
+SPEEDUP_FACTOR = 5          # playback speed inside a quiet stretch
+SPEEDUP_MIN_SECONDS = 6.0   # only stretches at least this long are sped up
+SPEEDUP_MARGIN_SECONDS = 1.0  # keep this much at real speed on each side
+END_HOLD_SECONDS = 6.0      # never speed up the final hold on the result
+SCROLL_THRESHOLD = 0.02     # fraction of pixels changed that counts as scrolling
+
+
+def frame_activity(text_frames, size=(160, 110)) -> list:
+    """Fraction of (downscaled) pixels that change from each frame to the next."""
+    import numpy as np
+    prev, activity = None, []
+    for path in text_frames:
+        data = np.asarray(Image.open(path).convert("L").resize(size), dtype=np.int16)
+        activity.append(0.0 if prev is None else float((np.abs(data - prev) > 24).mean()))
+        prev = data
+    return activity
+
+
+def plan_speedup(activity, capture_fps: int, min_seconds: float = SPEEDUP_MIN_SECONDS,
+                 margin_seconds: float = SPEEDUP_MARGIN_SECONDS) -> list:
+    """
+    Return [(start, end)] frame ranges to play at SPEEDUP_FACTOR.
+
+    A quiet stretch is a run of frames where no second contains a large change
+    (no scrolling output); a ticking progress bar or an idle wait qualifies.
+    """
+    n = len(activity)
+    window = max(1, capture_fps)
+    busy = [False] * n
+    for i in range(n):
+        lo, hi = max(0, i - window // 2), min(n, i + window // 2 + 1)
+        busy[i] = max(activity[lo:hi]) > SCROLL_THRESHOLD
+    end_limit = n - int(END_HOLD_SECONDS * capture_fps)
+    margin = int(margin_seconds * capture_fps)
+    ranges, i = [], 0
+    while i < end_limit:
+        if busy[i]:
+            i += 1
+            continue
+        j = i
+        while j < end_limit and not busy[j]:
+            j += 1
+        start, stop = i + margin, j - margin
+        if (stop - start) >= min_seconds * capture_fps:
+            ranges.append((start, stop))
+        i = j
+    return ranges
+
+
+PILL_W, PILL_H = 620, 28   # title-bar layer size (right-aligned pill inside)
+
+
+def render_pill(chapter=None, factor=None) -> Image.Image:
+    """
+    A transparent PILL_W x PILL_H layer with a right-aligned pill: the chapter
+    ("2/4 · Training YOUR transformer") and, while fast-forwarding, drawn
+    arrows plus "N×". It is overlaid on the window title bar, so it can
+    never cover terminal output. Menlo has no emoji, so the arrows are polygons.
+    """
+    layer = Image.new("RGBA", (PILL_W, PILL_H), (0, 0, 0, 0))
+    if not chapter and not factor:
+        return layer
+    draw = ImageDraw.Draw(layer)
+    try:
+        font = ImageFont.truetype("/System/Library/Fonts/Menlo.ttc", 15)
+    except OSError:
+        font = ImageFont.load_default()
+    ink = (30, 30, 46, 255)
+    text = "   ".join([t for t in (chapter, f"{factor}×" if factor else None) if t])
+    bbox = draw.textbbox((0, 0), text, font=font)
+    w, h = bbox[2] - bbox[0], bbox[3] - bbox[1]
+    arrows_w = 26 if factor else 0
+    right = PILL_W - 2
+    left = right - (w + arrows_w + 24)
+    fill = (250, 179, 135, 255) if factor else (137, 180, 250, 255)
+    draw.rounded_rectangle((left, 1, right, PILL_H - 2), radius=12, fill=fill)
+    tx = left + 12
+    if factor:
+        cy, th = PILL_H / 2, 6
+        for dx in (0, 10):
+            draw.polygon([(tx + dx, cy - th), (tx + dx + 10, cy), (tx + dx, cy + th)], fill=ink)
+        tx += arrows_w
+    draw.text((tx, (PILL_H - h) / 2 - bbox[1]), text, fill=ink, font=font)
+    return layer
+
+
+def plan_chapters(labels, activity, capture_fps: int) -> list:
+    """
+    Map each raw frame index to a chapter label (or None).
+
+    The longest quiet stretch of at least 3 s is the training phase; before it
+    is setup, after it until the final hold is generation and scoring, and the
+    final hold is the result. Independent of whether that stretch is long
+    enough to be fast-forwarded.
+    """
+    n = len(activity)
+    if not labels or len(labels) != 4:
+        return [None] * n
+    quiet = plan_speedup(activity, capture_fps, min_seconds=3.0, margin_seconds=0.0)
+    if not quiet:
+        return [None] * n
+    first, last = max(quiet, key=lambda r: r[1] - r[0])
+    hold = max(last, n - int(END_HOLD_SECONDS * capture_fps))
+    bounds = [(0, first), (first, last), (last, hold), (hold, n)]
+    out = [None] * n
+    for k, ((a, b), label) in enumerate(zip(bounds, labels), start=1):
+        for i in range(a, b):
+            out[i] = f"{k}/4 · {label}"
+    return out
+
+
+def build_playback_frames(frames_dir: Path, ranges, factor: int, chapters=None) -> tuple:
+    """Write the playback sequence (sub-sampled inside `ranges`) to a new folder."""
+    text_frames = sorted(frames_dir.glob("frame-text-*.png"))
+    cursor_frames = sorted(frames_dir.glob("frame-cursor-*.png"))
+    out = Path(tempfile.mkdtemp(prefix="vhs_playback_"))
+    in_range = [False] * len(text_frames)
+    for a, b in ranges:
+        for k in range(a, b):
+            in_range[k] = True
+    keep, k, pill_cache = [], 0, {}
+    while k < len(text_frames):
+        keep.append(k)
+        k += factor if in_range[k] else 1
+    for new_idx, old_idx in enumerate(keep, start=1):
+        src_text = text_frames[old_idx]
+        dst_text = out / f"frame-text-{new_idx:05d}.png"
+        shutil.copyfile(src_text, dst_text)
+        chapter = chapters[old_idx] if chapters else None
+        fast = factor if in_range[old_idx] else None
+        key = (chapter, fast)
+        if key not in pill_cache:
+            pill_cache[key] = render_pill(chapter, fast)
+        pill_cache[key].save(out / f"frame-pill-{new_idx:05d}.png")
+        if old_idx < len(cursor_frames):
+            shutil.copyfile(cursor_frames[old_idx], out / f"frame-cursor-{new_idx:05d}.png")
+    return out, len(keep)
+
+
 def record_tape(tape_path: Path, output_gif: Path, fps: int = 16) -> Path:
     """Record a .tape file with VHS and compile the captured frames into an authentic GIF."""
     print(f"\n🎬 Processing VHS Tape: {tape_path.name}")
@@ -153,6 +309,11 @@ def record_tape(tape_path: Path, output_gif: Path, fps: int = 16) -> Path:
     # Determine dimensions or framerate from tape if specified
     framerate_match = re.search(r"Set\s+Framerate\s+(\d+)", content)
     capture_fps = int(framerate_match.group(1)) if framerate_match else 25
+    if not framerate_match:
+        # 2026-09-29: VHS captures at 50 fps unless told otherwise, while this
+        # pipeline compiled at 25, so every demo played at about half speed.
+        content = re.sub(r"^(Set\s+Shell\s+.*)$", rf"\1\nSet Framerate {capture_fps}",
+                         content, count=1, flags=re.MULTILINE)
 
     # Create temporary directory for frame capture
     frames_dir = Path(tempfile.mkdtemp(prefix=f"vhs_{tape_path.stem}_"))
@@ -206,10 +367,44 @@ def record_tape(tape_path: Path, output_gif: Path, fps: int = 16) -> Path:
         duration_s = total_frames / capture_fps
         print(f"  ✓ Captured {total_frames} frames ({duration_s:.1f}s at {capture_fps} fps)")
 
+        keep_dir = os.environ.get("TT_KEEP_FRAMES")
+        if keep_dir:
+            dest = Path(keep_dir) / tape_path.stem
+            shutil.rmtree(dest, ignore_errors=True)
+            shutil.copytree(frames_dir, dest)
+            print(f"  ✓ Kept raw frames in {dest}")
+
+        activity = frame_activity(text_frames)
+        ranges = plan_speedup(activity, capture_fps)
+        chapters = plan_chapters(TAPE_CHAPTERS.get(tape_path.stem), activity, capture_fps)
+        has_pills = bool(ranges) or any(chapters)
+        if ranges:
+            spans = ", ".join(f"{a / capture_fps:.1f}-{b / capture_fps:.1f}s" for a, b in ranges)
+            print(f"  ⏩ Playing quiet stretches at {SPEEDUP_FACTOR}x: {spans}")
+        if any(chapters):
+            print(f"  ✓ Chapter cards: {TAPE_CHAPTERS[tape_path.stem]}")
+        if has_pills:
+            raw_dir = frames_dir
+            frames_dir, total_frames = build_playback_frames(raw_dir, ranges, SPEEDUP_FACTOR, chapters)
+            shutil.rmtree(raw_dir, ignore_errors=True)
+            text_frames = sorted(frames_dir.glob("frame-text-*.png"))
+            print(f"  ✓ Playback: {total_frames} frames ({total_frames / capture_fps:.1f}s)")
+
         # Prepare Terminalizer-style window frame
         first_img = Image.open(text_frames[0])
         title = TAPE_TITLES.get(tape_path.stem, f"tinytorch · {tape_path.stem}")
         tpl_path, term_x, term_y = create_window_template(first_img.width, first_img.height, title)
+        # The pill sits at the right end of the title bar (see create_window_template:
+        # 12 px outer margin, 36 px bar), clear of the traffic lights and centered title.
+        canvas_w = Image.open(tpl_path).width
+        pill_x, pill_y = canvas_w - 12 - 16 - PILL_W, 12 + (36 - PILL_H) // 2
+        pill_inputs, pill_step = [], ""
+        if has_pills:
+            pill_inputs = ["-framerate", str(capture_fps), "-start_number", "1",
+                           "-i", str(frames_dir / "frame-pill-%05d.png")]
+            pill_step = f"[base][3]overlay=x={pill_x}:y={pill_y}:shortest=1[merged];"
+        base_step = ("[1][2]overlay=shortest=1[term];[0][term]overlay="
+                     f"x={term_x}:y={term_y}:shortest=1[{'base' if has_pills else 'merged'}];")
 
         # Compile frames to GIF using ffmpeg with window overlay and optimal color palette
         print(f"  ▶ Compiling high-fidelity GIF with ffmpeg -> {output_gif.name}...")
@@ -224,8 +419,9 @@ def record_tape(tape_path: Path, output_gif: Path, fps: int = 16) -> Path:
             "-framerate", str(capture_fps),
             "-start_number", "1",
             "-i", str(frames_dir / "frame-cursor-%05d.png"),
+            *pill_inputs,
             "-filter_complex",
-            f"[1][2]overlay=shortest=1[term];[0][term]overlay=x={term_x}:y={term_y}:shortest=1[merged];[merged]fps={fps},split[s0][s1];[s0]palettegen=max_colors=256:stats_mode=diff[p];[s1][p]paletteuse=dither=none",
+            base_step + pill_step + f"[merged]fps={fps},split[s0][s1];[s0]palettegen=max_colors=256:stats_mode=diff[p];[s1][p]paletteuse=dither=none",
             str(output_gif),
         ]
 
@@ -250,8 +446,9 @@ def record_tape(tape_path: Path, output_gif: Path, fps: int = 16) -> Path:
             "-framerate", str(capture_fps),
             "-start_number", "1",
             "-i", str(frames_dir / "frame-cursor-%05d.png"),
+            *pill_inputs,
             "-filter_complex",
-            f"[1][2]overlay=shortest=1[term];[0][term]overlay=x={term_x}:y={term_y}:shortest=1[merged];[merged]fps={fps},format=yuv420p",
+            base_step + pill_step + f"[merged]fps={fps},format=yuv420p",
             "-c:v", "libx264",
             "-crf", "18",
             "-preset", "slow",

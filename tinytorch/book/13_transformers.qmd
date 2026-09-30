@@ -39,7 +39,7 @@ This chapter synthesizes the components of Part II into TinyGPT, TinyTorch's fla
 ![](assets/images/diagrams/13_transformers-diag-1.svg){width="100%"}
 :::
 
-Module 13 names this model `GPT`, with `TinyGPT` retained as an alias. Its caller supplies token IDs of shape $(B, S)$ and receives logits of shape $(B, S, V)$, one row of next-token scores per position. The training and sampling loop in [Synthesis II](synthesis_02.qmd#sec-milestone-2) will use that contract.
+Module 13 exports this model as `GPT`, with `TinyGPT` retained as an alias; the class itself lives in the hand-maintained `tinytorch/models/transformer.py`. Its caller supplies token IDs of shape $(B, S)$ and receives logits of shape $(B, S, V)$, one row of next-token scores per position. The training and sampling loop in [Synthesis II](synthesis_02.qmd#sec-milestone-2) will use that contract.
 
 ---
 
@@ -132,7 +132,7 @@ where $\mathcal{L}$ is the loss and $I$ is the identity matrix. The identity ter
 
 A useful picture is to think of the residual path as a **stream**, a $D$-dimensional scratchpad that each token carries through the whole network. Each sub-layer reads the stream, computes a delta, and writes the delta back by addition. An update can cancel an earlier value by adding its negative, so the stream is not an immutable record. The useful guarantee is structural: the old vector reaches the addition directly instead of having to pass through the learned transformation. A 12-block GPT has 24 sub-layers reading and writing the same stream.
 
-![**The residual stream communication highway**: Token embeddings enter a central communication bus that flows directly from input to final projection. Each transformer block taps into the bus, extracts standardized features via LayerNorm, computes attention and MLP deltas, and adds them back onto the highway ($x_{l+1} = x_l + f_l(x_l)$). Gradients propagate backward unimpeded along the identity path $I + J_l$, preventing signal attenuation across deep stacks.](assets/images/diagrams/13_residual-stream-bus.svg){#fig-residual-stream-bus width="100%" fig-alt="Diagram of the residual stream highway showing side branches for Multi-Head Attention and MLP, and unimpeded backward gradient flow."}
+![**The residual stream communication highway**: Token embeddings enter a central communication bus that flows directly from input to final projection. Each transformer block taps into the bus, extracts standardized features via LayerNorm, computes attention and MLP deltas, and adds them back onto the highway ($x_{l+1} = x_l + f_l(x_l)$). The identity term in $I + J_l$ gives gradients a direct backward route through every block.](assets/images/diagrams/13_residual-stream-bus.svg){#fig-residual-stream-bus width="100%" fig-alt="Diagram of the residual stream highway showing side branches for Multi-Head Attention and MLP, and unimpeded backward gradient flow."}
 
 ### Layer normalization
 
@@ -157,7 +157,7 @@ $$x_{l+1} = x_l + f_l(\text{LN}(x_l))$$
 In Post-LN, each residual addition feeds a normalization, so even the direct route through a block includes normalization derivatives. A stack of $N$ blocks has two such normalizations per block. In Pre-LN, each branch computes a normalized version of its input while the bypass carries the unnormalized stream to the addition. Only the final LayerNorm, just before the vocabulary projection, normalizes the stream leaving the stack. The reference listings use this Pre-LN arrangement.
 
 ::: {#chk-transformers-pre-ln-stability .callout-checkpoint title="Checkpoint: Pre-LN gradient highways vs Post-LN vanishing gradients"}
-Why did the deep learning community migrate universally from original Post-LN transformers (Vaswani et al.) to Pre-LN (GPT-2, LLaMA, TinyGPT)? In Post-LN ($x_{l+1} = \text{LN}(x_l + f_l(x_l))$), the residual connection passes *through* the normalization layer. Computing the gradient requires chaining through $\text{LN}'$ at every single block. For deep networks ($N \ge 24$), this degrades gradient magnitudes, requiring delicate learning rate warmup schedules to prevent divergence. In Pre-LN ($x_{l+1} = x_l + f_l(\text{LN}(x_l))$), the residual bypass is an uninterrupted identity path $I + J_l$, allowing backpropagation gradients to flow from the loss directly to early token embeddings without scaling decay.
+Why did many decoder models move from the original Post-LN arrangement (Vaswani et al.) to Pre-LN (GPT-2, LLaMA, TinyGPT)? In Post-LN ($x_{l+1} = \text{LN}(x_l + f_l(x_l))$), the residual connection passes *through* the normalization layer. Computing the gradient requires chaining through $\text{LN}'$ at every single block. For deep networks ($N \ge 24$), this degrades gradient magnitudes, requiring delicate learning rate warmup schedules to prevent divergence. In Pre-LN ($x_{l+1} = x_l + f_l(\text{LN}(x_l))$), the residual bypass is an uninterrupted identity path $I + J_l$, allowing backpropagation gradients to flow from the loss directly to early token embeddings without passing through a normalization derivative on the bypass.
 :::
 
 ### The MLP
@@ -169,7 +169,7 @@ The second sub-layer supplies the per-token feature transformation missing from 
 
 $$\text{MLP}(x) = \text{GELU}(x W_1 + b_1)\, W_2 + b_2, \qquad W_1 \in \mathbb{R}^{D \times 4D},\; W_2 \in \mathbb{R}^{4D \times D}$$
 
-Here $x$ is one token's row vector, as in the attention projection $q_t = x_t W_q$. The same $W_1, W_2$ apply to every position, and no position sees any other. The division of labor inside a block is therefore clean. Attention decides which tokens' information to gather; the MLP decides what to do with what was gathered, one token at a time. The MLP never dies: the feed-forward sub-layer inside every transformer block is the exact two-layer perceptron built in [Synthesis I](synthesis_01.qmd#sec-milestone-1) and @sec-layers, applied independently to every token across sequence space.
+Here $x$ is one token's row vector, as in the attention projection $q_t = x_t W_q$. The same $W_1, W_2$ apply to every position, and no position sees any other. The division of labor inside a block is therefore clean. Attention decides which tokens' information to gather; the MLP decides what to do with what was gathered, one token at a time. The feed-forward sub-layer has the same linear-activation-linear shape as the perceptron built in [Synthesis I](synthesis_01.qmd#sec-milestone-1) and @sec-layers, here with GELU and a 4D hidden width, applied independently to every token.
 
 ::: {.column-margin}
 ![](assets/images/diagrams/13_transformers-margin-mlp-expansion.svg){width="100%" fig-alt="Architecture card showing MLP 4x channel expansion from D to 4D with GELU activation and contraction back to D, allocating 8D squared weights."}
@@ -233,7 +233,7 @@ Both additions record their two inputs on the graph. During backward, the incomi
 
 For the input `[3, 7, 1]`, the corresponding training targets might be `[7, 1, 5]`. `GPT.forward` can compute all three predictions in one pass because the mask forbids position 0 from reading token 7 or 1, and position 1 from reading token 1. The next-token targets come from the training data; `GPT` returns scores and does not construct labels or compute a loss.
 
-The constructor first creates an `EmbeddingLayer` with learned position vectors. Each iteration then constructs a new `TransformerBlock` and appends it to `self.blocks`, so depth adds independent parameters rather than reusing one block's weights. In `forward`, the token shape supplies `seq_len`; the embedding layer returns $(B, S, D)$, adding position rows beginning at `start_pos`. `_create_causal_mask(seq_len)` delegates to `create_causal_mask`, which returns a lower-triangular matrix of ones with zeros above the diagonal and a leading singleton axis. For $S=3$ its rows are `[1,0,0]`, `[1,1,0]`, and `[1,1,1]`. Attention broadcasts this $(1,S,S)$ mask across batches and heads, following its binary mask contract.
+The constructor accepts its building blocks as optional keyword arguments (`block_cls`, `norm_cls`, `mask_fn`, and the sampling and generation functions), and each one left out defaults to the class or function exported from this module. That lets this module's notebook build a `GPT` from your own `TransformerBlock`, `LayerNorm`, and mask and test them before they are exported. The constructor then creates an `EmbeddingLayer` with learned position vectors. Each iteration calls `block_cls(embed_dim, num_heads)` to construct a new block and appends it to `self.blocks`, so depth adds independent parameters rather than reusing one block's weights. In `forward`, the token shape supplies `seq_len`; the embedding layer returns $(B, S, D)$, adding position rows beginning at `start_pos`. `forward` calls `self._mask_fn(seq_len)`, by default `create_causal_mask`, which returns a lower-triangular matrix of ones with zeros above the diagonal and a leading singleton axis. For $S=3$ its rows are `[1,0,0]`, `[1,1,0]`, and `[1,1,1]`. Attention broadcasts this $(1,S,S)$ mask across batches and heads, following its binary mask contract.
 
 {{< include _listings/13_transformers/GPT.qmd >}}
 
@@ -423,20 +423,20 @@ Persistent state belongs to the parameter tensors. Forward operations create new
 You have now constructed the flagship generative architecture of TinyTorch: `TinyGPT` (Modules 01 to 13). You can execute the milestone suite via the Tito companion CLI:
 
 ```bash
-# Part 1: Train TinyGPT on Shakespeare (next-token autoregression)
+# Required Parts 1 and 2, in order: TinyGPT on Shakespeare, then sequence routing
 tito milestone run 05
 
-# Part 2: Prove causal multi-head attention on sequence routing tasks
+# Part 2 alone: prove multi-head attention on sequence routing tasks
 tito milestone run 05 --part 2
 
-# Part 3: Train TinyCopilot on Python code with AST compiler gating
-tito milestone run tinycopilot
+# Optional Part 3: Train TinyCopilot on Python code with AST compiler gating
+tito milestone run 05 --part 3
 
-# Part 4: Conversational Q&A and the Overfitting Detective
+# Optional Part 4: Conversational Q&A and the Overfitting Detective
 tito milestone run 05 --part 4
 ```
 
-This milestone challenges multi-head attention on sequence reasoning tasks (sequence reversal, token copy, associative recall), trains TinyGPT to autoregressively sample coherent text, and generates valid Python source code in TinyCopilot under an objective compiler verification gate. Turn to [Synthesis II](synthesis_02.qmd#sec-milestone-2) (Parts 2 & 3) to walk through the complete language modeling loop and next-token generation.
+This milestone challenges multi-head attention on sequence routing tasks (reversal, copying, and a prefix-selected mix of the two), trains TinyGPT and gates it on training loss, held-out loss against a bigram baseline, and a causality probe before sampling from it, and scores greedy TinyCopilot completions for unseen function headers with `ast.parse` (the gate is at least 1 of 7; correct trainings parsed 1 to 6). Milestone 05 completes once Parts 1 and 2 have both passed; Parts 3 and 4 are optional extensions. Turn to [Synthesis II](synthesis_02.qmd#sec-milestone-2) to walk through the complete language modeling loop and next-token generation.
 :::
 
 ---

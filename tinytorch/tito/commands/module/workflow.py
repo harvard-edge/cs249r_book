@@ -7,6 +7,7 @@ Implements the natural workflow:
 3. tito module complete 01 → Tests, exports, updates progress
 """
 
+import re
 import os
 import subprocess
 import sys
@@ -35,6 +36,136 @@ from ...core.modules import (
     module_exists,
     get_all_module_metadata,
 )
+
+
+# ---------------------------------------------------------------------------
+# Export fingerprints: detect a package that no longer matches the notebook.
+#
+# `tito module complete` (or export) records, per module, a hash of the
+# notebook cells nbdev exports. `tito milestone run` recomputes it and warns
+# when the student edited the notebook after the last export, because the
+# milestone would otherwise run the OLD package code silently.
+# Only export-directive cells are hashed, so running cells (new outputs,
+# execution counts) or editing tests/markdown never triggers a warning.
+# ---------------------------------------------------------------------------
+
+EXPORT_RECORD_FILE = "exports.json"
+_EXPORT_DIRECTIVES = ("default_exp", "export", "exporti", "exports")
+
+
+def _cell_source(cell: dict) -> str:
+    source = cell.get("source", "")
+    return "".join(source) if isinstance(source, list) else str(source)
+
+
+def _is_export_cell(source: str) -> bool:
+    """True if the cell's leading #| directives include an nbdev export."""
+    import re
+    for line in source.splitlines():
+        stripped = line.strip()
+        if not stripped:
+            continue
+        if not stripped.startswith("#"):
+            return False
+        match = re.match(r"#\s*\|\s*(\w+)", stripped)
+        if match and match.group(1) in _EXPORT_DIRECTIVES:
+            return True
+    return False
+
+
+def notebook_export_fingerprint(notebook_path: Path) -> Optional[str]:
+    """SHA-256 over the source of the notebook's exported code cells.
+
+    Returns None if the notebook is missing or unreadable.
+    """
+    import hashlib
+    import json
+    try:
+        nb = json.loads(Path(notebook_path).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    digest = hashlib.sha256()
+    for cell in nb.get("cells", []):
+        if cell.get("cell_type") != "code":
+            continue
+        source = _cell_source(cell)
+        if _is_export_cell(source):
+            # Normalize line endings so a Windows re-save is not an edit.
+            digest.update(source.replace("\r\n", "\n").encode("utf-8"))
+            digest.update(b"\n\x00cell\x00\n")
+    return digest.hexdigest()
+
+
+def student_notebook_path(project_root: Path, module_name: str) -> Path:
+    short_name = module_name.split("_", 1)[-1]
+    return Path(project_root) / "modules" / module_name / f"{short_name}.ipynb"
+
+
+def _export_record_path(project_root: Path) -> Path:
+    return Path(project_root) / ".tito" / EXPORT_RECORD_FILE
+
+
+def load_export_records(project_root: Path) -> dict:
+    import json
+    try:
+        data = json.loads(_export_record_path(project_root).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+    modules = data.get("modules") if isinstance(data, dict) else None
+    return modules if isinstance(modules, dict) else {}
+
+
+def record_module_export(project_root: Path, module_name: str) -> None:
+    """Remember the fingerprint of the notebook that was just exported."""
+    import json
+    from datetime import datetime
+    number = module_name.split("_", 1)[0]
+    notebook = student_notebook_path(project_root, module_name)
+    fingerprint = notebook_export_fingerprint(notebook)
+    if fingerprint is None:
+        return
+    records = load_export_records(project_root)
+    records[number] = {
+        "module": module_name,
+        # POSIX form, so the record reads the same on every OS (Windows CI
+        # caught backslashes, 2026-09-30).
+        "notebook": notebook.relative_to(project_root).as_posix(),
+        "sha256": fingerprint,
+        "exported_at": datetime.now().isoformat(),
+    }
+    path = _export_record_path(project_root)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps({"modules": records}, indent=2), encoding="utf-8")
+
+
+def stale_export_report(project_root: Path, module_numbers) -> Dict[str, List[str]]:
+    """Classify required modules by export freshness.
+
+    Returns {"stale": [...], "unrecorded": [...]} of two-digit module numbers.
+    - stale: the notebook's exported cells changed since the recorded export.
+    - unrecorded: a student notebook exists but no export was ever recorded
+      (e.g. completed with an older tito). Freshness is unknown.
+    A module with no student notebook (fresh checkout, package built from
+    src/) is neither: there is no student edit that could be missing.
+    """
+    mapping = get_module_mapping()
+    records = load_export_records(project_root)
+    report: Dict[str, List[str]] = {"stale": [], "unrecorded": []}
+    for num in module_numbers:
+        key = f"{int(num):02d}"
+        module_name = mapping.get(key)
+        if not module_name:
+            continue
+        current = notebook_export_fingerprint(student_notebook_path(project_root, module_name))
+        if current is None:
+            continue
+        record = records.get(key)
+        if not isinstance(record, dict) or not record.get("sha256"):
+            report["unrecorded"].append(key)
+        elif record["sha256"] != current:
+            report["stale"].append(key)
+    return report
+
 
 class ModuleWorkflowCommand(BaseCommand):
     """Enhanced module command with natural workflow."""
@@ -1485,7 +1616,9 @@ if missing:
                     # Format: file.py::Class::method -> "Class: method"
                     path_parts = test_path.split('::')
                     if len(path_parts) >= 3:
-                        class_name = path_parts[1].replace('Test', '').replace('Module', 'Module ')
+                        # TestModule01Prerequisites -> "Module 01 Prerequisites"
+                        raw_class = re.sub(r'^Test', '', path_parts[1])
+                        class_name = re.sub(r'(?<=[a-z])(?=[A-Z0-9])|(?<=[0-9])(?=[A-Z])', ' ', raw_class)
                         method_name = path_parts[2].replace('test_', '').replace('_', ' ').title()
                         display_name = f"{class_name}: {method_name}"
                     elif len(path_parts) >= 2:
@@ -1663,6 +1796,10 @@ if missing:
                     os.replace(replacement_path, destination)
                 finally:
                     replacement_path.unlink(missing_ok=True)
+            try:
+                record_module_export(root, module_name)
+            except OSError as record_error:
+                self.console.print(f"[yellow]⚠️  Could not record export fingerprint: {record_error}[/yellow]")
             self.console.print("[dim]✅ Your code is now part of the tinytorch package![/dim]")
             return 0
         except ImportError:
@@ -1902,6 +2039,17 @@ if missing:
 
         # Calculate progress percentage
         total_modules = len(module_mapping)
+        if total_modules == 0:
+            # Happens when tito runs outside a TinyTorch checkout (e.g. from an
+            # installed wheel): there is no src/ curriculum to report on.
+            self.console.print(Panel(
+                "[yellow]No TinyTorch modules found.[/yellow]\n\n"
+                f"Looked for the curriculum under: [cyan]{self.config.project_root}[/cyan]\n"
+                "Run [bold]tito module status[/bold] from inside your TinyTorch repository checkout "
+                "(the folder that contains [cyan]src/[/cyan] and [cyan]modules/[/cyan]).",
+                title="📋 Module Status", border_style="yellow"
+            ))
+            return 1
         completed_count = len(completed)
         progress_percent = int((completed_count / total_modules) * 100)
 
@@ -1922,8 +2070,8 @@ if missing:
                     last_activity = f"{int(time_diff.total_seconds() / 3600)} hours ago"
                 else:
                     last_activity = f"{time_diff.days} days ago"
-            except:
-                pass
+            except (ValueError, TypeError):
+                pass  # malformed timestamp in progress.json; keep "just now"
 
         # Header panel with progress summary
         header_text = Text()

@@ -79,11 +79,15 @@ def test_auto_sync_runs_when_non_interactive_but_logged_in(monkeypatch):
     """THE core regression: a logged-in user on a non-TTY shell must still sync.
 
     Previously this path returned early on ``not sys.stdin.isatty()`` and never
-    uploaded -- the silent skip behind the dashboard desync.
+    uploaded -- the silent skip behind the dashboard desync. Uploading without a
+    prompt now requires recorded consent (see test_cli_hardening.py for the
+    no-consent case), so this user has opted in.
     """
     monkeypatch.setattr(submission.runtime, "is_ci", lambda: False)
     monkeypatch.setattr(submission.runtime, "is_interactive", lambda: False)
     monkeypatch.setattr(submission.auth, "is_logged_in", lambda: True)
+    monkeypatch.setattr(submission, "get_auto_sync_consent", lambda: True)
+    monkeypatch.delenv("TITO_NO_SYNC", raising=False)
 
     calls = {}
 
@@ -102,6 +106,9 @@ def test_auto_sync_prompts_when_interactive(monkeypatch):
     monkeypatch.setattr(submission.runtime, "is_ci", lambda: False)
     monkeypatch.setattr(submission.runtime, "is_interactive", lambda: True)
     monkeypatch.setattr(submission.auth, "is_logged_in", lambda: True)
+    # No recorded choice: the prompt path (independent of this machine's sync.json)
+    monkeypatch.setattr(submission, "get_auto_sync_consent", lambda: None)
+    monkeypatch.delenv("TITO_NO_SYNC", raising=False)
 
     asked = {}
     monkeypatch.setattr(submission.Confirm, "ask", lambda *a, **k: asked.setdefault("asked", True) or True)
@@ -223,3 +230,42 @@ def test_community_sync_requires_login(monkeypatch):
     cmd = CommunityCommand(CLIConfig.from_project_root(Path.cwd()))
     ns = argparse.Namespace(community_command="sync")
     assert cmd.run(ns) == 1  # not logged in -> nonzero exit, no upload attempted
+
+
+@pytest.mark.parametrize("interactive", [True, False])
+def test_disable_auto_means_no_prompt_and_no_upload(monkeypatch, interactive):
+    """'tito community sync --disable-auto' stops the per-completion prompt too."""
+    monkeypatch.setattr(submission.runtime, "is_ci", lambda: False)
+    monkeypatch.setattr(submission.runtime, "is_interactive", lambda: interactive)
+    monkeypatch.setattr(submission.auth, "is_logged_in", lambda: True)
+    monkeypatch.setattr(submission, "get_auto_sync_consent", lambda: False)
+    monkeypatch.delenv("TITO_NO_SYNC", raising=False)
+
+    def no_prompt(*a, **k):
+        raise AssertionError("prompted after --disable-auto")
+
+    def no_sync(*a, **k):
+        raise AssertionError("uploaded after --disable-auto")
+
+    monkeypatch.setattr(submission.Confirm, "ask", no_prompt)
+    monkeypatch.setattr(SubmissionHandler, "sync_progress", no_sync)
+    assert auto_sync_after_completion(CLIConfig.from_project_root(Path.cwd()), Console()) is None
+
+
+def test_enable_auto_syncs_without_prompt_in_terminal(monkeypatch):
+    monkeypatch.setattr(submission.runtime, "is_ci", lambda: False)
+    monkeypatch.setattr(submission.runtime, "is_interactive", lambda: True)
+    monkeypatch.setattr(submission.auth, "is_logged_in", lambda: True)
+    monkeypatch.setattr(submission, "get_auto_sync_consent", lambda: True)
+    monkeypatch.delenv("TITO_NO_SYNC", raising=False)
+
+    def no_prompt(*a, **k):
+        raise AssertionError("prompted although auto-sync is enabled")
+
+    monkeypatch.setattr(submission.Confirm, "ask", no_prompt)
+    monkeypatch.setattr(
+        SubmissionHandler, "sync_progress",
+        lambda self, total_modules=20, is_retry=False: SyncResult(ok=True, accepted=True, synced_modules=1, sent_modules=1),
+    )
+    result = auto_sync_after_completion(CLIConfig.from_project_root(Path.cwd()), Console())
+    assert result is not None and result.ok

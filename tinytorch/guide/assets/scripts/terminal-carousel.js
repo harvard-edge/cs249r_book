@@ -18,17 +18,17 @@
     },
     {
       index: 1,
-      title: "One-Line Install & Milestone 01 Out of the Box",
-      tagline: "From curl to running Frank Rosenblatt's 1958 Perceptron in seconds",
+      title: "One-Line Install & Your First Module",
+      tagline: "The real installer, then tito setup and Module 01 built, tested, and exported",
       command: "curl -fsSL https://mlsysbook.ai/tinytorch/install.sh | bash",
       gif: "assets/images/demos/tinytorch-01-install-and-run.gif",
       mp4: "assets/images/demos/tinytorch-01-install-and-run.mp4",
-      alt: "TinyTorch one-line install and running milestone 01 Perceptron out of the box"
+      alt: "Real TinyTorch install from one curl command, then tito setup and completing Module 01 (Tensor) with its tests"
     },
     {
       index: 2,
       title: "Module Mastery & Milestone Progress Grid",
-      tagline: "20/20 modules completed, autograd verified, 7 milestones unlocked",
+      tagline: "Completing a module, then a student's progress: 20/20 modules and 7 milestones earned",
       command: "tito module complete 06 && tito module status",
       gif: "assets/images/demos/tinytorch-02-modules-mastery.gif",
       mp4: "assets/images/demos/tinytorch-02-modules-mastery.mp4",
@@ -37,7 +37,7 @@
     {
       index: 3,
       title: "TinyGPT Conversational Streaming Chat",
-      tagline: "Decoder transformer streaming token responses character-by-character on CPU",
+      tagline: "Decoder transformer streaming answers token by token on CPU, with the Overfitting Detective",
       command: "tito milestone run 05 --part 4",
       gif: "assets/images/demos/tinytorch-03-tinygpt-chat.gif",
       mp4: "assets/images/demos/tinytorch-03-tinygpt-chat.mp4",
@@ -46,17 +46,17 @@
     {
       index: 4,
       title: "TinyCopilot: Code Generation on TinyPy",
-      tagline: "Autoregressive code synthesis with 100% AST compiler verification",
+      tagline: "Completing Python for function names it never saw, each completion checked by the AST parser",
       command: "tito milestone run 05 --part 3",
       gif: "assets/images/demos/tinytorch-04-tinycopilot.gif",
       mp4: "assets/images/demos/tinytorch-04-tinycopilot.mp4",
-      alt: "TinyCopilot code generation on TinyPy dataset with zero syntax errors verified by AST"
+      alt: "TinyCopilot trained on TinyPy completing unseen Python function prompts, with each greedy completion checked by the AST parser, some passing and some failing"
     },
     {
       index: 5,
       title: "MLPerf Benchmarking",
-      tagline: "INT8 quantization (4x), im2col (>70x), and KV-cache Pareto frontier",
-      command: "tito milestone run 06 --part 1",
+      tagline: "Gated INT8 quantization, pruning, im2col, and KV-cache measurements with a computed Pareto frontier",
+      command: "tito milestone run 06",
       gif: "assets/images/demos/tinytorch-05-mlperf-opt.gif",
       mp4: "assets/images/demos/tinytorch-05-mlperf-opt.mp4",
       alt: "MLPerf optimization triad evaluating dense, spatial, and autoregressive models"
@@ -64,7 +64,7 @@
     {
       index: 6,
       title: "TinyTorch Olympics & Competition Events",
-      tagline: "Speed, compression, and accuracy leaderboards with interlocking Olympic rings",
+      tagline: "Speed, compression, and accuracy events, coming soon",
       command: "tito olympics",
       gif: "assets/images/demos/tinytorch-07-tito-olympics.gif",
       mp4: "assets/images/demos/tinytorch-07-tito-olympics.mp4",

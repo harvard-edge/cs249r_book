@@ -3,7 +3,7 @@
 ::: {.column-margin}
 ![](assets/images/diagrams/15_framework-you-are-here.svg){width="100%" fig-alt="TinyTorch execution datapath blueprint highlighting Module 15 Quantization as the active subsystem."}
 
-*Framework Blueprint: Module 15 compresses 32-bit floats into 8-bit integers, quadrupling cache line density while maintaining numerical precision.*
+*Framework Blueprint: Module 15 maps 32-bit floats onto 8-bit integer codes with a scale and zero point, simulating INT8 in float32 and modeling the packed storage a real runtime would use.*
 :::
 
 
@@ -57,7 +57,7 @@ A 32-bit float costs 4 bytes. That is the whole problem, and a napkin shows how 
 - Arithmetic operations per token are unchanged at $33.5$ million. Counting weight bytes alone, the intensity rises from $0.5$ to $2.0$ operations per byte. Whether memory still limits execution depends on the machine and kernel.
 :::
 
-The first attempt fails on the four small weights from the opening. Casting truncates each value toward zero:
+The first attempt fails on four small weights. Casting truncates each value toward zero:
 
 ```python
 weights = [0.0123, -0.0871, 0.0456, -0.0012]
@@ -125,12 +125,12 @@ A shared scale also explains how a kernel could multiply the integer codes. Tiny
 
 $$\hat{y} = \hat{x} \hat{W}^{T} = (S_x S_W)\,\big((Q_x - Z_x)(Q_W - Z_W)^{T}\big)$$
 
-For this equation, the weight matrix has one output per row; the source Linear stores its transpose with shape `[in_features, out_features]`. Everything inside the last parentheses is integer arithmetic: subtract each zero point from its codes, which is still an integer, then take the dot products. The two scales are ordinary floats, and their product can rescale each accumulated output once. A single scale per tensor makes this factorization possible. The stored codes fit in a byte, but subtracting zero points and summing products require wider integers. The book-only integer function below will make those intermediate types explicit. Quantizing weights to INT8 cuts transferred bytes $Q$ by $4\times$. On the memory-bound slope of the Roofline model (@sec-profiling), this $4\times$ reduction in $Q$ lifts achieved throughput by up to $4\times$ without altering the arithmetic operations $F$. In @sec-acceleration, dedicated vector hardware (such as AVX-512 VNNI and GPU Tensor Cores) executes this integer dot product with $4\times$ the arithmetic density of FP32.
+For this equation, the weight matrix has one output per row; the source Linear stores its transpose with shape `[in_features, out_features]`. Everything inside the last parentheses is integer arithmetic: subtract each zero point from its codes, which is still an integer, then take the dot products. The two scales are ordinary floats, and their product can rescale each accumulated output once. A single scale per tensor makes this factorization possible. The stored codes fit in a byte, but subtracting zero points and summing products require wider integers. The book-only integer function below will make those intermediate types explicit. A kernel that reads packed INT8 weights would move a quarter of the weight bytes. On the memory-bound slope of the Roofline model (@sec-profiling), that bounds the possible gain at $4\times$ without changing $F$. TinyTorch does not realize this reduction: its codes live in float32 arrays and the multiply runs in float32. Production integer units such as AVX-512 VNNI and GPU Tensor Cores are outside this module.
 
 ::: {.column-margin}
 **Core Invariant: Symmetric Zero-Point Cancellation**\
 $$Z_W = 0 \implies (Q_x - Z_x) Q_W^T = Q_x Q_W^T - Z_x \sum Q_W$$\
-*Weight symmetry eliminates online activation zero-point subtraction during integer matrix multiplication.*
+*Weight symmetry removes the input-dependent $Z_W \sum Q_x$ correction; the remaining $Z_x \sum Q_W$ term depends only on the weights and can be precomputed.*
 :::
 
 ![**Symmetric versus asymmetric quantization grids**: Asymmetric quantization maps arbitrary $[x_{\min}, x_{\max}]$ to $[-128, 127]$ with an integer offset $Z$. Symmetric quantization centers the grid on zero ($Z_W = 0, \pm M$), sacrificing minor dynamic range on skewed distributions to eliminate runtime zero-point subtraction overhead on hardware DP4A / Tensor Cores.](assets/images/diagrams/15_zero-point-centering.svg){#fig-zero-point-centering width="100%" fig-alt="Number line diagram comparing asymmetric quantization with non-zero Z against symmetric absmax quantization centered at zero."}
@@ -421,7 +421,7 @@ A finer grouping also changes accuracy. Giving each output channel or small weig
 TinyTorch simulates affine quantization by mapping floats to integer steps and dequantizing back to float32 before matrix multiplication. In production acceleration runtimes (e.g., NVIDIA TensorRT, vLLM, and CUTLASS):
 
 1. **Native Integer Execution**: Accelerators execute integer matrix multiplications ($D = A_{\text{int8}} \times B_{\text{int8}}$) directly on hardware Tensor Cores using the `mma.sync.aligned.m16n8k32.row.col` PTX instruction. Intermediate products accumulate in 32-bit integer registers (`int32`) before a single epilogue instruction applies floating-point scale factor multiplication and bias addition.
-2. **FP8 and Microscaling**: Modern architectures (NVIDIA Hopper H100, Ada Lovelace, and Blackwell) extend sub-byte quantization to FP8: `E4M3` (1 sign bit, 4 exponent bits, 3 mantissa bits) provides higher precision ($[-448, 448]$) for forward-pass GEMM activations and weights, while `E5M2` (1 sign bit, 5 exponent bits, 2 mantissa bits) matches FP16's wide dynamic range ($[-57344, 57344]$) to prevent underflow during backward-pass gradient accumulation. Microscaling formats (e.g., MXFP4) provide up to $4\times$ higher throughput than FP16 without requiring complex zero-point tracking.
+2. **FP8 and Microscaling**: Modern architectures (NVIDIA Hopper H100, Ada Lovelace, and Blackwell) extend low-precision execution to 8-bit floating point (FP8): `E4M3` (1 sign bit, 4 exponent bits, 3 mantissa bits) provides higher precision ($[-448, 448]$) for forward-pass GEMM activations and weights, while `E5M2` (1 sign bit, 5 exponent bits, 2 mantissa bits) matches FP16's wide dynamic range ($[-57344, 57344]$) to prevent underflow during backward-pass gradient accumulation. Microscaling formats (e.g., MXFP4) provide up to $4\times$ higher throughput than FP16 without requiring complex zero-point tracking.
 :::
 
 | | TinyTorch `QuantizedLinear` | PyTorch 2.9 dynamic Linear | Weight-only design |
@@ -439,7 +439,7 @@ Three diagnostic principles guide empirical quantization. When a quantized model
 
 [^fn-ste-qat]: **Straight-through estimator**: the rule that lets gradients flow through a rounding step during training. Rounding has zero derivative almost everywhere, so backpropagation would stop at it; the estimator pretends the derivative is one, so the optimizer can update the underlying floating-point weights despite the discrete forward operation. The backward rule is an approximation to guide training, not the derivative of rounding.
 [^fn-symmetric-hardware-reduction]: **Hardware efficiency of symmetric quantization**: In symmetric quantization, $Z = 0$, which halves the algebraic expansion of integer matrix multiplication. Expanding the general asymmetric product yields $(Q_x - Z_x)(Q_W - Z_W)^T = Q_x Q_W^T - Z_x \sum Q_W^T - Z_W \sum Q_x^T + Z_x Z_W K$. For symmetric weights ($Z_W = 0$), two terms vanish entirely: $Q_x Q_W^T - Z_x \sum Q_W^T$. Because weights are static during inference, the column reduction vector $\sum Q_W^T$ can be precomputed once at compilation time, leaving hardware tensor cores to execute a pure fused multiply-add on raw integer codes with a single runtime vector correction.
-[^fn-llm-outlier-channels]: **Outlier features in large language models**: When Transformer parameter counts scale past 6.7B, emergent outlier features appear in a small subset ($<0.1\%$) of hidden state channels, exhibiting magnitudes $20\times$ to $100\times$ larger than normal activations across all tokens (Dettmers et al., 2022, *LLM.int8()*). Per-tensor or per-token quantization causes severe perplexity degradation because scaling for the outlier compresses all other channels into zero or one bit of resolution. This behavior is strongly coupled to normalization layers (@sec-layers), where LayerNorm standardizes variance across dimensions but leaves specific feature coordinates free to concentrate scale. Production runtimes resolve this via mixed-precision decomposition: outlier coordinate channels are routed to standard FP16 GEMM, while the remaining $>99.9\%$ are safely executed on INT8 tensor cores.
+[^fn-llm-outlier-channels]: **Outlier features in large language models**: When Transformer parameter counts scale past 6.7B, emergent outlier features appear in a small subset ($<0.1\%$) of hidden state channels, exhibiting magnitudes $20\times$ to $100\times$ larger than normal activations across all tokens (Dettmers et al., 2022, *LLM.int8()*). Per-tensor or per-token quantization causes severe perplexity degradation because scaling for the outlier compresses all other channels into zero or one bit of resolution. This behavior is strongly coupled to normalization layers (@sec-transformers), where LayerNorm standardizes variance across dimensions but leaves specific feature coordinates free to concentrate scale. Production runtimes resolve this via mixed-precision decomposition: outlier coordinate channels are routed to standard FP16 GEMM, while the remaining $>99.9\%$ are safely executed on INT8 tensor cores.
 
 {{< pagebreak >}}
 

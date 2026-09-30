@@ -68,3 +68,22 @@ def test_custom_gradient_transform():
     transform.transform_gradients([p])
     np.testing.assert_allclose(p.grad, [-0.5, 0.5])
 
+
+
+@pytest.mark.parametrize("hardware", [False, True])
+def test_custom_accelerated_op_paths_match_numpy_relu(monkeypatch, hardware):
+    """Accelerated and fallback paths must compute the same function (ReLU)."""
+    import tinytorch.extensions.template as template
+
+    monkeypatch.setattr(template, "has_custom_hardware", lambda: hardware)
+    rng = np.random.default_rng(0)
+    x = rng.standard_normal((4, 5)).astype(np.float32)
+    ref = np.maximum(0, x)
+
+    out_np = template.custom_accelerated_op(x)
+    assert isinstance(out_np, np.ndarray)
+    np.testing.assert_allclose(out_np, ref, atol=1e-6)
+
+    out_t = template.custom_accelerated_op(Tensor(x))
+    assert isinstance(out_t, Tensor)
+    np.testing.assert_allclose(out_t.data, ref, atol=1e-6)

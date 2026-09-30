@@ -3,7 +3,7 @@
 ::: {.column-margin}
 ![](assets/images/diagrams/09_framework-you-are-here.svg){width="100%" fig-alt="TinyTorch execution datapath blueprint highlighting Module 09 Convolutions as the active subsystem."}
 
-*Framework Blueprint: Module 09 exploits 2D spatial locality by lowering sliding receptive field convolutions to optimized GEMM matrix multiplication.*
+*Framework Blueprint: Module 09 implements convolution and pooling as sliding-window loops inside autograd; the chapter models the im2col lowering to GEMM that @sec-acceleration builds.*
 :::
 
 
@@ -92,7 +92,7 @@ The channel formula indexes the padded input when padding is enabled. Two choice
 
 $$H_{\text{out}} = \left\lfloor \frac{H + 2P - K}{S} \right\rfloor + 1,$$
 
-and the same for width. The formula is worth memorizing, because it is the source of most shape errors in convolutional networks. For a $3 \times 3$ filter, padding 1 and stride 1 keep the size ($32 \to 32$), padding 0 shrinks it by two ($32 \to 30$), and stride 2 roughly halves it ($32 \to 15$).
+and the same for width. The formula is worth memorizing, because it is the source of most shape errors in convolutional networks. For a $3 \times 3$ filter, padding 1 and stride 1 keep the size ($32 \to 32$), padding 0 shrinks it by two ($32 \to 30$), and stride 2 with padding 0 roughly halves it ($32 \to 15$).
 
 Count the parameters. A $3 \times 3$ layer taking 3 channels to 64 filters holds $64 \times 3 \times 3 \times 3 + 64 = 1{,}792$ numbers, and it works on a $224 \times 224$ photo or a $2000 \times 2000$ one without changing. The dense layer from The Problem needed 154 million and was tied to one image size.
 
@@ -219,7 +219,7 @@ $$\text{Patch } (C_{\text{in}}, K, K) \to \text{Row in } X_{\text{col}}$$\
 *Converts nested 4D spatial sliding windows into a single BLAS GEMM at the expense of $K^2$ memory expansion.*
 :::
 
-For a $32 \times 32$ color image with sixteen $3 \times 3$ filters and padding 1, both formulations perform 442,368 multiplies. The patch matrix contains 27,648 numbers, compared with 3,072 in the input: a $9\times$ memory footprint expansion because neighboring patches replicate interior pixels up to $K^2 = 9$ times. Why would silicon architectures gladly accept a nine-fold memory expansion? Because nested spatial loops access non-contiguous memory with irregular strides, causing constant cache misses and preventing instruction-level pipelining. Unrolling the patches into a contiguous 2D matrix lowers convolution into General Matrix Multiply (GEMM). Hardware accelerators (such as GPU Tensor Cores, TPU systolic arrays, and CPU AVX-512 units) execute contiguous GEMMs at thousands of times higher operational throughput than nested loops, heavily outweighing the transient memory expansion overhead.
+For a $32 \times 32$ color image with sixteen $3 \times 3$ filters and padding 1, both formulations perform 442,368 multiplies. The patch matrix contains 27,648 numbers, compared with 3,072 in the input: a $9\times$ memory footprint expansion because neighboring patches replicate interior pixels up to $K^2 = 9$ times. Why would silicon architectures gladly accept a nine-fold memory expansion? Because the copy turns every window into a row of one contiguous matrix, a single tuned GEMM routine can do all the dot products, reusing each loaded value many times from cache or registers. In this NumPy model the larger gain is leaving the per-multiply Python loop; how much the lowering pays on hardware depends on the library and the shape, which @sec-acceleration measures.
 
 The model in @lst-conv-im2col-model walks the same output positions as the loops, but instead of multiplying it copies the patch into a row. The order inside a row (channel, then filter row, then filter column) is the order `ravel` produces and the order `reshape` gives the flattened filters, so the dot products pair the right numbers.
 
@@ -322,7 +322,7 @@ Calling `bn.eval()` changes which statistics the next forward uses. It reads the
 
 The backward calculation explains why the mode is part of the operation record. In training, changing one activation changes its channel’s mean and variance, which changes every normalized activation in that channel. `BatchNorm2dFunction.backward` therefore combines the direct gradient with two reductions, `sum_grad` and `sum_grad_norm`, that account for those dependencies. In evaluation only the direct scale by `gamma * inv_std` remains. Both modes sum over `(0, 2, 3)` for `grad_beta` and sum `grad_output * normalized` over those axes for `grad_gamma`. The saved `normalized_data` and `inv_std` let backward use the quantities from this particular forward call.
 
-These spatial layers connect to the existing training loop through their tensor outputs and parameter lists. A classifier can pass `conv(x)` through normalization, activation, and pooling, then call `pooled.reshape(batch_size, -1)` before a `Linear` layer. Using `Tensor(pooled.data.reshape(...))` instead would detach the features; the classifier could still receive gradients while the convolution stopped learning. After a complete forward, the loss traverses the recorded operations backward, and the optimizer updates the parameters returned by the convolution, normalization, and classifier layers.
+These spatial layers connect to the existing training loop through their tensor outputs and parameter lists. A classifier can pass `conv(x)` through normalization, activation, and pooling, then call `pooled.reshape(batch_size, -1)` before a `Linear` layer. Using `Tensor(pooled.data.reshape(...))` instead would detach the features; the classifier could still receive gradients while the convolution stopped learning. Milestone 04 checks for exactly this failure. After a complete forward, the loss traverses the recorded operations backward, and the optimizer updates the parameters returned by the convolution, normalization, and classifier layers.
 
 ---
 
@@ -375,7 +375,7 @@ print(X.grad[0, 0].tolist())
 ```
 :::
 
-In @lst-conv-window-trace, lines 6 to 8 initialize a single $3 \times 3$ image tensor `X` with `requires_grad=True`. Lines 9 to 11 set up `conv = Conv2d(1, 1, 2)` with the trace kernel $\begin{bmatrix} 1 & 0 \\ -1 & 1 \end{bmatrix}$ and bias $1.0$. Line 13 executes the forward convolution `Y = conv(X)`, printing `[[3.0, 5.0], [0.0, 1.0]]` in line 14. Lines 15 to 16 verify that the layer's output matches `conv2d_im2col` bit-for-bit via `np.allclose`. In line 17, `MaxPool2d(2)(Y)` extracts the winning activation `[[5.0]]`.
+In @lst-conv-window-trace, lines 6 to 8 initialize a single $3 \times 3$ image tensor `X` with `requires_grad=True`. Lines 9 to 11 set up `conv = Conv2d(1, 1, 2)` with the trace kernel $\begin{bmatrix} 1 & 0 \\ -1 & 1 \end{bmatrix}$ and bias $1.0$. Line 13 executes the forward convolution `Y = conv(X)`, printing `[[3.0, 5.0], [0.0, 1.0]]` in line 14. Lines 15 to 16 verify that the layer's output matches `conv2d_im2col` within floating-point tolerance via `np.allclose`. In line 17, `MaxPool2d(2)(Y)` extracts the winning activation `[[5.0]]`.
 
 In line 19, `Y.backward(...)` injects unit gradients across all four output pixels. Lines 20 to 23 print the resulting analytical gradients: `conv.weight.grad` receives the column-patch sums `[[4.0, 6.0], [4.0, 5.0]]` (line 20), `conv.bias.grad` sums all four outputs to `[4.0]` (line 21), and `X.grad` reflects kernel overlap across pixels (lines 22 to 23).
 
@@ -419,7 +419,7 @@ A production implementation can preserve the window computation while changing h
 : **Alternative convolution formulations**: Each preserves the intended convolution while changing its arithmetic or temporary storage. Actual performance depends on the implementation and workload. {#tbl-cudnn-conv-algorithms tbl-colwidths="[24,26,50]"}
 
 ::: {#psp-convolutions-cudnn-winograd .callout-perspective title="Production Bridge: cuDNN implicit GEMM and Winograd minimal filtering"}
-Modern deep learning hardware rarely materializes an explicit im2col matrix. NVIDIA cuDNN selects dynamically among four convolution engines based on kernel geometry and available GPU workspace:
+Modern deep learning hardware rarely materializes an explicit im2col matrix. NVIDIA cuDNN selects among several convolution algorithms based on kernel geometry and available GPU workspace; two matter here:
 
 1. **Implicit GEMM**: Computes matrix addresses directly inside CUDA thread indexing formulas, achieving GEMM speed without the $9\times$ memory duplication penalty.[^fn-conv-cudnn-implicit-gemm]
 2. **Winograd $F(2 \times 2, 3 \times 3)$**: Uses polynomial residue transforms to reduce 2D multiplications from $4 \times 9 = 36$ down to $16$, yielding up to $2.25\times$ computational throughput on $3 \times 3$ filters at the expense of slight numerical precision.
@@ -462,16 +462,16 @@ A call to `Conv2d` validates `(N, C, H, W)`, allocates its output, visits each w
 
 Pooling preserves batch and channel axes while changing the spatial dimensions. Max pooling selects a winner per window; average pooling divides among the full kernel area, including padded positions. Batch normalization preserves shape and maintains two distinct kinds of state: learned scale and shift, and running statistics updated by training forwards. A returning reader can check the spatial chain by reproducing the worked values, then confirming that the same parameters receive gradients.
 
-The im2col model gives the same forward computation a matrix shape at the cost of an explicit patch buffer. It does not replace the module's recorded operations or establish a universal speedup. Convolutions exploit rigid, 2D local grid geometry through translational invariance and fixed receptive fields. But how do deep learning systems model open-ended, 1D sequential structures like human language or code, where dependencies span arbitrary distances and coordinates carry variable symbolic meaning? @sec-tokenization pivots from 2D spatial pixel arrays to 1D discrete sequential data, introducing byte-pair encoding to transform raw unicode strings into the integer token identifiers that feed modern language models.
+The im2col model gives the same forward computation a matrix shape at the cost of an explicit patch buffer. It does not replace the module's recorded operations or establish a universal speedup. Convolutions exploit rigid, 2D local grid geometry through translation equivariance and fixed receptive fields. But how do deep learning systems model open-ended, 1D sequential structures like human language or code, where dependencies span arbitrary distances and coordinates carry variable symbolic meaning? @sec-tokenization pivots from 2D spatial pixel arrays to 1D discrete sequential data, introducing byte-pair encoding to transform raw unicode strings into the integer token identifiers that feed modern language models.
 
 ::: {#chk-milestone-04 .callout-checkpoint title="Milestone 04 Unlocked: The 1998 CNN Revolution"}
-With `Conv2d` and `MaxPool2d` complete (Modules 01 to 09), you can run Yann LeCun's LeNet architecture on handwritten digits:
+With `Conv2d` and `MaxPool2d` complete (the milestone needs Modules 01 to 07 and 09), you can run Yann LeCun's LeNet architecture on handwritten digits:
 
 ```bash
 tito milestone run 04
 ```
 
-This milestone tests spatial weight sharing against dense multi-layer perceptrons on TinyDigits, demonstrating why convolutional inductive biases reduce parameter counts from 2,410 down to 810. See [Synthesis II](synthesis_02.qmd#sec-milestone-2) for the complete experimental comparison.
+This milestone tests spatial weight sharing against dense multi-layer perceptrons on TinyDigits, demonstrating why convolutional inductive biases reduce parameter counts from 2,410 down to 810. Before training, it checks YOUR `CrossEntropyLoss` on one batch against a NumPy computation. It passes when test accuracy reaches 75 percent and YOUR `Conv2d` filters receive a nonzero gradient and move at least 25 percent of their initial norm; accuracy alone cannot show that the convolution learned, because a classifier on frozen random filters still reaches about 81 percent. See [Synthesis II](synthesis_02.qmd#sec-milestone-2) for the complete experimental comparison.
 :::
 
 ---

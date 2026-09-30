@@ -105,7 +105,7 @@ We're sharing TinyTorch early because we'd rather shape the direction with commu
       <td>📅 Hosted cloud GPU environments</td>
     </tr>
     <tr>
-      <td>✅ 1,400+ unit, CLI, integration, & milestone tests</td>
+      <td>✅ 1,700+ unit, CLI, integration, & milestone tests</td>
       <td>🔧 Binder / WebAssembly preview</td>
       <td>📅 Video walkthrough lectures</td>
     </tr>
@@ -202,7 +202,7 @@ As you progress, unlock recreations of landmark ML achievements:
     <tr>
       <td align="center"><b>1958</b></td>
       <td>Perceptron</td>
-      <td>Binary classification with gradient descent</td>
+      <td>Binary classification forward pass, before training exists</td>
     </tr>
     <tr>
       <td align="center"><b>1969</b></td>
@@ -228,6 +228,11 @@ As you progress, unlock recreations of landmark ML achievements:
       <td align="center"><b>2018+</b></td>
       <td>MLPerf Optimization Olympics</td>
       <td>Triad benchmarking, kernel acceleration, and Pareto trade-offs</td>
+    </tr>
+    <tr>
+      <td align="center"><b>2024</b></td>
+      <td>Custom Kernels</td>
+      <td>YOUR tiled, fused, and im2col kernels checked against NumPy, then timed against bundled C++ SIMD, Apple Metal, and Triton kernels</td>
     </tr>
   </tbody>
 </table>
@@ -341,8 +346,8 @@ TinyTorch/
 │   ├── 03_1986_mlp/            # Backpropagation & TinyDigits
 │   ├── 04_1998_cnn/            # LeCun's CNNs & CIFAR-10
 │   ├── 05_2017_transformer/    # Attention mechanisms, TinyGPT & code completion
-│   ├── 06_2018_mlperf/         # Generative Serving & MLPerf
-│   └── 07_2024_kernels/        # Custom GPU Kernels (Triton & Metal)
+│   ├── 06_2018_mlperf/         # MLPerf to Generative Serving
+│   └── 07_2024_kernels/        # Custom Kernels (YOUR Module 17 kernels vs. SIMD, Metal & Triton)
 │
 ├── tito/                       # 🎛️ CLI tool for streamlined workflows
 │   ├── main.py                 # Entry point
@@ -362,7 +367,7 @@ TinyTorch/
 
 ## 🧪 Testing & Verification Architecture
 
-TinyTorch features an automated, multi-tiered test suite (~1,400 tests across 20 modules) engineered to catch defects early and deliver immediate educational feedback to learners.
+TinyTorch features an automated, multi-tiered test suite (~1,800 tests across 20 modules) engineered to catch defects early and deliver immediate educational feedback to learners.
 
 - **Three-Phase Module Testing (`tito module test <NN>`)**:
   1. **Phase 1: Inline Unit Tests** - Immediate assertion checks embedded directly within notebook cells.

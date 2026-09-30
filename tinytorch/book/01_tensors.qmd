@@ -71,9 +71,9 @@ print(f"float32 payload: {payload} bytes, nested-list objects: {list_bytes} byte
 ```
 
 ::: {.column-margin}
-![](assets/images/diagrams/01_tensor-margin-overhead.svg){width="100%" fig-alt="Storage overhead comparison showing nested Python lists occupying 280 bytes versus a contiguous float32 buffer occupying 36 bytes."}
+![](assets/images/diagrams/01_tensor-margin-overhead.svg){width="100%" fig-alt="Storage overhead comparison for a 3 by 3 matrix measured with sys.getsizeof on CPython 3.12, 64-bit: nested Python lists occupy 560 bytes, 15.6 times the 36-byte contiguous float32 buffer."}
 
-*Nested Python lists expand storage by ~8× over a contiguous float32 buffer.*
+*The listing's output on CPython 3.12 (64-bit macOS): nested lists take 560 B, 15.6× the 36 B float32 buffer. List headers dominate this tiny matrix; at $1024 \times 768$ with distinct values the measured ratio falls to about 8× (25.2 MB versus 3.1 MB).*
 :::
 
 The first count is always 36 bytes. The second depends on the Python implementation and includes the outer list, the three row lists, and the nine float objects. It does not measure a process's total memory use. Nor is 36 bytes the total cost of a NumPy array or Tensor; those objects also have metadata. The useful comparison is how storage grows as we add values. A float32 array adds four bytes per value to its data buffer, whereas nested lists hold references to separately represented Python numbers. Converting to float32 also changes numerical precision, which is acceptable for the exact integers in this example.
@@ -88,9 +88,9 @@ $$\text{Storage} = 786{,}432 \times 4\text{ bytes} \approx 3.15\text{ MB}$$
 
 **Nested list overhead**:
 Each Python `float` object contains a reference count and type pointer ($24$ bytes on 64-bit CPython). The inner lists require $8$ bytes per pointer plus list container metadata ($56$ bytes). The outer list requires $1024$ pointers ($8\text{ KB}$) plus $56$ bytes:
-$$\text{List payload} \approx 786{,}432 \times (24 + 8) + 1024 \times 64 \approx 25.17\text{ MB}$$
+$$\text{List payload} \approx 786{,}432 \times (24 + 8) + 1024 \times 64 \approx 25.23\text{ MB}$$
 
-**Systems insight**: Contiguous float32 storage achieves an $8.0\times$ memory reduction over nested Python lists while eliminating $786{,}432$ pointer indirections that thrash hardware data caches during matrix operations. Later in @sec-quantization, we pack these 4-byte floats down to 1-byte INT8 integers to quadruple cache line density again.
+**Systems insight**: Contiguous float32 storage achieves an $8.0\times$ memory reduction over nested Python lists while eliminating $786{,}432$ pointer indirections that thrash hardware data caches during matrix operations. Later in @sec-quantization, we model what packing these 4-byte floats into 1-byte INT8 codes would save; TinyTorch itself keeps the codes in float32 storage.
 
 :::
 
@@ -420,7 +420,7 @@ Layout directly governs hardware memory bandwidth utilization. Modern CPU archit
 
 **Zero-copy view mutation**: When code executes `t.transpose(0, 1)` or `t[::2]`, ATen creates a new `TensorImpl` pointing to the exact same `Storage` instance in $O(1)$ time, modifying only strides and offsets. No byte copies traverse PCIe or CPU memory buses.
 
-**The safety invariant**: Because views share memory, an in-place mutation immediately mutates the underlying `Storage`. When an operation involves a stride-0 broadcasted tensor, PyTorch detects that multiple logical coordinates map to identical physical addresses and raises `RuntimeError: in-place operation on a view...`, preventing corrupted concurrent memory writes.
+**The safety invariant**: Because views share memory, an in-place mutation immediately mutates the underlying `Storage`. When an operation involves a stride-0 broadcasted tensor, PyTorch detects that multiple logical coordinates map to identical physical addresses and raises `RuntimeError: unsupported operation: more than one element of the written-to tensor refers to a single memory location`, preventing corrupted concurrent memory writes.
 
 :::
 

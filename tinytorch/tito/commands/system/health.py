@@ -264,7 +264,8 @@ class HealthCommand(BaseCommand):
 
         console.print(Panel(status_text,
                            title="📋 Module Status", border_style="bright_blue"))
-        return 0
+        # Non-zero when any issue was reported, so scripts/CI can gate on it.
+        return 1 if issues else 0
 
     def _check_jupyter_kernel(self):
         """Check if a TinyTorch Jupyter kernel is registered."""

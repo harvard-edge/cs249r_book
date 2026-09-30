@@ -28,7 +28,7 @@ Underneath that profiling report, the systems profiler tracks the fundamental ph
 
 1. **Operator runtime attribution:** The profiler hooks into dispatcher call-sites to measure the wall-clock execution time and kernel launch overheads of individual layers and functions.
 2. **Memory traffic accounting:** The engine tracks buffer allocations, peak memory residency, and memory deallocations, distinguishing persistent parameter storage from transient activation buffers.
-3. **Operational intensity and hardware bounds:** By comparing floating-point arithmetic (FLOPs) against memory moved across the bus (bytes), the profiler grounds operations in the **Roofline Model**, diagnosing whether an operator is **memory-bandwidth bound** (stalled on DRAM) or **compute-bound** (saturating ALUs).
+3. **Operational intensity and hardware bounds:** By comparing floating-point arithmetic (FLOPs) against memory moved across the bus (bytes), a practitioner can place operations on the **Roofline Model** and ask whether an operator is **memory-bandwidth bound** or **compute-bound**; `torch.profiler` supplies timings, shapes, and optional FLOP estimates, not a bus-traffic measurement.
 
 This chapter establishes TinyTorch's profiling harness, providing the analytical and empirical diagnostic foundations that guide all performance optimizations in Part III. Before constructing these profiling tools, the first step is to examine why naive arithmetic counting fails to predict execution time.
 
@@ -125,7 +125,7 @@ Left of the ridge, the model's lower ceiling comes from memory bandwidth; this i
 
 The illustrative machine in @fig-roofline-model has a peak of 1,000 GFLOP/s and bandwidth of 200 GB/s. Here a GFLOP is a billion floating-point operations, and a GB is a billion bytes. Its ridge is $1000 / 200 = 5$ FLOPs per byte. An operation at 2 FLOPs per byte has a ceiling of $2 \times 200 = 400$ GFLOP/s. These are chosen numbers that make the relationship visible, not specifications for the reader's computer.[^fn-hardware-ridge-points]
 
-[^fn-hardware-ridge-points]: Real hardware accelerators exhibit dramatically different ridge points: an Apple M3 Max has $I_{\text{ridge}} \approx 3.75\text{ FLOP/B}$ ($1.5\text{ TFLOP/s} / 400\text{ GB/s}$), an Intel Xeon 8480+ has $I_{\text{ridge}} \approx 25\text{ FLOP/B}$ ($7.6\text{ TFLOP/s} / 307\text{ GB/s}$), and an NVIDIA H100 SXM5 GPU has $I_{\text{ridge}} \approx 295\text{ FLOP/B}$ ($989\text{ TFLOP/s FP16} / 3{,}350\text{ GB/s HBM3}$). Higher ridge points demand higher batch sizes to escape the memory-bound regime.
+[^fn-hardware-ridge-points]: Real hardware accelerators exhibit dramatically different ridge points: an illustrative laptop CPU with $1.5\text{ TFLOP/s}$ of FP32 arithmetic and $400\text{ GB/s}$ of memory bandwidth, roughly the class of an Apple M3 Max, has $I_{\text{ridge}} \approx 3.75\text{ FLOP/B}$ (the same chip's GPU, with several times the arithmetic, has a far higher ridge), an Intel Xeon 8480+ has $I_{\text{ridge}} \approx 25\text{ FLOP/B}$ ($7.6\text{ TFLOP/s} / 307\text{ GB/s}$), and an NVIDIA H100 SXM5 GPU has $I_{\text{ridge}} \approx 295\text{ FLOP/B}$ ($989\text{ TFLOP/s FP16} / 3{,}350\text{ GB/s HBM3}$). Higher ridge points demand higher batch sizes to escape the memory-bound regime.
 
 ### Why a Linear layer's intensity grows with its row count
 
@@ -133,22 +133,22 @@ Apply the definition to the layer that dominates every model in this book. A Lin
 
 $$I \;\approx\; \frac{2Rnm}{4nm} \;=\; \frac{R}{2}$$
 
-Under this traffic model, a Linear layer's intensity is roughly half its row count. The approximation assumes float32 weights, one transfer of each weight, and small input and output arrays relative to the weight matrix. One row gives about 0.5 FLOPs per byte; sixty-four rows give about 32. Rows can come from several examples in a batch or several positions in a sequence. As established in @sec-tensors, memory layout and contiguous strides govern transfer efficiency. At $I \approx 0.5\text{ FLOP/B}$, the memory bus is completely saturated. In @sec-acceleration, kernel fusion will eliminate intermediate DRAM roundtrips to lift memory-bound operators toward the compute ceiling, while @sec-memoization will decouple decode latency from sequence length.
+Under this traffic model, a Linear layer's intensity is roughly half its row count. The approximation assumes float32 weights, one transfer of each weight, and small input and output arrays relative to the weight matrix. One row gives about 0.5 FLOPs per byte; sixty-four rows give about 32. Rows can come from several examples in a batch or several positions in a sequence. As established in @sec-tensors, memory layout and contiguous strides govern transfer efficiency. At $I \approx 0.5\text{ FLOP/B}$, the model places the operation far left of any realistic ridge, so its ceiling comes from memory bandwidth. @sec-acceleration examines how fewer intermediate arrays could reduce traffic, and @sec-memoization shows how caching removes repeated projections while attention still reads the growing prefix.
 
 This explains why the generation algorithm matters. @sec-transformers's ordinary `GPT.generate` recomputes the supplied prefix, so a prefix of length $S$ sends $S$ rows through each projection. Processing only the newest position requires the cache introduced in @sec-memoization, and even then attention must read earlier keys and values. An `S = 1` forward pass here is a one-token input, not a cached decoding step with a long history.
 
-![**Weight streaming and operational intensity across batch sizes**: At batch size $B=1$ (single-token inference), weights are streamed from DRAM over the memory bus and touched only once, resulting in low arithmetic intensity ($I \approx 0.5$ FLOPs/byte) and severe memory bandwidth starvation. At batch size $B=64$, loaded weights are reused across all 64 tokens in fast on-chip cache, boosting arithmetic intensity ($I \approx 32$ FLOPs/byte) and saturating compute execution units.](assets/images/diagrams/14_weight-streaming-reuse.svg){#fig-weight-streaming-reuse width="100%" fig-alt="Diagram contrasting memory bandwidth starvation at batch size 1 with compute-bound weight reuse at batch size 64."}
+![**Weight streaming and operational intensity across batch sizes**: At batch size $B=1$ (single-token inference), weights are streamed from DRAM over the memory bus and touched only once, resulting in low arithmetic intensity ($I \approx 0.5$ FLOPs/byte) and severe memory bandwidth starvation. At batch size $B=64$, each loaded weight can serve all 64 rows, raising modeled arithmetic intensity to about 32 FLOPs/byte, which lies right of the ridge on many CPUs but left of it on accelerators with higher ridges.](assets/images/diagrams/14_weight-streaming-reuse.svg){#fig-weight-streaming-reuse width="100%" fig-alt="Diagram contrasting memory bandwidth starvation at batch size 1 with compute-bound weight reuse at batch size 64."}
 
 ::: {#nbk-profiling-tinygpt-intensity .callout-notebook title="Napkin Math: TinyGPT operational intensity across prefill and decode"}
 Consider the reference `TinyGPT` configuration ($d_{\text{model}}=128$, $n_{\text{layers}}=4$, context $S$, vocabulary $V=1000$). Each Transformer block contains $4 d^2$ projection parameters in attention ($W_Q, W_K, W_V, W_O$) and $8 d^2$ parameters in the two-layer MLP ($W_1, W_2$).
 
-Across $L=4$ layers, parameter weights total approximately $12 L d^2 \approx 786\text{ KB}$ in FP32 ($196,608$ floats $\times 4$ bytes), dominating activation traffic when batch size is 1:
+Per block, the projection weights total $12 d^2 = 196{,}608$ floats, or about $786\text{ KB}$ in FP32; across $L=4$ blocks, $12 L d^2 = 786{,}432$ floats, or about $3.15\text{ MB}$. Per block, these weights dominate activation traffic when batch size is 1:
 
-- **Autoregressive Decode ($S=1$)**: A single new token processes each weight matrix once. Arithmetic is $2 \times 1 \times 196,608 \approx 3.93 \times 10^5$ FLOPs. Memory traffic is dominated by reading the $786\text{ KB}$ of weights.
+- **Autoregressive Decode ($S=1$)**: A single new token processes each weight matrix once. Per block, arithmetic is $2 \times 1 \times 196,608 \approx 3.93 \times 10^5$ FLOPs, and memory traffic is dominated by reading that block's $786\text{ KB}$ of weights.
   $$I_{\text{decode}} \approx \frac{3.93 \times 10^5\text{ FLOPs}}{7.86 \times 10^5\text{ Bytes}} \approx 0.50\text{ FLOP/B}$$
   At $0.50\text{ FLOP/B}$, execution sits deeply in the memory-bound slope of the roofline.
 
-- **Prompt Prefill ($S=16$)**: The entire prompt of 16 tokens passes through simultaneously. Arithmetic scales linearly to $2 \times 16 \times 196,608 \approx 6.29 \times 10^6$ FLOPs, while weight reads remain $786\text{ KB}$:
+- **Prompt Prefill ($S=16$)**: The entire prompt of 16 tokens passes through simultaneously. Per block, arithmetic scales linearly to $2 \times 16 \times 196,608 \approx 6.29 \times 10^6$ FLOPs, while that block's weight reads remain $786\text{ KB}$:
   $$I_{\text{prefill}} \approx \frac{6.29 \times 10^6\text{ FLOPs}}{7.86 \times 10^5\text{ Bytes}} \approx 8.0\text{ FLOP/B}$$
   Arithmetic intensity increases $16\times$, pushing execution toward or past the ridge point of typical desktop processors.
 :::
@@ -173,7 +173,7 @@ Begin at `Profiler.profile_forward_pass(model, input_tensor)`, the entry point t
 
 ### Counting parameters and bytes
 
-Parameter storage determines whether a model can fit in memory before any input is processed. For the opening `Linear(3, 2)`, eight float32 parameters occupy $8 \times 4 = 32$ bytes. Counting the arrays also avoids omissions when a model contains biases, normalization parameters, or lookup tables in addition to weight matrices.
+Parameter storage determines whether a model can fit in memory before any input is processed. For a `Linear(3, 2)` like the last layer of @sec-layers's parameter ledger, eight float32 parameters occupy $8 \times 4 = 32$ bytes. Counting the arrays also avoids omissions when a model contains biases, normalization parameters, or lookup tables in addition to weight matrices.
 
 The architecture provides a useful independent check, but the framework can count the arrays it already owns. Each parameter is a `Tensor` around a NumPy array, and `.data.size` gives its element count. The model's `parameters()` method collects those tensors, so the main path is a sum over that list.
 
@@ -187,7 +187,7 @@ The byte calculation assumes float32 storage and multiplies the element count by
 
 ### Counting FLOPs
 
-Operation counts answer a different question from parameter counts. The opening layer has six weights whether the input contains one row or four, but its matrix-product work grows from twelve FLOPs to forty-eight. A count computed before execution makes that distinction visible without paying for a timed forward pass.
+Operation counts answer a different question from parameter counts. That `Linear(3, 2)` has six weights whether the input contains one row or four, but its matrix-product work grows from twelve FLOPs to forty-eight. A count computed before execution makes that distinction visible without paying for a timed forward pass.
 
 Counting each multiplication as it executes would add work to the operation under study. Instead, the profiler reads shapes. A Linear matrix product costs $2 \times \text{rows} \times \text{in} \times \text{out}$ under the multiply-plus-add convention. This is a conventional estimate: it omits the bias addition and treats every dot-product term as one multiplication plus one addition. In a transformer block, the two attention matrix products add $4 B S^2 D$ FLOPs for batch $B$, sequence length $S$, and embedding width $D$. The GPT counter omits embeddings, normalization, activations, softmax, and residual additions; these can still consume time and memory.
 

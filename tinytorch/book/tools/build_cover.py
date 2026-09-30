@@ -118,7 +118,7 @@ def build():
         f'<tspan font-family="{SERIF}" font-size="82" font-style="italic" fill="{SUB_C}">. Build it.</tspan>'
         f'</text>'
     )
-    p.append(_t(L, 1135, "From Tensors to Hardware-Accelerated Transformers—and Beyond.", SANS, 42, TEXT_C, ls=1))
+    p.append(_t(L, 1135, "From Tensors to Transformers", SANS, 42, TEXT_C, ls=1))
 
     # --- header divider bar -------------------------------------------------
     p.append(_t(L, 1330, "THE FULL RUNTIME STACK", MONO, 28, TEXT_C, ls=6))

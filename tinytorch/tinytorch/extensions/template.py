@@ -130,22 +130,35 @@ def has_custom_hardware() -> bool:
     return False
 
 
+def _hardware_relu_kernel(x_data: np.ndarray) -> np.ndarray:
+    """Stand-in for a compiled ReLU kernel (C++ / CUDA / Triton / MPS).
+
+    Replace the body with the native call (e.g., a ctypes function that writes
+    into a preallocated output buffer). Whatever runs here must compute the
+    same function as the NumPy fallback, so parity tests can compare them.
+    """
+    out = np.empty_like(x_data)
+    np.maximum(x_data, 0, out=out)
+    return out
+
+
 def custom_accelerated_op(
     x: Union[Tensor, np.ndarray],
 ) -> Union[Tensor, np.ndarray]:
-    """Example hardware-accelerated operator demonstrating safe fallback.
+    """Example hardware-accelerated ReLU demonstrating safe fallback.
 
-    If custom acceleration is detected, dispatches to the hardware path;
-    otherwise falls back transparently to NumPy without raising an error.
+    Both paths compute y = max(0, x). If custom acceleration is detected,
+    dispatches to the hardware kernel; otherwise falls back transparently
+    to NumPy without raising an error.
     """
     is_tensor = isinstance(x, Tensor)
     x_data = x.data if is_tensor else np.asarray(x)
 
     if has_custom_hardware():
         # Dispatch to compiled C++ shared library, Triton kernel, or GPU runtime
-        out_data = x_data  # placeholder for hardware execution
+        out_data = _hardware_relu_kernel(x_data)
     else:
-        # Transparent fallback to CPU reference implementation (e.g., ReLU)
+        # Transparent fallback to the CPU reference implementation (ReLU)
         out_data = np.maximum(0, x_data)
 
     return Tensor(out_data) if is_tensor else out_data

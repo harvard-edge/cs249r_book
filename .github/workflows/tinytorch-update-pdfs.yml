@@ -10,14 +10,15 @@ name: '🔥 TinyTorch · 📑 Update PDFs'
 #
 # Flow:
 #   1. BUILD_PAPER  — Compile research paper with LuaLaTeX
-#   2. BUILD_GUIDE  — Compile course guide with XeLaTeX
-#   3. DEPLOY_PDFS  — Copy PDFs into gh-pages/tinytorch/_static/downloads/
+#   2. BUILD_BOOK   — Render the textbook PDF (Quarto + LuaLaTeX)
+#   3. DEPLOY_PDFS  — Copy PDFs into gh-pages/tinytorch/assets/downloads/
+#                     (holds the shared gh-pages-deploy lock; retries push)
 #   4. SUMMARY      — Build status report
 #
 # Triggers:
 #   - workflow_dispatch: manual (select which PDFs to rebuild)
 #
-# Deploys to: mlsysbook.ai/tinytorch/_static/downloads/
+# Deploys to: mlsysbook.ai/tinytorch/assets/downloads/
 # Secrets:    GITHUB_TOKEN
 #
 # Related:
@@ -46,22 +47,25 @@ on:
         type: boolean
         default: true
 
+# Read-only by default; only deploy-pdfs pushes.
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   build-paper:
     name: '📑 Build Research Paper'
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     if: inputs.update_paper
     steps:
       - name: 📥 Checkout
         uses: actions/checkout@v6
         with:
           ref: main
+          persist-credentials: false
 
       - name: 📑 Compile Paper with LuaLaTeX
-        uses: xu-cheng/latex-action@v4
+        uses: xu-cheng/latex-action@6549dc21effb2730855a1281407ecfcececc6c1b # v4
         with:
           root_file: paper.tex
           working_directory: tinytorch/paper
@@ -77,15 +81,17 @@ jobs:
   build-book:
     name: '📘 Build Textbook'
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     if: inputs.update_book
     steps:
       - name: 📥 Checkout
         uses: actions/checkout@v6
         with:
           ref: main
+          persist-credentials: false
 
       - name: 📝 Setup Quarto
-        uses: quarto-dev/quarto-actions/setup@v2
+        uses: quarto-dev/quarto-actions/setup@8a96df13519ee81fd526f2dfca5962811136661b # v2
 
       - name: 📚 Setup TinyTeX
         run: |
@@ -130,6 +136,13 @@ jobs:
     runs-on: ubuntu-latest
     needs: [build-paper, build-book]
     if: always() && (needs.build-paper.result == 'success' || needs.build-book.result == 'success')
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    # Same lock as every *-publish-live deploy: never race their gh-pages pushes.
+    concurrency:
+      group: gh-pages-deploy
+      cancel-in-progress: false
     steps:
       - name: 📥 Checkout gh-pages
         uses: actions/checkout@v6
@@ -182,13 +195,29 @@ jobs:
 
           git add tinytorch/assets/downloads/
           git commit -m "📄 Update TinyTorch PDFs" || echo "No changes to commit"
-          git push origin gh-pages
+
+          PUSHED=false
+          for i in 1 2 3; do
+            if git push origin gh-pages; then
+              echo "✅ Push succeeded on attempt $i"
+              PUSHED=true
+              break
+            fi
+            echo "⚠️ Push failed (attempt $i/3), pulling with rebase..."
+            git pull --rebase origin gh-pages || { git rebase --abort 2>/dev/null || true; }
+            sleep $((i * 5))
+          done
+          if [ "$PUSHED" != "true" ]; then
+            echo "::error::gh-pages push failed after 3 attempts."
+            exit 1
+          fi
 
   summary:
     name: '📊 Summary'
     runs-on: ubuntu-latest
     needs: [build-paper, build-book, deploy-pdfs]
     if: always()
+    timeout-minutes: 5
     steps:
       - name: 📊 Generate Summary
         run: |

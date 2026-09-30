@@ -78,7 +78,7 @@ The first batch is entirely class 0. Its loss measures only performance on that 
 $$\text{Batch size} = 64 \times 768 \times 4\text{ bytes} = 196{,}608\text{ bytes} \approx 192\text{ KB}$$
 $$\text{Throughput} = 196{,}608\text{ bytes} \times 400\text{ steps/s} \approx 78.6\text{ MB/s}$$
 
-**The I/O bottleneck**: If samples are read individually from non-contiguous storage (random SSD reads at $0.1\text{ ms}$ per sample), loading $64$ samples sequentially takes $64 \times 0.1\text{ ms} = 6.4\text{ ms}$, starving the $2.5\text{ ms}$ GPU step and dropping GPU utilization to $\frac{2.5}{2.5 + 6.4} \approx 28\%$. In @sec-profiling, we will use timeline traces to diagnose this exact condition: a GPU compute engine showing periodic 0% utilization "bubbles" while waiting for the host DataLoader to collate and transfer the next batch.
+**The I/O bottleneck**: If samples are read individually from non-contiguous storage (random SSD reads at $0.1\text{ ms}$ per sample), loading $64$ samples sequentially takes $64 \times 0.1\text{ ms} = 6.4\text{ ms}$, starving the $2.5\text{ ms}$ GPU step and dropping GPU utilization to $\frac{2.5}{2.5 + 6.4} \approx 28\%$. Production profilers such as PyTorch Profiler and Nsight Systems (see the production bridge of @sec-profiling) expose this condition as periodic idle gaps on the accelerator timeline while the host prepares the next batch.
 
 :::
 
@@ -320,7 +320,7 @@ The copied sample isolates the stored image from transformations. `Compose` pass
 ::: {.column-margin}
 ![](assets/images/diagrams/05_dataloader-margin-shm.svg){width="100%" fig-alt="Multi-worker IPC comparison between pipe serialization with redundant byte copying and POSIX shared memory zero-copy page mapping."}
 
-*Multi-worker IPC: Worker processes bypass pipe serialization by writing batches directly to `/dev/shm`, sending an 8-byte file descriptor so the main process maps memory zero-copy.*
+*Multi-worker IPC: Worker processes bypass pipe serialization by writing batches directly to `/dev/shm`, sending a small handle (a file descriptor passed over a Unix socket) so the main process maps the same pages.*
 :::
 
 For datasets accessed by index, called map-style datasets in its API, PyTorch keeps indexed lookup separate from sampling and collation. Its tensor dataset indexes stored tensors directly, allowing a row view rather than TinyTorch's copied sample. Tensor fields are then stacked into batches. A configurable sampler and collation function support policies beyond the tuple-of-tensors contract used here. [PyTorch data loading documentation](https://docs.pytorch.org/docs/2.14/data.html).
@@ -333,25 +333,25 @@ Worker processes also need to hand completed tensors back to the caller. **Share
 
 ::: {#psp-dataloader-multiprocess-shm .callout-perspective title="Systems Perspective: POSIX shared memory and zero-copy IPC"}
 
-**Inter-process communication (IPC)**: When `num_workers > 0`, Python's `multiprocessing` spawns worker processes. Standard Python `queue.Queue` serializes objects through Unix pipes using `pickle`, thrashing memory with redundant byte copies.
+**Inter-process communication (IPC)**: When `num_workers > 0`, Python's `multiprocessing` spawns worker processes. `multiprocessing.Queue` pickles each object and sends the bytes through a pipe, so an unshared tensor is copied at least twice on its way to the main process.
 
-**POSIX shared memory (`/dev/shm`)**: PyTorch bypasses pickle serialization for tensors by writing tensor memory into POSIX shared memory (`shm_open`) or memory-mapped files. The worker sends only an 8-byte file descriptor or handle over the IPC pipe; the main process reconstructs the tensor zero-copy by mapping the identical physical memory pages.
+**POSIX shared memory (`/dev/shm`)**: PyTorch bypasses pickle serialization for tensors by writing tensor memory into POSIX shared memory (`shm_open`) or memory-mapped files. The worker sends only a small handle (a file descriptor plus storage metadata) over the IPC channel; the main process reconstructs the tensor zero-copy by mapping the identical physical memory pages.
 
 :::
 
-A later transfer to an accelerator introduces a critical hardware boundary. Standard host memory allocated via `malloc` or NumPy is pageable: the operating system can swap pages out to disk or migrate physical pages across virtual addresses at any time. When an accelerator (such as a GPU) copies data over PCIe, it uses Direct Memory Access (DMA) engines that require fixed physical page addresses. If host memory is pageable, the driver must first copy the batch into an internal, page-locked staging buffer before initiating the DMA transfer over PCIe, paying a double-copy penalty. **Pinned memory** (page-locked memory) avoids this by using the OS `mlock` system call to pin host virtual pages to permanent physical DRAM addresses.[^fn-posix-mlock-pinned] PyTorch's `pin_memory=True` allocates batches directly in pinned memory, allowing the GPU's DMA controller to stream bytes across the PCIe bus asynchronously without CPU mediation or staging buffer overhead. Neither option exists in TinyTorch's synchronous NumPy loader, which isolates memory mechanics before physical hardware transfer boundaries. [PyTorch pinned-memory and nonblocking-transfer guide](https://docs.pytorch.org/tutorials/intermediate/pinmem_nonblock.html).
+A later transfer to an accelerator introduces a critical hardware boundary. Standard host memory allocated via `malloc` or NumPy is pageable: the operating system can swap pages out to disk or migrate physical pages across virtual addresses at any time. When an accelerator (such as a GPU) copies data over PCIe, it uses Direct Memory Access (DMA) engines that require fixed physical page addresses. If host memory is pageable, the driver must first copy the batch into an internal, page-locked staging buffer before initiating the DMA transfer over PCIe, paying a double-copy penalty. **Pinned memory** (page-locked memory) avoids this by locking host pages to fixed physical DRAM addresses; the CUDA driver allocates or registers such buffers itself (`cudaHostAlloc`, `cudaHostRegister`), much as the POSIX `mlock` call locks pages.[^fn-posix-mlock-pinned] With `pin_memory=True`, a PyTorch loader thread copies each collated batch into page-locked host memory, so a later `.to(device, non_blocking=True)` can be served by the GPU's DMA engine without an extra staging copy. Neither option exists in TinyTorch's synchronous NumPy loader, which isolates memory mechanics before physical hardware transfer boundaries. [PyTorch pinned-memory and nonblocking-transfer guide](https://docs.pytorch.org/tutorials/intermediate/pinmem_nonblock.html).
 
 ::: {#ws-dataloader-fork-cow-explosion .callout-war-story title="War Story: Fork-based copy-on-write memory explosion"}
 
 **The Linux fork hazard**: On Linux/POSIX systems, starting workers via `fork` causes child processes to inherit parent address space marked Copy-on-Write (CoW).
 
-**CPython refcount thrashing**: Every time a worker process touches a Python object (e.g., iterating a large in-memory dataset list), CPython increments its internal reference count. This in-place integer mutation triggers Linux page-fault handlers, copying entire $4\text{ KB}$ memory pages from parent to child.[^fn-cow-instagram-incident] A parent process with $30\text{ GB}$ of RAM can quickly trigger Out-Of-Memory (OOM) fatal kills across 8 workers despite allocating no new data structures. Using `spawn` or flat byte buffers (like `numpy.memmap`) prevents refcount-induced memory duplication.
+**CPython refcount thrashing**: Every time a worker process touches a Python object (e.g., iterating a large in-memory dataset list), CPython increments its internal reference count. This in-place integer mutation triggers Linux page-fault handlers, copying entire $4\text{ KB}$ memory pages from parent to child.[^fn-cow-refcount-pages] A parent process with $30\text{ GB}$ of RAM can quickly trigger Out-Of-Memory (OOM) fatal kills across 8 workers despite allocating no new data structures. Using `spawn` or flat byte buffers (like `numpy.memmap`) prevents refcount-induced memory duplication.
 
 :::
 
 [^fn-posix-mlock-pinned]: The POSIX \texttt{mlock()} system call instructs the operating system kernel to disable paging for a specified virtual address range, locking pages into physical RAM. GPU DMA engines require physical address stability because PCIe bus transfers bypass the CPU memory management unit (MMU).
 
-[^fn-cow-instagram-incident]: This phenomenon caused massive production outages at Instagram and was documented by PyTorch core developers (Zhao et al., 2021). Because Python's reference counts are stored inline in object headers, even read-only iteration mutates refcounts, triggering Linux kernel copy-on-write page faults that duplicate memory pages across every forked worker.
+[^fn-cow-refcount-pages]: Because Python's reference counts are stored inline in object headers, even read-only iteration mutates refcounts, triggering Linux kernel copy-on-write page faults that duplicate memory pages across every forked worker.
 
 The comparison in @tbl-dataloader-vs-pytorch locates each extension at the boundary it changes. Indexed access remains usable whether retrieval runs in the caller or in a worker.
 

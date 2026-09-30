@@ -1,39 +1,35 @@
 # ==============================================================================
-# 06_tito_companion.tape: Tito CLI Companion & System Health Diagnostics
+# 06_tito_companion.tape: the tito CLI and its health check
 # ==============================================================================
 
 Output "tinytorch/guide/assets/images/demos/tinytorch-06-tito-companion.gif"
 
 Set Shell "bash"
-Set FontSize 14
+Set FontSize 15
 Set FontFamily "Menlo"
 Set Width 1200
-Set Height 860
+Set Height 820
 Set Theme "Catppuccin Mocha"
 Set TypingSpeed 35ms
-Set CursorBlink false
 
 # Prepare environment invisibly
 Hide
-Type "source ./tinytorch/guide/tools/tape_env.sh && clear"
+Type 'source ./tinytorch/guide/tools/tape_env.sh && clear'
 Enter
-Sleep 500ms
+Sleep 800ms
 Show
 
-# Step 1: Launch Tito companion CLI
 Type "tito"
 Sleep 300ms
 Enter
-Sleep 3500ms
-
-# Step 2: Clear screen for environment diagnostics
+Wait@900s /^\$ *$/
+Sleep 4s
 Type "clear"
 Sleep 200ms
 Enter
 Sleep 300ms
-
-# Step 3: Run comprehensive system health check
 Type "tito system health"
 Sleep 300ms
 Enter
-Sleep 7000ms
+Wait@900s /^\$ *$/
+Sleep 7s

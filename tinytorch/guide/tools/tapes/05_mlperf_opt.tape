@@ -23,5 +23,7 @@ Show
 Type "tito milestone run 06"
 Sleep 300ms
 Enter
-# Generous hold time to study 3 divisions (INT8, im2col, KV cache) and Pareto frontier
-Sleep 12000ms
+# Wait for the real run to finish (the shell prompt returns), however long
+# training takes on this machine, then hold on the result.
+Wait@600s /^\$ *$/
+Sleep 6s

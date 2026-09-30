@@ -20,13 +20,13 @@ logits = torch.tensor([[2.0, 1.0, 0.1], [1000.0, 1001.0, 1002.0]])
 targets = torch.tensor([0, 2])
 
 loss = F.cross_entropy(logits, targets)
-print("Stable scalar loss:", loss.item())  # 0.4076, no NaN or Inf!
+print("Stable scalar loss:", loss.item())  # 0.4123, no NaN or Inf!
 ```
 
 Underneath that single call, the runtime protects computation from the hazards of IEEE 754 floating-point arithmetic:
 
 1. **The LogSumExp max-subtraction shift:** In raw float32, $e^{1000}$ immediately overflows to `+inf`, causing division to produce `nan`. The runtime subtracts the row maximum ($\max_j z_j$) before exponentiation, bounding all exponents to $\le 0$ so they never overflow.
-2. **Operator fusion across softmax and log-likelihood:** Rather than materializing separate intermediate probability tensors through Softmax and then passing them to a logarithm, the kernel fuses them into a single pass to eliminate intermediate memory traffic.
+2. **Operator fusion across softmax and log-likelihood:** Rather than materializing a probability tensor and then taking its logarithm, the runtime computes log-softmax directly, so no probability array is formed.
 3. **Scalar reduction invariant:** A loss function must collapse high-dimensional prediction arrays across batch and class coordinates into a single 0-D scalar. This reduction guarantees that the training objective represents a global scalar potential, preventing downstream memory explosions during graph execution.
 
 This chapter constructs TinyTorch's loss library, defusing the numerical traps of cross-entropy to provide stable scalar objectives that @sec-autograd and @sec-optimizers turn into parameter updates. Before building the stable implementation, we must inspect how textbook mathematical recipes immediately fail in float32.
@@ -63,7 +63,7 @@ NumPy prints an overflow warning and carries on, and every probability comes out
 *In float32, $e^z$ overflows to $\infty$ at $z = 88.72$, necessitating the max-shift stabilization.*
 :::
 
-Logits of 100 are not exotic. Recall from @sec-activations that Softmax relies on raw elementwise exponentiation, where any input exceeding 88.72 overflows float32 dynamic range to infinity. Furthermore, @sec-layers showed how fast badly scaled weights inflate activations; a few layers of that and the outputs easily enter the hundreds. A nonfinite loss is a reason to stop and inspect the batch before updating weights. Nonfinite intermediate values can propagate into the derivatives and weight updates introduced in @sec-autograd and @sec-optimizers. The scalar alone does not tell us which intermediate first failed, so the useful debugging boundary is the input logits and the operations that turn them into a loss.
+Logits of 100 are not exotic. Recall from @sec-activations that a direct exponential overflows float32 to infinity for any input above 88.72, which is why TinyTorch's Softmax subtracts the row maximum first. Furthermore, @sec-layers showed how fast badly scaled weights inflate activations; a few layers of that and the outputs easily enter the hundreds. A nonfinite loss is a reason to stop and inspect the batch before updating weights. Nonfinite intermediate values can propagate into the derivatives and weight updates introduced in @sec-autograd and @sec-optimizers. The scalar alone does not tell us which intermediate first failed, so the useful debugging boundary is the input logits and the operations that turn them into a loss.
 
 So the need is concrete. We want a loss for classification that avoids preventable overflow when the input logits and their differences are representable. Stable algebra cannot recover a value that was already converted to `inf` before the loss received it.
 
@@ -110,7 +110,7 @@ The three loss functions in TinyTorch partition the core supervised learning wor
 | Loss Class | Target Type | Input Domain | Stability Mechanism | Primary Task |
 | :--- | :--- | :--- | :--- | :--- |
 | `MSELoss` | Continuous $\mathbb{R}$ | Unbounded predictions | Elementwise mean | Regression |
-| `BinaryCrossEntropyLoss` | Probabilities $[0, 1]$ | Probabilities in $(0, 1)$ | Epsilon clipping $[\epsilon, 1-\epsilon]$ | Binary classification |
+| `BinaryCrossEntropyLoss` | Probabilities $[0, 1]$ | Probabilities in $[0, 1]$ | Epsilon clipping $[\epsilon, 1-\epsilon]$ | Binary classification |
 | `CrossEntropyLoss` | Class indices $\{0, \dots, C-1\}$ | Unbounded logits $\mathbb{R}^C$ | Max-shifted log-softmax & gather | Multi-class classification |
 
 : **Loss function taxonomy**: Architectural contracts, input domains, and numerical stabilization strategies across TinyTorch losses. {#tbl-loss-taxonomy tbl-colwidths="[33,16,17,20,14]"}
@@ -137,7 +137,7 @@ The vector of all $C$ values of $\log p_i$ is the **log-softmax** of $\mathbf{z}
 
 ::: {#chk-loss-logsumexp-stability .callout-checkpoint title="Checkpoint: LogSumExp numerical stability invariants"}
 
-**The invariant**: In computing $\log \sum_j e^{z_j}$, shifting by $c = \max_j(z_j)$ ensures that every exponent $z_j - c \le 0$, bounding all terms $e^{z_j - c} \in (0, 1]$. Because the maximum element produces $e^0 = 1$, the sum is guaranteed to satisfy $\sum_j e^{z_j - c} \ge 1$, completely precluding both overflow ($\infty$) and underflow to zero ($0$).
+**The invariant**: In computing $\log \sum_j e^{z_j}$, shifting by $c = \max_j(z_j)$ ensures that every exponent $z_j - c \le 0$, bounding all terms $e^{z_j - c} \in [0, 1]$. Because the maximum element produces $e^0 = 1$, the sum is guaranteed to satisfy $\sum_j e^{z_j - c} \ge 1$, completely precluding both overflow ($\infty$) and underflow to zero ($0$).
 
 **Precision rule**: Always evaluate $(z_t - c) - \log \sum_j e^{z_j - c}$ instead of $z_t - (c + \log \sum_j e^{z_j - c})$. In float32, combining large $c$ with small log-sums obliterates low-order mantissa bits.
 
@@ -215,7 +215,7 @@ Targets represent integer class IDs, but their storage is float32: `Tensor([0, 1
 
 [^fn-one-hot-targets]: **One-hot**: a vector with a 1 in the position of the correct class and 0 everywhere else, so a label of class 2 among 5 classes becomes `[0, 0, 1, 0, 0]`. For a batch of $N$ examples it takes $N \times C$ numbers to store what $N$ integers already say, which is why the code indexes with the integers instead.
 
-[^fn-gather-bandwidth]: In hardware terms, direct integer index gathering translates to indirect memory addressing (`log_probs[i * C + target[i]]`). Instead of streaming $B \times C$ floats across the memory bus to multiply by sparse zeros, the memory controller transfers only $B$ floats, slashing DRAM traffic by a factor of $C$ (over $32{,}000\times$ in large vocabulary models).
+[^fn-gather-bandwidth]: In hardware terms, direct integer index gathering translates to indirect memory addressing (`log_probs[i * C + target[i]]`). Instead of streaming $B \times C$ floats across the memory bus to multiply by sparse zeros, the gather reads only $B$ selected values instead of multiplying through $B \times C$ one-hot entries (the log-softmax itself still reads every logit, as the next paragraph notes).
 
 ### `BinaryCrossEntropyLoss`, finite logs through clipping
 
@@ -306,7 +306,7 @@ import numpy as np
 for base in (1e3, 1e6):
     z = np.array([base, base + 2.0, base + 1.0], dtype=np.float32)
     c = np.max(z)
-    log_sum = np.log(np.sum(np.exp(z - c)))     # 0.40760596 in every case
+    log_sum = np.log(np.sum(np.exp(z - c)))     # 0.40760604 in every case
     lse_first = (c + log_sum) - z[1]            # big numbers first
     shift_first = log_sum - (z[1] - c)          # small numbers first
     print(f"logits near {base:.0e}: {lse_first:.6f} vs {shift_first:.6f}")
@@ -332,7 +332,7 @@ A production **fused kernel** combines several array operations into one device 
 
 ::: {#psp-fused-cross-entropy .callout-perspective title="Systems Perspective: Fused cross-entropy in large vocabulary models"}
 
-**The vocabulary VRAM bottleneck**: In modern LLMs (such as TinyGPT or LLaMA), vocabulary size $V$ ranges from $32{,}000$ to $128{,}000$. For batch size $B=16$ and sequence length $S=2048$, allocating an un-fused FP32 logits tensor of shape $(B, S, V)$ requires $16 \times 2048 \times 32{,}000 \times 4\text{ bytes} \approx 4.19\text{ GB}$. Materializing separate intermediate tensors for shifted logits, exponentials, and log-softmax can consume over $16\text{ GB}$ of VRAM just to compute the loss!
+**The vocabulary VRAM bottleneck**: In modern LLMs such as LLaMA, vocabulary size $V$ ranges from $32{,}000$ to $128{,}000$ (TinyGPT's character vocabulary is far smaller). For batch size $B=16$ and sequence length $S=2048$, allocating an un-fused FP32 logits tensor of shape $(B, S, V)$ requires $16 \times 2048 \times 32{,}000 \times 4\text{ bytes} \approx 4.19\text{ GB}$. Materializing separate intermediate tensors for shifted logits, exponentials, and log-softmax can consume over $16\text{ GB}$ of VRAM just to compute the loss!
 
 **Online LogSumExp fusion**: Production engines (such as Flash-Cross-Entropy or Triton kernels) stream through the vocabulary directly from the final linear layer projection, computing the running maximum and LogSumExp in fast GPU registers (SRAM) without ever materializing the massive $(B, S, V)$ logit tensor in DRAM.
 

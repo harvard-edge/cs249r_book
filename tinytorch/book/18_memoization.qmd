@@ -31,7 +31,7 @@ Underneath that simple flag, the runtime manages a dedicated memory buffer syste
 
 1. **Static buffer pre-allocation:** The runtime pre-allocates contiguous memory buffers for Key and Value projections up to the maximum context window, avoiding expensive dynamic memory reallocations at every generated token.
 2. **Single-token projection and moving write cursor:** At each decode step, only the newest single token is projected through $W_Q, W_K, W_V$. The new key and value vectors are written into the cache at the current sequence index cursor, leaving previous keys and values untouched.
-3. **Asymptotic latency reduction:** Caching cuts per-step projection cost from $O(t)$ rows to a single row, dropping cumulative sequence projection work from $O(S^2)$ to $O(S)$.
+3. **Asymptotic projection reduction:** Caching cuts per-step projection cost from $O(t)$ rows to a single row, dropping cumulative sequence projection work from $O(S^2)$ to $O(S)$; attention still reads the growing prefix.
 
 This chapter constructs TinyTorch's KV cache, checks that cached and full-prefix attention agree within floating-point tolerance, and then measures generation time for both. Before building the cache, inspecting the arithmetic waste of un-cached generation reveals why naive autoregression scales poorly.
 
@@ -110,7 +110,7 @@ Putting the two facts together, one generation step at one attention layer does 
 ::: {.column-margin}
 **Core Invariant: Cursor Write-Head Advance**\
 $$\text{cache}[:, :, \text{seq\_pos}, :] = k_{\text{new}}, \quad \text{seq\_pos} \mathrel{+}= 1$$\
-*Preallocating max capacity turns $O(S)$ dynamic memory reallocation into $O(1)$ stride indexing.*
+*Preallocating max capacity turns each step's $O(t)$ buffer reallocation into an $O(1)$ slot write; reading the prefix still copies $O(t)$ rows.*
 :::
 
 1. Project only the new token: $\mathbf{q}_t$, $\mathbf{k}_t$, $\mathbf{v}_t$, three products of a $1 \times D$ row with a $D \times d_k$ matrix.
@@ -120,7 +120,7 @@ $$\text{cache}[:, :, \text{seq\_pos}, :] = k_{\text{new}}, \quad \text{seq\_pos}
 
 Nothing in steps 1 through 4 touches an old key or value except to read it. The cache is append-only, and a single integer tracks the filled prefix shared by the layers. The stored key and value arrays carry the rest of its state.
 
-![**KV cache advancing write cursor and ring buffer**: Rather than reallocating expanding key/value tensors each generation step, a fixed buffer of shape $(B, H, S_{\max}, d_k)$ is preallocated. Each token generation step writes the newly projected key and value into the single slot indexed by `seq_pos` and advances the cursor, eliminating memory reallocation.](assets/images/diagrams/18_kv-cache-cursor.svg){#fig-kv-cache-cursor width="100%" fig-alt="Diagram of KV cache preallocated slots with valid slots 0 and 1, write head slot 2 at seq_pos=2, and reserved remaining slots."}
+![**KV cache advancing write cursor**: Rather than reallocating expanding key/value tensors each generation step, a fixed buffer of shape $(B, H, S_{\max}, d_k)$ is preallocated. Each token generation step writes the newly projected key and value into the single slot indexed by `seq_pos` and advances the cursor, so the persistent buffers are never reallocated; reads still copy the prefix.](assets/images/diagrams/18_kv-cache-cursor.svg){#fig-kv-cache-cursor width="100%" fig-alt="Diagram of KV cache preallocated slots with valid slots 0 and 1, write head slot 2 at seq_pos=2, and reserved remaining slots."}
 
 
 ### What it costs and what it buys
@@ -148,17 +148,17 @@ The price is memory. Every token adds one key row and one value row per head per
 For autoregressive generation, calculate the KV cache memory footprint across context lengths and concurrency:
 
 - **Per-Token Buffer Formula**:
-  $$\text{Memory per token} = 2 \times (\text{Key} + \text{Value}) \times L \times D \times b$$
+  $$\text{Memory per token} = 2\ (\text{key and value}) \times L \times D \times b$$
   where $L$ is the number of transformer layers, $D$ is model embedding dimension ($H \times d_k$), and $b$ is byte width per float.
 
-- **TinyGPT ($L=4, D=64, \text{FP32 } b=4$)**:
-  $$2 \times 4 \times 64 \times 4\text{ B} = 2{,}048\text{ bytes per token} = 2\text{ KB/token}.$$
-  For $S = 512$ sequence length: $512 \times 2\text{ KB} = 1.0\text{ MB}$ per sequence.
+- **TinyGPT ($L=4, D=128, \text{FP32 } b=4$)**:
+  $$2 \times 4 \times 128 \times 4\text{ B} = 4{,}096\text{ bytes per token} = 4\text{ KB/token}.$$
+  For its full $S = 256$ positions: $256 \times 4\text{ KB} = 1.0\text{ MB}$ per sequence.
 
 - **Production LLaMA-3-8B ($L=32, H_{kv}=8, d_k=128, D_{kv}=1024, \text{BF16 } b=2$)**:
   $$2 \times 32 \times 1024 \times 2\text{ B} = 131{,}072\text{ bytes per token} = 128\text{ KB/token}.$$
-  For $S = 8{,}192$ context length: $8{,}192 \times 128\text{ KB} = 1.05\text{ GB}$ per sequence.
-  Serving a batch of 64 concurrent requests requires $64 \times 1.05\text{ GB} = 67.2\text{ GB}$ dedicated exclusively to the KV cache, far exceeding the model weights ($16\text{ GB}$).
+  For $S = 8{,}192$ context length: $8{,}192 \times 131{,}072\text{ B} = 1.07\text{ GB}$ per sequence.
+  Serving a batch of 64 concurrent requests requires $64 \times 1.07\text{ GB} = 68.7\text{ GB}$ dedicated exclusively to the KV cache, far exceeding the model weights ($16\text{ GB}$).
 
 - **Decode Generation Latency Equation**:
   Because single-token generation is memory-bandwidth bound (@sec-profiling), per-token decode latency is governed by memory streaming:
@@ -242,7 +242,7 @@ The helper it calls first, `_create_cache_storage`, checks that the model has th
 
 The loop owns the request lifetime. `reset` first clears the previous request, and `with cache.generation():` activates cached routing until the loop exits. Two further details keep the positions consistent. Every call feeds exactly one token, with `start_pos=cache.seq_pos`, which is the argument @sec-embeddings gave the position table and @sec-transformers threaded through `GPT.forward` so that a single token knows where in the sequence it sits; without it every cached step would be embedded at position zero. The caller invokes `advance` exactly once per token, after the whole stack of blocks has processed it, so every layer writes the same slot.
 
-For a nonempty prompt, the final prefill logits predict the first generated token. The loop then samples that token and processes it to obtain the next logits. The final requested token is returned without another forward pass because its logits would be unused. For prompt length $P$ and positive output length $N$, the cursor ends at $P+N-1$. The generation check nevertheless requires the returned sequence length $P+N$ to be no greater than `max_seq_len`, matching `GPT.generate`'s limit on the returned sequence length. These are different counts: the last returned token occupies the output list but has no cached key or value. A zero-token request returns an empty list after resetting the cache. Prefilling one token at a time costs $P$ sequential steps; the bridge shows what production does instead. After the scope exits, ordinary forwards stop reading the cache even though its buffers remain attached. Taking the wrappers off entirely is the loop in reverse.
+For a nonempty prompt, the final prefill logits predict the first generated token. The loop then samples that token and processes it to obtain the next logits. The final requested token is returned without another forward pass because its logits would be unused. For prompt length $P$ and positive output length $N$, the cursor ends at $P+N-1$. The capacity check therefore requires only the $P+N-1$ cached positions to fit in `max_seq_len`, one position looser than `GPT.generate`, which limits the returned length $P+N$. These are different counts: the last returned token occupies the output list but has no cached key or value. A zero-token request returns an empty list after resetting the cache. Prefilling one token at a time costs $P$ sequential steps; the bridge shows what production does instead. After the scope exits, ordinary forwards stop reading the cache even though its buffers remain attached. Taking the wrappers off entirely is the loop in reverse.
 
 {{< include _listings/18_memoization/disable_kv_cache.qmd >}}
 

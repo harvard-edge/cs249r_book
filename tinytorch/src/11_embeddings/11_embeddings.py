@@ -65,15 +65,23 @@ from tinytorch.core.embeddings import Embedding, PositionalEncoding, create_sinu
 r"""
 ## 📋 Module Dependencies
 
+**Prerequisites**: Modules 01 (Tensor) and 06 (Autograd) must be complete. Module 10 supplies token IDs conceptually but is not imported.
+
+**External Dependencies**:
+- `numpy`: array manipulation, fast vectorized slicing, and math; provides `np.add.at`, the unbuffered scatter-add that keeps duplicate indices
+- `math` and `typing` (for scaling constants and type hints)
+- `time` (used only inside an analysis cell)
+
+**TinyTorch Dependencies**:
+
 | Dependency | Origin | Purpose in Module 11 | Systems Invariant |
 | :--- | :--- | :--- | :--- |
 | `Tensor` | Module 01 (`core.tensor`) | Wraps embedding weights, token indices, and activations | Strided memory buffer and gradient storage container |
-| `Function` | Module 06 (`core.tensor`) | Extensible computational graph node base class | Enforces separation of forward evaluation and backward adjoint |
+| `Function` | Module 01 (`core.tensor`) | Extensible computational graph node base class | Enforces separation of forward evaluation and backward adjoint |
 | `autograd` | Module 06 (`core.autograd`) | Backward tape and automatic gradient backpropagation | Accumulates gradients into leaf weight parameter `.grad` |
-| `BPETokenizer` | Module 10 (`core.tokenization`) | Upstream text tokenizer producing discrete token IDs | Maps variable-length strings into static vocabulary bounds $[0, V-1]$ |
-| `numpy` | External | Array manipulation, fast vectorized slicing, and math | Provides `np.add.at`, the unbuffered scatter-add that keeps duplicate indices |
+| `BPETokenizer` | Module 10 (`core.tokenization`), not imported | Upstream text tokenizer producing discrete token IDs | Maps variable-length strings into static vocabulary bounds $[0, V-1]$ |
 
-### Ingestion & Transformation Pipeline
+**Dependency Flow**: the ingestion and transformation pipeline
 
 | Pipeline Stage | Subsystem / Operator | Mathematical Mapping | Tensor Space & Dimensions |
 | :--- | :--- | :--- | :--- |
@@ -810,6 +818,21 @@ def test_unit_positional_encoding():
     assert len(params) == 1, "Should have 1 parameter (position embeddings)"
     assert params[0].shape == (512, 64), "Position embedding matrix has wrong shape"
 
+    # Test 5: VALUES. Each position's learned row is added to every batch element:
+    #   out[b, t, :] = x[b, t, :] + P[start_pos + t, :]
+    P = pos_enc.position_embeddings.data
+    expected = embeddings.data + P[np.newaxis, :10, :]
+    assert np.allclose(output.data, expected, atol=1e-6), \
+        "Output should equal x + position_embeddings[:seq_len] broadcast across the batch"
+    assert np.allclose(out1.data[0], P[:5], atol=1e-6), \
+        "With zero input, the output should be exactly the first seq_len position rows"
+
+    # start_pos shifts which rows are added (used by the KV cache in Module 18)
+    x_step = Tensor(rng.standard_normal((2, 3, 64)))
+    out_step = pos_enc.forward(x_step, start_pos=7)
+    assert np.allclose(out_step.data, x_step.data + P[np.newaxis, 7:10, :], atol=1e-6), \
+        "With start_pos=7 the output should add position rows 7, 8, 9"
+
     print("✅ Positional encoding works correctly!")
 
 if __name__ == "__main__":
@@ -961,6 +984,22 @@ def test_unit_sinusoidal_table():
     # Test 5: Returns numpy array (not Tensor)
     assert isinstance(table, np.ndarray), "Helper should return raw numpy array"
 
+    # Test 6: VALUES against the formula, element by element
+
+    def _reference_sinusoidal(max_len, d):
+        # PE[pos, 2i] = sin(pos / 10000^(2i/d)),  PE[pos, 2i+1] = cos(pos / 10000^(2i/d))
+        ref = np.zeros((max_len, d))
+        for pos in range(max_len):
+            for col in range(d):
+                angle = pos / (10000.0 ** ((col - col % 2) / d))
+                ref[pos, col] = np.sin(angle) if col % 2 == 0 else np.cos(angle)
+        return ref
+
+    for max_len, d in ((10, 8), (50, 16), (5, 7)):
+        got = _compute_sinusoidal_table(max_len, d)
+        assert np.allclose(got, _reference_sinusoidal(max_len, d), atol=1e-5), \
+            f"Table ({max_len}, {d}) should have sin(pos/10000^(2i/d)) in even columns and cos(...) in odd columns"
+
     print("✅ Sinusoidal table computation works correctly!")
 
 if __name__ == "__main__":
@@ -1058,6 +1097,22 @@ def test_unit_sinusoidal_embeddings():
 
     # Test 6: Returns Tensor (not numpy array)
     assert isinstance(pe, Tensor), "Should return a Tensor wrapping the sinusoidal table"
+
+    # Test 7: VALUES against PE[pos, 2i] = sin(pos/10000^(2i/d)), PE[pos, 2i+1] = cos(...)
+
+    def _reference_sinusoidal(max_len, d):
+        # PE[pos, 2i] = sin(pos / 10000^(2i/d)),  PE[pos, 2i+1] = cos(pos / 10000^(2i/d))
+        ref = np.zeros((max_len, d))
+        for pos in range(max_len):
+            for col in range(d):
+                angle = pos / (10000.0 ** ((col - col % 2) / d))
+                ref[pos, col] = np.sin(angle) if col % 2 == 0 else np.cos(angle)
+        return ref
+
+    assert np.allclose(pe_test.data[:50], _reference_sinusoidal(50, 16), atol=1e-5), \
+        "Sinusoidal encoding should equal sin(pos/10000^(2i/d)) at even dims and cos(...) at odd dims"
+    assert np.allclose(pe_odd.data, _reference_sinusoidal(10, 7), atol=1e-5), \
+        "Odd embed_dim: the last (even) column is a sine; odd columns are cosines of the same frequencies"
 
     print("✅ Sinusoidal embeddings work correctly!")
 

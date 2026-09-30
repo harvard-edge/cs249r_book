@@ -143,7 +143,7 @@ $$1 - 0.99^N \ge 0.95 \quad\Longrightarrow\quad N \ge \frac{\ln 0.05}{\ln 0.99} 
 Round up to **299 runs** to meet the inequality. This calculation concerns observing at least one tail event, assuming independent samples. It does not establish a precise percentile estimate: one event gives little evidence about the tail's shape. `MLPerf.run_standard_benchmark` defaults to 100 runs, while `Benchmark` defaults to 10 measured runs. Both are classroom starting points; repeat the experiment and collect more samples before interpreting its $P_{99}$ as a service guarantee.[^fn-gc-benchmarking-tail]
 :::
 
-[^fn-gc-benchmarking-tail]: **Python garbage collection pauses and allocator churn**: Python's automatic garbage collector tracks cyclic object references. When generational garbage collection triggers during an untimed iteration, it pauses execution to traverse heap object references, introducing multi-millisecond tail latency spikes. High-precision benchmarking harnesses explicitly invoke `gc.collect()` before timing and call `gc.disable()` during active timing loops, re-enabling collection only between iterations to prevent allocator maintenance from contaminating $P_{95}$ and $P_{99}$ latency metrics.
+[^fn-gc-benchmarking-tail]: **Python garbage collection pauses and allocator churn**: Python's automatic garbage collector tracks cyclic object references. When generational garbage collection triggers during a timed iteration, it pauses execution to traverse heap object references, introducing multi-millisecond tail latency spikes. High-precision benchmarking harnesses explicitly invoke `gc.collect()` before timing and call `gc.disable()` during active timing loops, re-enabling collection only between iterations to prevent allocator maintenance from contaminating $P_{95}$ and $P_{99}$ latency metrics.
 
 ### Throughput
 
@@ -172,7 +172,7 @@ Suppose you record 20 benchmark runs of a model forward pass. Exactly 19 iterati
 ::: {.column-margin}
 ![](assets/images/diagrams/19_bench-margin-source.svg){width="100%" fig-alt="Source code mapping card for Module 19 Benchmarking showing file path, exported package, and tested primitives."}
 
-*Source Code Mapping: Module 19 extracts benchmark timing harnesses, latency percentile metrics, and MLPerf compliance directly from the working repository.*
+*Source Code Mapping: Module 19 extracts benchmark timing harnesses, latency percentile metrics, and the classroom MLPerf-style check directly from the working repository.*
 :::
 
 Read the core path first: `Benchmark.run_latency_benchmark` produces a list of durations, and `BenchmarkResult` summarizes that list. Compare one unchanged baseline with one candidate before introducing multiple candidates or a statistical test. The module's suite combines several metrics and plots comparisons; it cannot repair mismatched workloads or establish statistical significance from a plot.
@@ -213,7 +213,7 @@ Notice that `pos` runs from 0 to `len(s) - 1`, so $P_0$ is the minimum and $P_{1
 
 `BenchmarkResult(name, values)` invokes `__post_init__`. That method rejects an empty list and stores the count, mean, sample standard deviation, median, and extrema. `percentile(p)` computes its answer on demand. Treat `values` as a finished record: the constructor retains the supplied list rather than copying it. Appending later would leave the stored mean and count unchanged while changing the next percentile result.
 
-The confidence interval uses $1.96\,s/\sqrt{N}$ on either side of the mean. Under suitable sampling assumptions, this normal approximation describes uncertainty in the estimated mean; it is not a range containing 95 percent of requests. With a small or strongly skewed sample it can be poorly calibrated, and the single-sample case collapses to one point because variability cannot be estimated. The raw list is what permits a reader to assess these limitations or compute another summary.
+The confidence interval uses $t_{0.975,\,N-1}\,s/\sqrt{N}$ on either side of the mean, a Student-$t$ critical value rather than the normal 1.96 (at $N = 10$, 2.262 against 1.96). It describes uncertainty in the estimated mean; it is not a range containing 95 percent of requests. With a strongly skewed sample it can still be poorly calibrated, and with a single sample there is no interval at all: `ci_lower` and `ci_upper` are `None`. The raw list is what permits a reader to assess these limitations or compute another summary.
 
 ### The harness
 
@@ -252,7 +252,7 @@ The toy receives 111 calls: ten warmups, one discarded timing, and one hundred r
 
 ### The verdict
 
-A benchmark ends in a decision, and @sec-capstone needs two kinds. The first is absolute. A model going into a service is asked to meet a latency bound, and the bound is about the slow requests, so it is a bound on $P_{99}$. The second is relative. Quantization in @sec-quantization, pruning in @sec-compression, and fusion in @sec-acceleration each change the numbers a model produces, some by rounding and some by removing weights outright, and a speedup is worth reporting only if the model still works afterward.
+A benchmark ends in a decision, and @sec-capstone needs two kinds. The first is absolute. A model going into a service is asked to meet a latency bound, and the bound is about the slow requests, so it is a bound on a tail percentile such as $P_{99}$. The module's `MLPerf` check below gates on $P_{90}$ instead, because it times one example per call and MLPerf Inference's single-stream scenario reports 90th-percentile latency, while its server scenario uses the 99th. The book helper `check_compliance` further down keeps $P_{99}$ as the stricter service bound. The second is relative. Quantization in @sec-quantization, pruning in @sec-compression, and fusion in @sec-acceleration each change the numbers a model produces, some by rounding and some by removing weights outright, and a speedup is worth reporting only if the model still works afterward.
 
 The naive verdict compares means and never asks about accuracy. It passes a model that averages 5 ms and stalls to 30 ms on every hundredth request, which is the request the user remembers. And it declares an INT8 model twice as fast without asking whether the rounding cost it accuracy, which would make it a different model rather than a faster one. The fix is two bars that both have to clear, latency and accuracy, and a fixed protocol around them so that two submissions can be compared. The module's classroom `MLPerf` class holds four task configurations inspired by MLPerf Tiny, each with an input shape, an accuracy target, and a latency bound. Passing this local check is not an official MLPerf result. Its timing loop uses a context manager that reads the clock on the way in and the way out.
 
@@ -264,7 +264,7 @@ This loop warms up on the first `max(1, num_runs // 10)` inputs, then times one 
 
 {{< include _listings/19_benchmarking/mlperf_run_standard_benchmark.qmd >}}
 
-The returned dictionary reports the mean and several percentiles, but the latency decision reads $P_{99}$. Accuracy comes from the following helper.
+The returned dictionary reports the mean and several percentiles, but the latency decision reads $P_{90}$, the single-stream statistic; $P_{99}$ is reported beside it and does not decide the verdict. Accuracy comes from the following helper.
 
 {{< include _listings/19_benchmarking/_mlperf_run_accuracy_test.qmd >}}
 
@@ -332,7 +332,7 @@ The protocol keeps runs 4 through 10, sorted: $[4.95, 5.05, 5.08, 5.10, 5.12, 5.
 
 {{< pagebreak >}}
 
-Constructing the container checks that the hand arithmetic agrees with the implementation. In line 3, `raw` lists the ten recorded durations from @tbl-bench-trace. Line 5 builds `naive = BenchmarkResult("naive", raw)`, which naively includes cold-start and setup artifacts, printing a distorted mean of $11.87$ ms in line 8. In line 6, `protocol = BenchmarkResult("protocol", raw[3:])` discards the two warmups and initial profiler timing. Lines 9 to 12 print the true steady-state metrics: median $P_{50} = 5.10$ ms, $P_{95} = 14.44$ ms, $P_{99} = 17.61$ ms, and throughput of 143.1 samples/sec. Lines 13 to 15 assert exact agreement with the manual calculations.
+Constructing the container checks that the hand arithmetic agrees with the implementation. In line 3, `raw` lists the ten recorded durations from @tbl-bench-trace. Line 5 builds `naive = BenchmarkResult("naive", raw)`, which naively includes cold-start and setup artifacts, printing a distorted mean of $11.87$ ms in line 8. In line 6, `protocol = BenchmarkResult("protocol", raw[3:])` discards the two warmups and initial profiler timing. Lines 9 to 12 print the true steady-state metrics: median $P_{50} = 5.10$ ms, $P_{95} = 14.44$ ms, $P_{99} = 17.61$ ms, and throughput of 143.1 samples/sec. Lines 13 to 15 assert agreement with the manual mean, $P_{50}$, and $P_{99}$ to within 0.01 ms.
 
 ```python
 from tinytorch.perf.benchmarking import BenchmarkResult
@@ -474,7 +474,7 @@ The comparison in @tbl-bench-bridge preserves the chapter's central contract: a 
 
 The latency harness creates an input, warms the model, discards one additional timing, and retains one duration per measured forward. `BenchmarkResult` keeps those observations and computes summaries; the mean describes average cost, the median describes typical cost, and a tail percentile describes a high position in the sorted sample. A small sample can demonstrate that arithmetic without establishing a rare-event guarantee.
 
-The MLPerf-style path adds predictions and labels to the timing loop. It validates their shapes and values, counts agreements, and checks both accuracy and $P_{99}$ against local thresholds. Synthetic labels cannot pass that local check, and supplied labels still need independent provenance. @sec-capstone uses these measurement habits to compare combinations of optimizations under its own event policy. Preserve the baseline, control input shape and model state, check quality on the same data, and compare the same named statistic before combining another mechanism.
+The MLPerf-style path adds predictions and labels to the timing loop. It validates their shapes and values, counts agreements, and checks both accuracy and $P_{90}$ against local thresholds. Synthetic labels cannot pass that local check, and supplied labels still need independent provenance. @sec-capstone uses these measurement habits to compare combinations of optimizations under its own event policy. Preserve the baseline, control input shape and model state, check quality on the same data, and compare the same named statistic before combining another mechanism.
 
 ## Further Reading
 
