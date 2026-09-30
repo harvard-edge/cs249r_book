@@ -3790,373 +3790,88 @@ Recommendation systems stress a different part of the machine than CNNs or trans
 
 :::
 
-Across MLPs, CNNs, RNNs, transformers, and DLRM-style sparse models, diverse computational profiles converge on a compact set of shared primitives. Dense matrix projections, normalization layers, skip connections\index{Skip connection!cross-architecture portability}, and gating mechanisms\index{Gating mechanism} recur across all five families. Every transformer block embeds a feedforward MLP, while gating, originally developed for recurrent cells, governs routing in mixture-of-experts models. These building blocks are portable because the numerical and optimization challenges they solve—gradient propagation, activation stability, and dynamic routing—persist regardless of inductive bias. For systems engineers, identifying these shared primitives reveals which hardware accelerators and compiler optimizations transfer across workloads and which must remain specialized.
+With DLRM, the roster of five families is complete, and each has been analyzed on its own terms: the pattern it targets, the computation it performs, the mapping it induces, and the bottleneck it exposes. A deployment rarely gets to examine one family in isolation. The same accelerator that serves a vision model today may serve a language model or a recommender tomorrow, and the architecture decides which of its resources gives out first.
 
-## Shared Building Blocks {#sec-network-architectures-architectural-building-blocks-aa3a}
+## What Each Architecture Asks of the Machine {#sec-network-architectures-architecture-selection-framework-a442}
 
-A transformer block reuses several ideas born elsewhere: dense projections from MLPs, residual paths from deep CNNs, normalization for activation stability, and gating-like routing in later variants. The five architecture families differ in their data assumptions, but many of their engineering problems recur, so the practical question is which building blocks\index{Architecture!building blocks} and optimizations transfer. @Tbl-dl-evolution shows how these primitives accumulated as architectures grew more complex: each era inherited the tools of its predecessors while adding a mechanism for the next bottleneck.
+Send three requests to the same accelerator, one at a time. A single ResNet-50 frame performs about `{python} LighthouseSpecs.resnet_gflop_str` of arithmetic against `{python} LighthouseSpecs.resnet_fp32_mb_str` of FP32 weights, and each convolutional filter is reused at every position of its feature map, so the weights arrive once and the arithmetic units stay busy. A single GPT-2 token at batch size one performs about `{python} LighthouseSpecs.gpt2_gflop_per_token_str` but must stream all `{python} AutoregressiveInferenceCost.fp16_weight_gb_str` of its FP16 weights through the memory system to do it, an arithmetic intensity of roughly `{python} AutoregressiveInferenceCost.intensity_fp16_str`, so the arithmetic units spend most of the step waiting. A single DLRM request performs little arithmetic at all. It gathers a handful of embedding rows from tables totaling `{python} LighthouseSpecs.dlrm_model_size_gb_str`, more than the accelerator's `{python} CapacityWall.a100_mem_gb_str` of memory, so before any question of speed arises the system must decide where those tables live.
 
-```{=latex}
-\begingroup
-%\renewcommand{\arraystretch}{1.25}
+The silicon is identical in all three cases, but the binding constraint is not. The frame is limited by arithmetic throughput, the token by memory bandwidth, and the recommendation by memory capacity, which in turn decides which bandwidth its lookups pay. These are the terms of the iron law (@sec-introduction-iron-law-ml-systems-c32a), and they can be read off the architecture before any kernel is written. Collecting the same reading for every family turns architecture choice into an engineering calculation. A profile of what each family asks of the machine names the binding term, a small set of shared building blocks carries its costs from one family to the next, and a deployment budget then rules candidates in or out.
+
+### Five families on one machine {#sec-network-architectures-machine-demand-profile}
+
+@Tbl-nn-architectures-machine-demands collects that profile. Each row is a family in its common execution regime; the transformer takes two rows because prefill and decode run the same weights under opposite regimes (@sec-network-architectures-inference-memory-bandwidth-wall-98d1). The columns follow a request through the machine: the state the architecture holds, the state it creates per request, the arithmetic it performs per byte it moves, the dimension across which hardware can spread the work, and the iron-law term that therefore binds.
+
+| **Family**               | **Parameters**                                                                   | **Activations**                                                                                            | **Intensity**                                         | **Parallel Axis**                   | **Binding Term**                                        | **Lighthouse**          |
+|:-------------------------|:---------------------------------------------------------------------------------|:-----------------------------------------------------------------------------------------------------------|:------------------------------------------------------|:------------------------------------|:--------------------------------------------------------|:------------------------|
+| **MLP**                  | $\mathcal{O}(d_{\text{in}} d_{\text{out}})$ per layer                            | $\mathcal{O}(B\, d_{\text{out}})$                                                                          | Low at batch one (GEMV); high when batched (GEMM)     | Batch                               | $D_{\text{vol}}/\text{BW}$ at small batch               | None (DLRM's dense MLPs) |
+| **CNN**                  | $\mathcal{O}(K^2 C_{\text{in}} C_{\text{out}})$ per layer, independent of image size | $\mathcal{O}(B\, H_{\text{img}} W_{\text{img}} C)$                                                     | High (filters reused across positions); lower for depthwise | Batch and spatial positions   | $O/(R_{\text{peak}}\,\eta_{\text{hw}})$                 | ResNet-50; MobileNetV2 and KWS |
+| **RNN**                  | $\mathcal{O}(d_{\text{hidden}}^2 + d_{\text{hidden}} d_{\text{in}})$, shared across steps | $\mathcal{O}(B\, d_{\text{hidden}})$ state; $\mathcal{O}(B S d_{\text{hidden}})$ in training     | Low (GEMV per step)                                   | Batch only; time is serial          | $L_{\text{lat}}$, paid $S$ times at low $\eta_{\text{hw}}$ | None                 |
+| **Transformer (prefill)** | $\mathcal{O}(d_{\text{model}}^2 + d_{\text{model}} d_{\text{ff}})$ per block    | $\mathcal{O}(B S d_{\text{model}})$; $\mathcal{O}(B S^2)$ if scores are materialized                       | High (GEMM over all $S$ tokens)                       | Batch and sequence positions        | $O/(R_{\text{peak}}\,\eta_{\text{hw}})$, with an $S^2$ attention term | GPT-2 (prompt)        |
+| **Transformer (decode)** | Same weights, reread for every token                                             | KV cache, $\mathcal{O}(B S d_{\text{model}})$ per layer                                                    | Low (GEMV per token at small batch)                   | Batch only; tokens are serial       | $D_{\text{vol}}/\text{BW}$ (weights and KV cache)       | GPT-2 (generation)      |
+| **DLRM**                 | Embedding tables, one row per category, dominate; dense MLPs are small           | Pooled embedding vectors per feature                                                                       | Very low (gathers with little arithmetic)             | Batch; tables sharded across devices | Capacity first, then $D_{\text{vol}}/\text{BW}$         | DLRM                    |
+
+: **Architecture Workload Profiles**: State, per-request activations, intensity regime, parallel axis, and binding iron-law term for each family in its common execution regime. Symbols follow the family sections: $B$ is batch size, $S$ sequence length, $K$ kernel size, $C$ channels, and $H_{\text{img}} \times W_{\text{img}}$ the feature-map size. Intensity regimes are qualitative; @tbl-workload-signatures gives weight-only proxies for the lighthouses. The $\mathcal{O}(B S^2)$ prefill term assumes materialized attention scores (@sec-network-architectures-memory-requirements-72c3). {#tbl-nn-architectures-machine-demands tbl-colwidths="[12,17,17,16,13,15,10]"}
+
+The parameter and activation columns decide how data reaches the arithmetic units, and the pattern of access matters as much as the volume. Three patterns cover the table. Sequential access\index{Memory access!sequential}, the streaming of contiguous weight rows in an MLP layer or a transformer projection, lets DRAM deliver long bursts and lets hardware prefetchers run ahead, so it approaches the interface's peak bandwidth. Strided access\index{Memory access!strided}, which a native convolution produces as it steps across the rows of a feature map, fetches whole cache lines to use a fraction of each; im2col lowering (@sec-network-architectures-computational-mapping-824c) converts it into sequential access at the price of up to $K^2$-fold duplication. Random access\index{Memory access!random} is the DLRM row. Sparse IDs index arbitrary rows of multi-gigabyte tables, defeating prefetchers and wasting most of each burst, which is why caching the popular rows matters so much there. Attention is not random access despite its content-dependent weights, because its queries, keys, and values sit in contiguous tensors that tiled kernels stream through on-chip SRAM.
+
+Whether an access pays DRAM prices at all depends on the working set\index{Working set size}, the data the execution units need at once. Small layers, such as the $784{\times}100$ reference layer at `{python} MLPLayerStats.weight_kb_str` in FP32, fit in on-chip SRAM. Production-width layers of tens of megabytes do not, which is why unbatched MLP inference and transformer decode stream their weights from off-chip memory on every request. Accelerators answer both ends of the table with memory hierarchy rather than arithmetic. High Bandwidth Memory (**HBM**\index{HBM!definition}) stacks DRAM dies beside the processor to supply the streaming rows at more than an order of magnitude above standard DDR channels, and multi-megabyte on-chip SRAM, often an explicitly managed scratchpad\index{Scratchpad memory!explicit control}, lets compilers stage tiles so that reuse happens on chip. The intensity column measures how much a family can profit from that staging, and it doubles as an energy column.
+
+```{python}
+#| echo: false
+#| label: energy-consumption-analysis
+
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ ENERGY CONSUMPTION ANALYSIS
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: Energy perspective callout in the workload-profile subsection
+# │
+# │ Goal: Contrast the energy cost of compute vs. data movement.
+# │ Show: That DRAM access consumes over 100× more energy than an FP32 multiply.
+# │ How: Compare picojoules per FLOP vs. a 32-bit DRAM read.
+# │
+# └─────────────────────────────────────────────────────────────────────────────
+
+from mlsysim.fmt import fmt_int, fmt, check, fmt_energy, fmt_energy_per_flop, fmt_multiple
+
+class EnergyConsumptionAnalysis:
+    """Contrast energy cost of compute vs. data movement using Horowitz-style anchors."""
+
+    # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
+    ENERGY_FLOP_FP32_PJ = Hardware.Tech.Op.FlopFp32.energy
+    ENERGY_DRAM_ACCESS_PJ = Hardware.Tech.Memory.DRAM.energy_per_access
+    multiply_pj = ENERGY_FLOP_FP32_PJ.to(pJ / flop).magnitude  # pJ per FP32 multiply
+    dram_pj = ENERGY_DRAM_ACCESS_PJ.to(pJ).magnitude  # pJ per 32-bit access
+
+    # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
+    dram_to_flop_ratio = dram_pj / multiply_pj
+
+    # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
+    check(dram_to_flop_ratio > 100, "DRAM access should cost over 100x a reference FP32 FLOP.")
+
+    # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
+    energy_multiply_pj_str = fmt_energy_per_flop(ENERGY_FLOP_FP32_PJ, precision=1, commas=False)
+    energy_dram_pj_str = fmt_energy(ENERGY_DRAM_ACCESS_PJ, unit=pJ, precision=0, commas=False)
+    energy_ratio_mult_str = fmt_multiple(round(dram_to_flop_ratio), precision=0, commas=True)
 ```
 
-| **Building Block**    | **Born In**      | **Problem Solved**               | **Now Used In**                                                                                  |
-|:----------------------|:-----------------|:---------------------------------|:-------------------------------------------------------------------------------------------------|
-| **GEMM**              | MLPs             | Universal function approximation | All architectures (feedforward layers)                                                           |
-| **Parameter Sharing** | CNNs             | Spatial efficiency               | Transformers (shared projections), RNNs (weight reuse across time)                               |
-| **Skip Connections**  | ResNets (CNNs)   | Gradient flow at depth           | Transformers, DenseNets, U-Nets, many modern deep networks                                       |
-| **Normalization**     | CNNs (BatchNorm) | Activation stability             | LayerNorm (Transformers), RMSNorm (root-mean-square normalization), GroupNorm (grouped channels) |
-| **Gating**            | LSTMs (RNNs)     | Selective signal routing         | Transformers (mixture-of-experts routing), GRUs, highway networks                                |
+::: {.column-margin}
+![](images/svg/vol1_nn_architectures_margin_004.svg){width="100%" fig-alt="Two horizontal log-scale energy bars labeled DRAM 640 pJ and FP32 multiply 3.7 pJ, with the DRAM bar much longer."}
 
-: **Cross-Architecture Building Blocks**: Engineering primitives that originated in one architecture family and now recur across many modern designs. Each building block solves a recurring problem (gradient flow, activation stability, signal routing), though not every architecture uses every primitive. {#tbl-dl-evolution tbl-colwidths="[15,18,32,35]"}
-
-```{=latex}
-\endgroup
-```
-
-Those portable building blocks were shaped by the hardware available at the time. LeNet-5\index{LeNet-5} [@lecun1998] trained on CPUs with networks small enough to fit in megabytes of memory. AlexNet\index{AlexNet} trained its 60-million-parameter network on two GTX 580 GPUs, mapping parallel convolutions to graphics hardware [@krizhevsky2012imagenet]. ResNet-152 [@he2016] became trainable because residual connections and batch normalization improved optimization at depth, using available GPU training infrastructure rather than a specific memory-capacity threshold. Transformers [@vaswani2017] became practical on contemporary GPUs and later scaled dramatically as GPU/TPU memory bandwidth and distributed training infrastructure improved. This pattern continues: each building block exploits newly available computational resources while pushing against the limits of existing systems.
-
-### Dense operations: The universal baseline {#sec-network-architectures-evolution-perceptron-multilayer-networks-d06e}
-
-General matrix multiplication is the primary primitive shared across all neural network architectures. While @sec-network-architectures-multilayer-perceptrons-dense-pattern-processing-bc11 examined MLPs as dense pattern processors, the systems engineering legacy of GEMM extends far beyond MLPs. It is the feedforward layer inside every transformer block, the $1{\times}1$ pointwise convolution in MobileNets, the input and recurrent projections inside every RNN cell, and the bottom MLP in every DLRM.
-
-MLPs introduced the GEMM-dominated computation profile that led GPU vendors to develop specialized matrix engines (Tensor Cores). The backpropagation algorithm's[^fn-backpropagation-activation-storage] memory access pattern, with alternating forward and backward passes storing intermediate activations, shaped accelerator memory hierarchies. The batch processing paradigm pioneered for MLP training established the throughput optimization that defines modern ML infrastructure: grouping independent samples into dense matrices converts memory-bandwidth-bound matrix-vector products into compute-bound matrix-matrix multiplications. These foundational patterns recur across all modern deep learning architectures.
-
-[^fn-backpropagation-activation-storage]: **Backpropagation**\index{Backpropagation!memory trade-off}: Rumelhart, Hinton, and Williams showed in 1986 how to efficiently apply the chain rule to train multi-layer networks; standard reverse-mode training retains the forward activations needed by the backward pass, so activation memory commonly grows with network depth. Checkpointing, recomputation, and offloading can reduce stored activations by trading additional computation or data movement. Activation storage, rather than weight storage, can therefore be the binding memory constraint that determines maximum feasible batch size on a given accelerator. \index{Backpropagation!activation storage}
-
-Dense connectivity also established the cost baseline that every subsequent architecture navigates. At $\mathcal{O}(n^2)$ parameters and operations for layers of width $n$, GEMM sets the reference point against which specialized architectures demonstrate efficiency gains. CNNs achieve spatial processing with $\mathcal{O}(k^2)$ parameters per location (where $k$ is kernel size), transformers trade parameter efficiency for dynamic computation with $\mathcal{O}(S^2)$ attention complexity, and sparse architectures like DLRM exploit embedding lookups to handle categorical dimensions that would explode dense layer sizes. Each innovation represents a different strategy for escaping the dense connectivity baseline, but none escapes GEMM itself—it reappears inside every architecture as the workhorse of feature transformation.
-
-### Skip connections: Solving the depth problem {#sec-network-architectures-evolution-dense-spatial-processing-2761}
-
-Parameter sharing made deep networks computationally tractable, but efficiency alone could not solve the numerical challenges of deep training. As networks grew deeper, repeated matrix multiplications and nonlinear activation derivatives caused gradient signals either to attenuate to numerical underflow or amplify to floating-point overflow. Skip connections resolve this optimization barrier by introducing additive identity shortcuts that bypass layer transformations.
-
-Those shortcuts carry a concrete hardware cost that every deep network pays. Evaluating $\mathbf{y} = \mathcal{F}(\mathbf{x}) + \mathbf{x}$ requires the input tensor $\mathbf{x}$ to remain resident in memory throughout the execution of all operations in the branch $\mathcal{F}(\mathbf{x})$. This extended liveness window increases peak activation memory in accelerator HBM during the forward pass and preserves $\mathbf{x}$ for backpropagation unless activation checkpointing is used. The elementwise addition is also memory-bandwidth bound. It performs one addition per two loaded operands and one stored result, about 0.08 FLOP/byte in FP32 (one FLOP per 12 bytes), so un-fused residual merges become memory stalls.
-
-#### The problem of depth {#sec-network-architectures-problem-depth-15bc}
-
-Backpropagation through $N_L$ layers\index{Network depth!training difficulty} applies the chain rule repeatedly; @sec-neural-computation-gradient-computation-backpropagation-dacf gives the formal derivation of backpropagation and the chain rule. For a deep network with layers $f_1, f_2, \ldots, f_{N_L}$, the gradient of the loss $\mathcal{L}$ with respect to the weights in layer 1 is:
-$$
-\frac{\partial \mathcal{L}}{\partial W_1} = \frac{\partial \mathcal{L}}{\partial a_{N_L}} \cdot \frac{\partial a_{N_L}}{\partial z_{N_L}} \cdot \frac{\partial z_{N_L}}{\partial a_{N_L-1}} \cdot \ldots \cdot \frac{\partial z_2}{\partial a_1} \cdot \frac{\partial a_1}{\partial z_1} \cdot \frac{\partial z_1}{\partial W_1}
-$$
-where $z_\ell$ represents the preactivation and $a_\ell = \sigma(z_\ell)$ the postactivation output of layer $\ell$. The gradient becomes a product of $N_L$ terms, each depending on the activation function derivative $\sigma'(z_\ell)$.
-
-Vanishing gradients create a silent training failure in deep architectures. With sigmoid activations, whose derivative peaks at 0.25 (@sec-neural-computation-sigmoid-a98f), the gradient magnitude shrinks by roughly $(0.25)^{N_L}$ through $N_L$ layers, so early layers receive negligible updates and effectively stop training.
-
-Exploding gradients\index{Exploding gradient problem} are the destabilizing counterpart to vanishing gradients. Large singular values in layer Jacobians can amplify gradient directions repeatedly through depth. For example, if each Jacobian expands a shared direction by about 1.5, that component grows exponentially. Such growth produces numerical overflow, NaN (not-a-number) values, extreme parameter updates, and training divergence. Unlike vanishing gradients, which silently stall learning, exploding gradients cause catastrophic numerical failure.
-
-#### Quantitative analysis: Plain deep networks {#sec-network-architectures-quantitative-analysis-plain-deep-networks-f132}
-
-Consider training a deep plain convolutional network on CIFAR-10 without architectural interventions. Even with ReLU activations, which have derivative one for positive inputs, optimization degrades as depth increases. The original ResNet study reported that a 56-layer plain network had higher CIFAR-10 training and test error than a 20-layer plain network throughout training, demonstrating that adding layers impairs optimization despite greater representational capacity [@he2016].
-
-This degradation problem is not overfitting: the 56-layer plain network exhibited higher training error than the 20-layer network, confirming that the failure stems from an optimization barrier rather than poor generalization.
-
-#### Why ReLU helps but is not sufficient {#sec-network-architectures-relu-helps-sufficient-9e69}
-
-ReLU\index{ReLU} activation ($\text{ReLU}(z) = \max(0, z)$) has derivative:
-$$
-\text{ReLU}'(z) = \begin{cases}
-1 & \text{if } z > 0 \\
-0 & \text{if } z \leq 0
-\end{cases}
-$$
-
-Through active paths $(z > 0)$, the derivative equals 1, avoiding gradient decay from the activation function. This improvement over sigmoid enabled stable training of networks with 10–20 layers.
-
-However, ReLU introduces a different failure mode: dead neurons\index{Dead neuron}\index{ReLU!dead neuron}. When $z \leq 0$, the gradient is zero, blocking gradient flow through that unit. A poorly initialized weight or large update can drive preactivations negative across the entire training distribution, permanently deactivating the neuron. Furthermore, ReLU does not regulate the spectral properties of the weight matrices themselves. Singular values differing significantly from unity continue to attenuate or amplify gradients across depth.
-
-#### The residual solution {#sec-network-architectures-residual-solution-69bf}
-
-ResNet blocks introduce residual learning\index{Residual learning} through skip connections that transform gradient flow\index{Gradient!flow in residual networks}. @Eq-residual adds the identity path $\mathbf{x}$ to the residual mapping $\mathcal{F}(\mathbf{x})$:
-$$
-\mathbf{y} = \mathcal{F}(\mathbf{x}) + \mathbf{x}
-$$ {#eq-residual}
-where $\mathcal{F}(\mathbf{x})$ represents the residual function (typically two convolutional layers with batch normalization and ReLU) and $\mathbf{x}$ is the identity skip connection. @Fig-example-skip-connection shows the original ResNet block built around this addition.
-
-::: {#fig-example-skip-connection fig-env="figure" fig-pos="htb" fig-cap="**Residual Connection Block (Original Post-Activation Form)**: The original ResNet block [@he2016] implements $\mathbf{y} = \text{ReLU}(\mathcal{F}(\mathbf{x}) + \mathbf{x})$, where an identity shortcut bypasses the weight layers before a final ReLU activation. In later pre-activation variants [@he2016identity] and modern transformer blocks, the nonlinearity moves inside $\mathcal{F}(\mathbf{x})$, making the addition a completely clean identity shortcut $\mathbf{y} = \mathcal{F}(\mathbf{x}) + \mathbf{x}$ that matches the unobstructed gradient flow in @eq-residual." fig-alt="Two blue weight layer blocks with ReLU between them. An input vector enters left, passes through the weight layers, then adds with an identity shortcut that bypasses both layers. Brown plus circle combines paths. Output shows the residual sum with final ReLU."}
-
-```{.tikz}
-\begin{tikzpicture}[line join=round,font=\small\sffamily]
-\tikzset{%
-  Line/.style={line width=1.0pt,black!50,text=black},
-  Box/.style={align=center,
-    inner xsep=2pt,
-    node distance=2,
-    draw=BlueLine,
-    line width=0.75pt,
-    fill=BlueL,
-    text width=24mm,
-    minimum width=24mm, minimum height=10mm
-  },
-  op/.style={circle, draw=GreenLine, minimum size=9mm,fill=GreenL,line width=0.75pt},
-  >={Latex[length=2mm]},line/.style={-latex, thick},
-do path picture/.style={%
-    path picture={%
-      \pgfpointdiff{\pgfpointanchor{path picture bounding box}{south west}}%
-        {\pgfpointanchor{path picture bounding box}{north east}}%
-      \pgfgetlastxy\x\y%
-      \tikzset{x=\x/2,y=\y/2}%
-      #1
-    }
-  },
-plus/.style={do path picture={
-    \draw [black,line cap=round, line width=1pt] (-3/5,0) -- (3/5,0) (0,-3/5) -- (0,3/5);
-  }}
-}
-%
-\node[Box] (in) {Weight Layer};
-\node[Box, right=5 of in] (hidden) {Weight Layer};
-\node[op] (relu1) at ($(in)!0.5!(hidden)$) {ReLU};
-\node[circle,draw,minimum size=7mm,node distance=1.65,right=of hidden,plus,
-draw=BrownLine,fill=BrownL,line width=0.75pt] (add) {};
-\node[op, below=0.7 of add] (relu2) {ReLU};
-%
-\draw[Line,-latex] (in) -- (relu1);
-\draw[Line,-latex] (relu1) -- (hidden);
-\draw[Line,-latex] (hidden) -- (add);
-\draw[Line,-latex] (add) -- (relu2);
-\draw[Line,-latex] (relu2) -- ++(1.7,0);
-%  Feedback (identity)
-\draw[Line,latex-] (in.west) --coordinate(SR) ++(-1.5,0) node[left] {$\mathbf{x}$};
-\draw[Line,-latex] (SR) --++(0,0.9)  -| node[pos=0.25,above]{$\mathbf{x}$ identity}(add);
-%
-\node[below=2pt of relu2] {$\mathcal{F}(\mathbf{x}) + \mathbf{x}$};
-\node[below=2pt of relu1] {$\mathcal{F}(\mathbf{x})$};
-\end{tikzpicture}
-```
-
+*Moving a 32-bit value from DRAM costs far more energy than one FP32 multiply.*
 :::
-
-During backpropagation, the gradient flows through this addition:
-$$
-\frac{\partial \mathcal{L}}{\partial \mathbf{x}} =
-\frac{\partial \mathcal{L}}{\partial \mathbf{y}} \cdot
-\frac{\partial \mathbf{y}}{\partial \mathbf{x}} =
-\frac{\partial \mathcal{L}}{\partial \mathbf{y}} \cdot
-\frac{\partial (\mathcal{F}(\mathbf{x}) + \mathbf{x})}{\partial \mathbf{x}}
-$$
-
-Applying the chain rule:
-$$
-\frac{\partial \mathcal{L}}{\partial \mathbf{x}} =
-\frac{\partial \mathcal{L}}{\partial \mathbf{y}} \cdot
-\left(\frac{\partial \mathcal{F}(\mathbf{x})}{\partial \mathbf{x}} + \mathbf{I}\right)
-= \frac{\partial \mathcal{L}}{\partial \mathbf{y}} \cdot
-\mathcal{F}'(\mathbf{x}) +
-\frac{\partial \mathcal{L}}{\partial \mathbf{y}}
-$$
-
-The gradient decomposes into two additive terms. Even if the residual transformation $\frac{\partial \mathcal{L}}{\partial \mathbf{y}}\mathcal{F}'(\mathbf{x})$ attenuates, the identity term passes $\frac{\partial \mathcal{L}}{\partial \mathbf{y}}$ directly to the earlier layer. While the residual branch can partially interfere with the identity signal, keeping $\|\mathcal{F}'(\mathbf{x})\|$ small ensures the block Jacobian remains close to identity and bounds its condition number. The additive path provides a direct gradient shortcut through the network, though it does not guarantee exact unit gain across arbitrary depth.
-
-#### Gradient flow through multiple blocks {#sec-network-architectures-gradient-flow-multiple-blocks-c58c}
-
-Through $N_L$ residual blocks, the gradient becomes:
-$$
-\frac{\partial \mathcal{L}}{\partial \mathbf{x}_0} =
-\frac{\partial \mathcal{L}}{\partial \mathbf{x}_{N_L}} \cdot
-\prod_{\ell=1}^{N_L}
-\left(\mathcal{F}'_\ell(\mathbf{x}_\ell) + \mathbf{I}\right)
-$$
-
-Each factor $(\mathcal{F}'_\ell + \mathbf{I})$ contains the identity term, keeping the factor near identity when the residual-branch Jacobian is small. A plain network instead multiplies arbitrary layer Jacobians, and if their average gain is even slightly below one the product vanishes exponentially ($0.9^{50} \approx 0.005$). ResNets multiply near-identity factors. The deviations can still compound, but this structure improves conditioning and helps make networks with 100+ layers trainable.
-
-#### Empirical validation at 56 layers {#sec-network-architectures-empirical-validation-50layer-comparison-77e9}
-
-Empirical results confirm this theoretical conditioning. In the original CIFAR-10 experiments, a 56-layer residual network reached about 7.0 percent test error against 8.8 percent for its 20-layer residual counterpart, reversing the degradation seen in plain networks [@he2016]. Identity shortcuts provide an unobstructed pathway for gradient backpropagation and representation refinement, allowing deeper models to realize their capacity advantage. There is no single depth where skip connections suddenly become mandatory; trainability also depends on initialization, normalization, optimizer dynamics, and block architecture [@he2016identity].
-
-Residual connections stabilize the backward gradient path, but they do not constrain the forward scale of intermediate activations. Unbounded variance across depth can still destabilize layer inputs, necessitating a complementary primitive: normalization.
-
-### Normalization: Stabilizing activations at depth {#sec-network-architectures-normalization-layers-mathematical-foundations-0fb7}
-
-Normalization functions as the forward-pass partner to skip connections: where residual paths preserve backward gradient flow, normalization stabilizes the distribution of intermediate activations. First established as batch normalization in CNNs[^fn-batch-normalization-ioffe] [@ioffe2015batch], the primitive evolved into layer normalization for sequence models and subsequently simplified into RMSNorm[^fn-rmsnorm-layer-efficiency] for large language models.
-
-[^fn-rmsnorm-layer-efficiency]: **RMSNorm (root mean square normalization)**\index{RMSNorm}\index{Normalization!RMSNorm}: Introduced by @zhang2019root at NeurIPS, RMSNorm simplifies LayerNorm by normalizing with the root mean square alone, dropping the mean-centering step. Across the paper's tested models and implementations, RMSNorm reduced overall running time by 7--64 percent relative to LayerNorm. LLaMA-family and Mixtral-style transformer reports use RMSNorm [@touvron2023llama; @touvron2023llama2; @jiang2024mixtral], illustrating why a simpler normalization kernel matters at large language model scale. \index{RMSNorm!efficiency}\index{RMSNorm!LLM adoption}
-
-[^fn-batch-normalization-ioffe]: **Batch normalization (BatchNorm)**\index{Batch normalization!training speedup}\index{Batch normalization!training-serving skew}: The original normalization layer [@ioffe2015batch], which re-scales activations using per-mini-batch statistics. In one ImageNet experiment, it reached the target accuracy with 14$\times$ fewer training steps. Its batch-size dependency and training-serving skew (switching from batch statistics to running averages at inference) are systems limitations that motivated alternatives: LayerNorm removed batch dependency for transformers, and RMSNorm removed mean centering.
-
-#### Batch normalization: Definition and formulation {#sec-network-architectures-batch-normalization-definition-formulation-8579}
-
-Batch normalization\index{Batch normalization}\index{Normalization!batch} standardizes activations using statistics computed across the mini-batch for each feature or channel during training. For fully connected activations, the reduction axis is the batch dimension. For convolutional activations, implementations compute per-channel statistics over both the batch and spatial positions ($B \times H \times W$). For a mini-batch $\mathcal{B} = \{x_1, \ldots, x_B\}$ of activations at a particular layer, the transformation proceeds in two stages.
-
-First, compute the batch statistics:
-$$
-\mu_{\mathcal{B}} = \frac{1}{B}\sum_{i=1}^{B} x_i \qquad \sigma_{\mathcal{B}}^2 = \frac{1}{B}\sum_{i=1}^{B} (x_i - \mu_{\mathcal{B}})^2
-$$
-
-Then, over the batch, normalize and apply learnable scale and shift. The normalization step in @eq-batchnorm-normalize centers and scales activations, while @eq-batchnorm-transform applies learnable parameters that allow the network to recover the identity transformation if optimal:
-$$
-\hat{x}_i = \frac{x_i - \mu_{\mathcal{B}}}{\sqrt{\sigma_{\mathcal{B}}^2 + \epsilon}}
-$$ {#eq-batchnorm-normalize}
-$$
-y_i = \gamma \hat{x}_i + \beta
-$$ {#eq-batchnorm-transform}
-
-The parameters $\gamma$ (scale) and $\beta$ (shift) are learned during training, while $\epsilon$ (typically $10^{-5}$) prevents division by zero. The affine transform restores learned scale and shift flexibility, but fixed $\gamma$ and $\beta$ cannot exactly invert varying statistics for every batch. Normalization permits larger learning rates by preventing intermediate activations from exploding into saturating non-linear regimes, accelerating convergence relative to unnormalized networks.
-
-Normalization also reshapes the gradient path. For the current batch, the Jacobian of the normalized output with respect to the input is
-$$
-\frac{\partial \hat{x}_i}{\partial x_j} = \frac{1}{\sqrt{\sigma_{\mathcal{B}}^2 + \epsilon}} \left( \delta_{ij} - \frac{1}{B} - \frac{(x_i - \mu_{\mathcal{B}})(x_j - \mu_{\mathcal{B}})}{B(\sigma_{\mathcal{B}}^2 + \epsilon)} \right)
-$$
-where $\delta_{ij}$ is the Kronecker delta. This Jacobian couples the examples within a batch and scales gradients by $1/\sqrt{\sigma_{\mathcal{B}}^2+\epsilon}$ (the affine scale $\gamma$ multiplies it), and it has zero directions associated with batchwise shift invariance. Batch normalization therefore improves optimization empirically by standardizing intermediate scales; it does not by itself guarantee well-conditioned gradients across the whole network, and its quantitative effect depends on architecture, batch statistics, and optimizer.
-
-#### Layer normalization: Architecture independence {#sec-network-architectures-layer-normalization-architecture-independence-24ba}
-
-While batch normalization enabled training of much deeper CNNs, it introduces severe distributed systems and sequence modeling constraints. In distributed training, computing true mini-batch statistics requires an all-reduce operation across accelerator nodes over PCIe or NVLink, adding communication latency to every normalized layer. If instead computed locally on small per-accelerator batches, noisy empirical statistics destabilize optimization. Furthermore, batch normalization cannot handle variable-length sequences or autoregressive token-by-token generation without complex padding masks and training-serving skew. Layer normalization\index{Layer normalization}\index{Normalization!layer} resolves these limitations by normalizing across the feature dimension rather than across the batch [@ba2016layer].
-
-For an input vector $\mathbf{x} \in \mathbb{R}^{d_{\text{model}}}$ with $d_{\text{model}}$ features:
-$$
-\mu_{\text{LN}} = \frac{1}{d_{\text{model}}}\sum_{i=1}^{d_{\text{model}}} x_i \qquad \sigma_{\text{LN}}^2 = \frac{1}{d_{\text{model}}}\sum_{i=1}^{d_{\text{model}}} (x_i - \mu_{\text{LN}})^2
-$$
-
-@Eq-layernorm defines the complete layer normalization operation, where $\odot$ denotes element-wise multiplication:
-$$
-\text{LayerNorm}(\mathbf{x}) = \frac{\mathbf{x} - \mu_{\text{LN}}}{\sqrt{\sigma_{\text{LN}}^2 + \epsilon}} \odot \boldsymbol{\gamma} + \boldsymbol{\beta}
-$$ {#eq-layernorm}
-
-Layer normalization normalizes each token or sample independently. The computation executes locally within an accelerator's on-chip SRAM and registers without cross-sample or cross-device communication. This independence makes layer normalization the standard choice for transformers, where sequences vary in length and autoregressive generation evaluates single tokens at inference time.
-
-#### Comparative analysis: When to use each variant {#sec-network-architectures-comparative-analysis-use-variant-2130}
-
-The choice among normalization variants reflects distinct machine and operational trade-offs. @Tbl-normalization-comparison summarizes the core properties. BatchNorm maintains learned scale/shift parameters alongside nonlearned running mean and variance buffers; LayerNorm computes statistics dynamically per sample at runtime, eliminating stateful running buffers.
-
-| **Characteristic**        | **BatchNorm**                          | **LayerNorm**            | **RMSNorm**                   |
-|:--------------------------|:---------------------------------------|:-------------------------|:------------------------------|
-| **Normalization Axis**    | Batch and, for CNNs, spatial positions | Feature dimension        | Feature dimension             |
-| **Batch Size Dependency** | High (noisy for small batches)         | None                     | None                          |
-| **Typical Use Case**      | CNNs, vision models                    | Transformers, RNNs       | LLaMA, efficient transformers |
-| **Computation Cost**      | Higher (mean + variance)               | Higher (mean + variance) | Lower (RMS only)              |
-| **Training/Inference**    | Different (running stats)              | Identical                | Identical                     |
-
-: **Normalization Variant Comparison**: Different normalization techniques trade off between computational efficiency, batch size sensitivity, and architectural compatibility. RMSNorm [@zhang2019root], used in LLaMA-family and other efficient transformer architectures [@touvron2023llama; @touvron2023llama2], omits mean centering: $\text{RMSNorm}(\mathbf{x}) = \mathbf{x} / \sqrt{\frac{1}{d_{\text{model}}}\sum_i x_i^2 + \epsilon} \cdot \boldsymbol{\gamma}$. {#tbl-normalization-comparison tbl-colwidths="[23,34,24,19]"}
-
-The computational profile of normalization is defined by its arithmetic intensity. Because normalization applies elementwise operations to large activation tensors, execution is memory-bandwidth bound rather than compute bound. A straightforward LayerNorm kernel makes two reductions across the hidden dimension $d_{\text{model}}$, one for the mean $\mu_{\text{LN}}$ and one for the variance $\sigma_{\text{LN}}^2$, although Welford's algorithm can compute both in a single pass. RMSNorm drops the mean-centering reduction, leaving a single sum of squares, which simplifies the kernel and eases fusion with neighboring operations; its authors report 7--64 percent lower running time across the models they tested.
-
-Operationally, BatchNorm requires explicit mode switching between training (which computes mini-batch statistics) and inference (which applies running statistics accumulated during training). Mismatches between running statistics and deployment data distributions represent a frequent source of training-serving skew. LayerNorm and RMSNorm apply identical computations during training and inference, eliminating running buffers and ensuring consistency across deployment environments.
-
-### Gating: Controlling information flow {#sec-network-architectures-evolution-sequence-processing-d809}
-
-Skip connections and normalization resolve depth-related stability—gradient flow and activation variance, respectively. Gating addresses a different challenge: selectively routing information through a network based on input context.
-
-Gating originated in recurrent networks, where simple recurrent loops suffered from severe gradient degradation across long temporal sequences. LSTMs[^fn-lstm-gating-mechanism] [@hochreiter1997] and GRUs[^fn-gru-gated-recurrence] [@cho2014] addressed this by introducing **gates**\index{Gating mechanism!sequence models}: parameter-weighted transformations that act as differentiable valves to protect, update, or discard stored state.
-
-[^fn-lstm-gating-mechanism]: **LSTM (long short-term memory)**\index{LSTM!gating mechanism}: Invented by Hochreiter\index{Hochreiter, Sepp} and Schmidhuber\index{Schmidhuber, Jürgen} in 1997, LSTMs introduced a "Constant Error Carousel," a gated cell state that protects error signals from exponential decay during backpropagation through time. The systems cost of this solution: a standard LSTM computes input, forget, and output gates plus a candidate cell update, giving roughly four affine transformations per time step vs. one in a vanilla RNN. This compute overhead explains why transformers, which solve long-range dependencies through parallelizable attention, replaced LSTMs in many large-scale language workloads. \index{LSTM!compute overhead}
-
-[^fn-gru-gated-recurrence]: **GRU (gated recurrent unit)**\index{GRU!efficiency}: @cho2014 describes a gated hidden unit for encoder-decoder translation that uses reset and update gates to control how the hidden state is updated. Relative to an LSTM's input, forget, and output gates plus candidate cell update, this gives a simpler gated recurrence. The broader systems lesson: architectural simplification can reduce state and matrix operations when it preserves task performance, a principle that recurs in efficiency-oriented designs from MobileNet to distilled transformers. \index{GRU!parameter efficiency}
-
-Gating generalizes beyond recurrence as a foundational mechanism for data-dependent conditional routing. In feedforward structures, Highway Networks used gating to dynamically interpolate between transformation and identity bypass, directly inspiring residual shortcuts. In sequence processing, attention scales gating across the entire temporal context: encoder-decoder\index{Encoder-decoder!definition} attention\index{Architecture!encoder-decoder} [@bahdanau2015neural] computes a dynamic routing distribution over input representations. In transformers, softmax attention weights act as data-dependent routing coefficients, determining how features aggregate across tokens, while mixture-of-experts architectures extend gating to dynamically dispatch tokens to specialized feedforward sub-networks.
-
-### Synthesis: How transformers recombine everything {#sec-network-architectures-modern-architectures-synthesis-unification-c816}
-
-Modern transformer architectures synthesize all four shared primitives into a unified block. In the encoder block of @fig-transformer, residual paths wrap each sub-layer to preserve gradient flow through deep stacks. Dense GEMM projections execute the feature transformations within multi-head attention and feedforward sub-networks. LayerNorm (or RMSNorm) stabilizes activations prior to each projection. Finally, attention softmax weights dynamically gate information routing across token positions.
-
-The transition from RNNs to transformers replaced sequential recurrent step dependencies with parallel all-to-all attention, reducing the sequential operational depth from $\mathcal{O}(S)$ steps to $\mathcal{O}(1)$ steps for tokens to interact. This architectural shift maximizes hardware occupancy on massively parallel accelerators like GPUs and TPUs, where thousands of arithmetic units sit idle if constrained by sequential dependencies. The other building blocks carried over directly: GEMM, skip connections, and normalization remain essential across all families.
-
-This portability extends to modern variants. Vision Transformers[^fn-vision-transformer-patching] adapt the transformer to images while maintaining all four building blocks [@dosovitskiy2021image]. GPT-3 scales these transformer patterns with alternating dense and locally banded sparse attention while relying on the identical primitive set [@brown2020language]. Practical implementation challenges and optimizations are explored in @sec-model-compression.
-
-[^fn-vision-transformer-patching]: **Vision transformers (ViTs)**\index{Vision transformer}: Google's 2020 ViT paper split $224{\times}224$ images into $16{\times}16$ patches (196 "tokens") and applied standard transformer attention. ViTs replace CNN's local convolutions with $\mathcal{O}(S^2)$ global attention over patch tokens. In the original study, large-scale pretraining improved ViT's competitiveness, illustrating how data and compute can compensate for weaker spatial inductive bias [@dosovitskiy2021image]. \index{Vision transformer!compute trade-off}
-
-@Tbl-primitive-comparison contrasts how the four architectural families utilize these core primitives. Transformers retain the dense GEMM operations common to all architectures but introduce content-dependent all-to-all reductions through attention, blending the broadcast operations of MLPs with the gather and reduce operations of more dynamic architectures.
-
-| **Primitive Type** | **MLP**    | **CNN**        | **RNN**            | **Transformer**   |
-|:-------------------|:-----------|:---------------|:-------------------|:------------------|
-| **Computation**    | Dense GEMM | Convolution    | Sequential GEMM    | GEMM + Attention  |
-| **Memory Access**  | Sequential | Strided        | Sequential + State | Tiled QKV streams |
-| **Data Movement**  | Broadcast  | Sliding window | Temporal broadcast | Gather + Reduce   |
-| **Parallelism**    | High       | High           | Low (time deps)    | High (positions)  |
-
-: **Primitive Utilization Across Architectures**: Every architecture uses GEMM, but they differ in memory access patterns, data movement (broadcast to gather+reduce), and parallelism. Transformers combine dense tiled QKV access with attention-specific reductions, which is why they stress both the GEMM units and the reduction path at once. {#tbl-primitive-comparison}
-
-For systems engineers, this building-block perspective separates portable optimizations from architecture-specific ones. GEMM tiling and mixed-precision compute benefit every architecture. Skip connection memory management applies to any residual network. Normalization kernel fusion helps CNNs and transformers alike. Attention-specific optimizations remain tied to attention's memory pattern, but even those build on the same underlying GEMM and memory-access primitives. To understand why these optimizations transfer, @sec-network-architectures-systemlevel-building-blocks-41c5 lowers the shared layers to the primitives the machine executes.
-
-## Computational Primitives {#sec-network-architectures-systemlevel-building-blocks-41c5}
-
-Frameworks and compilers do not execute high-level layer abstractions directly; they lower neural networks to a compact set of *computational primitives*. A ResNet-50 forward pass executes billions of multiply-accumulate operations; a transformer attention block streams gigabytes through on-chip memory hierarchies; a recommendation model scatters random lookups across terabyte-scale embedding tables. Despite these architectural divergences, the physical workload on hardware resolves into three primitive domains: dense arithmetic, memory access trajectories, and inter-core or inter-device data movement. Isolating these primitives exposes the physical bottlenecks—arithmetic intensity, memory bandwidth, and interconnect latency—that dictate accelerator design and compiler optimizations detailed in @sec-hardware-acceleration.
-
-### Core computational primitives {#sec-network-architectures-core-computational-primitives-b853}
-
-The core primitive determines which execution pattern an architecture forces the hardware to optimize: dense tensor math, repeated local reuse, or input-dependent routing. Matrix multiplication, sliding window operations, and dynamic computation recur across model families because each preserves a distinct execution profile when lowered to silicon. They are primitive in the engineering sense: decomposing them further erases the performance characteristics that hardware units and compilers must optimize.
-
-Matrix multiplication is the dense tensor-math path. Multiplying an activation matrix by a weight matrix computes linear combinations across feature dimensions (recall the reference MLP layer from @sec-network-architectures-algorithmic-structure-99f2). This path dominates modern workloads: MLPs execute it directly for fully connected projections, CNNs lower convolutions into matrix multiplications, and transformers rely on it for query-key-value projections and feed-forward networks. CNNs reach this path through the im2col lowering of @sec-network-architectures-computational-mapping-824c (@fig-im2col-diagram), which trades up to $K^2$-fold duplication of input pixels for the throughput of vendor-tuned GEMM libraries.
-
-Sliding window operations represent the local-reuse path. Rather than materializing duplicate buffers in memory, native sliding-window execution sweeps a compact filter kernel across input tensors, evaluating local stencils. Accelerators exploit this structure through specialized dataflow buffering. For example, TPUs route computations through 2D systolic arrays\index{Systolic array!CNN data reuse},[^fn-systolic-array-architecture] where activations and weights stream synchronously through a grid of multiply-accumulate processing elements. Passing data directly between adjacent registers prevents round-trips to off-chip memory for every arithmetic operation.
-
-[^fn-systolic-array-architecture]: **Systolic array**\index{Systolic array!etymology}\index{Systolic array!TPU}: Named for the heart's rhythmic contraction, the array's lockstep "pulse" of data through a grid of processors directly implements the efficient data reuse required by sliding window operations. By passing input values between neighboring processors, an expensive round-trip to off-chip DRAM is avoided for every single multiplication in the convolution. This is critical for efficiency, as a single off-chip memory access can cost over 100$\times$ more energy than a floating-point multiply-accumulate, and still more relative to low-precision arithmetic.
-
-Dynamic computation represents the adaptive-routing path. In dense transformer attention, query-key interaction weights vary per input token, but the underlying tensor shapes and matrix operations remain static and regular. In contrast, sparse attention, mixture-of-experts (MoE) gating, and dynamic graph execution introduce data-dependent control flow and runtime tensor dimensions. This dynamic execution challenges conventional static memory allocation and parallel work dispatch. Structured and unstructured sparsity are treated in @sec-model-compression-pruning-d1cb; hardware-aware sparse execution and algorithm-hardware co-design are treated in @sec-hardware-acceleration.
-
-Production architectures combine these execution paths. A transformer block uses dense GEMMs of shape $[S, d_{\text{model}}] \times [d_{\text{model}}, d_{\text{proj}}]$ for feature projections, an $S \times S$ attention score calculation, and optional dynamic routing across expert sub-networks. However, peak arithmetic throughput on paper does not guarantee realized performance: hardware execution units remain starved if the memory subsystem cannot feed them operands at matching rates.
-
-### Memory access primitives {#sec-network-architectures-memory-access-primitives-5e8b}
-
-Memory access speed and predictability determine accelerator utilization. Even a matrix-multiplication engine capable of hundreds of teraFLOPs stalls if data cannot traverse the memory hierarchy fast enough. While an on-chip arithmetic operation completes in single-digit clock cycles, fetching an operand from off-chip DRAM requires hundreds of cycles.
-
-Memory access patterns fall into three categories—sequential access\index{Memory access!sequential}, strided access\index{Memory access!strided}, and random access\index{Memory access!random}—governing how effectively hardware can prefetch, cache, and coalesce memory requests. Because transferring data across packaging boundaries consumes far more power than ALU operations, memory access patterns dictate energy budgets alongside execution latency.
 
 ::: {#psp-nn-architectures-energy-cost-data-movement .callout-perspective title="The energy cost of data movement"}
 
-A core systems principle: *moving data costs more than computing on it*. A floating-point multiply-accumulate operation consumes approximately 1–5 pJ depending on process node (for example, ~4.6 pJ at 45 nm [@horowitz2014]), while fetching a 32-bit operand from off-chip DRAM costs hundreds of pJ in the same reference model. Even conservative estimates put off-chip DRAM access tens to hundreds of times above arithmetic, explaining why memory access patterns, not just FLOP counts, determine real-world efficiency.
+A core systems principle: *moving data costs more than computing on it*. In the reference model of @horowitz2014, an FP32 multiply costs about `{python} EnergyConsumptionAnalysis.energy_multiply_pj_str`, while fetching one 32-bit operand from off-chip DRAM costs `{python} EnergyConsumptionAnalysis.energy_dram_pj_str`, a gap of `{python} EnergyConsumptionAnalysis.energy_ratio_mult_str`. Low-intensity rows are therefore energy-dominated by DRAM traffic. An unbatched MLP or a decode step loads each weight once per request and spends most of its energy moving it. A CNN amortizes each filter load over $H_{\text{img}} \times W_{\text{img}}$ applications, so the locality that makes it compute bound also makes it energy efficient, unless a fully materialized im2col buffer inflates temporary traffic by up to $K^2$. An RNN keeps its compact state in SRAM but idles execution units across serial steps, which raises energy per token. Tiled attention keeps score blocks on chip, so its energy tracks matrix multiplication rather than DRAM round-trips.
 
-Revisit the preceding architectures through this energy lens: MLPs have low data reuse (each weight loaded once per sample) and are therefore energy-dominated by DRAM traffic. CNNs reuse filter weights across spatial positions, amortizing load cost over $H \times W$ applications; the very locality that makes them compute-bound also makes them energy-efficient. RNNs reuse weights across time steps (high temporal reuse) but pay repeated hidden-state read/write costs at each step. Transformers combine pairwise score computation with key-value movement, making dense full-sequence attention compute-quadratic; implementation and tiling determine auxiliary memory traffic and energy. These energy profiles directly track the bottleneck column in @tbl-lighthouse-comparison.
-
-This principle underlies later optimization strategies: @sec-model-compression-quantization-precision-cd46 shows how quantization reduces bits moved per value, pruning eliminates unnecessary data movement, and tiling keeps working sets in faster, lower-energy caches.
+Later optimizations exploit this principle directly. @Sec-model-compression-quantization-precision-cd46 shows how quantization reduces the bits moved per value, pruning removes unnecessary movement, and tiling keeps working sets in faster, lower-energy memory.
 
 :::
 
-Sequential access provides the highest effective bandwidth. During batched MLP matrix multiplication, hardware streams contiguous weight rows and activation vectors. Modern DRAM architectures exploit burst-mode transfers for contiguous addresses, saturating available interface bandwidth (reaching multiple terabytes per second on HBM subsystems), while hardware prefetchers anticipate subsequent cache lines. Compilers optimize for this pattern by allocating contiguous memory blocks and aligning tensor strides with hardware cache lines.
+The parallel-axis column determines how data must move among processing elements once the work is spread out. Four collective patterns, contrasted in @fig-collective-comm, cover every row. Batch parallelism in MLPs, CNNs, and prefill broadcasts\index{Data movement!broadcast} stationary weight tiles to many units, each working on a different example or position, and compilers tile loops\index{Matrix tiling} to reuse each broadcast value as often as possible. Spatial and model partitioning scatter\index{Data movement!scatter} a tensor across tiles or devices; mixture-of-experts models make the scatter input-dependent, so a popular expert can overload one accelerator while others idle. DLRM gathers\index{Data movement!gather} embedding rows from wherever the sharded tables live, and each attention query gathers keys and values from every position in its sequence. Reductions\index{Data movement!reduction} combine values through sums or maxima (softmax denominators, normalization statistics, gradient synchronization across data-parallel workers), and tree-structured reduction hardware finishes them in $\mathcal{O}(\log n)$ stages rather than $\mathcal{O}(n)$. The rows with a serial axis, RNNs and decode, are the rows these collectives cannot rescue, because no amount of broadcast or reduction bandwidth shortens a dependency chain.
 
-Strided access occurs when memory requests skip across non-contiguous addresses at uniform intervals. In standard convolutional layers without im2col transformation, convolving across spatial dimensions requires accessing inputs separated by the row stride of the feature map. Strided access reduces memory throughput by fetching entire cache lines while utilizing only a fraction of each line's bytes. Compilers mitigate this penalty by reordering loops or packing strided slices into contiguous temporary buffers in shared memory.
-
-Random access presents the most severe memory bottleneck. In recommendation model embedding tables, sparse feature IDs index arbitrary rows across gigabyte- or terabyte-scale tables. These unpredictable lookups defeat hardware prefetchers, fragment DRAM burst transactions, and generate high cache miss ratios. Dense transformer attention presents a contrasting profile: while attention weights are content-dependent, the underlying query, key, and value vectors reside in contiguous tensors. Optimized attention kernels tile these dense matrices through on-chip SRAM, avoiding random DRAM addresses altogether.
-
-@Tbl-arch-complexity quantifies how these memory access patterns govern parameter and activation storage scaling across model families.
-
-| **Architecture** | **Input Dependency**       | **Parameter Storage**                                                        | **Activation Storage**                                                                      | **Scaling Behavior** |
-|:-----------------|:---------------------------|:-----------------------------------------------------------------------------|:--------------------------------------------------------------------------------------------|:---------------------|
-| **MLP**          | Linear                     | $\mathcal{O}(N_{\text{in}} \times d_{\text{width}})$                         | $\mathcal{O}(B \times d_{\text{width}})$                                                    | Predictable          |
-| **CNN**          | Constant w.r.t. resolution | $\mathcal{O}(K^2 C_{\text{in}} C_{\text{out}})$                              | $\mathcal{O}(B \times H_{\text{img}} \times W_{\text{img}} \times C)$                       | Efficient            |
-| **RNN**          | Linear                     | $\mathcal{O}(d_{\text{hidden}}^2)$                                           | $\mathcal{O}(B \times S \times d_{\text{hidden}})$                                          | Challenging          |
-| **Transformer**  | Quadratic attention        | $\mathcal{O}(d_{\text{model}}^2 + d_{\text{model}} d_{\text{ff}})$ per block | $\mathcal{O}(B \times S^2)$ attention, plus $\mathcal{O}(B S d_{\text{model}})$ activations | Problematic          |
-
-: **Memory Access Complexity**: Different neural network architectures exhibit varying memory access patterns and storage requirements, impacting system performance and scalability. Parameter storage depends on model dimensions, while activation storage represents a significant runtime cost. The transformer's $\mathcal{O}(B S^2)$ term assumes materialized attention scores (@sec-network-architectures-memory-requirements-72c3). {#tbl-arch-complexity tbl-colwidths="[12,24,21,25,18]"}
-
-Where:
-
-- $N_{\text{in}}$: Input size
-- $d_{\text{width}}$: Layer width
-- $B$: Batch size
-- $K$: Kernel size
-- $C$: Number of channels
-- $C_{\text{in}}, C_{\text{out}}$: Input and output channels
-- $H_{\text{img}}$: Height of input feature map (CNN)
-- $W_{\text{img}}$: Width of input feature map (CNN)
-- $d_{\text{hidden}}$: RNN hidden-state dimension
-- $S$: Sequence length
-- $d_{\text{model}}$: Transformer model dimensionality
-
-These memory scaling properties dictate data reuse opportunities and cache behavior. In CNNs, spatial reuse allows each input pixel to participate in multiple overlapping filter evaluations ($K^2$ times for a $K \times K$ kernel), enabling L1, L2, and shared memory to amortize DRAM load costs through loop tiling. Conversely, an unbatched MLP reloads its entire weight matrix for a single input vector, achieving minimal data reuse and leaving the processor bandwidth-starved.
-
-Working set size\index{Working set size}—the volume of data required concurrently by execution units—determines whether an operation fits within fast on-chip memory. Small MLP layers, such as the $784{\times}100$ reference layer at `{python} MLPLayerStats.weight_kb_str` in FP32, fit in on-chip SRAM; production-width layers of tens of megabytes do not, which is why unbatched MLP inference streams its weights from DRAM. Materialized attention maps scale as $\mathcal{O}(B \cdot S^2)$ and exceed on-chip SRAM for long sequences unless the computation is tiled.
-
-While @tbl-arch-complexity defines memory scaling, @tbl-computational-complexity contrasts the resulting arithmetic demands, parallelization structures, and primary hardware bottlenecks across the four reference architectures.
-
-| **Architecture** | **Parameters**                                                                                                            | **Forward Pass**                                                                                          | **Memory**                                                                                                              | **Parallelization**                     | **Bottleneck**                                                         |
-|:-----------------|:--------------------------------------------------------------------------------------------------------------------------|:----------------------------------------------------------------------------------------------------------|:------------------------------------------------------------------------------------------------------------------------|:----------------------------------------|:-----------------------------------------------------------------------|
-| **MLPs**         | $\mathcal{O}(d_{\text{in}} \times d_{\text{out}})$ per layer                                                              | $\mathcal{O}(d_{\text{in}} \times d_{\text{out}})$ per layer                                              | $\mathcal{O}(d_{\text{in}}d_{\text{out}})$ weights $\mathcal{O}(B d_{\text{out}})$ activations                          | Excellent Matrix ops parallel           | Memory bandwidth                                                       |
-| **CNNs**         | $\mathcal{O}(k^2 \times c_{\text{in}} \times c_{\text{out}})$ per layer                                                   | $\mathcal{O}(H_{\text{img}} \times W_{\text{img}} \times k^2 \times c_{\text{in}} \times c_{\text{out}})$ | $\mathcal{O}(H_{\text{img}} \times W_{\text{img}} \times c)$ features $\mathcal{O}(k^2 \times c^2)$ weights             | Good Spatial independence               | Often compute throughput; bandwidth for depthwise or small-batch cases |
-| **RNNs**         | $\mathcal{O}(d_{\text{hidden}}^2+d_{\text{hidden}} \times d_{\text{in}})$ total                                           | $\mathcal{O}(S \times d_{\text{hidden}}^2)$ for $S$ time steps                                            | $\mathcal{O}(d_{\text{hidden}})$ recurrent state (inference); $\mathcal{O}(S d_{\text{hidden}})$ activations (training) | Poor Sequential deps                    | Sequential deps                                                        |
-| **Transformers** | $\mathcal{O}(d_{\text{model}}^2)$ QKV/O projections plus $\mathcal{O}(d_{\text{model}}d_{\text{ff}})$ feed-forward layers | $\mathcal{O}(S^2 \times d_{\text{model}} + S \times d_{\text{model}}^2)$ per layer                        | $\mathcal{O}(S^2)$ attention $\mathcal{O}(S \times d_{\text{model}})$ sequences                                         | Excellent (positions) Limited by memory | $S^2$ compute (prefill); bandwidth (decode)                            |
-
-: **Computational Complexity Comparison**: Scaling behaviors and resource requirements for major neural network architectures. Variables: $d_{\text{in}}$ = input dimension, $d_{\text{out}}$ = output dimension, $d_{\text{model}}$ = transformer model dimension, $d_{\text{hidden}}$ = RNN hidden-state dimension, $k$ = kernel size, $c$ = channels, $H_{\text{img}}, W_{\text{img}}$ = spatial dimensions, $S$ = sequence length (time steps), $B$ = batch size. The bottleneck column identifies the primary performance-limiting factor in typical deployments. For transformers, the $\mathcal{O}(S^2)$ memory term assumes materialized attention scores. {#tbl-computational-complexity tbl-colwidths="[12,18,16,20,18,16]"}
-
-Memory access primitives govern how efficiently a single execution core pulls data from its local memory hierarchy. However, executing neural networks at scale requires coordinating data streams across multiple cores, on-chip caches, and discrete accelerators.
-
-### Data movement primitives {#sec-network-architectures-data-movement-primitives-5b39}
-
-Data movement primitives characterize the fan-out and fan-in of tensor values across processing elements, memory banks, and accelerator interconnects. As established by the physical energy gap between ALU operations and data transfers, moving data across interconnects often incurs higher latency and energy costs than the computation itself.
-
-Communication patterns reduce to four fundamental collective operations: broadcast\index{Data movement!broadcast}, scatter\index{Data movement!scatter}, gather\index{Data movement!gather}, and reduction\index{Data movement!reduction}. @Fig-collective-comm contrasts their communication topologies.
-
-::: {#fig-collective-comm fig-env="figure" fig-pos="htb" fig-cap="**Data Movement Primitives**: Four fundamental patterns govern information flow in neural network computation. Broadcast (top-left) replicates a single value to all destinations, used when sharing weights across batch elements. Scatter (top-right) distributes distinct elements to different destinations, enabling work partitioning. Gather (bottom-left) collects distributed values to a single location, as in attention pooling. Reduction (bottom-right) combines multiple values through aggregation (sum, max), appearing in gradient synchronization and attention scoring. The energy cost of data movement (see the Memory Access Primitives section) makes these patterns critical optimization targets." fig-alt="Four diagrams with nodes and arrows. Broadcast: one red square to four nodes. Scatter: four colored squares to four nodes. Gather: four nodes with colored squares to one. Reduction: four colored nodes combine through aggregation to one."}
+::: {#fig-collective-comm fig-env="figure" fig-pos="htb" fig-cap="**Data Movement Primitives**: Four fundamental patterns govern information flow in neural network computation. Broadcast (top-left) replicates a single value to all destinations, used when sharing weights across batch elements. Scatter (top-right) distributes distinct elements to different destinations, enabling work partitioning. Gather (bottom-left) collects distributed values to a single location, as in attention pooling. Reduction (bottom-right) combines multiple values through aggregation (sum, max), appearing in gradient synchronization and attention scoring. Because moving data costs more than computing on it, these patterns are primary optimization targets." fig-alt="Four diagrams with nodes and arrows. Broadcast: one red square to four nodes. Scatter: four colored squares to four nodes. Gather: four nodes with colored squares to one. Reduction: four colored nodes combine through aggregation to one."}
 ```{.tikz}
 \begin{tikzpicture}[line join=round,font=\sffamily,scale=0.8, every node/.append style={transform shape}]
 \definecolor{Ballcol}{RGB}{172,245,164}
@@ -4334,192 +4049,209 @@ local bounding box=B4,shift={($(0,0)+(11,-4.75)$)}]
 
 :::
 
-Broadcast operations distribute identical data from a single source to multiple parallel destinations. In batched GEMM execution, stationary weight tiles are broadcast to multiple processor cores, each evaluating an independent batch element. Accelerators accelerate broadcasts via dedicated on-chip crossbars or multicast interconnect fabrics, while compilers tile loops\index{Matrix tiling} to maximize the operational reuse of each broadcast value.
+The last column reads the iron law directly. Where intensity is high and the parallel axis is wide (CNNs, prefill), the compute term $O/(R_{\text{peak}}\,\eta_{\text{hw}})$ binds, and faster arithmetic or better utilization pays off. Where intensity is low (small-batch MLPs, decode), the data term $D_{\text{vol}}/\text{BW}$ binds, and only moving fewer bytes or batching more requests helps. Where the axis is serial (RNNs), the step latency $L_{\text{lat}}$ is paid once per element in sequence, and neither faster arithmetic nor more bandwidth shortens the chain. DLRM adds a constraint that sits in front of the equation. Capacity is not an iron-law term, but it decides which bandwidth the data term pays: HBM when the tables fit, a host or peer link when they do not. ResNet-50, GPT-2, and DLRM each sit in the row whose binding term they were chosen to isolate. MobileNetV2 and KWS share the CNN row, with depthwise layers pulling their intensity down, because the constraints they isolate (latency and power) are deployment budgets that decide where the iron-law terms are paid. No lighthouse occupies the RNN row, whose serial chain the recurrent family section analyzes directly.
 
-Scatter operations partition a source tensor into disjoint segments, dispatching distinct slices to different destinations. In spatial or model-parallel partitioning, a large activation or weight tensor is scattered across compute tiles or cluster nodes. In large language models, MoE architectures introduce dynamic, input-dependent scatter patterns: a gating network routes individual tokens to specific expert networks distributed across devices. Because token routing depends on runtime inputs, dynamic scatter operations frequently cause load imbalance, leaving lightly loaded accelerators idle while oversubscribed experts bottleneck the pipeline.
+### Portable building blocks {#sec-network-architectures-core-computational-primitives-b853}
 
-Gather operations collect distributed tensor slices into a centralized destination. In sparse recommendation systems, gather operations retrieve embedding vectors corresponding to sparse feature indices across distributed memory nodes. In transformer self-attention, gathering occurs along the sequence dimension as each query aggregates key-value representations across all sequence positions.
+The rows of @tbl-nn-architectures-machine-demands differ, but the operators inside them repeat. A transformer block reuses several ideas born elsewhere: dense projections from MLPs, residual paths from deep CNNs, normalization for activation stability, and gating-like routing in later variants. @Tbl-dl-evolution traces where each building block\index{Architecture!building blocks} originated and where it now recurs. Each era inherited the tools of its predecessors while adding a mechanism for the next bottleneck, and each block brings its hardware cost with it, so an optimization written for one family's residual additions or normalization kernels pays off in every family that inherits the block.
 
-Reduction operations combine multiple input values into an aggregated result using associative operators such as summation or maximum. Reductions appear universally in neural networks: evaluating layer normalization, computing softmax normalizers, and synchronizing weight gradients across distributed data-parallel workers. Accelerator hardware accelerates reductions through dedicated tree-structured reduction networks and warp-level shuffle registers, reducing completion latency from $\mathcal{O}(n)$ sequential steps to $\mathcal{O}(\log n)$ parallel stages.
-
-In real workloads, these primitives execute in composite stages. For example, a single transformer attention head with sequence length $S = 512$ and batch size $B = 32$ broadcasts query vectors, gathers key-value pairs across the sequence dimension, and reduces the resulting inner products through a softmax denominator. As model dimensions exceed single-accelerator memory limits, collective communications across scale-up links (such as NVLink or optical TPU fabrics) govern end-to-end throughput, making data movement primitives the primary architectural constraint.
-
-### System design impact {#sec-network-architectures-system-design-impact-500a}
-
-Computational, memory access, and data movement primitives dictate physical silicon allocation and compiler design. Hardware designers dedicate silicon area to specialized units only when the underlying mathematical primitive dominates representative workloads.
-
-The prevalence of dense matrix multiplication and convolution motivated the development of dedicated matrix engines, such as Google TPUs[^fn-tpu-systolic-execution] and GPU Tensor Cores. @Sec-hardware-acceleration analyzes how these execution units map algorithmic primitives directly onto silicon datapaths, trading general-purpose instruction flexibility for dense multiply-accumulate density.
-
-[^fn-tpu-systolic-execution]: **TPU (tensor processing unit)**\index{TPU!domain-specific design}\index{TPU!performance per watt}: Google's first TPU maps matrix multiplication onto a large systolic array, trading general-purpose features such as caches and complex control flow for domain-specific inference efficiency [@jouppi2017]. The architectural lesson needed here is qualitative: when one primitive dominates a workload, dedicated data paths and local reuse can outperform general-purpose flexibility. @Sec-hardware-acceleration develops the precision choices, hardware specifications, and performance trade-offs.
-
-Memory architectures have similarly bifurcated to accommodate divergent primitive profiles. Supporting predictable streaming alongside random or strided access led to the integration of High Bandwidth Memory (**HBM**\index{HBM!definition}), which stacks DRAM dies vertically to deliver 2--3 TB/s of bandwidth\index{HBM!bandwidth advantage}—more than an order of magnitude above standard DDR channels. On-chip, accelerators provide multi-megabyte SRAM hierarchies and explicitly managed **scratchpad memories**\index{Scratchpad memory!definition}\index{Scratchpad memory!explicit control}, giving compilers predictable control over working-set data staging.
-
-Interconnect architectures reflect data movement primitives. To sustain the high-volume broadcasts, gathers, and reductions demanded by multi-accelerator models, modern platforms incorporate high-bandwidth point-to-point links and specialized network-on-chip routers optimized for collective communication patterns.
-
-@Tbl-sys-design-implications summarizes this hardware-software co-design, mapping each computational, memory, and communication primitive to its dedicated hardware acceleration, compiler optimization, and primary physical bottleneck.
-
-| **Primitive**                                      | **Hardware Impact**       | **Software Optimization** | **Key Challenges**         |
-|:---------------------------------------------------|:--------------------------|:--------------------------|:---------------------------|
-| **Matrix Multiplication**                          | Tensor Cores              | Batching, GEMM libraries  | Parallelization, precision |
-| **Sliding Window**                                 | Specialized datapaths     | Data layout optimization  | Stride handling            |
-| **Dynamic computation**\index{Dynamic computation} | Flexible routing          | Dynamic graph execution   | Load balancing             |
-| **Sequential Access**                              | Burst mode DRAM           | Contiguous allocation     | Access latency             |
-| **Random Access**                                  | Large caches              | Memory-aware scheduling   | Cache misses               |
-| **Broadcast**                                      | Specialized interconnects | Operation fusion          | Bandwidth                  |
-| **Gather/Scatter**                                 | High-bandwidth memory     | Work distribution         | Load balancing             |
-
-: **Primitive-Hardware Co-Design**: Efficient machine learning systems require tight integration between algorithmic primitives and underlying hardware. Common primitives map to specific hardware accelerations and software optimizations, each presenting distinct implementation challenges. Specialized hardware such as Tensor Cores addresses computational demands of matrix multiplication and sliding windows, while software techniques like batching and dynamic graph execution further enhance performance. {#tbl-sys-design-implications tbl-colwidths="[22,26,26,26]"}
-
-These primitive mappings also govern system energy consumption. The analysis that follows quantifies the gap between moving an operand across the memory package and computing on it, a gap that spans orders of magnitude.
-
-```{python}
-#| echo: false
-#| label: energy-consumption-analysis
-
-# ┌─────────────────────────────────────────────────────────────────────────────
-# │ ENERGY CONSUMPTION ANALYSIS
-# ├─────────────────────────────────────────────────────────────────────────────
-# │ Context: Energy consumption patterns across architectures section
-# │
-# │ Goal: Contrast the energy cost of compute vs. data movement.
-# │ Show: That DRAM access consumes over 100× more energy than an FP32 multiply.
-# │ How: Compare picojoules per FLOP vs. a 32-bit DRAM read.
-# │
-# └─────────────────────────────────────────────────────────────────────────────
-
-from mlsysim.fmt import fmt_int, fmt, check, fmt_energy, fmt_energy_per_flop, fmt_multiple
-
-class EnergyConsumptionAnalysis:
-    """Contrast energy cost of compute vs. data movement using Horowitz-style anchors."""
-
-    # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    ENERGY_FLOP_FP32_PJ = Hardware.Tech.Op.FlopFp32.energy
-    ENERGY_DRAM_ACCESS_PJ = Hardware.Tech.Memory.DRAM.energy_per_access
-    multiply_pj = ENERGY_FLOP_FP32_PJ.to(pJ / flop).magnitude  # pJ per FP32 multiply
-    dram_pj = ENERGY_DRAM_ACCESS_PJ.to(pJ).magnitude  # pJ per 32-bit access
-
-    # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    dram_to_flop_ratio = dram_pj / multiply_pj
-
-    # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
-    check(dram_to_flop_ratio > 100, "DRAM access should cost over 100x a reference FP32 FLOP.")
-
-    # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
-    energy_multiply_pj_str = fmt_energy_per_flop(ENERGY_FLOP_FP32_PJ, precision=1, commas=False)
-    energy_dram_pj_str = fmt_energy(ENERGY_DRAM_ACCESS_PJ, unit=pJ, precision=0, commas=False)
-    energy_ratio_mult_str = fmt_multiple(round(dram_to_flop_ratio), precision=0, commas=True)
-```
-
-::: {.column-margin}
 ```{=latex}
-\vspace*{-28mm}
+\begingroup
+%\renewcommand{\arraystretch}{1.25}
 ```
-![](images/svg/vol1_nn_architectures_margin_004.svg){width="100%" fig-alt="Two horizontal log-scale energy bars labeled DRAM 640 pJ and FP32 multiply 3.7 pJ, with the DRAM bar much longer."}
 
-*Moving a 32-bit value from DRAM costs far more energy than one FP32 multiply.*
+| **Building Block**    | **Born In**      | **Problem Solved**               | **Now Used In**                                                                                  |
+|:----------------------|:-----------------|:---------------------------------|:-------------------------------------------------------------------------------------------------|
+| **GEMM**              | MLPs             | Universal function approximation | All architectures (feedforward layers)                                                           |
+| **Parameter Sharing** | CNNs             | Spatial efficiency               | Transformers (shared projections), RNNs (weight reuse across time)                               |
+| **Skip Connections**  | ResNets (CNNs)   | Gradient flow at depth           | Transformers, DenseNets, U-Nets, many modern deep networks                                       |
+| **Normalization**     | CNNs (BatchNorm) | Activation stability             | LayerNorm (Transformers), RMSNorm (root-mean-square normalization), GroupNorm (grouped channels) |
+| **Gating**            | LSTMs (RNNs)     | Selective signal routing         | Transformers (mixture-of-experts routing), GRUs, highway networks                                |
+
+: **Cross-Architecture Building Blocks**: Engineering primitives that originated in one architecture family and now recur across many modern designs. Each building block solves a recurring problem (gradient flow, activation stability, signal routing), though not every architecture uses every primitive. {#tbl-dl-evolution tbl-colwidths="[15,18,32,35]"}
+
+```{=latex}
+\endgroup
+```
+
+#### Dense projections: The universal baseline {#sec-network-architectures-evolution-perceptron-multilayer-networks-d06e}
+
+General matrix multiplication is the one primitive every row of the profile shares. It is the feedforward layer inside every transformer block, the $1{\times}1$ pointwise convolution in MobileNets, the input and recurrent projections inside every RNN cell, and the bottom and top MLPs of DLRM. Convolution reaches the same path through im2col lowering (@fig-im2col-diagram), and dedicated matrix engines, such as GPU Tensor Cores and the systolic arrays\index{Systolic array!CNN data reuse}[^fn-systolic-array-architecture] of TPUs, exist because this one primitive dominates the operation count of nearly every workload. Its hardware cost depends on shape rather than on the family that invokes it. Grouping independent samples or tokens into a matrix converts a bandwidth-bound matrix-vector product into a compute-bound matrix-matrix product, which is why batch size decides the intensity of three rows of the table.
+
+[^fn-systolic-array-architecture]: **Systolic array**\index{Systolic array!etymology}\index{Systolic array!TPU}: Named for the heart's rhythmic contraction, the array's lockstep "pulse" of data through a grid of multiply-accumulate processors directly implements the data reuse that matrix multiplication and convolution require. By passing input values between neighboring processors, an expensive round-trip to off-chip DRAM is avoided for every single multiplication. This is critical for efficiency, as a single off-chip memory access can cost over 100$\times$ more energy than a floating-point multiply-accumulate, and still more relative to low-precision arithmetic.
+
+Dense connectivity also sets the cost baseline that the other families escape. At $\mathcal{O}(n^2)$ parameters and operations for layers of width $n$, GEMM is the reference point against which CNNs ($\mathcal{O}(K^2)$ parameters per location), attention ($\mathcal{O}(S^2)$ score interactions), and embedding lookups (no arithmetic per category) demonstrate their savings. None of them escapes GEMM itself; it reappears inside every architecture as the workhorse of feature transformation.
+
+#### Skip connections: Solving the depth problem {#sec-network-architectures-evolution-dense-spatial-processing-2761}
+
+Parameter sharing and dense projections made deep networks computationally tractable, but efficiency alone could not make them trainable. As networks grew deeper, repeated matrix multiplications and activation derivatives drove gradient signals either toward numerical underflow or toward floating-point overflow. Skip connections\index{Skip connection!cross-architecture portability} resolve this optimization barrier with additive identity shortcuts that bypass the layer transformations, and the shortcuts carry a concrete hardware cost that every deep network pays. Evaluating $\mathbf{y} = \mathcal{F}(\mathbf{x}) + \mathbf{x}$ requires the input tensor $\mathbf{x}$ to remain resident in memory throughout the execution of every operation in the branch $\mathcal{F}(\mathbf{x})$. This extended liveness window increases peak activation memory in accelerator HBM during the forward pass and preserves $\mathbf{x}$ for backpropagation unless activation checkpointing is used. The elementwise addition is also memory-bandwidth bound. It performs one addition per two loaded operands and one stored result, about 0.08 FLOP/byte in FP32 (one FLOP per 12 bytes), so un-fused residual merges become memory stalls.
+
+The depth problem\index{Network depth!training difficulty} follows from the chain rule, whose formal derivation appears in @sec-neural-computation-gradient-computation-backpropagation-dacf. For a deep network with layers $f_1, f_2, \ldots, f_{N_L}$, the gradient of the loss $\mathcal{L}$ with respect to the weights in layer 1 is:
+$$
+\frac{\partial \mathcal{L}}{\partial W_1} = \frac{\partial \mathcal{L}}{\partial a_{N_L}} \cdot \frac{\partial a_{N_L}}{\partial z_{N_L}} \cdot \frac{\partial z_{N_L}}{\partial a_{N_L-1}} \cdot \ldots \cdot \frac{\partial z_2}{\partial a_1} \cdot \frac{\partial a_1}{\partial z_1} \cdot \frac{\partial z_1}{\partial W_1}
+$$
+where $z_\ell$ represents the preactivation and $a_\ell = \sigma(z_\ell)$ the postactivation output of layer $\ell$. The gradient is a product of $N_L$ terms, each depending on the activation derivative $\sigma'(z_\ell)$. With sigmoid activations, whose derivative peaks at 0.25 (@sec-neural-computation-sigmoid-a98f), the gradient magnitude shrinks by roughly $(0.25)^{N_L}$, so early layers receive negligible updates and silently stop training. Exploding gradients\index{Exploding gradient problem} are the destabilizing counterpart. If each layer Jacobian expands a shared direction by about 1.5, that component grows exponentially, producing overflow, NaN (not-a-number) values, and training divergence rather than a silent stall.
+
+ReLU\index{ReLU} removes the activation's share of this decay, since its derivative is one on active paths (@sec-neural-computation-relu-7184), and that change made networks of 10–20 layers trainable. It does not remove the problem. Inactive units pass zero gradient, and a poorly initialized weight or a large update can leave a unit permanently dead\index{Dead neuron}\index{ReLU!dead neuron}; more fundamentally, ReLU does nothing to regulate the singular values of the weight matrices, which continue to attenuate or amplify gradients across depth. The original ResNet study showed the consequence on CIFAR-10: a 56-layer plain network had higher training and test error than a 20-layer plain network throughout training [@he2016]. Because the deeper network was worse on the *training* set, the failure was an optimization barrier, not overfitting.
+
+ResNet blocks introduce residual learning\index{Residual learning} through skip connections that transform gradient flow\index{Gradient!flow in residual networks}. @Eq-residual adds the identity path $\mathbf{x}$ to the residual mapping $\mathcal{F}(\mathbf{x})$:
+$$
+\mathbf{y} = \mathcal{F}(\mathbf{x}) + \mathbf{x}
+$$ {#eq-residual}
+where $\mathcal{F}(\mathbf{x})$ represents the residual function (typically two convolutional layers with batch normalization and ReLU) and $\mathbf{x}$ is the identity skip connection. @Fig-example-skip-connection shows the original ResNet block built around this addition.
+
+::: {#fig-example-skip-connection fig-env="figure" fig-pos="htb" fig-cap="**Residual Connection Block (Original Post-Activation Form)**: The original ResNet block [@he2016] implements $\mathbf{y} = \text{ReLU}(\mathcal{F}(\mathbf{x}) + \mathbf{x})$, where an identity shortcut bypasses the weight layers before a final ReLU activation. In later pre-activation variants [@he2016identity] and modern transformer blocks, the nonlinearity moves inside $\mathcal{F}(\mathbf{x})$, making the addition a completely clean identity shortcut $\mathbf{y} = \mathcal{F}(\mathbf{x}) + \mathbf{x}$ that matches the unobstructed gradient flow in @eq-residual." fig-alt="Two blue weight layer blocks with ReLU between them. An input vector enters left, passes through the weight layers, then adds with an identity shortcut that bypasses both layers. Brown plus circle combines paths. Output shows the residual sum with final ReLU."}
+
+```{.tikz}
+\begin{tikzpicture}[line join=round,font=\small\sffamily]
+\tikzset{%
+  Line/.style={line width=1.0pt,black!50,text=black},
+  Box/.style={align=center,
+    inner xsep=2pt,
+    node distance=2,
+    draw=BlueLine,
+    line width=0.75pt,
+    fill=BlueL,
+    text width=24mm,
+    minimum width=24mm, minimum height=10mm
+  },
+  op/.style={circle, draw=GreenLine, minimum size=9mm,fill=GreenL,line width=0.75pt},
+  >={Latex[length=2mm]},line/.style={-latex, thick},
+do path picture/.style={%
+    path picture={%
+      \pgfpointdiff{\pgfpointanchor{path picture bounding box}{south west}}%
+        {\pgfpointanchor{path picture bounding box}{north east}}%
+      \pgfgetlastxy\x\y%
+      \tikzset{x=\x/2,y=\y/2}%
+      #1
+    }
+  },
+plus/.style={do path picture={
+    \draw [black,line cap=round, line width=1pt] (-3/5,0) -- (3/5,0) (0,-3/5) -- (0,3/5);
+  }}
+}
+%
+\node[Box] (in) {Weight Layer};
+\node[Box, right=5 of in] (hidden) {Weight Layer};
+\node[op] (relu1) at ($(in)!0.5!(hidden)$) {ReLU};
+\node[circle,draw,minimum size=7mm,node distance=1.65,right=of hidden,plus,
+draw=BrownLine,fill=BrownL,line width=0.75pt] (add) {};
+\node[op, below=0.7 of add] (relu2) {ReLU};
+%
+\draw[Line,-latex] (in) -- (relu1);
+\draw[Line,-latex] (relu1) -- (hidden);
+\draw[Line,-latex] (hidden) -- (add);
+\draw[Line,-latex] (add) -- (relu2);
+\draw[Line,-latex] (relu2) -- ++(1.7,0);
+%  Feedback (identity)
+\draw[Line,latex-] (in.west) --coordinate(SR) ++(-1.5,0) node[left] {$\mathbf{x}$};
+\draw[Line,-latex] (SR) --++(0,0.9)  -| node[pos=0.25,above]{$\mathbf{x}$ identity}(add);
+%
+\node[below=2pt of relu2] {$\mathcal{F}(\mathbf{x}) + \mathbf{x}$};
+\node[below=2pt of relu1] {$\mathcal{F}(\mathbf{x})$};
+\end{tikzpicture}
+```
+
 :::
 
-Large batched GEMMs in MLPs achieve high arithmetic intensity, amortizing weight loads across many inputs. In contrast, small-batch MLP inference exhibits minimal reuse and spends most of its energy moving weights from off-chip DRAM. A reference FP32 multiply costs approximately `{python} EnergyConsumptionAnalysis.energy_multiply_pj_str`, while fetching a single 32-bit operand from DRAM costs `{python} EnergyConsumptionAnalysis.energy_dram_pj_str` [@horowitz2014]—an energy disparity of `{python} EnergyConsumptionAnalysis.energy_ratio_mult_str`. While total workload energy depends on operation counts and reuse factors, low-reuse operations remain overwhelmingly energy-dominated by DRAM transfers. This physical reality drives accelerator architects to allocate large on-chip SRAM pools and adopt wafer-scale or multi-die packaging to keep active working sets on-chip.
+During backpropagation, the gradient flows through this addition, and applying the chain rule gives:
+$$
+\frac{\partial \mathcal{L}}{\partial \mathbf{x}} =
+\frac{\partial \mathcal{L}}{\partial \mathbf{y}} \cdot
+\left(\frac{\partial \mathcal{F}(\mathbf{x})}{\partial \mathbf{x}} + \mathbf{I}\right)
+= \frac{\partial \mathcal{L}}{\partial \mathbf{y}} \cdot
+\mathcal{F}'(\mathbf{x}) +
+\frac{\partial \mathcal{L}}{\partial \mathbf{y}}
+$$
 
-The other families follow the profiles sketched in Perspective \ref{psp-nn-architectures-energy-cost-data-movement}. Convolution amortizes filter loads across $H \times W$ positions, unless a fully materialized im2col buffer inflates temporary traffic by up to $K^2$. Recurrence keeps its compact state in SRAM but idles execution units across serial steps, inflating energy per token. Tiled attention keeps score blocks on-chip, so its energy tracks matrix multiplication rather than DRAM round-trips.
+The gradient decomposes into two additive terms. Even if the residual term $\frac{\partial \mathcal{L}}{\partial \mathbf{y}}\mathcal{F}'(\mathbf{x})$ attenuates, the identity term passes $\frac{\partial \mathcal{L}}{\partial \mathbf{y}}$ directly to the earlier layer. While the residual branch can partially interfere with the identity signal, keeping $\|\mathcal{F}'(\mathbf{x})\|$ small keeps the block Jacobian close to identity and bounds its condition number. Through $N_L$ residual blocks, the gradient becomes:
+$$
+\frac{\partial \mathcal{L}}{\partial \mathbf{x}_0} =
+\frac{\partial \mathcal{L}}{\partial \mathbf{x}_{N_L}} \cdot
+\prod_{\ell=1}^{N_L}
+\left(\mathcal{F}'_\ell(\mathbf{x}_\ell) + \mathbf{I}\right)
+$$
 
-Hardware architects face fundamental engineering trade-offs when optimizing for these primitives. Allocating silicon to wide, dense systolic arrays maximizes throughput and energy efficiency for regular GEMMs, but leaves functional units underutilized during sparse lookups or dynamic routing. Conversely, expanding on-chip SRAM to hold massive transformer working sets increases die area and static leakage power that dense, regular workloads do not require.
+Each factor $(\mathcal{F}'_\ell + \mathbf{I})$ contains the identity term, keeping the factor near identity when the residual-branch Jacobian is small. A plain network instead multiplies arbitrary layer Jacobians, and if their average gain is even slightly below one the product vanishes exponentially ($0.9^{50} \approx 0.005$). ResNets multiply near-identity factors. The deviations can still compound, and the additive path does not guarantee exact unit gain across arbitrary depth, but this structure improves conditioning enough to make networks with 100+ layers trainable. The CIFAR-10 experiments confirm it: a 56-layer residual network reached about 7.0 percent test error against 8.8 percent for its 20-layer residual counterpart, reversing the degradation seen in plain networks [@he2016]. There is no single depth at which skip connections suddenly become mandatory; trainability also depends on initialization, normalization, optimizer dynamics, and block architecture [@he2016identity].
 
-Profiling computational primitives establishes the operational boundaries of each architecture family. In production systems engineering, the task shifts from analyzing individual operators to selecting and provisioning a complete architecture under hard operational constraints—balancing predictive accuracy against the platform budgets established in @sec-ml-systems and lifecycle requirements in @sec-ml-workflow.
+Residual connections stabilize the backward gradient path, but they do not constrain the forward scale of intermediate activations. Unbounded variance across depth can still destabilize layer inputs, which calls for a complementary block: normalization.
 
-## Architecture Selection Framework {#sec-network-architectures-architecture-selection-framework-a442}
+#### Normalization: Stabilizing activations at depth {#sec-network-architectures-normalization-layers-mathematical-foundations-0fb7}
 
-A wildlife monitoring sensor must classify camera-trap images within a watt-scale solar power budget, while an industrial recommendation service must retrieve terabyte-scale embeddings within a tail-latency budget of tens of milliseconds. These deployment constraints immediately eliminate architectures that appear competitive on unconstrained predictive benchmarks. Each architectural family embodies distinct physical assumptions about data structure and computation: MLPs assume arbitrary pairwise feature interactions, CNNs exploit local spatial correlation via sliding-window weight reuse, RNNs enforce strict sequential recurrence, and transformers evaluate all-to-all attention across token contexts. Architecture selection is the discipline of matching these computational topologies to physical deployment budgets before optimizing kernels or tuning hyperparameters.
+Normalization functions as the forward-pass partner to skip connections: where residual paths preserve backward gradient flow, normalization stabilizes the distribution of intermediate activations. First established as batch normalization in CNNs[^fn-batch-normalization-ioffe] [@ioffe2015batch], the primitive evolved into layer normalization for sequence models and subsequently simplified into RMSNorm[^fn-rmsnorm-layer-efficiency] for large language models.
 
-In the D·A·M taxonomy, architecture selection defines the algorithmic compute graph ($A$) that bridges input data invariants ($D$) to physical execution hardware ($M$). A structural mismatch at this boundary cannot be rescued by downstream compiler optimizations or kernel tuning. The selection framework evaluates candidate models across three coupled dimensions: the statistical structure of the input data ($D$), the algorithmic complexity and arithmetic intensity of the model ($A$), and the hardware execution boundaries—memory capacity, memory bandwidth, compute throughput, and thermal envelope ($M$)—established in @sec-ml-systems and @sec-ml-workflow. The same selection logic governs data curation in @sec-data-selection and cluster deployment in @sec-ml-operations.
+[^fn-rmsnorm-layer-efficiency]: **RMSNorm (root mean square normalization)**\index{RMSNorm}\index{Normalization!RMSNorm}: Introduced by @zhang2019root at NeurIPS, RMSNorm simplifies LayerNorm by normalizing with the root mean square alone, dropping the mean-centering step. Across the paper's tested models and implementations, RMSNorm reduced overall running time by 7--64 percent relative to LayerNorm. LLaMA-family and Mixtral-style transformer reports use RMSNorm [@touvron2023llama; @touvron2023llama2; @jiang2024mixtral], illustrating why a simpler normalization kernel matters at large language model scale. \index{RMSNorm!efficiency}\index{RMSNorm!LLM adoption}
 
-### Data-to-architecture mapping {#sec-network-architectures-datatoarchitecture-mapping-fddb}
+[^fn-batch-normalization-ioffe]: **Batch normalization (BatchNorm)**\index{Batch normalization!training speedup}\index{Batch normalization!training-serving skew}: The original normalization layer [@ioffe2015batch], which re-scales activations using per-mini-batch statistics. In one ImageNet experiment, it reached the target accuracy with 14$\times$ fewer training steps. Its batch-size dependency and training-serving skew (switching from batch statistics to running averages at inference) are systems limitations that motivated alternatives: LayerNorm removed batch dependency for transformers, and RMSNorm removed mean centering.
 
-Systematic architecture selection begins with data-to-architecture mapping\index{Architecture!data-to-architecture mapping}: aligning the structural symmetries and invariants of the input data with an operator family's compute and memory access patterns. The architectural families introduced in @sec-network-architectures-architectural-principles-engineering-tradeoffs-362e establish this foundation: MLPs for tabular records with arbitrary feature interactions, CNNs for grid-structured data with local spatial correlation, RNNs for streaming inputs with temporal recurrence, transformers for relational contexts where tokens exhibit arbitrary pairwise dependencies, and sparse embedding architectures such as DLRM for high-cardinality categorical recommendation streams.
+Batch normalization\index{Batch normalization}\index{Normalization!batch} standardizes activations using statistics computed across the mini-batch for each feature or channel during training. For fully connected activations, the reduction axis is the batch dimension. For convolutional activations, implementations compute per-channel statistics over both the batch and spatial positions ($B \times H \times W$). For a mini-batch $\mathcal{B} = \{x_1, \ldots, x_B\}$ of activations at a particular layer, the transformation proceeds in two stages.
 
-This alignment reflects fundamental memory and compute trade-offs. When an architecture encodes data invariants directly into its computational operators—such as translation equivariance via convolutional weight reuse—it avoids learning those symmetries empirically. An architecture that matches data symmetries minimizes parameter count, confines intermediate activations to on-chip SRAM, and maximizes arithmetic intensity. Conversely, deploying an architecture that lacks appropriate inductive biases forces the model to learn structure through parameter over-provisioning, multiplying off-chip DRAM traffic and inflating training sample complexity.
+First, compute the batch statistics:
+$$
+\mu_{\mathcal{B}} = \frac{1}{B}\sum_{i=1}^{B} x_i \qquad \sigma_{\mathcal{B}}^2 = \frac{1}{B}\sum_{i=1}^{B} (x_i - \mu_{\mathcal{B}})^2
+$$
 
-In production systems, these structural trade-offs dictate workload partitioning across the memory hierarchy:
+Then, over the batch, normalize and apply learnable scale and shift. The normalization step in @eq-batchnorm-normalize centers and scales activations, while @eq-batchnorm-transform applies learnable parameters that allow the network to recover the identity transformation if optimal:
+$$
+\hat{x}_i = \frac{x_i - \mu_{\mathcal{B}}}{\sqrt{\sigma_{\mathcal{B}}^2 + \epsilon}}
+$$ {#eq-batchnorm-normalize}
+$$
+y_i = \gamma \hat{x}_i + \beta
+$$ {#eq-batchnorm-transform}
 
-- **MLPs** process dense tabular features (such as sensor telemetry or actuarial tables) where feature dimensions lack geometric distance metrics, yielding matrix-vector operations with deterministic latency.
-- **CNNs** process spatial grids (such as imagery and spectrograms) where localized convolution kernels reuse filter weights across the feature map, maximizing register and cache reuse.
-- **RNNs** process sequential streams with bounded temporal state, maintaining a compact working set in SRAM at the cost of serialized step-by-step evaluation.
-- **Transformers** process token sequences and relational graphs [@vaswani2017; @devlin2019; @wei2022cot] through dynamic all-to-all attention, enabling expressive cross-sequence interaction while incurring quadratic score computation and high activation-memory traffic.
-- **Sparse embedding architectures (DLRM)** decouple memory-capacity-bound embedding tables from compute-bound multilayer perceptrons, routing billions of sparse categorical IDs across high-capacity DRAM before dense feature interaction.
+The parameters $\gamma$ (scale) and $\beta$ (shift) are learned during training, while $\epsilon$ (typically $10^{-5}$) prevents division by zero. The affine transform restores learned scale and shift flexibility, but fixed $\gamma$ and $\beta$ cannot exactly invert varying statistics for every batch. Normalization permits larger learning rates by preventing intermediate activations from exploding into saturating non-linear regimes, accelerating convergence relative to unnormalized networks.
 
-### Computational complexity considerations {#sec-network-architectures-computational-complexity-considerations-08da}
+While batch normalization enabled training of much deeper CNNs, it introduces severe distributed systems and sequence modeling constraints. In distributed training, computing true mini-batch statistics requires an all-reduce operation across accelerator nodes over PCIe or NVLink, adding communication latency to every normalized layer. If instead computed locally on small per-accelerator batches, noisy empirical statistics destabilize optimization. Furthermore, batch normalization cannot handle variable-length sequences or autoregressive token-by-token generation without complex padding masks and training-serving skew. Layer normalization\index{Layer normalization}\index{Normalization!layer} resolves these limitations by normalizing across the feature dimension rather than across the batch [@ba2016layer].
 
-Data-to-architecture alignment establishes functional fit, but asymptotic scaling under hardware constraints determines physical feasibility. An architecture whose compute requirements or memory working set outpaces physical accelerator limits violates latency service level agreements (SLAs) or exceeds device memory capacity.
+For an input vector $\mathbf{x} \in \mathbb{R}^{d_{\text{model}}}$ with $d_{\text{model}}$ features:
+$$
+\mu_{\text{LN}} = \frac{1}{d_{\text{model}}}\sum_{i=1}^{d_{\text{model}}} x_i \qquad \sigma_{\text{LN}}^2 = \frac{1}{d_{\text{model}}}\sum_{i=1}^{d_{\text{model}}} (x_i - \mu_{\text{LN}})^2
+$$
 
-As synthesized in @tbl-arch-complexity and @tbl-computational-complexity, each architectural family imposes a characteristic profile of arithmetic intensity, working-set scaling, and memory access locality. Evaluating these profiles identifies the primary hardware bottleneck—memory bandwidth, arithmetic throughput, or sequential latency—governing production deployment.
+@Eq-layernorm defines the complete layer normalization operation, where $\odot$ denotes element-wise multiplication:
+$$
+\text{LayerNorm}(\mathbf{x}) = \frac{\mathbf{x} - \mu_{\text{LN}}}{\sqrt{\sigma_{\text{LN}}^2 + \epsilon}} \odot \boldsymbol{\gamma} + \boldsymbol{\beta}
+$$ {#eq-layernorm}
 
-#### Scalability and production considerations {#sec-network-architectures-scalability-production-considerations-68dd}
+Because each token or sample is normalized independently, the computation stays within an accelerator's on-chip SRAM and registers, with no cross-sample or cross-device communication. That independence makes layer normalization the standard choice for transformers, where sequences vary in length and autoregressive generation evaluates a single token at a time. @Tbl-normalization-comparison contrasts the three variants along the machine and operational dimensions that decide between them.
 
-Production deployment evaluates an architecture against strict service-level agreements: tail latency, memory capacity, energy per query, and checkpoint recovery overhead. These operational metrics are direct physical consequences of structural design: dense connectivity, spatial locality, sequential dependence, or all-to-all attention. The structural choices that determine representational capacity simultaneously govern execution parallelism, cache residency, and memory bandwidth consumption.
+| **Characteristic**        | **BatchNorm**                          | **LayerNorm**            | **RMSNorm**                   |
+|:--------------------------|:---------------------------------------|:-------------------------|:------------------------------|
+| **Normalization Axis**    | Batch and, for CNNs, spatial positions | Feature dimension        | Feature dimension             |
+| **Batch Size Dependency** | High (noisy for small batches)         | None                     | None                          |
+| **Typical Use Case**      | CNNs, vision models                    | Transformers, RNNs       | LLaMA, efficient transformers |
+| **Computation Cost**      | Higher (mean + variance)               | Higher (mean + variance) | Lower (RMS only)              |
+| **Training/Inference**    | Different (running stats)              | Identical                | Identical                     |
 
-MLPs and CNNs occupy the simpler operational regime because inference is stateless across input samples, allowing linear throughput scaling via data parallelism. However, their memory access profiles diverge significantly. At batch size $B=1$, MLP inference is strictly memory-bandwidth bound: streaming large weight matrices from off-chip DRAM to compute a single matrix-vector product yields an arithmetic intensity near 1 FLOP/byte in FP16 (0.5 in FP32), though latency remains highly deterministic. In contrast, CNN execution achieves high weight reuse across spatial dimensions, but intermediate activation memory scales with image resolution ($H_{\text{img}} \times W_{\text{img}} \times c$), dominating peak SRAM and DRAM capacity during high-resolution inference and training backward passes.
+: **Normalization Variant Comparison**: Different normalization techniques trade off between computational efficiency, batch size sensitivity, and architectural compatibility. RMSNorm [@zhang2019root], used in LLaMA-family and other efficient transformer architectures [@touvron2023llama; @touvron2023llama2], omits mean centering: $\text{RMSNorm}(\mathbf{x}) = \mathbf{x} / \sqrt{\frac{1}{d_{\text{model}}}\sum_i x_i^2 + \epsilon} \cdot \boldsymbol{\gamma}$. {#tbl-normalization-comparison tbl-colwidths="[23,34,24,19]"}
 
-RNNs and transformers create challenging operational regimes for contrasting physical reasons. An RNN maintains a compact recurrent hidden state, but the recurrence relation $h_t = f(h_{t-1}, x_t)$ serializes execution along the temporal dimension. Amdahl's law dictates that provisioning additional parallel execution units cannot reduce this critical-path latency; furthermore, stateful execution complicates distributed checkpointing and pipeline recovery. In contrast, transformers eliminate sequential recurrence, parallelizing token projections across the entire sequence dimension to saturate systolic arrays and Tensor Cores. Yet dense self-attention's score computation grows quadratically with sequence length $S$ (@sec-network-architectures-system-implications-05a3), and long contexts consume the HBM that would otherwise hold larger serving batches. Small serving batches underutilize matrix execution units, whereas large batches demand multi-device memory partitioning. @Sec-model-training formalizes these distributed execution strategies through data, tensor, pipeline, and sequence parallelism.
+The computational profile of normalization is defined by its arithmetic intensity. Because normalization applies elementwise operations to large activation tensors, execution is memory-bandwidth bound rather than compute bound. A straightforward LayerNorm kernel makes two reductions across the hidden dimension $d_{\text{model}}$, one for the mean $\mu_{\text{LN}}$ and one for the variance $\sigma_{\text{LN}}^2$, although Welford's algorithm can compute both in a single pass. RMSNorm drops the mean-centering reduction, leaving a single sum of squares, which simplifies the kernel and eases fusion with neighboring operations; its authors report 7--64 percent lower running time across the models they tested.
 
-#### Hardware mapping and optimization strategies {#sec-network-architectures-hardware-mapping-optimization-strategies-ec3b}
+The table's last row is an operational cost. BatchNorm keeps nonlearned running mean and variance buffers and switches from mini-batch statistics in training to those running statistics at inference, so a mismatch between the buffers and deployment data is a frequent source of training-serving skew. LayerNorm and RMSNorm compute identically in both modes and carry no running state.
 
-Hardware mapping matches the algebraic structure of an operator to the physical execution datapath. Dense matrix operations in MLPs map directly to systolic arrays and GPU Tensor Cores (@sec-hardware-acceleration details these silicon implementations). These workloads benefit from three hardware-level optimizations: hierarchical matrix tiling (such as $64{\times}64$ tiles for L1 cache, $256{\times}256$ for L2 cache, and $16{\times}16$ Tensor Core micro-tiles) to ensure register and cache residency; mixed-precision execution (such as FP16 or BF16 arithmetic with FP32 accumulation) to double arithmetic throughput and halve memory traffic; and operator fusion to eliminate intermediate DRAM round-trips by executing elementwise activations and bias additions entirely within register files. @Sec-ml-frameworks examines how compilers generate these fused kernel launches on specific accelerators.
+#### Gating: Controlling information flow {#sec-network-architectures-evolution-sequence-processing-d809}
 
-```{python}
-#| echo: false
-#| label: winograd-calc
+Skip connections and normalization stabilize depth, the first by preserving gradient flow and the second by bounding activation variance. Gating\index{Gating mechanism} addresses a different problem: routing information selectively according to the input. It originated in recurrent networks, where simple recurrent loops suffered severe gradient degradation across long sequences. LSTMs[^fn-lstm-gating-mechanism] [@hochreiter1997] and GRUs[^fn-gru-gated-recurrence] [@cho2014] addressed this by introducing **gates**\index{Gating mechanism!sequence models}: parameter-weighted transformations that act as differentiable valves to protect, update, or discard stored state.
 
-# ┌─────────────────────────────────────────────────────────────────────────────
-# │ WINOGRAD ALGORITHM REDUCTION
-# ├─────────────────────────────────────────────────────────────────────────────
-# │ Context: Footnote [^fn-winograd-minimal-filtering] explaining fast convolution algorithms
-# │
-# │ Goal: Demonstrate algorithmic acceleration of convolution.
-# │ Show: The 2.25× multiplication reduction achieved by Winograd transformation.
-# │ How: Compare standard 3x3 convolution ops to Winograd domain ops.
-# │
-# └─────────────────────────────────────────────────────────────────────────────
+[^fn-lstm-gating-mechanism]: **LSTM (long short-term memory)**\index{LSTM!gating mechanism}: Invented by Hochreiter\index{Hochreiter, Sepp} and Schmidhuber\index{Schmidhuber, Jürgen} in 1997, LSTMs introduced a "Constant Error Carousel," a gated cell state that protects error signals from exponential decay during backpropagation through time. The systems cost of this solution: a standard LSTM computes input, forget, and output gates plus a candidate cell update, giving roughly four affine transformations per time step vs. one in a vanilla RNN. This compute overhead explains why transformers, which solve long-range dependencies through parallelizable attention, replaced LSTMs in many large-scale language workloads. \index{LSTM!compute overhead}
 
-from mlsysim.fmt import fmt_int, fmt, check
+[^fn-gru-gated-recurrence]: **GRU (gated recurrent unit)**\index{GRU!efficiency}: @cho2014 describes a gated hidden unit for encoder-decoder translation that uses reset and update gates to control how the hidden state is updated. Relative to an LSTM's input, forget, and output gates plus candidate cell update, this gives a simpler gated recurrence. The broader systems lesson: architectural simplification can reduce state and matrix operations when it preserves task performance, a principle that recurs in efficiency-oriented designs from MobileNet to distilled transformers. \index{GRU!parameter efficiency}
 
-# ┌── LEGO ───────────────────────────────────────────────
-class WinogradCalc:
-    """Compare direct and Winograd multiplies for one 2x2 output tile."""
+Gating generalizes beyond recurrence as the basic mechanism for data-dependent routing. Highway Networks used gates to interpolate between a transformation and an identity bypass, directly inspiring residual shortcuts. Encoder-decoder\index{Encoder-decoder!definition} attention\index{Architecture!encoder-decoder} [@bahdanau2015neural] computes a dynamic routing distribution over input representations, and in transformers the softmax attention weights act as data-dependent routing coefficients that decide how features aggregate across tokens. Mixture-of-experts architectures extend the idea to dispatch each token to a subset of feedforward experts. The hardware cost of gating is irregularity. Dense attention keeps static tensor shapes even though its weights vary per token, but sparse attention, expert routing, and dynamic graph execution\index{Dynamic computation} introduce data-dependent control flow and runtime tensor sizes that defeat static memory allocation and balanced work dispatch. @Sec-model-compression-pruning-d1cb treats structured and unstructured sparsity, and @sec-hardware-acceleration treats hardware support for sparse and dynamic execution.
 
-    # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    std_muls_3x3 = 36  # four outputs x nine multiplies
-    winograd_muls = 16  # F(2x2, 3x3) elementwise multiplies
+A transformer block is where all four building blocks meet. In the encoder block of @fig-transformer, residual paths wrap each sub-layer to preserve gradient flow through deep stacks, dense GEMM projections carry the attention and feedforward transformations, LayerNorm or RMSNorm stabilizes activations around each sub-layer, and softmax attention weights gate information across positions. What the transformer changed was the dependency structure. Replacing recurrence with all-to-all attention cut the sequential depth for tokens to interact from $\mathcal{O}(S)$ steps to $\mathcal{O}(1)$, which let the other three blocks run at full width on parallel hardware. Vision Transformers[^fn-vision-transformer-patching] carry the same block set to images [@dosovitskiy2021image].
 
-    # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    winograd_reduction = std_muls_3x3 / winograd_muls
+[^fn-vision-transformer-patching]: **Vision transformers (ViTs)**\index{Vision transformer}: Google's 2020 ViT paper split $224{\times}224$ images into $16{\times}16$ patches (196 "tokens") and applied standard transformer attention. ViTs replace CNN's local convolutions with $\mathcal{O}(S^2)$ global attention over patch tokens. In the original study, large-scale pretraining improved ViT's competitiveness, illustrating how data and compute can compensate for weaker spatial inductive bias [@dosovitskiy2021image]. \index{Vision transformer!compute trade-off}
 
-    # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
-    check(winograd_reduction > 1, "Winograd must reduce multiply count.")
-    check(abs(winograd_reduction - 2.25) < 0.01, "Winograd F(2,3) must yield 2.25x reduction.")
-
-    # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
-    winograd_reduction_mult_str = fmt_multiple(winograd_reduction, precision=2, commas=False)  # e.g. "2.25"
-    std_muls_3x3_str = fmt(std_muls_3x3, precision=0, commas=False)  # e.g. "9"
-    winograd_muls_str = fmt(winograd_muls, precision=0, commas=False)  # e.g. "4"
-```
-
-CNNs benefit from specialized convolution algorithms and data layout optimizations that differ significantly from dense matrix operations. Im2col lowering (@sec-network-architectures-computational-mapping-824c) buys GEMM throughput at the price of up to $K^2$ temporary storage. Winograd algorithms[^fn-winograd-minimal-filtering] reduce multiplication count by `{python} WinogradCalc.winograd_reduction_mult_str` for $3{\times}3$ convolutions but can amplify numerical error. Direct convolution with custom kernels can avoid im2col materialization but requires architecture-specific tuning.
-
-[^fn-winograd-minimal-filtering]: **Winograd algorithm**\index{Winograd algorithm!convolution}\index{Winograd algorithm!precision trade-off}: For one $2{\times}2$ output tile with a $3{\times}3$ filter, this method trades `{python} WinogradCalc.std_muls_3x3_str` direct multiplications for `{python} WinogradCalc.winograd_muls_str` elementwise multiplications in the Winograd domain, plus additional transforms and additions. The transforms can amplify rounding error, so low-precision suitability depends on the variant, implementation, and accuracy requirements.
-
-Because the sequential recurrent dependency cannot be shortened by provisioning additional compute hardware (@sec-network-architectures-system-implications-18c3), optimization strategies focus on minimizing execution overhead along the critical path. Loop unrolling eliminates branch instructions and per-step control overhead at the expense of instruction cache pressure and activation storage. State vectorization batches multiple independent sequences across SIMD vector lanes, amortizing memory access costs across sequences without reducing single-sequence latency. Wavefront parallelization overlaps independent forward and backward passes in bidirectional models, improving execution unit saturation where the model topology permits. These techniques amortize runtime overhead but leave the fundamental serialization constraint intact.
-
-Self-attention requires memory-hierarchy optimizations that mitigate quadratic intermediate state. Because computing and storing raw attention matrices drives memory bandwidth bottlenecks, the dominant optimization strategy tiles computation within fast on-chip SRAM. @Sec-model-training-flash-attention-ioaware-attention-optimization-3da0 examines FlashAttention[^fn-flashattention-tiling-kernel] as an IO-aware tiling technique, while structured sparse attention reduces arithmetic complexity by restricting attention to fixed receptive patterns.
-
-[^fn-flashattention-tiling-kernel]: **FlashAttention**\index{FlashAttention!IO-aware}: An IO-aware algorithm [@dao2022] that avoids materializing the full $S{\times}S$ attention matrix in HBM by fusing computation into a single kernel tiled to fit in SRAM. The result: 2--4$\times$ wall-clock speedup and memory reduction\index{FlashAttention!memory reduction} from $\mathcal{O}(S^2)$ to $\mathcal{O}(S)$, enabling training on sequences 4--16$\times$ longer than standard attention. FlashAttention demonstrates that algorithmic optimization of data movement $(D_{\text{vol}})$ can yield larger speedups than increasing raw compute $(R_{\text{peak}})$ -- a concrete validation of the iron law's data term.
-
-These hardware trade-offs define the operational boundaries of each architecture: MLPs provide deterministic, low-latency execution for non-spatial feature vectors; CNNs maximize data reuse across spatial grids; RNNs maintain minimal state footprints for streaming sequences; and transformers trade quadratic score computation for relational expressiveness. Translating these hardware invariants into production deployments requires a structured decision protocol.
+This portability separates optimizations that transfer from those that do not. GEMM tiling and mixed-precision arithmetic help every row of @tbl-nn-architectures-machine-demands, residual memory management helps every deep network, and normalization kernel fusion helps CNNs and transformers alike. Attention-specific kernels remain tied to attention's memory pattern, but even they are built from the same GEMM and memory-access primitives. The profile and the building blocks describe what each family costs; choosing among families for a particular deployment requires turning those costs into a procedure.
 
 ### Decision framework {#sec-network-architectures-decision-framework-a889}
 
-Engineering teams frequently default to architectures based on popularity rather than physical constraints—deploying over-parameterized transformers where linear models or lightweight CNNs suffice, or selecting models that violate inference latency budgets. Systematic selection replaces heuristics with an ordered constraint-satisfaction protocol grounded in the D·A·M taxonomy.
+A wildlife monitoring sensor must classify camera-trap images within a watt-scale solar power budget, while an industrial recommendation service must retrieve terabyte-scale embeddings within a tail-latency budget of tens of milliseconds. Each constraint eliminates architectures that look competitive on unconstrained benchmarks, and a structural mismatch at this stage cannot be rescued later by compiler optimization or kernel tuning. Engineering teams nonetheless often default to architectures by popularity, deploying over-parameterized transformers where a lightweight CNN would suffice or selecting models that violate the inference latency budget. In D·A·M terms, architecture selection chooses the algorithm ($A$) that bridges the structure of the data ($D$) to the budgets of the machine ($M$): memory capacity, memory bandwidth, compute throughput, and thermal envelope, as established in @sec-ml-systems and @sec-ml-workflow.
 
-The decision flowchart in @fig-dnn-fm-framework begins by identifying input data characteristics, routes to candidate dense architectures (Transformers, RNNs, CNNs, or MLPs), and evaluates each candidate against physical hardware limits. High-cardinality recommendation workloads sit outside this dense flowchart and route to the sparse embedding/DLRM family (@sec-network-architectures-sparse-architectures-recommendation-systems-5d19) before applying the same memory, compute, speed, accuracy, and deployment checks. If any constraint fails, the decision path loops back to scale down model capacity or change the architecture family.
+Selection begins with data-to-architecture mapping\index{Architecture!data-to-architecture mapping}, matching the symmetries of the input to an operator family, and that mapping is also a ranking by inductive bias\index{Inductive bias!hierarchy} (@sec-network-architectures-architectural-principles-engineering-tradeoffs-362e). In systems terms, inductive bias is an efficiency lever. CNNs impose the strongest constraints (local connectivity, weight sharing, translation equivariance), which collapse parameter volume and expose reuse to the memory hierarchy but restrict them to grids. RNNs impose temporal recurrence, which bounds runtime state across arbitrary sequence lengths at the price of serialization. Transformers replace fixed topology with content-based attention, gaining flexibility across modalities and paying for it in quadratic score computation and memory traffic. MLPs assume nothing, so learning spatial or temporal structure costs them parameters, training data, and cache locality. An architecture that encodes the data's symmetries directly avoids learning them empirically; one that lacks them pays in parameters, DRAM traffic, and training samples.
+
+The decision flowchart in @fig-dnn-fm-framework turns this mapping into an ordered constraint-satisfaction procedure: identify the data's structure, route to candidate dense architectures, and test each candidate against the physical limits of the target hardware. High-cardinality recommendation workloads sit outside this dense flowchart and route to the sparse embedding family (@sec-network-architectures-sparse-architectures-recommendation-systems-5d19) before applying the same memory, compute, speed, accuracy, and deployment checks. If any constraint fails, the path loops back to scale down model capacity or change the architecture family.
 
 ::: {#fig-dnn-fm-framework fig-env="figure" fig-pos="htb" fig-cap="**Architecture Selection Decision Framework**: A systematic flowchart for choosing dense neural network architectures based on data characteristics and deployment constraints. The process begins with data type identification (text/sequences/images/tabular) to select initial architecture candidates (Transformers/RNNs/CNNs/MLPs), then iteratively evaluates memory budget, computational cost, inference speed, accuracy targets, and hardware compatibility. High-cardinality recommendation workloads are handled separately by the sparse-embedding family (DLRM) in the Sparse Architectures section, then re-enter the same constraint checks." fig-alt="Flowchart from Define Problem, branching by data type to Transformers, RNNs, CNNs, MLPs. Diamonds check memory, compute, speed, accuracy, deployment. Each No loops back via Scale Down or Increase Capacity; each Yes reaches Selected."}
 
@@ -4597,18 +4329,7 @@ When constraints require scaling down, the model compression techniques in @sec-
 2.  **Progressive physical constraint filtering ($A \times M$)**: Filter candidate models against hardware budgets: static parameter storage in flash/DRAM, peak dynamic activation footprint in SRAM/HBM, arithmetic intensity against the hardware roofline, and tail latency deadlines. A violation requires scaling down model width or depth, applying quantization and compression (@sec-model-compression), or switching to a lower-overhead architecture family.
 3.  **Empirical capacity and deployment validation**: Verify that candidate capacity meets target accuracy on representative evaluation distributions. If predictive accuracy falls short, scale model capacity and re-evaluate physical hardware constraints. If target accelerator hardware cannot sustain the required arithmetic throughput or memory bandwidth, select an alternative architecture rather than relying on marginal hyperparameter adjustments.
 
-### Inductive bias hierarchy {#sec-network-architectures-unified-framework-inductive-biases-257d}
-
-The decision framework operates on a continuum of structural constraints: the inductive bias hierarchy\index{Inductive bias!hierarchy} introduced in @sec-network-architectures-architectural-principles-engineering-tradeoffs-362e. In machine learning theory, inductive bias encompasses the assumptions a model uses to generalize beyond observed training examples. In systems engineering, inductive bias is a primary efficiency lever: constraining the hypothesis space restricts parameter volume, bounds intermediate activation working sets, and exposes structured data reuse patterns to the memory hierarchy.
-
-The architectural families form a hierarchy of decreasing structural constraint:
-
-- **CNNs** exhibit the strongest architectural bias via local connectivity, weight sharing, and translation equivariance. These constraints collapse parameter volume and enable aggressive tile staging in registers and cache, but restrict the model to grid-structured inputs.
-- **RNNs** enforce moderate structural bias through temporal recurrence and shared transition matrices, bounding runtime memory footprint across arbitrary sequence lengths at the cost of execution serialization.
-- **Transformers** exhibit adaptive inductive bias, replacing fixed spatial or temporal topologies with dynamic, content-based attention across all token pairs. This architectural flexibility enables generalization across diverse data modalities, but shifts the computational burden to quadratic attention matrices and high memory-bandwidth utilization.
-- **MLPs** maintain minimal inductive bias, assuming no topological relationships among input features. Without structural constraints, learning spatial or temporal patterns requires massive parameter over-provisioning and excessive training data, resulting in poor arithmetic intensity and low cache locality.
-
-Many deep architectures implement hierarchical representation learning\index{Hierarchical Representation Learning}, but through distinct operator mechanisms: CNNs through progressive receptive field expansion (@sec-network-architectures-cnns-spatial-pattern-processing-5b8d), RNNs through hidden state evolution (@sec-network-architectures-rnns-sequential-pattern-processing-f804), and transformers through multi-head attention (@sec-network-architectures-attention-mechanisms-dynamic-pattern-processing-22df). This hierarchical organization reflects a fundamental physical principle: complex representations compose from simpler primitives. In systems engineering, this composition directly dictates runtime efficiency. Feature aggregation pipelines must compose primitives without triggering redundant round-trips to off-chip DRAM. Memory staging must align with representational hierarchies to maximize on-chip SRAM reuse. Furthermore, parallel kernel dispatch must conform to hierarchical dependencies across layers, keeping execution units saturated across forward and backward passes.
+Kernel-level choices come after this decision. Im2col or direct convolution, fused normalization, and IO-aware tiled attention (@sec-model-training-flash-attention-ioaware-attention-optimization-3da0) change how efficiently an architecture's contract is paid, not which iron-law term binds; @sec-ml-frameworks and @sec-hardware-acceleration develop them. Recurrent models make the limit plain. Unrolling loops or batching independent sequences across vector lanes amortizes per-step overhead, but no such technique shortens the serial path that the architecture itself imposes.
 
 ### Architecture selection in practice {#sec-network-architectures-putting-together-architecture-selection-practice-052f}
 

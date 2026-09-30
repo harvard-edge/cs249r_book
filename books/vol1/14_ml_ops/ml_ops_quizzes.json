@@ -3,8 +3,8 @@
     "source_file": "books/vol1/14_ml_ops/14_ml_ops.qmd",
     "schema_version": 2,
     "generated_on": "2026-09-01",
-    "total_sections": 9,
-    "sections_with_quizzes": 9,
+    "total_sections": 11,
+    "sections_with_quizzes": 11,
     "sections_without_quizzes": 0
   },
   "sections": [
@@ -259,22 +259,20 @@
     },
     {
       "section_id": "#sec-ml-operations-production-operations-b76d",
-      "section_title": "Production Operations",
+      "section_title": "Deployment and Serving",
       "quiz_data": {
         "quiz_needed": true,
         "rationale": {
           "focus_areas": [
             "model deployment strategies (shadow, canary, blue-green)",
-            "end-to-end latency budget breakdown and Amdahl's Law speedup",
-            "hardware telemetry diagnosis (compute vs memory-bandwidth bounds)",
-            "statistical drift detection and Population Stability Index (PSI) thresholds",
-            "incident response, verification gap, and label delay",
-            "layered monitoring hierarchy"
+            "stateful vs. stateless rollback",
+            "validating converted serving artifacts and runtime version pinning",
+            "stage-level latency budgets as a diagnostic for regressions"
           ],
-          "question_strategy": "Test deployment risk management, evaluate latency budgets and Amdahl's law, diagnose hardware bottlenecks from GPU telemetry, organize layered monitoring checks, and test PSI threshold conventions.",
-          "difficulty_progression": "Starts with deployment pattern selection, moves to latency budget arithmetic and hardware telemetry diagnosis, and concludes with statistical drift thresholds and verification gap analysis.",
-          "integration": "Connects serving runtime optimizations from earlier chapters with production deployment safety, statistical monitoring, and live hardware observability.",
-          "ranking_explanation": "As the chapter's largest operational section, this covers critical runtime practices, hardware telemetry, statistical monitoring, and release safety, meriting a comprehensive, multi-faceted quiz."
+          "question_strategy": "Test deployment risk management, rollback design for stateful services, validation of optimized artifacts, and localization of serving latency regressions.",
+          "difficulty_progression": "Starts with deployment pattern selection, moves to stateful rollback and artifact validation, and ends with diagnosing a latency regression from a stage-level budget.",
+          "integration": "Connects serving runtime and latency-budget material from the serving chapter with deployment safety and rollback.",
+          "ranking_explanation": "The deployment section sets the release controls every later monitoring and incident process depends on, so it merits a full quiz."
         },
         "questions": [
           {
@@ -290,17 +288,50 @@
             "learning_objective": "Select appropriate model deployment patterns based on risk tolerance and operational verification requirements"
           },
           {
-            "question_type": "MCQ",
-            "question": "A real-time inference service has a 100 ms P99 latency SLO partitioned as: Network RTT (15 ms), Feature retrieval (25 ms), Request parsing (5 ms), Model inference (45 ms), Postprocessing (5 ms), and Response serialization (5 ms). If the team applies weight quantization and kernel fusion to achieve a 2x speedup on model inference (reducing it from 45 ms to 22.5 ms), what is the new end-to-end P99 latency and overall system speedup?",
-            "choices": [
-              "50.0 ms total latency, resulting in a 2.0x end-to-end speedup",
-              "22.5 ms total latency, because inference was the sole target of optimization",
-              "95.0 ms total latency, because non-inference stages expand to consume the budget",
-              "77.5 ms total latency, resulting in approximately 1.3x end-to-end speedup"
-            ],
-            "answer": "The correct answer is D. 77.5 ms total latency, resulting in approximately 1.3x end-to-end speedup. Model inference represents 45% of the 100 ms budget (45 ms / 100 ms). A 2x model speedup reduces inference execution time to $45 / 2 = 22.5\\text{ ms}$. Non-inference stages remain unchanged at $15 + 25 + 5 + 5 + 5 = 55\\text{ ms}$. The new end-to-end latency is $55 + 22.5 = 77.5\\text{ ms}$. The end-to-end speedup is $100\\text{ ms} / 77.5\\text{ ms} \\approx 1.29\\times \\approx 1.3\\times$, as governed by Amdahl's Law. Optimizing the model in isolation cannot overcome bottlenecks in feature retrieval or networking. The option claiming a 2.0x overall speedup ignores Amdahl's Law, while 22.5 ms ignores non-inference stages and 95.0 ms miscalculates the savings.",
-            "learning_objective": "Apply latency budget decomposition and Amdahl's Law to calculate end-to-end serving speedups"
+            "question_type": "SHORT",
+            "question": "A two-tower recommender caches precomputed user and item embeddings. Model v2 changed the embedding dimension, and after a regression the team rolls back to v1 by redeploying v1's weights. Explain why this rollback can still fail, and state what a stateful rollback procedure must include.",
+            "answer": "The embeddings cached while v2 was serving live in v2's vector space (here even a different dimension), so v1 would score queries against incompatible vectors and return nonsense or errors although its own weights are correct. A stateful rollback must invalidate or version those caches atomically with the weight swap, for example through dual-version namespaces, and if v2's bad predictions polluted feature logs or clickstream data during the degraded window, those records must be quarantined before the next retraining. Clean rollback is an architectural property that must be exercised in advance, not assumed.",
+            "learning_objective": "Explain why rollback of stateful ML services requires cache and data handling beyond redeploying earlier weights"
           },
+          {
+            "question_type": "TF",
+            "question": "True or False: Once an INT8-converted model passes numerical-equivalence tests against the original, upgrading the inference runtime by a minor version needs no revalidation, because the model weights have not changed.",
+            "answer": "False. A runtime upgrade can change kernel selection and fusion, and with them both latency and numerical results, in an artifact whose weights never changed. The runtime version is an input to reproducibility, so deployment configurations pin it explicitly and treat any upgrade as a change that must pass the same equivalence and slice-level checks as a new model.",
+            "learning_objective": "Justify explicit runtime version pinning as part of validating optimized serving artifacts"
+          },
+          {
+            "question_type": "MCQ",
+            "question": "A recommendation service's P99 latency rises from 80 ms to 110 ms overnight, breaching its 100 ms SLO. No model was deployed. Per-stage traces show model inference steady at 45 ms, while feature retrieval rose from 25 ms to 55 ms. What is the appropriate first operational response?",
+            "choices": [
+              "Roll back to the previous model version, because latency regressions are model regressions until proven otherwise",
+              "Quantize the model further to buy back the 30 ms from the inference stage",
+              "Route the incident to the feature-store owners and investigate the retrieval path, because the stage-level budget localizes the regression outside the model",
+              "Raise the SLO to 110 ms, because a drift in total latency indicates a permanent change in workload"
+            ],
+            "answer": "The correct answer is C. Route the incident to the feature-store owners and investigate the retrieval path, because the stage-level budget localizes the regression outside the model. The decomposed latency budget exists precisely to tell operators which stage moved. Inference is unchanged, so rolling back the model changes nothing. Further quantization attacks a stage that did not regress: it would pay an accuracy risk to mask part of the symptom while the retrieval fault persists and can keep growing. Raising the SLO hides the symptom without diagnosing it.",
+            "learning_objective": "Use a stage-level latency budget to localize a production latency regression and route it to the owning component"
+          }
+        ]
+      }
+    },
+    {
+      "section_id": "#sec-ml-operations-production-monitoring-5e1b",
+      "section_title": "Production Monitoring",
+      "quiz_data": {
+        "quiz_needed": true,
+        "rationale": {
+          "focus_areas": [
+            "hardware telemetry diagnosis (compute vs memory-bandwidth bounds)",
+            "statistical drift detection and Population Stability Index (PSI) thresholds",
+            "verification gap and label delay",
+            "layered monitoring hierarchy"
+          ],
+          "question_strategy": "Diagnose hardware bottlenecks from GPU telemetry, organize layered monitoring checks, analyze the verification gap, and test PSI threshold conventions.",
+          "difficulty_progression": "Starts with the verification gap, orders the monitoring hierarchy, diagnoses hardware telemetry, and ends with drift thresholds.",
+          "integration": "Connects the iron law and hardware utilization with statistical drift monitoring and delayed outcome labels.",
+          "ranking_explanation": "As the chapter's largest section, monitoring carries the core statistical and hardware observability concepts and merits a full quiz."
+        },
+        "questions": [
           {
             "question_type": "SHORT",
             "question": "Explain why high-stakes production ML systems (such as medical diagnosis or loan underwriting) experience a 'verification gap' and describe how leading indicators mitigate this challenge.",
@@ -324,6 +355,56 @@
             "question": "In statistical drift monitoring, a Population Stability Index value of $\\text{PSI} >$ ____ is the standard operational threshold indicating a significant distribution shift that requires investigation.",
             "answer": "0.25 (or 0.25 threshold). PSI conventions classify $\\text{PSI} < 0.10$ as stable, $0.10 \\le \\text{PSI} \\le 0.25$ as moderate shift, and $\\text{PSI} > 0.25$ as significant distribution shift requiring root-cause investigation.",
             "learning_objective": "Identify standard Population Stability Index (PSI) operational thresholds for feature drift alerting"
+          }
+        ]
+      }
+    },
+    {
+      "section_id": "#sec-ml-operations-incident-response-governance-2c9f",
+      "section_title": "Incident Response and Governance",
+      "quiz_data": {
+        "quiz_needed": true,
+        "rationale": {
+          "focus_areas": [
+            "ordered debugging for statistical incidents",
+            "governance as automated release invariants",
+            "ML Test Score as a min-bounded readiness rubric"
+          ],
+          "question_strategy": "Test incident triage order, governance enforcement through promotion gates, and prioritization with the ML Test Score.",
+          "difficulty_progression": "Starts with incident triage, moves to governance mechanisms, and ends with a readiness-rubric investment decision.",
+          "integration": "Connects monitoring signals to response procedures, organizational ownership, and production-readiness audits.",
+          "ranking_explanation": "This section turns monitoring signals into decisions and ownership; a short quiz checks the procedures and the readiness rubric."
+        },
+        "questions": [
+          {
+            "question_type": "MCQ",
+            "question": "At 2:00 AM an alert reports that recommendation click-through rate fell 12 percent in the past hour. There is no stack trace and no failed process. Following the chapter's debugging decision tree, what should the on-call engineer check first?",
+            "choices": [
+              "Feature attributions for recent mispredictions, to see which inputs the model now relies on",
+              "Upstream data pipelines for schema changes, missing values, or shifted input distributions",
+              "Calibration curves and confidence distributions of the current model version",
+              "Whether a quarterly retraining is due, since gradual concept drift is the most common cause"
+            ],
+            "answer": "The correct answer is B. Upstream data pipelines for schema changes, missing values, or shifted input distributions. Data pipeline integrity is the first diagnostic boundary because most production ML regressions originate in altered inputs, corrupted labels, or upstream transformations. Attribution and calibration analysis come last, after pipeline integrity and training-serving skew are ruled out, and an abrupt one-hour drop points toward a recent change or outage rather than gradual drift.",
+            "learning_objective": "Apply the ordered debugging decision tree to triage an ML incident that produces no explicit errors"
+          },
+          {
+            "question_type": "SHORT",
+            "question": "Explain how a model-registry promotion gate turns model governance from a review meeting into a release invariant, and name three conditions such a gate can require before a model moves from staging to production.",
+            "answer": "The gate encodes governance policy in the same CI/CD machinery that deploys the model, so a model that fails a condition cannot be promoted regardless of schedule pressure or who asks. Conditions the chapter lists include a signed feature contract, a recorded training-data lineage hash, subgroup metrics above policy thresholds, a canary SLO with automated rollback criteria, and a designated artifact owner. Because the checks run on every promotion, compliance is verified continuously rather than asserted once.",
+            "learning_objective": "Explain how promotion gates enforce governance policy as automated release invariants"
+          },
+          {
+            "question_type": "MCQ",
+            "question": "A team's ML Test Score audit yields category scores of data 6, model 7, infrastructure 5, and monitoring 1 (each out of 7). Leadership proposes adding two new model tests next quarter. What does the rubric imply about that plan?",
+            "choices": [
+              "It raises the overall score, because every added test increases the composite total",
+              "It yields no gain in overall production readiness, because the composite score is the minimum category and monitoring bounds it at 1",
+              "It is the right priority, because model tests catch the largest share of production failures",
+              "It lowers the overall score, because an unbalanced rubric penalizes over-investment in one category"
+            ],
+            "answer": "The correct answer is B. It yields no gain in overall production readiness, because the composite score is the minimum category and monitoring bounds it at 1. The ML Test Score takes the minimum across data, model, infrastructure, and monitoring, reflecting that an unmonitored serving path can deliver corrupted predictions regardless of offline test coverage. The model category is already saturated at 7 in any case, and effort should go to the bottleneck category.",
+            "learning_objective": "Use the min-bounded ML Test Score to direct reliability investment toward the weakest category"
           }
         ]
       }
