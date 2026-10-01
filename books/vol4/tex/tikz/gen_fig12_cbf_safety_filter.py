@@ -98,8 +98,9 @@ cx = np.linspace(-0.3, 5.2, 100)
 cy = (5 - cx) / 2
 ax.plot(cx, cy, color=ethdarkblue, linewidth=2.0, zorder=2)
 
-# Label for constraint — on upper portion of line, clear of vectors
-ax.text(0.7, 2.5, r"$a^\top u = b$", fontsize=9, fontweight="bold",
+# Label for constraint — on upper portion of line, clear of vectors.
+# Regular weight so only the vectors a_cbf and u read bold; b_cbf is a scalar.
+ax.text(0.7, 2.5, r"$\mathbf{a}_{\mathrm{cbf}}^\top \mathbf{u} = b_{\mathrm{cbf}}$", fontsize=9.5,
         color=ethdarkblue, rotation=-27, ha="center", va="bottom")
 
 # Axes arrows
