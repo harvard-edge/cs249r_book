@@ -43,7 +43,7 @@ Module 13 exports this model as `GPT`, with `TinyGPT` retained as an alias; the 
 
 ---
 
-\newpage
+
 
 ## The Problem
 
@@ -63,7 +63,7 @@ The second problem is depth. In a simplified stack whose layers each multiply th
 Consider a deep network of $N = 24$ layers without residual connections: $x_{l+1} = f_l(x_l)$. Its end-to-end gradient expands via the chain rule as a product of 24 Jacobians: $\frac{\partial x_{24}}{\partial x_0} = \prod_{l=0}^{23} J_l$. If the average singular value of each Jacobian is $0.9$, what is the gradient magnitude reaching the first layer? What happens when we add residual skip connections $x_{l+1} = x_l + f_l(x_l)$ so each term becomes $(I + J_l)$?
 :::
 
-\newpage
+
 
 ::: {#lst-transformer-depth-experiment lst-pos="htb" lst-cap="**Replacement and residual updates**: A seeded linear experiment contrasts multiplying a signal with adding an update computed from normalized inputs."}
 ```python
@@ -113,7 +113,7 @@ The seeded experiment ends with an RMS of 83.96 for `plain`, about 76 times its 
 
 ### The residual stream
 
-A **residual connection** passes a layer's input around the layer and adds it to the layer's output:
+Originally introduced in deep vision models like ResNet, residual skip connections form the uninterrupted central communication backbone of modern Transformer architectures like GPT and LLaMA. By providing an identity shortcut alongside each learned transformation, residual connections ensure that gradients can propagate backward through hundreds of layers without vanishing. A **residual connection** passes a layer's input around the layer and adds it to the layer's output:
 
 $$x_{l+1} = x_l + f_l(x_l)$$
 
@@ -136,7 +136,7 @@ A useful picture is to think of the residual path as a **stream**, a $D$-dimensi
 
 ### Layer normalization
 
-Residual additions preserve a direct route through the stack, but they do not bound its scale. Each sub-layer still benefits from inputs at a known scale, for the same reason the initialization in @sec-layers scales each weight matrix. **Layer normalization** standardizes each token's vector across its $D$ features. For one token with features $x_1, \dots, x_D$,
+While batch normalization dominates convolutional computer vision, sequence models like Transformers rely on LayerNorm to stabilize activation dynamics independently of batch size. Because it standardizes statistics across feature channels for each token in isolation, it eliminates inter-sample batch dependencies and preserves autoregressive causality. Residual additions preserve a direct route through the stack, but they do not bound its scale. Each sub-layer still benefits from inputs at a known scale, for the same reason the initialization in @sec-layers scales each weight matrix. **Layer normalization** standardizes each token's vector across its $D$ features. For one token with features $x_1, \dots, x_D$,
 
 $$\mu = \frac{1}{D} \sum_{i=1}^{D} x_i, \qquad \sigma^2 = \frac{1}{D} \sum_{i=1}^{D} (x_i - \mu)^2$$
 
@@ -146,7 +146,7 @@ where $\mu$ and $\sigma^2$ are the mean and variance of that one token's feature
 
 ### Where the normalization goes
 
-The [original transformer](https://arxiv.org/abs/1706.03762) normalized the stream itself after each addition, an arrangement now called **Post-LN**:
+Modern generative language models (including GPT-2, GPT-3, and LLaMA) departed from the original Transformer specification by shifting the placement of normalization layers. Relocating normalization from the residual path to the sub-layer inputs (Pre-LN) creates a pristine identity gradient highway, eliminating the need for delicate learning-rate warmup schedules and enabling stable scaling to hundreds of layers. The [original transformer](https://arxiv.org/abs/1706.03762) normalized the stream itself after each addition, an arrangement now called **Post-LN**:
 
 $$x_{l+1} = \text{LN}(x_l + f_l(x_l))$$
 
@@ -156,13 +156,13 @@ $$x_{l+1} = x_l + f_l(\text{LN}(x_l))$$
 
 In Post-LN, each residual addition feeds a normalization, so even the direct route through a block includes normalization derivatives. A stack of $N$ blocks has two such normalizations per block. In Pre-LN, each branch computes a normalized version of its input while the bypass carries the unnormalized stream to the addition. Only the final LayerNorm, just before the vocabulary projection, normalizes the stream leaving the stack. The reference listings use this Pre-LN arrangement.
 
-::: {#chk-transformers-pre-ln-stability .callout-checkpoint title="Checkpoint: Pre-LN gradient highways vs Post-LN vanishing gradients"}
+::: {#chk-transformers-pre-ln-stability .callout-checkpoint title="Checkpoint: Pre-LN gradient highways vs. Post-LN vanishing gradients"}
 Why did many decoder models move from the original Post-LN arrangement (Vaswani et al.) to Pre-LN (GPT-2, LLaMA, TinyGPT)? In Post-LN ($x_{l+1} = \text{LN}(x_l + f_l(x_l))$), the residual connection passes *through* the normalization layer. Computing the gradient requires chaining through $\text{LN}'$ at every single block. For deep networks ($N \ge 24$), this degrades gradient magnitudes, requiring delicate learning rate warmup schedules to prevent divergence. In Pre-LN ($x_{l+1} = x_l + f_l(\text{LN}(x_l))$), the residual bypass is an uninterrupted identity path $I + J_l$, allowing backpropagation gradients to flow from the loss directly to early token embeddings without passing through a normalization derivative on the bypass.
 :::
 
 ### The MLP
 
-The second sub-layer supplies the per-token feature transformation missing from attention alone. The **MLP** (multi-layer perceptron, the transformer literature's name for a two-layer feed-forward network) widens each token's vector from $D$ to $4D$, applies GELU from @sec-activations, and projects back to $D$:[^fn-mlp-4d-expansion]
+In all Transformer architectures, multi-head attention acts purely as a routing mechanism that re-mixes existing features across sequence positions. To synthesize new representations and store associative knowledge, every block pairs attention with a position-wise Feed-Forward Network (MLP) that transforms features along the channel dimension. The second sub-layer supplies the per-token feature transformation missing from attention alone. The **MLP** (multi-layer perceptron, the transformer literature's name for a two-layer feed-forward network) widens each token's vector from $D$ to $4D$, applies GELU from @sec-activations, and projects back to $D$:[^fn-mlp-4d-expansion]
 
 [^fn-mlp-4d-expansion]: The $4\times$ hidden expansion ($d_{\text{ff}} = 4D$) originated in Vaswani et al. (2017) as an empirical heuristic balancing non-linear representation capacity against parameter budget. It allocates $2 \times D \times 4D = 8D^2$ weights to the feed-forward network, exactly double the $4D^2$ projection weights of Multi-Head Attention. Modern architectures using 3-matrix gated activations like SwiGLU (e.g. LLaMA) scale the expansion to approximately $\frac{8}{3}D$ so that $3 \times D \times \frac{8}{3}D = 8D^2$, maintaining the exact same parameter and FLOP allocation.
 
@@ -171,15 +171,15 @@ $$\text{MLP}(x) = \text{GELU}(x W_1 + b_1)\, W_2 + b_2, \qquad W_1 \in \mathbb{R
 
 Here $x$ is one token's row vector, as in the attention projection $q_t = x_t W_q$. The same $W_1, W_2$ apply to every position, and no position sees any other. The division of labor inside a block is therefore clean. Attention decides which tokens' information to gather; the MLP decides what to do with what was gathered, one token at a time. The feed-forward sub-layer has the same linear-activation-linear shape as the perceptron built in [Synthesis I](synthesis_01.qmd#sec-milestone-1) and @sec-layers, here with GELU and a 4D hidden width, applied independently to every token.
 
+### Assembling the model
+
 ::: {.column-margin}
 ![](assets/images/diagrams/13_transformers-margin-mlp-expansion.svg){width="100%" fig-alt="Architecture card showing MLP 4x channel expansion from D to 4D with GELU activation and contraction back to D, allocating 8D squared weights."}
 
 *MLP Channel Expansion: Position-wise feedforward network widens features from D to 4D for non-linear separation before returning to stream dimension D.*
 :::
 
-### Assembling the model
-
-With the block defined, the whole model is a short list. Tokens $t_1, \dots, t_S$ enter as embedding rows plus position vectors from @sec-embeddings, pass through $N$ blocks, get normalized once more, and project onto the vocabulary:
+By stacking identical Transformer blocks and terminating with a vocabulary projection head, decoder architectures like GPT-2 and LLaMA construct unified generative language models. This end-to-end composition processes raw token sequences through continuous residual representations to predict next-token probability distributions across the entire vocabulary. With the block defined, the whole model is a short list. Tokens $t_1, \dots, t_S$ enter as embedding rows plus position vectors from @sec-embeddings, pass through $N$ blocks, get normalized once more, and project onto the vocabulary:
 
 $$
 \begin{aligned}
@@ -329,7 +329,7 @@ A full GPT adds embeddings and vocabulary scores around that block mechanism. Th
 
 : **Shape boundaries in GPT**: A two-block model preserves stream width until its final vocabulary projection. {#tbl-tinygpt-shapes tbl-colwidths="[36,34,30]"}
 
-The full model must preserve causality across every block. In @lst-transformer-gpt-contract, line 8 initializes `model = GPT(vocab_size=16, embed_dim=8, num_layers=2, num_heads=2, max_seq_len=8)` and line 9 feeds a three-token sequence `[[3, 7, 1]]`. Line 10 confirms output shape `(1, 3, 16)`, and line 11 verifies the exact parameter count of 2,080. In lines 14 to 15, appending token 5 to form sequence `[[3, 7, 1, 5]]` verifies prefix invariance: `assert np.allclose(logits.data, longer.data[:, :3])` passes, proving future tokens cannot leak backward across either block. In lines 18 to 25, a next-token cross-entropy loss at the final sequence position backpropagates through the entire depth of both blocks; lines 20 to 25 confirm that token embeddings and the active position vectors (indices 0 to 2) receive non-zero gradients, while unvisited position slots (index 3+) remain strictly zero.
+The full model must preserve causality across every block. In @lst-transformer-gpt-contract, line 8 initializes `model = GPT(vocab_size=16, embed_dim=8, num_layers=2, num_heads=2, max_seq_len=8)` and line 9 feeds a three-token sequence `[[3, 7, 1]]`. Line 10 confirms output shape `(1, 3, 16)`, and line 11 verifies the exact parameter count of 2,080. In lines 14 to 15, appending token 5 to form sequence `[[3, 7, 1, 5]]` verifies prefix invariance: `assert np.allclose(logits.data, longer.data[:, :3])` passes, proving future tokens cannot leak backward across either block. In lines 18 to 25, a next-token cross-entropy loss at the final sequence position backpropagates through the entire depth of both blocks; lines 20 to 25 confirm that token embeddings and the active position vectors (indices 0 to 2) receive nonzero gradients, while unvisited position slots (index 3+) remain strictly zero.
 
 ::: {#lst-transformer-gpt-contract lst-pos="H" lst-cap="**Checking the GPT contract**: Appending a suffix preserves prefix logits, and a last-position loss reaches token and positional embeddings."}
 ```python
@@ -387,9 +387,6 @@ The [Llama 2 reference](https://github.com/meta-llama/llama/blob/main/llama/mode
 
 [^fn-swiglu-mlp-gate]: **SwiGLU**: an MLP whose hidden layer multiplies two linear projections elementwise, with one passed through the Swish activation. The gate lets one projection control the contribution of the other. Using three matrices rather than two changes the parameter count, so a narrower hidden layer can offset that extra matrix.
 
-```{=latex}
-\newpage
-```
 
 | Design choice | Module 13 `GPT` | GPT-2 released code | Llama 2 reference |
 | :--- | :--- | :--- | :--- |
@@ -409,9 +406,6 @@ When a transformer exceeds the memory capacity of a single GPU, Megatron-LM spli
 
 Generation adds a separate cost. Module 13 appends one sampled token at a time, but each ordinary forward call recomputes the full prefix. The cache introduced in @sec-memoization will reuse earlier key and value projections; it will still need attention over the available prefix. That optimization changes retained state between calls, whereas the block traced here is a complete computation from its supplied sequence.
 
-```{=latex}
-\newpage
-```
 
 ## Summary
 

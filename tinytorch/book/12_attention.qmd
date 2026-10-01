@@ -73,7 +73,7 @@ Let query vector $q \in \mathbb{R}^{d_k}$ and key vector $k \in \mathbb{R}^{d_k}
 
 ### Queries, keys, and values
 
-Before introducing three new names, consider one row choosing between two sources. Let its selection vector be $[0,2]$ and the sources advertise $[1,1]$ and $[1,0]$. The dot products are $2$ and $0$, so the first source is preferred. Dividing by $\sqrt{2}$ and applying softmax gives weights of approximately $[0.8044,0.1956]$. If the sources carry $[2,1]$ and $[0,3]$, the retrieved mixture is $[1.6089,1.3911]$. The vectors used to choose a source and the content retrieved from it have different jobs.
+Modern sequence and vision architectures (such as GPT-4, LLaMA, and Vision Transformers) discard static receptive fields in favor of dynamic, content-dependent information routing. By decoupling a token's match criteria from its transmitted payload through distinct query, key, and value representations, attention mechanisms transform fixed sequences into dynamic routing graphs. Before introducing three new names, consider one row choosing between two sources. Let its selection vector be $[0,2]$ and the sources advertise $[1,1]$ and $[1,0]$. The dot products are $2$ and $0$, so the first source is preferred. Dividing by $\sqrt{2}$ and applying softmax gives weights of approximately $[0.8044,0.1956]$. If the sources carry $[2,1]$ and $[0,3]$, the retrieved mixture is $[1.6089,1.3911]$. The vectors used to choose a source and the content retrieved from it have different jobs.
 
 The selection vector is the **query**, each advertisement is a **key**, and the retrieved content is a **value**. Attention is a lookup in which every token can play all three roles. From each token's row $x_t$ we compute three vectors with three learned weight matrices; the projections also include biases, omitted here to keep the notation short:
 
@@ -97,11 +97,11 @@ where $V$ is the $S \times d_v$ matrix of values and $M$ is a mathematical mask 
 *Variance scaling preserves unit variance for any head width, preventing softmax logits from saturating into near-zero gradients.*
 :::
 
-Suppose the entries of $q$ and $k$ are independent with mean zero and variance one. Their dot product is a sum of $d_k$ products, each with mean zero and variance one, so by the same variance argument @sec-layers made for a layer's fan-in ($1/\sqrt{D_{\text{in}}}$), the sum has variance $d_k$ and standard deviation $\sqrt{d_k}$. The spread of the scores grows with the width of the head, and a softmax fed scores spread too far apart collapses toward a nearly one-hot vector with very small derivatives. Dividing every score by $\sqrt{d_k}$ divides the variance by $d_k$ and restores unit variance whatever the head width. The numbers for what goes wrong without it are beside the line of code that does the division.
+In deep Transformer architectures with wide attention heads (such as $d_k = 64$ or $128$), unscaled inner products cause dot-product magnitudes to grow aggressively with projection dimension. This variance explosion pushes downstream softmax activations into extreme saturation regions where gradients vanish, crippling model training. Suppose the entries of $q$ and $k$ are independent with mean zero and variance one. Their dot product is a sum of $d_k$ products, each with mean zero and variance one, so by the same variance argument @sec-layers made for a layer's fan-in ($1/\sqrt{D_{\text{in}}}$), the sum has variance $d_k$ and standard deviation $\sqrt{d_k}$. The spread of the scores grows with the width of the head, and a softmax fed scores spread too far apart collapses toward a nearly one-hot vector with very small derivatives. Dividing every score by $\sqrt{d_k}$ divides the variance by $d_k$ and restores unit variance whatever the head width. The numbers for what goes wrong without it are beside the line of code that does the division.
 
 ### Causal masking
 
-During generation the model predicts token $t+1$ from tokens $1$ through $t$. If it were allowed to read token $t+1$ while training, it would learn to copy rather than predict, and at generation time there would be nothing to copy. The rule is that query $i$ may attend to key $j$ only when $j \le i$, which the formula represents by adding a mask $M$ before softmax. The implementation instead replaces forbidden scores directly with negative infinity:
+Autoregressive generative models such as GPT and LLaMA rely on causal masking to train efficiently in parallel on full sequences without leaking future ground-truth tokens to earlier positions. By replacing future attention scores with negative infinity before the softmax normalization, frameworks enforce strict temporal causality entirely through vectorized matrix operations. During generation the model predicts token $t+1$ from tokens $1$ through $t$. If it were allowed to read token $t+1$ while training, it would learn to copy rather than predict, and at generation time there would be nothing to copy. The rule is that query $i$ may attend to key $j$ only when $j \le i$, which the formula represents by adding a mask $M$ before softmax. The implementation instead replaces forbidden scores directly with negative infinity:
 
 $$M_{i,j} = \begin{cases} 0 & j \le i \quad \text{(past and present, allowed)} \\ -\infty & j > i \quad \text{(future, forbidden)} \end{cases}$$
 
@@ -116,7 +116,7 @@ Because $e^{-\infty} = 0$, a masked position contributes nothing to the softmax 
 
 ### Several heads at once
 
-One attention pattern is one answer to "who looks at whom." A pronoun wants to find its noun; a verb wants its subject; a closing bracket wants its opening one. Multi-head attention runs $H$ of these patterns side by side. It splits the $D$ model dimensions into $H$ slices of width $d_k = D / H$, lets each head attend using only its slice of $Q$, $K$, and $V$, concatenates the $H$ outputs back into a $D$-wide row, and mixes them with one more learned matrix $W_o$. The model gets $H$ independent routing decisions per token instead of one, and the code section shows why the slicing, rather than $H$ full-width copies, is what makes that affordable.
+Production language and vision models rely on Multi-Head Attention to attend simultaneously to multiple distinct representation subspaces and relational patterns. By partitioning the embedding dimension into parallel heads rather than replicating full-width computations, the architecture enriches representational capacity without increasing computational FLOPs. One attention pattern is one answer to "who looks at whom." A pronoun wants to find its noun; a verb wants its subject; a closing bracket wants its opening one. Multi-head attention runs $H$ of these patterns side by side. It splits the $D$ model dimensions into $H$ slices of width $d_k = D / H$, lets each head attend using only its slice of $Q$, $K$, and $V$, concatenates the $H$ outputs back into a $D$-wide row, and mixes them with one more learned matrix $W_o$. The model gets $H$ independent routing decisions per token instead of one, and the code section shows why the slicing, rather than $H$ full-width copies, is what makes that affordable.
 
 In @fig-attention-engine, $B$ counts sequences in the batch, $H$ counts heads, $S$ counts tokens, and $d$ is the width of each head. Each batch item and head runs the same score-to-mixture path independently.
 
@@ -136,7 +136,7 @@ A caller enters through `MultiHeadAttention.forward(x, mask)` with shape `(B, S,
 
 ### The score matrix
 
-For the two-token example, $QK^T$ produces a $2 \times 2$ matrix. Entry `(i, j)` records how query `i` scores key `j`; row `i` therefore lists all the sources that output row `i` can read. At sequence length $S$, this becomes $S^2$ entries per head. A recurrent network[^fn-recurrent-network-serial] instead carries one state forward a token at a time. Its next state depends on the previous state, whereas attention scores for a supplied sequence can be computed together.
+In hardware-accelerated deep learning runtimes, the attention score matrix $QK^T$ materializes all-to-all sequence dependencies in a single high-throughput batched GEMM. This formulation eliminates the sequential latency bottleneck of recurrent models, allowing modern accelerators to evaluate pairwise token correlations entirely in parallel across context windows. For the two-token example, $QK^T$ produces a $2 \times 2$ matrix. Entry `(i, j)` records how query `i` scores key `j`; row `i` therefore lists all the sources that output row `i` can read. At sequence length $S$, this becomes $S^2$ entries per head. A recurrent network[^fn-recurrent-network-serial] instead carries one state forward a token at a time. Its next state depends on the previous state, whereas attention scores for a supplied sequence can be computed together.
 
 Nested Python loops could compute the same dot products, but a matrix product states the complete operation in one call. This lets NumPy use its matrix-multiplication implementation and avoids a Python call for every scalar product. TinyTorch still performs all the score arithmetic; expressing it as a matrix operation changes how the work is executed.
 
@@ -180,9 +180,6 @@ The variance argument predicts a score standard deviation of $8$ when $d_k=64$. 
 
 {{< include _listings/12_attention/scale_scores.qmd >}}
 
-```{=latex}
-\newpage
-```
 
 {{< include _listings/12_attention/sdpa.qmd >}}
 
@@ -202,6 +199,12 @@ The constructor requires positive integer dimensions and rejects an `embed_dim` 
 
 ### The heads
 
+::: {.column-margin}
+![](assets/images/diagrams/12_attention-margin-origami.svg){width="100%" fig-alt="Head split coordinate origami margin card illustrating tensor reshape from (B, S, D) to (B, S, H, d_k), axis transposition to (B, H, S, d_k) for batched 2D GEMM, and head merging back to (B, S, D)."}
+
+*Coordinate origami swaps head and sequence dimensions to place independent 2D matrix planes into the batch grid for hardware GEMM execution.*
+:::
+
 The Idea said a pronoun, a verb, and a closing bracket each want a different routing pattern, and a width-$768$ layer can provide twelve such patterns. The naive way to get twelve patterns is twelve full-width attention layers side by side, each with its own four $768 \times 768$ matrices. That is 28.3 million weights per layer instead of 2.36 million, and twelve times the score arithmetic, $12 \times S^2 \times D$ multiply-adds. The mechanism that makes twelve heads cost what one head costs is the slice. Project once at full width, cut each of $Q$, $K$, and $V$ into twelve strips of 64 columns, run attention on each strip, and concatenate. The score work is $H \times S^2 \times d_k = S^2 \times D$, the same as a single head, and each head uses a distinct output-column slice of the projection matrices.
 
 {{< include _listings/12_attention/MHA_split_heads.qmd >}}
@@ -213,12 +216,6 @@ The Idea said a pronoun, a verb, and a closing bracket each want a different rou
 The projections run once at full width. `_split_heads` reshapes `(B, S, D)` to `(B, S, H, d_k)` and swaps the middle axes, so the attention function receives `(B, H, S, d_k)`. There is no Python loop over heads. A supplied three-dimensional mask `(B, S, S)` becomes `(B, 1, S, S)` and broadcasts across heads; a shared `(S, S)` mask can broadcast directly. The constructor's divisibility check ensures that every feature belongs to exactly one head.
 
 After attention, `_merge_heads` reverses the axis swap and combines the head and feature axes. The output projection then mixes information across heads and returns `(B, S, D)`. Split and merge preserve the association between a token and its features, but each `reshape` and `transpose` returns a tensor with its own storage in TinyTorch. Forward creates these temporary activations without changing the input or the four projection layers.
-
-::: {.column-margin}
-![](assets/images/diagrams/12_attention-margin-origami.svg){width="100%" fig-alt="Head split coordinate origami margin card illustrating tensor reshape from (B, S, D) to (B, S, H, d_k), axis transposition to (B, H, S, d_k) for batched 2D GEMM, and head merging back to (B, S, D)."}
-
-*Coordinate origami swaps head and sequence dimensions to place independent 2D matrix planes into the batch grid for hardware GEMM execution.*
-:::
 
 ![**Multi-head coordinate origami**: Slicing the full hidden embedding $(B, S, D)$ into $(B, H, S, d_k)$ via reshape and transposition isolates head subspaces into independent 2D planes, enabling hardware parallel matrix multiplication across all heads in a single batch call.](assets/images/diagrams/12_head-split-origami.svg){#fig-head-split-origami width="100%" fig-alt="Diagram of coordinate origami: (B, Seq, D_model) reshapes and transposes to Head 0 and Head 1 subspaces, enabling batched Q @ K.T matrix multiplication."}
 
@@ -324,7 +321,7 @@ These counts exclude parameters, gradients, other activations, and intermediate 
 [FlashAttention](https://arxiv.org/abs/2205.14135) changes how attention uses memory. It partitions the calculation into blocks that fit in small, fast on-chip storage, reducing transfers to and from the GPU's larger main memory. For each query it maintains a running maximum and normalization sum, allowing later key blocks to join the same softmax calculation. The output can therefore be accumulated without storing a complete $S \times S$ score matrix. This is exact attention in its mathematical formulation, with possible floating-point differences from a different evaluation order. Tiling reduces intermediate storage and memory traffic; dense attention still scores all allowed query-key pairs.
 
 ::: {#psp-attention-flashattention-tiling .callout-perspective title="Production Bridge: FlashAttention SRAM tiling and online softmax"}
-In modern GPU architectures, bandwidth to high-bandwidth memory (HBM) is several times lower than to on-chip SRAM (the FlashAttention paper cites about 1.5 to 2.0 TB/s HBM versus about 19 TB/s SRAM on an NVIDIA A100). Standard attention materializes the $S \times S$ score matrix in HBM, reads it back for softmax, writes the probabilities to HBM, and reads them again to multiply by $V$. FlashAttention tiles $Q$, $K$, and $V$ into small SRAM blocks, computes attention using the online softmax algorithm (tracking running max $m_i$ and normalizer $\ell_i$), and accumulates output vectors entirely within SRAM registers without ever writing the quadratic intermediate matrix to DRAM (as profiled in @sec-profiling and accelerated via tiled loops in @sec-acceleration, with an end-to-end blueprint developed in @sec-extensions).
+In modern GPU architectures, bandwidth to high-bandwidth memory (HBM) is several times lower than to on-chip SRAM (the FlashAttention paper cites about 1.5 to 2.0 TB/s HBM vs. about 19 TB/s SRAM on an NVIDIA A100). Standard attention materializes the $S \times S$ score matrix in HBM, reads it back for softmax, writes the probabilities to HBM, and reads them again to multiply by $V$. FlashAttention tiles $Q$, $K$, and $V$ into small SRAM blocks, computes attention using the online softmax algorithm (tracking running max $m_i$ and normalizer $\ell_i$), and accumulates output vectors entirely within SRAM registers without ever writing the quadratic intermediate matrix to DRAM (as profiled in @sec-profiling and accelerated via tiled loops in @sec-acceleration, with an end-to-end blueprint developed in @sec-extensions).
 :::
 
 The [PyTorch scaled-dot-product attention interface](https://docs.pytorch.org/docs/stable/generated/torch.nn.functional.scaled_dot_product_attention.html) can select optimized or math implementations according to the input and available backends. Its boolean mask uses `True` for allowed entries, while a floating-point mask is an additive score bias. TinyTorch instead accepts only a binary allow-mask even though its Tensor storage is float32. PyTorch's function also returns only the mixed output; TinyTorch returns `(output, weights)` to make the mechanism inspectable. These interface differences matter when translating a test. A production causal option specifies the connectivity without requiring the caller to construct a square mask, but it does not by itself guarantee a particular backend.
@@ -348,9 +345,6 @@ Standard Multi-Head Attention (MHA) pairs each query head with its own dedicated
 :::
 
 
-```{=latex}
-\newpage
-```
 
 ## Summary
 
