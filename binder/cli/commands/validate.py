@@ -800,6 +800,10 @@ class ValidateCommand:
         "notation": [
             Scope("consistency", "_run_notation_consistency",
                   note="iron-law symbols (BW, R_peak, L_lat, D_vol)"),
+            Scope("registry", "_run_notation_registry",
+                  note="the notation files themselves: no extension redefines a core symbol, no file defines a symbol two ways"),
+            Scope("forms", "_run_notation_forms", default=False,
+                  note="banned notation forms inside math (\\mathrm subscripts, P(.) probability, bare O(.) big-O, ^\\top, raw thousands commas); default=False until vol2-4 are clean"),
             Scope("vol1-print-pin", "_run_notation_vol1_pin",
                   note="Volume I is in print: its assembled notation text must match the pinned hash; re-pin only as an errata decision"),
         ],
@@ -12497,6 +12501,142 @@ class ValidateCommand:
             elapsed_ms=int((time.time() - t0) * 1000),
         )
 
+    def _run_notation_registry(self, root: Path) -> ValidationRunResult:
+        """Check the series notation files against each other (added 2026-10-01).
+
+        Parses every symbol row of the series core (head + tail) and the four
+        volume extensions. Errors: a volume extension defines a core symbol with
+        a different meaning (unless its row says it is "the core's" quantity), or
+        one file defines a symbol two different ways. Tables in a section whose
+        heading says "(local)" declare chapter-scoped meanings and are skipped.
+        Letters outside the core may mean different things in different volumes
+        (rule D2 in notations.md), so cross-volume reuse is not an error.
+        """
+        t0 = time.time()
+        books = next((p for p in [root, *root.parents] if p.name == "books" and (p / "vol1").is_dir()),
+                     root / "books")
+        files = {
+            "core": [books / "shared/_partials/_notation_core_head.qmd", books / "shared/_partials/_notation_core_tail.qmd"],
+            "vol1": [books / "vol1/frontmatter/_notation_degradation.qmd"],
+            "vol2": [books / "vol2/frontmatter/_notation_scaling.qmd"],
+            "vol3": [books / "vol3/frontmatter/_notation_agentic.qmd"],
+            "vol4": [books / "vol4/frontmatter/_notation_physical.qmd"],
+        }
+
+        def norm(s: str) -> str:
+            return re.sub(r"\\s+", " ", re.sub(r"[*$]", "", s.lower())).strip()
+
+        defs: Dict[str, Dict[str, list]] = defaultdict(lambda: defaultdict(list))
+        for owner, paths in files.items():
+            for path in paths:
+                section, header = "", None
+                for lineno, ln in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
+                    if ln.startswith("#"):
+                        section, header = ln, None
+                        continue
+                    if not ln.startswith("|"):
+                        if ln.strip():
+                            header = None
+                        continue
+                    cells = [c.strip() for c in ln.strip().strip("|").split("|")]
+                    if re.match(r"^:?-+", cells[0]):
+                        continue
+                    if header is None:
+                        header = [norm(c) for c in cells]
+                        continue
+                    if "definition" not in header or "(local)" in section.lower():
+                        continue
+                    rec = dict(zip(header, cells))
+                    meaning = norm(rec.get("definition", ""))
+                    if not meaning or meaning.startswith(("expiry ", "t_")):
+                        continue
+                    for sym in re.findall(r"\$([^$]+)\$", rec.get("symbol", cells[0])):
+                        defs[re.sub(r"\s+", "", sym)][owner].append((meaning, str(path.relative_to(books.parent)), lineno, ln))
+
+        issues: List[ValidationIssue] = []
+        for sym, owners in sorted(defs.items()):
+            for owner, entries in owners.items():
+                meanings = {m for m, *_ in entries}
+                if len(meanings) > 1:
+                    _, f, line, _ = entries[-1]
+                    issues.append(ValidationIssue(
+                        file=f, line=line, code="notation-registry-duplicate",
+                        message=f"${sym}$ is defined {len(meanings)} ways in one file: " + " | ".join(sorted(meanings)),
+                        severity="error"))
+            if "core" in owners:
+                core_meanings = {m for m, *_ in owners["core"]}
+                for owner, entries in owners.items():
+                    if owner == "core":
+                        continue
+                    for meaning, f, line, row in entries:
+                        if meaning not in core_meanings and "core's" not in row:
+                            issues.append(ValidationIssue(
+                                file=f, line=line, code="notation-registry-core-redefined",
+                                message=f"${sym}$ is a core symbol ({' | '.join(sorted(core_meanings))}); {owner} redefines it as '{meaning}'",
+                                severity="error",
+                                suggestion="Use the core meaning, choose a non-core symbol, or state in the row that it is the core's quantity."))
+        return ValidationRunResult(
+            name="notation-registry",
+            description="Series notation files are mutually consistent",
+            files_checked=sum(len(p) for p in files.values()),
+            issues=issues,
+            elapsed_ms=int((time.time() - t0) * 1000),
+        )
+
+    def _run_notation_forms(self, root: Path) -> ValidationRunResult:
+        """Flag notation forms the Notation chapter rules out, inside math spans.
+
+        Settled in the 2026-10-01 notation pass (see .claude/rules/notations.md):
+        subscripts use \\text{} (not \\mathrm/\\rm), event probabilities use \\Pr
+        and distributions lowercase p, big-O is \\mathcal{O}, transpose is ^T, and
+        grouped digits inside math use {,}. Skips Python cells, inline
+        `{python}` references, TikZ blocks, and the notation files themselves
+        (matplotlib labels inside Python cells legitimately use \\mathrm).
+        """
+        t0 = time.time()
+        books = next((p for p in [root, *root.parents] if p.name == "books" and (p / "vol1").is_dir()),
+                     root / "books")
+        rules = [
+            ("mathrm-subscript", re.compile(r"_\{?\s*(?:\\mathrm\{|\\rm\s)"),
+             "subscript uses \\mathrm/\\rm; write \\text{...}"),
+            ("capital-P-probability", re.compile(r"(?<![A-Za-z\\_{])P\((?!t\))"),
+             "probability written P(...); use \\Pr(...) for events or p(...) for distributions"),
+            ("bare-big-O", re.compile(r"(?<![A-Za-z\\_{}])O\((?=\s*(?:1|n|N|S|d|\\log|log|k|m|B|P|D)\b)"),
+             "asymptotic order written O(...); use \\mathcal{O}(...)"),
+            ("transpose-top", re.compile(r"\^\{?\s*\\(?:top|mathsf\{T\})"),
+             "transpose written ^\\top or ^{\\mathsf T}; use ^T"),
+            ("math-thousands-comma", re.compile(r"(?<![\d{])\d{1,3},\d{3}(?!\d)"),
+             "raw comma inside math renders as '4, 096'; write 4{,}096"),
+        ]
+        issues: List[ValidationIssue] = []
+        files = 0
+        for qmd in sorted(books.glob("vol*/**/*.qmd")):
+            if "/frontmatter/" in str(qmd) and ("_notation" in qmd.name or qmd.name == "notation.qmd"):
+                continue
+            files += 1
+            text = qmd.read_text(encoding="utf-8")
+            masked = re.sub(r"^```.*?^```", lambda m: "\n" * m.group(0).count("\n"), text, flags=re.S | re.M)
+            masked = re.sub(r"`\{python\}[^`]*`", "", masked)
+            for m in re.finditer(r"\$\$(.+?)\$\$|\$([^$\n]+?)\$", masked, flags=re.S):
+                span = m.group(1) or m.group(2)
+                line = masked.count("\n", 0, m.start()) + 1
+                for code, pat, msg in rules:
+                    # D9 (2026-10-01): transpose form is per volume; vol4 keeps ^\\top.
+                    if code == "transpose-top" and "/vol4/" in str(qmd):
+                        continue
+                    if pat.search(span):
+                        issues.append(ValidationIssue(
+                            file=str(qmd.relative_to(books.parent)), line=line,
+                            code=f"notation-{code}", message=msg, severity="error",
+                            context=span.strip()[:160],
+                        ))
+        return ValidationRunResult(
+            name="notation-forms",
+            description="Banned notation forms inside math (Notation chapter rules)",
+            files_checked=files, issues=issues,
+            elapsed_ms=int((time.time() - t0) * 1000),
+        )
+
     def _run_notation_vol1_pin(self, root: Path) -> ValidationRunResult:
         """Fail when Volume I's printed notation text changes without an errata decision.
 
@@ -12513,7 +12653,9 @@ class ValidateCommand:
         import hashlib
 
         t0 = time.time()
-        books = root if root.name == "books" else root / "books"
+        # Callers pass the repo root, books/, or books/volN; find books/ in any case.
+        books = next((p for p in [root, *root.parents] if p.name == "books" and (p / "vol1").is_dir()),
+                     root / "books")
         repo = books.parent
         wrapper = books / "vol1" / "frontmatter" / "notation.qmd"
         pin_path = repo / "binder" / "tools" / "audit" / "data" / "vol1_notation_pin.json"
