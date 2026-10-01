@@ -1,9 +1,27 @@
-# Lab 6: Action Horizons, Language & Disturbances
+# Lab 5: Stress-Testing — Prediction, Language & Recovery
 
-**Schedule:** Week 9 | **Part:** [Part III: Running the Machine](module-3-running-the-machine.md)
-**Required Textbook Reading:** [Chapter 10: Grounded Intent](../../../books/vol4/10_intent/10_intent.qmd) & [Chapter 12: Safety Enforcement](../../../books/vol4/12_enforcement/12_enforcement.qmd)
+**Schedule:** Week 9 · Milestone 3 due end of week
+**Required Textbook Reading:** [Chapter 10: Grounded Intent](../../../books/vol4/10_intent/10_intent.qmd), [Chapter 11: Trajectory Planning](../../../books/vol4/11_planning/11_planning.qmd)
 **Target Competencies:** `[ ] C2 Temporal Horizons & Action Dynamics`, `[ ] C3 Disturbance Recovery & Replanning`
-**Milestone Alignment:** Concludes [Milestone 3](../curriculum/syllabus.md#sec-milestones) (End of Week 9)
+---
+
+## Overview
+
+### Purpose
+Your fine-tuned VLA can reach targets autonomously — but can it handle the unexpected? The real world doesn't hold still while your model thinks. This lab stress-tests your system along three axes: how far ahead the model can predict before physical drift accumulates (action horizons), whether language can redirect physical behavior (language conditioning), and what happens when the environment changes mid-action (disturbance recovery). This is where you learn the difference between a demo that works once and a system that works reliably.
+
+### Prerequisites
+**Lab 4 completed.** You need a fine-tuned VLA running in an untethered autonomous S·P·A loop on the UNO Q with ≥ 7/10 reach success rate and verified end-to-end latency ≤ 80 ms.
+
+### Learning Outcomes
+By the end of this lab, you will be able to:
+- Benchmark how action chunk horizon length (K) affects manipulation success rate, motion smoothness, and recovery ability
+- Demonstrate that natural language prompts can produce measurably different physical trajectories on the same scene
+- Evaluate closed-loop disturbance recovery by measuring whether the VLA replans or drifts when the target is displaced mid-reach
+- Quantify the tradeoff between open-loop prediction efficiency and closed-loop adaptation
+
+### What You Will Do
+In one week, you will run systematic experiments across three dimensions. First, you will benchmark four action chunk horizons (K = 1, 8, 16, 32) with matched trials. Second, you will test SmolVLA's language conditioning by giving contrasting prompts ("pick up the red block" vs. "pick up the blue block") and measuring the resulting trajectory divergence. Third, you will physically shift the target object 50 mm mid-reach and evaluate whether the VLA replans toward the new location or completes its original trajectory into empty space.
 
 ---
 
@@ -14,11 +32,8 @@ How far into the future can an embodied model predict open-loop actions before p
 
 ### 2. Hardware Setup
 
-| Component | Station Function | Technical Role | Visual Reference |
-|:---|:---|:---|:---:|
-| **Seeed SO-101 Arm** | Physical manipulation follower arm | Executes variable action chunk horizons ($K \in \{1, 8, 16, 32\}$) | <img src="../assets/images/so101-follower.png" alt="SO-101 Arm" style="max-height: 115px; max-width: 140px; object-fit: contain; display: block; margin: auto;" /> |
-| **Arduino UNO Q Board** | Edge VLA runtime engine | Runs SmolVLA/ACT inference and dynamic chunk replanning | <img src="../assets/images/arduino-uno-q.jpg" alt="Arduino UNO Q" style="max-height: 115px; max-width: 140px; object-fit: contain; display: block; margin: auto;" /> |
-| **Logitech C270 Webcam** | Live optical feedback | Provides continuous 30 FPS observation frames for disturbance detection | <img src="../assets/images/logitech-c270-webcam.png" alt="Webcam" style="max-height: 115px; max-width: 140px; object-fit: contain; display: block; margin: auto;" /> |
+> **Hardware Setup:** See the [Station Reference Card](station-reference.md) for the standard bench configuration.
+
 
 1. **Edge Board:** Arduino UNO Q running the closed-loop runtime pipeline.
 2. **Robot Station:** Seeed SO-101 arm and overhead USB webcam.
