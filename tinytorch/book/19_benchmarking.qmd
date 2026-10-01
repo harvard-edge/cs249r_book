@@ -50,7 +50,7 @@ This chapter builds TinyTorch's benchmarking suite, establishing the rigorous em
 *Training loop timing: early epoch steps include allocator initialization and worker process startup.*
 
 **↩ Jump back:** @sec-memoization
-*Benchmarking cached versus uncached autoregressive generation under strict warmup controls.*
+*Benchmarking cached vs. uncached autoregressive generation under strict warmup controls.*
 :::
 
 
@@ -101,24 +101,24 @@ Treating a latency measurement as a sample from a probability distribution requi
 
 ### Warmup
 
-For a sustained inference comparison, the distribution of interest is steady state, the cost once the model is loaded and running. An application concerned with startup must measure cold latency separately. Cold runs come from a different distribution, one that includes setup, and mixing the two corrupts every summary statistic. The fix is to run the model several times and discard those initial timings, so that the retained list is drawn purely from the steady-state distribution.[^fn-dvfs-thermal-soaking]
+Standard machine learning benchmarking suites, including MLPerf Inference and PyTorch's benchmark utilities, mandate dedicated warmup iterations before recording any performance metrics. Untimed warm iterations prime CPU instruction caches, trigger memory pool allocations, and settle processor dynamic frequency scaling (DVFS) so measurements reflect steady-state execution rather than one-time runtime overheads. For a sustained inference comparison, the distribution of interest is steady state, the cost once the model is loaded and running. An application concerned with startup must measure cold latency separately. Cold runs come from a different distribution, one that includes setup, and mixing the two corrupts every summary statistic. The fix is to run the model several times and discard those initial timings, so that the retained list is drawn purely from the steady-state distribution.[^fn-dvfs-thermal-soaking]
 
-[^fn-dvfs-thermal-soaking]: **DVFS and thermal settling**: Modern processors utilize Dynamic Voltage and Frequency Scaling (DVFS) to balance power and thermals. Under standard operating system balanced governors, processors boot from low idle frequencies (such as 800 MHz) and take tens of milliseconds to ramp to peak turbo clocks. Conversely, sustained execution heats the die and triggers thermal throttling that lowers clocks by 15% to 30%. Rigorous systems benchmarks lock hardware governors to performance mode and run continuous thermal-soak iterations prior to recording measurements.
+[^fn-dvfs-thermal-soaking]: **DVFS and thermal settling**: Modern processors use Dynamic Voltage and Frequency Scaling (DVFS) to balance power and thermals. Under standard operating system balanced governors, processors boot from low idle frequencies (such as 800 MHz) and take tens of milliseconds to ramp to peak turbo clocks. Conversely, sustained execution heats the die and triggers thermal throttling that lowers clocks by 15% to 30%. Rigorous systems benchmarks lock hardware governors to performance mode and run continuous thermal-soak iterations prior to recording measurements.
 
-\newpage
+
 
 ### Repetition and the shape of the distribution
+
+In production serving environments governed by strict Service Level Objectives (SLOs), performance is characterized by complete latency distributions rather than isolated average timings. Systems noise from operating system scheduling, memory allocator stalls, and shared bus contention produces a heavy right-skewed tail that single-number arithmetic means obscure. After warmup, run the model $N$ times and keep every timing $t_1, \dots, t_N$. Two summaries are familiar. The **mean** $\bar{t}$ is the sum divided by $N$, and the **standard deviation** $s$ measures how far a typical timing sits from the mean:
+
+$$\bar{t} = \frac{1}{N} \sum_{i=1}^N t_i, \qquad s = \sqrt{\frac{1}{N - 1} \sum_{i=1}^N (t_i - \bar{t})^2}$$
+
+The mean and standard deviation remain valid summaries of asymmetric data, but neither reveals directly where the slowest requests lie. Latency often has that asymmetry. Nothing can run faster than the floor, and occasional stalls push a few timings far above it, so the histogram has a sharp left edge and a long right tail. For such a distribution the useful summaries come from sorting.
 
 ::: {.column-margin}
 ![](assets/images/diagrams/19_benchmarking-margin-latency.svg){width="100%"}
 *Latency distribution anatomy: tail percentiles $P_{95}$ and $P_{99}$ capture system stalls that the mean obscures.*
 :::
-
-After warmup, run the model $N$ times and keep every timing $t_1, \dots, t_N$. Two summaries are familiar. The **mean** $\bar{t}$ is the sum divided by $N$, and the **standard deviation** $s$ measures how far a typical timing sits from the mean:
-
-$$\bar{t} = \frac{1}{N} \sum_{i=1}^N t_i, \qquad s = \sqrt{\frac{1}{N - 1} \sum_{i=1}^N (t_i - \bar{t})^2}$$
-
-The mean and standard deviation remain valid summaries of asymmetric data, but neither reveals directly where the slowest requests lie. Latency often has that asymmetry. Nothing can run faster than the floor, and occasional stalls push a few timings far above it, so the histogram has a sharp left edge and a long right tail. For such a distribution the useful summaries come from sorting.
 
 A **percentile** is a position in the sorted list. Sort the $N$ timings in ascending order, and the $p$-th percentile $P_p$ is the value at a fractional index $p$ percent of the way through that sorted list. Three percentiles carry most of the meaning:
 
@@ -133,7 +133,7 @@ When $p$ percent of the way through the list falls between two entries, TinyTorc
 
 ### How many runs
 
-A percentile is only as trustworthy as the number of samples behind it. $P_{99}$ describes an event that happens once per hundred runs, so twenty runs can easily miss that upper tail entirely. An interpolated percentile still exists, but provides little evidence about a rare event. The Napkin Math below turns that intuition into a concrete sample count.
+Rigorous benchmarking standards, such as those established by MLPerf, enforce minimum trial counts to ensure statistical confidence when characterizing high percentiles. Estimating tail metrics like $P_{99}$ or $P_{99.9}$ from too few iterations yields erratic results that fail to capture rare hardware and operating system hiccups. A percentile is only as trustworthy as the number of samples behind it. $P_{99}$ describes an event that happens once per hundred runs, so twenty runs can easily miss that upper tail entirely. An interpolated percentile still exists, but provides little evidence about a rare event. The Napkin Math below turns that intuition into a concrete sample count.
 
 ::: {#nbk-benchmarking-sample-size-tail-latencies .callout-notebook title="Napkin Math: Sample Size Requirements for P99 Tail Latency"}
 A run exceeds the true 99th percentile with probability $p = 0.01$. The chance that $N$ runs contain no such event is $(1 - p)^N$, so the chance of seeing at least one is $1 - (1 - p)^N$. Asking for a 95 percent chance of catching at least one tail event gives
@@ -147,7 +147,7 @@ Round up to **299 runs** to meet the inequality. This calculation concerns obser
 
 ### Throughput
 
-Latency is the cost of one request. **Throughput** is how many samples the model finishes per second, which is what matters when requests arrive in batches. Over the measured window it is total samples over total time, with $B$ the batch size and the timings in milliseconds:
+While interactive consumer applications demand low latency, production serving infrastructure and training pipelines optimize primarily for system throughput to maximize hardware utilization and operational economics. Benchmarking harnesses measure this dimension to understand how batching saturates memory bandwidth and matrix cores under sustained load. Latency is the cost of one request. **Throughput** is how many samples the model finishes per second, which is what matters when requests arrive in batches. Over the measured window it is total samples over total time, with $B$ the batch size and the timings in milliseconds:
 
 $$\text{Throughput} = \frac{N \cdot B}{\sum_{i=1}^N t_i} \times 1000 \quad \text{samples per second}$$
 
@@ -157,29 +157,29 @@ The formula is a special case of **Little's law**, which relates three averages 
 
 ### Fairness
 
-One more rule follows from the same model. A comparison is fair only when both sides are measured under the same conditions, which means the same input, the same machine, the same warmup and run counts, and the same statistic on each side. Comparing a median against a mean, or a warm run against a cold one, yields a ratio that reflects the measurement flaw rather than true model performance.
+In systems evaluation, valid comparative claims—such as benchmarking an optimized kernel against an unfused baseline—require strict isolation of experimental variables. Confounding factors like disparate batch dimensions, differing numerical precisions, or mismatched hardware frequency states invalidate empirical speedup ratios. One more rule follows from the same model. A comparison is fair only when both sides are measured under the same conditions, which means the same input, the same machine, the same warmup and run counts, and the same statistic on each side. Comparing a median against a mean, or a warm run against a cold one, yields a ratio that reflects the measurement flaw rather than true model performance.
 
-::: {.callout-tip title="Pause & Predict: The Mean vs Median Latency Trap"}
+::: {.callout-tip title="Pause & Predict: The Mean vs. Median Latency Trap"}
 Suppose you record 20 benchmark runs of a model forward pass. Exactly 19 iterations finish in 1.0 ms each, but iteration 14 experiences an operating system context switch and takes 21.0 ms. What is the mean latency across the 20 runs? What is the median ($P_{50}$)? If a client requires an SLA of $P_{99} \le 5.0\text{ ms}$, does this service pass or fail?
 :::
 
-\newpage
+
 
 ---
 
 ## The Code
-
-::: {.column-margin}
-![](assets/images/diagrams/19_bench-margin-source.svg){width="100%" fig-alt="Source code mapping card for Module 19 Benchmarking showing file path, exported package, and tested primitives."}
-
-*Source Code Mapping: Module 19 extracts benchmark timing harnesses, latency percentile metrics, and the classroom MLPerf-style check directly from the working repository.*
-:::
 
 Read the core path first: `Benchmark.run_latency_benchmark` produces a list of durations, and `BenchmarkResult` summarizes that list. Compare one unchanged baseline with one candidate before introducing multiple candidates or a statistical test. The module's suite combines several metrics and plots comparisons; it cannot repair mismatched workloads or establish statistical significance from a plot.
 
 The implementation consists of four modular components. A percentile function handles sorting and linear interpolation. `BenchmarkResult` holds every timing from one run and computes statistical summaries. `Benchmark` executes the warmup-then-measure loop. Finally, the `MLPerf` class evaluates result latencies alongside task accuracy to render a compliance verdict. The latency harness constructs a TinyTorch `Tensor` and passes it to the model's `forward` method. The MLPerf-style loop also accepts `predict` or an arbitrary callable, but every route must return predictions that the accuracy phase can interpret.
 
 ### Percentiles by hand
+
+::: {.column-margin}
+![](assets/images/diagrams/19_bench-margin-source.svg){width="100%" fig-alt="Source code mapping card for Module 19 Benchmarking showing file path, exported package, and tested primitives."}
+
+*Source Code Mapping: Module 19 extracts benchmark timing harnesses, latency percentile metrics, and the classroom MLPerf-style check directly from the working repository.*
+:::
 
 The median and tail comparisons in this chapter are positions in a sorted list. A bound on individual decode-step latency needs a percentile of those steps; a bound on the whole request instead needs whole-request timings. A report that the KV cache made the typical step faster needs $P_{50}$ before and after. So the first thing to understand is the function that reads those positions.
 
@@ -208,7 +208,7 @@ Notice that `pos` runs from 0 to `len(s) - 1`, so $P_0$ is the minimum and $P_{1
 ::: {.column-margin}
 ![](assets/images/diagrams/19_benchmarking-margin-confidence.svg){width="100%" fig-alt="Diagram contrasting confidence interval of the mean, which narrows with sample size, against tail percentile P95, which reflects request latency spread."}
 
-*Estimator uncertainty versus tail latency: increasing sample size N narrows the confidence interval of the mean ($1/\sqrt{N}$), but does not reduce the tail latency experienced by slow requests.*
+*Estimator uncertainty vs. tail latency: increasing sample size N narrows the confidence interval of the mean ($1/\sqrt{N}$), but does not reduce the tail latency experienced by slow requests.*
 :::
 
 `BenchmarkResult(name, values)` invokes `__post_init__`. That method rejects an empty list and stores the count, mean, sample standard deviation, median, and extrema. `percentile(p)` computes its answer on demand. Treat `values` as a finished record: the constructor retains the supplied list rather than copying it. Appending later would leave the stored mean and count unchanged while changing the next percentile result.
@@ -274,8 +274,6 @@ For scores `[[0.2, 0.8]]`, removing the singleton batch leaves `[0.2, 0.8]`; `ar
 
 Without supplied labels, the class draws synthetic labels from its seed and sets `synthetic_labels=True`. Such a run always has `compliant=False`, even if a small sample happens to exceed the accuracy threshold. Supplying labels enables the local decision, but cannot prove their provenance: the caller must supply independent ground truth. Here, as book code, are the two numerical bars on an already-validated `BenchmarkResult`, plus a relative comparison. These helpers assume finite measured values, positive latency denominators, and task accuracies in $[0,1]$; they do not validate a dataset or replace the module's input checks.
 
-{{< pagebreak >}}
-
 ```python
 def check_compliance(result, accuracy, max_latency_ms, min_accuracy):
     """A fast model that is wrong does not pass. Both bars, or neither. Book code."""
@@ -330,8 +328,6 @@ The protocol keeps runs 4 through 10, sorted: $[4.95, 5.05, 5.08, 5.10, 5.12, 5.
 - **$P_{99}$**: position $0.99 \times 6 = 5.94$, so $5.20 + 0.94 \times 13.20 = 17.61$ ms.
 - **Throughput**: $7 / 0.0489 \text{ s} = 143.1$ samples per second.
 
-{{< pagebreak >}}
-
 Constructing the container checks that the hand arithmetic agrees with the implementation. In line 3, `raw` lists the ten recorded durations from @tbl-bench-trace. Line 5 builds `naive = BenchmarkResult("naive", raw)`, which naively includes cold-start and setup artifacts, printing a distorted mean of $11.87$ ms in line 8. In line 6, `protocol = BenchmarkResult("protocol", raw[3:])` discards the two warmups and initial profiler timing. Lines 9 to 12 print the true steady-state metrics: median $P_{50} = 5.10$ ms, $P_{95} = 14.44$ ms, $P_{99} = 17.61$ ms, and throughput of 143.1 samples/sec. Lines 13 to 15 assert agreement with the manual mean, $P_{50}$, and $P_{99}$ to within 0.01 ms.
 
 ```python
@@ -355,8 +351,6 @@ assert abs(protocol.percentile(99) - 17.61) < 0.01
 For these seven observations, the median is 5.10 ms (line 9) and the interpolated $P_{99}$ is 17.61 ms (line 11). Seven observations cannot establish what one future request in a hundred will experience. The trace checks the percentile arithmetic; a repeated experiment must supply the evidence for a tail-latency claim.
 
 The accuracy path needs a separate trace, with labels fixed independently of the model. Use a small synthetic task: label an input 1 when the sum of its first two entries is positive, otherwise 0. Pad the remaining audio-shaped input with zeros. The four chosen pairs sum to $-3, 3, -1, 1$, so the labels are `[0, 1, 0, 1]`.
-
-{{< pagebreak >}}
 
 ```python
 import numpy as np
@@ -421,7 +415,7 @@ Alternatively, record timestamps on device streams using `torch.cuda.Event` with
 :::
 
 [^fn-cuda-event-gpu-timer]: **CUDA event**: a marker recorded in a GPU stream, the ordered queue of device work. With timing enabled, two completed events provide elapsed time between their positions in that stream. Work from other streams or gaps between submitted operations can still affect the interval.
-[^fn-cuda-event-overhead-vs-sync]: **CUDA events versus host synchronization**: Calling `torch.cuda.synchronize()` on the CPU blocks the host thread until the GPU has completely drained all submitted command queues. While necessary before reading CPU clocks, doing so inside a per-layer loop artificially flushes the GPU hardware execution pipeline, preventing the overlap of kernel launches and memory transfers. Using `torch.cuda.Event` with `enable_timing=True` records GPU clock cycle timestamps asynchronously within the stream without halting execution; host synchronization is deferred until after the entire benchmark window concludes.
+[^fn-cuda-event-overhead-vs-sync]: **CUDA events vs. host synchronization**: Calling `torch.cuda.synchronize()` on the CPU blocks the host thread until the GPU has completely drained all submitted command queues. While necessary before reading CPU clocks, doing so inside a per-layer loop artificially flushes the GPU hardware execution pipeline, preventing the overlap of kernel launches and memory transfers. Using `torch.cuda.Event` with `enable_timing=True` records GPU clock cycle timestamps asynchronously within the stream without halting execution; host synchronization is deferred until after the entire benchmark window concludes.
 [^fn-cuda-graphs-kernel-launch]: **CUDA Graphs and kernel launch overhead**: Even when GPU execution is asynchronous, the CPU overhead of launching individual CUDA kernels (typically 5 to 10 microseconds per kernel dispatch) can dominate execution time for small models or shallow layers. CUDA Graphs capture an entire sequence of kernel launches and memory dependencies into an execution graph. Subsequent benchmark iterations replay the pre-instantiated graph with a single CPU launch call, eliminating host driver overhead and isolating pure silicon execution latency.
 
 A more complete experiment also varies and records its conditions. Repeating the same setup at different times can reveal interference that one long run hides. Interleaving baseline and candidate measurements can reduce the effect of a slow change in machine load. Neither a warmup nor a fixed random seed guarantees a stable machine, as detailed in the Systems Perspective below, so preserve the raw observations and report the comparison procedure.
@@ -455,7 +449,7 @@ MLPerf formalizes workloads, quality checks, and measurement scenarios for compa
 [^fn-mlperf-tiny-paper]: Colby Banbury et al., ["MLPerf Tiny Benchmark"](https://datasets-benchmarks-proceedings.neurips.cc/paper_files/paper/2021/hash/da4fb5c6e93e74d3df8527599fa62642-Abstract-round1.html), *NeurIPS Datasets and Benchmarks Track*, 2021.
 [^fn-bootstrap-confidence-interval]: **Bootstrap**: sample with replacement from the measured observations, recompute the statistic, and repeat to examine its spread. Its usefulness depends on whether those observations and the resampling scheme represent the experiment; resampling cannot recover unobserved tail events.
 
-| Concern | TinyTorch benchmark classes | PyTorch / MLPerf practice |
+| Concern | TinyTorch benchmark classes | PyTorch/MLPerf practice |
 | :--- | :--- | :--- |
 | Clock | `time.perf_counter` on the CPU, read through `Profiler` or `precise_timer` | CUDA events, or `synchronize()` before reading the CPU clock |
 | Warmup | `Benchmark`: 5 warmups plus 1 discarded timing; `MLPerf`: at least 1 warmup, otherwise a tenth of the runs | Warmup and replication configured for the workload |

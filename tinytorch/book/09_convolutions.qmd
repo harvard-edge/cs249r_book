@@ -61,14 +61,14 @@ We want a layer that spends its weights on *what* a pattern looks like, not on *
 *How hardware accelerators optimize convolution memory layouts and high-throughput GEMM tiling.*
 :::
 
-::: {.callout-tip title="Pause & Predict: Parameter Sharing vs Dense Connections"}
+::: {.callout-tip title="Pause & Predict: Parameter Sharing vs. Dense Connections"}
 A dense linear layer connecting a $224 \times 224 \times 3$ image to 64 feature maps requires over 9.6 million weights. A $3 \times 3$ convolutional layer producing the same 64 feature maps requires only 1,728 weights, regardless of image size. If both layers can perform linear operations on the pixels, what structural assumption enables the convolution to discard 99.98% of the weights? What happens when that assumption fails (for example, if image pixels are randomly scrambled)?
 :::
 
 
 ### A filter that slides
 
-A **convolution** replaces the giant weight matrix with a small grid of weights, called a **filter** (or kernel), typically $3 \times 3$ or $5 \times 5$. The filter is placed over the top-left corner of the image, the overlapping pixels are multiplied by the matching filter weights, the products are summed, and the sum becomes one output pixel. Then the filter slides one step to the right and the same weights produce the next output pixel, and so on across and down the image.
+Standard vision backbones from AlexNet and ResNet to modern ConvNeXt models process images using spatial convolutions rather than dense connections. By constraining interactions to local neighborhoods and reusing the same kernel across all spatial coordinates, convolutions drastically reduce parameter counts while baking in translation equivariance. A **convolution** replaces the giant weight matrix with a small grid of weights, called a **filter** (or kernel), typically $3 \times 3$ or $5 \times 5$. The filter is placed over the top-left corner of the image, the overlapping pixels are multiplied by the matching filter weights, the products are summed, and the sum becomes one output pixel. Then the filter slides one step to the right and the same weights produce the next output pixel, and so on across and down the image.
 
 With input $X$ of height $H$ and width $W$, a $K \times K$ filter $w$, and a scalar bias $b$, the output at row $h$ and column $c$ is
 
@@ -78,13 +78,13 @@ Each output pixel sees only a $K \times K$ neighborhood of the input, its **rece
 
 ### Channels, padding, stride
 
+In production convolutional backbones such as ResNets and U-Nets, feature extractors expand channel capacity while managing spatial dimensionality through geometric padding and strides. These hyperparameters govern how spatial resolution shrinks through the network hierarchy while preventing border information loss. Real images have several channels (red, green, blue), and a useful layer produces several output planes, called **feature maps**, one per filter. This non-contiguous row striding is the 2D spatial manifestation of the stride arithmetic introduced in @sec-tensors: whereas horizontal steps along width exploit consecutive 64-byte cache line loads with unit stride, vertical steps jump by entire row strides, causing cache line eviction if rows exceed L1 cache capacity. TinyTorch, like PyTorch, stores an image batch as a 4D tensor with shape $[N, C, H, W]$, meaning $N$ images, each with $C$ channels of $H \times W$ pixels. A filter then spans all input channels, so a layer with $C_{\text{in}}$ input channels and $C_{\text{out}}$ filters holds a weight tensor of shape $[C_{\text{out}}, C_{\text{in}}, K, K]$ plus one bias per filter. Output pixel $(h, c)$ of filter $o$ sums over the input channels too:
+
 ::: {.column-margin}
-![](assets/images/diagrams/09_convolutions-margin-spatial-stride.svg){width="100%" fig-alt="2D spatial convolution patch mapped onto flat 1D DRAM memory showing unit stride across width versus large jump across rows."}
+![](assets/images/diagrams/09_convolutions-margin-spatial-stride.svg){width="100%" fig-alt="2D spatial convolution patch mapped onto flat 1D DRAM memory showing unit stride across width vs. large jump across rows."}
 
-*Spatial Locality vs Strided DRAM: Stepping along width accesses contiguous memory, while stepping vertically jumps $W$ elements. The im2col transformation unrolls patches to restore contiguous vector loads.*
+*Spatial Locality vs. Strided DRAM: Stepping along width accesses contiguous memory, while stepping vertically jumps $W$ elements. The im2col transformation unrolls patches to restore contiguous vector loads.*
 :::
-
-Real images have several channels (red, green, blue), and a useful layer produces several output planes, called **feature maps**, one per filter. This non-contiguous row striding is the 2D spatial manifestation of the stride arithmetic introduced in @sec-tensors: whereas horizontal steps along width exploit consecutive 64-byte cache line loads with unit stride, vertical steps jump by entire row strides, causing cache line eviction if rows exceed L1 cache capacity. TinyTorch, like PyTorch, stores an image batch as a 4D tensor with shape $[N, C, H, W]$, meaning $N$ images, each with $C$ channels of $H \times W$ pixels. A filter then spans all input channels, so a layer with $C_{\text{in}}$ input channels and $C_{\text{out}}$ filters holds a weight tensor of shape $[C_{\text{out}}, C_{\text{in}}, K, K]$ plus one bias per filter. Output pixel $(h, c)$ of filter $o$ sums over the input channels too:
 
 $$Y[n, o, h, c] = b[o] + \sum_{\text{ch}=0}^{C_{\text{in}}-1} \sum_{i=0}^{K-1} \sum_{j=0}^{K-1} X[n, \text{ch}, h S + i,\; c S + j] \cdot W[o, \text{ch}, i, j].$$
 
@@ -100,11 +100,11 @@ Count the parameters. A $3 \times 3$ layer taking 3 channels to 64 filters holds
 
 ### Max pooling
 
-**Max pooling** is the second layer we build, and it shrinks the planes a convolution produces. A $2 \times 2$ window with stride 2 slides over each channel independently and keeps only the largest value in each window, halving both height and width. It has no weights. It also makes the network a little tolerant to small shifts, since moving a strong activation one pixel within its window does not change the pooled output. The output-size formula is the same one as for convolution.
+Pioneered in architectures like AlexNet and VGG, spatial pooling downsamples intermediate feature maps to compress memory footprint and compute costs while conferring local translation invariance. By aggregating regional activations without introducing learnable parameters, pooling layers aggressively widen the network's effective receptive field. **Max pooling** is the second layer we build, and it shrinks the planes a convolution produces. A $2 \times 2$ window with stride 2 slides over each channel independently and keeps only the largest value in each window, halving both height and width. It has no weights. It also makes the network a little tolerant to small shifts, since moving a strong activation one pixel within its window does not change the pooled output. The output-size formula is the same one as for convolution.
 
 ### How far a stack of layers can see
 
-One convolution's output pixel sees a $K \times K$ patch. Stack layers and the patch grows, because each output of a later layer combines several outputs of the earlier one. A layer adds $K - 1$ positions of reach at its own depth, and one position at that depth spans as many input pixels as the product of the strides below it. The **receptive field** $r_\ell$ of layer $\ell$, measured in input pixels along one axis, therefore follows
+Deep vision backbones rely on hierarchical feature abstraction, where higher layers must integrate context across entire objects or scenes rather than isolated edges. Calculating the theoretical receptive field ensures that deep networks built from small, compute-efficient $3 \times 3$ kernels achieve sufficient global context without blowing up parameter counts. One convolution's output pixel sees a $K \times K$ patch. Stack layers and the patch grows, because each output of a later layer combines several outputs of the earlier one. A layer adds $K - 1$ positions of reach at its own depth, and one position at that depth spans as many input pixels as the product of the strides below it. The **receptive field** $r_\ell$ of layer $\ell$, measured in input pixels along one axis, therefore follows
 
 $$r_\ell = r_{\ell-1} + (K_\ell - 1)\prod_{i<\ell} S_i, \qquad r_0 = 1.$$
 
@@ -114,18 +114,18 @@ Three stacked $3 \times 3$ convolutions at stride 1 see 3, then 5, then 7 pixels
 
 ### The im2col trick
 
-Look again at the single-output formula. Each output pixel is a dot product between two lists of $C_{\text{in}} K^2$ numbers, the flattened patch under the filter and the flattened filter. That means the entire layer is a matrix multiply in disguise. Write every patch the filter visits as one row of a matrix, with $N \cdot H_{\text{out}} \cdot W_{\text{out}}$ rows of length $C_{\text{in}} K^2$, and write every filter as one column of a second matrix, with $C_{\text{in}} K^2$ rows and $C_{\text{out}}$ columns. Their product has one row per output position and one column per filter, and reshaping it gives the $[N, C_{\text{out}}, H_{\text{out}}, W_{\text{out}}]$ output. Building the patch matrix is called **im2col** ("image to column"), and the four steps are
+Production deep learning runtimes like cuDNN and oneDNN rarely execute 2D convolutions using nested spatial loops, which suffer from severe memory striding and poor arithmetic intensity. Instead, frameworks lower convolutions into a high-throughput General Matrix Multiply (GEMM) by unrolling receptive fields into a 2D patch matrix. Look again at the single-output formula. Each output pixel is a dot product between two lists of $C_{\text{in}} K^2$ numbers, the flattened patch under the filter and the flattened filter. That means the entire layer is a matrix multiply in disguise. Write every patch the filter visits as one row of a matrix, with $N \cdot H_{\text{out}} \cdot W_{\text{out}}$ rows of length $C_{\text{in}} K^2$, and write every filter as one column of a second matrix, with $C_{\text{in}} K^2$ rows and $C_{\text{out}}$ columns. Their product has one row per output position and one column per filter, and reshaping it gives the $[N, C_{\text{out}}, H_{\text{out}}, W_{\text{out}}]$ output. Building the patch matrix is called **im2col** ("image to column"), and the four steps are
+
+1. unroll every $K \times K \times C_{\text{in}}$ patch into a row of $X_{\text{col}}$, shape $[N H_{\text{out}} W_{\text{out}},\; C_{\text{in}} K^2]$;
+2. flatten every filter into a column of $W_{\text{col}}$, shape $[C_{\text{in}} K^2,\; C_{\text{out}}]$;
+3. compute $Y_{\text{col}} = X_{\text{col}} W_{\text{col}}$, shape $[N H_{\text{out}} W_{\text{out}},\; C_{\text{out}}]$;
+4. add the bias and reshape to $[N, C_{\text{out}}, H_{\text{out}}, W_{\text{out}}]$.
 
 ::: {.column-margin}
 ![](assets/images/diagrams/09_convolutions-margin-im2col.svg){width="100%" fig-alt="IM2COL receptive field patch unrolled into a matrix row vector, multiplying memory footprint by 9x."}
 
 *im2col unrolls spatial 2D patches into GEMM matrix rows, expanding memory footprint by $K_h \times K_w = 9\times$.*
 :::
-
-1. unroll every $K \times K \times C_{\text{in}}$ patch into a row of $X_{\text{col}}$, shape $[N H_{\text{out}} W_{\text{out}},\; C_{\text{in}} K^2]$;
-2. flatten every filter into a column of $W_{\text{col}}$, shape $[C_{\text{in}} K^2,\; C_{\text{out}}]$;
-3. compute $Y_{\text{col}} = X_{\text{col}} W_{\text{col}}$, shape $[N H_{\text{out}} W_{\text{out}},\; C_{\text{out}}]$;
-4. add the bias and reshape to $[N, C_{\text{out}}, H_{\text{out}}, W_{\text{out}}]$.
 
 The matrix multiplication performs the same dot products. In @sec-acceleration, we optimize this lowered GEMM operation using 2D cache tiling and SIMD vectorization, showing how hardware hierarchies transform memory-bound unrolled loops into peak arithmetic throughput. The Code section counts the extra storage and separates that analytical cost from elapsed time, which depends on the workload and machine.
 
@@ -205,7 +205,7 @@ Average pooling changes the reduction, not the geometry. For a window `[[1, 2], 
 
 ### im2col
 
-::: {#chk-conv-im2col-scope .callout-checkpoint title="Checkpoint: Model implementation versus module code"}
+::: {#chk-conv-im2col-scope .callout-checkpoint title="Checkpoint: Model implementation vs. module code"}
 Module 09 stops at the loops. The two functions in this section are the chapter's own NumPy model of the trick GPU libraries use, and the worked trace checks that they reproduce the module's numbers. @sec-acceleration builds im2col into the package and times it against these loops.
 :::
 
@@ -273,11 +273,6 @@ $$\text{im2col matrix} = (32 \times 112 \times 112) \times (64 \times 3 \times 3
 
 :::
 
-::: {.content-visible when-format="pdf"}
-```{=latex}
-\clearpage
-```
-:::
 
 ### The gradients
 
@@ -310,7 +305,7 @@ Finally the layer object, because the routines above are helpers and operations 
 
 ### Batch normalization and layer state
 
-For one channel containing `[[0, 1], [2, 3]]`, the mean is 1.5 and the variance is 1.25. With `gamma=1`, `beta=0`, and the default small denominator offset, `BatchNorm2d` returns approximately `[[-1.342, -0.447], [0.447, 1.342]]`. Even one image has several values per channel, so a batch of one does not generally normalize to zeros.
+Standard in vision architectures like ResNet and DenseNet, batch normalization stabilizes deep network optimization by standardizing feature distributions across mini-batches during training. Unlike purely stateless layers, it must track non-differentiable running statistics across iterations to enable deterministic inference during evaluation. For one channel containing `[[0, 1], [2, 3]]`, the mean is 1.5 and the variance is 1.25. With `gamma=1`, `beta=0`, and the default small denominator offset, `BatchNorm2d` returns approximately `[[-1.342, -0.447], [0.447, 1.342]]`. Even one image has several values per channel, so a batch of one does not generally normalize to zeros.
 
 The layer performs this calculation separately for each channel. For a tensor `(N, C, H, W)`, `_get_stats` reduces axes `(0, 2, 3)` and leaves one mean and variance per channel. `BatchNorm2dFunction.forward` reshapes those arrays to `(1, C, 1, 1)`, normalizes each activation, and applies learned scale `gamma` and shift `beta`. The input and output shapes match; the tensor broadcasting contract applies to whole image planes.
 

@@ -77,7 +77,7 @@ The two-coordinate example isolates a problem that also arises in networks: one 
 
 ### Gradient descent, and why it is called stochastic
 
-Write the parameters as one long vector $\theta$ and the gradient of the loss with respect to them as $g$. Plain gradient descent is
+In modern deep learning runtimes, gradient-based optimization drives parameter updates across every architecture from standard multilayer perceptrons to billion-parameter foundation models. Because computing exact loss gradients over an entire multi-gigabyte dataset is computationally and memory-prohibitive, frameworks evaluate loss on small mini-batches, turning classical gradient descent into an efficient stochastic approximation. Write the parameters as one long vector $\theta$ and the gradient of the loss with respect to them as $g$. Plain gradient descent is
 
 $$\theta \leftarrow \theta - \eta\, g,$$
 
@@ -90,7 +90,7 @@ where $\eta$ is the **learning rate**, the fraction of the gradient applied per 
 
 ### Momentum: let consistent gradients add up
 
-Suppose two successive gradients are both $2$, the learning rate is $0.1$, and the retained fraction of the previous update is $0.9$. Starting with velocity zero, the first velocity is $2$ and the second is $0.9\times2+2=3.8$. The weight moves by $0.2$, then $0.38$. If the second gradient were $-2$, the second velocity would instead be $-0.2$, giving a much smaller reversal. **Momentum** implements this memory with a velocity $v$:
+Widely adopted in competitive vision models such as ResNets and ConvNeXts, momentum augments stochastic gradient descent by carrying an exponentially decayed history of past update vectors. This running velocity buffer dampens high-frequency oscillations across steep ravine walls while accelerating parameter progress along gentle, consistent slopes. Suppose two successive gradients are both $2$, the learning rate is $0.1$, and the retained fraction of the previous update is $0.9$. Starting with velocity zero, the first velocity is $2$ and the second is $0.9\times2+2=3.8$. The weight moves by $0.2$, then $0.38$. If the second gradient were $-2$, the second velocity would instead be $-0.2$, giving a much smaller reversal. **Momentum** implements this memory with a velocity $v$:
 
 $$v \leftarrow \beta\, v + g, \qquad \theta \leftarrow \theta - \eta\, v.$$[^fn-nesterov-momentum]
 
@@ -108,7 +108,7 @@ If a transformer model contains 1 billion parameters stored in float32 (4 GB of 
 
 ### Adam: a step size for every parameter
 
-Consider a two-element gradient $[100,1]$. Plain SGD at learning rate $0.1$ would move the coordinates by $[10,0.1]$. Adam's first bias-corrected estimates are $\hat m=[100,1]$ and $\hat v=[10000,1]$, so division by $\sqrt{\hat v}$ gives $[1,1]$. Ignoring the small numerical-stability term, both coordinates move by $0.1$. Adam obtains these scales from two running averages, one of the gradient and one of its square:
+As the workhorse optimizer powering deep architectures from recurrent networks to modern transformers, Adam (Adaptive Moment Estimation) addresses the severe ill-conditioning of non-convex loss landscapes. By maintaining independent running averages of both past gradients and squared gradients, it automatically computes an individual adaptive step size for every parameter coordinate. Consider a two-element gradient $[100,1]$. Plain SGD at learning rate $0.1$ would move the coordinates by $[10,0.1]$. Adam's first bias-corrected estimates are $\hat m=[100,1]$ and $\hat v=[10000,1]$, so division by $\sqrt{\hat v}$ gives $[1,1]$. Ignoring the small numerical-stability term, both coordinates move by $0.1$. Adam obtains these scales from two running averages, one of the gradient and one of its square:
 
 $$m \leftarrow \beta_1 m + (1 - \beta_1)\, g, \qquad v \leftarrow \beta_2 v + (1 - \beta_2)\, g^2.$$
 
@@ -138,7 +138,7 @@ The thing to see in that formula is the ratio. For a parameter whose gradient is
 
 ### Weight decay and adaptive scaling
 
-With weight $1.0$, learning rate $0.1$, and decay coefficient $0.01$, a shrinkage step gives $0.999$. **Weight decay** uses this small movement toward zero to discourage large weights. Its rule is
+In production training pipelines, weight decay serves as a crucial regularizer that prevents parameter values from growing uncontrollably and overfitting training data. However, the classical approach of folding an $L_2$ penalty directly into the gradient interacts poorly with adaptive optimizers, where second-moment normalization distorts the intended shrinkage rate. With weight $1.0$, learning rate $0.1$, and decay coefficient $0.01$, a shrinkage step gives $0.999$. **Weight decay** uses this small movement toward zero to discourage large weights. Its rule is
 
 $$\theta \leftarrow (1 - \eta\lambda)\, \theta,$$
 
@@ -159,7 +159,7 @@ For the weight above, an adaptive update of $0.1$ therefore gives $0.999-0.1=0.8
 
 ### What a learning rate means
 
-The two families give $\eta$ different units, which is why their customary values differ by about a factor of ten. For SGD the step is $\eta g$, so a safe rate depends on the curvature of the loss. The ravine above diverged along its steep axis for any $\eta$ above $2/100$; a loss with ten times that curvature would need a rate ten times smaller. There is no universal SGD rate, only a rate for a given loss. For Adam the normalized step $\hat m / (\sqrt{\hat v} + \epsilon)$ has magnitude close to one when a coordinate's gradients agree in sign and less when they do not, so $\eta$ approximately bounds how far any parameter moves in one step, whatever the scale of its gradient (Kingma and Ba, 2015). That is why an Adam rate carries between models more readily than an SGD rate. TinyTorch's defaults follow the usual convention, $0.01$ for SGD and $0.001$ for Adam and AdamW, and the course milestones use those values: SGD at 0.01 for the digit networks of [Synthesis I](synthesis_01.qmd#sec-milestone-1) and [Synthesis II](synthesis_02.qmd#sec-milestone-2), and Adam at 0.001 for the attention routing task; the TinyGPT runs raise AdamW to between 0.002 and 0.008.
+Selecting and tuning the learning rate $\eta$ is the single most sensitive hyperparameter decision in deep learning systems, directly governing training stability and convergence speed. Because SGD and adaptive optimizers apply the learning rate to fundamentally different mathematical quantities—unnormalized gradient vectors vs. normalized, scale-invariant direction vectors—the effective meaning of $\eta$ changes between optimizer families. The two families give $\eta$ different units, which is why their customary values differ by about a factor of ten. For SGD the step is $\eta g$, so a safe rate depends on the curvature of the loss. The ravine above diverged along its steep axis for any $\eta$ above $2/100$; a loss with ten times that curvature would need a rate ten times smaller. There is no universal SGD rate, only a rate for a given loss. For Adam the normalized step $\hat m / (\sqrt{\hat v} + \epsilon)$ has magnitude close to one when a coordinate's gradients agree in sign and less when they do not, so $\eta$ approximately bounds how far any parameter moves in one step, whatever the scale of its gradient (Kingma and Ba, 2015). That is why an Adam rate carries between models more readily than an SGD rate. TinyTorch's defaults follow the usual convention, $0.01$ for SGD and $0.001$ for Adam and AdamW, and the course milestones use those values: SGD at 0.01 for the digit networks of [Synthesis I](synthesis_01.qmd#sec-milestone-1) and [Synthesis II](synthesis_02.qmd#sec-milestone-2), and Adam at 0.001 for the attention routing task; the TinyGPT runs raise AdamW to between 0.002 and 0.008.
 
 The batch size moves the rate as well. Averaging $B$ independent per-example gradients divides the variance of the estimate by $B$, so a larger batch gives a more reliable direction and can support a larger step. Goyal and colleagues (2017) turned this into a rule for SGD: when the batch grows by a factor of $k$, multiply the learning rate by $k$, and ramp the rate up over the first few epochs. With it they trained ResNet-50 on ImageNet at batches of up to 8,192 images without losing accuracy, and accuracy fell at larger batches. The rule is an empirical regularity for a family of models, not a law, and it is the reason a learning rate reported without its batch size is incomplete.
 
@@ -239,7 +239,7 @@ Run SGD on the ravine from $(1,1)$ with $\eta=0.019$ and `momentum=0.9`, supplyi
 
 ### AdamW
 
-AdamW replaces SGD's one velocity buffer with a pair of arrays per parameter tensor. A $(2,3)$ weight therefore has $(2,3)$ first- and second-moment arrays, but only one integer update count: all entries of that tensor receive a gradient together. The elementwise arithmetic supplies a different scale for each scalar weight without requiring a separate learning-rate setting for each one.
+The standard optimizer for modern foundation models—including GPT, LLaMA, and Vision Transformers—is **AdamW** (Loshchilov & Hutter, 2019). By applying weight decay directly to parameter buffers rather than blending it into gradient moment accumulators, AdamW restores true scale-invariant regularization across all weights. AdamW replaces SGD's one velocity buffer with a pair of arrays per parameter tensor. A $(2,3)$ weight therefore has $(2,3)$ first- and second-moment arrays, but only one integer update count: all entries of that tensor receive a gradient together. The elementwise arithmetic supplies a different scale for each scalar weight without requiring a separate learning-rate setting for each one.
 
 On the same ravine, start AdamW at $(1,1)$ with $\eta=0.1$ and `weight_decay=0.0` to isolate adaptive scaling. After 100 steps, both coordinates are approximately $0.002937$. This is a reproducible result for this loss and these settings, not evidence that AdamW permits an arbitrary learning rate. The gradient history and the numerical-stability term still affect the trajectory.
 
@@ -255,13 +255,13 @@ The call chain preserves three useful invariants. The per-parameter update count
 
 ### The original Adam, for contrast
 
+TinyTorch's `Adam` uses the same moment equations, but it adds $\lambda\theta$ before calling the helper. To isolate the role of the denominator, first hold the normalization fixed in @lst-optimizers-decay-scaling.
+
 ::: {.column-margin}
-![](assets/images/diagrams/07_optimizers-margin-decay.svg){width="100%" fig-alt="Comparison of coupled L2 regularization in Adam versus decoupled weight decay in AdamW showing variance suppression versus scale-invariant shrinkage."}
+![](assets/images/diagrams/07_optimizers-margin-decay.svg){width="100%" fig-alt="Comparison of coupled L2 regularization in Adam vs. decoupled weight decay in AdamW showing variance suppression vs. scale-invariant shrinkage."}
 
 *Decoupled Weight Decay: Adam couples decay to gradient variance, suppressing shrinkage on active weights, whereas AdamW applies uniform parameter decay.*
 :::
-
-TinyTorch's `Adam` uses the same moment equations, but it adds $\lambda\theta$ before calling the helper. To isolate the role of the denominator, first hold the normalization fixed in @lst-optimizers-decay-scaling.
 
 ::: {#lst-optimizers-decay-scaling lst-pos="H" lst-cap="**Fixed-normalization comparison**: This arithmetic illustration holds the denominator fixed."}
 ```python
