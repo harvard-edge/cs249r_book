@@ -47,6 +47,22 @@ Six labs follow the textbook's four parts in order, building from pen-and-paper 
 | 6 | **[Safety Governor — Build It, Then Break It](labs/lab-06-safety-governor.md)** | 10–11 | Part III–IV — Ch 12 *Safety Enforcement*, Ch 13 *Silicon Placement*, Ch 14 *Intervention*, Ch 15 *Verification*, Ch 16 *Release* | Prove the robot is trustworthy. Program safety barriers on the microcontroller, then try to defeat them by freezing the brain, corrupting packets, and cutting power. |
 | | **[Capstone: Physical Release Defense](labs/lab-capstone-studio.md)** | 12–14 | Synthesis — Ch 17 *Epistemic Frontier* | Put it all together. Design your own task, survive a peer team's adversarial attacks, defend your Physical Release Dossier, and generalize the pipeline to a new robot. |
 
+### How the labs connect
+
+Each lab consumes what the previous one produced. This chain is the course structure; individual procedures can change as long as the hand-offs hold.
+
+| Lab | Consumes | Produces | Status |
+|:---:|:---|:---|:---:|
+| 1 | — | DH table, IK solver, digital twin, workspace map | `skeleton` |
+| 2 | IK solver, digital twin | Calibrated station, IK on the MCU, camera extrinsics, RPC bridge, four-tap logging, IK sim2real table | `skeleton` |
+| 3 | Calibrated station, IK baseline | Sim-trained VLA on the UNO Q, sim2real gap table with failure causes | `skeleton` |
+| 4 | Sim-trained VLA, gap table | Real dataset and dataset card, fine-tuned VLA, untethered loop | `skeleton` |
+| 5 | Untethered loop | Chosen action horizon, language and disturbance-recovery evidence | `skeleton` |
+| 6 | Disturbance-tested loop | Governor firmware, watchdog, fault-injection evidence | `skeleton` |
+| Capstone | Everything above | Physical Release Dossier, oral defense | `skeleton` |
+
+Every lab follows the [lab template](LAB_TEMPLATE.md). A lab moves from `skeleton` to `draft` when every section is written, and to `bench-verified` when staff have run it end to end on the reference station.
+
 ---
 
 ## 4. Reference Documents
@@ -56,3 +72,4 @@ Six labs follow the textbook's four parts in order, building from pen-and-paper 
 | 📋 **[Master Course Syllabus](curriculum/syllabus.md)** | Grading weights, milestones, team roles, and safety contract. |
 | 🏷️ **[Physical AI Competency Card](curriculum/student-competencies.md)** | The scope test and the 12-skill rubric signed off at the bench. |
 | 🔧 **[Station Reference Card](labs/station-reference.md)** | Bench hardware, software stack, wiring, engineering rules, and telemetry schema. |
+| 🧩 **[Lab Template](LAB_TEMPLATE.md)** | The section-by-section structure every lab follows, with guidance for whoever writes it. |

@@ -53,7 +53,7 @@ The two axes separate the **domain of study** (the physical plant vs. the comput
 | ID | Competency | Observable Physical Evidence (Platform-Independent) |
 |:---|:---|:---|
 | **C1** | **Closed-Loop Physical Action**<br>Close the autonomous physical loop on hardware; stream policy proposals to produce consequential, intended physical change in the workspace. | Witnessed autonomous physical task completion driven entirely by on-board model inference without host PC tethering. |
-| **C2** | **Action Chunk Dynamics**<br>Evaluate multi-step action chunk horizons ($K$) versus single-step reactive execution; analyze trade-offs between trajectory smoothness and latency drift. | Trajectory tracking comparison across chunk horizons ($K=1, 8, 16, 32$), tracking error vs. horizon curves, and open-loop drift characterization. |
+| **C2** | **Action Chunk Dynamics**<br>Evaluate multi-step action chunk horizons ($K$) versus single-step reactive execution; analyze trade-offs between trajectory smoothness and latency drift. | Trajectory tracking comparison across chunk horizons $K$, tracking error vs. horizon curves, and open-loop drift characterization. |
 | **C3** | **Disturbance Recovery & Replanning**<br>Detect physical discrepancies (e.g., moved target mid-trajectory) from fresh sensory feedback; adapt action proposals or deliberately abstain. | Matched trials with mid-trajectory object displacement, comparing open-loop continuation (failure) against closed-loop adaptation (recovery) or justified abstention. |
 
 ### Quadrant D: Govern the System (Computing × Control)
@@ -62,7 +62,7 @@ The two axes separate the **domain of study** (the physical plant vs. the comput
 |:---|:---|:---|
 | **D1** | **Hardware Authority Routing**<br>Enforce that all actuation flows exclusively through the independent microcontroller permission boundary (`a_req` $\to$ `a_map` $\to$ `a_enf`); prove zero unmonitored host bypass. | Hardware interface and power routing diagram, verified single-path command trace, and proof of blocked host USB direct motor access. |
 | **D2** | **Real-Time Safety Governor & Cutoff**<br>Implement velocity clamps, collision envelopes, communication watchdogs, and emergency cutoffs on the MCU; verify safe-state transition with zero backlog. | Injected fault trials (over-speed request, workspace boundary breach, Linux hang/dropped frames) showing immediate MCU clipping or safe shutdown with 0 queued packets. |
-| **D3** | **Physical Release Defense**<br>Conduct a statistically frozen 20-trial held-out disturbance evaluation; compare against baseline; defend a bounded release dossier. | 20-trial physical benchmark report across varied initial positions and disturbances, failure mode taxonomy, and formal Physical Release Dossier oral defense. |
+| **D3** | **Physical Release Defense**<br>Conduct a statistically frozen held-out disturbance evaluation; compare against baseline; defend a bounded release dossier. | Held-out physical benchmark report across varied initial positions and disturbances, failure mode taxonomy, and formal Physical Release Dossier oral defense. |
 
 ---
 
@@ -86,19 +86,19 @@ This card serves as the concrete, observable sign-off sheet for students and ins
 │ [ ]  │ A3: Feedback Timing & Latency          │ Timestamp sync trace,   │ Date: ______ │
 │      │                                        │ sensor-to-torque delay  │ Staff: _____ │
 ├──────┼────────────────────────────────────────┼─────────────────────────┼──────────────┤
-│ [ ]  │ B1: Physical Dataset Engineering       │ 30 LeRobot episodes,    │ Date: ______ │
+│ [ ]  │ B1: Physical Dataset Engineering       │ LeRobot episodes,       │ Date: ______ │
 │      │                                        │ 4 action taps logged    │ Staff: _____ │
 ├──────┼────────────────────────────────────────┼─────────────────────────┼──────────────┤
 │ [ ]  │ B2: Deterministic Baseline Benchmark   │ Scripted reach baseline │ Date: ______ │
 │      │                                        │ matched trials report   │ Staff: _____ │
 ├──────┼────────────────────────────────────────┼─────────────────────────┼──────────────┤
-│ [ ]  │ B3: Edge Model Profiling & Opt.        │ ONNX export, <80 ms     │ Date: ______ │
-│      │                                        │ latency on Qualcomm MPU │ Staff: _____ │
+│ [ ]  │ B3: Edge Model Profiling & Opt.        │ Edge export, latency    │ Date: ______ │
+│      │                                        │ budget on Qualcomm MPU  │ Staff: _____ │
 ├──────┼────────────────────────────────────────┼─────────────────────────┼──────────────┤
 │ [ ]  │ C1: Closed-Loop Physical Action        │ Live autonomous reach   │ Date: ______ │
 │      │                                        │ completion on UNO Q     │ Staff: _____ │
 ├──────┼────────────────────────────────────────┼─────────────────────────┼──────────────┤
-│ [ ]  │ C2: Action Chunk Dynamics              │ K = 1, 8, 16, 32 sweep, │ Date: ______ │
+│ [ ]  │ C2: Action Chunk Dynamics              │ Chunk-horizon sweep,    │ Date: ______ │
 │      │                                        │ latency/smoothness plot │ Staff: _____ │
 ├──────┼────────────────────────────────────────┼─────────────────────────┼──────────────┤
 │ [ ]  │ C3: Disturbance Recovery & Replanning  │ Target moved mid-reach, │ Date: ______ │
@@ -110,7 +110,7 @@ This card serves as the concrete, observable sign-off sheet for students and ins
 │ [ ]  │ D2: Real-Time Safety Governor & Cutoff │ MCU over-speed refusal, │ Date: ______ │
 │      │                                        │ watchdog timeout cutoff │ Staff: _____ │
 ├──────┼────────────────────────────────────────┼─────────────────────────┼──────────────┤
-│ [ ]  │ D3: Physical Release Defense           │ 20-trial frozen trials  │ Date: ______ │
+│ [ ]  │ D3: Physical Release Defense           │ Frozen held-out trials  │ Date: ______ │
 │      │                                        │ & Release Dossier oral  │ Staff: _____ │
 └──────┴────────────────────────────────────────┴─────────────────────────┴──────────────┘
 ```

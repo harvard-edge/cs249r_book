@@ -1,6 +1,11 @@
 # Physical AI Station Reference Card
 
+**Status:** `draft`. The components are chosen; the specifications below come from vendor pages and still need to be measured on the delivered kit.
+
 This page describes the standard bench station used across all Volume IV labs. Individual labs link here rather than repeating this information.
+
+<!-- STAFF: confirm every spec (rates, resolutions, voltages, limits) on the
+     reference station and mark this page bench-verified. -->
 
 ---
 

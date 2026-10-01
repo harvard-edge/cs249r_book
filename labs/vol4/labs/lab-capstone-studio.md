@@ -1,79 +1,78 @@
-# Capstone Project Studio: Physical Release Defense
+# Capstone: Physical Release Defense
 
-**Schedule:** Weeks 12–14 (3 Full Weeks Dedicated Studio)
-**Required Textbook Reading:** Complete Volume IV Synthesis ([Chapters 1–17](../../../books/vol4/index.qmd))
-**Target Competencies:** `[ ] D3 Physical Release Defense & Evidence Dossier` *(Full 12-Card Mastery)*
-**Milestone Deliverable:** [Milestone 5](../curriculum/syllabus.md#4-assessment-milestones-and-grading) (End of Week 14) — *Capstone System Defense & Physical Release Dossier*
-
----
-
-### 1. The Physical Question
-How does an engineering team defend a formal, evidence-backed safety and release claim for an autonomous embodied machine? When operating under real-world physical variability, how do we prove where the system is dependable, where it safely abstains, and that it never violates its safety governor?
+**Status:** `skeleton`\
+**Weeks:** 12–14\
+**Reading:** [Chapter 17: The Epistemic Frontier](../../../books/vol4/17_frontier/17_frontier.qmd), plus the [whole volume](../../../books/vol4/index.qmd) as synthesis\
+**Competencies:** `D3` (and the full card)\
+**Milestone:** [Milestone 5](../curriculum/syllabus.md#4-assessment-milestones-and-grading) (End of Week 14)
 
 ---
 
-### 2. Studio Operating Rhythm (Weeks 12–14)
+## Overview
 
-Formal lectures and new lab assignments have concluded. The final three weeks give student teams dedicated bench runway:
+**The physical question.** How does a team defend an evidence-backed release claim for an autonomous machine? Under real physical variability, how do you show where the system is dependable, where it safely abstains, and that it never gets past its governor?
+
+**Purpose.** Lectures and new labs are over. The final three weeks give each team bench time to put the whole pipeline together on a task of its own, survive a peer team's attacks, and defend a written release decision. A team that concludes its system should *not* be released, and backs that with rigorous evidence, can earn full marks. Showing where a physical system fails is the job.
+
+**Comes in from Labs 1–6:** the full pipeline, from kinematics through the governor.\
+**Goes out:** the Physical Release Dossier and the oral defense.
+
+### Learning outcomes
+
+By the end of the capstone, you will be able to:
+- Define a manipulation task and the operating envelope in which you claim it works
+- Evaluate a learned system against a baseline under held-out conditions and disturbances
+- Build a claim–argument–evidence case from your own telemetry
+- Defend, individually, any trace from your system end to end
+
+---
+
+## 1. Studio Rhythm
 
 | Week | Focus | What the team does |
 |:---:|:---|:---|
-| **12** | Task build & policy hardening | Freeze the fixture and task (sorting, insertion, or bin picking). Collect a custom 50-episode LeRobot dataset with all four action taps. Fine-tune SmolVLA or ACT and export the quantized ONNX model to the UNO Q. |
-| **13** | Adversarial peer exchange & dress rehearsal | Swap fault challenges with an assigned peer team, which introduces unannounced disturbances (lighting drops, obstacles). Harden the STM32 governor, replanning, and abstention boundaries. |
-| **14** | Graduation trial & oral defense | Run 20 live, unedited trials (10 baseline + 10 disturbance). Submit the Physical Release Dossier. Each student defends the full causal loop individually. |
+| **12** | Task build & policy hardening | TBD (staff) |
+| **13** | Peer fault exchange & dress rehearsal | TBD (staff) |
+| **14** | Final trials & oral defense | TBD (staff) |
 
 ---
 
-### 3. The 20-Trial Physical Benchmark Protocol
+## 2. Final Trial Protocol
 
-During the final exam session in Week 14, each team executes **20 repeated physical trials** on hardware before the teaching panel:
-
-1. **Trials 1–10 (Baseline Operating Envelope):**
-   * Target objects placed at 10 randomized, held-out coordinates across the characterized workspace.
-   * Zero human intervention allowed.
-   * Evaluate positioning precision, reach duration, and final object state.
-2. **Trials 11–20 (Physical Disturbance Trials):**
-   * The examination panel or peer team introduces live disturbances:
-     * *Disturbance A (Mid-Reach Shift):* Object displaced by 50 mm during active trajectory.
-     * *Disturbance B (Illumination Drop):* Overhead ambient lighting reduced by 70%.
-     * *Disturbance C (Compliant Obstacle):* A soft foam barrier placed along the nominal approach path.
-     * *Disturbance D (Missing Target):* Target block removed completely before approach.
-   * The system must demonstrate adaptive recovery or justified, safe abstention. Zero unhandled collisions or hardware stalls are permitted.
+Baseline trials at held-out positions, then trials under live disturbances introduced by the panel or a peer team. Number of trials, disturbance types, and pass rules: TBD (staff).
 
 ---
 
-### 4. The Physical Release Dossier Specification
+## 3. Physical Release Dossier
 
-Each team submits a formal, versioned technical engineering document containing:
+The dossier contains:
+1. **Claim, argument, and evidence**, including the operating envelope
+2. **Baseline comparison**
+3. **Failure modes and abstention policy**
+4. **Traceability**: code and firmware versions, dataset, and trial logs
 
-1. **Claim-Argument-Evidence (CAE) Framework:**
-   * *Claim:* The exact task success rate and safety guarantees the system provides.
-   * *Operational Design Domain (ODD):* Precise physical boundaries (allowable lighting lux, object weight range, temperature, workspace volume).
-   * *Evidence:* Quantitative data from the 20 physical trials, telemetry plots, and latency distributions.
-2. **Baseline Comparative Analysis:**
-   * Matched comparison against the deterministic scripted baseline. Where does the neural policy provide superior generalization, and where is the baseline faster or more predictable?
-3. **Failure Mode Taxonomy & Abstention Policy:**
-   * Complete inventory of observed failure modes. Documentation proving the system safely halts or abstains rather than executing uncontrolled motion.
-4. **Complete Traceability Archive:**
-   * Git commit hash of all software and firmware.
-   * Hub link to the curated LeRobot evaluation dataset recording all 4 action taps for every trial.
+Format and length: TBD (staff).
 
 ---
 
-### 5. Individual Oral Defense Protocol
+## 4. Oral Defense
 
-Following the 20 physical trials, each team member is examined individually by the panel:
-* **Student A (The Brain):** Traces a randomly selected episode from raw camera pixels through model preprocessing, SmolVLA/ACT inference, and action chunk proposal generation.
-* **Student B (The Governor):** Explains the STM32 MCU permission log, boundary checks, velocity clamps, and why a specific proposal was permitted or clipped.
-* **Student C (The Physics):** Interprets the physical discrepancy between commanded trajectory ($a_{\text{req}}$), motor response ($a_{\text{meas}}$), and final material outcome.
+Each student is examined individually on one part of the loop:
+- **The brain:** a randomly chosen episode from pixels to proposed action
+- **The governor:** why a specific proposal was permitted or clipped
+- **The physics:** the gap between commanded and measured motion, and the final outcome
+
+Format and timing: TBD (staff).
 
 ---
 
-### 6. Sign-Off & Graduation Criteria
-To achieve course graduation and Milestone 5 completion:
-1. [ ] **20-Trial Execution:** Complete 20 witnessed physical trials with zero unhandled collisions or hardware crashes.
-2. [ ] **Physical Release Dossier:** Submit an approved, auditable Claim-Argument-Evidence release dossier.
-3. [ ] **Oral Defense:** Every team member successfully defends their individual causal trace.
-4. [ ] **Complete Competency Mastery:** All 12 competencies (A1–A3, B1–B3, C1–C3, D1–D3) signed off on the [Competency Card](../curriculum/student-competencies.md).
+## 5. Sign-Off
 
-> **A Note on Engineering Integrity:** A team that concludes their system **should NOT be released** for production due to measured timing or reliability limitations—and provides rigorous physical evidence supporting that conclusion—receives full honors. Proving where a physical system fails is the hallmark of a true systems engineer.
+| # | Criterion | Threshold |
+|:---:|:---|:---|
+| 1 | **Final trials completed** | TBD (staff) |
+| 2 | **Physical Release Dossier** | TBD (staff) |
+| 3 | **Individual oral defense** | TBD (staff) |
+| 4 | **Full competency card** | All twelve competencies signed off |
+
+*Staff signs off `D3` on the team's [Competency Card](../curriculum/student-competencies.md).*

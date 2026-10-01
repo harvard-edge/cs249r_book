@@ -1,123 +1,99 @@
 # Lab 1: Robot Kinematics & Digital Twin
 
-**Schedule:** Weeks 1–2 · Milestone 1 due end of Week 4 (with Lab 2)
-**Required Textbook Reading:** [Chapter 1: The Causal Boundary](../../../books/vol4/01_boundary/01_boundary.qmd), [Chapter 2: The Physical Body](../../../books/vol4/02_body/02_body.qmd)
-**Target Competencies:** `[ ] A1 Plant Mechanics & Safe Envelope`
-**Milestone Alignment:** Contributes to [Milestone 1](../curriculum/syllabus.md#4-assessment-milestones-and-grading) (End of Week 4)
+**Status:** `skeleton`\
+**Weeks:** 1–2\
+**Reading:** [Chapter 1: The Causal Boundary](../../../books/vol4/01_boundary/01_boundary.qmd), [Chapter 2: The Physical Body](../../../books/vol4/02_body/02_body.qmd)\
+**Competencies:** `A1`\
+**Milestone:** Contributes to [Milestone 1](../curriculum/syllabus.md#4-assessment-milestones-and-grading) (End of Week 4, with Lab 2)
 
 ---
 
 ## Overview
 
-### Purpose
-Before you touch the robot, you need to understand the math that makes it move. This lab teaches you to derive the forward and inverse kinematics of a 6-DoF serial manipulator by hand, then validate your equations by building a digital twin in simulation. By the end, you will be able to command a simulated robot to reach any target position in its workspace using equations you derived yourself — and you will understand *why* each joint must move the way it does, rather than just calling a library function.
+**The physical question.** How do you translate the intent "move the hand to $(x, y, z)$" into the joint angles $q = (q_1, \ldots, q_6)$ that achieve it? What happens at the edge of the workspace, and where does the math break down?
 
-### Prerequisites
-None — this is the first lab. You should have read Chapters 1–2 and have Python with a simulation environment (MuJoCo or PyBullet) installed on your workstation.
+**Purpose.** Before you touch the robot, you need to understand the math that makes it move. You derive the forward and inverse kinematics of a 6-DoF serial arm by hand, then validate your equations on a digital twin in simulation. By the end you can command a simulated robot to any reachable target with equations you derived yourself, and you understand *why* each joint moves the way it does rather than calling a library function.
 
-### Learning Outcomes
+**Comes in from:** nothing; this is the first lab.\
+**Goes out to Lab 2:** DH parameter table, IK solver, digital twin, workspace map.
+
+### Learning outcomes
+
 By the end of this lab, you will be able to:
-- Assign Denavit-Hartenberg (DH) parameters to a 6-DoF serial manipulator and derive the forward kinematics transformation $T_0^6(q)$
-- Compute the Jacobian and solve the inverse kinematics for a target end-effector pose
-- Build a digital twin of the course robot in a physics simulation environment
-- Command the simulated robot to reach specified target positions using your derived IK equations
-- Identify the workspace boundary, singularities, and mechanical limits in simulation
+- Assign Denavit-Hartenberg parameters to a 6-DoF serial manipulator and derive its forward kinematics $T_0^6(q)$
+- Compute the Jacobian and solve inverse kinematics for a target end-effector pose
+- Build a digital twin of the course robot in a physics simulator
+- Command the simulated robot to target positions with your own IK
+- Identify the workspace boundary, singularities, and joint limits in simulation
 
 ---
 
-### 1. The Physical Question
+## 1. Setup
 
-How do you translate the abstract intent "move the hand to position $(x, y, z)$" into the concrete joint angles $q = (q_1, q_2, \ldots, q_6)$ that achieve it? What happens at the boundaries of the workspace, and where does the math break down?
+> **Standard bench:** not needed. This lab runs entirely in simulation.
 
----
+Additional for this lab:
+- Simulator and Python environment: TBD (staff)
+- Robot model (URDF/MJCF) of the course arm: TBD (staff)
+- DH parameter worksheet: TBD (staff)
 
-### 2. Setup
-
-**Software Environment:**
-- Python 3.10+ with NumPy and SciPy
-- Physics simulator: MuJoCo (recommended) or PyBullet
-- Staff-provided URDF/MJCF model of the course robot
-- Jupyter notebook or Python IDE
-
-**Materials:**
-- DH parameter worksheet (provided)
-- Graph paper or tablet for hand derivations
+<!-- STAFF: pick one simulator (MuJoCo or PyBullet) and pin its version. The
+     robot model must match the delivered SO-101's geometry and joint limits. -->
 
 ---
 
-### 3. Step-by-Step Protocol
+## 2. Protocol
 
-#### Phase A: Pen-and-Paper Kinematics (Week 1)
+### Phase A: Pen-and-Paper Kinematics (Week 1)
 
-##### Step 1: DH Parameter Assignment
-1. Study the mechanical drawing of the 6-DoF robot arm. Identify each joint axis and link.
-2. Assign coordinate frames to each joint following the Denavit-Hartenberg convention.
-3. Fill in the DH parameter table:
+**Goal:** derive the arm's kinematics by hand.
 
-   | Joint $i$ | $\alpha_{i-1}$ | $a_{i-1}$ | $d_i$ | $\theta_i$ |
-   |:---:|:---:|:---:|:---:|:---:|
-   | 1 | | | | |
-   | 2 | | | | |
-   | 3 | | | | |
-   | 4 | | | | |
-   | 5 | | | | |
-   | 6 | | | | |
+1. **DH parameter assignment.** TBD (staff)
+2. **Forward kinematics derivation.** TBD (staff)
+3. **Jacobian and inverse kinematics.** TBD (staff)
 
-##### Step 2: Forward Kinematics Derivation
-1. For each joint, write the homogeneous transformation matrix $A_i$ using the DH parameters.
-2. Multiply the chain: $T_0^6 = A_1 \cdot A_2 \cdot A_3 \cdot A_4 \cdot A_5 \cdot A_6$.
-3. Verify your result by computing the end-effector position for known joint configurations (e.g., all zeros, all 90°).
+<!-- STAFF: decide the DH convention (standard or modified) and say so here.
+     Provide the mechanical drawing students work from. -->
 
-##### Step 3: Jacobian and Inverse Kinematics
-1. Compute the geometric Jacobian $J(q) \in \mathbb{R}^{6 \times 6}$ relating joint velocities to end-effector velocities.
-2. Implement a numerical IK solver using the Jacobian pseudo-inverse:
-   $$\Delta q = J(q)^+ \cdot \Delta x$$
-3. Identify at least one singular configuration where $\det(J) \approx 0$ and explain why the IK fails there.
+### Phase B: Digital Twin in Simulation (Week 2)
 
-#### Phase B: Digital Twin in Simulation (Week 2)
+**Goal:** validate the hand derivation against a simulated robot.
 
-##### Step 4: Build the Simulated Environment
-1. Load the staff-provided URDF/MJCF model into your simulator.
-2. Verify that the simulated joint limits match the DH parameters you derived.
-3. Command each joint individually through its full range. Confirm the simulated motion matches your kinematic model.
-
-##### Step 5: IK-Controlled Reaching in Simulation
-1. Implement your IK solver in Python. Given a target $(x, y, z)$, compute the joint angles and command the simulated robot.
-2. Test 10 target positions distributed across the workspace. Record success/failure and final positioning error for each.
-3. Attempt a target outside the workspace. Document the solver's behavior (divergence, oscillation, or graceful failure).
-
-##### Step 6: Workspace Mapping
-1. Systematically sample the reachable workspace by sweeping joint angles and computing forward kinematics.
-2. Visualize the workspace boundary as a 3D point cloud or cross-section.
-3. Identify and annotate the singularity configurations you found analytically.
+4. **Build the simulated environment.** TBD (staff)
+5. **IK-controlled reaching in simulation.** TBD (staff)
+6. **Workspace mapping.** TBD (staff)
 
 ---
 
-### 4. Exploration Challenges
+## 3. Disturbance & Failure Tests
 
-These are optional but encouraged — simulation is your sandbox:
-- Command the robot to trace a circle or figure-eight in Cartesian space. Plot the resulting trajectory.
-- Add a simple obstacle (a box) to the simulation. Can your IK avoid it?
-- Compare your analytical IK with the simulator's built-in IK solver. Where do they disagree?
+- **Unreachable target.** Command a target outside the workspace. Pass condition: TBD (staff).
+- **Singular configuration.** Drive the arm to a configuration where the Jacobian loses rank. Pass condition: TBD (staff).
 
----
-
-### 5. Common Pitfalls & Debugging
-
-* ⚠️ **DH Convention Variants:** There are two DH conventions (standard and modified). Be consistent. The course uses the modified convention (Craig's formulation).
-* ⚠️ **Gimbal Lock at Singularities:** When two joint axes align, the Jacobian loses rank. Your solver will oscillate or diverge. Implement a damped least-squares fallback: $\Delta q = J^T(JJ^T + \lambda^2 I)^{-1} \Delta x$.
-* ⚠️ **Multiple IK Solutions:** A 6-DoF arm typically has up to 8 IK solutions for a given end-effector pose. Your solver will find *one* — verify it's the physically reasonable one (no joint wrapping).
+Optional exploration: TBD (staff)
 
 ---
 
-### 6. Sign-Off Criteria
+## 4. Telemetry Trace
 
-| # | Criterion | Measurable Threshold |
+Not applicable; there is no hardware in this lab. The deliverable is the workspace map and the IK test results.
+
+---
+
+## 5. Common Pitfalls
+
+TBD (staff)
+
+---
+
+## 6. Sign-Off
+
+| # | Criterion | Threshold |
 |:---:|:---|:---|
-| 1 | **DH parameter table** | All 6 joints correctly parameterized; verified by instructor |
-| 2 | **Forward kinematics derivation** | Hand-derived $T_0^6(q)$ matches simulation FK for 3 test configurations within $< 1\text{ mm}$ |
-| 3 | **IK solver working in simulation** | ≥ 8/10 target positions reached with $< 5\text{ mm}$ error |
-| 4 | **Singularity identification** | At least 1 singular configuration identified and explained |
-| 5 | **Workspace visualization** | 3D plot of reachable workspace with annotated boundaries |
+| 1 | **DH parameter table** | TBD (staff) |
+| 2 | **Forward kinematics derivation** | TBD (staff) |
+| 3 | **IK solver working in simulation** | TBD (staff) |
+| 4 | **Singularity identification** | TBD (staff) |
+| 5 | **Workspace visualization** | TBD (staff) |
 
-*Staff signs off `[ ] A1` on the team's [Competency Card](../curriculum/student-competencies.md).*
+*Staff signs off `A1` on the team's [Competency Card](../curriculum/student-competencies.md).*
