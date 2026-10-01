@@ -1,6 +1,6 @@
 # Volume IV staff build brief: prove the kit before teaching it
 
-**Audience:** Postdoctoral researcher and teaching staff. **Status:** Supporting hardware notes for the proposed UNO Q spring seminar. Start with the [feasibility plan](feasibility-plan.md), then use this page for one-axis fallback details if the SO-101 command path cannot be reproduced. The [student competency checklist](../curriculum/student-competencies.md) defines what the course must teach; the [syllabus](../curriculum/syllabus.md#4-assessment-milestones-and-grading) defines the student milestones. Build and measure one complete station before reproducing a class set. The [candidate parts list](kit-bom.md) is a purchasing aid, not evidence that the parts work together.
+**Audience:** Postdoctoral researcher and teaching staff. **Status:** Supporting hardware notes for the proposed UNO Q spring seminar. Start with the [feasibility plan](feasibility-plan.md), then use this page for one-axis fallback details if the SO-101 command path cannot be reproduced. The [student competency checklist](../curriculum/student-competencies.md) defines what the course must teach; the [syllabus](../curriculum/syllabus.md#7-assessment-milestones-and-grading) defines the student milestones. Build and measure one complete station before reproducing a class set. The [candidate parts list](kit-bom.md) is a purchasing aid, not evidence that the parts work together.
 
 ## Priority pilot: SO-101 course station
 

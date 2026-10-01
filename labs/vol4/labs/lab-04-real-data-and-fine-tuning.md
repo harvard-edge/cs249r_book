@@ -4,7 +4,7 @@
 **Weeks:** 7–8 (Parts 4A, 4B)\
 **Reading:** [Chapter 7: Closed-Loop Evaluation](../../../books/vol4/07_evaluation/07_evaluation.qmd), [Chapter 8: Sensor Perception](../../../books/vol4/08_perception/08_perception.qmd), [Chapter 9: Spatial Memory](../../../books/vol4/09_memory/09_memory.qmd)\
 **Competencies:** `B1`, `C1`\
-**Milestone:** Concludes [Milestone 2](../curriculum/syllabus.md#4-assessment-milestones-and-grading) (End of Week 8). Capstone proposal due end of Week 8.
+**Milestone:** Concludes [Milestone 2](../curriculum/syllabus.md#7-assessment-milestones-and-grading) (End of Week 8). Capstone proposal due end of Week 8.
 
 ---
 

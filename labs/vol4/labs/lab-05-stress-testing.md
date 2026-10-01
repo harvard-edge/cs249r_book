@@ -4,7 +4,7 @@
 **Weeks:** 9 (Part 5A)\
 **Reading:** [Chapter 10: Grounded Intent](../../../books/vol4/10_intent/10_intent.qmd), [Chapter 11: Trajectory Planning](../../../books/vol4/11_planning/11_planning.qmd)\
 **Competencies:** `C2`, `C3`\
-**Milestone:** Concludes [Milestone 3](../curriculum/syllabus.md#4-assessment-milestones-and-grading) (End of Week 9)
+**Milestone:** Concludes [Milestone 3](../curriculum/syllabus.md#7-assessment-milestones-and-grading) (End of Week 9)
 
 ---
 

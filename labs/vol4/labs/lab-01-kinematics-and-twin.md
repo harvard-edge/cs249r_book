@@ -4,7 +4,7 @@
 **Weeks:** 1–3 (Parts 1A, 1B, 1C)\
 **Reading:** [Chapter 1: The Causal Boundary](../../../books/vol4/01_boundary/01_boundary.qmd), [Chapter 2: The Physical Body](../../../books/vol4/02_body/02_body.qmd)\
 **Competencies:** `A1`\
-**Milestone:** Contributes to [Milestone 1](../curriculum/syllabus.md#4-assessment-milestones-and-grading) (End of Week 4, with Lab 2)
+**Milestone:** Contributes to [Milestone 1](../curriculum/syllabus.md#7-assessment-milestones-and-grading) (End of Week 4, with Lab 2)
 
 ---
 
