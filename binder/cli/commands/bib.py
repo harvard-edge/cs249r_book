@@ -60,7 +60,7 @@ class BibCommand:
         parser.add_argument(
             "subcommand",
             nargs="?",
-            choices=["list", "mechanical", "clean", "update", "sync", "normalize"],
+            choices=["list", "mechanical", "clean", "update", "sync", "normalize", "add", "ingest"],
             help="Subcommand to run",
         )
         parser.add_argument("files", nargs="*", help=".bib file(s) for mechanical fixes")
@@ -77,6 +77,16 @@ class BibCommand:
             action="store_true",
             help="Mechanical fixes: exit 1 if a file was modified",
         )
+        parser.add_argument("--doi", default=None, help="Add reference by DOI (Crossref/DataCite)")
+        parser.add_argument("--arxiv", default=None, help="Add reference by arXiv ID")
+        parser.add_argument("--isbn", default=None, help="Add reference by ISBN (OpenLibrary)")
+        parser.add_argument("--url", default=None, help="Add reference by official URL")
+        parser.add_argument("--key", default=None, help="Custom citation key for --add")
+        parser.add_argument("--title", default=None, help="Custom title override for --url")
+        parser.add_argument("--author", default=None, help="Custom author override for --url")
+        parser.add_argument("--year", default=None, help="Custom year override for --url")
+        parser.add_argument("--venue", default=None, help="Custom venue override for --url")
+        parser.add_argument("--inbox", default="books/bib-inbox.bib", help="Inbox path for 'ingest' subcommand")
 
         try:
             # Pre-commit appends filenames after the hook entry, so the public
@@ -97,6 +107,26 @@ class BibCommand:
                 ns.files,
                 dry_run=ns.dry_run,
                 pre_commit=ns.pre_commit,
+            )
+
+        if ns.subcommand == "add":
+            return self._run_add(
+                doi=ns.doi,
+                arxiv=ns.arxiv,
+                isbn=ns.isbn,
+                url=ns.url,
+                custom_key=ns.key,
+                title=ns.title,
+                author=ns.author,
+                year=ns.year,
+                venue=ns.venue,
+                dry_run=ns.dry_run,
+            )
+
+        if ns.subcommand == "ingest":
+            return self._run_ingest(
+                inbox=ns.inbox,
+                dry_run=ns.dry_run,
             )
 
         root = self._resolve_path(ns.path, ns.vol1, ns.vol2)
@@ -132,6 +162,8 @@ class BibCommand:
         table = Table(show_header=True, header_style="bold cyan", box=None)
         table.add_column("Subcommand", style="cyan", width=14)
         table.add_column("Description", style="white", width=50)
+        table.add_row("add", "Authenticate, format, and seal new citation into ledger")
+        table.add_row("ingest", "Verify and promote candidate citations from inbox")
         table.add_row("list", "Show all .bib files with entry counts")
         table.add_row("mechanical", "Apply safe §5 field-level fixes")
         table.add_row("clean", "Remove unused entries from .bib files")
@@ -146,6 +178,11 @@ class BibCommand:
         )
         console.print(Panel(table, title="binder bib <subcommand>", border_style="cyan"))
         console.print("[dim]Examples:[/dim]")
+        console.print("  [cyan]./binder/binder bib add --doi 10.1145/3592433[/cyan]")
+        console.print("  [cyan]./binder/binder bib add --arxiv 1706.03762[/cyan]")
+        console.print("  [cyan]./binder/binder bib add --url https://github.com/huggingface/lerobot --key cadene2024lerobot[/cyan]")
+        console.print("  [cyan]./binder/binder bib add --isbn 9780136566953[/cyan]")
+        console.print("  [cyan]./binder/binder bib ingest --inbox books/bib-inbox.bib[/cyan]")
         console.print("  [cyan]./binder/binder bib list --path books/references.bib[/cyan]")
         console.print("  [cyan]./binder/binder bib mechanical refs.bib[/cyan]")
         console.print("  [cyan]./binder/binder bib clean --dry-run[/cyan]")
@@ -560,3 +597,103 @@ class BibCommand:
         update_ok = self._run_update(root)
 
         return clean_ok and update_ok
+
+    # ------------------------------------------------------------------
+    # Add (authoritative gateway)
+    # ------------------------------------------------------------------
+
+    def _run_add(
+        self,
+        doi: Optional[str] = None,
+        arxiv: Optional[str] = None,
+        isbn: Optional[str] = None,
+        url: Optional[str] = None,
+        custom_key: Optional[str] = None,
+        title: Optional[str] = None,
+        author: Optional[str] = None,
+        year: Optional[str] = None,
+        venue: Optional[str] = None,
+        dry_run: bool = False,
+    ) -> bool:
+        """Authenticate, format, and seal a new reference into the master bibliography."""
+        from cli.core import bib_gateway
+
+        repo = self.config_manager.root_dir
+        console.print("[bold cyan]Resolving reference via authoritative gateway...[/bold cyan]")
+
+        resolved = None
+        if doi:
+            console.print(f"[dim]Authenticating DOI '{doi}' via Crossref / DataCite...[/dim]")
+            resolved = bib_gateway.fetch_doi(doi, custom_key=custom_key)
+        elif arxiv:
+            console.print(f"[dim]Authenticating arXiv ID '{arxiv}' via arXiv.org...[/dim]")
+            resolved = bib_gateway.fetch_arxiv(arxiv, custom_key=custom_key)
+        elif isbn:
+            console.print(f"[dim]Authenticating ISBN '{isbn}' via OpenLibrary...[/dim]")
+            resolved = bib_gateway.fetch_isbn(isbn, custom_key=custom_key)
+        elif url:
+            console.print(f"[dim]Authenticating URL '{url}' via HTTP live check...[/dim]")
+            resolved = bib_gateway.fetch_url(
+                url,
+                custom_key=custom_key,
+                title_override=title or "",
+                author_override=author or "",
+                year_override=year or "",
+                venue_override=venue or "",
+            )
+        else:
+            console.print("[red]Error:[/red] Must provide one of --doi, --arxiv, --isbn, or --url.")
+            return False
+
+        if not resolved:
+            console.print(
+                "[red]Authentication failed:[/red] Could not verify or retrieve canonical "
+                "metadata from primary external registries."
+            )
+            return False
+
+        console.print(
+            f"[green]Authenticated:[/green] {resolved['evidence']['source']} -> "
+            f"'{resolved['fields'].get('title')}'"
+        )
+        console.print(f"[dim]Candidate citekey: @{resolved['entry_type']}{{{resolved['key']}}}[/dim]")
+
+        if dry_run:
+            console.print("\n[yellow]Dry run — entry would be formatted and sealed as follows:[/yellow]")
+            console.print(bib_gateway.format_bibtex_entry(resolved["entry_type"], resolved["key"], resolved["fields"]))
+            return True
+
+        ok, msg, record = bib_gateway.add_entry(repo, resolved, check_duplicates=True)
+        if not ok:
+            console.print(f"[red]Error:[/red] {msg}")
+            return False
+
+        console.print(f"\n[bold green]Success![/bold green] {msg}")
+        if record:
+            console.print(f"[dim]Cryptographic SHA-256: {record['entry_hash'][:16]}...[/dim]")
+        return True
+
+    # ------------------------------------------------------------------
+    # Ingest (staging inbox)
+    # ------------------------------------------------------------------
+
+    def _run_ingest(self, inbox: str = "books/bib-inbox.bib", dry_run: bool = False) -> bool:
+        """Scan staging inbox file, authenticate each entry online, promote verified entries."""
+        from cli.core import bib_gateway
+
+        repo = self.config_manager.root_dir
+        inbox_path = repo / inbox
+        if not inbox_path.is_file():
+            console.print(f"[yellow]Inbox file not found: {inbox_path}[/yellow]")
+            return True
+
+        console.print(f"[bold cyan]Scanning staging inbox {inbox_path}...[/bold cyan]")
+        added, rejected, messages = bib_gateway.ingest_inbox(repo, inbox_path, dry_run=dry_run)
+
+        for msg in messages:
+            console.print(f"  {msg}")
+
+        console.print("\n" + "=" * 50)
+        console.print(f"[bold]Ingestion Summary:[/bold] {added} verified & added, {rejected} rejected/pending.")
+        return rejected == 0
+
