@@ -25,7 +25,7 @@ When a chatbot makes a mistake, you retype the prompt. When a robot makes a mist
 | **Teams** | Two or three students per bench station, with rotating roles |
 | **Hardware** | One station per team: Arduino UNO Q, SO-101 arm, overhead camera, and separate motor power. See the [Station Reference Card](../labs/station-reference.md). |
 | **Workload** | Seminar and lab each week, plus reading, analysis, and booked bench time. Credits: TBD |
-| **Schedule and rooms** | TBD |
+| **Schedule** | Seminar early in the week (Monday or Tuesday), lab later in the week (Thursday or Friday). Times and rooms: TBD |
 
 ---
 
@@ -46,9 +46,11 @@ The twelve competencies on the [Competency Card](student-competencies.md) break 
 
 ## 4. How a Week Works
 
-**Seminar (about 90 minutes).** The instructor frames one physical AI question from the week's reading. A rotating team then presents one raw trace or failed prediction from its own station, and the class challenges it: what does this trace prove, and what other explanation is left? The seminar ends with the experiment each team will run in lab.
+The week has a fixed rhythm: **read the chapter, discuss it in seminar, then put it to work in lab.**
 
-**Lab (about 3 hours).** The teaching assistant opens with the station briefing: safe state, motion limits, and the week's common measurement. Teams then work through that week's **lab part**. Every part ends with a **checkpoint**, an artifact staff look at before the team moves on.
+**Seminar (early in the week, about 90 minutes).** Come having read the week's chapter. The instructor frames one physical AI question from the week's reading. A rotating team then presents one raw trace or failed prediction from its own station, and the class challenges it: what does this trace prove, and what other explanation is left? The seminar ends with the experiment each team will run in lab.
+
+**Lab (later in the week, about 3 hours).** The teaching assistant opens with the station briefing: safe state, motion limits, and the week's common measurement. Teams then work through that week's **lab part**. Every part ends with a **checkpoint**, an artifact staff look at before the team moves on.
 
 **Before and after.** Before each lab, write down what you predict will happen. After it, add a short entry to your team's shared notebook: the raw trace, what you measured, how it differed from your prediction, and what you will try next. The notebook is checked at the bench and feeds your milestones; there are no separate weekly lab reports.
 
@@ -56,7 +58,7 @@ The twelve competencies on the [Competency Card](student-competencies.md) break 
 
 ## 5. Schedule
 
-Read the week's chapter before the lab: the chapter gives the principles, and the lab puts them to work on the bench. Readings follow the book in order, so a chapter sometimes prepares a lab a week or two ahead. The [lab template](../LAB_TEMPLATE.md) explains how each lab is organized.
+Read the week's chapter before the seminar: the chapter gives the principles, the seminar tests them, and the lab puts them to work on the bench. Readings follow the book in order, so a chapter sometimes prepares a lab a week or two ahead. The [lab template](../LAB_TEMPLATE.md) explains how each lab is organized.
 
 | Week | Reading | Lab part | Due |
 |:---:|:---|:---|:---|
