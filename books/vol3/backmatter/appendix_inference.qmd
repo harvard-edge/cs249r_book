@@ -141,19 +141,19 @@ The two ceilings meet at the ridge point $I_{\text{ridge}} = R_{\text{peak}} / \
 
 ### Prefill and decode
 
-A dense transformer with $P$ active parameters performs about $2P$ weight-related operations per token, one multiply and one add per weight. Its weight payload is $P b$ bytes, where $b$ is bytes per parameter. The approximation counts this payload once per pass; prefill and decode differ in how many tokens share that read. Sparse activation and weight reuse from another cache level require a different traffic count.
+A dense transformer with $P$ active parameters performs about $2P$ weight-related operations per token, one multiply and one add per weight. Its weight payload is $P\,s_{\text{elem,W}}$ bytes, where $s_{\text{elem,W}}$ is bytes per parameter. The approximation counts this payload once per pass; prefill and decode differ in how many tokens share that read. Sparse activation and weight reuse from another cache level require a different traffic count.
 
-In the weight-only model, prefill shares each weight read across $S$ prompt positions, giving intensity $2PS / Pb = 2S/b$. When that intensity exceeds the ridge and arithmetic approaches the stated peak, the per-token time approaches the following floor. Small prompts, kernel tiling, attention, and additional memory traffic can invalidate those assumptions.
+In the weight-only model, prefill shares each weight read across $S$ prompt positions, giving intensity $2PS / (P\,s_{\text{elem,W}}) = 2S/s_{\text{elem,W}}$. When that intensity exceeds the ridge and arithmetic approaches the stated peak, the per-token time approaches the following floor. Small prompts, kernel tiling, attention, and additional memory traffic can invalidate those assumptions.
 
 $$t_{\text{prefill}} \approx \frac{2P}{R_{\text{peak}}}$$ {#eq-appdx-prefill-time}
 
-Ordinary decode for one stream generates one token per pass, with each token depending on the preceding prefix. If the weights must be read from the modeled memory on every pass, the weight-only intensity is $2/b$, or `{python} ServingRef.i_decode_str` operations per byte at 8-bit precision, about `{python} ServingRef.util_decode_str` percent of the ridge. Streaming those weights imposes a time floor even before attention-state traffic and overhead:
+Ordinary decode for one stream generates one token per pass, with each token depending on the preceding prefix. If the weights must be read from the modeled memory on every pass, the weight-only intensity is $2/s_{\text{elem,W}}$, or `{python} ServingRef.i_decode_str` operations per byte at 8-bit precision, about `{python} ServingRef.util_decode_str` percent of the ridge. Streaming those weights imposes a time floor even before attention-state traffic and overhead:
 
-$$t_{\text{decode}} \ge \frac{P b}{\text{BW}}$$ {#eq-appdx-shuttle-floor}
+$$t_{\text{decode}} \ge \frac{P\,s_{\text{elem,W}}}{\text{BW}}$$ {#eq-appdx-shuttle-floor}
 
 For the reference model, with $P$ = `{python} ServingRef.params_b_str` billion parameters at 8-bit precision, @eq-appdx-shuttle-floor gives a decode floor of `{python} ServingRef.t_dec_val_str` ms per output token, and @eq-appdx-prefill-time gives about `{python} ServingRef.t_pre_val_str` µs per prompt token. In the following comparison only, the time symbols denote these weight-only estimates rather than observed times:
 
-$$\frac{t_{\text{decode}}}{t_{\text{prefill}}} = \frac{P b / \text{BW}}{2P / R_{\text{peak}}} = \frac{R_{\text{peak}} \, b}{2 \text{BW}} = \frac{b}{2} \, I_{\text{ridge}}$$ {#eq-appdx-decode-prefill-ratio}
+$$\frac{t_{\text{decode}}}{t_{\text{prefill}}} = \frac{P\,s_{\text{elem,W}} / \text{BW}}{2P / R_{\text{peak}}} = \frac{R_{\text{peak}} \, s_{\text{elem,W}}}{2 \text{BW}} = \frac{s_{\text{elem,W}}}{2} \, I_{\text{ridge}}$$ {#eq-appdx-decode-prefill-ratio}
 
 which is `{python} ServingRef.ratio_str` for the reference configuration. Model size cancels in this approximation because both estimates count the same dense-model weights. The result assumes weight-dominated unbatched decode, peak-rate prefill, and negligible attention and serving overhead; it is not a measured ratio shared by every model on the accelerator. Within that model, the same number gives the number of tokens per pass at which arithmetic time meets weight-transfer time, a threshold used in the batching and speculative-decoding estimates below.
 
@@ -161,19 +161,19 @@ The estimate separates two quantities an agent engineer can influence. Shorter o
 
 ### Long contexts
 
-@Eq-appdx-prefill-time counts only the weights. Attention adds work that grows with the context itself. The token at position $s$ compares its query with $s$ earlier keys and combines $s$ earlier values, about $4 L d s$ operations for a model with $L$ layers and width $d$. Summed over a causal prefill of $S$ tokens, attention adds about $2 L d S^2$ operations to the $2PS$ of the weights, so
+@Eq-appdx-prefill-time counts only the weights. Attention adds work that grows with the context itself. The token at position $s$ compares its query with $s$ earlier keys and combines $s$ earlier values, about $4 N_L d s$ operations for a model with $N_L$ layers and width $d$. Summed over a causal prefill of $S$ tokens, attention adds about $2 N_L d S^2$ operations to the $2PS$ of the weights, so
 
-$$T_{\text{prefill}}(S) \approx \frac{2PS + 2 L d S^2}{R_{\text{peak}}}$$ {#eq-appdx-prefill-long}
+$$T_{\text{prefill}}(S) \approx \frac{2PS + 2 N_L d S^2}{R_{\text{peak}}}$$ {#eq-appdx-prefill-long}
 
-The quadratic term equals the linear one at $S^* = P / (L d)$, about `{python} ServingRef.s_cross_str` tokens for the reference model, with $L$ = `{python} ServingRef.n_layers_str` and $d$ = `{python} ServingRef.d_model_str`. At `{python} ServingRef.s_agent_str` tokens, attention adds about `{python} ServingRef.attn_share_agent_str` percent to the prefill arithmetic, and beyond $S^*$ it dominates. Under this fixed-throughput approximation, prefill time grows faster than linearly with length. Observed time to first token also depends on queueing, reuse, and the serving schedule. The logical selection problem in @sec-vol3-context-engineering-physics determines which information the request needs; the estimate here prices the processing work without establishing an optimal context length or task-quality threshold.
+The quadratic term equals the linear one at $S^* = P / (N_L d)$, about `{python} ServingRef.s_cross_str` tokens for the reference model, with $N_L$ = `{python} ServingRef.n_layers_str` and $d$ = `{python} ServingRef.d_model_str`. At `{python} ServingRef.s_agent_str` tokens, attention adds about `{python} ServingRef.attn_share_agent_str` percent to the prefill arithmetic, and beyond $S^*$ it dominates. Under this fixed-throughput approximation, prefill time grows faster than linearly with length. Observed time to first token also depends on queueing, reuse, and the serving schedule. The logical selection problem in @sec-vol3-context-engineering-physics determines which information the request needs; the estimate here prices the processing work without establishing an optimal context length or task-quality threshold.
 
 ### Batching and the fleet's cost per token
 
 A server can batch decode steps from several trajectories. If one weight read serves $B$ streams, the step produces one token for each stream. Ignoring the attention state each stream also reads, the time of one step is
 
-$$t_{\text{step}}(B) \approx \max\left( \frac{P b}{\text{BW}}, \; \frac{2 P B}{R_{\text{peak}}} \right)$$ {#eq-appdx-batched-step}
+$$t_{\text{step}}(B) \approx \max\left( \frac{P\,s_{\text{elem,W}}}{\text{BW}}, \; \frac{2 P B}{R_{\text{peak}}} \right)$$ {#eq-appdx-batched-step}
 
-and the step stays at the memory-bound floor until $B$ reaches $R_{\text{peak}} b / 2\text{BW}$, the ratio of @eq-appdx-decode-prefill-ratio. Within this weight-only approximation, adding streams up to that threshold leaves step time unchanged, while step time divided by the number of generated tokens falls as $1/B$ toward $2P/R_{\text{peak}}$. This is amortized serving time, not the latency of one stream or the price charged by a service. Repeated input adds prefill work when the prefix cannot be reused, but the bill also depends on utilization and the service's accounting rules.
+and the step stays at the memory-bound floor until $B$ reaches $R_{\text{peak}}\,s_{\text{elem,W}} / 2\text{BW}$, the ratio of @eq-appdx-decode-prefill-ratio. Within this weight-only approximation, adding streams up to that threshold leaves step time unchanged, while step time divided by the number of generated tokens falls as $1/B$ toward $2P/R_{\text{peak}}$. This is amortized serving time, not the latency of one stream or the price charged by a service. Repeated input adds prefill work when the prefix cannot be reused, but the bill also depends on utilization and the service's accounting rules.
 
 A trajectory cannot batch a future call whose input depends on an observation it has not received. Its current call can nevertheless share a physical serving batch with calls from other trajectories. That batching can change queueing and per-step latency; a dependent client stream is not evidence that the server runs at batch size one. The weight-only estimate also omits attention-state traffic. Each stream reads its own keys and values, approximately $s \cdot m_{\text{token}}$ bytes for a context of $s$ tokens (@sec-vol3-appendix-inference-kv-cache). Long contexts can therefore bind bandwidth or capacity before the arithmetic threshold in @eq-appdx-batched-step is reached. @Sec-vol3-appendix-inference-queueing relates resident state to the number of live trajectories.
 
@@ -187,9 +187,9 @@ Token selection, optional grammar constraints, and speculative verification add 
 
 ### Architectural placement of token sampling logic
 
-At each step the model produces one logit per vocabulary entry. Let $|\mathcal{V}|$ be the vocabulary size and $b_{\ell}$ the bytes stored per logit. One vector occupies $|\mathcal{V}|b_{\ell}$ bytes. If $B$ streams each emit $R$ tokens per second and transfer one full vector per token to a host sampler, the logit payload rate is $BR|\mathcal{V}|b_{\ell}$ bytes per second. Batching transfers can reduce the number of transfer operations, but not that payload under these assumptions.
+At each step the model produces one logit per vocabulary entry. Let $|\mathcal{V}|$ be the vocabulary size and $s_{\text{logit}}$ the bytes stored per logit. One vector occupies $|\mathcal{V}|s_{\text{logit}}$ bytes. If $B$ streams each emit $R$ tokens per second and transfer one full vector per token to a host sampler, the logit payload rate is $BR|\mathcal{V}|s_{\text{logit}}$ bytes per second. Batching transfers can reduce the number of transfer operations, but not that payload under these assumptions.
 
-Sampling on the accelerator permits an interface that transfers only the selected token identifier. If each identifier occupies $b_{\text{id}}$ bytes, its payload rate is $BRb_{\text{id}}$, giving a payload ratio of $|\mathcal{V}|b_{\ell}/b_{\text{id}}$. Neither expression counts protocol framing, requested log probabilities, or synchronization. Those costs must be measured on the actual path before choosing a placement. The calculation concerns an internal serving interface, not the application response format. A service may decode and buffer tokens into response chunks whose boundaries need not match tokens; @sec-vol3-foundation-model-contract specifies how the runtime handles that response.
+Sampling on the accelerator permits an interface that transfers only the selected token identifier. If each identifier occupies $s_{\text{id}}$ bytes, its payload rate is $BRs_{\text{id}}$, giving a payload ratio of $|\mathcal{V}|s_{\text{logit}}/s_{\text{id}}$. Neither expression counts protocol framing, requested log probabilities, or synchronization. Those costs must be measured on the actual path before choosing a placement. The calculation concerns an internal serving interface, not the application response format. A service may decode and buffer tokens into response chunks whose boundaries need not match tokens; @sec-vol3-foundation-model-contract specifies how the runtime handles that response.
 
 ### Grammar masks
 
@@ -203,7 +203,7 @@ A host-mediated implementation may instead transfer the selected token to a host
 
 Exact speculative sampling preserves a specified target distribution while checking several draft positions in a target-model pass [@leviathan2023fast; @chen2023accelerating]. A draft distribution $q$ proposes $k$ tokens $\tilde{x}_1, \dots, \tilde{x}_k$ autoregressively. The target computes the distributions needed to verify them and to sample after the full draft. Both $p$ and $q$ below are normalized distributions at the same prefix after their sampling transformations, including any grammar masks. Scanning left to right, candidate $\tilde{x}_j$ is accepted with probability
 
-$$\alpha_j = \min\left(1, \frac{p(\tilde{x}_j \mid \cdot)}{q(\tilde{x}_j \mid \cdot)}\right)$$ {#eq-appdx-spec-accept}
+$$\alpha_{\text{spec}, j} = \min\left(1, \frac{p(\tilde{x}_j \mid \cdot)}{q(\tilde{x}_j \mid \cdot)}\right)$$ {#eq-appdx-spec-accept}
 
 At the first rejection, the remaining drafts are discarded and one replacement token is drawn from the normalized residual distribution
 
@@ -219,15 +219,15 @@ For the full-attention decoder considered here, generation uses keys and values 
 
 ### Bytes per token
 
-For a decoder with $L$ layers, $H_{\text{kv}}$ key-value heads per layer, head dimension $d_{\text{head}}$, and $b_{\text{kv}}$ bytes per stored element, each token stores one key vector and one value vector per layer and key-value head:
+For a decoder with $N_L$ layers, $H_{\text{KV}}$ key-value heads per layer, head dimension $d_{\text{head}}$, and $s_{\text{elem,KV}}$ bytes per stored element, each token stores one key vector and one value vector per layer and key-value head:
 
-$$m_{\text{token}} = 2 \cdot L \cdot H_{\text{kv}} \cdot d_{\text{head}} \cdot b_{\text{kv}}$$ {#eq-appdx-kv-cache-token-size}
+$$m_{\text{token}} = 2 \cdot N_L \cdot H_{\text{KV}} \cdot d_{\text{head}} \cdot s_{\text{elem,KV}}$$ {#eq-appdx-kv-cache-token-size}
 
-and a context of $T$ tokens occupies
+and a context of $S$ tokens occupies
 
-$$M_{\text{KV}}(T) = T \cdot m_{\text{token}}$$
+$$M_{\text{KV}} = S \cdot m_{\text{token}}$$
 
-For the reference model, with $L$ = `{python} ServingRef.n_layers_str`, $H_{\text{kv}}$ = `{python} ServingRef.n_kv_heads_str`, $d_{\text{head}}$ = `{python} ServingRef.d_head_str`, and 16-bit storage, $m_{\text{token}}$ = `{python} ServingRef.m_token_str` bytes, so a `{python} ServingRef.s_agent_str`-token context occupies about `{python} ServingRef.kv_agent_str` GB. @Sec-vol3-kvcache-geometry turns this into the number of trajectories one node can hold.
+For the reference model, with $N_L$ = `{python} ServingRef.n_layers_str`, $H_{\text{KV}}$ = `{python} ServingRef.n_kv_heads_str`, $d_{\text{head}}$ = `{python} ServingRef.d_head_str`, and 16-bit storage, $m_{\text{token}}$ = `{python} ServingRef.m_token_str` bytes, so a `{python} ServingRef.s_agent_str`-token context occupies about `{python} ServingRef.kv_agent_str` GB. @Sec-vol3-kvcache-geometry turns this into the number of trajectories one node can hold.
 
 ### Attention designs
 
@@ -245,19 +245,19 @@ Storing each key and value element at 8 rather than 16 bits halves the element p
 
 ### Occupancy during a tool wait
 
-Memory occupancy depends on how much is held and for how long. A trajectory whose attention state stays resident through a tool wait of length $t_{\text{wait}}$ occupies
+Memory occupancy depends on how much is held and for how long. A trajectory whose attention state stays resident through a tool wait of length $T_{\text{wait}}$ occupies
 
-$$O = M_{\text{KV}}(T) \cdot t_{\text{wait}}$$
+$$O_{\text{mem}} = M_{\text{KV}} \cdot T_{\text{wait}}$$
 
 byte-seconds while generating nothing. When a tool wait exceeds the active generation interval and holds the same footprint, idle occupancy exceeds active occupancy. The relevant inputs are the actual retained bytes and their holding interval, which makes the retain, evict, recompute, or offload decision of @sec-vol3-kvcache-swapping a per-wait decision rather than a fixed property of agents.
 
 ### Paged storage
 
-Reserving a contiguous region for each trajectory's maximum context leaves unused capacity when its retained length is below that cap. Paged storage divides a pool into interchangeable fixed blocks of $B_s$ tokens and maps each trajectory's positions to blocks through a table [@kwon2023]. Allocation on demand removes variable-extent external fragmentation within that pool; it does not eliminate metadata, temporary allocations, or unused final-block slots. If sequence lengths have uniformly distributed remainders modulo $B_s$, the mean unused tail payload is
+Reserving a contiguous region for each trajectory's maximum context leaves unused capacity when its retained length is below that cap. Paged storage divides a pool into interchangeable fixed blocks of $S_{\text{blk}}$ tokens and maps each trajectory's positions to blocks through a table [@kwon2023]. Allocation on demand removes variable-extent external fragmentation within that pool; it does not eliminate metadata, temporary allocations, or unused final-block slots. If sequence lengths have uniformly distributed remainders modulo $S_{\text{blk}}$, the mean unused tail payload is
 
-$$\mathbb{E}[\text{waste}] \approx \frac{B_s - 1}{2} \cdot m_{\text{token}}$$
+$$\mathbb{E}[\text{waste}] \approx \frac{S_{\text{blk}} - 1}{2} \cdot m_{\text{token}}$$
 
-per sequence. Without that distributional assumption, the unconditional bound is at most $B_s-1$ unused token slots in a final block. Compatible blocks can also be shared, allowing branches and requests with a common prefix to use one physical copy under the serving system's ownership rules (@sec-vol3-kvcache-pagedattention).
+per sequence. Without that distributional assumption, the unconditional bound is at most $S_{\text{blk}} - 1$ unused token slots in a final block. Compatible blocks can also be shared, allowing branches and requests with a common prefix to use one physical copy under the serving system's ownership rules (@sec-vol3-kvcache-pagedattention).
 
 ## Queueing for Trajectories {#sec-vol3-appendix-inference-queueing}
 
@@ -356,13 +356,13 @@ Batch slots are not independent servers. Their occupants share weight reads, ari
 
 For a stable system with well-defined finite long-run averages, the mean number of items inside a boundary equals their entry rate times their mean time inside that same boundary [@little1961]:
 
-$$L = \lambda \cdot W$$ {#eq-appdx-littles-law}
+$$Q_{\text{req}} = \lambda_{\text{arr}} \cdot T_{\text{lat}}$$ {#eq-appdx-littles-law}
 
-A trajectory of $H$ turns spends each turn in a model call and then in a tool, so its time in the system is
+A trajectory of $H$ turns spends each turn in a model call and then in a tool, so its trajectory duration is
 
-$$W_{\text{traj}} = \sum_{k=1}^{H} \left( T_{\text{model}}^{(k)} + T_{\text{tool}}^{(k)} \right)$$
+$$T_{\text{traj}} = \sum_{t=0}^{H-1} \left( T_{\text{model}}^{(t)} + T_{\text{tool}}^{(t)} \right)$$
 
-under the simplifying assumption that model calls and tool operations run sequentially, with no additional approval, queueing, or runtime delay. As a worked case, let trajectories start at `{python} TrajectoryQueue.arrival_str` per second, each running `{python} TrajectoryQueue.turns_str` turns of `{python} TrajectoryQueue.t_model_str` s of model time and `{python} TrajectoryQueue.t_tool_str` s of tool time. Each lives `{python} TrajectoryQueue.w_traj_str` s, about `{python} TrajectoryQueue.w_traj_min_str` minutes, so @eq-appdx-littles-law gives `{python} TrajectoryQueue.live_str` live trajectories. Only `{python} TrajectoryQueue.model_share_str` percent of each trajectory's time is spent in a model call, so on average `{python} TrajectoryQueue.in_call_str` of them are calling the model at any moment.
+under the simplifying assumption that model calls and tool operations run sequentially, with no additional approval, queueing, or runtime delay. As a worked case, let trajectories start at `{python} TrajectoryQueue.arrival_str` per second, each running `{python} TrajectoryQueue.turns_str` turns of `{python} TrajectoryQueue.t_model_str` s of model time and `{python} TrajectoryQueue.t_tool_str` s of tool time. Each lives `{python} TrajectoryQueue.w_traj_str` s, about `{python} TrajectoryQueue.w_traj_min_str` minutes, so @eq-appdx-littles-law, in its trajectory form $N_{\text{traj}} = \lambda_{\text{traj}}\,\mathbb{E}[T_{\text{traj}}]$, gives `{python} TrajectoryQueue.live_str` live trajectories. Only `{python} TrajectoryQueue.model_share_str` percent of each trajectory's time is spent in a model call, so on average `{python} TrajectoryQueue.in_call_str` of them are calling the model at any moment.
 
 The gap between those two numbers measures the effect of holding state through tool waits in this workload. If every live trajectory keeps a `{python} ServingRef.s_agent_str`-token context resident, the attention state totals about `{python} TrajectoryQueue.resident_val_str` TB, about `{python} TrajectoryQueue.nodes_resident_str` nodes' worth of the reference pool of @sec-vol3-appendix-inference-assumptions. Holding the same footprint only during the stipulated model-call intervals gives about `{python} TrajectoryQueue.nodes_in_call_str` nodes' worth. Reloading or recomputing on resumption adds time and work omitted from this comparison; recomputing those intervals may change the averages. @Sec-vol3-kvcache-swapping develops that policy choice.
 
@@ -370,9 +370,9 @@ Harness records and sandbox leases require their own acquisition rates and holdi
 
 ### Load sensitivity of waiting
 
-A single-server queue isolates how variability and load contribute to waiting. Consider first-come, first-served service with independent, identically distributed interarrival times, independent, identically distributed service times, independence between the two sequences, finite variances, and utilization $\rho < 1$. Let $\mathbb{E}[S]$ be mean service time and $c_a^2$ and $c_s^2$ the squared coefficients of variation of interarrival and service times. Kingman's heavy-traffic result motivates the following finite-load approximation to mean waiting time; it is not an identity or a tail bound.
+A single-server queue isolates how variability and load contribute to waiting. Consider first-come, first-served service with independent, identically distributed interarrival times, independent, identically distributed service times, independence between the two sequences, finite variances, and utilization $\rho_{\text{serv}} < 1$. Let $\mathbb{E}[T_{\text{svc}}]$ be mean service time and $c_a^2$ and $c_s^2$ the squared coefficients of variation of interarrival and service times. Kingman's heavy-traffic result motivates the following finite-load approximation to mean waiting time; it is not an identity or a tail bound.
 
-$$W_q \approx \frac{c_a^2 + c_s^2}{2} \cdot \frac{\rho}{1 - \rho} \cdot \mathbb{E}[S]$$
+$$T_{\text{queue}} \approx \frac{c_a^2 + c_s^2}{2} \cdot \frac{\rho_{\text{serv}}}{1 - \rho_{\text{serv}}} \cdot \mathbb{E}[T_{\text{svc}}]$$
 
 With interarrival variability $c_a^2$ = `{python} QueueKnee.ca2_str` and service variability $c_s^2$ = `{python} QueueKnee.cs2_str`, the variability factor is `{python} QueueKnee.var_str`. Substitution gives approximate waits of `{python} QueueKnee.w50_str`, `{python} QueueKnee.w70_str`, and `{python} QueueKnee.w90_str` service times at `{python} QueueKnee.rho50_str`, `{python} QueueKnee.rho70_str`, and `{python} QueueKnee.rho90_str` percent utilization. These are selected comparison points, not a universal utilization knee or an operating recommendation.
 
@@ -380,17 +380,17 @@ Batching, correlated fan-out, retries, and state-dependent service rates can vio
 
 ### Trajectory concurrency capacity under accelerator memory constraints
 
-For a server with memory $M_{\text{HBM}}$, weights of $P b$ bytes, and a runtime reserve $M_{\text{runtime}}$, the memory left for attention state is
+For a server with memory $M_{\text{HBM}}$, weights of $P\,s_{\text{elem,W}}$ bytes (16-bit here, whereas the time floors assume 8-bit weights), and a runtime reserve $M_{\text{runtime}}$, the memory left for attention state is
 
-$$M_{\text{dynamic}} = M_{\text{HBM}} - P b - M_{\text{runtime}}$$ {#eq-appdx-mdynamic}
+$$M_{\text{pool}} = M_{\text{HBM}} - P\,s_{\text{elem,W}} - M_{\text{runtime}}$$ {#eq-appdx-mdynamic}
 
-and a mean-footprint estimate for contexts of average length $\bar{T}$ is
+and a mean-footprint estimate for contexts of average length $\bar{S}$ is
 
-$$B_{\max} = \left\lfloor \frac{M_{\text{dynamic}}}{\bar{T} \cdot m_{\text{token}}} \right\rfloor$$ {#eq-appdx-max-batch}
+$$B_{\max} = \left\lfloor \frac{M_{\text{pool}}}{\bar{S} \cdot m_{\text{token}}} \right\rfloor$$ {#eq-appdx-max-batch}
 
 An average footprint does not guarantee that a particular set of requests fits. For the reference node and equal-length unshared contexts, @eq-appdx-mdynamic leaves `{python} ServingRef.pool_str` GB and @eq-appdx-max-batch gives `{python} ServingRef.conc_agent_str` resident contexts at `{python} ServingRef.s_agent_str` tokens, before allocator overhead and additional headroom. This is the payload bound derived in @sec-vol3-kvcache-geometry, not an admission or throughput guarantee. When a new allocation cannot fit, the service may queue or reject work, reclaim dormant state, or move or drop eligible state.
 
-A restricted comparison estimates reconstruction of $T$ tokens by the linear weight-work term $2PT/R_{\text{peak}}$ and reload by $T \cdot m_{\text{token}} / \text{BW}_{\text{link}}$, assuming the stated sustained compute and transfer rates. It omits the attention term of @eq-appdx-prefill-long, queueing, allocation, and other overhead. Within that model alone, reconstruction has the smaller estimated duration when
+A restricted comparison estimates reconstruction of $S$ tokens by the linear weight-work term $2PS/R_{\text{peak}}$ and reload by $S \cdot m_{\text{token}} / \text{BW}_{\text{link}}$, assuming the stated sustained compute and transfer rates. It omits the attention term of @eq-appdx-prefill-long, queueing, allocation, and other overhead. Within that model alone, reconstruction has the smaller estimated duration when
 
 $$\frac{2 P}{R_{\text{peak}}} < \frac{m_{\text{token}}}{\text{BW}_{\text{link}}}$$
 
@@ -402,23 +402,23 @@ The worked estimates use the MLSysIM entries `Models.Language.Llama3_70B`, `Hard
 
 The two calculations have different placement boundaries. Per-token floors use one accelerator's compute rate and bandwidth with 8-bit weights. The memory pool instead aggregates `{python} ServingRef.n_acc_str` accelerators, totaling `{python} ServingRef.node_hbm_str`, and subtracts one 16-bit model copy and a node-wide reserve. It assumes a feasible sharding arrangement without counting communication time or per-device imbalance. Multiplying memory capacity does not establish an equivalent latency speedup. Memory quantities below use decimal GB consistently with the pool arithmetic, rather than the accelerator's branded capacity label.
 
-| Quantity                                       | Symbol                  | Reference value                                                                                  | Used in                                 |
-|:-----------------------------------------------|:------------------------|:-------------------------------------------------------------------------------------------------|:----------------------------------------|
-| **Parameters**                                 | $P$                     | `{python} ServingRef.params_b_str` billion                                                       | Per-token floors, weights in memory     |
-| **Layers**                                     | $L$                     | `{python} ServingRef.n_layers_str`                                                               | Attention state, long-context prefill   |
-| **Model width**                                | $d$                     | `{python} ServingRef.d_model_str`                                                                | Long-context prefill                    |
-| **Query heads / key-value heads**              | $H_q$ / $H_{\text{kv}}$ | `{python} ServingRef.n_heads_str` / `{python} ServingRef.n_kv_heads_str`                         | Attention state by design               |
-| **Head dimension**                             | $d_{\text{head}}$       | `{python} ServingRef.d_head_str`                                                                 | Attention state                         |
-| **Weight precision for time floors**           | $b$                     | 1 byte (8-bit)                                                                                   | Decode floor, ridge-to-ratio conversion |
-| **Key-value precision**                        | $b_{\text{kv}}$         | 2 bytes (16-bit)                                                                                 | Attention state                         |
-| **Accelerator memory bandwidth**               | $\text{BW}$             | `{python} ServingRef.bw_str` TB/s                                                                | Decode floor, ridge point               |
-| **Accelerator peak rate, 8-bit**               | $R_{\text{peak}}$       | `{python} ServingRef.peak_str` trillion operations per second                                    | Prefill floor, ridge point              |
-| **Memory per accelerator**                     | —                       | `{python} ServingRef.acc_hbm_str`                                                                | Component of node memory pool           |
-| **Accelerators per node**                      | $n_{\text{acc}}$        | `{python} ServingRef.n_acc_str`                                                                  | Node memory pool                        |
-| **Ridge point**                                | $I_{\text{ridge}}$      | `{python} ServingRef.ridge_str` operations per byte                                              | Where passes turn arithmetic-bound      |
-| **Decode floor per output token**              | $t_{\text{decode}}$     | `{python} ServingRef.t_dec_val_str` ms                                                           | Call latency                            |
-| **Weight-only prefill floor per prompt token** | $t_{\text{prefill}}$    | `{python} ServingRef.t_pre_val_str` µs                                                           | Conditional arithmetic estimate         |
-| **Attention state per token**                  | $m_{\text{token}}$      | `{python} ServingRef.m_token_str` bytes                                                          | Memory per trajectory                   |
-| **Attention-state pool per node**              | $M_{\text{dynamic}}$    | `{python} ServingRef.pool_str` GB (16-bit weights, `{python} ServingRef.reserve_str` GB reserve) | Trajectories per node                   |
+| Quantity                                       | Symbol                               | Reference value                                                                                  | Used in                                 |
+|:-----------------------------------------------|:-------------------------------------|:-------------------------------------------------------------------------------------------------|:----------------------------------------|
+| **Parameters**                                 | $P$                                  | `{python} ServingRef.params_b_str` billion                                                       | Per-token floors, weights in memory     |
+| **Layers**                                     | $N_L$                                | `{python} ServingRef.n_layers_str`                                                               | Attention state, long-context prefill   |
+| **Model width**                                | $d$                                  | `{python} ServingRef.d_model_str`                                                                | Long-context prefill                    |
+| **Query heads / key-value heads**              | $N_{\text{heads}}$ / $H_{\text{KV}}$ | `{python} ServingRef.n_heads_str` / `{python} ServingRef.n_kv_heads_str`                         | Attention state by design               |
+| **Head dimension**                             | $d_{\text{head}}$                    | `{python} ServingRef.d_head_str`                                                                 | Attention state                         |
+| **Weight precision for time floors**           | $s_{\text{elem,W}}$                  | 1 byte (8-bit)                                                                                   | Decode floor, ridge-to-ratio conversion |
+| **Key-value precision**                        | $s_{\text{elem,KV}}$                 | 2 bytes (16-bit)                                                                                 | Attention state                         |
+| **Accelerator memory bandwidth**               | $\text{BW}$                          | `{python} ServingRef.bw_str` TB/s                                                                | Decode floor, ridge point               |
+| **Accelerator peak rate, 8-bit**               | $R_{\text{peak}}$                    | `{python} ServingRef.peak_str` trillion operations per second                                    | Prefill floor, ridge point              |
+| **Memory per accelerator**                     | —                                    | `{python} ServingRef.acc_hbm_str`                                                                | Component of node memory pool           |
+| **Accelerators per node**                      | $n_{\text{acc}}$                     | `{python} ServingRef.n_acc_str`                                                                  | Node memory pool                        |
+| **Ridge point**                                | $I_{\text{ridge}}$                   | `{python} ServingRef.ridge_str` operations per byte                                              | Where passes turn arithmetic-bound      |
+| **Decode floor per output token**              | $t_{\text{decode}}$                  | `{python} ServingRef.t_dec_val_str` ms                                                           | Call latency                            |
+| **Weight-only prefill floor per prompt token** | $t_{\text{prefill}}$                 | `{python} ServingRef.t_pre_val_str` µs                                                           | Conditional arithmetic estimate         |
+| **Attention state per token**                  | $m_{\text{token}}$                   | `{python} ServingRef.m_token_str` bytes                                                          | Memory per trajectory                   |
+| **Attention-state pool per node**              | $M_{\text{pool}}$                    | `{python} ServingRef.pool_str` GB (16-bit weights, `{python} ServingRef.reserve_str` GB reserve) | Trajectories per node                   |
 
 : **Reference Serving Values**: Registry-backed model and hardware inputs, local precision and reserve assumptions, and derived quantities. The time floors use one accelerator; the attention-state pool uses aggregate node memory. {#tbl-appdx-hardware-constants tbl-colwidths="[30,14,32,24]"}
