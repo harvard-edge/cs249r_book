@@ -2,7 +2,7 @@
 
 **Status:** `skeleton`\
 **Weeks:** 10–11 (Parts 6A, 6B)\
-**Reading:** [Chapter 12: Safety Enforcement](../../../books/vol4/12_enforcement/12_enforcement.qmd), [Chapter 13: Silicon Placement](../../../books/vol4/13_placement/13_placement.qmd), [Chapter 14: Supervisory Intervention](../../../books/vol4/14_intervention/14_intervention.qmd), [Chapter 15: Adversarial Verification](../../../books/vol4/15_verification/15_verification.qmd), [Chapter 16: Safe Release](../../../books/vol4/16_release/16_release.qmd)\
+**Reading:** [Chapter 12: Safety Enforcement](../../../books/vol4/12_enforcement/12_enforcement.qmd), [Chapter 13: Silicon Placement](../../../books/vol4/13_placement/13_placement.qmd), [Chapter 14: Supervisory Intervention](../../../books/vol4/14_intervention/14_intervention.qmd), [Chapter 15: Adversarial Verification](../../../books/vol4/15_verification/15_verification.qmd)\
 **Competencies:** `D1`, `D2`\
 **Milestone:** Concludes [Milestone 4](../curriculum/syllabus.md#7-assessment-milestones-and-grading) (End of Week 11). Capstone task frozen by end of Week 10.
 

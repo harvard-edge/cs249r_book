@@ -56,24 +56,24 @@ The twelve competencies on the [Competency Card](student-competencies.md) break 
 
 ## 5. Schedule
 
-Each chapter has one core section for discussion, announced the week before; the rest is background. The [lab template](../LAB_TEMPLATE.md) explains how each lab is organized.
+Read the week's chapter before the lab: the chapter gives the principles, and the lab puts them to work on the bench. Readings follow the book in order, so a chapter sometimes prepares a lab a week or two ahead. The [lab template](../LAB_TEMPLATE.md) explains how each lab is organized.
 
 | Week | Reading | Lab part | Due |
 |:---:|:---|:---|:---|
-| 1 | [Ch 1: The Causal Boundary](../../../books/vol4/01_boundary/01_boundary.qmd) | [**1A** Meet the robot](../labs/lab-01-kinematics-and-twin.md) | |
-| 2 | [Ch 2: The Physical Body](../../../books/vol4/02_body/02_body.qmd) | [**1B** Kinematics on paper](../labs/lab-01-kinematics-and-twin.md) | |
-| 3 | Ch 2, continued | [**1C** Digital twin](../labs/lab-01-kinematics-and-twin.md) | |
-| 4 | [Ch 3: The Cognitive Brain](../../../books/vol4/03_brain/03_brain.qmd), [Ch 4: The Nervous System](../../../books/vol4/04_nervous/04_nervous.qmd) | [**2A** IK on the real arm](../labs/lab-02-sim-to-real.md) | **M1** |
-| 5 | [Ch 5: Physical Data](../../../books/vol4/05_data/05_data.qmd) | [**3A** VLAs in simulation](../labs/lab-03-learned-control.md) | |
-| 6 | [Ch 6: Policy Training](../../../books/vol4/06_training/06_training.qmd) | [**3B** The VLA on real hardware](../labs/lab-03-learned-control.md) | |
-| 7 | [Ch 7: Closed-Loop Evaluation](../../../books/vol4/07_evaluation/07_evaluation.qmd) | [**4A** Real demonstrations](../labs/lab-04-real-data-and-fine-tuning.md) | |
+| 1 | [Ch 1: The Causal Boundary](../../../books/vol4/01_boundary/01_boundary.qmd) | [**1A** Meet the robot](../labs/lab-01-kinematics-and-twin.md) |  |
+| 2 | [Ch 2: The Physical Body](../../../books/vol4/02_body/02_body.qmd) | [**1B** Measure the body](../labs/lab-01-kinematics-and-twin.md) |  |
+| 3 | [Ch 3: The Cognitive Brain](../../../books/vol4/03_brain/03_brain.qmd) | [**1C** Kinematics & digital twin](../labs/lab-01-kinematics-and-twin.md) |  |
+| 4 | [Ch 4: The Nervous System](../../../books/vol4/04_nervous/04_nervous.qmd) | [**2A** IK on the real arm](../labs/lab-02-sim-to-real.md) | **M1** |
+| 5 | [Ch 5: Physical Data](../../../books/vol4/05_data/05_data.qmd) | [**3A** VLAs in simulation](../labs/lab-03-learned-control.md) |  |
+| 6 | [Ch 6: Policy Training](../../../books/vol4/06_training/06_training.qmd); read ahead: calibration in Ch 8 | [**3B** The VLA on real hardware](../labs/lab-03-learned-control.md) |  |
+| 7 | [Ch 7: Closed-Loop Evaluation](../../../books/vol4/07_evaluation/07_evaluation.qmd) | [**4A** Real demonstrations](../labs/lab-04-real-data-and-fine-tuning.md) |  |
 | 8 | [Ch 8: Sensor Perception](../../../books/vol4/08_perception/08_perception.qmd), [Ch 9: Spatial Memory](../../../books/vol4/09_memory/09_memory.qmd) | [**4B** Fine-tuned & untethered](../labs/lab-04-real-data-and-fine-tuning.md) | **M2**, capstone proposal |
 | 9 | [Ch 10: Grounded Intent](../../../books/vol4/10_intent/10_intent.qmd), [Ch 11: Trajectory Planning](../../../books/vol4/11_planning/11_planning.qmd) | [**5A** Stress the loop](../labs/lab-05-stress-testing.md) | **M3** |
 | 10 | [Ch 12: Safety Enforcement](../../../books/vol4/12_enforcement/12_enforcement.qmd), [Ch 13: Silicon Placement](../../../books/vol4/13_placement/13_placement.qmd) | [**6A** Build the governor](../labs/lab-06-safety-governor.md) | Capstone task frozen |
-| 11 | [Ch 14: Supervisory Intervention](../../../books/vol4/14_intervention/14_intervention.qmd), [Ch 15: Adversarial Verification](../../../books/vol4/15_verification/15_verification.qmd), [Ch 16: Safe Release](../../../books/vol4/16_release/16_release.qmd) | [**6B** Break the governor](../labs/lab-06-safety-governor.md) | **M4** |
-| 12 | [Ch 17: The Epistemic Frontier](../../../books/vol4/17_frontier/17_frontier.qmd) | [**C1** Capstone task build](../labs/lab-capstone-studio.md) | |
-| 13 | No new reading | [**C2** Peer fault exchange](../labs/lab-capstone-studio.md) | |
-| 14 | No new reading | [**C3** Final trials and defense](../labs/lab-capstone-studio.md) | **M5** |
+| 11 | [Ch 14: Supervisory Intervention](../../../books/vol4/14_intervention/14_intervention.qmd), [Ch 15: Adversarial Verification](../../../books/vol4/15_verification/15_verification.qmd) | [**6B** Break the governor](../labs/lab-06-safety-governor.md) | **M4** |
+| 12 | [Ch 16: Safe Release](../../../books/vol4/16_release/16_release.qmd) | [**C1** Capstone task build](../labs/lab-capstone-studio.md) |  |
+| 13 | Ch 16, continued | [**C2** Peer fault exchange](../labs/lab-capstone-studio.md) |  |
+| 14 | [Ch 17: The Epistemic Frontier](../../../books/vol4/17_frontier/17_frontier.qmd) | [**C3** Final trials and defense](../labs/lab-capstone-studio.md) | **M5** |
 
 ---
 
