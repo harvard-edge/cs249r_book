@@ -275,7 +275,9 @@ _HAS_GREEK = {
 
 # Single-letter var presence in math (avoid matching LaTeX commands like \Beta).
 _HAS_SINGLE = {
-    "B": re.compile(r"(?<![A-Za-z\\])B(?![A-Za-z])"),
+    # B also excludes bold matrices ($\mathbf{B}$ in GEMM/LoRA), which the core's
+    # bold-matrix rule keeps distinct from bandwidth (2026-10-01, vol2-4 notation pass).
+    "B": re.compile(r"(?<![A-Za-z\\])(?<!\\mathbf\{)(?<!\\boldsymbol\{)B(?![A-Za-z])"),
     "D": re.compile(r"(?<![A-Za-z\\])D(?![A-Za-z])"),
     "P": re.compile(r"(?<![A-Za-z\\])P(?![A-Za-z])"),
     # L also excludes a preceding "_" so subscript uses like $N_L$ (table-registered

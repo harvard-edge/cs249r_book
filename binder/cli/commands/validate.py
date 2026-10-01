@@ -427,6 +427,8 @@ class ValidateCommand:
                   note='"chapter 12" lowercase in prose (§10.3.2)'),
             Scope("xref-case", "_run_xref_sentence_start_case",
                   note="@-prefix casing must match sentence position: @Fig- at a sentence start, @fig- mid-sentence (both directions; sec/fig/tbl/eq/lst/alg)"),
+            Scope("callout-ref-noun", "_run_callout_ref_noun",
+                  note="\\ref{} to a custom callout prints a bare number; a noun (notebook, principle, lighthouse, ...) must precede it"),
             Scope("callout-ref-form", "_run_callout_ref_form",
                   note="custom numbered callouts (dfn/exmp/nbk/pri/... from custom-numbered-blocks.yml) are referenced with \\ref{id}, never @id"),
             Scope("redundant-xref-prefix", "_run_redundant_xref_prefix",
@@ -454,6 +456,10 @@ class ValidateCommand:
             Scope("ids", "_run_headers", default=False),
             Scope("case", "_run_mitpress_heading_case",
                   note="MIT Press headline-case (§10.3.1)"),
+            Scope("blank-before", "_run_heading_blank_before",
+                  note="a heading or fenced div needs a blank line before it, or Pandoc folds it into the paragraph and its {#sec-}/{#fig-} anchor is lost"),
+            Scope("unnumbered-target", "_run_unnumbered_sec_targets",
+                  note="@sec- refs to a section of an .unnumbered page render as ?@sec in the PDF; name the page in words instead"),
         ],
         "bib": [
             Scope("hygiene", "_run_bib_hygiene"),
@@ -533,6 +539,8 @@ class ValidateCommand:
         "markup": [
             Scope("patterns", "_run_rendering",
                   note="low-level markup (backticks, dollar signs, asterisks)"),
+            Scope("prose-leaks", "_run_prose_tex_leaks",
+                  note="LaTeX ties (0.85~million) and a math closer glued to a digit (128$\\times$32) in Markdown prose"),
             Scope("list-spacing", "_run_markdown_list_spacing",
                   note="blank line required between bold lead-in paragraphs and lists"),
             Scope("div-fences", "_run_div_fences",
@@ -802,8 +810,8 @@ class ValidateCommand:
                   note="iron-law symbols (BW, R_peak, L_lat, D_vol)"),
             Scope("registry", "_run_notation_registry",
                   note="the notation files themselves: no extension redefines a core symbol, no file defines a symbol two ways"),
-            Scope("forms", "_run_notation_forms", default=False,
-                  note="banned notation forms inside math (\\mathrm subscripts, P(.) probability, bare O(.) big-O, ^\\top, raw thousands commas); default=False until vol2-4 are clean"),
+            Scope("forms", "_run_notation_forms",
+                  note="banned notation forms inside math (\\mathrm subscripts, P(.) probability, bare O(.) big-O, per-volume transpose, raw thousands commas); default since 2026-10-01, when vol1-4 reached zero"),
             Scope("vol1-print-pin", "_run_notation_vol1_pin",
                   note="Volume I is in print: its assembled notation text must match the pinned hash; re-pin only as an errata decision"),
         ],
@@ -842,6 +850,12 @@ class ValidateCommand:
             # may indicate a Python warning leaked into the rendered output.
             # Default=False — post-build audit, not a pre-commit gate.
             Scope("pdf-warnings", "_run_pdf_warnings", default=False),
+            # Added 2026-10-01: figure text measured in the PRINTED PDF. The palette
+            # rules' "8 px" SVG floor prints at 3-5 pt once a 680-1060 px canvas is
+            # scaled to the text block; most vol2-4 SVGs and many matplotlib figures
+            # print below 6 pt. Default=False until the figures are resized.
+            Scope("figure-font-floor", "_run_pdf_figure_font_floor", default=False,
+                  note="text on figure pages printing below 6 pt (excludes math fonts)"),
         ],
         "registry": [
             Scope("sources", "_run_registry_sources",
@@ -10218,6 +10232,65 @@ class ValidateCommand:
             elapsed_ms=int((time.time() - t0) * 1000),
         )
 
+    def _run_pdf_figure_font_floor(
+        self,
+        root: Path,
+        *,
+        vol1: bool = False,
+        vol2: bool = False,
+        vol3: bool = False,
+        vol4: bool = False,
+        tinytorch: bool = False,
+        floor_pt: float = 6.0,
+    ) -> ValidationRunResult:
+        """pdf --scope figure-font-floor: printed point size of figure text.
+
+        For every page carrying a numbered figure caption, collects text spans
+        below ``floor_pt`` whose font is not a math font (math sub/superscripts
+        are legitimately small) and that sit above the caption line. One issue
+        per figure page, with the smallest size seen.
+        """
+        import fitz  # PyMuPDF
+        from cli.commands._pdf_checks import default_pdf_path
+
+        t0 = time.time()
+        repo_root = Path(__file__).resolve().parents[3]
+        quarto_dir = repo_root / "books"
+        volumes = self._resolve_pdf_volumes(
+            root, quarto_dir, vol1=vol1, vol2=vol2, vol3=vol3, vol4=vol4, tinytorch=tinytorch
+        )
+        issues: List[ValidationIssue] = []
+        math_font = re.compile(r"math|cmsy|cmmi|cmex|msam|msbm|stix", re.I)
+        for vol in volumes:
+            pdf_path = default_pdf_path(quarto_dir, vol)
+            if not pdf_path.exists():
+                continue
+            doc = fitz.open(str(pdf_path))
+            for pno in range(len(doc)):
+                page = doc[pno]
+                text = page.get_text("text")
+                caps = re.findall(r"Figure (\d+\.\d+|[A-Z]\.\d+):", text)
+                if not caps:
+                    continue
+                small = []
+                for block in page.get_text("dict")["blocks"]:
+                    for line in block.get("lines", []):
+                        for span in line.get("spans", []):
+                            if span["text"].strip() and span["size"] < floor_pt and not math_font.search(span["font"]):
+                                small.append(span["size"])
+                if len(small) >= 3:
+                    issues.append(ValidationIssue(
+                        file=str(pdf_path.relative_to(repo_root)), line=pno + 1,
+                        code="figure-font-floor", severity="warning",
+                        message=f"Figure {', '.join(sorted(set(caps)))}: {len(small)} text spans print below {floor_pt:g} pt (smallest {min(small):.1f} pt)",
+                    ))
+        return ValidationRunResult(
+            name="pdf-figure-font-floor",
+            description=f"Printed figure text size ({', '.join(volumes)})",
+            files_checked=len(volumes), issues=issues,
+            elapsed_ms=int((time.time() - t0) * 1000),
+        )
+
     def _run_pdf_table_spacing(
         self,
         root: Path,
@@ -12583,12 +12656,184 @@ class ValidateCommand:
             elapsed_ms=int((time.time() - t0) * 1000),
         )
 
+    def _run_heading_blank_before(self, root: Path) -> ValidationRunResult:
+        """Flag ATX headings that directly follow a non-blank line (added 2026-10-01).
+
+        Pandoc requires a blank line before a heading. Without one the heading
+        is folded into the preceding paragraph and its {#sec-...} id prints as
+        literal text, so every @sec- reference to it renders "?@sec-...".
+        342 vol3/vol4 headings lost their blank line in late-September edits
+        and the Volume III PDF printed 664 unresolved section references.
+        """
+        t0 = time.time()
+        issues: List[ValidationIssue] = []
+        files = self._qmd_files(root)
+        for f in files:
+            lines = f.read_text(encoding="utf-8").split("\n")
+            fence = False
+            for i, ln in enumerate(lines):
+                if ln.startswith("```"):
+                    fence = not fence
+                    continue
+                if fence or i == 0:
+                    continue
+                prev = lines[i - 1]
+                is_heading = re.match(r"#{1,6} \S", ln) and not prev.startswith(("---", ":::", "<!--"))
+                # A fenced div opener after a prose line is folded the same way, losing its
+                # {#fig-}/{#tbl-} id (vol4 fig-14-authority-handshake-fsm, 2026-10-01).
+                is_div = re.match(r":{3,} ?\{", ln) and not re.match(r":{3,}", prev) and not prev.startswith(("---", "```"))
+                if (is_heading or is_div) and prev.strip():
+                    issues.append(ValidationIssue(
+                        file=self._relative_file(f), line=i + 1, code="heading-blank-before",
+                        message="heading has no blank line before it; Pandoc will fold it into the paragraph",
+                        severity="error", context=ln[:120]))
+        return ValidationRunResult(
+            name="heading-blank-before",
+            description="Headings are preceded by a blank line",
+            files_checked=len(files), issues=issues,
+            elapsed_ms=int((time.time() - t0) * 1000),
+        )
+
+    def _run_unnumbered_sec_targets(self, root: Path) -> ValidationRunResult:
+        """Flag @sec- references whose target sits on an .unnumbered page (added 2026-10-01).
+
+        Quarto cannot number a section of an unnumbered page, so the PDF prints
+        "?@sec-...". Found as four vol4 refs into the reader guide.
+        """
+        t0 = time.time()
+        files = self._qmd_files(root)
+        texts = {f: f.read_text(encoding="utf-8") for f in files}
+        unnumbered = set()
+        for f, txt in texts.items():
+            first = next((l for l in txt.split("\n") if l.startswith("# ")), "")
+            page_unnumbered = ".unnumbered" in first
+            for m in re.finditer(r"^#{1,6} .*\{#(sec-[A-Za-z0-9_-]+)([^}]*)\}", txt, re.M):
+                if page_unnumbered or ".unnumbered" in m.group(2):
+                    unnumbered.add(m.group(1))
+        issues: List[ValidationIssue] = []
+        for f, txt in texts.items():
+            for m in re.finditer(r"@(?:S|s)(ec-[A-Za-z0-9_-]+)", txt):
+                label = "s" + m.group(1)
+                label = label.rstrip(".-_")
+                if label in unnumbered:
+                    issues.append(ValidationIssue(
+                        file=self._relative_file(f), line=txt.count("\n", 0, m.start()) + 1,
+                        code="unnumbered-sec-target", severity="error",
+                        message=f"@{label} points into an unnumbered page; the PDF prints ?@{label}",
+                        suggestion="Name the page in words (for example 'the reader guide') instead of a numbered reference."))
+        return ValidationRunResult(
+            name="unnumbered-sec-target",
+            description="No @sec- references into unnumbered pages",
+            files_checked=len(files), issues=issues,
+            elapsed_ms=int((time.time() - t0) * 1000),
+        )
+
+    def _run_prose_tex_leaks(self, root: Path) -> ValidationRunResult:
+        """Flag TeX habits that Pandoc Markdown prints literally (added 2026-10-01).
+
+        - A tie between word characters (``0.85~million``, ``Scope~1``) prints a
+          literal tilde; 21 such ties shipped in a vol2 chapter. Markdown
+          subscripts (``CO~2~``) are not flagged.
+        - A ``$`` closer followed by a digit is not a closer to Pandoc, so
+          ``128$\\times$32`` prints as raw text (vol2 fig-tensor-core-tiling).
+        Code blocks, inline code, ``{=latex}`` blocks and math are masked first.
+        """
+        t0 = time.time()
+        files = self._qmd_files(root)
+        issues: List[ValidationIssue] = []
+        blank = lambda m: re.sub(r"[^\n]", " ", m.group(0))
+        for f in files:
+            text = f.read_text(encoding="utf-8")
+            prose = re.sub(r"(?ms)^```.*?^```", blank, text)
+            prose = re.sub(r"`[^`\n]*`", blank, prose)
+            glued = [m.start() for m in re.finditer(r"[0-9A-Za-z]\$\\times\$[0-9A-Za-z]", prose)]
+            masked = re.sub(r"\$\$.*?\$\$|\$[^$\n]+\$", blank, prose, flags=re.S)
+            masked = re.sub(r"~[^~\s]{1,12}~", blank, masked)
+            ties = [m.start() + 1 for m in re.finditer(r"[A-Za-z0-9.]~[A-Za-z0-9]", masked)]
+            # A closer `$` directly followed by an inline {python} ref renders as `$` + digit
+            # (`$\\pm$`{python} x`` printed "$±$5" in vol4); a caption attribute eats `\\,`.
+            for ln_no, line in enumerate(prose.split("\n"), 1):
+                L = re.sub(r"`\{python\}[^`]*`", "\x01", line).replace("\\$", "  ").replace("$$", "  ")
+                depth = 0
+                for i, ch in enumerate(L):
+                    if ch == "$":
+                        depth ^= 1
+                        if depth == 0 and i + 1 < len(L) and L[i + 1] == "\x01":
+                            issues.append(ValidationIssue(file=self._relative_file(f), line=ln_no,
+                                code="math-closer-before-inline-ref", severity="error",
+                                message="a $ closer right before an inline {python} value renders as $ + digit; move the value outside the math or use a Unicode symbol",
+                                context=line[:120]))
+            for m in re.finditer(r'fig-(?:cap|alt)="([^"]*)"', text):
+                if re.search(r"(?<!\\)\\[,;:! ]", m.group(1)):
+                    issues.append(ValidationIssue(file=self._relative_file(f), line=text.count("\n", 0, m.start()) + 1,
+                        code="caption-attr-escape", severity="error",
+                        message="inside a fig-cap/fig-alt attribute, \\, and similar escapes lose their backslash; double it (\\\\,)",
+                        context=m.group(1)[:120]))
+            for pos, code, msg in [(g, "math-closer-digit", "a $ closer followed by a digit is not math to Pandoc; write $128 \\times 32$")
+                                   for g in glued] + [(k, "latex-tie", "LaTeX tie ~ prints a literal tilde in Markdown; use a plain space") for k in ties]:
+                line = text.count("\n", 0, pos) + 1
+                issues.append(ValidationIssue(file=self._relative_file(f), line=line, code=code,
+                                              message=msg, severity="error",
+                                              context=text.split("\n")[line - 1][:120]))
+        return ValidationRunResult(
+            name="prose-tex-leaks",
+            description="No literal TeX ties or glued math closers in prose",
+            files_checked=len(files), issues=issues,
+            elapsed_ms=int((time.time() - t0) * 1000),
+        )
+
+    def _run_callout_ref_noun(self, root: Path) -> ValidationRunResult:
+        """A \\ref{} to a custom numbered callout must follow its noun (added 2026-10-01).
+
+        The filter prints a bare number, so "in \\ref{nbk-x} models both" reads
+        "in 7.1 models both" and "(\\ref{lhs-x})" reads "(1.4)". Accepted forms:
+        "notebook \\ref{...}", "(principle \\ref{...})", a list continuation
+        ("notebooks \\ref{a} and \\ref{b}"), and "the X principle (\\ref{...})",
+        where the noun ends the phrase just before the parenthesis. About 300
+        bare references were fixed across vol1-vol4 when this check was added.
+        """
+        t0 = time.time()
+        nouns = {"nbk": r"notebooks?|napkin[ -]math", "pri": r"principles?", "dfn": r"definitions?|invariants?",
+                 "exmp": r"examples?", "lhs": r"lighthouses?", "psp": r"perspectives?", "thrm": r"theorems?",
+                 "chk": r"checkpoints?", "cs": r"case stud(?:y|ies)", "ws": r"war stor(?:y|ies)"}
+        files = self._qmd_files(root)
+        issues: List[ValidationIssue] = []
+        pat = re.compile(r"\\ref\{(" + "|".join(nouns) + r")-[^}]+\}")
+        for f in files:
+            text = f.read_text(encoding="utf-8")
+            # Blank fenced code (LEGO cell header comments name callouts but never render).
+            text = re.sub(r"(?ms)^```.*?^```", lambda c: re.sub(r"[^\n]", " ", c.group(0)), text)
+            for m in pat.finditer(text):
+                noun = nouns[m.group(1)]
+                pre = re.sub(r"\\index\{[^{}]*\}", "", text[max(0, m.start() - 160):m.start()])[-60:]
+                line_start = text.rfind("\n", 0, m.start()) + 1
+                if re.fullmatch(r"\|[^|\n]*\|?\s*", text[line_start:m.start()]) or re.search(r"\|\s*\**$", text[line_start:m.start()]):
+                    continue  # the reference is the value of a table cell (a numbered "#" column)
+                if re.search(r"(?i)(?:" + noun + r")[\s~]*$", pre):
+                    continue
+                if re.search(r"\\ref\{[^}]+\}\s*(?:,|and|or|, and)\s*$", pre):
+                    continue
+                stripped = pre.rstrip()
+                if stripped.endswith("(") and re.search(r"(?i)\b(?:" + noun + r")$", stripped[:-1].rstrip()):
+                    continue
+                issues.append(ValidationIssue(
+                    file=self._relative_file(f), line=text.count("\n", 0, m.start()) + 1,
+                    code="callout-ref-noun", severity="error",
+                    message=f"{m.group(0)} prints a bare number; put its noun directly before it",
+                    context=text[max(0, m.start() - 60):m.end()].replace("\n", " ")))
+        return ValidationRunResult(
+            name="callout-ref-noun",
+            description="Custom callout references carry their noun",
+            files_checked=len(files), issues=issues,
+            elapsed_ms=int((time.time() - t0) * 1000),
+        )
+
     def _run_notation_forms(self, root: Path) -> ValidationRunResult:
         """Flag notation forms the Notation chapter rules out, inside math spans.
 
         Settled in the 2026-10-01 notation pass (see .claude/rules/notations.md):
         subscripts use \\text{} (not \\mathrm/\\rm), event probabilities use \\Pr
-        and distributions lowercase p, big-O is \\mathcal{O}, transpose is ^T, and
+        and distributions lowercase p, big-O is \\mathcal{O}, transpose is ^T (vol4: ^\\top, D9), and
         grouped digits inside math use {,}. Skips Python cells, inline
         `{python}` references, TikZ blocks, and the notation files themselves
         (matplotlib labels inside Python cells legitimately use \\mathrm).
@@ -12599,12 +12844,14 @@ class ValidateCommand:
         rules = [
             ("mathrm-subscript", re.compile(r"_\{?\s*(?:\\mathrm\{|\\rm\s)"),
              "subscript uses \\mathrm/\\rm; write \\text{...}"),
-            ("capital-P-probability", re.compile(r"(?<![A-Za-z\\_{])P\((?!t\))"),
+            ("capital-P-probability", re.compile(r"(?<![A-Za-z0-9\\_{])P\((?!t\)|N-1\)|N_\{\\text\{workers\}\}\)|s\)|s_0\)|\\operatorname)"),
              "probability written P(...); use \\Pr(...) for events or p(...) for distributions"),
-            ("bare-big-O", re.compile(r"(?<![A-Za-z\\_{}])O\((?=\s*(?:1|n|N|S|d|\\log|log|k|m|B|P|D)\b)"),
+            ("bare-big-O", re.compile(r"(?<![A-Za-z\\_{}])(?<!\\mathcal )O\((?=\s*(?:1|n|N|S|d|\\log|log|k|m|B|P|D)\b)"),
              "asymptotic order written O(...); use \\mathcal{O}(...)"),
             ("transpose-top", re.compile(r"\^\{?\s*\\(?:top|mathsf\{T\})"),
              "transpose written ^\\top or ^{\\mathsf T}; use ^T"),
+            ("transpose-T", re.compile(r"(?:\\(?:mathbf|boldsymbol)\{[^{}]*\}|[\])])\^\{?T\}?(?![A-Za-z{])"),
+             "vol4 writes transpose ^\\top (D9); convert ^T"),
             ("math-thousands-comma", re.compile(r"(?<![\d{])\d{1,3},\d{3}(?!\d)"),
              "raw comma inside math renders as '4, 096'; write 4{,}096"),
         ]
@@ -12617,12 +12864,15 @@ class ValidateCommand:
             text = qmd.read_text(encoding="utf-8")
             masked = re.sub(r"^```.*?^```", lambda m: "\n" * m.group(0).count("\n"), text, flags=re.S | re.M)
             masked = re.sub(r"`\{python\}[^`]*`", "", masked)
+            masked = masked.replace("\\$", "  ")  # escaped dollar signs are currency, not math delimiters
             for m in re.finditer(r"\$\$(.+?)\$\$|\$([^$\n]+?)\$", masked, flags=re.S):
                 span = m.group(1) or m.group(2)
                 line = masked.count("\n", 0, m.start()) + 1
                 for code, pat, msg in rules:
                     # D9 (2026-10-01): transpose form is per volume; vol4 keeps ^\\top.
                     if code == "transpose-top" and "/vol4/" in str(qmd):
+                        continue
+                    if code == "transpose-T" and "/vol4/" not in str(qmd):
                         continue
                     if pat.search(span):
                         issues.append(ValidationIssue(
