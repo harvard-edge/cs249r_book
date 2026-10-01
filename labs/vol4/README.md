@@ -8,63 +8,34 @@
 
 > **"Physical AI begins where computation stops being symbolic and becomes physical force."**
 
-In digital software AI, an algorithm outputs text, tokens, or pixels on a screen. Errors are symbolic, harmless, and can be undone with a keystroke. In **Physical AI**, an algorithm commands real electrical currents to motors possessing mass, velocity, inertia, and momentum. If the model makes a mistake, physical things collide, tear, or break. **You cannot `Ctrl+Z` physics.**
+When a chatbot makes a mistake, you retype the prompt. When a robot makes a mistake, something collides, tears, or breaks. **You cannot `Ctrl+Z` physics.** This studio teaches the systems engineering of machines that sense and act, built around one split of responsibility:
 
-This studio teaches the science and systems engineering of machines that sense and act in the physical world:
-1. **The Cognitive Brain:** Deploying high-capacity Vision-Language-Action (VLA) neural policies (**Hugging Face SmolVLA and ACT**) on an edge Linux processor (**Arduino UNO Q Qualcomm MPU**).
-2. **The Physical Body:** Actuating a 6-DoF robotic follower arm (**Seeed Studio SO-101**) with smart serial bus servos and an overhead workspace webcam.
-3. **The Safety Governor:** Enforcing deterministic, real-time safety constraints, velocity limits, and watchdog cutoffs through an independent microcontroller (**STM32U585 MCU**).
+1. **A learned brain proposes.** A Vision-Language-Action policy (Hugging Face **SmolVLA** or **ACT**) runs on the UNO Q's Qualcomm Linux processor and proposes the next move.
+2. **A deterministic governor permits.** The UNO Q's **STM32** microcontroller checks every proposal against joint limits, speed limits, and a table geofence before it reaches a motor.
+3. **A physical body acts.** A 6-DoF **Seeed SO-101** arm moves, and an overhead webcam shows what actually happened.
 
-![The Dual-Brain Architecture of Physical AI: Asymmetric Cognition vs. Deterministic Governance](assets/images/vol4-dual-brain-architecture.svg)
+![The control loop: the camera feeds a learned policy on Linux, which proposes an action across the authority boundary; the STM32 governor permits, clamps, or vetoes it before it reaches the SO-101 arm, and the next image closes the loop.](assets/images/vol4-control-loop.svg)
 
----
-
-## 2. The Three Foundational Pillars
-
-| 1. The Board & Body | 2. The Software Spine | 3. The Curriculum |
-| :---: | :---: | :---: |
-| <img src="assets/images/arduino-uno-q.jpg" alt="Arduino UNO Q" width="130" /><br><img src="assets/images/so101-follower.png" alt="Seeed SO-101 Follower Arm" width="130" /> | <img src="assets/images/lerobot-logo.png" alt="Hugging Face LeRobot" width="150" /> | <img src="assets/images/vol4-textbook-cover.png" alt="MLSysBook Volume IV: Physical AI" width="130" /> |
-| **Arduino UNO Q + Seeed SO-101 Arm**<br>Dual-brain architecture combining Qualcomm QRB2210 Linux MPU (vision & VLA inference) with STM32U585 MCU safety governor over 6× Feetech STS3215 bus smart servos. | **Hugging Face LeRobot & SmolVLA**<br>Open-source physical AI foundation providing teleoperation capture, LeRobot Dataset v3 format with 4-action-tap logging, language conditioning, and action-chunk policies (SmolVLA and ACT). | **MLSysBook Volume IV (17 Chapters)**<br>Four thematic parts: Anatomy (Chapters 1–4), Teaching (Chapters 5–7), Running (Chapters 8–13), and Governing (Chapters 14–17). Establishing S·P·A causal loops under fault. |
+The four logged actions (`a_req`, `a_map`, `a_enf`, `a_meas`) and the bench wiring are defined once, in the [Station Reference Card](labs/station-reference.md). The pass standard for every lab is the scope test in the [Competency Card](curriculum/student-competencies.md).
 
 ---
 
-## 3. The Physical AI Unit of Work: The S·P·A Loop
+## 2. The Kit
 
-The unit of work across every studio experiment is a single **physical episode**:
+| Board | Arm | Software | Textbook |
+| :---: | :---: | :---: | :---: |
+| <img src="assets/images/arduino-uno-q.jpg" alt="Arduino UNO Q" width="130" /> | <img src="assets/images/so101-follower.png" alt="Seeed SO-101 follower arm" width="130" /> | <img src="assets/images/lerobot-logo.png" alt="Hugging Face LeRobot" width="150" /> | <img src="assets/images/vol4-textbook-cover.png" alt="MLSysBook Volume IV: Physical AI" width="110" /> |
+| **Arduino UNO Q**<br>Linux MPU + STM32 MCU | **Seeed SO-101**<br>6 smart serial servos | **Hugging Face LeRobot**<br>SmolVLA and ACT | **MLSysBook Volume IV**<br>17 chapters, 4 parts |
 
-$$\text{Physical State } (s_t) \longrightarrow \text{Observation } (I_t, q_t) \longrightarrow \text{Learned Proposal } (a_{\text{req}}) \longrightarrow \text{MCU Permission } (a_{\text{enf}}) \longrightarrow \text{Actuation } (a_{\text{meas}}) \longrightarrow \text{New Observation } (I_{t+1}, q_{t+1}) \longrightarrow \text{Revised Decision}$$
-
-![The Physical AI Sense-Propose-Permit-Act Loop](assets/images/vol4-physical-ai-loop.svg)
-
-> **The Three-Part Scope Test:** A lab submission that merely classifies camera frames without driving actuators, or a model output wired to a hardcoded robotic script, does not satisfy the Physical AI requirement. Students must demonstrate learned decision-making whose next proposal responds directly to measured physical change under an independent MCU permission boundary.
-
----
-
-## 4. The 2×2 Competency Architecture (The 12 Skills)
-
-Engineering mastery is tracked using the [Physical AI Station Competency Card](curriculum/student-competencies.md) across four balanced quadrants (**3 competencies per quadrant = 12 total**):
-
-```
-                        ┌──────────────────────────┬──────────────────────────┐
-                        │   Characterize & Model   │     Control & Govern     │
-                        │  (Observe, Profile, Data)│   (Act, Enforce, Defend) │
-┌───────────────────────┼──────────────────────────┼──────────────────────────┤
-│ PHYSICAL EMBODIMENT   │  QUADRANT A:             │  QUADRANT C:             │
-│ (Actuators, Plant,    │  Kinematics & Sensing    │  Edge Loops & Planning   │
-│  Dynamics, Noise)     │  (A1, A2, A3)            │  (C1, C2, C3)            │
-├───────────────────────┼──────────────────────────┼──────────────────────────┤
-│ LOGICAL COGNITION     │  QUADRANT B:             │  QUADRANT D:             │
-│ (Neural Policies,     │  Data & Learning         │  Authority & Safety      │
-│  Compute, Safety)     │  (B1, B2, B3)            │  (D1, D2, D3)            │
-└───────────────────────┴──────────────────────────┴──────────────────────────┘
-```
+Specifications, wiring, and the three bench rules are on the [Station Reference Card](labs/station-reference.md).
 
 ---
 
-## 5. The 14-Week Lab Schedule
+## 3. The 14-Week Lab Schedule
 
 Six labs follow the textbook's four parts in order, building from pen-and-paper math through simulation, real hardware, learned control, and finally safety governance. The final three weeks are an open capstone.
 
+![Fourteen-week timeline: Labs 1 and 2 in weeks 1 to 4, Labs 3 and 4 in weeks 5 to 8, Lab 5 in week 9, Lab 6 in weeks 10 and 11, and the capstone in weeks 12 to 14, with milestones M1 to M5 due at the end of weeks 4, 8, 9, 11, and 14.](assets/images/vol4-course-timeline.svg)
 
 | | Lab | Weeks | Book Part & Chapters | What You Will Do |
 |:---:|:---|:---:|:---|:---|
@@ -78,10 +49,10 @@ Six labs follow the textbook's four parts in order, building from pen-and-paper 
 
 ---
 
-## 6. Reference Documents
+## 4. Reference Documents
 
 | Document | Description |
 |:---|:---|
 | 📋 **[Master Course Syllabus](curriculum/syllabus.md)** | Grading weights, milestones, team roles, and safety contract. |
-| 🏷️ **[Physical AI Competency Card](curriculum/student-competencies.md)** | The 12-skill rubric signed off at the bench across 4 quadrants. |
-| 🔧 **[Station Reference Card](labs/station-reference.md)** | Standard bench hardware, wiring, engineering rules, and telemetry schema. |
+| 🏷️ **[Physical AI Competency Card](curriculum/student-competencies.md)** | The scope test and the 12-skill rubric signed off at the bench. |
+| 🔧 **[Station Reference Card](labs/station-reference.md)** | Bench hardware, software stack, wiring, engineering rules, and telemetry schema. |

@@ -1,9 +1,9 @@
 # Lab 6: Safety Governor — Build It, Then Break It
 
 **Schedule:** Weeks 10–11 · Milestone 4 due end of Week 11
-**Required Textbook Reading:** [Chapter 12: Safety Enforcement](../../../books/vol4/12_safety/12_safety.qmd), [Chapter 13: Silicon Placement](../../../books/vol4/13_placement/13_placement.qmd), [Chapter 14: Supervisory Intervention](../../../books/vol4/14_supervisory/14_supervisory.qmd), [Chapter 15: Adversarial Verification](../../../books/vol4/15_adversarial/15_adversarial.qmd), [Chapter 16: Safe Release](../../../books/vol4/16_release/16_release.qmd)
+**Required Textbook Reading:** [Chapter 12: Safety Enforcement](../../../books/vol4/12_enforcement/12_enforcement.qmd), [Chapter 13: Silicon Placement](../../../books/vol4/13_placement/13_placement.qmd), [Chapter 14: Supervisory Intervention](../../../books/vol4/14_intervention/14_intervention.qmd), [Chapter 15: Adversarial Verification](../../../books/vol4/15_verification/15_verification.qmd), [Chapter 16: Safe Release](../../../books/vol4/16_release/16_release.qmd)
 **Target Competencies:** `[ ] D1 Hardware Authority Routing`, `[ ] D2 Deterministic Safety Enforcement`
-**Milestone Alignment:** Concludes [Milestone 4](../curriculum/syllabus.md#sec-milestones) (End of Week 11)
+**Milestone Alignment:** Concludes [Milestone 4](../curriculum/syllabus.md#4-assessment-milestones-and-grading) (End of Week 11)
 
 ---
 
@@ -23,16 +23,11 @@ By the end of this lab, you will be able to:
 - Implement and validate a hardware watchdog timer with zero-backlog command purging
 - Produce telemetry evidence showing active safety intervention (where enforced ≠ requested)
 
-### What You Will Do
-Over two weeks, you will first program the STM32 safety governor firmware — implementing velocity clamps, forward-kinematics-based table geofence, and joint-limit checks — and verify it rejects malicious proposals. Then you will become the adversary: freezing the Linux brain mid-action, flooding the UART buffer with stale commands, unplugging the camera, corrupting packet checksums, and cutting motor power under load. Each attack must either be safely handled or produce documented evidence of the failure mode.
-
 ---
 
 ### 1. The Physical Question
 
 Can an independent microcontroller guarantee physical safety even when the Linux brain crashes, lies, or goes silent — and can you **prove** it by systematically trying to break it?
-
-This lab has two phases. In Phase A, you build the deterministic safety governor on the STM32 MCU: velocity clamps, workspace geofences, and joint limits. In Phase B, you become the adversary — injecting faults, freezing processes, corrupting packets, and cutting power to verify that the governor holds under every failure mode you can devise.
 
 ---
 

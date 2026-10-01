@@ -9,7 +9,7 @@
 
 ## 1. Executive Mandate: Prove the Bench Before Teaching It
 
-Andrea, your primary mission before the semester begins is to **build, verify, and qualify one "Golden Reference Station"** from raw hardware to untethered physical AI execution. You must act as **"Student Zero"** across all 8 labs, verifying that every exercise functions deterministically, producing the gold-standard artifacts, and isolating hardware failure modes before students arrive.
+Andrea, your primary mission before the semester begins is to **build, verify, and qualify one "Golden Reference Station"** from raw hardware to untethered physical AI execution. You must act as **"Student Zero"** across all 6 labs and the capstone, verifying that every exercise functions deterministically, producing the gold-standard artifacts, and isolating hardware failure modes before students arrive.
 
 Students should finish this course with an autonomous embodied system that **senses physical reality via vision, uses a learned model to propose multi-joint action chunks, delegates safety authority to an on-board microcontroller to permit or clamp motion, measures true kinematic outcomes, and revises its next decision from closed-loop feedback**.
 
@@ -41,13 +41,11 @@ Complete these physical build steps and verify electrical safety before powering
   - Plug the UVC webcam into a USB-A port on the hub; verify Linux recognizes the device at `/dev/video0`.
   - Connect the single-wire half-duplex UART communication line from the STS3215 servo bus to the STM32U585 USART pins via the level-shifter circuit.
 
-![Arduino UNO Q Dual-Silicon Architecture and Safety Boundary](../assets/images/vol4-uno-q-dual-core-architecture.svg)
-
-![Physical Bench Rigging & Electrical Power Isolation Harness](../assets/images/vol4-bench-wiring-harness.svg)
+![Bench wiring: webcam and 45 W logic supply to the UNO Q, STM32 to the servo bus over UART, a separate switched 7.4 V motor supply, and a common star ground.](../assets/images/vol4-bench-wiring.svg)
 
 ---
 
-## 3. Phase 1: Hardware Bring-Up & Validation Steps
+## 3. Phase 1: Hardware Bring-Up and Validation Steps
 
 Before publishing student labs or ordering additional stations, you must successfully complete and log these four sequential validation steps:
 
@@ -116,22 +114,20 @@ Before publishing student labs or ordering additional stations, you must success
 
 ---
 
-## 4. Phase 2: "Student Zero" Lab Qualification Runs (Labs 1–8)
+## 4. Phase 2: "Student Zero" Lab Qualification Runs (Labs 1–6)
 
 For each lab in the 14-week curriculum, Andrea must execute the student protocol end-to-end, identify potential pitfalls, and prepare the "Gold Standard" starter assets:
 
-![Volume IV Physical AI Studio 14-Week Curriculum Map](../assets/images/vol4-course-structure-map.svg)
+![Fourteen-week student timeline: six labs, the capstone, and milestones M1 to M5.](../assets/images/vol4-course-timeline.svg)
 
 | Lab & Title | Pre-Flight Tasks for Andrea ("Student Zero") | Required Staff Deliverables for Students |
 |:---|:---|:---|
-| **[Lab 1: Causal Boundary](../labs/lab-01-boundary.md)** | • Wire dual power rails, common ground, and UART bus.<br>• Verify independent power rail isolation.<br>• Clock cold boot and reset settling times. | • `wiring_diagram_golden.pdf`<br>• `board_pinout_reference.md`<br>• `lab01_boundary_check.py` |
-| **[Lab 2: Sensing & Bridge](../labs/lab-02-body-and-sensors.md)** | • Calibrate camera intrinsic/extrinsics using AprilTag.<br>• Test STM32 joint angle readback accuracy ($\pm 1.5^\circ$).<br>• Benchmark inter-core RPC throughput ($> 50\text{ Hz}$). | • `calibrate_camera.py`<br>• `test_bridge_latency.py`<br>• `camera_v4l2_config.sh` |
-| **[Lab 3: Teleop & Datasets](../labs/lab-03-physical-episodes.md)** | • Record 10 pick-and-place episodes into LeRobot v2 format.<br>• Validate synchronized storage of RGB frames and joint taps.<br>• Verify HDF5/parquet schema compatibility. | • `teleop_record.py`<br>• `dataset_golden_10ep/`<br>• `inspect_dataset.py` |
-| **[Lab 4: Baseline & Policy Export](../labs/lab-04-baseline-and-learning.md)** | • Train baseline ACT policy on workstation (Colab/cluster).<br>• Quantize trained PyTorch checkpoint to ONNX INT8.<br>• Build deterministic heuristic reach baseline. | • `train_act_baseline.py`<br>• `export_onnx_quantized.py`<br>• `pretrained_act_int8.onnx` |
-| **[Lab 5: Autonomous Reach](../labs/lab-05-local-feedback-loop.md)** | • Deploy ONNX model natively to Qualcomm Linux.<br>• Execute untethered autonomous reach to randomized targets.<br>• Record 4-tap telemetry trace (`a_req`, `a_map`, `a_enf`, `a_meas`). | • `pai_edge_runtime.py`<br>• `telemetry_logger.py`<br>• `sample_reach_trace.csv` |
-| **[Lab 6: Action Horizons](../labs/lab-06-action-chunks.md)** | • Benchmark chunk horizons $K \in \{1, 8, 16, 32\}$.<br>• Test physical obstacle disturbance mid-reach.<br>• Run language conditioning prompt comparison on SmolVLA. | • `benchmark_chunking.py`<br>• `disturbance_eval.py`<br>• `smolvla_eval_harness.py` |
-| **[Lab 7: MCU Safety Governor](../labs/lab-07-authority-under-fault.md)** | • Program STM32 velocity clamp and table collision geofence.<br>• Inject table-crash and over-speed commands via Python.<br>• Measure real-time veto reaction latency ($< 5\text{ ms}$). | • `stm32_governor_firmware/`<br>• `inject_table_crash.py`<br>• `veto_audit_golden.csv` |
-| **[Lab 8: Fault Injection](../labs/lab-08-verification-and-release.md)** | • Program $150\text{ ms}$ hardware SysTick watchdog on MCU.<br>• Inject Linux process freezes (`kill -STOP`) and camera dropouts.<br>• Prove zero stale command backlog execution upon restart. | • `stm32_watchdog_firmware/`<br>• `fault_injection_suite.py`<br>• `recovery_verification.py` |
+| **[Lab 1: Kinematics & Digital Twin](../labs/lab-01-machine-anatomy.md)** | • Check that the URDF/MJCF model matches the delivered arm's geometry and joint limits.<br>• Work the DH table, forward kinematics, and IK by hand.<br>• Run the 10-target IK test and workspace map in simulation. | • URDF/MJCF model of the course arm<br>• DH parameter worksheet and answer key<br>• Simulation starter notebook |
+| **[Lab 2: Simulation to Real Hardware](../labs/lab-02-teleoperation-and-datasets.md)** | • Wire dual power rails, common ground, and UART bus; verify rail isolation.<br>• Clock cold boot and reset settling; test STM32 joint readback ($\pm 1.5^\circ$).<br>• Calibrate the camera; benchmark inter-core RPC latency. | • `wiring_diagram_golden.pdf`<br>• `calibrate_camera.py`, `camera_v4l2_config.sh`<br>• `test_bridge_latency.py`, `lab01_boundary_check.py` |
+| **[Lab 3: Learned Control with VLAs](../labs/lab-03-baseline-and-training.md)** | • Produce a SmolVLA or ACT checkpoint trained on simulated demonstrations of the course arm.<br>• Export to ONNX INT8 and profile on the UNO Q.<br>• Run the 20-trial simulation vs. hardware comparison. | • Sim-trained VLA checkpoint<br>• SmolVLA architecture overview<br>• `export_onnx_quantized.py` |
+| **[Lab 4: Real-World Data & Fine-Tuning](../labs/lab-04-autonomous-reach.md)** | • Record reference teleoperation episodes with all four action taps; validate the dataset schema.<br>• Fine-tune the sim-trained checkpoint; build the deterministic reach baseline.<br>• Run the untethered loop and record a four-tap trace. | • `teleop_record.py`, `inspect_dataset.py`, reference dataset<br>• Fine-tuning recipe, `heuristic_reach.py`<br>• `pai_edge_runtime.py`, `telemetry_logger.py`, `sample_reach_trace.csv` |
+| **[Lab 5: Stress-Testing](../labs/lab-05-horizons-and-disturbances.md)** | • Benchmark chunk horizons $K \in \{1, 8, 16, 32\}$.<br>• Test mid-reach target displacement and removal.<br>• Run the SmolVLA language-conditioning comparison. | • `benchmark_chunking.py`<br>• `disturbance_eval.py`<br>• `smolvla_eval_harness.py` |
+| **[Lab 6: Safety Governor](../labs/lab-06-safety-governor.md)** | • Program the STM32 velocity clamp, joint limits, and table geofence; measure veto latency ($< 5\text{ ms}$).<br>• Program the $150\text{ ms}$ watchdog; inject `kill -STOP`, camera dropouts, and corrupted packets.<br>• Prove zero stale-command execution on resume. | • `stm32_governor_firmware/`, `inject_table_crash.py`, `veto_audit_golden.csv`<br>• `stm32_watchdog_firmware/`, `fault_injection_suite.py`<br>• `recovery_verification.py` |
 
 ---
 
@@ -157,7 +153,7 @@ Once the single station passes all validation steps and lab qualifications, prep
 
 ---
 
-## 6. Phase 4: Risk Mitigation & Fallback Matrix {#sec-fallbacks}
+## 6. Phase 4: Risk Mitigation and Fallback Matrix
 
 If specific technical blockers arise during bench bring-up, apply these pre-authorized fallbacks:
 

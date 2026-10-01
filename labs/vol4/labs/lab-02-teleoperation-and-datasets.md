@@ -3,7 +3,7 @@
 **Schedule:** Weeks 3–4 · Milestone 1 due end of Week 4
 **Required Textbook Reading:** [Chapter 3: The Cognitive Brain](../../../books/vol4/03_brain/03_brain.qmd), [Chapter 4: The Nervous System](../../../books/vol4/04_nervous/04_nervous.qmd)
 **Target Competencies:** `[ ] A2 Multi-Modal Sensing & Calibration`, `[ ] A3 Feedback Timing & Latency`, `[ ] D1 Hardware Authority Routing`
-**Milestone Alignment:** Concludes [Milestone 1](../curriculum/syllabus.md#sec-milestones) (End of Week 4)
+**Milestone Alignment:** Concludes [Milestone 1](../curriculum/syllabus.md#4-assessment-milestones-and-grading) (End of Week 4)
 
 ---
 
@@ -23,9 +23,6 @@ By the end of this lab, you will be able to:
 - Measure inter-core RPC latency between the Linux MPU and the STM32 MCU
 - Quantify the discrepancies between your simulation model and the real hardware (sim2real gap preview)
 - Verify that the system fails safely under power loss and communication failure
-
-### What You Will Do
-In Week 3, you will wire the bench station, enumerate and calibrate all six servos, implement your Lab 1 IK equations in the STM32 firmware, and command the robot to reach target positions using the Arduino UNO Q CLI — comparing real-world accuracy against your simulation predictions. In Week 4, you will configure the overhead webcam, calibrate the camera-to-base transformation, bring up the inter-core RPC bridge, measure communication latency, and run failure tests (power cutoff, sensor dropout, stale data injection).
 
 ---
 

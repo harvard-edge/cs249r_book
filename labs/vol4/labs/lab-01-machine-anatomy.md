@@ -3,7 +3,7 @@
 **Schedule:** Weeks 1–2 · Milestone 1 due end of Week 4 (with Lab 2)
 **Required Textbook Reading:** [Chapter 1: The Causal Boundary](../../../books/vol4/01_boundary/01_boundary.qmd), [Chapter 2: The Physical Body](../../../books/vol4/02_body/02_body.qmd)
 **Target Competencies:** `[ ] A1 Plant Mechanics & Safe Envelope`
-**Milestone Alignment:** Contributes to [Milestone 1](../curriculum/syllabus.md#sec-milestones) (End of Week 4)
+**Milestone Alignment:** Contributes to [Milestone 1](../curriculum/syllabus.md#4-assessment-milestones-and-grading) (End of Week 4)
 
 ---
 
@@ -22,9 +22,6 @@ By the end of this lab, you will be able to:
 - Build a digital twin of the course robot in a physics simulation environment
 - Command the simulated robot to reach specified target positions using your derived IK equations
 - Identify the workspace boundary, singularities, and mechanical limits in simulation
-
-### What You Will Do
-In the first week, you will work through the kinematics on paper: assigning DH parameters to each joint, deriving the forward kinematics chain, computing the Jacobian, and solving the inverse kinematics for a target pose. In the second week, you will build a digital twin of the robot in simulation (MuJoCo or PyBullet), load the URDF model, implement your IK equations in Python, and command the simulated robot to reach target positions. You will map the reachable workspace, identify singularities, and experiment freely — because in simulation, you cannot break anything.
 
 ---
 

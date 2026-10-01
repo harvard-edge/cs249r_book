@@ -2,8 +2,8 @@
 
 **Schedule:** Weeks 7–8 · Milestone 2 due end of Week 8
 **Required Textbook Reading:** [Chapter 7: Closed-Loop Evaluation](../../../books/vol4/07_evaluation/07_evaluation.qmd), [Chapter 8: Sensor Perception](../../../books/vol4/08_perception/08_perception.qmd), [Chapter 9: Spatial Memory](../../../books/vol4/09_memory/09_memory.qmd)
-**Target Competencies:** `[ ] B3 Edge Model Profiling & Resource Budgets`, `[ ] C1 Closed-Loop Autonomous Action`
-**Milestone Alignment:** Concludes [Milestone 2](../curriculum/syllabus.md#sec-milestones) (End of Week 8)
+**Target Competencies:** `[ ] B1 Physical Dataset Engineering & Multi-Tap Logging`, `[ ] C1 Closed-Loop Autonomous Action`
+**Milestone Alignment:** Concludes [Milestone 2](../curriculum/syllabus.md#4-assessment-milestones-and-grading) (End of Week 8)
 
 ---
 
@@ -22,9 +22,6 @@ By the end of this lab, you will be able to:
 - Quantify how fine-tuning reduces the sim2real gap compared to the sim-only model
 - Integrate vision, inference, RPC, safety, and actuation into a single autonomous control loop running untethered on edge hardware
 - Evaluate autonomous manipulation through repeated physical trials
-
-### What You Will Do
-In Week 7, you will teleoperate the robot with a gamepad, collect 30 real-world demonstration episodes in LeRobot Dataset v3 format, audit the dataset, and fine-tune the Lab 3 sim-trained VLA on this real data. In Week 8, you will deploy the fine-tuned model, disconnect the host PC, and run the full autonomous Sense–Propose–Permit–Act loop untethered. You will measure the improvement over the sim-only model and decompose the end-to-end loop latency.
 
 ---
 
@@ -120,11 +117,7 @@ Additional requirements:
 
 ### 5. Multi-Tap Telemetry Trace
 
-Capture the full 4-tap telemetry during an autonomous reach:
-* $a_{\text{req}}$: VLA's proposed action (Dragonwing output)
-* $a_{\text{map}}$: Mapped joint command sent over RPC
-* $a_{\text{enf}}$: MCU's permitted command (after safety checks)
-* $a_{\text{meas}}$: Actual servo encoder readback
+Capture all four [action taps](station-reference.md#the-four-action-taps) during an autonomous reach. This is the first trace where $a_{\text{req}}$ comes from your own fine-tuned policy rather than a staff checkpoint.
 
 Verify convergence: $a_{\text{meas}} \to a_{\text{enf}}$ within $\pm 0.5^\circ$.
 
@@ -150,4 +143,4 @@ Verify convergence: $a_{\text{meas}} \to a_{\text{enf}}$ within $\pm 0.5^\circ$.
 | 6 | **Success rate** | Fine-tuned VLA: ≥ 7/10 reaches within 15 mm of target |
 | 7 | **Loop latency** | $T_{\text{total}} \le 80\text{ ms}$ (p50); $< 120\text{ ms}$ (p99) |
 
-*Staff signs off `[ ] B3` and `[ ] C1` on the team's [Competency Card](../curriculum/student-competencies.md).*
+*Staff signs off `[ ] B1` and `[ ] C1` on the team's [Competency Card](../curriculum/student-competencies.md).*

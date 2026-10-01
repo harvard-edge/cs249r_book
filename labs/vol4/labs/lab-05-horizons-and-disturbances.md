@@ -3,6 +3,8 @@
 **Schedule:** Week 9 · Milestone 3 due end of week
 **Required Textbook Reading:** [Chapter 10: Grounded Intent](../../../books/vol4/10_intent/10_intent.qmd), [Chapter 11: Trajectory Planning](../../../books/vol4/11_planning/11_planning.qmd)
 **Target Competencies:** `[ ] C2 Temporal Horizons & Action Dynamics`, `[ ] C3 Disturbance Recovery & Replanning`
+**Milestone Alignment:** Concludes [Milestone 3](../curriculum/syllabus.md#4-assessment-milestones-and-grading) (End of Week 9)
+
 ---
 
 ## Overview
@@ -20,9 +22,6 @@ By the end of this lab, you will be able to:
 - Evaluate closed-loop disturbance recovery by measuring whether the VLA replans or drifts when the target is displaced mid-reach
 - Quantify the tradeoff between open-loop prediction efficiency and closed-loop adaptation
 
-### What You Will Do
-In one week, you will run systematic experiments across three dimensions. First, you will benchmark four action chunk horizons (K = 1, 8, 16, 32) with matched trials. Second, you will test SmolVLA's language conditioning by giving contrasting prompts ("pick up the red block" vs. "pick up the blue block") and measuring the resulting trajectory divergence. Third, you will physically shift the target object 50 mm mid-reach and evaluate whether the VLA replans toward the new location or completes its original trajectory into empty space.
-
 ---
 
 ### 1. The Physical Question
@@ -32,12 +31,10 @@ How far into the future can an embodied model predict open-loop actions before p
 
 ### 2. Hardware Setup
 
-> **Hardware Setup:** See the [Station Reference Card](station-reference.md) for the standard bench configuration.
+> **Standard Bench Configuration:** See the [Station Reference Card](station-reference.md).
 
-
-1. **Edge Board:** Arduino UNO Q running the closed-loop runtime pipeline.
-2. **Robot Station:** Seeed SO-101 arm and overhead USB webcam.
-3. **Task Arena:** Tabletop setup containing two colored target blocks: a **Red Block** (left zone) and a **Blue Block** (right zone).
+Additional requirements:
+1. **Task Arena:** Tabletop setup containing two colored target blocks: a **Red Block** (left zone) and a **Blue Block** (right zone).
 
 ---
 
@@ -94,9 +91,12 @@ Record the multi-tap telemetry trace of a successful disturbance recovery:
 
 ---
 
-### 7. Sign-Off Criteria (The Exit Check)
-To receive credit for Lab 6 and complete Milestone 3:
-1. [ ] **Horizon Analysis Report:** Present the comparative tracking error and smoothness curves across chunk sizes ($K=1, 8, 16, 32$).
-2. [ ] **Language Conditioning Proof:** Demonstrate that changing the language prompt on the identical scene produces divergent, verified physical arm paths.
-3. [ ] **Live Disturbance Recovery Demo:** The instructor shifts the block mid-reach. The system must adapt autonomously, revising its trajectory to make successful contact at the new position.
+### 7. Sign-Off Criteria (Milestone 3 Exit Check)
+
+| # | Criterion | Measurable Threshold |
+|:---:|:---|:---|
+| 1 | **Horizon analysis report** | Tracking error and smoothness curves across $K = 1, 8, 16, 32$, with $K^*$ identified |
+| 2 | **Language conditioning proof** | Two prompts on the identical scene produce divergent, task-appropriate arm paths |
+| 3 | **Live disturbance recovery** | Instructor shifts the block mid-reach; the arm revises its trajectory and touches the block at its new position |
+
 *Staff signs off `[ ] C2` and `[ ] C3` on the team's [Competency Card](../curriculum/student-competencies.md).*

@@ -6,7 +6,7 @@ This page describes the standard bench station used across all Volume IV labs. I
 
 ## The Bench Station
 
-![Physical Bench Wiring Harness](../assets/images/vol4-bench-wiring-harness.svg)
+![Bench wiring: the webcam and the 45 W logic supply connect to the UNO Q; the STM32 drives the daisy-chained servo bus over UART; a separate 7.4 V motor supply with its own switch powers the servos; the two supplies share a star ground.](../assets/images/vol4-bench-wiring.svg)
 
 | Component | Role | Key Specs |
 |:---|:---|:---|
@@ -17,6 +17,18 @@ This page describes the standard bench station used across all Volume IV labs. I
 | **45W USB-C PD Adapter** | Logic and compute power | Powers QRB2210 Linux, STM32 MCU, and USB peripherals; fully independent from the motor power rail; continues operating during motor power cutoff |
 | **Workbench Clamp** | Physical mount and safety boundary | Arm baseplate clamped rigidly to workbench edge with heavy-duty C-clamps; 300 × 200 mm taped workspace boundary; zero base rocking under max payload |
 | **Foam Block Targets** | Manipulation task objects | Compliant colored foam blocks (red, blue, yellow) for safe pick-and-place demonstrations; placed within the marked workspace zone |
+
+---
+
+## The Software Stack
+
+| Layer | Tool | Role |
+|:---|:---|:---|
+| **Robot learning** | Hugging Face LeRobot | Teleoperation capture, episode recording, training, and deployment loops |
+| **Dataset format** | LeRobot Dataset v3 | Parquet + MP4 episodes that carry all four action taps |
+| **Policies** | SmolVLA, ACT | SmolVLA conditions on camera, joint state, and a language prompt; ACT predicts multi-step action chunks |
+| **Edge runtime** | ONNX Runtime, INT8 | Quantized policy inference on the Qualcomm Linux CPU |
+| **Governor firmware** | STM32 C (Arduino App Lab / STM32Cube) | Limits, geofence, watchdog, and the only driver of the servo bus |
 
 ---
 

@@ -2,8 +2,8 @@
 
 **Schedule:** Weeks 5–6 · Milestone 2 due end of Week 8 (with Lab 4)
 **Required Textbook Reading:** [Chapter 5: Physical Data](../../../books/vol4/05_data/05_data.qmd), [Chapter 6: Policy Training](../../../books/vol4/06_training/06_training.qmd)
-**Target Competencies:** `[ ] B1 Physical Dataset Engineering & Multi-Tap Logging`, `[ ] B2 Deterministic Baseline Benchmarking`
-**Milestone Alignment:** Contributes to [Milestone 2](../curriculum/syllabus.md#sec-milestones) (End of Week 8)
+**Target Competencies:** `[ ] B2 Deterministic Baseline Benchmarking`, `[ ] B3 Edge Model Profiling & Resource Budgets`
+**Milestone Alignment:** Contributes to [Milestone 2](../curriculum/syllabus.md#4-assessment-milestones-and-grading) (End of Week 8)
 
 ---
 
@@ -22,9 +22,6 @@ By the end of this lab, you will be able to:
 - Deploy a sim-trained VLA to the Arduino UNO Q Dragonwing (Qualcomm Linux MPU) and connect it to the MCU via RPC
 - Measure and document the sim2real performance gap quantitatively
 - Compare learned VLA control against your Lab 1–2 IK baseline on the same physical tasks
-
-### What You Will Do
-In Week 5, you will work in simulation: loading a staff-provided pre-trained VLA (SmolVLA or ACT trained on simulated demonstrations), running it on simulated tasks, evaluating its success rate, and comparing its behavior against your IK baseline. In Week 6, you will export the sim-trained VLA to ONNX, deploy it to the UNO Q Dragonwing, connect it to the STM32 MCU via the RPC bridge, and run the same tasks on the real robot. You will systematically measure the performance drop and identify what the model learned in simulation that doesn't transfer to reality.
 
 ---
 
@@ -131,4 +128,4 @@ Additional requirements:
 | 5 | **Real hardware trials** | 20-trial results on real hardware recorded |
 | 6 | **Sim2Real gap table** | Quantified comparison with categorized failure analysis |
 
-*Staff signs off `[ ] B1` and `[ ] B2` on the team's [Competency Card](../curriculum/student-competencies.md).*
+*Staff signs off `[ ] B2` and `[ ] B3` on the team's [Competency Card](../curriculum/student-competencies.md).*

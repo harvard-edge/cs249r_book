@@ -3,7 +3,7 @@
 **Schedule:** Weeks 12–14 (3 Full Weeks Dedicated Studio)
 **Required Textbook Reading:** Complete Volume IV Synthesis ([Chapters 1–17](../../../books/vol4/index.qmd))
 **Target Competencies:** `[ ] D3 Physical Release Defense & Evidence Dossier` *(Full 12-Card Mastery)*
-**Milestone Deliverable:** [Milestone 5](../curriculum/syllabus.md#sec-milestones) (End of Week 14) — *Capstone System Defense & Physical Release Dossier*
+**Milestone Deliverable:** [Milestone 5](../curriculum/syllabus.md#4-assessment-milestones-and-grading) (End of Week 14) — *Capstone System Defense & Physical Release Dossier*
 
 ---
 
@@ -16,24 +16,11 @@ How does an engineering team defend a formal, evidence-backed safety and release
 
 Formal lectures and new lab assignments have concluded. The final three weeks give student teams dedicated bench runway:
 
-```
-┌────────────────────────────────────────────────────────────────────────────────────────┐
-│ WEEK 12: TASK BUILD & POLICY HARDENING                                                 │
-│ • Freeze environment fixture and task definition (sorting, insertion, bin picking).    │
-│ • Collect custom 50-episode LeRobot dataset with all 4 action taps logged.             │
-│ • Fine-tune SmolVLA or ACT; export quantized ONNX model to Arduino UNO Q.              │
-├────────────────────────────────────────────────────────────────────────────────────────┤
-│ WEEK 13: ADVERSARIAL PEER FAULT EXCHANGE & DRESS REHEARSAL                             │
-│ • Teams swap "fault challenges" with an assigned peer group.                           │
-│ • Peer teams introduce unannounced physical disturbances (lighting drops, obstacles).   │
-│ • Teams harden STM32 safety governors, replanning routines, and abstention boundaries. │
-├────────────────────────────────────────────────────────────────────────────────────────┤
-│ WEEK 14: THE GRADUATION TRIAL & LIVE ORAL DEFENSE                                      │
-│ • Execute 20 live, unedited physical trials (10 baseline + 10 disturbance trials).     │
-│ • Submit the formal, auditable Physical Release Dossier.                               │
-│ • Individual student oral defense of the complete S·P·A causal loop.                   │
-└────────────────────────────────────────────────────────────────────────────────────────┘
-```
+| Week | Focus | What the team does |
+|:---:|:---|:---|
+| **12** | Task build & policy hardening | Freeze the fixture and task (sorting, insertion, or bin picking). Collect a custom 50-episode LeRobot dataset with all four action taps. Fine-tune SmolVLA or ACT and export the quantized ONNX model to the UNO Q. |
+| **13** | Adversarial peer exchange & dress rehearsal | Swap fault challenges with an assigned peer team, which introduces unannounced disturbances (lighting drops, obstacles). Harden the STM32 governor, replanning, and abstention boundaries. |
+| **14** | Graduation trial & oral defense | Run 20 live, unedited trials (10 baseline + 10 disturbance). Submit the Physical Release Dossier. Each student defends the full causal loop individually. |
 
 ---
 
