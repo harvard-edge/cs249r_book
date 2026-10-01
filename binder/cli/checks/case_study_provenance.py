@@ -87,7 +87,7 @@ def volume_bibliographies(repo: Path) -> list[tuple[Path, Path]]:
         List of (volume_directory, bibliography_file) tuples.
     """
     books_dir = repo / "books" if (repo / "books").is_dir() else repo
-    dedicated_volumes = {"vol4"}
+    dedicated_volumes: set[str] = set()
     pairs = []
     for vol_dir in sorted(books_dir.glob("vol*")):
         if not vol_dir.is_dir():
@@ -99,7 +99,7 @@ def volume_bibliographies(repo: Path) -> list[tuple[Path, Path]]:
             cand = books_dir / f"references-{vol_name}.bib"
             bib = cand if cand.exists() else (books_dir / "references.bib")
         pairs.append((vol_dir, bib))
-    return pairs or [(books_dir / "vol4", books_dir / "references-vol4.bib")]
+    return pairs or [(books_dir / "vol4", books_dir / "references.bib")]
 
 
 def bib_keys(path: Path) -> set[str]:

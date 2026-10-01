@@ -127,8 +127,8 @@ def test_maintain_volume_bib_rejects_unsupported_volumes():
     assert cmd._maintain_volume_bib("vol2") is False
 
 
-def test_volume_bibliographies_preserves_missing_dedicated_bib():
-    """Ensure dedicated bibliographies for vol3/vol4 are preserved even when missing."""
+def test_volume_bibliographies_uses_shared_bib():
+    """Ensure volumes resolve case studies against the shared references.bib."""
     from binder.cli.checks.case_study_provenance import collect
     with TemporaryDirectory() as tmp:
         p = Path(tmp)
@@ -136,10 +136,8 @@ def test_volume_bibliographies_preserves_missing_dedicated_bib():
         (p / "books/references.bib").write_text("@article{example2020,\n title={Example}\n}\n", encoding="utf-8")
         (p / "books/vol4/test.qmd").write_text("::: {.callout-case-study}\n@ example\nSource @example2020\nProvenance: example\n:::\n", encoding="utf-8")
         checked, findings = collect(repo=p)
-        assert checked == 0
-        assert len(findings) == 1
-        assert findings[0].code == "missing-bibliography"
-        assert findings[0].file.endswith("references-vol4.bib")
+        assert checked == 1
+        assert len(findings) == 0
 
 
 def test_build_json_emits_json_on_conflicting_volumes():
