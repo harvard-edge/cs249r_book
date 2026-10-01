@@ -12122,6 +12122,29 @@ class ValidateCommand:
                             context=f"@{entry.entry_type}{{{entry.key},",
                             suggestion="Re-verify modified entry and update manifest with audit tool.",
                         ))
+                elif status != "verified":
+                    issues.append(ValidationIssue(
+                        file=rel,
+                        line=entry.start_line,
+                        code="bib_unverified_status",
+                        message=f"@{entry.entry_type}{{{entry.key}}} is marked as '{status}' (must be 'verified').",
+                        severity="error",
+                        context=f"@{entry.entry_type}{{{entry.key},",
+                        suggestion="Authenticate entry against canonical databases and record external evidence.",
+                    ))
+                else:
+                    details = record.get("details", {})
+                    source = details.get("source") if isinstance(details, dict) else None
+                    if not source or source in ("unverified", "no_details"):
+                        issues.append(ValidationIssue(
+                            file=rel,
+                            line=entry.start_line,
+                            code="bib_unauthenticated_source",
+                            message=f"@{entry.entry_type}{{{entry.key}}} lacks authentic external source evidence in manifest.",
+                            severity="error",
+                            context=f"@{entry.entry_type}{{{entry.key},",
+                            suggestion="Verify entry against external academic database or official registry.",
+                        ))
 
         # Check unverified entries that have DOIs
         if unverified_doi_entries:
