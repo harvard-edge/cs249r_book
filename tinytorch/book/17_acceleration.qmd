@@ -107,7 +107,7 @@ On a processor architecture with 64-byte cache lines, how many compulsory cache 
 
 ---
 
-\newpage
+
 
 ## The Idea
 
@@ -146,15 +146,15 @@ The compact expression avoids retaining seven named `Tensor` wrapper objects, bu
 
 ### Tiling: reuse before eviction
 
-High-performance linear algebra libraries—such as NVIDIA cuBLAS, CUTLASS, and Intel oneMKL—rely on cache tiling to transform memory-bound matrix multiplications into compute-bound throughput. By partitioning large matrix operands into compact 2D sub-blocks that fit snugly within fast L1/L2 caches or GPU shared memory, hardware units reuse loaded data elements repeatedly before they are evicted back to high-latency DRAM. A matrix multiply has the opposite structure. Every output element needs a whole row of $A$ and a whole column of $B$, so the data cannot be consumed in one streaming pass. It can, however, be reused. $C_{ij} = \sum_k A_{ik} B_{kj}$ uses $A_{ik}$ in the computation of every $C_{ij}$ for all $N$ values of $j$, and $B_{kj}$ in every $C_{ij}$ for all $M$ values of $i$. The question is whether those reuses happen while the value is still in fast memory or after it has been evicted and must be fetched again.
-
-Tiling answers by changing the loop order. Instead of computing $C$ one element at a time, compute it one $T \times T$ block at a time. To produce block $(I, J)$ of $C$, walk along $k$ in steps of $T$: fetch the $T \times T$ block of $A$ at $(I, K)$ and the $T \times T$ block of $B$ at $(K, J)$, multiply them, and add the product into the block of $C$. While those two input blocks sit in fast memory, every one of their $T^2$ elements is used $T$ times.
-
 ::: {.column-margin}
 ![](assets/images/diagrams/17_acceleration-margin-tiling.svg){width="100%" fig-alt="2D block tiling diagram illustrating how partitioning large matrices into T by T blocks keeps three active tiles resident in L1 cache."}
 
 *2D cache block tiling: Partitioning matrix multiplication into $T \times T$ sub-blocks keeps three tiles ($A$, $B$, and $C$) in on-chip L1 cache ($3T^2 \times 4\text{ B} \le \text{cache size}$). Each float is reused $T$ times, cutting modeled input loads by $T\times$.*
 :::
+
+High-performance linear algebra libraries—such as NVIDIA cuBLAS, CUTLASS, and Intel oneMKL—rely on cache tiling to transform memory-bound matrix multiplications into compute-bound throughput. By partitioning large matrix operands into compact 2D sub-blocks that fit snugly within fast L1/L2 caches or GPU shared memory, hardware units reuse loaded data elements repeatedly before they are evicted back to high-latency DRAM. A matrix multiply has the opposite structure. Every output element needs a whole row of $A$ and a whole column of $B$, so the data cannot be consumed in one streaming pass. It can, however, be reused. $C_{ij} = \sum_k A_{ik} B_{kj}$ uses $A_{ik}$ in the computation of every $C_{ij}$ for all $N$ values of $j$, and $B_{kj}$ in every $C_{ij}$ for all $M$ values of $i$. The question is whether those reuses happen while the value is still in fast memory or after it has been evicted and must be fetched again.
+
+Tiling answers by changing the loop order. Instead of computing $C$ one element at a time, compute it one $T \times T$ block at a time. To produce block $(I, J)$ of $C$, walk along $k$ in steps of $T$: fetch the $T \times T$ block of $A$ at $(I, K)$ and the $T \times T$ block of $B$ at $(K, J)$, multiply them, and add the product into the block of $C$. While those two input blocks sit in fast memory, every one of their $T^2$ elements is used $T$ times.
 
 For a simplified input-load model, assume each block product loads its two input blocks once and reuses them internally. Ignore cache reuse between block products and traffic for the output accumulator. When all dimensions divide evenly by $T$, the scalar loop requests $2MNK$ input elements, while the blocked model requests $(M/T)(N/T)(K/T) \times 2T^2 = 2MNK/T$. The factor of $T$ belongs to this model. A real processor may reuse data in either loop, so this is not a measured memory-traffic reduction.
 
@@ -180,17 +180,17 @@ Only Level 3 has an intensity that grows with problem size. That growth is what 
 
 ## The Code
 
-::: {.column-margin}
-![](assets/images/diagrams/17_accel-margin-source.svg){width="100%" fig-alt="Source code mapping card for Module 17 Acceleration showing file path, exported package, and tested primitives."}
-
-*Source Code Mapping: Module 17 extracts operator fusion, memory traffic accounting, and tiled matrix multiplication directly from the working repository.*
-:::
-
 ### The two GELUs
 
 In modern Transformer architectures like GPT and BERT, the Gaussian Error Linear Unit (GELU) serves as the standard feed-forward activation function, commonly optimized in production engines via fused CUDA or Triton kernels. Because its mathematical approximation chains multiple transcendental and polynomial operations, measuring how GELU is structured reveals the stark performance difference between retaining intermediate tensor buffers and evaluating arithmetic in a single pass. The entry point receives a `Tensor` and reads `x.data`. Every intermediate has the same shape as that input because the operations act element by element. `unfused_gelu` first computes `x.data**3`, constructs a new `Tensor` from that array, and binds it to `temp1`. Each following line reads either that temporary's `.data` or the original input. The last line wraps the halved result and returns it; no input is mutated.
 
 {{< include _listings/17_acceleration/unfused_gelu.qmd >}}
+
+::: {.column-margin}
+![](assets/images/diagrams/17_accel-margin-source.svg){width="100%" fig-alt="Source code mapping card for Module 17 Acceleration showing file path, exported package, and tested primitives."}
+
+*Source Code Mapping: Module 17 extracts operator fusion, memory traffic accounting, and tiled matrix multiplication directly from the working repository.*
+:::
 
 The local names keep seven intermediate `Tensor` buffers alive while the output is constructed. Each constructor copies its input into owned float32 storage, so counting just the mathematical operations misses these copies. After return, the local intermediate objects can be released. The caller receives a fresh output with the input's shape. Compare that lifetime with the compact implementation.
 

@@ -317,12 +317,6 @@ The copied sample isolates the stored image from transformations. `Compose` pass
 
 ## From TinyTorch to Production
 
-::: {.column-margin}
-![](assets/images/diagrams/05_dataloader-margin-shm.svg){width="100%" fig-alt="Multi-worker IPC comparison between pipe serialization with redundant byte copying and POSIX shared memory zero-copy page mapping."}
-
-*Multi-worker IPC: Worker processes bypass pipe serialization by writing batches directly to `/dev/shm`, sending a small handle (a file descriptor passed over a Unix socket) so the main process maps the same pages.*
-:::
-
 For datasets accessed by index, called map-style datasets in its API, PyTorch keeps indexed lookup separate from sampling and collation. Its tensor dataset indexes stored tensors directly, allowing a row view rather than TinyTorch's copied sample. Tensor fields are then stacked into batches. A configurable sampler and collation function support policies beyond the tuple-of-tensors contract used here. [PyTorch data loading documentation](https://docs.pytorch.org/docs/2.14/data.html).
 
 When `__getitem__` reads and decodes disk-backed files, synchronous execution forces the model to wait during I/O. Background worker processes decouple ingestion from compute: a background producer prepares batch $N+1$ while the accelerator executes batch $N$. PyTorch exposes this through `num_workers` and `prefetch_factor`. TinyTorch leaves execution synchronous so every `next` call traces deterministically from index selection to memory layout. [PyTorch data loading documentation](https://docs.pytorch.org/docs/2.14/data.html).
@@ -330,6 +324,12 @@ When `__getitem__` reads and decodes disk-backed files, synchronous execution fo
 Dataset scale introduces an equally fundamental systems boundary. TinyTorch assumes the training dataset fits comfortably inside host RAM, allowing instant, random-access integer indexing (`dataset[i]`). In production, datasets scaling to terabytes or petabytes (such as Common Crawl text or ImageNet-scale image corpora) cannot be materialized in memory or indexed by random integers without thrashing the storage subsystem. Industrial runtimes transition from map-style datasets to streaming iterable datasets (such as WebDataset or Apache Arrow shards), reading sequential compressed tar or parquet archives directly from remote object storage over the network.
 
 Worker processes also need to hand completed tensors back to the caller. **Shared memory** lets two processes access the same region of RAM; PyTorch's multiprocessing support uses this for CPU tensor storage passed through its queues. Moving storage into shared memory can itself require a copy, so sharing does not mean every part of the handoff is free. [PyTorch multiprocessing notes](https://docs.pytorch.org/docs/2.14/notes/multiprocessing.html).
+
+::: {.column-margin}
+![](assets/images/diagrams/05_dataloader-margin-shm.svg){width="100%" fig-alt="Multi-worker IPC comparison between pipe serialization with redundant byte copying and POSIX shared memory zero-copy page mapping."}
+
+*Multi-worker IPC: Worker processes bypass pipe serialization by writing batches directly to `/dev/shm`, sending a small handle (a file descriptor passed over a Unix socket) so the main process maps the same pages.*
+:::
 
 ::: {#psp-dataloader-multiprocess-shm .callout-perspective title="Systems Perspective: POSIX shared memory and zero-copy IPC"}
 

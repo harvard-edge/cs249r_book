@@ -131,12 +131,6 @@ Consider evaluating a 7B parameter quantized model across two distinct deploymen
 
 The course scripts execute the experiments. The chapter's smaller score function explains how to interpret their results. Keeping these roles separate allows tracing the experiment without mistaking an illustrative ledger for measured evidence.
 
-::: {.column-margin}
-![](assets/images/diagrams/m03_edge-margin-source.svg){width="100%" fig-alt="Source code mapping card for Synthesis III MLPerf Olympics showing file path, exported package, and tested primitives."}
-
-*Source Code Mapping: Synthesis III combines Modules 14 to 20 to benchmark the combined impact of INT8 quantization, KV caching, and operator fusion under strict hardware ceilings.*
-:::
-
 ### Script 1: profile, quantize, prune, benchmark
 
 The first script trains `DigitMLP` for forty epochs on TinyDigits, then walks through the optimization steps in order. Each step is a function that takes the model and one of Part III's classes.
@@ -157,6 +151,12 @@ outputs = model(X_test)
 predictions = np.argmax(outputs.data, axis=1)
 baseline_acc = np.mean(predictions == y_test) * 100
 ```
+
+::: {.column-margin}
+![](assets/images/diagrams/m03_edge-margin-source.svg){width="100%" fig-alt="Source code mapping card for Synthesis III MLPerf Olympics showing file path, exported package, and tested primitives."}
+
+*Source Code Mapping: Synthesis III combines Modules 14 to 20 to benchmark the combined impact of INT8 quantization, KV caching, and operator fusion under strict hardware ceilings.*
+:::
 
 The byte count sums the actual parameter arrays. It excludes Python object overhead, intermediate activations, and any serialized file header, so it should be labeled parameter-array storage. The profiler times one held-out input row; accuracy uses all held-out rows. These are different batch sizes because they answer different questions, but every candidate must use the same timing input shape and the same accuracy dataset as the baseline. The script stops unless the baseline reaches 80 percent test accuracy; a model whose optimizer never moved it would otherwise become the reference every candidate is measured against. It also stops if the profiler's own numbers are wrong: the parameter and FLOP counts must equal those derived from the layer shapes (2,410 parameters, and 4,736 FLOPs at $2 \cdot \text{in} \cdot \text{out}$ per `Linear`), and the latency must be a positive, finite measurement. During training, your `CrossEntropyLoss` on the first batch must match a NumPy computation, because training can converge on a wrong loss value while every reported loss is meaningless. Later steps apply the same discipline to the other tools: `BenchmarkResult` and `pareto_frontier` must reproduce hand-worked fixtures and consistent latency summaries before they score anything, and the GPT must show that its logits vary, that no position reads later tokens, and that earlier tokens matter before it is cached, timed, or quantized.
 
@@ -412,11 +412,16 @@ Deploying quantized transformer models on consumer hardware (phones, laptops, em
 - **GGUF Format and llama.cpp**: Georgi Gerganov's `llama.cpp` uses the unified binary file format **GGUF** (successor to GGML). GGUF bundles model architecture hyperparameters, tokenizer vocabulary, and mixed-precision quantized tensor weights (e.g., Q4_K_M, Q8_0) into a single mmap-friendly file.
 - **Zero-Copy Memory Mapping (`mmap`)**: Instead of allocating and loading gigabytes of weights into heap RAM on startup, edge runtimes map the GGUF file directly into virtual address space. Pages are faulted into memory on demand by the OS kernel, enabling near-instantaneous startup and memory sharing across processes.
 - **Heterogeneous Offloading**: GGUF runtimes dynamically split layers between available compute backends, offloading $N$ transformer layers to a discrete or integrated GPU (via Metal on Apple Silicon, CUDA, or Vulkan) while executing remaining layers on the CPU SIMD units (ARM NEON, x86 AVX-512).
-- **ONNX Runtime (ORT)**: For cross-platform enterprise edge deployments, ONNX Runtime compiles computational graphs with hardware-specific Execution Providers (DirectML, OpenVINO, QNN for Qualcomm NPUs), fusing attention and layer normalization while executing quantized integer GEMM kernels.[^fn-zero-allocation-edge]
+- **ONNX Runtime (ORT)**: For cross-platform enterprise edge deployments, ONNX Runtime compiles computational graphs with hardware-specific Execution Providers (DirectML, OpenVINO, QNN for Qualcomm NPUs), fusing attention and layer normalization while executing quantized integer GEMM kernels.
+- **Embedded Microcontrollers (Bare-Metal Arena)**: In bare-metal environments (ARM Cortex-M, RISC-V targeted by MLPerf Tiny), dynamic heap allocation (`malloc`/`new`) is strictly prohibited. Runtimes like TFLite Micro and TinyEngine mandate static memory arenas pre-allocated at compile time into fixed contiguous SRAM offsets to prevent fragmentation crashes.
 :::
 
-[^fn-zero-allocation-edge]: **Zero-allocation invariants on embedded microcontrollers**: In bare-metal edge environments (such as ARM Cortex-M or RISC-V microcontrollers targeted by MLPerf Tiny), dynamic memory allocation via `malloc` or `new` is strictly prohibited during inference. Heap fragmentation over millions of cycles can trigger unrecoverable crashes. Production runtimes (such as TFLite Micro and TinyEngine) mandate a static memory arena where all tensor weights, activation lifetimes, and scratchpad buffers are pre-allocated at compile time into fixed contiguous SRAM offsets.
 
+::: {.column-margin}
+![](assets/images/diagrams/milestone_03-margin-mlperf-scenarios.svg){width="100%" fig-alt="Diagram of MLPerf Inference operational scenarios including Single-Stream, Server, Offline, and Multi-Stream, with the universal accuracy retention floor."}
+
+*MLPerf Inference Scenarios: Workload arrival patterns determine whether latency (Single-Stream), QPS under SLA (Server), or throughput (Offline) is benchmarked, all bounded by the non-negotiable R >= 0.99 accuracy retention floor.*
+:::
 
 @Tbl-m3-tinytorch-vs-mlperf separates the local experiment from the additional controls around an official result.
 
@@ -440,15 +445,7 @@ Before any compressed or accelerated model artifact is deployed into production 
 4. **Logit and Numerical Equivalence Bounds:** Intermediate layer activations and output logits must match reference single-precision executions within expected floating-point rounding tolerances before measuring speedups.
 :::
 
-::: {.column-margin}
-![](assets/images/diagrams/milestone_03-margin-mlperf-scenarios.svg){width="100%" fig-alt="Diagram of MLPerf Inference operational scenarios including Single-Stream, Server, Offline, and Multi-Stream, with the universal accuracy retention floor."}
-
-*MLPerf Inference Scenarios: Workload arrival patterns determine whether latency (Single-Stream), QPS under SLA (Server), or throughput (Offline) is benchmarked, all bounded by the non-negotiable R >= 0.99 accuracy retention floor.*
-:::
-
 ---
-
-{{< pagebreak >}}
 
 ## Summary
 

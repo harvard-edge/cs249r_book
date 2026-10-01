@@ -196,6 +196,12 @@ Suppose you fine-tune a 7-billion parameter language model in 16-bit precision u
 
 ### Extension 2: Activation Checkpointing
 
+::: {.column-margin}
+![](assets/images/diagrams/21_extensions-margin-checkpoint.svg){width="100%" fig-alt="Activation checkpointing diagram contrasting standard O(L) forward activation retention with checkpointed O(sqrt(L)) boundary storage and backward recomputation."}
+
+*Activation Checkpointing: Standard autograd holds all $L$ layer activations in memory. Checkpointing stores only boundary tensors ($O(\sqrt{L})$), recomputing intermediate activations during backpropagation to reduce peak memory by up to 80 percent at a 33 percent compute overhead.*
+:::
+
 Pioneered in frontier training systems like Megatron-LM and DeepSpeed, activation checkpointing is an essential systems primitive for scaling context lengths and model depths on memory-constrained GPUs. By selectively discarding intermediate forward tensors and recomputing them on-demand during the backward pass, frameworks trade minor redundant arithmetic for substantial memory footprint reductions.
 
 **The Systems Bottleneck:** In deep networks, the autograd tape saves intermediate tensor activations produced by every forward layer to evaluate gradient chain rules during backpropagation. For an $L$-layer transformer with sequence length $T$ and hidden dimension $D$, activation memory scales linearly with depth: $O(L \cdot T \cdot D)$. On long sequences or deep architectures, activation memory quickly dwarfs parameter storage and causes out-of-memory (OOM) crashes during training.
@@ -203,12 +209,6 @@ Pioneered in frontier training systems like Megatron-LM and DeepSpeed, activatio
 **Architectural Strategy:** Activation Checkpointing (or gradient recomputation) discards intermediate forward activations from memory. The forward pass runs inside a `no_grad()` context, caching only the input boundary tensors between major layer blocks. During backpropagation, the forward pass for each block is recomputed dynamically from the cached boundary tensors. By dividing an $L$-layer network into $\sqrt{L}$ segments, activation memory scaling drops from $O(L)$ to $O(\sqrt{L})$, trading a 33% increase in compute for an 80% reduction in peak activation memory.
 
 **The Implementation:** `checkpoint` wraps any forward callable inside a custom `Function`, detaching inputs during the backward pass to seed local recomputation:
-
-::: {.column-margin}
-![](assets/images/diagrams/21_extensions-margin-checkpoint.svg){width="100%" fig-alt="Activation checkpointing diagram contrasting standard O(L) forward activation retention with checkpointed O(sqrt(L)) boundary storage and backward recomputation."}
-
-*Activation Checkpointing: Standard autograd holds all $L$ layer activations in memory. Checkpointing stores only boundary tensors ($O(\sqrt{L})$), recomputing intermediate activations during backpropagation to reduce peak memory by up to 80 percent at a 33 percent compute overhead.*
-:::
 
 {{< include _listings/21_extensions/checkpoint.qmd >}}
 
@@ -645,8 +645,6 @@ Modern production engines bridge this gap through multi-tiered compiler infrastr
 
 The foundational principle remains invariant across all layers: whether hand-crafted through FFI or synthesized automatically by an optimizing JIT compiler, peak systems efficiency requires eliminating redundant DRAM round-trips, maximizing compute density in fast SRAM and registers, and aligning execution strides with hardware memory hierarchies.
 :::
-
-{{< pagebreak >}}
 
 ## Summary
 

@@ -172,15 +172,9 @@ Suppose an inference server has $16\text{ GB}$ of free GPU VRAM available for KV
 
 ---
 
-\newpage
+
 
 ## The Code
-
-::: {.column-margin}
-![](assets/images/diagrams/18_memo-margin-source.svg){width="100%" fig-alt="Source code mapping card for Module 18 Memoization showing file path, exported package, and tested primitives."}
-
-*Source Code Mapping: Module 18 extracts pre-allocated Key-Value caches, cursor write indexing, and cached attention directly from the working repository.*
-:::
 
 ### A buffer sized up front, with one cursor
 
@@ -193,6 +187,12 @@ A write can cost the same at step 500 as at step 1 if the maximum sequence lengt
 {{< include _listings/18_memoization/KVCache.qmd >}}
 
 Three details carry the design. The cursor `seq_pos` is shared by all layers, and `update` does not move it; every layer writes at the same slot for the same token, and `advance` moves the cursor once after the whole model has processed that token. Splitting the write from the advance is what lets one cache serve a stack of layers. `get` returns the rows before the cursor, which is the history and not the slot `update` just filled; the step below appends the row it has in hand, so the newest token attends to itself without the cache having to know which layer is asking. The bounds check in `update` refuses to write past `max_seq_len` rather than growing the buffer, which is the whole point of sizing it up front.
+
+::: {.column-margin}
+![](assets/images/diagrams/18_memo-margin-source.svg){width="100%" fig-alt="Source code mapping card for Module 18 Memoization showing file path, exported package, and tested primitives."}
+
+*Source Code Mapping: Module 18 extracts pre-allocated Key-Value caches, cursor write indexing, and cached attention directly from the working repository.*
+:::
 
 Each layer's key buffer and value buffer are separate `Tensor` objects of shape `(batch_size, num_heads, max_seq_len, head_dim)`, so the write is a slice assignment along the sequence axis and the read is a slice of the same array. `reset` zeroes the buffers as well as the cursor, a pass over memory that the cursor alone would make unnecessary; the module pays it so that a stale row can never be mistaken for a live one while debugging.
 
@@ -365,8 +365,6 @@ A production implementation can also prefill several prompt positions together. 
 The memory budget follows directly from the reference layout. For $L$ layers, $H$ key/value heads, head width $d_k$, and $b$ bytes per value, each cached position requires $2LHd_kb$ bytes per sequence. Grouped-query attention lets multiple query heads share a key/value head, reducing $H$ in this expression.[^fn-gqa-mqa-architectures] Quantized caches reduce $b$ by approximating stored values. A sliding window instead limits how many positions remain visible. TinyTorch implements none of these storage changes; its cache retains float32 rows up to its fixed capacity and raises an error when full.
 
 A different allocation strategy can preserve all the rows while reserving less unused space. [PagedAttention](https://arxiv.org/abs/2309.06180), introduced by Kwon and colleagues, divides a request's keys and values into blocks that need not be contiguous in physical memory.[^fn-virtual-memory-paged-kv] A block table maps a logical position to its allocated block. New blocks arrive as the sequence grows, and completed requests release blocks for reuse. This changes where attention finds the keys, rather than which keys the query can see, as analyzed in the production bridge below. Prefix sharing can additionally reuse blocks containing identical earlier context.
-
-{{< pagebreak >}}
 
 ::: {#psp-memoization-paged-attention-vllm .callout-perspective title="Production Bridge: vLLM and PagedAttention Memory Management"}
 In naive serving engines, allocating contiguous memory buffers for `max_seq_len` up front wastes up to 60 to 80% of high-bandwidth GPU memory due to three forms of fragmentation:

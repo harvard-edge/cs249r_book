@@ -105,20 +105,20 @@ Standard machine learning benchmarking suites, including MLPerf Inference and Py
 
 [^fn-dvfs-thermal-soaking]: **DVFS and thermal settling**: Modern processors use Dynamic Voltage and Frequency Scaling (DVFS) to balance power and thermals. Under standard operating system balanced governors, processors boot from low idle frequencies (such as 800 MHz) and take tens of milliseconds to ramp to peak turbo clocks. Conversely, sustained execution heats the die and triggers thermal throttling that lowers clocks by 15% to 30%. Rigorous systems benchmarks lock hardware governors to performance mode and run continuous thermal-soak iterations prior to recording measurements.
 
-\newpage
+
 
 ### Repetition and the shape of the distribution
-
-::: {.column-margin}
-![](assets/images/diagrams/19_benchmarking-margin-latency.svg){width="100%"}
-*Latency distribution anatomy: tail percentiles $P_{95}$ and $P_{99}$ capture system stalls that the mean obscures.*
-:::
 
 In production serving environments governed by strict Service Level Objectives (SLOs), performance is characterized by complete latency distributions rather than isolated average timings. Systems noise from operating system scheduling, memory allocator stalls, and shared bus contention produces a heavy right-skewed tail that single-number arithmetic means obscure. After warmup, run the model $N$ times and keep every timing $t_1, \dots, t_N$. Two summaries are familiar. The **mean** $\bar{t}$ is the sum divided by $N$, and the **standard deviation** $s$ measures how far a typical timing sits from the mean:
 
 $$\bar{t} = \frac{1}{N} \sum_{i=1}^N t_i, \qquad s = \sqrt{\frac{1}{N - 1} \sum_{i=1}^N (t_i - \bar{t})^2}$$
 
 The mean and standard deviation remain valid summaries of asymmetric data, but neither reveals directly where the slowest requests lie. Latency often has that asymmetry. Nothing can run faster than the floor, and occasional stalls push a few timings far above it, so the histogram has a sharp left edge and a long right tail. For such a distribution the useful summaries come from sorting.
+
+::: {.column-margin}
+![](assets/images/diagrams/19_benchmarking-margin-latency.svg){width="100%"}
+*Latency distribution anatomy: tail percentiles $P_{95}$ and $P_{99}$ capture system stalls that the mean obscures.*
+:::
 
 A **percentile** is a position in the sorted list. Sort the $N$ timings in ascending order, and the $p$-th percentile $P_p$ is the value at a fractional index $p$ percent of the way through that sorted list. Three percentiles carry most of the meaning:
 
@@ -163,23 +163,23 @@ In systems evaluation, valid comparative claims—such as benchmarking an optimi
 Suppose you record 20 benchmark runs of a model forward pass. Exactly 19 iterations finish in 1.0 ms each, but iteration 14 experiences an operating system context switch and takes 21.0 ms. What is the mean latency across the 20 runs? What is the median ($P_{50}$)? If a client requires an SLA of $P_{99} \le 5.0\text{ ms}$, does this service pass or fail?
 :::
 
-\newpage
+
 
 ---
 
 ## The Code
-
-::: {.column-margin}
-![](assets/images/diagrams/19_bench-margin-source.svg){width="100%" fig-alt="Source code mapping card for Module 19 Benchmarking showing file path, exported package, and tested primitives."}
-
-*Source Code Mapping: Module 19 extracts benchmark timing harnesses, latency percentile metrics, and the classroom MLPerf-style check directly from the working repository.*
-:::
 
 Read the core path first: `Benchmark.run_latency_benchmark` produces a list of durations, and `BenchmarkResult` summarizes that list. Compare one unchanged baseline with one candidate before introducing multiple candidates or a statistical test. The module's suite combines several metrics and plots comparisons; it cannot repair mismatched workloads or establish statistical significance from a plot.
 
 The implementation consists of four modular components. A percentile function handles sorting and linear interpolation. `BenchmarkResult` holds every timing from one run and computes statistical summaries. `Benchmark` executes the warmup-then-measure loop. Finally, the `MLPerf` class evaluates result latencies alongside task accuracy to render a compliance verdict. The latency harness constructs a TinyTorch `Tensor` and passes it to the model's `forward` method. The MLPerf-style loop also accepts `predict` or an arbitrary callable, but every route must return predictions that the accuracy phase can interpret.
 
 ### Percentiles by hand
+
+::: {.column-margin}
+![](assets/images/diagrams/19_bench-margin-source.svg){width="100%" fig-alt="Source code mapping card for Module 19 Benchmarking showing file path, exported package, and tested primitives."}
+
+*Source Code Mapping: Module 19 extracts benchmark timing harnesses, latency percentile metrics, and the classroom MLPerf-style check directly from the working repository.*
+:::
 
 The median and tail comparisons in this chapter are positions in a sorted list. A bound on individual decode-step latency needs a percentile of those steps; a bound on the whole request instead needs whole-request timings. A report that the KV cache made the typical step faster needs $P_{50}$ before and after. So the first thing to understand is the function that reads those positions.
 
@@ -274,8 +274,6 @@ For scores `[[0.2, 0.8]]`, removing the singleton batch leaves `[0.2, 0.8]`; `ar
 
 Without supplied labels, the class draws synthetic labels from its seed and sets `synthetic_labels=True`. Such a run always has `compliant=False`, even if a small sample happens to exceed the accuracy threshold. Supplying labels enables the local decision, but cannot prove their provenance: the caller must supply independent ground truth. Here, as book code, are the two numerical bars on an already-validated `BenchmarkResult`, plus a relative comparison. These helpers assume finite measured values, positive latency denominators, and task accuracies in $[0,1]$; they do not validate a dataset or replace the module's input checks.
 
-{{< pagebreak >}}
-
 ```python
 def check_compliance(result, accuracy, max_latency_ms, min_accuracy):
     """A fast model that is wrong does not pass. Both bars, or neither. Book code."""
@@ -330,8 +328,6 @@ The protocol keeps runs 4 through 10, sorted: $[4.95, 5.05, 5.08, 5.10, 5.12, 5.
 - **$P_{99}$**: position $0.99 \times 6 = 5.94$, so $5.20 + 0.94 \times 13.20 = 17.61$ ms.
 - **Throughput**: $7 / 0.0489 \text{ s} = 143.1$ samples per second.
 
-{{< pagebreak >}}
-
 Constructing the container checks that the hand arithmetic agrees with the implementation. In line 3, `raw` lists the ten recorded durations from @tbl-bench-trace. Line 5 builds `naive = BenchmarkResult("naive", raw)`, which naively includes cold-start and setup artifacts, printing a distorted mean of $11.87$ ms in line 8. In line 6, `protocol = BenchmarkResult("protocol", raw[3:])` discards the two warmups and initial profiler timing. Lines 9 to 12 print the true steady-state metrics: median $P_{50} = 5.10$ ms, $P_{95} = 14.44$ ms, $P_{99} = 17.61$ ms, and throughput of 143.1 samples/sec. Lines 13 to 15 assert agreement with the manual mean, $P_{50}$, and $P_{99}$ to within 0.01 ms.
 
 ```python
@@ -355,8 +351,6 @@ assert abs(protocol.percentile(99) - 17.61) < 0.01
 For these seven observations, the median is 5.10 ms (line 9) and the interpolated $P_{99}$ is 17.61 ms (line 11). Seven observations cannot establish what one future request in a hundred will experience. The trace checks the percentile arithmetic; a repeated experiment must supply the evidence for a tail-latency claim.
 
 The accuracy path needs a separate trace, with labels fixed independently of the model. Use a small synthetic task: label an input 1 when the sum of its first two entries is positive, otherwise 0. Pad the remaining audio-shaped input with zeros. The four chosen pairs sum to $-3, 3, -1, 1$, so the labels are `[0, 1, 0, 1]`.
-
-{{< pagebreak >}}
 
 ```python
 import numpy as np

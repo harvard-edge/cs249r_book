@@ -180,9 +180,6 @@ The variance argument predicts a score standard deviation of $8$ when $d_k=64$. 
 
 {{< include _listings/12_attention/scale_scores.qmd >}}
 
-```{=latex}
-\newpage
-```
 
 {{< include _listings/12_attention/sdpa.qmd >}}
 
@@ -202,6 +199,12 @@ The constructor requires positive integer dimensions and rejects an `embed_dim` 
 
 ### The heads
 
+::: {.column-margin}
+![](assets/images/diagrams/12_attention-margin-origami.svg){width="100%" fig-alt="Head split coordinate origami margin card illustrating tensor reshape from (B, S, D) to (B, S, H, d_k), axis transposition to (B, H, S, d_k) for batched 2D GEMM, and head merging back to (B, S, D)."}
+
+*Coordinate origami swaps head and sequence dimensions to place independent 2D matrix planes into the batch grid for hardware GEMM execution.*
+:::
+
 The Idea said a pronoun, a verb, and a closing bracket each want a different routing pattern, and a width-$768$ layer can provide twelve such patterns. The naive way to get twelve patterns is twelve full-width attention layers side by side, each with its own four $768 \times 768$ matrices. That is 28.3 million weights per layer instead of 2.36 million, and twelve times the score arithmetic, $12 \times S^2 \times D$ multiply-adds. The mechanism that makes twelve heads cost what one head costs is the slice. Project once at full width, cut each of $Q$, $K$, and $V$ into twelve strips of 64 columns, run attention on each strip, and concatenate. The score work is $H \times S^2 \times d_k = S^2 \times D$, the same as a single head, and each head uses a distinct output-column slice of the projection matrices.
 
 {{< include _listings/12_attention/MHA_split_heads.qmd >}}
@@ -213,12 +216,6 @@ The Idea said a pronoun, a verb, and a closing bracket each want a different rou
 The projections run once at full width. `_split_heads` reshapes `(B, S, D)` to `(B, S, H, d_k)` and swaps the middle axes, so the attention function receives `(B, H, S, d_k)`. There is no Python loop over heads. A supplied three-dimensional mask `(B, S, S)` becomes `(B, 1, S, S)` and broadcasts across heads; a shared `(S, S)` mask can broadcast directly. The constructor's divisibility check ensures that every feature belongs to exactly one head.
 
 After attention, `_merge_heads` reverses the axis swap and combines the head and feature axes. The output projection then mixes information across heads and returns `(B, S, D)`. Split and merge preserve the association between a token and its features, but each `reshape` and `transpose` returns a tensor with its own storage in TinyTorch. Forward creates these temporary activations without changing the input or the four projection layers.
-
-::: {.column-margin}
-![](assets/images/diagrams/12_attention-margin-origami.svg){width="100%" fig-alt="Head split coordinate origami margin card illustrating tensor reshape from (B, S, D) to (B, S, H, d_k), axis transposition to (B, H, S, d_k) for batched 2D GEMM, and head merging back to (B, S, D)."}
-
-*Coordinate origami swaps head and sequence dimensions to place independent 2D matrix planes into the batch grid for hardware GEMM execution.*
-:::
 
 ![**Multi-head coordinate origami**: Slicing the full hidden embedding $(B, S, D)$ into $(B, H, S, d_k)$ via reshape and transposition isolates head subspaces into independent 2D planes, enabling hardware parallel matrix multiplication across all heads in a single batch call.](assets/images/diagrams/12_head-split-origami.svg){#fig-head-split-origami width="100%" fig-alt="Diagram of coordinate origami: (B, Seq, D_model) reshapes and transposes to Head 0 and Head 1 subspaces, enabling batched Q @ K.T matrix multiplication."}
 
@@ -348,9 +345,6 @@ Standard Multi-Head Attention (MHA) pairs each query head with its own dedicated
 :::
 
 
-```{=latex}
-\newpage
-```
 
 ## Summary
 

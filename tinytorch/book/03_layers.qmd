@@ -162,9 +162,7 @@ Rerunning the loop from The Problem with the weights scaled three ways gives @tb
 *Inverted Dropout: Training scales active activations by $1/(1-p)$ so that evaluation executes as a zero-overhead identity pass.*
 :::
 
-Popularized in deep convolutional networks and ubiquitous in Transformer feed-forward sublayers, **dropout** acts as a powerful regularizer by preventing neurons from co-adapting to noise. Because training requires stochastic unit masking while production inference demands deterministic predictions, introducing dropout forces neural network frameworks to maintain distinct execution modes (`train` vs. `eval`). For an activation of value 3 and dropout probability $p=0.5$, half of the random outcomes discard the value and half retain it. Returning either 0 or 3 would average to 1.5. Returning either 0 or 6 instead averages to 3, matching the value passed through at evaluation. That correction is the arithmetic behind dropout, a training technique intended to reduce overfitting.[^fn-overfitting-dropout-motive] Each activation is independently dropped, so later computations cannot always rely on the same inputs being present.
-
-[^fn-overfitting-dropout-motive]: **Overfitting** occurs when a model memorizes training noise at the expense of generalization. Dropout injects stochastic perturbations to prevent co-adaptation of features.
+Popularized in deep convolutional networks and ubiquitous in Transformer feed-forward sublayers, **dropout** acts as a powerful regularizer by preventing neurons from co-adapting to noise. Because training requires stochastic unit masking while production inference demands deterministic predictions, introducing dropout forces neural network frameworks to maintain distinct execution modes (`train` vs. `eval`). For an activation of value 3 and dropout probability $p=0.5$, half of the random outcomes discard the value and half retain it. Returning either 0 or 3 would average to 1.5. Returning either 0 or 6 instead averages to 3, matching the value passed through at evaluation. That correction is the arithmetic behind dropout, a training technique intended to reduce overfitting. Each activation is independently dropped, so later computations cannot always rely on the same inputs being present.
 
 The correction can be placed on either side of training. One convention leaves surviving values unchanged during training and scales them down at evaluation. **Inverted dropout**, which TinyTorch implements, instead divides surviving training activations by the probability of keeping them, $1-p$. Evaluation can then return the original input without performing any scaling or array passes:
 
@@ -206,15 +204,15 @@ A caller needs two independent operations on a model. `model(x)` computes an out
 
 `Linear(2, 3)` packages the opening calculation. Its constructor allocates a `(2, 3)` weight matrix and a `(3,)` bias once; calling the layer with a `(1, 2)` row then returns a `(1, 3)` result. A later call reads the same tensors. The constructor chooses random starting values and their scale, while `forward` only reads them.
 
+The constructor derives the initialization scale from its own width. Module 03 uses LeCun's rule from @tbl-init-schemes, $\text{Var}(w) = 1 / D_{\text{in}}$, so `Linear` draws its weight with standard deviation $\sqrt{1 / D_{\text{in}}}$ (the module's `INIT_SCALE_FACTOR` is 1) and applies $y = xW + b$. The weight is stored as `(in_features, out_features)`, so a batch `x` of shape `(B, in_features)` multiplies it directly. The bias starts at zero; it adds nothing to the initial weighted sum. `rng` is the module's NumPy generator, created once with seed 7, and each constructor consumes the next draw from that generator. Repeated calls therefore create different weights; constructing a new layer does not reset the random sequence.
+
+{{< include _listings/03_layers/Linear.qmd >}}
+
 ::: {.column-margin}
 ![](assets/images/diagrams/03_layers-margin-fanin.svg){width="100%" fig-alt="Kaiming weight standard deviation ladder showing scale decreasing from 0.250 at fan-in 32 down to 0.044 at fan-in 1024."}
 
 *Kaiming weight $\sigma = \sqrt{2/D_{\text{in}}}$ scales inversely with the square root of fan-in.*
 :::
-
-The constructor derives the initialization scale from its own width. Module 03 uses LeCun's rule from @tbl-init-schemes, $\text{Var}(w) = 1 / D_{\text{in}}$, so `Linear` draws its weight with standard deviation $\sqrt{1 / D_{\text{in}}}$ (the module's `INIT_SCALE_FACTOR` is 1) and applies $y = xW + b$. The weight is stored as `(in_features, out_features)`, so a batch `x` of shape `(B, in_features)` multiplies it directly. The bias starts at zero; it adds nothing to the initial weighted sum. `rng` is the module's NumPy generator, created once with seed 7, and each constructor consumes the next draw from that generator. Repeated calls therefore create different weights; constructing a new layer does not reset the random sequence.
-
-{{< include _listings/03_layers/Linear.qmd >}}
 
 Notice that `scale` comes from `in_features` alone. With a ReLU after every layer, LeCun's scale lets the next pre-activation variance shrink rather than hold steady, which is the gap Kaiming's gain of 2 closes. The module implements one simple default; the first exercise changes the gain and measures its effect instead of assuming that one initializer suits every network. PyTorch's `nn.Linear` stores the weight the other way around, as `(out_features, in_features)`, and uses a different default distribution; the bridge section takes up both. Notice also that the weights are created with `requires_grad=True`. As defined on `Tensor` in @sec-tensors, learnable parameters declare their need for gradients at construction so that when @sec-autograd activates backward graph recording, operations seamlessly capture the parameters without requiring manual flags.
 

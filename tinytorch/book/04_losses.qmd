@@ -47,6 +47,12 @@ This chapter constructs TinyTorch's loss library, defusing the numerical traps o
 
 A classifier with three classes produces three numbers. Suppose, early in training, they come out as `[100.0, 101.0, 99.0]`. The standard recipe for turning them into probabilities is to exponentiate each one and divide by the sum. Here is that recipe, verbatim, in float32.
 
+::: {.column-margin}
+![](assets/images/diagrams/04_losses-margin-overflow.svg){width="100%" fig-alt="Plot showing float32 exponent cliff where e^z overflows to infinity for z greater than 88.72."}
+
+*In float32, $e^z$ overflows to $\infty$ at $z = 88.72$, necessitating the max-shift stabilization.*
+:::
+
 ```python
 import numpy as np
 
@@ -56,12 +62,6 @@ print(e / np.sum(e))         # [nan nan nan]
 ```
 
 NumPy prints an overflow warning and carries on, and every probability comes out as `nan`. The reason is the range of a 32-bit float. The largest finite float32 is about $3.4 \times 10^{38}$, which is $e^{88.72}$, so `exp` of anything above 88.72 returns `inf`. The sigmoid in @sec-activations met the same wall and selected the branch whose exponent was nonpositive; this chapter applies the same idea to a whole row of numbers at once. Once one term is `inf`, the sum is `inf`, and `inf / inf` is not a number. The other direction fails just as quietly. Below about $-104$, `exp` returns an exact `0.0`, so logits of `[-1000, -1002, -1001]` give a sum of zero and `0 / 0`, which is also `nan`.
-
-::: {.column-margin}
-![](assets/images/diagrams/04_losses-margin-overflow.svg){width="100%" fig-alt="Plot showing float32 exponent cliff where e^z overflows to infinity for z greater than 88.72."}
-
-*In float32, $e^z$ overflows to $\infty$ at $z = 88.72$, necessitating the max-shift stabilization.*
-:::
 
 Logits of 100 are not exotic. Recall from @sec-activations that a direct exponential overflows float32 to infinity for any input above 88.72, which is why TinyTorch's Softmax subtracts the row maximum first. Furthermore, @sec-layers showed how fast badly scaled weights inflate activations; a few layers of that and the outputs easily enter the hundreds. A nonfinite loss is a reason to stop and inspect the batch before updating weights. Nonfinite intermediate values can propagate into the derivatives and weight updates introduced in @sec-autograd and @sec-optimizers. The scalar alone does not tell us which intermediate first failed, so the useful debugging boundary is the input logits and the operations that turn them into a loss.
 
@@ -145,17 +145,18 @@ The vector of all $C$ values of $\log p_i$ is the **log-softmax** of $\mathbf{z}
 
 ---
 
+
 ## The Code
+
+Module 04 follows the pattern @sec-activations set. Each loss is a pair of classes: an operation, a `Function` subclass whose `forward` takes NumPy arrays and returns a numerical result, and a thin wrapper that takes tensors and hands them to the operation through `apply`. The wrapper is what the caller uses. For `MSELoss()(predictions, targets)`, Python enters `MSELoss.__call__`, which calls `forward`, which delegates to `MSEFunction.apply`. That shared method passes the tensors' arrays to `MSEFunction.forward` and wraps its numerical result in a `Tensor`. @sec-autograd will add the record of how the result was computed and the derivative rules that use it.
+
+### A loss is one scalar in a `Tensor`
 
 ::: {.column-margin}
 ![](assets/images/diagrams/04_losses-margin-source.svg){width="100%" fig-alt="Source code mapping card for Module 04 Losses showing file path, exported package, and tested primitives."}
 
 *Source Code Mapping: Module 04 extracts MSELoss, numerically stabilized CrossEntropyLoss, and BinaryCrossEntropyLoss directly from the working repository.*
 :::
-
-Module 04 follows the pattern @sec-activations set. Each loss is a pair of classes: an operation, a `Function` subclass whose `forward` takes NumPy arrays and returns a numerical result, and a thin wrapper that takes tensors and hands them to the operation through `apply`. The wrapper is what the caller uses. For `MSELoss()(predictions, targets)`, Python enters `MSELoss.__call__`, which calls `forward`, which delegates to `MSEFunction.apply`. That shared method passes the tensors' arrays to `MSEFunction.forward` and wraps its numerical result in a `Tensor`. @sec-autograd will add the record of how the result was computed and the derivative rules that use it.
-
-### A loss is one scalar in a `Tensor`
 
 The loss is the boundary between scoring predictions and deciding how to improve them. This module enforces a strict architectural contract: the loss must collapse multi-dimensional predictions into a single 0-dimensional scalar `Tensor` of shape `()`.
 
@@ -179,17 +180,17 @@ The output has shape `()`, NumPy's shape for a scalar. The loss object has no le
 
 ### `LogSoftmax`, the max shift in code
 
-::: {.column-margin}
-![](assets/images/diagrams/04_losses-margin-precision.svg){width="100%" fig-alt="Comparison of left-to-right subtraction preserving mantissa bits vs. parenthesized sum causing catastrophic cancellation in float32."}
-
-*Subtraction Ordering: Evaluating `x - max_vals - log_sum_exp` left-to-right preserves 24-bit mantissa precision; grouping terms causes catastrophic cancellation.*
-:::
-
 For a batch with shape `(2, 3)`, each row holds three class scores. The loss must normalize each row separately: the first example's scores must not affect the second example's probabilities. Later classifiers will increase the number of rows and classes, but this row-wise computation stays the same.
 
 The naive way first computes `e = np.exp(z)`, then `np.log(e / np.sum(e))`. The Problem showed the loud failure, `nan` for any logit past 88.7. There is a quiet one too. Even when nothing overflows, a probability that underflows to `0.0` goes into `log` and comes out `-inf`. In float32, `log(softmax([-110, 0]))` prints `[-inf, 0.]`, where the stable log-probabilities round to `[-110, 0]`; the naive form has thrown away a perfectly finite number. The composition also creates separate intermediate arrays for exponentiation, division, and logarithms.
 
 The fix is The Idea's two moves, in that order. Subtract each row's maximum, so every exponential is at most 1 and every sum is at least 1. Then take the log of the sum and subtract it from the shifted logits, so no probability is ever formed and nothing is ever divided. The operation normalizes along the selected axis `dim` and returns log-probabilities of the same shape. For `(N, C)` classification scores, `dim=-1` selects the class axis; a one-line function wraps it for callers holding a `Tensor`.
+
+::: {.column-margin}
+![](assets/images/diagrams/04_losses-margin-precision.svg){width="100%" fig-alt="Comparison of left-to-right subtraction preserving mantissa bits vs. parenthesized sum causing catastrophic cancellation in float32."}
+
+*Subtraction Ordering: Evaluating `x - max_vals - log_sum_exp` left-to-right preserves 24-bit mantissa precision; grouping terms causes catastrophic cancellation.*
+:::
 
 {{< include _listings/04_losses/LogSoftmax.qmd >}}
 
@@ -294,11 +295,6 @@ The same seven steps on the logits that broke the naive formula show the shift d
 
 One last detail hides in the final row. The loss can be written as $\text{LSE}(\mathbf{z}) - z_t = 1002.4076 - 1002$, or as $-((z_t - c) - \log\text{sum}) = -(0 - 0.4076)$. On paper these are equal. In float32 they are not, because a float32 carries about seven significant digits, and $1002.4076$ has already spent four of them on the integer part. Adding $1002$ to $0.4076$ and then subtracting $1002$ throws away the digits that matter.
 
-::: {.content-visible when-format="pdf"}
-```{=latex}
-\newpage
-```
-:::
 
 ```python
 import numpy as np

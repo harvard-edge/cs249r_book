@@ -128,6 +128,12 @@ The order matters. A tensor's backward rule turns the gradient at that tensor in
 
 ### Used twice means add
 
+::: {.column-margin}
+![](assets/images/diagrams/06_autograd-margin-diamond.svg){width="100%" fig-alt="Diamond DAG topology showing forward split and backward gradient accumulation at leaf x."}
+
+*Diamond DAGs require gradient accumulation: $\nabla_x = \nabla_{y_1} \frac{\partial y_1}{\partial x} + \nabla_{y_2} \frac{\partial y_2}{\partial x}$.*
+:::
+
 Architectural motifs like residual skip connections in ResNets and shared projection weights in Transformers routinely fan out a single tensor into multiple downstream consumers. To correctly evaluate the multivariable chain rule across such diamond dependencies, the autograd engine must accumulate incoming cotangent vectors into a shared buffer rather than overwriting them. When a tensor feeds two operations, the loss depends on it along two paths, and the multivariable chain rule says the total derivative is the sum over paths:
 
 $$\frac{\partial L}{\partial x} = \sum_{k} \frac{\partial L}{\partial y_k} \frac{\partial y_k}{\partial x},$$
@@ -135,12 +141,6 @@ $$\frac{\partial L}{\partial x} = \sum_{k} \frac{\partial L}{\partial y_k} \frac
 where the $y_k$ are the tensors computed directly from $x$. In code the incoming contributions must be added. The implementation accumulates them in `pending` before adding the complete result into `x.grad`. The smallest example is `x + x`. The same tensor is both inputs of one addition, so its gradient is the incoming gradient twice. An engine that overwrote each pending contribution would silently report half the true value, and the mistake would not raise an error. It would just train worse. The same accumulation is what makes a layer whose input is added back to its output work, and it introduces one kind of accumulation: combining paths within a backward call. A separate choice keeps `.grad` between calls, so the training loop must clear it when starting a new gradient estimate.
 
 ![**Gradient fan-in accumulation across branches**: When a tensor fans out during forward execution (e.g. into parallel residual branches or multi-head attention), reverse-mode autograd must accumulate incoming vector-Jacobian products (`x.grad += dL/dx`) rather than assigning them, honoring the multivariable chain rule.](assets/images/diagrams/06_gradient-fanin-accumulation.svg){#fig-gradient-fanin-accumulation width="100%" fig-alt="DAG diagram illustrating Node X receiving accumulated gradients from Op A and Op B via multivariable chain rule summation."}
-
-::: {.column-margin}
-![](assets/images/diagrams/06_autograd-margin-diamond.svg){width="100%" fig-alt="Diamond DAG topology showing forward split and backward gradient accumulation at leaf x."}
-
-*Diamond DAGs require gradient accumulation: $\nabla_x = \nabla_{y_1} \frac{\partial y_1}{\partial x} + \nabla_{y_2} \frac{\partial y_2}{\partial x}$.*
-:::
 
 
 ### What the design costs
@@ -251,17 +251,17 @@ The same requirement applies to the loss rules from @sec-losses. For example, bi
 
 ### Walking the graph backward
 
-In production runtimes like PyTorch's C++ autograd engine (`torch::autograd::Engine`), backward execution coordinates dependencies across complex acyclic computation graphs. By executing nodes in reverse topological order, the engine guarantees that all downstream consumers finish depositing their cotangent contributions before an upstream node evaluates its vector-Jacobian product. The records are in place. What is left is the call the training loop of @sec-training will make once per step, `loss.backward()`, which has to visit every record and leave every leaf holding its gradient.
-
-A tempting walk combines recursion with a visited set. Start at the loss, run its rule, and immediately recurse into each unvisited input. On the straight chain in the worked trace below that gives the right answer, which is what makes it dangerous. For `x = 2`, let `h = x * 2` and `L = h * 3 + h * 4`. The two branches contribute $3$ and $4$ at `h`; its multiply must send $(3+4) \times 2 = 14$ to `x`. If a recursive walk reaches `h` through the first branch and immediately runs its rule, it sends only $3 \times 2 = 6$. When the second branch arrives, the visited set suppresses another traversal of `h`, losing the remaining $8$. Dropping the visited set while propagating the total `.grad` causes a different error: the later traversal also resends the first contribution. No error, a wrong number, and a model that trains a little worse than it should.
-
-The fix is to run no rule until every consumer of its tensor has reported. A topological order guarantees exactly that, and a depth-first walk hands us one for free. The implementation therefore does four things: sorts the graph, seeds the gradient at the loss, walks the order once, and releases the graph.
-
 ::: {.column-margin}
 ![](assets/images/diagrams/06_autograd-margin-topo-tape.svg){width="100%" fig-alt="Topological tape execution diagram showing reverse post-order DFS sequence where consumers h1 and h2 deposit gradients into pending buffer before parent h backward executes."}
 
 *Reverse topological sort guarantees all consumer paths contribute to pending gradients before a parent node executes.*
 :::
+
+In production runtimes like PyTorch's C++ autograd engine (`torch::autograd::Engine`), backward execution coordinates dependencies across complex acyclic computation graphs. By executing nodes in reverse topological order, the engine guarantees that all downstream consumers finish depositing their cotangent contributions before an upstream node evaluates its vector-Jacobian product. The records are in place. What is left is the call the training loop of @sec-training will make once per step, `loss.backward()`, which has to visit every record and leave every leaf holding its gradient.
+
+A tempting walk combines recursion with a visited set. Start at the loss, run its rule, and immediately recurse into each unvisited input. On the straight chain in the worked trace below that gives the right answer, which is what makes it dangerous. For `x = 2`, let `h = x * 2` and `L = h * 3 + h * 4`. The two branches contribute $3$ and $4$ at `h`; its multiply must send $(3+4) \times 2 = 14$ to `x`. If a recursive walk reaches `h` through the first branch and immediately runs its rule, it sends only $3 \times 2 = 6$. When the second branch arrives, the visited set suppresses another traversal of `h`, losing the remaining $8$. Dropping the visited set while propagating the total `.grad` causes a different error: the later traversal also resends the first contribution. No error, a wrong number, and a model that trains a little worse than it should.
+
+The fix is to run no rule until every consumer of its tensor has reported. A topological order guarantees exactly that, and a depth-first walk hands us one for free. The implementation therefore does four things: sorts the graph, seeds the gradient at the loss, walks the order once, and releases the graph.
 
 {{< include _listings/06_autograd/Tensor_backward.qmd >}}
 
