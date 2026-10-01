@@ -46,12 +46,10 @@ class LoginCommand(BaseCommand):
         try:
             port = receiver.start()
             
-            # Build the target URL with both old (redirect_port) and new (redirect_url) parameters
-            # for backward compatibility. The website will use redirect_url if available,
-            # otherwise fall back to constructing from redirect_port
-            import urllib.parse
-            callback_url = receiver.get_redirect_url()
-            target_url = f"{ENDPOINTS['cli_login']}?redirect_port={port}&redirect_url={urllib.parse.quote(callback_url)}"
+            # The login URL carries redirect_port / redirect_url plus a random
+            # `state` nonce that the callback must echo (CSRF protection; see
+            # REQUIRE_CALLBACK_STATE in tito/core/auth.py).
+            target_url = receiver.get_login_url()
             
             open_url(target_url, self.console, show_manual_fallback=True)
             
@@ -72,18 +70,31 @@ class LoginCommand(BaseCommand):
                 start_time = time.time()
                 timeout = 300
                 while getattr(receiver.server, "auth_data", None) is None:
+                    if getattr(receiver.server, "save_error", None):
+                        break
                     if time.time() - start_time > timeout:
                         break
                     time.sleep(0.25)
                 
                 tokens = getattr(receiver.server, "auth_data", None)
+                save_error = getattr(receiver.server, "save_error", None)
             
             # Now stop the server AFTER the progress spinner is done
             receiver.stop()
+
+            if save_error:
+                self.console.print(f"[red]Login succeeded in the browser, but {save_error}[/red]")
+                self.console.print("[yellow]Check that the directory is writable (or set TINYTORCH_CREDENTIALS_DIR) and run 'tito community login' again.[/yellow]")
+                return 1
             
             if tokens:
-                save_credentials(tokens)
+                try:
+                    save_credentials(tokens)
+                except OSError as e:
+                    self.console.print(f"[red]Could not save credentials: {e}[/red]")
+                    return 1
                 self.console.print(f"[green]Success! Logged in as {tokens['user_email']}[/green]")
+                self._record_sync_consent()
                 self._offer_post_login_sync()
                 return 0
             else:
@@ -94,6 +105,40 @@ class LoginCommand(BaseCommand):
         except Exception as e:
             self.console.print(f"[red]Error: {e}[/red]")
             return 1
+
+    def _record_sync_consent(self) -> None:
+        """Show exactly what sync uploads and record whether auto-sync is allowed.
+
+        Logging in is the moment a student opts into the community features,
+        so this is where the disclosure is shown. On an interactive terminal
+        the student chooses; on a non-interactive one (Git Bash / MinTTY,
+        where we cannot prompt) logging in after seeing the disclosure counts
+        as consent, which keeps the #1849 fix working for those users. Either
+        way it can be changed later (TITO_NO_SYNC=1 or
+        'tito community sync --disable-auto').
+        """
+        from tito.core import runtime
+        from tito.core.submission import (
+            show_sync_disclosure, set_auto_sync_consent, sync_disabled_by_env, NO_SYNC_ENV,
+        )
+
+        self.console.print()
+        show_sync_disclosure(self.console)
+        if sync_disabled_by_env():
+            self.console.print(f"[dim]{NO_SYNC_ENV} is set: automatic sync stays off.[/dim]")
+            return
+        if runtime.is_interactive():
+            allowed = Confirm.ask(
+                "[bold yellow]Sync automatically after you complete modules and milestones?[/bold yellow]",
+                default=True,
+            )
+        else:
+            allowed = True
+            self.console.print("[dim]Automatic sync enabled. Turn it off with 'tito community sync --disable-auto'.[/dim]")
+        try:
+            set_auto_sync_consent(allowed)
+        except OSError as e:
+            self.console.print(f"[yellow]Could not save your sync preference: {e}[/yellow]")
 
     def _offer_post_login_sync(self) -> None:
         """Offer to upload progress completed *before* logging in.
@@ -140,11 +185,12 @@ class LogoutCommand(BaseCommand):
 
     def run(self, args: Namespace) -> int:
         try:
-            receiver = AuthReceiver()
-            port = receiver.start()
+            receiver = AuthReceiver(mode="logout")
+            receiver.start()
 
-            # Use the WSL-aware callback_host from the receiver
-            logout_url = f"http://{receiver.callback_host}:{port}/logout"
+            # WSL-aware host, plus the per-run nonce: /logout ignores any
+            # request that does not carry it.
+            logout_url = receiver.get_logout_url()
             
             self.console.print("Opening browser to complete logout...")
             self.console.print(f"[dim]Contacting local auth endpoint: {logout_url}[/dim]")

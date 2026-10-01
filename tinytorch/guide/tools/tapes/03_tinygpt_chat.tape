@@ -20,8 +20,10 @@ Sleep 500ms
 Show
 
 # Run Milestone 05 conversational assistant with live token streaming
-Type "tito milestone run 05"
+Type "tito milestone run 05 --part 4"
 Sleep 300ms
 Enter
-# Generous hold time to study loss drop, Overfitting Detective gap, live streaming, and dialogue
-Sleep 13000ms
+# Wait for the real run to finish (the shell prompt returns), however long
+# training takes on this machine, then hold on the result.
+Wait@600s /^\$ *$/
+Sleep 6s

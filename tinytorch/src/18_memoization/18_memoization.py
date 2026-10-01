@@ -63,12 +63,29 @@ from tinytorch.perf.memoization import KVCache, enable_kv_cache, disable_kv_cach
 
 ## 📋 Module Dependencies
 
+**Prerequisites**: Modules 01 (Tensor), 12 (Attention), 13 (Transformers), and 14 (Profiling) must be complete
+
+**External Dependencies**:
+- `numpy` (cache buffers and array operations)
+- `time` (latency measurements)
+- `contextlib.contextmanager` and `typing` (context managers and type hints)
+
+**TinyTorch Dependencies**:
+
 | Dependency Module | Exported Abstraction | Consumed Functional Role | Memory & Architectural Invariant |
 |:---|:---|:---|:---|
 | **Module 01 (`01_tensor`)** | `Tensor` | Contiguous N-D array storage & slicing | Pre-allocated float32 buffers without autograd overhead |
 | **Module 12 (`12_attention`)** | `MultiHeadAttention`, `MASK_VALUE` | Attention projections, head transformations, masking sentinel | Splits `Q, K, V` into `(B, H, S, D)`, recombines output, and reuses one masking constant |
 | **Module 13 (`13_transformers`)** | `GPT` | Autoregressive language model backbone | Blocks are reached by duck typing through `model.blocks`, so `TransformerBlock` is never imported or subclassed |
 | **Module 14 (`14_profiling`)** | `Profiler` | High-resolution microsecond timer | Quantifies latency scaling with and without cache |
+
+**Dependency Flow**:
+```
+Module 01 (Tensor)                          ──┐
+Module 12 (MultiHeadAttention, MASK_VALUE)  ──┤
+Module 13 (GPT)                             ──┼──→ Module 18 (KVCache)
+Module 14 (Profiler)                        ──┘
+```
 """
 
 # %% nbgrader={"grade": false, "grade_id": "imports", "solution": false}

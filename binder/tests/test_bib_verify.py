@@ -32,6 +32,7 @@ def test_bib_verify_clean_match(tmp_path: Path):
             "file": "refs.bib",
             "entry_hash": _compute_hash(raw_entry),
             "status": "verified",
+            "details": {"source": "crossref"},
         }
     }
     manifest_dir = tmp_path / "review" / "bib-verification"
@@ -45,6 +46,70 @@ def test_bib_verify_clean_match(tmp_path: Path):
     result = cmd._run_bib_verify(bib)
     assert result.passed
     assert len(result.issues) == 0
+
+
+def test_bib_verify_flags_unverified_status(tmp_path: Path):
+    """Entry with status != 'verified' produces an error."""
+    bib = tmp_path / "refs.bib"
+    raw_entry = """@article{unv2020,
+  title = {Unconfirmed Paper},
+  author = {Smith, John},
+  year = {2020},
+}"""
+    bib.write_text(raw_entry, encoding="utf-8")
+
+    manifest = {
+        "unv2020": {
+            "key": "unv2020",
+            "file": "refs.bib",
+            "entry_hash": _compute_hash(raw_entry),
+            "status": "metadata_fix",
+            "details": {"source": "crossref"},
+        }
+    }
+    manifest_dir = tmp_path / "review" / "bib-verification"
+    manifest_dir.mkdir(parents=True)
+    (manifest_dir / "manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
+
+    cmd = ValidateCommand(
+        config_manager=SimpleNamespace(root_dir=tmp_path, book_dir=tmp_path),
+        chapter_discovery=None,
+    )
+    result = cmd._run_bib_verify(bib)
+    assert not result.passed
+    assert any(i.code == "bib_unverified_status" and i.severity == "error" for i in result.issues)
+
+
+def test_bib_verify_flags_unauthenticated_source(tmp_path: Path):
+    """Entry marked verified but without authentic external source produces an error."""
+    bib = tmp_path / "refs.bib"
+    raw_entry = """@article{fakeauth2020,
+  title = {Paper Lacking Evidence},
+  author = {Smith, John},
+  year = {2020},
+}"""
+    bib.write_text(raw_entry, encoding="utf-8")
+
+    manifest = {
+        "fakeauth2020": {
+            "key": "fakeauth2020",
+            "file": "refs.bib",
+            "entry_hash": _compute_hash(raw_entry),
+            "status": "verified",
+            "details": {"source": "unverified"},
+        }
+    }
+    manifest_dir = tmp_path / "review" / "bib-verification"
+    manifest_dir.mkdir(parents=True)
+    (manifest_dir / "manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
+
+    cmd = ValidateCommand(
+        config_manager=SimpleNamespace(root_dir=tmp_path, book_dir=tmp_path),
+        chapter_discovery=None,
+    )
+    result = cmd._run_bib_verify(bib)
+    assert not result.passed
+    assert any(i.code == "bib_unauthenticated_source" and i.severity == "error" for i in result.issues)
 
 
 def test_bib_verify_flags_invalid_entry(tmp_path: Path):

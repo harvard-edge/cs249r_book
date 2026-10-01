@@ -20,13 +20,13 @@ logits = torch.tensor([[2.0, 1.0, 0.1], [1000.0, 1001.0, 1002.0]])
 targets = torch.tensor([0, 2])
 
 loss = F.cross_entropy(logits, targets)
-print("Stable scalar loss:", loss.item())  # 0.4076, no NaN or Inf!
+print("Stable scalar loss:", loss.item())  # 0.4123, no NaN or Inf!
 ```
 
 Underneath that single call, the runtime protects computation from the hazards of IEEE 754 floating-point arithmetic:
 
 1. **The LogSumExp max-subtraction shift:** In raw float32, $e^{1000}$ immediately overflows to `+inf`, causing division to produce `nan`. The runtime subtracts the row maximum ($\max_j z_j$) before exponentiation, bounding all exponents to $\le 0$ so they never overflow.
-2. **Operator fusion across softmax and log-likelihood:** Rather than materializing separate intermediate probability tensors through Softmax and then passing them to a logarithm, the kernel fuses them into a single pass to eliminate intermediate memory traffic.
+2. **Operator fusion across softmax and log-likelihood:** Rather than materializing a probability tensor and then taking its logarithm, the runtime computes log-softmax directly, so no probability array is formed.
 3. **Scalar reduction invariant:** A loss function must collapse high-dimensional prediction arrays across batch and class coordinates into a single 0-D scalar. This reduction guarantees that the training objective represents a global scalar potential, preventing downstream memory explosions during graph execution.
 
 This chapter constructs TinyTorch's loss library, defusing the numerical traps of cross-entropy to provide stable scalar objectives that @sec-autograd and @sec-optimizers turn into parameter updates. Before building the stable implementation, we must inspect how textbook mathematical recipes immediately fail in float32.
@@ -47,6 +47,12 @@ This chapter constructs TinyTorch's loss library, defusing the numerical traps o
 
 A classifier with three classes produces three numbers. Suppose, early in training, they come out as `[100.0, 101.0, 99.0]`. The standard recipe for turning them into probabilities is to exponentiate each one and divide by the sum. Here is that recipe, verbatim, in float32.
 
+::: {.column-margin}
+![](assets/images/diagrams/04_losses-margin-overflow.svg){width="100%" fig-alt="Plot showing float32 exponent cliff where e^z overflows to infinity for z greater than 88.72."}
+
+*In float32, $e^z$ overflows to $\infty$ at $z = 88.72$, necessitating the max-shift stabilization.*
+:::
+
 ```python
 import numpy as np
 
@@ -57,13 +63,7 @@ print(e / np.sum(e))         # [nan nan nan]
 
 NumPy prints an overflow warning and carries on, and every probability comes out as `nan`. The reason is the range of a 32-bit float. The largest finite float32 is about $3.4 \times 10^{38}$, which is $e^{88.72}$, so `exp` of anything above 88.72 returns `inf`. The sigmoid in @sec-activations met the same wall and selected the branch whose exponent was nonpositive; this chapter applies the same idea to a whole row of numbers at once. Once one term is `inf`, the sum is `inf`, and `inf / inf` is not a number. The other direction fails just as quietly. Below about $-104$, `exp` returns an exact `0.0`, so logits of `[-1000, -1002, -1001]` give a sum of zero and `0 / 0`, which is also `nan`.
 
-::: {.column-margin}
-![](assets/images/diagrams/04_losses-margin-overflow.svg){width="100%" fig-alt="Plot showing float32 exponent cliff where e^z overflows to infinity for z greater than 88.72."}
-
-*In float32, $e^z$ overflows to $\infty$ at $z = 88.72$, necessitating the max-shift stabilization.*
-:::
-
-Logits of 100 are not exotic. Recall from @sec-activations that Softmax relies on raw elementwise exponentiation, where any input exceeding 88.72 overflows float32 dynamic range to infinity. Furthermore, @sec-layers showed how fast badly scaled weights inflate activations; a few layers of that and the outputs easily enter the hundreds. A nonfinite loss is a reason to stop and inspect the batch before updating weights. Nonfinite intermediate values can propagate into the derivatives and weight updates introduced in @sec-autograd and @sec-optimizers. The scalar alone does not tell us which intermediate first failed, so the useful debugging boundary is the input logits and the operations that turn them into a loss.
+Logits of 100 are not exotic. Recall from @sec-activations that a direct exponential overflows float32 to infinity for any input above 88.72, which is why TinyTorch's Softmax subtracts the row maximum first. Furthermore, @sec-layers showed how fast badly scaled weights inflate activations; a few layers of that and the outputs easily enter the hundreds. A nonfinite loss is a reason to stop and inspect the batch before updating weights. Nonfinite intermediate values can propagate into the derivatives and weight updates introduced in @sec-autograd and @sec-optimizers. The scalar alone does not tell us which intermediate first failed, so the useful debugging boundary is the input logits and the operations that turn them into a loss.
 
 So the need is concrete. We want a loss for classification that avoids preventable overflow when the input logits and their differences are representable. Stable algebra cannot recover a value that was already converted to `inf` before the loss received it.
 
@@ -79,7 +79,7 @@ So the need is concrete. We want a loss for classification that avoids preventab
 
 ### A loss is one number, and lower is better
 
-A loss function compares predictions with targets and returns an error score. The losses here are nonnegative, with smaller values indicating better agreement. MSE can reach zero exactly; classification loss approaches zero as the probability of the correct answer approaches one. For regression, where the target is a number, the natural choice is **mean squared error**:
+Every supervised training pipeline—from continuous noise prediction in diffusion models to coordinate regression in robotics—culminates in an objective function that quantifies task performance. By reducing multidimensional batch predictions into a single scalar value, this objective defines the scalar potential that drives reverse-mode gradient updates. A loss function compares predictions with targets and returns an error score. The losses here are nonnegative, with smaller values indicating better agreement. MSE can reach zero exactly; classification loss approaches zero as the probability of the correct answer approaches one. For regression, where the target is a number, the natural choice is **mean squared error**:
 
 $$\mathcal{L}_{\text{MSE}} = \frac{1}{N} \sum_{i=1}^{N} (\hat{y}_i - y_i)^2$$
 
@@ -89,7 +89,7 @@ Here $N$ is the number of predictions, $\hat{y}_i$ is the model's $i$-th predict
 
 ### Cross-entropy scores the probability of the right answer
 
-For classification the model outputs a vector $\mathbf{z} = [z_1, \dots, z_C]$ of $C$ raw scores, one per class. These are the **logits**, and they can be any real numbers. To read them as probabilities we apply the **softmax** function:
+The ubiquitous objective powering language model pretraining (such as next-token prediction in GPT and LLaMA) and multi-class image classification is **cross-entropy loss**. Grounded in maximum likelihood estimation, it applies an increasingly steep gradient penalty as the probability assigned to the ground-truth target approaches zero. For classification the model outputs a vector $\mathbf{z} = [z_1, \dots, z_C]$ of $C$ raw scores, one per class. These are the **logits**, and they can be any real numbers. To read them as probabilities we apply the **softmax** function:
 
 $$p_i = \frac{e^{z_i}}{\sum_{j=1}^{C} e^{z_j}}$$
 
@@ -110,7 +110,7 @@ The three loss functions in TinyTorch partition the core supervised learning wor
 | Loss Class | Target Type | Input Domain | Stability Mechanism | Primary Task |
 | :--- | :--- | :--- | :--- | :--- |
 | `MSELoss` | Continuous $\mathbb{R}$ | Unbounded predictions | Elementwise mean | Regression |
-| `BinaryCrossEntropyLoss` | Probabilities $[0, 1]$ | Probabilities in $(0, 1)$ | Epsilon clipping $[\epsilon, 1-\epsilon]$ | Binary classification |
+| `BinaryCrossEntropyLoss` | Probabilities $[0, 1]$ | Probabilities in $[0, 1]$ | Epsilon clipping $[\epsilon, 1-\epsilon]$ | Binary classification |
 | `CrossEntropyLoss` | Class indices $\{0, \dots, C-1\}$ | Unbounded logits $\mathbb{R}^C$ | Max-shifted log-softmax & gather | Multi-class classification |
 
 : **Loss function taxonomy**: Architectural contracts, input domains, and numerical stabilization strategies across TinyTorch losses. {#tbl-loss-taxonomy tbl-colwidths="[33,16,17,20,14]"}
@@ -121,7 +121,7 @@ Before deriving the max-shift stabilization, consider what happens when evaluati
 
 ### The fix: shift before you exponentiate
 
-Softmax has a property that saves it. Multiply the numerator and denominator by the same constant $e^{-c}$ and nothing changes:
+Production deep learning runtimes (such as PyTorch's native ATen kernels and Triton fused-softmax operators) protect classification objectives against floating-point overflow using the **max-subtraction trick**. Because single-precision IEEE 754 float32 overflows to $+\infty$ for any exponent exceeding $88.72$, evaluating raw logits in deep networks would routinely crash training with $\text{NaN}$ values. Softmax has a property that saves it. Multiply the numerator and denominator by the same constant $e^{-c}$ and nothing changes:
 
 $$p_i = \frac{e^{z_i}}{\sum_j e^{z_j}} = \frac{e^{-c} \, e^{z_i}}{e^{-c} \sum_j e^{z_j}} = \frac{e^{z_i - c}}{\sum_j e^{z_j - c}}$$
 
@@ -129,7 +129,7 @@ So we may subtract any constant $c$ from every logit before exponentiating, and 
 
 ### Take the logarithm before you divide
 
-The loss never needs the probabilities themselves; it needs $\log p_t$. Taking the logarithm of the shifted softmax turns the division into a subtraction:
+High-performance deep learning systems never compute cross-entropy by chaining separate Softmax, division, and logarithm operations; instead, they execute a single fused **Log-Softmax** routine. This algebraic fusion eliminates intermediate DRAM round-trips while preventing small probabilities from underflowing to zero, which would cause downstream logarithms to evaluate to $-\infty$. The loss never needs the probabilities themselves; it needs $\log p_t$. Taking the logarithm of the shifted softmax turns the division into a subtraction:
 
 $$\log p_i = (z_i - c) - \log \sum_{j=1}^{C} e^{z_j - c}$$
 
@@ -137,7 +137,7 @@ The vector of all $C$ values of $\log p_i$ is the **log-softmax** of $\mathbf{z}
 
 ::: {#chk-loss-logsumexp-stability .callout-checkpoint title="Checkpoint: LogSumExp numerical stability invariants"}
 
-**The invariant**: In computing $\log \sum_j e^{z_j}$, shifting by $c = \max_j(z_j)$ ensures that every exponent $z_j - c \le 0$, bounding all terms $e^{z_j - c} \in (0, 1]$. Because the maximum element produces $e^0 = 1$, the sum is guaranteed to satisfy $\sum_j e^{z_j - c} \ge 1$, completely precluding both overflow ($\infty$) and underflow to zero ($0$).
+**The invariant**: In computing $\log \sum_j e^{z_j}$, shifting by $c = \max_j(z_j)$ ensures that every exponent $z_j - c \le 0$, bounding all terms $e^{z_j - c} \in [0, 1]$. Because the maximum element produces $e^0 = 1$, the sum is guaranteed to satisfy $\sum_j e^{z_j - c} \ge 1$, completely precluding both overflow ($\infty$) and underflow to zero ($0$).
 
 **Precision rule**: Always evaluate $(z_t - c) - \log \sum_j e^{z_j - c}$ instead of $z_t - (c + \log \sum_j e^{z_j - c})$. In float32, combining large $c$ with small log-sums obliterates low-order mantissa bits.
 
@@ -145,17 +145,18 @@ The vector of all $C$ values of $\log p_i$ is the **log-softmax** of $\mathbf{z}
 
 ---
 
+
 ## The Code
+
+Module 04 follows the pattern @sec-activations set. Each loss is a pair of classes: an operation, a `Function` subclass whose `forward` takes NumPy arrays and returns a numerical result, and a thin wrapper that takes tensors and hands them to the operation through `apply`. The wrapper is what the caller uses. For `MSELoss()(predictions, targets)`, Python enters `MSELoss.__call__`, which calls `forward`, which delegates to `MSEFunction.apply`. That shared method passes the tensors' arrays to `MSEFunction.forward` and wraps its numerical result in a `Tensor`. @sec-autograd will add the record of how the result was computed and the derivative rules that use it.
+
+### A loss is one scalar in a `Tensor`
 
 ::: {.column-margin}
 ![](assets/images/diagrams/04_losses-margin-source.svg){width="100%" fig-alt="Source code mapping card for Module 04 Losses showing file path, exported package, and tested primitives."}
 
 *Source Code Mapping: Module 04 extracts MSELoss, numerically stabilized CrossEntropyLoss, and BinaryCrossEntropyLoss directly from the working repository.*
 :::
-
-Module 04 follows the pattern @sec-activations set. Each loss is a pair of classes: an operation, a `Function` subclass whose `forward` takes NumPy arrays and returns a numerical result, and a thin wrapper that takes tensors and hands them to the operation through `apply`. The wrapper is what the caller uses. For `MSELoss()(predictions, targets)`, Python enters `MSELoss.__call__`, which calls `forward`, which delegates to `MSEFunction.apply`. That shared method passes the tensors' arrays to `MSEFunction.forward` and wraps its numerical result in a `Tensor`. @sec-autograd will add the record of how the result was computed and the derivative rules that use it.
-
-### A loss is one scalar in a `Tensor`
 
 The loss is the boundary between scoring predictions and deciding how to improve them. This module enforces a strict architectural contract: the loss must collapse multi-dimensional predictions into a single 0-dimensional scalar `Tensor` of shape `()`.
 
@@ -166,7 +167,7 @@ In @sec-autograd, we formalize this through the **scalar loss contract**: becaus
 The cheaper thing to return would be a bare Python float, and for this chapter a float would work. It stops working in @sec-autograd, where `backward()` walks from the loss back through every operation that produced it, and a float has no place to record where it came from. So every loss returns a `Tensor` holding a single value, and `apply` guarantees it: whatever the operation's `forward` returns, even a NumPy scalar, comes back wrapped. `MSELoss` is the smallest pair that satisfies the contract.
 
 ::: {.column-margin}
-![](assets/images/diagrams/04_losses-margin-jacobian.svg){width="100%" fig-alt="Comparison of vector loss allocating a 51.2 GB Jacobian matrix versus scalar loss using a 400 MB vector-Jacobian product buffer."}
+![](assets/images/diagrams/04_losses-margin-jacobian.svg){width="100%" fig-alt="Comparison of vector loss allocating a 51.2 GB Jacobian matrix vs. scalar loss using a 400 MB vector-Jacobian product buffer."}
 
 *Scalar Loss Reduction Invariant: Collapsing multi-sample predictions to a scalar prevents materializing a 51.2 GB Jacobian during reverse-mode autograd.*
 :::
@@ -179,17 +180,17 @@ The output has shape `()`, NumPy's shape for a scalar. The loss object has no le
 
 ### `LogSoftmax`, the max shift in code
 
-::: {.column-margin}
-![](assets/images/diagrams/04_losses-margin-precision.svg){width="100%" fig-alt="Comparison of left-to-right subtraction preserving mantissa bits versus parenthesized sum causing catastrophic cancellation in float32."}
-
-*Subtraction Ordering: Evaluating `x - max_vals - log_sum_exp` left-to-right preserves 24-bit mantissa precision; grouping terms causes catastrophic cancellation.*
-:::
-
 For a batch with shape `(2, 3)`, each row holds three class scores. The loss must normalize each row separately: the first example's scores must not affect the second example's probabilities. Later classifiers will increase the number of rows and classes, but this row-wise computation stays the same.
 
 The naive way first computes `e = np.exp(z)`, then `np.log(e / np.sum(e))`. The Problem showed the loud failure, `nan` for any logit past 88.7. There is a quiet one too. Even when nothing overflows, a probability that underflows to `0.0` goes into `log` and comes out `-inf`. In float32, `log(softmax([-110, 0]))` prints `[-inf, 0.]`, where the stable log-probabilities round to `[-110, 0]`; the naive form has thrown away a perfectly finite number. The composition also creates separate intermediate arrays for exponentiation, division, and logarithms.
 
 The fix is The Idea's two moves, in that order. Subtract each row's maximum, so every exponential is at most 1 and every sum is at least 1. Then take the log of the sum and subtract it from the shifted logits, so no probability is ever formed and nothing is ever divided. The operation normalizes along the selected axis `dim` and returns log-probabilities of the same shape. For `(N, C)` classification scores, `dim=-1` selects the class axis; a one-line function wraps it for callers holding a `Tensor`.
+
+::: {.column-margin}
+![](assets/images/diagrams/04_losses-margin-precision.svg){width="100%" fig-alt="Comparison of left-to-right subtraction preserving mantissa bits vs. parenthesized sum causing catastrophic cancellation in float32."}
+
+*Subtraction Ordering: Evaluating `x - max_vals - log_sum_exp` left-to-right preserves 24-bit mantissa precision; grouping terms causes catastrophic cancellation.*
+:::
 
 {{< include _listings/04_losses/LogSoftmax.qmd >}}
 
@@ -205,7 +206,7 @@ The textbook formula does not say "pick." It says $-\sum_i y_i \log p_i$, where 
 
 NumPy can. Indexing an array with two integer arrays of the same length pairs them up elementwise, so `log_probs[np.arange(N), target_idx]` pairs row `i` with column `target_idx[i]` and selects `N` entries into a new vector of shape `(N,)`. For `N=2` and targets `[0, 1]`, the pairs are `(row 0, column 0)` and `(row 1, column 1)`. Computing the log-probabilities still visits all `N*C` logits; the saving is in avoiding hundreds of megabytes of intermediate one-hot memory traffic and eliminating redundant arithmetic.
 
-![**Sparse index gathering versus one-hot expansion**: Expanding target labels into dense one-hot vectors allocates $O(B \times C)$ memory and performs $B \times C$ redundant multiplications by zero. Direct integer index gathering ($O(B)$ memory) fetches the target logit via row-offset indexing without constructing intermediate matrices.](assets/images/diagrams/04_index-gather-memory.svg){#fig-index-gather-memory width="100%" fig-alt="Left panel shows wasteful dense one-hot matrix multiplication allocating B by C elements. Right panel shows direct sparse index gathering indexing row pointers directly."}
+![**Sparse index gathering vs. one-hot expansion**: Expanding target labels into dense one-hot vectors allocates $O(B \times C)$ memory and performs $B \times C$ redundant multiplications by zero. Direct integer index gathering ($O(B)$ memory) fetches the target logit via row-offset indexing without constructing intermediate matrices.](assets/images/diagrams/04_index-gather-memory.svg){#fig-index-gather-memory width="100%" fig-alt="Left panel shows wasteful dense one-hot matrix multiplication allocating B by C elements. Right panel shows direct sparse index gathering indexing row pointers directly."}
 
 {{< include _listings/04_losses/CrossEntropyFunction.qmd >}}
 
@@ -215,7 +216,7 @@ Targets represent integer class IDs, but their storage is float32: `Tensor([0, 1
 
 [^fn-one-hot-targets]: **One-hot**: a vector with a 1 in the position of the correct class and 0 everywhere else, so a label of class 2 among 5 classes becomes `[0, 0, 1, 0, 0]`. For a batch of $N$ examples it takes $N \times C$ numbers to store what $N$ integers already say, which is why the code indexes with the integers instead.
 
-[^fn-gather-bandwidth]: In hardware terms, direct integer index gathering translates to indirect memory addressing (`log_probs[i * C + target[i]]`). Instead of streaming $B \times C$ floats across the memory bus to multiply by sparse zeros, the memory controller transfers only $B$ floats, slashing DRAM traffic by a factor of $C$ (over $32{,}000\times$ in large vocabulary models).
+[^fn-gather-bandwidth]: In hardware terms, direct integer index gathering translates to indirect memory addressing (`log_probs[i * C + target[i]]`). Instead of streaming $B \times C$ floats across the memory bus to multiply by sparse zeros, the gather reads only $B$ selected values instead of multiplying through $B \times C$ one-hot entries (the log-softmax itself still reads every logit, as the next paragraph notes).
 
 ### `BinaryCrossEntropyLoss`, finite logs through clipping
 
@@ -294,11 +295,6 @@ The same seven steps on the logits that broke the naive formula show the shift d
 
 One last detail hides in the final row. The loss can be written as $\text{LSE}(\mathbf{z}) - z_t = 1002.4076 - 1002$, or as $-((z_t - c) - \log\text{sum}) = -(0 - 0.4076)$. On paper these are equal. In float32 they are not, because a float32 carries about seven significant digits, and $1002.4076$ has already spent four of them on the integer part. Adding $1002$ to $0.4076$ and then subtracting $1002$ throws away the digits that matter.
 
-::: {.content-visible when-format="pdf"}
-```{=latex}
-\newpage
-```
-:::
 
 ```python
 import numpy as np
@@ -306,7 +302,7 @@ import numpy as np
 for base in (1e3, 1e6):
     z = np.array([base, base + 2.0, base + 1.0], dtype=np.float32)
     c = np.max(z)
-    log_sum = np.log(np.sum(np.exp(z - c)))     # 0.40760596 in every case
+    log_sum = np.log(np.sum(np.exp(z - c)))     # 0.40760604 in every case
     lse_first = (c + log_sum) - z[1]            # big numbers first
     shift_first = log_sum - (z[1] - c)          # small numbers first
     print(f"logits near {base:.0e}: {lse_first:.6f} vs {shift_first:.6f}")
@@ -332,7 +328,7 @@ A production **fused kernel** combines several array operations into one device 
 
 ::: {#psp-fused-cross-entropy .callout-perspective title="Systems Perspective: Fused cross-entropy in large vocabulary models"}
 
-**The vocabulary VRAM bottleneck**: In modern LLMs (such as TinyGPT or LLaMA), vocabulary size $V$ ranges from $32{,}000$ to $128{,}000$. For batch size $B=16$ and sequence length $S=2048$, allocating an un-fused FP32 logits tensor of shape $(B, S, V)$ requires $16 \times 2048 \times 32{,}000 \times 4\text{ bytes} \approx 4.19\text{ GB}$. Materializing separate intermediate tensors for shifted logits, exponentials, and log-softmax can consume over $16\text{ GB}$ of VRAM just to compute the loss!
+**The vocabulary VRAM bottleneck**: In modern LLMs such as LLaMA, vocabulary size $V$ ranges from $32{,}000$ to $128{,}000$ (TinyGPT's character vocabulary is far smaller). For batch size $B=16$ and sequence length $S=2048$, allocating an unfused FP32 logits tensor of shape $(B, S, V)$ requires $16 \times 2048 \times 32{,}000 \times 4\text{ bytes} \approx 4.19\text{ GB}$. Materializing separate intermediate tensors for shifted logits, exponentials, and log-softmax can consume over $16\text{ GB}$ of VRAM just to compute the loss!
 
 **Online LogSumExp fusion**: Production engines (such as Flash-Cross-Entropy or Triton kernels) stream through the vocabulary directly from the final linear layer projection, computing the running maximum and LogSumExp in fast GPU registers (SRAM) without ever materializing the massive $(B, S, V)$ logit tensor in DRAM.
 

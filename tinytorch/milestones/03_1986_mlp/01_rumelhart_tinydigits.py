@@ -95,6 +95,12 @@ from rich import box
 
 console = Console()
 
+# Success criterion (docstring: 75-85% test accuracy). Measured 2026-09-28 over
+# eight full runs of this script: 82.0-82.5% test accuracy (five at 82.5%,
+# three at 82.0%). The lower end of the stated range, 75%, fails a network that
+# has not learned while leaving margin for a correct implementation.
+MIN_TEST_ACCURACY = 75.0
+
 # =============================================================================
 # 🎯 YOUR TINYTORCH MODULES IN ACTION
 # =============================================================================
@@ -265,6 +271,62 @@ def evaluate_accuracy(model, images, labels):
     accuracy = 100.0 * correct / total
 
     return accuracy, predictions
+
+# ============================================================================
+# 🔎 LOSS FORWARD CHECK (is YOUR Module 04 loss value right?)
+# ============================================================================
+#
+# 2026-09-29: with CrossEntropy's forward returning 0, this milestone still
+# passed. Training only needs the gradient, and the gradient comes from the
+# backward pass, so the network learned while every printed loss was wrong.
+# One batch, checked against an independent NumPy computation before training
+# starts, catches that without touching the training run.
+
+def reference_cross_entropy(logits, targets):
+    """Mean cross-entropy computed directly in NumPy (Module 04's definition).
+
+    Uses the stable log-softmax: subtract each row's max before exponentiating.
+    """
+    z = np.asarray(logits, dtype=np.float64)
+    z = z.reshape(-1, z.shape[-1])
+    t = np.asarray(targets).reshape(-1).astype(int)
+    z = z - z.max(axis=1, keepdims=True)
+    log_probs = z - np.log(np.exp(z).sum(axis=1, keepdims=True))
+    return float(-np.mean(log_probs[np.arange(len(t)), t]))
+
+
+def loss_forward_failure(loss_fn, outputs, targets, reference_fn, rtol=1e-3, atol=1e-4):
+    """Compare YOUR loss value on one batch to the NumPy reference.
+
+    Returns None when they agree, otherwise a message naming both numbers.
+    """
+    name = type(loss_fn).__name__
+    expected = reference_fn(outputs.data, targets.data)
+    value = np.asarray(getattr(loss_fn(outputs, targets), "data", None), dtype=np.float64)
+    if value.size != 1:
+        return (f"your {name} forward returns an array of shape {value.shape} for this batch, "
+                f"but a loss is one number (the mean over the batch, here {expected:.4f}): "
+                "check Module 04")
+    got = float(value.reshape(()))
+    if np.isfinite(got) and np.isclose(got, expected, rtol=rtol, atol=atol):
+        return None
+    return (f"your {name} forward returns {got:.4f} for this batch, "
+            f"but the loss of these outputs is {expected:.4f}: check Module 04")
+
+
+def report_loss_forward_failure(message):
+    """Print the teaching panel for a wrong loss value."""
+    console.print(Panel.fit(
+        "[bold red]❌ YOUR loss value is wrong[/bold red]\n\n"
+        f"{message}.\n\n"
+        "Training could still work, because the gradient comes from the backward\n"
+        "pass, but every loss this milestone prints would be wrong. Cross-entropy\n"
+        "is -mean(log_softmax(logits)[i, target_i]), with the row max subtracted\n"
+        "before exp so large logits cannot overflow.",
+        title="Needs Work",
+        border_style="red",
+    ))
+
 
 def press_enter_to_continue():
     if os.environ.get("TINYTORCH_NON_INTERACTIVE") == "1" or os.environ.get("CI") == "true":
@@ -460,9 +522,20 @@ def train_mlp():
 
     initial_acc, _ = evaluate_accuracy(model, test_images, test_labels)
 
+    # One training-sized batch, sliced directly so the DataLoader's shuffle
+    # order is untouched.
+    check_images = Tensor(train_images.data[:32])
+    check_labels = Tensor(train_labels.data[:32])
+    loss_failure = loss_forward_failure(loss_fn, model(check_images), check_labels,
+                                        reference_cross_entropy)
+    if loss_failure:
+        report_loss_forward_failure(loss_failure)
+        return 1
+
     console.print("[bold]📌 Before Training:[/bold]")
     console.print(f"  Initial accuracy: {initial_acc:.1f}% (random ~10%)")
     console.print("  Model has random weights - knows nothing about digits yet!")
+    console.print("  [green]✓[/green] YOUR CrossEntropyLoss matches a NumPy check on one batch")
 
     press_enter_to_continue()
 
@@ -600,6 +673,22 @@ def train_mlp():
     # ACT 5: THE REFLECTION 🌟
     # ═══════════════════════════════════════════════════════════════════════
 
+    # 2026-09-28: this milestone once printed "Success!" and exited 0 at any accuracy.
+    if final_test_acc < MIN_TEST_ACCURACY:
+        console.print(Panel.fit(
+            f"[bold red]❌ MILESTONE 03 FAILED: test accuracy {final_test_acc:.1f}% "
+            f"is below the {MIN_TEST_ACCURACY:.0f}% target[/bold red]\n\n"
+            "A working MLP reaches about 82% here. Check YOUR Linear, ReLU,\n"
+            "CrossEntropyLoss, autograd, and SGD implementations.",
+            title="Needs Work",
+            border_style="red",
+        ))
+        return 1
+
+    generalization = (f"  ✓ Model generalizes well (gap: {overfitting_gap:.1f}%)\n"
+                      if overfitting_gap < 10 else
+                      f"  ⚠ Train/test gap is {overfitting_gap:.1f}%, a sign of overfitting\n")
+
     console.print("")
     console.print(Panel.fit(
         "[bold green]🎉 Success! Your MLP Learned to Recognize Digits![/bold green]\n\n"
@@ -612,7 +701,7 @@ def train_mlp():
         "  ✓ Built multi-layer network with YOUR components\n"
         "  ✓ Trained on TinyDigits (synthetic handwritten digits)\n"
         "  ✓ Used YOUR DataLoader for efficient batching\n"
-        f"  ✓ Model generalizes well (gap: {overfitting_gap:.1f}%)\n"
+        + generalization +
         "  ✓ Backprop through hidden layers works on image data!\n"
         f"  ✓ Achieved {final_test_acc:.1f}% test accuracy!\n\n"
 
@@ -653,6 +742,8 @@ def train_mlp():
         except EOFError:
             pass
 
+    return 0
+
 
 if __name__ == "__main__":
-    train_mlp()
+    sys.exit(train_mlp())

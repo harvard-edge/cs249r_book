@@ -69,20 +69,23 @@ from tinytorch.core.spatial import Conv2d, MaxPool2d, AvgPool2d, BatchNorm2d
 r"""
 ## 📋 Module Dependencies
 
-**Prerequisites**: Modules 01-08 must be complete
+**Prerequisites**: Modules 01 (Tensor), 02 (Activations), 03 (Layers), and 06 (Autograd) must be complete
 
 **External Dependencies**:
 - `numpy` (for array operations and numerical computing)
 - `time` (for performance measurements)
 
 **TinyTorch Dependencies**:
-- `tinytorch.core.tensor` (`Tensor` class from Module 01)
+- `tinytorch.core.tensor` (`Tensor` and the `Function` base class from Module 01)
 - `tinytorch.core.activations` (`ReLU` from Module 02)
 - `tinytorch.core.layers` (`Linear` from Module 03)
 - `tinytorch.core.autograd` (gradient tracking and reverse-mode AD from Module 06)
 
-This module builds directly upon your training pipeline.
+This module builds directly on your tensor, layer, and autograd modules.
 Spatial operations integrate with your existing layers and backpropagation engine.
+
+**Dependency Flow**:
+$$\underbrace{\text{Module 01: Tensor}}_{\text{Data and Function nodes}} \longrightarrow \underbrace{\text{Modules 02, 03: Activations, Layers}}_{\text{ReLU and Linear}} \longrightarrow \underbrace{\text{Module 06: Autograd}}_{\text{Backward halves}} \longrightarrow \underbrace{\text{Module 09: Convolutions}}_{\text{Conv2d, pooling, BatchNorm2d}}$$
 """
 
 # %% nbgrader={"grade": false, "grade_id": "spatial-setup", "solution": false}
@@ -430,7 +433,7 @@ class Conv2dFunction(Function):
         """
         x, weight = self.inputs[0], self.inputs[1]
         bias = self.inputs[2] if len(self.inputs) > 2 else None
-        stride, padding, kernel_size = self.layer.stride, self.layer.padding, self.layer.kernel_size
+        (stride_h, stride_w), padding, kernel_size = self.layer.stride, self.layer.padding, self.layer.kernel_size
 
         batch_size, out_channels, out_height, out_width = grad_output.shape
         _, in_channels, in_height, in_width = x.shape
@@ -455,8 +458,8 @@ class Conv2dFunction(Function):
                 for out_h in range(out_height):
                     for out_w in range(out_width):
                         # Position in input
-                        in_h_start = out_h * stride
-                        in_w_start = out_w * stride
+                        in_h_start = out_h * stride_h
+                        in_w_start = out_w * stride_w
 
                         # Gradient value flowing back to this position
                         grad_val = grad_output[b, out_ch, out_h, out_w]
@@ -508,13 +511,13 @@ class Conv2d:
         in_channels: Number of input channels
         out_channels: Number of output feature maps
         kernel_size: Size of convolution kernel (int or tuple)
-        stride: Stride of convolution (default: 1)
+        stride: Integer or (height, width) strides (default: 1)
         padding: Zero-padding added to input (default: 0)
         bias: Whether to add learnable bias (default: True)
     """
 
     def __init__(self, in_channels: int, out_channels: int, kernel_size: int | tuple[int, int],
-                 stride: int = 1, padding: int = 0, bias: bool = True) -> None:
+                 stride: int | tuple[int, int] = 1, padding: int = 0, bias: bool = True) -> None:
         """
         Initialize Conv2d layer with proper weight initialization.
 
@@ -530,7 +533,7 @@ class Conv2d:
         - He init: std = sqrt(2 / (in_channels * kernel_h * kernel_w))
         - This prevents vanishing/exploding gradients with ReLU
 
-        HINT: Convert kernel_size to tuple if it's an integer
+        HINT: Convert kernel_size and stride to (height, width) tuples if they are integers
         """
         ### BEGIN SOLUTION role="scaffold"
         self.in_channels = in_channels
@@ -542,7 +545,11 @@ class Conv2d:
         else:
             self.kernel_size = kernel_size
 
-        self.stride = stride
+        # Stride as (height, width), like kernel_size and MaxPool2d's stride
+        if isinstance(stride, int):
+            self.stride = (stride, stride)
+        else:
+            self.stride = tuple(stride)
         self.padding = padding
 
         # He initialization for ReLU networks
@@ -587,8 +594,9 @@ class Conv2d:
         """
         ### BEGIN SOLUTION role="scaffold"
         kernel_h, kernel_w = self.kernel_size
-        out_height = (in_h + 2 * self.padding - kernel_h) // self.stride + 1
-        out_width = (in_w + 2 * self.padding - kernel_w) // self.stride + 1
+        stride_h, stride_w = self.stride
+        out_height = (in_h + 2 * self.padding - kernel_h) // stride_h + 1
+        out_width = (in_w + 2 * self.padding - kernel_w) // stride_w + 1
         return out_height, out_width
         ### END SOLUTION
 
@@ -649,12 +657,13 @@ class Conv2d:
                         output[b, out_ch, oh, ow] = conv_sum
 
         HINT: The input position for kernel element (k_h, k_w) at output
-        position (oh, ow) with stride s is: (oh * s + k_h, ow * s + k_w).
+        position (oh, ow) is: (oh * stride_h + k_h, ow * stride_w + k_w).
         """
         ### BEGIN SOLUTION
         out_channels = self.out_channels
         in_channels = self.in_channels
         kernel_h, kernel_w = self.kernel_size
+        stride_h, stride_w = self.stride
 
         output = np.zeros((batch_size, out_channels, out_h, out_w))
 
@@ -662,8 +671,8 @@ class Conv2d:
             for out_ch in range(out_channels):
                 for oh in range(out_h):
                     for ow in range(out_w):
-                        in_h_start = oh * self.stride
-                        in_w_start = ow * self.stride
+                        in_h_start = oh * stride_h
+                        in_w_start = ow * stride_w
 
                         conv_sum = 0.0
                         for k_h in range(kernel_h):
@@ -974,6 +983,41 @@ def test_unit_conv2d() -> None:
     assert len(params5) == 1, f"Expected 1 parameter tensor (no bias), got {len(params5)}"
     assert conv5.bias is None, "Bias should be None when bias=False"
 
+    # Test 6: VALUES against an independent NumPy reference.
+    # Conv2d computes cross-correlation (the kernel is NOT flipped):
+    #   out[b, oc, i, j] = bias[oc] + sum_{ic, m, n} x_pad[b, ic, i*s + m, j*s + n] * W[oc, ic, m, n]
+    print("  Testing output values against a reference...")
+
+    def _reference_conv2d(x_np, w_np, b_np, stride, padding):
+        x_pad = np.pad(x_np, ((0, 0), (0, 0), (padding, padding), (padding, padding)))
+        n, _, h, w = x_pad.shape
+        oc_n, _, kh, kw = w_np.shape
+        out_h, out_w = (h - kh) // stride + 1, (w - kw) // stride + 1
+        out = np.zeros((n, oc_n, out_h, out_w))
+        for b in range(n):
+            for oc in range(oc_n):
+                for i in range(out_h):
+                    for j in range(out_w):
+                        patch = x_pad[b, :, i * stride:i * stride + kh, j * stride:j * stride + kw]
+                        out[b, oc, i, j] = np.sum(patch * w_np[oc])
+                out[b, oc] += 0.0 if b_np is None else b_np[oc]
+        return out
+
+    # Stride-2 layer from Test 3 (no padding)
+    expected3 = _reference_conv2d(x3.data, conv3.weight.data, conv3.bias.data, stride=2, padding=0)
+    assert np.allclose(out3.data, expected3, atol=1e-5), \
+        "Strided Conv2d output should equal the sliding-window sum of x_patch * W (cross-correlation, kernel not flipped)"
+
+    # Multi-channel, padded, strided, rectangular input, with a nonzero bias
+    conv6 = Conv2d(in_channels=2, out_channels=3, kernel_size=3, stride=2, padding=1)
+    conv6.bias.data[...] = rng.standard_normal(3)
+    x6 = Tensor(rng.standard_normal((2, 2, 7, 6)))
+    out6 = conv6(x6)
+    expected6 = _reference_conv2d(x6.data, conv6.weight.data, conv6.bias.data, stride=2, padding=1)
+    assert out6.shape == expected6.shape, f"Expected {expected6.shape}, got {out6.shape}"
+    assert np.allclose(out6.data, expected6, atol=1e-5), \
+        "Conv2d output should equal bias[oc] + sum over in-channels and kernel window of x_pad * W (no kernel flip)"
+
     print("✅ Conv2d works correctly!")
 
 if __name__ == "__main__":
@@ -1147,9 +1191,11 @@ class MaxPool2d:
         APPROACH:
         1. Convert kernel_size to tuple if needed
         2. Set stride to kernel_size if not provided (non-overlapping)
-        3. Store padding parameter
+        3. Reject padding larger than half the kernel, then store it
 
-        HINT: Default stride equals kernel_size for non-overlapping windows
+        HINT: Default stride equals kernel_size for non-overlapping windows.
+        Max pooling pads with -infinity, so a window that lies entirely in the
+        padding would output -inf. PyTorch raises ValueError in that case; so do we.
         """
         ### BEGIN SOLUTION role="scaffold"
         # Handle kernel_size as int or tuple
@@ -1166,6 +1212,12 @@ class MaxPool2d:
         else:
             self.stride = tuple(stride)
 
+        # Padding beyond half the kernel lets a window see only padding (-inf)
+        if padding < 0 or padding > min(self.kernel_size) // 2:
+            raise ValueError(
+                f"MaxPool2d padding must be between 0 and half the kernel size "
+                f"({min(self.kernel_size) // 2}), got {padding}"
+            )
         self.padding = padding
         ### END SOLUTION
 

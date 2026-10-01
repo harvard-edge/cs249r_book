@@ -5,14 +5,17 @@
 #
 # USAGE
 # -----
-#   # Standard installation (stable release from main):
+#   # Standard installation (the latest release, tag tinytorch-v<version>):
 #   curl -sSL mlsysbook.ai/tinytorch/install.sh | bash
 #
 #   # Install latest development version from dev branch:
 #   curl -sSL mlsysbook.ai/tinytorch/install.sh | bash -s -- --dev
 #
-#   # Install from a specific branch:
+#   # Install from a specific branch (e.g. main, the untagged tip):
 #   curl -sSL mlsysbook.ai/tinytorch/install.sh | bash -s -- --branch <branch>
+#
+#   # Install an exact tag or commit (full 40-character SHA):
+#   curl -sSL mlsysbook.ai/tinytorch/install.sh | bash -s -- --ref <tag-or-sha>
 #
 # WHAT THIS SCRIPT DOES
 # ---------------------
@@ -73,21 +76,32 @@ set -e  # Exit on any error
 #   CLI flags (pass via bash -s -- when curling):
 #     curl -sSL mlsysbook.ai/tinytorch/install.sh | bash -s -- --dev
 #     curl -sSL mlsysbook.ai/tinytorch/install.sh | bash -s -- --branch <branch>
+#     curl -sSL mlsysbook.ai/tinytorch/install.sh | bash -s -- --ref <tag-or-sha>
 #     curl -sSL mlsysbook.ai/tinytorch/install.sh | bash -s -- --dir <path>
 #     curl -sSL mlsysbook.ai/tinytorch/install.sh | bash -s -- --non-interactive
 #   Environment variables:
 #     curl -sSL mlsysbook.ai/tinytorch/install.sh | TINYTORCH_BRANCH=dev bash
 #     TINYTORCH_DEV=1 ./install.sh
-#     TINYTORCH_VERSION=0.1.5 TINYTORCH_BRANCH=feature/foo ./install.sh
+#     TINYTORCH_VERSION=0.1.5 ./install.sh      # install release tag tinytorch-v0.1.5
+#     TINYTORCH_REF=<tag-or-sha> ./install.sh   # exact tag or full commit SHA
 #     TINYTORCH_NON_INTERACTIVE=1 ./install.sh  # Skip all prompts (for CI)
 REPO_SHORT="${TINYTORCH_REPO:-harvard-edge/cs249r_book}"
 REPO_URL="${TINYTORCH_REPO_URL:-https://github.com/${REPO_SHORT}.git}"
 TAGS_API="https://api.github.com/repos/${REPO_SHORT}/tags"
 TAG_PREFIX="tinytorch-v"
-BRANCH="${TINYTORCH_BRANCH:-main}"
+# What to install. Default: the release tag tinytorch-v$TINYTORCH_VERSION, so a
+# student gets exactly what was tested and tagged, not whatever main's tip is.
+# Overrides (highest first): --branch/--dev/TINYTORCH_BRANCH/TINYTORCH_DEV,
+# then --ref/TINYTORCH_REF. A full 40-hex SHA is fetched as a commit.
+BRANCH="${TINYTORCH_BRANCH:-}"
 if [ -n "${TINYTORCH_DEV:-}" ] && [ "$TINYTORCH_DEV" != "0" ]; then
     BRANCH="dev"
 fi
+REF_OVERRIDE="${TINYTORCH_REF:-}"
+# Resolved by resolve_install_ref (after flags are parsed):
+INSTALL_REF=""      # what git fetches
+REF_KIND=""         # release | branch | ref | commit
+REF_LABEL=""        # shown to the user; empty for the default release
 INSTALL_DIR="${TINYTORCH_INSTALL_DIR:-tinytorch}"
 SPARSE_PATH="tinytorch"
 # Non-interactive mode: skip prompts, use defaults (for CI/testing)
@@ -161,8 +175,8 @@ spin() {
 
 print_banner() {
     echo ""
-    if [ "$BRANCH" != "main" ]; then
-        echo -e "  ${BOLD}Tiny${NC}${YELLOW}🔥Torch${NC} ${DIM}v${TINYTORCH_VERSION}${NC} ${YELLOW}[branch: ${BRANCH}]${NC}"
+    if [ -n "$REF_LABEL" ]; then
+        echo -e "  ${BOLD}Tiny${NC}${YELLOW}🔥Torch${NC} ${DIM}v${TINYTORCH_VERSION}${NC} ${YELLOW}[${REF_LABEL}]${NC}"
     else
         echo -e "  ${BOLD}Tiny${NC}${YELLOW}🔥Torch${NC} ${DIM}v${TINYTORCH_VERSION}${NC}"
     fi
@@ -202,6 +216,50 @@ run_with_timeout() {
     fi
 }
 
+# Decide what to install. Sets INSTALL_REF, REF_KIND, REF_LABEL.
+resolve_install_ref() {
+    local ref kind
+    if [ -n "$BRANCH" ]; then
+        ref="$BRANCH"; kind="branch"
+    elif [ -n "$REF_OVERRIDE" ]; then
+        ref="$REF_OVERRIDE"; kind="ref"
+    else
+        ref="${TAG_PREFIX}${TINYTORCH_VERSION}"; kind="release"
+    fi
+    # A full commit SHA cannot be cloned with --branch; fetch it directly.
+    if echo "$ref" | grep -Eq '^[0-9a-f]{40}$'; then
+        kind="commit"
+    fi
+    INSTALL_REF="$ref"
+    REF_KIND="$kind"
+    case "$kind" in
+        release) REF_LABEL="" ;;
+        branch)  REF_LABEL="branch: $ref" ;;
+        commit)  REF_LABEL="commit: ${ref:0:12}" ;;
+        *)       REF_LABEL="ref: $ref" ;;
+    esac
+}
+
+# Download tinytorch/ at INSTALL_REF into <dest> (shallow, sparse, blobless).
+# Usage: clone_install_ref <dest>   (run under run_with_timeout by the caller)
+clone_install_ref() {
+    local dest="$1"
+    if [ "$REF_KIND" = "commit" ]; then
+        # GitHub serves any reachable commit by SHA (incl. PR merge commits).
+        git init -q "$dest" &&
+            git -C "$dest" remote add origin "$REPO_URL" &&
+            git -C "$dest" config core.sparseCheckout true &&
+            git -C "$dest" config core.sparseCheckoutCone true &&
+            printf '/*\n!/*/\n/%s/\n' "$SPARSE_PATH" > "$dest/.git/info/sparse-checkout" &&
+            git -C "$dest" fetch -q --depth 1 --filter=blob:none origin "$INSTALL_REF" &&
+            git -C "$dest" -c advice.detachedHead=false checkout -q FETCH_HEAD
+    else
+        # --branch accepts both branch and tag names.
+        git clone --depth 1 --filter=blob:none --sparse --branch "$INSTALL_REF" \
+            "$REPO_URL" "$dest"
+    fi
+}
+
 # Fetch latest version from GitHub tags API or branch pyproject.toml
 # Sets TINYTORCH_VERSION global variable
 fetch_latest_version() {
@@ -211,7 +269,7 @@ fetch_latest_version() {
     fi
 
     # If targeting a non-main branch (e.g. dev), fetch version directly from that branch's pyproject.toml
-    if [ "$BRANCH" != "main" ]; then
+    if [ -n "$BRANCH" ] && [ "$BRANCH" != "main" ]; then
         if command_exists curl; then
             local pyproject_url="https://raw.githubusercontent.com/${REPO_SHORT}/${BRANCH}/tinytorch/pyproject.toml"
             local pyproject
@@ -247,7 +305,7 @@ fetch_latest_version() {
 
     # Fallback: fetch pyproject.toml directly from raw.githubusercontent.com
     if command_exists curl; then
-        local pyproject_url="https://raw.githubusercontent.com/${REPO_SHORT}/${BRANCH}/tinytorch/pyproject.toml"
+        local pyproject_url="https://raw.githubusercontent.com/${REPO_SHORT}/${BRANCH:-main}/tinytorch/pyproject.toml"
         local pyproject
         pyproject=$(curl -fsSL --max-time 10 "$pyproject_url" 2>/dev/null) || true
         if [ -n "$pyproject" ]; then
@@ -647,15 +705,19 @@ show_plan_and_confirm() {
     echo -e "  ${BOLD}$PWD/${INSTALL_DIR}${NC}"
     echo ""
     echo "What will be installed:"
-    if [ "$BRANCH" != "main" ]; then
-        echo -e "  - Tiny${YELLOW}🔥Torch${NC} learning modules ${YELLOW}[branch: ${BRANCH}]${NC}"
+    if [ -n "$REF_LABEL" ]; then
+        echo -e "  - Tiny${YELLOW}🔥Torch${NC} learning modules ${YELLOW}[${REF_LABEL}]${NC}"
     else
         echo -e "  - Tiny${YELLOW}🔥Torch${NC} learning modules"
     fi
     echo "  - Python virtual environment (.venv/)"
     echo "  - tito CLI tool"
     echo ""
-    echo -e "${DIM}Source: ${REPO_SHORT} (${BRANCH} branch)${NC}"
+    if [ "$REF_KIND" = "release" ]; then
+        echo -e "${DIM}Source: ${REPO_SHORT} (release ${INSTALL_REF})${NC}"
+    else
+        echo -e "${DIM}Source: ${REPO_SHORT} (${REF_LABEL})${NC}"
+    fi
     echo ""
 }
 
@@ -676,16 +738,39 @@ do_install() {
     # better to fail with a clear message than leave the spinner running
     # forever with no way to tell it apart from a slow-but-working download.
     local clone_err_file="$TEMP_DIR/clone.err"
-    run_with_timeout "$CLONE_TIMEOUT" git clone --depth 1 --filter=blob:none --sparse --branch "$BRANCH" \
-        "$REPO_URL" "$TEMP_DIR/repo" >/dev/null 2>"$clone_err_file" &
+    # clone_install_ref is a shell function; export what the subshell needs so
+    # run_with_timeout (timeout/gtimeout exec a new process) can run it.
+    export -f clone_install_ref
+    export REF_KIND INSTALL_REF REPO_URL SPARSE_PATH
+    run_with_timeout "$CLONE_TIMEOUT" bash -c 'clone_install_ref "$1"' _ "$TEMP_DIR/repo" \
+        >/dev/null 2>"$clone_err_file" &
     local clone_pid=$!
-    if [ "$BRANCH" != "main" ]; then
-        spin $clone_pid "Cloning repository (${BRANCH} branch)..."
+    if [ -n "$REF_LABEL" ]; then
+        spin $clone_pid "Cloning repository (${REF_LABEL})..."
     else
-        spin $clone_pid "Cloning repository..."
+        spin $clone_pid "Cloning repository (${INSTALL_REF})..."
     fi
-    wait $clone_pid
-    local clone_status=$?
+    # `|| clone_status=$?` keeps a failed clone from tripping `set -e` here, so
+    # the fallback and the error messages below are actually reachable.
+    local clone_status=0
+    wait $clone_pid || clone_status=$?
+
+    # The default release tag can be briefly absent (the site is deployed a
+    # few minutes before the tag is pushed) or missing after a partial publish.
+    # Fall back to main rather than failing a student's install.
+    if [ $clone_status -ne 0 ] && [ $clone_status -ne 124 ] && [ "$REF_KIND" = "release" ] \
+        && grep -qi "not found" "$clone_err_file" 2>/dev/null; then
+        print_warning "Release tag ${INSTALL_REF} not found; installing from main instead."
+        rm -rf "$TEMP_DIR/repo"
+        INSTALL_REF="main"; REF_KIND="branch"; REF_LABEL="branch: main"
+        export REF_KIND INSTALL_REF
+        run_with_timeout "$CLONE_TIMEOUT" bash -c 'clone_install_ref "$1"' _ "$TEMP_DIR/repo" \
+            >/dev/null 2>"$clone_err_file" &
+        clone_pid=$!
+        spin $clone_pid "Cloning repository (branch: main)..."
+        clone_status=0
+        wait $clone_pid || clone_status=$?
+    fi
 
     if [ $clone_status -eq 124 ]; then
         print_error "Download timed out after ${CLONE_TIMEOUT}s"
@@ -695,9 +780,9 @@ do_install() {
         exit 1
     elif [ $clone_status -ne 0 ]; then
         print_error "Failed to download from GitHub"
-        if [ -f "$clone_err_file" ] && grep -qi "Remote branch.*not found" "$clone_err_file"; then
-            echo "  Branch '$BRANCH' was not found in $REPO_SHORT."
-            echo "  Please verify the branch name and try again."
+        if [ -f "$clone_err_file" ] && grep -qiE "Remote branch.*not found|couldn't find remote ref|not our ref" "$clone_err_file"; then
+            echo "  '$INSTALL_REF' was not found in $REPO_SHORT."
+            echo "  Please verify the branch, tag, or commit and try again."
         else
             echo "  Check your internet connection and try again."
             if [ -f "$clone_err_file" ] && [ -s "$clone_err_file" ]; then
@@ -791,10 +876,10 @@ do_install() {
     if [ -d "$INSTALL_DIR/tinytorch/perf" ]; then
         find "$INSTALL_DIR/tinytorch/perf" -name "*.py" ! -name "__init__.py" -type f -delete 2>/dev/null || true
     fi
-    if [ "$BRANCH" != "main" ]; then
-        print_success "Downloaded TinyTorch ${DIM}(branch: ${BRANCH}, ${COMMIT_HASH})${NC}"
+    if [ -n "$REF_LABEL" ]; then
+        print_success "Downloaded TinyTorch ${DIM}(${REF_LABEL}, ${COMMIT_HASH})${NC}"
     else
-        print_success "Downloaded TinyTorch ${DIM}(${COMMIT_HASH})${NC}"
+        print_success "Downloaded TinyTorch ${DIM}(${INSTALL_REF}, ${COMMIT_HASH})${NC}"
     fi
 
     # -------------------------------------------------------------------------
@@ -897,8 +982,8 @@ print_success_message() {
     fi
 
     echo ""
-    if [ "$BRANCH" != "main" ]; then
-        echo -e "${GREEN}✓${NC} Tiny${YELLOW}🔥Torch${NC} (${YELLOW}${BRANCH} branch${NC}) installed successfully!"
+    if [ -n "$REF_LABEL" ]; then
+        echo -e "${GREEN}✓${NC} Tiny${YELLOW}🔥Torch${NC} (${YELLOW}${REF_LABEL}${NC}) installed successfully!"
     else
         echo -e "${GREEN}✓${NC} Tiny${YELLOW}🔥Torch${NC} installed successfully!"
     fi
@@ -931,24 +1016,30 @@ Usage:
 
 Options:
   --dev                     Install latest development version from the 'dev' branch
-  -b, --branch BRANCH       Install from a specific Git branch (default: main)
+  -b, --branch BRANCH       Install from a specific Git branch, e.g. main or dev
+                            (default: the latest release tag, tinytorch-v<version>)
+  --ref REF                 Install an exact tag or full 40-character commit SHA
   -d, --dir DIR             Target installation directory (default: tinytorch)
-  -v, --version VERSION     Override version string
+  -v, --version VERSION     Install release tag tinytorch-v<VERSION>
   -y, --yes, --non-interactive
                             Skip interactive prompts and use defaults (for CI)
   -h, --help                Show this help message
 
 Environment Variables:
-  TINYTORCH_BRANCH          Target branch (e.g. dev, main)
+  TINYTORCH_BRANCH          Target branch (e.g. dev, main); overrides the release tag
+  TINYTORCH_REF             Exact tag or full commit SHA
   TINYTORCH_DEV             Set to 1 to target dev branch
   TINYTORCH_INSTALL_DIR     Target installation directory
-  TINYTORCH_VERSION         Version override
+  TINYTORCH_VERSION         Release to install (tag tinytorch-v<version>)
   TINYTORCH_NON_INTERACTIVE Set to 1 to skip interactive prompts
   TINYTORCH_REPO            GitHub repository (default: harvard-edge/cs249r_book)
 
 Examples:
-  # Standard installation (stable release from main):
+  # Standard installation (latest release):
   curl -sSL mlsysbook.ai/tinytorch/install.sh | bash
+
+  # Untagged tip of main:
+  curl -sSL mlsysbook.ai/tinytorch/install.sh | bash -s -- --branch main
 
   # Install latest development version from dev branch:
   curl -sSL mlsysbook.ai/tinytorch/install.sh | bash -s -- --dev
@@ -979,6 +1070,19 @@ parse_args() {
                 ;;
             --branch=*)
                 BRANCH="${1#*=}"
+                shift
+                ;;
+            --ref)
+                if [ -n "${2:-}" ] && [ "${2:0:1}" != "-" ]; then
+                    REF_OVERRIDE="$2"
+                    shift 2
+                else
+                    echo -e "${RED}✗${NC} Option '$1' requires a tag or commit SHA argument."
+                    exit 1
+                fi
+                ;;
+            --ref=*)
+                REF_OVERRIDE="${1#*=}"
                 shift
                 ;;
             -d|--dir|--directory)
@@ -1034,6 +1138,9 @@ main() {
 
     # Fetch version from GitHub (single source of truth: pyproject.toml via tags or branch)
     fetch_latest_version
+
+    # Decide the exact ref to install (release tag by default)
+    resolve_install_ref
 
     print_banner
 

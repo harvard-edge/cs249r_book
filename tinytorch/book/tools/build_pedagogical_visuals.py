@@ -279,7 +279,7 @@ def gen_10_bpe_merge():
 
   <rect x="50" y="65" width="160" height="40" rx="2" fill="#ffffff" stroke="#9ca3af" stroke-width="1"/>
   <text x="130" y="89" text-anchor="middle" font-size="11" font-family="monospace" fill="#1f2937">['l', 'o', 'w', '_']</text>
-  <text x="50" y="120" font-size="9.5" fill="#6b7280">Step 0: Base byte tokens</text>
+  <text x="50" y="120" font-size="9.5" fill="#6b7280">Step 0: Base character tokens</text>
 
   <path d="M220,85 H260" stroke="#ff8246" stroke-width="1.5" fill="none" marker-end="url(#arrow-orange)"/>
   <text x="222" y="77" font-size="8.5" font-weight="700" fill="#c85a17">Rank #1</text>
@@ -296,7 +296,7 @@ def gen_10_bpe_merge():
   <text x="490" y="120" font-size="9.5" font-weight="700" fill="#c85a17">Step 2: Merge ('lo', 'w') -> 'low'</text>
 
   <line x1="50" y1="145" x2="610" y2="145" stroke="#e2e8f0" stroke-width="1"/>
-  <text x="50" y="168" font-size="9.5" fill="#4b5563">• BPE greedy compression resolves out-of-vocabulary (OOV) tokens by falling back to UTF-8 byte units.</text>
+  <text x="50" y="168" font-size="9.5" fill="#4b5563">• Characters outside the trained alphabet map to &lt;UNK&gt; (ID 0); byte-level BPE starts from 256 bytes instead.</text>
   <text x="50" y="186" font-size="9.5" fill="#4b5563">• Tokenizer dictionary stores exact merge rankings; inference repeats merges in identical priority order.</text>
 {FOOTER}"""
     save("10_bpe-merge-progression.svg", content)
@@ -421,7 +421,7 @@ def gen_16_csr_arrays():
   <text x="45" y="37" font-size="11" font-weight="700" fill="#1f2937">COMPRESSED SPARSE ROW (CSR): 3-Array Storage vs Dense 2D Grid</text>
 
   <rect x="50" y="65" width="130" height="120" rx="2" fill="#f8fafc" stroke="#9ca3af" stroke-width="1"/>
-  <text x="115" y="85" text-anchor="middle" font-size="10" font-weight="700">Dense Grid (66% Zeros)</text>
+  <text x="115" y="85" text-anchor="middle" font-size="10" font-weight="700">Dense Grid (5 of 9 Zeros)</text>
   <text x="80" y="115" font-family="monospace" font-weight="700" fill="#c85a17">1.5</text> <text x="115" y="115" font-family="monospace" fill="#9ca3af">0.0</text> <text x="145" y="115" font-family="monospace" fill="#9ca3af">0.0</text>
   <text x="80" y="140" font-family="monospace" fill="#9ca3af">0.0</text> <text x="115" y="140" font-family="monospace" font-weight="700" fill="#c85a17">2.0</text> <text x="145" y="140" font-family="monospace" fill="#9ca3af">0.0</text>
   <text x="80" y="165" font-family="monospace" font-weight="700" fill="#c85a17">3.5</text> <text x="115" y="165" font-family="monospace" fill="#9ca3af">0.0</text> <text x="145" y="165" font-family="monospace" font-weight="700" fill="#c85a17">4.0</text>
@@ -437,7 +437,7 @@ def gen_16_csr_arrays():
   <rect x="245" y="155" width="385" height="35" rx="2" fill="#f8fafc" stroke="#9ca3af" stroke-width="1"/>
   <text x="255" y="177" font-size="9.5" font-family="monospace" fill="#4b5563">row_ptr:     [ 0,   1,   2,   4 ] (Row slice bounds)</text>
 
-  <text x="50" y="215" font-size="9.5" fill="#6b7280">• Each nonzero value requires an index; at low sparsity (&lt; 66%), index metadata exceeds saved zeros!</text>
+  <text x="50" y="215" font-size="9.5" fill="#6b7280">• Each nonzero value requires an index; below 50% sparsity (4-byte values and indices), index metadata exceeds saved zeros.</text>
 {FOOTER}"""
     save("16_csr-three-arrays.svg", content)
 

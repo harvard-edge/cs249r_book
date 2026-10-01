@@ -56,7 +56,7 @@ The second problem appears once the integers are gone. Take the two sentences *"
 ::: {.column-margin}
 ![](assets/images/diagrams/11_embeddings-margin-lookup.svg){width="100%" fig-alt="Comparison card contrasting naive one-hot matrix multiplication allocating 206 MB and 39 billion FLOPs against direct pointer gather copying 3.1 MB with zero arithmetic."}
 
-*Gather vs One-Hot GEMM: Pointer-indexed table gathering eliminates sparse intermediate allocations and wasted zero arithmetic.*
+*Gather vs. One-Hot GEMM: Pointer-indexed table gathering eliminates sparse intermediate allocations and wasted zero arithmetic.*
 :::
 
 ```python
@@ -89,7 +89,7 @@ In a language model with vocabulary size $V = 100{,}000$ and hidden dimension $D
 
 ### A table, not a multiply
 
-Take a three-row table `W = [[1, 2], [3, 4], [5, 6]]`. Token 2 selects `[5, 6]`; the sequence `[2, 0, 2]` selects `[[5, 6], [1, 2], [5, 6]]`. A one-hot row `[0, 0, 1]` multiplied by `W` produces the same `[5, 6]`, because it discards the first two rows and keeps the third. Repeating a token repeats its current vector; the lookup does not change the table.
+In all modern sequence models—including BERT, GPT, and LLaMA—the input layer maps discrete token IDs into continuous semantic vectors. To eliminate the massive memory allocation and wasted arithmetic of multiplying one-hot vectors by a weight matrix, runtimes implement embeddings as a direct memory lookup (row-gather) into an embedding table. Take a three-row table `W = [[1, 2], [3, 4], [5, 6]]`. Token 2 selects `[5, 6]`; the sequence `[2, 0, 2]` selects `[[5, 6], [1, 2], [5, 6]]`. A one-hot row `[0, 0, 1]` multiplied by `W` produces the same `[5, 6]`, because it discards the first two rows and keeps the third. Repeating a token repeats its current vector; the lookup does not change the table.
 
 Write the one-hot vector for token $i$ as $\mathbf{e}_i$, a row vector of length $V$, and the weight matrix as $W$ with shape $V \times D$, where $D$ is the width of the vectors the rest of the network will use. The product picks out one row:
 
@@ -108,7 +108,7 @@ Nothing in the table says that `"dog"` and `"cat"` should be near each other. Th
 
 ### Position is a second table
 
-The simplest way to tell the network where a token sits is a second table, $P$, with shape $S_{\max} \times D$, one row per position up to some maximum length $S_{\max}$. The vector for token $i$ at position $t$ is the sum of the two rows:
+Because self-attention operations are inherently permutation-equivariant, Transformer models like BERT and GPT-2 cannot distinguish word order without explicit coordinate hints. Adding a dedicated positional embedding table directly to token representations injects sequence order into the activations without increasing tensor dimensionality. The simplest way to tell the network where a token sits is a second table, $P$, with shape $S_{\max} \times D$, one row per position up to some maximum length $S_{\max}$. The vector for token $i$ at position $t$ is the sum of the two rows:
 
 $$\mathbf{x}_{i,t} = W[i, :] + P[t, :]$$
 
@@ -126,19 +126,17 @@ There are two ways to fill $P$. The first is to learn it, exactly like $W$. The 
 
 ## The Code
 
-::: {.column-margin}
-![](assets/images/diagrams/11_embed-margin-source.svg){width="100%" fig-alt="Source code mapping card for Module 11 Embeddings showing file path, exported package, and tested primitives."}
-
-*Source Code Mapping: Module 11 extracts embedding table lookup and sinusoidal positional encodings directly from the working repository.*
-:::
-
 ### The embedding table
 
 Consider the same $V = 50{,}257$, $D = 768$ table and batch of 1,024 token IDs used in The Problem. The one-hot route allocates about 206 MB for its input and performs about 39 billion multiplications. A gather instead selects 1,024 rows of width 768. These are analytical counts, not measured timings; they identify the work avoided without assuming a particular machine or matrix-multiplication library.
 
 For a contiguous float32 table, row $i$ starts $i \times D \times 4$ bytes into the buffer (@sec-tensors), following standard row-major contiguous strides $(D, 1)$. Selecting it copies $D$ values, or 3,072 bytes at this width. The batch therefore contains about 3.1 MB of selected values. This is the payload size, not the total memory traffic of TinyTorch: NumPy creates the indexed result, and the Tensor constructor copies the result into its own storage. The lookup is constant-time with respect to vocabulary size for a fixed width, but moving one row still costs $O(D)$.
 
+::: {.column-margin}
+![](assets/images/diagrams/11_embed-margin-source.svg){width="100%" fig-alt="Source code mapping card for Module 11 Embeddings showing file path, exported package, and tested primitives."}
 
+*Source Code Mapping: Module 11 extracts embedding table lookup and sinusoidal positional encodings directly from the working repository.*
+:::
 
 Module 11 follows the pattern of every layer since @sec-activations: an operation that does the work on arrays, and a layer that owns the table and calls it. The operation is the interesting half, because its backward routes each output gradient to the row that supplied its values. Three things to watch for: the one-line gather, the way the indices travel, and the scatter-add.
 
@@ -151,7 +149,7 @@ The backward is where the operation earns its class. Here is the trap. The obvio
 [^fn-scatter-add-autograd]: Formally, if the forward operation is index-gather $Y = \text{gather}(W, \text{indices})$, its vector-Jacobian product is scatter-add $\nabla_W L = \text{scatter\_add}(\mathbf{0}, \text{indices}, \nabla_Y L)$. In PyTorch ATen, this dispatches to the C++ kernel `at::native::embedding_dense_backward` or `scatter_add_`, which uses hardware atomic addition (`atomicAdd` in CUDA) to prevent simultaneous writes when identical token IDs occur within a micro-batch.
 
 ::: {#chk-embeddings-scatter-add-race .callout-checkpoint title="Checkpoint: The silent overwrite in naive indexing"}
-Why is `grad_weight[indices] += grad_output` one of the most insidious bugs in autograd implementations? In Python and NumPy, `a[idx] += b` is syntactic sugar for `a[idx] = a[idx] + b`. When the same token ID appears multiple times in a single batch (e.g. `[2, 0, 2]`), NumPy reads row 2 once, computes the sum with the first gradient, and writes it back; then reads the unchanged original row 2, adds the second gradient, and writes it back, clobbering the first gradient. The backward pass executes without throwing any error or warning, but silently drops gradient signal for repeated tokens. Only atomic accumulation (`np.add.at` or CUDA atomic adds) guarantees correct mathematical accumulation.
+Why is `grad_weight[indices] += grad_output` one of the most insidious bugs in autograd implementations? In Python and NumPy, `a[idx] += b` is syntactic sugar for `a[idx] = a[idx] + b`. When the same token ID appears multiple times in a single batch (e.g. `[2, 0, 2]`), NumPy gathers `a[[2, 0, 2]]` (two copies of the original row 2), adds the gradients, then writes row 2 twice; the second write replaces the first, so one gradient is lost. The backward pass executes without throwing any error or warning, but silently drops gradient signal for repeated tokens. Only unbuffered or atomic accumulation (`np.add.at` or CUDA atomic adds) guarantees correct mathematical accumulation.
 :::
 
 ![**Embedding table memory mechanics: forward gather and backward scatter-add**: In the forward pass, token IDs index directly into table rows, gathering vectors without constructing one-hot matrices. In the backward pass, repeated token IDs in the same sequence require atomic accumulation (`np.add.at`) into gradient rows, avoiding the silent write-collision data loss of naive `+=` indexing.](assets/images/diagrams/11_embedding-gather-scatter.svg){#fig-embedding-gather-scatter width="100%" fig-alt="Diagram showing forward index gather into vocabulary rows and backward scatter-add gradient accumulation preventing race conditions."}
@@ -166,7 +164,7 @@ The state boundary is small. `Embedding.weight` persists across calls; the integ
 
 ### The sinusoidal table
 
-The two occurrences of token 2 still have identical vectors after the gather. A position row makes them distinguishable before @sec-attention introduces interactions between tokens. @sec-transformers will place this composition at the front of its transformer model.
+Introduced in the seminal Transformer architecture (Vaswani et al.) and foundational to modern relative schemes like RoPE, sinusoidal positional encodings offer a deterministic mathematical alternative to learned position tables. By projecting token positions across a geometric progression of frequencies, fixed sinusoidal encodings eliminate position parameter storage while allowing attention heads to compute relative token distances. The two occurrences of token 2 still have identical vectors after the gather. A position row makes them distinguishable before @sec-attention introduces interactions between tokens. @sec-transformers will place this composition at the front of its transformer model.
 
 A learned `PositionalEncoding` owns $S_{\max} \times D$ parameters. For $S_{\max}=1{,}024$ and $D=768$, that is 786,432 values. With positions numbered from zero, row $t$ only receives a contribution from a sequence containing position $t$; in ordinary full-sequence training that requires at least $t+1$ tokens. Later rows may therefore see less data. A requested position beyond `max_seq_len - 1` has no row at all. This limit comes from the allocated table, even if every training sequence was shorter.
 
@@ -184,7 +182,7 @@ The table is a plain function of two integers. It builds the frequencies once, w
 
 `position * div_term` multiplies a column of positions by a row of frequencies, so each entry is one position times one frequency. NumPy broadcasting does the work of a double loop. Row 0 is always `[0, 1, 0, 1, ...]`, because $\sin 0 = 0$ and $\cos 0 = 1$; that is a quick sanity check when something looks wrong. `create_sinusoidal_embeddings` wraps the array in a `Tensor` without `requires_grad`, so the table does not require gradients and `EmbeddingLayer.parameters()` excludes it. The implementation still allocates only `max_seq_len` rows; evaluating the formula at a larger position would require extending that allocation. Both fixed and learned tables occupy $4S_{\max}D$ bytes of float32 value storage here, but only learned positions need parameter gradients and optimizer state.
 
-Two properties of the formula are worth keeping, because the production schemes lean on both. First, for even $D$, each sine and cosine pair has length exactly one, so every row of $P$ has length $\sqrt{D/2}$ and adding it to a token row shifts that row by the same fixed amount at every position. Second, also for even $D$, the row for position $t + \Delta$ is a fixed linear function of the row for position $t$, one that depends on the offset $\Delta$ and not on $t$. Within each pair, the angle-addition identities for sine and cosine give
+Two properties of the formula are worth keeping, because the production schemes lean on both. First, for even $D$, each sine and cosine pair has length exactly one, so every row of $P$ has length $\sqrt{D/2}$, and adding it shifts a token row by a vector of the same length at every position, in a position-dependent direction. Second, also for even $D$, the row for position $t + \Delta$ is a fixed linear function of the row for position $t$, one that depends on the offset $\Delta$ and not on $t$. Within each pair, the angle-addition identities for sine and cosine give
 
 $$\begin{bmatrix} P[t+\Delta, 2k] \\ P[t+\Delta, 2k+1] \end{bmatrix} = \begin{bmatrix} \cos(\omega_k \Delta) & \sin(\omega_k \Delta) \\ -\sin(\omega_k \Delta) & \cos(\omega_k \Delta) \end{bmatrix} \begin{bmatrix} P[t, 2k] \\ P[t, 2k+1] \end{bmatrix}$$
 
@@ -206,7 +204,7 @@ The reshape must remain a Tensor operation. Rewrapping `pos_embeddings.data` in 
 
 ### Putting the two tables together
 
-The last step is wiring the tables together, and this is where @sec-transformers picks up. `EmbeddingLayer` owns a token table and one of three position choices: a learned `PositionalEncoding`, the fixed sinusoidal table, or nothing. Its `forward` is written in a separate cell and attached to the class.
+Production Transformer architectures unify token semantics and sequence geometry at their input stage, synthesizing discrete token sequences into a contiguous $(B, S, D)$ activation tensor. Wrapping token lookup and positional injection into a single composite layer establishes a clean, modular front-end contract that feeds directly into downstream self-attention blocks. The last step is wiring the tables together, and this is where @sec-transformers picks up. `EmbeddingLayer` owns a token table and one of three position choices: a learned `PositionalEncoding`, the fixed sinusoidal table, or nothing. Its `forward` is written in a separate cell and attached to the class.
 
 {{< include _listings/11_embeddings/EmbeddingLayer.qmd >}}
 
@@ -253,7 +251,7 @@ and feed it the sequence `[2, 0, 3]` with sinusoidal positions. With $D = 4$ the
 
 The fast pair (dimensions 0 and 1) already differs noticeably between positions 0, 1, and 2; the slow pair (dimensions 2 and 3) has barely moved from $[0, 1]$. That is the clock with two hands, one turning a hundred times faster than the other.
 
-For the backward pass, take the loss to be the sum of every entry in the output, so the gradient arriving at each of the three output rows is all ones. In the script below, lines 6 to 15 configure `EmbeddingLayer` with the $4 \times 4$ trace weights. Line 17 feeds the sequence `Tensor([[2, 0, 3]])`, producing output `h` of shape `(1, 3, 4)` verified in lines 18 to 21 against @tbl-embedding-pe-trace. In line 24, `h.sum().backward()` propagates through the gather. Scatter-add routes row 0's gradient to $W[2, :]$, row 1's to $W[0, :]$, and row 2's to $W[3, :]$. Lines 25 to 28 confirm that `W_grad` holds ones in rows 0, 2, and 3 and zeros in row 1, while `layer.pos_encoding.grad` is `None` (sinusoidal encodings have no learned parameters). In lines 30 to 33, clearing gradients and running repeated token sequence `[[2, 0, 2]]` verifies that row 2 accumulates to twos (`[[1]*4, [0]*4, [2]*4, [0]*4]`), which naive in-place addition `grad_weight[indices] += ...` fails to compute correctly.
+For the backward pass, take the loss to be the sum of every entry in the output, so the gradient arriving at each of the three output rows is all ones. In the script below, lines 6 to 15 configure `EmbeddingLayer` with the $4 \times 4$ trace weights. Line 17 feeds the sequence `Tensor([[2, 0, 3]])`, producing output `h` of shape `(1, 3, 4)` verified in lines 18 to 21 against @tbl-embedding-pe-trace. In line 24, `h.sum().backward()` propagates through the gather. Scatter-add routes row 0's gradient to $W[2, :]$, row 1's to $W[0, :]$, and row 2's to $W[3, :]$. Lines 25 to 28 confirm that `W_grad` holds ones in rows 0, 2, and 3 and zeros in row 1, while `layer.pos_encoding.grad` is `None` (sinusoidal encodings have no learned parameters). In lines 30 to 34, clearing gradients and running repeated token sequence `[[2, 0, 2]]` verifies that row 2 accumulates to twos (`[[1]*4, [0]*4, [2]*4, [0]*4]`), which naive in-place addition `grad_weight[indices] += ...` fails to compute correctly.
 
 ```python
 import numpy as np
@@ -335,7 +333,7 @@ For $B=8$, $S=2{,}048$, $D=4{,}096$, and a hypothetical 2-byte weight format, se
 :::
 
 ::: {#psp-embeddings-sparse-gather-scatter .callout-perspective title="Production Bridge: Sparse embeddings and sharded tables"}
-At industrial scale with vocabularies of $256{,}000$ tokens (such as Gemma and LLaMA 3) and hidden dimensions of $4{,}096$, the embedding table alone contains over 1 billion parameters ($>4\text{ GB}$ in FP32). Generating a dense $V \times D$ gradient tensor per micro-batch wastes gigabytes of memory on zeros. Production frameworks solve this with `sparse=True` (returning a `torch.sparse_coo_tensor` holding only active rows) or dedicated distributed embedding tables (such as TorchRec or Megatron-LM tensor parallel vocabulary sharding), communicating only the gathered rows across GPU nodes.
+At industrial scale with vocabularies of $256{,}000$ tokens (such as Gemma) and hidden dimensions of $4{,}096$, the embedding table alone contains over 1 billion parameters ($>4\text{ GB}$ in FP32). Generating a dense $V \times D$ gradient tensor per micro-batch wastes gigabytes of memory on zeros. Production frameworks solve this with `sparse=True` (returning a `torch.sparse_coo_tensor` holding only active rows) or dedicated distributed embedding tables (such as TorchRec or Megatron-LM tensor parallel vocabulary sharding), communicating only the gathered rows across GPU nodes.
 :::
 
 A different way to reduce persistent storage is **weight tying**, which uses the input table again to compute output scores as $\mathbf{h}W^T$. The [original GPT-2 implementation](https://raw.githubusercontent.com/openai/gpt-2/master/src/model.py) gathers from `wte` at the input, adds a separately learned `wpe` table, and multiplies the final hidden rows by `wte` transposed at the output. Sharing that parameter saves a second $V \times D$ table. It also gives the table a second gradient path; the claim that only looked-up rows receive gradients applies to the gather operation, not to every possible use of a shared weight.
@@ -351,9 +349,7 @@ Position schemes change where the position signal enters the model. The comparis
 
 : **Position information enters at different points**: Fixed formulas avoid learning a row for every position, but do not guarantee successful inference at unseen sequence lengths. {#tbl-position-encodings tbl-colwidths="[24,28,14,16,18]"}
 
-[Rotary position embedding (RoPE)](https://arxiv.org/html/2104.09864v5) rotates pairs of coordinates in query and key vectors, two projections of a token vector that @sec-attention will introduce. Their dot product retains both tokens' content, while its positional factor depends on their relative offset.[^fn-rope-complex-phase] This uses the same sine/cosine angle-addition identities studied here, but changes the attention computation rather than adding a second table to the input. Evaluating a rotation at a larger position does not by itself guarantee that a model trained on shorter sequences will work there. TinyTorch's `EmbeddingLayer` implements learned and sinusoidal addition, not RoPE.
-
-[^fn-rope-complex-phase]: In the 2D complex plane, RoPE represents a coordinate pair $(q_0, q_1)$ as complex number $z_q = q_0 + i q_1$. Position rotation by angle $m\theta$ corresponds to complex multiplication $z_q e^{i m \theta}$. When evaluating the attention inner product with key $z_k e^{i n \theta}$, the dot product corresponds to the real part of $(z_q e^{i m \theta})^* (z_k e^{i n \theta}) = z_q^* z_k e^{i (n - m) \theta}$. The absolute positions $m$ and $n$ cancel into their relative distance $n - m$, enabling self-attention to attend naturally across variable token separations.
+[Rotary position embedding (RoPE)](https://arxiv.org/html/2104.09864v5) rotates pairs of coordinates in query and key vectors, two projections of a token vector that @sec-attention will introduce. In the 2D complex plane, each coordinate pair is rotated by angle multiples $m\theta$ and $n\theta$; their inner product retains token content while absolute positions cancel into their relative distance $(n - m)$. This uses the same sine/cosine angle-addition identities studied here, but changes the attention computation rather than adding a second table to the input. Evaluating a rotation at a larger position does not by itself guarantee that a model trained on shorter sequences will work there. TinyTorch's `EmbeddingLayer` implements learned and sinusoidal addition, not RoPE.
 
 ::: {.column-margin}
 **Core Invariant: RoPE Shift Invariance**\
@@ -361,7 +357,7 @@ $$\langle R_m q, R_n k \rangle = q^T R_{n-m} k$$\
 *Rotates 2D coordinate subspaces by $m\theta$; attention dot product depends strictly on relative offset $(n - m)$.*
 :::
 
-![**Rotary Position Embedding (RoPE) 2D subspace rotation**: Instead of adding static position vectors to inputs, RoPE rotates 2D coordinate slices of query ($m$) and key ($n$) vectors by angle multiples $m\theta$ and $n\theta$. The resulting attention inner product preserves relative distance $(n - m)$, enabling length generalization.](assets/images/diagrams/11_rope-phase-clock.svg){#fig-rope-phase-clock width="100%" fig-alt="Diagram of 2D complex subspace circles showing query rotated by m*theta and key rotated by n*theta, with invariant relative distance dot product formula."}
+![**Rotary Position Embedding (RoPE) 2D subspace rotation**: Instead of adding static position vectors to inputs, RoPE rotates 2D coordinate slices of query ($m$) and key ($n$) vectors by angle multiples $m\theta$ and $n\theta$. The resulting attention inner product depends on position only through the offset $(n - m)$.](assets/images/diagrams/11_rope-phase-clock.svg){#fig-rope-phase-clock width="100%" fig-alt="Diagram of 2D complex subspace circles showing query rotated by m*theta and key rotated by n*theta, with invariant relative distance dot product formula."}
 
 
 Three practical checks follow from the reference. Keep token IDs paired with the tokenizer that assigned them. Include the token table and any learned position table in the optimizer's parameter list. Check position capacity before a call: both position strategies in `EmbeddingLayer` raise `ValueError` when the requested interval exceeds their allocated table. A sinusoidal table can be regenerated at a greater length without learning new rows, but that storage change and the model's ability to use longer inputs are separate questions.

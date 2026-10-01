@@ -61,17 +61,30 @@ from tinytorch.core.training import Trainer, CosineSchedule, clip_grad_norm
 r"""
 ## 📋 Module Dependencies
 
-**Prerequisites**: Modules 01 through 07 must be complete and passing tests.
+**Prerequisites**: Modules 01, 02, 03, 04, 06, and 07 must be complete and passing tests.
+Module 05 is not imported: `Trainer` accepts any iterable of `(inputs, targets)`
+batches, so a Module 05 `DataLoader` and a plain Python list both work.
+
+**External Dependencies**:
+- `numpy` (for array operations and numerical computing)
+- `pickle` and `os` (for checkpoints: `pickle.dump` writes a temporary file and `os.replace` swaps it in atomically)
+- `pathlib` (for checkpoint paths)
+- `inspect` (to check whether a model's `forward` accepts a `training` flag)
+- `typing` (for type hints)
+
+**TinyTorch Dependencies**:
 
 | Subsystem Component | Upstream Source | Role in Training Harness |
 | :--- | :--- | :--- |
 | **`Tensor`** | Module 01 (`tinytorch.core.tensor`) | Memory buffers holding model weights, activations, and gradient accumulators |
-| **`Linear` / Layers** | Module 03 (`tinytorch.core.layers`) | Trainable layer modules defining `.forward()` and yielding `.parameters()` |
-| **`CrossEntropyLoss` / Losses** | Module 04 (`tinytorch.core.losses`) | Objective penalty scalar computation and backward seed generation |
-| **`DataLoader`** | Module 05 (`tinytorch.core.dataloader`) | Mini-batch generator providing batch slicing, permutation, and iteration |
-| **`autograd`** | Module 06 (`tinytorch.core.autograd`) | Reverse-mode topological traversal propagating gradient vectors into `.grad` |
-| **`SGD` / `AdamW`** | Module 07 (`tinytorch.core.optimizers`) | Parameter update engines executing step mechanics and zeroing gradients |
+| **`ReLU`** | Module 02 (`tinytorch.core.activations`) | Nonlinearity in the small models the tests train |
+| **`Linear` / Layers** | Module 03 (`tinytorch.core.layers`) | Trainable layer modules defining `.forward()` and yielding `.parameters()`; `set_training_mode` flips the `training` flag on a model and every layer inside it |
+| **`MSELoss`, `CrossEntropyLoss`, `BinaryCrossEntropyLoss`** | Module 04 (`tinytorch.core.losses`) | Objective penalty scalar computation and backward seed generation |
+| **`DataLoader`** | Module 05 (`tinytorch.core.dataloader`), not imported | Mini-batch generator providing batch slicing, permutation, and iteration; `Trainer` only iterates over whatever batch source it is given |
+| **`autograd`, `no_grad`** | Module 06 (`tinytorch.core.autograd`) | Reverse-mode topological traversal propagating gradient vectors into `.grad`; `no_grad` switches graph recording off during evaluation |
+| **`SGD`** | Module 07 (`tinytorch.core.optimizers`) | Parameter update engine executing step mechanics and zeroing gradients; `Trainer` accepts any Module 07 optimizer, including `Adam` and `AdamW` |
 
+**Dependency Flow**:
 $$\mathbf{x}, \mathbf{y} \xrightarrow{\text{Mod 05}} \text{Model}(\mathbf{x}) \xrightarrow{\text{Mod 03}} \mathcal{L}(\hat{\mathbf{y}}, \mathbf{y}) \xrightarrow{\text{Mod 04}} \nabla_{\boldsymbol{\theta}} \mathcal{L} \xrightarrow{\text{Mod 06}} \boldsymbol{\theta}_{t+1} \xrightarrow{\text{Mod 07}} \text{Trainer} \text{ (Mod 08)}$$
 """
 
@@ -90,7 +103,7 @@ rng = np.random.default_rng(7)
 
 # Import dependencies from other modules
 from tinytorch.core.tensor import Tensor
-from tinytorch.core.layers import Linear
+from tinytorch.core.layers import Linear, set_training_mode
 from tinytorch.core.activations import ReLU
 from tinytorch.core.losses import MSELoss, CrossEntropyLoss, BinaryCrossEntropyLoss
 from tinytorch.core.optimizers import SGD
@@ -176,7 +189,7 @@ Neural network architectures contain layers whose forward mathematics depend str
 | **Stochastic Layers (Dropout)** | Active (random neuron masking at dropout rate $p$) | Inactive (deterministic identity pass-through) |
 | **Normalization Layers** | Update running batch statistics ($\mu_B, \sigma_B^2$) | Freeze running statistics (use historical moving averages) |
 
-That is the whole of what the flag does. Two things are routinely described as if `training_mode` controlled them, and it does not. The backward tape is switched off by `no_grad()`, which `evaluate` wraps around its forward pass, and weights are frozen by simply not calling `optimizer.step()`. Flipping `training_mode` to `False` on its own leaves the tape recording and leaves `step()` free to mutate weights. The flag routes layer behavior; the caller controls gradients and updates.
+That is the whole of what the flag does. Two things are routinely described as if `training_mode` controlled them, and it does not. The backward tape is switched off by `no_grad()`, which `evaluate` wraps around its forward pass, and weights are frozen by simply not calling `optimizer.step()`. Flipping `training_mode` to `False` on its own leaves the tape recording and leaves `step()` free to mutate weights. The flag routes layer behavior; the caller controls gradients and updates. It reaches the layers through Module 03's `set_training_mode`, which sets `training` on the model and on every layer stored inside it, so a Dropout buried in a hand-written model switches off just as one inside a `Sequential` does.
 """
 
 # %% [markdown]
@@ -234,7 +247,8 @@ class CosineSchedule:
     >>> print(schedule.get_lr(50))   # Middle: ~0.055
     >>> print(schedule.get_lr(100))  # End: 0.01
 
-    HINT: Use np.cos() and np.pi for the cosine calculation
+    HINT: Use np.cos() and np.pi for the cosine calculation, and return a
+          Python float so the learning rate never promotes float32 weights
     """
     ### BEGIN SOLUTION role="scaffold"
     def __init__(self, max_lr: float = DEFAULT_MAX_LR, min_lr: float = DEFAULT_MIN_LR, total_epochs: int = DEFAULT_TOTAL_EPOCHS):
@@ -249,7 +263,8 @@ class CosineSchedule:
 
         # Cosine annealing formula
         cosine_factor = (1 + np.cos(np.pi * epoch / self.total_epochs)) / 2
-        return self.min_lr + (self.max_lr - self.min_lr) * cosine_factor
+        # Return a plain Python float: an np.float64 lr would promote float32 weights
+        return float(self.min_lr + (self.max_lr - self.min_lr) * cosine_factor)
     ### END SOLUTION
 
 # %% [markdown]
@@ -348,6 +363,7 @@ def clip_grad_norm(parameters: List, max_norm: float = 1.0) -> float:
     - Use np.linalg.norm() to compute norms
     - Only clip if total_norm > max_norm
     - Modify gradients in-place for efficiency
+    - Make clip_coef a Python float so float32 gradients stay float32
     """
     ### BEGIN SOLUTION role="scaffold"
     if not np.isfinite(max_norm) or max_norm < 0:
@@ -374,7 +390,8 @@ def clip_grad_norm(parameters: List, max_norm: float = 1.0) -> float:
 
     # Clip if necessary
     if total_norm > max_norm:
-        clip_coef = max_norm / total_norm
+        # A Python float scales float32 gradients without promoting them to float64
+        clip_coef = float(max_norm / total_norm)
         for param in parameters:
             if param.grad is not None:
                 # Handle both Tensor gradients and numpy array gradients
@@ -822,7 +839,8 @@ def trainer_train_epoch(self, dataloader: Iterable[Tuple[Tensor, Tensor]],
     TODO: Compose _process_batch and _optimizer_update into the epoch loop
 
     APPROACH:
-    1. Set model.training = True and self.training_mode = True
+    1. Call set_training_mode(self.model, True) (Module 03), which flags the model
+       and every layer inside it, and set self.training_mode = True
     2. Reset gradients and set the scheduler's learning rate for this epoch
     3. Process batches, counting both batches and samples in the current window
     4. After accumulation_steps batches, update using the actual sample count;
@@ -835,7 +853,7 @@ def trainer_train_epoch(self, dataloader: Iterable[Tuple[Tensor, Tensor]],
     ### BEGIN SOLUTION
     if isinstance(accumulation_steps, bool) or not isinstance(accumulation_steps, (int, np.integer)) or accumulation_steps < 1:
         raise ValueError("accumulation_steps must be a positive integer")
-    self.model.training = True
+    set_training_mode(self.model, True)   # model and every layer inside it
     self.training_mode = True
     self.optimizer.zero_grad()
 
@@ -1097,7 +1115,8 @@ def trainer_evaluate(self, dataloader: Iterable[Tuple[Tensor, Tensor]]) -> Tuple
     TODO: Implement evaluation loop (forward pass only, no gradient updates)
 
     APPROACH:
-    1. Set model.training = False and self.training_mode = False
+    1. Call set_training_mode(self.model, False), so Dropout inside any model
+       (Sequential or hand-written) switches off, and set self.training_mode = False
     2. For each batch: forward pass only through self._forward (flag off, so Dropout is the identity),
        inside no_grad() so no graph is recorded; accumulate loss times sample count
     3. Choose accuracy by loss type: argmax for cross-entropy, threshold for BCE;
@@ -1115,7 +1134,7 @@ def trainer_evaluate(self, dataloader: Iterable[Tuple[Tensor, Tensor]]) -> Tuple
     - accuracy = correct / total if total > 0 else 0.0
     """
     ### BEGIN SOLUTION role="scaffold"
-    self.model.training = False
+    set_training_mode(self.model, False)  # model and every layer inside it
     self.training_mode = False
 
     total_loss = 0.0
@@ -1426,7 +1445,7 @@ def trainer_load_checkpoint(self, path: str) -> None:
     self.history = checkpoint['history']
     self.training_mode = checkpoint['training_mode']
     self.grad_clip_norm = checkpoint.get('grad_clip_norm', self.grad_clip_norm)
-    self.model.training = self.training_mode
+    set_training_mode(self.model, self.training_mode)
 
     # Restore states
     if 'model_state' in checkpoint:
@@ -1948,7 +1967,7 @@ Answer these to deepen your understanding of training systems and their implicat
 **Question**: Both of the Trainer's bookkeeping flags decide correctness rather than speed. What breaks when each one is wrong?
 
 **Consider**:
-- Which layers read `model.training`, and what does each one do differently when it is `False`? (Think about dropout.)
+- `set_training_mode` sets `training` on the model and on every layer stored inside it. Which layers read that flag, and what does each one do differently when it is `False`? (Think about dropout.)
 - Flipping `training_mode` does not disable the backward tape or freeze the weights. What does each of those?
 - What would happen if you forgot to zero gradients between training steps?
 - How does gradient accumulation intentionally exploit not zeroing?

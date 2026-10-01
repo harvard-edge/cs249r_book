@@ -69,10 +69,12 @@ r"""
 - `random` (for shuffling indices)
 - `abc` (for abstract base class)
 - `typing` (for type hints)
+- `sys` and `time` (for the memory and timing measurements in the analysis cells)
 
 **TinyTorch Dependencies**:
 - `tinytorch.core.tensor.Tensor` (foundation from Module 01)
 
+**Dependency Flow**:
 $$\begin{array}{ccc}
 \mathbf{\text{Module 01: Tensor}} & \longrightarrow & \mathbf{\text{Module 05: DataLoader}} \\
 \downarrow & & \downarrow \\

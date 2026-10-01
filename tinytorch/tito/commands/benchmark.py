@@ -1,11 +1,14 @@
 """
 Tiny🔥Torch Benchmark Commands
 
-Run baseline and capstone benchmarks, with automatic submission prompts.
+Run the baseline environment speed check and the capstone benchmark.
+Results are saved locally under .tito/benchmarks/. There is no community
+upload yet, so nothing here claims to submit anything.
 """
 
 import json
-import time
+import math
+import os
 import platform
 from argparse import ArgumentParser, Namespace
 from datetime import datetime
@@ -30,9 +33,38 @@ def _get_rng():
 from rich.panel import Panel
 from rich.table import Table
 from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn
-from rich.prompt import Prompt, Confirm
 from rich.console import Console
 
+
+
+def argparse_suppress() -> str:
+    """Hide a no-op compatibility flag from --help."""
+    from argparse import SUPPRESS
+    return SUPPRESS
+
+
+def geometric_mean(values: List[float]) -> float:
+    """Geometric mean of positive ratios: exp(mean(log(v)))."""
+    if not values or any(v <= 0 for v in values):
+        raise ValueError("geometric mean needs positive values")
+    return math.exp(sum(math.log(v) for v in values) / len(values))
+
+
+def summarize_times(times_ms: Dict[str, float]) -> Dict[str, float]:
+    """
+    Summarize the environment check from measured times only.
+
+    Reports each time plus their geometric mean, which weights every check
+    equally no matter how many milliseconds it takes.
+    """
+    # 2026-09-28: this once claimed a geometric mean while summing times, and
+    # scored against hand-typed "reference laptop" times that had no source.
+    # Those references were 219-3,392x slower than an Apple-silicon laptop, and
+    # min(100, ...) hid it by giving everyone 100/100. Raw times are the honest
+    # output until a reference machine is actually measured.
+    summary = {f"{name}_ms": t for name, t in times_ms.items()}
+    summary["geometric_mean_ms"] = geometric_mean(list(times_ms.values()))
+    return summary
 
 
 class BenchmarkCommand(BaseCommand):
@@ -44,7 +76,7 @@ class BenchmarkCommand(BaseCommand):
 
     @property
     def description(self) -> str:
-        return "Run benchmarks - baseline (setup validation) and capstone (full performance)"
+        return "Run benchmarks - baseline (NumPy environment speed check) and capstone (Module 20)"
 
     def add_arguments(self, parser: ArgumentParser) -> None:
         """Add benchmark subcommands."""
@@ -57,12 +89,13 @@ class BenchmarkCommand(BaseCommand):
         # Baseline benchmark
         baseline_parser = subparsers.add_parser(
             'baseline',
-            help='Run baseline benchmark (quick setup validation)'
+            help='Run baseline environment speed check (times NumPy, not TinyTorch)'
         )
+        # Kept so existing scripts keep working; there is no submission step.
         baseline_parser.add_argument(
             '--skip-submit',
             action='store_true',
-            help='Skip submission prompt after benchmark'
+            help=argparse_suppress()
         )
 
         # Capstone benchmark
@@ -79,7 +112,7 @@ class BenchmarkCommand(BaseCommand):
         capstone_parser.add_argument(
             '--skip-submit',
             action='store_true',
-            help='Skip submission prompt after benchmark'
+            help=argparse_suppress()
         )
 
     def run(self, args: Namespace) -> int:
@@ -96,32 +129,15 @@ class BenchmarkCommand(BaseCommand):
             self.console.print(f"[red]Unknown benchmark command: {args.benchmark_command}[/red]")
             return 1
 
-    def _get_reference_times(self) -> Dict[str, float]:
-        """
-        Get reference times for normalization (SPEC-style).
-
-        Reference system: Mid-range laptop (Intel i5-8th gen, 16GB RAM)
-        These times represent expected performance on reference hardware.
-        Results are normalized: normalized_score = reference_time / actual_time
-
-        Returns:
-            Dict with reference times in milliseconds for each benchmark
-        """
-        return {
-            "tensor_ops": 0.8,      # Reference: 0.8ms for tensor operations
-            "matmul": 2.5,          # Reference: 2.5ms for matrix multiply
-            "forward_pass": 6.7,    # Reference: 6.7ms for forward pass
-            "total": 10.0           # Reference: 10.0ms total
-        }
-
     def _run_baseline(self, args: Namespace) -> int:
         """Run baseline benchmark - lightweight setup validation."""
         console = self.console
 
         console.print(Panel(
-            "[bold cyan]🎯 Baseline Benchmark[/bold cyan]\n\n"
-            "Running lightweight benchmarks to validate your setup...\n"
-            "[dim]Results are normalized to a reference system for fair comparison.[/dim]",
+            "[bold cyan]🎯 Baseline Environment Speed Check[/bold cyan]\n\n"
+            "Times plain NumPy operations (elementwise ops, matmul, a two-layer\n"
+            "forward pass) to check how fast this Python/NumPy install is.\n"
+            "[dim]It does not run your TinyTorch code.[/dim]",
             title="Baseline Benchmark",
             border_style="cyan"
         ))
@@ -148,101 +164,32 @@ class BenchmarkCommand(BaseCommand):
 
             progress.update(task, completed=True)
 
-        # Get reference times for normalization (SPEC-style)
-        reference = self._get_reference_times()
+        raw_metrics = summarize_times({
+            "tensor_ops": tensor_time,
+            "matmul": matmul_time,
+            "forward_pass": forward_time,
+        })
 
-        # Calculate normalized scores (SPEC-style: reference_time / actual_time)
-        # Higher normalized score = better performance
-        tensor_normalized = reference["tensor_ops"] / max(tensor_time, 0.001)
-        matmul_normalized = reference["matmul"] / max(matmul_time, 0.001)
-        forward_normalized = reference["forward_pass"] / max(forward_time, 0.001)
-
-        # Overall normalized score (geometric mean for fairness)
-        total_time = tensor_time + matmul_time + forward_time
-        total_normalized = reference["total"] / max(total_time, 0.001)
-
-        # Convert to 0-100 score scale
-        # Reference system = 100 points, faster systems > 100, slower < 100
-        score = min(100, int(100 * total_normalized))
-
-        # Store both raw and normalized metrics
-        raw_metrics = {
-            "tensor_ops_ms": tensor_time,
-            "matmul_ms": matmul_time,
-            "forward_pass_ms": forward_time,
-            "total_ms": total_time
-        }
-
-        normalized_metrics = {
-            "tensor_ops_normalized": tensor_normalized,
-            "matmul_normalized": matmul_normalized,
-            "forward_pass_normalized": forward_normalized,
-            "total_normalized": total_normalized,
-            "score": score
-        }
-
-        # Display results
-        results_table = Table(title="Baseline Benchmark Results", show_header=True, header_style="bold cyan")
-        results_table.add_column("Metric", style="cyan")
-        results_table.add_column("Time", justify="right", style="green")
-        results_table.add_column("Normalized", justify="right", style="yellow")
-        results_table.add_column("Status", justify="center")
-
-        results_table.add_row(
-            "Tensor Operations",
-            f"{tensor_time:.2f} ms",
-            f"{tensor_normalized:.2f}x",
-            "✅"
-        )
-        results_table.add_row(
-            "Matrix Multiply",
-            f"{matmul_time:.2f} ms",
-            f"{matmul_normalized:.2f}x",
-            "✅"
-        )
-        results_table.add_row(
-            "Forward Pass",
-            f"{forward_time:.2f} ms",
-            f"{forward_normalized:.2f}x",
-            "✅"
-        )
-        results_table.add_row("", "", "", "")
-        results_table.add_row(
-            "[bold]Total[/bold]",
-            f"{total_time:.2f} ms",
-            f"{total_normalized:.2f}x",
-            "✅"
-        )
-        results_table.add_row(
-            "[bold]Score[/bold]",
-            "",
-            f"[bold]{score}/100[/bold]",
-            "🎯"
-        )
+        results_table = Table(title="Baseline Environment Check (NumPy)", show_header=True, header_style="bold cyan")
+        results_table.add_column("Check", style="cyan")
+        results_table.add_column("Measured time", justify="right", style="green")
+        results_table.add_row("Elementwise ops (100×100 add, mul, sum)", f"{tensor_time:.4f} ms")
+        results_table.add_row("Matrix multiply (100×100)", f"{matmul_time:.4f} ms")
+        results_table.add_row("Two-layer forward pass (784→128→10)", f"{forward_time:.4f} ms")
+        results_table.add_row("", "")
+        results_table.add_row("[bold]Geometric mean[/bold]", f"[bold]{raw_metrics['geometric_mean_ms']:.4f} ms[/bold]")
 
         console.print("\n")
         console.print(results_table)
+        console.print("[dim]Lower is faster. This times NumPy on this machine, not your TinyTorch modules.[/dim]")
 
-        # Show normalization info
-        console.print(f"\n[dim]📊 Normalization: Results normalized to reference system[/dim]")
-        console.print(f"[dim]   Reference: {reference['total']:.1f}ms total time[/dim]")
-        console.print(f"[dim]   Your system: {total_time:.2f}ms ({total_normalized:.2f}x vs reference)[/dim]")
-
-        # Create results dict
         results = {
             "benchmark_type": "baseline",
+            "measures": "NumPy environment speed (does not run TinyTorch code)",
             "timestamp": datetime.now().isoformat(),
             "system_info": self._get_system_info(),
-            "reference_system": {
-                "description": "Mid-range laptop (Intel i5-8th gen, 16GB RAM)",
-                "times_ms": reference
-            },
             "raw_metrics": raw_metrics,
-            "normalized_metrics": normalized_metrics,
-            "metrics": {
-                **raw_metrics,
-                **normalized_metrics
-            }
+            "metrics": raw_metrics,
         }
 
         # Save results
@@ -258,17 +205,14 @@ class BenchmarkCommand(BaseCommand):
 
         # Success message
         console.print(Panel(
-            f"[bold green]🎉 Baseline Benchmark Complete![/bold green]\n\n"
-            f"📊 Your Score: [bold]{score}/100[/bold]\n"
-            f"✅ Setup verified and working!\n\n"
-            f"💡 Run [cyan]tito benchmark capstone[/cyan] after Module 20 for full benchmarks",
-            title="Success",
+            f"[bold green]Baseline environment check complete[/bold green]\n\n"
+            f"📊 Geometric-mean time: [bold]{raw_metrics['geometric_mean_ms']:.4f} ms[/bold]\n"
+            f"NumPy runs on this machine; this does not test your TinyTorch code.\n\n"
+            f"💡 Run [cyan]tito benchmark capstone[/cyan] after Module 20 to benchmark your model",
+            title="Done",
             border_style="green"
         ))
-
-        # Prompt for submission
-        if not args.skip_submit:
-            self._prompt_submission(results, "baseline")
+        self._report_local_only(results_file)
 
         return 0
 
@@ -305,120 +249,34 @@ class BenchmarkCommand(BaseCommand):
         try:
             from tinytorch.olympics import generate_submission
         except ImportError:
+            # 2026-09-28: this used to sleep for a second and save a fixed
+            # "basic_score": 75 as if something had been measured.
             console.print(Panel(
-                "[yellow]⚠️  Module 20 (Capstone) not complete[/yellow]\n\n"
-                "Running simplified capstone benchmarks...\n"
-                "For full benchmarks, complete Module 20 first:\n"
+                "[red]❌ Module 20 (Capstone) is required[/red]\n\n"
+                "The capstone benchmark measures your Module 20 model, which is not\n"
+                "exported yet, so there is nothing to measure. No results were saved.\n\n"
+                "Complete Module 20 first:\n"
                 "  [cyan]tito module complete 20[/cyan]",
-                title="Warning",
-                border_style="yellow"
+                title="Error",
+                border_style="red"
             ))
-            # Fall back to simplified benchmarks
-            return self._run_simplified_capstone(args)
+            return 1
 
-        # NOTE: these metrics are NOT measured from the student's model yet.
-        # generate_submission is only used above as an availability check.
-        # The values below are fixed placeholders (same for every student,
-        # regardless of what they built) until this is wired up to actually
-        # run Module 19's Benchmark class against the student's Module 20
-        # model. Surface that honestly instead of presenting fabricated
-        # numbers as a real measurement.
-        console.print("[yellow]⚠️  Placeholder benchmark: these numbers are not yet measured from your model.[/yellow]")
-        console.print("[dim]Full instrumentation (Module 19 Benchmark + your model) is not implemented yet.[/dim]\n")
-
-        results = {
-            "benchmark_type": "capstone",
-            "is_placeholder": True,
-            "note": "Placeholder benchmark: metrics below are fixed values, not measured from your model. Full instrumentation is not implemented yet.",
-            "timestamp": datetime.now().isoformat(),
-            "system_info": self._get_system_info(),
-            "track": args.track,
-            "metrics": {
-                "speed": {
-                    "latency_ms": 45.2,
-                    "throughput_ops_per_sec": 22.1,
-                    "score": 92
-                },
-                "compression": {
-                    "model_size_mb": 12.4,
-                    "compression_ratio": 4.2,
-                    "score": 88
-                },
-                "accuracy": {
-                    "accuracy_percent": 87.5,
-                    "score": 95
-                },
-                "efficiency": {
-                    "memory_mb": 8.3,
-                    "energy_score": 85,
-                    "score": 85
-                }
-            },
-            "overall_score": 90
-        }
-
-        # Save results
-        benchmark_dir = Path(".tito") / "benchmarks"
-        benchmark_dir.mkdir(parents=True, exist_ok=True)
-        timestamp_str = datetime.now().strftime("%Y%m%d_%H%M%S")
-        results_file = benchmark_dir / f"capstone_{timestamp_str}.json"
-
-        with open(results_file, 'w', encoding='utf-8') as f:
-            json.dump(results, f, indent=2)
-
-        # Display results
-        self._display_capstone_results(results)
-
-        console.print(f"\n[green]✅ Results saved to: {results_file}[/green]")
-
-        # Prompt for submission (never for placeholder results: they are the
-        # same fixed numbers for every student and would be meaningless on a
-        # leaderboard, or actively misleading if compared against real scores)
-        if not args.skip_submit and not results.get("is_placeholder"):
-            self._prompt_submission(results, "capstone")
-
-        return 0
-
-    def _run_simplified_capstone(self, args: Namespace) -> int:
-        """Run simplified capstone benchmarks when Module 20 isn't complete."""
-        console = self.console
-
-        console.print("[yellow]Running simplified capstone benchmarks...[/yellow]\n")
-
-        # Run basic benchmarks
-        with Progress(
-            SpinnerColumn(),
-            TextColumn("[progress.description]{task.description}"),
-            console=console
-        ) as progress:
-            task = progress.add_task("Running benchmarks...", total=None)
-
-            progress.update(task, description="[cyan]Testing performance...")
-            time.sleep(1)  # Simulate benchmark time
-
-        results = {
-            "benchmark_type": "capstone_simplified",
-            "timestamp": datetime.now().isoformat(),
-            "system_info": self._get_system_info(),
-            "note": "Simplified benchmarks - complete Module 20 for full suite",
-            "metrics": {
-                "basic_score": 75
-            }
-        }
-
-        # Save results
-        benchmark_dir = Path(".tito") / "benchmarks"
-        benchmark_dir.mkdir(parents=True, exist_ok=True)
-        timestamp_str = datetime.now().strftime("%Y%m%d_%H%M%S")
-        results_file = benchmark_dir / f"capstone_simplified_{timestamp_str}.json"
-
-        with open(results_file, 'w', encoding='utf-8') as f:
-            json.dump(results, f, indent=2)
-
-        console.print(f"\n[green]✅ Results saved to: {results_file}[/green]")
-        console.print("[yellow]💡 Complete Module 20 for full capstone benchmarks[/yellow]")
-
-        return 0
+        # 2026-09-28: this path used to display and save fixed placeholder
+        # metrics (latency 45.2 ms, 87.5% accuracy, overall 90/100) that were
+        # the same for every student. Nothing measures the Module 20 model
+        # yet, so say so and fail instead of printing numbers.
+        console.print(Panel(
+            "[yellow]Capstone measurement is not implemented yet.[/yellow]\n\n"
+            "Module 20 is exported, but this command does not yet run Module 19's\n"
+            "Benchmark against your model, so it has no numbers to report.\n"
+            "No results were saved.\n\n"
+            "Measure your model directly with the Benchmark class from Module 19\n"
+            "(see the Module 20 notebook).",
+            title="Not implemented",
+            border_style="yellow"
+        ))
+        return 1
 
     def _benchmark_tensor_ops(self) -> float:
         """Benchmark basic tensor operations."""
@@ -494,202 +352,14 @@ class BenchmarkCommand(BaseCommand):
             "platform": platform.platform(),
             "processor": platform.processor(),
             "python_version": platform.python_version(),
-            "cpu_count": str(platform.processor() or "unknown")
+            "cpu_count": str(os.cpu_count() or "unknown")
         }
 
-    def _display_capstone_results(self, results: Dict[str, Any]) -> None:
-        """Display capstone benchmark results."""
-        console = self.console
-
-        results_table = Table(title="Capstone Benchmark Results", show_header=True, header_style="bold cyan")
-        results_table.add_column("Track", style="cyan")
-        results_table.add_column("Metric", style="yellow")
-        results_table.add_column("Value", justify="right", style="green")
-        results_table.add_column("Score", justify="right", style="magenta")
-
-        metrics = results.get("metrics", {})
-
-        if "speed" in metrics:
-            speed = metrics["speed"]
-            results_table.add_row("Speed", "Latency", f"{speed['latency_ms']:.2f} ms", f"{speed['score']}/100")
-            results_table.add_row("", "Throughput", f"{speed['throughput_ops_per_sec']:.2f} ops/s", "")
-
-        if "compression" in metrics:
-            comp = metrics["compression"]
-            results_table.add_row("Compression", "Model Size", f"{comp['model_size_mb']:.2f} MB", f"{comp['score']}/100")
-            results_table.add_row("", "Compression Ratio", f"{comp['compression_ratio']:.1f}x", "")
-
-        if "accuracy" in metrics:
-            acc = metrics["accuracy"]
-            results_table.add_row("Accuracy", "Accuracy", f"{acc['accuracy_percent']:.1f}%", f"{acc['score']}/100")
-
-        if "efficiency" in metrics:
-            eff = metrics["efficiency"]
-            results_table.add_row("Efficiency", "Memory", f"{eff['memory_mb']:.2f} MB", f"{eff['score']}/100")
-
-        results_table.add_row("", "", "", "")
-        results_table.add_row("[bold]Overall[/bold]", "", "", f"[bold]{results.get('overall_score', 0)}/100[/bold]")
-
-        console.print("\n")
-        console.print(results_table)
-
-        if results.get("is_placeholder"):
-            console.print(Panel(
-                f"[bold yellow]⚠️  These are placeholder values, not a real measurement[/bold yellow]\n\n"
-                f"{results.get('note', '')}",
-                title="Placeholder Benchmark",
-                border_style="yellow"
-            ))
-        else:
-            console.print(Panel(
-                f"[bold green]🏆 Capstone Benchmark Complete![/bold green]\n\n"
-                f"📊 Overall Score: [bold]{results.get('overall_score', 0)}/100[/bold]",
-                title="Success",
-                border_style="green"
-            ))
-
-    def _prompt_submission(self, results: Dict[str, Any], benchmark_type: str) -> None:
-        """Prompt user to submit benchmark results."""
-        console = self.console
-
-        try:
-            console.print("\n")
-            submit = Confirm.ask(
-                f"[cyan]Would you like to submit your {benchmark_type} benchmark results to the community?[/cyan]",
-                default=True
-            )
-
-            if submit:
-                # Collect submission configuration
-                console.print("\n[cyan]Submission Configuration:[/cyan]")
-
-                # Check if user is in community
-                community_data = self._get_community_data()
-                if not community_data:
-                    console.print("[yellow]⚠️  You're not in the community yet.[/yellow]")
-                    join = Confirm.ask("Would you like to join the community first?", default=True)
-                    if join:
-                        console.print("\n[cyan]Run: [bold]tito community login[/bold][/cyan]")
-                        return
-
-                # Additional submission options
-                include_system_info = Confirm.ask(
-                    "Include system information in submission?",
-                    default=True
-                )
-
-                anonymous = Confirm.ask(
-                    "Submit anonymously?",
-                    default=False
-                )
-
-                # Create submission data
-                submission = {
-                    "benchmark_type": benchmark_type,
-                    "timestamp": results["timestamp"],
-                    "metrics": results["metrics"],
-                    "include_system_info": include_system_info,
-                    "anonymous": anonymous
-                }
-
-                if include_system_info:
-                    submission["system_info"] = results.get("system_info", {})
-
-                # Save submission
-                submission_dir = Path(".tito") / "submissions"
-                submission_dir.mkdir(parents=True, exist_ok=True)
-                timestamp_str = datetime.now().strftime("%Y%m%d_%H%M%S")
-                submission_file = submission_dir / f"{benchmark_type}_submission_{timestamp_str}.json"
-
-                with open(submission_file, 'w', encoding='utf-8') as f:
-                    json.dump(submission, f, indent=2)
-
-                console.print(f"\n[green]✅ Submission prepared: {submission_file}[/green]")
-
-                # Stub: Try to submit to website
-                self._submit_to_website(submission)
-
-                config = self._get_config()
-                if not config.get("website", {}).get("enabled", False):
-                    console.print("[cyan]💡 Submission saved locally. Community leaderboard coming soon![/cyan]")
-        except EOFError:
-            console.print("\n[dim]Skipping submission (no interactive input available).[/dim]")
-        except KeyboardInterrupt:
-            console.print("\n[dim]Submission cancelled.[/dim]")
-
-    def _get_community_data(self) -> Optional[Dict[str, Any]]:
-        """Get user's community profile from ~/.tinytorch (flat structure)."""
-        from pathlib import Path
-        profile_file = Path.home() / ".tinytorch" / "profile.json"
-        if profile_file.exists():
-            try:
-                with open(profile_file, 'r', encoding='utf-8') as f:
-                    return json.load(f)
-            except Exception:
-                return None
-        return None
-
-    def _get_config(self) -> Dict[str, Any]:
-        """Get community configuration."""
-        tito_config = self.config.project_root / ".tito" / "config.json"
-        legacy_config = self.config.project_root / ".tinytorch" / "config.json"
-        config_file = tito_config if (tito_config.exists() or not legacy_config.exists()) else legacy_config
-        default_config = {
-            "website": {
-                "base_url": "https://tinytorch.ai",
-                "community_map_url": "https://tinytorch.ai/map",
-                "api_url": None,  # Set when API is available
-                "enabled": False  # Set to True when website integration is ready
-            },
-            "local": {
-                "enabled": True,  # Always use local storage
-                "auto_sync": False  # Auto-sync to website when enabled
-            }
-        }
-
-        if config_file.exists():
-            try:
-                with open(config_file, 'r', encoding='utf-8') as f:
-                    user_config = json.load(f)
-                    # Merge with defaults
-                    default_config.update(user_config)
-                    return default_config
-            except Exception:
-                pass
-
-        # Create default config in .tito if it doesn't exist
-        tito_config.parent.mkdir(parents=True, exist_ok=True)
-        with open(tito_config, 'w', encoding='utf-8') as f:
-            json.dump(default_config, f, indent=2)
-
-        return default_config
-
-    def _submit_to_website(self, submission: Dict[str, Any]) -> None:
-        """Stub: Submit benchmark results to website (local for now, website integration later)."""
-        config = self._get_config()
-
-        if not config.get("website", {}).get("enabled", False):
-            # Website integration not enabled, just store locally
-            return
-
-        api_url = config.get("website", {}).get("api_url")
-        if api_url:
-            # TODO: Implement API call when website is ready
-            # Example:
-            # import requests
-            # try:
-            #     response = requests.post(
-            #         f"{api_url}/api/benchmarks/submit",
-            #         json=submission,
-            #         timeout=30,  # 30 second timeout for benchmark submissions
-            #         headers={"Content-Type": "application/json"}
-            #     )
-            #     response.raise_for_status()
-            #     self.console.print("[green]✅ Submitted to community leaderboard![/green]")
-            # except requests.Timeout:
-            #     self.console.print("[yellow]⚠️  Submission timed out. Saved locally.[/yellow]")
-            #     self.console.print("[dim]You can submit later or try again.[/dim]")
-            # except requests.RequestException as e:
-            #     self.console.print(f"[yellow]⚠️  Could not submit to website: {e}[/yellow]")
-            #     self.console.print("[dim]Your submission is saved locally and can be submitted later.[/dim]")
-            pass
+    def _report_local_only(self, results_file: Path) -> None:
+        """Say plainly where results live. There is no upload step."""
+        # 2026-09-28: this once asked "submit to the community?" (default yes)
+        # and then only wrote a local file via a stub uploader.
+        self.console.print(
+            f"[dim]Results are stored locally only ({results_file}). "
+            "TinyTorch has no community upload for benchmarks yet.[/dim]"
+        )

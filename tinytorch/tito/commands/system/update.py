@@ -159,10 +159,15 @@ class UpdateCommand(BaseCommand):
         import ssl
 
         try:
-            # Create unverified context for macOS compatibility
-            ctx = ssl.create_default_context()
-            ctx.check_hostname = False
-            ctx.verify_mode = ssl.CERT_NONE
+            # Always verify TLS. certifi's CA bundle fixes the macOS
+            # python.org-installer case (no system certs) without ever
+            # disabling verification; on failure we report that the update
+            # check could not run instead of trusting an unverified server.
+            try:
+                import certifi
+                ctx = ssl.create_default_context(cafile=certifi.where())
+            except ImportError:
+                ctx = ssl.create_default_context()
 
             req = urllib.request.Request(
                 self.TAGS_API,
@@ -176,7 +181,8 @@ class UpdateCommand(BaseCommand):
                 return None, None
 
             return self._extract_best_tag(tags)
-        except Exception:
+        except Exception as e:
+            self.console.print(f"[dim]Couldn't check for updates: {e}[/dim]")
             return None, None
 
     def _compare_versions(self, current: str, latest: str) -> int:

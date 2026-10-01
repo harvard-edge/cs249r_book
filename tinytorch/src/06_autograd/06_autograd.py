@@ -75,8 +75,11 @@ of any particular layer.
 - `numpy` (for array operations and numerical computing)
 
 **TinyTorch Dependencies**:
-- `tinytorch.core.tensor.Tensor` - Core tensor operations
+- `tinytorch.core.tensor` (Module 01): `Tensor`, the `Function` base class, and the operation classes `Add`, `Sub`, `Mul`, `Div`, `MatMul`, `Reshape`, `Permute`, `Copy`, `Slice`, `MaskedFill`, `Sum`, `Mean`, `Max`
+- `tinytorch.core.activations` (Module 02): `SigmoidFunction`, `ReLUFunction`, `TanhFunction`, `GELUFunction`, `SoftmaxFunction`
+- `tinytorch.core.losses` (Module 04): `LogSoftmax`, `MSEFunction`, `BinaryCrossEntropyFunction`, `CrossEntropyFunction`
 
+**Dependency Flow**:
 $$\begin{array}{ccccc}
 \mathbf{\text{Module 01: Tensor}} & \longrightarrow & \mathbf{\text{Module 06: Autograd}} & \longrightarrow & \mathbf{\text{Module 07: Optimizers}} \\
 \downarrow & & \downarrow & & \downarrow \\
@@ -2159,12 +2162,11 @@ def backward(self, grad_output):
 
     APPROACH:
     1. Extract predictions tensor from self.inputs
-    2. If predictions requires gradients:
-       - Compute difference: predictions.data - targets.data
-       - Apply MSE derivative: 2 * difference / N
-       - Multiply by grad_output: grad * grad_output
-       - Return (result, None): targets carry no gradient
-    3. Else return (None, None)
+    2. Compute the prediction gradient: 2 * (predictions - targets) / N,
+       multiplied by grad_output
+    3. The loss is symmetric in its two inputs, so the target gradient is
+       the negation of the prediction gradient
+    4. Return a gradient only for an input that requires one, None otherwise
 
     EXAMPLE:
     >>> predictions = Tensor([2.0, 3.0], requires_grad=True)
@@ -2177,17 +2179,19 @@ def backward(self, grad_output):
     - MSE derivative: ∂MSE/∂pred = 2 * (pred - target) / N
     - N = np.size(targets.data) (total number of elements)
     - Multiply by grad_output for chain rule
+    - Targets usually do not require gradients, but when they do (e.g.
+      matching one network's output to another's), ∂L/∂target = -∂L/∂pred
     """
     ### BEGIN SOLUTION
     predictions, targets = self.inputs
 
-    if isinstance(predictions, Tensor) and predictions.requires_grad:
-        # Gradient: 2 * (predictions - targets) / N
-        num_samples = np.size(targets.data)
-        grad = 2.0 * (predictions.data - targets.data) / num_samples
+    # Gradient: 2 * (predictions - targets) / N
+    num_samples = np.size(targets.data)
+    grad = 2.0 * (predictions.data - targets.data) / num_samples * grad_output
 
-        return grad * grad_output, None
-    return None, None
+    grad_pred = grad if isinstance(predictions, Tensor) and predictions.requires_grad else None
+    grad_target = -grad if isinstance(targets, Tensor) and targets.requires_grad else None
+    return grad_pred, grad_target
     ### END SOLUTION
 
 # %% [markdown]
@@ -2217,6 +2221,10 @@ cancellation is why sigmoid and BCE are always paired.
 to zero as the model becomes confident. A confident wrong prediction produces a
 gradient that overflows. Real frameworks fuse sigmoid and BCE into one operation
 so the cancellation happens before any division does.
+
+**Clipping has a price**: the forward pass clips p into [1e-7, 1 - 1e-7] before
+taking logarithms, so any prediction outside that interval sits on a flat piece
+of the loss and receives exactly zero gradient, however wrong it is.
 """
 
 # %% nbgrader={"grade": false, "grade_id": "bce-backward", "solution": true}
@@ -2241,8 +2249,10 @@ def backward(self, grad_output):
        - Apply BCE derivative: (p - y) / (p * (1-p) * N)
        - Zero it outside the clipping interval, where forward is constant
        - Multiply by grad_output
-       - Return (result, None): targets carry no gradient
-    3. Else return (None, None)
+    3. If targets require gradients (soft labels produced by another model):
+       - L is linear in y, so ∂L/∂y = -(log(p) - log(1-p)) / N, times grad_output
+    4. Return (prediction gradient, target gradient), None for any input
+       that does not require a gradient
 
     EXAMPLE:
     >>> predictions = Tensor([0.7, 0.3], requires_grad=True)
@@ -2255,25 +2265,30 @@ def backward(self, grad_output):
     - Clip predictions to avoid log(0) instability; outer regions have zero gradient
     - At the clipping boundaries, use the one-sided derivative from the interior
     - Divide by N for mean loss
+    - The target gradient uses the same clipped p the forward pass used
     """
     ### BEGIN SOLUTION role="scaffold"
     predictions, targets = self.inputs
+    eps = EPSILON
+    p = np.clip(predictions.data, eps, 1 - eps)
+    y = targets.data
+    num_samples = np.size(targets.data)
 
+    grad_pred = None
     if isinstance(predictions, Tensor) and predictions.requires_grad:
-        eps = EPSILON
-        p = np.clip(predictions.data, eps, 1 - eps)
-        y = targets.data
-        num_samples = np.size(targets.data)
-
         # Gradient: (p - y) / (p * (1-p) * N)
         grad = (p - y) / (p * (1 - p) * num_samples)
         # Forward is constant outside the clipping interval. At a boundary,
         # choose the derivative from the interior of that interval.
         unclipped = (predictions.data >= eps) & (predictions.data <= 1 - eps)
-        grad = np.where(unclipped, grad, 0.0)
+        grad_pred = np.where(unclipped, grad, 0.0) * grad_output
 
-        return grad * grad_output, None
-    return None, None
+    grad_target = None
+    if isinstance(targets, Tensor) and targets.requires_grad:
+        # L is linear in y: ∂L/∂y = -(log p - log(1-p)) / N
+        grad_target = -(np.log(p) - np.log(1 - p)) / num_samples * grad_output
+
+    return grad_pred, grad_target
     ### END SOLUTION
 
 # %% [markdown]

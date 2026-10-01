@@ -17,7 +17,7 @@ In this interactive milestone, YOU bring together your student-authored modules:
    Formatting prompts with "Q: ..." and completing answers with "A: ...".
 2. The Overfitting Detective Experiment:
    Comparing Train Loss versus Test Loss on held-out concept splits.
-   Because a 119K parameter model has more weights than the dataset has
+   Because a 218K parameter model has more weights than the dataset has
    characters, you will observe how micro-models can achieve near-zero training
    loss through rote memorization, exposing the generalization gap.
 3. Interactive Typewriter Streaming:
@@ -33,11 +33,28 @@ In this interactive milestone, YOU bring together your student-authored modules:
   Module 06 (Autograd)      : YOUR reverse-mode computational graph
   Module 07 (Optimizers)    : YOUR AdamW optimizer
   Module 08 (Training)      : YOUR Trainer training loop
-  Module 10 (Tokenization)  : YOUR Character Tokenizer
   Module 11 (Embeddings)    : YOUR Token + Learned Positional Embeddings
   Module 12 (Attention)     : YOUR Causal Multi-Head Attention
   Module 13 (Transformers)  : YOUR Pre-LN Transformer Blocks & TinyGPT
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  Tokenizer: this part uses a word-level ConceptTokenizer defined in this
+  script, not your Module 10 tokenizer. 64 Q&A pairs are too few for a
+  character model to learn whole answers in a few epochs, and your
+  BPETokenizer splits on whitespace, which drops the newlines that separate
+  "Q:" from "A:". Your CharTokenizer runs in Parts 1 and 3.
+
+📊 SUCCESS CRITERIA:
+  Learned        : Training loss < 0.60, measured in NumPy after training
+                   (a model without working attention stalls near 1.0)
+  Generalized    : The lowest held-out loss sits well below the untrained
+                   model's held-out loss (see HELDOUT_DROP_MARGIN)
+  Overfitting    : The final held-out loss sits above the training loss
+                   (the Overfitting Detective's finding, not a score)
+  Causality      : Changing future tokens never changes past predictions
+  Honest Loss    : YOUR cross-entropy matches a NumPy reference
+  Positions      : A repeated token gives different logits at different
+                   positions (YOUR positional encoding is doing its job)
 
 🏗️ ARCHITECTURE (Decoder-Only Conversational Transformer):
     ┌─────────────┐    ┌─────────────┐    ┌─────────────┐    ┌─────────────┐
@@ -66,6 +83,10 @@ import numpy as np
 project_root = Path(__file__).resolve().parents[2]
 if str(project_root) not in sys.path:
     sys.path.insert(0, str(project_root))
+# Shared Milestone 05 checks live next to this script (transformer_gates.py)
+milestone_dir = str(Path(__file__).resolve().parent)
+if milestone_dir not in sys.path:
+    sys.path.insert(0, milestone_dir)
 
 # =============================================================================
 # 🎓 ZONE 1: STUDENT CORE LEGO BRICKS (YOUR Modules 01-13)
@@ -84,6 +105,19 @@ from tinytorch.core.transformers import (  # noqa: E402
     create_causal_mask,
 )
 from milestones.data_manager import DatasetManager  # noqa: E402
+from transformer_gates import (  # noqa: E402
+    attention_content_failure_message,
+    attention_content_probe,
+    attention_content_report,
+    causality_failure_message,
+    causality_probe,
+    causality_report,
+    cross_entropy_check,
+    cross_entropy_failure_message,
+    measured_loss,
+    position_failure_message,
+    position_probe,
+)
 
 # Rich for terminal UI
 from rich.console import Console  # noqa: E402
@@ -235,9 +269,11 @@ class TinyGPT:
         self.num_heads = num_heads
         self.max_seq_len = max_seq_len
 
-        # Token + Positional Embeddings
-        self.token_embeddings = EmbeddingLayer(vocab_size, embed_dim)
-        self.pos_embeddings = EmbeddingLayer(max_seq_len, embed_dim)
+        # Token + learned positional embeddings (Module 11). 2026-09-29: this
+        # used to add a second EmbeddingLayer indexed by position ids, so the
+        # model knew positions even when YOUR PositionalEncoding returned its
+        # input unchanged; Parts 1 and 3 use the same single layer.
+        self.embedding_layer = EmbeddingLayer(vocab_size, embed_dim, max_seq_len)
 
         # Transformer Blocks with Pre-LN Residual Connections
         self.blocks = [
@@ -262,12 +298,8 @@ class TinyGPT:
         """
         batch_size, seq_len = tokens.shape
 
-        # Positional indices
-        positions = np.arange(start_pos, start_pos + seq_len, dtype=np.int32)
-        pos_tensor = Tensor(np.tile(positions, (batch_size, 1)))
-
-        # Sum token and position representations
-        h = self.token_embeddings.forward(tokens) + self.pos_embeddings.forward(pos_tensor)
+        # Token embeddings plus the position table rows start_pos..start_pos+seq_len
+        h = self.embedding_layer.forward(tokens, start_pos)
 
         # Create causal triangular mask
         mask = create_causal_mask(seq_len)
@@ -287,8 +319,7 @@ class TinyGPT:
     def parameters(self) -> list:
         """Return all learnable parameter Tensors."""
         params = []
-        params.extend(self.token_embeddings.parameters())
-        params.extend(self.pos_embeddings.parameters())
+        params.extend(self.embedding_layer.parameters())
         for block in self.blocks:
             params.extend(block.parameters())
         params.extend(self.ln_f.parameters())
@@ -420,40 +451,6 @@ def generate_chat_response(
     return tokenizer.decode(current_ids)
 
 
-def evaluate_dataloader_loss(
-    model: TinyGPT,
-    dataloader: DataLoader,
-    criterion: CrossEntropyLoss,
-    vocab_size: int,
-) -> float:
-    """
-    Compute average cross-entropy loss over a dataloader without updating weights.
-
-    Args:
-        model: TinyGPT instance.
-        dataloader: DataLoader containing inputs and targets.
-        criterion: CrossEntropyLoss criterion.
-        vocab_size: Total vocabulary size.
-
-    Returns:
-        Average loss across all evaluation tokens.
-    """
-    total_loss = 0.0
-    total_tokens = 0
-
-    for inputs, targets in dataloader:
-        logits = model.forward(inputs)
-        logits_flat = logits.reshape(-1, vocab_size)
-        targets_flat = targets.reshape(-1)
-        loss = criterion(logits_flat, targets_flat)
-
-        batch_tokens = targets.data.size
-        total_loss += float(loss.data) * batch_tokens
-        total_tokens += batch_tokens
-
-    return total_loss / total_tokens if total_tokens > 0 else 0.0
-
-
 # =============================================================================
 # ZONE 2: MILESTONE HARNESS & USER EXPERIENCE
 # =============================================================================
@@ -525,9 +522,8 @@ def create_token_windows(
     tokens: List[int],
     seq_len: int = 36,
     stride: int = 2,
-    batch_size: int = 32,
-) -> DataLoader:
-    """Create a DataLoader of sliding windows from a token sequence."""
+) -> Tuple[np.ndarray, np.ndarray]:
+    """Sliding (input, next-token target) windows over a token sequence."""
     inputs = []
     targets = []
     for start in range(0, len(tokens) - seq_len, stride):
@@ -539,10 +535,58 @@ def create_token_windows(
         inputs.append(tokens[:-1])
         targets.append(tokens[1:])
 
-    x_tensor = Tensor(np.array(inputs, dtype=np.int32))
-    y_tensor = Tensor(np.array(targets, dtype=np.int32))
-    dataset = TensorDataset(x_tensor, y_tensor)
-    return DataLoader(dataset, batch_size=batch_size, shuffle=True)
+    return np.array(inputs, dtype=np.int32), np.array(targets, dtype=np.int32)
+
+
+def diagnose_epochs(history):
+    """Label each epoch from the measured held-out curve.
+
+    The sweet spot is the epoch with the lowest held-out loss; overfitting
+    means held-out loss has risen past it. Labels were once assigned by epoch
+    number, so a steadily rising test loss could still be called "Sweet Spot".
+
+    Args:
+        history: list of (epoch, train_loss, test_loss, gap) tuples.
+
+    Returns:
+        list of (diagnosis, rich_style) tuples, one per epoch.
+    """
+    best_ep, _, best_te, _ = min(history, key=lambda row: row[2])
+    labels = []
+    for ep, _, te, _ in history:
+        if ep == best_ep:
+            labels.append(("Sweet Spot (lowest held-out loss)", "green"))
+        elif ep < best_ep:
+            labels.append(("Learning (held-out loss still falling)", "white"))
+        elif te > best_te:
+            labels.append(
+                (f"Overfitting (held-out loss up {te - best_te:.2f} since epoch {best_ep})", "bold red")
+            )
+        else:
+            labels.append(("Plateau (held-out loss matches best)", "dim"))
+    return labels
+
+
+# Gate calibration, 2026-09-29 (final training loss; --quick trains 8 epochs
+# on the same splits instead of 10):
+#   correct code     0.087-0.093 (quick 0.098); gap about +11
+#   attention zeroed 1.009-1.013 (quick 1.002); gap about +7.5
+# --quick used to pass on (loss < 2.80 or drop > 0.30), which any model met.
+CHAT_TRAIN_LOSS_TARGET = 0.60
+OVERFIT_GAP_TARGET = 0.30
+# The lowest held-out loss must sit this far below the untrained model's
+# held-out loss. Added 2026-09-29: with Trainer.train_epoch a no-op, the old
+# gate read the Trainer's "0.0000" and passed a model whose test loss (7.28)
+# matched the untrained one (7.27). Measured 2026-09-29, default run, in
+# NumPy after the single-EmbeddingLayer change (untrained held-out 7.20):
+#   correct code        lowest held-out 5.86-5.94 (epoch 1), drop 1.26-1.34 (3 runs)
+#                       final train 0.068-0.074, gap +10.6 to +11.0
+#   attention zeroed    lowest 6.22, drop 1.01; final train 0.99 (fails the loss)
+#   no-op train_epoch   lowest 7.20, drop 0.00; final train 7.22 (fails all three)
+#   uniform attention   lowest 6.49, drop 0.70; final train 0.079 (PASSES: with
+#                       positions available, averaging the prefix still lets
+#                       this model memorize; Part 1 is the check that catches it)
+HELDOUT_DROP_MARGIN = 0.50
 
 
 def run_milestone(args=None):
@@ -631,15 +675,17 @@ def run_milestone(args=None):
     stride_train = 2
     stride_test = 4
 
-    train_loader = create_token_windows(train_tokens, seq_len=seq_len, stride=stride_train)
-    test_loader = create_token_windows(test_tokens, seq_len=seq_len, stride=stride_test)
+    train_x, train_y = create_token_windows(train_tokens, seq_len=seq_len, stride=stride_train)
+    test_x, test_y = create_token_windows(test_tokens, seq_len=seq_len, stride=stride_test)
+    train_loader = DataLoader(TensorDataset(Tensor(train_x), Tensor(train_y)),
+                              batch_size=32, shuffle=True)
 
     console.print(
-        f"  Train windows   : [cyan]{len(train_loader.dataset):,} slices[/cyan] "
+        f"  Train windows   : [cyan]{len(train_x):,} slices[/cyan] "
         f"(seq_len={seq_len}, stride={stride_train})"
     )
     console.print(
-        f"  Test windows    : [cyan]{len(test_loader.dataset):,} slices[/cyan] "
+        f"  Test windows    : [cyan]{len(test_x):,} slices[/cyan] "
         f"(seq_len={seq_len}, stride={stride_test})"
     )
 
@@ -697,6 +743,30 @@ def run_milestone(args=None):
     loss_fn = CrossEntropyLoss()
     trainer = Trainer(model, optimizer, loss_fn)
 
+    # Two checks that need no training, so a broken module fails in seconds:
+    # YOUR cross-entropy forward must report the true loss of the logits, and
+    # YOUR positional encoding must make positions distinguishable.
+    ce_check = cross_entropy_check(model, loss_fn, train_x[:32], train_y[:32], vocab_size)
+    if not ce_check.passed:
+        console.print(Panel.fit(cross_entropy_failure_message(ce_check),
+                                border_style="red", title="Loss Check Failed"))
+        return 1
+    positions = position_probe(model, int(train_x[0, 0]), seq_len)
+    if not positions.passed:
+        console.print(Panel.fit(position_failure_message(positions),
+                                border_style="red", title="Position Check Failed"))
+        return 1
+
+    # Losses of the untrained model, measured before the first update. Every
+    # loss the gate reads is computed in NumPy from the model's logits.
+    train_loss_before = measured_loss(model, train_x, train_y)
+    test_loss_before = measured_loss(model, test_x, test_y)
+    console.print(
+        f"  Loss before training: train [cyan]{train_loss_before:.4f}[/cyan], "
+        f"test [cyan]{test_loss_before:.4f}[/cyan] "
+        f"(uniform guessing: {np.log(vocab_size):.4f})\n"
+    )
+
     console.print(
         "[bold]🚀 Training TinyGPT & Running Overfitting Detective...[/bold]"
     )
@@ -715,13 +785,12 @@ def run_milestone(args=None):
         task = progress.add_task("[cyan]Training epochs...", total=epochs)
 
         for epoch in range(epochs):
-            train_loss = trainer.train_epoch(train_loader)
-            test_loss = evaluate_dataloader_loss(
-                model=model,
-                dataloader=test_loader,
-                criterion=loss_fn,
-                vocab_size=vocab_size,
-            )
+            # The training loss is re-measured after the epoch rather than
+            # taken from YOUR Trainer.train_epoch: a train_epoch that did
+            # nothing once reported 0.0 and passed an untrained model.
+            trainer.train_epoch(train_loader)
+            train_loss = measured_loss(model, train_x, train_y)
+            test_loss = measured_loss(model, test_x, test_y)
             gap = test_loss - train_loss
             history.append((epoch + 1, train_loss, test_loss, gap))
 
@@ -754,19 +823,8 @@ def run_milestone(args=None):
     detective_table.add_column("Generalization Gap", justify="right")
     detective_table.add_column("Detective Diagnosis", style="yellow")
 
-    for ep, tr, te, gap in history:
-        if ep == 1:
-            diag = "Underfitting (Both losses high)"
-            gap_style = "dim"
-        elif ep == epochs // 2:
-            diag = "Sweet Spot (Optimal generalization)"
-            gap_style = "green"
-        elif ep == epochs:
-            diag = "Overfitting (Rote memorization active)"
-            gap_style = "bold red"
-        else:
-            diag = "Learning representations"
-            gap_style = "white"
+    best_ep, _, best_te, _ = min(history, key=lambda row: row[2])
+    for (ep, tr, te, gap), (diag, gap_style) in zip(history, diagnose_epochs(history)):
 
         gap_str = f"+{gap:.4f}" if gap >= 0 else f"{gap:.4f}"
         detective_table.add_row(
@@ -806,6 +864,7 @@ def run_milestone(args=None):
         test_prompts = list(benchmark_prompts)
 
     scorecard_rows = []
+    answered_count = 0
 
     for prompt in test_prompts:
         t0 = time.perf_counter()
@@ -851,6 +910,7 @@ def run_milestone(args=None):
 
         # Format validation: check that answer is non-empty and coherent
         has_content = len(answer_body) > 10
+        answered_count += int(has_content)
         scorecard_rows.append(
             (
                 prompt.split("\n")[0],
@@ -918,34 +978,74 @@ def run_milestone(args=None):
     # =========================================================================
     # 8. CONVERGENCE SCORECARD & ACHIEVEMENT GATE
     # =========================================================================
-    initial_train_loss = history[0][1]
     final_train_loss = history[-1][1]
     final_test_loss = history[-1][2]
     final_gap = history[-1][3]
-    train_loss_drop = initial_train_loss - final_train_loss
+    train_loss_drop = train_loss_before - final_train_loss
 
-    # The gate checks that the model converged on training concepts
-    # and observed the generalization gap
-    if is_quick:
-        passed = (final_train_loss < 2.80) or (train_loss_drop > 0.30)
-    else:
-        passed = (final_train_loss < 0.60 or train_loss_drop > 1.20) and final_gap > 0.30
+    causality = causality_probe(model, test_tokens[:seq_len], vocab_size)
+    if not causality.passed:
+        console.print()
+        console.print(Panel.fit(causality_failure_message(causality),
+                                border_style="red", title="Causality Check Failed"))
+        return 1
+
+    # Uniform attention (every earlier word weighted equally) still memorizes
+    # these 64 Q&A pairs, so the loss gates alone cannot reject it.
+    attention = attention_content_probe(model, test_tokens[:seq_len])
+    if not attention.passed:
+        console.print()
+        console.print(Panel.fit(attention_content_failure_message(attention),
+                                border_style="red", title="Attention Check Failed"))
+        return 1
+
+    # Every loss below was measured in NumPy from the model's logits.
+    # Three separate checks (2026-09-29):
+    #   1. Learned: training loss below CHAT_TRAIN_LOSS_TARGET. A model with
+    #      attention zeroed plateaus at 1.01 here (it can only count which word
+    #      follows which); correct code reaches 0.09.
+    #   2. Generalized at some point: the lowest held-out loss must sit
+    #      HELDOUT_DROP_MARGIN below the untrained model's. An untrained model
+    #      (or one whose training loop does nothing) cannot.
+    #   3. Overfitting demonstrated: the held-out gap must open, because the
+    #      Overfitting Detective is the lesson of this part. The gap is a
+    #      symptom of memorization, not a sign of a good model, so it is
+    #      reported as the experiment's result, never as success.
+    # The old gate, (loss < 0.60 or drop > 1.20) and gap > 0.30, passed the
+    # no-attention model through the drop clause.
+    loss_target = CHAT_TRAIN_LOSS_TARGET
+    learned = final_train_loss < loss_target
+    heldout_target = test_loss_before - HELDOUT_DROP_MARGIN
+    generalized = best_te < heldout_target
+    gap_opened = final_gap > OVERFIT_GAP_TARGET
+    passed = learned and generalized and gap_opened
+
+    gap_note = (
+        " (train/test gap opened: memorization is visible)"
+        if gap_opened else " (gap still small at this training length)"
+    )
 
     if passed:
         success_msg = (
             "[bold green]🏆 MILESTONE ACHIEVED: "
-            "TINYGPT CHAT & OVERFITTING DETECTIVE VERIFIED![/bold green]\n\n"
-            f"  • Initial Train Loss : {initial_train_loss:.4f}\n"
+            "TINYGPT CHAT TRAINED, OVERFITTING REPRODUCED[/bold green]\n\n"
+            f"  • Train Loss Before  : {train_loss_before:.4f} (untrained model)\n"
             f"  • Final Train Loss   : [bold green]{final_train_loss:.4f}[/bold green]"
-            f" (drop: -{train_loss_drop:.2f})\n"
+            f" (drop: -{train_loss_drop:.2f}, needed < {loss_target:.2f})\n"
+            f"  • Test Loss Before   : {test_loss_before:.4f} (untrained model)\n"
             f"  • Final Test Loss    : [cyan]{final_test_loss:.4f}[/cyan]\n"
-            f"  • Generalization Gap : [yellow]+{final_gap:.2f}[/yellow] "
-            "(Demonstrated rote memorization boundary!)\n"
-            "  • Dialogue Gate      : Coherent Q&A formatting with "
-            "autoregressive completion!\n\n"
-            "You trained a conversational assistant explaining TinyTorch\n"
-            "from scratch using exclusively your TinyTorch autograd and "
-            "transformer blocks!\n\n"
+            f"  • Generalization Gap : [yellow]{final_gap:+.2f}[/yellow]"
+            f"{gap_note}\n"
+            f"  • Lowest Test Loss   : {best_te:.4f} at epoch {best_ep} of {epochs}"
+            f" (needed < {heldout_target:.2f})\n"
+            f"  • {causality_report(causality)}\n"
+            f"  • {attention_content_report(attention)}\n"
+            f"  • Answers Generated  : {answered_count}/{len(test_prompts)} "
+            "prompts produced a non-empty answer (length check only)\n\n"
+            "The gap is the Overfitting Detective's finding, not a score: on 64\n"
+            "Q&A pairs the model memorizes its training answers and does worse\n"
+            "on questions it never saw. Your attention and training work; the\n"
+            "dataset is simply too small to generalize from.\n\n"
             "[dim]In Milestone 06: Profile and accelerate these models "
             "with KV caching (Module 18)\n"
             "and INT8 quantization (Module 15) for low latency inference.[/dim]"
@@ -959,11 +1059,23 @@ def run_milestone(args=None):
         )
         return 0
     else:
+        mark = lambda ok: "[green]✓[/green]" if ok else "[red]✗[/red]"
         console.print(
             Panel.fit(
                 "[bold red]❌ MILESTONE 05 FAILED: CONVERGENCE GATE NOT MET[/bold red]\n\n"
-                f"  • Final Train Loss   : {final_train_loss:.4f} (target < 0.60)\n"
-                f"  • Generalization Gap : +{final_gap:.2f} (target > 0.30)",
+                f"  {mark(learned)} Final Train Loss   : {final_train_loss:.4f} "
+                f"(target < {loss_target:.2f}, measured after training)\n"
+                f"  {mark(generalized)} Lowest Test Loss   : {best_te:.4f} at epoch {best_ep} "
+                f"(target < {heldout_target:.2f}, {HELDOUT_DROP_MARGIN:.2f} below the "
+                f"untrained {test_loss_before:.2f})\n"
+                f"  {mark(gap_opened)} Generalization Gap : {final_gap:+.2f} "
+                f"(the overfitting demonstration needs > {OVERFIT_GAP_TARGET:.2f})\n\n"
+                "  A model whose attention does nothing plateaus near 1.0 here: it\n"
+                "  learns which word follows which, but cannot recall a whole answer.\n"
+                "  A held-out loss that never drops below the untrained model's means\n"
+                "  the weights did not move: check that Trainer.train_epoch runs\n"
+                "  forward, backward and optimizer.step on every batch.\n"
+                "  Check MultiHeadAttention.forward and that every parameter updates.",
                 border_style="red",
                 title="Needs Tuning",
             )

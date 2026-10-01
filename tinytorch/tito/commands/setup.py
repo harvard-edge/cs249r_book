@@ -296,6 +296,8 @@ class SetupCommand(BaseCommand):
             # Detect Apple Silicon and force arm64 if needed
             arch = platform.machine()
             python_exe = sys.executable
+            # argv prefix; ["arch", "-arm64"] when forcing a native interpreter.
+            arch_prefix = []
 
             if platform.system() == "Darwin" and arch == "x86_64":
                 # Check if we're on Apple Silicon but running Rosetta
@@ -310,21 +312,17 @@ class SetupCommand(BaseCommand):
                         self.console.print("[yellow]⚠️  Detected Apple Silicon but Python is running in Rosetta (x86_64)[/yellow]")
                         self.console.print("[cyan]🔧 Creating arm64 native environment for better performance...[/cyan]")
                         # Force arm64 Python
-                        python_exe = f"arch -arm64 {python_exe}"
-                except:
+                        arch_prefix = ["arch", "-arm64"]
+                except (OSError, sp.SubprocessError):
                     pass
 
-            # Create virtual environment (potentially with arch prefix)
-            if "arch -arm64" in python_exe:
-                result = subprocess.run(
-                    f'{python_exe} -m venv {venv_path}',
-                    shell=True,
-                    capture_output=True, text=True, encoding="utf-8", errors="replace"
-                )
-            else:
-                result = subprocess.run([
-                    python_exe, "-m", "venv", str(venv_path)
-                ], capture_output=True, text=True, encoding="utf-8", errors="replace")
+            # Create virtual environment (potentially with arch prefix). An
+            # argv list, never a shell string: venv_path may contain spaces
+            # or shell metacharacters.
+            result = subprocess.run(
+                [*arch_prefix, python_exe, "-m", "venv", str(venv_path)],
+                capture_output=True, text=True, encoding="utf-8", errors="replace"
+            )
 
             if result.returncode != 0:
                 self.console.print(f"[red]Failed to create virtual environment: {result.stderr}[/red]")

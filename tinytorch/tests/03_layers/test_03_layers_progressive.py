@@ -917,6 +917,7 @@ class TestModuleCompletionReadiness:
             relu = ReLU()
             chained_output = relu(output)
             assert isinstance(chained_output, Tensor)
+            np.testing.assert_allclose(chained_output.data, [1, 2, 3])
             completion_checklist["Layer chains with activations"] = True
 
             # Check 6: supports parameters
@@ -929,6 +930,7 @@ class TestModuleCompletionReadiness:
 
             param_layer = ParameterLayer()
             param_output = param_layer(x)
+            np.testing.assert_allclose(param_output.data, [0.5, 1.0, 1.5])
             completion_checklist["Foundation supports parameters"] = True
 
             # Check 7: supports batches
@@ -969,25 +971,9 @@ class TestModuleCompletionReadiness:
             Just fix the error above and you'll have a complete Layer foundation!
             """
 
-        # If we get here, everything passed!
-        assert True, """
-        🎉 MODULE 03 COMPLETE! 🎉
-
-        ✅ Layer base class implemented
-        ✅ Proper interface design
-        ✅ Integration with foundation
-        ✅ Ready for neural networks
-
-        🚀 READY FOR MODULE 04: LOSSES!
-
-        💡 What you can now do:
-        - Inherit from Layer to create Dense layers
-        - Build multi-layer neural networks
-        - Train on real datasets
-        - Solve non-linear problems like XOR
-
-        🎯 Next: Implement Losses in Module 04!
-        """
+        # Every checklist item must have been reached and marked complete.
+        missing = [check for check, done in completion_checklist.items() if not done]
+        assert not missing, f"Module 03 checklist incomplete: {missing}"
 
 
 # Note: No regression prevention section needed here since we ARE testing regression

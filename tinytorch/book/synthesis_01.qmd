@@ -57,33 +57,48 @@ This milestone synthesizes the foundations of TinyTorch into a complete working 
 
 ## Part 1: The 1958 Perceptron (Forward Pass Without Training)
 
-Frank Rosenblatt's 1958 perceptron is one `Linear` layer feeding one squashing function (`Sigmoid`). With Modules 01 through 03 in hand, the entire model fits in ten lines of Python:
+Frank Rosenblatt's 1958 perceptron is one `Linear` layer feeding one squashing function (`Sigmoid`). With Modules 01 through 03 in hand, the model class fits in about a dozen lines of Python, and the rest of this excerpt draws the data and runs one forward pass:
 
 ```python
-# milestones/01_1958_perceptron/01_rosenblatt_forward.py (excerpt)
+# milestones/01_1958_perceptron/01_rosenblatt_forward.py (trimmed)
 import numpy as np
-from tinytorch import Tensor, Linear, Sigmoid
+rng = np.random.default_rng()
+from tinytorch.core.tensor import Tensor        # Module 01: YOU built this!
+from tinytorch.core.layers import Linear        # Module 03: YOU built this!
+from tinytorch.core.activations import Sigmoid  # Module 02: YOU built this!
 
 class Perceptron:
     def __init__(self, input_size=2, output_size=1):
         self.linear = Linear(input_size, output_size)
         self.activation = Sigmoid()
 
+    def forward(self, x):
+        x = self.linear(x)
+        x = self.activation(x)
+        return x
+
     def __call__(self, x):
-        return self.activation(self.linear(x))
+        return self.forward(x)
 
-# 10 linearly separable points: class 0 clustered near (1,1), class 1 near (4,4)
-X_sep = np.array([[1.0, 1.0], [1.5, 2.0], [2.0, 1.5], [0.5, 1.0], [1.0, 0.5],
-                  [3.5, 3.5], [4.0, 4.5], [4.5, 3.5], [3.0, 4.0], [4.0, 3.0]])
-y_sep = np.array([[0], [0], [0], [0], [0], [1], [1], [1], [1], [1]])
+# in main():
+cluster1 = rng.normal([2, 2], 0.5, (5, 2))   # Class 1: top-right
+cluster2 = rng.normal([-2, -2], 0.5, (5, 2)) # Class 0: bottom-left
+X = np.vstack([cluster1, cluster2]).astype(np.float32)
+y = np.array([1, 1, 1, 1, 1, 0, 0, 0, 0, 0], dtype=np.float32)  # True labels
 
-model = Perceptron()
-predictions = model(Tensor(X_sep))
-pred_classes = (predictions.data > 0.5).astype(int)
-print(f"Untrained Perceptron Accuracy: {(pred_classes == y_sep).mean():.0%}")
+import tinytorch.core.layers as _layers
+_layers.rng = np.random.default_rng()
+
+model = Perceptron(input_size=2, output_size=1)
+
+input_tensor = Tensor(X)
+predictions = model(input_tensor)
+
+pred_classes = (predictions.data > 0.5).astype(int).flatten()
+accuracy = (pred_classes == y).mean()
 ```
 
-Running this forward pass (`tito milestone run 01`) yields an accuracy hovering between 40% and 60%, essentially a coin flip. The forward pass computes without error, but because the weights are drawn randomly from initialization, the decision boundary lands at an arbitrary orientation.
+Running this forward pass (`tito milestone run 01`) draws two clusters of five points each, centered at $(2, 2)$ for class 1 and $(-2, -2)$ for class 0, and scores them with a perceptron whose weights are random. Neither the data nor the weights are seeded. The script replaces the layers module's seeded generator, so every run draws a new line. The accuracy can land anywhere from 0% to 100%. The clusters are separable, so a random line often gets every point right or every point backwards, and neither outcome is learning. The forward pass computes without error, but because the weights are drawn randomly from initialization, the decision boundary lands at an arbitrary orientation. Since the accuracy is luck, the script grades the arithmetic instead: it recomputes $\sigma(XW + b)$ in NumPy from the model's own weights and exits with status 1 if your `Linear` and `Sigmoid` disagree.
 
 This demonstrates the foundational lesson of deep learning systems: **a forward pass alone does not produce intelligence**. Writing model architectures is straightforward; making them learn requires loss functions, automatic differentiation, and optimizers (@sec-losses through @sec-training).
 
@@ -91,21 +106,32 @@ This demonstrates the foundational lesson of deep learning systems: **a forward 
 
 ## Part 2: The 1969 XOR Crisis (Linear Separability Limits)
 
-Can we fix the perceptron simply by choosing the weights by hand? For linearly separable clusters, yes: picking $w_1 = 1, w_2 = 1, b = -5$ separates the two clusters above with 100% accuracy.
+Can we fix the perceptron simply by choosing the weights by hand? For linearly separable clusters, yes: picking $w_1 = 1, w_2 = 1, b = 0$ separates the script's two clusters, centered at $(-2,-2)$ and $(2,2)$, with 100% accuracy.
 
 In 1969, Marvin Minsky and Seymour Papert published their famous critique showing that for non-linear boundaries, no weight configuration exists that can separate the data.[^fn-minsky-papert-ai-winter] XOR (exclusive or) is the smallest function that defeats the single-layer perceptron. It outputs 1 when its two inputs differ and 0 when they agree: $(0,0) \to 0$, $(0,1) \to 1$, $(1,0) \to 1$, and $(1,1) \to 0$. The two positive corners sit on one diagonal and the two negative corners on the other. Draw any line you like through the square and at least one corner ends up on the wrong side.
 
-[^fn-minsky-papert-ai-winter]: Minsky and Papert's mathematical proof demonstrated that single-layer perceptrons could not compute predicates requiring global coordination, such as connectedness or parity (XOR). Although the authors noted that multi-layer perceptrons could bypass these limitations, they proved that no general learning rule existed at the time to adjust weights across multiple layers. This mathematical dead end led DARPA and international funding bodies to drastically cut neural network research, inaugurating the first "AI Winter" that lasted until Rumelhart, Hinton, and Williams popularized backpropagation in 1986.
+[^fn-minsky-papert-ai-winter]: Minsky and Papert proved that single-layer perceptrons of limited order cannot compute global predicates such as parity (XOR is its two-input case) and connectedness. The authors acknowledged that multilayer networks escape these limits, but they doubted that a practical learning procedure for them would be found; they did not prove that none existed. Their book is often credited with contributing to a decline in neural network funding that lasted until Rumelhart, Hinton, and Williams popularized backpropagation in 1986.
 
 The script in `milestones/02_1969_xor/01_xor_crisis.py` tests several candidate lines before the proof. It builds the perceptron from the existing modules, sets two weights and one bias by hand, and scores the four rows:
 
 ```python
-# milestones/02_1969_xor/01_xor_crisis.py (excerpt)
+# milestones/02_1969_xor/01_xor_crisis.py (trimmed)
 import numpy as np
 from tinytorch import Tensor, Linear, Sigmoid
 
-XOR_INPUTS = np.array([[0., 0.], [0., 1.], [1., 0.], [1., 1.]])
-XOR_TARGETS = np.array([[0.0], [1.0], [1.0], [0.0]])
+XOR_INPUTS = np.array([
+    [0.0, 0.0],
+    [0.0, 1.0],
+    [1.0, 0.0],
+    [1.0, 1.0]
+])
+
+XOR_TARGETS = np.array([
+    [0.0],  # 0 XOR 0 = 0
+    [1.0],  # 0 XOR 1 = 1
+    [1.0],  # 1 XOR 0 = 1
+    [0.0],  # 1 XOR 1 = 0
+])
 
 class SingleLayerPerceptron:
     def __init__(self):
@@ -113,24 +139,34 @@ class SingleLayerPerceptron:
         self.sigmoid = Sigmoid()
 
     def set_weights(self, w1, w2, b):
-        self.linear.weight.data = np.array([[w1], [w2]])  # (in, out)
-        self.linear.bias.data = np.array([b])
+        # Weight shape is (in_features, out_features) = (2, 1)
+        self.linear.weight.data[...] = [[w1], [w2]]
+        self.linear.bias.data[...] = b
 
     def __call__(self, x):
         return self.sigmoid(self.linear(x))
 
 def evaluate_on_xor(model):
-    predictions = model(Tensor(XOR_INPUTS))
+    X = Tensor(XOR_INPUTS)
+    predictions = model(X)
     pred_classes = (predictions.data > 0.5).astype(int)
-    return (pred_classes == XOR_TARGETS).mean()
+    accuracy = (pred_classes == XOR_TARGETS).mean()
+    return accuracy, predictions.data.flatten()
 
+# in main(), the first four of ten hand-picked lines:
 model = SingleLayerPerceptron()
-for w1, w2, b in [(1, 1, -0.5), (1, 1, -1.5), (-1, 1, 0), (1, -1, 0)]:
+configurations = [
+    (1.0, 1.0, -0.5, "Diagonal line (positive slope)"),
+    (1.0, 1.0, -1.5, "Diagonal line (shifted)"),
+    (-1.0, 1.0, 0.0, "Diagonal line (negative slope)"),
+    (1.0, -1.0, 0.0, "Diagonal line (other direction)"),
+]
+for i, (w1, w2, b, description) in enumerate(configurations):
     model.set_weights(w1, w2, b)
-    print(f"w=({w1:+}, {w2:+}) b={b:+}: accuracy {evaluate_on_xor(model):.0%}")
+    accuracy, preds = evaluate_on_xor(model)
 ```
 
-The four settings score 75, 25, 75, and 75 percent. The code uses `> 0.5`, so a score exactly at zero belongs to class zero; the proof uses the opposite tie convention. Neither convention makes XOR separable. The full script tries ten hand-picked lines and one hundred random ones, and the best of the 110 gets three rows out of four. Notice what is absent. There is no optimizer and no loss in this script, and it needs only modules 01 through 03. The failure is not a training failure. No weight setting represents all four labels, so changing the training procedure cannot repair this model.
+The four settings score 75, 25, 75, and 75 percent. The code uses `> 0.5`, so a score exactly at zero belongs to class zero; the proof uses the opposite tie convention. Neither convention makes XOR separable. The full script tries ten hand-picked lines and one hundred random ones, and the best of the 110 gets three rows out of four. Notice what is absent. There is no optimizer and no loss in this script, and it needs only modules 01 through 03. The failure is not a training failure. No weight setting represents all four labels, so changing the training procedure cannot repair this model. The script checks every one of those 110 forward passes against the same arithmetic in NumPy, and it treats a line that scores all four rows as a bug: a single layer that "solves" XOR can only come from broken code, so the milestone exits with status 1.
 
 ## The Idea
 
@@ -186,13 +222,13 @@ The XOR truth table itself is a complete finite task, so fitting its four rows i
 ::: {.column-margin}
 ![](assets/images/diagrams/m01_xor-margin-source.svg){width="100%" fig-alt="Source code mapping card for Milestone I MLP Synthesis showing file path, exported package, and tested primitives."}
 
-*Source Code Mapping: Milestone I combines Modules 01–08 to build and train a multi-layer perceptron from scratch.*
+*Source Code Mapping: Milestone I combines Modules 01–07 to build and train a multi-layer perceptron from scratch.*
 :::
 
 The model is the two-layer shape from The Idea with two changes from the hand-built construction. The hidden layer has four units rather than two. Two units suffice when choosing the weights analytically, but additional units give gradient descent more possible active paths from a random start; the next subsection shows what happens when the slack runs out. The hidden units use ReLU rather than the sigmoid of the 1986 paper, because @sec-activations showed that a sigmoid passes at most a quarter of the gradient through and ReLU passes the gradient unchanged on its positive branch and blocks it on its negative branch. After the output layer comes a sigmoid, and the reason is the loss. Binary cross-entropy, the two-class form of @sec-losses's cross-entropy, scores a probability against a 0 or 1 target, and a `Linear` layer emits any real number, so the sigmoid is what turns the score into something the loss can read.
 
 ```python
-# milestones/02_1969_xor/02_xor_solved.py (excerpt)
+# adapted from milestones/02_1969_xor/02_xor_solved.py (corner loop and forward pass condensed)
 import numpy as np
 from tinytorch import Tensor, Linear, ReLU, Sigmoid, BinaryCrossEntropyLoss, SGD
 
@@ -222,7 +258,7 @@ class XORNetwork:
         return self.hidden.parameters() + self.output.parameters()
 ```
 
-The model is seventeen numbers: a 2 by 4 weight matrix and 4 biases in the hidden layer, a 4 by 1 weight matrix and 1 bias in the output layer. Notice `parameters()`. `XORNetwork` is a plain Python class, not a @sec-layers `Layer`, so nothing walks its attributes for it; it has to hand the optimizer the concatenation of the two layers' lists itself. That list is all the optimizer ever learns about the model's structure, A production container can discover these tensors automatically; the optimizer still receives parameter references, not a description of the forward computation.
+The model is seventeen numbers: a 2 by 4 weight matrix and 4 biases in the hidden layer, a 4 by 1 weight matrix and 1 bias in the output layer. Notice `parameters()`. `XORNetwork` is a plain Python class, not a @sec-layers `Layer`, so nothing walks its attributes for it; it has to hand the optimizer the concatenation of the two layers' lists itself. That list is all the optimizer ever learns about the model's structure. A production container can discover these tensors automatically; the optimizer still receives parameter references, not a description of the forward computation.
 
 ### The loop
 
@@ -246,25 +282,25 @@ def train_network(model, X, y, epochs=500, lr=0.5):
     return model
 
 import tinytorch.core.layers as layers
-layers.rng = np.random.default_rng(1986)       # see below
+layers.rng = np.random.default_rng(11)         # see below
 
 X, y = generate_xor_data(100)
 model = train_network(XORNetwork(hidden_size=4), X, y)
 ```
 
-The trailing `zero_grad()` is valid here because the freshly constructed parameters begin with `grad=None`, and every iteration clears after its update. Calling this function on a model with existing gradients would require clearing before the first forward pass as well. The printed predictions and loss belong to the forward pass before the update; measuring the updated model would require another forward pass. The script also reseeds the random number generator that `Linear` uses for its initial weights.[^fn-seed-xor-init] Initialization determines which ReLU paths are initially active. With only four hidden units, some random starts put a unit permanently on the dead side of its ReLU, and a run can settle at 75 percent accuracy with one corner near probability 0.5. Inspecting hidden pre-activations and gradients distinguishes the dying ReLU failure from a broken backward path. The seed 1986 provides a verified initialization; the script advises rerunning with another seed if training lands on a local plateau.
+The trailing `zero_grad()` is valid here because the freshly constructed parameters begin with `grad=None`, and every iteration clears after its update. Calling this function on a model with existing gradients would require clearing before the first forward pass as well. The printed predictions and loss belong to the forward pass before the update; measuring the updated model would require another forward pass. The script also reseeds the random number generator that `Linear` uses for its initial weights.[^fn-seed-xor-init] Initialization determines which ReLU paths are initially active. With only four hidden units, some random starts put a unit permanently on the dead side of its ReLU, and a run can settle at 75 percent accuracy with one corner near probability 0.5. Inspecting hidden pre-activations and gradients distinguishes the dying ReLU failure from a broken backward path. The default seed, 11, is chosen so that the output layer alone cannot solve the task: its initial hidden features do not separate the four corners, so the hidden layer has to learn. The script therefore passes only when the trained model gets all four truth-table rows right, the hidden layer received a nonzero gradient, and the hidden weights moved by at least a quarter of their initial norm. A seeded run repeats exactly, so a failure at the default seed points at the code, not at luck. Only a run started with a different `--seed` can land on the 75 percent plateau with correct code, which happens for about one seed in six.
 
 ::: {#chk-symmetry-breaking-initialization .callout-checkpoint title="Checkpoint: Symmetry breaking in hidden layer initialization"}
 If all weights in a hidden layer are initialized to identical values (such as all zeros or all ones), every hidden unit computes the exact same forward pre-activation and receives the exact same gradient during `backward()`. The units update identically and remain clones forever, effectively reducing an $N$-unit hidden layer to a single unit.
 
-Non-zero randomized initialization (such as He/Kaiming normal) is required to break permutation symmetry across neurons.
+Nonzero randomized initialization (such as He/Kaiming normal) is required to break permutation symmetry across neurons.
 :::
 
 [^fn-seed-xor-init]: **Seed**: the starting value of a pseudo-random number generator. Two runs with the same seed draw the same sequence of "random" numbers, which makes a training run reproducible; two runs with different seeds start from different initial weights and can end in different places.
 
-With that seed, the excerpt starts at loss 0.7357 and 50 percent accuracy, reaches 100 percent accuracy by epoch 100 at loss 0.0755, and ends after 500 epochs at loss 0.0053. Fed the four exact corners, the trained network answers 0.002, 0.998, 0.998, and 0.003. These values check that the seeded training path reaches a solution; the hand-built trace below explains why such a solution exists.
+With that seed, the excerpt starts at loss 0.7468 and 38 percent accuracy, reaches 100 percent accuracy by epoch 100 at loss 0.1773, and ends after 500 epochs at loss 0.0060. Fed the four exact corners, the trained network answers 0.005, 0.996, 0.997, and 0.002. These values check that the seeded training path reaches a solution; the hand-built trace below explains why such a solution exists.
 
-![**End-to-end kernel execution trace and flamechart**: Tracing one full training iteration on hardware shows the sequential execution of forward matrix multiplication, activation, backward vector-Jacobian products, and in-place SGD weight mutation, illustrating where CPU time and memory allocations occur across the integrated framework.](assets/images/diagrams/milestone_01_kernel-trace.svg){#fig-milestone1-kernel-trace width="100%" fig-alt="Kernel trace flamechart showing forward Linear, ReLU, BCELoss followed by backward gradient kernels and SGD step."}
+![**One training iteration, step by step**: A schematic of the forward operations, the reverse vector-Jacobian products, and the optimizer update for the XOR network. It shows order and data dependencies, not measured time or memory.](assets/images/diagrams/milestone_01_kernel-trace.svg){#fig-milestone1-kernel-trace width="100%" fig-alt="Schematic of one XOR training iteration showing forward Linear, ReLU, Linear, and Sigmoid with BCE loss, followed by backward gradient steps and the optimizer update."}
 
 ### Digits
 
@@ -276,7 +312,7 @@ The second change is how the data arrives. XOR feeds all one hundred points thro
 
 The third change is what we measure. Training loss checks whether updates fit the examples presented to the optimizer. Held-out accuracy checks predictions on other examples from the same dataset. Neither substitutes for the other, and a high held-out score on a small dataset does not establish general digit recognition. The listing reports held-out accuracy so the two roles stay distinct; repeatedly tuning settings to this split would turn it into validation data and require a fresh test split.
 ```python
-# milestones/03_1986_mlp/01_rumelhart_tinydigits.py (excerpt)
+# adapted from milestones/03_1986_mlp/01_rumelhart_tinydigits.py (loading, evaluation, and display condensed)
 import pickle
 import numpy as np
 from tinytorch import Tensor, Linear, ReLU, CrossEntropyLoss, SGD
@@ -326,7 +362,7 @@ for epoch in range(20):
 
 `DigitMLP.__call__` changes an `(N, 8, 8)` batch to `(N, 64)` before the first `Linear`. The reference `Tensor.reshape` wraps the NumPy result in a new Tensor, which owns copied float32 storage. It also records the reshape when a gradient connection is needed. Reconstructing a Tensor directly from `.data` would discard that connection; using the Tensor operation keeps the example safe if a trainable image transform later precedes the classifier. `parameters()` returns the four original parameter tensors, so an update changes the same weights the next forward pass reads.
 
-The model has $64 \times 32 + 32 + 32 \times 10 + 10 = 2{,}410$ parameters, or 9,640 bytes of float32 parameter data. The bundled training images occupy $1{,}000 \times 64 \times 4 = 256{,}000$ bytes before Tensor and Python overhead. Dataset variants and random initialization change the learning curve, so the split sizes can be checked directly with `train_images.shape` and `test_images.shape`. A useful run records those sizes, the seed, the loss, and held-out accuracy. The invariant under test is that batches reach the loss and the resulting gradients reach both layers, not that every run attains a particular percentage.
+The model has $64 \times 32 + 32 + 32 \times 10 + 10 = 2{,}410$ parameters, or 9,640 bytes of float32 parameter data. The bundled training images occupy $1{,}000 \times 64 \times 4 = 256{,}000$ bytes before Tensor and Python overhead. Dataset variants and random initialization change the learning curve, so the split sizes can be checked directly with `train_images.shape` and `test_images.shape`. A useful run records those sizes, the seed, the loss, and held-out accuracy. The invariant under test is that batches reach the loss and the resulting gradients reach both layers, not that every run attains a particular percentage. The script still sets a floor. It exits with status 1 when test accuracy falls below 75%, well under the roughly 82% a working implementation reaches.
 
 ## A Worked Trace
 
@@ -384,14 +420,14 @@ The trained four-unit network finds a fold of its own. Feeding the four exact co
 
 | Input | Hidden $(h_1, h_2, h_3, h_4)$ | Output score $z$ | Probability $\sigma(z)$ |
 | :--- | :--- | :--- | :--- |
-| $(0, 0)$ | $(0.05, 0.75, 0.16, 1.60)$ | $-6.36$ | $0.002$ |
-| $(0, 1)$ | $(2.69, 1.96, 0.00, 0.00)$ | $+6.15$ | $0.998$ |
-| $(1, 0)$ | $(0.00, 1.82, 2.87, 0.00)$ | $+6.22$ | $0.998$ |
-| $(1, 1)$ | $(0.00, 3.03, 0.00, 0.00)$ | $-5.92$ | $0.003$ |
+| $(0, 0)$ | $(0.00, 0.00, 0.21, 1.71)$ | $-5.38$ | $0.005$ |
+| $(0, 1)$ | $(0.00, 0.00, 2.66, 0.00)$ | $+5.60$ | $0.996$ |
+| $(1, 0)$ | $(2.45, 0.38, 0.00, 0.16)$ | $+5.92$ | $0.997$ |
+| $(1, 1)$ | $(0.00, 2.65, 2.44, 0.00)$ | $-6.04$ | $0.002$ |
 
-: **A learned XOR solution**: Hidden activations of the trained four-unit XOR network at the four corners. The output score is $z = \mathbf{w}_2 \cdot \mathbf{h} + b_2$ with learned weights $\mathbf{w}_2 = (3.83, -1.67, 3.52, -3.12)$ and bias $b_2 = -0.85$. {#tbl-xor-learned-fold tbl-colwidths="[14,36,24,26]"}
+: **A learned XOR solution**: Hidden activations of the trained four-unit XOR network at the four corners. The output score is $z = \mathbf{w}_2 \cdot \mathbf{h} + b_2$ with learned weights $\mathbf{w}_2 = (3.59, -4.20, 2.40, -2.98)$ and bias $b_2 = -0.78$. {#tbl-xor-learned-fold tbl-colwidths="[14,36,24,26]"}
 
-The learned units have readable jobs. Units 1 and 3 respond most strongly to $(0,1)$ and $(1,0)$, respectively, and both carry large positive output weights. Unit 2 fires for everything, more strongly the more inputs are on, and carries a negative weight, which is how the network cancels the $(1,1)$ row. Unit 4 fires only for $(0,0)$ and is also weighted negative. Nobody told the network to decompose XOR this way. It is one of many folds that work, and a different seed finds a different one.
+The learned units have readable jobs. Unit 1 responds to $(1,0)$ and unit 3 most strongly to $(0,1)$, and both carry positive output weights. Unit 3 also fires for $(1,1)$, so unit 2, which fires almost only for $(1,1)$ and carries the largest negative weight, is how the network cancels that row. Unit 4 fires mainly for $(0,0)$ and is also weighted negative. Nobody told the network to decompose XOR this way. It is one of many folds that work, and a different seed finds a different one.
 
 ## From TinyTorch to Production
 
@@ -424,9 +460,9 @@ for epoch in range(500):
 : **The same update contract in two frameworks**: The XOR and digits experiments in TinyTorch and in PyTorch. {#tbl-milestone1-production-bridge tbl-colwidths="[18,42,40]"}
 
 ::: {.column-margin}
-![](assets/images/diagrams/milestone_01-margin-bce.svg){width="100%" fig-alt="Modular loss versus fused BCEWithLogitsLoss comparison showing memory traffic and gradient stability."}
+![](assets/images/diagrams/milestone_01-margin-bce.svg){width="100%" fig-alt="Modular loss vs. fused BCEWithLogitsLoss comparison showing memory traffic and gradient stability."}
 
-*Modular vs Fused Loss: Separating Sigmoid and BCELoss requires intermediate DRAM traffic and clips gradients, whereas fused BCEWithLogits evaluates stably in on-chip registers.*
+*Modular vs. Fused Loss: Separating Sigmoid and BCELoss writes an intermediate probability tensor and clips gradients, whereas BCEWithLogits evaluates one log-sum-exp formula that stays finite without clipping.*
 :::
 
 The loss comparison in @tbl-milestone1-production-bridge reveals a crucial trade-off between pedagogical modularity and systems performance. To maintain clear abstraction boundaries, TinyTorch separates the `Sigmoid` activation from the `BCELoss` module. However, executing them as separate operations introduces two significant runtime vulnerabilities:
@@ -434,9 +470,9 @@ The loss comparison in @tbl-milestone1-production-bridge reveals a crucial trade
 1. **Numerical instability**: Evaluating $\sigma(z) = 1/(1+e^{-z})$ directly in float32 causes exponentials to saturate for large magnitudes, forcing TinyTorch to manually clip probabilities to $[10^{-7}, 1 - 10^{-7}]$ to prevent $\log(0)$ crashes. While clipping avoids `NaN`, it creates zero gradients on clipped activations, permanently stalling weight updates in saturated regimes.
 2. **Intermediate memory traffic**: Separating the operations writes an intermediate probability tensor of shape $(B, 1)$ out to main memory, only to immediately read it back across the bus into the loss kernel.
 
-Production engines resolve both issues through operator fusion: `torch.nn.BCEWithLogitsLoss` combines the sigmoid and binary cross-entropy algebra into a single numerically stable kernel:
+Production engines address these issues by merging the two operations: `torch.nn.BCEWithLogitsLoss` combines the sigmoid and binary cross-entropy algebra into a single numerically stable expression:
 $$\mathcal{L} = \max(z, 0) - z \cdot y + \log(1 + e^{-|z|})$$
-This fused algebraic formulation guarantees finite values across all inputs without epsilon clipping, simplifies the analytical backward gradient to $\sigma(z) - y$, and eliminates intermediate DRAM round-trips entirely, as documented in the [PyTorch loss documentation](https://docs.pytorch.org/docs/stable/generated/torch.nn.modules.loss.BCEWithLogitsLoss.html).
+This formulation keeps every term finite without epsilon clipping and simplifies the gradient to $\sigma(z) - y$; the [PyTorch loss documentation](https://docs.pytorch.org/docs/stable/generated/torch.nn.modules.loss.BCEWithLogitsLoss.html) attributes its advantage to this log-sum-exp stability. Whether the operations also run as one kernel depends on the backend and compiler.
 
 ::: {#psp-universal-approximation-mlp .callout-perspective title="Production Bridge: The Universal Approximation Theorem in practice"}
 Cybenko (1989) and Hornik (1991) proved that single-hidden-layer feedforward networks with non-linear activations can approximate any continuous function on compact subsets of $\mathbb{R}^n$ arbitrarily well.
@@ -444,13 +480,13 @@ Cybenko (1989) and Hornik (1991) proved that single-hidden-layer feedforward net
 However, the theorem guarantees *representational existence*, not *efficient learnability*: an MLP may require exponentially many hidden neurons ($O(2^n)$) to approximate functions that deep, structured architectures learn with polynomial parameter counts using gradient descent.[^fn-barron-curse-dimensionality]
 :::
 
-[^fn-barron-curse-dimensionality]: While the Universal Approximation Theorem guarantees uniform approximation of continuous functions by single-hidden-layer networks, Barron (1993) proved that to achieve approximation error $\epsilon$, a shallow network may require $\Omega(1/\epsilon^{d/2})$ neurons for general smooth functions in $d$ dimensions. This curse of dimensionality means shallow width scales exponentially with input dimension, whereas deep compositional architectures can represent hierarchically structured functions with polynomially bounded width and depth.
+[^fn-barron-curse-dimensionality]: While the Universal Approximation Theorem guarantees uniform approximation of continuous functions by single-hidden-layer networks, Barron (1993) showed that for functions with a bounded Fourier-moment (Barron) norm, a one-hidden-layer sigmoidal network with $n$ units reaches squared error $O(1/n)$ independent of the input dimension $d$, whereas any linear combination of $n$ fixed basis functions cannot beat order $(1/n)^{2/d}$. Outside that function class, the width a shallow network needs can grow exponentially with $d$.
 
 The core training contract remains invariant: forward passes evaluate parameters, backward passes compute gradients, and optimizers apply updates. Production frameworks alter batching, scheduling, or memory layouts while preserving this contract. When training stalls, systematic diagnosis precedes structural changes: inspect hidden pre-activations, verify backward propagation with deterministic traces, and test initialization seeds before adjusting hyperparameters.
 
 ## Summary
 
-Eight core modules now participate in a single unified training loop. The XOR experiment shows how multi-layer networks solve linearly inseparable tasks via non-linear space folding, while the backward trace verifies exact gradient flow across layers without explicit intermediate targets. In @sec-transformers, we discover that the two-layer multi-layer perceptron built in this synthesis never disappears in modern foundation models: it serves as the Feedforward Network (FFN) sublayer in every transformer block, projecting token representations into expanded dimensions before non-linear gating. @sec-convolutions preserves this identical training contract while introducing spatial weight sharing for images, laying the foundation for **TinyGPT**.
+Eight core modules now participate in a single unified training loop. The XOR experiment shows how multi-layer networks solve linearly inseparable tasks via non-linear space folding, while the backward trace verifies exact gradient flow across layers without explicit intermediate targets. In @sec-transformers, we discover that the two-layer multi-layer perceptron built in this synthesis never disappears in modern foundation models: it serves as the Feedforward Network (FFN) sublayer in every transformer block, projecting token representations into expanded dimensions before non-linear gating. @sec-convolutions preserves this identical training contract while introducing spatial weight sharing for images.
 
 ## Further Reading
 

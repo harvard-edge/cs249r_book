@@ -50,7 +50,7 @@ class TestConv2dOperations:
         # The center should have strong positive responses (detecting the edge)
         # At position (0,0): convolution over [0,0,1; 0,0,1; 0,0,1] = sum of element-wise products
         # = -1*0 + 0*0 + 1*1 + -1*0 + 0*0 + 1*1 + -1*0 + 0*0 + 1*1 = 3
-        assert np.isclose(output.data[0, 0, 0, 0], 3.0, atol=0.1), \
+        assert np.isclose(output.data[0, 0, 0, 0], 3.0, rtol=0, atol=1e-6), \
             f"Expected edge response ~3.0, got {output.data[0, 0, 0, 0]}"
 
         print("✅ Conv2d actually performs convolution (not just shape manipulation)")

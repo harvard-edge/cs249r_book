@@ -59,9 +59,16 @@ In this capstone milestone, YOU bring together your full TinyTorch stack:
                                                              └─────────────┘
 
 📊 SUCCESS CRITERIA:
-  Loss Convergence  : Training loss drops steadily (loss < 2.0 or drop > 1.0)
-  Syntactic Validity: Generated code parses cleanly via ast.parse (rate >= 60%)
-  Code Completion   : Completes function definitions and class structures
+  Loss Convergence  : Final training loss < 1.0 (a model without working
+                      attention stalls near 2.1)
+  Syntactic Validity: Greedy completions of function names absent from the
+                      training corpus parse via ast.parse exactly as generated
+                      (at least 1 of the 7 held-out prompts)
+  Causality         : Changing future tokens never changes past predictions
+  Honest Loss       : YOUR cross-entropy matches a NumPy reference, and the
+                      gated loss is measured in NumPy from the model's logits
+  Positions         : A repeated token gives different logits at different
+                      positions (YOUR positional encoding is doing its job)
 """
 
 import argparse
@@ -78,6 +85,10 @@ import numpy as np
 project_root = Path(__file__).resolve().parents[2]
 if str(project_root) not in sys.path:
     sys.path.insert(0, str(project_root))
+# Shared Milestone 05 checks live next to this script (transformer_gates.py)
+milestone_dir = str(Path(__file__).resolve().parent)
+if milestone_dir not in sys.path:
+    sys.path.insert(0, milestone_dir)
 
 # =============================================================================
 # 🎓 ZONE 1: STUDENT CORE LEGO BRICKS (YOUR Modules 01-13)
@@ -97,6 +108,20 @@ from tinytorch.core.transformers import (  # noqa: E402
     create_causal_mask,
 )
 from milestones.data_manager import DatasetManager  # noqa: E402
+from milestones.try_it import try_it  # noqa: E402
+from transformer_gates import (  # noqa: E402
+    attention_content_failure_message,
+    attention_content_probe,
+    attention_content_report,
+    causality_failure_message,
+    causality_probe,
+    causality_report,
+    cross_entropy_check,
+    cross_entropy_failure_message,
+    measured_loss,
+    position_failure_message,
+    position_probe,
+)
 
 # Rich for terminal UI
 from rich.console import Console  # noqa: E402
@@ -330,50 +355,112 @@ def generate_code_completion(
     return tokenizer.decode(current_ids)
 
 
-def check_ast_validity(full_code: str) -> Tuple[bool, str]:
+# Scored prompts are function names that never appear in the training corpus,
+# so a pass means the model learned Python syntax rather than recalled a
+# snippet it trained on. tests/cli/test_release_regressions.py enforces that
+# none of these leak into datasets/tinypy/tinypy_sample.txt.
+HELDOUT_PROMPTS = [
+    "def square(x):",
+    "def mean(values):",
+    "def clamp(x, lo, hi):",
+    "def is_even(n):",
+    "class Counter:",
+    "def sigmoid(x):",
+    "def dot(a, b):",
+]
+
+# Gate calibration, 2026-09-29, default full run (35,000 tokens, 10 epochs).
+# The milestone trains ONE network per run and gates on it. Each held-out
+# prompt is scored with a greedy completion (temperature 0), so the score is a
+# property of the trained network, not of a random draw; the sampled
+# completion is printed for display only. (Scoring the sampled output at 40%
+# failed correct code in about 1 run in 4.)
+#
+#   Greedy prompts parsed out of 7, correct code, 20 separate trainings:
+#     4,4,2,2,3,5,3,3,3,6 (release audit), 3,5,3,5,2,3,5 (calibration) and
+#     1,4,5 (full script runs after the change)
+#   Broken or untrained code (no attention, untrained): 0/7 in 6 of 6 runs.
+#   Final training loss: correct 0.225-0.236 (20 runs); attention zeroed 2.130-2.131.
+#
+# A threshold of 2 of 7 failed correct code in the first verification run
+# (1/7), so the syntax check asks for at least ONE parseable completion. The
+# minimum observed on correct code (1 of 7, once in 20 runs) EQUALS that
+# threshold, so this check carries no margin and cannot separate correct from
+# broken code by itself. The loss gate (correct 0.23 vs 2.13 without
+# attention) and the causality probe are the primary catchers of broken
+# code; the syntax check confirms the network writes some parseable Python
+# for a name it never saw (broken code scored 0/7 every time).
+HELDOUT_MIN_VALID = 1
+HELDOUT_VALIDITY_TARGET = 100.0 * HELDOUT_MIN_VALID / len(HELDOUT_PROMPTS)  # 14.3%
+SCORED_MAX_NEW_TOKENS = 60
+COPILOT_TRAIN_LOSS_TARGET = 1.0
+
+
+def check_ast_validity(full_code: str, prompt: str) -> Tuple[bool, str]:
     """
-    Check if full_code parses into a valid Python Abstract Syntax Tree (AST).
+    Check whether the model's completion parses into a valid Python AST.
+
+    The code is judged exactly as the model wrote it. Two rules keep the gate
+    honest: nothing is ever added to the code (padding an open block with
+    ``pass`` makes any header valid), and at most ONE line may be dropped,
+    only when generation stopped on the token budget mid-line. Trimming lines
+    until something parses would accept a single good line followed by garbage.
 
     Args:
-        full_code: Complete Python source code string.
+        full_code: Prompt plus generated completion.
+        prompt: The prompt the completion extends.
 
     Returns:
         tuple: (is_valid: bool, status_message: str)
     """
-    # 1. Direct parse of the complete generated code
+    completion = full_code[len(prompt):]
+    if not completion.strip():
+        return False, "No completion generated"
+
+    # generate_code_completion stops at a blank line when the block is done;
+    # otherwise the token budget cut it off and the last line may be partial.
+    block_finished = "\n\n" in completion
+    code = prompt + completion.split("\n\n", 1)[0] if block_finished else full_code
+
     try:
-        ast.parse(full_code)
+        ast.parse(code)
         return True, "Valid AST (exact parse)"
     except SyntaxError as e:
         direct_err = f"SyntaxError: {e.msg} at line {e.lineno}"
 
-    # 2. For fixed-budget generation, check if trimming an incomplete
-    # trailing line yields valid AST
-    lines = full_code.rstrip().split("\n")
-    while len(lines) > 1:
-        lines.pop()
-        candidate = "\n".join(lines) + "\n"
-        try:
-            ast.parse(candidate)
-            return True, "Valid AST (trimmed incomplete trailing line)"
-        except SyntaxError:
-            pass
-        # Check if adding pass to an open block header makes candidate valid
-        try:
-            ast.parse(candidate.rstrip() + "\n        pass\n")
-            return True, "Valid AST (trimmed incomplete trailing line)"
-        except SyntaxError:
-            continue
+    if not block_finished:
+        lines = code.rstrip("\n").split("\n")
+        prompt_lines = prompt.rstrip("\n").count("\n") + 1
+        # Keep the prompt plus at least one generated line after the drop
+        if len(lines) - 1 > prompt_lines:
+            try:
+                ast.parse("\n".join(lines[:-1]) + "\n")
+                return True, "Valid AST (dropped final line cut off by token budget)"
+            except SyntaxError:
+                pass
 
     return False, direct_err
 
 
 # =============================================================================
+# --quick trains on fewer tokens of the same bundled corpus; epochs are unchanged.
+# 2026-09-28: --quick was documented as "sample dataset" but the bundled sample
+# was always loaded, so the only real difference is this token budget.
+QUICK_TOKEN_LIMIT = 20000
+FULL_TOKEN_LIMIT = 35000
+
+
 # 📊 ZONE 2: MILESTONE HARNESS & VALIDATION UX
 # =============================================================================
 
-def load_tinypy_corpus(sample_only: bool = False, data_path: Optional[str] = None) -> str:
-    """Load the TinyPy or custom dataset with robust path resolution."""
+def load_tinypy_corpus(data_path: Optional[str] = None) -> str:
+    """
+    Load the bundled TinyPy corpus, or a custom text file.
+
+    TinyPy ships as one offline file (datasets/tinypy/tinypy_sample.txt);
+    there is no larger download, so quick and full runs read the same corpus
+    and differ only in how many tokens they train on (see QUICK_TOKEN_LIMIT).
+    """
     if data_path:
         custom_path = Path(data_path)
         if not custom_path.exists():
@@ -395,7 +482,7 @@ def load_tinypy_corpus(sample_only: bool = False, data_path: Optional[str] = Non
     dm = DatasetManager()
     if hasattr(dm, "get_tinypy"):
         try:
-            text = dm.get_tinypy(sample_only=sample_only)
+            text = dm.get_tinypy()
             if text and len(text) > 0:
                 return text
         except Exception:
@@ -411,9 +498,7 @@ def run_milestone(args=None):
     """Main milestone execution flow for TinyGPT code completion."""
     args = args or argparse.Namespace()
     data_path = getattr(args, "data_path", None)
-    is_quick = getattr(args, "quick", False)
-    is_sample = getattr(args, "sample", False)
-    sample_only = is_quick or is_sample
+    is_quick = getattr(args, "quick", False) or getattr(args, "sample", False)
     pause = getattr(args, "pause", False)
 
     dataset_title = Path(data_path).name if data_path else "TinyPy"
@@ -421,7 +506,7 @@ def run_milestone(args=None):
     custom_prompt = getattr(args, "prompt", default_prompt)
 
     temperature = getattr(args, "temperature", 0.4)
-    epochs = getattr(args, "epochs", 8 if sample_only else 10)
+    epochs = getattr(args, "epochs", 10)
     top_k = getattr(args, "top_k", 5)
     should_stream = getattr(args, "stream", True)
     if (
@@ -458,7 +543,7 @@ def run_milestone(args=None):
     # 2. LOAD DATASET
     # =========================================================================
     with console.status(f"[bold green]Loading {dataset_title} dataset..."):
-        text = load_tinypy_corpus(sample_only=sample_only, data_path=data_path)
+        text = load_tinypy_corpus(data_path=data_path)
 
     console.print(
         f"📖 Dataset loaded: [bold]{len(text):,} characters[/bold] "
@@ -477,9 +562,13 @@ def run_milestone(args=None):
     console.print(f"  Vocabulary size : [cyan]{vocab_size} tokens[/cyan]")
     console.print(f"  Encoded stream  : [cyan]{len(tokens):,} tokens[/cyan]")
 
-    # Build sequence dataset (crop text to ~35k tokens for fast convergence)
-    token_limit = 20000 if sample_only else 35000
+    # Crop the stream so training stays fast; --quick uses a smaller crop.
+    token_limit = QUICK_TOKEN_LIMIT if is_quick else FULL_TOKEN_LIMIT
     train_tokens = tokens[: min(len(tokens), token_limit)]
+    console.print(
+        f"  Training crop   : [cyan]first {len(train_tokens):,} tokens[/cyan] "
+        f"({'quick' if is_quick else 'full'} run)"
+    )
     seq_len = 64
     stride = 4
 
@@ -552,6 +641,33 @@ def run_milestone(args=None):
     loss_fn = CrossEntropyLoss()
     trainer = Trainer(model, optimizer, loss_fn)
 
+    # Two checks that need no training, so a broken module fails in seconds:
+    # YOUR cross-entropy forward must report the true loss of the logits, and
+    # YOUR positional encoding must make positions distinguishable.
+    train_x = np.array(inputs, dtype=np.int32)
+    train_y = np.array(targets, dtype=np.int32)
+    ce_check = cross_entropy_check(model, loss_fn, train_x[:32], train_y[:32], vocab_size)
+    if not ce_check.passed:
+        console.print(Panel.fit(cross_entropy_failure_message(ce_check),
+                                border_style="red", title="Loss Check Failed"))
+        return 1
+    positions = position_probe(model, int(train_x[0, 0]), seq_len)
+    if not positions.passed:
+        console.print(Panel.fit(position_failure_message(positions),
+                                border_style="red", title="Position Check Failed"))
+        return 1
+
+    # Loss of the untrained model on a fixed spread of training windows,
+    # measured before the first update (uniform guessing scores ln(vocab)).
+    probe_windows = np.linspace(0, len(inputs) - 1, num=min(256, len(inputs))).astype(int)
+    probe_x = train_x[probe_windows]
+    probe_y = train_y[probe_windows]
+    loss_before = measured_loss(model, probe_x, probe_y)
+    console.print(
+        f"  Loss before training: [cyan]{loss_before:.4f}[/cyan] "
+        f"(uniform guessing: {np.log(vocab_size):.4f})\n"
+    )
+
     console.print(
         "[bold]🚀 Training TinyGPT from Scratch on Python Code...[/bold]"
     )
@@ -592,7 +708,7 @@ def run_milestone(args=None):
     # Display convergence summary
     res_table = Table(title="Training Loss Trajectory", box=box.ROUNDED)
     res_table.add_column("Epoch", justify="center")
-    res_table.add_column("Cross-Entropy Loss", justify="right")
+    res_table.add_column("Epoch Loss (your Trainer)", justify="right")
     res_table.add_column("Perplexity", justify="right")
 
     summary_epochs = [history[0], history[len(history) // 2], history[-1]]
@@ -609,15 +725,10 @@ def run_milestone(args=None):
         "[bold]✨ Generating Python Code Autoregressively...[/bold]\n"
     )
 
-    benchmark_prompts = [
-        "def add(a, b):",
-        "def relu(x):",
-        "def factorial(n):",
-        "def is_prime(n):",
-        "class Linear:",
-    ]
-
-    test_prompts = list(benchmark_prompts)
+    # A prompt that appears in the training text only tests recall, so it is
+    # shown as a demo but never counted toward the gate.
+    scored_prompts = [p for p in HELDOUT_PROMPTS if p not in text]
+    test_prompts = list(scored_prompts)
     if custom_prompt and custom_prompt not in test_prompts:
         test_prompts.insert(0, custom_prompt)
 
@@ -625,7 +736,11 @@ def run_milestone(args=None):
     valid_count = 0
 
     for prompt in test_prompts:
-        t0 = time.perf_counter()
+        is_scored = prompt in scored_prompts
+
+        # (a) Sampled completion (temperature + top-k): shown, never scored.
+        #     Sampling is a random draw, so scoring it made a correct model
+        #     pass only about 3 runs in 4.
         if should_stream:
             with Live(console=console, refresh_per_second=25) as live:
                 def on_token(current_text: str):
@@ -647,7 +762,7 @@ def run_milestone(args=None):
                     if not (os.environ.get("TINYTORCH_NON_INTERACTIVE") == "1" or os.environ.get("CI") == "true"):
                         time.sleep(0.015)
 
-                full_code = generate_code_completion(
+                sampled_code = generate_code_completion(
                     model=model,
                     tokenizer=tokenizer,
                     prompt=prompt,
@@ -657,7 +772,7 @@ def run_milestone(args=None):
                     stream_callback=on_token,
                 )
         else:
-            full_code = generate_code_completion(
+            sampled_code = generate_code_completion(
                 model=model,
                 tokenizer=tokenizer,
                 prompt=prompt,
@@ -665,51 +780,65 @@ def run_milestone(args=None):
                 temperature=temperature,
                 top_k=top_k,
             )
+        console.print(
+            Panel(
+                Syntax(sampled_code, syntax_lang, theme="monokai",
+                       line_numbers=True, word_wrap=True),
+                border_style="dim",
+                title=f"Prompt: {prompt} | sampled (temp={temperature}, top_k={top_k})",
+                subtitle="[dim]display only, not scored[/dim]",
+            )
+        )
 
+        # (b) Greedy completion (always the most likely next character): the
+        #     model's single best answer, and the one that is scored.
+        t0 = time.perf_counter()
+        full_code = generate_code_completion(
+            model=model,
+            tokenizer=tokenizer,
+            prompt=prompt,
+            max_new_tokens=SCORED_MAX_NEW_TOKENS,
+            temperature=0.0,
+            top_k=top_k,
+        )
         gen_time_ms = (time.perf_counter() - t0) * 1000
+        is_valid, diagnostic = check_ast_validity(full_code, prompt)
 
-        is_valid, diagnostic = check_ast_validity(full_code)
-
-        if is_valid:
+        if is_valid and is_scored:
             valid_count += 1
+        if is_valid:
             status_badge = "[bold green]PASS (AST Valid)[/bold green]"
         else:
             status_badge = "[bold red]FAIL (Syntax Error)[/bold red]"
+        if not is_scored:
+            status_badge += " [dim](seen in training, not scored)[/dim]"
 
         scorecard_rows.append(
             (prompt, status_badge, diagnostic, f"{gen_time_ms:.1f}ms")
         )
 
-        syntax = Syntax(
-            full_code,
-            syntax_lang,
-            theme="monokai",
-            line_numbers=True,
-            word_wrap=True,
-        )
         console.print(
             Panel(
-                syntax,
+                Syntax(full_code, syntax_lang, theme="monokai",
+                       line_numbers=True, word_wrap=True),
                 border_style="green" if is_valid else "yellow",
-                title=f"Prompt: {prompt} | {status_badge}",
-                subtitle=(
-                    f"[dim]{diagnostic} in {gen_time_ms:.1f}ms "
-                    f"(temp={temperature}, top_k={top_k})[/dim]"
-                ),
+                title=f"Prompt: {prompt} | greedy | {status_badge}",
+                subtitle=f"[dim]{diagnostic} in {gen_time_ms:.1f}ms (greedy decode)[/dim]",
             )
         )
 
     # =========================================================================
     # 7. CONVERGENCE SCORECARD & ACHIEVEMENT GATE
     # =========================================================================
-    ast_validity_rate = (valid_count / len(test_prompts)) * 100.0
+    n_scored = len(scored_prompts)
+    ast_validity_rate = (valid_count / n_scored) * 100.0 if n_scored else 0.0
 
     score_table = Table(
-        title="Syntactic Validity Scorecard (AST Parsing Gate)",
+        title="Syntactic Validity on Unseen Function Names (AST Parsing Gate)",
         box=box.ROUNDED,
     )
     score_table.add_column("Prompt Prefix", style="cyan")
-    score_table.add_column("AST Status", justify="center")
+    score_table.add_column("AST Status (greedy)", justify="center")
     score_table.add_column("Compiler Diagnostic", style="magenta")
     score_table.add_column("Decode Latency", justify="right", style="green")
 
@@ -718,27 +847,47 @@ def run_milestone(args=None):
 
     console.print(score_table)
 
-    initial_loss = history[0][1]
-    final_loss = history[-1][1]
-    loss_drop = initial_loss - final_loss
+    # Training loss is re-measured on every training window after training,
+    # in NumPy (2026-09-29): gating on the Trainer's epoch average, which is
+    # YOUR cross-entropy's value, passed a loss forward that returned 0.
+    final_loss = measured_loss(model, train_x, train_y)
+    loss_drop = loss_before - final_loss
 
-    loss_converged = (final_loss < 2.0) or (loss_drop > 1.0)
-    syntax_converged = ast_validity_rate >= 60.0
+    causality = causality_probe(model, inputs[0], vocab_size)
+    if not causality.passed:
+        console.print()
+        console.print(Panel.fit(causality_failure_message(causality),
+                                border_style="red", title="Causality Check Failed"))
+        return 1
+
+    # Uniform attention (every earlier character weighted equally) still
+    # reaches a low loss and parses some prompts, so it is checked directly.
+    attention = attention_content_probe(model, inputs[0])
+    if not attention.passed:
+        console.print()
+        console.print(Panel.fit(attention_content_failure_message(attention),
+                                border_style="red", title="Attention Check Failed"))
+        return 1
+
+    loss_converged = final_loss < COPILOT_TRAIN_LOSS_TARGET
+    syntax_converged = n_scored > 0 and valid_count >= min(HELDOUT_MIN_VALID, n_scored)
     passed = loss_converged and syntax_converged
 
     console.print()
     if passed:
-        pass_ratio = f"{valid_count}/{len(test_prompts)}"
+        pass_ratio = f"{valid_count}/{n_scored}"
         success_msg = (
             "[bold green]🏆 MILESTONE ACHIEVED: "
             "TINYCOPILOT CODE GENERATION VERIFIED![/bold green]\n\n"
-            f"  • Initial Loss     : {initial_loss:.4f}\n"
+            f"  • Loss Before      : {loss_before:.4f} (untrained model)\n"
             f"  • Final Loss       : [bold green]{final_loss:.4f}[/bold green]"
-            f" (drop: -{loss_drop:.2f})\n"
+            f" (measured after training; drop: -{loss_drop:.2f}, needed < {COPILOT_TRAIN_LOSS_TARGET:.1f})\n"
             f"  • AST Validity Rate: [bold green]{ast_validity_rate:.1f}%"
-            f"[/bold green] ({pass_ratio} prompts passed)\n"
-            "  • Syntactic Gate   : Interpretable Python generated "
-            "with valid syntax!\n\n"
+            f"[/bold green] ({pass_ratio} unseen prompts parsed, greedy decode)\n"
+            f"  • {causality_report(causality)}\n"
+            f"  • {attention_content_report(attention)}\n"
+            "  • Syntactic Gate   : Valid Python for function names "
+            "the model never saw in training\n\n"
             "You trained the foundation of OpenAI Codex and GitHub Copilot\n"
             "from scratch using exclusively your TinyTorch autograd and "
             "transformer blocks!\n\n"
@@ -753,22 +902,79 @@ def run_milestone(args=None):
                 title="Success!",
             )
         )
+        try_completions(model, tokenizer, should_stream)
         return 0
     else:
+        mark = lambda ok: "[green]✓[/green]" if ok else "[red]✗[/red]"
         console.print(
             Panel.fit(
                 "[bold red]❌ MILESTONE 05 FAILED: "
                 "SYNTAX OR LOSS GATE NOT MET[/bold red]\n\n"
-                f"  • Final Loss       : {final_loss:.4f} "
-                "(target < 2.0 or drop > 1.0)\n"
-                f"  • AST Validity Rate: {ast_validity_rate:.1f}% "
-                "(target >= 60.0%)\n"
-                f"  • Passed Prompts   : {valid_count}/{len(test_prompts)}",
+                f"  {mark(loss_converged)} Final Loss       : {final_loss:.4f} "
+                f"(measured after training, target < {COPILOT_TRAIN_LOSS_TARGET:.1f})\n"
+                f"  {mark(syntax_converged)} AST Validity Rate: {ast_validity_rate:.1f}% "
+                f"(target: at least {HELDOUT_MIN_VALID} of {n_scored} unseen prompts, greedy)\n"
+                f"    Passed Prompts   : {valid_count}/{n_scored} unseen\n\n"
+                "  Without working attention the model only learns which character\n"
+                "  follows which: loss stalls near 2.1 and no completion parses.\n"
+                "  Check MultiHeadAttention.forward and that every parameter updates.",
                 border_style="red",
                 title="Needs Tuning",
             )
         )
         return 1
+
+
+TRY_IT_MAX_PROMPT_CHARS = 80
+
+
+def try_completions(model, tokenizer, should_stream, read=None):
+    """After a pass, let the student type their own code prefixes to complete.
+
+    Completions are greedy (always the most likely next character), the same
+    decode the syntax gate scores, so "parses" here means what it means there.
+    """
+
+    def complete(prompt: str) -> None:
+        if len(prompt) > TRY_IT_MAX_PROMPT_CHARS:
+            console.print(f"[yellow]Keep it under {TRY_IT_MAX_PROMPT_CHARS} characters; "
+                          "TinyCopilot sees 128 at a time.[/yellow]")
+            return
+        if tokenizer.decode(tokenizer.encode(prompt)) != prompt:
+            console.print("[yellow]That prompt uses characters TinyCopilot never saw "
+                          "in training. Stick to ordinary Python.[/yellow]")
+            return
+        decode = dict(model=model, tokenizer=tokenizer, prompt=prompt,
+                      max_new_tokens=SCORED_MAX_NEW_TOKENS, temperature=0.0)
+        if should_stream:
+            with Live(console=console, refresh_per_second=25, transient=True) as live:
+                def on_token(current_text: str):
+                    live.update(Panel(Syntax(current_text, "python", theme="monokai",
+                                             line_numbers=True, word_wrap=True),
+                                      border_style="cyan", title="Generating..."))
+                code = generate_code_completion(stream_callback=on_token, **decode)
+        else:
+            code = generate_code_completion(**decode)
+        is_valid, diagnostic = check_ast_validity(code, prompt)
+        verdict = "[green]parses as Python[/green]" if is_valid else "[yellow]does not parse[/yellow]"
+        console.print(Panel(
+            Syntax(code, "python", theme="monokai", line_numbers=True, word_wrap=True),
+            border_style="green" if is_valid else "yellow",
+            title=f"YOUR TinyCopilot | {verdict}",
+            subtitle=f"[dim]{diagnostic}[/dim]",
+        ))
+
+    return try_it(
+        console,
+        "Type the start of some Python and YOUR TinyCopilot finishes it.\n"
+        "Try a function it never saw, like [cyan]def triple(x):[/cyan] or "
+        "[cyan]def is_positive(n):[/cyan]\n"
+        "It learned from a few thousand lines of code, so expect the shape of "
+        "Python more than correct logic.",
+        "[yellow]Complete > [/yellow]",
+        complete,
+        read=read,
+    )
 
 
 def main():
@@ -779,7 +985,8 @@ def main():
         "--quick",
         "--sample",
         action="store_true",
-        help="Run fast verification on sample dataset with fewer windows",
+        help=("Train on the first 20,000 tokens of the bundled corpus instead of "
+              "35,000 (same corpus and epochs, fewer training windows)"),
     )
     parser.add_argument(
         "--prompt",

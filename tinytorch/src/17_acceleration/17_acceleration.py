@@ -70,12 +70,29 @@ from tinytorch.perf.acceleration import (
 
 ## 📋 Module Dependencies
 
+**Prerequisites**: Modules 01 (Tensor), 06 (Autograd), 09 (Convolutions), and 14 (Profiling) must be complete
+
+**External Dependencies**:
+- `numpy` (vectorized kernels and array operations)
+- `time` and `typing` (for timing loops and type hints)
+- `tracemalloc` (used only inside an analysis cell)
+
+**TinyTorch Dependencies**:
+
 | Dependency Component | Source Module | Systems Capability Exploited | Integration Role |
 | :--- | :--- | :--- | :--- |
 | **`Tensor` & `Function`** | Module 01 (`01_tensor`) | Multidimensional data container & computational graph node | Base tensor representations & custom autograd mechanics |
-| **`autograd` Engine** | Module 06 (`06_autograd`) | Reverse-mode automatic differentiation graph traversal | Backpropagates through `Im2colConv2dFunction` |
+| **`autograd` Engine** | Module 06 (`06_autograd`), loaded with the `tinytorch` package rather than imported by name | Reverse-mode automatic differentiation graph traversal | Backpropagates through `Im2colConv2dFunction` |
 | **`Conv2d` Reference** | Module 09 (`09_convolutions`) | Seven-loop explicit spatial convolution kernel | Golden mathematical reference for im2col verification |
 | **`Profiler`** | Module 14 (`14_profiling`) | High-resolution microsecond latency and memory benchmarking | Validates acceleration speedup & memory savings |
+
+**Dependency Flow**:
+```
+Module 01 (Tensor, Function) ──┐
+Module 06 (autograd)         ──┤
+Module 09 (Conv2d reference) ──┼──→ Module 17 (Acceleration)
+Module 14 (Profiler)         ──┘
+```
 """
 
 # %% nbgrader={"grade": false, "grade_id": "imports", "solution": false}
@@ -1849,7 +1866,7 @@ def analyze_tiling_effectiveness():
             start = time.perf_counter()
             tiled = tiled_matmul(a, b, tile_size=tile)
             tile_time = time.perf_counter() - start
-            assert np.allclose(tiled.data, vectorized_matmul(a, b).data, atol=1e-2), \
+            assert np.allclose(tiled.data, (ref := vectorized_matmul(a, b).data), rtol=1e-5, atol=1e-5 * np.abs(ref).max()), \
                 f"Tiled result diverged at tile_size={tile}"
             cells.append(f" {tile_time*1000:8.2f} ({tile_time/blas_time:5.1f}×)")
 

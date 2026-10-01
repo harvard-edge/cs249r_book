@@ -38,7 +38,7 @@ This milestone uses a forward-only script:
 
 - Build perceptron with random weights
 - Run forward pass on linearly separable data
-- Show that random weights = random predictions (~50% accuracy)
+- Show that random weights = random predictions (any accuracy from 0% to 100%)
 - **Key Learning:** "My model doesn't work... yet!"
 
 **When to run:** After Module 03 (before learning losses, autograd, and training)
@@ -54,9 +54,11 @@ This milestone uses a forward-only script:
 </tr>
 </thead>
 <tbody>
-<tr><td><b>01 (Forward Only)</b></td><td>~50%</td><td>Random weights = random guessing</td></tr>
+<tr><td><b>01 (Forward Only)</b></td><td>Random</td><td>Random weights = random guessing</td></tr>
 </tbody>
 </table>
+
+**Pass condition:** accuracy is luck, so it is not graded. The script recomputes sigmoid(XW + b) in NumPy from the model's own weights and exits 1 if YOUR `Linear` and `Sigmoid` disagree.
 
 ## Key Learning: Forward Pass ≠ Intelligence
 

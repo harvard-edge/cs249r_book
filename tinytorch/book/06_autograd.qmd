@@ -98,7 +98,7 @@ Handwritten derivative formulas work for the four-weight example, but every chan
 
 ### One rule per operation
 
-In the opening example, increasing $y$ by a small amount increases $L=y+x$ by the same amount. The derivative of $L$ with respect to $y$ is therefore $1$. Through the path $y=x^2$, the derivative of $y$ at $x=3$ is $6$, giving a contribution $1 \times 6$ to the derivative of $L$. This multiplication is the **chain rule**. When $L$ depends on $x$ only through $y$,
+In production frameworks like PyTorch and JAX, automatic differentiation decomposes complex neural network graphs into modular, isolated operations registered with their own vector-Jacobian products (VJPs). This modular decoupling ensures the runtime engine never needs global knowledge of the network architecture to propagate exact gradients backward. In the opening example, increasing $y$ by a small amount increases $L=y+x$ by the same amount. The derivative of $L$ with respect to $y$ is therefore $1$. Through the path $y=x^2$, the derivative of $y$ at $x=3$ is $6$, giving a contribution $1 \times 6$ to the derivative of $L$. This multiplication is the **chain rule**. When $L$ depends on $x$ only through $y$,
 
 $$\frac{\partial L}{\partial x} = \frac{\partial L}{\partial y} \cdot \frac{\partial y}{\partial x}.$$
 
@@ -106,7 +106,7 @@ In the opening example the direct $+x$ supplies a separate contribution, which i
 
 That question has a short answer for every operation we use. Addition passes the gradient through unchanged to both inputs, because $\partial(a + b)/\partial a = 1$. ReLU passes it through where the input was positive and blocks it where the input was not, because its derivative is $1$ for positive $z$ and $0$ for negative $z$. At zero the ordinary derivative is undefined; TinyTorch chooses zero. Summing a tensor to a scalar sends the same gradient to every element. Each rule needs only what the operation saw during the forward pass: ReLU needs the sign of its input, and matrix multiplication needs both of its inputs.
 
-::: {.callout-tip title="Pause & Predict: Vector-Jacobian Products vs Full Jacobians"}
+::: {.callout-tip title="Pause & Predict: Vector-Jacobian Products vs. Full Jacobians"}
 For a hidden linear layer with batch size $B=128$, input dimension $D_\text{in}=1024$, and output dimension $D_\text{out}=4096$, how many elements would the full Jacobian tensor $\partial \mathbf{Y} / \partial \mathbf{W}$ contain? What is its memory footprint in float32? Why does reverse-mode autodiff compute the vector-Jacobian product directly without ever constructing this tensor?
 :::
 
@@ -120,27 +120,27 @@ For the chapter's concrete input $A=[1,2]$ and incoming gradient $G=[1,1]$, $A^T
 
 ### Reverse order
 
-During the forward pass each result is computed from earlier results, so the tensors and operations form a graph with a direction (from inputs toward the loss) and no cycles (a tensor cannot depend on something computed after it). Reverse mode starts at the loss, where the gradient is trivially $\partial L / \partial L = 1$, and moves toward the inputs.[^fn-reverse-mode-efficiency]
+Modern deep learning frameworks universally rely on reverse-mode automatic differentiation because neural networks optimize a single scalar objective over millions of trainable parameters. Propagating cotangents backward from the scalar loss to leaf inputs computes every parameter gradient in a single reverse sweep, avoiding the prohibitive $O(N)$ passes required by forward-mode differentiation. During the forward pass each result is computed from earlier results, so the tensors and operations form a graph with a direction (from inputs toward the loss) and no cycles (a tensor cannot depend on something computed after it). Reverse mode starts at the loss, where the gradient is trivially $\partial L / \partial L = 1$, and moves toward the inputs.[^fn-reverse-mode-efficiency]
 
-[^fn-reverse-mode-efficiency]: **Forward-mode versus reverse-mode AD**: For a function $f: \mathbb{R}^N \to \mathbb{R}^M$, forward-mode automatic differentiation propagates tangent vectors with cost proportional to the number of inputs $N$. Reverse-mode automatic differentiation propagates cotangent vectors with cost proportional to the number of outputs $M$. Because deep neural networks optimize a single scalar loss ($M=1$) over millions of parameters ($N \gg 1$), reverse-mode AD computes all $N$ parameter gradients in a single backward pass ($O(1)$ sweeps), whereas forward-mode would require $N$ separate forward passes.
+[^fn-reverse-mode-efficiency]: **Forward-mode vs. reverse-mode AD**: For a function $f: \mathbb{R}^N \to \mathbb{R}^M$, forward-mode automatic differentiation propagates tangent vectors with cost proportional to the number of inputs $N$. Reverse-mode automatic differentiation propagates cotangent vectors with cost proportional to the number of outputs $M$. Because deep neural networks optimize a single scalar loss ($M=1$) over millions of parameters ($N \gg 1$), reverse-mode AD computes all $N$ parameter gradients in a single backward pass ($O(1)$ sweeps), whereas forward-mode would require $N$ separate forward passes.
 
 The order matters. A tensor's backward rule turns the gradient at that tensor into gradients at its parents, so the rule must not run until the gradient at that tensor is complete. If the tensor feeds two later operations, both of them must have reported back first. The backward traversal therefore needs the reverse of a **topological order**: consumers precede the tensors they read. A depth-first walk from the loss that lists each tensor only after all of its parents produces the opposite order (parents first), and reversing that list gives us the one we want.
 
 ### Used twice means add
-
-When a tensor feeds two operations, the loss depends on it along two paths, and the multivariable chain rule says the total derivative is the sum over paths:
-
-$$\frac{\partial L}{\partial x} = \sum_{k} \frac{\partial L}{\partial y_k} \frac{\partial y_k}{\partial x},$$
-
-where the $y_k$ are the tensors computed directly from $x$. In code the incoming contributions must be added. The implementation accumulates them in `pending` before adding the complete result into `x.grad`. The smallest example is `x + x`. The same tensor is both inputs of one addition, so its gradient is the incoming gradient twice. An engine that overwrote each pending contribution would silently report half the true value, and the mistake would not raise an error. It would just train worse. The same accumulation is what makes a layer whose input is added back to its output work, and it introduces one kind of accumulation: combining paths within a backward call. A separate choice keeps `.grad` between calls, so the training loop must clear it when starting a new gradient estimate.
-
-![**Gradient fan-in accumulation across branches**: When a tensor fan-outs during forward execution (e.g. into parallel residual branches or multi-head attention), reverse-mode autograd must accumulate incoming vector-Jacobian products (`x.grad += dL/dx`) rather than assigning them, honoring the multivariable chain rule.](assets/images/diagrams/06_gradient-fanin-accumulation.svg){#fig-gradient-fanin-accumulation width="100%" fig-alt="DAG diagram illustrating Node X receiving accumulated gradients from Op A and Op B via multivariable chain rule summation."}
 
 ::: {.column-margin}
 ![](assets/images/diagrams/06_autograd-margin-diamond.svg){width="100%" fig-alt="Diamond DAG topology showing forward split and backward gradient accumulation at leaf x."}
 
 *Diamond DAGs require gradient accumulation: $\nabla_x = \nabla_{y_1} \frac{\partial y_1}{\partial x} + \nabla_{y_2} \frac{\partial y_2}{\partial x}$.*
 :::
+
+Architectural motifs like residual skip connections in ResNets and shared projection weights in Transformers routinely fan out a single tensor into multiple downstream consumers. To correctly evaluate the multivariable chain rule across such diamond dependencies, the autograd engine must accumulate incoming cotangent vectors into a shared buffer rather than overwriting them. When a tensor feeds two operations, the loss depends on it along two paths, and the multivariable chain rule says the total derivative is the sum over paths:
+
+$$\frac{\partial L}{\partial x} = \sum_{k} \frac{\partial L}{\partial y_k} \frac{\partial y_k}{\partial x},$$
+
+where the $y_k$ are the tensors computed directly from $x$. In code the incoming contributions must be added. The implementation accumulates them in `pending` before adding the complete result into `x.grad`. The smallest example is `x + x`. The same tensor is both inputs of one addition, so its gradient is the incoming gradient twice. An engine that overwrote each pending contribution would silently report half the true value, and the mistake would not raise an error. It would just train worse. The same accumulation is what makes a layer whose input is added back to its output work, and it introduces one kind of accumulation: combining paths within a backward call. A separate choice keeps `.grad` between calls, so the training loop must clear it when starting a new gradient estimate.
+
+![**Gradient fan-in accumulation across branches**: When a tensor fans out during forward execution (e.g. into parallel residual branches or multi-head attention), reverse-mode autograd must accumulate incoming vector-Jacobian products (`x.grad += dL/dx`) rather than assigning them, honoring the multivariable chain rule.](assets/images/diagrams/06_gradient-fanin-accumulation.svg){#fig-gradient-fanin-accumulation width="100%" fig-alt="DAG diagram illustrating Node X receiving accumulated gradients from Op A and Op B via multivariable chain rule summation."}
 
 
 ### What the design costs
@@ -153,11 +153,13 @@ The reference keeps all inputs even when a particular rule only needs a shape. A
 
 **Problem**: For a 12-layer TinyGPT model with batch size $B=16$, sequence length $S=1024$, and hidden dimension $D=768$, what is the activation memory retained on the forward tape?
 
-**Per-layer activation footprint**:
+**Per-layer activation footprint** (counting only four $B \times S \times D$ tensors per layer and excluding the $S \times S$ attention maps):
 $$\text{Layer activations} \approx 4 \times (B \times S \times D) \times 4\text{ bytes} \approx 4 \times (16 \times 1024 \times 768) \times 4 \approx 192\text{ MB}$$
 
 **Total tape footprint**:
-$$\text{Total activation memory} \approx 12\text{ layers} \times 192\text{ MB} \approx 2.30\text{ GB}$$
+$$\text{Total activation memory} \approx 12\text{ layers} \times 192\text{ MB} \approx 2.25\text{ GB}$$
+
+The excluded attention maps are larger still: each holds $B \times h \times S^2$ values, about $805\text{ MB}$ per layer in float32 with $h = 12$ heads, so a full count reaches tens of gigabytes.
 
 **Systems insight**: While model parameters for this configuration occupy only $\sim 340\text{ MB}$, forward activation memory on the autograd tape exceeds parameter memory by nearly $7\times$, making activation management the primary bottleneck during training. In @sec-extensions, we implement activation checkpointing to break this linear memory growth: by discarding intermediate layer activations during the forward pass and selectively recomputing them during the backward traversal, memory drops from $O(L)$ to $O(\sqrt{L})$ at the cost of one additional forward evaluation.
 
@@ -190,20 +192,20 @@ Read `apply` again with this chapter's question in mind. It builds a node that h
 The output is a new `Tensor` wrapping the array returned by `forward`. The node keeps this tensor as `node.output`, because some derivative rules reuse the output value. If tracking is enabled and any input requires a gradient, `apply` sets `out.requires_grad = True` and stores the node as `out._grad_fn`. For `x * x`, following that link reaches a `Mul` whose two input entries both refer to `x`. Another operation can extend the chain without knowing how the earlier result was computed.
 
 ::: {#chk-autograd-inplace-versioning .callout-checkpoint title="Checkpoint: In-place mutation corrupts forward activation recordings"}
-When a tensor is mutated in place (e.g., `x += 1` or `x.data[0] = 5`), the numerical values saved during forward execution are destroyed. If `backward()` runs later, operations like `Mul` or `ReLU` read the modified values rather than the activations present when the graph was recorded, silently producing corrupt gradients.
+When a tensor's array is mutated in place (e.g., `x.data[0] = 5` or `x.data += 1`), the numerical values saved during forward execution are destroyed. If `backward()` runs later, operations like `Mul` or `ReLU` read the modified values rather than the activations present when the graph was recorded, silently producing corrupt gradients.
 
-Always ensure parameter updates and buffer overwrites occur *after* `loss.backward()` has finished traversing the graph, or isolate mutations inside explicit `no_grad()` contexts.
+Always ensure parameter updates and buffer overwrites occur *after* `loss.backward()` has finished traversing the graph. `no_grad()` stops new recording; it does not protect values an existing graph already references.
 :::
 
 The `if` line controls whether this record survives the call. A prediction using trainable weights still records operations unless tracking is disabled. Inside `no_grad()`, the output has `requires_grad=False` and no `_grad_fn`; leaving the context restores the previous tracking state. Setting a layer to evaluation mode is a separate decision about behavior such as dropout, and does not disable autograd.
 
 A tensor constructed directly, such as `x` or a weight, has no producing operation. Such a tensor is a **leaf** of this record structure. Backward stops there after accumulating its gradient. TinyTorch also stores `.grad` on visited intermediates, which makes the trace inspectable; the production bridge distinguishes that choice from PyTorch's default.
 
-What each node needs in order to send a gradient back to its inputs is the other half of the operation, the `backward` that @sec-tensors left raising `NotImplementedError`. The rest of this section writes those halves, one class at a time, on the same classes that already implement `forward`.
+What each node needs to send a gradient back to its inputs is the other half of the operation, the `backward` that @sec-tensors left raising `NotImplementedError`. The rest of this section writes those halves, one class at a time, on the same classes that already implement `forward`.
 
 ### The broadcast obligation: reducing gradients
 
-For a concrete bias addition, let the activation batch be `[[1, 2, 3], [4, 5, 6]]` with shape `(2, 3)` and the bias be `[10, 20, 30]` with shape `(3,)`. Forward returns `[[11, 22, 33], [14, 25, 36]]`. NumPy broadcasting reuses each bias entry across rows without requiring an explicitly tiled bias array; the addition still creates a result, and TinyTorch wraps it in its own float32 storage. An upstream gradient `[[1, 2, 3], [4, 5, 6]]` must therefore give the bias `[5, 7, 9]`, summing the two uses of each entry.
+In framework tensor runtimes, operations like layer bias additions and channel scaling expand lower-dimensional tensors across batch axes via zero-copy broadcasting. Because forward broadcasting implicitly replicates parameter values across multiple output coordinates, the backward pass incurs an obligation to sum incoming gradients across those broadcasted axes to recover the parameter's original shape. For a concrete bias addition, let the activation batch be `[[1, 2, 3], [4, 5, 6]]` with shape `(2, 3)` and the bias be `[10, 20, 30]` with shape `(3,)`. Forward returns `[[11, 22, 33], [14, 25, 36]]`. NumPy broadcasting reuses each bias entry across rows without requiring an explicitly tiled bias array; the addition still creates a result, and TinyTorch wraps it in its own float32 storage. An upstream gradient `[[1, 2, 3], [4, 5, 6]]` must therefore give the bias `[5, 7, 9]`, summing the two uses of each entry.
 
 If the framework blindly pushed that gradient into the bias, two things would break. First, the shapes would mismatch, crashing the first elementwise update. Second, and worse, the bias gradient would fail to accumulate the contributions from every example in the batch. By the multivariable chain rule, because $b_j$ was added to every row $i$ of the output, its total gradient is the sum across the batch:
 
@@ -249,17 +251,17 @@ The same requirement applies to the loss rules from @sec-losses. For example, bi
 
 ### Walking the graph backward
 
-The records are in place. What is left is the call the training loop of @sec-training will make once per step, `loss.backward()`, which has to visit every record and leave every leaf holding its gradient.
-
-A tempting walk combines recursion with a visited set. Start at the loss, run its rule, and immediately recurse into each unvisited input. On the straight chain in the worked trace below that gives the right answer, which is what makes it dangerous. For `x = 2`, let `h = x * 2` and `L = h * 3 + h * 4`. The two branches contribute $3$ and $4$ at `h`; its multiply must send $(3+4) \times 2 = 14$ to `x`. If a recursive walk reaches `h` through the first branch and immediately runs its rule, it sends only $3 \times 2 = 6$. When the second branch arrives, the visited set suppresses another traversal of `h`, losing the remaining $8$. Dropping the visited set while propagating the total `.grad` causes a different error: the later traversal also resends the first contribution. No error, a wrong number, and a model that trains a little worse than it should.
-
-The fix is to run no rule until every consumer of its tensor has reported. A topological order guarantees exactly that, and a depth-first walk hands us one for free. The implementation therefore does four things: sorts the graph, seeds the gradient at the loss, walks the order once, and releases the graph.
-
 ::: {.column-margin}
 ![](assets/images/diagrams/06_autograd-margin-topo-tape.svg){width="100%" fig-alt="Topological tape execution diagram showing reverse post-order DFS sequence where consumers h1 and h2 deposit gradients into pending buffer before parent h backward executes."}
 
 *Reverse topological sort guarantees all consumer paths contribute to pending gradients before a parent node executes.*
 :::
+
+In production runtimes like PyTorch's C++ autograd engine (`torch::autograd::Engine`), backward execution coordinates dependencies across complex acyclic computation graphs. By executing nodes in reverse topological order, the engine guarantees that all downstream consumers finish depositing their cotangent contributions before an upstream node evaluates its vector-Jacobian product. The records are in place. What is left is the call the training loop of @sec-training will make once per step, `loss.backward()`, which has to visit every record and leave every leaf holding its gradient.
+
+A tempting walk combines recursion with a visited set. Start at the loss, run its rule, and immediately recurse into each unvisited input. On the straight chain in the worked trace below that gives the right answer, which is what makes it dangerous. For `x = 2`, let `h = x * 2` and `L = h * 3 + h * 4`. The two branches contribute $3$ and $4$ at `h`; its multiply must send $(3+4) \times 2 = 14$ to `x`. If a recursive walk reaches `h` through the first branch and immediately runs its rule, it sends only $3 \times 2 = 6$. When the second branch arrives, the visited set suppresses another traversal of `h`, losing the remaining $8$. Dropping the visited set while propagating the total `.grad` causes a different error: the later traversal also resends the first contribution. No error, a wrong number, and a model that trains a little worse than it should.
+
+The fix is to run no rule until every consumer of its tensor has reported. A topological order guarantees exactly that, and a depth-first walk hands us one for free. The implementation therefore does four things: sorts the graph, seeds the gradient at the loss, walks the order once, and releases the graph.
 
 {{< include _listings/06_autograd/Tensor_backward.qmd >}}
 
@@ -332,7 +334,7 @@ $$
 
 The zero in $\partial L / \partial \mathbf{x}$ has a plain meaning. Raising $x_0$ by a small amount raises $z_0$ by half that amount and lowers $z_1$ by the same half, and since $L$ is $z_0 + z_1$, the two effects cancel. The gradient with respect to $\mathbf{W}$ matches the finite-difference estimate from The Problem to within its noise, which is the check that matters.
 
-Running the real module on the same inputs reproduces the table (@lst-autograd-network-trace). Importing `tinytorch.core.autograd` in line 3 completes the operation classes with their backward methods; before that import, `backward()` raises. In lines 5 to 6, `x` and `W` are declared with `requires_grad=True`. Lines 8 to 10 evaluate the forward sequence $z \to a \to L$, attaching operation nodes inspected in lines 11 to 12 (`<MatMulBackward>`, `<ReLUBackward>`, `<SumBackward>`). In line 14, `L.backward()` seeds the gradient at 1.0 and traverses the tape in reverse topological order, populating `W.grad` and `x.grad` in lines 15 to 17 to match the hand-derived matrix products in @tbl-autograd-trace exactly.
+Running the real module on the same inputs reproduces the table (@lst-autograd-network-trace). Line 3 imports `tinytorch.core.autograd`, which completes the operation classes with their backward methods. The package's `__init__` already performs this import, so the line documents the dependency rather than changing behavior. In lines 5 to 6, `x` and `W` are declared with `requires_grad=True`. Lines 8 to 10 evaluate the forward sequence $z \to a \to L$, attaching operation nodes inspected in lines 11 to 12 (`<MatMulBackward>`, `<ReLUBackward>`, `<SumBackward>`). In line 14, `L.backward()` seeds the gradient at 1.0 and traverses the tape in reverse topological order, populating `W.grad` and `x.grad` in lines 15 to 17 to match the hand-derived matrix products in @tbl-autograd-trace exactly.
 
 ::: {#lst-autograd-network-trace lst-cap="**Tracing a matrix network**: Three recorded operations produce the weight and input gradients."}
 ```python
@@ -370,7 +372,7 @@ print(x.grad)          # [[2. 2.]]
 Residual connections ($y = x + F(x)$) feed a single activation tensor into multiple downstream consumers. If an autograd engine used assignment (`pending[parent] = incoming`) rather than accumulation (`pending[parent] += incoming`), the gradient from the skip connection would overwrite the gradient flowing through the residual sub-block, silently zeroing out feature updates in deep networks.
 :::
 
-Replace the `+` in the `pending` update inside `backward` with an assignment and this prints `[[1. 1.]]`, with no error to tell us it is wrong. A shared intermediate adds a second obligation: its local rule must propagate the combined gradient once. The trace in @lst-autograd-retained-graph checks accumulation across separate calls that share a forward intermediate. In lines 1 to 3, `h = x * 2` branches into `left` and `right`. Line 4 runs `left.backward(retain_graph=True)`, printing `x.grad = [6.]` in line 5. Line 6 runs `right.backward()`, accumulating an additional 8 to yield `x.grad = [14.]` in line 7. In lines 9 to 12, attempting to backpropagate through `h` a third time raises a `RuntimeError` because the un-retained backward pass released `h`'s computational graph.
+Replace the `+` in the `pending` update inside `backward` with an assignment and this prints `[[1. 1.]]`, with no error to tell us it is wrong. A shared intermediate adds a second obligation: its local rule must propagate the combined gradient once. The trace in @lst-autograd-retained-graph checks accumulation across separate calls that share a forward intermediate. In lines 1 to 3, `h = x * 2` branches into `left` and `right`. Line 4 runs `left.backward(retain_graph=True)`, printing `x.grad = [6.]` in line 5. Line 6 runs `right.backward()`, accumulating an additional 8 to yield `x.grad = [14.]` in line 7. In lines 9 to 12, attempting to backpropagate through `h` a third time raises a `RuntimeError` because the unretained backward pass released `h`'s computational graph.
 
 ::: {#lst-autograd-retained-graph lst-cap="**Gradient and graph lifetimes**: Contributions accumulate across calls, but a released intermediate cannot be traversed again."}
 ```python
@@ -389,7 +391,7 @@ except RuntimeError:
 ```
 :::
 
-On the first call (line 4), `h` receives three and sends six to `x`. On the second (line 6), its fresh `pending` entry receives four and sends eight, even though `h.grad` also retains the earlier three. The second call releases `h`'s producing operation. The third call (line 9) reaches that marked intermediate during graph validation and stops before changing `x.grad`. Recomputing `h = x * 2` creates a usable graph; clearing `x.grad` alone does not restore the old one.
+On the first call (line 4), `h` receives three and sends six to `x`. On the second (line 6), its fresh `pending` entry receives four and sends eight, even though `h.grad` also retains the earlier three. The second call releases `h`'s producing operation. The third call (line 10) reaches that marked intermediate during graph validation and stops before changing `x.grad`. Recomputing `h = x * 2` creates a usable graph; clearing `x.grad` alone does not restore the old one.
 
 ---
 
@@ -397,10 +399,10 @@ On the first call (line 4), `h` receives three and sends six to `x`. On the seco
 
 PyTorch also records executed operations and exposes a result's producing node through `grad_fn`.[^fn-cyclic-gc-hazard] Its backward engine applies local derivative rules to saved forward values. A production implementation can save only the values a rule needs; TinyTorch keeps every input and its output to make the record easy to inspect. PyTorch also checks version counters to detect changes to saved tensors. [PyTorch autograd mechanics](https://docs.pytorch.org/docs/2.14/notes/autograd.html).
 
-[^fn-cyclic-gc-hazard]: If a backward closure or tape node retains a direct Python reference to its own output tensor while that tensor retains a reference to the node via \texttt{\_grad\_fn}, a cyclic reference is formed. CPython's reference-counting memory manager cannot reclaim cyclic structures immediately upon variable scope exit, forcing the system to fall back on the periodic generational garbage collector. In industrial engines like PyTorch, these cycles are explicitly severed using C++ weak pointers (\texttt{std::weak\_ptr} or \texttt{c10::intrusive\_ptr}) to ensure deterministic memory reclamation.
+[^fn-cyclic-gc-hazard]: If a backward closure or tape node retains a direct Python reference to its own output tensor while that tensor retains a reference to the node via \texttt{\_grad\_fn}, a cyclic reference is formed. CPython's reference-counting memory manager cannot reclaim cyclic structures immediately upon variable scope exit, forcing the system to fall back on the periodic generational garbage collector. TinyTorch forms exactly this cycle (`node.output` and `out._grad_fn`) and breaks it when backward releases the graph; a graph that is never differentiated waits for the cyclic collector. PyTorch avoids the cycle by saving outputs through weak references (\texttt{c10::weak\_intrusive\_ptr}).
 
 ::: {#psp-autograd-cpp-engine .callout-perspective title="Production Bridge: PyTorch's C++ autograd engine and version counters"}
-In PyTorch's native C++ core (`torch/csrc/autograd`), every `Tensor` maintains an internal `_version` counter incremented on every in-place mutation. When a backward rule requires saved forward activations (via `ctx.save_for_backward`), it records their version. If any saved tensor's version increments before backward executes, PyTorch immediately raises:
+In PyTorch's native C++ core (`torch/csrc/autograd`), every `Tensor` maintains an internal `_version` counter incremented on every in-place mutation. When a backward rule requires saved forward activations (via `ctx.save_for_backward`), it records their version. If any saved tensor's version has changed by the time backward uses it, PyTorch raises:
 `RuntimeError: one of the variables needed for gradient computation has been modified by an inplace operation`.
 
 PyTorch also executes the reverse traversal using a ready-queue worker thread pool, executing vector-Jacobian products in C++ without Python interpreter or GIL overhead.

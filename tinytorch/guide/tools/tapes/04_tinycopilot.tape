@@ -20,8 +20,10 @@ Sleep 500ms
 Show
 
 # Train TinyCopilot on Python code and evaluate syntax with AST compiler
-Type "tito milestone run tinycopilot"
+Type "tito milestone run 05 --part 3"
 Sleep 300ms
 Enter
-# Generous hold time to study code completions, compiler diagnostics, and 100% AST validity scorecard
-Sleep 19000ms
+# Wait for the real run to finish (the shell prompt returns), however long
+# training takes on this machine, then hold on the result.
+Wait@600s /^\$ *$/
+Sleep 6s

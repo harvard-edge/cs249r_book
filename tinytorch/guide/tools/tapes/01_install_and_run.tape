@@ -1,5 +1,5 @@
 # ==============================================================================
-# 01_install_and_run.tape: One-Line Install to Running Milestone 01 Out of the Box
+# 01_install_and_run.tape: one-line install, then a student's first module, all real
 # ==============================================================================
 
 Output "tinytorch/guide/assets/images/demos/tinytorch-01-install-and-run.gif"
@@ -12,32 +12,44 @@ Set Height 820
 Set Theme "Catppuccin Mocha"
 Set TypingSpeed 35ms
 
-# Prepare environment invisibly
+# Fresh shell in an empty directory: system PATH, no inherited venv or PYTHONPATH
 Hide
-Type "source ./tinytorch/guide/tools/tape_env.sh && clear"
+Type 'source ./tinytorch/guide/tools/tape_env.sh && export PATH=/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin && unset PYTHONPATH VIRTUAL_ENV && cd "$(mktemp -d)" && clear'
 Enter
-Sleep 500ms
+Sleep 800ms
 Show
 
-# Step 1: One-line install command
+# The real installer: clone, virtual environment, dependencies, tito check
 Type "curl -fsSL https://mlsysbook.ai/tinytorch/install.sh | bash"
 Sleep 300ms
 Enter
-Sleep 2500ms
-
-# Step 2: First-time setup
+Wait@900s /^\$ *$/
+Sleep 3s
+Type "cd tinytorch && source .venv/bin/activate"
+Sleep 300ms
+Enter
+Sleep 1s
 Type "tito setup"
 Sleep 300ms
 Enter
-Sleep 2500ms
-
-# Step 3: Run Milestone 01 out of the box
+Wait@900s /^\$ *$/
+Sleep 3s
 Type "clear"
 Sleep 200ms
 Enter
 Sleep 300ms
-Type "tito milestone run 01"
+# A student's first module: create the notebook, then test and export it
+Type "tito module start 01 --no-jupyter"
 Sleep 300ms
 Enter
-# Generous hold time for viewer to read parameters, decision plot, and achievement banner
-Sleep 6000ms
+Wait@900s /^\$ *$/
+Sleep 3s
+Type "clear"
+Sleep 200ms
+Enter
+Sleep 300ms
+Type "tito module complete 01"
+Sleep 300ms
+Enter
+Wait@900s /^\$ *$/
+Sleep 6s
