@@ -16,7 +16,9 @@ def main() -> int:
     pdf_path = Path(sys.argv[1])
     log_path = Path(sys.argv[2])
     paper_path = Path(__file__).resolve().parent / "paper.tex"
-    bib_path = Path(__file__).resolve().parent / "refs.bib"
+    bib_path = Path(__file__).resolve().parent / "references.bib"
+    if not bib_path.exists():
+        bib_path = Path(__file__).resolve().parent / "refs.bib"
 
     reader = PdfReader(pdf_path)
     # Sanity range, not an editorial page budget. It catches a collapsed or

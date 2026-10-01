@@ -19,7 +19,7 @@ $(GENERATED): FORCE generate_registry_snapshot.py $(REGISTRY_INPUTS) $(REFERENCE
 
 FORCE:
 
-$(OUTPUT_PDF): $(PAPER).tex refs.bib $(GENERATED) check_paper_pdf.py
+$(OUTPUT_PDF): $(PAPER).tex references.bib $(GENERATED) check_paper_pdf.py
 	mkdir -p $(BUILD_DIR) $(OUTPUT_DIR)
 	$(LATEX) -interaction=nonstopmode -halt-on-error -file-line-error -output-directory=$(BUILD_DIR) $(PAPER).tex
 	$(BIBTEX) $(BUILD_DIR)/$(PAPER)
