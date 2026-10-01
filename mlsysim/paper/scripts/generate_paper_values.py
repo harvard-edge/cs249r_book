@@ -24,7 +24,7 @@ install)::
     cd mlsysim && PYTHONPATH=. uv run --no-project --python 3.11 \\
         --with "pint>=0.24.4" --with "pydantic>=2.10.5" --with "numpy>=2.0" \\
         --with typer --with rich --with pyyaml --with matplotlib \\
-        --with pytest --with marimo --with scipy --with ortools \\
+        --with pytest --with marimo --with scipy --with ortools --with plotly \\
         python paper/scripts/generate_paper_values.py
 
 or ``make values`` in ``paper/``. The test-count step collects ``tests/``,
@@ -371,19 +371,31 @@ def section_counts(V: Values, check: bool) -> None:
     provs = {v.id for v in vars(provenance_catalog).values() if isinstance(v, Provenance)}
     V.num("CountProvenanceRecords", len(provs), "distinct Provenance ids defined in mlsysim.core.provenance_catalog")
 
-    registries = sorted(n for n in dir(mlsysim) if isinstance(getattr(mlsysim, n), type)
-                        and issubclass(getattr(mlsysim, n), Registry))
-    require(hasattr(mlsysim, "Scenarios"), "mlsysim.Scenarios missing")
-    registries.append("Scenarios")
+    workload_classes = [n for n in dir(mlsysim.models.types) if n.endswith("Workload") and n != "Workload"]
+    V.num("CountWorkloadTypes", len(workload_classes), "subclasses of Workload in mlsysim.models.types")
+
+    core_registries = [
+        "Hardware", "Models", "Datasets", "Platforms",
+        "Infrastructure", "Systems", "Ops", "Scenarios",
+    ]
+    extension_registries = ["Agents", "Embodied", "Sensors", "Actuators"]
     auxiliary = ["Literature", "ReferenceStats"]
-    for name in auxiliary + ["Agents", "Embodied"]:
-        require(name in registries, f"registry {name} missing")
-    curated = [r for r in registries if r not in auxiliary]
-    V.num("CountRegistriesTotal", len(registries), "top-level Registry subclasses on mlsysim, plus Scenarios")
-    V.num("CountRegistriesCurated", len(curated), "CountRegistriesTotal minus auxiliary Literature and ReferenceStats")
-    V.num("CountRegistriesAuxiliary", len(auxiliary), "Literature and ReferenceStats")
+    for name in core_registries + extension_registries + auxiliary:
+        require(hasattr(mlsysim, name), f"registry {name} missing")
+    curated = core_registries + extension_registries
+    registries = curated + auxiliary
+    V.num("CountRegistriesCore", len(core_registries), "core curriculum registries")
+    V.num("CountRegistriesExtension", len(extension_registries), "extension registries (Agents, Embodied, Sensors, Actuators)")
+    V.num("CountRegistriesCurated", len(curated), "curated registries (core + extensions)")
+    V.num("CountRegistriesAuxiliary", len(auxiliary), "Literature and ReferenceStats auxiliary surfaces")
+    V.num("CountRegistriesTotal", len(registries), "total top-level registries on mlsysim")
     V.text("ListRegistriesCurated", ", ".join(curated), "curated registry names")
-    V.audit["registries"] = {"curated": curated, "auxiliary": auxiliary}
+    V.audit["registries"] = {"core": core_registries, "extensions": extension_registries, "curated": curated, "auxiliary": auxiliary}
+
+    fmt_mod = sys.modules.get("mlsysim.fmt")
+    if fmt_mod is not None:
+        fmt_funcs = [n for n in dir(fmt_mod) if n.startswith("fmt_") or n == "fmt"]
+        V.num("CountFormatters", len(fmt_funcs), "helpers in mlsysim.fmt")
 
     public = [m.name for m in pkgutil.iter_modules(physics_pkg.__path__) if not m.name.startswith("_")]
     supporting = ["constants", "quantities"]
@@ -488,6 +500,7 @@ def section_anchors(V: Values) -> None:
     V.num("AnchorThreeSeqLen", ps.A3_CONFIG["seq_len"], "paper_scenarios.A3_CONFIG")
     V.num("AnchorThreeBatch", ps.A3_CONFIG["batch_size"], "paper_scenarios.A3_CONFIG (sequences per step)")
     V.num("AnchorThreeMicrobatches", ps.A3_CONFIG["microbatch_count"], "paper_scenarios.A3_CONFIG")
+    V.num("AnchorThreeVstages", ps.A3_V_STAGES, "paper_scenarios.A3_V_STAGES")
     V.num("AnchorThreeFabricGbps", fleet.fabric.bandwidth.m_as(Gbps), "Systems.Fabrics.InfiniBand_NDR.bandwidth")
     V.num("AnchorThreeOverlap", ps.A3_CONFIG["overlap_efficiency"], "paper_scenarios.A3_CONFIG", nd=2)
     V.num("AnchorThreeEta", ps.A3_ETA, "paper_scenarios.A3_ETA", nd=2)
@@ -506,10 +519,35 @@ def section_anchors(V: Values) -> None:
     V.pct("AnchorThreeReportedMfuPct", a3["reported"], "paper_scenarios.A3_REPORTED_MFU (Llama 3 herd paper)", nd=0)
     V.pct("AnchorThreeErrorPct", a3["rel_error"], "|MFU - reported| / reported")
     V.num("AnchorThreeErrorPoints", a3["abs_error_points"], "|MFU - reported| in percentage points", nd=1)
+
+    cfg_v1 = dict(ps.A3_CONFIG, v_stages=1)
+    d_v1 = DistributedModel().solve(Models.Language.Llama3_405B, fleet, **cfg_v1)
+    V.pct("AnchorThreeUninterleavedBubblePct", d_v1.bubble_fraction, "A3 bubble fraction with v=1")
+    V.pct("AnchorThreeUninterleavedMfuPct", d_v1.scaling_efficiency * d_v1.node_profile.mfu, "A3 MFU with v=1")
+
+    cfg_low = dict(ps.A3_CONFIG, efficiency=0.45)
+    d_low = DistributedModel().solve(Models.Language.Llama3_405B, fleet, **cfg_low)
+    V.pct("AnchorThreeMfuAtLowEtaPct", d_low.scaling_efficiency * d_low.node_profile.mfu, "A3 MFU with eta=0.45")
+
+    cfg_high = dict(ps.A3_CONFIG, efficiency=0.55)
+    d_high = DistributedModel().solve(Models.Language.Llama3_405B, fleet, **cfg_high)
+    V.pct("AnchorThreeMfuAtHighEtaPct", d_high.scaling_efficiency * d_high.node_profile.mfu, "A3 MFU with eta=0.55")
+
+    h100_cap_gb = Hardware.Cloud.H100.memory.capacity.m_as("GB")
+    V.pct("AnchorThreeMemoryOverCapPct", (a3["memory_gb"] - h100_cap_gb) / h100_cap_gb, "(A3 memory - H100 cap) / H100 cap", nd=1)
+    V.num("AnchorThreeLayers", Models.Language.Llama3_405B.layers, "Models.Language.Llama3_405B.layers")
+    V.num("AnchorThreeEtaLow", 0.45, "low eta sweep", nd=2)
+    V.num("AnchorThreeEtaHigh", 0.55, "high eta sweep", nd=2)
+    mfu_low = d_low.scaling_efficiency * d_low.node_profile.mfu
+    mfu_high = d_high.scaling_efficiency * d_high.node_profile.mfu
+    slope = (mfu_high - mfu_low) / (0.55 - 0.45)
+    V.num("AnchorThreeEtaSlope", slope, "d(MFU) / d(eta) across eta in [0.45, 0.55]", nd=2)
+
     V.audit["A3_node_profile"] = {"feasible": d.node_profile.feasible, "bottleneck": d.node_profile.bottleneck}
 
     a4 = ps.anchor_four()
     d4 = a4["result"]
+    V.pct("AnchorFourCommSharePct", 1.0 - d4.scaling_efficiency, "1 - d4.scaling_efficiency (PaLM comm overhead share)", nd=1)
     V.num("AnchorFourChips", a4["fleet"].total_accelerators, "Fleet.total_accelerators")
     V.num("AnchorFourChipsPerHost", ps.A4_CHIPS_PER_HOST, "paper_scenarios.A4_CHIPS_PER_HOST")
     V.num("AnchorFourTp", ps.A4_CONFIG["tp_size"], "paper_scenarios.A4_CONFIG")
@@ -533,6 +571,16 @@ def section_anchors(V: Values) -> None:
     V.pct("AnchorFourReplicaMfuPct", d4.node_profile.mfu, a4["source"] + ".node_profile.mfu (excludes rematerialization)")
     V.pct("AnchorFourErrorPct", a4["rel_error"], "|MFU - reported| / reported")
     V.num("AnchorFourErrorPoints", a4["abs_error_points"], "|MFU - reported| in percentage points", nd=1)
+
+    hfu_mfu_ratio = a4["reported"] / ps.A4_REPORTED_HFU
+    V.num("AnchorFourHfuMfuRatio", hfu_mfu_ratio, "AnchorFourReportedMfuPct / AnchorFourReportedHfuPct", nd=2)
+    remat_overhead = (ps.A4_REPORTED_HFU - a4["reported"]) / a4["reported"]
+    V.pct("AnchorFourRematOverheadPct", remat_overhead, "(HFU - MFU) / MFU", nd=0)
+    V.num("AnchorFourFullRecomputeFactor", 0.75, "standard 3/4 activation recomputation factor", nd=2)
+    gap_recomp_pts = ps.A4_REPORTED_HFU * (hfu_mfu_ratio - 0.75) * 100.0
+    V.num("AnchorFourGapRecompPoints", gap_recomp_pts, "HFU * (ratio - 0.75) in percentage points", nd=1)
+    gap_comm_pts = ps.A4_REPORTED_HFU * 0.75 * (1.0 - d4.scaling_efficiency) * 100.0
+    V.num("AnchorFourGapCommPoints", gap_comm_pts, "HFU * 0.75 * (1 - scaling_eff) in percentage points", nd=1)
 
     a5 = ps.anchor_five()
     V.sci("AnchorFiveComputeBudget", a5["budget"], "Literature.Chinchilla.ComputeConstant x 70e9 x 1.4e12 (FLOPs)")
@@ -929,6 +977,7 @@ def section_researchers(V: Values) -> None:
           src + " exposed DP communication / .step_latency_total")
     V.pct("FallacyCommCommFractionPct", 1 - d.scaling_efficiency, "1 - " + src + ".scaling_efficiency")
     V.pct("FallacyCommGoodputLossPct", 1 - rel.goodput_ratio, "1 - ReliabilityModel().solve(Training_512_H100, 720).goodput_ratio")
+    V.pct("FallacyCommReworkLossPct", 2 * (1 - rel.goodput_ratio), "2 * (1 - ReliabilityModel().solve(Training_512_H100, 720).goodput_ratio)")
 
     V.section("Case R4: parallelism search for GPT-3 on Production_2K")
     gpt3, f2k = Models.Language.GPT3, Systems.Clusters.Production_2K
@@ -1041,9 +1090,10 @@ def section_listings(V: Values) -> None:
     fleet = Systems.Clusters.Research_256  # Scenario B
     d = DistributedModel().solve(llama70, fleet, batch_size=1024, seq_len=2048, tp_size=8, pp_size=1, activation_recomputation=True)
     days = (d.step_latency_total * (1e12 / (1024 * 2048))).m_as("day")
-    s = SustainabilityModel().solve(fleet, duration_days=days, datacenter=Infrastructure.Datacenters.Iowa_Reference, mfu=0.42)
+    mfu_est = d.scaling_efficiency * d.node_profile.mfu
+    s = SustainabilityModel().solve(fleet, duration_days=days, datacenter=Infrastructure.Datacenters.Iowa_Reference, mfu=mfu_est)
     V.num("ScenarioBDays", days, "DistributedModel().solve(Llama3_70B, Research_256, batch_size=1024, seq_len=2048, tp_size=8, activation_recomputation=True).step_latency_total x 1e12/(1024 x 2048)")
-    V.num("ScenarioBCarbonTonnes", s.carbon_footprint_kg / 1e3, "SustainabilityModel().solve(Research_256, ScenarioBDays, Iowa_Reference, mfu=0.42).carbon_footprint_kg / 1e3", nd=1)
+    V.num("ScenarioBCarbonTonnes", s.carbon_footprint_kg / 1e3, "SustainabilityModel().solve(Research_256, ScenarioBDays, Iowa_Reference, mfu=d.scaling_efficiency * d.node_profile.mfu).carbon_footprint_kg / 1e3", nd=1)
 
     demand = Q_(SC_DEMAND_IMG_PER_S, "1/s") * S2_SAMPLE_SIZE  # Scenario C
     dm = DataModel().solve(workload_data_rate=demand, hardware=A100)
@@ -1251,7 +1301,7 @@ def figure_roofline(ctx: dict) -> list[Path]:
     ax.annotate(f"peak ridge {ridge_peak:,.0f}", (ridge_peak, peak_t), xytext=(0, 6), textcoords="offset points",
                 ha="center", va="bottom", fontsize=6.6, color=INK_2)
 
-    label_offsets = {128: ((6, -5), "left", "top"), 256: ((7, 0), "left", "center")}
+    label_offsets = {128: ((6, -6), "left", "top"), 256: ((6, 6), "left", "bottom")}
     for b, p, att in zip(batches, profiles, attained):
         ai = p.arithmetic_intensity.m_as("flop/byte")
         roof = min(bw * ai, eta * peak_t)

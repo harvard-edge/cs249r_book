@@ -177,12 +177,6 @@ def generate_plot():
     ax.set_ylabel("Worst-Case Clock Synchronization Jitter (log scale)  [ $\\downarrow$ Lower Jitter = Higher Determinism ]",
                   fontsize=10.5, fontweight="bold", labelpad=8)
 
-    # Title block
-    fig.suptitle("The Nervous System Frontier: Fieldbus Bandwidth vs Synchronization Jitter",
-                 fontsize=14, fontweight="bold", x=0.08, y=0.98, ha="left", color=PALETTE["charcoal"])
-    ax.set_title("From asynchronous CSMA arbitration to gigabit sub-microsecond determinism: enabling 20–40 kHz distributed motor control",
-                 fontsize=9.5, color="#475569", loc="left", pad=14)
-
     # Legend - placed at top right
     legend_elements = [
         Line2D([0], [0], marker='s', color='w', markerfacecolor=PALETTE['slate'], markersize=8, label='Serial Master-Slave (Modbus RS-485)'),
@@ -198,12 +192,14 @@ def generate_plot():
     legend.set_zorder(15)
 
     plt.tight_layout()
-    plt.subplots_adjust(top=0.90, bottom=0.10, left=0.08, right=0.94)
+    plt.subplots_adjust(top=0.95, bottom=0.10, left=0.08, right=0.94)
 
     out_path = os.path.join(os.path.dirname(__file__), "ch04_fieldbus_jitter.png")
     fig.savefig(out_path, dpi=300)
+    book_path = os.path.join(os.path.dirname(__file__), "..", "books", "vol4", "04_nervous", "images", "png", "fig04_fieldbus_bandwidth_vs_jitter.png")
+    fig.savefig(book_path, dpi=300)
     plt.close(fig)
-    print(f"Saved: {out_path}")
+    print(f"Saved: {out_path} and {book_path}")
 
 if __name__ == "__main__":
     generate_plot()

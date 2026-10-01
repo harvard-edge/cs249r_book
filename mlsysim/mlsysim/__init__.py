@@ -64,7 +64,7 @@ from .fmt import (
     fmt_area, fmt_heat_flux, fmt_specific_heat, fmt_memory, fmt_memory_capacity,
     fmt_length, fmt_emissions, fmt_carbon_intensity, fmt_water,
     fmt_water_rate, fmt_water_intensity, fmt_latency,
-    fmt_frequency, fmt_acceleration, fmt_torque, fmt_torque_rate, fmt_torque_constant, fmt_velocity, fmt_jerk,
+    fmt_frequency, fmt_acceleration, fmt_torque, fmt_torque_rate, fmt_torque_constant, fmt_motor_constant, fmt_velocity, fmt_jerk,
     fmt_inertia, fmt_voltage, fmt_current, fmt_resistance, fmt_token_rate,
     fmt_force, fmt_force_rate, fmt_mass, fmt_angular_velocity,
     fmt_temperature, fmt_temperature_rate, fmt_decibel, fmt_illuminance,

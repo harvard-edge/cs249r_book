@@ -12,6 +12,9 @@ _LABELING = Metadata(provenance=pc.LABELING_PRICING_2024)
 _FLEET = Metadata(provenance=pc.FLEET_ECONOMICS_2024)
 _CAPITAL = Metadata(provenance=pc.BARROSO_DATACENTER_ECONOMICS)
 _ONPREM = Metadata(provenance=pc.BARROSO_DATACENTER_ECONOMICS)
+_DISCOUNTS = Metadata(provenance=pc.CLOUD_COMMITMENT_DISCOUNT_RANGES)
+_NETWORK = Metadata(provenance=pc.NETWORK_CABLING_PRICES_2024)
+_LABOR = Metadata(provenance=pc.ML_ENGINEER_LOADED_RATE)
 
 
 class Cloud(Registry):
@@ -56,6 +59,11 @@ class Cloud(Registry):
         rate=4.0 * USD / hour,
         metadata=_CLOUD,
     )
+    # --- Added 2026-09-28: discount fractions off on-demand (dimensionless) ---
+    SpotDiscountLow = PricePoint(name="Spot/preemptible discount (low)", rate=0.60, metadata=_DISCOUNTS)
+    SpotDiscountHigh = PricePoint(name="Spot/preemptible discount (high)", rate=0.90, metadata=_DISCOUNTS)
+    ReservedDiscountLow = PricePoint(name="Reserved/committed-use discount (low)", rate=0.40, metadata=_DISCOUNTS)
+    ReservedDiscountHigh = PricePoint(name="Reserved/committed-use discount (high)", rate=0.60, metadata=_DISCOUNTS)
 
 
 class Storage(Registry):
@@ -105,6 +113,27 @@ class Storage(Registry):
         rate=15 * USD / GB,
         metadata=_STORAGE,
     )
+    # --- Added 2026-09-28 ---
+    HbmLowPerGb = PricePoint(
+        name="HBM capital cost per GB (low reference)",
+        rate=10 * USD / GB,
+        metadata=_STORAGE,
+    )
+    HostDramLowPerGb = PricePoint(
+        name="Host DRAM (DDR5) cost per GB (low)",
+        rate=3 * USD / GB,
+        metadata=_STORAGE,
+    )
+    HostDramHighPerGb = PricePoint(
+        name="Host DRAM (DDR5) cost per GB (high)",
+        rate=5 * USD / GB,
+        metadata=_STORAGE,
+    )
+    S3GetPer1kRequests = PricePoint(
+        name="S3 standard GET requests (per 1,000)",
+        rate=0.0004 * USD,
+        metadata=_STORAGE,
+    )
 
 
 class Labeling(Registry):
@@ -131,6 +160,18 @@ class Fleet(Registry):
         rate=0.16 * ureg.kilogram,
         metadata=Metadata(provenance=pc.CARBON_PER_GPU_HR),
     )
+
+
+class Network(Registry):
+    """Network link-media unit prices (added 2026-09-28)."""
+    DacCableUsd = PricePoint(name="Direct-attach copper cable (per cable)", rate=50 * USD, metadata=_NETWORK)
+    AocCableUsd = PricePoint(name="Active optical cable (per cable)", rate=500 * USD, metadata=_NETWORK)
+    OpticsPerLinkUsd = PricePoint(name="Optical link (per link)", rate=500 * USD, metadata=_NETWORK)
+
+
+class Labor(Registry):
+    """Engineering labor rates (added 2026-09-28)."""
+    MlEngineerLoadedHourly = PricePoint(name="ML engineer (fully loaded, per hour)", rate=150 * USD / hour, metadata=_LABOR)
 
 
 class Monitoring(Registry):
@@ -170,6 +211,17 @@ class Capital(Registry):
         rate=30_000 * USD,
         metadata=_CAPITAL,
     )
+    # --- Added 2026-09-28: amortization lifetimes (years, dimensionless) ---
+    AcceleratorServiceLifeYears = PricePoint(
+        name="Accelerator service life for amortization (years)",
+        rate=3,
+        metadata=_CAPITAL,
+    )
+    AcceleratorExtendedServiceLifeYears = PricePoint(
+        name="Accelerator extended service life (years, longer-life contrast)",
+        rate=4,
+        metadata=_CAPITAL,
+    )
 
 
 class OnPremises(Registry):
@@ -189,3 +241,5 @@ class Pricing(Registry):
     Monitoring = Monitoring
     Capital = Capital
     OnPremises = OnPremises
+    Network = Network
+    Labor = Labor

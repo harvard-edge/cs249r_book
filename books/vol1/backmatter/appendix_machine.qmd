@@ -12,11 +12,11 @@ This appendix is designed as a reference. When diagnosing performance issues, us
 
 Conventions used here follow the book-wide notation (for example, $B$ is reserved for batch size and $\text{BW}$ for bandwidth).
 
-- Sanity-check feasibility: Start with @sec-appdx-machine-foundations-numbers-know-b531 for order-of-magnitude numbers.
-- Diagnose the dominant ceiling: Use the Roofline Model in @sec-appdx-machine-foundations-roofline-model-2529 to decide whether the workload is compute bound or memory bound.
-- Reason about scaling limits: Use Amdahl's and Gustafson's Laws in @sec-appdx-machine-foundations-amdahls-law-gustafsons-law-b741 to understand why adding accelerators may not reduce time-to-train.
-- Choose the right precision: Use @sec-appdx-machine-foundations-floatingpoint-format-comparison-1836 to reason about FP32 vs. BF16/FP16 vs. INT8 as a systems trade-off.
-- Follow the chapter treatment: For the full narrative, use @sec-hardware-acceleration, @sec-model-training, and @sec-model-serving.
+- **Sanity-check feasibility**: Start with @sec-appdx-machine-foundations-numbers-know-b531 for order-of-magnitude numbers.
+- **Diagnose the dominant ceiling**: Use the roofline model in @sec-appdx-machine-foundations-roofline-model-2529 to decide whether the workload is compute bound or memory bound.
+- **Reason about scaling limits**: Use Amdahl's and Gustafson's laws in @sec-appdx-machine-foundations-amdahls-law-gustafsons-law-b741 to understand why adding accelerators may not reduce time-to-train.
+- **Choose the right precision**: Use @sec-appdx-machine-foundations-floatingpoint-format-comparison-1836 to reason about FP32 vs. BF16/FP16 vs. INT8 as a systems trade-off.
+- **Follow the chapter treatment**: For the full narrative, use @sec-hardware-acceleration, @sec-model-training, and @sec-model-serving.
 
 Although modern hardware encompasses diverse accelerator architectures, interconnect topologies, and packaging options, the physical laws and bottleneck models detailed here govern them all.
 
@@ -172,9 +172,9 @@ Just as Jeff Dean's "Latency Numbers Every Programmer Should Know"[^fn-jeff-dean
 
 ::: {#psp-appendix-machine-three-numbers .callout-perspective title="Three numbers that matter most"}
 
-* Energy ratio: In the cited 45 nm reference, a 32-bit DRAM read uses ~`{python} NumbersToKnow.dram_vs_compute_ratio_mult_str` the energy of one FP16 multiply. This motivates arithmetic intensity.
-* Training-state footprint: Model weights (`{python} NumbersToKnow.fp16_bytes_per_param_str` FP16) + gradients (`{python} NumbersToKnow.fp16_bytes_per_param_str` FP16) + master weights (`{python} NumbersToKnow.fp32_bytes_per_param_str` FP32) + optimizer states for Adaptive Moment Estimation (Adam) at `{python} NumbersToKnow.adam_state_bytes_per_param_str`. That totals `{python} NumbersToKnow.training_state_bytes_per_param_str` per parameter, so a `{python} NumbersToKnow.training_model_params_b_str` model needs `{python} NumbersToKnow.training_state_footprint_gb_str` just to start training.
-* Fiber propagation limit: Light travels about 200 km/ms in fiber. The table's ~40 ms cross-country round trip includes reducible overhead, but propagation cannot be optimized away.
+* **Energy ratio**: In the cited 45 nm reference, a 32-bit DRAM read uses ~`{python} NumbersToKnow.dram_vs_compute_ratio_mult_str` the energy of one FP16 multiply. This motivates arithmetic intensity.
+* **Training-state footprint**: Model weights (`{python} NumbersToKnow.fp16_bytes_per_param_str` FP16) + gradients (`{python} NumbersToKnow.fp16_bytes_per_param_str` FP16) + master weights (`{python} NumbersToKnow.fp32_bytes_per_param_str` FP32) + optimizer states for Adaptive Moment Estimation (Adam) at `{python} NumbersToKnow.adam_state_bytes_per_param_str`. That totals `{python} NumbersToKnow.training_state_bytes_per_param_str` per parameter, so a `{python} NumbersToKnow.training_model_params_b_str` model needs `{python} NumbersToKnow.training_state_footprint_gb_str` just to start training.
+* **Fiber propagation limit**: Light travels about 200 km/ms in fiber. The table's ~40 ms cross-country round trip includes reducible overhead, but propagation cannot be optimized away.
 
 :::
 
@@ -344,19 +344,20 @@ Every operation has an **arithmetic intensity**\index{Arithmetic intensity!appen
 ```
 :::
 
-The **ridge point**\index{Ridge point!appendix refresher} determines the hardware's balance. If a workload's intensity falls below this point, it is memory-bound (sloped region). If above, it is compute-bound (flat region).
-\begin{gather*}
-\text{Arithmetic Intensity} = \frac{\text{FLOPs}}{\text{bytes accessed}}
-\qquad\qquad
-\text{Ridge Point} = \frac{\text{Peak FLOP/s}}{\text{Memory Bandwidth}}
-\end{gather*}
+The **ridge point**\index{Ridge point!appendix refresher} determines the hardware's balance. Formally, when computation and data movement execute under the overlapped iron law, idealized wall-clock time is bounded below by the critical path:
+$$ T \geq \max\left( \frac{O}{R_{\text{peak}}}, \frac{D_{\text{vol}}}{\text{BW}} \right) $$
+Attainable throughput $R = O / T$ is therefore bounded by:
+$$ R \leq \frac{O}{\max\left( \frac{O}{R_{\text{peak}}}, \frac{D_{\text{vol}}}{\text{BW}} \right)} = \min\left( R_{\text{peak}}, \frac{O}{D_{\text{vol}}} \times \text{BW} \right) = \min(R_{\text{peak}}, I \times \text{BW}) $$
+where $I = O / D_{\text{vol}}$ is operational intensity at the DRAM interface. The ridge point $I_{\text{ridge}}$ is the transition intensity where the compute and bandwidth ceilings meet:
+$$ R_{\text{peak}} = I_{\text{ridge}} \times \text{BW} \implies I_{\text{ridge}} = \frac{R_{\text{peak}}}{\text{BW}} $$
+If a workload's operational intensity falls below $I_{\text{ridge}}$, it is memory bound; if above, it is compute bound.
 
 ::: {#psp-appendix-machine-batch-size-arithmetic-intensity .callout-perspective title="Batch size controls arithmetic intensity"}
 
 For matrix multiplications, arithmetic intensity scales with the batch dimension. For $\mathbf{Y} = \mathbf{X}\mathbf{W}$, where $\mathbf{X}$ is $(B\times d_{\text{in}})$ and $\mathbf{W}$ is $(d_{\text{in}}\times d_{\text{out}})$:
 
-- FLOPs: $2 \times B \times d_{\text{in}} \times d_{\text{out}}$ (multiply-adds)
-- Bytes: Moving $X$, $W$, and $Y$ costs approximately $s_{\text{elem}}(B d_{\text{in}} + d_{\text{in}}d_{\text{out}} + B d_{\text{out}})$ bytes.
+- **FLOPs**: $2 \times B \times d_{\text{in}} \times d_{\text{out}}$ (multiply-adds).
+- **Bytes**: Moving $\mathbf{X}$, $\mathbf{W}$, and $\mathbf{Y}$ costs approximately $s_{\text{elem}}(B d_{\text{in}} + d_{\text{in}}d_{\text{out}} + B d_{\text{out}})$ bytes.
 
 Doubling $B$ doubles FLOPs while weight traffic stays nearly constant when weights dominate, increasing arithmetic intensity. This is why batching often helps inference serving, although activation traffic, cache behavior, shape, precision, and the ridge point determine whether it reaches the compute ceiling.
 
@@ -409,15 +410,15 @@ $$ T = \frac{D_{\text{vol}}}{\text{BW}} + \frac{O}{R_{\text{peak}} \cdot \eta_{\
 Correctness is verified by confirming that every term resolves to time (seconds):
 $$ T [s] = \underbrace{ \frac{D_{\text{vol}} [\text{bytes}]}{\text{BW} [\text{bytes/s}]} }_{\text{seconds}} + \underbrace{ \frac{O [\text{FLOPs}]}{R_{\text{peak}} [\text{FLOP/s}] \cdot \eta_{\text{hw}} [1]} }_{\text{seconds}} + \underbrace{ L_{\text{lat}} [s] }_{\text{seconds}} $$
 
-*   Data term: $\frac{\text{bytes}}{\text{bytes/s}} = \text{bytes} \times \frac{\text{s}}{\text{bytes}} = \mathbf{s}$
-*   Compute term: $\frac{\text{FLOPs}}{\text{FLOP/s}} = \text{FLOPs} \times \frac{\text{s}}{\text{FLOP}} = \mathbf{s}$
-*   Latency term: Already in seconds.
+*   **Data term**: $\frac{\text{bytes}}{\text{bytes/s}} = \text{bytes} \times \frac{\text{s}}{\text{bytes}} = \mathbf{s}$
+*   **Compute term**: $\frac{\text{FLOPs}}{\text{FLOP/s}} = \text{FLOPs} \times \frac{\text{s}}{\text{FLOP}} = \mathbf{s}$
+*   **Latency term**: Already in seconds.
 
 The equation is physically consistent. Apply this technique to any systems equation: if the dimensions do not match, the formula is wrong. "FLOPs" and "Bandwidth" cannot be traded directly because they have different units. Any such trade-off must convert through Time, which is precisely what the iron law quantifies.
 
 Once an equation is dimensionally sound, the next question is how its time terms scale across devices. @Sec-appdx-machine-foundations-amdahls-law-gustafsons-law-b741 answers that question with two complementary bounds.
 
-### Amdahl's Law and Gustafson's Law {#sec-appdx-machine-foundations-amdahls-law-gustafsons-law-b741}
+### Amdahl's law and Gustafson's law {#sec-appdx-machine-foundations-amdahls-law-gustafsons-law-b741}
 
 Parallelization is the primary tool for scaling ML, but its limits depend on *how* the workload scales. These two laws frame the fundamental tension in parallel computing. **Amdahl's law**\index{Amdahl's law!appendix refresher} is the pessimist's view, governing how much faster a *fixed* task can run (optimizing latency). **Gustafson's law**\index{Gustafson's law!appendix refresher} is the optimist's view, governing how much *more* work can be done in the same time (optimizing throughput).
 
@@ -425,8 +426,10 @@ Parallelization is the primary tool for scaling ML, but its limits depend on *ho
 
 **Strong scaling**\index{Strong scaling!appendix refresher} measures how much faster a fixed-size problem runs as processors are added.
 
-Amdahl's Law [@amdahl1967] states that the speedup is limited by the serial portion of the task.[^fn-amdahl-scaling-appendix] If a fraction $s$ of the task is serial (cannot be parallelized) and $p = 1-s$ is parallelizable, the maximum speedup with $n$ processors is:
-$$ \text{Speedup}(n) = \frac{1}{s + \frac{1-s}{n}} $$
+Amdahl's law [@amdahl1967] states that speedup is limited by the serial fraction of the task.[^fn-amdahl-scaling-appendix] Let $T(1) = 1$ be normalized single-processor execution time, composed of serial fraction $s$ and parallelizable fraction $1-s$. If $n$ processors execute the parallel fraction with linear scaling and zero communication overhead, execution time on $n$ processors is:
+$$ T(n) = s + \frac{1-s}{n} $$
+The resulting theoretical speedup is:
+$$ \text{Speedup}(n) = \frac{T(1)}{T(n)} = \frac{1}{s + \frac{1-s}{n}} $$
 
 [^fn-amdahl-scaling-appendix]: **Gene Amdahl (1922–2015)**\index{Amdahl, Gene|seealso{Amdahl's law}}: A legendary computer architect at IBM, where he was the chief architect of the System/360. He later founded Amdahl Corporation to compete with IBM in the mainframe market.
 
@@ -524,8 +527,8 @@ No matter how many accelerators are added, this fixed workload cannot run faster
 
 This is the reality of Large Language Models. Rather than using 1,000 accelerators to train a model on a small dataset in milliseconds, they are used to train on a dataset 1,000$\times$ larger in reasonable time.
 
-For $n$ processors, let $s$ be the serial fraction of execution time measured on those processors for the scaled workload. Gustafson's Law [@gustafson1988] models this "scaled speedup":
-$$ \text{Scaled Speedup}(n) = n - s(n - 1) $$
+For $n$ processors, let $s$ be the serial fraction of execution time measured on those processors for the scaled workload, and $1-s$ the parallel fraction. Gustafson's law [@gustafson1988] derives "scaled speedup" by asking how long that scaled problem would take on a single processor. On $n$ processors, normalized runtime is $T(n) = s + (1-s) = 1$. Executing the same total work on a single processor requires running the parallel fraction sequentially, taking $T(1) = s + n(1-s) = s + n - ns = n - s(n-1)$. The resulting scaled speedup is:
+$$ \text{Scaled Speedup}(n) = \frac{T(1)}{T(n)} = n - s(n - 1) $$
 
 [^fn-gustafsons-law-scaling]: **John Gustafson**\index{Gustafson, John|seealso{Gustafson's law}}: A computer scientist known for his work in parallel computing and for introducing the Unum (universal number) format. His law was a direct response to the perceived "limits" of Amdahl's Law when applied to massive scale.
 
@@ -691,12 +694,12 @@ $$ T \approx \frac{6 \cdot P \cdot D}{N_{\text{GPU}} \cdot R_{\text{peak}} \cdot
 
 **Variables**:
 
-*   Training FLOP factor: The factor 6 derives from $2P\text{ FLOP/token}$ for the forward pass and $4P\text{ FLOP/token}$ for the backward pass ($2P$ for activation gradients and $2P$ for weight gradients), yielding $6PD\text{ FLOP}$ total across $D$ training tokens.
-*   $P$: Number of model parameters.
-*   $D$: Number of training tokens.
-*   $N_{\text{GPU}}$: Number of GPUs.
-*   $R_{\text{peak}}$: Peak FLOP/s of one accelerator.
-*   $\eta_{\text{hw}}$: Hardware utilization, typically 30 percent–50 percent in this training estimate.
+*   **Training FLOP factor**: The factor 6 derives from $2P\text{ FLOP/token}$ for the forward pass and $4P\text{ FLOP/token}$ for the backward pass ($2P$ for activation gradients and $2P$ for weight gradients), yielding $6PD\text{ FLOP}$ total across $D$ training tokens.
+*   **$P$**: Number of model parameters.
+*   **$D$**: Number of training tokens.
+*   **$N_{\text{GPU}}$**: Number of GPUs.
+*   **$R_{\text{peak}}$**: Peak FLOP/s of one accelerator.
+*   **$\eta_{\text{hw}}$**: Hardware utilization, typically 30 percent–50 percent in this training estimate.
 
 **Example**: Training a `{python} TrainingTimeRef.p_params_str` parameter model on `{python} TrainingTimeRef.d_tokens_str` tokens using `{python} TrainingTimeRef.n_gpus_str` A100 (`{python} TrainingTimeRef.a100_fp16_tflop_per_s_str`) at `{python} TrainingTimeRef.u_mfu_pct_str` utilization.
 `{python} TrainingTimeRef.total_flops_math`.
@@ -711,6 +714,10 @@ $$ T \approx \frac{6 \cdot P \cdot D}{N_{\text{GPU}} \cdot R_{\text{peak}} \cdot
 
 For capacity planning in stable inference systems, **Little's law**\index{Little's law!appendix refresher} [@little1961] relates long-run mean concurrency ($Q_{\text{req}}$), mean arrival rate ($\lambda_{\text{arr}}$), and mean time in system ($T_{\text{lat}}$):[^fn-littles-law-appendix]
 $$ Q_{\text{req}} = \lambda_{\text{arr}} \times T_{\text{lat}} $$
+
+The law follows from operational conservation of requests over any observation interval $[0, T]$. Let $A(t)$ denote cumulative arrivals and $C(t)$ cumulative completions, so the instantaneous in-flight queue occupancy is $Q(t) = A(t) - C(t)$. The average number of requests in the system over $[0, T]$ is $\bar{Q} = \frac{1}{T}\int_0^T Q(t)\,dt$. The total accumulated request-time $\int_0^T Q(t)\,dt$ equals the sum of residence times $\sum_{i=1}^{N(T)} W_i$ of all $N(T)$ requests completed by time $T$ (plus boundary terms that vanish as $T \to \infty$). Dividing both sides by $T$:
+$$ \bar{Q} = \frac{1}{T}\int_0^T Q(t)\,dt = \frac{N(T)}{T} \cdot \frac{1}{N(T)}\sum_{i=1}^{N(T)} W_i $$
+In the limit as $T \to \infty$ for a stable queue, $\lim_{T\to\infty} \frac{N(T)}{T} = \lambda_{\text{arr}}$ and $\lim_{N\to\infty} \frac{1}{N}\sum_{i=1}^N W_i = T_{\text{lat}}$, yielding $Q_{\text{req}} = \lambda_{\text{arr}} \times T_{\text{lat}}$ regardless of arrival distribution or service-time distribution.
 
 [^fn-littles-law-appendix]: **John Little**\index{Little, John|seealso{Little's law}}: An Institute Professor at MIT and a pioneer in the field of operations research. His law, proved in 1961, is fundamental to queuing theory and is used across fields from manufacturing to computer network analysis.
 
@@ -1088,14 +1095,8 @@ class BandwidthLatencyExample:
     )
 ```
 
-*   Latency-bound packet (`{python} BandwidthLatencySetup.data_kb_str`):
-    *   Transmission: `{python} BandwidthLatencySetup.data_kb_str` $\times$ 8/`{python} BandwidthLatencySetup.bw_gbit_per_s_str` ≈ `{python} BandwidthLatencyExample.tx_time_us_str`.
-    *   Total Time ≈ `{python} BandwidthLatencySetup.base_latency_ms_str` + `{python} BandwidthLatencyExample.tx_time_us_str` ≈ `{python} BandwidthLatencySetup.base_latency_ms_str`.
-    *   *Result*: Fixed path and protocol latency dominates; propagation is one component.
-*   Bandwidth-bound checkpoint (`{python} BandwidthLatencyExample.large_data_gb_str`):
-    *   Transmission: `{python} BandwidthLatencyExample.large_tx_math`.
-    *   Total Time `{python} BandwidthLatencyExample.large_total_math`.
-    *   *Result*: Base latency is negligible; bandwidth is the bottleneck.
+*   **Latency-bound packet (`{python} BandwidthLatencySetup.data_kb_str`)**: Transmission time is `{python} BandwidthLatencySetup.data_kb_str` $\times$ 8/`{python} BandwidthLatencySetup.bw_gbit_per_s_str` ≈ `{python} BandwidthLatencyExample.tx_time_us_str`. Total time is approximately `{python} BandwidthLatencySetup.base_latency_ms_str` + `{python} BandwidthLatencyExample.tx_time_us_str` ≈ `{python} BandwidthLatencySetup.base_latency_ms_str`. **Result**: Fixed path and protocol latency dominates; propagation is one component.
+*   **Bandwidth-bound checkpoint (`{python} BandwidthLatencyExample.large_data_gb_str`)**: Transmission time is `{python} BandwidthLatencyExample.large_tx_math`. Total time is `{python} BandwidthLatencyExample.large_total_math`. **Result**: Base latency is negligible; bandwidth is the bottleneck.
 
 Architecture determines how fast data can move, but numerical precision\index{Precision!numerical format trade-offs} directly controls *how much* data must move. Halving precision from FP32 to FP16 halves bytes per parameter and can nearly double useful bandwidth when the hardware, kernels, and model accuracy support it. Understanding these trade-offs requires a closer look at how numbers are represented in hardware.
 
@@ -1174,9 +1175,9 @@ Among these formats, BF16\index{BF16!appendix refresher}[^fn-bf16-precision-appe
 
 The choice of numerical format is a direct application of the iron law of ML systems (principle \ref{pri-iron-law}). Reducing precision from FP32 to BF16 or FP16 halves the data volume term, potentially doubling throughput on memory-bound workloads. However, the *type* of 16-bit format determines the engineering complexity:
 
-*   Dynamic range (the exponent): BF16 preserves the eight-bit exponent of FP32 and therefore the same normal exponent range [@kalamkar2019].
-*   Precision (the mantissa): FP16\index{FP16!appendix refresher} has a larger 10-bit mantissa than BF16 (7 bits), offering higher precision for values within its range. Its five-bit exponent, however, raises underflow risk. FP16 training therefore often uses **loss scaling**\index{Loss scaling!appendix refresher}, an operational step that multiplies gradients by a large constant to keep more values representable [@micikevicius2017mixed].
-*   Energy efficiency: INT8\index{INT8!appendix refresher} operations can be substantially more efficient than floating-point equivalents because they move less data and use simpler integer arithmetic paths. Moving to INT8 for inference is a primary lever for deploying neural networks under tight memory, latency, or power budgets [@jacob2018; @krishnamoorthi2018quantizing].
+*   **Dynamic range (the exponent)**: BF16 preserves the eight-bit exponent of FP32 and therefore the same normal exponent range [@kalamkar2019].
+*   **Precision (the mantissa)**: FP16\index{FP16!appendix refresher} has a larger 10-bit mantissa than BF16 (7 bits), offering higher precision for values within its range. Its five-bit exponent, however, raises underflow risk. FP16 training therefore often uses **loss scaling**\index{Loss scaling!appendix refresher}, an operational step that multiplies gradients by a large constant to keep more values representable [@micikevicius2017mixed].
+*   **Energy efficiency**: INT8\index{INT8!appendix refresher} operations can be substantially more efficient than floating-point equivalents because they move less data and use simpler integer arithmetic paths. Moving to INT8 for inference is a primary lever for deploying neural networks under tight memory, latency, or power budgets [@jacob2018; @krishnamoorthi2018quantizing].
 
 :::
 
@@ -1195,6 +1196,6 @@ The choice between symmetric and asymmetric quantization depends on the tensor's
 
 ## Summary {.unnumbered}
 
-Machine-side diagnosis begins with units, ceilings, and working sets. Reference numbers establish orders of magnitude; the Roofline Model and the iron law identify whether operations, bytes, or latency bind; Amdahl's Law, Gustafson's Law, and Little's Law test speedup, scaling, and concurrency claims; and dimensional analysis catches impossible results. The memory hierarchy and interconnect show how those limits appear as latency and bandwidth constraints, while numerical representations show how dynamic range, precision, and quantization change storage, energy, throughput, and accuracy.
+Machine-side diagnosis begins with units, ceilings, and working sets. Reference numbers establish orders of magnitude; the roofline model and the iron law identify whether operations, bytes, or latency bind; Amdahl's law, Gustafson's law, and Little's law test speedup, scaling, and concurrency claims; and dimensional analysis catches impossible results. The memory hierarchy and interconnect show how those limits appear as latency and bandwidth constraints, while numerical representations show how dynamic range, precision, and quantization change storage, energy, throughput, and accuracy.
 
 Treat peak specifications as ceilings, not predictions. Compare a measurement with the relevant ceiling, then trace the remaining gap to utilization, data movement, runtime overhead, architecture, or software. A back-of-envelope estimate is useful when it states its assumptions and units and makes the next measurement obvious.

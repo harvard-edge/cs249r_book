@@ -197,7 +197,7 @@ Volume IV: Physical AI Systems
 - [x] **`fig12_stopping_envelope_phase_plane.svg`** (Type A): Phase plane $(x, \dot{x})$ showing safe set $\mathcal{C}$, viability boundary, and maximum emergency deceleration envelope.
 - [x] **`fig12_canonical_fallback_ladder.svg`** (Type A): Active figure showing state-dependent filtering, powered hold, controlled stop, and drive torque inhibit as alternatives with different prerequisites. The older `fig12_fallback_ladder.svg` is unreferenced legacy art and must not be reused.
 - [x] **`fig12_sto_safety_circuit.svg`** (Type A): Illustrative dual-contact emergency-stop path to safety relays and drive STO inputs, with a separate optional brake. Performance level, isolation, and physical stopping time require application-specific validation.
-- [x] **`fig12_real_laser_scanner.jpg`** (Type B): Authentic industrial safety laser scanner (SICK microScan3) showing programmable protective fields.
+- [x] **`fig12_real_laser_scanner.jpg`** (Type B): Photograph of a SICK planar 2D laser scanner (not identified as a safety-rated model; it shows no fields). Björn Heller, Wikimedia Commons, CC BY-SA 3.0 DE; credit carried in the caption.
 
 #### Chapter 13: Placement
 *Focus: Heterogeneous SoCs, Linux-RTOS boundaries, memory bus contention, cache partitioning.*
@@ -213,7 +213,7 @@ Volume IV: Physical AI Systems
 #### Chapter 14: Intervention
 *Focus: Shared authority, bumpless transfer, Mode 2 automation surprise, forensic logging.*
 - [x] **`fig14_authority_handshake_fsm.svg`** (Type A): Request, ACK, atomic commit, enforcer-owned blend, manual lease, and fallback states.
-- [x] **`fig14_bumpless_transfer_dynamics.svg`** (Type A): Illustrative command step versus fixed-endpoint $C^2$ quintic command and their derivatives; plant response is not measured.
+- [x] **`fig14_bumpless_transfer_dynamics.svg`** (Type A): Illustrative command step vs. fixed-endpoint $C^2$ quintic command and their derivatives; plant response is not measured.
 - [x] **`fig14_real_teach_pendant.jpg`** (Type B): Front view of ABB teach pendant; rear enabling grip and wiring are not visible. Auledas, [Wikimedia Commons](https://commons.wikimedia.org/wiki/File:Teach_Pendant_ABB.JPG), CC BY-SA 4.0; local copy re-encoded. The annotated derivative is legacy and is not used in this chapter.
 
 #### Chapter 15: Verification

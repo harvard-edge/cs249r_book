@@ -47,7 +47,7 @@ DOMAIN_FMT_ASSIGN = re.compile(
     r"fmt_energy_per_byte|fmt_energy_per_bit|fmt_energy_per_flop|fmt_energy_per_op|"
     r"fmt_compute_efficiency|fmt_length|fmt_carbon_intensity|fmt_water|fmt_water_rate|fmt_water_intensity|"
     r"fmt_force|fmt_force_rate|fmt_mass|fmt_angular_velocity|"
-    r"fmt_velocity|fmt_acceleration|fmt_voltage|fmt_current|fmt_resistance|fmt_torque|fmt_torque_rate|fmt_torque_constant|"
+    r"fmt_velocity|fmt_acceleration|fmt_voltage|fmt_current|fmt_resistance|fmt_torque|fmt_torque_rate|fmt_torque_constant|fmt_motor_constant|"
     r"fmt_temperature|fmt_temperature_rate|fmt_decibel|fmt_illuminance|fmt_jerk|fmt_inertia|fmt_frequency|fmt_token_rate|"
     r"fmt_thermal_resistance|fmt_heat_capacity|fmt_density|fmt_mass_flow|fmt_mass_flow_rate|"
     r"fmt_volumetric_flow|fmt_flow_rate|fmt_charge|fmt_battery_capacity|fmt_angle|fmt_inductance|fmt_capacitance|fmt_power_rate|"
@@ -65,7 +65,9 @@ FMT_QTY_DOMAIN_UNIT = re.compile(
     r"\bfmt_qty\s*\([^;\n]+?,\s*(?:unit\s*=\s*)?(?:"
     r"[TGKM]B\s*/\s*(?:second|s)|[TGKM]bps|[PEGT]FLOPs?\s*/\s*(?:second|s)|flops_per_second|"
     r"(?<![/\w])(?:W|kW|MW|GW|watt|kilowatt|megawatt)(?!\s*/\s*s)(?![a-zA-Z0-9_])|"
-    r"(?<![/\w])(?:GB|MB|KB|TB|gigabyte|terabyte|megabyte|kilobyte)(?!\s*/\s*s)(?![a-zA-Z0-9_])|"
+    # 2026-09-28: a memory unit multiplied by time (e.g. GB * second, a capacity-occupancy
+    # product) is not a memory quantity, so no domain formatter applies.
+    r"(?<![/\w])(?:GB|MB|KB|TB|gigabyte|terabyte|megabyte|kilobyte)(?!\s*[/*]\s*s)(?![a-zA-Z0-9_])|"
     r"(?<![/\w])(?:newton|kilonewton)(?!\s*/)(?![a-zA-Z0-9_])|"
     r"newton\s*/\s*(?:second|millisecond|s|ms)|"
     r"(?<![/\w])(?:kilogram|gram|metric_ton)(?!\s*/)(?![a-zA-Z0-9_])|"

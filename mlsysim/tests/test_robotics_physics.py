@@ -26,6 +26,8 @@ from mlsysim.physics.robotics import (
     calc_cbf_safety_margin,
     calc_action_chunk_streaming_amortization,
     calc_watchdog_lease_bound,
+    calc_phase_lag_total,
+    calc_canfd_frame_bits,
     calc_canfd_bus_utilization,
     calc_ethercat_cycle_time,
     calc_contact_force,
@@ -51,11 +53,17 @@ from mlsysim.physics.robotics import (
     calc_teleop_ingestion_budget,
     calc_tsdf_voxel_grid_budget,
     calc_target_evidence_horizon,
+    calc_tracked_evidence_horizon,
+    calc_watchdog_feed_window,
     calc_intent_drift_lease,
     calc_process_thermal_runaway_lease,
     calc_c2_effective_deceleration,
     calc_latch_contact_stopping_profile,
     calc_scenario_stopping_budget,
+    calc_c2_stop_suffix,
+    calc_scurve_stop_distance,
+    calc_scurve_stop_time,
+    calc_scurve_max_permitted_velocity,
 )
 
 
@@ -284,24 +292,77 @@ def test_watchdog_lease_bound():
     assert res["t_lease_max"] == res["t_total_delay_max"]
 
 
+def test_canfd_frame_bits_8_bytes():
+    # ISO 11898-1:2015 FD base format, 8 data bytes, CRC-17.
+    f = calc_canfd_frame_bits(8)
+    assert f["data_field_bytes"] == 8
+    assert f["crc_bits"] == 17 and f["fixed_stuff_bits"] == 6
+    # Stuffed run SOF..data = 17 + 5 + 64 = 86 bits -> floor(85/4) = 21 stuff bits;
+    # 4 of them fall in the 17 nominal-rate arbitration bits.
+    assert f["stuff_bits_nominal"] == 4 and f["stuff_bits_data"] == 17
+    # Nominal: 17 + 13 (CRC delim, ACK, ACK delim, EOF 7, IFS 3) + 4 = 34
+    assert f["bits_nominal"] == 34
+    # Data: ESI 1 + DLC 4 + 64 + stuff count 4 + CRC 17 + fixed stuff 6 + 17 = 113
+    assert f["bits_data"] == 113
+
+
+def test_canfd_frame_bits_crc21_padding_and_extended():
+    f = calc_canfd_frame_bits(64)
+    assert f["crc_bits"] == 21 and f["fixed_stuff_bits"] == 7
+    assert f["bits_data"] == 5 + 512 + 4 + 21 + 7 + ((17 + 5 + 512 - 1) // 4 - 4)
+    # 9 bytes pad up to the 12-byte data field; 17 < 20 keeps CRC-17.
+    assert calc_canfd_frame_bits(9)["data_field_bytes"] == 12
+    assert calc_canfd_frame_bits(17)["crc_bits"] == 21
+    # Extended identifier: 36 nominal arbitration bits.
+    ext = calc_canfd_frame_bits(8, extended_id=True, worst_case_stuffing=False)
+    assert ext["bits_nominal"] == 36 + 13
+    with pytest.raises(ValueError):
+        calc_canfd_frame_bits(65)
+
+
 def test_canfd_bus_utilization():
-    # Chapter 4 CAN-FD 8 axes, 64-byte payload
+    # 9 axes, command + feedback frames, 8 bytes each, 1/5 Mbps, worst-case stuffing.
     res = calc_canfd_bus_utilization(
-        num_axes=8,
-        payload_bytes=64,
+        num_axes=9,
+        payload_bytes=8,
         baud_arbitration=Q_("1.0 Mbps"),
         baud_data=Q_("5.0 Mbps"),
         cycle_time=Q_("1.0 ms"),
-        interframe_spacing=Q_("6.0 us"),
-        overhead_bits_arb=32,
     )
-    # t_tx = 32 us + 102.4 us + 6.0 us = 140.4 us
-    assert res["t_tx"].to("us").magnitude == pytest.approx(140.4, rel=1e-2)
-    # t_total = 8 * 140.4 = 1123.2 us
-    assert res["t_total_tx"].to("us").magnitude == pytest.approx(1123.2, rel=1e-2)
-    # utilization = 1.1232 (>1.0 -> unschedulable)
-    assert res["utilization"] == pytest.approx(1.1232, rel=1e-2)
+    # t_frame = 34 bits / 1 Mbps + 113 bits / 5 Mbps = 34 + 22.6 = 56.6 us
+    assert res["t_tx"].to("us").magnitude == pytest.approx(56.6, rel=1e-9)
+    assert res["n_frames"] == 18
+    # 18 * 56.6 = 1018.8 us > 1 ms
+    assert res["t_total_tx"].to("us").magnitude == pytest.approx(1018.8, rel=1e-9)
+    assert res["utilization"] == pytest.approx(1.0188, rel=1e-9)
     assert res["is_schedulable"] is False
+    # One bus per limb: the 7-joint arm bus fits the serialization check.
+    arm = calc_canfd_bus_utilization(num_axes=7)
+    assert arm["t_total_tx"].to("us").magnitude == pytest.approx(792.4, rel=1e-9)
+    assert arm["is_schedulable"] is True
+    # Without stuffing the frame is shorter (lower bound, not a WCRT input).
+    lo = calc_canfd_bus_utilization(num_axes=9, worst_case_stuffing=False)
+    assert lo["t_tx"] < res["t_tx"]
+
+
+def test_phase_lag_total():
+    # 20 Hz crossover, 1 ms tick, 0.25 ms compute, 1 ms bus, 5 deg allowance.
+    r = calc_phase_lag_total(
+        Q_("20 Hz"), Q_("1 ms"), compute_delay=Q_("0.25 ms"), transport_delay=Q_("1 ms"),
+        phase_allowance=Q_("5 degree"),
+    )
+    # ZOH: 360 * 20 * 0.0005 = 3.6 deg; bus: 7.2 deg; compute: 1.8 deg; total 12.6 deg
+    assert r["phase_zoh"].to("degree").magnitude == pytest.approx(3.6, rel=1e-9)
+    assert r["phase_transport"].to("degree").magnitude == pytest.approx(7.2, rel=1e-9)
+    assert r["phase_total"].to("degree").magnitude == pytest.approx(12.6, rel=1e-9)
+    assert r["tau_total"].to("ms").magnitude == pytest.approx(1.75, rel=1e-9)
+    # allowed delay = 5 / (360 * 20) s = 0.6944 ms; f_max = 5 / (360 * 1.75e-3) = 7.937 Hz
+    assert r["tau_allowed"].to("ms").magnitude == pytest.approx(0.694444, rel=1e-5)
+    assert r["f_crossover_max"].to("Hz").magnitude == pytest.approx(7.936508, rel=1e-5)
+    assert r["within_allowance"] is False
+    # Sample-and-hold alone fits the allowance.
+    z = calc_phase_lag_total(Q_("20 Hz"), Q_("1 ms"), phase_allowance=Q_("5 degree"))
+    assert z["within_allowance"] is True
 
 
 def test_ethercat_cycle_time():
@@ -655,3 +716,139 @@ def test_calc_scenario_stopping_budget():
     assert budget_info["a_eff"].to("m/s^2").magnitude == pytest.approx(2.0 / 1.5, rel=1e-4)
     assert budget_info["tau_delay"].to("ms").magnitude == pytest.approx(133.6, rel=1e-3)
 
+
+
+# ── Jerk-limited S-curve stop (Biagiotti & Melchiorri 2008, ch. 3) ──────────
+
+def test_c2_polynomial_peak_jerk():
+    # T = 1.5 v / a = 1.125 s; j = 6 v / T^2 = (8/3) a^2 / v = 64/9 m/s^3.
+    res = calc_c2_stop_suffix(Q_("1.5 m/s"), Q_("2.0 m/s^2"))
+    assert res["peak_jerk"].to("m/s^3").magnitude == pytest.approx(64.0 / 9.0, rel=1e-12)
+
+
+def test_scurve_stop_trapezoidal_regime_matches_closed_form():
+    v, a, j = Q_("1.5 m/s"), Q_("2.0 m/s^2"), Q_(64.0 / 9.0, "m/s^3")
+    # v >= a^2/j = 0.5625: d = (v/2)(v/a + a/j), T = v/a + a/j
+    assert calc_scurve_stop_distance(v, a, j).to("mm").magnitude == pytest.approx(773.4375, rel=1e-12)
+    assert calc_scurve_stop_time(v, a, j).to("ms").magnitude == pytest.approx(1031.25, rel=1e-12)
+    # Equals constant braking plus cruise over half a jerk ramp.
+    d_equiv = 1.5**2 / (2 * 2.0) + 1.5 * 2.0 / (2 * 64.0 / 9.0)
+    assert calc_scurve_stop_distance(v, a, j).to("m").magnitude == pytest.approx(d_equiv, rel=1e-12)
+    assert calc_scurve_stop_distance(Q_("1.3 m/s"), a, j).to("mm").magnitude == pytest.approx(605.3125, rel=1e-12)
+
+
+def test_scurve_stop_triangular_regime_and_continuity():
+    a, j = Q_("2.0 m/s^2"), Q_("8.0 m/s^3")  # threshold a^2/j = 0.5 m/s
+    v = Q_("0.32 m/s")
+    assert calc_scurve_stop_time(v, a, j).to("s").magnitude == pytest.approx(2 * math.sqrt(0.04), rel=1e-12)
+    assert calc_scurve_stop_distance(v, a, j).to("m").magnitude == pytest.approx(0.32 * 0.2, rel=1e-12)
+    # Both branches agree at the threshold speed.
+    lo = calc_scurve_stop_distance(Q_(0.5 - 1e-12, "m/s"), a, j).to("m").magnitude
+    hi = calc_scurve_stop_distance(Q_(0.5, "m/s"), a, j).to("m").magnitude
+    assert lo == pytest.approx(hi, rel=1e-9)
+    assert calc_scurve_stop_distance(Q_("0 m/s"), a, j).to("m").magnitude == 0.0
+
+
+def test_scurve_is_shorter_than_polynomial_and_longer_than_constant_decel():
+    for v_mps in (0.8, 1.0, 1.5, 2.5):
+        v, a = Q_(v_mps, "m/s"), Q_("2.0 m/s^2")
+        poly = calc_c2_stop_suffix(v, a)
+        s_curve = calc_scurve_stop_distance(v, a, poly["peak_jerk"]).to("m").magnitude
+        assert v_mps**2 / 4.0 < s_curve < poly["distance"].to("m").magnitude
+
+
+def test_scurve_stop_rejects_invalid_limits():
+    with pytest.raises(ValueError, match="max_jerk"):
+        calc_scurve_stop_distance(Q_("1 m/s"), Q_("2 m/s^2"), Q_("0 m/s^3"))
+    with pytest.raises(ValueError, match="max_deceleration"):
+        calc_scurve_stop_time(Q_("1 m/s"), Q_("-2 m/s^2"), Q_("7 m/s^3"))
+
+
+def test_scurve_ceiling_matches_closed_form_and_fills_clearance():
+    d, tau, a, j = Q_("1.10 m"), Q_("133.6 ms"), Q_("2.0 m/s^2"), Q_(64.0 / 9.0, "m/s^3")
+    loc, margin = Q_("0.05 m"), Q_("0.14 m")
+    v = calc_scurve_max_permitted_velocity(d, tau, a, j, loc_margin=loc, physical_margin=margin)
+    # Trapezoidal regime: constant braking after tau + a/(2j).
+    closed = calc_max_permitted_velocity(d, tau + (a / (2 * j)).to("ms"), a, loc_margin=loc, physical_margin=margin)
+    assert v.to("m/s").magnitude == pytest.approx(closed.to("m/s").magnitude, rel=1e-12)
+    assert v.to("m/s").magnitude == pytest.approx(1.43669, abs=1e-5)
+    used = (v * tau + calc_scurve_stop_distance(v, a, j) + loc + margin).to("m").magnitude
+    assert used == pytest.approx(1.10, rel=1e-12)
+
+
+def test_scurve_ceiling_with_approaching_obstacle_and_exhausted_clearance():
+    d, tau, a, j = Q_("1.10 m"), Q_("133.6 ms"), Q_("2.0 m/s^2"), Q_(64.0 / 9.0, "m/s^3")
+    vh = Q_("1.6 m/s")
+    v = calc_scurve_max_permitted_velocity(d, tau, a, j, Q_("0.05 m"), Q_("0.14 m"), approach_velocity=vh)
+    t = calc_scurve_stop_time(v, a, j)
+    used = (v * tau + calc_scurve_stop_distance(v, a, j) + vh * (tau + t) + Q_("0.19 m")).to("m").magnitude
+    assert used == pytest.approx(1.10, rel=1e-12)
+    assert v < Q_("0.5625 m/s")  # triangular regime
+    assert calc_scurve_max_permitted_velocity(Q_("0.1 m"), tau, a, j, Q_("0.05 m"), Q_("0.14 m")).magnitude == 0.0
+
+
+# Chunk renewal on the setpoint grid (added 2026-09-28, M5).
+from mlsysim.physics.robotics import calc_chunk_renewal_schedule  # noqa: E402
+
+
+def test_chunk_renewal_schedule_hand_checked():
+    s = calc_chunk_renewal_schedule(Q_("20 Hz"), Q_("25 ms"), 16, Q_("40 ms"))
+    # 50 ms / 25 ms = 2; 50 + 40 = 90 ms; ceil(90/25) = 4; 16 x 25 = 400 ms; 16 // 2 = 8
+    assert s["renewal_period"].to("ms").magnitude == pytest.approx(50.0)
+    assert s["setpoints_per_renewal"] == 2
+    assert s["open_loop_span"].to("ms").magnitude == pytest.approx(90.0)
+    assert s["min_supply_setpoints"] == 4
+    assert s["chunk_span"].to("ms").magnitude == pytest.approx(400.0)
+    assert s["overlapping_chunks"] == 8
+    assert s["renewal_slack"].to("ms").magnitude == pytest.approx(10.0)
+
+
+def test_chunk_renewal_schedule_act_per_step_query():
+    # ACT queries every step at 50 Hz with k = 100: n = 1, 100 overlapping predictions.
+    s = calc_chunk_renewal_schedule(Q_("50 Hz"), Q_("20 ms"), 100, Q_("10 ms"))
+    assert s["setpoints_per_renewal"] == 1
+    assert s["overlapping_chunks"] == 100
+    assert s["min_supply_setpoints"] == 2
+
+
+def test_chunk_renewal_schedule_exact_multiple_h_min():
+    # 40 ms renewal + 20 ms inference = 60 ms = exactly 3 x 20 ms steps.
+    s = calc_chunk_renewal_schedule(Q_("25 Hz"), Q_("20 ms"), 8, Q_("20 ms"))
+    assert s["min_supply_setpoints"] == 3
+
+
+def test_chunk_renewal_schedule_rejects_off_grid():
+    with pytest.raises(ValueError, match="not a whole number"):
+        calc_chunk_renewal_schedule(Q_("20 Hz"), Q_("20 ms"), 16, Q_("40 ms"))
+
+
+def test_chunk_renewal_schedule_rejects_overrun_and_short_chunk():
+    with pytest.raises(ValueError, match="does not finish"):
+        calc_chunk_renewal_schedule(Q_("25 Hz"), Q_("20 ms"), 16, Q_("40 ms"))
+    with pytest.raises(ValueError, match="shorter than"):
+        calc_chunk_renewal_schedule(Q_("20 Hz"), Q_("25 ms"), 3, Q_("40 ms"))
+
+
+def test_tracked_evidence_horizon_constant_acceleration():
+    # tau_ev = sqrt(2 (r_tol - e_0) / a_slip); 9 mm margin at 0.375 m/s^2 -> 219.09 ms
+    tau = calc_tracked_evidence_horizon(Q_("15 mm"), Q_("6 mm"), Q_("0.375 m/s^2"))
+    assert tau.to("ms").magnitude == pytest.approx(219.089, rel=1e-4)
+    # the drift a_slip tau^2 / 2 consumes exactly the margin
+    drift = (0.5 * Q_("0.375 m/s^2") * tau**2).to("mm")
+    assert drift.magnitude == pytest.approx(9.0, rel=1e-9)
+    with pytest.raises(ValueError):
+        calc_tracked_evidence_horizon(Q_("6 mm"), Q_("6 mm"), Q_("0.375 m/s^2"))
+    with pytest.raises(ValueError):
+        calc_tracked_evidence_horizon(Q_("15 mm"), Q_("6 mm"), Q_("0 m/s^2"))
+
+
+def test_watchdog_feed_window_bounds():
+    # 1 ms tick, completions in [60, 250] us, 20 us phase jitter -> spread 210 us, [790, 1210] us
+    w = calc_watchdog_feed_window(Q_("1 ms"), Q_("60 us"), Q_("250 us"), Q_("20 us"))
+    assert w["spread"].to("us").magnitude == pytest.approx(210.0)
+    assert w["t_lower"].to("us").magnitude == pytest.approx(790.0)
+    assert w["t_upper"].to("us").magnitude == pytest.approx(1210.0)
+    with pytest.raises(ValueError):
+        calc_watchdog_feed_window(Q_("1 ms"), Q_("300 us"), Q_("250 us"), Q_("20 us"))
+    with pytest.raises(ValueError):
+        calc_watchdog_feed_window(Q_("100 us"), Q_("0 us"), Q_("250 us"), Q_("20 us"))

@@ -3276,6 +3276,27 @@ def fmt_torque_constant(quantity, *, unit=None, precision=None, commas=False):
     )
 
 
+def fmt_motor_constant(quantity, *, unit=None, precision=None, commas=False):
+    """Format a motor constant K_m = K_t / sqrt(R) for prose (N·m/√W)."""
+    if not isinstance(quantity, ureg.Quantity):
+        raise TypeError("fmt_motor_constant() requires a Pint Quantity.")
+    km_unit = ureg.newton * ureg.meter / ureg.watt**0.5
+    if (1 * quantity).dimensionality != (1 * km_unit).dimensionality:
+        raise ValueError(f"fmt_motor_constant unit must have N·m/√W dimensionality, got {quantity}.")
+    display_unit = _coerce_unit(unit) if unit is not None else km_unit
+    q = quantity.to(display_unit)
+    auto_precision = precision is None
+    p = _resolve_display_precision(q.magnitude, precision)
+    return fmt_qty(
+        q,
+        display_unit,
+        precision=p,
+        commas=commas,
+        unit_label="N·m/√W",
+        trim_trailing_zeros=auto_precision,
+    )
+
+
 def fmt_force(
     quantity,
     *,
@@ -4006,11 +4027,18 @@ def fmt_stiffness(
     q = quantity.to(display_unit)
     auto_precision = precision is None
     p = _resolve_display_precision(q.magnitude, precision)
-    unit_str = str(display_unit)
-    if "millimeter" in unit_str or "mm" in unit_str:
-        unit_label = "N/mm"
-    else:
-        unit_label = "N/m"
+    # 2026-09-29: the label was chosen by substring, so kN/m values printed
+    # as "N/m". Build the label from the numerator and denominator prefixes.
+    force_prefixes = (("meganewton", "MN"), ("kilonewton", "kN"), ("millinewton", "mN"), ("newton", "N"))
+    length_prefixes = (("kilometer", "km"), ("millimeter", "mm"), ("micrometer", "µm"), ("centimeter", "cm"), ("meter", "m"))
+    parts = dict(display_unit._units)
+    num = " ".join(k for k, v in parts.items() if v > 0)
+    den = " ".join(k for k, v in parts.items() if v < 0)
+    f_lbl = next((lbl for name, lbl in force_prefixes if name in num), None)
+    l_lbl = next((lbl for name, lbl in length_prefixes if name in den), None)
+    if f_lbl is None or l_lbl is None:
+        raise ValueError(f"fmt_stiffness cannot label unit {display_unit}; pass a force/length unit.")
+    unit_label = f"{f_lbl}/{l_lbl}"
     return fmt_qty(
         q,
         display_unit,

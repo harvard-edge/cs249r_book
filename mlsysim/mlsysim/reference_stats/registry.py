@@ -31,6 +31,9 @@ from ..core.units import (
     param,
     second,
     TRILLION,
+    BYTES_ADAM_STATE,
+    BYTES_FP16,
+    BYTES_FP32,
 )
 
 _hour = ureg.hour
@@ -151,25 +154,32 @@ class TrainingScaleProfiles(Registry):
         0.9,
         pc.SCALING_EFFICIENCY_TIERS,
         name="Scaling efficiency (32 GPUs)",
-        description="Near-linear scaling regime for a reference training scenario.",
+        description="Book convention for small jobs; the 175B reference job needs 64 GPUs per TP8xPP8 replica, so this tier is not modeled.",
     )
     Eff256Gpu = sourced(
-        0.7,
-        pc.SCALING_EFFICIENCY_TIERS,
+        0.87,
+        pc.SCALING_EFFICIENCY_REFERENCE_JOB_MODELED,
         name="Scaling efficiency (256 GPUs)",
-        description="Reference training scenario where communication begins to reduce scaling efficiency.",
+        description="Modeled for the 175B reference job at a fixed GPT-3 batch; tensor-parallel communication is the main loss.",
     )
     Eff1024Gpu = sourced(
-        0.5,
-        pc.SCALING_EFFICIENCY_TIERS,
+        0.83,
+        pc.SCALING_EFFICIENCY_REFERENCE_JOB_MODELED,
         name="Scaling efficiency (1024 GPUs)",
-        description="Reference training scenario with significant communication overhead at 1k GPUs.",
+        description="Modeled for the 175B reference job; pipeline fill and drain become visible (~6% of step).",
     )
     Eff8192Gpu = sourced(
-        0.35,
-        pc.MEGASCALE,
+        0.56,
+        pc.SCALING_EFFICIENCY_REFERENCE_JOB_MODELED,
         name="Scaling efficiency (8192 GPUs)",
-        description="Illustrative scaling efficiency at 8192 GPUs for LLM training.",
+        description="Modeled for the 175B reference job at a fixed GPT-3 batch; pipeline bubble dominates (~33% of step). Production runs with larger batches and interleaved pipelines retain more (MegaScale).",
+    )
+    # Added 2026-09-28.
+    LocalComputeEfficiency = sourced(
+        0.45,
+        pc.LOCAL_COMPUTE_EFFICIENCY_ASSUMPTION,
+        name="Per-accelerator compute efficiency",
+        description="Fraction of peak each accelerator achieves on its local compute before communication losses.",
     )
 
 
@@ -187,6 +197,13 @@ class TrainingCostAnchors(Registry):
         pc.GPT4_TRAINING_COST_EST,
         name="GPT-4 training cost (estimate)",
         description="Commonly cited nine-figure estimate for GPT-4-class training runs.",
+    )
+    # Added 2026-09-28.
+    Gpt3CostEstimate = sourced_qty(
+        4.6 * MILLION * USD,
+        pc.GPT3_TRAINING_COST_EST,
+        name="GPT-3 training cost (estimate)",
+        description="Widely cited third-party estimate of one GPT-3 (175B) training run at 2020 cloud prices.",
     )
 
 
@@ -257,6 +274,19 @@ class StorageTrainingCorpus(Registry):
         pc.STORAGE_TRAINING_CORPUS_REFERENCE,
         name="Storage running-example checkpoint bytes per parameter",
         description="Resumable mixed-precision Adam checkpoint footprint: FP16 weights, FP32 master weights, and two FP32 moments; gradients excluded.",
+    )
+    # Added 2026-09-28.
+    StepTime = sourced_qty(
+        200 * ureg.ms,
+        pc.STORAGE_TRAINING_CORPUS_REFERENCE,
+        name="Storage running-example training step time",
+        description="Reference per-step compute time the input pipeline must keep fed.",
+    )
+    TokenizedShardSize = sourced_qty(
+        3 * GB,
+        pc.STORAGE_TRAINING_CORPUS_REFERENCE,
+        name="Storage running-example tokenized shard size",
+        description="Reference size of one tokenized training shard file.",
     )
 
 
@@ -387,6 +417,11 @@ class ServingProfiles(Registry):
 class CheckpointArchetypes(Registry):
     """Reusable checkpoint-size scenario anchors for fault-tolerance examples."""
 
+    # NOTE (2026-09-28): despite its name and description, this 12 B/param value
+    # is the OPTIMIZER STATE only (ZeRO's K = FP32 master + Adam m, v). A
+    # resumable checkpoint is 14 B/param and full training state 16 B/param;
+    # see ReferenceStats.MixedPrecisionAdam. Value and name intentionally
+    # unchanged (rename belongs to a separate cleanup pass).
     MixedPrecisionOptimizerBytesPerParameter = sourced_qty(
         12 * (byte / param),
         pc.CHECKPOINT_ARCHETYPE_SCENARIO_ASSUMPTIONS,
@@ -411,6 +446,185 @@ class CheckpointArchetypes(Registry):
         name="Medium vision-transformer checkpoint size",
         description="Representative checkpoint footprint for a medium vision transformer.",
     )
+    # Added 2026-09-28.
+    TrillionParameterReference = sourced_qty(
+        1 * TRILLION * param,
+        pc.CHECKPOINT_ARCHETYPE_SCENARIO_ASSUMPTIONS,
+        name="Trillion-parameter reference model size",
+        description="Round 1T-parameter model used as the top rung of checkpoint-size ladders.",
+    )
+
+
+class MixedPrecisionAdam(Registry):
+    """Mixed-precision Adam bytes-per-parameter accounting (ZeRO, Rajbhandari et al. 2020).
+
+    16 = 2 (FP16 weights) + 2 (FP16 gradients) + 4 (FP32 master) + 8 (Adam m, v).
+    14 = 16 - 2: a resumable checkpoint omits the gradients.
+    12 = optimizer state only (FP32 master + m + v), ZeRO's K.
+
+    The 14 and 12 entries are ALIASES of the existing objects in
+    StorageTrainingCorpus and CheckpointArchetypes (same object, one home);
+    only the 16 B/param training-state figure is new here.
+    """
+
+    TrainingStateBytesPerParameter = sourced_qty(
+        (2 * BYTES_FP16 + BYTES_FP32 + BYTES_ADAM_STATE) / param,
+        pc.ZERO_MIXED_PRECISION_ADAM_ACCOUNTING,
+        name="Mixed-precision Adam training state bytes per parameter",
+        description="FP16 weights + FP16 gradients + FP32 master weights + two FP32 Adam moments (16 B/param).",
+    )
+    CheckpointBytesPerParameter = StorageTrainingCorpus.CheckpointBytesPerParameter
+    OptimizerStateBytesPerParameter = CheckpointArchetypes.MixedPrecisionOptimizerBytesPerParameter
+
+
+assert abs(MixedPrecisionAdam.TrainingStateBytesPerParameter.m_as("byte/param") - 16) < 1e-12
+assert abs(
+    MixedPrecisionAdam.TrainingStateBytesPerParameter.m_as("byte/param")
+    - BYTES_FP16.m_as("byte")
+    - MixedPrecisionAdam.CheckpointBytesPerParameter.m_as("byte/param")
+) < 1e-12, "checkpoint = training state minus FP16 gradients"
+assert abs(
+    MixedPrecisionAdam.CheckpointBytesPerParameter.m_as("byte/param")
+    - BYTES_FP16.m_as("byte")
+    - MixedPrecisionAdam.OptimizerStateBytesPerParameter.m_as("byte/param")
+) < 1e-12, "checkpoint = FP16 weights + optimizer state"
+
+
+class RecommenderAtScaleProfile(Registry):
+    """Reference industrial recommender serving profile (DLRM-class; the book's
+    Archetype B). Workload architecture: Models.Recommendation.DLRM."""
+
+    P99LatencySlo = sourced_qty(
+        100 * ureg.ms,
+        pc.RECOMMENDER_AT_SCALE_PROFILE,
+        name="Recommender end-to-end P99 latency SLO",
+        description="End-to-end P99 latency budget (P99 <= 100 ms).",
+    )
+    EmbeddingTableSize = sourced_qty(
+        10 * TB,
+        pc.RECOMMENDER_AT_SCALE_PROFILE,
+        name="Recommender embedding-table size (lower bound)",
+        description="Embedding tables of at least 10 TB for one production recommender (render as '10 TB+').",
+    )
+    PlatformQps = sourced_qty(
+        1e7 * count / second,
+        pc.RECOMMENDER_AT_SCALE_PROFILE,
+        name="Recommender platform traffic",
+        description="Platform-scale serving rate (10^7 queries per second).",
+    )
+    PlatformResidentEmbeddingFootprint = sourced_qty(
+        100 * TB,
+        pc.RECOMMENDER_AT_SCALE_PROFILE,
+        name="Platform-wide resident embedding footprint",
+        description="Resident embedding budget across many models on the platform (not one model's table).",
+    )
+    EntityCatalogIds = sourced_qty(
+        10 * TRILLION * count,
+        pc.RECOMMENDER_AT_SCALE_PROFILE,
+        name="Recommender entity catalog size",
+        description="Unique sparse-feature identifiers in the platform entity catalog.",
+    )
+
+
+class DataParallelScalingProfile(Registry):
+    """Single-node data-parallel scaling scenario (workload: Models.Language.GPT2)."""
+
+    SingleGpuStepTime = sourced_qty(
+        1.8 * second, pc.DATA_PARALLEL_SCALING_SCENARIO,
+        name="Single-GPU step time", description="Per-step time on one GPU before data parallelism.")
+    PerGpuBatch = sourced(
+        16, pc.DATA_PARALLEL_SCALING_SCENARIO,
+        name="Per-GPU batch size (samples)", description="Samples per GPU per step.")
+    SingleGpuTrainingTime = sourced_qty(
+        25 * _hour, pc.DATA_PARALLEL_SCALING_SCENARIO,
+        name="Single-GPU training time", description="End-to-end training time on one GPU.")
+
+
+class CollectiveCommunicationProfile(Registry):
+    """Reusable collective-communication scenario anchors."""
+
+    GradientBuffer = sourced_qty(
+        1 * GB, pc.COLLECTIVE_COMMUNICATION_SCENARIO,
+        name="AllReduce gradient buffer", description="Gradient payload reduced per AllReduce.")
+    TrainingRunSteps = sourced(
+        100_000, pc.COLLECTIVE_COMMUNICATION_SCENARIO,
+        name="Training-run steps", description="Optimizer steps in the reference training campaign.")
+
+
+class NetworkEconomicsProfile(Registry):
+    """Reusable cluster network-economics scenario anchors."""
+
+    ClusterCapex = sourced_qty(
+        300 * MILLION * USD, pc.NETWORK_ECONOMICS_SCENARIO,
+        name="Cluster capital cost", description="Capital cost of the reference training cluster.")
+    CommunicationFraction = sourced(
+        0.30, pc.NETWORK_ECONOMICS_SCENARIO,
+        name="Communication fraction of step time", description="Fraction of step time spent in exposed communication.")
+    PerGpuGradientPayload = sourced_qty(
+        5 * GB, pc.NETWORK_ECONOMICS_SCENARIO,
+        name="Per-GPU gradient payload", description="Gradient bytes each GPU exchanges per step.")
+
+
+class ClusterTcoProfile(Registry):
+    """Build-vs-buy TCO line items for the 1K- and 10K-GPU reference clusters."""
+
+    Reference1KNetworkCapex = sourced_qty(
+        5 * MILLION * USD, pc.CLUSTER_TCO_SCENARIO,
+        name="1K-GPU cluster network capex", description="Fat-tree network capital cost for the ~1K-GPU cluster.")
+    Reference1KFacilityCapex = sourced_qty(
+        10 * MILLION * USD, pc.CLUSTER_TCO_SCENARIO,
+        name="1K-GPU cluster facility capex", description="Facility build-out capital cost for the ~1K-GPU cluster.")
+    Reference1KAnnualOpex = sourced_qty(
+        1.5 * MILLION * USD, pc.CLUSTER_TCO_SCENARIO,
+        name="1K-GPU cluster annual opex", description="Annual operating cost (non-hardware) for the ~1K-GPU cluster.")
+    Reference10KNetworkCapex = sourced_qty(
+        25 * MILLION * USD, pc.CLUSTER_TCO_SCENARIO,
+        name="10K-GPU cluster network capex", description="Network capital cost for the 10K-GPU cluster.")
+    Reference10KFacilityCapex = sourced_qty(
+        75 * MILLION * USD, pc.CLUSTER_TCO_SCENARIO,
+        name="10K-GPU cluster facility capex", description="Facility capital cost for the 10K-GPU cluster.")
+    Reference10KAnnualStaffing = sourced_qty(
+        5 * MILLION * USD, pc.CLUSTER_TCO_SCENARIO,
+        name="10K-GPU cluster annual staffing", description="Annual staffing cost for the 10K-GPU cluster.")
+
+
+class FacilityScaleAnchors(Registry):
+    """Order-of-magnitude datacenter facility scale anchors."""
+
+    HyperscaleCampusPower = sourced_qty(
+        100 * ureg.megawatt, pc.FACILITY_SCALE_ANCHORS,
+        name="Hyperscale AI campus power", description="Round facility power of a hyperscale AI campus.")
+    ReferenceItLoad = sourced_qty(
+        10 * ureg.megawatt, pc.FACILITY_SCALE_ANCHORS,
+        name="Reference facility IT load", description="Round IT load used for facility water and power examples.")
+
+
+class CarbonPlacementProfile(Registry):
+    """Carbon-aware placement scenario anchors."""
+
+    TrainingRunEnergy = sourced_qty(
+        10_000 * MWh, pc.CARBON_PLACEMENT_SCENARIO,
+        name="Placement-example training-run energy", description="Energy of the training run compared across grids.")
+
+
+class MidScaleTrainingCarbonProfile(Registry):
+    """Mid-scale training carbon scenario: Models.Language.Llama2_7B on
+    Systems.Clusters.Lab_64_A100."""
+
+    TrainingDays = sourced_qty(
+        14 * day, pc.MIDSCALE_TRAINING_CARBON_SCENARIO,
+        name="Mid-scale training duration", description="Wall-clock duration of the 64-GPU training run.")
+
+
+class WaterAnchors(Registry):
+    """Everyday water-use comparison anchors."""
+
+    UsHouseholdAnnualWaterLow = sourced_qty(
+        380_000 * ureg.liter, pc.EPA_WATERSENSE_HOUSEHOLD,
+        name="US household annual water use (low)", description="Lower edge of the per-household annual indoor+outdoor water band.")
+    UsHouseholdAnnualWaterHigh = sourced_qty(
+        450_000 * ureg.liter, pc.EPA_WATERSENSE_HOUSEHOLD,
+        name="US household annual water use (high)", description="Upper edge of the per-household annual water band.")
 
 
 class EdgeDeviceSpectrum(Registry):
@@ -865,6 +1079,16 @@ class ReferenceStats(Registry):
     ModelLoading = ModelLoading
     ServingProfiles = ServingProfiles
     CheckpointArchetypes = CheckpointArchetypes
+    MixedPrecisionAdam = MixedPrecisionAdam
+    RecommenderAtScaleProfile = RecommenderAtScaleProfile
+    DataParallelScalingProfile = DataParallelScalingProfile
+    CollectiveCommunicationProfile = CollectiveCommunicationProfile
+    NetworkEconomicsProfile = NetworkEconomicsProfile
+    ClusterTcoProfile = ClusterTcoProfile
+    FacilityScaleAnchors = FacilityScaleAnchors
+    CarbonPlacementProfile = CarbonPlacementProfile
+    MidScaleTrainingCarbonProfile = MidScaleTrainingCarbonProfile
+    WaterAnchors = WaterAnchors
     EdgeDeviceSpectrum = EdgeDeviceSpectrum
     EdgeAdaptationTierProfile = EdgeAdaptationTierProfile
     MobilePower = MobilePower

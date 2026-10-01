@@ -31,15 +31,38 @@ class MemoryTier(BaseModel):
     model_config = ConfigDict(arbitrary_types_allowed=True, extra="forbid")
     name: str
     latency: Optional[Quantity] = None            # access latency
+    # Measured access latency in core clock cycles, when the source reports
+    # cycles (GPU microbenchmarks do). ``latency`` then holds the derived
+    # wall-clock value at the source's stated clock.
+    latency_cycles: Optional[float] = None
     energy_per_access: Optional[Quantity] = None  # pJ per access
     energy_per_byte: Optional[Quantity] = None    # pJ per byte
     bandwidth: Optional[Quantity] = None          # representative interface bandwidth
+    # DRAM core timings of a speed grade (command clock, activate-to-column,
+    # precharge). A row conflict costs t_rp + t_rcd before column service.
+    t_ck: Optional[Quantity] = None
+    t_rcd: Optional[Quantity] = None
+    t_rp: Optional[Quantity] = None               # per-bank precharge
+    # Analog minima the standard states in nanoseconds; the clocked timings
+    # above are these rounded up to whole command-clock cycles.
+    t_rcd_min: Optional[Quantity] = None
+    t_rp_min: Optional[Quantity] = None           # per-bank precharge minimum
+    t_rpab_min: Optional[Quantity] = None         # all-bank precharge minimum
+    channel_width: Optional[Quantity] = None      # data width of one channel (bits)
     metadata: Metadata = Field(default_factory=Metadata)
 
-    @field_validator("latency", mode="after")
+    @field_validator("latency", "t_ck", "t_rcd", "t_rp", "t_rcd_min", "t_rp_min", "t_rpab_min",
+                     mode="after")
     @classmethod
-    def _validate_latency(cls, v):
-        return require_dimensionality(v, ureg.second, "latency")
+    def _validate_latency(cls, v, info):
+        return require_dimensionality(v, ureg.second, info.field_name)
+
+    @field_validator("channel_width", mode="after")
+    @classmethod
+    def _validate_channel_width(cls, v):
+        if v is None:
+            return v
+        return require_dimensionality(v, ureg.bit, "channel_width")
 
     @field_validator("energy_per_access", mode="after")
     @classmethod
@@ -93,6 +116,27 @@ class InterconnectTier(BaseModel):
     @classmethod
     def _validate_latency(cls, v):
         return require_dimensionality(v, ureg.second, "latency")
+
+
+class ReticleField(BaseModel):
+    """Lithography exposure-field limit (technology-class): the largest die a
+    stepper/scanner can pattern in one exposure without stitching."""
+
+    model_config = ConfigDict(arbitrary_types_allowed=True, extra="forbid")
+    name: str
+    width: Quantity
+    height: Quantity
+    metadata: Metadata = Field(default_factory=Metadata)
+
+    @field_validator("width", "height", mode="after")
+    @classmethod
+    def _validate_length(cls, v, info):
+        return require_dimensionality(v, ureg.meter, info.field_name)
+
+    @property
+    def area(self) -> Quantity:
+        """Derived exposure-field area (width x height)."""
+        return (self.width * self.height).to(ureg.millimeter ** 2)
 
 
 class OpEnergy(BaseModel):
@@ -154,6 +198,11 @@ Interconnect = load_collection(
     doc="Interconnect technology generations (link access-latency floor).",
 )
 
+Lithography = load_collection(
+    _DATA / "lithography.yaml", ReticleField, name="Lithography",
+    doc="Lithography technology limits (exposure-field / reticle size).",
+)
+
 
 class Tech(Registry):
     """Technology-class reference facts: latency / energy / generic bandwidth."""
@@ -164,6 +213,7 @@ class Tech(Registry):
     EffectiveCompute = EffectiveCompute
     Movement = Movement
     Interconnect = Interconnect
+    Lithography = Lithography
 
 
 def resolve_latency(instance_latency, tech_default):

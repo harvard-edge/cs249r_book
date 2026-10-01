@@ -50,8 +50,17 @@ def generate_plot():
     ar_params = np.logspace(np.log10(3.5e7), np.log10(5.5e10), 100)
     ar_freq = 3.0 * (3.5e7 / ar_params)**0.15
     ax.plot(ar_params, ar_freq, color=PALETTE["crimson"], lw=2.2, ls="--", zorder=4, alpha=0.8)
-    ax.text(1.2e9, 1.8, "Autoregressive Memory Wall: $f \\propto 1 / M_{\\mathrm{weights}}$",
-            fontsize=8.5, fontweight="bold", color=PALETTE["crimson"], rotation=-6, ha="center")
+    ax.text(
+        1.2e9,
+        2.4,
+        "Autoregressive Memory Wall: $f \\propto 1 / M_{\\mathrm{weights}}$",
+        fontsize=8.5,
+        fontweight="bold",
+        color=PALETTE["crimson"],
+        rotation=-6,
+        ha="center",
+        bbox=dict(boxstyle="round,pad=0.2", facecolor="#FFFFFF", edgecolor="#FECACA", alpha=0.9),
+    )
 
     # Chunking / Flow-matching frontier line
     fx = np.array([8e7, 5e8, 2e9, 3.3e9, 5e9, 1.5e10])
@@ -184,12 +193,6 @@ def generate_plot():
     ax.set_xlabel("Foundation Policy Parameter Count $M_{\\mathrm{weights}}$ (log scale)", fontsize=11, fontweight="bold", labelpad=8)
     ax.set_ylabel("Onboard Physical Action Frequency (Hz, log scale)", fontsize=11, fontweight="bold", labelpad=8)
     
-    # Title block
-    fig.suptitle("The Embodied Brain Frontier: Parameter Scaling vs Physical Action Frequency (2020–2026)",
-                 fontsize=14, fontweight="bold", x=0.08, y=0.98, ha="left", color=PALETTE["charcoal"])
-    ax.set_title("Overcoming the deliberation wall: how continuous action chunking and flow matching break the memory wall ($1\\,\\mathrm{Hz} \\rightarrow 100\\,\\mathrm{Hz}$)",
-                 fontsize=9.5, color="#475569", loc="left", pad=14)
-    
     # Legend - placed at bottom left
     from matplotlib.lines import Line2D
     legend_elements = [
@@ -206,12 +209,14 @@ def generate_plot():
     legend.set_zorder(15)
 
     plt.tight_layout()
-    plt.subplots_adjust(top=0.90, bottom=0.10, left=0.08, right=0.94)
+    plt.subplots_adjust(top=0.95, bottom=0.10, left=0.08, right=0.94)
     
     out_path = os.path.join(os.path.dirname(__file__), "ch03_vla_scaling_timeline.png")
     fig.savefig(out_path, dpi=300)
+    book_path = os.path.join(os.path.dirname(__file__), "..", "books", "vol4", "03_brain", "images", "png", "fig03_vla_scaling_timeline.png")
+    fig.savefig(book_path, dpi=300)
     plt.close(fig)
-    print(f"Saved: {out_path}")
+    print(f"Saved: {out_path} and {book_path}")
 
 if __name__ == "__main__":
     generate_plot()

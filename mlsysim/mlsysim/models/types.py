@@ -1,4 +1,4 @@
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 from typing import Optional
 from ..core.units import ureg, BYTES_FP16
 from ..core.types import (
@@ -180,6 +180,19 @@ class TransformerWorkload(Workload):
     training_gpu_days: Optional[float] = None
     training_hardware_label: Optional[str] = None
     inference_flops: Optional[Quantity] = None
+    # Architecture facts from the model card / paper (added 2026-09-28).
+    # ``context_length`` is the pre-training / supported context window in
+    # tokens; ``vocab_size`` is the tokenizer vocabulary. Both are optional
+    # because not every source states them.
+    context_length: Optional[int] = None
+    vocab_size: Optional[int] = None
+    # Reported training emissions (mass of CO2e, e.g. metric tonnes).
+    training_co2e: Optional[Quantity] = None
+
+    @field_validator("training_co2e", mode="after")
+    @classmethod
+    def _validate_training_co2e(cls, v):
+        return require_dimensionality(v, ureg.kilogram, "training_co2e")
 
     @field_validator("training_ops", mode="after")
     @classmethod
@@ -195,7 +208,31 @@ class TransformerWorkload(Workload):
     @classmethod
     def _validate_training_days_ref(cls, v):
         return require_dimensionality(v, ureg.day, "training_days_ref")
-    
+
+    @model_validator(mode="after")
+    def _check_training_fleet_consistency(self):
+        """Keep the reference fleet internally consistent.
+
+        When an entry states a reference accelerator count, a reference
+        duration, and an accelerator-day total, the product of the first two
+        must match the third within 1%. Added 2026-09-29 after GPT-4 stored
+        25,000 accelerators x 90 days beside a 2.5M accelerator-day anchor,
+        a 10% self-contradiction.
+        """
+        gpu_days = self.training_gpu_days
+        accel = self.training_accelerators_ref
+        days = self.training_days_ref
+        if gpu_days is None or accel is None or days is None:
+            return self
+        implied = accel.to(ureg.count).magnitude * days.to(ureg.day).magnitude
+        if abs(gpu_days - implied) / gpu_days > 0.01:
+            raise ValueError(
+                f"{self.name}: training_accelerators_ref x training_days_ref = "
+                f"{implied:,.0f} accelerator-days, but training_gpu_days = "
+                f"{gpu_days:,.0f} (must agree within 1%)."
+            )
+        return self
+
     def size_in_bytes(self, precision: Quantity = BYTES_FP16) -> Quantity:
         param_count = self.parameters.to(ureg.count).magnitude
         bpp = precision.to(ureg.byte).magnitude

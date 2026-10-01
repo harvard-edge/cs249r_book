@@ -391,6 +391,25 @@ BOSTON_DYNAMICS_ATLAS = _est(
     verified="2026-09-15",
 )
 
+FRANKA_FER_CONTROL_LIMITS = _ds(
+    "prov:franka-fer-control-limits",
+    "Franka Robotics documentation, Robot and interface specifications: 'Limits for "
+    "Franka Emika Robot (FER)' and the Panda Denavit-Hartenberg parameters",
+    "https://github.com/frankaemika/docs/blob/master/source/robot_specifications.rst",
+    verified="2026-09-29",
+    notes=(
+        "Joint limits from source/control-parameters-joint-fer.csv (master, "
+        "checked 2026-09-29): velocity 2.1750 rad/s on joints 1-4 and 2.6100 on "
+        "5-7; acceleration 15, 7.5, 10, 12.5, 15, 20, 20 rad/s^2; jerk 7500, "
+        "3750, 5000, 6250, 7500, 10000, 10000 rad/s^3; torque rate 1000 Nm/s on "
+        "every joint. FER Cartesian translation velocity 1.7 m/s. DH d3 = 0.316 m "
+        "and d5 = 0.384 m: the current page labels the table for FR3; the Panda "
+        "label with d3 = 0.316 m is in earlier revisions of the docs (commits "
+        "6346f562cc and 7a46004875, control_parameters.rst). Rendered site: "
+        "https://frankarobotics.github.io/docs."
+    ),
+)
+
 FRANKA_EMIKA_PANDA = _ds(
     "prov:franka-emika-panda",
     "Franka Emika Panda datasheet (May 2018) and Robot Instruction Handbook (October 2021)",
@@ -443,8 +462,16 @@ INDUSTRIAL_AMR = _est(
 WAREHOUSE_AMR = _est(
     "prov:warehouse-amr-300kg",
     "Representative warehouse fulfillment AMR class profile (300 kg gross mass)",
-    notes="300 kg mass, 1.5 m/s max velocity, 2.0 m/s^2 emergency braking deceleration (Chapter 4 watchdog model).",
-    verified="2026-09-18",
+    notes=(
+        "300 kg mass and 1.5 m/s max velocity are class-profile values. The 2.0 m/s^2 "
+        "max_acceleration is the illustrative credible loaded deceleration that the "
+        "stopping budget adopts; it is not measured. It is checked against the traction, "
+        "drive-torque, and tip-over ceilings by calc_braking_limits with the machine's "
+        "sourced hub-motor drive (ZLTECH_ZLLG10ASM800); the tip-over ceiling needs a "
+        "measured center of gravity. (2026-09-28, M6: previously attributed to a "
+        "'Chapter 4 watchdog model', which is not its origin.)"
+    ),
+    verified="2026-09-28",
 )
 
 HEAVY_AMR = _est(
@@ -452,6 +479,23 @@ HEAVY_AMR = _est(
     "Representative heavy industrial logistics AMR class profile (250 kg mass)",
     notes="250 kg mass, 1.8 m/s cruise velocity, 2.0 m/s^2 braking deceleration (Chapter 1 model).",
     verified="2026-09-18",
+)
+
+# OpenVLA on the Jetson AGX Orin (added 2026-09-28, vol4 M2 intent-model latency).
+JETSON_AI_LAB_OPENVLA_ORIN = _lit(
+    "prov:jetson-ai-lab-openvla-orin",
+    "Franklin, D., NVIDIA Jetson AI Lab, 'OpenVLA' tutorial (2024): OpenVLA-7B "
+    "quantization results on Jetson AGX Orin 64GB, JetPack 6",
+    url="https://www.jetson-ai-lab.com/archive/openvla.html",
+    verified="2026-09-28",
+    notes=(
+        "Measured mean per-frame latency over 10 BridgeData V2 episodes: FP16 "
+        "(HuggingFace backend) 840 ms / 1.19 FPS / 95.3% NRMSE accuracy; FP8 "
+        "(MLC q8f16_ft) 471 ms / 2.12 FPS / 95.2%; INT4 (MLC q4f16_ft) 336 ms / "
+        "2.97 FPS / 90.1%. Single 224x224 image, ~275 image tokens plus the text "
+        "prompt, 7 autoregressive action tokens; vision encoders in FP16 TensorRT. "
+        "Archived page; first published August 2024 (repository history)."
+    ),
 )
 
 # Volume IV running machine (added 2026-09-21, vol4 flow canon section 3.3).
@@ -463,8 +507,9 @@ WAREHOUSE_MOBILE_MANIPULATOR = _est(
         "Composite of existing registry entries; component values carry their own "
         "records. Illustrative or chosen here: 50 kg tote-rack capacity, 1.00 m "
         "footprint width, 1 kHz permission loop, 20 kHz current loop, 1 ms EtherCAT "
-        "cycle, 9 servo axes, 5 Hz / 160 ms intent model, 20 Hz / 40 ms chunk policy, "
-        "20 ms setpoint period, chunk horizon 16, 0.70 sustained DRAM efficiency, "
+        "cycle, 9 servo axes, 2 Hz intent model (latency computed, see "
+        "JETSON_AI_LAB_OPENVLA_ORIN), 20 Hz / 40 ms ACT chunk policy, "
+        "25 ms setpoint period (two per 50 ms renewal), chunk horizon 16, 0.70 sustained DRAM efficiency, "
         "1.0 m/s free-space TCP limit. The WarehouseAMR record calls 300 kg gross, so "
         "the loaded mass is an upper bound."
         " Control rail: 24 V nominal is a design choice; the 21.5 V depleted-battery "
@@ -477,8 +522,20 @@ WAREHOUSE_MOBILE_MANIPULATOR = _est(
         "a design choice; the 70 W permission-path load and the 30-80 ms spring-brake "
         "engage window are illustrative. The permission loads are assumed to share the "
         "18.0 V regulator dropout."
+        " Drive bus and drivetrain (2026-09-28, M6): the wheel drives, arm drives, and a "
+        "48-to-24 V converter share a 48 V-class drive bus whose pack envelope "
+        "(54 / 47.7 / 42 V) comes from MIR250_BATTERY; the converter's 33 V lockout, "
+        "67.2 V input maximum, and 91 percent efficiency come from MEANWELL_DDR240; the "
+        "60 mOhm source resistance is illustrative (needs a measured value); the 60 V "
+        "chopper clamp and 100 V switch rating are design choices. The driven wheels are "
+        "ZLTECH_ZLLG10ASM800 hub motors with the current limit chosen at the motor's "
+        "25 A peak. Loaded center-of-gravity height, its distance to the leading support, "
+        "and the driven wheels' load share need source (corner-scale or tilt measurement)."
+        " The 24 V control-rail fields remain for chapters that still model a 24 V "
+        "shared rail; in the 48 V architecture they describe the permission-rail store "
+        "(charged to 21.5 V, discharging to the 18 V regulator dropout)."
     ),
-    verified="2026-09-21",
+    verified="2026-09-28",
 )
 
 WAREHOUSE_AISLE_SCENARIO = _est(
@@ -511,16 +568,111 @@ LOCKSTEP_SAFETY_MCU_REFERENCE = _est(
 
 ISO_13855_APPROACH_SPEED = _ds(
     "prov:iso-13855-approach-speed",
-    "ISO 13855:2010 walking approach speed K = 1600 mm/s, applied over the whole "
+    "ISO 13855:2024 walking approach speed K = 1600 mm/s, applied over the whole "
     "stopping time T in S = K*T + C",
-    "https://www.iso.org/standard/42845.html",
-    verified="2026-09-21",
+    "https://www.iso.org/standard/80590.html",
+    verified="2026-09-29",
     notes=(
-        "ISO 13855:2010 (Safety of machinery: positioning of safeguards with respect "
-        "to the approach speeds of parts of the human body); the URL is that edition. "
-        "The standard's text is paywalled, so the value was checked against secondary "
-        "sources that quote it, not the standard itself, and not against the 2024 "
-        "edition."
+        "ISO 13855:2024 (Safety of machinery: positioning of safeguards with respect "
+        "to the approach of the human body), third edition, published 2024-11; it "
+        "replaced ISO 13855:2010 (iso.org/standard/42845), withdrawn 2024-11-22 "
+        "(both iso.org pages read via 2025 Wayback captures, 2026-09-29). The "
+        "1600 mm/s value was checked against secondary sources quoting the 2010 "
+        "edition. Carry-forward note: the 2024 abstract says its approach-speed "
+        "values are 'time tested and proven in practical experience', which indicates "
+        "K = 1600 mm/s carries forward, but the value has not been read from the "
+        "2024 text (paywalled); confirm before print."
+    ),
+)
+
+ISO_TS_15066_HAND_BODY_MODEL = _ds(
+    "prov:iso-ts-15066-hand-body-model",
+    "ISO/TS 15066:2016 Annex A body model, hand and fingers: effective mass "
+    "m_H = 0.6 kg, effective spring constant k_H = 75 N/mm",
+    "https://arxiv.org/abs/2203.02706",
+    verified="2026-09-29",
+    notes=(
+        "ISO/TS 15066:2016 (Robots and robotic devices: collaborative robots), "
+        "Annex A. ISO 10218-2:2025 incorporates the collaborative-application "
+        "requirements formerly published as ISO/TS 15066; ISO/TS 15066:2016 itself "
+        "remains published and is under revision. The standard is paywalled; the values were checked against "
+        "Kirschner, Mansfeld, Abdolshah, and Haddadin, 'ISO/TS 15066: How "
+        "Different Interpretations Affect Risk Assessment' (arXiv:2203.02706, "
+        "2022), which reproduces TS Appendix A (hand m_h = 0.6 kg, "
+        "k = 75 N/mm; back m_h = 40 kg, k = 35 N/mm) and its transient-contact "
+        "model F = v*sqrt(mu*k), mu = (1/m_r + 1/m_h)^-1 (eqs. 1-2)."
+    ),
+)
+
+# --- Human takeover response times (2026-09-28, M4) ---
+CARD_MORAN_NEWELL_MHP = _lit(
+    "prov:card-moran-newell-1983-mhp",
+    "Card, S. K., Moran, T. P., and Newell, A., The Psychology of Human-Computer "
+    "Interaction, Lawrence Erlbaum Associates (1983); CRC Press reprint 2018, "
+    "DOI 10.1201/9780203736166. Model Human Processor cycle times.",
+    url="https://doi.org/10.1201/9780203736166",
+    verified="2026-09-28",
+    notes=(
+        "Processor cycle times, nominal [range]: perceptual 100 [50-200] ms, cognitive "
+        "70 [25-170] ms, motor 70 [30-100] ms; a simple reaction takes one cycle of each, "
+        "240 ms nominal and 470 ms with every processor at its slow bound. Values checked "
+        "against Jastrzembski and Charness (2007), PMC4591021, which quotes the 1983 "
+        "parameters. The ranges bracket the model, not a percentile of a measured "
+        "population. Applies to an attending person responding to an expected stimulus."
+    ),
+)
+
+GREEN_2000_PERCEPTION_BRAKE = _lit(
+    "prov:green-2000-perception-brake",
+    "Green, M., '\"How long does it take to stop?\" Methodological analysis of driver "
+    "perception-brake times', Transportation Human Factors 2(3):195-216 (2000), "
+    "DOI 10.1207/STHF0203_1",
+    url="https://doi.org/10.1207/STHF0203_1",
+    verified="2026-09-28",
+    notes=(
+        "Abstract (Crossref and TRID record): a driver fully aware of the time and place "
+        "of the brake signal detects it and moves the foot to the brake in about "
+        "0.70-0.75 s; an unexpected but common signal (lead-car brake lights) takes about "
+        "1.25 s; a surprise event about 1.5 s. Expectation changes the time by about a "
+        "factor of two. The registry uses 0.75 s, the upper end of the expected range. "
+        "These are typical values synthesized from many data sets, not percentiles."
+    ),
+)
+
+ZHANG_2019_TAKEOVER_META = _lit(
+    "prov:zhang-2019-takeover-meta-analysis",
+    "Zhang, B., de Winter, J., Varotto, S., Happee, R., and Martens, M., 'Determinants "
+    "of take-over time from automated driving: A meta-analysis of 129 studies', "
+    "Transportation Research Part F 64:285-307 (2019), DOI 10.1016/j.trf.2019.04.020; "
+    "supplementary data DOI 10.4121/uuid:75c28abe-6559-4273-85f4-927e969c1c59 (CC0)",
+    url="https://doi.org/10.1016/j.trf.2019.04.020",
+    verified="2026-09-28",
+    notes=(
+        "Paper, section 3.1: mean take-over time (TOT) across 520 conditions of 129 "
+        "studies ranged 0.69-19.79 s; the average mean TOT was 2.72 s (SD 1.45), and the "
+        "distribution of mean TOTs is right-skewed. Section 3.3: mean and SD of TOT "
+        "correlate at r = 0.82 (n = 397). Percentiles computed here from the 520 MTOT "
+        "values in the supplementary mastersheet.xlsx (observed-value, inverted-CDF "
+        "percentiles): p50 2.37 s, p90 4.33 s, p99 7.0 s; the same file reproduces "
+        "2.72 s mean and 1.45 s SD. These are percentiles of condition means, not of "
+        "individual responses: the individual tail within a condition is longer (the "
+        "file's SD rises about 0.39 s per second of mean). Take-over is measured from "
+        "the take-over request to the driver's first input."
+    ),
+)
+
+SCHIMPE_2022_TELEOP_G2G = _lit(
+    "prov:schimpe-2022-teleop-glass-to-glass",
+    "Schimpe, A., Feiler, J., Hoffmann, S., Majstorovic, D., and Diermeyer, F., 'Open "
+    "Source Software for Teleoperated Driving', 2022 International Conference on "
+    "Connected Vehicle and Expo (ICCVE), pp. 1-6, DOI 10.1109/ICCVE52871.2022.9742859",
+    url="https://arxiv.org/abs/2109.11252",
+    verified="2026-09-28",
+    notes=(
+        "Measured glass-to-glass latency of a 40 Hz, 520p video feed sent over a wired "
+        "connection and shown on a 144 Hz monitor: about 104 ms. The same stack on a "
+        "Jetson TX2 RC car at 15 Hz measured 241 ms. The wired figure is a best case; a "
+        "site's wireless console link needs its own measurement."
     ),
 )
 
@@ -542,7 +694,7 @@ UNITREE_H1_HUMANOID = _est(
     notes=(
         "Verified: about 47 kg, 3.3 m/s moving speed, 360 N*m maximum joint "
         "torque (knee), M107 joint motors. The page lists 5 degrees of freedom "
-        "per leg and 4 per arm, 18 in total, not the stored 19. Standard compute "
+        "per leg and 4 per arm, 18 in total (stored value corrected from 19 on 2026-09-29). Standard compute "
         "is an Intel Core i5 plus Core i7 with Orin NX optional, not the stored "
         "Jetson AGX Orin. Unsourced MLSysIM estimates: 30 kg payload_capacity "
         "(no H1 payload is listed), 1000 Hz control_frequency, 800 W "
@@ -550,6 +702,21 @@ UNITREE_H1_HUMANOID = _est(
     ),
     url="https://www.unitree.com/h1/",
     verified="2026-09-15",
+)
+
+UNITREE_H1_COM_HEIGHT_ESTIMATE = _est(
+    "prov:unitree-h1-com-height-estimate",
+    "Unitree H1 standing center-of-mass height (MLSysIM estimate, not a datasheet value)",
+    notes=(
+        "Illustrative estimate, 0.9 m. The Unitree H1 product page (checked "
+        "2026-09-29) lists a height of about 180 cm and thigh and calf lengths "
+        "of 400 mm each, but states no center-of-mass height. 0.9 m places the "
+        "CoM near hip height, about half the stature, the usual inverted-pendulum "
+        "height for an adult-scale biped. Replace with a value computed from the "
+        "vendor URDF link masses or a measured CoM if one is published."
+    ),
+    url="https://www.unitree.com/h1/",
+    verified="2026-09-29",
 )
 
 UBER_ATG_VOLVO_XC90 = _lit(
@@ -593,26 +760,68 @@ SONY_IMX296 = _ds(
 
 INTEL_REALSENSE_D435I = _ds(
     "prov:intel-realsense-d435i",
-    "Intel RealSense Depth Camera D435i Datasheet",
-    "https://www.intelrealsense.com/depth-camera-d435i/",
-    verified="2026-09-18",
-    notes="Active IR stereo depth camera with integrated Bosch BMI055/BMI088 IMU, 90 fps depth stream.",
+    "RealSense D400 Series Product Family Datasheet, revision 023 (March 2026), D435/D435i",
+    "https://www.realsenseai.com/wp-content/uploads/2026/03/RealSense-D400-Series-Datasheet-Mar-2026.pdf",
+    verified="2026-09-29",
+    notes=(
+        "Active IR stereo depth camera with integrated IMU, 90 fps depth stream. "
+        "Table 3-49: the D435/D435i uses the D430 depth module (wide imagers) and "
+        "an OV2740 color sensor. Table 3-18: OV2740 is rolling shutter, 1920x1080. "
+        "The wide left/right imagers (OV9282) are global shutter. shutter_type "
+        "describes the color stream; depth_shutter_type the depth imagers. "
+        "nominal_latency and nominal_power are not from this datasheet."
+    ),
 )
 
 OUSTER_OS1_64 = _ds(
     "prov:ouster-os1-64",
-    "Ouster OS1 Mid-Range High-Resolution Imaging LiDAR Datasheet",
-    "https://ouster.com/products/hardware/os1-lidar-sensor",
-    verified="2026-09-18",
-    notes="64-channel digital LiDAR with 120m range, 10-20 Hz configurable spin rate.",
+    "Ouster OS1 Mid-Range High-Resolution Imaging Lidar Datasheet, hardware Rev7.0, firmware 3.1.x",
+    "https://data.ouster.io/downloads/datasheets/datasheet-rev7-v3p1-os1.pdf",
+    verified="2026-09-29",
+    notes=(
+        "64-channel digital LiDAR, 10 or 20 Hz rotation. Range precision 0.5-3 cm "
+        "(1 sigma, beyond 1 m, 1024 @ 10 Hz); range accuracy +/-2.5 cm Lambertian; "
+        "data latency < 10 ms (stored as nominal_latency); PTP / gPTP / PPS "
+        "accuracy < 1 ms; internal clock 10 ppm drift; power 14-20 W; laser "
+        "wavelength 865 nm, Class 1 eye-safe per IEC/EN 60825-1:2014 (re-read "
+        "2026-09-29). The Rev7 "
+        "sheet gives range as 170 m (80 percent target) and 90 m (10 percent), so "
+        "the stored 120 m max_range needs source; nominal_power 18 W sits in the "
+        "14-20 W band."
+    ),
 )
 
 BOSCH_BMI088 = _ds(
     "prov:bosch-bmi088",
-    "Bosch Sensortec BMI088 High-Performance 6-Axis Inertial Measurement Unit Datasheet",
-    "https://www.bosch-sensortec.com/products/motion-sensors/imus/bmi088/",
-    verified="2026-09-18",
-    notes="Automotive and robotics grade 6-DoF IMU with 1000 Hz gyroscope and 1600 Hz accelerometer update rates.",
+    "Bosch Sensortec BMI088 Data Sheet, document BST-BMI088-DS000-19, revision 1.9 (January 2024)",
+    "https://www.bosch-sensortec.com/media/boschsensortec/downloads/datasheets/bst-bmi088-ds001.pdf",
+    verified="2026-09-29",
+    notes=(
+        "Automotive and robotics grade 6-DoF IMU with 1000 Hz gyroscope and 1600 Hz "
+        "accelerometer update rates. Typical values read from the PDF 2026-09-29: "
+        "Table 4 (accelerometer) output noise density 160 ug/sqrt(Hz) on X and Y "
+        "(190 on Z), zero-g offset 20 mg (nominal supplies, 25 C, +/-6 g range); "
+        "Table 5 (gyroscope) zero-rate offset +/-1 deg/s (25 C, offset cancellation "
+        "off), output noise 0.1 deg/s rms at 47 Hz bandwidth (0.014 deg/s/sqrt(Hz)). "
+        "Bias instability and angle random walk are not given."
+    ),
+)
+
+KEYENCE_SZ_V32 = _ds(
+    "prov:keyence-sz-v32",
+    "Keyence SZ-V Series Safety Laser Scanner, specifications (SZ-V32)",
+    "https://www.keyence.com/products/safety/laser-scanner/sz-v/specs/",
+    verified="2026-09-29",
+    notes=(
+        "Representative certified AMR safety scanner, not the only choice. Read "
+        "2026-09-29: IEC 61496-3 Type 3 AOPDDR; EN ISO 13849-1:2015 PL d, "
+        "Category 3; scan angle 190 deg. Protection zone for 70/150 mm objects: "
+        "8.4 m (standard mode), 5.7 m (high-speed mode); for 30 mm objects 2.9 m / "
+        "2.0 m. Response time (ON to OFF): 160-1280 ms standard mode, 80-640 ms "
+        "high-speed mode (2 to 16 scans); network variants add 6 ms (PROFIsafe) or "
+        "10 ms (CIP Safety). The registry stores the high-speed-mode values for "
+        "70/150 mm objects (5.7 m, 80 ms), the mode a moving base would use."
+    ),
 )
 
 HARMONIC_DRIVE_CSG = _ds(
@@ -910,6 +1119,63 @@ STREAMING_VOICE_AGENT_PROFILE = Provenance(
         "The 8,000-token context_window, 2,000-token working_memory, and 0 ms "
         "sandbox_startup_latency are MLSysIM teaching assumptions with no "
         "published source."
+    ),
+)
+
+RESEARCH_AGENT_WORKLOAD = Provenance(
+    id="prov:research-agent-workload",
+    kind=ProvenanceKind.ILLUSTRATIVE,
+    ref=(
+        "Illustrative orchestrator-worker research agent workload; token "
+        "multiples from Hadfield et al. (2025), How We Built Our Multi-Agent "
+        "Research System, Anthropic Engineering Blog"
+    ),
+    url="https://www.anthropic.com/engineering/built-multi-agent-research-system",
+    verified="2026-09-29",
+    notes=(
+        "Sourced: agent_token_multiple = 4 and fanout_token_multiple = 15 "
+        "quote the report's 'agents typically use about 4x more tokens than "
+        "chat interactions, and multi-agent systems use about 15x more tokens "
+        "than chats', measured on the builders' own data. Teaching "
+        "assumptions with no published source: the 20-turn horizon, 100 "
+        "untrusted documents read per task, the 16,000-input and 800-output "
+        "token chat answer, the USD 0.10 search/fetch and USD 0.05 rubric "
+        "charges per attempt, the 0.60 acceptance probability, and the USL "
+        "coefficients sigma = 0.10 and kappa = 0.002."
+    ),
+)
+
+REMEDIATION_AGENT_WORKLOAD = Provenance(
+    id="prov:remediation-agent-workload",
+    kind=ProvenanceKind.ILLUSTRATIVE,
+    ref="Illustrative on-call remediation agent workload (approved production configuration change)",
+    verified="2026-09-29",
+    notes=(
+        "Every value is an MLSysIM teaching assumption with no published "
+        "source: 10-turn horizon, 10 untrusted items (alerts, log excerpts) "
+        "per task, USD 0.15 model, USD 0.10 tool, and USD 0.20 health-check "
+        "charges per attempt, 0.70 acceptance probability, 2 approval requests "
+        "per hour, 6 min diagnosis, 15 min mean approval decision, 9 min "
+        "apply-and-verify, 10 min reviewer effort at USD 120 per hour, 0.04 "
+        "probability a proposed fleet change is wrong, USD 12,000 impact of a "
+        "committed wrong change, 0.80 canary catch rate, and 0.90 of a caught "
+        "change's impact recovered by canary revert."
+    ),
+)
+
+SUPPORT_AGENT_WORKLOAD = Provenance(
+    id="prov:support-agent-workload",
+    kind=ProvenanceKind.ILLUSTRATIVE,
+    ref="Illustrative customer-support agent workload (short interactive sessions)",
+    verified="2026-09-29",
+    notes=(
+        "Every value is an MLSysIM teaching assumption with no published "
+        "source: 6-turn session, 6 untrusted items (messages, attachments) per "
+        "session, 8,192-token session context with a 6,144-token shared "
+        "prefix, 150-token replies, 2 s generation residence and 20 s customer "
+        "reply time per turn, USD 0.03 model, USD 0.01 record-lookup, and "
+        "USD 0.01 grounding-check charges per session, 0.85 acceptance "
+        "probability, and a USD 4 human handoff per rejected session."
     ),
 )
 
@@ -1240,14 +1506,33 @@ OVERHEAD_BUDGETS = _conv(
 
 SCALING_EFFICIENCY_TIERS = _conv(
     "prov:scaling-efficiency-tiers",
-    "Illustrative scaling efficiency vs GPU count (32→1024 GPUs)",
-    notes="8192-GPU tier uses MEGASCALE literature anchor separately.",
+    "Book convention: small-job scaling efficiency (32 GPUs)",
+    notes="Only the 32-GPU tier; larger tiers are modeled (prov:scaling-efficiency-reference-job-modeled).",
 )
 
 ENERGY_HIERARCHY_CONVENTIONS = _conv(
     "prov:energy-hierarchy-conventions",
     "Simplified energy hierarchy: architecture-class effective pJ/FLOP (CPU→ASIC) and per-byte data-movement cost (register→network)",
     notes="Order-of-magnitude teaching figures; effective system-level energy, consistent with the Horowitz (2014) energy trend.",
+)
+
+LPDDR5_6400_TIMINGS = _ds(
+    "prov:lpddr5-6400-timings",
+    "JEDEC JESD209-5C LPDDR5-6400 timings as encoded in the Ramulator 2.0 "
+    "LPDDR5_6400 preset (tCK = 1250 ps; nRCD = 15, nRP = 15, nRPab = 17 cycles)",
+    "https://github.com/CMU-SAFARI/ramulator2/blob/main/python/ramulator/dram/lpddr5.py",
+    verified="2026-09-29",
+    notes=(
+        "Checked at ramulator2 main 72427a1bba (2026-09-02). BG mode, CKR 4:1: "
+        "t_RCD = t_RP(per bank) = 15 x 1.25 ns = 18.75 ns. The JEDEC standard is "
+        "not read directly (jedec.org access), so the values rest on the "
+        "simulator's encoding of JESD209-5C Table 339/340. The analog minima "
+        "t_RCD,min = t_RPpb,min = 18 ns and t_RPab,min = 21 ns, and the x16 "
+        "(16-bit) channel width, agree with a second independent encoding: "
+        "coreboot util/spd_tools/src/spd_gen/lp5.go (TRCDMinNs = 18, "
+        "TRPPBMinNs = 18, TRPABMinNs = 21, 'Table 372 from JESD209-5B'; channel "
+        "widths 8 or 16 bits), read 2026-09-29."
+    ),
 )
 
 MEMORY_INTERFACE_BANDWIDTH_TIERS = _conv(
@@ -1475,4 +1760,540 @@ THERMAL_CONSTANTS_ELECTROMECHANICAL = _est(
         "tau ~ 5-20 min. Values reflect typical orders of magnitude across industrial and mobile robotics."
     ),
     verified="2026-09-22",
+)
+
+
+# ---------------------------------------------------------------------------
+# Drivetrain, drive bus, and arm-joint sources (added 2026-09-28, vol4 M6).
+# ---------------------------------------------------------------------------
+
+ZLTECH_ZLLG10ASM800 = _ds(
+    "prov:zltech-zllg10asm800",
+    "Shenzhen Zhongling Technology (ZLTECH), ZLLG10ASM800-48 V1.0 robot hub motor "
+    "drawing and motor parameters (V1.00, 2022-09-26)",
+    "https://www.zlingkj.com/Data/zlingkj/upload/file/20240102/ZLLG10ASM800%20V1.0%E5%8F%8C%E5%87%BA%E8%BD%B4.pdf",
+    verified="2026-09-28",
+    notes=(
+        "10-inch direct-drive BLDC hub motor for AGV/AMR drive wheels, no gearbox. "
+        "Motor-parameter table: outer (wheel) diameter 266 +/- 2 mm; 48 VDC rated; "
+        "20 N m rated torque at 8.5 A; 60 N m peak torque at 25 A peak current; "
+        "150 rpm rated, 180 rpm peak speed; 20 pole pairs; line resistance "
+        "0.7 ohm +/- 10 percent; line inductance 1.885 mH +/- 10 percent; back-EMF "
+        "constant 0.262 V/rpm +/- 10 percent; 9.5 kg; maximum load 300 kg per two "
+        "motors; ambient -20 to +40 C. The table does not publish rotor inertia "
+        "(needs source). Torque constant is derived as 60 N m / 25 A = 2.4 N m/A. "
+        "Cross-check: 0.262 V/rpm x 180 rpm = 47.2 V, the rated bus, so the "
+        "back-EMF constant is a line-to-line value compared directly with the DC bus."
+    ),
+)
+
+ZLTECH_ZLAC8030L = _ds(
+    "prov:zltech-zlac8030l",
+    "ZLTECH ZLAC8030L hub-servo driver product page (Shenzhen Zhongling Technology)",
+    "https://www.robotmotor.com/zlac8030l-zltech-20v-60v-60a-canopen-rs485-dc-servo-motor-controller-driver-for-robot-agv-product/",
+    verified="2026-09-28",
+    notes=(
+        "Driver matched to the ZLLG10ASM800 (its wiring table names the 8030L): "
+        "24-48 VDC input, rated 30 A, maximum 60 A output current, CANopen/RS485. "
+        "The driver's 60 A exceeds the motor's 25 A peak, so the motor rating sets "
+        "the drive current limit. Overvoltage and undervoltage thresholds are not "
+        "published (needs source)."
+    ),
+)
+
+MIR250_BATTERY = _ds(
+    "prov:mir250-specifications",
+    "Mobile Industrial Robots, MiR250 Specifications (2025-04-14)",
+    "https://ai.motion.com/wp-content/uploads/2025/10/MiR250-Specifications-2.99.pdf",
+    verified="2026-09-28",
+    notes=(
+        "Reference 48 V-class AMR (94 kg robot, 250 kg payload, 2.0 m/s). Battery: "
+        "lithium-ion, 47.7 V nominal, minimum 42 V, maximum 54 V, 1.63 kWh (34.2 Ah). "
+        "Floor-to-wheel friction coefficient 0.60-0.80; clean and dry floors; design "
+        "based on ISO 3691-4 (with listed exceptions) and ISO 13849-1. Used as the "
+        "source of the running machine's drive-bus voltage envelope."
+    ),
+)
+
+MEANWELL_DDR240 = _ds(
+    "prov:meanwell-ddr-240",
+    "MEAN WELL DDR-240 series 240 W DIN-rail DC-DC converter specification (DDR-240C-24, 48 V input)",
+    "https://www.meanwell.com/Upload/PDF/DDR-240/DDR-240-spec.pdf",
+    verified="2026-09-28",
+    notes=(
+        "DDR-240C-24 (48 V in, 24 V out): continuous input 33.6-67.2 VDC; 100 ms "
+        "ride-through 28.8-33.6 VDC; input under-voltage lockout ON >= 33.6 V, "
+        "OFF <= 33 V; typical efficiency 91 percent. Used as the 48-to-24 V converter "
+        "feeding the control electronics; its 33 V turn-off is the drive bus's "
+        "undervoltage threshold and its 67.2 V continuous maximum bounds the clamp."
+    ),
+)
+
+TQ_ROBODRIVE_ILM = _ds(
+    "prov:tq-robodrive-ilm",
+    "TQ-RoboDrive ILM series frameless servo kits data sheet (Rev. 0414)",
+    "https://www.tq-group.com/filedownloads/files/products/robodrive/data-sheets/en/DRVA_DB_Servo-Kits_ILM_EN_Rev0414_Web.pdf",
+    verified="2026-09-28",
+    notes=(
+        "ILM 70x18, star-serial winding: 48 V rated, 1.25 N m rated torque, "
+        "4.05 N m peak torque (20 percent deviation from linearity), 6.7 A rated "
+        "current, torque constant 187 mNm/A, motor constant 0.266 N m/sqrt(W), "
+        "terminal resistance 660 mOhm and inductance 1,460 uH at 20 C, rotor inertia "
+        "0.321 kg cm^2, 10 pole pairs, 330 g. The rated copper loss (22.2 W) equals "
+        "(3/2) I_r^2 (R_TT / 2), so the rated current is the amplitude-invariant "
+        "(peak phase) current. The data sheet states that thermal behavior depends "
+        "strongly on the installation, so no thermal resistance or capacitance is "
+        "published (needs source). The ILM line derives from DLR drive engineering."
+    ),
+)
+
+HARMONIC_DRIVE_CSG_2UH_ENGINEERING = _ds(
+    "prov:harmonic-drive-csg-2uh-engineering-data",
+    "Harmonic Drive AG, Engineering Data CSG-2UH Units (1019642, 12/2014), Table 10.2",
+    "https://innodrive.ru/upload/iblock/387/pv21y3bafuu4i675xna8v70s8naalpa2.pdf",
+    verified="2026-09-28",
+    notes=(
+        "Distributor-hosted copy of the Harmonic Drive AG document; the torque "
+        "ratings match harmonicdrive.net's CSG-25-50-2UH product page. "
+        "CSG-25-2UH, ratio 50: repeatable peak torque 127 N m, average torque 72 N m, "
+        "rated torque 51 N m, momentary peak 242 N m; moment of inertia at the input "
+        "0.413e-4 kg m^2; 1.5 kg. Efficiency varies with load, speed, and temperature "
+        "(Section 4.4)."
+    ),
+)
+
+FRANKA_CLASS_STRAIN_WAVE_JOINT = _est(
+    "prov:franka-class-strain-wave-joint",
+    "Panda-class strain-wave joint stand-in: Harmonic Drive CSG-25-50-2UH with a "
+    "TQ-RoboDrive ILM 70x18 frameless motor",
+    notes=(
+        "Franka does not publish the Panda's joint motor or gear parameters; its "
+        "datasheet gives 87 N m peak torque on axes 1-4 and a harmonic-drive "
+        "transmission with joint torque sensing. The stand-in pairs sourced parts of "
+        "that class: the CSG-25-50 (127 N m repeatable peak covers 87 N m) and the "
+        "smallest ILM whose peak torque through 50:1 covers the gear's repeatable "
+        "peak (ILM 70x18: 4.05 N m x 50 = 202 N m; the ILM 70x10 gives 106 N m). "
+        "Rotor inertia at the motor shaft = ILM rotor 0.321e-4 + CSG-25 input "
+        "0.413e-4 = 0.734e-4 kg m^2. The pairing is a choice; each value is sourced."
+    ),
+    verified="2026-09-28",
+)
+
+
+# ---------------------------------------------------------------------------
+# 2026-09-28 additions (vol2 registry integration). Add-only: every record
+# below is new; no existing record above was changed.
+# ---------------------------------------------------------------------------
+_V = "2026-09-28"
+
+
+def _report(id: str, ref: str, url: str, *, notes: str | None = None) -> Provenance:
+    """Creates a Provenance object for an industry / government report."""
+    return Provenance(
+        id=id,
+        kind=ProvenanceKind.INDUSTRY_REPORT,
+        ref=ref,
+        url=url,
+        verified=_V,
+        notes=notes,
+    )
+
+
+# --- Training-state accounting ---
+ZERO_MIXED_PRECISION_ADAM_ACCOUNTING = _lit(
+    "prov:rajbhandari-zero-2020",
+    "Rajbhandari et al. (2020), ZeRO: Memory Optimizations Toward Training Trillion Parameter Models",
+    url="https://arxiv.org/abs/1910.02054",
+    verified=_V,
+    notes=(
+        "Mixed-precision Adam model state = 2 (FP16 weights) + 2 (FP16 gradients) + K=12 "
+        "(FP32 master weights + Adam m and v) = 16 bytes/parameter. A resumable checkpoint "
+        "omits the gradients: 16 - 2 = 14 bytes/parameter."
+    ),
+)
+PATTERSON_CARBON_2021 = _lit(
+    "prov:patterson-carbon-2021",
+    "Patterson et al. (2021), Carbon Emissions and Large Neural Network Training",
+    url="https://arxiv.org/abs/2104.10350",
+    verified=_V,
+    notes=(
+        "GPT-3 training (Table 4 / App. A): 10,000 V100 GPUs (NVIDIA-suggested count), "
+        "24.6 TFLOP/s per GPU measured by OpenAI, ~14.8 days derived, 330 W system power "
+        "per GPU, PUE 1.10, 1,287 MWh, 552.1 tCO2e (net, metric tonnes)."
+    ),
+)
+
+# --- Model papers ---
+DUBEY_LLAMA3_2024 = _lit(
+    "prov:dubey-llama3-2024",
+    "Dubey et al. (2024), The Llama 3 Herd of Models",
+    url="https://arxiv.org/abs/2407.21783",
+    verified=_V,
+    notes=(
+        "Sec. 3.3: 405B trained on up to 16K H100 GPUs; Table 4: 43% BF16 MFU on 8,192 GPUs, "
+        "41% on 16,384 GPUs; Sec. 3.3.4: 54-day snapshot with 466 job interruptions "
+        "(47 planned, 419 unexpected), >90% effective training time, manual intervention "
+        "required only three times."
+    ),
+)
+DOSOVITSKIY_VIT_2021 = _lit(
+    "prov:dosovitskiy-vit-2021",
+    "Dosovitskiy et al. (2021), An Image is Worth 16x16 Words: Transformers for Image Recognition at Scale",
+    url="https://arxiv.org/abs/2010.11929",
+    verified=_V,
+    notes="ViT-L/16: 307M parameters; 87.76% ImageNet top-1 after JFT-300M pre-training (Table 2).",
+)
+TAN_EFFICIENTNET_2019 = _lit(
+    "prov:tan-efficientnet-2019",
+    "Tan & Le (2019), EfficientNet: Rethinking Model Scaling for Convolutional Neural Networks",
+    url="https://arxiv.org/abs/1905.11946",
+    verified=_V,
+    notes="EfficientNet-B4: 19M parameters, 4.2B FLOPS (paper counts multiply-adds), 82.9% ImageNet top-1 (Table 2).",
+)
+HOWARD_MOBILENETV3_2019 = _lit(
+    "prov:howard-mobilenetv3-2019",
+    "Howard et al. (2019), Searching for MobileNetV3",
+    url="https://arxiv.org/abs/1905.02244",
+    verified=_V,
+    notes="MobileNetV3-Large 1.0: 5.4M parameters, 219M multiply-adds, 75.2% ImageNet top-1 (Table 3).",
+)
+
+# --- Cited training runs (Literature.TrainingRuns) ---
+KRIZHEVSKY_ALEXNET_2012 = _lit(
+    "prov:krizhevsky-alexnet-2012",
+    "Krizhevsky, Sutskever & Hinton (2012), ImageNet Classification with Deep Convolutional Neural Networks",
+    url="https://papers.nips.cc/paper/2012/hash/c399862d3b9d6b76c8436e924a68c45b-Abstract.html",
+    verified=_V,
+    notes="Trained for five to six days on two NVIDIA GTX 580 3GB GPUs.",
+)
+NARAYANAN_MEGATRON_2021 = _lit(
+    "prov:narayanan-megatron-2021",
+    "Narayanan et al. (2021), Efficient Large-Scale Language Model Training on GPU Clusters Using Megatron-LM",
+    url="https://arxiv.org/abs/2104.04473",
+    verified=_V,
+    notes="1T-parameter model on 3,072 A100 GPUs at 502 PFLOP/s aggregate, 52% of theoretical peak per GPU.",
+)
+GOYAL_IMAGENET_1HR_2017 = _lit(
+    "prov:goyal-imagenet-1hr-2017",
+    "Goyal et al. (2017), Accurate, Large Minibatch SGD: Training ImageNet in 1 Hour",
+    url="https://arxiv.org/abs/1706.02677",
+    verified=_V,
+    notes="ResNet-50 on ImageNet in one hour on 256 GPUs with a minibatch of 8,192 images.",
+)
+ZHANG_OPT_2022 = _lit(
+    "prov:zhang-opt-2022",
+    "Zhang et al. (2022), OPT: Open Pre-trained Transformer Language Models",
+    url="https://arxiv.org/abs/2205.01068",
+    verified=_V,
+    notes=(
+        "OPT-175B trained on 992 80GB A100 GPUs at up to 147 TFLOP/s per GPU. Hardware "
+        "failures caused at least 35 manual restarts and the cycling of over 100 hosts over "
+        "2 months; the authors estimate 70+ additional automatic restarts (Sec. 2.5)."
+    ),
+)
+MICROSOFT_OPENAI_SUPERCOMPUTER_2020 = _report(
+    "prov:microsoft-openai-supercomputer-2020",
+    "Microsoft (2020), Microsoft announces new supercomputer, lays out vision for future AI work",
+    "https://news.microsoft.com/source/features/ai/openai-azure-supercomputer/",
+    notes="Azure supercomputer built for OpenAI: more than 285,000 CPU cores and 10,000 GPUs.",
+)
+TOUVRON_LLAMA_2023 = _lit(
+    "prov:touvron-llama-2023",
+    "Touvron et al. (2023), LLaMA: Open and Efficient Foundation Language Models",
+    url="https://arxiv.org/abs/2302.13971",
+    verified=_V,
+    notes="The 65B model was trained on 2,048 A100 80GB GPUs.",
+)
+DEEPSEEK_V3_TRAINING_CLUSTER = _lit(
+    "prov:deepseek-v3-training-cluster-2024",
+    "DeepSeek-AI (2024), DeepSeek-V3 Technical Report",
+    url="https://arxiv.org/abs/2412.19437",
+    verified=_V,
+    notes="DeepSeek-V3 was trained on a cluster of 2,048 NVIDIA H800 GPUs.",
+)
+
+# --- Measured fleet operations (Literature.FleetOperations) ---
+KOKOLIS_RSC_RELIABILITY_2025 = _lit(
+    "prov:kokolis-rsc-reliability-2025",
+    "Kokolis et al. (2025), Revisiting Reliability in Large-Scale Machine Learning Research Clusters",
+    url="https://arxiv.org/abs/2410.21680",
+    verified=_V,
+    notes=(
+        "Measured MTTF: 1,024-GPU jobs 7.9 hours; 8-GPU jobs 47.7 days (1,144.8 hours). "
+        "Projected MTTF: 16,384-GPU jobs 1.8 hours; 131,072-GPU jobs 0.23 hours."
+    ),
+)
+JEON_PHILLY_2019 = _lit(
+    "prov:jeon-philly-2019",
+    "Jeon et al. (2019), Analysis of Large-Scale Multi-Tenant GPU Clusters for DNN Training Workloads (USENIX ATC)",
+    url="https://arxiv.org/abs/1901.05758",
+    verified=_V,
+    notes="Hardware utilization of GPUs in use is only around 52% on average (Microsoft Philly trace).",
+)
+LI_PERLMUTTER_2023 = _lit(
+    "prov:li-perlmutter-2023",
+    "Li et al. (2023), Analyzing Resource Utilization in an HPC System: A Case Study of NERSC's Perlmutter",
+    url="https://arxiv.org/abs/2301.05145",
+    verified=_V,
+    notes="About 50% of GPU-enabled jobs used up to 25% of the GPU memory (one-month usage analysis).",
+)
+SIGLER_OPENAI_K8S_2021 = _report(
+    "prov:sigler-openai-k8s-2021",
+    "OpenAI (2021), Scaling Kubernetes to 7,500 nodes",
+    "https://openai.com/index/scaling-kubernetes-to-7500-nodes/",
+)
+
+# --- Datacenter electricity projections (Literature.DatacenterElectricity) ---
+LBNL_US_DATACENTER_ENERGY_2024 = _report(
+    "prov:lbnl-us-datacenter-energy-2024",
+    "Shehabi et al. (2024), 2024 United States Data Center Energy Usage Report (LBNL)",
+    "https://eta.lbl.gov/publications/2024-lbnl-data-center-energy-usage-report",
+    notes="US data centers: ~58 TWh (2014), ~176 TWh (2023), 325-580 TWh projected for 2028.",
+)
+IEA_ENERGY_AND_AI_2025 = _report(
+    "prov:iea-energy-and-ai-2025",
+    "IEA (2025), Energy and AI",
+    "https://www.iea.org/reports/energy-and-ai",
+    notes="Global data-center electricity projected to ~945 TWh by 2030, just under 3% of global electricity.",
+)
+
+# --- Hardware additions ---
+HOPPER_MICROBENCHMARK_LATENCY = _lit(
+    "prov:luo-hopper-microbenchmark-2024",
+    "Luo et al. (2024), Benchmarking and Dissecting the Nvidia Hopper GPU Architecture",
+    url="https://arxiv.org/abs/2402.13499",
+    verified=_V,
+    notes=(
+        "Table IV (H800 PCIe, Hopper): shared memory 29.0 cycles, L1 40.7, L2 263.0, "
+        "global 478.8 cycles; max clock 1,755 MHz (Table III). Nanosecond values are "
+        "derived as cycles / 1.755 GHz."
+    ),
+)
+LITHOGRAPHY_RETICLE_FIELD = _conv(
+    "prov:lithography-reticle-field",
+    "Standard 26 mm x 33 mm full-field exposure of 4x-reduction steppers/scanners (DUV and 0.33-NA EUV)",
+    notes="Area 858 mm^2 is derived (26 x 33). Sets the maximum single-die size without stitching.",
+)
+ST_STM32F407_DATASHEET = _ds(
+    "prov:st-stm32f407-datasheet",
+    "STMicroelectronics STM32F405xx/STM32F407xx datasheet (DS8626)",
+    "https://www.st.com/resource/en/datasheet/stm32f407vg.pdf",
+    verified=_V,
+    notes=(
+        "Arm Cortex-M4 with FPU at up to 168 MHz; up to 1 MB Flash; 192 KB SRAM including "
+        "64 KB core-coupled memory. peak_flops (1 single-precision FLOP per cycle) and "
+        "memory.bandwidth (32-bit AHB at 168 MHz) are derived, not datasheet figures."
+    ),
+)
+GOOGLE_TPU_V6E_ICI = _ds(
+    "prov:google-tpu-v6e-ici",
+    "Google Cloud TPU v6e system architecture",
+    "https://docs.cloud.google.com/tpu/docs/v6e",
+    verified=_V,
+    notes="Interchip interconnect bandwidth per chip: 800 GBps (Google quotes ICI as a bidirectional total).",
+)
+NVIDIA_HOPPER_HBM_STACKS = _ds(
+    "prov:nvidia-hopper-blackwell-hbm-stacks",
+    "NVIDIA Hopper Architecture In-Depth; NVIDIA Blackwell architecture technical brief",
+    "https://developer.nvidia.com/blog/nvidia-hopper-architecture-in-depth/",
+    verified=_V,
+    notes="H100 SXM5: five active HBM3 stacks (six sites) for 80 GB; B200: eight HBM3e stacks for 192 GB.",
+)
+DGX_H100_USER_GUIDE_PHYSICAL = _ds(
+    "prov:nvidia-dgx-h100-user-guide-physical",
+    "NVIDIA DGX H100/H200 User Guide: hardware overview and physical specifications",
+    "https://docs.nvidia.com/dgx/dgxh100-user-guide/introduction-to-dgxh100.html",
+    verified=_V,
+    notes="Four third-generation NVSwitch chips; 18 fourth-generation NVLink links per GPU; system weight 287.6 lb (130.45 kg).",
+)
+
+DGX_H100_USER_GUIDE_POWER = _ds(
+    "prov:nvidia-dgx-h100-user-guide-power",
+    "NVIDIA DGX H100/H200 User Guide: hardware overview, power supplies and networking",
+    "https://docs.nvidia.com/dgx/dgxh100-user-guide/introduction-to-dgxh100.html",
+    verified="2026-09-29",
+    notes=("Six 3.3 kW PSUs (3300 W @ 200-240 V, 16 A) in 4+2 redundancy; 10.2 kW max system power; "
+           "runs at reduced performance on three PSUs, boots only with at least three. Networking: eight "
+           "single-port ConnectX-7 InfiniBand cards (compute) plus two dual-port ConnectX-7 Ethernet cards "
+           "(storage/in-band); nics_per_node counts only the eight compute cards."),
+)
+
+DGX_A100_USER_GUIDE_POWER = _ds(
+    "prov:nvidia-dgx-a100-user-guide-power",
+    "NVIDIA DGX A100 User Guide: hardware overview, power specifications and N+N redundancy",
+    "https://docs.nvidia.com/dgx/dgxa100-user-guide/introduction-to-dgxa100.html",
+    verified="2026-09-29",
+    notes=("Six 3 kW PSUs (3000 W @ 200-240 V, 16 A) in 3+3 redundancy; full power on any three; "
+           "6.5 kW max system power (also DGX A100 datasheet 'System Power Usage 6.5kW max'); boots on "
+           "two PSUs with GPUs unavailable; NVIDIA directs a shutdown to replace faulty PSUs. "
+           "nics_per_node counts the eight single-port compute ConnectX cards; the dual-port storage "
+           "cards are excluded."),
+)
+
+DGX_B200_USER_GUIDE_POWER = _ds(
+    "prov:nvidia-dgx-b200-user-guide-power",
+    "NVIDIA DGX B200 User Guide: hardware overview, power specifications and PSU redundancy",
+    "https://docs.nvidia.com/dgx/dgxb200-user-guide/introduction-to-dgxb200.html",
+    verified="2026-09-29",
+    notes=("Six 3.3 kW PSUs (3300 W @ 200-240 V, 16 A) in 5+1 redundancy; 14.3 kW max system power; "
+           "with 5 PSUs no effect (1,000 W per GPU), with 4 or 3 PSUs reduced performance (800 W per "
+           "GPU), boots only with at least three. nics_per_node counts the eight single-port ConnectX-7 "
+           "compute cards; the two dual-port BlueField-3 DPUs are excluded."),
+)
+
+# --- Composed systems ---
+NVIDIA_DGX_SUPERPOD_H100_RA = _ds(
+    "prov:nvidia-dgx-superpod-h100-ra",
+    "NVIDIA DGX SuperPOD Reference Architecture (DGX H100)",
+    "https://docs.nvidia.com/dgx-superpod/reference-architecture-scalable-infrastructure-h100/latest/",
+    verified=_V,
+    notes="One scalable unit (SU) = 32 DGX H100 nodes (256 GPUs) on an NDR 400 Gb/s InfiniBand compute fabric.",
+)
+META_GENAI_INFRA_2024 = _report(
+    "prov:meta-genai-infrastructure-2024",
+    "Meta Engineering (2024), Building Meta's GenAI Infrastructure",
+    "https://engineering.fb.com/2024/03/12/data-center-engineering/building-metas-genai-infrastructure/",
+    notes=(
+        "Two 24,576-GPU H100 clusters on Grand Teton (8 GPUs per server): one on a 400 Gb/s "
+        "RoCE fabric, one on NVIDIA Quantum-2 400 Gb/s InfiniBand."
+    ),
+)
+META_RSC_2022 = _report(
+    "prov:meta-rsc-2022",
+    "Meta AI (2022), Introducing the AI Research SuperCluster",
+    "https://ai.meta.com/blog/ai-rsc/",
+    notes="Full build-out: 16,000 A100 GPUs in DGX A100 systems (2,000 nodes) on a 200 Gb/s InfiniBand fabric.",
+)
+FABRIC_OVERSUBSCRIPTION_PROFILES = _est(
+    "prov:fabric-oversubscription-profiles",
+    "Reference 2:1 and 4:1 oversubscribed fat-tree profiles",
+    notes="Documented teaching profiles: an NDR fabric with 2:1 or 4:1 leaf downlink-to-uplink oversubscription; no single field source.",
+    verified=_V,
+)
+
+# --- Economics ---
+NETWORK_CABLING_PRICES_2024 = _est(
+    "prov:network-cabling-prices-2024",
+    "Illustrative 400G-class link-media prices (DAC, AOC, optical link)",
+    notes="Documented teaching assumption: ~$50 per DAC, ~$500 per AOC or per optical link; order-of-magnitude list prices, not a vendor quote.",
+    verified=_V,
+)
+ML_ENGINEER_LOADED_RATE = _est(
+    "prov:ml-engineer-loaded-rate",
+    "Illustrative fully loaded ML engineer cost per hour",
+    notes="Documented teaching assumption: $150/hour fully loaded (salary, benefits, overhead); no field source.",
+    verified=_V,
+)
+CLOUD_COMMITMENT_DISCOUNT_RANGES = _est(
+    "prov:cloud-commitment-discount-ranges",
+    "Illustrative public-cloud spot and reserved discount ranges versus on-demand",
+    notes="Documented teaching ranges: spot/preemptible 60-90% off on-demand; 1-3 year reserved/committed 40-60% off. Providers advertise 'up to' figures; realized discounts vary by region and instance.",
+    verified=_V,
+)
+CLOUD_PREEMPTION_NOTICE = _ds(
+    "prov:cloud-preemption-notice",
+    "AWS EC2 Spot Instance interruption notices; Google Cloud preemptible VM instances",
+    "https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/spot-instance-termination-notices.html",
+    verified=_V,
+    notes="AWS Spot gives a two-minute interruption notice; Google Cloud preemptible/Spot VMs give 30 seconds (https://cloud.google.com/compute/docs/instances/preemptible).",
+)
+SCHEDULER_PREEMPTION_CASE_STUDY = _est(
+    "prov:scheduler-preemption-case-study",
+    "Reference scheduler/preemption goodput loss for a shared 100K-GPU fleet case study",
+    notes="Documented teaching assumption: 17% of fleet time lost to scheduling and preemption; with the four OVERHEAD_BUDGETS fractions it sums to a 0.60 goodput ratio.",
+    verified=_V,
+)
+GPT3_TRAINING_COST_EST = _est(
+    "prov:gpt3-training-cost-estimate",
+    "Lambda Labs (2020), OpenAI's GPT-3 Language Model: A Technical Overview (~$4.6M on V100 cloud instances)",
+    url="https://lambdalabs.com/blog/demystifying-gpt-3",
+    notes="Third-party estimate at 2020 cloud prices; OpenAI did not disclose the training cost.",
+    verified=_V,
+)
+EPA_WATERSENSE_HOUSEHOLD = _est(
+    "prov:epa-watersense-household",
+    "US EPA WaterSense: average American family uses more than 300 gallons of water per day at home",
+    url="https://www.epa.gov/watersense/how-we-use-water",
+    notes="300 gal/day x 365 = ~414,000 L/year; the 380,000-450,000 L band brackets that household figure.",
+    verified=_V,
+)
+
+# --- Reusable scenario anchors (ReferenceStats) ---
+RECOMMENDER_AT_SCALE_PROFILE = _est(
+    "prov:recommender-at-scale-profile",
+    "Reference industrial recommender serving profile (DLRM-class)",
+    notes=(
+        "Documented teaching assumption: 100 ms P99 end-to-end SLO, embedding tables of at "
+        "least 10 TB, 10^7 QPS platform traffic, a 100 TB platform-wide resident embedding "
+        "footprint across many models, and a 10-trillion-identifier entity catalog. "
+        "Architecture per Naumov et al. (2019)."
+    ),
+    verified=_V,
+)
+LOCAL_COMPUTE_EFFICIENCY_ASSUMPTION = _est(
+    "prov:local-compute-efficiency-assumption",
+    "Reference per-accelerator compute efficiency for large-model training",
+    notes="Documented teaching assumption: 45% of peak achieved per accelerator before communication losses; no field source.",
+    verified=_V,
+)
+DATA_PARALLEL_SCALING_SCENARIO = _est(
+    "prov:data-parallel-scaling-scenario",
+    "Reference single-node data-parallel scaling scenario (GPT-2 class)",
+    notes="Documented teaching assumption: 1.8 s single-GPU step, 16 samples per GPU, 25 h single-GPU training time; no field source.",
+    verified=_V,
+)
+COLLECTIVE_COMMUNICATION_SCENARIO = _est(
+    "prov:collective-communication-scenario",
+    "Reference collective-communication scenario",
+    notes="Documented teaching assumption: 1 GB gradient buffer per AllReduce and a 100,000-step training run; no field source.",
+    verified=_V,
+)
+NETWORK_ECONOMICS_SCENARIO = _est(
+    "prov:network-economics-scenario",
+    "Reference cluster network-economics scenario",
+    notes="Documented teaching assumption: $300M cluster capex, 30% of step time in communication, 5 GB per-GPU gradient payload; no field source.",
+    verified=_V,
+)
+CLUSTER_TCO_SCENARIO = _est(
+    "prov:cluster-tco-scenario",
+    "Reference build-vs-buy cluster TCO scenario (1K and 10K GPU)",
+    notes="Documented teaching assumption: network, facility, opex, and staffing line items for 1K- and 10K-GPU clusters; no field source.",
+    verified=_V,
+)
+FACILITY_SCALE_ANCHORS = _est(
+    "prov:facility-scale-anchors",
+    "Reference datacenter facility scale anchors",
+    notes="Documented teaching anchors: ~100 MW hyperscale AI campus; 10 MW reference IT load; order-of-magnitude only.",
+    verified=_V,
+)
+CARBON_PLACEMENT_SCENARIO = _est(
+    "prov:carbon-placement-scenario",
+    "Reference carbon-aware placement scenario",
+    notes="Documented teaching assumption: a 10,000 MWh training run used to compare grid siting; no field source.",
+    verified=_V,
+)
+MIDSCALE_TRAINING_CARBON_SCENARIO = _est(
+    "prov:midscale-training-carbon-scenario",
+    "Reference mid-scale training carbon scenario (7B model, 64 A100s)",
+    notes="Documented teaching assumption: a 14-day run on a 64-GPU A100 lab cluster; no field source.",
+    verified=_V,
+)
+
+
+# ---------------------------------------------------------------------------
+# 2026-09-29 additions (scaling-efficiency tiers, registry-items-2). Add-only.
+# ---------------------------------------------------------------------------
+SCALING_EFFICIENCY_REFERENCE_JOB_MODELED = Provenance(
+    id="prov:scaling-efficiency-reference-job-modeled",
+    kind=ProvenanceKind.DERIVED,
+    ref="MLSysIM DistributedModel sweep of Scenarios.DenseLLMPretrainingReference",
+    notes=(
+        "GPT-3 175B on DGX H100 + HDR InfiniBand; TP8 x PP8 (64-GPU replica); fixed global batch "
+        "1,536 sequences (Brown et al. 2020 Table 2.1), one sequence per micro-batch, overlap_comm=True, "
+        "efficiency=LocalComputeEfficiency 0.45, fp16. Raw 0.8738 (256), 0.8293 (1,024), 0.5619 (8,192), "
+        "rounded to 2 dp. Same sweep as vol2 fig-fleet-orchestration-scaling-efficiency-curve. Published "
+        "strong-scaling retention is higher with larger batch and interleaved pipelines: MegaScale Table 2 "
+        "is 0.90 from 256 to 1,024 and 0.93 from 3,072 to 12,288 GPUs."
+    ),
+    verified="2026-09-29",
 )

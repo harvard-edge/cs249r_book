@@ -376,6 +376,17 @@ PRINCIPLE_PARTS_ORDER: dict[str, list[str]] = {
         "vol2/parts/deployment_principles.qmd",
         "vol2/parts/responsible_fleet_principles.qmd",
     ],
+    "vol3": [
+        "vol3/01_introduction/01_introduction.qmd",
+        "vol3/parts/model_principles.qmd",
+        "vol3/02_foundation_model/02_foundation_model.qmd",
+        "vol3/parts/memory_principles.qmd",
+        "vol3/parts/tool_use_principles.qmd",
+        "vol3/parts/runtime_principles.qmd",
+        "vol3/parts/learning_principles.qmd",
+        "vol3/parts/scale_principles.qmd",
+        "vol3/parts/synthesis_principles.qmd",
+    ],
 }
 
 
@@ -634,6 +645,33 @@ def fix_cross_reference_link(match, from_file, build_dir, epub_mapping=None):
         return full_match
 
 
+_CALLOUT_NUMBER_CACHE: dict[str, str | None] = {}
+_CALLOUT_TITLE_NUMBER_RE = re.compile(r'<strong>[^<:]*?\s([0-9IVXA-Z]+\.[0-9]+)\s*:')
+
+
+def _callout_display_number(build_dir: Path, abs_path: str, ref_id: str) -> str | None:
+    """Return the number a callout box displays in its rendered page (e.g. "1.2").
+
+    `abs_path` is the mapping entry `vol3/01_introduction/01_introduction.html#id`.
+    The box title renders as `<summary><strong>Lighthouse 1.2: Title</strong>`.
+    """
+    if ref_id in _CALLOUT_NUMBER_CACHE:
+        return _CALLOUT_NUMBER_CACHE[ref_id]
+    number = None
+    page = Path(build_dir) / abs_path.split("#", 1)[0]
+    try:
+        text = page.read_text(encoding="utf-8")
+    except OSError:
+        text = ""
+    anchor = text.find(f'id="{ref_id}"')
+    if anchor >= 0:
+        m = _CALLOUT_TITLE_NUMBER_RE.search(text, anchor, anchor + 1500)
+        if m:
+            number = m.group(1)
+    _CALLOUT_NUMBER_CACHE[ref_id] = number
+    return number
+
+
 def resolve_cross_references(
     html_content: str,
     from_file: Path,
@@ -750,11 +788,35 @@ def resolve_cross_references(
     total_matches += principle_box_fixes
     unmapped_refs.extend(principle_box_unmapped)
 
+    # Pattern 6 — the same math-span leak for every other numbered callout
+    # (lhs-, dfn-, nbk-, exmp-, psp-, thrm-, ws-, ...). The Lua filter resolves
+    # `\ref{id}` only when the target is in the same page, so a reference into a
+    # sibling chapter ships as raw math. The link text is the number the target
+    # box itself displays, read from its rendered page, so link and box agree.
+    # Volume III first relied on this (lighthouses cited from every chapter). 2026-09-29
+    pattern6 = r'<span class="math inline">\\\(\\ref\{((?!pri-)[a-z]+-[a-zA-Z0-9-]+)\}\\\)</span>'
+    matches6 = re.findall(pattern6, fixed_content)
+    total_matches += len(matches6)
+
+    def fix_callout_reference(match):
+        ref_id = match.group(1)
+        abs_path = chapter_mapping.get(ref_id)
+        number = _callout_display_number(build_dir, abs_path, ref_id) if abs_path else None
+        if number and abs_path:
+            rel_path = calculate_relative_path(from_file, abs_path, build_dir, epub_mapping)
+            return f'<a href="{rel_path}">{number}</a>'
+        unmapped_refs.append(ref_id)
+        return match.group(0)
+
+    fixed_content = re.sub(pattern6, fix_callout_reference, fixed_content)
+
     remaining1 = re.findall(pattern1, fixed_content)
     remaining2 = re.findall(pattern2, fixed_content)
     remaining3 = re.findall(pattern3, fixed_content)
     remaining4 = re.findall(pattern4, fixed_content)
-    fixed_count = total_matches - len(remaining1) - len(remaining2) - len(remaining3) - len(remaining4)
+    remaining6 = re.findall(pattern6, fixed_content)
+    fixed_count = (total_matches - len(remaining1) - len(remaining2) - len(remaining3)
+                   - len(remaining4) - len(remaining6))
 
     return fixed_content, fixed_count, unmapped_refs
 

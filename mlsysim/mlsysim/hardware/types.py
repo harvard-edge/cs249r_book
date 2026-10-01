@@ -22,6 +22,10 @@ class ComputeCore(BaseModel):
     # on peak_flops. Populated where a device's clock is stated; absent (None)
     # for entries whose source gives only aggregate throughput.
     clock_rate: Optional[Quantity] = None
+    # Count of programmable compute cores for architectures that publish one
+    # (e.g. a wafer-scale engine's processing elements). Absent (None) where the
+    # vendor does not state a core count or where sm_count is the unit.
+    core_count: Optional[int] = None
 
     @field_validator("peak_flops", mode="after")
     @classmethod
@@ -69,13 +73,27 @@ class MemoryHierarchy(BaseModel):
     # without SMs. Multiply by ComputeCore.sm_count to derive chip-level totals.
     register_file_per_sm: Optional[Quantity] = None
     shared_memory_per_sm: Optional[Quantity] = None
+    # DRAM interface: total data-bus width and per-pin data rate (bit/s per pin,
+    # one bit per transfer, so 6.4 Gb/s is 6400 MT/s). bandwidth = width x rate / 8.
+    bus_width: Optional[Quantity] = None
+    pin_data_rate: Optional[Quantity] = None
+    # Number of active HBM stacks on the package (HBM devices only). Per-stack
+    # bandwidth/capacity = bandwidth / hbm_stacks, capacity / hbm_stacks.
+    hbm_stacks: Optional[int] = None
 
     @field_validator("capacity", "sram_capacity", "flash_capacity", "l2_cache", "register_file_per_sm", "shared_memory_per_sm", mode="after")
     @classmethod
     def _validate_capacity_fields(cls, v, info):
         return require_unit_family(v, ureg.byte, info.field_name, "data")
 
-    @field_validator("bandwidth", "sram_bandwidth", "flash_bandwidth", mode="after")
+    @field_validator("bus_width", mode="after")
+    @classmethod
+    def _validate_bus_width(cls, v):
+        if v is None:
+            return v
+        return require_unit_family(v, ureg.bit, "bus_width", "data")
+
+    @field_validator("bandwidth", "sram_bandwidth", "flash_bandwidth", "pin_data_rate", mode="after")
     @classmethod
     def _validate_bandwidth_fields(cls, v, info):
         return require_unit_family(v, ureg.byte / ureg.second, info.field_name, "data")

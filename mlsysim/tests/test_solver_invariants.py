@@ -132,3 +132,45 @@ def test_si_and_binary_capacity_units_convert_consistently():
 
     assert h100_capacity.m_as("GiB") == pytest.approx(80.0)
     assert h100_capacity.m_as("GB") == pytest.approx(85.89934592)
+
+
+@pytest.mark.parametrize("invalid_batch", [0, -1, -16])
+def test_single_node_model_rejects_non_positive_batch(invalid_batch):
+    solver = mlsysim.engine.solvers.SingleNodeModel()
+    with pytest.raises(ValueError, match="batch_size must be >= 1"):
+        solver.solve(mlsysim.Models.Language.Llama3_8B, mlsysim.Hardware.Cloud.H100, batch_size=invalid_batch)
+
+
+@pytest.mark.parametrize("invalid_seq", [0, -1, -128])
+def test_serving_model_rejects_non_positive_seq_len(invalid_seq):
+    solver = mlsysim.engine.solvers.ServingModel()
+    with pytest.raises(ValueError, match="seq_len .* must be >= 1"):
+        solver.solve(mlsysim.Models.Language.Llama3_8B, mlsysim.Hardware.Cloud.H100, seq_len=invalid_seq, batch_size=1)
+
+
+@pytest.mark.parametrize("invalid_batch", [0, -1, -8])
+def test_serving_model_rejects_non_positive_batch(invalid_batch):
+    solver = mlsysim.engine.solvers.ServingModel()
+    with pytest.raises(ValueError, match="batch_size .* must be >= 1"):
+        solver.solve(mlsysim.Models.Language.Llama3_8B, mlsysim.Hardware.Cloud.H100, seq_len=128, batch_size=invalid_batch)
+
+
+@pytest.mark.parametrize("invalid_batch", [0, -1, -64])
+def test_distributed_model_rejects_non_positive_batch(invalid_batch):
+    solver = mlsysim.engine.solvers.DistributedModel()
+    with pytest.raises(ValueError, match="batch_size must be >= 1"):
+        solver.solve(mlsysim.Models.Language.Llama3_8B, mlsysim.Systems.Clusters.Research_256, batch_size=invalid_batch)
+
+
+@pytest.mark.parametrize("invalid_seq", [0, -1, -256])
+def test_distributed_model_rejects_non_positive_seq_len(invalid_seq):
+    solver = mlsysim.engine.solvers.DistributedModel()
+    with pytest.raises(ValueError, match="seq_len must be >= 1"):
+        solver.solve(mlsysim.Models.Language.Llama3_8B, mlsysim.Systems.Clusters.Research_256, batch_size=256, seq_len=invalid_seq)
+
+
+def test_training_memory_model_rejects_unsupported_precision():
+    solver = mlsysim.engine.solvers.TrainingMemoryModel()
+    with pytest.raises(ValueError, match="precision 'invalid' is not supported"):
+        solver.solve(mlsysim.Models.Language.Llama3_8B, mlsysim.Hardware.Cloud.H100, batch_size=1, precision="invalid")
+

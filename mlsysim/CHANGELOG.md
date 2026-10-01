@@ -65,6 +65,13 @@ Release body. Omit any section that has no entries for a given release.
   - `calc_inductive_pdn_voltage_droop`: Fast inductive power distribution network (PDN) $L \cdot di/dt$ voltage droop under transient current steps.
   - `calc_intervention_takeover_budget`: Human takeover reaction time, out-of-loop drift displacement, and total safety stopping distance.
   - `calc_architectural_shield_dilution`: Reliability dilution across layered runtime defense shields.
+- **Sensor and Actuator Registries (`mlsysim.sensors`, `mlsysim.actuators`)**: Added two extension registries alongside `Embodied`. `Sensors` covers `Camera`, `IMU`, and `LiDAR` entries; `Actuators` covers joint and wheel drives (`FramelessMotor`, `HarmonicDrive`, `HubMotor`, `QuasiDirectDrive`, `Servo`, and the composed `PandaClassJoint`).
+- **Drivetrain Braking Physics (`mlsysim.physics.drivetrain`)**: Added a module that checks a requested deceleration for a wheeled base against three independent ceilings:
+  - `calc_traction_deceleration_limit` / `calc_required_friction`: Tire-floor Coulomb friction ceiling, and the friction a given deceleration demands.
+  - `calc_tipover_deceleration_limit` / `calc_max_cg_height_ratio`: Tip-over ceiling about the leading support, and the largest center-of-gravity height ratio a deceleration tolerates.
+  - `calc_drive_torque_deceleration_limit`: Ceiling set by wheel torque at the drive current limit, including reflected rotating mass.
+  - `calc_drive_voltage_headroom`: Bus voltage left over after back-EMF at speed.
+  - `calc_braking_limits`: Combines the three ceilings and reports the binding one and whether the request passes.
 - **Physical AI SI Units (`mlsysim.core.units`)**: Added exported aliases and quantities for `millimeter`, `mm`, `newton`, `N`, `volt`, `V`, `millivolt`, `mV`, `ampere`, `A`, `milliampere`, `mA`, `ohm`, `milliohm`, `radian`, `rad`, `hertz`, `Hz`.
 - **Provenance Catalog (`mlsysim.core.provenance_catalog`)**: Integrated verifiable engineering sources and datasheets for all embodied platforms and parameters.
 
@@ -173,6 +180,61 @@ Release body. Omit any section that has no entries for a given release.
   per direction, six links at 50 GB/s (Jouppi et al. 2023, Table 4, which
   quotes the A100's NVLink at the same one-way convention). Its provenance now
   carries the paper's actual title.
+- `Hardware.Cloud.TPUv3` peak is 123 TFLOP/s per chip (BF16) and TDP 450 W per
+  chip (Jouppi et al. 2020, CACM, Table 3), replacing 105 TFLOP/s (a quarter of
+  the 4-chip Cloud TPU v3 board rating) and 250 W. Its provenance URL now
+  points to the CACM article (DOI 10.1145/3360307) instead of an unrelated
+  arXiv entry.
+- `Hardware.Cloud.TPUv3` records its ICI as 280 GB/s per direction, four
+  links at 70 GB/s (Jouppi et al. 2023, Table 4, the source of the TPUv4
+  entry). Jouppi et al. 2020 Table 3 gives a 4 x 656 Gbit/s line rate
+  (328 GB/s). `release_year` is 2018 (announced and deployed 2018), not 2019.
+- `Hardware.Cloud.TPUv2` peak is 46 TFLOP/s per chip (BF16) and TDP 280 W per
+  chip (Jouppi et al. 2020, CACM, Table 3), replacing 45 TFLOP/s (the Hot
+  Chips pod figure divided by 256) and 200 W. Its provenance URL now points to
+  the CACM article (DOI 10.1145/3360307) instead of an unrelated arXiv entry.
+  `release_year` is 2017 (announced May 2017, first deployed Q3 2017), not 2018.
+
+### Workload & Model Registry
+
+- `Models.Language.GPT3` reference run is 10,000 V100 GPUs for about 14.8 days
+  (Patterson et al. 2021, Table 4), replacing 1,024 accelerators for 25 days,
+  which implied more than 100 percent MFU. It gains `training_hardware_label:
+  V100`, consistent with its existing energy and CO2 fields from the same table.
+- `Models.Language.GPT4` reference duration is 100 days (SemiAnalysis 2023
+  estimate of 90 to 100 days on ~25,000 A100s), matching its existing
+  `training_gpu_days` anchor.
+- `TransformerWorkload` validates that `training_accelerators_ref` times
+  `training_days_ref` agrees with `training_gpu_days` within 1 percent when all
+  three are set.
+- `Scenarios.FrontierTraining` keeps its 8,192-H100 fleet; its description now
+  states that this is the H100 restatement of a GPT-4-class run.
+
+### Infrastructure & Systems Registry
+
+- `Infrastructure.FacilityCooling.Typical` PUE is 1.55, the Uptime Institute
+  2022 survey's global average annual PUE, replacing 1.40. The duplicate
+  `FacilityCooling.UptimeSurvey2022Average` anchor (also 1.55, same source) is
+  removed; read `Typical` instead.
+- `Node` gains `psu_redundancy` (M in an N+M supply), `psu_rating`, and
+  `max_power`, validated so that the N required PSUs can carry `max_power`.
+  A new `series_psus` property counts the PSUs whose single failure stops the
+  node (0 for a redundant supply, otherwise `psus_per_node`). The defaults
+  leave custom nodes unchanged.
+- `Systems.Nodes.DGX_H100` records six 3.3 kW PSUs in 4+2 redundancy and
+  10.2 kW maximum system power (NVIDIA DGX H100 User Guide,
+  `prov:nvidia-dgx-h100-user-guide-power`). `ReliabilityModel` now sums
+  `series_psus` rather than `psus_per_node`, so the DGX H100 node MTBF rises
+  from 4,285.7 h to 4,687.5 h (GPU and NIC terms only) and every DGX H100
+  fleet MTBF rises by the same 9.4 percent.
+- `Systems.Nodes.DGX_A100` records six 3 kW PSUs in 3+3 redundancy and 6.5 kW
+  maximum system power (`prov:nvidia-dgx-a100-user-guide-power`), and
+  `Systems.Nodes.DGX_B200` records six 3.3 kW PSUs in 5+1 redundancy and
+  14.3 kW maximum (`prov:nvidia-dgx-b200-user-guide-power`). Their node MTBF
+  also rises from 4,285.7 h to 4,687.5 h, so every fleet on them
+  (`Clusters.Training_1K_A100`, `Lab_64_A100`, `Meta_RSC_A100_16K`) gains the
+  same 9.4 percent in fleet MTBF. `HGX_H100_EPYC`, `GrandTeton_H100`,
+  `Kempner_H100_4GPU` and custom nodes keep the non-redundant two-PSU default.
 
 ### Documentation
 
@@ -197,6 +259,8 @@ Release body. Omit any section that has no entries for a given release.
 
 ### Breaking Changes
 
+- `Infrastructure.FacilityCooling.UptimeSurvey2022Average` is removed; use
+  `Infrastructure.FacilityCooling.Typical` (now 1.55).
 - `ContinuousBatchingModel.solve()` and `ServingCapacityModel.solve()` rename
   `seq_len` to `max_seq_len`.
 - `ContinuousBatchingResult.memory_fragmentation_pct` is replaced by

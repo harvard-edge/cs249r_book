@@ -143,3 +143,57 @@ def test_storage_local_nvme_gen5():
     assert gen5x4.aggregate_bandwidth.to(GB / second).magnitude == pytest.approx(56.0)
 
 
+def test_dgx_h100_power_supplies_match_user_guide():
+    """pc.DGX_H100_USER_GUIDE_POWER: six 3.3 kW PSUs in 4+2 redundancy, 10.2 kW max."""
+    dgx = Systems.Nodes.DGX_H100
+
+    assert dgx.psus_per_node == 6
+    assert dgx.psu_redundancy == 2
+    assert dgx.series_psus == 0
+    assert dgx.psu_rating.m_as("kW") == pytest.approx(3.3)
+    assert dgx.max_power.m_as("kW") == pytest.approx(10.2)
+    assert (dgx.psus_per_node - dgx.psu_redundancy) * dgx.psu_rating >= dgx.max_power
+    assert dgx.metadata.provenance is not None
+
+
+def test_node_psu_defaults_and_redundancy_validation():
+    from mlsysim.hardware.registry import Hardware
+    from mlsysim.systems.types import Node
+
+    base = dict(
+        name="custom",
+        accelerator=Hardware.Cloud.H100,
+        accelerators_per_node=8,
+        intra_node_bw=Hardware.Cloud.H100.nvlink.bandwidth_per_direction,
+    )
+    node = Node(**base)
+    assert node.psus_per_node == 2
+    assert node.psu_redundancy == 0
+    assert node.series_psus == 2
+
+    with pytest.raises(ValueError):
+        Node(**base, psus_per_node=2, psu_redundancy=2)
+    with pytest.raises(ValueError):
+        Node(**base, psus_per_node=6, psu_redundancy=2, psu_rating=2 * kilowatt, max_power=10.2 * kilowatt)
+
+
+def test_dgx_a100_power_supplies_match_user_guide():
+    """pc.DGX_A100_USER_GUIDE_POWER: six 3 kW PSUs in 3+3 redundancy, 6.5 kW max."""
+    dgx = Systems.Nodes.DGX_A100
+    assert dgx.psus_per_node == 6
+    assert dgx.psu_redundancy == 3
+    assert dgx.series_psus == 0
+    assert dgx.psu_rating.m_as("kW") == pytest.approx(3.0)
+    assert dgx.max_power.m_as("kW") == pytest.approx(6.5)
+    assert (dgx.psus_per_node - dgx.psu_redundancy) * dgx.psu_rating >= dgx.max_power
+
+
+def test_dgx_b200_power_supplies_match_user_guide():
+    """pc.DGX_B200_USER_GUIDE_POWER: six 3.3 kW PSUs in 5+1 redundancy, 14.3 kW max."""
+    dgx = Systems.Nodes.DGX_B200
+    assert dgx.psus_per_node == 6
+    assert dgx.psu_redundancy == 1
+    assert dgx.series_psus == 0
+    assert dgx.psu_rating.m_as("kW") == pytest.approx(3.3)
+    assert dgx.max_power.m_as("kW") == pytest.approx(14.3)
+    assert (dgx.psus_per_node - dgx.psu_redundancy) * dgx.psu_rating >= dgx.max_power

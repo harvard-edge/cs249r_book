@@ -51,6 +51,7 @@ def test_vol4_ch01_tempe_idealized_constant_speed_budget():
     check(abs(d_lag.to(meter).magnitude - 19.2) < 0.1, f"Unexpected lag displacement: {d_lag}")
     check(abs(d_brake.to(meter).magnitude - 20.5) < 0.1, f"Unexpected braking distance: {d_brake}")
     check(abs(d_remaining.to(meter).magnitude - 3.6) < 0.1, f"Unexpected remaining travel: {d_remaining}")
+    check(abs(kinetic_energy.to(joule).magnitude - 387072.0) < 1.0, f"Unexpected kinetic energy: {kinetic_energy}")
     check(
         d_brake > d_remaining,
         "Idealized stopping distance should exceed remaining travel",
@@ -143,7 +144,8 @@ def test_vol4_ch08_sensor_information_age():
 
 
 def test_vol4_ch11_planning_seam_inertia():
-    joint = Actuators.HarmonicDrive.CSG_25_50
+    # 2026-09-28 (M6): the seam joint is the sourced Panda-class stand-in.
+    joint = Actuators.PandaClassJoint.CSG_25_50_ILM70x18
     gear_ratio = joint.gear_ratio
     rotor_inertia = joint.rotor_inertia
     delta_omega = 0.2 * (ureg.radian / second)
@@ -158,12 +160,12 @@ def test_vol4_ch11_planning_seam_inertia():
     tau_blend_peak = 1.5 * tau_blended
     torque_reduction_ratio = tau_unblended / tau_blend_peak
 
-    check(abs(j_reflected.magnitude - 0.25) < 0.001, f"Unexpected reflected inertia: {j_reflected}")
+    check(abs(j_reflected.magnitude - 0.1835) < 0.0001, f"Unexpected reflected inertia: {j_reflected}")
     check(abs(alpha_unblended.magnitude - 200.0) < 0.1, f"Unexpected unblended acceleration: {alpha_unblended}")
-    check(abs(tau_unblended.magnitude - 50.0) < 0.1, f"Unexpected unblended torque: {tau_unblended}")
+    check(abs(tau_unblended.magnitude - 36.7) < 0.01, f"Unexpected unblended torque: {tau_unblended}")
     check(abs(alpha_blended.magnitude - 4.0) < 0.01, f"Unexpected blended acceleration: {alpha_blended}")
-    check(abs(tau_blended.magnitude - 1.0) < 0.01, f"Unexpected blended torque: {tau_blended}")
-    check(abs(tau_blend_peak.magnitude - 1.5) < 0.01, f"Unexpected peak blend torque: {tau_blend_peak}")
+    check(abs(tau_blended.magnitude - 0.734) < 0.001, f"Unexpected blended torque: {tau_blended}")
+    check(abs(tau_blend_peak.magnitude - 1.101) < 0.001, f"Unexpected peak blend torque: {tau_blend_peak}")
     check(abs(torque_reduction_ratio.magnitude - 50/1.5) < 0.1, f"Unexpected peak reduction ratio: {torque_reduction_ratio}")
 
 
@@ -190,6 +192,7 @@ def test_vol4_ch14_intervention_takeover_budget():
     check(abs(d_drift_ool.magnitude - 10.0) < 0.01, f"Unexpected out-of-loop drift: {d_drift_ool}")
     check(abs(d_stop_ool.magnitude - 15.0) < 0.01, f"Unexpected out-of-loop stop: {d_stop_ool}")
     check(abs(drift_expansion_ratio.magnitude - 13.33) < 0.1, f"Unexpected drift expansion: {drift_expansion_ratio}")
+    check(abs(stop_expansion_ratio.magnitude - 2.61) < 0.05, f"Unexpected stop expansion: {stop_expansion_ratio}")
 
 
 def test_vol4_ch04_amr_watchdog_lease():
@@ -210,39 +213,33 @@ def test_vol4_ch04_amr_watchdog_lease():
 
 
 def test_vol4_ch04_fieldbus_schedulability():
-    num_axes = 8
+    # Mirrors calc-nervous-fieldbus-schedulability: 9 axes (7 arm + 2 wheels),
+    # 8-byte command and feedback frames on CAN FD vs one EtherCAT frame.
     cycle_time = 1.0 * millisecond
-
-    canfd_64 = calc_canfd_bus_utilization(
-        num_axes=num_axes,
-        payload_bytes=64,
+    kw = dict(
+        payload_bytes=8,
         baud_arbitration=1.0 * (megabit / second),
         baud_data=5.0 * (megabit / second),
         cycle_time=cycle_time,
-        interframe_spacing=6.0 * microsecond,
     )
-    canfd_32 = calc_canfd_bus_utilization(
-        num_axes=num_axes,
-        payload_bytes=32,
-        baud_arbitration=1.0 * (megabit / second),
-        baud_data=5.0 * (megabit / second),
-        cycle_time=cycle_time,
-        interframe_spacing=6.0 * microsecond,
-    )
+    one_bus = calc_canfd_bus_utilization(num_axes=9, **kw)
+    arm_bus = calc_canfd_bus_utilization(num_axes=7, **kw)
+    base_bus = calc_canfd_bus_utilization(num_axes=2, **kw)
     ethercat = calc_ethercat_cycle_time(
-        num_axes=num_axes,
-        bytes_per_axis=32,
+        num_axes=9,
+        bytes_per_axis=16,
         baud_rate=100.0 * (megabit / second),
         header_bytes=64,
         hop_delay=0.6 * microsecond,
         cycle_time=cycle_time,
     )
 
-    check(abs(canfd_64["t_tx"].to(microsecond).magnitude - 140.4) < 0.5, f"Unexpected CAN-FD 64B frame time: {canfd_64['t_tx']}")
-    check(abs(canfd_64["t_total_tx"].to(microsecond).magnitude - 1123.2) < 2.0, f"Unexpected CAN-FD 64B total: {canfd_64['t_total_tx']}")
-    check(canfd_64["utilization"] > 1.0, "CAN-FD 64B must overrun 1.0 ms cycle time")
-    check(abs(ethercat["t_cycle_total"].to(microsecond).magnitude - 30.4) < 0.2, f"Unexpected EtherCAT total: {ethercat['t_cycle_total']}")
-    check(abs(ethercat["t_margin"].to(microsecond).magnitude - 969.6) < 0.5, f"Unexpected EtherCAT margin: {ethercat['t_margin']}")
+    check(abs(one_bus["t_tx"].to(microsecond).magnitude - 56.6) < 1e-6, f"Unexpected CAN FD frame time: {one_bus['t_tx']}")
+    check(abs(one_bus["t_total_tx"].to(microsecond).magnitude - 1018.8) < 1e-6, f"Unexpected single-bus total: {one_bus['t_total_tx']}")
+    check(one_bus["utilization"] > 1.0, "One CAN FD bus for 9 axes must overrun the 1.0 ms cycle")
+    check(abs(arm_bus["t_total_tx"].to(microsecond).magnitude - 792.4) < 1e-6, f"Unexpected arm-bus total: {arm_bus['t_total_tx']}")
+    check(arm_bus["utilization"] < 1.0 and base_bus["utilization"] < 1.0, "Per-limb buses pass serialization")
+    check(abs(ethercat["t_cycle_total"].to(microsecond).magnitude - 22.04) < 1e-6, f"Unexpected EtherCAT total: {ethercat['t_cycle_total']}")
     check(ethercat["utilization"] < 0.05, "EtherCAT utilization must be under 5%")
 
 

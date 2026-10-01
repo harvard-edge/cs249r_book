@@ -119,7 +119,7 @@ def _replica_profile(model: Workload, fleet: Fleet, *, batch_size: int,
             trainable_fraction=trainable_fraction,
         )
         memory_footprint = memory.total_memory
-        memory_trace = list(memory.constraint_trace)
+        memory_trace = list(memory.constraint_trace or [])
     else:
         n_params = (graph.weight_bytes / bpp).to_base_units()
         optimizer_state = n_params * Q_(cal.TRAINING_OPTIMIZER_BYTES_ADAM, "byte")

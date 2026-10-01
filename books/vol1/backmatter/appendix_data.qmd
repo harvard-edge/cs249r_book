@@ -8,7 +8,7 @@ Data problems rarely present as data problems; they surface as a training run th
 
 ## How to Use This Appendix {.unnumbered}
 
-This appendix is designed as a *reference*. Reach for it when debugging "slow training," "low accelerator utilization," or "production accuracy drift" calls for the quickest path from symptom to measurement.
+This appendix is designed as a reference. Reach for it when debugging "slow training," "low accelerator utilization," or "production accuracy drift" calls for the quickest path from symptom to measurement.
 
 Conventions used here follow the book-wide notation (for example, $B$ is reserved for batch size and $\text{BW}$ denotes bandwidth).
 
@@ -96,7 +96,7 @@ With those reference points in place, the appendix begins with the physical cons
 
 ## Data Engineering Foundations {#sec-appdx-data-foundations-data-engineering-foundations-0c20}
 
-Understanding hardware constraints is only half the battle; we must also shape our data to fit them. Data engineering applies the principles of the memory hierarchy to storage formats and pipeline design, ensuring that the accelerator never starves. This process begins with recognizing that data is physical—it has volume, it takes time to move, and it requires energy to parse.
+Understanding hardware constraints is only the first requirement; systems engineering must also shape data to fit them. Data engineering applies the principles of the memory hierarchy to storage formats and pipeline design, ensuring that the accelerator never starves. This process begins with recognizing that data is physical—it has volume, it takes time to move, and it requires energy to parse.
 
 ### Napkin math: The physics of data gravity {#sec-appdx-data-foundations-napkin-math-physics-data-gravity-9ae0}
 
@@ -319,7 +319,7 @@ class DataAlgebra:
 
 ### The algebra of data {#sec-appdx-data-foundations-algebra-data-9792}
 
-Feature engineering turns raw records into the columns a model can learn from, and that transformation is usually a dataflow problem before it is a modeling problem. A pipeline first narrows the population, then chooses the features, then attaches context from other tables. Those three moves correspond to three Structured Query Language (SQL)\index{Structured query language!feature pipeline primitives}\index{SQL|see{Structured query language}} primitives, and their computational cost determines whether the feature job stays local, scans unnecessary bytes, or turns into a network shuffle.
+Feature engineering turns raw records into the columns a model can learn from, and that transformation is usually a dataflow problem before it is a modeling problem. A pipeline first narrows the population, then chooses the features, then attaches context from other tables. Those three moves correspond to three Structured Query Language (SQL)\index{Structured query language!feature pipeline primitives}\index{SQL!feature pipeline primitives} primitives, and their computational cost determines whether the feature job stays local, scans unnecessary bytes, or turns into a network shuffle.
 
 1.  **Selection ($\sigma$)**: Filtering rows (for example, `WHERE age > 30`).
     *   **Cost**: $\mathcal{O}(\log N + K)$ if a B-tree index lookup returns $K$ rows; $\mathcal{O}(N)$ for a full scan.
@@ -331,7 +331,7 @@ Feature engineering turns raw records into the columns a model can learn from, a
     *   **Broadcast Join**: One small table is sent to all workers.
         *   **Cost**: $S(W-1)$ bytes; the $S$-byte table must fit on each of $W$ workers.
 
-Understanding data formats, serialization costs, and algebraic primitives tells us how to *move* data efficiently. Even a perfectly engineered pipeline, however, can silently fail if the data it carries changes character over time. Detecting that change—and quantifying how much it matters—requires a different set of tools: probability and statistics.
+Understanding data formats, serialization costs, and algebraic primitives tells how to move data efficiently. Even a perfectly engineered pipeline, however, can silently fail if the data it carries changes character over time. Detecting that change—and quantifying how much it matters—requires a different set of tools: probability and statistics.
 
 ## Probability and Statistics {#sec-appdx-data-foundations-probability-statistics-3934}
 
@@ -416,7 +416,7 @@ For $N_{\text{session}} = 100$ independent requests, each with a 0.01 chance of 
 
 ### Measuring drift (divergence) {#sec-appdx-data-foundations-measuring-drift-divergence-a6dd}
 
-Because distributions have long tails where the most dangerous failures hide, simple metrics like "mean shift" are insufficient. We need tools that compare the *entire shape* of the distribution. Detecting drift between the serving distribution ($P_t$) and training distribution ($P_0$) requires measuring the "distance" between distributions.
+Because distributions have long tails where the most dangerous failures hide, simple metrics like "mean shift" are insufficient. We need tools that compare the entire shape of the distribution. Detecting drift between the serving distribution ($P_t$) and training distribution ($P_0$) requires measuring the "distance" between distributions.
 
 For discrete outcomes $x$, @eq-appdx-data-kl-divergence expresses KL divergence\index{Kullback-Leibler divergence!appendix refresher}[^fn-kl-divergence-relative] as the expected extra coding cost of approximating $P_t$ with $P_0$ [@kullback1951; @cover2006]. The displayed form is finite only when $P_0(x) > 0$ wherever $P_t(x) > 0$; production implementations therefore need explicit smoothing or zero handling.
 $$ \mathcal{D}_{\text{KL}}(P_t \lVert P_0) = \sum_x P_t(x) \log \frac{P_t(x)}{P_0(x)} $$ {#eq-appdx-data-kl-divergence}
@@ -572,22 +572,26 @@ print(KLDrift.psi_eq)
 #| label: psi-threshold
 # ┌── LEGO ───────────────────────────────────────────────
 # │ Context: PSI threshold prose in this callout
-# │ Goal: PSI manual-review threshold (0.2)
-# │ Show: PSI review threshold as a prose-local scalar.
-# │ How: Load the monitoring threshold from MLSysIM and guard the expected value.
+# │ Goal: PSI warning (0.1) and critical (0.25) thresholds, matching the
+# │       bands used in the data engineering and ML operations chapters.
+# │ Show: Both thresholds as prose-local scalars.
+# │ How: Load the monitoring thresholds from MLSysIM and guard the expected values.
 from mlsysim import Ops
 from mlsysim.fmt import fmt, check
 
 class PsiThreshold:
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    psi_threshold = Ops.Monitoring.PsiReviewThreshold
+    psi_threshold = Ops.Monitoring.PsiWarnThreshold
+    psi_critical = Ops.Monitoring.PsiCriticalThreshold
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
-    check(abs(psi_threshold - 0.2) < 1e-12, f"Expected PSI review threshold 0.2, got {psi_threshold}")
+    check(abs(psi_threshold - 0.1) < 1e-12, f"Expected PSI warning threshold 0.1, got {psi_threshold}")
+    check(abs(psi_critical - 0.25) < 1e-12, f"Expected PSI critical threshold 0.25, got {psi_critical}")
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
     psi_threshold_str = fmt(psi_threshold, precision=1, commas=False)
+    psi_critical_str = fmt(psi_critical, precision=2, commas=False)
 ```
 
-**Systems insight**: Since PSI = `{python} KLDrift.psi_str` < `{python} PsiThreshold.psi_threshold_str`, this drift does not yet cross the illustrative manual-review threshold used here. The right response is to keep the feature on the monitoring dashboard and look for corroborating drift signals rather than retraining from this statistic alone.
+**Systems insight**: Since PSI = `{python} KLDrift.psi_str` < `{python} PsiThreshold.psi_threshold_str`, this drift sits just below the conventional warning threshold and well short of the critical threshold of `{python} PsiThreshold.psi_critical_str` used in @sec-ml-operations. The right response is to keep the feature on the monitoring dashboard and look for corroborating drift signals rather than retraining from this statistic alone.
 
 :::
 
@@ -595,17 +599,15 @@ The threshold remains illustrative: its meaning depends on sample size, binning,
 
 [^fn-kl-divergence-relative]: **KL divergence**\index{Kullback-Leibler divergence!appendix refresher}: Named after Solomon Kullback\index{Kullback, Solomon|seealso{Kullback-Leibler divergence}} and Richard Leibler\index{Leibler, Richard|seealso{Kullback-Leibler divergence}}, who introduced it in 1951. Also called *relative entropy*, it quantifies the expected extra information needed to encode samples from one distribution using a code optimized for another; for drift monitoring in this book, the canonical direction is $\mathcal{D}_{\text{KL}}(P_t \lVert P_0)$. With natural logarithms, as in the example above, the unit is nats; with base-2 logarithms, the unit is bits. In production ML, KL divergence is the theoretical backbone of many drift-detection metrics.
 
-Both KL divergence and PSI are grounded in a deeper framework—information theory\index{Information theory}—which provides the units and bounds that make these metrics principled rather than ad hoc.
+Both KL divergence and PSI are grounded in a deeper framework—information theory\index{Information theory}—which provides the units and bounds that make these metrics principled rather than *ad hoc*.
 
 ### Information theory for systems {#sec-appdx-data-foundations-information-theory-systems-c033}
 
 A training run can consume more examples, run longer, and still stop improving if the added data carries too little useful signal. At that point, the bottleneck is not only compute or bandwidth; it is the amount of information the data pipeline delivers to the learner. @Sec-appdx-dam-taxonomy-information-roofline-destination-6426 treats that data quality limit as a diagnostic constraint, and information theory provides the units for reasoning about it.
 
-**Entropy ($H$)**\index{Entropy!definition}[^fn-entropy-information-theory] is the average uncertainty in a distribution, defined as $H(X) = -\sum p(x) \log p(x)$. The log base sets the unit: natural logs give nats, while $\log_2$ gives bits. A uniform distribution has maximum entropy only over a fixed finite support. This connects directly to KL divergence above: $\mathcal{D}_{\text{KL}}$ measures the excess coding cost of using the wrong distribution.
-
-**Information density**\index{Information density!definition} is used here as a book-level heuristic for useful learning signal per unit of storage, not as a standard information-theory quantity.
-
-**Signal-to-noise ratio (SNR)**\index{Signal-to-noise ratio!definition} is the ratio of signal power to noise power. In ML, the book uses low SNR qualitatively for data in which task-relevant structure is weak relative to noise; adding compute cannot compensate for missing task-relevant signal.
+* **Entropy ($H$)**\index{Entropy!definition}:[^fn-entropy-information-theory] The average uncertainty in a distribution, defined as $H(X) = -\sum p(x) \log p(x)$. The log base sets the unit: natural logs give nats, while $\log_2$ gives bits. A uniform distribution has maximum entropy only over a fixed finite support. This connects directly to KL divergence above: $\mathcal{D}_{\text{KL}}$ measures the excess coding cost of using the wrong distribution.
+* **Information density**\index{Information density!definition}: Used here as a book-level heuristic for useful learning signal per unit of storage, not as a standard information-theory quantity.
+* **Signal-to-noise ratio (SNR)**\index{Signal-to-noise ratio!definition}: The ratio of signal power to noise power. In ML, the book uses low SNR qualitatively for data in which task-relevant structure is weak relative to noise; adding compute cannot compensate for missing task-relevant signal.
 
 [^fn-entropy-information-theory]: **Entropy**\index{Entropy!appendix refresher}: Shannon\index{Shannon, Claude!information theory} adopted the term in 1948 to quantify information content [@shannon1948]. In systems terms, Shannon entropy is a lower bound on average lossless code length. Practical prefix codes approach it, and block codes can approach it asymptotically. With $\log_2$, the unit is bits; natural logs give nats. These bounds inform compression ratios and data-pipeline sizing.
 
