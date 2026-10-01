@@ -111,7 +111,9 @@ def list_all_chapters() -> list[tuple[str, str, Path]]:
         contents = REPO  / "books" / vol
         for qmd in sorted(contents.glob("*/*.qmd")):
             if qmd.name.startswith("_") and qmd.name not in (
-                "_notation_body.qmd",
+                "_notation_core_head.qmd",
+                "_notation_core_tail.qmd",
+                "_notation_degradation.qmd",
                 "_notation_distributed.qmd",
                 "_notation_scaling.qmd",
                 "_notation_agentic.qmd",

@@ -124,7 +124,7 @@ When most elements in a matrix are zero, specialized storage formats avoid wasti
 - `Col_Idx`: The column index of each nonzero element
 - `Row_Ptr`: The starting position in `Values` for each row (length = num_rows + 1)
 
-CSR is useful for sparse feature matrices in recommendation pipelines and for pruned model weights. For a matrix with $N$ elements, $R$ rows, and $K$ nonzeros, CSR uses $\mathcal{O}(K + R)$ storage instead of $\mathcal{O}(N)$; when $K$ is large relative to $R$, this is often summarized as $\mathcal{O}(K)$.
+CSR is useful for sparse feature matrices in recommendation pipelines and for pruned model weights. For a matrix with $N$ elements, $n_{\text{rows}}$ rows, and $n_{\text{nz}}$ nonzeros, CSR uses $\mathcal{O}(n_{\text{nz}} + n_{\text{rows}})$ storage instead of $\mathcal{O}(N)$; when $n_{\text{nz}}$ is large relative to $n_{\text{rows}}$, this is often summarized as $\mathcal{O}(n_{\text{nz}})$.
 
 ```{python}
 #| echo: false
@@ -190,7 +190,7 @@ A shape mismatch crash, a silently wrong broadcast, a kernel running at 5 percen
 
 | **Layer type**                |        **Output shape**       |                                 **Parameters ($P$)**                                 |                              **FLOPs (per forward pass)**                              |
 |:------------------------------|:-----------------------------:|:------------------------------------------------------------------------------------:|:--------------------------------------------------------------------------------------:|
-| **Linear**                    |     $(B, N_{\text{out}})$     |      $N_{\text{in}} \times N_{\text{out}} + N_{\text{out}}$ if bias is enabled       |                $2 \times B \times N_{\text{in}} \times N_{\text{out}}$                 |
+| **Linear**                    |     $(B, d_{\text{out}})$     |      $d_{\text{in}} \times d_{\text{out}} + d_{\text{out}}$ if bias is enabled       |                $2 \times B \times d_{\text{in}} \times d_{\text{out}}$                 |
 | **Conv2D**                    | $(B, C_{\text{out}}, H', W')$ | $K^2 \times C_{\text{in}} \times C_{\text{out}} + C_{\text{out}}$ if bias is enabled | $2 \times B \times H' \times W' \times K^2 \times C_{\text{in}} \times C_{\text{out}}$ |
 | **Multi-head self-attention** |          $(B, S, d)$          |          $4 \times d^2$, plus $4 \times d$ if projection biases are enabled          |                             $B \times (4 S^2 d + 8 S d^2)$                             |
 | **LayerNorm**                 |          $(B, S, d)$          |                  $2 \times d$ if affine scale and bias are enabled                   |                           $\mathcal{O}(B \times S \times d)$                           |
@@ -205,13 +205,13 @@ A shape mismatch crash, a silently wrong broadcast, a kernel running at 5 percen
 
 A tensor\index{Tensor!appendix refresher} is a view over an underlying storage buffer, described by shape, stride, dtype, and offset metadata. Its shape specifies the dimensions of the tensor (for example, `(3, 4)`), while its stride defines the number of elements to skip in memory to move to the next element along each dimension. Only contiguous tensors lay their logical elements out as one adjacent block.
 
-Operations like `transpose()` or `view()` often just change the strides, not the data in memory. This is fast ($\mathcal{O}(1)$) but can lead to noncontiguous tensors that fail in kernels requiring contiguous data. In such cases, calling `contiguous()` forces an $\mathcal{O}(N)$ memory copy that can dominate runtime if triggered repeatedly inside a loop.
+Operations like `transpose()` or `view()` often just change the strides, not the data in memory. This is fast ($\mathcal{O}(1)$) but can lead to noncontiguous tensors that fail in kernels requiring contiguous data. In such cases, calling `contiguous()` on a tensor of $N$ elements forces an $\mathcal{O}(N)$ memory copy that can dominate runtime if triggered repeatedly inside a loop.
 
 ### Broadcasting {#sec-appdx-algorithm-foundations-broadcasting-ec16}
 
 **Broadcasting**\index{Broadcasting!definition} allows arithmetic operations on tensors of different shapes by comparing dimensions from right to left. Two dimensions are compatible when they are equal or when one of them is 1.
 
-@Fig-broadcasting-rules diagrams this virtual expansion across complementary singleton dimensions, adding a $(3, 1)$ column tensor ($A$) to a $(1, 4)$ row tensor ($B$) to generate a $(3, 4)$ matrix of pairwise sums ($A_i + B_j$). Dashed cell boundaries mark elements evaluated via stride 0 without physical memory copies, allowing hardware to repeatedly access identical buffer addresses with $\mathcal{O}(1)$ storage overhead.
+@Fig-broadcasting-rules diagrams this virtual expansion across complementary singleton dimensions, adding a $(3, 1)$ column tensor ($\mathbf{A}$) to a $(1, 4)$ row tensor ($\mathbf{B}$) to generate a $(3, 4)$ matrix of pairwise sums ($A_i + B_j$). Dashed cell boundaries mark elements evaluated via stride 0 without physical memory copies, allowing hardware to repeatedly access identical buffer addresses with $\mathcal{O}(1)$ storage overhead.
 
 ::: {#fig-broadcasting-rules fig-env="figure" fig-pos="htb" fig-cap="**Tensor Broadcasting Rules**: A (3,1) column and a (1,4) row broadcast across complementary dimensions, producing the pairwise sums in a (3,4) result." fig-alt="Tensor A, a three-cell column labeled A0 through A2 with shape (3,1), plus tensor B, a four-cell row labeled B0 through B3 with shape (1,4), equals a (3,4) grid whose cells contain every Ai+Bj pair. Dashed cells and an annotation indicate virtual expansion via stride 0 without memory allocation."}
 ![](images/svg/broadcasting_rules.svg)
@@ -242,11 +242,11 @@ Modern frameworks use reverse-mode automatic differentiation\index{Automatic dif
 
 ### The backpropagation algorithm {#sec-appdx-algorithm-foundations-backpropagation-algorithm-93f7}
 
-Backpropagation[^fn-backprop-chain-rule] implements the chain rule efficiently through two passes: forward to compute outputs, backward to compute gradients. The gradient edges retrace forward dependencies, meaning each backward step requires intermediate activations retained from the corresponding forward operation. @Fig-backprop-graph traces these dual dataflow passes across a two-layer network: solid gray arrows stage forward activations ($x \to h \to y$) through weight parameters $W_1$ and $W_2$ to evaluate loss $\mathcal{L}$, while curved dashed red arrows propagate intermediate adjoints ($\frac{\partial \mathcal{L}}{\partial y}, \frac{\partial \mathcal{L}}{\partial h}, \frac{\partial \mathcal{L}}{\partial x}$) in reverse order.
+Backpropagation[^fn-backprop-chain-rule] implements the chain rule efficiently through two passes: forward to compute outputs, backward to compute gradients. The gradient edges retrace forward dependencies, meaning each backward step requires intermediate activations retained from the corresponding forward operation. @Fig-backprop-graph traces these dual dataflow passes across a two-layer network: solid gray arrows stage forward activations ($\mathbf{x} \to \mathbf{h} \to \mathbf{y}$) through weight parameters $\mathbf{W}_1$ and $\mathbf{W}_2$ to evaluate loss $\mathcal{L}$, while curved dashed red arrows propagate intermediate adjoints ($\frac{\partial \mathcal{L}}{\partial \mathbf{y}}, \frac{\partial \mathcal{L}}{\partial \mathbf{h}}, \frac{\partial \mathcal{L}}{\partial \mathbf{x}}$) in reverse order.
 
 [^fn-backprop-chain-rule]: **Backpropagation**\index{Backpropagation!appendix refresher}: Short for "backward propagation of errors." The algorithm was independently discovered multiple times—by @werbos1974beyond and @linnainmaa1970representation for reverse-mode differentiation and by @rumelhart1986 for neural network training. Its key insight is that computing gradients for all parameters requires one backward pass through the graph rather than one pass per parameter. @Sec-appdx-algorithm-baur-strassen derives the constant-factor work bound and a representative dense-layer cost.
 
-::: {#fig-backprop-graph fig-env="figure" fig-pos="htb" fig-cap="**Backpropagation Computational Graph**: Solid gray arrows carry the forward computation from input $x$ to loss $\mathcal{L}$, while dashed red arrows carry gradients backward along the same dependencies." fig-alt="A computational graph with four nodes labeled x, h, y, and a calligraphic L denoting loss, connected left to right. Solid gray arrows show the forward pass with weights W1 and W2. Dashed red arrows curve backward showing gradient flow with partial derivative notation."}
+::: {#fig-backprop-graph fig-env="figure" fig-pos="htb" fig-cap="**Backpropagation Computational Graph**: Solid gray arrows carry the forward computation from input $\mathbf{x}$ to loss $\mathcal{L}$, while dashed red arrows carry gradients backward along the same dependencies." fig-alt="A computational graph with four nodes labeled x, h, y, and a calligraphic L denoting loss, connected left to right. Solid gray arrows show the forward pass with weights W1 and W2. Dashed red arrows curve backward showing gradient flow with partial derivative notation."}
 ```{.tikz}
 \begin{tikzpicture}[font=\small\sffamily, node distance=3cm, auto, >=stealth, thick]
   \tikzset{
@@ -255,16 +255,16 @@ Backpropagation[^fn-backprop-chain-rule] implements the chain rule efficiently t
     BackEdge/.style={->, dashed, draw=RedLine, line width=0.8pt, bend right=30},
     Label/.style={font=\footnotesize\sffamily, text=TextBlack}
   }
-  \node[Node] (x) {x};
-  \node[Node, right of=x] (h) {h};
-  \node[Node, right of=h] (y) {y};
+  \node[Node] (x) {$\mathbf{x}$};
+  \node[Node, right of=x] (h) {$\mathbf{h}$};
+  \node[Node, right of=h] (y) {$\mathbf{y}$};
   \node[Node, right of=y, fill=RedLine!10, draw=RedLine] (L) {$\mathcal{L}$};
-  \draw[Edge] (x) -- node[below, Label] {$W_1$} (h);
-  \draw[Edge] (h) -- node[below, Label] {$W_2$} (y);
+  \draw[Edge] (x) -- node[below, Label] {$\mathbf{W}_1$} (h);
+  \draw[Edge] (h) -- node[below, Label] {$\mathbf{W}_2$} (y);
   \draw[Edge] (y) -- node[below, Label] {Loss} (L);
-  \draw[BackEdge,overlay] (L) to node[above, Label, text=RedLine] {$\frac{\partial \mathcal{L}}{\partial y}$} (y);
-  \draw[BackEdge,overlay] (y) to node[above, Label, text=RedLine] {$\frac{\partial \mathcal{L}}{\partial h}$} (h);
-  \draw[BackEdge,overlay] (h) to node[above, Label, text=RedLine] {$\frac{\partial \mathcal{L}}{\partial x}$} (x);
+  \draw[BackEdge,overlay] (L) to node[above, Label, text=RedLine] {$\frac{\partial \mathcal{L}}{\partial \mathbf{y}}$} (y);
+  \draw[BackEdge,overlay] (y) to node[above, Label, text=RedLine] {$\frac{\partial \mathcal{L}}{\partial \mathbf{h}}$} (h);
+  \draw[BackEdge,overlay] (h) to node[above, Label, text=RedLine] {$\frac{\partial \mathcal{L}}{\partial \mathbf{x}}$} (x);
  \path[use as bounding box] (-0.5,-0.55) rectangle (9.5,1.21);
 \end{tikzpicture}
 ```
@@ -390,6 +390,7 @@ class GPT2TrainingMem:
     batch_small_str = fmt(batch_small, precision=0, commas=False)
     seq_len_str = fmt(seq_len, precision=0, commas=False)
     act_small_gb_str = fmt_memory(act_small_q, unit=GB, precision=1, commas=False)
+    act_small_gb_value_str = fmt(act_small_q.to(GB).magnitude, precision=1, commas=False)
     total_small_gb_str = fmt_memory(total_small_q, unit=GB, precision=1, commas=False, approx=True)
     batch_large_str = fmt(batch_large, precision=0, commas=False)
     act_large_gb_str = fmt_memory(act_large_q, unit=GB, precision=1, commas=False, approx=True)
@@ -398,7 +399,7 @@ class GPT2TrainingMem:
     grad_ckpt_overhead_pct_str = fmt_percent(33 / 100, precision=0, commas=False, style='prose')
     act_small_display_math = fmt_display_math(
         rf"{layers_str} \times {act_factor_str} \times {batch_small_str} \times {seq_len_str} \times "
-        rf"{d_str} \times {bf16_bytes_value_str}\text{{ bytes }} \approx {act_small_gb_str}"
+        rf"{d_str} \times {bf16_bytes_value_str}\text{{ bytes }} \approx {act_small_gb_value_str}\text{{ GB}}"
     )
 ```
 
@@ -441,27 +442,27 @@ Compilers transform graphs into static single-assignment (SSA) form\index{Static
 
 Without fusion, each operation in a chain like `MatMul → Add (bias) → ReLU` produces an intermediate tensor that is written to HBM and then read back for the next operation. For elementwise operations like `Add` and `ReLU`, the compute is trivial (one FLOP per element) but the memory traffic is not (read the tensor, write it back). The arithmetic intensity of unfused elementwise operations is therefore close to zero—deeply memory bound.
 
-Fusion combines consecutive operations into a single kernel that reads the input once, applies all operations in registers or shared memory, and writes the final result once. For a sequence of $k$ elementwise operations on a tensor of size $N$ bytes, fusion reduces memory traffic from $2kN$ bytes (each operation reads and writes) to $2N$ bytes (one read, one write)—a $k\times$ reduction.
+Fusion combines consecutive operations into a single kernel that reads the input once, applies all operations in registers or shared memory, and writes the final result once. For a sequence of $k$ elementwise operations on a tensor of $N$ elements of $s_{\text{elem}}$ bytes each, fusion reduces memory traffic from $2kN s_{\text{elem}}$ bytes (each operation reads and writes) to $2N s_{\text{elem}}$ bytes (one read, one write)—a $k\times$ reduction.
 
 FlashAttention\index{FlashAttention!appendix refresher} is an I/O-aware tiled attention algorithm: it computes the score, softmax, and value-product stages in SRAM tiles without materializing the full attention matrix in HBM, reducing HBM traffic and auxiliary attention memory from $\mathcal{O}(S^2)$ to $\mathcal{O}(S)$. The original work reports up to 3$\times$ wall-clock speedups on its evaluated workloads [@dao2022]; realized gains depend on shape and hardware (see @sec-appdx-algorithm-flash-attention for the step-by-step derivation). Together, the linear algebra foundations, tensor programming mechanics, and training memory model covered in this appendix form the algorithmic substrate on which all ML systems are built.
 
 ## Baur–Strassen Reverse-Mode AD Complexity Theorem {#sec-appdx-algorithm-baur-strassen}
 
-Modern deep learning scales to hundreds of billions of parameters because evaluating the full gradient vector $\nabla f(x)$ of a scalar loss function $f: \mathbb{R}^N \to \mathbb{R}$ requires compute proportional to evaluating $f(x)$ itself, with a constant-factor bound independent of the input dimension $N$. Baur and Strassen proved this complexity result in 1983 [@baur1983complexity].
+Modern deep learning scales to hundreds of billions of parameters because evaluating the full gradient vector $\nabla f(\mathbf{x})$ of a scalar loss function $f: \mathbb{R}^N \to \mathbb{R}$ requires compute proportional to evaluating $f(\mathbf{x})$ itself, with a constant-factor bound independent of the input dimension $N$. Baur and Strassen proved this complexity result in 1983 [@baur1983complexity].
 
 ### Mathematical formulation and theorem statement {#sec-appdx-algorithm-baur-strassen-statement}
 
 Let $f: \mathbb{R}^N \to \mathbb{R}$ be a multivariate scalar-valued function represented as a computational graph $G = (V, E)$ consisting of $W(f)$ elementary operations (additions, subtractions, multiplications, divisions, and unary functions such as $\exp, \ln, \sin, \sqrt{\cdot}$).
 
 ::: {#thrm-appendix-algorithm-baur-strassen .callout-theorem title="Baur–Strassen complexity theorem"}
-If a scalar function $f: \mathbb{R}^N \to \mathbb{R}$ can be computed in $W(f)$ elementary operations, then the full gradient vector $\nabla f(x) = \left(\frac{\partial f}{\partial x_1}, \frac{\partial f}{\partial x_2}, \dots, \frac{\partial f}{\partial x_N}\right)^T \in \mathbb{R}^N$ can be evaluated in total work $\text{Work}_{\text{Reverse}}(f, \nabla f)$ satisfying:
+If a scalar function $f: \mathbb{R}^N \to \mathbb{R}$ can be computed in $W(f)$ elementary operations, then the full gradient vector $\nabla f(\mathbf{x}) = \left(\frac{\partial f}{\partial x_1}, \frac{\partial f}{\partial x_2}, \dots, \frac{\partial f}{\partial x_N}\right)^T \in \mathbb{R}^N$ can be evaluated in total work $\text{Work}_{\text{Reverse}}(f, \nabla f)$ satisfying:
 $$ \text{Work}_{\text{Reverse}}(f, \nabla f) \le C \cdot W(f) $$
 where $C \le 5$ is a universal constant independent of the input dimension $N$. Furthermore, the backward pass alone requires work $\text{Work}_{\text{Backward}}(\nabla f) \le 4 \cdot W(f)$.
 :::
 
 ### Step-by-step chain rule adjoint graph propagation proof {#sec-appdx-algorithm-baur-strassen-proof}
 
-Let the computational graph $G = (V, E)$ be topologically ordered with nodes $v_{1-N}, \dots, v_0, v_1$, $v_2, \dots, v_W$, where input variables are $x_i = v_{i-N}$ for $i \in \{1, \dots, N\}$ and the final output is $f(x) = v_W$. Each intermediate node $v_j$ is evaluated via a primitive operation:
+Let the computational graph $G = (V, E)$ be topologically ordered with nodes $v_{1-N}, \dots, v_0, v_1$, $v_2, \dots, v_W$, where input variables are $x_i = v_{i-N}$ for $i \in \{1, \dots, N\}$ and the final output is $f(\mathbf{x}) = v_W$. Each intermediate node $v_j$ is evaluated via a primitive operation:
 $$ v_j = \phi_j\left( \{ v_k \mid k \in \text{Parents}(j) \} \right) $$
 
 Define the *adjoint variable* $\bar{v}_i$ for every node $v_i$ as the partial derivative of the scalar output $v_W$ with respect to $v_i$:
@@ -517,8 +518,8 @@ Standard self-attention in transformers requires materializing an $S \times S$ a
 
 ### Standard softmax HBM I/O bottleneck {#sec-appdx-algorithm-flash-attention-hbm-bottleneck}
 
-Given queries $\mathbf{Q} \in \mathbb{R}^{S \times d}$, keys $\mathbf{K} \in \mathbb{R}^{S \times d}$, and values $\mathbf{V} \in \mathbb{R}^{S \times d}$ for sequence length $S$ and head dimension $d$, standard attention evaluates:
-$$ \mathbf{S} = \mathbf{Q} \mathbf{K}^T \in \mathbb{R}^{S \times S}, \qquad \mathbf{A} = \text{softmax}(\mathbf{S}) \in \mathbb{R}^{S \times S}, \qquad \mathbf{O} = \mathbf{A} \mathbf{V} \in \mathbb{R}^{S \times d} $$
+Given queries $\mathbf{Q} \in \mathbb{R}^{S \times d_{\text{head}}}$, keys $\mathbf{K} \in \mathbb{R}^{S \times d_{\text{head}}}$, and values $\mathbf{V} \in \mathbb{R}^{S \times d_{\text{head}}}$ for sequence length $S$ and head dimension $d_{\text{head}}$, standard attention evaluates:
+$$ \mathbf{S} = \mathbf{Q} \mathbf{K}^T \in \mathbb{R}^{S \times S}, \qquad \mathbf{A} = \text{softmax}(\mathbf{S}) \in \mathbb{R}^{S \times S}, \qquad \mathbf{O} = \mathbf{A} \mathbf{V} \in \mathbb{R}^{S \times d_{\text{head}}} $$
 
 To prevent numerical overflow, row-wise softmax subtracts the row maximum $m_i = \max_{1 \le j \le S} S_{ij}$:
 $$ A_{ij} = \frac{\exp(S_{ij} - m_i)}{\sum_{k=1}^S \exp(S_{ik} - m_i)} $$
@@ -526,72 +527,72 @@ $$ A_{ij} = \frac{\exp(S_{ij} - m_i)}{\sum_{k=1}^S \exp(S_{ik} - m_i)} $$
 Standard GPU implementations execute this in three discrete kernel launches:
 
 1. Compute $\mathbf{S} = \mathbf{Q}\mathbf{K}^T$ in SRAM, then write $\mathbf{S} \in \mathbb{R}^{S \times S}$ to HBM ($\Theta(S^2)$ writes).
-2. Read $\mathbf{S}$ from HBM, compute row max $m$ and row sum $d$, compute $\mathbf{A} = \text{softmax}(\mathbf{S})$, write $\mathbf{A} \in \mathbb{R}^{S \times S}$ to HBM ($\Theta(S^2)$ reads + writes).
-3. Read $\mathbf{A}$ and $\mathbf{V}$ from HBM, compute $\mathbf{O} = \mathbf{A}\mathbf{V}$, write $\mathbf{O} \in \mathbb{R}^{S \times d}$ to HBM ($\Theta(S^2 + Sd)$ reads + writes).
+2. Read $\mathbf{S}$ from HBM, compute row max $m$ and row sum $z$, compute $\mathbf{A} = \text{softmax}(\mathbf{S})$, write $\mathbf{A} \in \mathbb{R}^{S \times S}$ to HBM ($\Theta(S^2)$ reads + writes).
+3. Read $\mathbf{A}$ and $\mathbf{V}$ from HBM, compute $\mathbf{O} = \mathbf{A}\mathbf{V}$, write $\mathbf{O} \in \mathbb{R}^{S \times d_{\text{head}}}$ to HBM ($\Theta(S^2 + S d_{\text{head}})$ reads + writes).
 
-Total HBM memory traffic is $\Theta(S^2 + Sd)$ elements. For $S = 8192$, $d = 128$ in FP16, $\mathbf{S}$ requires $8192^2 \times 2 \text{ B} = 134 \text{ MB}$ per head per layer. Because modern GPUs feature massive compute throughput relative to HBM bandwidth, repeatedly reading and writing intermediate matrices $\mathbf{S}$ and $\mathbf{A}$ leaves GPU execution units memory-bound.
+Total HBM memory traffic is $\Theta(S^2 + S d_{\text{head}})$ elements. For $S = 8192$, $d_{\text{head}} = 128$ in FP16, $\mathbf{S}$ requires $8192^2 \times 2 \text{ B} = 134 \text{ MB}$ per head per layer. Because modern GPUs feature massive compute throughput relative to HBM bandwidth, repeatedly reading and writing intermediate matrices $\mathbf{S}$ and $\mathbf{A}$ leaves GPU execution units memory-bound.
 
 ### Online softmax recurrence proof {#sec-appdx-algorithm-flash-attention-online-softmax-proof}
 
-Tiling softmax is difficult because computing $d_i = \sum_{k=1}^N \exp(S_{ik} - m_i)$ requires the global maximum $m_i$ across all $N$ keys. The online softmax recurrence solves this by incrementally updating normalization statistics as sub-blocks arrive.
+Tiling softmax is difficult because computing $z_i = \sum_{k=1}^{S} \exp(S_{ik} - m_i)$ requires the global maximum $m_i$ across all $S$ keys. The online softmax recurrence solves this by incrementally updating normalization statistics as sub-blocks arrive.
 
 ::: {#thrm-appendix-algorithm-online-softmax .callout-theorem title="Online softmax recurrence theorem"}
-Let a vector $x \in \mathbb{R}^N$ be partitioned into two sub-vectors $x^{(1)} \in \mathbb{R}^{N_1}$ and $x^{(2)} \in \mathbb{R}^{N_2}$ with $N = N_1 + N_2$. Let the local statistics for block 1 be:
-$$ m^{(1)} = \max_{1 \le j \le N_1} x_j^{(1)}, \qquad d^{(1)} = \sum_{j=1}^{N_1} \exp\left(x_j^{(1)} - m^{(1)}\right) $$
+Let a vector $\mathbf{x} \in \mathbb{R}^n$ be partitioned into two sub-vectors $\mathbf{x}^{(1)} \in \mathbb{R}^{n_1}$ and $\mathbf{x}^{(2)} \in \mathbb{R}^{n_2}$ with $n = n_1 + n_2$. Let the local statistics for block 1 be:
+$$ m^{(1)} = \max_{1 \le j \le n_1} x_j^{(1)}, \qquad z^{(1)} = \sum_{j=1}^{n_1} \exp\left(x_j^{(1)} - m^{(1)}\right) $$
 and for block 2 be:
-$$ m^{(2)} = \max_{1 \le j \le N_2} x_j^{(2)}, \qquad d^{(2)} = \sum_{j=1}^{N_2} \exp\left(x_j^{(2)} - m^{(2)}\right) $$
+$$ m^{(2)} = \max_{1 \le j \le n_2} x_j^{(2)}, \qquad z^{(2)} = \sum_{j=1}^{n_2} \exp\left(x_j^{(2)} - m^{(2)}\right) $$
 
-Then the combined maximum $m^{\text{new}}$, normalization sum $d^{\text{new}}$, and accumulated output vector $\mathbf{O}^{\text{new}}$ satisfy the exact recurrence relations:
+Then the combined maximum $m^{\text{new}}$, normalization sum $z^{\text{new}}$, and accumulated output vector $\mathbf{O}^{\text{new}}$ satisfy the exact recurrence relations:
 $$ \begin{aligned}
 m^{\text{new}} &= \max\left(m^{(1)}, m^{(2)}\right), \\
-d^{\text{new}} &= d^{(1)} e^{m^{(1)} - m^{\text{new}}} + d^{(2)} e^{m^{(2)} - m^{\text{new}}}, \\
-\mathbf{O}^{\text{new}} &= \frac{d^{(1)} e^{m^{(1)} - m^{\text{new}}}}{d^{\text{new}}} \mathbf{O}^{(1)} + \frac{e^{m^{(2)} - m^{\text{new}}}}{d^{\text{new}}} \sum_{j=1}^{N_2} e^{x_j^{(2)} - m^{(2)}} \mathbf{V}_j^{(2)},
+z^{\text{new}} &= z^{(1)} e^{m^{(1)} - m^{\text{new}}} + z^{(2)} e^{m^{(2)} - m^{\text{new}}}, \\
+\mathbf{O}^{\text{new}} &= \frac{z^{(1)} e^{m^{(1)} - m^{\text{new}}}}{z^{\text{new}}} \mathbf{O}^{(1)} + \frac{e^{m^{(2)} - m^{\text{new}}}}{z^{\text{new}}} \sum_{j=1}^{n_2} e^{x_j^{(2)} - m^{(2)}} \mathbf{V}_j^{(2)},
 \end{aligned} $$
-where $\mathbf{O}^{(1)} = \frac{1}{d^{(1)}} \sum_{j=1}^{N_1} e^{x_j^{(1)} - m^{(1)}} \mathbf{V}_j^{(1)}$ is the partial output accumulated from block 1.
+where $\mathbf{O}^{(1)} = \frac{1}{z^{(1)}} \sum_{j=1}^{n_1} e^{x_j^{(1)} - m^{(1)}} \mathbf{V}_j^{(1)}$ is the partial output accumulated from block 1.
 :::
 
 #### Derivation of denominator recurrence {.unnumbered}
 
-Expanding the combined sum $d^{\text{new}} = \sum_{j=1}^N e^{x_j - m^{\text{new}}}$:
-$$ \begin{aligned} d^{\text{new}} &= \sum_{j=1}^{N_1} e^{x_j^{(1)} - m^{\text{new}}} + \sum_{j=1}^{N_2} e^{x_j^{(2)} - m^{\text{new}}} \\ &= \sum_{j=1}^{N_1} e^{\left(x_j^{(1)} - m^{(1)}\right) + \left(m^{(1)} - m^{\text{new}}\right)} + \sum_{j=1}^{N_2} e^{\left(x_j^{(2)} - m^{(2)}\right) + \left(m^{(2)} - m^{\text{new}}\right)} \\ &= e^{m^{(1)} - m^{\text{new}}} \underbrace{\sum_{j=1}^{N_1} e^{x_j^{(1)} - m^{(1)}}}_{d^{(1)}} + e^{m^{(2)} - m^{\text{new}}} \underbrace{\sum_{j=1}^{N_2} e^{x_j^{(2)} - m^{(2)}}}_{d^{(2)}} \\ &= d^{(1)} e^{m^{(1)} - m^{\text{new}}} + d^{(2)} e^{m^{(2)} - m^{\text{new}}}. \quad \blacksquare \end{aligned} $$
+Expanding the combined sum $z^{\text{new}} = \sum_{j=1}^n e^{x_j - m^{\text{new}}}$:
+$$ \begin{aligned} z^{\text{new}} &= \sum_{j=1}^{n_1} e^{x_j^{(1)} - m^{\text{new}}} + \sum_{j=1}^{n_2} e^{x_j^{(2)} - m^{\text{new}}} \\ &= \sum_{j=1}^{n_1} e^{\left(x_j^{(1)} - m^{(1)}\right) + \left(m^{(1)} - m^{\text{new}}\right)} + \sum_{j=1}^{n_2} e^{\left(x_j^{(2)} - m^{(2)}\right) + \left(m^{(2)} - m^{\text{new}}\right)} \\ &= e^{m^{(1)} - m^{\text{new}}} \underbrace{\sum_{j=1}^{n_1} e^{x_j^{(1)} - m^{(1)}}}_{z^{(1)}} + e^{m^{(2)} - m^{\text{new}}} \underbrace{\sum_{j=1}^{n_2} e^{x_j^{(2)} - m^{(2)}}}_{z^{(2)}} \\ &= z^{(1)} e^{m^{(1)} - m^{\text{new}}} + z^{(2)} e^{m^{(2)} - m^{\text{new}}}. \quad \blacksquare \end{aligned} $$
 
 #### Derivation of output rescaling recurrence {.unnumbered}
 
-The true normalized output over the concatenated sequence is $\mathbf{O}^{\text{new}} = \frac{1}{d^{\text{new}}} \sum_{j=1}^N e^{x_j - m^{\text{new}}} \mathbf{V}_j$:
-$$ \begin{aligned} \mathbf{O}^{\text{new}} &= \frac{1}{d^{\text{new}}} \left[ \sum_{j=1}^{N_1} e^{x_j^{(1)} - m^{\text{new}}} \mathbf{V}_j^{(1)} + \sum_{j=1}^{N_2} e^{x_j^{(2)} - m^{\text{new}}} \mathbf{V}_j^{(2)} \right] \\ &= \frac{1}{d^{\text{new}}} \left[ e^{m^{(1)} - m^{\text{new}}} \sum_{j=1}^{N_1} e^{x_j^{(1)} - m^{(1)}} \mathbf{V}_j^{(1)} + e^{m^{(2)} - m^{\text{new}}} \sum_{j=1}^{N_2} e^{x_j^{(2)} - m^{(2)}} \mathbf{V}_j^{(2)} \right] \end{aligned} $$
+The true normalized output over the concatenated sequence is $\mathbf{O}^{\text{new}} = \frac{1}{z^{\text{new}}} \sum_{j=1}^n e^{x_j - m^{\text{new}}} \mathbf{V}_j$:
+$$ \begin{aligned} \mathbf{O}^{\text{new}} &= \frac{1}{z^{\text{new}}} \left[ \sum_{j=1}^{n_1} e^{x_j^{(1)} - m^{\text{new}}} \mathbf{V}_j^{(1)} + \sum_{j=1}^{n_2} e^{x_j^{(2)} - m^{\text{new}}} \mathbf{V}_j^{(2)} \right] \\ &= \frac{1}{z^{\text{new}}} \left[ e^{m^{(1)} - m^{\text{new}}} \sum_{j=1}^{n_1} e^{x_j^{(1)} - m^{(1)}} \mathbf{V}_j^{(1)} + e^{m^{(2)} - m^{\text{new}}} \sum_{j=1}^{n_2} e^{x_j^{(2)} - m^{(2)}} \mathbf{V}_j^{(2)} \right] \end{aligned} $$
 
-Noting that $d^{(1)} \mathbf{O}^{(1)} = \sum_{j=1}^{N_1} e^{x_j^{(1)} - m^{(1)}} \mathbf{V}_j^{(1)}$, we substitute this directly:
-$$ \mathbf{O}^{\text{new}} = \frac{d^{(1)} e^{m^{(1)} - m^{\text{new}}}}{d^{\text{new}}} \mathbf{O}^{(1)} + \frac{e^{m^{(2)} - m^{\text{new}}}}{d^{\text{new}}} \sum_{j=1}^{N_2} e^{x_j^{(2)} - m^{(2)}} \mathbf{V}_j^{(2)}. \quad \blacksquare $$
+Noting that $z^{(1)} \mathbf{O}^{(1)} = \sum_{j=1}^{n_1} e^{x_j^{(1)} - m^{(1)}} \mathbf{V}_j^{(1)}$, we substitute this directly:
+$$ \mathbf{O}^{\text{new}} = \frac{z^{(1)} e^{m^{(1)} - m^{\text{new}}}}{z^{\text{new}}} \mathbf{O}^{(1)} + \frac{e^{m^{(2)} - m^{\text{new}}}}{z^{\text{new}}} \sum_{j=1}^{n_2} e^{x_j^{(2)} - m^{(2)}} \mathbf{V}_j^{(2)}. \quad \blacksquare $$
 
 ### Formal HBM access complexity proof {#sec-appdx-algorithm-flash-attention-complexity-proof}
 
-Let $M$ be the fast SRAM capacity (in words). Following Algorithm 1 of @dao2022, FlashAttention sets $B_c = \lfloor M/(4d) \rfloor$ and $B_r = \min(\lfloor M/(4d) \rfloor,d)$. The proof abstracts constant factors and buffer reuse, using $B_c=\Theta(M/d)$, $B_r=\Theta(\min(M/d,d))$, and $B_rB_c=O(M)$ for the on-chip working set.
+Let $M_{\text{SRAM}}$ be the fast SRAM capacity (in words). Following Algorithm 1 of @dao2022, FlashAttention sets $B_c = \lfloor M_{\text{SRAM}}/(4d_{\text{head}}) \rfloor$ and $B_r = \min(\lfloor M_{\text{SRAM}}/(4d_{\text{head}}) \rfloor,d_{\text{head}})$. The proof abstracts constant factors and buffer reuse, using $B_c=\Theta(M_{\text{SRAM}}/d_{\text{head}})$, $B_r=\Theta(\min(M_{\text{SRAM}}/d_{\text{head}},d_{\text{head}}))$, and $B_rB_c=\mathcal{O}(M_{\text{SRAM}})$ for the on-chip working set.
 
-The algorithm partitions $\mathbf{Q}$ into $T_r = \lceil N/B_r \rceil$ blocks of size $B_r \times d$, and partitions $\mathbf{K}, \mathbf{V}$ into $T_c = \lceil N/B_c \rceil$ blocks of size $B_c \times d$. It executes two nested loops:
+The algorithm partitions $\mathbf{Q}$ into $T_r = \lceil S/B_r \rceil$ blocks of size $B_r \times d_{\text{head}}$, and partitions $\mathbf{K}, \mathbf{V}$ into $T_c = \lceil S/B_c \rceil$ blocks of size $B_c \times d_{\text{head}}$. It executes two nested loops:
 
 - **Outer loop** over $j = 1, \dots, T_c$: Load $\mathbf{K}_j$ and $\mathbf{V}_j$ into SRAM.
 - **Inner loop** over $i = 1, \dots, T_r$: Load $\mathbf{Q}_i$, $\mathbf{O}_i$, and its softmax statistics; compute $\mathbf{S}_{ij} = \mathbf{Q}_i \mathbf{K}_j^T$ in SRAM; then update and write $\mathbf{O}_i$ and the statistics without materializing $\mathbf{S}_{ij}$ in HBM.
 
-This loop order is the source of the I/O reduction. A key-value tile remains resident while the algorithm visits every query tile, so each element of $\mathbf{K}$ and $\mathbf{V}$ crosses the HBM boundary once. The query and output tiles must be revisited for each key-value block, but the $B_r\times B_c$ score tile is consumed on chip and discarded. Standard attention instead writes and rereads the full $N\times N$ score and probability matrices.
+This loop order is the source of the I/O reduction. A key-value tile remains resident while the algorithm visits every query tile, so each element of $\mathbf{K}$ and $\mathbf{V}$ crosses the HBM boundary once. The query and output tiles must be revisited for each key-value block, but the $B_r\times B_c$ score tile is consumed on chip and discarded. Standard attention instead writes and rereads the full $S\times S$ score and probability matrices.
 
 #### Total memory access accounting {.unnumbered}
 
-Total HBM accesses comprise two components: key and value reads, where each element of $\mathbf{K}$ and $\mathbf{V}$ is loaded once (contributing $2Nd$ accesses); and query, output, and statistics passes, where each of the $T_c$ column blocks reads all of $\mathbf{Q}$, reads and writes $\mathbf{O}$, and updates $O(N)$ softmax statistics. The matrices dominate the statistics for head dimension $d\geq 1$, so each pass contributes $\Theta(Nd)$ accesses and all passes contribute $\Theta(NdT_c)$.
+Total HBM accesses comprise two components: key and value reads, where each element of $\mathbf{K}$ and $\mathbf{V}$ is loaded once (contributing $2S d_{\text{head}}$ accesses); and query, output, and statistics passes, where each of the $T_c$ column blocks reads all of $\mathbf{Q}$, reads and writes $\mathbf{O}$, and updates $\mathcal{O}(S)$ softmax statistics. The matrices dominate the statistics for head dimension $d_{\text{head}}\geq 1$, so each pass contributes $\Theta(S d_{\text{head}})$ accesses and all passes contribute $\Theta(S d_{\text{head}} T_c)$.
 
-Because $T_c=\lceil N/B_c\rceil=\Theta(Nd/M)$, the total is
-$$ \text{HBM}_{\text{Flash}} = \Theta\left(Nd + NdT_c\right) = \Theta\left(Nd + \frac{N^2d^2}{M}\right) = \Theta\left(\frac{N^2d^2}{M}\right), $$
-where the final equality follows for $d \leq M \leq Nd$.
+Because $T_c=\lceil S/B_c\rceil=\Theta(S d_{\text{head}}/M_{\text{SRAM}})$, the total is
+$$ \text{HBM}_{\text{Flash}} = \Theta\left(S d_{\text{head}} + S d_{\text{head}} T_c\right) = \Theta\left(S d_{\text{head}} + \frac{S^2 d_{\text{head}}^2}{M_{\text{SRAM}}}\right) = \Theta\left(\frac{S^2 d_{\text{head}}^2}{M_{\text{SRAM}}}\right), $$
+where the final equality follows for $d_{\text{head}} \leq M_{\text{SRAM}} \leq S d_{\text{head}}$.
 
 The bound counts communication rather than arithmetic. FlashAttention still evaluates the same dense score blocks and may recompute intermediate quantities during backpropagation; its advantage comes from keeping those intermediates out of HBM.
 
 #### I/O reduction ratio {.unnumbered}
 
 Comparing standard attention I/O to FlashAttention I/O:
-$$ \frac{\text{HBM}_{\text{Standard}}}{\text{HBM}_{\text{Flash}}} = \frac{\Theta(N^2 + Nd)}{\Theta\left(Nd + \frac{N^2 d^2}{M}\right)} = \Theta\left(\frac{M}{d^2}\right) \quad \text{for } N \gg \max\left(d,\frac{M}{d}\right) $$
+$$ \frac{\text{HBM}_{\text{Standard}}}{\text{HBM}_{\text{Flash}}} = \frac{\Theta(S^2 + S d_{\text{head}})}{\Theta\left(S d_{\text{head}} + \frac{S^2 d_{\text{head}}^2}{M_{\text{SRAM}}}\right)} = \Theta\left(\frac{M_{\text{SRAM}}}{d_{\text{head}}^2}\right) \quad \text{for } S \gg \max\left(d_{\text{head}},\frac{M_{\text{SRAM}}}{d_{\text{head}}}\right) $$
 
 ::: {#psp-appendix-algorithm-flash-attention-io-reduction .callout-perspective title="A100 I/O reduction"}
 
-The asymptotic ratio $M/d^2$ predicts how greater SRAM capacity can reduce HBM traffic, but hidden constants and kernel details prevent it from serving as an exact transfer count. In an NVIDIA A100 measurement, @dao2022 report the effect for a forward-and-backward attention workload with sequence length 1,024, head dimension 64, 16 heads, batch size 64, a key-padding mask, and no dropout:
+The asymptotic ratio $M_{\text{SRAM}}/d_{\text{head}}^2$ predicts how greater SRAM capacity can reduce HBM traffic, but hidden constants and kernel details prevent it from serving as an exact transfer count. In an NVIDIA A100 measurement, @dao2022 report the effect for a forward-and-backward attention workload with sequence length 1,024, head dimension 64, 16 heads, batch size 64, a key-padding mask, and no dropout:
 
 * **Standard attention**: 35.3 GB of HBM reads and writes; 35.1 ms runtime.
 * **FlashAttention**: 4.4 GB of HBM reads and writes; 11.7 ms runtime.
@@ -601,81 +602,81 @@ The measurements show the systems consequence of the I/O bound: substantially le
 
 ## Kaplan & Chinchilla Compute-Optimal Scaling Law Derivation {#sec-appdx-algorithm-chinchilla-derivation}
 
-Determining the compute-optimal allocation between model parameters and training dataset tokens for a given floating-point budget $C$ is a central decision in large language model system design. This section provides the rigorous mathematical derivation of compute-optimal scaling laws using Lagrange multipliers, contrasting the original findings of @kaplan2020scaling with the compute-optimal corrections of @hoffmann2022chinchilla.
+Determining the compute-optimal allocation between model parameters and training dataset tokens for a given floating-point budget $O$ is a central decision in large language model system design. This section provides the rigorous mathematical derivation of compute-optimal scaling laws using Lagrange multipliers, contrasting the original findings of @kaplan2020scaling with the compute-optimal corrections of @hoffmann2022chinchilla.
 
-**Notation note**: To remain consistent with the original scaling literature of Kaplan et al. [-@kaplan2020scaling] and Hoffmann et al. [-@hoffmann2022chinchilla], this derivation denotes model parameters as $N$ (contrasting with the book's canonical parameter symbol $P$) and dataset size in tokens as $D$.
+**Notation note**: This derivation writes model parameters as $P$, dataset size in tokens as $D$, and the training compute budget as $O$ total FLOPs; Kaplan et al. [-@kaplan2020scaling] and Hoffmann et al. [-@hoffmann2022chinchilla] write $N$ for parameters and $C$ for compute. The fitted constants $E$, $A$, $B$, $\alpha$, and $\beta$ and the Lagrange multiplier $\lambda$ keep the papers' letters and are local to this section, so $E$ is a loss rather than an energy and $B$ is a fitted constant rather than batch size.
 
 ### Parametric loss surface formulation {#sec-appdx-algorithm-chinchilla-loss-surface}
 
-The cross-entropy evaluation loss $\mathcal{L}(N, D)$ of an autoregressive transformer language model trained with $N$ non-embedding parameters on $D$ tokens is modeled by the power-law formulation:
-$$ \mathcal{L}(N, D) = E + \frac{A}{N^\alpha} + \frac{B}{D^\beta} $$
+The cross-entropy evaluation loss $\mathcal{L}(P, D)$ of an autoregressive transformer language model trained with $P$ non-embedding parameters on $D$ tokens is modeled by the power-law formulation:
+$$ \mathcal{L}(P, D) = E + \frac{A}{P^\alpha} + \frac{B}{D^\beta} $$
 where:
 
 * $E$: Irreducible loss representing the entropy of natural language data.
-* $\frac{A}{N^\alpha}$: Capacity bottleneck loss resulting from finite model parameters $N$.
+* $\frac{A}{P^\alpha}$: Capacity bottleneck loss resulting from finite model parameters $P$.
 * $\frac{B}{D^\beta}$: Dataset size bottleneck loss resulting from finite training tokens $D$.
 * $A, B > 0$: Empirical scaling constants.
 * $\alpha, \beta > 0$: Power-law scaling exponents for model size and dataset size, respectively.
 
 ### Constrained optimization via Lagrange multipliers {#sec-appdx-algorithm-chinchilla-lagrange}
 
-The total floating-point operations required to train a transformer with $N$ non-embedding parameters for $D$ tokens is given by
-$$ C = 6 N D \text{ FLOPs}, $$
-where $2 N D$ accounts for the forward pass and $4 N D$ accounts for the backward pass.
+The total floating-point operations required to train a transformer with $P$ non-embedding parameters for $D$ tokens is given by
+$$ O = 6 P D \text{ FLOPs}, $$
+where $2 P D$ accounts for the forward pass and $4 P D$ accounts for the backward pass.
 
-Given a fixed training compute budget $C_0$, we formulate the constrained optimization problem to minimize the reducible loss $\hat{\mathcal{L}}(N, D) = \frac{A}{N^\alpha} + \frac{B}{D^\beta}$:
-$$ \min_{N, D} \left( \frac{A}{N^\alpha} + \frac{B}{D^\beta} \right) \quad \text{subject to} \quad g(N, D) = 6 N D - C_0 = 0 $$
+Given a fixed training compute budget $O_0$, we formulate the constrained optimization problem to minimize the reducible loss $\hat{\mathcal{L}}(P, D) = \frac{A}{P^\alpha} + \frac{B}{D^\beta}$:
+$$ \min_{P, D} \left( \frac{A}{P^\alpha} + \frac{B}{D^\beta} \right) \quad \text{subject to} \quad g(P, D) = 6 P D - O_0 = 0 $$
 
-We construct the Lagrangian function $\mathcal{L}_{\text{Lagrange}}(N, D, \lambda)$:
-$$ \mathcal{L}_{\text{Lagrange}}(N, D, \lambda) = \frac{A}{N^\alpha} + \frac{B}{D^\beta} + \lambda (6 N D - C_0) $$
+We construct the Lagrangian function $\mathcal{L}_{\text{Lagrange}}(P, D, \lambda)$:
+$$ \mathcal{L}_{\text{Lagrange}}(P, D, \lambda) = \frac{A}{P^\alpha} + \frac{B}{D^\beta} + \lambda (6 P D - O_0) $$
 
-Taking partial derivatives with respect to $N, D$, and $\lambda$ and setting them to zero yields:
-$$ \frac{\partial \mathcal{L}_{\text{Lagrange}}}{\partial N} = -\alpha A N^{-\alpha - 1} + 6 \lambda D = 0 \implies \alpha A N^{-\alpha - 1} = 6 \lambda D, \tag{1} $$
-$$ \frac{\partial \mathcal{L}_{\text{Lagrange}}}{\partial D} = -\beta B D^{-\beta - 1} + 6 \lambda N = 0 \implies \beta B D^{-\beta - 1} = 6 \lambda N, \tag{2} $$
-$$ \frac{\partial \mathcal{L}_{\text{Lagrange}}}{\partial \lambda} = 6 N D - C_0 = 0. \tag{3} $$
+Taking partial derivatives with respect to $P, D$, and $\lambda$ and setting them to zero yields:
+$$ \frac{\partial \mathcal{L}_{\text{Lagrange}}}{\partial P} = -\alpha A P^{-\alpha - 1} + 6 \lambda D = 0 \implies \alpha A P^{-\alpha - 1} = 6 \lambda D, \tag{1} $$
+$$ \frac{\partial \mathcal{L}_{\text{Lagrange}}}{\partial D} = -\beta B D^{-\beta - 1} + 6 \lambda P = 0 \implies \beta B D^{-\beta - 1} = 6 \lambda P, \tag{2} $$
+$$ \frac{\partial \mathcal{L}_{\text{Lagrange}}}{\partial \lambda} = 6 P D - O_0 = 0. \tag{3} $$
 
-Multiplying Equation (1) by $N$ and Equation (2) by $D$ gives:
-$$ \alpha A N^{-\alpha} = 6 \lambda N D, $$
-$$ \beta B D^{-\beta} = 6 \lambda N D. $$
+Multiplying Equation (1) by $P$ and Equation (2) by $D$ gives:
+$$ \alpha A P^{-\alpha} = 6 \lambda P D, $$
+$$ \beta B D^{-\beta} = 6 \lambda P D. $$
 
 Equating these expressions yields the fundamental power-law optimality condition:
-$$ \alpha A N^{-\alpha} = \beta B D^{-\beta}. $$
+$$ \alpha A P^{-\alpha} = \beta B D^{-\beta}. $$
 
 This condition proves that at the compute-optimal allocation, the marginal loss reduction per fractional increase in parameter count must equal the marginal loss reduction per fractional increase in dataset tokens.
 
 ### Analytical derivation of compute-optimal exponents {#sec-appdx-algorithm-chinchilla-exponents}
 
-From $\alpha A N^{-\alpha} = \beta B D^{-\beta}$, solving for $D$ in terms of $N$ yields:
-$$ D^\beta = \left(\frac{\beta B}{\alpha A}\right) N^\alpha \implies D = \left(\frac{\beta B}{\alpha A}\right)^{1/\beta} N^{\alpha/\beta}. $$
+From $\alpha A P^{-\alpha} = \beta B D^{-\beta}$, solving for $D$ in terms of $P$ yields:
+$$ D^\beta = \left(\frac{\beta B}{\alpha A}\right) P^\alpha \implies D = \left(\frac{\beta B}{\alpha A}\right)^{1/\beta} P^{\alpha/\beta}. $$
 
-Substituting $D$ into the compute constraint $C = 6 N D$ gives:
-$$ C = 6 N \left(\frac{\beta B}{\alpha A}\right)^{1/\beta} N^{\alpha/\beta} = 6 \left(\frac{\beta B}{\alpha A}\right)^{1/\beta} N^{\frac{\alpha + \beta}{\beta}}. $$
+Substituting $D$ into the compute constraint $O = 6 P D$ gives:
+$$ O = 6 P \left(\frac{\beta B}{\alpha A}\right)^{1/\beta} P^{\alpha/\beta} = 6 \left(\frac{\beta B}{\alpha A}\right)^{1/\beta} P^{\frac{\alpha + \beta}{\beta}}. $$
 
-Solving explicitly for the compute-optimal parameter count $N^*(C)$:
-$$ N^*(C) = \left( \frac{\alpha A}{\beta B} \right)^{\frac{1}{\alpha + \beta}} \left( \frac{C}{6} \right)^{\frac{\beta}{\alpha + \beta}} \propto C^{\frac{\beta}{\alpha + \beta}}. $$
+Solving explicitly for the compute-optimal parameter count $P^*(O)$:
+$$ P^*(O) = \left( \frac{\alpha A}{\beta B} \right)^{\frac{1}{\alpha + \beta}} \left( \frac{O}{6} \right)^{\frac{\beta}{\alpha + \beta}} \propto O^{\frac{\beta}{\alpha + \beta}}. $$
 
-By symmetry, solving for the compute-optimal token count $D^*(C)$ yields:
-$$ D^*(C) = \left( \frac{\beta B}{\alpha A} \right)^{\frac{1}{\alpha + \beta}} \left( \frac{C}{6} \right)^{\frac{\alpha}{\alpha + \beta}} \propto C^{\frac{\alpha}{\alpha + \beta}}. $$
+By symmetry, solving for the compute-optimal token count $D^*(O)$ yields:
+$$ D^*(O) = \left( \frac{\beta B}{\alpha A} \right)^{\frac{1}{\alpha + \beta}} \left( \frac{O}{6} \right)^{\frac{\alpha}{\alpha + \beta}} \propto O^{\frac{\alpha}{\alpha + \beta}}. $$
 
-#### Empirical exponents and the $D/N \approx 20$ rule {.unnumbered}
+#### Empirical exponents and the $D/P \approx 20$ rule {.unnumbered}
 
 Fitting the parametric loss surface to over 400 experimental runs, @hoffmann2022chinchilla estimated $\alpha \approx 0.34$ and $\beta \approx 0.28$. Substituting these values gives exponents close to the paper's parametric-model result:
 
 $$ \frac{\beta}{\alpha + \beta} \approx 0.45, \qquad \frac{\alpha}{\alpha + \beta} \approx 0.55 $$
 
 Thus the parametric model predicts:
-$$ N^*(C) \propto C^{0.45}, \qquad D^*(C) \propto C^{0.55} $$
+$$ P^*(O) \propto O^{0.45}, \qquad D^*(O) \propto O^{0.55} $$
 
-The paper's two direct empirical approaches report near-balanced exponents of $(0.50, 0.50)$ and $(0.49, 0.51)$, which motivate the common square-root shorthand. Under the parametric fit, however, $D^*/N^*$ grows slowly with compute rather than remaining strictly constant. Across the regime studied, roughly 20 training tokens per parameter is a useful Chinchilla heuristic, not a universal invariant.
+The paper's two direct empirical approaches report near-balanced exponents of $(0.50, 0.50)$ and $(0.49, 0.51)$, which motivate the common square-root shorthand. Under the parametric fit, however, $D^*/P^*$ grows slowly with compute rather than remaining strictly constant. Across the regime studied, roughly 20 training tokens per parameter is a useful Chinchilla heuristic, not a universal invariant.
 
 ::: {#psp-appendix-algorithm-kaplan-vs-chinchilla .callout-perspective title="Kaplan vs. Chinchilla scaling"}
 
 The difference between @kaplan2020scaling and @hoffmann2022chinchilla highlights how hyperparameter choices in empirical benchmarking can alter system design conclusions:
 
-* **Kaplan scaling model**: @kaplan2020scaling estimated $\alpha \approx 0.057$ and $\beta \approx 0.28$, predicting $N \propto C^{0.73}$ and $D \propto C^{0.27}$. This led the field to scale model sizes aggressively while holding training dataset sizes relatively small (e.g., GPT-3 175B trained on 300B tokens, giving $D/N = 1.71$).
+* **Kaplan scaling model**: @kaplan2020scaling fit a different loss form with its own exponents and reported compute-optimal growth of $P \propto O^{0.73}$ and $D \propto O^{0.27}$; this split does not follow from substituting exponents into the two-term surface above. This led the field to scale model sizes aggressively while holding training dataset sizes relatively small (e.g., GPT-3 175B trained on 300B tokens, giving $D/P = 1.71$).
 * **Methodological divergence**: @kaplan2020scaling used a fixed token budget and learning-rate schedule across models. @hoffmann2022chinchilla matched the schedule to each training horizon and found that the earlier setup understated the value of training smaller models on more data.
 * **Chinchilla revision**: @hoffmann2022chinchilla found near-balanced parameter and token scaling: its three approaches report exponent pairs of $(0.50, 0.50)$, $(0.49, 0.51)$, and $(0.46, 0.54)$ rather than one exact universal ratio.
-* **Practical impact**: Chinchilla (70B parameters trained on 1.4T tokens, $D/N = 20$) outperformed GPT-3 (175B parameters trained on 300B tokens) across downstream benchmarks while requiring $2.5\times$ less compute during inference and $2.5\times$ lower weight memory at the same precision [@hoffmann2022chinchilla].
+* **Practical impact**: Chinchilla (70B parameters trained on 1.4T tokens, $D/P = 20$) outperformed GPT-3 (175B parameters trained on 300B tokens) across downstream benchmarks while requiring $2.5\times$ less compute during inference and $2.5\times$ lower weight memory at the same precision [@hoffmann2022chinchilla].
 
 :::
 

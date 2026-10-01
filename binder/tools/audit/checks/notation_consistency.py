@@ -5,7 +5,8 @@ This is a conservative, high-signal scanner intended for CI:
 - Emits DEFERRED issues for context-dependent collisions (review-only).
 
 Ground truth definitions live in:
-  - books/shared/_partials/_notation_body.qmd (shared)
+  - books/shared/_partials/_notation_core_head.qmd and _notation_core_tail.qmd (series core)
+  - books/vol1/frontmatter/_notation_degradation.qmd (vol1-only)
   - books/vol2/frontmatter/_notation_scaling.qmd (vol2-only)
 
 Rule: "Notation conventions" (see the Notations chapter in each volume).
@@ -31,10 +32,10 @@ RULE_TEXT = (
 # ── Definition parsing (from the Notations chapter tables) ────────────────────
 
 _NOTATION_PATHS = (
-    Path("books/shared/_partials/_notation_body.qmd"),
-    Path("books/vol1/frontmatter/_notation_body.qmd"),
+    Path("books/shared/_partials/_notation_core_head.qmd"),
+    Path("books/shared/_partials/_notation_core_tail.qmd"),
+    Path("books/vol1/frontmatter/_notation_degradation.qmd"),
     Path("books/vol2/frontmatter/_notation_scaling.qmd"),
-    Path("books/vol2/frontmatter/_notation_distributed.qmd"),
     Path("books/vol3/frontmatter/_notation_agentic.qmd"),
     Path("books/vol4/frontmatter/_notation_physical.qmd"),
 )
@@ -254,7 +255,7 @@ _HAS_BW_BARE_RE = re.compile(r"(?<![A-Za-z\\])BW(?![A-Za-z])")
 _HAS_DVOL_RE = re.compile(r"D_\{\\text\{vol\}\}")
 _HAS_RPEAK_RE = re.compile(r"R_\{\\text\{peak\}\}")
 # Accept any \text{}-wrapped subscript on L: L_{\text{lat}}, L_{\text{lat,network}},
-# L_{\text{net}}, L_{\text{lat,target}}, etc. The convention (per _notation_body.qmd)
+# L_{\text{net}}, L_{\text{lat,target}}, etc. The convention (per the series notation core)
 # is that any \text{}-wrapped subscript denotes a named latency variant; bare L is
 # what we flag.
 _HAS_LLAT_RE = re.compile(r"L_\{\\text\{[^}]+\}\}")
@@ -359,8 +360,8 @@ def check(
 ) -> tuple[list[Issue], int]:
     """Scan one QMD source for notation-convention violations in its math.
 
-    Files that define the notation (`notation.qmd`, `_notation_body.qmd`,
-    `_notation_distributed.qmd`) are skipped. Each inline or display math
+    Files that define the notation (`notation.qmd` and any `_notation_*.qmd`
+    partial) are skipped. Each inline or display math
     span is tested against the book conventions, using nearby prose to
     decide whether a bare symbol is likely the conflicting meaning:
 
