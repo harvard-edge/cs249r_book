@@ -76,7 +76,7 @@ From week 1 to week 9 the arm runs under a staff-written baseline governor; in L
 
 | Document | Description |
 |:---|:---|
-| 📋 **[Master Course Syllabus](curriculum/syllabus.md)** | Grading weights, milestones, team roles, and safety contract. |
+| 📋 **[Master Course Syllabus](curriculum/syllabus.md)** | Course description, weekly schedule, grading, and course policies. |
 | 🏷️ **[Physical AI Competency Card](curriculum/student-competencies.md)** | The scope test and the 12-skill rubric signed off at the bench. |
 | 🔧 **[Station Reference Card](labs/station-reference.md)** | Bench hardware, software stack, wiring, engineering rules, and telemetry schema. |
 | 🧩 **[Lab Template](LAB_TEMPLATE.md)** | The section-by-section structure every lab follows, with guidance for whoever writes it. |

@@ -104,40 +104,18 @@ The notebook, seminar participation, and the week-13 rehearsal receive feedback 
 
 ---
 
-## 8. Team Roles
+## 8. Course Policies
 
-Teams of two or three share a station. Roles rotate weekly so every student does every job.
+**Collaboration.** Collaboration is encouraged. Bench hardware is limited, so all lab work is done in teams; discussing ideas across teams is welcome. Each student must still be able to explain their own team's work at the final defense.
 
-1. **Operator.** Controls motor power, target placement, and teleoperation; responsible for calibration, homing, and fixture safety.
-2. **Systems lead.** Runs the Linux side: LeRobot scripts, model export, and the RPC bridge; responsible for latency profiling and version control.
-3. **Evidence reviewer.** Logs run IDs, checks timestamp alignment and the four action taps, makes the plots, and keeps the notebook and Competency Card up to date.
+**Use of AI tools.** AI tools are allowed. Say which tools you used and how, in your notebook or with the deliverable. There is no penalty for using them; the point is that you learn, and you will be asked to explain your work without them at the defense.
 
----
+**Late work and repairs.** The labs build on each other, so falling behind costs more than a late penalty would.
+- **Equipment failures** that are not your team's fault (a dead servo, a broken station) get an automatic extension.
+- **A missed checkpoint** can be finished in booked bench time before the next lab; if your team falls further behind, staff hand you the reference artifact so you can keep going.
+- **Repairs.** Staff may ask you to fix and re-run a result before signing it off. A repair finished within a week earns full credit.
+- **Milestones** otherwise lose 10% per day late, unless you arranged an extension before the deadline.
 
-## 9. Safety Contract
+**Accommodations.** Students with approved accommodations should contact the instructor in the first week. Because lab work is a physical demonstration at the bench, lab accommodations are given as extra time on checkpoints and milestones.
 
-Actuators carry real momentum and current. Every student agrees to these rules before the first lab:
-
-1. **Power order.** Motor power is switched on only after the STM32 firmware has started and the operator confirms the workspace is clear.
-2. **Table geofence.** Motion stays inside the marked workspace. Driving the gripper into the table or the mount triggers an immediate disarm.
-3. **Incident protocol.** If a servo chatters, buzzes, stalls, or overheats, switch off motor power within two seconds. A staff inspection is required before re-arming.
-4. **No bypass.** Connecting a host directly to the servo bus, around the STM32, fails the current milestone.
-
----
-
-## 10. Station Logistics
-
-- **Supervised lab.** Each team has 3 hours of supervised bench time a week.
-- **Open bench booking.** Stations can be booked outside class hours, up to 6 extra hours a week. Booking system: TBD
-- **Prepare offline.** Write and test code against recorded replay data before coming to the bench; bench time is for physical trials.
-- **Spares.** Staff keep spare servos, cables, and cameras; damaged parts are swapped during office hours.
-
----
-
-## 11. Course Policies
-
-- **Collaboration:** TBD
-- **Use of AI tools:** TBD
-- **Late work and repairs:** TBD
-- **Accommodations:** TBD
-- **Office hours:** TBD
+**Office hours.** TBD
