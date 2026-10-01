@@ -1,20 +1,20 @@
 # Volume IV Lab Template
 
-Every Volume IV lab follows this template, section for section and in this order. Copy it to `labs/lab-NN-slug.md` to start a new lab.
+Every Volume IV lab has five sections in this order. Copy the block below to `labs/lab-NN-slug.md` to start a new lab.
 
-**How to read this file.** Text in normal type is the structure students will see. Text inside `<!-- STAFF: … -->` comments is guidance for the person writing the lab; it is visible in the source but not on the rendered GitHub page. `TBD (staff)` marks a slot that has not been filled yet.
+| Section | Written by | Purpose |
+|:---|:---|:---|
+| **1. Overview** | Instructor | The physical question, why the lab exists, and where it sits in the course |
+| **2. Learning Objectives** | Instructor | What a student can do afterward |
+| **3. Instructions** | Staff | Setup, then one sub-section per weekly part: steps, tests, and pitfalls |
+| **4. Deliverables** | Instructor (staff add thresholds) | The evidence each team hands in, and how it is signed off |
+| **5. Reflection** | Instructor | Questions that connect the measurement back to the book |
 
-**Lab status.** Each lab carries one status in its header:
+**Parts.** A lab is made of parts, one per week. Each part is one supervised studio session with a goal and a **checkpoint**, the artifact staff see before the team moves on. The goal and checkpoint are set by the instructor; the steps are written by staff.
 
-| Status | Meaning |
-|:---|:---|
-| `skeleton` | Purpose, question, readings, competencies, and the part outline are set. Procedures, commands, and thresholds are not. |
-| `draft` | Every section is written, but at least one procedure or threshold has not been run on the bench. |
-| `bench-verified` | A staff member has run the whole lab as Student Zero on the reference station, and every threshold comes from that run. |
+**Status.** Each lab carries one status: `skeleton` (sections 1, 2, 4, 5 written; instructions open), `draft` (instructions written, not yet run on the bench), or `bench-verified` (a staff member has run the whole lab on the reference station, and every threshold comes from that run).
 
-**Labs are made of parts.** One part is one week: one supervised studio session with a single goal, a few steps, and a **checkpoint**, the artifact staff look at before the team moves on. A lab groups the parts that answer one physical question. The course has eleven lab parts in weeks 1–11 and three capstone weeks.
-
-**What lives elsewhere.** Bench hardware, wiring, the three engineering rules, the four action taps, and the telemetry CSV format are defined once in the [Station Reference Card](labs/station-reference.md). Labs link there and add only what is specific to the lab. Competency definitions live in the [Competency Card](curriculum/student-competencies.md); milestone weights live in the [syllabus](curriculum/syllabus.md).
+**Conventions.** `TBD (staff)` marks a slot staff fill. Guidance for staff goes in `<!-- STAFF: … -->` comments, which show in the source but not on the rendered page. Bench hardware, wiring, the four action taps, and the telemetry format are defined once in the [Station Reference Card](labs/station-reference.md); labs link there instead of repeating them.
 
 ---
 
@@ -22,106 +22,72 @@ Every Volume IV lab follows this template, section for section and in this order
 # Lab N: Title
 
 **Status:** `skeleton`\
-**Weeks:** X–Y\
-**Reading:** [Chapter A: Title](../../../books/vol4/AA_slug/AA_slug.qmd), [Chapter B: Title](…)\
+**Weeks:** X–Y (Parts NA, NB)\
+**Reading:** [Chapter A: Title](../../../books/vol4/AA_slug/AA_slug.qmd)\
 **Competencies:** `A1`, `D1`\
 **Milestone:** Contributes to / Concludes [Milestone M](../curriculum/syllabus.md#4-assessment-milestones-and-grading) (End of Week W)
 
 ---
 
-## Overview
+## 1. Overview
 
-**The physical question.** One or two sentences: the systems relationship this lab measures or proves on hardware.
+**The physical question.** One or two sentences: the systems relationship this lab measures.
 
-**Purpose.** One paragraph: why this lab exists in the sequence, and what the student understands at the end that they did not before.
+**Purpose.** One paragraph: why this lab exists, and what the student understands at the end that they did not before.
 
-**Comes in from Lab N−1:** the artifacts this lab consumes.\
-**Goes out to Lab N+1:** the artifacts this lab produces.\
-**If Lab N−1 didn't finish:** the staff-provided substitute that lets a team start this lab anyway.
-
-### Learning outcomes
-
-By the end of this lab, you will be able to:
-- Outcome phrased as an observable ability (verb first).
-
-<!-- STAFF: 3–6 outcomes. Each one should map to a sign-off criterion below. -->
+**Comes in from Lab N−1:** artifacts this lab uses.\
+**Goes out to Lab N+1:** artifacts this lab produces.\
+**If Lab N−1 didn't finish:** the staff-provided substitute.
 
 ---
 
-## 1. Setup
+## 2. Learning Objectives
+
+By the end of this lab, you will be able to:
+- Observable ability, verb first.
+
+---
+
+## 3. Instructions
 
 > **Standard bench:** see the [Station Reference Card](station-reference.md).
 
-Additional for this lab:
-- TBD (staff)
-
-<!-- STAFF: list only what differs from the standard station: extra hardware,
-     fixtures, software, starter files, and the required initial state
-     (e.g., motor power off, arm at rest). -->
-
----
-
-## 2. Protocol
+**Additional setup:** TBD (staff)
 
 ### Part NA: Name (Week X)
 
-**Goal:** one sentence.
-
-1. **Step name.** TBD (staff)
-2. **Step name.** TBD (staff)
-
-**Checkpoint:** the artifact staff check at the end of the session.
-
-<!-- STAFF: one part must fit one 3-hour studio session. For each step give
-     the procedure, the exact commands or code entry points, what to record,
-     and the expected result. Every command must exist in the starter repo and
-     have been run on the reference station. Long compute (training, export)
-     runs between sessions, not inside one. -->
-
-### Part NB: Name (Week Y)
-
-**Goal:** one sentence.
-
-1. **Step name.** TBD (staff)
-
-**Checkpoint:** TBD (staff)
-
----
-
-## 3. Disturbance & Failure Tests
-
-- **Test name.** What is perturbed or injected. Pass condition: TBD (staff).
-
-<!-- STAFF: at least one deliberate physical disturbance or injected fault, with
-     an observable pass condition. Simulation-only labs use an out-of-envelope
-     or degenerate case instead. -->
-
----
-
-## 4. Telemetry Trace
-
-Which [action taps](station-reference.md#the-four-action-taps) to capture, during which event, and what the trace must show.
-
-<!-- STAFF: name the plot or CSV the student submits and what it proves. -->
-
----
-
-## 5. Common Pitfalls
+**Goal:** one sentence. **Checkpoint:** the artifact staff check.
 
 TBD (staff)
 
-<!-- STAFF: fill from the Student Zero run. Each pitfall: symptom, cause, fix. -->
+<!-- STAFF: steps with real commands, what to record, the expected result,
+     any disturbance or failure test, and pitfalls from the Student Zero run.
+     One part must fit one 3-hour studio session; long compute runs between
+     sessions. -->
+
+### Part NB: Name (Week Y)
+
+**Goal:** one sentence. **Checkpoint:** the artifact staff check.
+
+TBD (staff)
 
 ---
 
-## 6. Sign-Off
+## 4. Deliverables
 
-| # | Criterion | Threshold |
+| # | Evidence | Threshold |
 |:---:|:---|:---|
-| 1 | **Criterion name** | TBD (staff) |
+| 1 | **What the team hands in** | TBD (staff) |
 
-<!-- STAFF: 3–6 criteria, each observable at the bench. Thresholds come from the
-     Student Zero run on the reference station, not from a spec sheet. -->
+<!-- STAFF: thresholds come from the Student Zero run on the reference
+     station, not from a spec sheet. -->
 
 *Staff signs off `A1` and `D1` on the team's [Competency Card](../curriculum/student-competencies.md).*
+
+---
+
+## 5. Reflection
+
+1. A question that asks what the measurement means.
+2. A question that connects it back to the chapter.
 ```

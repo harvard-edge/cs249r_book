@@ -8,17 +8,19 @@
 
 ---
 
-## Overview
+## 1. Overview
 
 **The physical question.** How far ahead can an embodied model act open-loop before drift or a changing world demands a fresh observation? Does language change physical action on the same scene, and how does a closed-loop system adapt when the world moves mid-reach?
 
 **Purpose.** Your fine-tuned VLA reaches targets on its own. Can it handle the unexpected? The world does not hold still while the model thinks. This lab stresses the system along time (how far ahead it can predict), a changing world (what happens when the target moves mid-reach), and language (whether the instruction changes the motion). This is where you learn the difference between a demo that works once and a system that works reliably.
 
-**Comes in from Lab 4:** fine-tuned VLA running an untethered loop on the UNO Q.\
-**Goes out to Lab 6:** chosen action horizon, disturbance-recovery traces, language check.\
-**If Lab 4 didn't finish:** staff provide a reference fine-tuned checkpoint.
+**Comes in from the previous lab:** fine-tuned VLA running an untethered loop on the UNO Q.\
+**Goes out to the next lab:** chosen action horizon, disturbance-recovery traces, language check.\
+**If the previous lab didn't finish:** staff provide a reference fine-tuned checkpoint.
 
-### Learning outcomes
+---
+
+## 2. Learning Objectives
 
 By the end of this lab, you will be able to:
 - Benchmark how action-chunk horizon affects success, smoothness, and recovery
@@ -28,59 +30,38 @@ By the end of this lab, you will be able to:
 
 ---
 
-## 1. Setup
+## 3. Instructions
 
 > **Standard bench:** see the [Station Reference Card](station-reference.md). The arm runs under the staff baseline governor.
 
-Additional for this lab:
-- Two-target task arena: TBD (staff)
+**Additional setup:** TBD (staff)
 
----
-
-## 2. Protocol
+<!-- STAFF: This is the one single-week lab and the schedule buffer. Keep the horizon sweep and the disturbance test; keep the language check short. Choose horizon values, the size and timing of the target shift, and trial counts. Needs a two-target arena. -->
 
 ### Part 5A: Stress the Loop (Week 9)
 
-**Goal:** find where the loop breaks in time, under a moving world, and under a changed instruction.
-
-1. **Action-chunk horizon benchmark.** TBD (staff)
-2. **Mid-reach physical disturbance.** TBD (staff)
-3. **Language check.** One paired-prompt test on the same scene. TBD (staff)
-
-**Checkpoint:** horizon curves and a recorded disturbance recovery.
-
-<!-- STAFF: this is the one single-week lab and the schedule buffer. Keep the
-     horizon sweep and the disturbance test; keep the language check short.
-     Choose the horizon values, the size and timing of the target shift, and
-     the number of trials each needs. -->
-
----
-
-## 3. Disturbance & Failure Tests
-
-- **Target removed mid-reach.** Pass condition: TBD (staff).
-- **Target moved outside the envelope.** Pass condition: TBD (staff).
-
----
-
-## 4. Telemetry Trace
-
-A successful disturbance recovery: the shift event, the change in `a_req` after the fresh observation, how the governor smooths `a_enf`, and the final settled position. Details: TBD (staff).
-
----
-
-## 5. Common Pitfalls
+**Goal:** find where the loop breaks in time, under a moving world, and under a changed instruction. **Checkpoint:** horizon curves and a recorded disturbance recovery.
 
 TBD (staff)
 
+<!-- STAFF: expected to cover action-chunk horizon benchmark; mid-reach disturbance; one paired-prompt language check; target-removed and target-out-of-envelope tests. Write steps with real commands, what to record, the expected result, and pitfalls from the Student Zero run. -->
+
 ---
 
-## 6. Sign-Off
+## 4. Deliverables
 
-| # | Criterion | Threshold |
+| # | Evidence | Threshold |
 |:---:|:---|:---|
-| 1 | **Horizon analysis report** | TBD (staff) |
+| 1 | **Horizon analysis: success and smoothness across horizons** | TBD (staff) |
 | 2 | **Live disturbance recovery** | TBD (staff) |
-| 3 | **Language check** | TBD (staff) |
+| 3 | **Four-tap trace of the recovery** | TBD (staff) |
+| 4 | **Language check** | TBD (staff) |
 
 *Staff signs off `C2` and `C3` on the team's [Competency Card](../curriculum/student-competencies.md).*
+
+---
+
+## 5. Reflection
+
+1. What horizon would you ship, and what did you give up to get it?
+2. When the target moved, what had to happen, and in what order, for the arm to recover? Where in your loop would that chain break first?

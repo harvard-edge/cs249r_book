@@ -8,17 +8,19 @@
 
 ---
 
-## Overview
+## 1. Overview
 
 **The physical question.** Can a neural network that learned to manipulate objects in simulation control a real robot? Where does it fail, and is the gap in perception (lighting, camera angle), dynamics (friction, backlash, gravity), timing, or the policy itself?
 
 **Purpose.** You can move the robot with hand-derived equations. Now you let it learn from data instead. Vision-Language-Action models take camera images and a language instruction and output motor commands directly. You run a staff-provided VLA in simulation, calibrate the real camera it will see through, deploy the same model to the hardware, and measure what happens. The gap between simulated and physical performance, the **sim2real gap**, is the central lesson.
 
-**Comes in from Lab 2:** IK baseline on the MCU, sim-vs-real table, RPC bridge, four-tap logging.\
-**Goes out to Lab 4:** camera calibration, a sim-trained VLA deployed on the UNO Q, a sim2real gap table with failure causes, and a VLA-versus-IK comparison.\
-**If Lab 2 didn't finish:** staff provide reference IK firmware for the MCU.
+**Comes in from the previous lab:** IK baseline on the MCU, sim-vs-real table, RPC bridge, four-tap logging.\
+**Goes out to the next lab:** camera calibration, a sim-trained VLA deployed on the UNO Q, a sim2real gap table with failure causes, and a VLA-versus-IK comparison.\
+**If the previous lab didn't finish:** staff provide reference IK firmware for the MCU.
 
-### Learning outcomes
+---
+
+## 2. Learning Objectives
 
 By the end of this lab, you will be able to:
 - Explain how a VLA combines vision, language, and proprioception into actions
@@ -29,81 +31,47 @@ By the end of this lab, you will be able to:
 
 ---
 
-## 1. Setup
+## 3. Instructions
 
 > **Standard bench:** see the [Station Reference Card](station-reference.md). The arm runs under the staff baseline governor.
 
-Additional for this lab:
-- GPU workstation or cloud instance for simulation: TBD (staff)
-- Sim-trained VLA checkpoint (SmolVLA or ACT): TBD (staff)
-- Camera calibration target: TBD (staff)
-- The Lab 1 simulation environment
+**Additional setup:** TBD (staff)
 
-<!-- STAFF: this lab depends on a checkpoint trained on simulated
-     demonstrations of the course arm, in a simulated scene whose camera
-     matches the real one. Decide SmolVLA vs. ACT and who produces it. -->
-
----
-
-## 2. Protocol
+<!-- STAFF: This lab depends on a checkpoint trained on simulated demonstrations of the course arm, in a simulated scene whose camera matches the real one. Decide SmolVLA vs. ACT and who produces it. Run model export between sessions. -->
 
 ### Part 3A: VLAs in Simulation (Week 5)
 
-**Goal:** understand the model and measure it where it was trained.
+**Goal:** understand the model and measure it where it was trained. **Checkpoint:** simulated success rate for the VLA and the IK baseline on the same targets.
 
-1. **Understanding VLA architecture.** TBD (staff)
-2. **Running the pre-trained VLA in simulation.** TBD (staff)
-3. **VLA versus IK baseline in simulation.** TBD (staff)
+TBD (staff)
 
-**Checkpoint:** simulated success rate for the VLA and the IK baseline on the same targets.
+<!-- STAFF: expected to cover VLA architecture walkthrough; running the pre-trained VLA in simulation; VLA versus IK in simulation. Write steps with real commands, what to record, the expected result, and pitfalls from the Student Zero run. -->
 
 ### Part 3B: The VLA on Real Hardware (Week 6)
 
-**Goal:** give the model real eyes, run it on the robot, and measure what breaks.
-
-1. **Camera configuration and calibration.** TBD (staff)
-2. **Model export and on-board profiling.** TBD (staff)
-3. **Real hardware trials.** TBD (staff)
-4. **Measuring the sim2real gap.** TBD (staff)
-
-**Checkpoint:** camera calibration and a sim2real gap table with each failure sorted into perception, dynamics, timing, or distribution shift.
-
-<!-- STAFF: run the model export between sessions so Part 3B is bench time. -->
-
----
-
-## 3. Disturbance & Failure Tests
-
-- **Camera occlusion.** Block the camera briefly. Pass condition: TBD (staff).
-- **Degraded lighting.** Pass condition: TBD (staff).
-- **Shifted target.** Pass condition: TBD (staff).
-
----
-
-## 4. Telemetry Trace
+**Goal:** give the model real eyes, run it on the robot, and measure what breaks. **Checkpoint:** camera calibration and a sim2real gap table.
 
 TBD (staff)
 
-<!-- STAFF: likely an inference-latency and stale-observation trace on real
-     hardware, using the four action taps. -->
+<!-- STAFF: expected to cover camera configuration and calibration; export and on-board profiling; real hardware trials; the sim2real gap table; camera occlusion, degraded lighting, and shifted-target tests. Write steps with real commands, what to record, the expected result, and pitfalls from the Student Zero run. -->
 
 ---
 
-## 5. Common Pitfalls
+## 4. Deliverables
 
-TBD (staff)
-
----
-
-## 6. Sign-Off
-
-| # | Criterion | Threshold |
+| # | Evidence | Threshold |
 |:---:|:---|:---|
 | 1 | **VLA architecture sketch** | TBD (staff) |
 | 2 | **VLA versus IK comparison** | TBD (staff) |
 | 3 | **Camera calibration** | TBD (staff) |
-| 4 | **Export and on-board profiling** | TBD (staff) |
-| 5 | **Real hardware trials** | TBD (staff) |
-| 6 | **Sim2real gap table** | TBD (staff) |
+| 4 | **Export and on-board profile** | TBD (staff) |
+| 5 | **Sim2real gap table, each failure sorted into perception, dynamics, timing, or distribution shift** | TBD (staff) |
 
 *Staff signs off `A2`, `B2`, and `B3` on the team's [Competency Card](../curriculum/student-competencies.md).*
+
+---
+
+## 5. Reflection
+
+1. Which category of sim2real failure dominated, and what kind of data would fix it?
+2. Where did the hand-derived IK beat the learned policy, and where did the policy win? What does that say about when learning is worth its cost?
