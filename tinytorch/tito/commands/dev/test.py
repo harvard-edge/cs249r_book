@@ -45,6 +45,11 @@ class TestResult:
 class DevTestCommand(BaseCommand):
     """Unified developer testing command."""
 
+    # Module numbers ("01".."20") that legitimately ship without a tests/NN_*
+    # directory. Empty: every module has unit tests. Add to this only with a
+    # reason; `--unit --module NN` fails for any module missing its tests.
+    MODULES_WITHOUT_UNIT_TESTS: frozenset = frozenset()
+
     @property
     def name(self) -> str:
         return "test"
@@ -428,11 +433,15 @@ class DevTestCommand(BaseCommand):
         full_path = project_root / test_path
 
         if not full_path.exists():
+            # A missing test path is a broken suite, not an empty one: a renamed
+            # or deleted directory must not let its stage report green.
+            if ci_mode:
+                print(f"✗ {name}: expected test path does not exist: {test_path}")
             return TestResult(
                 name=name,
-                passed=True,
+                passed=False,
                 duration=0,
-                message="No tests found"
+                message=f"Test path not found: {test_path}"
             )
 
         # Set up environment with project root in PYTHONPATH
@@ -776,11 +785,21 @@ class DevTestCommand(BaseCommand):
             module_num = module.zfill(2)
             test_dirs = list((project_root / "tests").glob(f"{module_num}_*"))
             if not test_dirs:
+                # Every module is expected to ship unit tests. A module that
+                # legitimately has none must be listed in
+                # MODULES_WITHOUT_UNIT_TESTS; anything else is a failure.
+                if module_num in self.MODULES_WITHOUT_UNIT_TESTS:
+                    return TestResult(
+                        name=f"Unit tests (module {module_num})",
+                        passed=True,
+                        duration=0,
+                        message="Module has no unit tests (allowlisted)"
+                    )
                 return TestResult(
                     name=f"Unit tests (module {module_num})",
-                    passed=True,
+                    passed=False,
                     duration=0,
-                    message="No tests found for this module"
+                    message=f"No tests/{module_num}_* directory for this module"
                 )
             test_path = str(test_dirs[0].relative_to(project_root))
             name = f"Unit tests (module {module_num})"
@@ -806,7 +825,12 @@ class DevTestCommand(BaseCommand):
         """Run E2E tests."""
         return self._run_pytest(
             project_root, "tests/e2e", "E2E tests", verbose,
-            timeout=600, extra_args=["-m", "quick"], ci_mode=ci_mode
+            timeout=600,
+            # full_journey is excluded: it is the long end-to-end run covered by
+            # --user-journey. module_flow and milestone_flow run in isolated
+            # temp copies of the project (tests/e2e/conftest.py).
+            extra_args=["-m", "quick or module_flow or milestone_flow"],
+            ci_mode=ci_mode
         )
 
     def _run_milestone_tests(self, project_root: Path, verbose: bool, ci_mode: bool = False) -> TestResult:

@@ -64,12 +64,32 @@ from tinytorch.perf.benchmarking import Benchmark, BenchmarkSuite, BenchmarkResu
 
 ## 📋 Module Dependencies
 
+**Prerequisites**: Modules 01 (Tensor), 03 (Layers), and 14 (Profiling) must be complete; the comparison cells also use Modules 15 (Quantization) and 16 (Compression)
+
+**External Dependencies**:
+- `numpy` (array operations and statistics)
+- `json`, `os`, `platform`, `tempfile`, `pathlib` (result files and system metadata)
+- `statistics` and `time` (measurement statistics and timing)
+- `contextlib`, `dataclasses`, `typing` (timer context manager, result records, type hints)
+- `matplotlib` (optional, for plots only)
+- `copy` (used only inside the comparison cell)
+
+**TinyTorch Dependencies**:
+
 | Dependency Module | Exported Abstraction | Consumed Functional Role | Memory & Evaluation Invariant |
 |:---|:---|:---|:---|
 | **Module 01 (`01_tensor`)** | `Tensor` | Contiguous N-D numerical array representation | Evaluation inputs and outputs without autograd overhead |
 | **Module 03 (`03_layers`)** | `Linear` | Fully connected layer primitive | Reference workloads for single-layer benchmarking |
 | **Module 14 (`14_profiling`)** | `Profiler` | High-resolution microsecond timer | Core latency and memory probe reused by `Benchmark` |
 | **Modules 15–16** | `QuantizedLinear`, `magnitude_prune` | Optimized model variants | Inputs to multi-dimensional comparative benchmarking |
+
+**Dependency Flow**:
+```
+Module 01 (Tensor)      ──┐
+Module 03 (Linear)      ──┤
+Module 14 (Profiler)    ──┼──→ Module 19 (Benchmark, BenchmarkSuite)
+Modules 15-16 (variants)──┘
+```
 """
 
 # %% nbgrader={"grade": false, "grade_id": "imports", "solution": false}

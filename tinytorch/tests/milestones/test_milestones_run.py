@@ -10,11 +10,22 @@ This is Option C: Full run (~10-15 minutes total)
 - Verifies outputs are correct (accuracy thresholds, etc.)
 - Suitable for release validation, not regular CI
 
+Isolation (2026-09-29): tito keeps student state in ``.tito/`` under the
+directory it runs from, and these runs used to write the checkout's real
+``.tito/milestones.json``. Each run now happens in a temporary project whose
+entries are symlinks to this checkout, except for a private ``.tito/``.
+
+Assertions check the return code and lines only the milestone SCRIPT prints
+on a real pass. They never accept tito's own banner text ("Milestone 0N",
+descriptions such as "75% max"), which prints whether or not the script
+succeeded.
+
 Usage:
     pytest tests/milestones/test_milestones_run.py -v
     pytest tests/milestones/test_milestones_run.py -v -k "milestone_01"
 """
 
+import json
 import subprocess
 import sys
 import os
@@ -38,29 +49,37 @@ def reported_accuracy(output: str, label: str) -> float:
     return value
 
 
-def run_milestone(milestone_id: str, part: int = None, timeout: int = 300) -> tuple[int, str, str]:
-    """
-    Run a milestone via tito CLI and capture output.
+@pytest.fixture(scope="module")
+def project(tmp_path_factory) -> Path:
+    """A temp project mirroring this checkout, with its own empty .tito/."""
+    root = tmp_path_factory.mktemp("tito_project")
+    for entry in TINYTORCH_ROOT.iterdir():
+        if entry.name == ".tito":
+            continue
+        (root / entry.name).symlink_to(entry, target_is_directory=entry.is_dir())
+    (root / ".tito").mkdir()
+    return root
 
-    Args:
-        milestone_id: Milestone ID (01-06)
-        part: Optional part number for multi-part milestones
-        timeout: Timeout in seconds (default 5 minutes)
+
+def run_milestone(project: Path, milestone_id: str, part: int = None,
+                  timeout: int = 300) -> tuple[int, str, str]:
+    """
+    Run a milestone via the tito CLI inside the temp project and capture output.
+
+    Uses --skip-checks (no prerequisite checks), which runs the scripts as a
+    demo and records nothing; the test then confirms the temp ledger holds
+    no completion.
 
     Returns:
         (return_code, stdout, stderr)
     """
-    # Use the bin/tito script directly
-    tito_script = TINYTORCH_ROOT / "bin" / "tito"
-
-    # Invoke bin/tito with the interpreter running the tests, not the shebang's
-    # `env python3`. Otherwise the milestone runs under whatever python3 happens
-    # to be first on PATH, which may not be the venv pytest is running in.
+    # Invoke tito with the interpreter running the tests, not bin/tito: that
+    # wrapper chdirs into the checkout, which would put .tito/ back in the repo.
     cmd = [
-        sys.executable,
-        str(tito_script),
+        sys.executable, "-c",
+        "import sys; from tito.main import main; sys.exit(main())",
         "milestone", "run", milestone_id,
-        "--skip-checks"  # Skip prerequisite checks since we're testing
+        "--skip-checks", "--non-interactive",
     ]
 
     if part is not None:
@@ -68,12 +87,12 @@ def run_milestone(milestone_id: str, part: int = None, timeout: int = 300) -> tu
 
     env = os.environ.copy()
     env["TITO_ALLOW_SYSTEM"] = "1"  # Allow running without venv
-    env["PYTHONPATH"] = str(TINYTORCH_ROOT)
+    env["PYTHONPATH"] = str(project)
+    env["TITO_NO_SYNC"] = "1"
 
-    # Auto-answer prompts by providing 'n' to stdin (decline syncing achievements, etc.)
     result = subprocess.run(
         cmd,
-        cwd=TINYTORCH_ROOT,
+        cwd=project,
         capture_output=True,
         text=True, encoding='utf-8', errors='replace',
         timeout=timeout,
@@ -81,77 +100,135 @@ def run_milestone(milestone_id: str, part: int = None, timeout: int = 300) -> tu
         input="n\nn\nn\n"  # Answer 'n' to any prompts
     )
 
+    ledger = project / ".tito" / "milestones.json"
+    if ledger.exists():
+        data = json.loads(ledger.read_text(encoding="utf-8"))
+        assert not data.get("completed_milestones"), "--skip-checks must not record completion"
+        assert not data.get("part_results"), "--skip-checks must not record part results"
+
     return result.returncode, result.stdout, result.stderr
 
 
+def _plain(text: str) -> str:
+    """Strip ANSI and undo Rich panel wrapping so phrases can be matched."""
+    plain = re.sub(r"\x1b\[[0-9;]*m", "", text)
+    return re.sub(r"[│\s]+", " ", plain)
+
+
 class TestMilestoneRuns:
-    """Test that all milestones run successfully and produce correct output."""
+    """Each milestone script runs and prints its own pass-only output."""
 
     @pytest.mark.slow
-    def test_milestone_01_perceptron(self):
+    def test_milestone_01_perceptron(self, project):
         """Milestone 01: Perceptron (1958) - Forward pass with random weights."""
-        returncode, stdout, stderr = run_milestone("01", timeout=60)
+        returncode, stdout, stderr = run_milestone(project, "01", timeout=60)
 
-        # Should complete and show milestone achievement
         assert returncode == 0, f"Milestone 01 failed:\nstdout: {stdout}\nstderr: {stderr}"
-        assert "MILESTONE ACHIEVED!" in stdout or "Milestone 01" in stdout
-        assert "Model Parameters" in stdout or "Decision Line" in stdout
-        assert "random" in stdout.lower()
+        flowed = _plain(stdout)
+        # Panel titles and the closing experiment note are script output only.
+        assert "Model Parameters" in flowed
+        assert "Predictions with Decision Boundary" in flowed
+        assert "Run this script multiple times!" in flowed
 
     @pytest.mark.slow
-    def test_milestone_02_xor_crisis(self):
+    def test_milestone_02_xor_crisis(self, project):
         """Milestone 02: XOR Crisis (1969) - Demonstrates XOR problem."""
-        returncode, stdout, stderr = run_milestone("02", timeout=60)
+        returncode, stdout, stderr = run_milestone(project, "02", timeout=60)
 
         assert returncode == 0, f"Milestone 02 failed:\nstdout: {stdout}\nstderr: {stderr}"
-        assert "MILESTONE ACHIEVED!" in stdout or "Milestone 02" in stdout
-        assert "CONFIRMED: XOR is UNSOLVABLE!" in stdout or "75%" in stdout
+        # 2026-09-29: this once accepted "75%", which tito's description prints.
+        flowed = _plain(stdout)
+        assert "CONFIRMED: XOR is UNSOLVABLE!" in flowed
+        assert "No matter how you draw a single line, at least one point is wrong." in flowed
 
     @pytest.mark.slow
-    def test_milestone_03_mlp_revival(self):
-        """Milestone 03: MLP Revival (1986) - Solves XOR and trains on digits."""
-        returncode, stdout, stderr = run_milestone("03", timeout=180)
+    def test_milestone_03_mlp_revival(self, project):
+        """Milestone 03 Part 1: hidden layers solve XOR."""
+        # 2026-09-28: this once accepted OR-ed banner strings that always print.
+        returncode, stdout, stderr = run_milestone(project, "03", part=1, timeout=180)
 
         assert returncode == 0, f"Milestone 03 failed:\nstdout: {stdout}\nstderr: {stderr}"
-        assert "MILESTONE ACHIEVED!" in stdout or "Milestone 03" in stdout
-        assert "XOR Solved" in stdout or "100%" in stdout
-        assert "TinyDigits" in stdout or "Test accuracy:" in stdout
+        accuracy = reported_accuracy(stdout, "Final accuracy")
+        assert accuracy == 100.0, f"XOR not solved: final accuracy {accuracy}%"
 
     @pytest.mark.slow
-    def test_milestone_04_cnn_tinydigits(self):
-        """Milestone 04: CNN Revolution (1998) - TinyDigits (default, no download)."""
-        returncode, stdout, stderr = run_milestone("04", timeout=360)
+    def test_milestone_03_tinydigits(self, project):
+        """Milestone 03 Part 2: MLP on TinyDigits must meet its accuracy gate."""
+        returncode, stdout, stderr = run_milestone(project, "03", part=2, timeout=180)
+
+        assert returncode == 0, f"Milestone 03 Part 2 failed:\nstdout: {stdout}\nstderr: {stderr}"
+        # The script exits 1 below 75%; measured 82.0-82.5% on 2026-09-28.
+        accuracy = reported_accuracy(stdout, "Test Accuracy")
+        assert accuracy >= 75, f"MLP final test accuracy too low: {accuracy}%"
+
+    @pytest.mark.slow
+    def test_milestone_04_cnn_tinydigits(self, project):
+        """Milestone 04: CNN Revolution (1998) - TinyDigits (the required part)."""
+        returncode, stdout, stderr = run_milestone(project, "04", timeout=360)
 
         assert returncode == 0, f"Milestone 04 failed:\nstdout: {stdout}\nstderr: {stderr}"
-
-        # Should use TinyDigits (not CIFAR)
-        assert "TinyDigits" in stdout or "tinydigits" in stdout.lower() or "8x8" in stdout
-
+        # The script exits 1 below 75%; measured 85.0-86.0% on 2026-09-28.
         accuracy = reported_accuracy(stdout, "Test Accuracy")
-        assert accuracy >= 70, f"CNN final test accuracy too low: {accuracy}%"
+        assert accuracy >= 75, f"CNN final test accuracy too low: {accuracy}%"
 
     @pytest.mark.slow
-    def test_milestone_05_transformer(self):
-        """Milestone 05: Transformer Era (2017) - TinyGPT on Shakespeare."""
-        returncode, stdout, stderr = run_milestone("05", timeout=180)
+    def test_milestone_05_transformer(self, project):
+        """Milestone 05 Part 1: TinyGPT on Shakespeare."""
+        returncode, stdout, stderr = run_milestone(project, "05", part=1, timeout=180)
 
         assert returncode == 0, f"Milestone 05 failed:\nstdout: {stdout}\nstderr: {stderr}"
-        assert "MILESTONE ACHIEVED!" in stdout or "Milestone 05" in stdout
-        assert "TinyGPT" in stdout or "Shakespeare" in stdout
-        assert "Generated Output:" in stdout or "Sample:" in stdout
+        flowed = _plain(stdout)
+        # "TinyGPT"/"Shakespeare" are in tito's banner; these are script-only.
+        assert "Generated Output:" in flowed
+        assert "Success!" in flowed
 
     @pytest.mark.slow
-    def test_milestone_06_mlperf(self):
-        """Milestone 06: MLPerf Benchmarks (2018) - Optimization techniques."""
-        returncode, stdout, stderr = run_milestone("06", timeout=180)
+    # 2026-09-30: TinyCopilot and the chat part train for about two minutes
+    # locally and ran past 180 s on ubuntu-latest, so they get 900 s.
+    def test_milestone_05_tinycopilot(self, project):
+        """Milestone 05 Part 3: TinyCopilot on TinyPy Python code."""
+        returncode, stdout, stderr = run_milestone(project, "05", part=3, timeout=900)
+
+        assert returncode == 0, f"Milestone 05 Part 3 failed:\nstdout: {stdout}\nstderr: {stderr}"
+        flowed = _plain(stdout)
+        assert "Syntactic Validity on Unseen Function Names" in flowed
+        assert "Success!" in flowed
+
+    @pytest.mark.slow
+    def test_milestone_05_conversational_chat(self, project):
+        """Milestone 05 Part 4: Conversational Q&A & Overfitting Detective."""
+        returncode, stdout, stderr = run_milestone(project, "05", part=4, timeout=900)
+
+        assert returncode == 0, f"Milestone 05 Part 4 failed:\nstdout: {stdout}\nstderr: {stderr}"
+        flowed = _plain(stdout)
+        assert "The Overfitting Detective: Train vs. Test Generalization Gap" in flowed
+        assert "Success!" in flowed
+
+    @pytest.mark.slow
+    def test_milestone_06_mlperf(self, project):
+        """Milestone 06 Part 1: compression on the MLPerf Pareto frontier."""
+        returncode, stdout, stderr = run_milestone(project, "06", part=1, timeout=180)
 
         assert returncode == 0, f"Milestone 06 failed:\nstdout: {stdout}\nstderr: {stderr}"
-        assert "MILESTONE ACHIEVED!" in stdout or "Milestone 06" in stdout
 
-        # Should mention optimization techniques
-        assert any(term in stdout.lower() for term in [
-            "quantiz", "compress", "cache", "kv", "speedup", "accelerat"
-        ])
+        # 2026-09-28: `"4" in stdout` passed on any output containing a digit 4.
+        # Parse the measured INT8 ratio; FP32 -> INT8 codes approach 4x from
+        # below because scale/zero-point metadata is counted (3.95x measured).
+        plain = re.sub(r"\x1b\[[0-9;]*m", "", stdout)
+        # 2026-09-29: sizes now come from the stored INT8 code arrays plus scale metadata.
+        ratios = re.findall(r"INT8 artifact counted from YOUR code arrays \(with scale metadata\):\s+[\d,]+ bytes\s+\((\d+\.\d+)× smaller\)", plain)
+        assert len(ratios) == 1, f"Expected one measured INT8 ratio line, found {ratios}"
+        ratio = float(ratios[0])
+        assert 3.5 <= ratio <= 4.0, f"Implausible INT8 compression ratio: {ratio}×"
+        # The synthesis must quote the same measured ratio, not a rounded "4×".
+        assert f"INT8 codes are {ratio:.2f}× smaller" in _plain(stdout)
 
-        # Should show compression ratio (4x for INT8)
-        assert "4" in stdout and ("compress" in stdout.lower() or "×" in stdout or "x" in stdout.lower())
+    @pytest.mark.slow
+    def test_milestone_07_kernels(self, project):
+        """Milestone 07: Custom Kernels (2024) - YOUR Module 17 kernels vs bundled native ones."""
+        returncode, stdout, stderr = run_milestone(project, "07", timeout=120)
+
+        assert returncode == 0, f"Milestone 07 failed:\nstdout: {stdout}\nstderr: {stderr}"
+        # "simd"/"kernel" appear in tito's description; these lines do not.
+        assert "[SUCCESS] Milestone 07 complete: YOUR acceleration kernels are correct." in stdout
+        assert "[PASS]" in stdout

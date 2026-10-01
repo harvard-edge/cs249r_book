@@ -135,13 +135,13 @@ XOR_TARGETS = np.array([
 ])
 
 
-# ============================================================================
-# SINGLE-LAYER PERCEPTRON
-# ============================================================================
+# =============================================================================
+# 🎓 ZONE 1: STUDENT CORE LEGO BRICKS (Model Architecture)
+# =============================================================================
 
 class SingleLayerPerceptron:
     """
-    Single-layer perceptron - the architecture that CANNOT solve XOR.
+    Single-layer perceptron: the architecture that CANNOT solve XOR.
 
     This is the exact architecture Minsky proved insufficient in 1969.
     Decision boundary: w1*x1 + w2*x2 + b = 0 (always a straight line)
@@ -169,13 +169,59 @@ class SingleLayerPerceptron:
         return w[0], w[1], b
 
 
+# =============================================================================
+# 📊 ZONE 2: MILESTONE HARNESS & VALIDATION UX
+# =============================================================================
+
+class ForwardPassMismatch(Exception):
+    """Raised when YOUR Linear + Sigmoid disagree with the same math in NumPy."""
+
+
+def check_forward_against_numpy(model, predictions):
+    """Compare YOUR forward pass with sigmoid(X @ W + b) computed in NumPy.
+
+    Uses the model's own weight and bias, so it checks the arithmetic only.
+    The crisis is only meaningful if the forward pass is correct: a broken
+    Linear or Sigmoid can make XOR look solvable, or make every
+    configuration look equally bad for the wrong reason.
+    """
+    W = np.asarray(model.linear.weight.data, dtype=np.float64)
+    b = np.asarray(model.linear.bias.data, dtype=np.float64)
+    expected = 1.0 / (1.0 + np.exp(-(XOR_INPUTS @ W + b)))
+    got = np.asarray(predictions.data, dtype=np.float64)
+    if got.shape != expected.shape or not np.allclose(got, expected, rtol=1e-4, atol=1e-6):
+        raise ForwardPassMismatch((W.flatten(), b.flatten(), got, expected))
+
+
 def evaluate_on_xor(model):
     """Evaluate model on XOR and return accuracy + predictions."""
     X = Tensor(XOR_INPUTS)
     predictions = model(X)
+    check_forward_against_numpy(model, predictions)
     pred_classes = (predictions.data > 0.5).astype(int)
     accuracy = (pred_classes == XOR_TARGETS).mean()
     return accuracy, predictions.data.flatten()
+
+
+def report_forward_mismatch(err):
+    """Explain a forward-pass mismatch and point at the modules to fix."""
+    W, b, got, expected = err.args[0]
+    if got.shape != expected.shape:
+        detail = f"output shape {got.shape}, expected {expected.shape}"
+    else:
+        detail = f"largest difference {np.max(np.abs(got - expected)):.3g}"
+    console.print(Panel(
+        "[bold red]❌ YOUR forward pass does not compute sigmoid(X @ W + b)[/bold red]\n\n"
+        f"Weights w1={W[0]:.2f}, w2={W[1]:.2f}, b={b[0]:.2f}: {detail}.\n"
+        f"  outputs on the 4 XOR inputs, yours: {np.round(got.flatten(), 4)}\n"
+        f"  outputs on the 4 XOR inputs, NumPy: {np.round(expected.flatten(), 4)}\n\n"
+        "The crisis only means something if the forward pass is right, so\n"
+        "this milestone stops here. Check:\n"
+        "  • Module 03 Linear.forward: returns x @ weight + bias\n"
+        "  • Module 02 Sigmoid.forward: returns 1 / (1 + exp(-x))",
+        title="[red]Forward pass check FAILED[/red]",
+        border_style="red",
+    ))
 
 
 def describe_decision_boundary(w1, w2, b):
@@ -189,11 +235,14 @@ def describe_decision_boundary(w1, w2, b):
     intercept = -b/w2
     return f"Line: x2 = {slope:.2f}*x1 + {intercept:.2f}"
 
-def press_enter_to_continue() :
-    if sys.stdin.isatty() and sys.stdout.isatty() :
-        try :
+def press_enter_to_continue():
+    """Pause in interactive sessions; skip in CI or non-interactive runs."""
+    if os.environ.get("TINYTORCH_NON_INTERACTIVE") == "1" or os.environ.get("CI") == "true":
+        return
+    if sys.stdin.isatty() and sys.stdout.isatty():
+        try:
             console.input("\n[yellow]Press Enter to continue...[/yellow] ")
-        except EOFError :
+        except EOFError:
             pass
         console.print()
 
@@ -311,6 +360,7 @@ def demonstrate_crisis():
                 best_config = (w1, w2, b, "Random")
 
     console.print(f"  Best from random search: [yellow]{random_best:.0%}[/yellow]")
+    console.print(f"  [green]✓[/green] All {len(configurations) + 100} forward passes matched sigmoid(X @ W + b) computed in NumPy")
     press_enter_to_continue()
 
     # Show the conclusion
@@ -327,11 +377,20 @@ def demonstrate_crisis():
             border_style="red"
         ))
     else:
+        # No straight line separates XOR, so 100% is impossible for a correct
+        # single-layer perceptron. A "solution" means the code is wrong.
+        w1, w2, b, description = best_config
         console.print(Panel(
-            "[yellow]Unexpected: Found a solution![/yellow]\n"
-            "This shouldn't happen with standard XOR.",
-            border_style="yellow"
+            "[bold red]❌ Impossible result: a single straight line 'solved' XOR[/bold red]\n\n"
+            f"Configuration: w1={w1:.2f}, w2={w2:.2f}, b={b:.2f} ({description})\n\n"
+            "Minsky & Papert proved no single-layer perceptron beats 75% on XOR.\n"
+            "A 100% score can only come from broken code, for example a Linear\n"
+            "that ignores its weights or a Sigmoid/threshold that is not monotonic.\n"
+            "Re-check Module 03 (Linear) and Module 02 (Sigmoid).",
+            title="[red]Milestone FAILED[/red]",
+            border_style="red"
         ))
+        return 1
     press_enter_to_continue()
 
     # Visual explanation
@@ -374,7 +433,11 @@ def demonstrate_crisis():
 
 def main():
     """Demonstrate the XOR crisis."""
-    return demonstrate_crisis()
+    try:
+        return demonstrate_crisis()
+    except ForwardPassMismatch as err:
+        report_forward_mismatch(err)
+        return 1
 
 
 if __name__ == "__main__":

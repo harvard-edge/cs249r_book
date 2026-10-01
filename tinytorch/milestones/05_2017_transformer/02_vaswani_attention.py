@@ -117,6 +117,11 @@ from tinytorch.core.dataloader import Dataset, DataLoader  # Module 05: YOUR Dat
 from tinytorch.core.embeddings import Embedding, PositionalEncoding
 from tinytorch.core.attention import MultiHeadAttention
 from tinytorch.core.transformers import LayerNorm
+# Shared Milestone 05 checks live next to this script (transformer_gates.py)
+_milestone_dir = str(Path(__file__).resolve().parent)
+if _milestone_dir not in sys.path:
+    sys.path.insert(0, _milestone_dir)
+from transformer_gates import cross_entropy_check, cross_entropy_failure_message
 
 # Rich for beautiful output
 from rich.console import Console
@@ -175,6 +180,10 @@ console = Console()
 #
 # =============================================================================
 
+
+# =============================================================================
+# 🎓 ZONE 1: STUDENT LEGO BRICKS (Attention Transformer Architecture)
+# =============================================================================
 
 class AttentionTransformer:
     """
@@ -262,7 +271,7 @@ COPY_TOKEN = 28     # [C] prefix
 
 
 # =============================================================================
-# 📦 SEQUENCE DATASET - Using YOUR DataLoader from Module 05
+# 📊 ZONE 2: MILESTONE HARNESS & SEQUENCE PIPELINE
 # =============================================================================
 
 class SequenceDataset(Dataset):
@@ -382,11 +391,13 @@ def train_epoch(model, dataloader, optimizer, loss_fn):
 
     return total_loss / total_samples, (correct_sequences / total_samples) * 100
 
-def press_enter_to_continue() :
-    if sys.stdin.isatty() and sys.stdout.isatty() :
-        try :
+def press_enter_to_continue():
+    if os.environ.get("TINYTORCH_NON_INTERACTIVE") == "1" or os.environ.get("CI") == "true":
+        return
+    if sys.stdin.isatty() and sys.stdout.isatty():
+        try:
             console.input("\n[yellow]Press Enter to continue...[/yellow] ")
-        except EOFError :
+        except EOFError:
             pass
         console.print()
 
@@ -419,6 +430,17 @@ def run_challenge(name, model, train_data, test_data, optimizer, loss_fn, epochs
         console.print(f"  {tokens_to_letters(inp)} -> {tokens_to_letters(tgt)}")
     press_enter_to_continue()
 
+    # YOUR CrossEntropyLoss forward must report the true loss of the logits.
+    # Training here uses only its backward, so a wrong forward value would
+    # otherwise go unnoticed (the accuracy gate still passes).
+    check_x = np.array([inp for inp, _ in train_data[:32]], dtype=np.int32)
+    check_y = np.array([tgt for _, tgt in train_data[:32]], dtype=np.int32)
+    ce_check = cross_entropy_check(model, loss_fn, check_x, check_y, model.vocab_size)
+    if not ce_check.passed:
+        console.print(Panel.fit(cross_entropy_failure_message(ce_check),
+                                border_style="red", title="Loss Check Failed"))
+        sys.exit(1)
+
     # Create DataLoader for training (YOUR Module 05!)
     train_dataset = SequenceDataset(train_data)
     train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
@@ -433,7 +455,7 @@ def run_challenge(name, model, train_data, test_data, optimizer, loss_fn, epochs
         TimeElapsedColumn(),
         console=console
     ) as progress:
-        task = progress.add_task(f"[cyan]Training...", total=epochs)
+        task = progress.add_task("[cyan]Training...", total=epochs)
 
         for epoch in range(epochs):
             train_loss, train_acc = train_epoch(model, train_loader, optimizer, loss_fn)

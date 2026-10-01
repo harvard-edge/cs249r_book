@@ -37,7 +37,6 @@ CNNs that exploit spatial structure in images:
 <tr><td><b>Module 05</b></td><td>DataLoader</td><td>YOUR data batching</td></tr>
 <tr><td><b>Module 06</b></td><td>Autograd</td><td>YOUR automatic differentiation</td></tr>
 <tr><td><b>Module 07</b></td><td>Optimizers</td><td>YOUR SGD/Adam optimizers</td></tr>
-<tr><td><b>Module 08</b></td><td>Training</td><td>YOUR end-to-end training loop</td></tr>
 <tr><td><b>Module 09</b></td><td>Convolutions</td><td>YOUR Conv2d + MaxPool2d</td></tr>
 </tbody>
 </table>
@@ -96,10 +95,22 @@ This milestone has **two parts** that progressively showcase your TinyTorch modu
 </tr>
 </thead>
 <tbody>
-<tr><td><b>01 (TinyDigits)</b></td><td>1K train</td><td>8×8 gray</td><td>Simple CNN</td><td>86–87% (50 epochs)</td><td>~2 min</td><td>3× fewer parameters, not higher accuracy</td></tr>
+<tr><td><b>01 (TinyDigits)</b></td><td>1K train</td><td>8×8 gray</td><td>Simple CNN</td><td>86-87% (50 epochs)</td><td>~2 min</td><td>3× fewer parameters, not higher accuracy</td></tr>
 <tr><td><b>02 (CIFAR-10)</b></td><td>50K train</td><td>32×32 RGB</td><td>Deeper CNN</td><td>65-75%</td><td>30-60 min</td><td>MLPs struggle here</td></tr>
 </tbody>
 </table>
+
+## How the Milestone Is Graded
+
+**Part 1** first checks YOUR `CrossEntropyLoss` on one batch against a NumPy computation and exits 1 if they disagree: training can still converge while every printed loss is wrong, because the gradient comes from Module 06's backward. After training, it exits 0 only when all of these hold, and exits 1 otherwise:
+
+- Test accuracy is at least 75%.
+- YOUR `Conv2d` received a non-zero filter gradient during training.
+- The filters moved at least 25% (relative norm) from their random start.
+
+Accuracy alone is not enough here. With the filter gradients zeroed, the Linear head still reaches about 81% on random filters. A correct run moves the filters about 76%.
+
+**Part 2** exits 0 only when every conv and linear weight moved from its initial value and test accuracy is at least 25% (20% with `--quick-test`; chance is 10%). These floors are not yet calibrated on the full dataset. `--test-only` is a smoke check: one forward pass on synthetic data, no training, and no milestone result.
 
 ## Key Learning: Why Convolution Dominates Vision
 

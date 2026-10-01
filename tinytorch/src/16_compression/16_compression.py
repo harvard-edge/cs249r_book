@@ -67,7 +67,14 @@ from tinytorch.perf.compression import (
 r"""
 ## 📋 Module Dependencies
 
-### Dependency Inventory
+**Prerequisites**: Modules 01, 02, 03, 04, 06, 07, and 14 must be complete
+
+**External Dependencies**:
+- `numpy` (vectorized linear algebra operations)
+- `copy` (model cloning)
+- `typing` (type hints)
+
+**TinyTorch Dependencies**:
 
 | Module Dependency | Component Imported | Purpose in Compression Engine |
 | :--- | :--- | :--- |
@@ -76,9 +83,15 @@ r"""
 | **Module 03: Layers** | `Linear`, `Sequential` | Neural layer abstraction for weight extraction and replacement |
 | **Module 04: Losses** | `log_softmax` | Numerically stable log-probabilities for distillation loss |
 | **Module 06: Autograd** | `autograd` | Automatic differentiation tracking gradients to student parameters |
-| **Module 07: Optimizers** | `SGD` | Parameter update verification during student training |
-| **Module 14: Profiling** | `Profiler` | Memory and parameter baseline accounting |
-| **Standard Library / NumPy** | `copy`, `numpy` | Model cloning and vectorized linear algebra operations |
+| **Module 07: Optimizers** | `SGD` | Parameter update verification during student training (imported inside that test) |
+| **Module 14: Profiling** | `Profiler` | Memory and parameter baseline accounting (imported in the profiling cells) |
+
+**Dependency Flow**:
+```
+Modules 01-04 (Tensor, ReLU, Linear, log_softmax) ──┐
+Modules 06-07 (autograd, SGD)                     ──┼──→ Module 16 (Compression)
+Module 14 (Profiler)                              ──┘
+```
 """
 
 # %% nbgrader={"grade": false, "grade_id": "imports", "solution": false}

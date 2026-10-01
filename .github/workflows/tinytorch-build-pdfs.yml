@@ -29,7 +29,10 @@ name: '🔥 TinyTorch · 🔨 Build PDFs'
 # =============================================================================
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
+  # Keyed on the ref actually built. Inside workflow_call github.workflow is
+  # the CALLER's name, so the old `${{ github.workflow }}-${{ github.ref }}`
+  # let two publish runs cancel each other's PDF builds after main was merged.
+  group: tinytorch-build-pdfs-${{ inputs.ref || github.ref }}
   cancel-in-progress: true
 
 on:
@@ -42,13 +45,6 @@ on:
         type: string
         required: false
         default: ''
-    outputs:
-      book_built:
-        description: "Whether the textbook PDF was built successfully"
-        value: ${{ jobs.build-pdf-book.result == 'success' }}
-      paper_built:
-        description: "Whether the paper PDF was built successfully"
-        value: ${{ jobs.build-pdf-paper.result == 'success' }}
 
 permissions:
   contents: read
@@ -57,15 +53,17 @@ jobs:
   build-pdf-book:
     name: '📘 Build Textbook'
     runs-on: ubuntu-latest
+    timeout-minutes: 30
 
     steps:
       - name: 📥 Checkout
         uses: actions/checkout@v6
         with:
           ref: ${{ inputs.ref || github.ref }}
+          persist-credentials: false
 
       - name: 📝 Setup Quarto
-        uses: quarto-dev/quarto-actions/setup@v2
+        uses: quarto-dev/quarto-actions/setup@8a96df13519ee81fd526f2dfca5962811136661b # v2
 
       - name: 📚 Setup TinyTeX
         run: |
@@ -104,20 +102,22 @@ jobs:
         with:
           name: TinyTorch-Book
           path: tinytorch/book/_build/TinyTorch-Book.pdf
-          retention-days: 90
+          retention-days: 14
 
   build-pdf-paper:
     name: '📑 Build Research Paper'
     runs-on: ubuntu-latest
+    timeout-minutes: 15
 
     steps:
       - name: 📥 Checkout
         uses: actions/checkout@v6
         with:
           ref: ${{ inputs.ref || github.ref }}
+          persist-credentials: false
 
       - name: 📑 Compile Paper with LuaLaTeX
-        uses: xu-cheng/latex-action@v4
+        uses: xu-cheng/latex-action@6549dc21effb2730855a1281407ecfcececc6c1b # v4
         with:
           root_file: paper.tex
           working_directory: tinytorch/paper
@@ -128,13 +128,14 @@ jobs:
         with:
           name: TinyTorch-Paper
           path: tinytorch/paper/paper.pdf
-          retention-days: 90
+          retention-days: 14
 
   summary:
     name: '📊 Build Summary'
     runs-on: ubuntu-latest
     needs: [build-pdf-book, build-pdf-paper]
     if: always()
+    timeout-minutes: 5
 
     steps:
       - name: 📊 Generate Summary

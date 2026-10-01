@@ -14,7 +14,7 @@ MLSYSIM_ROOT = ..
 UV_RUN = uv run --no-project --python 3.11 \
 	--with "pint>=0.24.4" --with "pydantic>=2.10.5" --with "numpy>=2.0" \
 	--with typer --with rich --with pyyaml --with matplotlib \
-	--with pytest --with marimo --with scipy --with ortools
+	--with pytest --with marimo --with scipy --with ortools --with plotly
 GENERATOR = paper/scripts/generate_paper_values.py
 
 values:

@@ -62,8 +62,10 @@ Watch a multi-layer network SOLVE the "impossible" XOR problem that stumped AI f
     └──────────────────────────────────────────────────────────────────────┘
 
 📊 EXPECTED RESULTS:
-- Training time: ~30 seconds
-- Accuracy: 95-100% (problem solved!)
+- Training time: about a second
+- Accuracy: 100% on the four XOR cases (problem solved!)
+- Pass condition: all 4 truth-table rows correct after training, AND
+  YOUR backprop moved the hidden-layer weights (not just the output layer)
 - Loss decreases smoothly
 - Perfect XOR predictions
 - ✅ YOUR backpropagation trains the hidden layer!
@@ -73,6 +75,7 @@ This is the architecture that ended the AI Winter! Rumelhart, Hinton, and Willia
 proved that YOUR autograd can train hidden layers to learn useful features.
 """
 
+import argparse
 import sys
 from pathlib import Path
 import os
@@ -133,15 +136,57 @@ console = Console()
 # │ Only Sigmoid activation      │ + ReLU activation (non-linearity!)           │
 # │ No training (random weights) │ + YOUR Autograd trains the hidden layer      │
 # │ No optimizer                 │ + YOUR SGD updates 17 parameters             │
-# │ Max 75% accuracy             │ + 95-100% accuracy (problem SOLVED!)         │
+# │ Max 75% accuracy             │ + 100%: all 4 XOR cases (problem SOLVED!)    │
 # └──────────────────────────────┴──────────────────────────────────────────────┘
 #
 # =============================================================================
 
 
-# ============================================================================
-# 🎲 DATA GENERATION
-# ============================================================================
+# =============================================================================
+# 🎓 ZONE 1: STUDENT CORE LEGO BRICKS (Model Architecture)
+# =============================================================================
+
+class XORNetwork:
+    """
+    Multi-layer network that SOLVES XOR!
+
+    The hidden layer creates new features that make XOR linearly separable.
+    This is the architecture that ended the AI Winter.
+    """
+
+    def __init__(self, hidden_size=4):
+        # Hidden layer: the key innovation!
+        self.hidden = Linear(2, hidden_size)
+        self.relu = ReLU()  # Non-linearity is essential!
+
+        # Output layer
+        self.output = Linear(hidden_size, 1)
+        self.sigmoid = Sigmoid()
+
+    def __call__(self, x):
+        """
+        Forward pass through hidden layer.
+
+        Input → Hidden Layer → ReLU → Output Layer → Sigmoid
+        """
+        # Hidden layer transforms input space
+        h = self.hidden(x)
+        h_activated = self.relu(h)
+
+        # Output layer in new feature space
+        logits = self.output(h_activated)
+        output = self.sigmoid(logits)
+
+        return output
+
+    def parameters(self):
+        """Return all trainable parameters."""
+        return self.hidden.parameters() + self.output.parameters()
+
+
+# =============================================================================
+# 📊 ZONE 2: MILESTONE HARNESS & VALIDATION UX
+# =============================================================================
 
 def generate_xor_data(n_samples=100):
     """Generate balanced XOR cases with slight noise."""
@@ -178,48 +223,6 @@ def generate_xor_data(n_samples=100):
 
 
 # ============================================================================
-# 🏗️ MULTI-LAYER NETWORK (The Solution!)
-# ============================================================================
-
-class XORNetwork:
-    """
-    Multi-layer network that SOLVES XOR!
-
-    The hidden layer creates new features that make XOR linearly separable.
-    This is the architecture that ended the AI Winter.
-    """
-
-    def __init__(self, hidden_size=4):
-        # Hidden layer - THE KEY INNOVATION!
-        self.hidden = Linear(2, hidden_size)
-        self.relu = ReLU()  # Non-linearity is essential!
-
-        # Output layer
-        self.output = Linear(hidden_size, 1)
-        self.sigmoid = Sigmoid()
-
-    def __call__(self, x):
-        """
-        Forward pass through hidden layer.
-
-        Input → Hidden Layer → ReLU → Output Layer → Sigmoid
-        """
-        # Hidden layer transforms input space
-        h = self.hidden(x)
-        h_activated = self.relu(h)
-
-        # Output layer in new feature space
-        logits = self.output(h_activated)
-        output = self.sigmoid(logits)
-
-        return output
-
-    def parameters(self):
-        """Return all trainable parameters."""
-        return self.hidden.parameters() + self.output.parameters()
-
-
-# ============================================================================
 # 🔥 TRAINING FUNCTION (That Will SUCCEED on XOR!)
 # ============================================================================
 
@@ -235,7 +238,7 @@ def train_network(model, X, y, epochs=500, lr=0.5):
     console.print("\n[bold cyan]🔥 Training Multi-Layer Network...[/bold cyan]")
     console.print("[dim](This will work - hidden layers solve XOR!)[/dim]\n")
 
-    history = {"loss": [], "accuracy": []}
+    history = {"loss": [], "accuracy": [], "hidden_grad_max": 0.0}
 
     # Use Live display with spinner for real-time feedback
     with Live(console=console, refresh_per_second=10) as live:
@@ -246,6 +249,14 @@ def train_network(model, X, y, epochs=500, lr=0.5):
 
             # Backward pass (through hidden layers!)
             loss.backward()
+
+            # Record how much gradient reached the HIDDEN layer. If backprop
+            # stops at the output layer, this stays at zero.
+            g = model.hidden.weight.grad
+            if g is not None:
+                g = np.asarray(getattr(g, "data", g), dtype=np.float64)
+                history["hidden_grad_max"] = max(history["hidden_grad_max"],
+                                                 float(np.abs(g).max()))
 
             # Update weights
             optimizer.step()
@@ -268,33 +279,66 @@ def train_network(model, X, y, epochs=500, lr=0.5):
             if (epoch + 1) % 100 == 0:
                 live.console.print(f"Epoch {epoch+1:3d}/{epochs}  Loss: {loss.data:.4f}  Accuracy: {accuracy:.1%}")
 
-    # Only declare success if the network actually converged on XOR.
-    # Anything below ~95% on a noiseless 4-pattern problem means the
-    # optimizer landed in a saddle point (classic 75% dead-ReLU symptom).
-    final_accuracy = history["accuracy"][-1]
-    if final_accuracy >= 0.95:
-        console.print("\n[green]✅ Training Complete - XOR Solved![/green]")
-    else:
-        console.print(
-            f"\n[yellow]⚠️  Training Complete - but only {final_accuracy:.1%} accuracy.[/yellow]"
-        )
-        console.print(
-            "[yellow]   The network did not converge (likely stuck in a saddle point).[/yellow]"
-        )
-        console.print(
-            "[yellow]   Try re-running the milestone - random init can pin a 4-unit hidden[/yellow]"
-        )
-        console.print(
-            "[yellow]   layer at 75% on XOR. See issue #1614.[/yellow]"
-        )
+    # The per-epoch accuracy above is measured BEFORE each update, so it lags
+    # the model by one step. Report the trained model itself; the milestone's
+    # pass/fail verdict comes later, from the XOR truth table.
+    final_preds = model(X)
+    final_accuracy = ((final_preds.data > 0.5).astype(int) == y.data).mean()
+    console.print(f"\n[bold]Training complete.[/bold] Accuracy of the trained model: {final_accuracy:.1%}")
 
     return history
 
-def press_enter_to_continue() :
-    if sys.stdin.isatty() and sys.stdout.isatty() :
-        try :
+# ============================================================================
+# 🔎 LOSS FORWARD CHECK (is YOUR Module 04 loss value right?)
+# ============================================================================
+#
+# 2026-09-29: with BinaryCrossEntropy's forward returning 0, this milestone
+# still passed. Training only needs the gradient, and the gradient comes from
+# the backward pass, so the network learned while every printed loss was
+# wrong. One batch, checked against an independent NumPy computation before
+# training starts, catches that without touching the training run.
+
+BCE_EPSILON = 1e-7  # the clip Module 04 applies before taking logs
+
+
+def reference_bce(predictions, targets):
+    """Mean binary cross-entropy computed directly in NumPy (Module 04's definition).
+
+    The clip runs in the predictions' own dtype, as Module 04's does: in
+    float32, 1 - 1e-7 rounds to 1 - 1.19e-7, which changes log(1 - p) at p = 1.
+    """
+    p = np.clip(np.asarray(predictions), BCE_EPSILON, 1 - BCE_EPSILON).astype(np.float64)
+    t = np.asarray(targets, dtype=np.float64)
+    return float(np.mean(-(t * np.log(p) + (1 - t) * np.log(1 - p))))
+
+
+def loss_forward_failure(loss_fn, outputs, targets, reference_fn, rtol=1e-3, atol=1e-4):
+    """Compare YOUR loss value on one batch to the NumPy reference.
+
+    Returns None when they agree, otherwise a message naming both numbers.
+    """
+    name = type(loss_fn).__name__
+    expected = reference_fn(outputs.data, targets.data)
+    value = np.asarray(getattr(loss_fn(outputs, targets), "data", None), dtype=np.float64)
+    if value.size != 1:
+        return (f"your {name} forward returns an array of shape {value.shape} for this batch, "
+                f"but a loss is one number (the mean over the batch, here {expected:.4f}): "
+                "check Module 04")
+    got = float(value.reshape(()))
+    if np.isfinite(got) and np.isclose(got, expected, rtol=rtol, atol=atol):
+        return None
+    return (f"your {name} forward returns {got:.4f} for this batch, "
+            f"but the loss of these outputs is {expected:.4f}: check Module 04")
+
+
+def press_enter_to_continue():
+    """Pause in interactive sessions; skip in CI or non-interactive runs."""
+    if os.environ.get("TINYTORCH_NON_INTERACTIVE") == "1" or os.environ.get("CI") == "true":
+        return
+    if sys.stdin.isatty() and sys.stdout.isatty():
+        try:
             console.input("\n[yellow]Press Enter to continue...[/yellow] ")
-        except EOFError :
+        except EOFError:
             pass
         console.print()
 
@@ -365,19 +409,34 @@ def evaluate_and_celebrate(model, X, y, history):
 
     if all_correct:
         console.print("\n[bold green]✨ Perfect! All XOR cases correctly predicted![/bold green]")
+        console.print("\n[bold]💡 Key Insights:[/bold]")
+        console.print("  • Hidden layer transformed XOR into a solvable problem")
+        console.print("  • Network learned non-linear decision boundary")
+        console.print("  • Multi-layer networks can solve ANY classification problem!")
 
-    console.print("\n[bold]💡 Key Insights:[/bold]")
-    console.print("  • Hidden layer transformed XOR into a solvable problem")
-    console.print("  • Network learned non-linear decision boundary")
-    console.print("  • Multi-layer networks can solve ANY classification problem!")
+    return all_correct, final_acc
 
 
 # ============================================================================
 # 🎯 MAIN EXECUTION
 # ============================================================================
 
+DEFAULT_SEED = 11  # why 11: see the seed comment in main()
+
+
+def parse_args(argv=None):
+    parser = argparse.ArgumentParser(
+        description="XOR solved with a hidden layer (1986)", allow_abbrev=False,
+        epilog="Try --seed 5 to watch a correct network stall at 75% in a dead-ReLU saddle point.")
+    parser.add_argument("--seed", type=int, default=DEFAULT_SEED,
+                        help=f"weight-init seed (default {DEFAULT_SEED}, which converges with correct code)")
+    args, _unknown = parser.parse_known_args(argv)
+    return args
+
+
 def main():
     """Demonstrate solving XOR with multi-layer networks."""
+    args = parse_args()
 
     # ═══════════════════════════════════════════════════════════════════════
     # ACT 1: THE CHALLENGE 🎯
@@ -433,15 +492,25 @@ def main():
     # ACT 3: THE EXPERIMENT 🔬
     # ═══════════════════════════════════════════════════════════════════════
 
-    # Re-seed the layers' weight-init RNG to guarantee reproducible 100%
-    # convergence on XOR. With a 4-unit hidden layer, some random
-    # initializations land in a "dead ReLU" saddle point that pins accuracy
-    # at 75% (one of the four XOR cases stuck at p≈0.5). 1986 (the year of the
-    # backprop paper) reliably escapes that saddle.
+    # Seed the layers' weight-init RNG so the run is reproducible.
+    #
+    # Seed choice (measured 2026-09-29 over seeds 0-59 and 1986, reference
+    # implementation, 500 epochs, lr=0.5, 4 hidden units):
+    #   * 51 of 61 seeds solve XOR with correct code; 10 land in the 75%
+    #     dead-ReLU saddle point.
+    #   * The old seed, 1986, draws hidden features that ALREADY separate XOR,
+    #     so training only the output layer solved it and a broken backprop
+    #     passed this milestone.
+    #   * Seed 11's initial hidden features are NOT linearly separable on the
+    #     four XOR inputs, so no output-layer-only training can solve it: the
+    #     hidden layer has to learn. With correct code it converges with every
+    #     truth-table probability within 0.005 of its target, and still
+    #     converges at lr 0.3 or 0.8 and at 300 epochs.
     import tinytorch.core.layers as _layers
-    _layers.rng = np.random.default_rng(1986)
+    _layers.rng = np.random.default_rng(args.seed)
 
     model = XORNetwork(hidden_size=4)
+    hidden_w_before = np.array(model.hidden.weight.data, dtype=np.float64, copy=True)
     initial_preds = model(X)
     initial_acc = ((initial_preds.data > 0.5).astype(int) == y.data).mean()
 
@@ -450,12 +519,30 @@ def main():
     console.print("  XOR is impossible for single-layer networks!")
     console.print("  Let's see if hidden layers change the game...")
 
+    loss_failure = loss_forward_failure(BinaryCrossEntropyLoss(), initial_preds, y, reference_bce)
+    if loss_failure:
+        console.print(Panel.fit(
+            "[bold red]❌ YOUR loss value is wrong[/bold red]\n\n"
+            f"{loss_failure}.\n\n"
+            "Training could still work, because the gradient comes from the backward\n"
+            "pass, but every loss this milestone prints would be wrong. BCE is\n"
+            "mean(-(y·log(p) + (1-y)·log(1-p))) with p clipped to [1e-7, 1-1e-7].",
+            title="❌ Milestone FAILED",
+            border_style="red",
+            box=box.DOUBLE
+        ))
+        return 1
+    console.print("  [green]✓[/green] YOUR BinaryCrossEntropyLoss matches a NumPy check on this batch")
+
     press_enter_to_continue()
 
     console.print("[bold]🔥 Training in Progress...[/bold]")
     console.print("[dim](This will work - hidden layers solve XOR!)[/dim]\n")
 
     history = train_network(model, X, y, epochs=500, lr=0.5)
+    hidden_w_after = np.asarray(model.hidden.weight.data, dtype=np.float64)
+    hidden_rel_change = float(np.linalg.norm(hidden_w_after - hidden_w_before)
+                              / max(np.linalg.norm(hidden_w_before), 1e-12))
 
     #console.print("\n[green]✅ Training Complete - XOR Solved![/green]")
 
@@ -465,7 +552,7 @@ def main():
     # ACT 4: THE DIAGNOSIS 📊
     # ═══════════════════════════════════════════════════════════════════════
 
-    evaluate_and_celebrate(model, X, y, history)
+    truth_table_correct, final_acc = evaluate_and_celebrate(model, X, y, history)
 
     press_enter_to_continue()
 
@@ -473,18 +560,37 @@ def main():
     # ACT 5: THE REFLECTION 🌟
     # ═══════════════════════════════════════════════════════════════════════
 
-    final_acc = history["accuracy"][-1]
+    # The milestone passes only if all three hold for the TRAINED model:
+    #   1. All four XOR truth-table rows are predicted correctly.
+    #   2. Backprop delivered a non-zero gradient to the hidden layer.
+    #   3. The hidden weights moved by at least HIDDEN_MIN_REL_CHANGE of their
+    #      initial size (||W_after - W_before|| / ||W_before||).
+    # Threshold measured 2026-09-29: correct code moves the hidden weights by
+    # 1.43x-13.7x their initial norm on the 51 converging seeds of 0-59 (and
+    # 0.92x-2.4x on the 10 that stall); with backprop stopped at the output
+    # layer, or an optimizer step that does nothing, the change is exactly 0.
+    # 0.25 sits far from both.
+    HIDDEN_MIN_REL_CHANGE = 0.25
+    hidden_grad_max = history.get("hidden_grad_max", 0.0)
+    hidden_grad_ok = hidden_grad_max > 0.0
+    hidden_moved_ok = hidden_rel_change >= HIDDEN_MIN_REL_CHANGE
+    passed = truth_table_correct and hidden_grad_ok and hidden_moved_ok
 
-    # Convergence threshold: noiseless 4-pattern XOR should hit >=95% when
-    # training succeeds. Below that, the optimizer is stuck in a saddle
-    # point (the classic 75% dead-ReLU symptom).
-    XOR_CONVERGENCE_THRESHOLD = 0.95
+    console.print("[bold]🔎 Milestone checks:[/bold]")
+    for ok, label in [
+        (truth_table_correct, "All 4 XOR truth-table rows correct after training"),
+        (hidden_grad_ok, f"Hidden layer received gradients (max |grad| = {hidden_grad_max:.3g})"),
+        (hidden_moved_ok, f"Hidden weights changed by {hidden_rel_change:.2f}x their initial size "
+                          f"(need ≥ {HIDDEN_MIN_REL_CHANGE})"),
+    ]:
+        console.print(f"  {'[green]✓[/green]' if ok else '[red]✗[/red]'} {label}")
+    console.print()
 
-    if final_acc >= XOR_CONVERGENCE_THRESHOLD:
+    if passed:
         console.print(Panel.fit(
             "[bold green]🎉 Success! You Ended the AI Winter![/bold green]\n\n"
 
-            f"Final accuracy: [bold]{final_acc:.1%}[/bold] (Perfect XOR solution!)\n\n"
+            f"Final accuracy: [bold]{final_acc:.1%}[/bold], all 4 XOR cases correct!\n\n"
 
             "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
 
@@ -525,41 +631,58 @@ def main():
             box=box.DOUBLE
         ))
     else:
-        # Training did not converge - tell the student honestly and suggest
-        # how to recover, instead of falsely advertising XOR as solved.
+        # Say which check failed and what it points at, instead of falsely
+        # advertising XOR as solved.
+        causes = []
+        if not hidden_grad_ok:
+            causes.append(
+                "  • [bold]No gradient reached the hidden layer.[/bold] Backprop stops at\n"
+                "    the output layer, so the hidden features never learn. Check that\n"
+                "    Module 06's matmul backward returns the gradient for its INPUT\n"
+                "    (grad @ W.T), not only for its weights, and that ReLU's\n"
+                "    backward passes gradient through where the input was positive.\n")
+        if hidden_grad_ok and not hidden_moved_ok:
+            causes.append(
+                "  • [bold]The hidden weights barely moved[/bold] even though gradients\n"
+                "    reached them. Check Module 07's SGD.step: it must update\n"
+                "    param.data in place (param.data -= lr * grad) for every parameter.\n")
+        if not truth_table_correct:
+            causes.append(
+                "  • [bold]The trained model gets at least one XOR row wrong.[/bold]\n"
+                "    Check Module 04's BinaryCrossEntropy gradient and Module 07's\n"
+                "    SGD.step (does the loss in the log above go down?).\n")
+        if args.seed == DEFAULT_SEED:
+            luck_note = (
+                f"[bold]🎲 Is it bad luck?[/bold] Not with the default seed ({DEFAULT_SEED}).\n"
+                "  The run is seeded, so re-running repeats it exactly, and this\n"
+                "  seed converges with correct code. Fix the code first.\n\n")
+        else:
+            luck_note = (
+                f"[bold]🎲 Is it bad luck?[/bold] Possibly: you chose --seed {args.seed}.\n"
+                "  About 1 seed in 6 leaves one XOR case stuck at p≈0.5 (a 75%\n"
+                "  dead-ReLU saddle point) even with correct code. Run without\n"
+                f"  --seed (default {DEFAULT_SEED}) to test your code.\n\n")
         console.print(Panel.fit(
-            "[bold yellow]⚠️  Training Did Not Converge[/bold yellow]\n\n"
+            "[bold red]❌ XOR Not Solved by a Learning Hidden Layer[/bold red]\n\n"
 
-            f"Final accuracy: [bold]{final_acc:.1%}[/bold] "
-            f"(below the {XOR_CONVERGENCE_THRESHOLD:.0%} convergence threshold)\n\n"
+            f"Accuracy of the trained model: [bold]{final_acc:.1%}[/bold]\n\n"
 
-            "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
-
-            "[bold]🔍 What Likely Happened:[/bold]\n"
-            "  A 4-unit hidden layer trained on XOR can land in a\n"
-            "  [italic]dead-ReLU saddle point[/italic] where one of the four XOR\n"
-            "  cases stays pinned at probability ≈ 0.5 forever.\n"
-            "  That gives the classic 75% accuracy plateau - the network\n"
-            "  has [bold]not[/bold] solved XOR.\n\n"
-
-            "[bold]🛠️  How to Recover:[/bold]\n"
-            "  • Re-run the milestone - a different random init usually escapes\n"
-            "  • Check your ReLU / Linear / autograd implementations\n"
-            "  • Try a larger hidden layer (e.g. hidden_size=8) for robustness\n\n"
-
-            "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+            "[bold]🔍 What the checks point at:[/bold]\n"
+            + "".join(causes) +
+            "\n"
+            + luck_note +
 
             "[dim]Do not move on to Milestone 03 (TinyDigits) until XOR\n"
             "actually converges - otherwise you are debugging on top of a\n"
             "broken foundation.[/dim]",
 
-            title="⚠️  XOR Not Solved Yet",
-            border_style="yellow",
+            title="❌ Milestone FAILED",
+            border_style="red",
             box=box.DOUBLE
         ))
 
     press_enter_to_continue()
-    return 0 if final_acc >= XOR_CONVERGENCE_THRESHOLD else 1
+    return 0 if passed else 1
 
 if __name__ == "__main__":
     sys.exit(main())

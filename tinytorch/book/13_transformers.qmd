@@ -15,28 +15,31 @@ In PyTorch, a full transformer block is declared and composed in standard module
 import torch
 import torch.nn as nn
 
-# Standard Transformer Decoder Layer (Self-Attention + MLP + Pre-LN)
-layer = nn.TransformerDecoderLayer(d_model=64, nhead=4, dim_feedforward=256, batch_first=True)
+# Modern decoder-only Transformer block (Pre-LN with causal mask)
+layer = nn.TransformerEncoderLayer(
+    d_model=64, nhead=4, dim_feedforward=256, norm_first=True, batch_first=True
+)
 
 x = torch.randn(2, 8, 64)       # Batch of 2, sequence length 8, hidden dim 64
-memory = torch.randn(2, 8, 64)  # Context memory
-out = layer(x, memory)
+mask = nn.Transformer.generate_square_subsequent_mask(8)
+out = layer(x, is_causal=True, src_mask=mask)
 
-print("Decoder block output shape:", out.shape)  # (2, 8, 64)
+print("Decoder block output shape:", out.shape)  # torch.Size([2, 8, 64])
 ```
 
 Underneath that composable layer block, the runtime balances multiple structural and gradient invariants:
+
 1. **The Pre-LN residual highway:** By applying layer normalization to the inputs of each sub-layer rather than their outputs (Pre-LN), the main residual stream remains unnormalized. This creates an unhindered identity highway for gradients during backpropagation.
 2. **Balanced compute and parameter allocation:** The block balances parameter capacity between token communication (multi-head attention, $4D^2$ parameters) and channel-wise feature transformation (the two-layer feed-forward MLP with a $4\times$ expansion, $8D^2$ parameters).
 3. **End-to-end logit projection:** Stacking $N$ identical blocks and projecting the final hidden states through a vocabulary linear head produces next-token logit distributions of shape $(B, S, V)$.
 
-This chapter synthesizes the components of Part II into TinyGPT, TinyTorch's flagship generative language model, setting the stage for text generation in @sec-milestone-2. Before assembling the model, we must inspect what happens when deep attention networks lack residual pathways and layer normalization.
+This chapter synthesizes the components of Part II into TinyGPT, TinyTorch's flagship generative language model, setting the stage for text generation in [Synthesis II](synthesis_02.qmd#sec-milestone-2). Before assembling the model, we must inspect what happens when deep attention networks lack residual pathways and layer normalization.
 
 ::: {#fig-transformer-arch fig-env="figure" fig-pos="htb" fig-cap="**Composing a transformer**: Each block adds two learned updates to the residual stream. The complete GPT stacks these blocks before a final normalization and a separate vocabulary projection." fig-alt="Two panels show a Pre-LN block with two bypass arrows around attention and MLP branches, and a GPT path from token and position embeddings through N blocks to logits of shape B by S by V."}
 ![](assets/images/diagrams/13_transformers-diag-1.svg){width="100%"}
 :::
 
-Module 13 names this model `GPT`, with `TinyGPT` retained as an alias. Its caller supplies token IDs of shape $(B, S)$ and receives logits of shape $(B, S, V)$, one row of next-token scores per position. The training and sampling loop in @sec-milestone-2 will use that contract.
+Module 13 exports this model as `GPT`, with `TinyGPT` retained as an alias; the class itself lives in the hand-maintained `tinytorch/models/transformer.py`. Its caller supplies token IDs of shape $(B, S)$ and receives logits of shape $(B, S, V)$, one row of next-token scores per position. The training and sampling loop in [Synthesis II](synthesis_02.qmd#sec-milestone-2) will use that contract.
 
 ---
 
@@ -55,6 +58,10 @@ Two things go wrong if you simply stack attention layers.
 The first is the lack of a dedicated transformation of each token's features after mixing. Attention is already nonlinear because its softmax weights depend on the input. Its output, however, is organized as a weighted mixture of projected values. A separate MLP lets every token transform that mixture through a nonlinear hidden layer without constructing another matrix of interactions between positions. It reuses the linear-activation-linear pattern from Part I at every position.
 
 The second problem is depth. In a simplified stack whose layers each multiply the signal's scale by a gain, a gain of $1.2$ across 24 layers gives $1.2^{24} \approx 79$; a gain of $0.8$ gives $0.8^{24} \approx 0.005$. The chain rule similarly composes derivatives on the way back. The stacked sigmoids in @sec-activations illustrated this gradient problem. The variance-based initialization in @sec-layers controls a fresh linear layer's scale, but training changes its weights. The following linear experiment isolates the difference between replacing a signal and adding a normalized update.
+
+::: {.callout-tip title="Pause & Predict: The Residual Highway Gradient Propagation"}
+Consider a deep network of $N = 24$ layers without residual connections: $x_{l+1} = f_l(x_l)$. Its end-to-end gradient expands via the chain rule as a product of 24 Jacobians: $\frac{\partial x_{24}}{\partial x_0} = \prod_{l=0}^{23} J_l$. If the average singular value of each Jacobian is $0.9$, what is the gradient magnitude reaching the first layer? What happens when we add residual skip connections $x_{l+1} = x_l + f_l(x_l)$ so each term becomes $(I + J_l)$?
+:::
 
 \newpage
 
@@ -100,14 +107,8 @@ The seeded experiment ends with an RMS of 83.96 for `plain`, about 76 times its 
 ## The Idea
 
 ::: {.column-margin}
-**↪ Jump ahead:** @sec-milestone-2
+**↪ Jump ahead:** [Synthesis II](synthesis_02.qmd#sec-milestone-2)
 *Autoregressive text generation and next-token probability distribution sampling with TinyGPT.*
-:::
-
-
-::: {.column-margin}
-![](assets/images/diagrams/13_transformers-margin-pre-ln.svg){width="100%"}
-*Pre-LN residual gradient highway ($I + J_l$).*
 :::
 
 ### The residual stream
@@ -124,9 +125,14 @@ $$\frac{\partial \mathcal{L}}{\partial x_l} = \frac{\partial \mathcal{L}}{\parti
 
 where $\mathcal{L}$ is the loss and $I$ is the identity matrix. The identity term means the gradient arriving at layer $l+1$ reaches layer $l$ unchanged, with the layer's own contribution added on. Across $N$ residual sub-layers the chain rule still multiplies $N$ Jacobians, the matrices of output derivatives with respect to input features, but each has the form $I + J_l$. Expanding that product reveals a direct identity contribution as well as paths through the learned updates. This route makes gradient propagation easier; it does not guarantee that gradients cannot grow, shrink, or cancel. In code this needs nothing new. The autograd mechanism from @sec-autograd already sums the gradients of a tensor that is used on two paths, and $x_l$ is used on two paths: once into $f_l$, once straight into the addition.
 
+::: {.column-margin}
+![](assets/images/diagrams/13_transformers-margin-pre-ln.svg){width="100%" fig-alt="Pre-LN block diagram showing the clean identity skip connection alongside the LayerNorm and sub-layer computation path."}
+*Pre-LN residual gradient highway ($I + J_l$).*
+:::
+
 A useful picture is to think of the residual path as a **stream**, a $D$-dimensional scratchpad that each token carries through the whole network. Each sub-layer reads the stream, computes a delta, and writes the delta back by addition. An update can cancel an earlier value by adding its negative, so the stream is not an immutable record. The useful guarantee is structural: the old vector reaches the addition directly instead of having to pass through the learned transformation. A 12-block GPT has 24 sub-layers reading and writing the same stream.
 
-![**The residual stream communication highway**: Token embeddings enter a central communication bus that flows directly from input to final projection. Each transformer block taps into the bus, extracts standardized features via LayerNorm, computes attention and MLP deltas, and adds them back onto the highway ($x_{l+1} = x_l + f_l(x_l)$). Gradients propagate backward unimpeded along the identity path $I + J_l$, preventing signal attenuation across deep stacks.](assets/images/diagrams/13_residual-stream-bus.svg){#fig-residual-stream-bus width="100%" fig-alt="Diagram of the residual stream highway showing side branches for Multi-Head Attention and MLP, and unimpeded backward gradient flow."}
+![**The residual stream communication highway**: Token embeddings enter a central communication bus that flows directly from input to final projection. Each transformer block taps into the bus, extracts standardized features via LayerNorm, computes attention and MLP deltas, and adds them back onto the highway ($x_{l+1} = x_l + f_l(x_l)$). The identity term in $I + J_l$ gives gradients a direct backward route through every block.](assets/images/diagrams/13_residual-stream-bus.svg){#fig-residual-stream-bus width="100%" fig-alt="Diagram of the residual stream highway showing side branches for Multi-Head Attention and MLP, and unimpeded backward gradient flow."}
 
 ### Layer normalization
 
@@ -150,8 +156,8 @@ $$x_{l+1} = x_l + f_l(\text{LN}(x_l))$$
 
 In Post-LN, each residual addition feeds a normalization, so even the direct route through a block includes normalization derivatives. A stack of $N$ blocks has two such normalizations per block. In Pre-LN, each branch computes a normalized version of its input while the bypass carries the unnormalized stream to the addition. Only the final LayerNorm, just before the vocabulary projection, normalizes the stream leaving the stack. The reference listings use this Pre-LN arrangement.
 
-::: {#chk-transformers-pre-ln-stability .callout-check title="Sanity Check: Pre-LN Gradient Highways vs Post-LN Vanishing Gradients"}
-Why did the deep learning community migrate universally from original Post-LN transformers (Vaswani et al.) to Pre-LN (GPT-2, LLaMA, TinyGPT)? In Post-LN ($x_{l+1} = \text{LN}(x_l + f_l(x_l))$), the residual connection passes *through* the normalization layer. Computing the gradient requires chaining through $\text{LN}'$ at every single block. For deep networks ($N \ge 24$), this degrades gradient magnitudes, requiring delicate learning rate warmup schedules to prevent divergence. In Pre-LN ($x_{l+1} = x_l + f_l(\text{LN}(x_l))$), the residual bypass is an uninterrupted identity path $I + J_l$, allowing backpropagation gradients to flow from the loss directly to early token embeddings without scaling decay.
+::: {#chk-transformers-pre-ln-stability .callout-checkpoint title="Checkpoint: Pre-LN gradient highways vs Post-LN vanishing gradients"}
+Why did many decoder models move from the original Post-LN arrangement (Vaswani et al.) to Pre-LN (GPT-2, LLaMA, TinyGPT)? In Post-LN ($x_{l+1} = \text{LN}(x_l + f_l(x_l))$), the residual connection passes *through* the normalization layer. Computing the gradient requires chaining through $\text{LN}'$ at every single block. For deep networks ($N \ge 24$), this degrades gradient magnitudes, requiring delicate learning rate warmup schedules to prevent divergence. In Pre-LN ($x_{l+1} = x_l + f_l(\text{LN}(x_l))$), the residual bypass is an uninterrupted identity path $I + J_l$, allowing backpropagation gradients to flow from the loss directly to early token embeddings without passing through a normalization derivative on the bypass.
 :::
 
 ### The MLP
@@ -163,7 +169,13 @@ The second sub-layer supplies the per-token feature transformation missing from 
 
 $$\text{MLP}(x) = \text{GELU}(x W_1 + b_1)\, W_2 + b_2, \qquad W_1 \in \mathbb{R}^{D \times 4D},\; W_2 \in \mathbb{R}^{4D \times D}$$
 
-Here $x$ is one token's row vector, as in the attention projection $q_t = x_t W_q$. The same $W_1, W_2$ apply to every position, and no position sees any other. The division of labor inside a block is therefore clean. Attention decides which tokens' information to gather; the MLP decides what to do with what was gathered, one token at a time.
+Here $x$ is one token's row vector, as in the attention projection $q_t = x_t W_q$. The same $W_1, W_2$ apply to every position, and no position sees any other. The division of labor inside a block is therefore clean. Attention decides which tokens' information to gather; the MLP decides what to do with what was gathered, one token at a time. The feed-forward sub-layer has the same linear-activation-linear shape as the perceptron built in [Synthesis I](synthesis_01.qmd#sec-milestone-1) and @sec-layers, here with GELU and a 4D hidden width, applied independently to every token.
+
+::: {.column-margin}
+![](assets/images/diagrams/13_transformers-margin-mlp-expansion.svg){width="100%" fig-alt="Architecture card showing MLP 4x channel expansion from D to 4D with GELU activation and contraction back to D, allocating 8D squared weights."}
+
+*MLP Channel Expansion: Position-wise feedforward network widens features from D to 4D for non-linear separation before returning to stream dimension D.*
+:::
 
 ### Assembling the model
 
@@ -221,7 +233,7 @@ Both additions record their two inputs on the graph. During backward, the incomi
 
 For the input `[3, 7, 1]`, the corresponding training targets might be `[7, 1, 5]`. `GPT.forward` can compute all three predictions in one pass because the mask forbids position 0 from reading token 7 or 1, and position 1 from reading token 1. The next-token targets come from the training data; `GPT` returns scores and does not construct labels or compute a loss.
 
-The constructor first creates an `EmbeddingLayer` with learned position vectors. Each iteration then constructs a new `TransformerBlock` and appends it to `self.blocks`, so depth adds independent parameters rather than reusing one block's weights. In `forward`, the token shape supplies `seq_len`; the embedding layer returns $(B, S, D)$, adding position rows beginning at `start_pos`. `_create_causal_mask(seq_len)` delegates to `create_causal_mask`, which returns a lower-triangular matrix of ones with zeros above the diagonal and a leading singleton axis. For $S=3$ its rows are `[1,0,0]`, `[1,1,0]`, and `[1,1,1]`. Attention broadcasts this $(1,S,S)$ mask across batches and heads, following its binary mask contract.
+The constructor accepts its building blocks as optional keyword arguments (`block_cls`, `norm_cls`, `mask_fn`, and the sampling and generation functions), and each one left out defaults to the class or function exported from this module. That lets this module's notebook build a `GPT` from your own `TransformerBlock`, `LayerNorm`, and mask and test them before they are exported. The constructor then creates an `EmbeddingLayer` with learned position vectors. Each iteration calls `block_cls(embed_dim, num_heads)` to construct a new block and appends it to `self.blocks`, so depth adds independent parameters rather than reusing one block's weights. In `forward`, the token shape supplies `seq_len`; the embedding layer returns $(B, S, D)$, adding position rows beginning at `start_pos`. `forward` calls `self._mask_fn(seq_len)`, by default `create_causal_mask`, which returns a lower-triangular matrix of ones with zeros above the diagonal and a leading singleton axis. For $S=3$ its rows are `[1,0,0]`, `[1,1,0]`, and `[1,1,1]`. Attention broadcasts this $(1,S,S)$ mask across batches and heads, following its binary mask contract.
 
 {{< include _listings/13_transformers/GPT.qmd >}}
 
@@ -261,7 +273,7 @@ For this trace only, set `ff_dim=4` rather than the default 16. Identity MLP mat
 
 : **A real block with controlled weights**: The first token traverses both branches and residual additions. The second token has the opposite normalized input, so its causal attention average cancels. {#tbl-transformer-block-trace tbl-colwidths="[14,28,29,29]"}
 
-In @lst-transformer-controlled-trace, line 6 instantiates `TransformerBlock(4, 2, ff_dim=4)` and lines 7--13 zero the biases while configuring projection and feedforward weights as identity matrices. Line 15 supplies a two-token input `x` alongside the causal mask in line 17. Lines 18--22 trace the internal sequence step-by-step: `n1 = block.ln1(x)`, `attention = block.attention(n1, mask)`, first residual `x1 = x + attention`, second norm `n2 = block.ln2(x1)`, and `mlp = block.mlp(n2)`. In line 23, `result = block(x, mask)` runs the full composite forward method. Lines 24--26 verify that `result` matches the explicit residual sum `x1 + mlp`, that `x` is unmodified, and that token 1's attention update cancels to zero as predicted. Line 27 prints the final block outputs (lines 28--31).
+In @lst-transformer-controlled-trace, line 6 instantiates `TransformerBlock(4, 2, ff_dim=4)` and lines 7 to 13 zero the biases while configuring projection and feedforward weights as identity matrices. Line 15 supplies a two-token input `x` alongside the causal mask in line 17. Lines 18 to 22 trace the internal sequence step-by-step: `n1 = block.ln1(x)`, `attention = block.attention(n1, mask)`, first residual `x1 = x + attention`, second norm `n2 = block.ln2(x1)`, and `mlp = block.mlp(n2)`. In line 23, `result = block(x, mask)` runs the full composite forward method. Lines 24 to 26 verify that `result` matches the explicit residual sum `x1 + mlp`, that `x` is unmodified, and that token 1's attention update cancels to zero as predicted. Line 27 prints the final block outputs (lines 28 to 31).
 
 ::: {#lst-transformer-controlled-trace lst-pos="H" lst-cap="**Tracing the complete block**: Controlled parameters expose the causal average and both residual additions without replacing any forward method."}
 ```python
@@ -317,7 +329,7 @@ A full GPT adds embeddings and vocabulary scores around that block mechanism. Th
 
 : **Shape boundaries in GPT**: A two-block model preserves stream width until its final vocabulary projection. {#tbl-tinygpt-shapes tbl-colwidths="[36,34,30]"}
 
-The full model must preserve causality across every block. In @lst-transformer-gpt-contract, line 8 initializes `model = GPT(vocab_size=16, embed_dim=8, num_layers=2, num_heads=2, max_seq_len=8)` and line 9 feeds a three-token sequence `[[3, 7, 1]]`. Line 10 confirms output shape `(1, 3, 16)`, and line 11 verifies the exact parameter count of 2,080. In lines 14--15, appending token 5 to form sequence `[[3, 7, 1, 5]]` verifies prefix invariance: `assert np.allclose(logits.data, longer.data[:, :3])` passes, proving future tokens cannot leak backward across either block. In lines 18--25, a next-token cross-entropy loss at the final sequence position backpropagates through the entire depth of both blocks; lines 20--25 confirm that token embeddings and the active position vectors (indices 0--2) receive non-zero gradients, while unvisited position slots (index 3+) remain strictly zero.
+The full model must preserve causality across every block. In @lst-transformer-gpt-contract, line 8 initializes `model = GPT(vocab_size=16, embed_dim=8, num_layers=2, num_heads=2, max_seq_len=8)` and line 9 feeds a three-token sequence `[[3, 7, 1]]`. Line 10 confirms output shape `(1, 3, 16)`, and line 11 verifies the exact parameter count of 2,080. In lines 14 to 15, appending token 5 to form sequence `[[3, 7, 1, 5]]` verifies prefix invariance: `assert np.allclose(logits.data, longer.data[:, :3])` passes, proving future tokens cannot leak backward across either block. In lines 18 to 25, a next-token cross-entropy loss at the final sequence position backpropagates through the entire depth of both blocks; lines 20 to 25 confirm that token embeddings and the active position vectors (indices 0 to 2) receive non-zero gradients, while unvisited position slots (index 3+) remain strictly zero.
 
 ::: {#lst-transformer-gpt-contract lst-pos="H" lst-cap="**Checking the GPT contract**: Appending a suffix preserves prefix logits, and a last-position loss reaches token and positional embeddings."}
 ```python
@@ -355,11 +367,17 @@ Of the 2,080 parameters, 1,744 sit in the two blocks (872 each, of which 552 are
 
 ## From TinyTorch to Production
 
-The [released GPT-2 implementation](https://github.com/openai/gpt-2/blob/master/src/model.py) uses the same Pre-LN attention/addition and MLP/addition sequence, learned positions, and a final normalization. Its MLP uses a different GELU approximation, based on a hyperbolic tangent. More consequently, the final projection multiplies by the token embedding table's transpose instead of owning another matrix. This is **weight tying**. Input lookup and output scoring then train one shared table through two paths, so the optimizer must receive that Tensor only once.
+The [released GPT-2 implementation](https://github.com/openai/gpt-2/blob/master/src/model.py) uses the same Pre-LN attention/addition and MLP/addition sequence, learned positions, and a final normalization. Its MLP uses a different GELU approximation, based on a hyperbolic tangent. More consequently, the final projection multiplies the final hidden states by the transpose of the token embedding table (defined in @sec-embeddings) instead of owning another matrix. This is **weight tying**. Input lookup and output scoring then train one shared table through two paths, so the optimizer must receive that Tensor only once.
 
 The memory consequence follows directly from the shapes. Untied, the token table and head each own $VD$ weights. Tying removes one $VD$ allocation but constrains both uses to share their learned values. For the trace model, it removes 128 parameters and changes the total from 2,080 to 1,952. At $V=50{,}257$ and $D=768$, the same change saves $38{,}597{,}376$ parameters. These are parameter counts, not measured speedups; output scoring still multiplies every final hidden row by a vocabulary-sized matrix.
 
-::: {#nbk-transformers-flop-parameter-accounting .callout-notebook title="Parameter accounting for a transformer block"}
+::: {.column-margin}
+![](assets/images/diagrams/13_transformers-margin-block-budget.svg){width="100%" fig-alt="Budget breakdown card illustrating the 12D squared parameter allocation per transformer block, with one-third allocated to multi-head attention and two-thirds allocated to the feedforward MLP."}
+
+*Block Parameter Budget: Matrix weights split 1:2 between multi-head attention (4D squared) and feedforward MLP (8D squared), totaling 12D squared scalars.*
+:::
+
+::: {#nbk-transformers-flop-parameter-accounting .callout-notebook title="Napkin Math: Parameter accounting for a transformer block"}
 The default TinyTorch block owns $12D^2$ matrix weights, $9D$ biases, and $4D$ normalization parameters, for $12D^2+13D$ scalars. With $N$ blocks, vocabulary size $V$, and position capacity $S_{\max}$, its untied GPT owns $N(12D^2+13D)+2VD+S_{\max}D+2D$ parameters. Substituting $D=8$, $N=2$, $V=16$, and $S_{\max}=8$ gives $1{,}744+256+64+16=2{,}080$. The count depends on allocated position capacity, even when a call uses only three positions. Changing `ff_dim` or removing biases changes the formula.
 :::
 
@@ -368,6 +386,10 @@ Normalization placement is another design choice with a training consequence. [X
 The [Llama 2 reference](https://github.com/meta-llama/llama/blob/main/llama/model.py) preserves the two residual additions but changes their branches. RMSNorm divides each row by its root-mean-square scale without subtracting its mean, and learns a featurewise scale without a shift. A gated MLP uses SwiGLU,[^fn-swiglu-mlp-gate] and rotary positions alter queries and keys inside attention rather than adding a position table to the stream. These are alternatives to the components traced above; TinyTorch's Module 13 implements none of those replacements.
 
 [^fn-swiglu-mlp-gate]: **SwiGLU**: an MLP whose hidden layer multiplies two linear projections elementwise, with one passed through the Swish activation. The gate lets one projection control the contribution of the other. Using three matrices rather than two changes the parameter count, so a narrower hidden layer can offset that extra matrix.
+
+```{=latex}
+\newpage
+```
 
 | Design choice | Module 13 `GPT` | GPT-2 released code | Llama 2 reference |
 | :--- | :--- | :--- | :--- |
@@ -379,30 +401,42 @@ The [Llama 2 reference](https://github.com/meta-llama/llama/blob/main/llama/mode
 
 : **Alternative components, shared residual structure**: The implementations differ in normalization, positions, activation, and parameter sharing while preserving two additions per block. {#tbl-tinygpt-vs-production tbl-colwidths="[22,26,26,26]"}
 
-The implementations in @tbl-tinygpt-vs-production need not schedule those operations alike. TinyTorch executes separate NumPy operations for centering, squaring, reduction, scaling, and addition; its intermediate arrays occupy ordinary host memory. A production implementation may combine operations into a compiled kernel to avoid some intermediate reads and writes. The code here establishes the arithmetic and data dependencies, not a GPU memory-traffic count or a universal fusion speedup. @Sec-profiling will distinguish operation counts and storage estimates from elapsed measurements.
+The implementations in @tbl-tinygpt-vs-production need not schedule those operations alike. TinyTorch executes separate NumPy operations for centering, squaring, reduction, scaling, and addition; its intermediate arrays occupy ordinary host memory. A production implementation may combine operations into a compiled kernel to avoid some intermediate reads and writes. The code here establishes the arithmetic and data dependencies, not a GPU memory-traffic count or a universal fusion speedup. @sec-profiling will distinguish operation counts and storage estimates from elapsed measurements.
 
-::: {#psp-transformers-megatron-parallelism .callout-production title="Production Bridge: Megatron-LM Tensor Parallelism"}
+::: {#psp-transformers-megatron-parallelism .callout-perspective title="Production Bridge: Megatron-LM tensor parallelism"}
 When a transformer exceeds the memory capacity of a single GPU, Megatron-LM splits individual weight matrices across GPUs without requiring pipeline stalls. In the Multi-Head Attention block, $W_q, W_k, W_v$ are column-parallel (split across heads), while $W_o$ is row-parallel, requiring only a single `AllReduce` communication at the block output. Similarly, in the MLP block, $W_1$ is column-parallel ($D \to 4D/K$) and $W_2$ is row-parallel ($4D/K \to D$), requiring exactly one `AllReduce` before the residual addition. This symmetric decomposition minimizes inter-GPU communication to just two collective calls per transformer block.
 :::
 
 Generation adds a separate cost. Module 13 appends one sampled token at a time, but each ordinary forward call recomputes the full prefix. The cache introduced in @sec-memoization will reuse earlier key and value projections; it will still need attention over the available prefix. That optimization changes retained state between calls, whereas the block traced here is a complete computation from its supplied sequence.
 
----
+```{=latex}
+\newpage
+```
 
 ## Summary
 
 A GPT forward call begins with $(B,S)$ token IDs. The embedding layer adds learned position rows, each block normalizes a branch input and adds attention and MLP updates, and the final normalization and head return $(B,S,V)$ logits. The mask prevents every block from reading future positions, while normalization and the MLP act within each position. Together those properties explain why appending a suffix preserves earlier predictions.
 
-Persistent state belongs to the parameter tensors. Forward operations create new activations and, when recording gradients, per-call operation records; they do not overwrite the caller's stream or update weights. `parameters()` exposes the complete ownership tree to the optimizer, and backward follows the recorded residual branches into that tree. @sec-milestone-2 uses these logits to construct a next-token loss and to sample from the final row. It must supply targets during training and the whole prefix during ordinary generation.
+Persistent state belongs to the parameter tensors. Forward operations create new activations and, when recording gradients, per-call operation records; they do not overwrite the caller's stream or update weights. `parameters()` exposes the complete ownership tree to the optimizer, and backward follows the recorded residual branches into that tree. [Synthesis II](synthesis_02.qmd#sec-milestone-2) uses these logits to construct a next-token loss and to sample from the final row. It must supply targets during training and the whole prefix during ordinary generation.
 
 ::: {#chk-milestone-05 .callout-checkpoint title="Milestone 05 Unlocked: The Transformer Era & TinyGPT"}
-You have now constructed the flagship generative architecture of TinyTorch: `TinyGPT` (Modules 01–13). You can run:
+You have now constructed the flagship generative architecture of TinyTorch: `TinyGPT` (Modules 01 to 13). You can execute the milestone suite via the Tito companion CLI:
 
 ```bash
+# Required Parts 1 and 2, in order: TinyGPT on Shakespeare, then sequence routing
 tito milestone run 05
+
+# Part 2 alone: prove multi-head attention on sequence routing tasks
+tito milestone run 05 --part 2
+
+# Optional Part 3: Train TinyCopilot on Python code with AST compiler gating
+tito milestone run 05 --part 3
+
+# Optional Part 4: Conversational Q&A and the Overfitting Detective
+tito milestone run 05 --part 4
 ```
 
-This milestone challenges multi-head attention on sequence reasoning tasks (sequence reversal, token copy, associative recall) and trains TinyGPT to autoregressively sample coherent text from a prompt. Turn to @sec-milestone-2 (Parts 2 & 3) to walk through the complete language modeling loop and next-token generation.
+This milestone challenges multi-head attention on sequence routing tasks (reversal, copying, and a prefix-selected mix of the two), trains TinyGPT and gates it on training loss, held-out loss against a bigram baseline, and a causality probe before sampling from it, and scores greedy TinyCopilot completions for unseen function headers with `ast.parse` (the gate is at least 1 of 7; correct trainings parsed 1 to 6). Milestone 05 completes once Parts 1 and 2 have both passed; Parts 3 and 4 are optional extensions. Turn to [Synthesis II](synthesis_02.qmd#sec-milestone-2) to walk through the complete language modeling loop and next-token generation.
 :::
 
 ---
@@ -412,3 +446,4 @@ This milestone challenges multi-head attention on sequence reasoning tasks (sequ
 - **Xiong et al.** (2020). "[On layer normalization in the transformer architecture](https://arxiv.org/abs/2002.04745)." *ICML*. Post-LN and Pre-LN compared, and why the Pre-LN arrangement this chapter uses trains without warmup.
 - **Radford et al.** (2019). "[Language models are unsupervised multitask learners](https://cdn.openai.com/better-language-models/language_models_are_unsupervised_multitask_learners.pdf)." *OpenAI*. The GPT-2 block that the chapter's `GPT` follows.
 - **Kaplan et al.** (2020). "[Scaling laws for neural language models](https://arxiv.org/abs/2001.08361)." *arXiv*. How loss falls with parameters, data, and compute for this family of models.
+- **Shoeybi et al.** (2019). "[Megatron-LM: Training Multi-Billion Parameter Language Models Using Model Parallelism](https://arxiv.org/abs/1909.08053)." *arXiv*. Tensor parallelism across multi-head attention and feed-forward linear layers.

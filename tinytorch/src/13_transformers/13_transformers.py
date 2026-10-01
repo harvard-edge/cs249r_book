@@ -65,14 +65,33 @@ from tinytorch.core.transformers import LayerNorm, MLP, TransformerBlock, create
 
 ## 📋 Module Dependencies
 
+**Prerequisites**: Modules 01 (Tensor), 02 (Activations), 03 (Layers), 11 (Embeddings), and 12 (Attention) must be complete
+
+**External Dependencies**:
+- `numpy`: high-performance array operations for random number generation, moment reductions, and masking
+- `typing` (for type hints)
+- `unittest.mock` (used only inside a unit test)
+
+**TinyTorch Dependencies**:
+
 | Dependency | Origin | Functionality Utilized | Role in Module 13 |
 |:---|:---|:---|:---|
-| `tinytorch.core.tensor` | Module 01 | Multi-dimensional arrays & autograd | Base data structure and computation graphs |
+| `tinytorch.core.tensor` | Module 01 | `Tensor`, `Function` | Base data structure and computation graph nodes |
 | `tinytorch.core.activations`| Module 02 | `GELU` activation function | Non-linear gating inside the MLP expansion layer |
 | `tinytorch.core.layers` | Module 03 | `Linear` projection layers | Projection weights for MLP and output LM head |
 | `tinytorch.core.embeddings`| Module 11 | `EmbeddingLayer` | Converts token IDs to dense representation vectors |
 | `tinytorch.core.attention` | Module 12 | `MultiHeadAttention` | Subspace relational routing across sequence positions |
-| `numpy` | External | High-performance array operations | Random number generation, moment reductions, and masking |
+
+A final export cell also re-exports `GPT` and `TinyGPT` from `tinytorch.models.transformer` when that package is present.
+
+**Dependency Flow**:
+```
+Module 01 (Tensor, Function) ──┐
+Module 02 (GELU)             ──┤
+Module 03 (Linear)           ──┼──→ Module 13 (LayerNorm, MLP, TransformerBlock, generate)
+Module 11 (EmbeddingLayer)   ──┤
+Module 12 (MultiHeadAttention)─┘
+```
 """
 
 # %% nbgrader={"grade": false, "grade_id": "imports", "solution": false}
@@ -481,7 +500,7 @@ where input $x \in \mathbb{R}^{B \times S \times d_{\text{embed}}}$ is expanded 
 
 | Property | Rectified Linear Unit ($\text{ReLU}$) | Gaussian Error Linear Unit ($\text{GELU}$) |
 |:---|:---|:---|
-| **Mathematical Definition** | $\text{ReLU}(x) = \max(0, x)$ | $\text{GELU}(x) = x \cdot \Phi(x) \approx 0.5 x \left(1 + \tanh\left(\sqrt{2/\pi}(x + 0.044715 x^3)\right)\right)$ |
+| **Mathematical Definition** | $\text{ReLU}(x) = \max(0, x)$ | $\text{GELU}(x) = x \cdot \Phi(x) \approx x \cdot \sigma(1.702x)$, the sigmoid form your Module 02 `GELU` computes (PyTorch's `approximate='tanh'` uses $0.5x\left(1 + \tanh\left(\sqrt{2/\pi}(x + 0.044715x^3)\right)\right)$ instead) |
 | **Curvature & Continuity** | Piecewise linear; non-differentiable cusp at $x = 0$ | Smooth, continuously differentiable across entire real domain $\mathbb{R}$ |
 | **Negative Input Handling** | Hard zero clamp ($\frac{d}{dx} = 0$ for $x < 0$) | Small negative curvature; allows gradient recovery |
 | **Dead Neuron Vulnerability** | High (negative activations permanently kill gradient flow) | Negligible (smooth probabilistic gating prevents dead units) |
@@ -616,6 +635,18 @@ def test_unit_mlp():
     # Test custom hidden dimension
     custom_mlp = MLP(embed_dim, hidden_dim=128)
     assert custom_mlp.hidden_dim == 128
+
+    # Check VALUES against an independent NumPy reference built from the MLP's own
+    # weights: linear2(GELU(linear1(x))), with GELU(z) = z * sigmoid(1.702 z) as in
+    # Module 02. Nonzero biases make sure both bias adds are exercised.
+    mlp.linear1.bias.data[...] = rng.standard_normal(mlp.linear1.bias.data.shape)
+    mlp.linear2.bias.data[...] = rng.standard_normal(mlp.linear2.bias.data.shape)
+    output = mlp.forward(x)
+    hidden_ref = x.data @ mlp.linear1.weight.data + mlp.linear1.bias.data
+    hidden_ref = hidden_ref / (1.0 + np.exp(-1.702 * hidden_ref))  # z * sigmoid(1.702 z)
+    expected = hidden_ref @ mlp.linear2.weight.data + mlp.linear2.bias.data
+    assert np.allclose(output.data, expected, atol=1e-5), \
+        "MLP output should equal W2·GELU(W1·x + b1) + b2 (expand, apply GELU, project back)"
 
     print("✅ MLP works correctly!")
 
@@ -873,6 +904,56 @@ def test_unit_transformer_block():
         np.asarray(perturbed_output.data)[:, :-1, :],
         atol=1e-5,
     ), "Causal mask leaked a future token into an earlier position"
+
+    # Check VALUES against an independent NumPy reference of the pre-norm block,
+    # using the block's own sublayer parameters:
+    #   h = x + MHA(LN1(x)),   out = h + MLP(LN2(h))
+    # Randomize LayerNorm scale/shift and all biases so every parameter matters.
+    for ln in (block.ln1, block.ln2):
+        ln.gamma.data[...] = 1.0 + 0.1 * rng.standard_normal(embed_dim)
+        ln.beta.data[...] = 0.1 * rng.standard_normal(embed_dim)
+    attn = block.attention
+    for lin in (attn.q_proj, attn.k_proj, attn.v_proj, attn.out_proj,
+                block.mlp.linear1, block.mlp.linear2):
+        lin.bias.data[...] = 0.1 * rng.standard_normal(lin.bias.data.shape)
+
+    def _ref_layernorm(z, ln):
+        mu = z.mean(axis=-1, keepdims=True)
+        var = ((z - mu) ** 2).mean(axis=-1, keepdims=True)
+        return ln.gamma.data * (z - mu) / np.sqrt(var + ln.eps) + ln.beta.data
+
+    def _ref_attention(z, keep=None):
+        H, dh = attn.num_heads, embed_dim // attn.num_heads
+        q = z @ attn.q_proj.weight.data + attn.q_proj.bias.data
+        k = z @ attn.k_proj.weight.data + attn.k_proj.bias.data
+        v = z @ attn.v_proj.weight.data + attn.v_proj.bias.data
+        heads = []
+        for h in range(H):
+            cols = slice(h * dh, (h + 1) * dh)
+            scores = q[..., cols] @ np.swapaxes(k[..., cols], -1, -2) / np.sqrt(dh)
+            if keep is not None:
+                scores = np.where(keep == 0, -np.inf, scores)
+            scores = scores - scores.max(axis=-1, keepdims=True)
+            w = np.exp(scores)
+            w = w / w.sum(axis=-1, keepdims=True)
+            heads.append(w @ v[..., cols])
+        return np.concatenate(heads, axis=-1) @ attn.out_proj.weight.data + attn.out_proj.bias.data
+
+    def _ref_mlp(z):
+        hid = z @ block.mlp.linear1.weight.data + block.mlp.linear1.bias.data
+        hid = hid / (1.0 + np.exp(-1.702 * hid))  # GELU(z) = z * sigmoid(1.702 z)
+        return hid @ block.mlp.linear2.weight.data + block.mlp.linear2.bias.data
+
+    def _ref_block(z, keep=None):
+        h = z + _ref_attention(_ref_layernorm(z, block.ln1), keep)
+        return h + _ref_mlp(_ref_layernorm(h, block.ln2))
+
+    output = block.forward(x)
+    assert np.allclose(output.data, _ref_block(x.data), atol=1e-5), \
+        "Block output should equal h + MLP(LN2(h)) with h = x + MHA(LN1(x)) (pre-norm, two residual adds)"
+    masked_output = block.forward(x, mask)
+    assert np.allclose(masked_output.data, _ref_block(x.data, mask.data), atol=1e-5), \
+        "Masked block output should match the pre-norm reference with causal attention"
 
     # Test parameter counting
     params = block.parameters()
@@ -1220,13 +1301,16 @@ def demonstrate_transformer_integration():
     print(f"Vocabulary size: {vocab_size}")
     print(f"Characters: {''.join(vocab)}")
 
-    # Create model
+    # Create the model from the classes defined above in this notebook, not from
+    # the exported package, so this runs before `tito module complete 13`.
     model = GPT(
         vocab_size=vocab_size,
         embed_dim=64,
         num_layers=2,
         num_heads=4,
-        max_seq_len=32
+        max_seq_len=32,
+        block_cls=TransformerBlock, norm_cls=LayerNorm, mask_fn=create_causal_mask,
+        sample_fn=sample_next_token, generate_fn=generate
     )
 
     # Sample text encoding
@@ -1334,7 +1418,9 @@ def analyze_parameter_scaling():
             vocab_size=vocab_size,
             embed_dim=embed_dim,
             num_layers=num_layers,
-            num_heads=num_heads
+            num_heads=num_heads,
+            block_cls=TransformerBlock, norm_cls=LayerNorm, mask_fn=create_causal_mask,
+            sample_fn=sample_next_token, generate_fn=generate
         )
 
         total_params = sum(param.size for param in model.parameters())
@@ -1436,7 +1522,11 @@ def test_module():
     num_layers = 2
     num_heads = 4
 
-    model = GPT(vocab_size, embed_dim, num_layers, num_heads)
+    # Assemble GPT from YOUR classes above, so this test checks the code in this
+    # notebook and runs before Module 13 is exported.
+    model = GPT(vocab_size, embed_dim, num_layers, num_heads,
+                block_cls=TransformerBlock, norm_cls=LayerNorm, mask_fn=create_causal_mask,
+                sample_fn=sample_next_token, generate_fn=generate)
 
     # Test batch processing
     batch_size = 3

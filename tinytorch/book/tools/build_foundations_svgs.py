@@ -718,7 +718,7 @@ def gen_milestone_01_kernel_trace():
   <g transform="translate(35, 52)">
     <rect x="0" y="0" width="105" height="50" rx="1" fill="#f8fafc" stroke="#cbd5e1" stroke-width="1"/>
     <text x="52" y="20" text-anchor="middle" font-size="9" font-weight="700" fill="#1f2937">1. Batch X</text>
-    <text x="52" y="36" text-anchor="middle" font-size="8" font-family="monospace" fill="#6b7280">[4, 2] float32</text>
+    <text x="52" y="36" text-anchor="middle" font-size="8" font-family="monospace" fill="#6b7280">[100, 2] float32</text>
 
     <path d="M105 25 H125" stroke="#9ca3af" stroke-width="1.2" marker-end="url(#arrow-gray)"/>
 
@@ -741,8 +741,8 @@ def gen_milestone_01_kernel_trace():
     <path d="M480 25 H500" stroke="#9ca3af" stroke-width="1.2" marker-end="url(#arrow-gray)"/>
 
     <rect x="500" y="0" width="110" height="50" rx="1" fill="#f1f5f9" stroke="#1f2937" stroke-width="1.2"/>
-    <text x="555" y="20" text-anchor="middle" font-size="9" font-weight="700" fill="#1f2937">5. BCE Loss</text>
-    <text x="555" y="36" text-anchor="middle" font-size="8" font-family="monospace" fill="#c85a17">Scalar L = 0.69</text>
+    <text x="555" y="20" text-anchor="middle" font-size="9" font-weight="700" fill="#1f2937">5. Sigmoid + BCE</text>
+    <text x="555" y="36" text-anchor="middle" font-size="8" font-family="monospace" fill="#c85a17">Scalar loss L</text>
   </g>
 
   <!-- Backward Pipeline Container -->
@@ -777,11 +777,11 @@ def gen_milestone_01_kernel_trace():
 
   <!-- Step & Zero Container (ACCENT) -->
   <rect x="25" y="230" width="630" height="48" rx="2" fill="#fff1e8" stroke="#ff8246" stroke-width="1.2"/>
-  <text x="35" y="250" font-size="9.5" font-weight="700" fill="#c85a17">3. IN-PLACE OPTIMIZER MUTATION: opt.step() &amp; opt.zero_grad() (MODULE 07)</text>
-  <text x="35" y="266" font-size="8" font-family="monospace" fill="#1f2937">param.data -= lr * param.grad (in-place memory mutation) → sever _grad_fn tape references</text>
+  <text x="35" y="250" font-size="9.5" font-weight="700" fill="#c85a17">3. OPTIMIZER UPDATE: opt.step() &amp; opt.zero_grad() (MODULE 07)</text>
+  <text x="35" y="266" font-size="8" font-family="monospace" fill="#1f2937">param.data = (param.data - lr * grad).astype(dtype): new array, same Tensor; zero_grad() clears .grad</text>
 
   <!-- Bottom Annotation -->
-  <text x="340" y="300" text-anchor="middle" font-size="9" fill="#6b7280">The complete TinyTorch lifecycle: forward evaluation → autograd graph recording → reverse gradient propagation → in-place optimizer step.</text>
+  <text x="340" y="300" text-anchor="middle" font-size="9" fill="#6b7280">The complete TinyTorch lifecycle: forward evaluation → autograd graph recording → reverse gradient propagation → optimizer step.</text>
 {FOOTER}"""
     write_svg("milestone_01_kernel-trace.svg", body)
 
@@ -1029,24 +1029,28 @@ def gen_08_training_diag_1():
 # -----------------------------------------------------------------------------
 
 def gen_01_tensor_margin_overhead():
-    h = 95
+    # Byte counts are the output of the 01_tensors.qmd listing (sys.getsizeof)
+    # on CPython 3.12, 64-bit macOS arm64; re-measure if the interpreter changes.
+    h = 105
     body = f"""<?xml version="1.0" encoding="UTF-8"?>
 <svg xmlns="http://www.w3.org/2000/svg" width="220" height="{h}" viewBox="0 0 220 {h}" font-family="'TeX Gyre Heros', 'Helvetica Neue', Arial, sans-serif">
 <rect width="220" height="{h}" fill="#ffffff"/>
-  <rect x="5" y="5" width="210" height="85" rx="2" fill="#ffffff" stroke="#9ca3af" stroke-width="1.2"/>
+  <rect x="5" y="5" width="210" height="95" rx="2" fill="#ffffff" stroke="#9ca3af" stroke-width="1.2"/>
   <rect x="5" y="5" width="210" height="20" rx="2" fill="#f1f5f9" stroke="#9ca3af" stroke-width="1.2"/>
   <text x="12" y="19" font-size="8.5" font-weight="700" fill="#1f2937">STORAGE: 3×3 FLOAT MATRIX</text>
 
   <g transform="translate(15, 33)">
     <rect x="0" y="0" width="180" height="20" rx="1" fill="#f8fafc" stroke="#cbd5e1" stroke-width="1"/>
-    <rect x="0" y="0" width="156" height="20" rx="1" fill="#e2e8f0" stroke="#9ca3af" stroke-width="1"/>
-    <text x="8" y="14" font-size="8" font-weight="700" fill="#1f2937">Nested Lists: 280 B</text>
-    <text x="175" y="14" text-anchor="end" font-size="7.5" font-family="monospace" fill="#6b7280">7.8×</text>
+    <rect x="0" y="0" width="140" height="20" rx="1" fill="#e2e8f0" stroke="#9ca3af" stroke-width="1"/>
+    <text x="8" y="14" font-size="8" font-weight="700" fill="#1f2937">Nested Lists: 560 B</text>
+    <text x="175" y="14" text-anchor="end" font-size="7.5" font-family="monospace" fill="#6b7280">15.6×</text>
 
     <rect x="0" y="26" width="180" height="20" rx="1" fill="#f8fafc" stroke="#cbd5e1" stroke-width="1"/>
-    <rect x="0" y="26" width="28" height="20" rx="1" fill="#fff1e8" stroke="#ff8246" stroke-width="1.2"/>
-    <text x="34" y="40" font-size="8" font-weight="700" fill="#c85a17">Float32 Buffer: 36 B</text>
+    <rect x="0" y="26" width="9" height="20" rx="1" fill="#fff1e8" stroke="#ff8246" stroke-width="1.2"/>
+    <text x="16" y="40" font-size="8" font-weight="700" fill="#c85a17">Float32 Buffer: 36 B</text>
     <text x="175" y="40" text-anchor="end" font-size="7.5" font-family="monospace" font-weight="bold" fill="#c85a17">1.0×</text>
+
+    <text x="0" y="61" font-size="8" fill="#6b7280">sys.getsizeof, CPython 3.12, 64-bit</text>
   </g>
 </svg>
 """
@@ -1075,7 +1079,7 @@ def gen_02_activation_margin_gelu():
     <!-- GELU curve with recovery dip -->
     <path d="M 25 65 Q 55 65 67 71 T 85 65 Q 110 48 155 10" fill="none" stroke="#ff8246" stroke-width="1.8"/>
     <circle cx="67" cy="71" r="2.5" fill="#c85a17"/>
-    <text x="67" y="83" text-anchor="middle" font-size="7" font-family="monospace" font-weight="bold" fill="#c85a17">-0.17 well</text>
+    <text x="67" y="83" text-anchor="middle" font-size="7" font-family="monospace" font-weight="bold" fill="#c85a17">-0.16 well</text>
     <text x="125" y="38" font-size="7.5" font-weight="700" fill="#ff8246">GELU</text>
   </g>
 </svg>

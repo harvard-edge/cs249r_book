@@ -1,0 +1,98 @@
+---
+title: "Milestone 07: Custom Kernels (2024)"
+---
+
+:::{.callout-note title="Milestone Info"}
+
+**Hardware Acceleration Milestone** | Difficulty: ●●●●● | Time: 30–45 min | Prerequisites: Modules 01, 06, 09, 14, 17
+:::
+
+:::{.callout-tip title="What You'll Learn"}
+
+- Why a blocked matrix multiply must handle the ragged last tile on every axis
+- How im2col turns a sliding-window convolution into one matrix multiply, and why col2im is its adjoint
+- Why a fast kernel that computes the wrong answer is not an optimization
+- What compiled C++ SIMD, Apple Metal (MPS), and OpenAI Triton kernels change relative to NumPy, measured on your machine
+- How modern inference engines (vLLM, TensorRT-LLM, FlashAttention) eliminate memory traffic
+:::
+
+## Overview
+
+**In 2024, Python is the control plane of AI, but native silicon executes the workload.**
+
+Across Parts I, II, and III, you built a complete framework from first principles in Python and NumPy: tensors, reverse-mode autograd, multi-head attention, autoregressive Transformers, quantization, and KV caching. You proved that pure NumPy code can train MLPs and run TinyGPT.
+
+Yet production AI systems face the **memory wall**. Every time a Python interpreter dispatches an operation (a matrix multiplication, an addition, or an activation function), intermediate tensors are allocated in DRAM. For large language models, memory bandwidth (not arithmetic compute) is the primary bottleneck.
+
+To break through this bottleneck, production systems bypass high-level framework runtimes and write custom hardware kernels:
+
+1. **Operator Fusion:** Combining linear projections, bias additions, and activation functions into a single kernel execution, keeping intermediate values in fast L1/L2 caches or GPU SRAM.
+2. **Hardware-Specific Instruction Sets:** Exploiting AVX-512 and ARM NEON SIMD vector units on CPUs, Apple Metal compute shaders on macOS M-series chips, and OpenAI Triton / CUDA kernels on NVIDIA GPUs.
+
+Every one of those kernels rests on ideas you implemented in Module 17: blocking a matrix multiply into cache-sized tiles, lowering convolution to one GEMM, and fusing an elementwise chain into one pass. Milestone 07 checks that your versions are correct on the shapes that break naive kernels, then times them against native kernels built on the same ideas.
+
+## What You'll Recreate
+
+`01_custom_kernels.py` runs in two parts.
+
+1. **Part A, the pass gate: YOUR Module 17 kernels.**
+   - `tiled_matmul` on ragged shapes (sizes that are not a multiple of the tile on any axis, 1-wide matrices, a matrix smaller than one tile) and several tile sizes.
+   - `fused_gelu` against the tanh-approximation formula computed in float64.
+   - `im2col_conv2d` on odd spatial sizes, stride 2, and padding, against a direct convolution.
+   - `col2im`, checked as the adjoint of `im2col`: $\langle \text{im2col}(x), g\rangle = \langle x, \text{col2im}(g)\rangle$.
+   - 30 cases in all, each compared with NumPy within float32 tolerance.
+2. **Part B, context: bundled native kernels.** The same GEMM and bias + GELU run on kernels that ship with TinyTorch in `tinytorch/extensions/`, and the script prints their timings next to yours:
+   - **C++ SIMD:** a matrix multiply and a fused bias + GELU compiled on the fly with your C++ compiler (AVX2 or NEON, with OpenMP when available) and bound through `ctypes`.
+   - **Apple Metal (MPS):** a matrix multiply on the Apple GPU through PyTorch's MPS backend (`torch.matmul`, a library call). This optional path needs PyTorch (`pip install torch`), which TinyTorch itself never imports.
+   - **OpenAI Triton:** a fused bias + GELU kernel, run only when a CUDA GPU with Triton is present.
+
+   These kernels are reference points, not your work, and they never decide the result. A bundled kernel that disagrees with NumPy is flagged as a TinyTorch bug, not credited.
+
+## Prerequisites
+
+@tbl-milestone-07-prerequisites lists the modules you need to have completed before starting.
+
+| Module | Component | What It Provides |
+|--------|-----------|------------------|
+| 01 | Tensor | The tensor type the kernels take and return |
+| 06 | Autograd | Backward pass for the im2col convolution |
+| 09 | Convolutions | The `Conv2d` reference that im2col must reproduce |
+| 14 | Profiling | Latency and memory measurement |
+| 17 | Acceleration | YOUR `tiled_matmul`, `fused_gelu`, `im2col`, `im2col_conv2d`, and `col2im` |
+
+: **Prerequisite modules for the Custom Kernels milestone.** {#tbl-milestone-07-prerequisites}
+
+## Running the Milestone
+
+Run the milestone using `tito`:
+
+```bash
+tito milestone run 07
+```
+
+You can also use semantic aliases:
+
+```bash
+tito milestone run kernels
+tito milestone run triton
+tito milestone run metal
+```
+
+All three aliases run the same script. Part B detects your hardware and times whichever bundled kernels can run:
+
+- **On macOS (Apple Silicon):** C++ SIMD and Apple Metal MPS.
+- **On Linux/Windows with NVIDIA GPUs:** C++ SIMD and OpenAI Triton.
+- **On CPU-only systems:** C++ SIMD, which needs only a C++ compiler (clang or gcc).
+
+The milestone passes when every Part A case matches NumPy, with or without a compiler or GPU. If Module 17 is not exported, it prints INCOMPLETE and exits with status 1; if any of your kernels disagrees with NumPy, it names the failing cases, explains what to fix, and exits with status 1.
+
+## What Makes This Special
+
+When Milestone 07 passes:
+
+- Your tiled matrix multiply covers the ragged last tile on every axis, for every tile size tested.
+- Your im2col lowering computes exactly the convolution a direct sliding window computes, including stride and padding.
+- Your fused GELU matches the float64 formula, and your `col2im` scatters every gradient back to the pixel it came from.
+- Every native kernel that ran on your machine was timed on the same problem, so you can see what compiled SIMD or a GPU changes relative to your NumPy-backed tiles.
+
+You have journeyed from Frank Rosenblatt's 1958 Perceptron to the tiling and lowering ideas inside 2024's custom kernels, understanding every single layer of the stack.

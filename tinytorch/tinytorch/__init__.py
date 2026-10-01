@@ -10,16 +10,49 @@ Imports are optional - only available after completing each module.
 
 from pathlib import Path as _Path
 
-def _get_version() -> str:
-    """Read version from pyproject.toml (single source of truth)."""
+def _version_from_pyproject(pyproject_path: _Path):
+    """Return [project].version if this pyproject belongs to tinytorch, else None."""
     try:
-        pyproject_path = _Path(__file__).parent.parent / "pyproject.toml"
-        if pyproject_path.exists():
-            content = pyproject_path.read_text(encoding="utf-8")
-            for line in content.splitlines():
-                if line.strip().startswith("version"):
-                    return line.split("=")[1].strip().strip('"').strip("'")
-    except Exception:
+        content = pyproject_path.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError):
+        return None
+    section, name, version = None, None, None
+    for raw in content.splitlines():
+        line = raw.strip()
+        if line.startswith("["):
+            section = line.strip("[]").strip()
+            continue
+        if section != "project" or "=" not in line:
+            continue
+        key, _, value = line.partition("=")
+        key, value = key.strip(), value.strip().strip('"').strip("'")
+        if key == "name":
+            name = value
+        elif key == "version":
+            version = value
+    return version if name == "tinytorch" and version else None
+
+
+def _get_version() -> str:
+    """Return the tinytorch version.
+
+    Order of precedence:
+      1. ``pyproject.toml`` next to the package, when it belongs to the
+         ``tinytorch`` project (a repo checkout / editable install -- the file
+         is the source of truth and may be ahead of stale install metadata).
+      2. ``importlib.metadata.version("tinytorch")`` (an installed wheel, which
+         ships no pyproject.toml).
+    """
+    version = _version_from_pyproject(_Path(__file__).parent.parent / "pyproject.toml")
+    if version:
+        return version
+    try:
+        from importlib.metadata import version as _dist_version, PackageNotFoundError
+        try:
+            return _dist_version("tinytorch")
+        except PackageNotFoundError:
+            pass
+    except ImportError:
         pass
     return "0.0.0-dev"
 

@@ -38,10 +38,13 @@ take several minutes.
 |----|------|----------------|---------|
 | 01 | Perceptron (1958) | `01_1958_perceptron/01_rosenblatt_forward.py` | Forward pass with random weights |
 | 02 | XOR Crisis (1969) | `02_1969_xor/01_xor_crisis.py` | Single-layer XOR limitation |
-| 03 | MLP Revival (1986) | `02_xor_solved.py`, `01_rumelhart_tinydigits.py` | Hidden layers plus TinyDigits |
+| 03 | MLP Revival (1986) | `02_xor_solved.py`, `01_rumelhart_tinydigits.py` (both required) | Hidden layers plus TinyDigits |
 | 04 | CNN Revolution (1998) | `04_1998_cnn/01_lecun_tinydigits.py` | Convolutions on TinyDigits |
-| 05 | Transformer Era (2017) | `05_2017_transformer/01_tinygpt_shakespeare.py` | TinyGPT Shakespeare training & generation (ChatGPT foundation) |
-| 06 | MLPerf Benchmarks (2018) | `06_2018_mlperf/*.py` | Optimization and speedup demos |
+| 05 | The Transformer (2017) | `01_tinygpt_shakespeare.py`, `02_vaswani_attention.py` (both required; Parts 3-4 optional) | TinyGPT training with a causality probe, plus attention routing |
+| 06 | MLPerf to Generative Serving (2018) | `06_2018_mlperf/*.py` (both required) | Gated profiling, benchmarking, quantization, pruning, and KV-cache checks |
+| 07 | Custom Kernels (2024) | `07_2024_kernels/01_custom_kernels.py` | YOUR Module 17 kernels, timed against bundled C++ SIMD, Metal, and Triton |
+
+A milestone is recorded complete only when every required part passes. The `test_gates_*.py` files inject specific student bugs (a no-op optimizer, a loss forward that returns 0, a missing causal mask, frozen filters, a broken quantizer) and assert that the milestone exits 1.
 
 ## Required Setup
 

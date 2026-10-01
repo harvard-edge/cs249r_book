@@ -61,32 +61,27 @@ Engineering mastery is tracked using the [Physical AI Station Competency Card](c
 
 ---
 
-## 5. The 14-Week Semester Schedule
+## 5. The 14-Week Lab Schedule
 
-Formal classroom instruction and new textbook readings run through **Week 11**, covering the four parts of the textbook across **8 focused labs**. The final three weeks (**Weeks 12–14**) are preserved as an open **Capstone Project Studio**:
+Six labs follow the textbook's four parts in order, building from pen-and-paper math through simulation, real hardware, learned control, and finally safety governance. The final three weeks are an open capstone.
 
-![Volume IV Physical AI Studio 14-Week Curriculum Map](assets/images/vol4-course-structure-map.svg)
 
----
-
-## 6. Studio Lab Directory & Reading Guide
-
-| Studio Module & Link | Schedule | Required Textbook Reading | Primary Physical AI Focus | Competency Check-Off |
-|:---|:---:|:---|:---|:---:|
-| **[Module 1: The Machine Anatomy](labs/module-1-machine-anatomy.md)**<br>• [Lab 1: Causal Boundary & Bus Bring-Up](labs/lab-01-boundary.md)<br>• [Lab 2: Sensing & Inter-Core Bridge](labs/lab-02-body-and-sensors.md) | Weeks 1–3 | **Ch 1:** Causal Boundary<br>**Ch 2:** Physical Body<br>**Ch 3:** Cognitive Brain<br>**Ch 4:** Nervous System | Enumerate STS3215 servos on STM32; zero-calibrate offsets; measure travel limits and power-off drop trace. Calibrate USB webcam ($T_{\text{cam}}^{\text{base}}$) and measure inter-core RPC latency. | `A1` · `A2`<br>`A3` · `D1` |
-| **[Module 2: Teaching the Machine](labs/module-2-teaching-the-machine.md)**<br>• [Lab 3: Teleoperation & Datasets](labs/lab-03-physical-episodes.md)<br>• [Lab 4: Baseline & Policy Export](labs/lab-04-baseline-and-learning.md) | Weeks 4–6 | **Ch 5:** Physical Data<br>**Ch 6:** Policy Training<br>**Ch 7:** Closed-Loop Evaluation | Teleoperate SO-101; record 30 episodes in LeRobot Dataset v3 format with 4 action taps. Build scripted reach baseline. Train ACT / fine-tune SmolVLA; export ONNX to Qualcomm Linux (<100ms). | `B1` · `B2`<br>`B3` |
-| **[Module 3: Running the Machine](labs/module-3-running-the-machine.md)**<br>• [Lab 5: Closed-Loop Autonomous Reach](labs/lab-05-local-feedback-loop.md)<br>• [Lab 6: Action Horizons & Disturbances](labs/lab-06-action-chunks.md) | Weeks 7–9 | **Ch 8:** Sensor Perception<br>**Ch 10:** Grounded Intent<br>**Ch 11:** Trajectory Planning<br>**Ch 13:** Silicon Placement | Deploy live inference on UNO Q without host tethering. Benchmark action chunk horizons ($K=1$ vs $16$). Test SmolVLA language conditioning. Shift target mid-reach to evaluate replanning vs. drift. | `C1` · `C2`<br>`C3` |
-| **[Module 4: Governing the Machine](labs/module-4-governing-the-machine.md)**<br>• [Lab 7: Microcontroller Safety Governor](labs/lab-07-authority-under-fault.md)<br>• [Lab 8: Fault Injection & Safe Cutoff](labs/lab-08-verification-and-release.md) | Weeks 10–11 | **Ch 12:** Safety Enforcement<br>**Ch 14:** Supervisory Intervention<br>**Ch 15:** Adversarial Verification<br>**Ch 16:** Safe Release | Implement real-time velocity clamps and table geofences on STM32. Inject synthetic faults (frozen Linux, dropped frames, stale packets); verify communication watchdog cutoff with zero backlog. | `D1` · `D2` |
-| **[Capstone Project Studio](labs/lab-capstone-studio.md)**<br>*(Synthesis & Physical Release)* | Weeks 12–14 | **Chapters 1–17**<br>*(Complete Book Synthesis)* | 3 full weeks: independent task design, peer adversarial fault exchange, 20 held-out physical disturbance trials, and oral defense of the **Physical Release Dossier**. | `D3`<br>*(Full Card Mastery)* |
+| | Lab | Weeks | Book Part & Chapters | What You Will Do |
+|:---:|:---|:---:|:---|:---|
+| 1 | **[Robot Kinematics & Digital Twin](labs/lab-01-machine-anatomy.md)** | 1–2 | Part I — Ch 1 *Causal Boundary*, Ch 2 *Physical Body* | Understand the math that makes a robot move. Derive inverse kinematics by hand, then build a simulated digital twin and command it with your own equations. |
+| 2 | **[From Simulation to Real Hardware](labs/lab-02-teleoperation-and-datasets.md)** | 3–4 | Part I — Ch 3 *Cognitive Brain*, Ch 4 *Nervous System* | Discover what simulation gets wrong. Wire the physical bench, port your IK to the microcontroller, control the real robot via CLI, and measure the gap between sim and reality. |
+| 3 | **[Learned Control with Vision-Language-Action Models](labs/lab-03-baseline-and-training.md)** | 5–6 | Part II — Ch 5 *Physical Data*, Ch 6 *Policy Training* | Replace hand-coded equations with a neural policy that learns from data. Run a pre-trained VLA in simulation, then deploy it to the real robot and measure the sim2real performance drop. |
+| 4 | **[Real-World Data Collection & Fine-Tuning](labs/lab-04-autonomous-reach.md)** | 7–8 | Part II–III — Ch 7 *Evaluation*, Ch 8 *Perception*, Ch 9 *Spatial Memory* | Bridge the sim2real gap with real data. Teleoperate the robot to collect demonstrations, fine-tune the sim-trained model, and deploy it untethered for fully autonomous operation. |
+| 5 | **[Stress-Testing: Prediction, Language & Recovery](labs/lab-05-horizons-and-disturbances.md)** | 9 | Part III — Ch 10 *Grounded Intent*, Ch 11 *Trajectory Planning* | Push the system until it breaks. Test how far ahead the model can predict, whether language changes its behavior, and what happens when you move the target mid-reach. |
+| 6 | **[Safety Governor — Build It, Then Break It](labs/lab-06-safety-governor.md)** | 10–11 | Part III–IV — Ch 12 *Safety Enforcement*, Ch 13 *Silicon Placement*, Ch 14 *Intervention*, Ch 15 *Verification*, Ch 16 *Release* | Prove the robot is trustworthy. Program safety barriers on the microcontroller, then try to defeat them by freezing the brain, corrupting packets, and cutting power. |
+| | **[Capstone: Physical Release Defense](labs/lab-capstone-studio.md)** | 12–14 | Synthesis — Ch 17 *Epistemic Frontier* | Put it all together. Design your own task, survive a peer team's adversarial attacks, defend your Physical Release Dossier, and generalize the pipeline to a new robot. |
 
 ---
 
-## 7. Operational & Governance Documents
+## 6. Reference Documents
 
-| Domain | Document | Primary Focus & Target Audience |
-|:---|:---|:---|
-| **Academic Policy** | 📋 **[Master Course Syllabus](curriculum/syllabus.md)** | Full academic grading weights (15% M1, 25% M2, 20% M3, 15% M4, 25% M5), team roles, and safety contract. |
-| **Student Rubric** | 🏷️ **[Physical AI Competency Card](curriculum/student-competencies.md)** | The 12-item platform-independent rubric signed off at the bench across 4 quadrants. |
-| **Hardware Kit** | 📦 **[Kit Bill of Materials (BOM)](staff/kit-bom.md)** | Complete component list, pricing, power rails, and supplier links for the UNO Q and SO-101 arm. |
-| **Bench Bring-Up** | 🧪 **[Postdoc Pre-Flight Qualification Guide](staff/feasibility-plan.md)** | Engineering bring-up protocol and the four hardware validation steps (Steps 1–4). |
-| **Staff Roadmap** | 🗓️ **[Staff Implementation Master Plan](staff/staff-implementation-plan.md)** | Comprehensive 13-week execution schedule (Sep 21 – Dec 18, 2026) for hardware bring-up, "Student Zero" runs, and class-set replication. |
+| Document | Description |
+|:---|:---|
+| 📋 **[Master Course Syllabus](curriculum/syllabus.md)** | Grading weights, milestones, team roles, and safety contract. |
+| 🏷️ **[Physical AI Competency Card](curriculum/student-competencies.md)** | The 12-skill rubric signed off at the bench across 4 quadrants. |
+| 🔧 **[Station Reference Card](labs/station-reference.md)** | Standard bench hardware, wiring, engineering rules, and telemetry schema. |

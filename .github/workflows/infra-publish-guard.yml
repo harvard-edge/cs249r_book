@@ -15,6 +15,11 @@ name: '🔧 Infra · 🛡️ Publish Guard'
 #   branch             Branch whose latest run we trust (default: "dev").
 #   max_age_minutes    Refuse to trust runs older than this. Default 1440
 #                      (24h). Prevents stale green from gating publish.
+#   event              Only trust runs of this trigger event (e.g. "push").
+#                      Blank (default) keeps the legacy any-event behavior.
+#                      Without it, a fork PR whose head branch is named
+#                      <branch>, or a quick workflow_dispatch, can satisfy
+#                      the gate.
 #
 # Outputs:
 #   gate_status        "ok" if the latest validate run on <branch> is green
@@ -39,6 +44,11 @@ on:
         type: number
         default: 1440
         description: 'Maximum age (minutes) of the validate-dev run we trust. Default 24h.'
+      event:
+        required: false
+        type: string
+        default: ''
+        description: 'Only trust runs triggered by this event (e.g. "push"). Blank = any event (legacy behavior).'
 
     outputs:
       gate_status:
@@ -53,6 +63,7 @@ jobs:
   guard:
     name: '🛡️ Validate-Dev Green Gate'
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     outputs:
       gate_status: ${{ steps.gate.outputs.gate_status }}
     steps:
@@ -65,13 +76,20 @@ jobs:
           WORKFLOW: ${{ inputs.validate_workflow }}
           BRANCH: ${{ inputs.branch }}
           MAX_AGE: ${{ inputs.max_age_minutes }}
+          EVENT: ${{ inputs.event }}
         run: |
           set -euo pipefail
           echo "Looking for the latest run of '$WORKFLOW' on branch '$BRANCH'..."
 
-          # Pull the latest run that completed (status=completed) on $BRANCH.
+          # Pull the latest run that completed (status=completed) on $BRANCH,
+          # optionally restricted to one trigger event.
+          EVENT_FILTER=""
+          if [ -n "$EVENT" ]; then
+            EVENT_FILTER="&event=$EVENT"
+            echo "Restricting to '$EVENT' runs."
+          fi
           RUN_JSON=$(gh api \
-            "repos/$OWNER/$REPO/actions/workflows/$WORKFLOW/runs?branch=$BRANCH&per_page=1&status=completed" \
+            "repos/$OWNER/$REPO/actions/workflows/$WORKFLOW/runs?branch=$BRANCH${EVENT_FILTER}&per_page=1&status=completed" \
             --jq '.workflow_runs[0] // empty')
 
           if [ -z "$RUN_JSON" ]; then
@@ -102,6 +120,7 @@ jobs:
             echo ""
             echo "- **Workflow watched**: \`$WORKFLOW\`"
             echo "- **Branch**: \`$BRANCH\`"
+            echo "- **Event filter**: \`${EVENT:-any}\`"
             echo "- **Conclusion**: \`$CONCLUSION\`"
             echo "- **Head SHA**: \`$HEAD_SHA\`"
             echo "- **Age**: ${AGE_MIN}m (limit ${MAX_AGE}m)"

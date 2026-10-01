@@ -1,4 +1,4 @@
-# Activation Functions: Non-Linearity and Gradients {#sec-activations}
+# Activation Functions: Non-Linearity and Numerical Stability {#sec-activations}
 
 ::: {.column-margin}
 ![](assets/images/diagrams/02_framework-you-are-here.svg){width="100%" fig-alt="TinyTorch execution datapath blueprint highlighting Module 02 Activations as the active subsystem."}
@@ -7,7 +7,7 @@
 :::
 
 
-The core premise of deep learning is the ability to learn complex, non-linear representations from data. Yet if a neural network consists solely of linear transformations, matrix multiplications and bias additions, it suffers a fatal mathematical collapse: the composition of any number of linear maps is itself just a single linear map ($\mathbf{W}_2(\mathbf{W}_1 \mathbf{x} + \mathbf{b}_1) + \mathbf{b}_2 = \mathbf{W}_{\text{eff}}\mathbf{x} + \mathbf{b}_{\text{eff}}$). Without non-linearity, a 100-layer deep network has no more expressive power than a single linear layer. To bend representation space and learn intricate decision boundaries, deep architectures require **activation functions**.
+The core premise of deep learning is the ability to learn complex, non-linear representations from data. Yet if a neural network consists solely of linear transformations, matrix multiplications and bias additions, it suffers a fatal mathematical collapse: the composition of any number of linear maps is itself just a single linear map ($(\mathbf{x}\mathbf{W}_1 + \mathbf{b}_1)\mathbf{W}_2 + \mathbf{b}_2 = \mathbf{x}\mathbf{W}_{\text{eff}} + \mathbf{b}_{\text{eff}}$, with effective weight $\mathbf{W}_{\text{eff}} = \mathbf{W}_1 \mathbf{W}_2$ and bias $\mathbf{b}_{\text{eff}} = \mathbf{b}_1 \mathbf{W}_2 + \mathbf{b}_2$). Without non-linearity, a 100-layer deep network has no more expressive power than a single linear layer. To bend representation space and learn intricate decision boundaries, deep architectures require **activation functions**.
 
 In PyTorch, applying an activation function is a concise one-liner:
 
@@ -20,13 +20,14 @@ relu_out = F.relu(x)
 gelu_out = F.gelu(x)
 
 print("ReLU:", relu_out)  # [0.0, 0.0, 0.0, 1.5]
-print("GELU:", gelu_out)  # [-0.0454, -0.1543, 0.0, 1.3996]
+print("GELU:", gelu_out)  # [-0.0455, -0.1543, 0.0, 1.3998]
 ```
 
 Underneath that simple call, the runtime coordinates three distinct systems concerns:
+
 1. **Elementwise 1D kernel execution:** The runtime dispatches an elementwise unary kernel across the contiguous float32 buffer, reading input values and writing transformed activations into a newly allocated output tensor of identical shape and strides.
 2. **Memory-bandwidth saturation:** Because an activation performs only a few arithmetic operations per float read and written, its arithmetic intensity is low. On modern accelerators with fast FP32 units, the wall-clock execution time is dominated almost entirely by the memory bus bandwidth required to move bytes to and from DRAM.
-3. **The autograd contract and saved state:** The runtime must record the operator on the autograd tape and preserve either the forward inputs or a boolean bitmask (`x > 0` for ReLU) so that reverse-mode automatic differentiation can compute exact gradients during backpropagation.
+3. **Execution contracts and activation lifetimes:** The runtime must allocate and manage output buffers for downstream consumption, while maintaining activation records that downstream optimization and automatic differentiation engines will require during training (@sec-autograd).
 
 This chapter builds the non-linear foundation of TinyTorch, implementing the core activation zoo (ReLU, Sigmoid, Tanh, GELU, and Softmax) through `Function.apply`. Before building these operators, we must inspect the mathematical collapse that occurs when non-linearities are omitted.
 
@@ -45,6 +46,12 @@ This chapter builds the non-linear foundation of TinyTorch, implementing the cor
 With one input, consider a first layer that computes $h = 2x + 1$ and a second that computes $y = 3h - 2$. At $x = 1$, the intermediate value is $h = 3$ and the result is $y = 7$. Substitution gives $y = 6x + 1$, a single multiply-and-add with the same result. Adding the second layer changed the coefficients, but not the kind of function available.
 
 The layer traditionally called linear includes a bias, so mathematically it is an affine map, a linear map plus a constant shift. It maps an input row vector $\mathbf{x}$ to $\mathbf{x}\mathbf{W} + \mathbf{b}$, where $\mathbf{W}$ is a matrix of weights and $\mathbf{b}$ is a vector of biases. Stack two of them, feeding the output of the first into the second:
+
+::: {.column-margin}
+![](assets/images/diagrams/02_activation-margin-linear-collapse.svg){width="100%" fig-alt="Diagram of linear collapse showing two stacked linear layers folding associatively into a single equivalent affine layer with effective weights and biases."}
+
+*Stacking linear layers yields an equivalent single linear layer ($\mathbf{W}_{\text{eff}} = \mathbf{W}_1\mathbf{W}_2$), collapsing model depth into a single flat hyperplane.*
+:::
 
 $$\mathbf{h} = \mathbf{x}\mathbf{W}_1 + \mathbf{b}_1, \qquad \mathbf{y} = \mathbf{h}\mathbf{W}_2 + \mathbf{b}_2$$
 
@@ -87,7 +94,7 @@ The two paths agree exactly for these small values. Algebraically the equivalenc
 
 : Two linear layers in sequence versus the single layer they fold into, on the input $\mathbf{x} = [1, 2]$. {#tbl-linear-collapse-trace tbl-colwidths="[15,25,35,25]"}
 
-The reason this hurts is what a single linear layer cannot do. Take the four points of the XOR truth table, $(0,0)$ and $(1,1)$ labeled 0, $(0,1)$ and $(1,0)$ labeled 1, and ask a linear function $f(x_1, x_2) = a x_1 + b x_2 + c$ to score the 1s above some threshold $t$ and the 0s below it. Adding the two "below" conditions gives $a + b + 2c < 2t$; adding the two "above" conditions gives $a + b + 2c > 2t$. Both cannot hold, so no linear function separates the points, and by the collapse above no *stack* of linear functions can either. A hundred layers and a million weights are no better than a single line through the plane. Milestone I revisits this example with a two-layer network that solves it, once we have the missing piece.
+The reason this hurts is what a single linear layer cannot do. Take the four points of the XOR truth table, $(0,0)$ and $(1,1)$ labeled 0, $(0,1)$ and $(1,0)$ labeled 1, and ask a linear function $f(x_1, x_2) = a x_1 + b x_2 + c$ to score the 1s above some threshold $t$ and the 0s below it. Adding the two "below" conditions gives $a + b + 2c < 2t$; adding the two "above" conditions gives $a + b + 2c > 2t$. Both cannot hold, so no linear function separates the points, and by the collapse above no *stack* of linear functions can either. A hundred layers and a million weights are no better than a single line through the plane. [Synthesis I](synthesis_01.qmd#sec-milestone-1) revisits this example with a two-layer network that solves it, once we have the missing piece.
 
 ---
 
@@ -116,6 +123,12 @@ Notice the spatial collapse: the two off-diagonal points $(1, 0)$ and $(0, 1)$ m
 
 Breaking the collapse is only the first requirement. The function also has to be inexpensive to evaluate across a whole array and responsive enough that changing the incoming values can change the result. A nearly flat function loses that responsiveness. @sec-autograd will turn this observation into derivatives and gradients, the quantities used to decide how weights should change during training. Here the output values and the shapes of the curves are enough to compare the choices in @tbl-activation-zoo.
 
+::: {.column-margin}
+![](assets/images/diagrams/02_activation-margin-sigmoid.svg){width="100%" fig-alt="Sigmoid activation S-curve showing midpoint (0, 0.5) and saturation zones approaching 0 and 1."}
+
+*Sigmoid squashes inputs to $(0, 1)$ with maximum gradient $0.25$ at origin, saturating in extreme tails.*
+:::
+
 | Activation | Rule | Output behavior | Limitation |
 | :--- | :--- | :--- | :--- |
 | Sigmoid | $1/(1 + e^{-x})$ | Squashes toward 0 and 1 | Nearly flat in both tails |
@@ -127,17 +140,11 @@ Breaking the collapse is only the first requirement. The function also has to be
 
 ### Sigmoid and saturation
 
-::: {.column-margin}
-![](assets/images/diagrams/02_activation-margin-sigmoid.svg){width="100%" fig-alt="Sigmoid activation S-curve showing midpoint (0, 0.5) and saturation zones approaching 0 and 1."}
-
-*Sigmoid squashes inputs to $(0, 1)$ with maximum gradient $0.25$ at origin, saturating in extreme tails.*
-:::
-
 The **sigmoid** maps zero to $0.5$, $-1$ to about $0.269$, and $1$ to about $0.731$. Its mathematical range is $(0, 1)$, useful when an output represents a probability. The endpoints are approached but never reached in exact arithmetic; float32 can round sufficiently extreme results to exactly 0 or 1.
 
-At the ends of the curve, large input changes produce small output changes. For example, increasing the input from 5 to 6 moves the output only from about $0.9933$ to $0.9975$. This flattening is called **saturation**. At extreme inputs, float32 evaluations of exponential functions also encounter severe hardware limits.[^fn-exp-overflow] @sec-autograd explains why saturated activations can weaken the signal used to update earlier weights, a problem called vanishing gradients. Saturation is already visible in the forward values, without implementing training.
+At the ends of the curve, large input changes produce small output changes. For example, increasing the input from 5 to 6 moves the output only from about $0.9933$ to $0.9975$. This flattening is called **saturation**.[^fn-ieee754-ftz] At extreme inputs, float32 evaluations of exponential functions also encounter severe hardware limits. In single-precision IEEE 754 float32, the maximum finite positive value is $(2 - 2^{-23}) \times 2^{127} \approx 3.4028235 \times 10^{38}$. Because $\ln(3.4028235 \times 10^{38}) \approx 88.72284$, any unshielded evaluation of $e^x$ for $x > 88.72$ overflows to $+\infty$. Symmetrically, below $x \approx -87.34$ the result of $e^x$ falls under the smallest normal float32 value and becomes subnormal, and below about $-104$ it underflows to exactly $0.0$, causing downstream unshielded logarithms to produce $-\infty$ or $\text{NaN}$. @sec-autograd explains why saturated activations can weaken the signal used to update earlier weights, a problem called vanishing gradients. Saturation is already visible in the forward values, without implementing training.
 
-[^fn-exp-overflow]: In single-precision IEEE 754 float32, the maximum finite positive value is $(2 - 2^{-23}) \times 2^{127} \approx 3.4028235 \times 10^{38}$. Because $\ln(3.4028235 \times 10^{38}) \approx 88.72284$, any unshielded evaluation of $e^x$ for $x > 88.72$ overflows to $+\infty$, quickly poisoning downstream calculations with $\text{NaN}$ or infinity.
+[^fn-ieee754-ftz]: In IEEE 754 single-precision float32, the subnormal minimum is $2^{-149} \approx 1.4 \times 10^{-45}$ and the normal minimum is $2^{-126} \approx 1.175 \times 10^{-38}$. Some accelerator code paths enable Flush-To-Zero (FTZ), for example CUDA builds with fast-math, and treat subnormals as zero; under FTZ, $e^x$ becomes $0.0$ below about $-87.34$. NumPy on a CPU keeps subnormals, so TinyTorch reaches exact zero only below about $-104$.
 
 ### Tanh
 
@@ -163,29 +170,25 @@ The zero branch has a cost. If every example gives a unit a negative input, its 
 
 ::: {#chk-dying-relu-saturation .callout-checkpoint title="Checkpoint: Dying ReLU and saturation traps"}
 
-**Mechanism**: If a large gradient updates weights such that an artificial neuron outputs negative values across the entire dataset, its output remains permanently $0$. Because $\frac{\partial}{\partial x}\text{ReLU}(x) = 0$ for $x < 0$, backpropagation injects zero gradient into upstream weights, creating an unrecoverable "dead unit."
+**Mechanism**: If a layer's weights and bias project representations entirely into negative space across a dataset, the unit outputs $0.0$ everywhere. Because the output remains constant zero regardless of input variation, all downstream layers receive zero information from this feature, collapsing the effective representation capacity of the network. When training begins (@sec-autograd), a zero slope on the negative branch means upstream weights receive no corrective learning signals.
 
-**Invariant check**: Saturated units (in sigmoid/tanh) or dead units (in ReLU) collapse effective model capacity. Monitoring the percentage of inactive activations during training provides an early warning before training diverges.
+**Invariant check**: Saturated units (in sigmoid/tanh) or dead units (in ReLU) collapse effective model capacity. Tracking the percentage of completely inactive activations across a batch provides an immediate diagnostic for representation collapse.[^fn-leaky-relu-elu]
 
 :::
+
+[^fn-leaky-relu-elu]: To prevent dead units, Maas et al. (2013) proposed Leaky ReLU ($\max(\alpha x, x)$ with $\alpha = 0.01$) and Clevert et al. (2015) introduced the Exponential Linear Unit (ELU), ensuring a non-zero derivative across negative inputs.
 
 ### GELU
 
-::: {.column-margin}
-![](assets/images/diagrams/02_activation-margin-gelu.svg){width="100%" fig-alt="Plot comparing GELU curvature with ReLU, highlighting the smooth negative dip to -0.17 at x = -0.75."}
-
-*GELU allows small negative gradients through its -0.17 dip before asymptotically saturating at zero.*
-:::
-
-A gate is a multiplier that controls how much of a value passes through. ReLU uses a hard gate, either 0 or 1. GELU, the **Gaussian error linear unit**, replaces it with a smooth multiplier. The exact definition is $x\Phi(x)$, where $\Phi(x)$ is the fraction of a standard normal bell curve lying to the left of $x$. That bell curve is centered at zero with standard deviation one; $\Phi(0)=0.5$ and $\Phi(1)\approx0.8413$. This probability interpretation defines the gate, but applying GELU does not draw a random sample.
+A gate is a multiplier that controls how much of a value passes through. ReLU uses a hard gate, either 0 or 1. GELU, the **Gaussian error linear unit**, replaces it with a smooth multiplier. The exact definition is $x\Phi(x)$, where $\Phi(x)$ is the fraction of a standard normal bell curve lying to the left of $x$. That bell curve is centered at zero with standard deviation one; $\Phi(0)=0.5$ and $\Phi(1)\approx0.8413$. In contrast to stochastic regularizers like Dropout that randomly zero activations with Bernoulli trials during training, GELU gates values deterministically by their cumulative probability: each activation is weighted by the likelihood that standard Gaussian noise falls below it ($x \cdot P(X \le x)$). This probability interpretation defines the shape of the smooth gate, but applying GELU does not draw a random sample; it is an entirely deterministic mathematical function.
 
 TinyTorch approximates the gate with the sigmoid already introduced:
 
-$$\operatorname{GELU}_{\text{TinyTorch}}(x) = x\,\sigma(1.702x).$$[^fn-gelu-constant]
+$$\operatorname{GELU}_{\text{TinyTorch}}(x) = x\,\sigma(1.702x).$$
+
+At $x=-1$, the gate is about $0.1542$, giving an output of $-0.1542$. At $x=1$, it is about $0.8458$, giving $0.8458$. Negative inputs can therefore affect the next layer, unlike ReLU's zero branch. Very negative inputs still produce outputs close to zero, so smoothness does not promise strong responsiveness everywhere. The approximation also differs from exact GELU, whose outputs at $-1$ and $1$ are about $-0.1587$ and $0.8413$.[^fn-gelu-constant] The worked trace follows the sigmoid form that the code actually computes.
 
 [^fn-gelu-constant]: The scaling factor $1.702 \approx \sqrt{8/\pi} \times 1.066$ is the classical logistic coefficient that minimizes the uniform Chebyshev discrepancy $\sup_{x \in \mathbb{R}} |\sigma(c \cdot x) - \Phi(x)|$, guaranteeing that the sigmoid gate deviates from the standard Gaussian cumulative normal distribution by less than $0.0095$ across the entire real line.
-
-At $x=-1$, the gate is about $0.1542$, giving an output of $-0.1542$. At $x=1$, it is about $0.8458$, giving $0.8458$. Negative inputs can therefore affect the next layer, unlike ReLU's zero branch. Very negative inputs still produce outputs close to zero, so smoothness does not promise strong responsiveness everywhere. The approximation also differs from exact GELU, whose outputs at $-1$ and $1$ are about $-0.1587$ and $0.8413$. The worked trace follows the sigmoid form that the code actually computes.
 
 ### Which activation goes last
 
@@ -195,17 +198,13 @@ Hidden layers need a nonlinearity. The last layer needs whatever form the loss e
 - **One yes-or-no label.** End with a sigmoid, so the output is one probability in $(0, 1)$. TinyTorch's `BinaryCrossEntropyLoss` expects exactly that, and clips it away from 0 and 1 before taking logarithms.
 - **One label among many.** Return the raw scores, the **logits**, and let the loss normalize them. TinyTorch's `CrossEntropyLoss` applies a max-shifted log-softmax internally, which stays finite where exponentiating first would overflow. Apply softmax yourself only when a caller needs probabilities, at inference time.
 
-The third rule is the one that fails quietly. A model that ends in softmax and trains with `CrossEntropyLoss` runs without an error, because the loss simply treats the probabilities as logits and normalizes them again. Every score it sees then lies between 0 and 1, so the correct class can never pull far ahead. With ten classes, the best the loss can reach is $-\ln\big(e / (e + 9)\big) \approx 1.46$, however well the model separates the classes.
+The third rule is the one that fails quietly. A model that ends in softmax and trains with `CrossEntropyLoss` runs without an error,[^fn-double-softmax-failure] because the loss internally applies `LogSoftmax` and treats those probabilities as raw logits (as detailed in @sec-losses). Every score it receives then lies strictly in $(0, 1)$, so the correct class can never pull far ahead in exponentiated space. With ten classes, the best loss the model can ever achieve is $-\ln\big(e / (e + 9)\big) \approx 1.46$, however well the network separates the inputs. In addition, computing Softmax twice creates redundant memory round-trips and distorts backward gradients, corrupting the learning trajectory without raising a single exception.
+
+[^fn-double-softmax-failure]: This represents one of the most common silent failure modes in beginner PyTorch pipelines. Because PyTorch's `nn.CrossEntropyLoss` internally composes `LogSoftmax` and `NLLLoss`, feeding it softmax probabilities evaluates $\log(\text{softmax}(p))$, squashing the logit differences the loss can see and capping how low the loss can go.
 
 ---
 
 ## The Code
-
-::: {.column-margin}
-![](assets/images/diagrams/02_activation-margin-source.svg){width="100%" fig-alt="Source code mapping card for Module 02 Activations showing file path, exported package, and tested primitives."}
-
-*Source Code Mapping: Module 02 extracts elementwise activations (ReLU, Sigmoid, Tanh, GELU) and Softmax normalization directly from the working repository.*
-:::
 
 ### Two classes per activation
 
@@ -213,9 +212,20 @@ A layer might turn a batch of two examples into a $2 \times 3$ array. Applying `
 
 Module 02 writes each activation as a pair of classes, and the pair is the pattern every later module follows. The first is an *operation*, a subclass of @sec-tensors's `Function` whose `forward` takes a NumPy array and returns one. @sec-autograd will teach the framework to retain this object as a record of the call and add a `backward` method for computing gradients. The second is a *layer*, a plain class that @sec-layers's containers can hold: it reports no parameters, its `forward` takes a `Tensor` and hands it to the operation through `apply`, and `__call__` makes `y = f(x)` work. Here is the sigmoid pair, the layer first.
 
+::: {.column-margin}
+![](assets/images/diagrams/02_activation-margin-source.svg){width="100%" fig-alt="Source code mapping card for Module 02 Activations showing file path, exported package, and tested primitives."}
+
+*Source Code Mapping: Module 02 extracts elementwise activations (ReLU, Sigmoid, Tanh, GELU) and Softmax normalization directly from the working repository.*
+:::
+
 {{< include _listings/02_activations/Sigmoid.qmd >}}
 
 Three things to notice. `parameters()` returns an empty list because @sec-layers's containers will ask every component for its learnable parameters, and an activation has none. `forward` contains no arithmetic at all; `SigmoidFunction.apply` unwraps the tensor, runs the operation on the array, and wraps the result in a fresh `Tensor`, exactly as @sec-tensors showed for `Add`. Neither class examines the shape. An elementwise function does not care whether the array is a vector or a four-dimensional batch of images, and NumPy walks whatever strides the array has, so a transposed input needs no special handling.
+
+::: {.column-margin}
+**↪ Jump ahead:** @sec-acceleration
+*Operator fusion combines activation arithmetic with linear layers, slashing DRAM round-trips.*
+:::
 
 ### The four operations
 
@@ -231,16 +241,12 @@ Sigmoid needs an additional numerical safeguard. The formula $1 / (1 + e^{-v})$ 
 
 The crucial line computes `z = exp(-abs(x))`. Every exponent is nonpositive, so `z` stays between zero and one. For nonnegative inputs, the result is `1 / (1 + z)`; for negative inputs it is `z / (1 + z)`. `np.where` selects between these results per element. NumPy evaluates both candidate arrays before selecting, but both are safe because they share the bounded `z`. This implementation does not need to silence overflow in a discarded sigmoid branch. At zero either division gives $0.5$; at $-1000$, `z` rounds to zero and the negative branch returns zero safely.
 
-::: {.column-margin}
-**↪ Jump ahead:** @sec-acceleration
-*Operator fusion combines activation arithmetic with linear layers, slashing DRAM round-trips.*
-:::
 
 GELU is defined as $x\,\Phi(x)$, where the Gaussian fraction can be computed using Python's `math.erf`, the error function. Module 02 instead approximates that fraction. It uses the approximation $x\,\sigma(1.702x)$, the sigmoid form, because it reuses the operation just written and expresses the gate using NumPy array operations.
 
 {{< include _listings/02_activations/GELUFunction.qmd >}}
 
-This is a different numerical function from the exact GELU. Its approximation error and derivative must therefore be checked against the sigmoid form actually implemented; the approximation exercise compares the forms on a grid. Notice that the call is `SigmoidFunction().forward`, the array-level method, not `Sigmoid()` on a tensor. Inside an operation everything is NumPy; tensor wrapping happens at the boundary that `apply` guards. The temporary `SigmoidFunction` call is array arithmetic inside GELU, not a separate Tensor operation. The `errstate` around scaling allows extreme finite inputs to reach infinite gate arguments, where sigmoid saturates safely. The second guard handles the otherwise invalid product $-\infty \times 0$, and the final `where` supplies its intended limiting output, zero.
+This is a different numerical function from the exact GELU. Its approximation error and derivative must therefore be checked against the sigmoid form actually implemented. Notice that the call is `SigmoidFunction().forward`, the array-level method, not `Sigmoid()` on a tensor. Inside an operation everything is NumPy; tensor wrapping happens at the boundary that `apply` guards. The temporary `SigmoidFunction` call is array arithmetic inside GELU, not a separate Tensor operation. The `errstate` around scaling allows extreme finite inputs to reach infinite gate arguments, where sigmoid saturates safely. The second guard handles the otherwise invalid product $-\infty \times 0$, and the final `where` supplies its intended limiting output, zero.
 
 For `y = Sigmoid()(x)`, read the calls in order: `Sigmoid.__call__` delegates to `Sigmoid.forward`, which selects `SigmoidFunction.apply`; `apply` passes `x.data` to the operation and constructs `y` from its result. The wrapper decides which operation runs, the operation decides the numerical formula, and `apply` decides how arrays cross the tensor boundary. A test can check the formula directly on an array, then check shape preservation and unchanged input through the public wrapper. These are different failure points, so one test should not stand in for both.
 
@@ -278,17 +284,17 @@ For scores `[1, 2, 3]`, Softmax returns approximately `[0.0900, 0.2447, 0.6652]`
 
 `Softmax.forward(x, dim=-1)` calls `SoftmaxFunction.apply(x, dim=dim)`. The `dim` argument becomes an attribute of that operation instance; it chooses which axis to normalize. For an input with shape $(2, 3)$ and `dim=-1`, the operation handles each row independently. Its maximum and sum arrays have shape $(2, 1)$ because `keepdims=True` retains the reduced axis. NumPy can then broadcast those values across their original rows.
 
-{{< include _listings/02_activations/SoftmaxFunction.qmd >}}
-
-The formula exponentiates each score and divides by the row's exponential sum. To avoid asking for an enormous exponential, the code subtracts the row maximum first. For `[1, 2, 3]`, the shifted scores are `[-2, -1, 0]`, the exponentials are approximately `[0.1353, 0.3679, 1]`, and their sum is `1.5032`. Division gives the probabilities above. Subtracting a common constant $m = \max_k x_k$ does not change the normalized ratios, since its exponential factor cancels between numerator and denominator:
-
-$$\frac{e^{x_i - m}}{\sum_j e^{x_j - m}} = \frac{e^{x_i} e^{-m}}{\sum_j (e^{x_j} e^{-m})} = \frac{e^{-m} e^{x_i}}{e^{-m} \sum_j e^{x_j}} = \frac{e^{x_i}}{\sum_j e^{x_j}}.$$
-
 ::: {.column-margin}
 **Core Invariant: Safe Exponentiation**\
 $$\max(z) \text{ subtraction keeps } z_i - m \le 0$$\
 *Exponentials never exceed $e^0 = 1.0$, preventing float32 overflow cliff.*
 :::
+
+{{< include _listings/02_activations/SoftmaxFunction.qmd >}}
+
+The formula exponentiates each score and divides by the row's exponential sum. To avoid asking for an enormous exponential, the code subtracts the row maximum first. For `[1, 2, 3]`, the shifted scores are `[-2, -1, 0]`, the exponentials are approximately `[0.1353, 0.3679, 1]`, and their sum is `1.5032`. Division gives the probabilities above. Subtracting a common constant $m = \max_k x_k$ does not change the normalized ratios, since its exponential factor cancels between numerator and denominator:
+
+$$\frac{e^{x_i - m}}{\sum_j e^{x_j - m}} = \frac{e^{x_i} e^{-m}}{\sum_j (e^{x_j} e^{-m})} = \frac{e^{-m} e^{x_i}}{e^{-m} \sum_j e^{x_j}} = \frac{e^{x_i}}{\sum_j e^{x_j}}.$$
 
 ![**The Softmax numerical cliff**: Naive exponentiation of large logits triggers float32 overflow ($> 3.4 \times 10^{38}$), returning $\text{NaN}$ and collapsing training. Subtracting the running maximum shifts exponents into the non-positive domain ($\le 0$), ensuring finite, stable probability evaluation.](assets/images/diagrams/02_softmax-numerical-cliff.svg){#fig-softmax-numerical-cliff width="100%" fig-alt="Top panel displays naive softmax overflowing to +Inf and NaN. Bottom panel displays safe LogSumExp shifting by max logit to compute exact probabilities without NaN risk."}
 
@@ -333,9 +339,21 @@ for i in range(len(v)):
           f" {gate[i]:10.4f} {g[i]:8.4f}")
 ```
 
-In line 4, `v` defines six sample points spanning negative, zero, and positive domains. Lines 5--6 compute standard Sigmoid and ReLU activations via their `forward` methods. In lines 7--8, `gate` evaluates the sigmoid factor $\sigma(1.702x)$ and `g` computes the complete GELU activation; line 9 validates the identity $g = v \cdot \text{gate}$ with `assert_allclose`.
+::: {.column-margin}
+![](assets/images/diagrams/02_activation-margin-gelu.svg){width="100%" fig-alt="Plot comparing GELU curvature with ReLU, highlighting the smooth negative dip to about -0.16 near x = -0.75."}
 
-In @tbl-activation-numerical-trace (printed by lines 11--14), the GELU output is the product of the first and fourth columns. At $-1$, a small positive gate ($0.1542$) lets a small negative value through ($-0.1542$); at zero, the gate is $0.5$ but the product is still zero. These are consequences of the multiplication, not special cases added to the function.
+*TinyTorch's sigmoid-form GELU dips to about -0.164 near x = -0.75 (exact GELU: -0.170) before approaching zero.*
+:::
+
+In line 4, `v` defines six sample points spanning negative, zero, and positive domains. Lines 5 to 6 compute standard Sigmoid and ReLU activations via their `forward` methods. In lines 7 to 8, `gate` evaluates the sigmoid factor $\sigma(1.702x)$ and `g` computes the complete GELU activation; line 9 validates the identity $g = v \cdot \text{gate}$ with `assert_allclose`.
+
+In @tbl-activation-numerical-trace (printed by lines 11 to 14), the GELU output is the product of the first and fourth columns. At $-1$, a small positive gate ($0.1542$) lets a small negative value through ($-0.1542$); at zero, the gate is $0.5$ but the product is still zero. These are consequences of the multiplication, not special cases added to the function.
+
+::: {.column-margin}
+![](assets/images/diagrams/02_activation-margin-vanishing-gradients.svg){width="100%" fig-alt="Plot comparing gradient decay across 10 layers for Sigmoid (0.25^10 ≈ 9.5e-7) versus ReLU (1.0^10 = 1.0)."}
+
+*Sigmoid's maximum slope ($0.25$) compounds across 10 layers to $9.5\times10^{-7}$, causing vanishing gradients. ReLU maintains unit slope ($1.0$), preserving signal flow.*
+:::
 
 | Input $x$ | Sigmoid | ReLU | GELU gate $\sigma(1.702x)$ | GELU output |
 | :---: | :---: | :---: | :---: | :---: |
@@ -370,11 +388,11 @@ An ideal separate ReLU pass reads one input array and writes one output array, a
 These are byte counts, not measured transfers from physical memory or a latency prediction. Caches, allocation, and the execution environment affect elapsed time. The count explains why reducing temporary arrays can matter even when the arithmetic is cheap. In-place evaluation saves an allocation but still reads and writes the values; fusion can eliminate the intermediate pass itself.
 :::
 
-For such a simple function, memory movement can dominate arithmetic. An operation is called **memory-bound** when moving its data is the limiting cost. That diagnosis requires measurement on a particular implementation and workload; it does not follow from a universal GPU timing ratio. Sigmoid and GELU make this especially worth checking in TinyTorch because their NumPy expressions create several temporary arrays, not one shared loop for the entire activation.
+For such a simple function, memory movement can dominate arithmetic. An operation is called **memory-bound** when moving its data is the limiting cost. In @sec-profiling, we will plot ReLU and Sigmoid on the Roofline model. Because an elementwise activation performs only 1 FLOP per 8 bytes of DRAM traffic (4 bytes read plus 4 bytes written), its operational intensity is $0.125$ FLOP/byte, placing it deep within the memory-bandwidth-bound region of all modern processors. That diagnosis requires measurement on a particular implementation and workload; it does not follow from a universal GPU timing ratio. Sigmoid and GELU make this especially worth checking in TinyTorch because their NumPy expressions create several temporary arrays, not one shared loop for the entire activation.
 
 ::: {#psp-fused-activation-cuda .callout-perspective title="Systems Perspective: Fused activation kernels in GPU execution"}
 
-**The memory bandwidth wall**: In modern deep learning accelerators, arithmetic units (e.g., NVIDIA Tensor Cores) execute floating-point operations orders of magnitude faster than high-bandwidth memory (HBM) can supply operands. A separate activation kernel spends ~90% of its execution time waiting on memory round-trips:
+**The memory bandwidth wall**: In modern deep learning accelerators, arithmetic units (e.g., NVIDIA Tensor Cores) execute floating-point operations orders of magnitude faster than high-bandwidth memory (HBM) can supply operands. A separate activation kernel spends most of its execution time waiting on memory round-trips:
 
 $$\text{Time} \approx \frac{\text{Bytes Read} + \text{Bytes Written}}{\text{Peak Memory Bandwidth}}$$
 
@@ -415,4 +433,4 @@ The numerical mechanisms are small but consequential. ReLU keeps positives and z
 ## Further Reading
 
 - **Glorot, Bordes, and Bengio** (2011). "[Deep sparse rectifier neural networks](https://proceedings.mlr.press/v15/glorot11a.html)." *AISTATS*. The case for ReLU in deep networks, including the exact zeros this chapter's ReLU produces.
-- **Hendrycks and Gimpel** (2016). "[Gaussian error linear units (GELUs)](https://arxiv.org/abs/1606.08415)." *arXiv*. The source of GELU and of the tanh approximation the module implements.
+- **Hendrycks and Gimpel** (2016). "[Gaussian error linear units (GELUs)](https://arxiv.org/abs/1606.08415)." *arXiv*. The source of GELU and of both approximations, including the sigmoid form $x\,\sigma(1.702x)$ the module implements.

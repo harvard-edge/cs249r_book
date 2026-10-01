@@ -56,14 +56,14 @@ x1  x2    XOR
 These 4 points CANNOT be separated by a single line!
 
 ### 02_xor_solved.py
-**Purpose:** Show how multi-layer networks solve it once Modules 04-08 are complete
+**Purpose:** Show how multi-layer networks solve it once Modules 04, 06, and 07 are complete
 
 - Add ONE hidden layer (2-layer network)
 - Same XOR problem, now solvable
 - Watch accuracy reach 100%
 - **Key Learning:** "Hidden layers unlock non-linear problems!"
 
-This script is run by `tito milestone run 03 --part 1`, not by `tito milestone run 02`.
+This script is run by `tito milestone run 03 --part 1`, not by `tito milestone run 02`. That command records Part 1 only; Milestone 03 completes once Part 2 (TinyDigits) has also passed, and `tito milestone run 03` runs both.
 
 **The Solution:**
 ```
@@ -87,9 +87,11 @@ The hidden layer learns to transform the space so XOR becomes linearly separable
 </thead>
 <tbody>
 <tr><td><b>01 (Single Layer)</b></td><td>1</td><td>N/A</td><td>≤75%</td><td>Cannot solve XOR (Minsky was right)</td></tr>
-<tr><td><b>02 (Multi-Layer)</b></td><td>2</td><td>→ 0.0</td><td>100%</td><td>Hidden layers solve the problem in Milestone 03</td></tr>
+<tr><td><b>02 (Multi-Layer)</b></td><td>2</td><td>0.7468 → 0.0060</td><td>100%</td><td>Hidden layers solve the problem in Milestone 03</td></tr>
 </tbody>
 </table>
+
+**Pass conditions.** `01_xor_crisis.py` checks every forward pass against sigmoid(XW + b) computed in NumPy, and exits 1 on a mismatch or if any single-layer line scores 100% (only broken code can). `02_xor_solved.py` first checks YOUR `BinaryCrossEntropyLoss` on the untrained outputs against a NumPy computation and exits 1 if they disagree. With the default seed 11, it then passes only when all four truth-table rows are right after training, the hidden layer received a non-zero gradient, and the hidden weights moved at least 0.25× their initial norm. With the default seed a failure means the code needs fixing; about 1 seed in 6 chosen with `--seed` stalls at 75% even with correct code.
 
 ## Key Learning: The Power of Depth
 
@@ -111,7 +113,7 @@ python 01_xor_crisis.py
 # Or from the TinyTorch project root:
 tito milestone run 02
 
-# See the solution later, after Module 08:
+# See the solution later, after Module 07:
 tito milestone run 03 --part 1
 ```
 

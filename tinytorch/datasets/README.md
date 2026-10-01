@@ -7,8 +7,10 @@ This directory contains datasets for TinyTorch milestone examples.
 ```
 datasets/
 ├── tinydigits/         ← 8×8 handwritten digits (ships with repo, ~310KB)
-├── tinytalks/          ← conversational Q&A text for transformers (~40KB)
+├── tinypy/             ← curated, verified Python code for code completion (~67KB)
 ├── tinyshakespeare/    ← bundled sample of Shakespeare plays (~21KB)
+├── tinytalks/          ← conversational Q&A text for transformers (~40KB)
+├── DATASHEET.md        ← Comprehensive TinyVerse suite datasheet (Gebru et al.)
 └── README.md           ← This file
 ```
 
@@ -16,23 +18,34 @@ datasets/
 
 ### TinyDigits
 - **Used by:** Milestones 03 & 04 (MLP and CNN examples)
-- **Contents:** 1,000 training + 200 test samples
-- **Format:** 8×8 grayscale images, pickled
+- **Contents:** 1,000 training + 200 test samples (balanced 0 to 9)
+- **Format:** 8x8 grayscale images, pickled
 - **Size:** ~310 KB
+- **Documentation:** README.md and DATASHEET.md
 - **Purpose:** Fast iteration on real image classification
 
+### TinyPy
+- **Used by:** Milestone 05 Part 3 (Code completion and syntax verification)
+- **Contents:** 102 curated Python snippets across math, sorting, data structures, and deep learning primitives
+- **Format:** Clean, 100% AST-valid Python source code
+- **Size:** ~73 KB
+- **Documentation:** README.md and DATASHEET.md
+- **Purpose:** Fast, offline code completion, syntax learning, and AST compiler gates
+
 ### TinyTalks
-- **Used by:** Transformer / language teaching (e.g. Milestone 05 materials and extensions)
-- **Contents:** 350 Q&A pairs across 5 difficulty levels
-- **Format:** Plain text (`Q:` / `A:` lines), character-level friendly
-- **Size:** ~40 KB
-- **Purpose:** Fast, offline conversational text for attention and GPT-style experiments
+- **Used by:** Milestone 05 Part 4 (Conversational modeling and Overfitting Detective)
+- **Contents:** 350 general Q&A pairs plus 81 specialized TinyTorch Concepts Q&A pairs with train/test splits
+- **Format:** Plain text (Q: / A: lines), character-level friendly
+- **Size:** ~53 KB combined
+- **Documentation:** README.md and DATASHEET.md
+- **Purpose:** Conversational text, concept retrieval, and measuring memorization versus generalization
 
 ### TinyShakespeare (Sample)
-- **Used by:** Milestone 05 (Transformer Era: TinyGPT autoregressive language modeling)
-- **Contents:** Curated excerpt from William Shakespeare's plays
+- **Used by:** Milestone 05 Part 1 (TinyGPT character-level language modeling)
+- **Contents:** Curated excerpt from William Shakespeare plays
 - **Format:** Plain text, character-level friendly
 - **Size:** ~21 KB
+- **Documentation:** README.md and DATASHEET.md
 - **Purpose:** Fast, offline next-token prediction and autoregressive sampling without downloading the full corpus
 
 ## Downloaded Datasets (On-Demand)
@@ -40,7 +53,7 @@ datasets/
 The milestones automatically download larger datasets when needed:
 
 ### MNIST
-- **Used by:** `milestones/03_1986_mlp/02_rumelhart_mnist.py`
+- **Used by:** Optional scaling benchmark via `DatasetManager().get_mnist()`
 - **Downloads to:** `milestones/datasets/mnist/`
 - **Contents:** 60K training + 10K test samples
 - **Format:** 28×28 grayscale images
@@ -71,7 +84,7 @@ The milestones automatically download larger datasets when needed:
 
 ## Total Repository Size
 
-- **Shipped data:** ~350 KB (TinyDigits + TinyTalks combined)
+- **Shipped data:** ~440 KB (TinyDigits, TinyPy, TinyTalks, TinyShakespeare combined)
 - **USB-friendly:** Entire repo fits on any device
 - **Offline-capable:** Core milestones work without internet
 - **Git-friendly:** No large binary files in version control

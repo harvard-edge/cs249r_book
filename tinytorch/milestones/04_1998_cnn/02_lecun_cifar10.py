@@ -71,7 +71,9 @@ CIFAR-10 contains 60,000 32×32 color images in 10 classes:
 📊 EXPECTED PERFORMANCE:
 - Dataset: 50,000 training images, 10,000 test images
 - Training time: 3-5 minutes (demonstration mode)
-- Expected accuracy: 70%+ (with YOUR CNN + BatchNorm + Augmentation!)
+- Expected accuracy: 70%+ (with YOUR CNN + BatchNorm + Augmentation!) after
+  full training. The default demo run (3 epochs of at most 100 batches) is
+  graded against a much lower floor: see MIN_TEST_ACCURACY below.
 - Parameters: ~600K (mostly in conv layers)
 - 🆕 BatchNorm: Stabilizes training, faster convergence
 - 🆕 Augmentation: Reduces overfitting, better generalization
@@ -160,54 +162,7 @@ from data_manager import DatasetManager
 
 
 # =============================================================================
-# DATASET CLASS - Your Module 05 Enables This Pattern
-# =============================================================================
-# The Dataset abstraction YOU built defines a contract: __len__() and __getitem__().
-# This simple interface lets YOUR DataLoader handle any data source uniformly.
-
-class CIFARDataset(Dataset):
-    """Custom CIFAR-10 Dataset using YOUR Dataset interface from Module 05!
-
-    Now with data augmentation support using YOUR transforms from Module 05!
-    """
-
-    def __init__(self, data, labels, transform=None):
-        """Initialize with data, labels, and optional transforms."""
-        self.data = data
-        self.labels = labels
-        self.transform = transform  # Module 05: YOUR augmentation transforms!
-
-    def __getitem__(self, idx):
-        """Get a single sample - YOUR Dataset interface!"""
-        img = self.data[idx]
-
-        # Apply augmentation if provided (training only!)
-        if self.transform is not None:
-            img = self.transform(img)
-            # Convert back to numpy if it became a Tensor
-            if isinstance(img, Tensor):
-                img = img.data
-
-        return Tensor(img), Tensor([self.labels[idx]])
-
-    def __len__(self):
-        """Return dataset size - YOUR Dataset interface!"""
-        return len(self.data)
-
-    def get_num_classes(self):
-        """Return number of classes."""
-        return 10
-
-
-# Training augmentation using YOUR transforms from Module 05!
-train_transforms = Compose([
-    RandomHorizontalFlip(p=0.5),   # 50% chance to flip - cars/animals look similar flipped!
-    RandomCrop(32, padding=4),      # Random crop with 4px padding - simulates translation
-])
-
-
-# =============================================================================
-# CNN MODEL - Your Convolution Modules Power Feature Extraction
+# 🎓 ZONE 1: STUDENT LEGO BRICKS (CIFAR-10 CNN Architecture)
 # =============================================================================
 # CNNs revolutionized vision by exploiting spatial structure. YOUR Conv2d uses
 # local connectivity + weight sharing to detect patterns with 100x fewer params.
@@ -222,6 +177,7 @@ def flatten(x):
     """
     batch_size = x.data.shape[0]
     return x.reshape(batch_size, -1)
+
 
 class CIFARCNN:
     """
@@ -319,6 +275,53 @@ class CIFARCNN:
             self.fc1.weight, self.fc1.bias,
             self.fc2.weight, self.fc2.bias
         ]
+
+
+# =============================================================================
+# 📊 ZONE 2: MILESTONE HARNESS & DATASET PIPELINE
+# =============================================================================
+# The Dataset abstraction YOU built defines a contract: __len__() and __getitem__().
+# This simple interface lets YOUR DataLoader handle any data source uniformly.
+
+class CIFARDataset(Dataset):
+    """Custom CIFAR-10 Dataset using YOUR Dataset interface from Module 05!
+
+    Now with data augmentation support using YOUR transforms from Module 05!
+    """
+
+    def __init__(self, data, labels, transform=None):
+        """Initialize with data, labels, and optional transforms."""
+        self.data = data
+        self.labels = labels
+        self.transform = transform  # Module 05: YOUR augmentation transforms!
+
+    def __getitem__(self, idx):
+        """Get a single sample - YOUR Dataset interface!"""
+        img = self.data[idx]
+
+        # Apply augmentation if provided (training only!)
+        if self.transform is not None:
+            img = self.transform(img)
+            # Convert back to numpy if it became a Tensor
+            if isinstance(img, Tensor):
+                img = img.data
+
+        return Tensor(img), Tensor([self.labels[idx]])
+
+    def __len__(self):
+        """Return dataset size - YOUR Dataset interface!"""
+        return len(self.data)
+
+    def get_num_classes(self):
+        """Return number of classes."""
+        return 10
+
+
+# Training augmentation using YOUR transforms from Module 05!
+train_transforms = Compose([
+    RandomHorizontalFlip(p=0.5),   # 50% chance to flip - cars/animals look similar flipped!
+    RandomCrop(32, padding=4),      # Random crop with 4px padding - simulates translation
+])
 
 # =============================================================================
 # VISUALIZATIONS - Teaching Aids for Understanding
@@ -549,8 +552,10 @@ def test_cifar_cnn(model, test_loader, class_names):
         print("\n   🎉 EXCELLENT! YOUR CNN mastered natural image recognition!")
     elif accuracy >= 50:
         print("\n   ✅ Good progress! YOUR CNN is learning visual features!")
+    elif accuracy >= MIN_TEST_ACCURACY:
+        print("\n   🔄 YOUR CNN is learning, above chance (demo mode trains briefly)")
     else:
-        print("\n   🔄 YOUR CNN is still learning... (normal for demo mode)")
+        print("\n   ⚠️  Close to chance (10%): see the pass check below")
 
     return accuracy
 
@@ -606,12 +611,100 @@ def analyze_cnn_systems(model, batch_size=32):
 # The main function ties everything together: data loading, model creation,
 # training, testing, and analysis. This is YOUR end-to-end ML pipeline.
 
+# Exit codes (also listed in --help):
+#   0  training run passed the gate below (or the --test-only smoke check ran;
+#      that mode trains nothing and reports no milestone result)
+#   1  training ran but did not pass the gate: a weight did not move, or test
+#      accuracy stayed below the floor
+#   2  CIFAR-10 is not available locally and was not downloaded. Every mode
+#      except --test-only trains on real CIFAR-10 images, including
+#      --quick-test, which subsets the data only after the ~170 MB download.
+EXIT_GATE_FAILED = 1
+EXIT_DATASET_UNAVAILABLE = 2
+
+# ---------------------------------------------------------------------------
+# Pass gate. 2026-09-29: this part used to print "SUCCESS" and exit 0 at any
+# accuracy; the 65%/50% thresholds in test_cifar_cnn only changed the message.
+#
+# NOT YET CALIBRATED ON THE FULL DATASET (2026-09-29). The floors are set from
+# first principles, not from measured runs:
+#   * Chance on CIFAR-10 is 10% (ten balanced classes). A network whose conv
+#     or backward pass is broken sits at 10-15%.
+#   * The default run is a demo, not the 70%+ figure in the docstring: 3
+#     epochs capped at 100 batches of 32, so 300 Adam steps over 9,600
+#     images, scored on the first 2,000 test images. That budget sits far
+#     from the 70%+ a fully trained LeNet reaches, so the floor has to sit
+#     far below it too.
+#   * 25% is 2.5x chance: clearly above a model that has not learned, while
+#     leaving wide room for a correct model on a short, unlucky run.
+#   * --quick-test trains on 1,000 images (about 96 steps) and scores 500, so
+#     it gets a lower floor: 20%, still 2x chance. The one recorded
+#     --quick-test run (guide/milestones/04_cnn.qmd) reached 37%.
+# Replace these with measured numbers once correct runs have been recorded.
+MIN_TEST_ACCURACY = 25.0
+MIN_TEST_ACCURACY_QUICK = 20.0
+
+# Every conv and linear weight must move from its initial value by at least
+# this fraction of its norm (||W_final - W_init|| / ||W_init||). Adam moves
+# each element by up to about lr (1e-3) per step, so a weight that receives a
+# gradient moves by several percent in even the ~96-step quick test; a weight
+# the graph never reaches moves by exactly 0. Biases are not gated: the conv
+# biases feed straight into BatchNorm, which subtracts the channel mean, so
+# their true gradient is zero in a correct network.
+MIN_WEIGHT_RELATIVE_CHANGE = 1e-3
+
+
+def gated_weights(model):
+    """(name, weight Tensor) for every conv and linear layer in CIFARCNN."""
+    return [(name, getattr(model, name).weight)
+            for name in ("conv1", "conv2", "fc1", "fc2")]
+
+
+def relative_change(before, after):
+    """||after - before|| / ||before||: how far a weight tensor moved."""
+    before = np.asarray(before, dtype=np.float64)
+    after = np.asarray(after, dtype=np.float64)
+    scale = np.linalg.norm(before)
+    if scale == 0:
+        scale = 1.0
+    return float(np.linalg.norm(after - before) / scale)
+
+
+def cifar_gate_failures(accuracy, weight_changes, min_accuracy=MIN_TEST_ACCURACY,
+                        min_relative_change=MIN_WEIGHT_RELATIVE_CHANGE):
+    """Return the reasons this run fails the milestone (empty list = pass).
+
+    accuracy: test accuracy in percent.
+    weight_changes: {layer name: relative_change(init, final)}.
+    """
+    failures = []
+    for name, rel in weight_changes.items():
+        if not np.isfinite(rel):
+            failures.append(f"{name}.weight became NaN/inf during training")
+        elif rel < min_relative_change:
+            failures.append(f"{name}.weight did not move ({rel:.2e} relative change): "
+                            "no gradient reached it")
+    if not np.isfinite(accuracy) or accuracy < min_accuracy:
+        failures.append(f"test accuracy {accuracy:.1f}% is below the {min_accuracy:.0f}% "
+                        "floor (chance is 10%)")
+    return failures
+
+
 def main():
     """Demonstrate CIFAR-10 CNN using YOUR Tiny🔥Torch!"""
 
-    parser = argparse.ArgumentParser(description='CIFAR-10 CNN')
+    parser = argparse.ArgumentParser(
+        description='CIFAR-10 CNN',
+        epilog=('Exit codes: 0 = passed (weights moved and test accuracy cleared '
+                f'{MIN_TEST_ACCURACY:.0f}%, or {MIN_TEST_ACCURACY_QUICK:.0f}% with '
+                '--quick-test), or --test-only smoke check ran; 1 = trained but did not '
+                'pass; 2 = CIFAR-10 not downloaded (needed by every mode except '
+                '--test-only, including --quick-test). '
+                'Set TINYTORCH_AUTO_DOWNLOAD=1 to download without a prompt.'),
+    )
     parser.add_argument('--test-only', action='store_true',
-                       help='Test architecture only')
+                       help='Smoke check only: one forward pass on synthetic data, '
+                            'no training, no milestone result')
     parser.add_argument('--epochs', type=int, default=3,
                        help='Training epochs (demo mode)')
     parser.add_argument('--batch-size', type=int, default=32,
@@ -619,7 +712,7 @@ def main():
     parser.add_argument('--visualize', action='store_true', default=True,
                        help='Show CNN visualization')
     parser.add_argument('--quick-test', action='store_true',
-                       help='Use small subset for testing')
+                       help='Train on a 1,000-image subset (still needs the full CIFAR-10 download)')
     args = parser.parse_args()
 
     print("🎯 CIFAR-10 CNN - Natural Image Recognition with YOUR Convolution Modules!")
@@ -651,16 +744,32 @@ def main():
         # Test with single sample from minimal DataLoader
         for batch_data, batch_labels in mini_loader:
             test_output = model(batch_data)
-            print(f"✅ Forward pass successful! Shape: {test_output.data.shape}")
-            print("✅ YOUR CNN + DataLoader work together!")
+            print(f"✅ Forward pass ran. Output shape: {test_output.data.shape}")
             break
-        return
+        print("\n⚠️  SMOKE CHECK ONLY: shapes line up, nothing was trained.")
+        print("   This does not complete the milestone and records no result.")
+        print("   Run without --test-only to train on CIFAR-10 and be graded.")
+        return 0
 
     # Step 1: Load CIFAR-10
     print("\n📥 Loading CIFAR-10 dataset...")
     data_manager = DatasetManager()
 
-    (train_data, train_labels), (test_data, test_labels) = data_manager.get_cifar10()
+    try:
+        (train_data, train_labels), (test_data, test_labels) = data_manager.get_cifar10()
+    except (RuntimeError, OSError) as exc:
+        # 2026-09-28: a non-interactive --quick-test used to die here with a
+        # bare traceback, because the download prompt cannot be answered.
+        print(f"\n❌ CIFAR-10 is not available: {exc}")
+        print("   This part trains on real CIFAR-10 images (~170 MB download).")
+        print("   --quick-test only subsets the data after it is downloaded.")
+        print("   Options:")
+        print("     • Run in a terminal and answer the download prompt")
+        print("     • Set TINYTORCH_AUTO_DOWNLOAD=1 to download without asking")
+        print("     • Use --test-only for a download-free architecture check")
+        print("     • Run Part 1 (TinyDigits), which ships with TinyTorch")
+        print(f"   Exiting with code {EXIT_DATASET_UNAVAILABLE} (dataset unavailable).")
+        return EXIT_DATASET_UNAVAILABLE
     print(f"✅ Loaded {len(train_data)} training, {len(test_data)} test images")
 
     if args.quick_test:
@@ -691,6 +800,7 @@ def main():
     model = CIFARCNN()
 
     # Step 4: Train using YOUR DataLoader
+    initial_weights = {name: w.data.copy() for name, w in gated_weights(model)}
     start_time = time.time()
     model = train_cifar_cnn(model, train_loader, epochs=args.epochs)
     train_time = time.time() - start_time
@@ -705,6 +815,30 @@ def main():
     processed_per_epoch = min(len(train_dataset), 100 * args.batch_size)
     print(f"   Images/sec: {processed_per_epoch * args.epochs / train_time:.0f}")
 
+    # Step 6: The gate. Only a model whose weights moved and whose accuracy
+    # clears the floor earns the success message.
+    min_accuracy = MIN_TEST_ACCURACY_QUICK if args.quick_test else MIN_TEST_ACCURACY
+    weight_changes = {name: relative_change(initial_weights[name], w.data)
+                      for name, w in gated_weights(model)}
+    print("\n🔎 Did YOUR CNN learn?")
+    for name, rel in weight_changes.items():
+        print(f"   {name}.weight moved {rel:.1%} from init")
+    print(f"   Test accuracy {accuracy:.1f}% (floor {min_accuracy:.0f}%, chance 10%)")
+    failures = cifar_gate_failures(accuracy, weight_changes, min_accuracy=min_accuracy)
+    if failures:
+        print("\n❌ MILESTONE 04 PART 2 NOT PASSED")
+        for reason in failures:
+            print(f"   • {reason}")
+        print("\n   What to check:")
+        print("   • A weight that did not move means backward() never reached it.")
+        print("     Check YOUR Conv2dFunction / BatchNorm2d backward (Module 09) and")
+        print("     that flatten uses Tensor.reshape so the graph stays connected.")
+        print("   • Weights that moved but accuracy near 10% means the gradients are")
+        print("     wrong, not missing. Re-run Module 09's unit tests, which compare")
+        print("     YOUR conv gradients against numerical gradients.")
+        print("   • If everything above checks out, try more training: --epochs 5.")
+        return EXIT_GATE_FAILED
+
     print("\n✅ SUCCESS! CIFAR-10 CNN Milestone Complete!")
     print("\n🎓 What YOU Accomplished:")
     print("   • YOUR Conv2d extracts spatial features from natural images")
@@ -717,6 +851,7 @@ def main():
     print("   • Continue to TinyGPT after Module 14 (Transformers)")
     print("   • YOUR spatial understanding scales to segmentation, detection, etc.")
     print(f"   • With {accuracy:.1f}% accuracy, YOUR computer vision works!")
+    return 0
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())

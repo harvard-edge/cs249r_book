@@ -1,7 +1,9 @@
 """Simple secure JSON credentials storage system for TinyTorch CLI."""
 from __future__ import annotations
 
+import hmac
 import http.server
+import secrets
 import threading
 import json
 import os
@@ -29,11 +31,49 @@ ENDPOINTS = {
 }
 
 # Defaults
-LOCAL_SERVER_HOST = "0.0.0.0"  # Listen on all interfaces for WSL compatibility
+# The callback server binds to loopback only. WSL is the one exception: there
+# the browser runs on the Windows host and reaches the CLI through the WSL VM's
+# network address (see _get_callback_host), so it must listen on all
+# interfaces. Binding 0.0.0.0 everywhere exposed the token callback and the
+# /logout endpoint to the whole local network.
+LOOPBACK_HOST = "127.0.0.1"
+WSL_SERVER_HOST = "0.0.0.0"
 AUTH_START_PORT = 54321
 AUTH_PORT_HUNT_RANGE = 100
 AUTH_CALLBACK_PATH = "/callback"
 CREDENTIALS_FILE_NAME = "credentials.json"
+
+# CSRF protection for the browser callback. Every login/logout generates a
+# random nonce (``state``) that is sent to the website and must come back on
+# the callback. A callback carrying a *different* state is always rejected.
+#
+# A callback carrying *no* state is accepted only while REQUIRE_CALLBACK_STATE
+# is False: the deployed /cli-login page (as of 2026-09) ignores unknown query
+# parameters and rebuilds the callback URL from ``redirect_port`` alone, so it
+# cannot echo the nonce yet. Once the website forwards ``state`` onto the
+# callback URL, flip this to True (or set TITO_AUTH_REQUIRE_STATE=1) so a
+# stateless callback is refused.
+REQUIRE_CALLBACK_STATE = False
+
+
+def _require_callback_state() -> bool:
+    env = os.getenv("TITO_AUTH_REQUIRE_STATE", "").strip().lower()
+    if env in ("1", "true", "yes", "on"):
+        return True
+    if env in ("0", "false", "no", "off"):
+        return False
+    return REQUIRE_CALLBACK_STATE
+
+
+def new_state() -> str:
+    """Return a fresh, unguessable nonce for one login/logout round trip."""
+    return secrets.token_urlsafe(32)
+
+
+def _state_matches(expected: Optional[str], received: Optional[str]) -> bool:
+    if not expected or not received:
+        return False
+    return hmac.compare_digest(expected.encode("utf-8"), received.encode("utf-8"))
 
 # Determine credentials directory (Standard Python way)
 CREDENTIALS_DIR = os.getenv("TINYTORCH_CREDENTIALS_DIR", str(Path.home() / ".tinytorch"))
@@ -62,13 +102,24 @@ def save_credentials(data: Dict[str, str]) -> None:
     p = _credentials_path()
     # Use a unique temporary file to prevent race conditions (e.g. during login callback)
     tmp = p.parent / f"credentials_{uuid.uuid4().hex}.tmp"
-    with tmp.open("w", encoding="utf-8") as f:
-        json.dump(data, f, indent=2)
-        f.flush()
-        os.fsync(f.fileno())
-    os.replace(str(tmp), str(p))
+    # Create the temp file owner-only from the start (O_EXCL + 0o600), so the
+    # tokens are never readable by other users, even briefly, regardless of
+    # the process umask.
+    fd = os.open(str(tmp), os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
     try:
-        os.chmod(p, 0o600)
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            json.dump(data, f, indent=2)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(str(tmp), str(p))
+    except BaseException:
+        try:
+            tmp.unlink()
+        except OSError:
+            pass
+        raise
+    try:
+        os.chmod(p, 0o600)  # belt and braces if the file pre-existed
     except OSError:
         pass
 
@@ -198,41 +249,67 @@ def refresh_token(console: "Console") -> Optional[str]:
 class CallbackHandler(http.server.BaseHTTPRequestHandler):
     def do_GET(self):
         parsed_path = urlparse(self.path)
+        query_params = parse_qs(parsed_path.query)
+        received_state = query_params.get('state', [None])[0]
+        expected_state = getattr(self.server, "expected_state", None)
 
         if parsed_path.path == "/logout":
+            # Only the `tito community logout` flow serves /logout, and only
+            # for the URL the CLI itself opened (which carries the nonce).
+            if (getattr(self.server, "mode", "login") != "logout"
+                    or not _state_matches(expected_state, received_state)):
+                self.send_error(403, "Forbidden")
+                return
             self.server.logout_requested = True  # Signal that logout was hit
             self.send_response(302)
             self.send_header('Location', f"{API_BASE_URL}/cli/logged-out")
             self.end_headers()
             return
 
-        if parsed_path.path != AUTH_CALLBACK_PATH:
+        if parsed_path.path != AUTH_CALLBACK_PATH or getattr(self.server, "mode", "login") != "login":
             self.send_error(404, "Not Found")
             return
 
-        query_params = parse_qs(parsed_path.query)
+        # CSRF guard: a mismatched state is always rejected; a missing state
+        # is rejected once the website echoes it (see REQUIRE_CALLBACK_STATE).
+        if received_state is not None:
+            if not _state_matches(expected_state, received_state):
+                self.send_error(403, "Invalid state parameter")
+                return
+        elif _require_callback_state():
+            self.send_error(403, "Missing state parameter")
+            return
+
+        # Accept exactly one callback per login attempt.
+        if getattr(self.server, "auth_data", None) is not None:
+            self.send_error(409, "Login already completed")
+            return
 
         if 'access_token' in query_params and 'refresh_token' in query_params:
-            self.server.auth_data = {
+            auth_data = {
                 'access_token': query_params['access_token'][0],
                 'refresh_token': query_params['refresh_token'][0],
                 'user_email': query_params.get('email', [''])[0]
             }
 
+            # Persist before signalling success so a failed save is visible.
+            try:
+                save_credentials(auth_data)
+            except OSError as e:
+                self.server.save_error = f"Could not save credentials to {_credentials_path()}: {e}"
+                self.send_error(500, "Could not save credentials on this machine")
+                return
+
+            self.server.auth_data = auth_data
+
             # Redirect to the branded "Logged In" page
-            user_email = self.server.auth_data['user_email']
+            user_email = auth_data['user_email']
             safe_email = urllib.parse.quote(user_email.replace('\r', '').replace('\n', ''), safe='@.')
             redirect_url = f"{API_BASE_URL}/cli/logged-in?email={safe_email}"
 
             self.send_response(302)
             self.send_header('Location', redirect_url)
             self.end_headers()
-
-            # Persist immediately
-            try:
-                save_credentials(self.server.auth_data)
-            except Exception:
-                pass
         else:
             self.send_error(400, "Missing tokens in callback URL")
 
@@ -240,18 +317,27 @@ class CallbackHandler(http.server.BaseHTTPRequestHandler):
         pass
 
 class LocalAuthServer(http.server.HTTPServer):
-    def __init__(self, server_address, RequestHandlerClass):
+    def __init__(self, server_address, RequestHandlerClass, *, mode: str = "login",
+                 expected_state: Optional[str] = None):
         super().__init__(server_address, RequestHandlerClass)
         self.auth_data: Optional[Dict[str, str]] = None
         self.logout_requested: bool = False  # Initialize the logout flag
+        self.save_error: Optional[str] = None
+        self.mode = mode
+        self.expected_state = expected_state
 
 def _is_wsl() -> bool:
     """Check if running in WSL environment."""
     try:
         with open('/proc/version', 'r', encoding='utf-8') as f:
             return 'microsoft' in f.read().lower()
-    except:
+    except (OSError, UnicodeDecodeError):
         return False
+
+
+def _server_bind_host() -> str:
+    """Loopback everywhere except WSL, where the Windows browser must reach us."""
+    return WSL_SERVER_HOST if _is_wsl() else LOOPBACK_HOST
 
 def _get_callback_host() -> str:
     """Get the appropriate host for callback URL (handles WSL)."""
@@ -274,12 +360,16 @@ def _get_callback_host() -> str:
     return "127.0.0.1"
 
 class AuthReceiver:
-    def __init__(self, start_port: int = None):
+    def __init__(self, start_port: int = None, mode: str = "login"):
+        if mode not in ("login", "logout"):
+            raise ValueError(f"unknown auth receiver mode: {mode!r}")
         self.start_port = start_port if start_port is not None else AUTH_START_PORT
         self.server: Optional[LocalAuthServer] = None
         self.thread: Optional[threading.Thread] = None
         self.port: int = 0
         self.callback_host: str = "127.0.0.1"
+        self.mode = mode
+        self.state: str = new_state()
 
     def start(self) -> int:
         port = self.start_port
@@ -287,7 +377,10 @@ class AuthReceiver:
 
         while True:
             try:
-                self.server = LocalAuthServer((LOCAL_SERVER_HOST, port), CallbackHandler)
+                self.server = LocalAuthServer(
+                    (_server_bind_host(), port), CallbackHandler,
+                    mode=self.mode, expected_state=self.state,
+                )
                 self.port = self.server.server_address[1]
                 break
             except OSError:
@@ -341,18 +434,28 @@ class AuthReceiver:
         """Get the full redirect URL that should work from the browser."""
         return f"http://{self.callback_host}:{self.port}{AUTH_CALLBACK_PATH}"
 
+    def get_login_url(self) -> str:
+        """Website login URL carrying the port, callback URL, and CSRF nonce."""
+        params = urllib.parse.urlencode({
+            "redirect_port": self.port,
+            "redirect_url": self.get_redirect_url(),
+            "state": self.state,
+        })
+        return f"{ENDPOINTS['cli_login']}?{params}"
+
+    def get_logout_url(self) -> str:
+        """Local logout URL; only this exact URL (with the nonce) is honoured."""
+        return f"http://{self.callback_host}:{self.port}/logout?state={urllib.parse.quote(self.state)}"
+
     def wait_for_tokens(self, timeout: int = 120) -> Optional[Dict[str, str]]:
         start_time = time.time()
         try:
             while getattr(self.server, "auth_data", None) is None:
+                if getattr(self.server, "save_error", None):
+                    raise OSError(self.server.save_error)
                 if time.time() - start_time > timeout:
                     return None
                 time.sleep(0.25)
-
-            try:
-                save_credentials(self.server.auth_data)
-            except Exception:
-                pass
 
             time.sleep(1.0)
 

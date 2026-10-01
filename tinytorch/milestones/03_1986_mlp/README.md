@@ -17,7 +17,7 @@ Multi-layer perceptrons (MLPs) on non-linear and image classification tasks:
 
 ## Required Modules
 
-**Run after Module 08** (Full training pipeline with data loading)
+**Run after Module 07** (the scripts run their own training loop, so Module 08 is not required)
 
 <table width="100%">
   <thead>
@@ -35,7 +35,6 @@ Multi-layer perceptrons (MLPs) on non-linear and image classification tasks:
 <tr><td><b>Module 05</b></td><td>DataLoader</td><td>YOUR batching and data pipeline</td></tr>
 <tr><td><b>Module 06</b></td><td>Autograd</td><td>YOUR automatic differentiation</td></tr>
 <tr><td><b>Module 07</b></td><td>Optimizers</td><td>YOUR SGD optimizer</td></tr>
-<tr><td><b>Module 08</b></td><td>Training</td><td>YOUR end-to-end training loop</td></tr>
 </tbody>
 </table>
 
@@ -48,7 +47,7 @@ This milestone uses **progressive scaling** with 2 scripts:
 
 - **Dataset:** XOR truth table
 - **Architecture:** Input(2) → Linear → ReLU → Linear → Sigmoid
-- **Expected:** 100% accuracy
+- **Expected:** 100% accuracy; YOUR `BinaryCrossEntropyLoss` must first match NumPy on the untrained outputs, and the run passes only if the hidden layer receives gradient and its weights move at least 0.25× their initial norm
 - **Key Learning:** "Depth plus gradients solves non-linear problems!"
 
 ### 01_rumelhart_tinydigits.py
@@ -56,7 +55,7 @@ This milestone uses **progressive scaling** with 2 scripts:
 
 - **Dataset:** TinyDigits (1000 train + 200 test, 8×8 images)
 - **Architecture:** Input(64) → Linear(64→32) → ReLU → Linear(32→10)
-- **Expected:** 85%+ accuracy in a few minutes
+- **Expected:** 81-83% test accuracy (the gate is 75%); before training, YOUR `CrossEntropyLoss` must match NumPy on one batch
 - **Key Learning:** "MLPs can learn hierarchical features from images!"
 
 **Why TinyDigits First?**
@@ -81,7 +80,7 @@ This milestone uses **progressive scaling** with 2 scripts:
 </thead>
 <tbody>
 <tr><td><b>01 (XOR Solved)</b></td><td>4 examples</td><td>N/A</td><td>small</td><td>→ 0.0</td><td>100%</td><td>&lt;1 min</td></tr>
-<tr><td><b>02 (TinyDigits)</b></td><td>1K train</td><td>8×8</td><td>~2.4K</td><td>&lt; 0.5</td><td>85%+</td><td>3-5 min</td></tr>
+<tr><td><b>02 (TinyDigits)</b></td><td>1K train</td><td>8×8</td><td>~2.4K</td><td>&lt; 0.5</td><td>81-83%</td><td>3-5 min</td></tr>
 </tbody>
 </table>
 
@@ -106,13 +105,13 @@ This is **representation learning** - the foundation of deep learning's power.
 ```bash
 cd milestones/03_1986_mlp
 
-# Quick validation on TinyDigits (run after Module 08)
+# Quick validation on TinyDigits (run after Module 07)
 python 01_rumelhart_tinydigits.py
 
-# Or run the full milestone from the TinyTorch project root:
+# Or run the full milestone from the TinyTorch project root (both required parts):
 tito milestone run 03
 
-# Run individual parts:
+# Run individual parts (each records only that part):
 tito milestone run 03 --part 1  # XOR Solved
 tito milestone run 03 --part 2  # TinyDigits
 ```

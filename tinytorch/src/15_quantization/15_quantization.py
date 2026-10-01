@@ -64,14 +64,32 @@ from tinytorch.perf.quantization import quantize_int8, dequantize_int8, Quantize
 
 ## 📋 Module Dependencies
 
+**Prerequisites**: Modules 01 (Tensor), 02 (Activations), 03 (Layers), and 14 (Profiling) must be complete
+
+**External Dependencies**:
+
+| Dependency | Origin | Imported Symbols | Architectural Purpose in Quantization |
+| :--- | :--- | :--- | :--- |
+| `numpy` | External | `np`, `default_rng` | Vectorized numerical operations and uniform array generation |
+| `inspect` | Standard Lib | `signature` | Reflection utility ensuring inference mode (`training=False`) during calibration |
+| `typing` | Standard Lib | `Tuple`, `Dict`, `List`, `Optional`, `Any` | Type hints |
+
+**TinyTorch Dependencies**:
+
 | Dependency | Origin | Imported Symbols | Architectural Purpose in Quantization |
 | :--- | :--- | :--- | :--- |
 | `tinytorch.core.tensor` | Module 01 | `Tensor` | Multi-dimensional array container holding weights and activations |
 | `tinytorch.core.layers` | Module 03 | `Linear`, `Sequential` | Base linear transformation layers replaced during quantization |
 | `tinytorch.core.activations` | Module 02 | `ReLU` | Non-linear activations traversed during forward calibration |
-| `tinytorch.perf.profiling` | Module 14 | `Profiler` | Diagnostic profiler used to benchmark memory and parameter savings |
-| `numpy` | External | `np`, `default_rng` | Vectorized numerical operations and uniform array generation |
-| `inspect` | Standard Lib | `signature` | Reflection utility ensuring inference mode (`training=False`) during calibration |
+| `tinytorch.perf.profiling` | Module 14 | `Profiler` | Diagnostic profiler used to benchmark memory and parameter savings (imported in the profiling cells, not the exported package) |
+
+**Dependency Flow**:
+```
+Module 01 (Tensor)              ──┐
+Module 02 (ReLU)                ──┤
+Module 03 (Linear, Sequential)  ──┼──→ Module 15 (Quantization)
+Module 14 (Profiler)            ──┘
+```
 """
 
 # %% nbgrader={"grade": false, "grade_id": "imports", "solution": false}

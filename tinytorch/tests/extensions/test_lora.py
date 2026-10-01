@@ -53,3 +53,24 @@ def test_lora_learning_xor():
         
     final_loss = loss.data.item()
     assert final_loss < initial_loss
+
+
+def test_lora_parameters_are_exactly_the_adapter_and_they_train():
+    """An optimizer built from parameters() must update A and B, never W or b."""
+    np.random.seed(0)
+    layer = LoRALinear(8, 4, rank=2)
+    params = layer.parameters()
+    assert len(params) == 2
+    assert params[0] is layer.A and params[1] is layer.B
+
+    w_before = layer.weight.data.copy()
+    b_before = layer.B.data.copy()
+    optimizer = SGD(layer.parameters(), lr=0.1)
+    x = Tensor(np.random.randn(5, 8).astype(np.float32))
+    y = Tensor(np.random.randn(5, 4).astype(np.float32))
+    loss = MSELoss()(layer(x), y)
+    loss.backward()
+    optimizer.step()
+
+    assert not np.allclose(layer.B.data, b_before), "adapter B did not train"
+    assert np.array_equal(layer.weight.data, w_before), "frozen base weight changed"

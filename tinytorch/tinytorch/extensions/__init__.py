@@ -1,18 +1,32 @@
-"""TinyTorch Hardware Extensions and Accelerators.
+"""TinyTorch Extensions Ecosystem.
 
-Optional, hand-written kernels that take TinyTorch past NumPy onto the
-hardware underneath. None of them is needed by the 20 modules.
-1. C++ SIMD kernels through ctypes (vectorized for AVX2/NEON, OpenMP if available)
-2. A Triton GPU kernel that fuses bias + GELU (needs PyTorch, Triton, NVIDIA GPU)
-3. A matrix multiply on the Apple GPU through MPS (needs PyTorch)
-Each falls back to NumPy when its hardware or library is missing.
+Optional, modular extensions that demonstrate how TinyTorch interfaces with physical
+hardware, memory optimization, fine-tuning, and compilation beyond the 20 core modules:
+
+1. LoRALinear: Low-Rank Adaptation for parameter-efficient fine-tuning
+2. LossScaler: Mixed-precision loss scaling for FP16 training stability
+3. checkpoint: Activation checkpointing / gradient recomputation for memory efficiency
+4. compile_graph: Graph capture and kernel fusion compiler
+5. simd_matmul, simd_fused_bias_gelu: C++ SIMD kernels through ctypes (AVX2/NEON, OpenMP)
+6. triton_fused_gelu: Triton GPU kernel that fuses bias + GELU (NVIDIA GPUs)
+7. mps_matmul: Apple Silicon GPU matrix multiply via Metal Performance Shaders
 """
 
 from .simd_ops import simd_matmul, simd_fused_bias_gelu, has_simd_support, simd_build_info
 from .triton_gelu import triton_fused_gelu, has_triton_support
 from .mps_ops import mps_matmul, has_mps_support
+from .lora import LoRALinear
+from .loss_scaler import LossScaler
+from .checkpoint import checkpoint
+from .compile import compile_graph
 
 __all__ = [
+    # Systems & Modeling
+    "LoRALinear",
+    "LossScaler",
+    "checkpoint",
+    "compile_graph",
+    # Hardware Acceleration
     "simd_matmul",
     "simd_fused_bias_gelu",
     "has_simd_support",
@@ -22,15 +36,3 @@ __all__ = [
     "mps_matmul",
     "has_mps_support",
 ]
-
-# Ecosystem Extensions (Chapter 22)
-try:
-    from .lora import LoRALinear
-    from .loss_scaler import LossScaler
-except ImportError:
-    pass
-try:
-    from .checkpoint import checkpoint
-    from .compile import compile_graph
-except ImportError:
-    pass

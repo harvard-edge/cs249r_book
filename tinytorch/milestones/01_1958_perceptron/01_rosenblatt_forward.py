@@ -108,9 +108,9 @@ from rich.text import Text
 
 console = Console()
 
-# ============================================================================
-# 🎓 STUDENT CODE: This is what YOU built with Modules 01-03!
-# ============================================================================
+# =============================================================================
+# 🎓 ZONE 1: STUDENT CORE LEGO BRICKS (Model Architecture)
+# =============================================================================
 
 class Perceptron:
     """
@@ -144,9 +144,10 @@ class Perceptron:
         """PyTorch-style: model(x) calls forward(x)"""
         return self.forward(x)
 
-# ============================================================================
-# 📊 VISUALIZATION CODE: Rich CLI formatting (you can ignore this!)
-# ============================================================================
+
+# =============================================================================
+# 📊 ZONE 2: MILESTONE HARNESS & VALIDATION UX
+# =============================================================================
 
 def draw_network_architecture():
     """Draw the perceptron architecture using ASCII art."""
@@ -239,11 +240,50 @@ def visualize_data_points(X, y, predictions=None, weights=None):
 
     return "\n".join(lines)
 
-def press_enter_to_continue() :
-    if sys.stdin.isatty() and sys.stdout.isatty() :
-        try :
+def check_forward_against_numpy(model, X, predictions):
+    """Verify YOUR forward pass against the same math done in plain NumPy.
+
+    Reads the model's own weight and bias, computes sigmoid(X @ W + b) with
+    NumPy, and compares it to what YOUR Linear + Sigmoid produced. Returns
+    True on a match; prints a diagnosis and returns False otherwise.
+    """
+    W = np.asarray(model.linear.weight.data, dtype=np.float64)
+    b = np.asarray(model.linear.bias.data, dtype=np.float64)
+    expected = 1.0 / (1.0 + np.exp(-(X.astype(np.float64) @ W + b)))
+    got = np.asarray(predictions.data, dtype=np.float64)
+
+    if got.shape == expected.shape and np.allclose(got, expected, rtol=1e-4, atol=1e-6):
+        console.print("   [green]✓[/green] Forward pass matches sigmoid(X @ W + b) computed in NumPy\n")
+        return True
+
+    if got.shape != expected.shape:
+        detail = f"output shape {got.shape}, expected {expected.shape}"
+    else:
+        detail = f"largest difference {np.max(np.abs(got - expected)):.3g}"
+    console.print(Panel(
+        "[bold red]❌ YOUR forward pass does not compute sigmoid(X @ W + b)[/bold red]\n\n"
+        f"Compared against NumPy using the model's own weights: {detail}.\n"
+        f"  first outputs, yours: {np.round(got.flatten()[:3], 4)}\n"
+        f"  first outputs, NumPy: {np.round(expected.flatten()[:3], 4)}\n\n"
+        "Random weights make the ACCURACY random, but the arithmetic is\n"
+        "never random. Check:\n"
+        "  • Module 03 Linear.forward: returns x @ weight + bias\n"
+        "  • Module 02 Sigmoid.forward: returns 1 / (1 + exp(-x))\n"
+        "  • Both return a Tensor built from the computed values",
+        title="[red]Forward pass check FAILED[/red]",
+        border_style="red",
+    ))
+    return False
+
+
+def press_enter_to_continue():
+    """Pause in interactive sessions; skip in CI or non-interactive runs."""
+    if os.environ.get("TINYTORCH_NON_INTERACTIVE") == "1" or os.environ.get("CI") == "true":
+        return
+    if sys.stdin.isatty() and sys.stdout.isatty():
+        try:
             console.input("\n[yellow]Press Enter to continue...[/yellow] ")
-        except EOFError :
+        except EOFError:
             pass
         console.print()
 
@@ -326,6 +366,14 @@ def main():
 
     input_tensor = Tensor(X)
     predictions = model(input_tensor)
+
+    # Accuracy here is luck by design, so it cannot tell working code from
+    # broken code. What CAN be checked is the arithmetic: the model's output
+    # must equal sigmoid(X @ W + b) computed in plain NumPy from the model's
+    # OWN weights. A Linear that returns zeros, or a Sigmoid with the wrong
+    # formula, fails this check and the milestone exits 1.
+    if not check_forward_against_numpy(model, X, predictions):
+        return 1
 
     # Convert to binary predictions
     pred_classes = (predictions.data > 0.5).astype(int).flatten()
@@ -443,6 +491,7 @@ def main():
     )
     console.print(Panel(next_steps, title="[bold green]🚀 Next Steps[/bold green]", border_style="green"))
     press_enter_to_continue()
+    return 0
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())

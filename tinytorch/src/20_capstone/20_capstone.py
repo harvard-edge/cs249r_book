@@ -90,12 +90,31 @@ save_submission(submission, "my_submission.json")
 r"""
 ## 📋 Module Dependencies
 
+**Prerequisites**: Modules 01 (Tensor), 02 (Activations), 03 (Layers), and 19 (Benchmarking) must be complete; the example workflows also use Modules 14 (Profiling), 15 (Quantization), and 16 (Compression)
+
+**External Dependencies**:
+
 | Dependency Type | Component / Module | Systems Function | Technical Role |
 | :--- | :--- | :--- | :--- |
-| **External Runtime** | `numpy`, `time`, `json`, `pathlib`, `platform`, `enum`, `sys` | OS interface & serialization | High-resolution timing, platform detection, JSON encoding |
+| **External Runtime** | `numpy`, `time`, `json`, `pathlib`, `platform`, `enum`, `sys`, `typing` | OS interface & serialization | High-resolution timing, platform detection, JSON encoding |
+
+The example workflows also import `copy` and `tempfile`.
+
+**TinyTorch Dependencies**:
+
+| Dependency Type | Component / Module | Systems Function | Technical Role |
+| :--- | :--- | :--- | :--- |
 | **Core Primitives** | `tinytorch.core.tensor`, `tinytorch.core.layers`, `tinytorch.core.activations` | Computational substrate | Tensor allocations (M01), affine projections `Linear` (M03), activations `ReLU` (M02) |
 | **Optimization Stack**| `tinytorch.perf.profiling`, `quantization`, `compression` | Efficiency transformations | `Profiler.count_parameters` (M14), `QuantizedLinear` (M15), `magnitude_prune` (M16) |
 | **Benchmarking Engine**| `tinytorch.perf.benchmarking.precise_timer`, `BenchmarkResult` | High-precision measurement | Monotonic nanosecond timing with guaranteed `finally` cleanup, and its percentile statistics |
+
+**Dependency Flow**:
+```
+Modules 01-03 (Tensor, ReLU, Linear)          ──┐
+Modules 14-16 (Profiler, QuantizedLinear,     ──┼──→ Module 20 (Olympics submission)
+               magnitude_prune)                 │
+Module 19 (precise_timer, BenchmarkResult)    ──┘
+```
 
 Students completing this module demonstrate their complete framework's capabilities through reproducible benchmarking and professional submission generation.
 """

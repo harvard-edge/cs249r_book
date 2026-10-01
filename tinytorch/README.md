@@ -23,9 +23,9 @@
 > [!NOTE]
 > **📌 Early release (2026)**
 >
-> TinyTorch is **live and usable**. It shipped with the **2026** MLSysBook refresh and we expect **steady iteration**—modules, APIs, and course materials will keep improving. Community input drives what we prioritize next.
+> TinyTorch is **live and usable**. It shipped with the **2026** MLSysBook refresh and we expect **steady iteration**: modules, APIs, and course materials will keep improving. Community input drives what we prioritize next.
 >
-> **Classroom release** — Spring 2027 | **Right now** — [Help shape TinyTorch](#-help-shape-tinytorch)
+> **Classroom release**: Spring 2027 | **Right now**: [Help shape TinyTorch](#-help-shape-tinytorch)
 <!-- EARLY-RELEASE-CALLOUT:END -->
 
 ---
@@ -40,7 +40,7 @@ In machine learning, we see the same pattern. Everyone wants to train models, ru
 
 ### The Solution: AI Bricks 🧱
 
-TinyTorch teaches you the **AI bricks**—the stable engineering foundations you can use to build any AI system.
+TinyTorch teaches you the **AI bricks**: the stable engineering foundations you can use to build any AI system.
 
 - **Small enough to learn from**: bite-sized code that runs even on a Raspberry Pi
 - **Big enough to matter**: showing the real architecture of how frameworks are built
@@ -105,7 +105,7 @@ We're sharing TinyTorch early because we'd rather shape the direction with commu
       <td>📅 Hosted cloud GPU environments</td>
     </tr>
     <tr>
-      <td>✅ 1,400+ unit, CLI, integration, & milestone tests</td>
+      <td>✅ 1,700+ unit, CLI, integration, & milestone tests</td>
       <td>🔧 Binder / WebAssembly preview</td>
       <td>📅 Video walkthrough lectures</td>
     </tr>
@@ -115,7 +115,7 @@ We're sharing TinyTorch early because we'd rather shape the direction with commu
       <td></td>
     </tr>
     <tr>
-      <td>✅ Historical milestones (1958 Perceptron to 2018 MLPerf)</td>
+      <td>✅ Historical milestones (1958 Perceptron to 2024 GPU Kernels)</td>
       <td></td>
       <td></td>
     </tr>
@@ -202,7 +202,7 @@ As you progress, unlock recreations of landmark ML achievements:
     <tr>
       <td align="center"><b>1958</b></td>
       <td>Perceptron</td>
-      <td>Binary classification with gradient descent</td>
+      <td>Binary classification forward pass, before training exists</td>
     </tr>
     <tr>
       <td align="center"><b>1969</b></td>
@@ -222,17 +222,22 @@ As you progress, unlock recreations of landmark ML achievements:
     <tr>
       <td align="center"><b>2017</b></td>
       <td>Transformer Era (TinyGPT)</td>
-      <td>Autoregressive Shakespeare generation with Pre-LN GPT</td>
+      <td>Autoregressive Shakespeare generation, Python/C code completion, and concept Q&A</td>
     </tr>
     <tr>
       <td align="center"><b>2018+</b></td>
       <td>MLPerf Optimization Olympics</td>
       <td>Triad benchmarking, kernel acceleration, and Pareto trade-offs</td>
     </tr>
+    <tr>
+      <td align="center"><b>2024</b></td>
+      <td>Custom Kernels</td>
+      <td>YOUR tiled, fused, and im2col kernels checked against NumPy, then timed against bundled C++ SIMD, Apple Metal, and Triton kernels</td>
+    </tr>
   </tbody>
 </table>
 
-**These aren't toy demos** - they're historically significant ML achievements rebuilt with YOUR framework!
+**These aren't toy demos**: they're historically significant ML achievements rebuilt with YOUR framework!
 
 ---
 
@@ -320,6 +325,12 @@ TinyTorch/
 │   └── ...                     # (20 module directories)
 │                               # Exported code lands in tinytorch/core/, not here
 │
+├── datasets/                   # 💾 TinyVerse offline educational micro-datasets (<550 KB)
+│   ├── tinydigits/             # 8x8 handwritten digits (1,000 train / 200 test)
+│   ├── tinypy/                 # Algorithmic Python code snippets for TinyGPT
+│   ├── tinytalks/              # Q&A pairs on deep learning & TinyTorch concepts
+│   └── tinyshakespeare/        # Bundled Shakespeare sample for instant next-token LM
+│
 ├── guide/                      # 🌐 Course website & lab guide (Quarto)
 │   ├── index.qmd               # Landing page
 │   ├── _quarto.yml             # Site navigation & configuration
@@ -334,9 +345,9 @@ TinyTorch/
 │   ├── 02_1969_xor/            # Minsky's challenge & multi-layer solution
 │   ├── 03_1986_mlp/            # Backpropagation & TinyDigits
 │   ├── 04_1998_cnn/            # LeCun's CNNs & CIFAR-10
-│   ├── 05_2017_transformer/    # Attention mechanisms & language
-│   ├── 06_2018_mlperf/         # Modern optimization & profiling
-│   └── 07_2020_tinygpt/        # Generative LLM & Shakespeare next-token prediction
+│   ├── 05_2017_transformer/    # Attention mechanisms, TinyGPT & code completion
+│   ├── 06_2018_mlperf/         # MLPerf to Generative Serving
+│   └── 07_2024_kernels/        # Custom Kernels (YOUR Module 17 kernels vs. SIMD, Metal & Triton)
 │
 ├── tito/                       # 🎛️ CLI tool for streamlined workflows
 │   ├── main.py                 # Entry point
@@ -356,7 +367,7 @@ TinyTorch/
 
 ## 🧪 Testing & Verification Architecture
 
-TinyTorch features an automated, multi-tiered test suite (~1,400 tests across 20 modules) engineered to catch defects early and deliver immediate educational feedback to learners.
+TinyTorch features an automated, multi-tiered test suite (~1,800 tests across 20 modules) engineered to catch defects early and deliver immediate educational feedback to learners.
 
 - **Three-Phase Module Testing (`tito module test <NN>`)**:
   1. **Phase 1: Inline Unit Tests** - Immediate assertion checks embedded directly within notebook cells.
@@ -364,7 +375,7 @@ TinyTorch features an automated, multi-tiered test suite (~1,400 tests across 20
   3. **Phase 3: Cumulative Integration Tests** - Runs cross-module integration tests inherited up through the current module.
 - **Cross-Module Integration (`tests/integration/`)**: Backpropagation validation across deep layers, full training loops, and end-to-end computer vision and NLP pipelines.
 - **Bug & Hardware Regressions (`tests/regression/`)**: Prevents silent backprop regressions, verifies shape compatibility, and validates hardware acceleration parity (C++ SIMD, Apple Metal MPS, Triton).
-- **Historical Milestones (`tests/milestones/`)**: Proves student-built frameworks can train real neural architectures (1958 Perceptron to 2018 MLPerf).
+- **Historical Milestones (`tests/milestones/`)**: Proves student-built frameworks can train real neural architectures (1958 Perceptron to 2024 GPU Kernels).
 
 For the full test suite breakdown, conventions, and running instructions, see **[tests/README.md](tests/README.md)**.
 
