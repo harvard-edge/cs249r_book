@@ -599,11 +599,13 @@ class ValidateCommand:
             Scope("slash", "_run_mitpress_spaced_slash",
                   note="training/inference, no spaces", default=False),
             Scope("vs-period", "_run_mitpress_vs_period",
-                  note="vs. not vs", default=False),
+                  note="vs. not vs (§10.5)", default=True),
             Scope("eg-ie-comma", "_run_mitpress_eg_ie_comma",
-                  note="comma after e.g./i.e.", default=False),
+                  note="comma after e.g./i.e. (§10.10)", default=True),
             Scope("hyphen-range", "_run_mitpress_hyphen_range",
-                  note="en-dash for number ranges", default=False),
+                  note="en-dash for number ranges (§6.78)", default=True),
+            Scope("quotes", "_run_mitpress_quote_punctuation",
+                  note='periods and commas inside quotation marks per CMOS §6.9 (," and .")', default=True),
         ],
         "numbers": [
             Scope("unit-spacing", "_run_unit_spacing",
@@ -3155,7 +3157,9 @@ class ValidateCommand:
         # regardless of how they are spaced.
         # See book-prose.md §5 ("Footnote Marker Placement").
         cite_then_fn_pat = re.compile(r"(\[@[^\]\s]+\])\s*(\[\^fn-[\w-]+\])")
-        fn_before_punct_pat = re.compile(r"(\[\^fn-[\w-]+\])([\.,;:!?])")
+        fn_before_punct_pat = re.compile(r"(\[\^fn-[\w-]+\])\s*([\.,;:!?])")
+        fn_before_quote_pat = re.compile(r"(\[\^fn-[\w-]+\])\s*([\"”])")
+        punct_space_fn_pat = re.compile(r"([\.,;:!?])\s+(\[\^fn-[\w-]+\])")
         stacked_fn_pat = re.compile(r"(\[\^fn-[\w-]+\])\s*(\[\^fn-[\w-]+\])")
         def_colon_prefix_pat = re.compile(r"^:\s*\[\^fn-[\w-]+\]")
 
@@ -3330,6 +3334,33 @@ class ValidateCommand:
                                 context=_rich_escape(stripped[:80]),
                             )
                         )
+
+                    for m in fn_before_quote_pat.finditer(line):
+                        fn_marker, quote = m.group(1), m.group(2)
+                        issues.append(
+                            ValidationIssue(
+                                file=self._relative_file(file),
+                                line=idx,
+                                code="footnote_inside_quote",
+                                message=f"Footnote {_rich_escape(fn_marker)} placed before closing quotation mark '{quote}'; move marker after quote per CMOS §14.19/§14.26",
+                                severity="error",
+                                context=_rich_escape(stripped[:80]),
+                            )
+                        )
+
+                    if not stripped.startswith("#"):
+                        for m in punct_space_fn_pat.finditer(line):
+                            punct, fn_marker = m.group(1), m.group(2)
+                            issues.append(
+                                ValidationIssue(
+                                    file=self._relative_file(file),
+                                    line=idx,
+                                    code="footnote_spaced_from_punctuation",
+                                    message=f"Footnote {_rich_escape(fn_marker)} separated from preceding punctuation '{punct}' by whitespace; remove space per CMOS §14.19/§14.26",
+                                    severity="error",
+                                    context=_rich_escape(stripped[:80]),
+                                )
+                            )
 
                     for m in stacked_fn_pat.finditer(line):
                         fn1, fn2 = m.group(1), m.group(2)
@@ -7811,6 +7842,70 @@ class ValidateCommand:
         return ValidationRunResult(
             name="mitpress-eg-ie-comma",
             description='Comma after e.g. and i.e. (MIT Press §10.10)',
+            files_checked=len(files),
+            issues=issues,
+            elapsed_ms=int((time.time() - start) * 1000),
+        )
+
+    def _run_mitpress_quote_punctuation(self, root: Path) -> ValidationRunResult:
+        """Flag periods and commas placed outside quotation marks per CMOS §6.9 / MIT Press §10."""
+        start = time.time()
+        files = self._qmd_files(root)
+        issues: List[ValidationIssue] = []
+        # Match closing double quote or right double quotation mark followed immediately by period or comma
+        quote_punct_pat = re.compile(r"(\w+)([\"”])([,\.])")
+
+        for file in files:
+            lines = self._read_text(file).splitlines()
+            in_code = False
+            in_comment = False
+            for idx, line in enumerate(lines, 1):
+                stripped = line.strip()
+                if stripped.startswith("```"):
+                    in_code = not in_code
+                    continue
+                if in_code:
+                    continue
+                if stripped.startswith("<!--"):
+                    if "-->" not in stripped:
+                        in_comment = True
+                    continue
+                if in_comment:
+                    if "-->" in stripped:
+                        in_comment = False
+                    continue
+                if stripped.startswith("#"):
+                    continue
+
+                # Mask inline code, math, and Quarto attribute blocks
+                masked = re.sub(r"`[^`]*`", lambda m: " " * len(m.group(0)), line)
+                masked = re.sub(r"\$\$?[^$]+\$\$?", lambda m: " " * len(m.group(0)), masked)
+                masked = re.sub(r"\{[^{}]*\}", lambda m: " " * len(m.group(0)), masked)
+                masked = re.sub(r"\]\([^)]+\)", lambda m: " " * len(m.group(0)), masked)
+
+                for m in quote_punct_pat.finditer(masked):
+                    word = m.group(1)
+                    quote = m.group(2)
+                    punct = m.group(3)
+                    context = line[max(0, m.start() - 10) : min(len(line), m.end() + 15)].strip()
+                    issues.append(
+                        ValidationIssue(
+                            file=self._relative_file(file),
+                            line=idx,
+                            code="quote_punctuation_placement",
+                            message=(
+                                f"Period or comma placed outside quotation marks ('{quote}{punct}'); "
+                                f"move punctuation inside quotes (e.g. '{punct}{quote}') per CMOS §6.9 / MIT Press §10"
+                            ),
+                            severity="warning",
+                            context=context,
+                            suggestion=f"{word}{punct}{quote}",
+                        )
+                    )
+
+        return ValidationRunResult(
+            name="mitpress-quote-punctuation",
+            description='Periods and commas inside quotation marks (CMOS §6.9 / MIT Press §10)',
             files_checked=len(files),
             issues=issues,
             elapsed_ms=int((time.time() - start) * 1000),
