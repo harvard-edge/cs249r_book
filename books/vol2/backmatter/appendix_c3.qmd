@@ -93,7 +93,7 @@ This intersection captures the idle compute caused by orchestration and resilien
 
 Three distinct mechanisms govern this intersection:
 
-1.  **Pipeline bubbles**: In pipeline parallelism (PP), stages idle during pipeline fill (warmup) and drain (cooldown). For $p$ pipeline stages and $m$ microbatches, the bubble fraction $b_{\text{pipe}} = (p - 1)/(p - 1 + m)$ (@sec-appdx-comm-foundations-bubble-fraction) is accelerator time lost to idling; more microbatches or interleaved schedules shrink it.
+1.  **Pipeline bubbles**: In pipeline parallelism (PP), stages idle during pipeline fill (warmup) and drain (cooldown). For $N_{\text{PP}}$ pipeline stages and $m$ microbatches, the bubble fraction $b_{\text{pipe}} = (N_{\text{PP}} - 1)/(N_{\text{PP}} - 1 + m)$ (@sec-appdx-comm-foundations-bubble-fraction) is accelerator time lost to idling; more microbatches or interleaved schedules shrink it.
 2.  **Checkpoint stalls**: Synchronous checkpoint writes that block the training loop to serialize terabytes of weights and optimizer states convert expensive compute time into storage wait time. Asynchronous checkpointing mitigates this by snapshotting host-pinned or local Non-Volatile Memory Express (NVMe) memory in milliseconds, delegating remote persistence to background I/O threads.
 3.  **Recovery rollback**: When a node fails in an $N$-node cluster, training halts and rolls back to the last valid checkpoint, squandering the arithmetic executed since that snapshot. Minimizing the failure blast radius through fast health heartbeats and dynamic node replacement bounds this compute loss (@sec-fault-tolerance-reliability, @sec-fleet-orchestration).
 
@@ -365,11 +365,11 @@ The C$^3$ Scorecard grades fleet efficiency against known thresholds, extending 
 
 | **C$^3$ Axis**    |                    **Metric**                    |                                                    **Definition**                                                    |            **Failing Grade**            |            **Passing Grade**            |
 |:------------------|:------------------------------------------------:|:--------------------------------------------------------------------------------------------------------------------:|:---------------------------------------:|:---------------------------------------:|
-| **Compute**       |                     **MFU**                      |                      $\frac{O_{\text{step}}}{N R_{\text{peak,device}} \times T_{\text{step}}}$                       |  $<$ `{python} C3Scorecard.mfu_low_str` | $>$ `{python} C3Scorecard.mfu_high_str` |
+| **Compute**       |                     **MFU**                      |                         $\frac{O_{\text{useful}}}{N R_{\text{peak}} \times T_{\text{step}}}$                         |  $<$ `{python} C3Scorecard.mfu_low_str` | $>$ `{python} C3Scorecard.mfu_high_str` |
 | **Communication** | **Scaling Efficiency** ($\eta_{\text{scaling}}$) |                                              $\frac{T_1}{N \times T_N}$                                              | $<$ `{python} C3Scorecard.eff_8192_str` |  $>$ `{python} C3Scorecard.eff_256_str` |
 | **Coordination**  |                **Goodput Ratio**                 | $\frac{T_{\text{useful}}}{T_{\text{wall}}}$ or $\frac{\text{useful steps/sec}}{\text{ideal or allocated steps/sec}}$ |                 $<$ 75%                 |                 $>$ 90%                 |
 
-: **The C$^3$ Efficiency Rubric**: Use these three numbers to characterize fleet health. The MFU denominator uses aggregate fleet peak, written as $N R_{\text{peak,device}}$ when $R_{\text{peak}}$ is a per-device value. These illustrative thresholds guide investigation; passing all three does not prove that inexpensive optimizations are exhausted. {#tbl-c3-scorecard tbl-colwidths="[16,21,29,17,17]"}
+: **The C$^3$ Efficiency Rubric**: Use these three numbers to characterize fleet health. The MFU denominator uses aggregate fleet peak, written as $N R_{\text{peak}}$ when $R_{\text{peak}}$ is a per-device value. These illustrative thresholds guide investigation; passing all three does not prove that inexpensive optimizations are exhausted. {#tbl-c3-scorecard tbl-colwidths="[16,21,29,17,17]"}
 
 ## C$^3$ Infrastructure Diagnostic Decision Tree and Fleet D·A·M Scorecard {#sec-appdx-c3-diagnostic-tree}
 
@@ -505,9 +505,9 @@ class C3EffectiveFlops:
 
 A fleet's **Effective FLOP/s**\index{Effective FLOP/s} is the usable throughput after compounding three disjoint C$^3$ efficiency factors:
 
-$$\text{Effective} = \text{Peak} \times \underbrace{\eta_{\text{compute-phase}}}_{\text{Compute}} \times \underbrace{\eta_{\text{scaling}}}_{\text{Distributed step}} \times \underbrace{\eta_{\text{operational}}}_{\text{Operational goodput}}$$
+$$R_{\text{eff}} = (N R_{\text{peak}}) \times \underbrace{\text{MFU}}_{\text{Compute}} \times \underbrace{\eta_{\text{scaling}}}_{\text{Distributed step}} \times \underbrace{\eta_{\text{goodput}}}_{\text{Operational goodput}}$$
 
-The compute-phase factor measures useful model arithmetic against peak throughput only while local computation is active. Scaling efficiency captures communication and other distributed-step losses, including pipeline bubbles. Operational goodput captures time outside those measured steps, including checkpointing, failure recovery, scheduler preemptions, and maintenance. These disjoint measurement windows prevent the same loss from being counted twice.
+MFU, the single-device baseline, measures useful model arithmetic against peak throughput only while local computation is active. This compute-phase factor is not the step-averaged fleet MFU of @tbl-c3-scorecard, whose $T_{\text{step}}$ denominator already includes the in-step losses that $\eta_{\text{scaling}}$ counts, so the product does not count them twice. Scaling efficiency captures communication and other distributed-step losses, including pipeline bubbles. Operational goodput captures time outside those measured steps, including checkpointing, failure recovery, scheduler preemptions, and maintenance. These disjoint measurement windows prevent the same loss from being counted twice.
 
 A concrete estimate makes the multiplicative loss visible at fleet scale.
 

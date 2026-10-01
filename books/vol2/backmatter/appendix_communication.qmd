@@ -186,7 +186,7 @@ $$ T_{\text{ring}} = 2 \cdot \frac{N - 1}{N} \cdot \frac{M}{\beta} + 2(N - 1) \c
 
 The factor $2(N-1)/N$ approaches 2 as $N$ grows. Each rank sends that factor times $M$ bytes and receives the same amount. With full-duplex links, sending and receiving overlap; $\beta$ is the effective bandwidth in one direction, so sent-plus-received bytes must not be divided by that one-direction rate. The latency term grows linearly with $N$, which makes the ring algorithm expensive in latency for large GPU counts.
 
-For comparison, tree AllReduce has the cost shown in @eq-tree-allreduce:
+Tree AllReduce trades that linear latency growth for logarithmic depth. @Eq-tree-allreduce charges both the bandwidth and the latency term once per tree level, $2 \log_2 N$ times in total:
 
 $$ T_{\text{tree}} = 2 \log_2 N \cdot \frac{M}{\beta} + 2 \log_2 N \cdot \alpha $$ {#eq-tree-allreduce}
 
@@ -321,22 +321,22 @@ The ring algorithm minimizes bandwidth usage but pays a latency cost that grows 
 
 The decision boundary between ring and tree depends on both message size and participant count. For the power-of-two case modeled by @eq-ring-allreduce and @eq-tree-allreduce, equating the two times gives the crossover in @eq-ring-tree-crossover:
 
-$$ M_{\times}(N) = n^* \times \frac{(N-1)-\log_2 N}{\log_2 N-(N-1)/N}, \qquad n^*=\alpha\beta $$ {#eq-ring-tree-crossover}
+$$ M_{\text{crossover}}(N) = n^* \times \frac{(N-1)-\log_2 N}{\log_2 N-(N-1)/N}, \qquad n^*=\alpha\beta $$ {#eq-ring-tree-crossover}
 
-- **$M > M_{\times}(N)$** (large gradients): The ring has the lower modeled cost because its smaller bandwidth coefficient outweighs its additional startup steps.
-- **$M < M_{\times}(N)$** (barriers, scalars): The tree has the lower modeled cost because its logarithmic startup term outweighs its additional bandwidth cost.
-- **$M \approx M_{\times}(N)$** (medium tensors): The two modeled costs are similar, so benchmark them alongside recursive halving-doubling on the target topology.
+- **$M > M_{\text{crossover}}(N)$** (large gradients): The ring has the lower modeled cost because its smaller bandwidth coefficient outweighs its additional startup steps.
+- **$M < M_{\text{crossover}}(N)$** (barriers, scalars): The tree has the lower modeled cost because its logarithmic startup term outweighs its additional bandwidth cost.
+- **$M \approx M_{\text{crossover}}(N)$** (medium tensors): The two modeled costs are similar, so benchmark them alongside recursive halving-doubling on the target topology.
 
 @Tbl-algorithm-selection provides guidance for choosing the right algorithm.
 
-| **Regime**                    |                **Ring**               |                **Tree**                | **Recursive Halving-Doubling**                              |
-|:------------------------------|:-------------------------------------:|:--------------------------------------:|:------------------------------------------------------------|
-| **$M > M_{\times}(N)$**       | Lower cost under the displayed models |         Higher bandwidth term          | Candidate with near-optimal bandwidth and logarithmic steps |
-| **$M < M_{\times}(N)$**       |       Higher linear startup term      | Lower cost under the displayed models  | Candidate with logarithmic startup steps                    |
-| **$M \approx M_{\times}(N)$** |    Benchmark on the target topology   |    Benchmark on the target topology    | Benchmark on the target topology                            |
-| **Power-of-2 $N$**            |           Works for any $N$           | Matches the displayed $\log_2 N$ model | Requires $N = 2^k$                                          |
+| **Regime**                              |                **Ring**               |                **Tree**                | **Recursive Halving-Doubling**                              |
+|:----------------------------------------|:-------------------------------------:|:--------------------------------------:|:------------------------------------------------------------|
+| **$M > M_{\text{crossover}}(N)$**       | Lower cost under the displayed models |         Higher bandwidth term          | Candidate with near-optimal bandwidth and logarithmic steps |
+| **$M < M_{\text{crossover}}(N)$**       |       Higher linear startup term      | Lower cost under the displayed models  | Candidate with logarithmic startup steps                    |
+| **$M \approx M_{\text{crossover}}(N)$** |    Benchmark on the target topology   |    Benchmark on the target topology    | Benchmark on the target topology                            |
+| **Power-of-2 $N$**                      |           Works for any $N$           | Matches the displayed $\log_2 N$ model | Requires $N = 2^k$                                          |
 
-: **Algorithm Selection Guide**: Strengths and weaknesses of ring, tree, and recursive halving-doubling relative to the participant-dependent ring-tree crossover $M_{\times}(N)$ in @eq-ring-tree-crossover. {#tbl-algorithm-selection}
+: **Algorithm Selection Guide**: Strengths and weaknesses of ring, tree, and recursive halving-doubling relative to the participant-dependent ring-tree crossover $M_{\text{crossover}}(N)$ in @eq-ring-tree-crossover. {#tbl-algorithm-selection}
 
 ### Hierarchical AllReduce {#sec-appdx-comm-foundations-hierarchical}
 
@@ -388,15 +388,15 @@ Pipeline parallelism splits a model across multiple GPUs so that each GPU holds 
 
 ### Bubble fraction {#sec-appdx-comm-foundations-bubble-fraction}
 
-In a pipeline with $p$ stages and $m$ microbatches, @eq-pipeline-bubble defines the **Bubble Fraction**\index{Pipeline!bubble fraction} as the proportion of total GPU-time spent idle:
+In a pipeline with $N_{\text{PP}}$ stages and $m$ microbatches, @eq-pipeline-bubble defines the **Bubble Fraction**\index{Pipeline!bubble fraction} as the proportion of total GPU-time spent idle:
 
-$$ b_{\text{pipe}} = \frac{p - 1}{p - 1 + m} $$ {#eq-pipeline-bubble}
+$$ b_{\text{pipe}} = \frac{N_{\text{PP}} - 1}{N_{\text{PP}} - 1 + m} $$ {#eq-pipeline-bubble}
 
 For balanced stages with negligible transfer overhead, this formula applies to both GPipe (where all forward passes complete before any backward pass begins) and 1F1B (one-forward-one-backward interleaving). The 1F1B schedule has the same asymptotic bubble fraction but uses less peak memory because it retires microbatches earlier.
 
 The bubble fraction depends on the ratio of stages to microbatches. Adding more microbatches (for a fixed number of stages) amortizes the pipeline fill and drain across more useful work.
 
-Rule of thumb: Keeping bubble overhead at or below 20 percent requires $m \geq 4(p - 1)$; strictly below 20 percent requires $m > 4(p - 1)$. The practical rule $m \geq 4p$ is a convenient conservative target.
+Rule of thumb: Keeping bubble overhead at or below 20 percent requires $m \geq 4(N_{\text{PP}} - 1)$; strictly below 20 percent requires $m > 4(N_{\text{PP}} - 1)$. The practical rule $m \geq 4N_{\text{PP}}$ is a convenient conservative target.
 
 Pipeline depth and microbatch count (@tbl-pipeline-bubble) govern the effective bubble fraction.
 
@@ -442,22 +442,22 @@ class CommPipeline:
     bubble_p8_m64_pct_str = fmt_percent(bubble_p8_m64, precision=1, commas=False, style='symbol')
 ```
 
-| **Pipeline Stages ($p$)** |                 **$m$ = 8**                  |                  **$m$ = 16**                 |                  **$m$ = 32**                 |                  **$m$ = 64**                 |
-|:--------------------------|:--------------------------------------------:|:---------------------------------------------:|:---------------------------------------------:|:---------------------------------------------:|
-| **$p$ = 4**               | `{python} CommPipeline.bubble_p4_m8_pct_str` | `{python} CommPipeline.bubble_p4_m16_pct_str` | `{python} CommPipeline.bubble_p4_m32_pct_str` | `{python} CommPipeline.bubble_p4_m64_pct_str` |
-| **$p$ = 8**               | `{python} CommPipeline.bubble_p8_m8_pct_str` | `{python} CommPipeline.bubble_p8_m16_pct_str` | `{python} CommPipeline.bubble_p8_m32_pct_str` | `{python} CommPipeline.bubble_p8_m64_pct_str` |
+| **Pipeline Stages ($N_{\text{PP}}$)** |                 **$m$ = 8**                  |                  **$m$ = 16**                 |                  **$m$ = 32**                 |                  **$m$ = 64**                 |
+|:--------------------------------------|:--------------------------------------------:|:---------------------------------------------:|:---------------------------------------------:|:---------------------------------------------:|
+| **$N_{\text{PP}}$ = 4**               | `{python} CommPipeline.bubble_p4_m8_pct_str` | `{python} CommPipeline.bubble_p4_m16_pct_str` | `{python} CommPipeline.bubble_p4_m32_pct_str` | `{python} CommPipeline.bubble_p4_m64_pct_str` |
+| **$N_{\text{PP}}$ = 8**               | `{python} CommPipeline.bubble_p8_m8_pct_str` | `{python} CommPipeline.bubble_p8_m16_pct_str` | `{python} CommPipeline.bubble_p8_m32_pct_str` | `{python} CommPipeline.bubble_p8_m64_pct_str` |
 
-: **Pipeline Bubble Fraction**: Percentage of GPU-time lost to pipeline bubbles for various stage counts and microbatch counts. The conservative choice $m \geq 4p$ keeps the modeled fraction below 20 percent. {#tbl-pipeline-bubble}
+: **Pipeline Bubble Fraction**: Percentage of GPU-time lost to pipeline bubbles for various stage counts and microbatch counts. The conservative choice $m \geq 4N_{\text{PP}}$ keeps the modeled fraction below 20 percent. {#tbl-pipeline-bubble}
 
 As the table demonstrates, scaling to deeper pipelines requires proportionally more microbatches to maintain high accelerator utilization. When activation memory bounds limit the microbatch count, systems must adopt alternative scheduling strategies to mitigate bubble overhead.
 
 ### Interleaved scheduling {#sec-appdx-comm-foundations-interleaved}
 
-Interleaved scheduling (used in Megatron-LM) assigns $V$ virtual stages to each physical GPU instead of one. Each GPU processes $V$ nonconsecutive chunks of the model, which means the pipeline has $p \times V$ virtual stages but the bubble overhead uses the original $p$, as @eq-interleaved-bubble shows:
+Interleaved scheduling (used in Megatron-LM) assigns $V$ virtual stages to each physical GPU instead of one. Each GPU processes $V$ nonconsecutive chunks of the model, which means the pipeline has $N_{\text{PP}} \times V$ virtual stages but the bubble overhead uses the original $N_{\text{PP}}$, as @eq-interleaved-bubble shows:
 
-$$ b_{\text{interleaved}} = \frac{p - 1}{p - 1 + m \times V} $$ {#eq-interleaved-bubble}
+$$ b_{\text{interleaved}} = \frac{N_{\text{PP}} - 1}{N_{\text{PP}} - 1 + m \times V} $$ {#eq-interleaved-bubble}
 
-The microbatch term in the denominator is multiplied by $V$ compared to @eq-pipeline-bubble, so the bubble reduction approaches $V$ when $m$ dominates $p - 1$. For $p$ = 8, $m$ = 16, and $V$ = 4, the bubble fraction drops from `{python} CommPipeline.bubble_std_pct_str` to `{python} CommPipeline.bubble_interleaved_pct_str`, a `{python} CommPipeline.interleaved_bubble_reduction_mult_str` reduction that comes at the cost of more frequent, smaller communication between stages.
+The microbatch term in the denominator is multiplied by $V$ compared to @eq-pipeline-bubble, so the bubble reduction approaches $V$ when $m$ dominates $N_{\text{PP}} - 1$. For $N_{\text{PP}}$ = 8, $m$ = 16, and $V$ = 4, the bubble fraction drops from `{python} CommPipeline.bubble_std_pct_str` to `{python} CommPipeline.bubble_interleaved_pct_str`, a `{python} CommPipeline.interleaved_bubble_reduction_mult_str` reduction that comes at the cost of more frequent, smaller communication between stages.
 
 Interleaved scheduling highlights a recurring theme in distributed ML: communication granularity is a tunable knob. Smaller, more frequent transfers improve overlap and reduce idle time, but increase the aggregate latency overhead. The same trade-off governs gradient compression.
 
@@ -590,4 +590,4 @@ Ultimately, these break-even limits show that gradient compression delivers the 
 
 ## Summary {.unnumbered}
 
-The communication models in this appendix rest on two hardware parameters, the startup latency $\alpha$ and the bandwidth $\beta$ of the $\alpha$-$\beta$ model (principle \ref{pri-alpha-beta-model}), and on two workload parameters, the payload ($n$ or $M$) and, for collectives, the participant count $N$. The crossover size $n^* = \alpha\beta$ separates latency-dominated from bandwidth-dominated transfers. Ring collectives carry a $(N-1)/N$ bandwidth factor and a latency term linear in $N$, while tree algorithms trade bandwidth for logarithmic latency, so message size relative to the crossover $M_{\times}(N)$ selects the algorithm. Pipeline parallelism adds the bubble fraction $b_{\text{pipe}} = (p-1)/(p-1+m)$, which the rule $m \geq 4p$ keeps below 20 percent, and gradient compression pays only when codec overhead is smaller than the communication time it saves and convergence is unaffected. Measuring $\alpha$ and $\beta$ for a cluster therefore yields a first-order prediction of its communication overhead.
+The communication models in this appendix rest on two hardware parameters, the startup latency $\alpha$ and the bandwidth $\beta$ of the $\alpha$-$\beta$ model (principle \ref{pri-alpha-beta-model}), and on two workload parameters, the payload ($n$ or $M$) and, for collectives, the participant count $N$. The crossover size $n^* = \alpha\beta$ separates latency-dominated from bandwidth-dominated transfers. Ring collectives carry a $(N-1)/N$ bandwidth factor and a latency term linear in $N$, while tree algorithms trade bandwidth for logarithmic latency, so message size relative to the crossover $M_{\text{crossover}}(N)$ selects the algorithm. Pipeline parallelism adds the bubble fraction $b_{\text{pipe}} = (N_{\text{PP}}-1)/(N_{\text{PP}}-1+m)$, which the rule $m \geq 4N_{\text{PP}}$ keeps below 20 percent, and gradient compression pays only when codec overhead is smaller than the communication time it saves and convergence is unaffected. Measuring $\alpha$ and $\beta$ for a cluster therefore yields a first-order prediction of its communication overhead.
