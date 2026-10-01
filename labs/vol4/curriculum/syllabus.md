@@ -37,11 +37,11 @@ Grades are earned through witnessed bench demonstrations, milestone packets, and
 
 | Milestone | Due | Weight | Witnessed Evidence | Competencies |
 |:---|:---:|:---:|:---|:---:|
-| **M1: Station Charter & Envelope** | End of Week 4 | **15%** | Labs 1–2. Hand-derived kinematics validated in simulation, measured joint envelope and calibration, camera extrinsics, power-off safe-state trace, and proof that the STM32 is the only path to the servos. | A1, A2, A3, D1 |
-| **M2: Learned Policy on the Edge** | End of Week 8 | **25%** | Labs 3–4. Sim-trained VLA deployed with a measured sim2real gap, a real LeRobot dataset with all four action taps, and a fine-tuned policy running untethered on the UNO Q. | B1, B2, B3, C1 |
-| **M3: Stress-Tested Closed Loop** | End of Week 9 | **20%** | Lab 5. Chunk-horizon benchmark, proof that language changes the physical path, and live recovery from a displaced target. | C2, C3 |
-| **M4: Certified Governed Station** | End of Week 11 | **15%** | Lab 6. The MCU clamps or vetoes unsafe proposals, the watchdog halts the arm when Linux freezes, and no stale command runs on resume. | D1, D2 |
-| **M5: Capstone Release & Defense** | End of Week 14 | **25%** | Capstone. Live held-out trials under disturbance, baseline comparison, oral defense, and the Physical Release Dossier. | D3 (full card) |
+| **M1: Station Charter & Envelope** | End of Week 4 | **15%** | Labs 1–2. Safe-state check, hand-derived kinematics validated in simulation, and the sim-vs-real gap measured with your own IK on the real arm. | A1, A3 |
+| **M2: Learned Policy on the Edge** | End of Week 8 | **25%** | Labs 3–4. Camera calibration, a sim-trained VLA deployed with a measured sim2real gap, a real LeRobot dataset with all four action taps, and a fine-tuned policy running untethered on the UNO Q. | A2, B1, B2, B3, C1 |
+| **M3: Stress-Tested Closed Loop** | End of Week 9 | **10%** | Lab 5. Chunk-horizon benchmark, live recovery from a displaced target, and a language check. | C2, C3 |
+| **M4: Certified Governed Station** | End of Week 11 | **25%** | Lab 6. Your own governor clamps or vetoes unsafe proposals, the watchdog halts the arm when Linux freezes, and no stale command runs on resume. | D1, D2 |
+| **M5: Capstone Release & Defense** | End of Week 14 | **25%** | Capstone. Proposal (Week 8) and frozen task (Week 10), then live held-out trials under disturbance, baseline comparison, oral defense, and the Physical Release Dossier. | D3 (full card) |
 
 The lab-by-lab schedule and readings are in the [studio landing page](../README.md#3-the-14-week-lab-schedule). The capstone protocol is in the [Capstone Project Studio](../labs/lab-capstone-studio.md).
 

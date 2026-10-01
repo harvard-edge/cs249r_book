@@ -121,15 +121,15 @@ This card serves as the concrete, observable sign-off sheet for students and ins
 
 | Competency | Signed off in | Milestone |
 |:---|:---|:---:|
-| **A1** Plant Kinematics & Safe Envelope | [Lab 1: Robot Kinematics & Digital Twin](../labs/lab-01-machine-anatomy.md) | M1 |
-| **A2** Multi-Modal Sensing & Calibration | [Lab 2: From Simulation to Real Hardware](../labs/lab-02-teleoperation-and-datasets.md) | M1 |
-| **A3** Feedback Timing & Latency | [Lab 2](../labs/lab-02-teleoperation-and-datasets.md) | M1 |
-| **B1** Physical Dataset Engineering | [Lab 4: Real-World Data Collection & Fine-Tuning](../labs/lab-04-autonomous-reach.md) | M2 |
-| **B2** Deterministic Baseline Benchmarking | [Lab 3: Learned Control with VLAs](../labs/lab-03-baseline-and-training.md) | M2 |
-| **B3** Edge Model Profiling & Optimization | [Lab 3](../labs/lab-03-baseline-and-training.md) | M2 |
-| **C1** Closed-Loop Physical Action | [Lab 4](../labs/lab-04-autonomous-reach.md) | M2 |
-| **C2** Action Chunk Dynamics | [Lab 5: Stress-Testing](../labs/lab-05-horizons-and-disturbances.md) | M3 |
-| **C3** Disturbance Recovery & Replanning | [Lab 5](../labs/lab-05-horizons-and-disturbances.md) | M3 |
-| **D1** Hardware Authority Routing | [Lab 2](../labs/lab-02-teleoperation-and-datasets.md), confirmed in [Lab 6](../labs/lab-06-safety-governor.md) | M1, M4 |
-| **D2** Real-Time Safety Governor & Cutoff | [Lab 6: Safety Governor](../labs/lab-06-safety-governor.md) | M4 |
+| **A1** Plant Kinematics & Safe Envelope | [Lab 1: Robot Kinematics & Digital Twin](../labs/lab-01-kinematics-and-twin.md) | M1 |
+| **A2** Multi-Modal Sensing & Calibration | [Lab 3: Learned Control with VLAs](../labs/lab-03-learned-control.md) | M2 |
+| **A3** Feedback Timing & Latency | [Lab 2: From Simulation to Real Hardware](../labs/lab-02-sim-to-real.md) | M1 |
+| **B1** Physical Dataset Engineering | [Lab 4: Real-World Data Collection & Fine-Tuning](../labs/lab-04-real-data-and-fine-tuning.md) | M2 |
+| **B2** Deterministic Baseline Benchmarking | [Lab 3](../labs/lab-03-learned-control.md) | M2 |
+| **B3** Edge Model Profiling & Optimization | [Lab 3](../labs/lab-03-learned-control.md) | M2 |
+| **C1** Closed-Loop Physical Action | [Lab 4](../labs/lab-04-real-data-and-fine-tuning.md) | M2 |
+| **C2** Action Chunk Dynamics | [Lab 5: Stress-Testing](../labs/lab-05-stress-testing.md) | M3 |
+| **C3** Disturbance Recovery & Replanning | [Lab 5](../labs/lab-05-stress-testing.md) | M3 |
+| **D1** Hardware Authority Routing | [Lab 6: Safety Governor](../labs/lab-06-safety-governor.md) (first traced in Lab 1, Part 1A) | M4 |
+| **D2** Real-Time Safety Governor & Cutoff | [Lab 6](../labs/lab-06-safety-governor.md) | M4 |
 | **D3** Physical Release Defense | [Capstone](../labs/lab-capstone-studio.md) | M5 |

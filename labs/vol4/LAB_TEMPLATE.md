@@ -8,9 +8,11 @@ Every Volume IV lab follows this template, section for section and in this order
 
 | Status | Meaning |
 |:---|:---|
-| `skeleton` | Purpose, question, readings, competencies, and phase outline are set. Procedures, commands, and thresholds are not. |
+| `skeleton` | Purpose, question, readings, competencies, and the part outline are set. Procedures, commands, and thresholds are not. |
 | `draft` | Every section is written, but at least one procedure or threshold has not been run on the bench. |
 | `bench-verified` | A staff member has run the whole lab as Student Zero on the reference station, and every threshold comes from that run. |
+
+**Labs are made of parts.** One part is one week: one supervised studio session with a single goal, a few steps, and a **checkpoint**, the artifact staff look at before the team moves on. A lab groups the parts that answer one physical question. The course has eleven lab parts in weeks 1–11 and three capstone weeks.
 
 **What lives elsewhere.** Bench hardware, wiring, the three engineering rules, the four action taps, and the telemetry CSV format are defined once in the [Station Reference Card](labs/station-reference.md). Labs link there and add only what is specific to the lab. Competency definitions live in the [Competency Card](curriculum/student-competencies.md); milestone weights live in the [syllabus](curriculum/syllabus.md).
 
@@ -34,7 +36,8 @@ Every Volume IV lab follows this template, section for section and in this order
 **Purpose.** One paragraph: why this lab exists in the sequence, and what the student understands at the end that they did not before.
 
 **Comes in from Lab N−1:** the artifacts this lab consumes.\
-**Goes out to Lab N+1:** the artifacts this lab produces.
+**Goes out to Lab N+1:** the artifacts this lab produces.\
+**If Lab N−1 didn't finish:** the staff-provided substitute that lets a team start this lab anyway.
 
 ### Learning outcomes
 
@@ -60,22 +63,28 @@ Additional for this lab:
 
 ## 2. Protocol
 
-### Phase A: Name (Week X)
+### Part NA: Name (Week X)
 
 **Goal:** one sentence.
 
 1. **Step name.** TBD (staff)
 2. **Step name.** TBD (staff)
 
-<!-- STAFF: for each step give the procedure, the exact commands or code entry
-     points, what to record, and the expected result. Every command must exist
-     in the starter repo and have been run on the reference station. -->
+**Checkpoint:** the artifact staff check at the end of the session.
 
-### Phase B: Name (Week Y)
+<!-- STAFF: one part must fit one 3-hour studio session. For each step give
+     the procedure, the exact commands or code entry points, what to record,
+     and the expected result. Every command must exist in the starter repo and
+     have been run on the reference station. Long compute (training, export)
+     runs between sessions, not inside one. -->
+
+### Part NB: Name (Week Y)
 
 **Goal:** one sentence.
 
 1. **Step name.** TBD (staff)
+
+**Checkpoint:** TBD (staff)
 
 ---
 

@@ -33,7 +33,7 @@ This page describes the standard bench station used across all Volume IV labs. I
 | **Dataset format** | LeRobot Dataset v3 | Parquet + MP4 episodes that carry all four action taps |
 | **Policies** | SmolVLA, ACT | SmolVLA conditions on camera, joint state, and a language prompt; ACT predicts multi-step action chunks |
 | **Edge runtime** | ONNX Runtime, INT8 | Quantized policy inference on the Qualcomm Linux CPU |
-| **Governor firmware** | STM32 C (Arduino App Lab / STM32Cube) | Limits, geofence, watchdog, and the only driver of the servo bus |
+| **Governor firmware** | STM32 C (Arduino App Lab / STM32Cube) | Limits, geofence, watchdog, and the only driver of the servo bus. A staff-written **baseline governor** runs from week 1; students replace it with their own in Lab 6. |
 
 ---
 

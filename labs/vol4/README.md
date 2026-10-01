@@ -35,33 +35,40 @@ Specifications, wiring, and the three bench rules are on the [Station Reference 
 
 Six labs follow the textbook's four parts in order, building from pen-and-paper math through simulation, real hardware, learned control, and finally safety governance. The final three weeks are an open capstone.
 
-![Fourteen-week timeline: Labs 1 and 2 in weeks 1 to 4, Labs 3 and 4 in weeks 5 to 8, Lab 5 in week 9, Lab 6 in weeks 10 and 11, and the capstone in weeks 12 to 14, with milestones M1 to M5 due at the end of weeks 4, 8, 9, 11, and 14.](assets/images/vol4-course-timeline.svg)
+![Fourteen-week timeline: Lab 1 in weeks 1 to 3, Lab 2 in week 4, Labs 3 and 4 in weeks 5 to 8, Lab 5 in week 9, Lab 6 in weeks 10 and 11, and the capstone in weeks 12 to 14, with milestones M1 to M5 due at the end of weeks 4, 8, 9, 11, and 14.](assets/images/vol4-course-timeline.svg)
 
 | | Lab | Weeks | Book Part & Chapters | What You Will Do |
 |:---:|:---|:---:|:---|:---|
-| 1 | **[Robot Kinematics & Digital Twin](labs/lab-01-machine-anatomy.md)** | 1–2 | Part I — Ch 1 *Causal Boundary*, Ch 2 *Physical Body* | Understand the math that makes a robot move. Derive inverse kinematics by hand, then build a simulated digital twin and command it with your own equations. |
-| 2 | **[From Simulation to Real Hardware](labs/lab-02-teleoperation-and-datasets.md)** | 3–4 | Part I — Ch 3 *Cognitive Brain*, Ch 4 *Nervous System* | Discover what simulation gets wrong. Wire the physical bench, port your IK to the microcontroller, control the real robot via CLI, and measure the gap between sim and reality. |
-| 3 | **[Learned Control with Vision-Language-Action Models](labs/lab-03-baseline-and-training.md)** | 5–6 | Part II — Ch 5 *Physical Data*, Ch 6 *Policy Training* | Replace hand-coded equations with a neural policy that learns from data. Run a pre-trained VLA in simulation, then deploy it to the real robot and measure the sim2real performance drop. |
-| 4 | **[Real-World Data Collection & Fine-Tuning](labs/lab-04-autonomous-reach.md)** | 7–8 | Part II–III — Ch 7 *Evaluation*, Ch 8 *Perception*, Ch 9 *Spatial Memory* | Bridge the sim2real gap with real data. Teleoperate the robot to collect demonstrations, fine-tune the sim-trained model, and deploy it untethered for fully autonomous operation. |
-| 5 | **[Stress-Testing: Prediction, Language & Recovery](labs/lab-05-horizons-and-disturbances.md)** | 9 | Part III — Ch 10 *Grounded Intent*, Ch 11 *Trajectory Planning* | Push the system until it breaks. Test how far ahead the model can predict, whether language changes its behavior, and what happens when you move the target mid-reach. |
+| 1 | **[Robot Kinematics & Digital Twin](labs/lab-01-kinematics-and-twin.md)** | 1–3 | Part I — Ch 1 *Causal Boundary*, Ch 2 *Physical Body* | Drive the robot on day one, then learn the math that makes it move. Derive inverse kinematics by hand, then build a simulated digital twin and command it with your own equations. |
+| 2 | **[From Simulation to Real Hardware](labs/lab-02-sim-to-real.md)** | 4 | Part I — Ch 3 *Cognitive Brain*, Ch 4 *Nervous System* | Discover what simulation gets wrong. Run your IK on the microcontroller, reach the same targets on the real robot, and measure the gap between sim and reality. |
+| 3 | **[Learned Control with Vision-Language-Action Models](labs/lab-03-learned-control.md)** | 5–6 | Part II — Ch 5 *Physical Data*, Ch 6 *Policy Training* | Replace hand-coded equations with a neural policy that learns from data. Run a pre-trained VLA in simulation, then deploy it to the real robot and measure the sim2real performance drop. |
+| 4 | **[Real-World Data Collection & Fine-Tuning](labs/lab-04-real-data-and-fine-tuning.md)** | 7–8 | Part II–III — Ch 7 *Evaluation*, Ch 8 *Perception*, Ch 9 *Spatial Memory* | Bridge the sim2real gap with real data. Teleoperate the robot to collect demonstrations, fine-tune the sim-trained model, and deploy it untethered for fully autonomous operation. |
+| 5 | **[Stress-Testing: Prediction, Language & Recovery](labs/lab-05-stress-testing.md)** | 9 | Part III — Ch 10 *Grounded Intent*, Ch 11 *Trajectory Planning* | Push the system until it breaks. Test how far ahead the model can predict, whether language changes its behavior, and what happens when you move the target mid-reach. |
 | 6 | **[Safety Governor — Build It, Then Break It](labs/lab-06-safety-governor.md)** | 10–11 | Part III–IV — Ch 12 *Safety Enforcement*, Ch 13 *Silicon Placement*, Ch 14 *Intervention*, Ch 15 *Verification*, Ch 16 *Release* | Prove the robot is trustworthy. Program safety barriers on the microcontroller, then try to defeat them by freezing the brain, corrupting packets, and cutting power. |
 | | **[Capstone: Physical Release Defense](labs/lab-capstone-studio.md)** | 12–14 | Synthesis — Ch 17 *Epistemic Frontier* | Put it all together. Design your own task, survive a peer team's adversarial attacks, defend your Physical Release Dossier, and generalize the pipeline to a new robot. |
 
-### How the labs connect
+### Week by week
 
-Each lab consumes what the previous one produced. This chain is the course structure; individual procedures can change as long as the hand-offs hold.
+Each lab is made of **parts**. One part is one week: a single studio session with one goal and a **checkpoint** artifact that staff see before the team moves on. Each lab names what it takes from the previous one, what it hands to the next, and the staff-provided substitute if a team falls behind.
 
-| Lab | Consumes | Produces | Status |
-|:---:|:---|:---|:---:|
-| 1 | — | DH table, IK solver, digital twin, workspace map | `skeleton` |
-| 2 | IK solver, digital twin | Calibrated station, IK on the MCU, camera extrinsics, RPC bridge, four-tap logging, IK sim2real table | `skeleton` |
-| 3 | Calibrated station, IK baseline | Sim-trained VLA on the UNO Q, sim2real gap table with failure causes | `skeleton` |
-| 4 | Sim-trained VLA, gap table | Real dataset and dataset card, fine-tuned VLA, untethered loop | `skeleton` |
-| 5 | Untethered loop | Chosen action horizon, language and disturbance-recovery evidence | `skeleton` |
-| 6 | Disturbance-tested loop | Governor firmware, watchdog, fault-injection evidence | `skeleton` |
-| Capstone | Everything above | Physical Release Dossier, oral defense | `skeleton` |
+| Week | Part | Checkpoint |
+|:---:|:---|:---|
+| 1 | **1A** Meet the robot | A recorded episode that replays; safe-state check |
+| 2 | **1B** Kinematics on paper | DH table, FK/IK derivation |
+| 3 | **1C** Digital twin | IK reaching in simulation, workspace map |
+| 4 | **2A** IK on the real arm | Sim-vs-real table, RPC timing trace |
+| 5 | **3A** VLAs in simulation | VLA vs. IK success in simulation |
+| 6 | **3B** The VLA on real hardware | Camera calibration, sim2real gap table |
+| 7 | **4A** Real demonstrations | Audited dataset and dataset card |
+| 8 | **4B** Fine-tuned & untethered | Comparison table, untethered run, latency breakdown; capstone proposal |
+| 9 | **5A** Stress the loop | Horizon curves, disturbance recovery |
+| 10 | **6A** Build the governor | Your governor, veto log, placement test; capstone task frozen |
+| 11 | **6B** Break the governor | Fault-injection evidence, zero-backlog trace |
+| 12 | **C1** Task build | Capstone task running end to end |
+| 13 | **C2** Peer fault exchange | Fault manifest and fixes |
+| 14 | **C3** Defense | Final trials, dossier, oral defense |
 
-Every lab follows the [lab template](LAB_TEMPLATE.md). A lab moves from `skeleton` to `draft` when every section is written, and to `bench-verified` when staff have run it end to end on the reference station.
+From week 1 to week 9 the arm runs under a staff-written baseline governor; in Lab 6 students replace it with their own. Every lab follows the [lab template](LAB_TEMPLATE.md) and carries a status: all are `skeleton` today, then `draft` when every section is written, then `bench-verified` when staff have run them end to end on the reference station.
 
 ---
 
