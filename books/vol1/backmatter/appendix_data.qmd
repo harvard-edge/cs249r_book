@@ -171,7 +171,7 @@ Even after data arrives at the machine, the serialization tax remains a final hu
 
 ### Row vs. columnar formats {#sec-appdx-data-foundations-row-vs-columnar-formats-bca2}
 
-The choice of file format determines the "physics" of how the data is read. Row-oriented formats such as CSV and JSON store data record-by-record, so reading the `age` field still requires parsing each row. This suits appended logs but not analytics on selected features. Parquet stores compressed column chunks on disk, while Arrow provides a columnar in-memory and IPC format. Parquet readers can use *projection pushdown*\index{Projection pushdown} to fetch selected column chunks, and both formats support *vectorized processing*\index{Vectorization!columnar processing}. Compare the two arrangements in @fig-row-vs-col to see why columnar access avoids scanning unnecessary bytes.
+The choice of file format determines the "physics" of how data traverses the storage hierarchy. Row-oriented formats such as CSV and JSON store data record-by-record, so reading the `age` field still requires parsing every attribute in each row. This layout suits append-only logs but incurs steep overhead for feature filtering. Parquet stores compressed column chunks on disk, while Arrow provides a contiguous columnar in-memory and IPC representation. Parquet readers exploit *projection pushdown*\index{Projection pushdown} to fetch selected column chunks directly, and both formats support *vectorized processing*\index{Vectorization!columnar processing}. @Fig-row-vs-col diagrams this structural contrast: where the row layout forces a wide scan across all fields (`ID`, `Age`, `Loc`), the columnar layout isolates the target `Age` chunk, avoiding data movement for irrelevant attributes.
 
 ::: {#fig-row-vs-col fig-env="figure" fig-pos="htb" fig-cap="**Storage Layouts**: Row-oriented formats group values by record, so the illustrated scan reads every field. Column-oriented formats group values by feature, so the illustrated scan reads only Age." fig-alt="Diagram contrasting row and column stores. The row store groups ID, Age, and Loc values by record and reads every column. The column store groups values by column and reads only Age."}
 ```{.tikz}
@@ -272,11 +272,11 @@ fill=\filllcirclecolor,minimum height=6mm,anchor=north]at(PO){};
 ```
 :::
 
-The layouts in @fig-row-vs-col differ in how many irrelevant bytes enter the training path.
+This physical partitioning in @fig-row-vs-col isolates how storage layout dictates bus traffic: extracting a single feature from a row store forces every intervening attribute into the host memory bus, whereas columnar chunking allows the storage subsystem to skip unreferenced columns entirely before deserialization.
 
 ::: {#psp-appendix-data-accelerator-starvation-problem .callout-perspective title="The accelerator starvation problem"}
 
-The choice of file format can determine whether a system is I/O bound or compute bound. As @fig-row-vs-col shows, storage layout compounds the serialization tax because row-oriented formats force full-row scans while columnar formats enable projection pushdown, reading only the bytes the model needs. The result is that the "Data Movement" term in the iron law can silently become the bottleneck that leaves expensive accelerators idling.
+The choice of file format often determines whether a training pipeline is I/O bound or compute bound. Because row-oriented formats enforce full-record scans while columnar layouts enable projection pushdown, storage layout compounds the serialization tax whenever models consume a subset of tabular features. When ingest pipelines fail to filter at the storage layer, the data-movement term in the iron law can silently become the critical-path bottleneck, starving accelerators and leaving matrix cores idling.
 
 :::
 
