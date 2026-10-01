@@ -11955,11 +11955,11 @@ class ValidateCommand:
                 elapsed_ms=int((time.time() - t0) * 1000),
             )
 
-        # Locate manifest: check review/bib-verification/manifest.json then binder/tools/
+        # Locate manifest: check canonical tracked binder/tools/bib_verification_manifest.json first
         issues: List[ValidationIssue] = []
-        ledger_path = self.config_manager.root_dir / "review" / "bib-verification" / "manifest.json"
+        ledger_path = self.config_manager.root_dir / "binder" / "tools" / "bib_verification_manifest.json"
         if not ledger_path.exists():
-            fallback = self.config_manager.root_dir / "binder" / "tools" / "bib_verification_manifest.json"
+            fallback = self.config_manager.root_dir / "review" / "bib-verification" / "manifest.json"
             if fallback.exists():
                 ledger_path = fallback
 
