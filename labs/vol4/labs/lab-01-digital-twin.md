@@ -22,7 +22,7 @@
 
 **Comes in from:** nothing; this is the first lab.\
 **Goes out to the next lab:** a replayed episode, a safe-state check, the body's measured limits, your IK solver, the digital twin, and a workspace map.\
-**If the previous lab didn't finish:** staff provide a reference IK solver.
+**If a part didn't finish:** staff provide a reference IK solver.
 
 ---
 
