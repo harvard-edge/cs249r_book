@@ -361,9 +361,9 @@ GPT-2 (1.5 billion parameters) serves as the primary case study because it is la
 ```
 
 **Mechanism**:
-In dense transformer models, the arithmetic work per token is directly proportional to parameter count $P$. In the forward pass, each parameter participates in one multiply-accumulate operation ($1\text{ MAC} = 2\text{ FLOPs}$), consuming $2P\text{ FLOPs/token}$. Backpropagation computes two matrix products per parameter: one to propagate gradients backward with respect to activations ($2P\text{ FLOPs}$), and another to calculate weight gradients for the optimizer ($2P\text{ FLOPs}$). The backward pass therefore requires twice the compute of the forward pass ($4P\text{ FLOPs/token}$), yielding a total work factor of $2P + 4P = 6P\text{ FLOPs/token}$. Across a dataset of $D$ tokens, total training work is $O \approx 6 \cdot P \cdot D_{\text{tokens}}$, or `{python} GPT2LighthouseSpecs.gpt2_total_flops_str`.
+In dense transformer models, the arithmetic work per token is directly proportional to parameter count $P$. In the forward pass, each parameter participates in one multiply-accumulate operation ($1\text{ MAC} = 2\text{ FLOPs}$), consuming $2P\text{ FLOPs/token}$. Backpropagation computes two matrix products per parameter: one to propagate gradients backward with respect to activations ($2P\text{ FLOPs}$), and another to calculate weight gradients for the optimizer ($2P\text{ FLOPs}$). The backward pass therefore requires twice the compute of the forward pass ($4P\text{ FLOPs/token}$), yielding a total work factor of $2P + 4P = 6P\text{ FLOPs/token}$. Across a dataset of $D$ tokens, total training work is $O \approx 6 \cdot P \cdot D$, or `{python} GPT2LighthouseSpecs.gpt2_total_flops_str`.
 
-Training GPT-2 couples this operation count with a strict memory footprint $M_{\text{state}} = M_{\text{weights}} + M_{\text{grads}} + M_{\text{opt}} + M_{\text{act}}$. Balancing execution time $T_{\text{train}} = \frac{O}{R_{\text{peak}} \cdot \eta_{\text{hw}}}$ requires orchestrating data ingestion, activation memory, and compute throughput within accelerator high-bandwidth memory (HBM) capacity.
+Training GPT-2 couples this operation count with a strict memory footprint $M_{\text{total}} = M_{\text{weights}} + M_{\text{gradients}} + M_{\text{optimizer}} + M_{\text{activations}}$. Balancing execution time $T_{\text{train}} = \frac{O}{R_{\text{peak}} \cdot \eta_{\text{hw}}}$ requires orchestrating data ingestion, activation memory, and compute throughput within accelerator high-bandwidth memory (HBM) capacity.
 
 :::
 
@@ -560,25 +560,25 @@ Each GPT-2 layer performs attention computations that exemplify dense matrix mul
 
 **Query, Key, Value Projections** (the three linear transformations that create attention inputs—3 separate matrix multiplications):
 \begin{gather*}
-\text{FLOPs} = `{python} GPT2Compute.mac_factor_str` \times `{python} GPT2Compute.n_projections_str` \times (B \times S \times d \times d)
+O = `{python} GPT2Compute.mac_factor_str` \times `{python} GPT2Compute.n_projections_str` \times (B \times S \times d \times d)
 \\
 = `{python} GPT2Compute.mac_factor_str` \times `{python} GPT2Compute.n_projections_str` \times (`{python} GPT2Compute.batch_str` \times `{python} GPT2Compute.seq_len_str` \times `{python} GPT2Compute.hidden_str` \times `{python} GPT2Compute.hidden_str`) \approx `{python} GPT2Compute.qkv_billion_str` \text{ billion FLOPs}
 \end{gather*}
 **Attention matmuls** ($\mathbf{Q}\mathbf{K}^\top$ and $\mathbf{A}_{\text{attn}}\mathbf{V}$):
 \begin{gather*}
-\text{FLOPs}_{QK} = `{python} GPT2Compute.mac_factor_str` \times B \times N_{\text{heads}} \times S \times S \times d_{\text{head}}
+O_{\text{QK}} = `{python} GPT2Compute.mac_factor_str` \times B \times N_{\text{heads}} \times S \times S \times d_{\text{head}}
 = `{python} GPT2Compute.attn_qk_billion_str` \text{ billion FLOPs}
 \\
-\text{FLOPs}_{\text{Attn}\times V} = \text{FLOPs}_{QK};\quad
+O_{\text{Attn}\times V} = O_{\text{QK}};\quad
 \text{pair total} \approx `{python} GPT2Compute.attn_pair_billion_str` \text{ billion FLOPs}
 \end{gather*}
 **Output projection** (attention output $\rightarrow$ hidden):
 $$
-\text{FLOPs} = `{python} GPT2Compute.mac_factor_str` \times B \times S \times d \times d \approx `{python} GPT2Compute.out_proj_billion_str` \text{ billion FLOPs}
+O = `{python} GPT2Compute.mac_factor_str` \times B \times S \times d \times d \approx `{python} GPT2Compute.out_proj_billion_str` \text{ billion FLOPs}
 $$
 **Feed-Forward Network** (Two linear transformations with expansion factor 4):
 $$
-\text{FLOPs} \approx `{python} GPT2Compute.ffn_coeff_str` \times B \times S \times d^2
+O \approx `{python} GPT2Compute.ffn_coeff_str` \times B \times S \times d^2
 $$
 **Computation Scale**
 
@@ -1375,7 +1375,7 @@ Forward propagation, gradient computation, and parameter updates define *what* t
 
 Arithmetic intensity\index{Arithmetic intensity!training operations}\index{Roofline model!training bottlenecks} captures this distinction---the ratio of computation to data movement that reveals whether an operation is limited by compute throughput or memory bandwidth:
 $$
-\text{Arithmetic Intensity} = \frac{\text{FLOPs}}{\text{bytes moved}}
+I = \frac{O}{D_{\text{vol}}}
 $$
 
 Operations with high arithmetic intensity are compute bound: their performance is limited by the processor's computational throughput. Operations with low arithmetic intensity are memory bound: they spend more time moving data than computing. @Sec-appdx-machine-foundations-roofline-model-2529 gives the formal definition of the Roofline Model and shows how to compute a hardware's ridge point.[^fn-ridge-point-precision]
@@ -1575,7 +1575,7 @@ class AttentionIntensity:
 
 To build intuition for these relationships, study the roofline diagram in @fig-training-roofline. The ridge point marks the "knee" where the sloped memory-bound region meets the flat compute-bound ceiling. An implementation plotted left of this point is bandwidth bound under the roofline assumptions; one plotted right is compute bound. The operation points in this diagram are illustrative placements that show how to interpret the model, not measured GPT-2 coordinates.
 
-Consider a GPT-2 attention layer\index{Arithmetic intensity!attention layer} that materializes the $S{\times}S$ attention-score matrix. For each head, the $\mathbf{Q}\mathbf{K}^\top$ product costs approximately $2S^2d_{\text{head}}$ FLOPs, while writing the FP16 score matrix and reading it back moves about $4S^2$ bytes. Counting only that score-matrix traffic gives the approximation $d_{\text{head}}/2$. For GPT-2 Small ($d_{\text{model}}=$ `{python} AttentionIntensity.H_small_str` across `{python} AttentionIntensity.heads_small_str` heads, so $d_{\text{head}}=$ `{python} AttentionIntensity.head_dim_str`), this restricted accounting yields `{python} AttentionIntensity.attn_intensity_str`. A complete kernel analysis must also count Q and K traffic, softmax work, additional reads and writes, cache reuse, and fusion. The $\mathcal{O}(S^2)$ materialized score traffic remains the term that FlashAttention targets.
+Consider a GPT-2 attention layer\index{Arithmetic intensity!attention layer} that materializes the $S{\times}S$ attention-score matrix. For each head, the $\mathbf{Q}\mathbf{K}^\top$ product costs approximately $2S^2d_{\text{head}}$ FLOPs, while writing the FP16 score matrix and reading it back moves about $4S^2$ bytes. Counting only that score-matrix traffic gives the approximation $d_{\text{head}}/2$. For GPT-2 Small ($d=$ `{python} AttentionIntensity.H_small_str` across `{python} AttentionIntensity.heads_small_str` heads, so $d_{\text{head}}=$ `{python} AttentionIntensity.head_dim_str`), this restricted accounting yields `{python} AttentionIntensity.attn_intensity_str`. A complete kernel analysis must also count Q and K traffic, softmax work, additional reads and writes, cache reuse, and fusion. The $\mathcal{O}(S^2)$ materialized score traffic remains the term that FlashAttention targets.
 
 Accelerators have characteristic hardware ridge points where operations transition from memory-bound to compute bound. A representative data-center accelerator has a ridge point high enough that low-intensity operations such as materialized attention softmax remain memory bound even when large matrix multiplications are compute bound. Operations below the ridge point are memory bound; above it, they are compute bound.
 
@@ -4305,9 +4305,9 @@ FlashAttention\index{FlashAttention!I/O-aware algorithm}\index{FlashAttention!me
 
 Standard self-attention\index{Attention!memory bottleneck}\index{Attention!quadratic complexity} (@sec-network-architectures) computes relationships between all positions in a sequence. For an input sequence of length $S$, the mechanism computes an $S{\times}S$ attention matrix according to @eq-attention:
 
-$$ \text{Attention}(\mathbf{Q}, \mathbf{K}, \mathbf{V}) = \text{softmax}\left(\frac{\mathbf{Q}\mathbf{K}^T}{\sqrt{d_k}}\right)\mathbf{V} $$ {#eq-attention}
+$$ \text{Attention}(\mathbf{Q}, \mathbf{K}, \mathbf{V}) = \text{softmax}\left(\frac{\mathbf{Q}\mathbf{K}^T}{\sqrt{d_{\text{head}}}}\right)\mathbf{V} $$ {#eq-attention}
 
-Here, $\mathbf{Q}$, $\mathbf{K}$, and $\mathbf{V}$ are the query, key, and value matrices for the sequence, and $d_k$ is the key-vector dimension used to scale the dot products before softmax. The $\mathbf{Q}\mathbf{K}^T$ term is the source of the $S{\times}S$ score matrix, which is why attention becomes an I/O problem even when the arithmetic itself maps well to Tensor Cores.
+Here, $\mathbf{Q}$, $\mathbf{K}$, and $\mathbf{V}$ are the query, key, and value matrices for the sequence, and $d_{\text{head}}$ is the key-vector dimension used to scale the dot products before softmax. The $\mathbf{Q}\mathbf{K}^T$ term is the source of the $S{\times}S$ score matrix, which is why attention becomes an I/O problem even when the arithmetic itself maps well to Tensor Cores.
 
 ```{python}
 #| echo: false
@@ -4355,9 +4355,9 @@ The memory bottleneck emerges from materializing the $S{\times}S$ intermediate m
 
 GPU memory hierarchy creates the opportunity for I/O-aware attention. HBM\index{HBM!memory bandwidth} offers large off-chip capacity, while much smaller on-chip SRAM has substantially higher bandwidth and lower latency. Attention implementations that materialize the quadratic intermediates in HBM must write and later read them during backpropagation. Because that traffic grows with the square of sequence length, it takes a growing share of step time as sequences lengthen.
 
-The backward pass requires the information represented by the attention probabilities, but an implementation may either save those intermediates or recompute them. For $\mathbf{A}_{\text{attn}} = \text{softmax}(\mathbf{Z}_{\text{attn}})$ and $\mathbf{Z}_{\text{attn}} = \mathbf{Q}\mathbf{K}^T/\sqrt{d_k}$, one gradient expression is:
+The backward pass requires the information represented by the attention probabilities, but an implementation may either save those intermediates or recompute them. For $\mathbf{A}_{\text{attn}} = \text{softmax}(\mathbf{Z}_{\text{attn}})$ and $\mathbf{Z}_{\text{attn}} = \mathbf{Q}\mathbf{K}^T/\sqrt{d_{\text{head}}}$, one gradient expression is:
 $$
-\frac{\partial \mathcal{L}}{\partial \mathbf{Q}} = \frac{1}{\sqrt{d_k}} \cdot \text{dsoftmax}\!\left(\frac{\partial \mathcal{L}}{\partial \mathbf{A}_{\text{attn}}},\, \mathbf{A}_{\text{attn}}\right) \cdot \mathbf{K}
+\frac{\partial \mathcal{L}}{\partial \mathbf{Q}} = \frac{1}{\sqrt{d_{\text{head}}}} \cdot \text{dsoftmax}\!\left(\frac{\partial \mathcal{L}}{\partial \mathbf{A}_{\text{attn}}},\, \mathbf{A}_{\text{attn}}\right) \cdot \mathbf{K}
 $$
 where $\text{dsoftmax}$ denotes the softmax Jacobian-vector product. A conventional implementation may save the probability matrix for this computation; saving both probabilities and raw scores is not mathematically required. FlashAttention instead saves compact normalization statistics and recomputes tiled score and probability blocks during backward propagation, avoiding full quadratic intermediates in HBM.
 
@@ -4367,7 +4367,7 @@ FlashAttention eliminates the need to materialize full $S{\times}S$ attention ma
 
 The key algorithmic insight relies on the mathematical structure of softmax attention. Standard attention computes:
 $$
-\text{Attention}(\mathbf{Q}, \mathbf{K}, \mathbf{V}) = \text{softmax}\left(\frac{\mathbf{Q}\mathbf{K}^T}{\sqrt{d_k}}\right)\mathbf{V}
+\text{Attention}(\mathbf{Q}, \mathbf{K}, \mathbf{V}) = \text{softmax}\left(\frac{\mathbf{Q}\mathbf{K}^T}{\sqrt{d_{\text{head}}}}\right)\mathbf{V}
 $$
 
 @Algo-streaming-attention decomposes this computation by partitioning the queries and the keys/values into tiles small enough to fit in SRAM, then streaming over the key/value tiles while maintaining the running softmax statistics needed to assemble each output tile, without ever forming the full score matrix.
@@ -4393,7 +4393,7 @@ No full $S{\times}S$ score or probability matrix is written to HBM. A $128{\time
 \For{each query tile $\mathbf{Q}_i$}
     \State in SRAM: $\mathbf{Y}_i^{\text{acc}} \gets \mathbf{0}$, $m_i \gets -\infty$, $l_i \gets 0$
     \For{each key/value tile $(\mathbf{K}_j, \mathbf{V}_j)$}
-        \State load $\mathbf{Q}_i, \mathbf{K}_j, \mathbf{V}_j$ into SRAM; $\mathbf{Z}_{ij} \gets \mathbf{Q}_i \mathbf{K}_j^\top / \sqrt{d_k}$
+        \State load $\mathbf{Q}_i, \mathbf{K}_j, \mathbf{V}_j$ into SRAM; $\mathbf{Z}_{ij} \gets \mathbf{Q}_i \mathbf{K}_j^\top / \sqrt{d_{\text{head}}}$
         \State $m_i' \gets \max(m_i,\operatorname{rowmax}(\mathbf{Z}_{ij}))$ \Comment{new stable max}
         \State $\mathbf{Y}_i^{\text{acc}} \gets \mathbf{Y}_i^{\text{acc}}\odot e^{m_i-m_i'} + e^{\mathbf{Z}_{ij}-m_i'}\mathbf{V}_j$
         \State $l_i \gets l_i\odot e^{m_i-m_i'} + \operatorname{rowsum}(e^{\mathbf{Z}_{ij}-m_i'})$; $m_i \gets m_i'$
@@ -6245,7 +6245,7 @@ class NetworkWall:
 
 1. **Gradient size** (FP16): `{python} NetworkWall.gradient_size_gb_str` per step.
 2. **AllReduce cost**: Ring AllReduce passes gradient shards around a logical ring, so each worker ends up sending nearly two full copies of the gradient: $2(N_{\text{GPU}}-1)/N_{\text{GPU}}$, which equals `{python} NetworkWall.allreduce_factor_mult_str` for `{python} NetworkWall.n_gpus_str`. That gives `{python} NetworkWall.allreduce_factor_value_str` $\times$ `{python} NetworkWall.gradient_size_gb_str` = `{python} NetworkWall.allreduce_gb_str` total.
-3. **Bandwidth-only lower bound**: At `{python} NetworkWall.network_bw_gb_per_s_str` per worker on the 100 Gbps fabric, synchronization latency is $T_{\text{comm}} = D_{\text{comm}} / \text{BW}_{\text{net}} =$ `{python} NetworkWall.allreduce_gb_str` / `{python} NetworkWall.network_bw_gb_per_s_str` $=$ `{python} NetworkWall.network_time_s_str`.
+3. **Bandwidth-only lower bound**: At `{python} NetworkWall.network_bw_gb_per_s_str` per worker on the 100 Gbps fabric, synchronization latency is $T_{\text{comm}} = D_{\text{comm}} / \text{BW}_{\text{network}} =$ `{python} NetworkWall.allreduce_gb_str` / `{python} NetworkWall.network_bw_gb_per_s_str` $=$ `{python} NetworkWall.network_time_s_str`.
 4. **Compute comparison**: If the nonoverlapped forward and backward work takes $T_{\text{compute}} \approx$ `{python} NetworkWall.compute_time_s_str`, communication latency $T_{\text{comm}} \approx$ `{python} NetworkWall.network_time_s_str` dominates.
 
 **Systems insight**: The network becomes a wall\index{AllReduce!network wall} when $T_{\text{comm}} > T_{\text{compute}}$, causing accelerator efficiency $\eta_{\text{hw}} = \frac{T_{\text{compute}}}{T_{\text{compute}} + T_{\text{comm}}}$ to plummet to about `{python} NetworkWall.hw_efficiency_pct_str`. Mitigations include gradient compression (reducing $D_{\text{comm}}$), ring AllReduce primitives [@sergeev2018horovod], and hierarchical topologies that confine high-frequency transfers to fast intra-node links (NVLink at `{python} NetworkWall.nvlink_h100_gb_per_s_str` vs. `{python} NetworkWall.network_bw_gb_per_s_str` inter-node).
@@ -6465,7 +6465,7 @@ class TrainingCarbonFootprint:
 
 ::: {#nbk-training-carbon-footprint-training .callout-notebook title="The carbon footprint of training"}
 
-**Context**: Training large models requires substantial energy and compute. The physical ceiling\index{Scaling!physical ceiling} appears once training time is converted to energy, cluster power multiplied by training time ($E_{\text{total}} = P_{\text{fleet}} \cdot T_{\text{train}}$), quantifying environmental scale:
+**Context**: Training large models requires substantial energy and compute. The physical ceiling\index{Scaling!physical ceiling} appears once training time is converted to energy, cluster power multiplied by training time ($E_{\text{total}} = P_{\text{cluster}} \cdot T_{\text{train}}$), quantifying environmental scale:
 
 1.  Workload: Training a `{python} TrainingCarbonFootprint.cf_params_b_str`-parameter model for `{python} TrainingCarbonFootprint.cf_tokens_str` tokens.
 2.  Compute: $O \approx$ `{python} TrainingCarbonFootprint.cf_flops_eqn_str`.

@@ -813,7 +813,7 @@ The overhead costs of eager execution motivate the opposite design: capturing th
 
 #### Static computation graphs {#sec-ml-frameworks-static-computation-graphs-e100}
 
-Static graph execution\index{Static graph!define-then-run model} defines the complete computational graph\index{Computational graph!static} as a symbolic representation first, then executes it separately. This "define-then-run" execution model means the graph exists before any computation occurs, enabling aggressive ahead-of-time optimization. Seeing the complete computation before launching device kernels allows the framework to analyze, transform, and optimize the graph globally—visibility unavailable across separate eager calls unless a compiler captures them. @Sec-appdx-algorithm-foundations-operator-fusion-5d73 works through the canonical global transformation this enables: for $N$ elements of $b$ bytes each, fusing a chain of $k$ elementwise operations into one kernel reduces idealized read-and-write traffic from $2kNb$ to $2Nb$ bytes.
+Static graph execution\index{Static graph!define-then-run model} defines the complete computational graph\index{Computational graph!static} as a symbolic representation first, then executes it separately. This "define-then-run" execution model means the graph exists before any computation occurs, enabling aggressive ahead-of-time optimization. Seeing the complete computation before launching device kernels allows the framework to analyze, transform, and optimize the graph globally—visibility unavailable across separate eager calls unless a compiler captures them. @Sec-appdx-algorithm-foundations-operator-fusion-5d73 works through the canonical global transformation this enables: for $N$ elements of $s_{\text{elem}}$ bytes each, fusing a chain of $k$ elementwise operations into one kernel reduces idealized read-and-write traffic from $2kNb$ to $2N s_{\text{elem}}$ bytes.
 
 ##### Two-phase execution {.unnumbered}
 
@@ -1262,14 +1262,14 @@ class FusionSpeedup:
 The latency term $(L_{\text{lat}})$ in the iron law is dominated by software overhead: dispatching instructions from Python to the GPU. Each operation pays a Python dispatch cost of ~`{python} FusionSpeedup.python_dispatch_us_str` plus a kernel launch cost of ~`{python} FusionSpeedup.kernel_launch_only_us_str`, which together set the per-launch overhead applied in the scenarios that follow.
 
 **Scenario one: Eager Mode (The "Tiny Op" Trap)**
-Consider a simple activation block, `y = relu(x + bias)`, in which each tensor contains $N$ elements of $b$ bytes each.
+Consider a simple activation block, `y = relu(x + bias)`, in which each tensor contains $N$ elements of $s_{\text{elem}}$ bytes each.
 
 *   **Operations**: Two (Add, ReLU).
 *   Execution:
     1.  Launch `Add` Kernel: `{python} FusionSpeedup.kernel_launch_us_str` overhead.
-    2.  Read/Write Memory: $2Nb$ bytes.
+    2.  Read/Write Memory: $2N s_{\text{elem}}$ bytes.
     3.  Launch `ReLU` Kernel: `{python} FusionSpeedup.kernel_launch_us_str` overhead.
-    4.  Read/Write Memory: $2Nb$ bytes.
+    4.  Read/Write Memory: $2N s_{\text{elem}}$ bytes.
 *   **Total overhead**: `{python} FusionSpeedup.eager_overhead_str`.
 *   **Total memory traffic**: $4Nb$ bytes.
 
@@ -1278,12 +1278,12 @@ The compiler fuses this into one kernel: `FusedAddRelu`.
 
 *   Execution:
     1.  Launch `Fused` Kernel: `{python} FusionSpeedup.compiled_overhead_str` overhead.
-    2.  Read/Write Memory: $2Nb$ bytes (the intermediate result stays on chip).
+    2.  Read/Write Memory: $2N s_{\text{elem}}$ bytes (the intermediate result stays on chip).
 *   **Total overhead**: `{python} FusionSpeedup.compiled_overhead_str` (`{python} FusionSpeedup.overhead_speedup_mult_str` speedup).
-*   **Total memory traffic**: $2Nb$ bytes (`{python} FusionSpeedup.bw_efficiency_mult_str` bandwidth efficiency).
+*   **Total memory traffic**: $2N s_{\text{elem}}$ bytes (`{python} FusionSpeedup.bw_efficiency_mult_str` bandwidth efficiency).
 
 **Systems insight**:
-Fusion wins on two fronts at once. Collapsing two launches into one halves the per-op dispatch overhead in this scenario, and keeping the intermediate result on chip cuts idealized memory traffic from $4Nb$ to $2Nb$ bytes. For small element-wise operations, the avoided round-trip to external memory can matter more than the arithmetic.
+Fusion wins on two fronts at once. Collapsing two launches into one halves the per-op dispatch overhead in this scenario, and keeping the intermediate result on chip cuts idealized memory traffic from $4Nb$ to $2N s_{\text{elem}}$ bytes. For small element-wise operations, the avoided round-trip to external memory can matter more than the arithmetic.
 
 :::
 
@@ -2657,7 +2657,7 @@ The illustrative ResNet-50 breakdown in @sec-ml-frameworks-pytorch-autograd-inte
 3.  Master weights (FP32): `{python} AdminTax.admin_master_gb_str`, the full-precision copy that mixed-precision training updates.
 4.  Optimizer states (Adam): `{python} AdminTax.admin_opt_gb_str` (momentum and variance in FP32, $4 \times$ the FP16 weight memory).
 5.  Activations: For a batch size of `{python} AdminTax.admin_batch_str` and a `{python} AdminTax.admin_layers_str`-layer network, reverse-mode AD retains the operation-dependent values required by derivative rules; activation checkpointing can omit selected values and recompute them during the backward pass.
-    $$ \text{Activations} \approx B \times N_L \times S \times d_{\text{model}} \times n_{\text{saved}} \times 2 \text{ bytes} $$
+    $$ \text{Activations} \approx B \times N_L \times S \times d \times n_{\text{saved}} \times 2 \text{ bytes} $$
     For a `{python} AdminTax.admin_seq_len_str`-token sequence, `{python} AdminTax.admin_width_str`-wide hidden state, and `{python} AdminTax.admin_saved_tensors_str` saved tensor per layer: `{python} AdminTax.admin_act_calc_math`. Materialized attention terms can add a separate $B \times N_{\text{heads}} \times S^2$ component, which is why memory-efficient attention kernels matter.
 
 **Systems insight**: A `{python} AdminTax.admin_weights_gb_str` model carries `{python} AdminTax.admin_persistent_gb_str` of persistent training state before the first batch is processed, `{python} AdminTax.admin_persistent_mult_str` its FP16 weights (16 bytes per parameter in the mixed-precision Adam recipe that @sec-model-training budgets). During a training step, batch-dependent activations add another `{python} AdminTax.admin_act_gb_str`, raising the peak "administrative tax" to ~`{python} AdminTax.admin_tax_gb_str` beyond the weights. During training, data movement includes saving and retrieving these activations.
