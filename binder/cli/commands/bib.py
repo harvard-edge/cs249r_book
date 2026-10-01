@@ -86,7 +86,7 @@ class BibCommand:
         parser.add_argument("--author", default=None, help="Custom author override for --url")
         parser.add_argument("--year", default=None, help="Custom year override for --url")
         parser.add_argument("--venue", default=None, help="Custom venue override for --url")
-        parser.add_argument("--inbox", default="books/bib-inbox.bib", help="Inbox path for 'ingest' subcommand")
+        parser.add_argument("--inbox", default="bibs/inbox.bib", help="Inbox path for 'ingest' subcommand")
 
         try:
             # Pre-commit appends filenames after the hook entry, so the public
@@ -182,17 +182,17 @@ class BibCommand:
         console.print("  [cyan]./binder/binder bib add --arxiv 1706.03762[/cyan]")
         console.print("  [cyan]./binder/binder bib add --url https://github.com/huggingface/lerobot --key cadene2024lerobot[/cyan]")
         console.print("  [cyan]./binder/binder bib add --isbn 9780136566953[/cyan]")
-        console.print("  [cyan]./binder/binder bib ingest --inbox books/bib-inbox.bib[/cyan]")
-        console.print("  [cyan]./binder/binder bib list --path books/references.bib[/cyan]")
+        console.print("  [cyan]./binder/binder bib ingest --inbox bibs/inbox.bib[/cyan]")
+        console.print("  [cyan]./binder/binder bib list --path bibs/references.bib[/cyan]")
         console.print("  [cyan]./binder/binder bib mechanical refs.bib[/cyan]")
         console.print("  [cyan]./binder/binder bib clean --dry-run[/cyan]")
-        console.print("  [cyan]./binder/binder bib update --path books/references.bib[/cyan]")
+        console.print("  [cyan]./binder/binder bib update --path bibs/references.bib[/cyan]")
         console.print("  [cyan]./binder/binder bib sync --dry-run[/cyan]")
         console.print(
             "  [cyan]./binder/binder bib normalize[/cyan]   "
             "# all git-tracked .bib (run from repo root)"
         )
-        console.print("  [cyan]./binder/binder bib normalize --path books/references.bib[/cyan]")
+        console.print("  [cyan]./binder/binder bib normalize --path bibs/references.bib[/cyan]")
         console.print()
 
     # ------------------------------------------------------------------
@@ -677,7 +677,7 @@ class BibCommand:
     # Ingest (staging inbox)
     # ------------------------------------------------------------------
 
-    def _run_ingest(self, inbox: str = "books/bib-inbox.bib", dry_run: bool = False) -> bool:
+    def _run_ingest(self, inbox: str = "bibs/inbox.bib", dry_run: bool = False) -> bool:
         """Scan staging inbox file, authenticate each entry online, promote verified entries."""
         from cli.core import bib_gateway
 

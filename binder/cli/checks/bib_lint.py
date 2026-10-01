@@ -96,7 +96,15 @@ def load_baseline() -> set[tuple[str, str, str]]:
     if not ALLOW_LIST_PATH.exists():
         return set()
     data = json.loads(ALLOW_LIST_PATH.read_text())
-    return {(e["file"], e["key"], e["rule"]) for e in data.get("allowed", [])}
+    base = set()
+    for e in data.get("allowed", []):
+        f = e["file"]
+        base.add((f, e["key"], e["rule"]))
+        if f == "books/references.bib":
+            base.add(("bibs/references.bib", e["key"], e["rule"]))
+        elif f == "bibs/references.bib":
+            base.add(("books/references.bib", e["key"], e["rule"]))
+    return base
 
 
 def load_style_baseline() -> set[tuple[str, str, str]]:
@@ -104,7 +112,15 @@ def load_style_baseline() -> set[tuple[str, str, str]]:
     if not STYLE_ALLOW_LIST_PATH.exists():
         return set()
     data = json.loads(STYLE_ALLOW_LIST_PATH.read_text())
-    return {(e["file"], e["key"], e["rule"]) for e in data.get("allowed", [])}
+    base = set()
+    for e in data.get("allowed", []):
+        f = e["file"]
+        base.add((f, e["key"], e["rule"]))
+        if f == "books/references.bib":
+            base.add(("bibs/references.bib", e["key"], e["rule"]))
+        elif f == "bibs/references.bib":
+            base.add(("books/references.bib", e["key"], e["rule"]))
+    return base
 
 
 def save_baseline(violations: list[tuple[str, "Violation"]]) -> None:
@@ -1003,12 +1019,26 @@ def report_violations(path: Path, violations: list[Violation]) -> None:
 
 
 def find_all_bib_files() -> list[Path]:
-    """Walk the repo and return all tracked .bib files."""
+    """Walk the repo and return all tracked .bib files, deduplicated by real path."""
     import subprocess
     out = subprocess.check_output(
         ["git", "ls-files", "*.bib"], cwd=Path.cwd()
     ).decode()
-    return [Path(p.strip()) for p in out.splitlines() if p.strip()]
+    seen: set[Path] = set()
+    result: list[Path] = []
+    for p in out.splitlines():
+        p_str = p.strip()
+        if not p_str:
+            continue
+        path = Path(p_str)
+        try:
+            real = path.resolve()
+        except Exception:
+            real = path
+        if real not in seen:
+            seen.add(real)
+            result.append(path)
+    return result
 
 
 def main() -> int:

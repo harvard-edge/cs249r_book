@@ -1424,7 +1424,20 @@ class ValidateCommand:
             return [root] if root.suffix == ".bib" else []
         bibs = sorted(root.rglob("*.bib"))
         if bibs:
-            return bibs
+            unique_bibs = []
+            seen_targets = set()
+            for b in bibs:
+                if b.name.endswith("inbox.bib") or "inbox" in b.stem:
+                    continue
+                try:
+                    resolved = b.resolve()
+                except OSError:
+                    resolved = b
+                if resolved in seen_targets:
+                    continue
+                seen_targets.add(resolved)
+                unique_bibs.append(b)
+            return unique_bibs
         return self._book_bib_files_for_root(root)
 
     def _read_text(self, path: Path) -> str:
@@ -1439,7 +1452,10 @@ class ValidateCommand:
         try:
             return str(path.relative_to(self.config_manager.book_dir))
         except ValueError:
-            return str(path)
+            try:
+                return str(path.relative_to(self.config_manager.root_dir))
+            except ValueError:
+                return str(path)
 
     def _run_cli_contract(self, root: Path) -> ValidationRunResult:
         """Run read-only command-surface contract checks for Binder itself."""
@@ -11029,7 +11045,9 @@ class ValidateCommand:
         else to the shared ``references.bib``; front matter and back matter use the shared file.
         """
         contents = self.config_manager.book_dir
-        shared_bib = contents / "references.bib"
+        shared_bib = self.config_manager.root_dir / "bibs" / "references.bib"
+        if not shared_bib.exists():
+            shared_bib = contents / "references.bib"
         from cli.core.discovery import discover_volumes
         scopes: List[ValidateCommand._BibScope] = []
         for vol in discover_volumes(contents):
@@ -12034,13 +12052,17 @@ class ValidateCommand:
                 elapsed_ms=int((time.time() - t0) * 1000),
             )
 
-        # Locate manifest: check canonical tracked binder/tools/bib_verification_manifest.json first
+        # Locate manifest: check canonical tracked bibs/manifest.json first
         issues: List[ValidationIssue] = []
-        ledger_path = self.config_manager.root_dir / "binder" / "tools" / "bib_verification_manifest.json"
+        ledger_path = self.config_manager.root_dir / "bibs" / "manifest.json"
         if not ledger_path.exists():
-            fallback = self.config_manager.root_dir / "review" / "bib-verification" / "manifest.json"
-            if fallback.exists():
-                ledger_path = fallback
+            legacy = self.config_manager.root_dir / "binder" / "tools" / "bib_verification_manifest.json"
+            if legacy.exists():
+                ledger_path = legacy
+            else:
+                fallback = self.config_manager.root_dir / "review" / "bib-verification" / "manifest.json"
+                if fallback.exists():
+                    ledger_path = fallback
 
         if not ledger_path.exists():
             issues.append(ValidationIssue(
@@ -12188,7 +12210,8 @@ class ValidateCommand:
                     ))
                 elif recorded_hash != current_hash:
                     # Only flag drift if the entry is in the primary file recorded in manifest
-                    if record.get("file") == rel:
+                    rec_file = record.get("file")
+                    if not rec_file or rec_file == rel or Path(rec_file).name == bib_path.name:
                         issues.append(ValidationIssue(
                             file=rel,
                             line=entry.start_line,
