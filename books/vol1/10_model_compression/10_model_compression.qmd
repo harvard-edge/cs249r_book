@@ -286,7 +286,7 @@ AlexNet, the model that won the 2012 ImageNet challenge, encountered a memory wa
 
 **Impact**: The model could not be trained on a single device at all, so the memory ceiling propagated upward into the network design itself rather than remaining a hardware procurement problem.
 
-**Fix**: They partitioned the model across two 3 GB GTX 580 GPUs and limited cross-GPU connections so that the working set would fit within each device's memory bound ($M_{\text{peak}} \le 3\text{ GB}$). The resulting two-tower architecture achieved a winning top-5 error rate of 15.3 percent, a 10.8 percentage point margin.
+**Fix**: They partitioned the model across two 3 GB GTX 580 GPUs and limited cross-GPU connections so that the working set would fit within each device's memory bound ($M_{\text{total}} \le 3\text{ GB}$). The resulting two-tower architecture achieved a winning top-5 error rate of 15.3 percent, a 10.8 percentage point margin.
 
 **Systems lesson**: Memory capacity bounds have constrained deep learning since its inception. The same physical ceiling that forced AlexNet's split during training now appears at deployment, where compression rather than model splitting is the lever.
 
@@ -491,7 +491,7 @@ Consider a MobileNet trained for image classification on a wearable health monit
 
 Pruning[^fn-pruning-lecun-1989] directly addresses memory efficiency constraints by eliminating parameters or structures that contribute little to the deployed objective. Many trained networks contain removable capacity, but the safe fraction depends on the architecture, task, pruning pattern, and recovery procedure. The central questions are *what* to prune (individual weights vs. entire structures), *how* to estimate what is expendable (magnitude, gradients, or activations), and *when* to prune (after training, during training, or even at initialization). While @sec-hardware-acceleration-nm-structured-sparsity-mechanics-9a71 analyzes the microarchitectural execution of sparse operands, the foundational systems rule is invariant: zero-valued weights conserve physical resources only when the underlying hardware and runtime execution path can skip loading or computing them.
 
-[^fn-pruning-lecun-1989]: **Optimal Brain Damage**\index{Pruning!Optimal Brain Damage}: Introduced by @lecun1990optimal, the method achieved 4$\times$ parameter reduction—and proportional memory savings—in a handwriting recognizer by using a diagonal approximation to second-derivative (Hessian) information to estimate the loss increase from removing each weight. A full Hessian has $\mathcal{O}(n^2)$ entries for $n$ parameters, but Optimal Brain Damage avoids storing that full matrix by approximating its diagonal. Modern-scale pruning still favors cheaper criteria such as magnitude because even diagonal curvature estimation adds training cost.
+[^fn-pruning-lecun-1989]: **Optimal Brain Damage**\index{Pruning!Optimal Brain Damage}: Introduced by @lecun1990optimal, the method achieved 4$\times$ parameter reduction—and proportional memory savings—in a handwriting recognizer by using a diagonal approximation to second-derivative (Hessian) information to estimate the loss increase from removing each weight. A full Hessian has $\mathcal{O}(P^2)$ entries for $P$ parameters, but Optimal Brain Damage avoids storing that full matrix by approximating its diagonal. Modern-scale pruning still favors cheaper criteria such as magnitude because even diagonal curvature estimation adds training cost.
 
 ::: {#dfn-model-compression-pruning .callout-definition title="Pruning"}
 
@@ -507,7 +507,7 @@ The formal pruning objective seeks a sparse parameter tensor $\hat{\mathbf{W}}$ 
 $$
 \min_{\hat{\mathbf{W}}} \mathcal{L}(\hat{\mathbf{W}}) \quad \text{subject to} \quad \|\hat{\mathbf{W}}\|_0 \leq k
 $$
-where $\|\hat{\mathbf{W}}\|_0$ is the **L0-norm**\index{L0 norm!parameter count} (the count of nonzero parameters). Solving this cardinality-constrained optimization is combinatorial, so practical methods use heuristics[^fn-heuristic-magnitude-pruning] such as **magnitude-based pruning**\index{Magnitude-based pruning!definition}. @Lst-pruning_example demonstrates this thresholding heuristic, while @fig-sparse-matrix contrasts the resulting $11\times 11$ weight tensor before and after pruning, isolating how sub-threshold entries collapse to zero while irregular, high-magnitude weights persist across the grid.
+where $\|\hat{\mathbf{W}}\|_0$ is the **$\ell_0$ norm**\index{L0 norm!parameter count} (the count of nonzero parameters). Solving this cardinality-constrained optimization is combinatorial, so practical methods use heuristics[^fn-heuristic-magnitude-pruning] such as **magnitude-based pruning**\index{Magnitude-based pruning!definition}. @Lst-pruning_example demonstrates this thresholding heuristic, while @fig-sparse-matrix contrasts the resulting $11\times 11$ weight tensor before and after pruning, isolating how sub-threshold entries collapse to zero while irregular, high-magnitude weights persist across the grid.
 
 [^fn-heuristic-magnitude-pruning]: **Heuristic**\index{Heuristic!pruning}: From Greek *heuriskein* (to discover), the same root as Archimedes' "eureka." In pruning, the dominant heuristic--larger magnitude means more important--works well empirically but creates a systems trap: magnitude-based pruning applied globally can remove most parameters from overparameterized layers while leaving critical bottleneck layers largely intact, giving the appearance of aggressive compression while preserving much of the compute and memory cost in the layers that matter [@blalock2020state]. This is why iterative prune-retrain cycles with per-layer budgets are often safer than naive global magnitude pruning: each cycle lets the network redistribute importance before the next cut.
 
@@ -532,7 +532,7 @@ print("Pruned (4 nonzeros):", pruned_weights)
 
 :::
 
-::: {#fig-sparse-matrix fig-env="figure" fig-pos="htb" fig-cap="**Sparse Matrix Transformation**: Magnitude-based pruning replaces weights below a numerical threshold with exact zeros (white cells) while preserving salient high-magnitude connections (colored cells). The resulting sparsity cuts parameter count, but realizing hardware speedups requires translating these unstructured zero entries into sparse storage formats or specialized execution kernels." fig-alt="Two 11×11 matrices side by side. Left matrix shows dense weights with colored cells indicating magnitudes. Right matrix shows sparse version with most cells white (zero) and only high-magnitude values retained in color."}
+::: {#fig-sparse-matrix fig-env="figure" fig-pos="htb" fig-cap="**Sparse Matrix Transformation**: Magnitude-based pruning replaces weights below a numerical threshold with exact zeros (white cells) while preserving salient high-magnitude connections (colored cells). The resulting sparsity cuts parameter count, but realizing hardware speedups requires translating these unstructured zero entries into sparse storage formats or specialized execution kernels." fig-alt="Two 11×11 matrices side by side. Left matrix shows every cell shaded uniformly with its weight value, including many near-zero entries. Right matrix shows sparse version with most cells white (zero) and only high-magnitude values retained in color."}
 
 ```{.tikz}
 \begin{tikzpicture}[line join=round,font=\sffamily\footnotesize]
@@ -1603,9 +1603,9 @@ This perspective leads to the Lottery Ticket Hypothesis[^fn-lottery-ticket-spars
 
 [^fn-lottery-ticket-sparsity]: **Lottery ticket hypothesis**\index{Lottery ticket hypothesis!etymology}: Named for the intuition that training a large network is like buying many lottery tickets--most lose, but a few "winning tickets" (sparse subnetworks with favorable initializations) can train to comparable accuracy on their own. @frankle2019lottery established the hypothesis on smaller vision and fully connected networks; later work surveyed and extended the idea to larger settings [@rachwan2022winning]. The systems implication is that some of the memory and compute spent training dense networks may be discoverable overhead, but the practical payoff depends on whether the winning subnetwork can be found before paying most of the original training cost.
 
-@Fig-winning-ticket diagrams this iterative pruning-and-rewinding loop: after training to convergence and pruning low-magnitude connections, surviving weights reset to their initialization state $\boldsymbol{\theta}_0$ to isolate the sparse subnetwork highlighted on the right. Repeating the cycle can isolate a sparse subnetwork that, in the reported settings, trains to accuracy comparable with the original network [@frankle2019lottery]. Whether the same procedure succeeds depends on architecture, scale, optimizer, and training budget.
+@Fig-winning-ticket diagrams this iterative pruning-and-rewinding loop: after training to convergence and pruning low-magnitude connections, surviving weights reset to their initialization state $\theta_0$ to isolate the sparse subnetwork highlighted on the right. Repeating the cycle can isolate a sparse subnetwork that, in the reported settings, trains to accuracy comparable with the original network [@frankle2019lottery]. Whether the same procedure succeeds depends on architecture, scale, optimizer, and training budget.
 
-::: {#fig-winning-ticket fig-env="figure" fig-pos="htb" fig-cap="**Lottery Ticket Iteration Cycle**: The original procedure repeatedly trains, prunes low-magnitude weights, and resets surviving weights to their initial state $\boldsymbol{\theta}_0$. The cycle tests whether the resulting sparse subnetwork can match the dense baseline when trained in isolation; the outcome is empirical rather than guaranteed." fig-alt="Cyclic flowchart with four stages: dense network, train to convergence, prune smallest weights, reset remaining weights to initial values. Arrows form an iterative loop used to test for a winning-ticket subnetwork."}
+::: {#fig-winning-ticket fig-env="figure" fig-pos="htb" fig-cap="**Lottery Ticket Iteration Cycle**: The original procedure repeatedly trains, prunes low-magnitude weights, and resets surviving weights to their initial state $\theta_0$. The cycle tests whether the resulting sparse subnetwork can match the dense baseline when trained in isolation; the outcome is empirical rather than guaranteed." fig-alt="Cyclic flowchart with four stages: dense network, train to convergence, prune smallest weights, reset remaining weights to initial values. Arrows form an iterative loop used to test for a winning-ticket subnetwork."}
 
 ```{.tikz}
 \begin{tikzpicture}[line join=round,font=\small\sffamily]
@@ -1879,7 +1879,7 @@ Suppose a medical question-answering model exceeds the memory and latency budget
 
 :::
 
-@Sec-data-selection-knowledge-distillation-compressing-information-ce68 introduced these soft targets as a source of training data; here they become a compression mechanism. Teacher models transfer semantic knowledge through non-zero probabilities assigned across non-target classes. Whereas a one-hot ground-truth label assigns a probability of one exclusively to the correct class, the probability distribution charted in @fig-kd-targets preserves dark knowledge across negative predictions—revealing that an input classified as a cat (85%) shares subtle semantic features with a dog (10%) and a fox (5%).
+@Sec-data-selection-knowledge-distillation-compressing-information-ce68 introduced these soft targets as a source of training data; here they become a compression mechanism. Teacher models transfer semantic knowledge through nonzero probabilities assigned across non-target classes. Whereas a one-hot ground-truth label assigns a probability of one exclusively to the correct class, the probability distribution charted in @fig-kd-targets preserves dark knowledge across negative predictions—revealing that an input classified as a cat (85%) shares subtle semantic features with a dog (10%) and a fox (5%).
 
 [^fn-distillation-etymology-chemistry]: **Distillation**\index{Knowledge distillation!etymology}: The name borrows from the chemical process of separating a mixture. In model compression, the student learns from a teacher's softened output distribution or internal representations rather than copying its parameters. Soft targets can encode relationships among classes, but the student learns only what its objective and training data expose. The metaphor is useful but not literal: the temperature parameter comes from softmax scaling, and the size-quality trade-off depends on the student, data, objective, and training procedure [@hinton2015distilling]. Deployment savings come from the student architecture, not from the metaphor itself.
 
@@ -1939,7 +1939,7 @@ nodes near coords={\pgfmathprintnumber{\pgfplotspointmeta}\%},
 
 :::
 
-Training a student model requires balancing teacher imitation against ground-truth task supervision. Operationally, the workflow requires four decisions before training begins: selecting a teacher with the desired behavior, designing a student whose dense architecture satisfies the target accelerator's memory and compute budget, generating soft targets over the training corpus, and choosing the temperature and loss weights that govern optimization. @Fig-kd-overview traces this dual-path distillation pipeline: an input sample $x$ passes concurrently through the teacher and student networks, routing temperature-scaled soft predictions ($T_{\text{distill}} = t$) into the distillation loss while unscaled student predictions ($T_{\text{distill}} = 1$) evaluate against ground-truth hard labels.
+Training a student model requires balancing teacher imitation against ground-truth task supervision. Operationally, the workflow requires four decisions before training begins: selecting a teacher with the desired behavior, designing a student whose dense architecture satisfies the target accelerator's memory and compute budget, generating soft targets over the training corpus, and choosing the temperature and loss weights that govern optimization. @Fig-kd-overview traces this dual-path distillation pipeline: an input sample $x$ passes concurrently through the teacher and student networks, routing temperature-scaled soft predictions ($T_{\text{distill}} > 1$) into the distillation loss while unscaled student predictions ($T_{\text{distill}} = 1$) evaluate against ground-truth hard labels.
 
 ::: {#fig-kd-overview fig-env="figure" fig-pos="htb" fig-cap="**Knowledge Distillation Workflow**: An input sample passes through both the teacher and the student network. The teacher produces soft labels via temperature-scaled softmax, while the student output is compared against both the soft labels (distillation loss) and the hard labels (student loss)." fig-alt="Block diagram showing knowledge distillation. Input flows to both teacher and student models. Teacher outputs soft labels via temperature-scaled softmax. Student outputs feed into distillation loss and student loss functions."}
 
@@ -1987,12 +1987,12 @@ yshift=2.5mm,fill=none,fit=(GB1)(GB3),line width=0.75pt](GBB2){};
 \node[below=4pt of  GBB2.north,inner sep=0pt,
 anchor=north]{Teacher model};
 %%
-\node[Box, rounded corners=7pt, left=2of $(GB1)!0.5!(B1)$](IN){Input x};
+\node[Box, rounded corners=7pt, left=2of $(GB1)!0.5!(B1)$](IN){Input $x$};
 \draw[Line,-latex](IN.east)--++(0:0.4)|-(GB1);
 \draw[Line,-latex](IN.east)--++(0:0.4)|-(B1);
 %%
-\node[Box2, right= 1.3of GB3,fill=OliveL,draw=OliveLine](S1){Softmax ($T_{\text{distill}}=t$)};
-\node[Box2,above right=0 and 1.3 of B3,fill=OliveL,draw=OliveLine](S2){Softmax ($T_{\text{distill}}=t$)};
+\node[Box2, right= 1.3of GB3,fill=OliveL,draw=OliveLine](S1){Softmax ($T_{\text{distill}}>1$)};
+\node[Box2,above right=0 and 1.3 of B3,fill=OliveL,draw=OliveLine](S2){Softmax ($T_{\text{distill}}>1$)};
 \node[Box2,below right=0 and 1.3 of B3,fill=OliveL,draw=OliveLine](S3){Softmax ($T_{\text{distill}}=1$)};
 %
 \node[Box2, right= 0.65of S1,fill=BlueL,draw=BlueLine](SL1){Soft labels};
@@ -2017,7 +2017,7 @@ anchor=north]{Teacher model};
 \draw[Line,-latex](S2)--(SL2);
 \draw[Line,-latex](S3)--(SL3);
 \draw[Line,-latex](SL3)-|(L2);
-\draw[Line,-latex](L2)|-(HL);
+\draw[Line,-latex](HL)-|(L2);
 %
 \end{tikzpicture}
 ```
@@ -2040,10 +2040,10 @@ A higher $T_{\text{distill}}$ flattens the softmax distribution and exposes **da
 [^fn-kl-divergence-distillation]: **KL divergence**\index{Kullback-Leibler divergence!distillation loss}: Introduced by Solomon Kullback and Richard Leibler in 1951, $\mathcal{D}_{\text{KL}}(p \lVert q)$ quantifies the extra bits needed to encode samples from distribution $p$ using a code optimized for $q$. The key asymmetric consequence: $\mathcal{D}_{\text{KL}}(\text{teacher} \lVert \text{student})$ penalizes the student heavily for assigning zero probability to teacher-probable outputs, forcing the student to maintain broad coverage of the teacher's distribution, including low-probability "soft labels" that carry the teacher's learned uncertainty. Distillation can affect calibration, which must be evaluated separately.
 
 $$
-\mathcal{L}_{\text{distill}} = (1 - \gamma_{\text{KD}}) \mathcal{L}_{\text{CE}}(\mathbf{p}_{\text{student}}, y) + \gamma_{\text{KD}} T_{\text{distill}}^2 \mathcal{D}_{\text{KL}}(\mathbf{p}_{\text{teacher}}^{(T_{\text{distill}})} \lVert \mathbf{p}_{\text{student}}^{(T_{\text{distill}})})
+\mathcal{L}_{\text{distill}} = (1 - \gamma_{\text{KD}}) \mathcal{L}_{\text{CE}}(\mathbf{p}_{\text{student}}, \mathbf{y}) + \gamma_{\text{KD}} T_{\text{distill}}^2 \mathcal{D}_{\text{KL}}(\mathbf{p}_{\text{teacher}}^{(T_{\text{distill}})} \lVert \mathbf{p}_{\text{student}}^{(T_{\text{distill}})})
 $$
 
-Here $\mathbf{p}_{\text{teacher}}^{(T_{\text{distill}})}$ and $\mathbf{p}_{\text{student}}^{(T_{\text{distill}})}$ are the probability vectors computed at temperature $T_{\text{distill}}$, $y$ is the one-hot ground-truth label, and $\gamma_{\text{KD}} \in [0,1]$ balances the hard-label and soft-target objectives. The scaling factor $T_{\text{distill}}^2$ ensures that the gradient magnitude of the distillation loss remains commensurate with the hard cross-entropy loss: dividing logits by $T_{\text{distill}}$ scales the derivative of the softmax probabilities by $1/T_{\text{distill}}$, and the gradient of the KL divergence with respect to the student's logits scales as $1/T_{\text{distill}}^2$ in the high-temperature limit. Multiplying by $T_{\text{distill}}^2$ prevents the teacher's supervisory gradient from vanishing relative to the hard-label loss as $T_{\text{distill}}$ increases. This formulation defines response-based distillation, matching final output distributions. Modern pipelines also employ feature-based distillation, training intermediate student layers to directly match the teacher's hidden representations or attention maps using mean squared error or cosine distance to guide gradient updates across deep backbones.
+Here $\mathbf{p}_{\text{teacher}}^{(T_{\text{distill}})}$ and $\mathbf{p}_{\text{student}}^{(T_{\text{distill}})}$ are the probability vectors computed at temperature $T_{\text{distill}}$, $\mathbf{y}$ is the one-hot ground-truth label vector, and $\gamma_{\text{KD}} \in [0,1]$ balances the hard-label and soft-target objectives. The scaling factor $T_{\text{distill}}^2$ ensures that the gradient magnitude of the distillation loss remains commensurate with the hard cross-entropy loss: dividing logits by $T_{\text{distill}}$ scales the derivative of the softmax probabilities by $1/T_{\text{distill}}$, and the gradient of the KL divergence with respect to the student's logits scales as $1/T_{\text{distill}}^2$ in the high-temperature limit. Multiplying by $T_{\text{distill}}^2$ prevents the teacher's supervisory gradient from vanishing relative to the hard-label loss as $T_{\text{distill}}$ increases. This formulation defines response-based distillation, matching final output distributions. Modern pipelines also employ feature-based distillation, training intermediate student layers to directly match the teacher's hidden representations or attention maps using mean squared error or cosine distance to guide gradient updates across deep backbones.
 
 ##### Efficiency gains and trade-offs {#sec-model-compression-efficiency-gains-tradeoffs-fb5b}
 
@@ -2138,9 +2138,9 @@ Factoring the matrix at rank $k =$ `{python} LowRankFactorization.rank_k_value_s
 
 :::
 
-This bandwidth-compute trade-off exemplifies the memory wall at the operator level: when batch sizes are small, execution is bottlenecked by the time required to fetch weight bytes from DRAM rather than the time required to perform multiply-accumulate operations. @Sec-hardware-acceleration-understanding-ai-memory-wall-3ea9 examines this memory wall from the hardware architecture perspective. In production serving engines, evaluating the factored representation avoids full-rank materialization entirely. @Fig-matrix-factorization diagrams this low-rank decomposition, factoring the original $m \times n$ weight matrix $\mathbf{M}$ into the product of a tall factor $\mathbf{L}_k$ ($m \times k$) and a wide factor $\mathbf{R}_k^T$ ($k \times n$).
+This bandwidth-compute trade-off exemplifies the memory wall at the operator level: when batch sizes are small, execution is bottlenecked by the time required to fetch weight bytes from DRAM rather than the time required to perform multiply-accumulate operations. @Sec-hardware-acceleration-understanding-ai-memory-wall-3ea9 examines this memory wall from the hardware architecture perspective. In production serving engines, evaluating the factored representation avoids full-rank materialization entirely. @Fig-matrix-factorization diagrams this low-rank decomposition, factoring the original $m \times n$ weight matrix $\mathbf{W}$ into the product of a tall factor $\mathbf{U}$ ($m \times k$) and a wide factor $\mathbf{V}^T$ ($k \times n$).
 
-::: {#fig-matrix-factorization fig-env="figure" fig-pos="htb" fig-cap="**Low-Rank Factorization**: A weight matrix $\mathbf{M}$ of size $m{\times}n$ is approximated by two smaller factors, labeled $\mathbf{L}_k$ $(m{\times}k)$ and $\mathbf{R}_k^T$ $(k{\times}n)$ in the diagram and corresponding to $\mathbf{U}_k$ and $\mathbf{V}_k^T$ in the surrounding notation. Storage falls from $m \times n$ to $m \times k + k \times n$ parameters, while one dense operation becomes two factor operations." fig-alt="Three rectangular boxes show matrix factorization. A large M matrix of size m by n approximately equals the product of a narrower L-k matrix of size m by k and a wider R-k-transpose matrix of size k by n."}
+::: {#fig-matrix-factorization fig-env="figure" fig-pos="htb" fig-cap="**Low-Rank Factorization**: A weight matrix $\mathbf{W}$ of size $m{\times}n$ is approximated by two smaller factors, $\mathbf{U}$ $(m{\times}k)$ and $\mathbf{V}^T$ $(k{\times}n)$. Storage falls from $m \times n$ to $m \times k + k \times n$ parameters, while one dense operation becomes two factor operations." fig-alt="Three rectangular boxes show matrix factorization. A large W matrix of size m by n approximately equals the product of a narrower U matrix of size m by k and a wider V-transpose matrix of size k by n."}
 
 ```{.tikz}
 \begin{tikzpicture}[font=\small\sffamily]
@@ -2154,11 +2154,11 @@ This bandwidth-compute trade-off exemplifies the memory wall at the operator lev
   minimum height=17mm
   },
 }
-\node[Box,fill=red!30](B1)at (0.33,0.5){\textit{M}};
+\node[Box,fill=red!30](B1)at (0.33,0.5){$\mathbf{W}$};
 \node[Box,fill=Brown!20,minimum width=8mm,
-             right=of B1](B2){\textit{L\textsubscript{k}}};
+             right=of B1](B2){$\mathbf{U}$};
 \node[Box,fill=BlueL!90,minimum width=12mm,   minimum height=8mm,
-             right=of B2](B3){\textit{R\textsubscript{k}\kern-3pt\textsuperscript{T}}};
+             right=of B2](B3){$\mathbf{V}^T$};
 \node[]at($(B1)!0.53!(B2)$){$\boldsymbol{\approx}$};
 \node[]at($(B2)!0.47!(B3)$){$\boldsymbol{\times}$};
 \node[below=2pt of B1]{\textit{m $\boldsymbol{\times}$ n}};
@@ -2173,9 +2173,9 @@ LRMF applies directly to fully connected projection layers and to flattened conv
 
 #### Tensor decomposition {#sec-model-compression-tensor-decomposition-5e9e}
 
-**Tensor decomposition**\index{Tensor decomposition!definition} extends low-rank approximation to multidimensional arrays, such as four-dimensional convolutional kernels ($C_{\text{out}} \times C_{\text{in}} \times K_h \times K_w$) and multi-head attention weights. Unfolding these parameters into two-dimensional matrices discards spatial and cross-channel correlations, leading to poor approximation accuracy for a given rank budget. Tensor decompositions preserve multiway structure by representing the tensor through multilinear products of lower-dimensional factors. @Fig-tensor-decomposition decomposes a three-dimensional tensor $y \in \mathbb{R}^{M \times N \times T}$ into three rank-$R$ factor matrices ($U$, $X$, and $V^T$), isolating how outer products of slice vectors $\mathbf{u}_i$, $\mathbf{x}_t$, and $\mathbf{v}_j$ reconstruct entry $y_{ijt}$.
+**Tensor decomposition**\index{Tensor decomposition!definition} extends low-rank approximation to multidimensional arrays, such as four-dimensional convolutional kernels ($C_{\text{out}} \times C_{\text{in}} \times K_h \times K_w$) and multi-head attention weights. Unfolding these parameters into two-dimensional matrices discards spatial and cross-channel correlations, leading to poor approximation accuracy for a given rank budget. Tensor decompositions preserve multiway structure by representing the tensor through multilinear products of lower-dimensional factors. @Fig-tensor-decomposition decomposes a three-dimensional tensor $\mathcal{Y} \in \mathbb{R}^{m \times n \times p}$ into three rank-$k$ factor matrices ($\mathbf{U}$, $\mathbf{X}$, and $\mathbf{V}^T$), isolating how outer products of slice vectors $\mathbf{u}_i$, $\mathbf{x}_t$, and $\mathbf{v}_j$ reconstruct entry $y_{ijt}$.
 
-::: {#fig-tensor-decomposition fig-env="figure" fig-pos="htb" fig-cap="**Tensor Decomposition**: A three-dimensional tensor $y\in\mathbb{R}^{M{\times}N{\times}T}$ is approximated by factor matrices U, X, and V. The highlighted factor vectors $\mathbf{u}_i$, $\mathbf{x}_t$, and $\mathbf{v}_j$ combine across rank R to reconstruct the entry $y_{ijt}$. Extending low-rank approximation from two dimensions to three carries the storage and computation argument into convolutional layers. Source: [@gholami2022]." fig-alt="A three-dimensional tensor y with dimensions M by N by T beside factor matrices U, X, and transposed V. Highlighted factor vectors u i, x t, and v j combine across the rank dimension to reconstruct tensor entry y i j t."}
+::: {#fig-tensor-decomposition fig-env="figure" fig-pos="htb" fig-cap="**Tensor Decomposition**: A three-dimensional tensor $\mathcal{Y}\in\mathbb{R}^{m{\times}n{\times}p}$ is approximated by factor matrices $\mathbf{U}$, $\mathbf{X}$, and $\mathbf{V}$. The highlighted factor vectors $\mathbf{u}_i$, $\mathbf{x}_t$, and $\mathbf{v}_j$ combine across rank $k$ to reconstruct the entry $y_{ijt}$. Extending low-rank approximation from two dimensions to three carries the storage and computation argument into convolutional layers. Source: [@gholami2022]." fig-alt="A three-dimensional tensor Y with dimensions m by n by p beside factor matrices U, X, and transposed V. Highlighted factor vectors u i, x t, and v j combine across the rank dimension to reconstruct tensor entry y i j t."}
 
 ```{.tikz}
 \scalebox{0.75}{%
@@ -2205,9 +2205,9 @@ LRMF applies directly to fully connected projection layers and to flattened conv
 (A)--(E)--(D)--(G)
 (B)--(A) (F)--(E);
 \path [every edge/.append style={line width=0.75pt,draw=blue, |-|}](C)+(0,-7pt)coordinate (C2)
-edge [auto, text=blue, "$N$"']  (C2 -|G)
-(G) +(4.5pt,-4.5pt) coordinate (G2) edge [text=blue,"$T$"'] ([xshift=4.5pt,yshift=-4.5pt]D)
-(C) +(-7pt,0) coordinate (C1) edge [blue,"$M$"] (C1 |- B);
+edge [auto, text=blue, "$n$"']  (C2 -|G)
+(G) +(4.5pt,-4.5pt) coordinate (G2) edge [text=blue,"$p$"'] ([xshift=4.5pt,yshift=-4.5pt]D)
+(C) +(-7pt,0) coordinate (C1) edge [blue,"$m$"] (C1 |- B);
 \end{scope}
 
 \begin{scope}[shift={(0.75,0.75)},line width=0.5pt]
@@ -2230,13 +2230,13 @@ edge [auto, text=blue, "$N$"']  (C2 -|G)
 \draw[RedLine,fill=none] (MC) -- (MB) -- (MF) -- (MG) -- cycle;% Front Face
 \draw[RedLine,fill=none] (MA) -- (MB) -- (MF) -- (ME) -- cycle;% Top Face
 \draw[latex-]($(MC)!0.5!(MG)$)--++(260:0.81)node[below,text=black]{$(i,j,t)$-th};
-\node[RedLine,below right=0pt and 0pt of MG]{$\boldsymbol{y_{ijt}}$};
+\node[RedLine,below right=0pt and 0pt of MG]{$y_{ijt}$};
 %
 \draw[RedLine,line width=0.75pt](MB)--(MC)--(MG)--(MF)--(MB)
 (MA)--(ME)--(MD)--(MG)
 (MB)--(MA) (MF)--(ME);
 %
-\node[below=0.8of $(C)!0.5!(G)$]{$y\in\mathbb{R}^{M\times N\times T}$};
+\node[below=0.8of $(C)!0.5!(G)$]{$\mathcal{Y}\in\mathbb{R}^{m\times n\times p}$};
 \end{scope}
 
 %the second
@@ -2263,7 +2263,7 @@ edge [auto, text=blue, "$N$"']  (C2 -|G)
 (A2)--(E2)--(D2)--(G2)
 (B2)--(A2) (F2)--(E2);
 %
-\node[below=0.3 of $(C2)!0.5!(G2)$]{$U\in\mathbb{R}^{M\times R}$};
+\node[below=0.3 of $(C2)!0.5!(G2)$]{$\mathbf{U}\in\mathbb{R}^{m\times k}$};
 \end{scope}
 
 %the second small
@@ -2291,7 +2291,7 @@ edge [auto, text=blue, "$N$"']  (C2 -|G)
 (MA2)--(ME2)--(MD2)--(MG2)
 (MB2)--(MA2) (MF2)--(ME2);
 %
-\node[RedLine,left=1pt of $(MB2)!0.5!(MC2)$](UI){$\boldsymbol{u_i}$};
+\node[RedLine,left=1pt of $(MB2)!0.5!(MC2)$](UI){$\mathbf{u}_i$};
 \node[left=0.17 of UI,font=\Large]{$\boldsymbol{\approx}$};
 \end{scope}
 
@@ -2320,7 +2320,7 @@ edge [auto, text=blue, "$N$"']  (C2 -|G)
 (A3)--(E3)--(D3)--(G3)
 (B3)--(A3) (F3)--(E3);
 %
-\node[right=0.3 of $(G3)!0.5!(D3)$]{$X\in\mathbb{R}^{T\times R}$};
+\node[right=0.3 of $(G3)!0.5!(D3)$]{$\mathbf{X}\in\mathbb{R}^{p\times k}$};
 \end{scope}
 
 %the threed small
@@ -2349,8 +2349,8 @@ edge [auto, text=blue, "$N$"']  (C2 -|G)
 %
 \draw[BlueLine,fill=none,line width=0.75pt] (F3) -- (E3) -- cycle;% Right Face
 %
-\node[right=0.3 of $(G3)!0.5!(D3)$]{$X\in\mathbb{R}^{T\times R}$};
-\node[RedLine,left=2pt of $(MB3)!0.9!(MA3)$](UI){$\boldsymbol{x_t}$};
+\node[right=0.3 of $(G3)!0.5!(D3)$]{$\mathbf{X}\in\mathbb{R}^{p\times k}$};
+\node[RedLine,left=2pt of $(MB3)!0.9!(MA3)$](UI){$\mathbf{x}_t$};
 \end{scope}
 
 %%%%%%%%%%%%%%%%%%%%%
@@ -2379,7 +2379,7 @@ edge [auto, text=blue, "$N$"']  (C2 -|G)
 (A4)--(E4)--(D4)--(G4)
 (B4)--(A4)  (F4)--(E4);
 %
-\node[below=0.6 of $(C4)!0.5!(G4)$]{$V^{\mathsf T}\in\mathbb{R}^{R\times N}$};
+\node[below=0.6 of $(C4)!0.5!(G4)$]{$\mathbf{V}^T\in\mathbb{R}^{k\times n}$};
 \end{scope}
 %
 %the fourth small
@@ -2405,7 +2405,7 @@ edge [auto, text=blue, "$N$"']  (C2 -|G)
 \draw[RedLine,line width=0.75pt](MB4)--(MC4)--(MG4)--(MF4)--(MB4)
 (MA4)--(ME4)--(MD4)--(MG4)
 (MB4)--(MA4)  (MF4)--(ME4);
-\node[RedLine,below=2pt of $(MC4)!0.5!(MG4)$](UI){$\boldsymbol{v_j}$};
+\node[RedLine,below=2pt of $(MC4)!0.5!(MG4)$](UI){$\mathbf{v}_j$};
 %
 \draw[OliveLine,fill=none,line width=0.75pt] (B4) -- (F4) -- cycle;% Right Face
 \end{scope}
@@ -2452,7 +2452,7 @@ Pruning, distillation, and factorization assume an existing topology engineered 
 \Needspace{25\baselineskip}
 ```
 
-@Fig-nas-flow formalizes this closed-loop discovery pipeline: the search strategy samples candidate architectures $A \in \mathcal{A}$ from the defined search space, while the performance estimation engine evaluates empirical latency or accuracy and routes feedback signals back to refine subsequent proposals. NAS[^fn-nas-hardware-aware] explores these candidate layer topologies, expansion ratios, and kernel dimensions to discover Pareto-optimal graphs under explicit resource bounds. Each evaluation feeds performance metrics back to the search controller, steering subsequent candidate proposals toward regions that balance task accuracy with physical resource budgets.
+@Fig-nas-flow formalizes this closed-loop discovery pipeline: the search strategy samples candidate architectures $\alpha \in \mathcal{A}$ from the defined search space, while the performance estimation engine evaluates empirical latency or accuracy and routes feedback signals back to refine subsequent proposals. NAS[^fn-nas-hardware-aware] explores these candidate layer topologies, expansion ratios, and kernel dimensions to discover Pareto-optimal graphs under explicit resource bounds. Each evaluation feeds performance metrics back to the search controller, steering subsequent candidate proposals toward regions that balance task accuracy with physical resource budgets.
 
 [^fn-nas-hardware-aware]: **Hardware-aware NAS**\index{NAS!hardware-aware}: Optimizes measured latency rather than FLOPs, which can diverge by 3--5$\times$ when memory access or operator support dominates. @tan2019 fed device latency into search and found architectures 1.8$\times$ faster than MobileNetV2 at higher accuracy.
 
@@ -2593,8 +2593,8 @@ yshift=5.5mm,fill=BackColor!10,fit=(C2)(C3)(B3),line width=1pt](BB1){};
 anchor=north,align=center]{One-shot approach:\\
 learning model architecture parameters and weights together};
 \draw[Arr](C1)--(C2);
-\draw[Arr](C2.15)--node[text=black,above=2pt,align=center]{Architecture  $A\in\mathcal{A}$}(C3.165);
-\draw[Arr](C3.195)--node[text=black,below,align=center]{Performance\ estimate of $A$}(C2.345);
+\draw[Arr](C2.15)--node[text=black,above=2pt,align=center]{Architecture  $\alpha\in\mathcal{A}$}(C3.165);
+\draw[Arr](C3.195)--node[text=black,below,align=center]{Performance\ estimate of $\alpha$}(C2.345);
 \end{tikzpicture}
 ```
 
@@ -2645,9 +2645,9 @@ Gradient-based methods such as DARTS (Differentiable Architecture Search) [@liu2
 
 Hardware-aware NAS moves beyond theoretical FLOP counts by optimizing directly for execution metrics on target silicon. FLOP counts correlate poorly with runtime latency when memory bandwidth, cache residency, or kernel launch overheads dominate. Under the arithmetic intensity law (principle \ref{pri-arithmetic-intensity}), an operation with low FLOPs but low arithmetic intensity stalls waiting for memory transactions, running slower than a higher-FLOP operation that achieves roofline compute saturation. MnasNet addresses this divergence by measuring each candidate's latency directly on a mobile phone and folding it into the reward, which combines accuracy and latency through a weighted product:
 $$
-\text{Reward}(\alpha) = \text{Accuracy}(\alpha) \times \left(\frac{L_{\text{lat,target}}}{L_{\text{lat}}(\alpha)}\right)^\beta
+\text{Reward}(\alpha) = \text{Accuracy}(\alpha) \times \left(\frac{L_{\text{lat,target}}}{L_{\text{lat,infer}}(\alpha)}\right)^\beta
 $$
-where $L_{\text{lat}}(\alpha)$ is measured latency, $L_{\text{lat,target}}$ is the latency constraint, and $\beta$ controls the accuracy-latency trade-off. This formulation penalizes architectures that exceed latency targets while rewarding those that achieve high accuracy within the budget. In the reported MnasNet search space, varying inverted-residual expansion ratios produced a stronger accuracy-latency trade-off than uniform expansion, illustrating how search can expose nonuniform designs that a narrower manual sweep might not test.
+where $L_{\text{lat,infer}}(\alpha)$ is the measured on-device inference latency of architecture $\alpha$, $L_{\text{lat,target}}$ is the latency constraint, and $\beta$ controls the accuracy-latency trade-off. This formulation penalizes architectures that exceed latency targets while rewarding those that achieve high accuracy within the budget. In the reported MnasNet search space, varying inverted-residual expansion ratios produced a stronger accuracy-latency trade-off than uniform expansion, illustrating how search can expose nonuniform designs that a narrower manual sweep might not test.
 
 #### When to use NAS {#sec-model-compression-use-nas-2b47}
 
@@ -3378,9 +3378,9 @@ $\text{Throughput Gain} = \text{INT8 elements/inst} / \text{FP32 elements/inst}$
 
 :::
 
-Reducing numerical precision introduces trade-offs, however. Lower-precision formats can cause numerical instability and quantization noise, potentially affecting model accuracy. @Fig-quantization-error-dist plots this residual density: while standard rounding errors concentrate near zero within the central $[-\Delta/2, \Delta/2]$ interval, the highlighted red tails isolate severe distortion caused by saturation clipping and step-size aggregation. For an ideal uniform quantizer, within-range rounding error is instead bounded by $[-\Delta/2, \Delta/2]$; errors outside that interval arise from clipping or from aggregating different step sizes. Many CNNs tolerate INT8 well, whereas large transformers often need outlier-aware or mixed-precision schemes because a few activation channels carry extreme values. Selecting the appropriate numerical precision therefore requires balancing accuracy constraints, hardware support, and efficiency gains.
+Reducing numerical precision introduces trade-offs, however. Lower-precision formats can cause numerical instability and quantization noise, potentially affecting model accuracy. @Fig-quantization-error-dist plots this residual density: while standard rounding errors concentrate near zero within the central $[-s/2, s/2]$ interval, where $s$ is the quantizer's step size (formalized in @eq-quant-scale), the highlighted red tails isolate severe distortion caused by saturation clipping and step-size aggregation. For an ideal uniform quantizer, within-range rounding error is instead bounded by $[-s/2, s/2]$; errors outside that interval arise from clipping or from aggregating different step sizes. Many CNNs tolerate INT8 well, whereas large transformers often need outlier-aware or mixed-precision schemes because a few activation channels carry extreme values. Selecting the appropriate numerical precision therefore requires balancing accuracy constraints, hardware support, and efficiency gains.
 
-::: {#fig-quantization-error-dist fig-env="figure" fig-pos="htb" fig-cap="**Illustrative Aggregate Quantization Residuals**: Illustrative aggregate residual distribution across heterogeneous scales and clipped values. Within one unclipped uniform quantizer, rounding error is bounded by $[-\Delta/2, \Delta/2]$; the displayed tails represent clipping or aggregation across different step sizes." fig-alt="Illustrative histogram of aggregate quantization residuals centered near zero, with tails representing clipping or aggregation across values that use different quantization step sizes."}
+::: {#fig-quantization-error-dist fig-env="figure" fig-pos="htb" fig-cap="**Illustrative Aggregate Quantization Residuals**: Illustrative aggregate residual distribution across heterogeneous scales and clipped values. Within one unclipped uniform quantizer, rounding error is bounded by $[-s/2, s/2]$ for step size $s$; the displayed tails represent clipping or aggregation across different step sizes." fig-alt="Illustrative histogram of aggregate quantization residuals centered near zero, with tails representing clipping or aggregation across values that use different quantization step sizes."}
 
 ```{.tikz}
 \begin{tikzpicture}[font=\small\sffamily]
@@ -4018,13 +4018,13 @@ Post-training quantization (PTQ) reduces numerical precision after training, con
 
 PTQ's key advantage is low computational cost: it requires no retraining and usually no labeled training set, although activation calibration typically needs a small representative calibration dataset. However, reducing precision introduces quantization error that can degrade accuracy, especially for tasks requiring fine-grained numerical precision. Machine learning frameworks such as TensorFlow Lite, the Open Neural Network Exchange runtime, and PyTorch provide built-in PTQ support.
 
-The core mechanism of PTQ is **uniform quantization**\index{Uniform quantization!definition}, which maps floating-point values to discrete integer levels using a consistent scaling factor. Because the interval between each quantized value is constant, uniform quantization simplifies implementation and enables efficient hardware execution. For the symmetric form shown here, $s$ is chosen from the maximum absolute value so that the resulting integers stay within the target range. The quantized value $q$ is computed as:
+The core mechanism of PTQ is **uniform quantization**\index{Uniform quantization!definition}, which maps floating-point values to discrete integer levels using a consistent scaling factor. Because the interval between each quantized value is constant, uniform quantization simplifies implementation and enables efficient hardware execution. For the symmetric form shown here, $s$ is chosen from the maximum absolute value so that the resulting integers stay within the target range. The quantized value $x_q$ is computed as:
 $$
-q = \text{round} \left(\frac{x}{s} \right)
+x_q = \text{round} \left(\frac{x}{s} \right)
 $$
 where:
 
-- $q$ is the quantized integer representation,
+- $x_q$ is the quantized integer representation,
 - $x$ is the original floating-point value,
 - $s$ is a scaling factor that maps the floating-point range to the available integer range.
 
@@ -4047,7 +4047,7 @@ print(f"Memory per weight: 32 bits")
 max_val = weights_fp32.abs().max()
 scale = max_val / 127  # 127 is max positive INT8 value
 
-# Step 2: Quantize using our formula q = round(x/s)
+# Step 2: Quantize using our formula x_q = round(x/s)
 weights_int8 = torch.round(weights_fp32 / scale).to(torch.int8)
 print(f"Quantized INT8: {weights_int8}")
 print(f"Memory per weight: 8 bits (reduced from 32)")
@@ -4071,7 +4071,7 @@ PTQ is a useful first experiment for many vision, language, and speech models, b
 
 Quantization calibration estimates the real-valued clipping range $[\alpha, \beta]$ for each tensor. An ill-fitting range either saturates critical values through clipping or squanders available integer levels on sparse outliers. Calibration minimizes representation error over the sampled distribution, although it does not guarantee bounds on out-of-distribution deployment inputs.
 
-Because activation tensors vary with input data, profiling requires running an unlabelled calibration dataset through the forward pass to capture dynamic ranges. @Fig-ptq-calibration diagrams this offline conversion pipeline: inputs from the pre-trained model and representative calibration dataset pass into a profiling stage to establish dynamic ranges, which parameterize the quantization kernel to yield the final quantized model. Complementing this flow, @algo-ptq-calibration formalizes the layer-by-layer calibration procedure where activation observers record value distributions to compute scale and zero-point metadata.
+Because activation tensors vary with input data, profiling requires running an unlabelled calibration dataset through the forward pass to capture dynamic ranges. @Fig-ptq-calibration diagrams this offline conversion pipeline: inputs from the pretrained model and representative calibration dataset pass into a profiling stage to establish dynamic ranges, which parameterize the quantization kernel to yield the final quantized model. Complementing this flow, @algo-ptq-calibration formalizes the layer-by-layer calibration procedure where activation observers record value distributions to compute scale and zero-point metadata.
 
 ```pseudocode
 #| label: algo-ptq-calibration
@@ -4081,10 +4081,10 @@ Because activation tensors vary with input data, profiling requires running an u
 \begin{algorithm}
 \caption{Post-training quantization calibration}
 \begin{algorithmic}
-\Require pretrained model $f_\theta$; representative calibration set $C$; bit width $b$; granularity (layer/group/channel); method (max, entropy, percentile)
+\Require pretrained model $f_\theta$; representative calibration set $\mathcal{C}_{\text{cal}}$; bit width $b$; granularity (layer/group/channel); method (max, entropy, percentile)
 \Ensure quantized weights and per-group range metadata $\{(\alpha_g, \beta_g, s_g, z_g)\}$
 \State attach observers to weights and selected activation tensors, at the chosen granularity
-\For{each batch in $C$} \Comment{calibration pass}
+\For{each batch in $\mathcal{C}_{\text{cal}}$} \Comment{calibration pass}
     \State run $f_\theta$ in inference; record per-group value distributions
 \EndFor
 \For{each quantization group $g$}
@@ -4097,7 +4097,7 @@ Because activation tensors vary with input data, profiling requires running an u
 \end{algorithm}
 ```
 
-::: {#fig-ptq-calibration fig-env="figure" fig-pos="htb" fig-cap="**Post-Training Quantization Pipeline**: PTQ converts a trained FP32 model directly to INT8 without retraining. Representative calibration data passes through the model to record activation ranges $[\alpha, \beta]$, computing scale factor $S$ and zero-point $Z$ parameters to quantize parameters before deployment." fig-alt="Vertical flowchart with four boxes connected by arrows. Pretrained model and calibration data feed into calibration step, which feeds into quantization step, producing final quantized model output."}
+::: {#fig-ptq-calibration fig-env="figure" fig-pos="htb" fig-cap="**Post-Training Quantization Pipeline**: PTQ converts a trained FP32 model directly to INT8 without retraining. Representative calibration data passes through the model to record activation ranges $[\alpha, \beta]$, computing scale factor $s$ and zero-point $z$ parameters to quantize parameters before deployment." fig-alt="Vertical flowchart with four boxes connected by arrows. Pretrained model and calibration data feed into calibration step, which feeds into quantization step, producing final quantized model output."}
 
 ```{.tikz}
 \begin{tikzpicture}[font=\footnotesize\sffamily]
@@ -4130,7 +4130,7 @@ anchor= south east](B5){Calibration data};
 
 :::
 
-The single calibration pass over $C$ avoids retraining, and FP32-to-INT8 weight quantization cuts raw stored weight values by 4$\times$ before scale, zero-point, and packing metadata. The price is that the static activation ranges fixed in the loop risk saturation or wasted integer levels when the calibration data misses deployment tails. The quantization step then converts model parameters to the lower-precision format, producing the final quantized model.
+The single calibration pass over $\mathcal{C}_{\text{cal}}$ avoids retraining, and FP32-to-INT8 weight quantization cuts raw stored weight values by 4$\times$ before scale, zero-point, and packing metadata. The price is that the static activation ranges fixed in the loop risk saturation or wasted integer levels when the calibration data misses deployment tails. The quantization step then converts model parameters to the lower-precision format, producing the final quantized model.
 
 Mapping an unnecessarily wide real-valued interval to the 256 discrete bins of an 8-bit integer wastes numerical resolution on empty range, whereas clipping too aggressively truncates signal. Three calibration methods balance this clipping-versus-resolution trade-off: **max**\index{Quantization calibration!max method} sets bounds to the absolute extremum (preserving extreme values at the cost of vulnerability to outliers), **entropy**\index{Quantization calibration!entropy method} selects bounds by minimizing the Kullback--Leibler (KL) divergence between original and quantized distributions, and **percentile**\index{Quantization calibration!percentile method} clips a fixed tail fraction (such as 99.9 percent). @Fig-resnet-activations-histogram charts this dynamic range trade-off for a ResNet-50 layer: the dense bulk of activations clusters below 1.1, while a sparse outlier tail stretching past 2.0 justifies placing a 99th-percentile clipping boundary to prevent wasting discrete INT8 bins on extreme values.
 
@@ -4234,7 +4234,7 @@ Calibration ranges can be **symmetric**\index{Quantization!symmetric} (a zero-ce
 
 Once calibration identifies clipping boundaries $[\alpha, \beta]$, the range must be mapped onto integer endpoints. @Fig-calibration-ranges contrasts the two primary mapping schemes: the symmetric layout on the left forces real zero to integer zero by mapping $[-1, 1]$ directly onto $[-127, 127]$, whereas the asymmetric layout on the right accommodates skewed activation intervals $[-0.5, 1.5]$ across $[-128, 127]$ by shifting the integer zero-point offset $z$.
 
-::: {#fig-calibration-ranges fig-env="figure" fig-pos="htb" fig-cap="**Calibration Range Selection**: Symmetric vs. asymmetric affine quantization mappings. Symmetric quantization (left) forces real zero to map to integer zero, constraining range selection to $[-\alpha, \alpha]$ at the expense of wasted dynamic range for skewed activation distributions; asymmetric quantization (right) uses an explicit zero-point offset $Z$ to map non-centered ranges $[\alpha, \beta]$ efficiently." fig-alt="Two side-by-side mapping diagrams. Left shows symmetric calibration with range from – 1 to 1 mapping to – 127 to 127 with zero aligned. Right shows asymmetric calibration with range – 0.5 to 1.5 mapping with shifted zero point."}
+::: {#fig-calibration-ranges fig-env="figure" fig-pos="htb" fig-cap="**Calibration Range Selection**: Symmetric vs. asymmetric affine quantization mappings. Symmetric quantization (left) forces real zero to map to integer zero, constraining range selection to $[-\alpha, \alpha]$ at the expense of wasted dynamic range for skewed activation distributions; asymmetric quantization (right) uses an explicit zero-point offset $z$ to map non-centered ranges $[\alpha, \beta]$ efficiently." fig-alt="Two side-by-side mapping diagrams. Left shows symmetric calibration with range from – 1 to 1 mapping to – 127 to 127 with zero aligned. Right shows asymmetric calibration with range – 0.5 to 1.5 mapping with shifted zero point."}
 
 ```{.tikz}
 \begin{tikzpicture}[line join=round,font=\large\sffamily]
@@ -4315,7 +4315,7 @@ LineD/.style={dashed,black,line width=0.75pt},
 
 :::
 
-Symmetric quantization simplifies integer matrix multiplication kernels because the zero-point is zero ($z = 0$), eliminating cross-term additions during hardware accumulation. However, for activations following asymmetric distributions (such as post-ReLU feature maps where all values are non-negative), symmetric quantization wastes roughly half of the integer dynamic range on unused negative values. Asymmetric quantization recovers this dynamic range by mapping $[\alpha, \beta]$ to $[0, 2^b - 1]$, but requires runtime hardware to compute offset corrections ($z \sum W$) during multiply-accumulate operations.
+Symmetric quantization simplifies integer matrix multiplication kernels because the zero-point is zero ($z = 0$), eliminating cross-term additions during hardware accumulation. However, for activations following asymmetric distributions (such as post-ReLU feature maps where all values are non-negative), symmetric quantization wastes roughly half of the integer dynamic range on unused negative values. Asymmetric quantization recovers this dynamic range by mapping $[\alpha, \beta]$ to $[0, 2^b - 1]$, but requires runtime hardware to compute offset corrections ($z \sum_k W_{ik}$ for output row $i$) during multiply-accumulate operations.
 
 ##### Granularity {#sec-model-compression-granularity-93b3}
 
@@ -4407,7 +4407,7 @@ Affine quantization establishes a linear mapping $x \approx s(x_q - z)$, where $
 2.  **Calculate zero-point $(z)$**: Shift the range so that real zero maps to an integer using @eq-quant-zero-point.
     $$z = \text{round}\left(\frac{-\alpha}{s}\right)$$ {#eq-quant-zero-point}
 
-3.  **Quantize $(x \to x_q)$** using @eq-quantize:
+3.  **Quantize $(x \to x_q)$**: Divide by the scale, add the zero-point, then round and clamp to the integer range using @eq-quantize.
     $$x_q = \text{clamp}\left(\text{round}\left(\frac{x}{s} + z\right), 0, 2^b - 1\right)$$ {#eq-quantize}
 
 ```{=latex}
@@ -4665,7 +4665,7 @@ Channelwise quantization preserves accuracy over layerwise quantization when cha
 
 Executing low-precision inference requires transforming floating-point inputs before kernel execution and requantizing intermediate accumulator outputs. During integer matrix multiplication, multiplying two 8-bit integers produces a 16-bit product. Summing these products across an inner dimension of length $K$ causes bit-growth that quickly overflows 8-bit registers; hardware therefore accumulates into 32-bit integer registers (`INT32`). Before feeding the result into subsequent layers, requantization rescales the 32-bit accumulated sum by the layer's effective scale factor ($s_{\text{eff}} = \frac{s_W \cdot s_X}{s_Y}$) and clamps the values back into the 8-bit integer range. @Fig-weight-activations-quantization diagrams this pipeline across four stages: violet quantizers convert floating-point activations and weights into INT8 operands, a blue core executes integer matrix multiplication, a red stage buffers the 32-bit accumulated sum, and a green stage requantizes the result back to INT8 before non-linear activation.
 
-::: {#fig-weight-activations-quantization fig-env="figure" fig-pos="htb" fig-cap="**Quantized Matrix Multiplication Pipeline**: Color-coded computation stage. Floating-point weights and activation inputs are quantized to INT8 (violet), fed into integer SIMD/Tensor Core matrix multiplication (blue), accumulated in 32-bit registers (red), and requantized back to INT8 (green) before non-linear activation. From the HarvardX TinyML course." fig-alt="Matrix multiplication diagram. Violet boxes quantize floating-point inputs to INT8 before matrix multiplication, a blue block performs the multiplication, red boxes show intermediate and final output tensors, and a green block requantizes before activation."}
+::: {#fig-weight-activations-quantization fig-env="figure" fig-pos="htb" fig-cap="**Quantized Matrix Multiplication Pipeline**: Color-coded computation stage. Floating-point weights and activation inputs are quantized to INT8 (violet), fed into integer SIMD/Tensor Core matrix multiplication (blue), accumulated in 32-bit registers (red), and requantized back to INT8 (green) before non-linear activation. From the HarvardX TinyML course." fig-alt="Matrix multiplication diagram. Violet boxes quantize floating-point inputs to INT8 before matrix multiplication, a blue block performs the multiplication, a red box shows the INT32 intermediate output, a green block requantizes before activation, and a green box shows the final INT8 output."}
 
 ```{.tikz}
 \begin{tikzpicture}[font=\small\sffamily]
@@ -4686,7 +4686,7 @@ Box/.style={inner xsep=2pt,
 \node[Box,right=of B1,fill=RedL,draw=RedLine](B2){INT32\\ Output};
 \node[Box,right=of B2,fill=GreenL,draw=GreenLine](B3){Requantization};
 \node[Box,node distance=1.4,right=of B3,fill=BrownL,draw=BrownLine](B4){Activation};
-\node[Box,right=of B4,fill=RedL,draw=RedLine](B5){INT8\\ Output};
+\node[Box,right=of B4,fill=GreenL,draw=GreenLine](B5){INT8\\ Output};
 \node[Box,above left=0.2 and 0 of B1,fill=VioletL2,draw=VioletLine2](GB2){Quantization};
 \node[Box,left=of GB2,fill=VioletL2,draw=VioletLine2](GB1){Float input};
 \node[Box,below left=0.2 and 0 of B1,fill=VioletL2,draw=VioletLine2](DB2){Quantization};
@@ -4772,7 +4772,7 @@ The primary limitation is that PTQ freezes model parameters, preventing compensa
 
 #### Quantization-aware training {#sec-model-compression-quantizationaware-training-4032}
 
-Quantization-aware training incorporates numerical rounding noise directly into the optimization graph. @Fig-qat stages this workflow from the top down: an initial pre-trained model undergoes quantization before entering a retraining and fine-tuning stage driven by the training dataset, yielding a calibrated low-precision model whose parameters have adapted to rounding noise.
+Quantization-aware training incorporates numerical rounding noise directly into the optimization graph. @Fig-qat stages this workflow from the top down: an initial pretrained model undergoes quantization before entering a retraining and fine-tuning stage driven by the training dataset, yielding a calibrated low-precision model whose parameters have adapted to rounding noise.
 
 ::: {#fig-qat fig-env="figure" fig-pos="htb" fig-cap="**Quantization-Aware Training Pipeline**: QAT inserts fake-quantization nodes into the forward graph to simulate low-precision clipping and rounding errors during training. Backpropagation updates floating-point master weights using straight-through estimators (STE), allowing network parameters to adapt to numerical noise before exporting fixed integer scales for inference." fig-alt="Vertical flowchart showing QAT process. Pretrained model feeds into quantization step, then retraining/fine-tuning step with training data input, producing final quantized model output."}
 
@@ -4813,7 +4813,7 @@ draw=none,anchor= south east](B5){};
 
 :::
 
-Rather than training from scratch or cold-starting scale parameters, production workflows frequently initialize QAT using scale factors derived during an initial PTQ calibration pass. @Fig-ptq-qat sequences this two-phase pipeline: an upper PTQ phase feeds calibration data into the pre-trained model to establish initial scale metadata, passing the resulting PTQ checkpoint into a lower QAT phase where full training data drives fine-tuning to yield the final robust model.
+Rather than training from scratch or cold-starting scale parameters, production workflows frequently initialize QAT using scale factors derived during an initial PTQ calibration pass. @Fig-ptq-qat sequences this two-phase pipeline: an upper PTQ phase feeds calibration data into the pretrained model to establish initial scale metadata, passing the resulting PTQ checkpoint into a lower QAT phase where full training data drives fine-tuning to yield the final robust model.
 
 ::: {#fig-ptq-qat fig-env="figure" fig-pos="htb" fig-cap="**PTQ-to-QAT Pipeline**: PTQ calibration can initialize ranges and scales before QAT fine-tunes the pretrained weights with simulated quantization. Calibration data feeds the PTQ stage, and training data feeds QAT." fig-alt="Vertical flowchart with two grouped stages. PTQ stage shows pretrained model through quantize and calibrate steps. QAT stage shows fine-tuning step. Calibrate data feeds PTQ; training data feeds QAT."}
 
@@ -4895,22 +4895,22 @@ A fake quantization node must preserve the same errors the inference runtime wil
 Mathematically, for symmetric quantization with bit width $b$, given a floating-point input value $x$:
 $$
 \begin{aligned}
-q_{\text{level}} &= \text{clip}\left(\text{round}\left(\frac{x}{s}\right), -2^{b-1}, 2^{b-1} - 1\right) \\
-x_{\text{fake}} &= q_{\text{level}} \times s
+x_q &= \text{clip}\left(\text{round}\left(\frac{x}{s}\right), -2^{b-1}, 2^{b-1} - 1\right) \\
+x_{\text{fake}} &= x_q \times s
 \end{aligned}
 $$
-where $s = \frac{\max(|x|)}{2^{b-1} - 1}$ is the scale factor computed from the input distribution, and $x_{\text{fake}}$ represents the fake-quantized output that mimics INT8 values but remains in floating-point format.
+where $x_q$ is the quantized integer level, $s = \frac{\max(|x|)}{2^{b-1} - 1}$ is the scale factor computed from the input distribution, and $x_{\text{fake}}$ represents the fake-quantized output that mimics INT8 values but remains in floating-point format.
 
 For asymmetric quantization supporting unsigned integers, assume the observed range has been extended to include zero:
 $$
 \begin{aligned}
 s &= \frac{\max(x) - \min(x)}{2^b - 1} \\
 z &= \text{round}\left(-\frac{\min(x)}{s}\right) \\
-q_{\text{level}} &= \text{clip}\left(\text{round}\left(\frac{x}{s} + z\right), 0, 2^b - 1\right) \\
-x_{\text{fake}} &= (q_{\text{level}} - z) \times s
+x_q &= \text{clip}\left(\text{round}\left(\frac{x}{s} + z\right), 0, 2^b - 1\right) \\
+x_{\text{fake}} &= (x_q - z) \times s
 \end{aligned}
 $$
-where $z$ is the zero-point offset enabling asymmetric range representation.
+where $z$ is the zero-point offset enabling asymmetric range representation and the observed range $[\min(x), \max(x)]$ serves as the clipping range $[\alpha, \beta]$.
 
 @Lst-qat-conv-forward shows the QAT forward path: fake quantization is applied to inputs and weights before convolution, simulating INT8 numerics while retaining floating-point tensors for training.
 
@@ -4938,11 +4938,11 @@ def qat_conv_forward(x, weight):
 During backpropagation, fake quantization nodes approximate gradients through a clipping-aware straight-through estimator:
 $$
 \frac{\partial x_{\text{fake}}}{\partial x} = \begin{cases}
-1 & \text{if } x \in [x_{\text{min}}, x_{\text{max}}] \\
+1 & \text{if } x \in [\alpha, \beta] \\
 0 & \text{otherwise}
 \end{cases}
 $$
-Within the clipping range $[x_{\text{min}}, x_{\text{max}}]$, the estimator treats quantization as an identity mapping, passing the upstream gradient $\frac{\partial \mathcal{L}}{\partial x_{\text{fake}}}$ unchanged to master weight $x$. Beyond clipping boundaries, the derivative evaluates to zero, blocking gradients from saturated outliers that would otherwise destabilize optimizer updates.
+Within the clipping range $[\alpha, \beta]$, the estimator treats quantization as an identity mapping, passing the upstream gradient $\frac{\partial \mathcal{L}}{\partial x_{\text{fake}}}$ unchanged to master weight $x$. Beyond clipping boundaries, the derivative evaluates to zero, blocking gradients from saturated outliers that would otherwise destabilize optimizer updates.
 
 In practice, frameworks like PyTorch and TensorFlow implement fake quantization as custom autograd operators whose forward pass performs the quantize-dequantize round trip while the backward pass applies an STE. Scale handling depends on the method: observers may track distributions and later freeze, or scales may be learned. Batch normalization also requires deployment-consistent handling: workflows fold batch normalization into preceding convolution weights ($\mathbf{W}_{\text{fused}} = \frac{\gamma}{\sigma} \mathbf{W}$) and freeze its running statistics before quantization export, ensuring that training-time fake quantization scales match the static fused kernel parameters executed during inference.
 
@@ -5063,15 +5063,15 @@ The first architectural response is global: when every stage of the profile is o
 
 Mathematically, the total FLOPs for a convolutional model can be approximated as:
 $$
-O \propto N_L \cdot w^2 \cdot r^2,
+O \propto N_L \cdot w_{\text{mult}}^2 \cdot r^2,
 $$
-where $N_L$ is depth (number of layers), $w$ is width, and $r$ is the input resolution. This expression shows why naive scaling fails: increasing width and resolution together multiplies work quickly, and the resulting model may exceed the memory bandwidth or power budget even when the parameter count appears reasonable.
+where $N_L$ is depth (number of layers), $w_{\text{mult}}$ is the width multiplier (channel count relative to a base model), and $r$ is the input resolution. This expression shows why naive scaling fails: increasing width and resolution together multiplies work quickly, and the resulting model may exceed the memory bandwidth or power budget even when the parameter count appears reasonable.
 
 Compound scaling turns this balancing act into a controlled design rule. Instead of adjusting depth, width, and resolution independently, compound scaling grows all three dimensions by fixed ratios $(\alpha, \beta, \gamma)$ relative to a base model:
 $$
-N_L = \alpha^\phi N_{L,0}, \quad w = \beta^\phi w_0, \quad r = \gamma^\phi r_0
+N_L = \alpha^\phi N_{L,0}, \quad w_{\text{mult}} = \beta^\phi w_{\text{mult},0}, \quad r = \gamma^\phi r_0
 $$
-Here, $\phi$ is a scaling coefficient, and $\alpha$, $\beta$, and $\gamma$ are scaling factors determined from empirical accuracy and efficiency measurements. The rule matters because it prevents one dimension from consuming the budget before the others can contribute useful accuracy.
+Here, $\phi$ is a scaling coefficient, and $\alpha$, $\beta$, and $\gamma$ (as in the original EfficientNet paper) are scaling factors determined from empirical accuracy and efficiency measurements. The rule matters because it prevents one dimension from consuming the budget before the others can contribute useful accuracy.
 
 EfficientNet (@sec-model-compression-neural-architecture-search-cf12) validated this principle by using search to find a baseline architecture and then scaling it with balanced depth, width, and resolution coefficients [@tan2019efficientnet]. The lesson is not that every deployment should use EfficientNet. The systems lesson is that scaling is a resource-allocation decision: the same accuracy target can imply different depth-width-resolution trade-offs depending on which resource the target platform makes scarce. Later benchmarking material formalizes how to measure those trade-offs; here, the design principle is to scale the dimensions against the binding resource.
 
@@ -5106,7 +5106,7 @@ $$
 
 DenseNet reduces parameter redundancy through feature reuse, but concatenating retained features can increase activation storage and memory traffic. The resulting working set and runtime must be measured on the target hardware.
 
-Activation checkpointing (@sec-model-training-activation-checkpointing-2ee1) complements feature reuse by trading computation for memory during training. For $N_L$ comparable layers with activation footprint $A_{\text{layer}}$ per layer, evenly spaced checkpointing reduces the saved-activation term from $\mathcal{O}(N_L A_{\text{layer}})$ to $\mathcal{O}(\sqrt{N_L}\,A_{\text{layer}})$ while recomputing omitted activations during backpropagation. In the compression context, checkpointing enables training of larger models within fixed memory budgets, which in turn provides more capacity for subsequent pruning or distillation to exploit.
+Activation checkpointing (@sec-model-training-activation-checkpointing-2ee1) complements feature reuse by trading computation for memory during training. For $N_L$ comparable layers, each with activation footprint $M_{\text{activations}}^{(\ell)}$, evenly spaced checkpointing reduces the saved-activation term from $\mathcal{O}(N_L M_{\text{activations}}^{(\ell)})$ to $\mathcal{O}(\sqrt{N_L}\,M_{\text{activations}}^{(\ell)})$ while recomputing omitted activations during backpropagation. In the compression context, checkpointing enables training of larger models within fixed memory budgets, which in turn provides more capacity for subsequent pruning or distillation to exploit.
 
 Parameter reduction applies the same reasoning to storage. SqueezeNet uses $1{\times}1$ convolutions to reduce the number of input channels before applying standard convolutions, making the expensive layer operate on a smaller representation [@iandola2016squeezenet]. The number of parameters in a standard convolutional layer is:
 $$
@@ -5127,7 +5127,7 @@ Kernel fusion first appeared in @sec-ml-frameworks-execution-strategy-matters-me
 
 ***Operator fusion***\index{Operator fusion!definition} is a compiler and runtime optimization that combines adjacent tensor operations into a single fused kernel so intermediate values remain in registers or on-chip memory instead of being written to and reread from accelerator global memory.
 
-1.  **Significance**: In an ideal chain of $N$ element-wise operations over the same $M$-byte tensor, separate kernels can move about $2NM$, while a fused kernel can approach $2M$ by keeping intermediates on chip. Real traffic also includes weights, caches, alignment, and spills, so profiling must confirm the reduction.
+1.  **Significance**: In an ideal chain of $n_{\text{ops}}$ element-wise operations over the same tensor of $M_{\text{tensor}}$ bytes, separate kernels can move about $2\,n_{\text{ops}} M_{\text{tensor}}$, while a fused kernel can approach $2M_{\text{tensor}}$ by keeping intermediates on chip. Real traffic also includes weights, caches, alignment, and spills, so profiling must confirm the reduction.
 2.  **Distinction**: Unlike pruning, quantization, or distillation, operator fusion does not change the model's parameters, precision, or architecture. It changes the execution schedule of mathematically equivalent operations, preserving model outputs while improving latency and throughput on memory-bound workloads.
 3.  **Common pitfall**: A frequent misconception is that more fusion is always better. Fusion is constrained by data dependencies, tensor shapes, register pressure, and cache capacity; over-fusing can reduce occupancy or force spills back to memory, erasing the benefit.
 
@@ -5140,13 +5140,13 @@ Modern neural networks consist of sequences of operations such as convolution, b
 3. Writing output tensors back to global memory
 4. Launching the next kernel
 
-The read-compute-write cycle creates memory bandwidth bottlenecks for operations with low arithmetic intensity (FLOP/byte). For an ideal sequence of $N$ operations over the same $M$-byte intermediate tensor, the unfused traffic is:
+The read-compute-write cycle creates memory bandwidth bottlenecks for operations with low arithmetic intensity (FLOP/byte). For an ideal sequence of $n_{\text{ops}}$ operations over the same intermediate tensor of $M_{\text{tensor}}$ bytes, the unfused traffic is:
 $$
-D_{\text{vol,unfused}} = 2NM
+D_{\text{vol,unfused}} = 2\,n_{\text{ops}} M_{\text{tensor}}
 $$
 where each operation reads and writes the intermediate once. If the sequence is legal to fuse and intermediates stay on chip, the traffic can approach:
 $$
-D_{\text{vol,fused}} = 2M
+D_{\text{vol,fused}} = 2M_{\text{tensor}}
 $$
 by reading the intermediate input once and writing its final output once. Weights, auxiliary inputs, cache effects, and register spills are outside this simple bound. Several inference patterns nevertheless approximate it closely enough for fusion to matter.
 
@@ -5346,7 +5346,7 @@ To control execution depth, **early exit**\index{Adaptive computation!early exit
 
 The systems trade-off diverges sharply across hardware deployment targets. On single-sample edge processors (batch size $B=1$, typical of microcontrollers and mobile NPUs), early exit immediately terminates the execution thread [@hu2020triple]. Skipping remaining layers eliminates both the arithmetic operations and the off-chip DRAM transactions required to load subsequent layer weights into on-chip SRAM cache. Conversely, on parallel throughput accelerators (GPUs and TPUs) processing batched workloads ($B > 1$), early exit introduces severe batch fragmentation [@chen2024eellm]. If only a subset of samples in a batch reaches the exit threshold, the remaining samples must still traverse deeper layers. Unless the runtime executes dynamic batch compaction—gathering unresolved activation tensors into a contiguous memory buffer via memory copies and kernel synchronizations—inactive samples remain allocated in memory, or the accelerator must mask inactive SIMD or single instruction, multiple threads (SIMT) lanes. Consequently, tail latency for the batch remains dictated by the deepest traversing sample. @Fig-early-exit-transformers traces this branching topology along the backbone: each transformer block taps intermediate representations into an auxiliary classifier and confidence estimator (LTE) to trigger an early exit, while unresolved tokens traverse horizontal connections to deeper layers.
 
-::: {#fig-early-exit-transformers fig-env="figure" fig-pos="htb" fig-cap="**Early Exit Architecture**: Transformer layers dynamically adjust computation by classifying each layer's output and enabling early termination if sufficient confidence is reached, reducing average latency and power when many inputs can exit before the final layer. Source: [@xin2021]." fig-alt="Flowchart with input feeding n transformer layers in sequence. Each layer connects to a classifier, confidence estimator, and exit point. Arrows show continue paths for low confidence."}
+::: {#fig-early-exit-transformers fig-env="figure" fig-pos="htb" fig-cap="**Early Exit Architecture**: Transformer layers dynamically adjust computation by classifying each layer's output and enabling early termination if sufficient confidence is reached, reducing average latency and power when many inputs can exit before the final layer. Source: [@xin2021]." fig-alt="Flowchart with input feeding transformer layers 1 through N sub L in sequence. Each layer connects to a classifier, confidence estimator, and exit point. Arrows show continue paths for low confidence."}
 
 ```{.tikz}
 \begin{tikzpicture}[font=\small\sffamily]
@@ -5366,7 +5366,7 @@ Box/.style={inner xsep=2pt,
              minimum height=10mm, fill=RedL,draw=RedLine](B1){Input};
 \node[Box,right=of B1](B2){Transformer 1};
 \node[Box,right=of B2](B3){Transformer 2};
-\node[Box, node distance=2.5,right=of B3](B4){Transformer $n$};
+\node[Box, node distance=2.5,right=of B3](B4){Transformer $N_L$};
 \node[font=\tiny\sffamily](B0)at($(B3)!0.5!(B4)$){$\bullet$ $\bullet$ $\bullet$};
 %
 \def\di{0.45}
@@ -5380,7 +5380,7 @@ Box/.style={inner xsep=2pt,
 \node[Box,node distance=\di,below=of 2C2,ellipse,text width=14mm,minimum width=12mm,
              minimum height=10mm, fill=RedL,draw=RedLine](2C3){Exit};
 %
-\node[Box,node distance=\di,below=of B4,fill=VioletL2,draw=VioletLine](3C1){Classifier $n$};
+\node[Box,node distance=\di,below=of B4,fill=VioletL2,draw=VioletLine](3C1){Classifier $N_L$};
 \node[Box,node distance=\di,below=of 3C1,fill=BlueL,draw=BlueLine](3C2){Confidence/LTE};
 \node[Box,node distance=\di,below=of 3C2,ellipse,text width=14mm,minimum width=12mm,
              minimum height=10mm, fill=RedL,draw=RedLine](3C3){Exit};
@@ -5419,7 +5419,7 @@ Scaling dense transformer models couples parameter capacity directly to per-toke
 
 [^fn-switch-transformer-scaling]: **Switch Transformer**\index{Switch Transformer!scaling trade-off}: @fedus2022switch scales to roughly 1.6 trillion total parameters while routing each token to one expert; in a compute-matched experiment, Switch-Base with 64 experts reached the T5-Base quality target in about one-seventh the training time; the trillion-parameter comparison reported roughly 4$\times$ speedup over T5-XXL. Routing each token to one expert reduces communication relative to top-$k$ routing, but load imbalance requires auxiliary losses and capacity factors. This trade-off—massive parameter capacity at low per-token compute cost, but with complex systems engineering for load balancing—defines the MoE design space.
 
-This sparse activation creates a fundamental memory-bandwidth and capacity trade-off on accelerator hardware. While a token executes arithmetic against only $1/E$ of the total expert parameters, all $E$ expert matrices must remain resident in device memory (HBM or SRAM). At low operational batch sizes—such as single-stream autoregressive generation—routing divergent tokens to different experts fragments matrix-matrix multiplications ($GEMM$) into low-arithmetic-intensity matrix-vector operations ($GEMV$), causing memory bandwidth saturation. Furthermore, uneven token distribution causes computational hotspots where overloaded experts drop tokens exceeding their capacity factor, while under-allocated experts leave tensor core pipelines idle.
+This sparse activation creates a fundamental memory-bandwidth and capacity trade-off on accelerator hardware. While a token routed to one of $N_{\text{experts}}$ experts executes arithmetic against only $1/N_{\text{experts}}$ of the total expert parameters, all $N_{\text{experts}}$ expert matrices must remain resident in device memory (HBM or SRAM). At low operational batch sizes—such as single-stream autoregressive generation—routing divergent tokens to different experts fragments matrix-matrix multiplications (GEMM) into low-arithmetic-intensity matrix-vector operations (GEMV), causing memory bandwidth saturation. Furthermore, uneven token distribution causes computational hotspots where overloaded experts drop tokens exceeding their capacity factor, while under-allocated experts leave tensor core pipelines idle.
 
 Sparse Mixture-of-Experts architectures replace monolithic feedforward networks (FFNs) with dynamically routed subnetworks. @Fig-switch-transformer diagrams this conditional execution pathway: the left block embeds a Switching FFN layer within the standard transformer stack, while the expanded right panel details the gating router dispatching individual tokens ("More" with $p=0.65$, "Parameters" with $p=0.8$) to distinct expert sub-blocks (FFN 2 and FFN 1) while leaving unselected experts idle.
 
@@ -5743,23 +5743,23 @@ Realizing the efficiency gains of adaptive computation requires overcoming criti
 
 At runtime, control-flow branching fundamentally conflicts with the bulk-synchronous parallel execution model of modern accelerators. When parallel threads within a GPU warp encounter divergent execution branches, the hardware serializes branch execution and masks inactive threads, nullifying theoretical FLOP reductions. Furthermore, evaluating gating networks introduces control dependencies that prevent operator fusion, inject host-device synchronization barriers, and require intermediate memory copies for token permutation. If these dispatch overheads exceed the compute time saved by skipping layers, the dynamic model exhibits higher end-to-end latency than a dense baseline. @Sec-hardware-acceleration-dynamic-kernel-execution-33fc examines hardware-aware runtime strategies, including ragged batching and dynamic kernel launch queues, designed to manage these execution patterns.
 
-Beyond systems efficiency, dynamic control introduces severe quality and security failure modes. Because gating policies route inputs based on statistical heuristics, poorly calibrated gates systematically underallocate computation to rare distribution tails, degrading prediction accuracy precisely on safety-critical edge cases. Furthermore, input-dependent computation exposes an attack surface: adversarial perturbations can intentionally manipulate routing gates to trigger denial-of-quality attacks (forcing inputs into truncated early exits that fail) or denial-of-service attacks (forcing all inputs into maximally deep or imbalanced paths to saturate accelerator queues). Consequently, evaluating adaptive models cannot rely on average FLOP counts alone. Rigorous system profiling must report path distribution histograms, tail latency (P99), accuracy stratified by input difficulty, and throughput stability under dynamic batching. Where dynamic computation decides whether to perform certain operations, sparsity exploitation addresses a complementary question: how to accelerate computation when many operands are zero.
+Beyond systems efficiency, dynamic control introduces severe quality and security failure modes. Because gating policies route inputs based on statistical heuristics, poorly calibrated gates systematically underallocate computation to rare distribution tails, degrading prediction accuracy precisely on safety-critical edge cases. Furthermore, input-dependent computation exposes an attack surface: adversarial perturbations can intentionally manipulate routing gates to trigger denial-of-quality attacks (forcing inputs into truncated early exits that fail) or denial-of-service attacks (forcing all inputs into maximally deep or imbalanced paths to saturate accelerator queues). Consequently, evaluating adaptive models cannot rely on average FLOP counts alone. Rigorous system profiling must report path distribution histograms, tail latency (p99), accuracy stratified by input difficulty, and throughput stability under dynamic batching. Where dynamic computation decides whether to perform certain operations, sparsity exploitation addresses a complementary question: how to accelerate computation when many operands are zero.
 
 ### Sparsity exploitation {#sec-model-compression-sparsity-exploitation-48a6}
 
 Recall that pruning (from @sec-model-compression-pruning-d1cb) introduces zeros into weight matrices. Sparsity exploitation asks how to accelerate computation when those zeros are present. Pruning creates zeros or removes structure; sparse formats can reduce storage, and matching kernels can reduce computation. **Sparsity**\index{Sparsity!definition}[^fn-sparsity-hardware-gap] in machine learning refers to the condition where a significant portion of the elements within a tensor, such as weight matrices or activation tensors, are zero or nearly zero.
 
-[^fn-sparsity-hardware-gap]: **Sparsity**\index{Sparsity!hardware gap}: From Latin *sparsus* (scattered), past participle of *spargere* (to scatter); in ML, L1 regularization such as the lasso can induce exact zeros rather than merely small values [@tibshirani1996regression]. Software can represent arbitrary sparsity patterns, while efficient hardware execution generally requires a supported format or structured pattern (for example, NVIDIA's 2:4 sparsity). The gap between representable and executable sparsity separates theoretical compression from realized speedup.
+[^fn-sparsity-hardware-gap]: **Sparsity**\index{Sparsity!hardware gap}: From Latin *sparsus* (scattered), past participle of *spargere* (to scatter); in ML, $\ell_1$ regularization such as the lasso can induce exact zeros rather than merely small values [@tibshirani1996regression]. Software can represent arbitrary sparsity patterns, while efficient hardware execution generally requires a supported format or structured pattern (for example, NVIDIA's 2:4 sparsity). The gap between representable and executable sparsity separates theoretical compression from realized speedup.
 
 More formally, for a sparse weight matrix $\mathbf{W}_{\text{sparse}} \in \mathbb{R}^{m \times n}$, the sparsity ratio $\rho_{\text{sparse}}$ can be expressed as:
 $$
 \rho_{\text{sparse}} = \frac{\Vert \mathbf{1}_{\{(\mathbf{W}_{\text{sparse}})_{ij} = 0\}} \Vert_0}{m \times n}
 $$
-where $\mathbf{1}_{\{(\mathbf{W}_{\text{sparse}})_{ij} = 0\}}$ is an indicator function that yields one if entry $(i,j)$ is zero and 0 otherwise, and $\Vert \cdot \Vert_0$ represents the L0 norm, which counts the number of nonzero elements. Exact zero is representable in floating point, but thresholded definitions also group small-magnitude values when the pruning method treats them as removable. The thresholded sparsity ratio becomes:
+where $\mathbf{1}_{\{(\mathbf{W}_{\text{sparse}})_{ij} = 0\}}$ is an indicator function that yields one if entry $(i,j)$ is zero and 0 otherwise, and $\Vert \cdot \Vert_0$ represents the $\ell_0$ norm, which counts the number of nonzero elements. Exact zero is representable in floating point, but thresholded definitions also group small-magnitude values when the pruning method treats them as removable. The thresholded sparsity ratio becomes:
 $$
-\rho_{\text{sparse},\epsilon} = \frac{\Vert \mathbf{1}_{\{|(\mathbf{W}_{\text{sparse}})_{ij}| < \epsilon\}} \Vert_0}{m \times n}
+\rho_{\text{sparse},\delta} = \frac{\Vert \mathbf{1}_{\{|(\mathbf{W}_{\text{sparse}})_{ij}| \le \delta_{\text{prune}}\}} \Vert_0}{m \times n}
 $$
-where $\epsilon$ is a small threshold value.
+where $\delta_{\text{prune}}$ is the same small magnitude threshold that defines the pruning mask.
 
 Exact sparsity can emerge during training through regularization or be introduced deliberately through pruning, which forces selected elements to zero. It yields memory, compute, or energy savings only when the storage format and execution path skip those zeros with less overhead than dense execution. That qualification is especially important on resource-constrained devices, where index metadata and irregular accesses consume the same scarce bandwidth and power.
 
@@ -5796,7 +5796,7 @@ The deployment choice is therefore not a generic desire for fewer parameters; it
 
 Achieving actual speedups from sparsity requires hardware that can efficiently skip zero-valued computations. Different processor architectures handle sparse patterns with varying effectiveness—for example, Ampere Sparse Tensor Cores exploit fine-grained 2:4 structured patterns while systolic arrays require dense block structures, hardware mechanics detailed in @sec-hardware-acceleration-nm-structured-sparsity-mechanics-9a71. Software libraries such as cuSPARSE can help bridge this gap by reformulating sparse computations into patterns that current hardware handles efficiently. For example, MegaBlocks [@gale2022megablocksefficientsparsetraining] reformulates sparse Mixture of Experts training into block-sparse operations, grouping routed expert-token work into dense tiles so specialized kernels can maintain high accelerator utilization despite irregular sparsity patterns.
 
-A sparse pattern earns hardware speedup only when it is regular enough for kernels to predict. Two prominent formats make that regularity explicit: block sparse matrices and N:M sparsity patterns. Block sparse matrices isolate blocks of zero and nonzero dense submatrices so that operations on the large sparse matrix can be re-expressed as a smaller number of dense operations on submatrices. This structure supports more efficient storage of dense submatrices while maintaining shape compatibility for matrix or vector products. @Fig-block-sparse-gemm diagrams how NVIDIA's cuSPARSE [@nvidia_cusparse_block] format clusters non-zero weights into uniform $3\times 3$ dense sub-blocks indexed by an auxiliary coordinate array, allowing regular sub-block GEMM kernels to bypass empty gray tiles while maintaining aligned memory transactions. Several other works, such as Monarch matrices [@dao2022monarchexpressivestructuredmatrices], have built on this block-sparsity approach to strike an improved balance between matrix expressivity and compute/memory efficiency.
+A sparse pattern earns hardware speedup only when it is regular enough for kernels to predict. Two prominent formats make that regularity explicit: block sparse matrices and N:M sparsity patterns. Block sparse matrices isolate blocks of zero and nonzero dense submatrices so that operations on the large sparse matrix can be re-expressed as a smaller number of dense operations on submatrices. This structure supports more efficient storage of dense submatrices while maintaining shape compatibility for matrix or vector products. @Fig-block-sparse-gemm diagrams how NVIDIA's cuSPARSE [@nvidia_cusparse_block] format clusters nonzero weights into uniform $3\times 3$ dense sub-blocks indexed by an auxiliary coordinate array, allowing regular sub-block GEMM kernels to bypass empty gray tiles while maintaining aligned memory transactions. Several other works, such as Monarch matrices [@dao2022monarchexpressivestructuredmatrices], have built on this block-sparsity approach to strike an improved balance between matrix expressivity and compute/memory efficiency.
 
 ::: {#fig-block-sparse-gemm fig-env="figure" fig-pos="htb" fig-cap="**Block Sparse Representation**: Grouping non-zero weights into dense sub-blocks ($3\times3$ tiles) and storing an auxiliary index array allows sparse matrices to be computed via regular sub-block GEMM kernels, restoring high GPU memory alignment and Tensor Core utilization. Adapted from NVIDIA cuSPARSE documentation [@nvidia_cusparse_block]." fig-alt="Grid of 3×3 matrix blocks with varying shades indicating dense submatrices. Adjacent index array shows non zero block positions. Gray blocks represent zeros, colored blocks represent dense submatrices stored separately."}
 
@@ -6425,7 +6425,7 @@ yshift=0mm,fill=none,fit=(cell-1-1A5)(cell-1-9A5),line width=3.5pt](BB3){};
 
 :::
 
-Similarly, $N$:$M$ sparsity retains at most $N$ nonzeros in each group of $M$ consecutive elements; hardware-oriented pruning often enforces exactly $N$ retained values so every group has the same representation [@zhou2021learningnmfinegrainedstructured]. The deterministic format lets a supported kernel predict the value and metadata layout while retaining more capacity than removing whole channels or blocks. That regularity creates an executable compromise between arbitrary masks and dense computation, but only for targets with the matching path. As the 2:4 example in @sec-model-compression-structured-pruning-9692 showed, each stored value then needs only a 2-bit index ($00_2$ through $11_2$) to record its position within its block of four. This compact metadata imposes only a 16-bit overhead per 16-element row segment—far below the multi-byte pointer arrays required by general CSR or COO formats—allowing Tensor Cores to stream compressed operands without memory bandwidth bloat. @Fig-2-4-gemm contrasts the execution mechanics between standard dense GEMM and 2:4 sparse processing: on the right, 2-bit coordinate indices steer hardware multiplexers to pull matching activation elements into the dot-product engine alongside the two retained weights per 4-element block, halving arithmetic cycles relative to the 8-element dense baseline on the left. In parallel, STEP examines learning more general $N$:$M$ masks for inference [@lu2023steplearningnmstructured].
+Similarly, N:M sparsity retains at most $n$ nonzeros in each group of $m$ consecutive elements; hardware-oriented pruning often enforces exactly $n$ retained values so every group has the same representation [@zhou2021learningnmfinegrainedstructured]. The deterministic format lets a supported kernel predict the value and metadata layout while retaining more capacity than removing whole channels or blocks. That regularity creates an executable compromise between arbitrary masks and dense computation, but only for targets with the matching path. As the 2:4 example in @sec-model-compression-structured-pruning-9692 showed, each stored value then needs only a 2-bit index ($00_2$ through $11_2$) to record its position within its block of four. This compact metadata imposes only a 16-bit overhead per 16-element row segment—far below the multi-byte pointer arrays required by general CSR or COO formats—allowing Tensor Cores to stream compressed operands without memory bandwidth bloat. @Fig-2-4-gemm contrasts the execution mechanics between standard dense GEMM and 2:4 sparse processing: on the right, 2-bit coordinate indices steer hardware multiplexers to pull matching activation elements into the dot-product engine alongside the two retained weights per 4-element block, halving arithmetic cycles relative to the 8-element dense baseline on the left. In parallel, STEP examines learning more general N:M masks for inference [@lu2023steplearningnmstructured].
 
 At accelerator level, the same pattern-specific rule holds: hardware support is a contract between the sparse format and the execution path.
 
@@ -6920,7 +6920,7 @@ Because optimization techniques interact so heavily through shared execution mec
 
 Selecting compression techniques for production deployment requires identifying the binding physical constraint of the target execution environment. Consider a transformer deployment where model parameters exceed device memory by 3$\times$, inference latency exceeds the service-level objective by 4$\times$, and the thermal envelope restricts dissipation to no more than 2 W sustained. Deciding whether to quantize, prune, distill to a compact architecture, or compose multiple methods depends on which hardware boundary is saturated, the allowable task accuracy loss, and the available training budget.
 
-The three primary optimization levers target different levels of the system stack. Distillation alters the algorithmic architecture by training a compact dense student to emulate a larger teacher, executing efficiently on standard hardware without specialized runtime support. Pruning modifies tensor topology and operation patterns, but yields wall-clock acceleration only when the resulting sparsity aligns with hardware execution units, such as $2:4$ structured sparse matrix cores or channel-aligned sub-matrices. Quantization alters data representation by reducing numerical bit width, directly lowering memory bus traffic and cache footprint while engaging higher-throughput integer datapaths. @Tbl-optimization-comparison summarizes the first-order trade-offs among these techniques across quality risk, training cost, and hardware dependency.
+The three primary optimization levers target different levels of the system stack. Distillation alters the algorithmic architecture by training a compact dense student to emulate a larger teacher, executing efficiently on standard hardware without specialized runtime support. Pruning modifies tensor topology and operation patterns, but yields wall-clock acceleration only when the resulting sparsity aligns with hardware execution units, such as 2:4 structured sparse matrix cores or channel-aligned sub-matrices. Quantization alters data representation by reducing numerical bit width, directly lowering memory bus traffic and cache footprint while engaging higher-throughput integer datapaths. @Tbl-optimization-comparison summarizes the first-order trade-offs among these techniques across quality risk, training cost, and hardware dependency.
 
 ```{=latex}
 \begingroup
@@ -7307,7 +7307,7 @@ Complementing latency and throughput profiles, layer-wise sensitivity analysis q
 
 ### Measuring optimization effectiveness {#sec-model-compression-measuring-optimization-effectiveness-a3b2}
 
-Evaluating compression requires balancing statistical quality against physical execution costs across the Data, Algorithm, and Machine (D·A·M) axes. A single scalar metric—such as top-1 accuracy or parameter count—fails to capture deployment viability. Quality baselines must capture aggregate accuracy, confidence calibration (verifying that predicted probabilities reflect empirical correctness), and performance across underrepresented input slices. Simultaneously, efficiency baselines must record peak memory residency, latency distributions (including tail latency $p99$), memory bus saturation, and per-inference energy.
+Evaluating compression requires balancing statistical quality against physical execution costs across the Data, Algorithm, and Machine (D·A·M) axes. A single scalar metric—such as top-1 accuracy or parameter count—fails to capture deployment viability. Quality baselines must capture aggregate accuracy, confidence calibration (verifying that predicted probabilities reflect empirical correctness), and performance across underrepresented input slices. Simultaneously, efficiency baselines must record peak memory residency, latency distributions (including p99 tail latency), memory bus saturation, and per-inference energy.
 
 ```{python}
 #| echo: false
@@ -7466,7 +7466,7 @@ export the calibrated graph and metadata as one reproducible artifact
 
 :::
 
-A parallel graph-mutation strategy governs pruning within framework APIs. Physical hardware cannot accelerate arbitrary parameter removal during training: excising non-contiguous weights dynamically would fragment memory allocations and destroy coalesced memory accesses across SIMD execution lanes. Consequently, framework pruning APIs do not shrink tensor dimensions during fine-tuning. Instead, they reparameterize the layer by retaining the original dense weight tensor $\mathbf{W}$ and allocating an auxiliary binary mask tensor $\mathbf{M}$ of identical shape, executing the forward pass via element-wise multiplication ($\mathbf{W}_{\text{pruned}} = \mathbf{W} \odot \mathbf{M}$). This design preserves dense tensor memory layouts and gradient updates during optimization. Only when training concludes does the export pass finalize the transformation, either by physically slicing away unneeded channels in structured pruning or by encoding nonzeros into sparse container formats compatible with hardware accelerators. @Lst-pytorch_pruning illustrates the lifecycle of parameter scoring, masking, and export.
+A parallel graph-mutation strategy governs pruning within framework APIs. Physical hardware cannot accelerate arbitrary parameter removal during training: excising non-contiguous weights dynamically would fragment memory allocations and destroy coalesced memory accesses across SIMD execution lanes. Consequently, framework pruning APIs do not shrink tensor dimensions during fine-tuning. Instead, they reparameterize the layer by retaining the original dense weight tensor $\mathbf{W}$ and allocating an auxiliary binary mask tensor $\mathbf{M}$ of identical shape, executing the forward pass via element-wise multiplication ($\hat{\mathbf{W}} = \mathbf{M} \odot \mathbf{W}$). This design preserves dense tensor memory layouts and gradient updates during optimization. Only when training concludes does the export pass finalize the transformation, either by physically slicing away unneeded channels in structured pruning or by encoding nonzeros into sparse container formats compatible with hardware accelerators. @Lst-pytorch_pruning illustrates the lifecycle of parameter scoring, masking, and export.
 
 ::: {#lst-pytorch_pruning lst-cap="**Pruning Artifact Boundary**: Applies unstructured or structured removal rules, then records the mask and fine-tuning context needed to reproduce the compressed model."}
 
@@ -7488,7 +7488,7 @@ Exporting an optimized model from a training framework produces an intermediate 
 
 The compilation pass verifies whether nominal compression yields physical speedup. Pruning removes zero-valued weights from the graph, but unless the hardware provides sparsity-aware memory layouts and execution paths—such as 2:4 structured sparsity support—matrix engines stream and multiply zeros identically to nonzero values, yielding no reduction in memory traffic or latency. Quantization lowers bitwidth, but if an accelerator lacks native INT8 or INT4 compute pipelines, the runtime must unpack operands into floating-point registers before arithmetic execution, replacing memory bottlenecks with instruction overhead.
 
-This introduces the *runtime dequantization trap*: if an accelerator provides native INT8 matrix-multiplication kernels but lacks an INT8 implementation for an adjacent operation (such as LayerNorm, GeLU, or an attention softmax reduction), the runtime encounters a type boundary. The execution engine must allocate a temporary buffer, launch a dequantization kernel to unpack INT8 integers back into FP32 ($x = s(q - z)$), execute the unsupported operator in floating point, and then launch a second kernel to re-quantize the output back to INT8 for the subsequent layer. These intermediate format conversions incur extra kernel launches, introduce synchronization barriers, and flood the memory bus with temporary FP32 allocations—often causing the quantized model to run slower than the uncompressed FP16 baseline.
+This introduces the *runtime dequantization trap*: if an accelerator provides native INT8 matrix-multiplication kernels but lacks an INT8 implementation for an adjacent operation (such as LayerNorm, GeLU, or an attention softmax reduction), the runtime encounters a type boundary. The execution engine must allocate a temporary buffer, launch a dequantization kernel to unpack INT8 integers back into FP32 ($x = s(x_q - z)$), execute the unsupported operator in floating point, and then launch a second kernel to re-quantize the output back to INT8 for the subsequent layer. These intermediate format conversions incur extra kernel launches, introduce synchronization barriers, and flood the memory bus with temporary FP32 allocations—often causing the quantized model to run slower than the uncompressed FP16 baseline.
 
 Furthermore, low-precision kernels require specialized tensor layouts, such as tiled or interleaved memory channels, to ensure coalesced loads into shared memory or register files. Operator fusion eliminates intermediate round-trips to off-chip DRAM by staging intermediate activations directly inside on-chip SRAM or register space. When an unsupported operator sequence blocks fusion, the memory-bandwidth bottleneck remains intact. Framework-level optimizations merely expose opportunities; hardware-specific compilers determine whether those opportunities survive translation into an efficient machine execution plan.
 
@@ -8182,7 +8182,7 @@ Teams may obtain a `{python} FallaciesAnalysis.int8_size_reduction_mult_str` raw
 
 **Fallacy**: *Sparse matrices always save memory.*
 
-Sparse formats add index-array metadata that erodes storage savings at moderate densities. To represent $N_{\text{nz}}$ nonzero values across $R$ rows, a coordinate list (COO) stores explicit coordinate tuples `(row_idx, col_idx, value)`. For 32-bit floats and 32-bit integer indices, each nonzero element consumes 12 bytes ($3\times$ a dense 4-byte FP32 entry), requiring greater than 66.7 percent sparsity just to break even on memory footprint. Compressed sparse row (CSR) eliminates redundant row coordinates by storing three arrays: `values` ($N_{\text{nz}} \times 4\text{ B}$), `col_indices` ($N_{\text{nz}} \times 4\text{ B}$), and `row_pointers` ($(R+1) \times 4\text{ B}$). Each nonzero entry costs 8 bytes ($2\times$ a dense FP32 entry), requiring over 50 percent sparsity before the sparse structure consumes less memory than the original dense tensor; below 50 percent sparsity, CSR metadata actually expands the model's memory footprint.
+Sparse formats add index-array metadata that erodes storage savings at moderate densities. To represent $N_{\text{nz}}$ nonzero values across $n_{\text{rows}}$ rows, a coordinate list (COO) stores explicit coordinate tuples `(row_idx, col_idx, value)`. For 32-bit floats and 32-bit integer indices, each nonzero element consumes 12 bytes ($3\times$ a dense 4-byte FP32 entry), requiring greater than 66.7 percent sparsity just to break even on memory footprint. Compressed sparse row (CSR) eliminates redundant row coordinates by storing three arrays: `values` ($N_{\text{nz}} \times 4\text{ B}$), `col_indices` ($N_{\text{nz}} \times 4\text{ B}$), and `row_pointers` ($(n_{\text{rows}}+1) \times 4\text{ B}$). Each nonzero entry costs 8 bytes ($2\times$ a dense FP32 entry), requiring over 50 percent sparsity before the sparse structure consumes less memory than the original dense tensor; below 50 percent sparsity, CSR metadata actually expands the model's memory footprint.
 
 Performance has no universal sparsity threshold because tensor shape, format, kernel, batch, and hardware determine whether sparse execution outruns dense execution. Specialized formats such as 2:4 structured sparsity eliminate index arrays in favor of fixed 2-bit multiplexer metadata, providing a hardware-accelerated path that nearly halves weight traffic with only a small fixed metadata cost (see @sec-model-compression-structured-pruning-9692).
 

@@ -103,7 +103,7 @@ def test_unlabeled_frontmatter_does_not_use_empty_aux_label(tmp_path: Path):
 def test_fragment_owner_routes_include_only_sources(tmp_path: Path):
     volume_root = tmp_path / "contents" / "vol1"
     assert _fragment_owner(volume_root / "frontmatter" / "_conventions.qmd", volume_root) == volume_root / "frontmatter" / "about.qmd"
-    assert _fragment_owner(volume_root / "frontmatter" / "_notation_body.qmd", volume_root) == volume_root / "frontmatter" / "notation.qmd"
+    assert _fragment_owner(volume_root / "frontmatter" / "_notation_core_tail.qmd", volume_root) == volume_root / "frontmatter" / "notation.qmd"
     assert _fragment_owner(volume_root / "chapter.qmd", volume_root) is None
 
 
