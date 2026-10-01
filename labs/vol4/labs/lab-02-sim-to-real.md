@@ -14,6 +14,11 @@
 
 **Purpose.** Your IK worked in simulation. Now you run it on the real robot and discover what simulation got wrong. Servos have backlash, gravity pulls on real mass, and every command crosses a communication link with its own delay. You meet the dual-brain architecture properly for the first time: the Linux MPU that thinks and the STM32 MCU that governs, with the bridge between them.
 
+**Core concepts:**
+- **The sim-to-real gap:** what a model of the body leaves out
+- **Two processors:** one thinks, one governs, and a bridge carries every command between them
+- **Time:** every command crosses a link with its own delay, and two clocks must agree
+
 **Comes in from the previous lab:** IK solver, digital twin, the targets you tested in simulation.\
 **Goes out to the next lab:** IK running on the MCU (your nonlearned baseline), the sim-vs-real table, RPC timing, and four-tap logging.\
 **If the previous lab didn't finish:** staff provide a reference IK solver.

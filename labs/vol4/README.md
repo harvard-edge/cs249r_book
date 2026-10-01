@@ -39,7 +39,7 @@ Six labs follow the textbook's four parts in order, building from pen-and-paper 
 
 | | Lab | Weeks | Book Part & Chapters | What You Will Do |
 |:---:|:---|:---:|:---|:---|
-| 1 | **[Robot Kinematics & Digital Twin](labs/lab-01-kinematics-and-twin.md)** | 1–3 | Part I — Ch 1 *Causal Boundary*, Ch 2 *Physical Body*, Ch 3 *Cognitive Brain* | Drive the robot on day one, measure the limits of its body, then learn the math that makes it move: derive inverse kinematics and command a simulated digital twin with your own equations. |
+| 1 | **[The Digital Twin](labs/lab-01-digital-twin.md)** | 1–3 | Part I — Ch 1 *Causal Boundary*, Ch 2 *Physical Body*, Ch 3 *Cognitive Brain* | Drive the robot on day one, measure the limits of its body, then learn the math that makes it move: derive inverse kinematics and command a simulated digital twin with your own equations. |
 | 2 | **[From Simulation to Real Hardware](labs/lab-02-sim-to-real.md)** | 4 | Part I — Ch 4 *Nervous System* | Discover what simulation gets wrong. Run your IK on the microcontroller, reach the same targets on the real robot, and measure the gap between sim and reality. |
 | 3 | **[Learned Control with Vision-Language-Action Models](labs/lab-03-learned-control.md)** | 5–6 | Part II — Ch 5 *Physical Data*, Ch 6 *Policy Training* | Replace hand-coded equations with a neural policy that learns from data. Run a pre-trained VLA in simulation, then deploy it to the real robot and measure the sim2real performance drop. |
 | 4 | **[Real-World Data Collection & Fine-Tuning](labs/lab-04-real-data-and-fine-tuning.md)** | 7–8 | Part II–III — Ch 7 *Evaluation*, Ch 8 *Perception*, Ch 9 *Spatial Memory* | Bridge the sim2real gap with real data. Teleoperate the robot to collect demonstrations, fine-tune the sim-trained model, and deploy it untethered for fully autonomous operation. |
@@ -55,7 +55,7 @@ Each lab is made of **parts**. One part is one week: a single studio session wit
 |:---:|:---|:---|
 | 1 | **1A** Meet the robot | A recorded episode that replays; safe-state check |
 | 2 | **1B** Measure the body | The body's measured limits: stopping distance, thermal duty, supply sag, measurement age |
-| 3 | **1C** Kinematics & digital twin | IK reaching in simulation, workspace map |
+| 3 | **1C** The digital twin | IK reaching in simulation, workspace map |
 | 4 | **2A** IK on the real arm | Sim-vs-real table, RPC timing trace |
 | 5 | **3A** VLAs in simulation | VLA vs. IK success in simulation |
 | 6 | **3B** The VLA on real hardware | Camera calibration, sim2real gap table |

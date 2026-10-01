@@ -14,6 +14,11 @@
 
 **Purpose.** Lectures and new labs are over. The final three weeks give each team bench time to run the whole pipeline on a task of its own, survive a peer team's attacks, and defend a written release decision. The thinking starts earlier: you propose the task in week 8 and freeze it in week 10, so the studio weeks go to building and testing, not deciding. A team that concludes its system should *not* be released, and backs that with rigorous evidence, can earn full marks. Showing where a physical system fails is the job.
 
+**Core concepts:**
+- **Bounded claims:** a release claim holds only inside the envelope your evidence covers
+- **Release as a decision:** release, conditional release, or no release, each defended with evidence
+- **Generalizing:** what changes, and what must be measured again, when the pipeline meets an unfamiliar system
+
 **Comes in from the previous labs:** the full pipeline, from kinematics through your own governor.\
 **Goes out:** the Physical Release Dossier and the oral defense.\
 **If the previous lab didn't finish:** staff provide reference governor firmware.

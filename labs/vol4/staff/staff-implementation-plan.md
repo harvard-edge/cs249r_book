@@ -131,7 +131,7 @@ To ensure bulletproof reliability and avoid mysterious CPU brownout resets:
 **Focus:** Sensor calibration, human demonstration recording, and baseline imitation policy training.
 
 #### Week 5 (Oct 19 – Oct 23, 2026): "Student Zero" Run for Labs 1 & 2
-* **Primary Objective:** Qualify Lab 1 (Kinematics & Digital Twin) and Lab 2 (Simulation to Real Hardware).
+* **Primary Objective:** Qualify Lab 1 (The Digital Twin) and Lab 2 (Simulation to Real Hardware).
 * **Tasks:**
   - [ ] Mount UVC USB webcam at $45^\circ$ oblique angle, $40\text{ cm}$ overlooking workspace; tape $300 \times 200\text{ mm}$ boundary.
   - [ ] Write and test AprilTag camera calibration script (`calibrate_camera.py`).
@@ -248,7 +248,7 @@ To ensure bulletproof reliability and avoid mysterious CPU brownout resets:
 | **W02: Sep 28 – Oct 02** | Hardware Bring-Up | • Mechanical arm assembled & clamped<br>• 7.4V motor power harness verified<br>• **Step 1:** LeRobot USB teleoperation passing | 60-second teleoperation replay executed without communication dropout | `[ ]` |
 | **W03: Oct 05 – Oct 09** | Bus Authority | • STM32 UART level-shifter circuit wired<br>• Inter-core RPC bridge test script<br>• **Step 2:** 1-joint velocity clamp & veto | Joint 1 clamped at $45^\circ/\text{s}$; out-of-range targets ($> 180^\circ$) rejected | `[ ]` |
 | **W04: Oct 12 – Oct 16** | 6-DoF Integration | • `UnoQMotorsBus` Python adapter deployed<br>• Table geofence ($z \ge 15\text{ mm}$) programmed<br>• **Step 3:** Governed 6-DoF teleoperation | Full 6-DoF teleoperation functional; downward table crash actively vetoed | `[ ]` |
-| **W05: Oct 19 – Oct 23** | **Milestone 1:** Anatomy | • Lab 1 (Kinematics & Digital Twin) qualified by Student Zero<br>• Lab 2 (Simulation to Real Hardware) qualified<br>• AprilTag camera & joint offset calibration | Joint repeatability $\pm 1.5^\circ$; inter-core bridge round-trip $\le 5\text{ ms}$ at $50\text{ Hz}$ | `[ ]` |
+| **W05: Oct 19 – Oct 23** | **Milestone 1:** Anatomy | • Lab 1 (The Digital Twin) qualified by Student Zero<br>• Lab 2 (Simulation to Real Hardware) qualified<br>• AprilTag camera & joint offset calibration | Joint repeatability $\pm 1.5^\circ$; inter-core bridge round-trip $\le 5\text{ ms}$ at $50\text{ Hz}$ | `[ ]` |
 | **W06: Oct 26 – Oct 30** | Dataset Pipeline | • Lab 4 data collection qualified<br>• 10-episode pick-and-place reference dataset<br>• Standardized LeRobot v2 schema validated | Zero dropped frames at $30\text{ Hz}$; all 4 action taps synchronized | `[ ]` |
 | **W07: Nov 02 – Nov 06** | Training | • Lab 4 training & export qualified<br>• ACT model trained on workstation GPU<br>• Quantized ONNX INT8 policy exported ($< 50\text{ MB}$) | Offline MSE validation curves clean; model file size $< 50\text{ MB}$ | `[ ]` |
 | **W08: Nov 09 – Nov 13** | **Milestone 2:** Edge Inference | • **Step 4:** Untethered reach on Qualcomm Linux<br>• End-to-end loop latency $T_{\text{total}} \le 80\text{ ms}$<br>• Lab 4 untethered loop qualified | Host PC tether disconnected; 10/10 autonomous reach completions | `[ ]` |

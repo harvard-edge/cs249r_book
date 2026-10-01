@@ -4,13 +4,13 @@ Every Volume IV lab has five sections in this order. Copy the block below to `la
 
 | Section | Written by | Purpose |
 |:---|:---|:---|
-| **1. Overview** | Instructor | The physical question, why the lab exists, and where it sits in the course |
+| **1. Overview** | Instructor | The physical question, why the lab exists, its core concepts, and where it sits in the course |
 | **2. Learning Objectives** | Instructor | What a student can do afterward |
 | **3. Instructions** | Staff | Setup, then one sub-section per weekly part: steps, tests, and pitfalls |
 | **4. Deliverables** | Instructor (staff add thresholds) | The evidence each team hands in, and how it is signed off |
 | **5. Reflection** | Instructor | Questions that connect the measurement back to the book |
 
-**Parts.** A lab is made of parts, one per week. Each part is one supervised studio session with a goal and a **checkpoint**, the artifact staff see before the team moves on. The goal and checkpoint are set by the instructor; the steps are written by staff.
+**Labs and parts.** A lab teaches one core set of concepts. It is made of parts, one per week. Each part is one supervised studio session with a goal and a **checkpoint**, the artifact staff see before the team moves on. The goal and checkpoint are set by the instructor; the steps are written by staff.
 
 **Status.** Each lab carries one status: `skeleton` (sections 1, 2, 4, 5 written; instructions open), `draft` (instructions written, not yet run on the bench), or `bench-verified` (a staff member has run the whole lab on the reference station, and every threshold comes from that run).
 
@@ -34,6 +34,9 @@ Every Volume IV lab has five sections in this order. Copy the block below to `la
 **The physical question.** One or two sentences: the systems relationship this lab measures.
 
 **Purpose.** One paragraph: why this lab exists, and what the student understands at the end that they did not before.
+
+**Core concepts:**
+- **Concept name:** the one idea, in a phrase. Three or four per lab; every part should serve at least one.
 
 **Comes in from Lab N−1:** artifacts this lab uses.\
 **Goes out to Lab N+1:** artifacts this lab produces.\

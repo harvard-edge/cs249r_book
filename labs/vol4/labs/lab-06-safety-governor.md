@@ -14,6 +14,11 @@
 
 **Purpose.** Since week 1 the arm has run under a staff-written baseline governor, and you have trusted it without looking inside. Now safety is the subject. In the first week you replace that governor with your own: speed limits, a workspace geofence, and joint limits, and you test why it belongs on the MCU rather than in Linux. In the second week you try to defeat it by freezing the brain, corrupting packets, and cutting power. If you can't break it, you can trust it.
 
+**Core concepts:**
+- **Proposal versus permission:** the learned brain proposes; only the governor permits
+- **Placement:** why safety lives on its own silicon
+- **Adversarial verification:** trust what you tried and failed to break
+
 **Comes in from the previous lab:** a working, disturbance-tested autonomous loop.\
 **Goes out to the next lab:** your governor firmware, watchdog, and fault-injection evidence.\
 **If the previous lab didn't finish:** staff provide a reference autonomous loop.

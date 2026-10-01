@@ -121,7 +121,7 @@ This card serves as the concrete, observable sign-off sheet for students and ins
 
 | Competency | Signed off in | Milestone |
 |:---|:---|:---:|
-| **A1** Plant Kinematics & Safe Envelope | [Lab 1: Robot Kinematics & Digital Twin](../labs/lab-01-kinematics-and-twin.md) | M1 |
+| **A1** Plant Kinematics & Safe Envelope | [Lab 1: The Digital Twin](../labs/lab-01-digital-twin.md) | M1 |
 | **A2** Multi-Modal Sensing & Calibration | [Lab 3: Learned Control with VLAs](../labs/lab-03-learned-control.md) | M2 |
 | **A3** Feedback Timing & Latency | [Lab 2: From Simulation to Real Hardware](../labs/lab-02-sim-to-real.md) | M1 |
 | **B1** Physical Dataset Engineering | [Lab 4: Real-World Data Collection & Fine-Tuning](../labs/lab-04-real-data-and-fine-tuning.md) | M2 |

@@ -14,6 +14,11 @@
 
 **Purpose.** Your fine-tuned VLA reaches targets on its own. Can it handle the unexpected? The world does not hold still while the model thinks. This lab stresses the system along time (how far ahead it can predict), a changing world (what happens when the target moves mid-reach), and language (whether the instruction changes the motion). This is where you learn the difference between a demo that works once and a system that works reliably.
 
+**Core concepts:**
+- **Open loop versus closed loop:** how far ahead to commit before looking again
+- **Recovery:** replanning when the world changes mid-action
+- **Grounded language:** whether an instruction changes the physical motion
+
 **Comes in from the previous lab:** fine-tuned VLA running an untethered loop on the UNO Q.\
 **Goes out to the next lab:** chosen action horizon, disturbance-recovery traces, language check.\
 **If the previous lab didn't finish:** staff provide a reference fine-tuned checkpoint.

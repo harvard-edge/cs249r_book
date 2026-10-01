@@ -1,4 +1,4 @@
-# Lab 1: Robot Kinematics & Digital Twin
+# Lab 1: The Digital Twin
 
 **Status:** `skeleton`\
 **Weeks:** 1–3 (Parts 1A, 1B, 1C)\
@@ -12,7 +12,13 @@
 
 **The physical question.** What are the physical limits of this body, and how do you command it to a target within them? How do you translate "move the hand to $(x, y, z)$" into joint angles, and where does that math break down?
 
-**Purpose.** On day one you drive the robot, record a motion, replay it, and cut its power, so you know what the machine does before you study how. In week two you measure the body's own limits: how far it travels before it stops, how hot a servo gets holding a load, how far the supply voltage sags when a joint stalls, and how old a joint reading is by the time you use it. Then you learn the math that makes it move: you derive the arm's kinematics, solve inverse kinematics, and command a digital twin with your own equations. By the end you know both what the body can do and how to ask it to do it.
+**Purpose.** On day one you drive the robot, record a motion, replay it, and cut its power, so you know what the machine does before you study how. In week two you measure the body's own limits: how far it travels before it stops, how hot a servo gets holding a load, how far the supply voltage sags when a joint stalls, and how old a joint reading is by the time you use it. Then you build its digital twin: a simulated copy of the arm that runs on kinematics you derive yourself, so you can command it, push it to its limits, and break it without consequence. By the end you know both what the body can do and how to ask it to do it.
+
+**Core concepts:**
+- **The causal boundary:** where computation stops being symbolic and becomes physical force
+- **The body's limits:** stopping distance, heat, power, and measurement age bound everything the robot can do
+- **The digital twin:** a model of the body you can command, test, and break safely
+- **Where the model breaks:** workspace edges and singularities
 
 **Comes in from:** nothing; this is the first lab.\
 **Goes out to the next lab:** a replayed episode, a safe-state check, the body's measured limits, your IK solver, the digital twin, and a workspace map.\
@@ -57,9 +63,9 @@ TBD (staff)
 
 <!-- STAFF: expected to cover stopping distance from several speeds; servo temperature while holding a load; supply voltage sag when a joint stalls; the age of a joint reading by the time Linux sees it. The STS3215 servos report temperature, voltage, and load directly. Write steps with real commands, what to record, the expected result, and pitfalls from the Student Zero run. -->
 
-### Part 1C: Kinematics & Digital Twin (Week 3)
+### Part 1C: The Digital Twin (Week 3)
 
-**Goal:** derive the arm's kinematics and command a simulated twin with them. **Checkpoint:** IK reaching results in simulation and a workspace map with singularities marked.
+**Goal:** build the arm's digital twin and command it with kinematics you derive yourself. **Checkpoint:** IK reaching results in simulation and a workspace map with singularities marked.
 
 TBD (staff)
 

@@ -14,6 +14,11 @@
 
 **Purpose.** You can move the robot with hand-derived equations. Now you let it learn from data instead. Vision-Language-Action models take camera images and a language instruction and output motor commands directly. You run a staff-provided VLA in simulation, calibrate the real camera it will see through, deploy the same model to the hardware, and measure what happens. The gap between simulated and physical performance, the **sim2real gap**, is the central lesson.
 
+**Core concepts:**
+- **The classical wall:** where hand-written control gives way to learning
+- **Vision-Language-Action policies:** one model from pixels and words to motor commands
+- **The learned sim2real gap:** perception, dynamics, timing, and distribution shift
+
 **Comes in from the previous lab:** IK baseline on the MCU, sim-vs-real table, RPC bridge, four-tap logging.\
 **Goes out to the next lab:** camera calibration, a sim-trained VLA deployed on the UNO Q, a sim2real gap table with failure causes, and a VLA-versus-IK comparison.\
 **If the previous lab didn't finish:** staff provide reference IK firmware for the MCU.

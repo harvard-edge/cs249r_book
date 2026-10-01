@@ -14,6 +14,11 @@
 
 **Purpose.** Your sim-trained VLA struggled on real hardware. Now you solve it the way the field does: collect a small set of real demonstrations and fine-tune the simulation-trained model on them. Pre-train cheaply in simulation, then adapt with real data. By the end you close the loop completely, with a fine-tuned VLA running autonomously on the edge and no host tether. Knowing what the loop can do, you propose your capstone task.
 
+**Core concepts:**
+- **Data as the fix:** a little real experience adapting a model trained in simulation
+- **Closing the loop on the edge:** sense, propose, permit, and act with no host
+- **Memory:** acting on a world the camera can no longer see
+
 **Comes in from the previous lab:** camera calibration, sim-trained VLA on the UNO Q, sim2real gap table.\
 **Goes out to the next lab:** real-world dataset and dataset card, fine-tuned VLA, untethered loop, loop-latency breakdown, and your capstone proposal.\
 **If the previous lab didn't finish:** staff provide a reference sim-trained checkpoint already deployed on the board.

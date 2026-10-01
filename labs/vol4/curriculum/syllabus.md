@@ -64,9 +64,9 @@ Read the week's chapter before the seminar: the chapter gives the principles, th
 
 | Week | Reading | Lab part | Due |
 |:---:|:---|:---|:---|
-| 1 | [Ch 1: The Causal Boundary](../../../books/vol4/01_boundary/01_boundary.qmd) | [**1A** Meet the robot](../labs/lab-01-kinematics-and-twin.md) |  |
-| 2 | [Ch 2: The Physical Body](../../../books/vol4/02_body/02_body.qmd) | [**1B** Measure the body](../labs/lab-01-kinematics-and-twin.md) |  |
-| 3 | [Ch 3: The Cognitive Brain](../../../books/vol4/03_brain/03_brain.qmd) | [**1C** Kinematics & digital twin](../labs/lab-01-kinematics-and-twin.md) |  |
+| 1 | [Ch 1: The Causal Boundary](../../../books/vol4/01_boundary/01_boundary.qmd) | [**1A** Meet the robot](../labs/lab-01-digital-twin.md) |  |
+| 2 | [Ch 2: The Physical Body](../../../books/vol4/02_body/02_body.qmd) | [**1B** Measure the body](../labs/lab-01-digital-twin.md) |  |
+| 3 | [Ch 3: The Cognitive Brain](../../../books/vol4/03_brain/03_brain.qmd) | [**1C** The digital twin](../labs/lab-01-digital-twin.md) |  |
 | 4 | [Ch 4: The Nervous System](../../../books/vol4/04_nervous/04_nervous.qmd) | [**2A** IK on the real arm](../labs/lab-02-sim-to-real.md) | **M1** |
 | 5 | [Ch 5: Physical Data](../../../books/vol4/05_data/05_data.qmd) | [**3A** VLAs in simulation](../labs/lab-03-learned-control.md) |  |
 | 6 | [Ch 6: Policy Training](../../../books/vol4/06_training/06_training.qmd); read ahead: calibration in Ch 8 | [**3B** The VLA on real hardware](../labs/lab-03-learned-control.md) |  |
