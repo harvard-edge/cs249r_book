@@ -122,6 +122,7 @@ To ensure bulletproof reliability and avoid mysterious CPU brownout resets:
   - [ ] Implement the 60-line Python `UnoQMotorsBus` custom LeRobot adapter.
   - [ ] Program Cartesian forward kinematics check in STM32 firmware; implement table collision geofence ($z_{\text{tool}} \ge 15\text{ mm}$).
   - [ ] **Validation Step 3 Check:** Run full 6-DoF LeRobot teleoperation through the governed adapter; verify that table-crash command proposals are actively vetoed by the STM32.
+  - [ ] Package the governed-arm firmware as the **baseline governor** students run from week 1 (joint limits, speed clamp, watchdog).
 * **Weekly Deliverable:** `UnoQMotorsBus.py` source code + demonstration of live table-crash veto.
 
 ---
@@ -136,6 +137,7 @@ To ensure bulletproof reliability and avoid mysterious CPU brownout resets:
   - [ ] Write and test AprilTag camera calibration script (`calibrate_camera.py`).
   - [ ] Write joint homing calibration script; verify $\pm 1.5^\circ$ repeatability across 20 cycles.
   - [ ] Benchmark inter-core RPC latency: measure round-trip times across 1,000 packets; confirm $\le 5\text{ ms}$ at $50\text{ Hz}$.
+  - [ ] Prepare Lab 1 assets: the body-limits procedure (Part 1B), the kinematics primer, and the digital twin of the delivered arm (Part 1C).
   - [ ] Package student starter assets: `wiring_diagram_golden.pdf`, `calibrate_camera.py`, `test_bridge_latency.py`.
 * **Weekly Deliverable:** Milestone 1 qualification package (Labs 1 & 2 starter repo + reference calibration card).
 
@@ -144,6 +146,7 @@ To ensure bulletproof reliability and avoid mysterious CPU brownout resets:
 * **Tasks:**
   - [ ] Establish reproducible pick-and-place task: pick $30\text{ mm}$ foam cube from marked start zone and place in receptacle.
   - [ ] Record 10 expert demonstration episodes using teleoperation.
+  - [ ] Produce the **sim-trained VLA checkpoint** Lab 3 needs (trained on simulated demonstrations, simulated camera matched to the real one), or qualify a public SO-101 checkpoint as the fallback.
   - [ ] Synchronize $30\text{ Hz}$ RGB frames ($224 \times 224$) with the 4 action taps (`a_req`, `a_map`, `a_enf`, `a_meas`).
   - [ ] Format into `LeRobotDataset` v2 schema; verify zero dropped frames and correct chunk indexing.
   - [ ] Package student starter scripts: `teleop_record.py`, `inspect_dataset.py`, `dataset_golden_10ep/`.

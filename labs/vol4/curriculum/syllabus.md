@@ -42,6 +42,8 @@ By the end of the course, you will be able to:
 
 The twelve competencies on the [Competency Card](student-competencies.md) break these outcomes into skills that staff sign off at the bench.
 
+**Before week 1.** Read the Volume IV [reader guide and prerequisites](../../../books/vol4/frontmatter/prerequisites.qmd) and [Chapter 1](../../../books/vol4/01_boundary/01_boundary.qmd). If you want a refresher, the book's appendices cover [machine learning](../../../books/vol4/backmatter/appendix_ml.qmd), [systems](../../../books/vol4/backmatter/appendix_systems.qmd), and [control](../../../books/vol4/backmatter/appendix_control.qmd); you do not need to master them before the course begins.
+
 ---
 
 ## 4. How a Week Works

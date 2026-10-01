@@ -35,6 +35,8 @@ By the end of this lab, you will be able to:
 
 > **Standard bench:** see the [Station Reference Card](station-reference.md). In Part 1A the arm runs under the staff baseline governor.
 
+> **Two rules from day one.** If a servo chatters, buzzes, stalls, or overheats, switch off motor power within two seconds and call staff before re-arming. Never connect a computer directly to the servo bus, around the STM32; doing so fails the current milestone.
+
 **Additional setup:** TBD (staff)
 
 <!-- STAFF: Part 1A must be fun and safe: low speed, soft targets, a staff member at the bench, and every motion through the STM32 baseline governor, never the stock USB path. The book does not teach DH or inverse kinematics, so Part 1C needs a short kinematics primer handout. Needs a teleoperation input, a pinned simulator (MuJoCo or PyBullet), and a robot model matching the delivered SO-101. -->
