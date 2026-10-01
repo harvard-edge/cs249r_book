@@ -41,12 +41,12 @@ def test_format_bibtex_entry_pages_dash():
 
 
 def test_add_entry_success(tmp_path: Path):
-    bib_file = tmp_path / "books" / "references.bib"
+    bib_file = tmp_path / "bibs" / "references.bib"
     bib_file.parent.mkdir(parents=True)
     bib_file.write_text("@article{existing,\n  title = {Existing},\n  year = {2020},\n}\n", encoding="utf-8")
 
-    manifest_file = tmp_path / "binder" / "tools" / "bib_verification_manifest.json"
-    manifest_file.parent.mkdir(parents=True)
+    manifest_file = tmp_path / "bibs" / "manifest.json"
+    manifest_file.parent.mkdir(parents=True, exist_ok=True)
     manifest_file.write_text("{}", encoding="utf-8")
 
     entry_data = {
@@ -75,19 +75,43 @@ def test_add_entry_success(tmp_path: Path):
     manifest = json.loads(manifest_file.read_text(encoding="utf-8"))
     assert "new2024paper" in manifest
     assert manifest["new2024paper"]["entry_hash"] == rec["entry_hash"]
+    assert manifest["new2024paper"]["file"] == "bibs/references.bib"
 
     # Check references.bib contains entry
     content = bib_file.read_text(encoding="utf-8")
     assert "@article{new2024paper," in content
 
 
-def test_add_entry_rejects_duplicate_key(tmp_path: Path):
+def test_add_entry_legacy_fallback(tmp_path: Path):
+    """Fallback to books/references.bib and binder/tools/bib_verification_manifest.json if bibs/ not present."""
     bib_file = tmp_path / "books" / "references.bib"
+    bib_file.parent.mkdir(parents=True)
+    bib_file.write_text("@article{existing,\n  title = {Existing},\n  year = {2020},\n}\n", encoding="utf-8")
+
+    manifest_file = tmp_path / "binder" / "tools" / "bib_verification_manifest.json"
+    manifest_file.parent.mkdir(parents=True, exist_ok=True)
+    manifest_file.write_text("{}", encoding="utf-8")
+
+    entry_data = {
+        "key": "legacy2024",
+        "entry_type": "article",
+        "fields": {"title": "Legacy Test", "year": "2024"},
+        "evidence": {"source": "crossref"},
+    }
+
+    ok, msg, rec = bib_gateway.add_entry(tmp_path, entry_data, check_duplicates=True)
+    assert ok
+    assert rec is not None
+    assert "legacy2024" in json.loads(manifest_file.read_text(encoding="utf-8"))
+
+
+def test_add_entry_rejects_duplicate_key(tmp_path: Path):
+    bib_file = tmp_path / "bibs" / "references.bib"
     bib_file.parent.mkdir(parents=True)
     bib_file.write_text("@article{duplicate2024,\n  title = {First},\n  year = {2024},\n}\n", encoding="utf-8")
 
-    manifest_file = tmp_path / "binder" / "tools" / "bib_verification_manifest.json"
-    manifest_file.parent.mkdir(parents=True)
+    manifest_file = tmp_path / "bibs" / "manifest.json"
+    manifest_file.parent.mkdir(parents=True, exist_ok=True)
     manifest_file.write_text("{}", encoding="utf-8")
 
     entry_data = {
@@ -103,12 +127,12 @@ def test_add_entry_rejects_duplicate_key(tmp_path: Path):
 
 
 def test_add_entry_rejects_duplicate_doi(tmp_path: Path):
-    bib_file = tmp_path / "books" / "references.bib"
+    bib_file = tmp_path / "bibs" / "references.bib"
     bib_file.parent.mkdir(parents=True)
     bib_file.write_text("@article{orig2024,\n  title = {Orig},\n  year = {2024},\n  doi = {10.1145/123456},\n}\n", encoding="utf-8")
 
-    manifest_file = tmp_path / "binder" / "tools" / "bib_verification_manifest.json"
-    manifest_file.parent.mkdir(parents=True)
+    manifest_file = tmp_path / "bibs" / "manifest.json"
+    manifest_file.parent.mkdir(parents=True, exist_ok=True)
     manifest_file.write_text("{}", encoding="utf-8")
 
     entry_data = {
@@ -124,7 +148,7 @@ def test_add_entry_rejects_duplicate_doi(tmp_path: Path):
 
 
 def test_ingest_inbox(tmp_path: Path):
-    inbox_file = tmp_path / "books" / "bib-inbox.bib"
+    inbox_file = tmp_path / "bibs" / "inbox.bib"
     inbox_file.parent.mkdir(parents=True)
     inbox_content = """@misc{fakeentry,
   title = {Totally Fabricated Nonexistent Paper},
@@ -133,11 +157,11 @@ def test_ingest_inbox(tmp_path: Path):
 }"""
     inbox_file.write_text(inbox_content, encoding="utf-8")
 
-    manifest_file = tmp_path / "binder" / "tools" / "bib_verification_manifest.json"
-    manifest_file.parent.mkdir(parents=True)
+    manifest_file = tmp_path / "bibs" / "manifest.json"
+    manifest_file.parent.mkdir(parents=True, exist_ok=True)
     manifest_file.write_text("{}", encoding="utf-8")
 
-    bib_file = tmp_path / "books" / "references.bib"
+    bib_file = tmp_path / "bibs" / "references.bib"
     bib_file.write_text("", encoding="utf-8")
 
     added, rejected, msgs = bib_gateway.ingest_inbox(tmp_path, inbox_file)

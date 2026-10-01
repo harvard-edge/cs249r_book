@@ -1,7 +1,7 @@
 """Native Reference Gateway: Authenticated citation resolution, formatting, and ledger sealing.
 
 Provides programmatic and CLI facilities to safely ingest, verify, and seal
-new bibliography entries without direct, unvalidated file edits to books/references.bib.
+new bibliography entries without direct, unvalidated file edits to bibs/references.bib.
 """
 from __future__ import annotations
 
@@ -510,8 +510,17 @@ def add_entry(
     check_duplicates: bool = True,
 ) -> tuple[bool, str, dict[str, Any] | None]:
     """Atomically append a verified entry to references.bib and seal it into the manifest."""
-    bib_path = repo_root / "books" / "references.bib"
-    manifest_path = repo_root / "binder" / "tools" / "bib_verification_manifest.json"
+    bib_path = repo_root / "bibs" / "references.bib"
+    if not bib_path.is_file():
+        fallback = repo_root / "books" / "references.bib"
+        if fallback.is_file():
+            bib_path = fallback
+
+    manifest_path = repo_root / "bibs" / "manifest.json"
+    if not manifest_path.is_file():
+        legacy = repo_root / "binder" / "tools" / "bib_verification_manifest.json"
+        if legacy.is_file():
+            manifest_path = legacy
 
     if not bib_path.is_file():
         return False, f"Bibliography file not found: {bib_path}", None
@@ -548,7 +557,7 @@ def add_entry(
     # Record manifest entry
     manifest_record = {
         "key": key,
-        "file": "books/references.bib",
+        "file": "bibs/references.bib",
         "entry_type": metadata["entry_type"],
         "title": clean_str(str(metadata["fields"].get("title", ""))),
         "year": str(metadata["fields"].get("year", "")),

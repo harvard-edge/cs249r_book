@@ -34,8 +34,13 @@ REPO_ROOT = Path(__file__).resolve().parents[4]
 sys.path.insert(0, str(REPO_ROOT / "binder"))
 from cli.checks import bib_lint
 
-MANIFEST_PATH = REPO_ROOT / "binder" / "tools" / "bib_verification_manifest.json"
-BIB_PATH = REPO_ROOT / "books" / "references.bib"
+MANIFEST_PATH = REPO_ROOT / "bibs" / "manifest.json"
+if not MANIFEST_PATH.exists():
+    MANIFEST_PATH = REPO_ROOT / "binder" / "tools" / "bib_verification_manifest.json"
+
+BIB_PATH = REPO_ROOT / "bibs" / "references.bib"
+if not BIB_PATH.exists():
+    BIB_PATH = REPO_ROOT / "books" / "references.bib"
 
 SSL_CTX = ssl.create_default_context(cafile=certifi.where())
 FALLBACK_SSL_CTX = ssl.create_default_context()
@@ -75,7 +80,9 @@ TRUSTED_DOMAINS = {
     "circleci.com", "cloudflare.com", "cnbc.com", "tensorflow.org", "google.dev"
 }
 
-BAK_MANIFEST_PATH = REPO_ROOT / "binder" / "tools" / "bib_verification_manifest.json.bak"
+BAK_MANIFEST_PATH = REPO_ROOT / "bibs" / "manifest.json.bak"
+if not BAK_MANIFEST_PATH.exists():
+    BAK_MANIFEST_PATH = REPO_ROOT / "binder" / "tools" / "bib_verification_manifest.json.bak"
 BAK_MANIFEST = {}
 if BAK_MANIFEST_PATH.exists():
     try:
@@ -103,7 +110,9 @@ def string_similarity(a: str, b: str) -> float:
 
 
 # Load curated provenance if available
-PROVENANCE_FILE = REPO_ROOT / "binder" / "tools" / "canonical_provenance.json"
+PROVENANCE_FILE = REPO_ROOT / "bibs" / "canonical_provenance.json"
+if not PROVENANCE_FILE.exists():
+    PROVENANCE_FILE = REPO_ROOT / "binder" / "tools" / "canonical_provenance.json"
 if not PROVENANCE_FILE.exists():
     PROVENANCE_FILE = Path("/tmp/canonical_provenance.json")
 CURATED_PROVENANCE = {}
@@ -485,7 +494,7 @@ def verify_entry(entry: bib_lint.Entry, existing_record: dict | None) -> dict:
     if key in CURATED_PROVENANCE:
         return {
             "key": key,
-            "file": "books/references.bib",
+            "file": "bibs/references.bib",
             "entry_type": entry.entry_type,
             "title": title_val,
             "year": year_val,
@@ -501,7 +510,7 @@ def verify_entry(entry: bib_lint.Entry, existing_record: dict | None) -> dict:
         src = det.get("source") if isinstance(det, dict) else None
         if existing_record.get("status") == "verified" and src and src not in ("unverified", "no_details"):
             existing_record["entry_hash"] = raw_hash
-            existing_record["file"] = "books/references.bib"
+            existing_record["file"] = "bibs/references.bib"
             existing_record["status"] = "verified"
             return existing_record
 
@@ -564,7 +573,7 @@ def verify_entry(entry: bib_lint.Entry, existing_record: dict | None) -> dict:
     if evidence:
         return {
             "key": key,
-            "file": "books/references.bib",
+            "file": "bibs/references.bib",
             "entry_type": entry.entry_type,
             "title": title_val,
             "year": year_val,
@@ -576,7 +585,7 @@ def verify_entry(entry: bib_lint.Entry, existing_record: dict | None) -> dict:
     else:
         return {
             "key": key,
-            "file": "books/references.bib",
+            "file": "bibs/references.bib",
             "entry_type": entry.entry_type,
             "title": title_val,
             "year": year_val,
