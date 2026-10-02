@@ -19,6 +19,8 @@
 - **Release as a decision:** release, conditional release, or no release, each defended with evidence
 - **Generalizing:** what changes, and what must be measured again, when the pipeline meets an unfamiliar system
 
+**Your digital twin:** by now it has been corrected all term. Use it to rehearse your task and its disturbances, and include where it still disagrees with the real arm in your dossier.
+
 **Comes in from the previous labs:** the full pipeline, from kinematics through your own governor.\
 **Goes out:** the Physical Release Dossier and the oral defense.\
 **If the previous lab didn't finish:** staff provide reference governor firmware.

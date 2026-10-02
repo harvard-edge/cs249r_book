@@ -19,6 +19,8 @@
 - **Two processors:** one thinks, one governs, and a bridge carries every command between them
 - **Time:** every command crosses a link with its own delay, and two clocks must agree
 
+**Your digital twin:** compare the real arm against it target by target, then feed the backlash and latency you measured back into it. It should predict the real arm better at the end of this lab than at the start.
+
 **Comes in from the previous lab:** IK solver, digital twin, the targets you tested in simulation.\
 **Goes out to the next lab:** IK running on the MCU (your nonlearned baseline), the sim-vs-real table, RPC timing, and four-tap logging.\
 **If the previous lab didn't finish:** staff provide a reference IK solver.

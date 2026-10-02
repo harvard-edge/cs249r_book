@@ -124,17 +124,17 @@ For each lab in the 14-week curriculum, Andrea must execute the student protocol
 
 | Asset | First needed | Notes |
 |:---|:---|:---|
-| **Baseline governor firmware** (joint limits, speed clamp, watchdog) | Part 1A, week 1 | The arm runs under it in weeks 1–9; students replace it with their own in Lab 6. Builds on the Step 3 governed arm. |
-| **Pre-wired, pre-calibrated stations** | Part 1A, week 1 | Students trace the wiring in week 1 but do not build it. |
-| **Body-limits measurement procedure** | Part 1B, week 2 | Stopping distance, servo temperature under held load, supply sag on stall, joint-reading age. The STS3215 servos report temperature, voltage, and load. |
-| **Kinematics primer handout** | Part 1C, week 3 | The book does not teach DH parameters or inverse kinematics. |
-| **Digital twin** (URDF/MJCF matching the delivered SO-101) | Part 1C, week 3 | Also reused in Lab 3's simulation. |
+| **Baseline governor firmware** (joint limits, speed clamp, watchdog) | Getting Started, week 1 | The arm runs under it in weeks 1–9; students replace it with their own in Lab 6. Builds on the Step 3 governed arm. |
+| **Pre-wired, pre-calibrated stations** | Getting Started, week 1 | Students trace the wiring in week 1 but do not build it. |
+| **Body-limits measurement procedure** | Part 1A, week 2 | Stopping distance, servo temperature under held load, supply sag on stall, joint-reading age. The STS3215 servos report temperature, voltage, and load. |
+| **Kinematics primer handout** | Part 1B, week 3 | The book does not teach DH parameters or inverse kinematics. |
+| **Digital twin** (URDF/MJCF matching the delivered SO-101) | Part 1B, week 3 | Used in every lab after Lab 1, and in Lab 3's simulation in Lab 3's simulation. |
 | **Sim-trained VLA checkpoint** (SmolVLA or ACT, trained on simulated demonstrations of the course arm) | Part 3A, week 5 | The simulated camera should match the real one. Fallback: a suitable public SO-101 checkpoint, if one exists. |
 | **Fallback artifacts** for each lab | Each lab | A reference IK solver, reference IK firmware, reference checkpoints, and a reference governor, handed to a team that did not finish the previous lab. |
 
 | Lab & Parts | Pre-Flight Tasks for Andrea ("Student Zero") | Required Staff Deliverables for Students |
 |:---|:---|:---|
-| **[Lab 1: The Digital Twin](../labs/lab-01-digital-twin.md)** (1A meet the robot, 1B measure the body, 1C the digital twin) | • Run teleoperation, record and replay, and a motor-power cut under the baseline governor.<br>• Measure the body's limits on the reference station.<br>• Work the kinematics primer and the IK test in the twin. | • Baseline governor firmware<br>• Body-limits procedure<br>• Kinematics primer, digital twin, simulation starter notebook |
+| **[Lab 1: The Digital Twin](../labs/lab-01-digital-twin.md)** (Getting Started, then 1A measure the body, 1B build the twin) | • Run teleoperation, record and replay, and a motor-power cut under the baseline governor.<br>• Measure the body's limits on the reference station.<br>• Work the kinematics primer and the IK test in the twin. | • Baseline governor firmware<br>• Body-limits procedure<br>• Kinematics primer, digital twin, simulation starter notebook |
 | **[Lab 2: Simulation to Real Hardware](../labs/lab-02-sim-to-real.md)** (2A IK on the real arm) | • Run student IK on the STM32 against the Lab 1 targets.<br>• Benchmark inter-core RPC latency and timestamp alignment. | • IK-on-MCU path (student port or staff module)<br>• `test_bridge_latency.py`<br>• Reference IK solver (fallback) |
 | **[Lab 3: Learned Control with VLAs](../labs/lab-03-learned-control.md)** (3A sim, 3B hardware) | • Run the sim-trained checkpoint in simulation and compare with IK.<br>• Calibrate the camera; export and profile the model on the UNO Q.<br>• Run the simulation vs. hardware comparison. | • Sim-trained VLA checkpoint<br>• `calibrate_camera.py`, `camera_v4l2_config.sh`<br>• `export_onnx_quantized.py` |
 | **[Lab 4: Real-World Data & Fine-Tuning](../labs/lab-04-real-data-and-fine-tuning.md)** (4A data, 4B untethered) | • Record reference teleoperation episodes with all four action taps; validate the dataset schema.<br>• Fine-tune the sim-trained checkpoint offline; build the deterministic reach baseline.<br>• Run the untethered loop and record a four-tap trace. | • `teleop_record.py`, `inspect_dataset.py`, reference dataset<br>• Fine-tuning recipe, `heuristic_reach.py`<br>• `pai_edge_runtime.py`, `telemetry_logger.py` |

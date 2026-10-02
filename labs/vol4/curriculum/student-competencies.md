@@ -130,6 +130,6 @@ This card serves as the concrete, observable sign-off sheet for students and ins
 | **C1** Closed-Loop Physical Action | [Lab 4](../labs/lab-04-real-data-and-fine-tuning.md) | M2 |
 | **C2** Action Chunk Dynamics | [Lab 5: Stress-Testing](../labs/lab-05-stress-testing.md) | M3 |
 | **C3** Disturbance Recovery & Replanning | [Lab 5](../labs/lab-05-stress-testing.md) | M3 |
-| **D1** Hardware Authority Routing | [Lab 6: Safety Governor](../labs/lab-06-safety-governor.md) (first traced in Lab 1, Part 1A) | M4 |
+| **D1** Hardware Authority Routing | [Lab 6: Safety Governor](../labs/lab-06-safety-governor.md) (first traced in Getting Started) | M4 |
 | **D2** Real-Time Safety Governor & Cutoff | [Lab 6](../labs/lab-06-safety-governor.md) | M4 |
 | **D3** Physical Release Defense | [Capstone](../labs/lab-capstone-studio.md) | M5 |

@@ -64,9 +64,9 @@ Read the week's chapter before the seminar: the chapter gives the principles, th
 
 | Week | Reading | Lab part | Due |
 |:---:|:---|:---|:---|
-| 1 | [Ch 1: The Causal Boundary](../../../books/vol4/01_boundary/01_boundary.qmd) | [**1A** Meet the robot](../labs/lab-01-digital-twin.md) |  |
-| 2 | [Ch 2: The Physical Body](../../../books/vol4/02_body/02_body.qmd) | [**1B** Measure the body](../labs/lab-01-digital-twin.md) |  |
-| 3 | [Ch 3: The Cognitive Brain](../../../books/vol4/03_brain/03_brain.qmd) | [**1C** The digital twin](../labs/lab-01-digital-twin.md) |  |
+| 1 | [Ch 1: The Causal Boundary](../../../books/vol4/01_boundary/01_boundary.qmd) | [**Getting Started**](../labs/week-01-getting-started.md) |  |
+| 2 | [Ch 2: The Physical Body](../../../books/vol4/02_body/02_body.qmd) | [**1A** Measure the body](../labs/lab-01-digital-twin.md) |  |
+| 3 | [Ch 3: The Cognitive Brain](../../../books/vol4/03_brain/03_brain.qmd) | [**1B** Build the digital twin](../labs/lab-01-digital-twin.md) |  |
 | 4 | [Ch 4: The Nervous System](../../../books/vol4/04_nervous/04_nervous.qmd) | [**2A** IK on the real arm](../labs/lab-02-sim-to-real.md) | **M1** |
 | 5 | [Ch 5: Physical Data](../../../books/vol4/05_data/05_data.qmd) | [**3A** VLAs in simulation](../labs/lab-03-learned-control.md) |  |
 | 6 | [Ch 6: Policy Training](../../../books/vol4/06_training/06_training.qmd); read ahead: calibration in Ch 8 | [**3B** The VLA on real hardware](../labs/lab-03-learned-control.md) |  |
@@ -93,7 +93,7 @@ Grades are earned through witnessed bench demonstrations, milestone packets, and
 
 | Milestone | Due | Weight | Witnessed Evidence | Competencies |
 |:---|:---:|:---:|:---|:---:|
-| **M1: Station Charter & Envelope** | End of Week 4 | **15%** | Labs 1–2. Safe-state check, hand-derived kinematics validated in simulation, and the sim-vs-real gap measured with your own IK on the real arm. | A1, A3 |
+| **M1: Station Charter & Envelope** | End of Week 4 | **15%** | Getting Started and Labs 1–2. Safe-state check, the body's measured limits, a digital twin driven by your own kinematics, and the sim-vs-real gap measured with your own IK on the real arm. | A1, A3 |
 | **M2: Learned Policy on the Edge** | End of Week 8 | **25%** | Labs 3–4. Camera calibration, a sim-trained VLA deployed with a measured sim2real gap, a real LeRobot dataset with all four action taps, and a fine-tuned policy running untethered on the UNO Q. | A2, B1, B2, B3, C1 |
 | **M3: Stress-Tested Closed Loop** | End of Week 9 | **10%** | Lab 5. Chunk-horizon benchmark, live recovery from a displaced target, and a language check. | C2, C3 |
 | **M4: Certified Governed Station** | End of Week 11 | **25%** | Lab 6. Your own governor clamps or vetoes unsafe proposals, the watchdog halts the arm when Linux freezes, and no stale command runs on resume. | D1, D2 |

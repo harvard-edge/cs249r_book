@@ -19,6 +19,8 @@
 - **Placement:** why safety lives on its own silicon
 - **Adversarial verification:** trust what you tried and failed to break
 
+**Your digital twin:** attack the governor in the twin before risking the real arm. Which attacks can the twin reproduce, and which only show up on hardware?
+
 **Comes in from the previous lab:** a working, disturbance-tested autonomous loop.\
 **Goes out to the next lab:** your governor firmware, watchdog, and fault-injection evidence.\
 **If the previous lab didn't finish:** staff provide a reference autonomous loop.

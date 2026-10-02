@@ -37,16 +37,16 @@ Specifications, wiring, and the three bench rules are on the [Station Reference 
 
 Read the chapter early in the week, discuss it in seminar, then put it to work in lab. Six labs follow the book in order; the final three weeks are the capstone.
 
-![Fourteen-week timeline: Lab 1 in weeks 1 to 3, Lab 2 in week 4, Labs 3 and 4 in weeks 5 to 8, Lab 5 in week 9, Lab 6 in weeks 10 and 11, and the capstone in weeks 12 to 14, with milestones M1 to M5 due at the end of weeks 4, 8, 9, 11, and 14.](assets/images/vol4-course-timeline.svg)
+![Fourteen-week timeline: Getting Started in week 1, Lab 1 in weeks 2 and 3, Lab 2 in week 4, Labs 3 and 4 in weeks 5 to 8, Lab 5 in week 9, Lab 6 in weeks 10 and 11, and the capstone in weeks 12 to 14, with milestones M1 to M5 due at the end of weeks 4, 8, 9, 11, and 14.](assets/images/vol4-course-timeline.svg)
 
 <table>
   <thead>
     <tr><th>Week</th><th>Lab</th><th>Book part &amp; chapters</th><th>What you'll do</th></tr>
   </thead>
   <tbody>
-    <tr><td align="center">1</td><td rowspan="3">Lab 1<br><a href="labs/lab-01-digital-twin.md"><strong>The Digital Twin</strong></a></td><td>Part I · Ch 1 <em>The Causal Boundary</em></td><td><strong>1A</strong> Meet the robot: drive it, record and replay a motion, and cut its power safely.</td></tr>
-    <tr><td align="center">2</td><td>Part I · Ch 2 <em>The Physical Body</em></td><td><strong>1B</strong> Measure the body: stopping distance, heat under load, supply sag, and measurement age.</td></tr>
-    <tr><td align="center">3</td><td>Part I · Ch 3 <em>The Cognitive Brain</em></td><td><strong>1C</strong> Build the digital twin and command it with kinematics you derive yourself.</td></tr>
+    <tr><td align="center">1</td><td><a href="labs/week-01-getting-started.md"><strong>Getting Started</strong></a></td><td>Part I · Ch 1 <em>The Causal Boundary</em></td><td>Set up, learn the two safety rules, then drive the robot: record and replay a motion, and cut its power safely.</td></tr>
+    <tr><td align="center">2</td><td rowspan="2">Lab 1<br><a href="labs/lab-01-digital-twin.md"><strong>The Digital Twin</strong></a></td><td>Part I · Ch 2 <em>The Physical Body</em></td><td><strong>1A</strong> Measure the body: stopping distance, heat under load, supply sag, and measurement age.</td></tr>
+    <tr><td align="center">3</td><td>Part I · Ch 3 <em>The Cognitive Brain</em></td><td><strong>1B</strong> Build the digital twin and command it with kinematics you derive yourself. You will use and improve it all term.</td></tr>
     <tr><td align="center">4</td><td rowspan="1">Lab 2<br><a href="labs/lab-02-sim-to-real.md"><strong>From Simulation to Real Hardware</strong></a></td><td>Part I · Ch 4 <em>The Nervous System</em></td><td><strong>2A</strong> Run your IK on the real arm and measure what simulation got wrong. <strong>M1 due.</strong></td></tr>
     <tr><td align="center">5</td><td rowspan="2">Lab 3<br><a href="labs/lab-03-learned-control.md"><strong>Learned Control with Vision-Language-Action Models</strong></a></td><td>Part II · Ch 5 <em>Physical Data</em></td><td><strong>3A</strong> Run a pre-trained VLA in simulation and compare it with your IK.</td></tr>
     <tr><td align="center">6</td><td>Part II · Ch 6 <em>Policy Training</em></td><td><strong>3B</strong> Calibrate the camera, deploy the VLA to the robot, and measure the sim2real gap.</td></tr>
@@ -63,7 +63,7 @@ Read the chapter early in the week, discuss it in seminar, then put it to work i
 
 Each lab teaches one core set of concepts and is split into weekly **parts**. Every part ends with a **checkpoint**, an artifact staff see before the team moves on.
 
-From week 1 to week 9 the arm runs under a staff-written baseline governor; in Lab 6 students replace it with their own. Every lab follows the [lab template](LAB_TEMPLATE.md) and carries a status: all are `skeleton` today, then `draft` when every section is written, then `bench-verified` when staff have run them end to end on the reference station.
+From week 1 to week 9 the arm runs under a staff-written baseline governor; in Lab 6 students replace it with their own. The digital twin built in Lab 1 is used in every lab after it. Every lab follows the [lab template](LAB_TEMPLATE.md) and carries a status: all are `skeleton` today, then `draft` when every section is written, then `bench-verified` when staff have run them end to end on the reference station.
 
 ---
 

@@ -19,6 +19,8 @@
 - **Closing the loop on the edge:** sense, propose, permit, and act with no host
 - **Memory:** acting on a world the camera can no longer see
 
+**Your digital twin:** compare the sim-only and fine-tuned policies in the twin and on the arm. Does real data help in simulation too, or only on the hardware?
+
 **Comes in from the previous lab:** camera calibration, sim-trained VLA on the UNO Q, sim2real gap table.\
 **Goes out to the next lab:** real-world dataset and dataset card, fine-tuned VLA, untethered loop, loop-latency breakdown, and your capstone proposal.\
 **If the previous lab didn't finish:** staff provide a reference sim-trained checkpoint already deployed on the board.

@@ -137,7 +137,7 @@ To ensure bulletproof reliability and avoid mysterious CPU brownout resets:
   - [ ] Write and test AprilTag camera calibration script (`calibrate_camera.py`).
   - [ ] Write joint homing calibration script; verify $\pm 1.5^\circ$ repeatability across 20 cycles.
   - [ ] Benchmark inter-core RPC latency: measure round-trip times across 1,000 packets; confirm $\le 5\text{ ms}$ at $50\text{ Hz}$.
-  - [ ] Prepare Lab 1 assets: the body-limits procedure (Part 1B), the kinematics primer, and the digital twin of the delivered arm (Part 1C).
+  - [ ] Prepare Lab 1 assets: the Getting Started week, the body-limits procedure (Part 1A), the kinematics primer, and the digital twin of the delivered arm (Part 1B).
   - [ ] Package student starter assets: `wiring_diagram_golden.pdf`, `calibrate_camera.py`, `test_bridge_latency.py`.
 * **Weekly Deliverable:** Milestone 1 qualification package (Labs 1 & 2 starter repo + reference calibration card).
 
