@@ -1095,6 +1095,10 @@ While standardized benchmarks measure aggregate throughput, profilers reveal the
 
 Framework profilers, such as the PyTorch Profiler\index{PyTorch profiler!performance analysis}\index{Framework profiler!performance analysis tool}, capture the logical execution trace of a training or inference iteration. They track operator dispatch on the host CPU, determine whether host preparation overlaps asynchronously with accelerator execution, and identify whether the data loader pipeline starves compute queues. The primary diagnostic metric is the step-time breakdown partitioned across data loading, host launch latency, device compute, and inter-device communication. This breakdown pinpoints which subsystem bounds iteration latency before inspecting individual kernels.
 
+::: {.column-margin .margin-pointer}
+↩ Compute queue starvation and data-loading bottlenecks build upon the feeding tax analysis established in @sec-data-engineering-feeding-problem.
+:::
+
 #### Kernel profilers {.unnumbered}
 
 Kernel profilers, such as NVIDIA Nsight Systems and Nsight Compute\index{NVIDIA Nsight!systems and compute profiling}\index{Kernel profiler!hardware-level analysis}, capture physical execution on accelerator silicon. Nsight Systems constructs a global timeline across CPU threads, CUDA API calls, memory transfers, and kernel durations to expose serialization bubbles. Nsight Compute conducts in-depth analysis of individual kernel invocations, measuring Streaming Multiprocessor (SM) warp occupancy, instruction issue stalls, and memory coalescing efficiency against the hardware roofline. Kernel profilers extract these diagnostics directly from on-chip Performance Monitoring Units (PMUs), capturing hardware counters for HBM byte traffic, L2 cache hit rates, and pipeline stall reasons without distorting execution dynamics through software instrumentation.
@@ -2325,6 +2329,10 @@ Training workloads often run for extended periods, sometimes spanning days or we
 
 In large-scale cloud-based training, node failures are an operational reality. If a GPU node in a distributed cluster fails, training must continue without corrupting the model. Production systems checkpoint for fault tolerance, periodically saving progress so a failure does not restart the run. For large language model (LLM) training, however, checkpointing is itself a systems bottleneck: a single checkpoint must write model weights plus optimizer states to network storage, which at 100-billion-parameter scale can mean hundreds of gigabytes written before training resumes. During that write, accelerators can stall, degrading time-to-accuracy by extending the effective iteration time. Production LLM training systems address this by overlapping checkpoint I/O with the next training step (asynchronous checkpointing) or by using high-bandwidth parallel file systems that reduce idle time. MLPerf Training itself primarily measures time-to-quality under standardized workloads and does not benchmark failure recovery directly, but checkpoint overhead is a material component of any real sustained-throughput number.
 
+::: {.column-margin .margin-pointer}
+↩ Checkpoint I/O overhead and cluster-scale synchronization constraints build upon the distributed training analysis in @sec-model-training-scaling-beyond-single-node-a671.
+:::
+
 #### Reproducibility and standardization {#sec-benchmarking-reproducibility-standardization-7ecf}
 
 Reproducibility studies have repeatedly shown that modest benchmark gains can disappear when random seeds, hardware, framework versions, or implementation details change [@henderson2018]. This failure mode illustrates a pervasive problem: training benchmarks involve stochastic processes (weight initialization, data shuffling, dropout masks) that interact with hardware-specific behaviors (floating-point rounding, memory layout, compiler optimizations) to produce results that can vary meaningfully across environments.
@@ -2515,6 +2523,10 @@ Apply three rules before finalizing metric selection:
 Tail latency's connection to user experience at scale becomes critical in production systems serving millions of users. Even small p99 latency degradations create compounding effects across large request volumes: if 1 percent of requests experience 10$\times$ latency (for example, 1000 ms instead of 100 ms), this affects 10,000 requests per million, potentially leading to timeout errors, poor user experience, and customer churn. Search engines and recommendation systems demonstrate this sensitivity: Google's search-latency experiments found measurable reductions in daily searches per user after 100--400 ms server-side delays [@brutlag2009speed], which is why interactive services often treat sub-100 ms response times as a practical design target.
 
 SLOs in production systems therefore focus on tail latency rather than mean latency to ensure consistent user experience. Interactive services often define percentile-based latency objectives because occasional slow responses have disproportionate impact on user satisfaction. Large-scale systems may track even deeper tails, such as p99.9, when traffic spikes and infrastructure variation affect reliability.
+
+::: {.column-margin .margin-pointer}
+↪ Tail-latency percentiles dictate queue headroom and dynamic batching thresholds in production serving systems in @sec-model-serving-load-latency-architecture-a4d8.
+:::
 
 The challenge of meeting these tail latency targets is that the source of the tail is often architectural, not algorithmic. A garbage-collected runtime, a shared kernel driver, or a priority-inversion bug in the serving stack can inject latency spikes that no model optimization will remove.
 
@@ -4125,6 +4137,10 @@ This train-to-production alignment\index{Distribution shift!train-to-production 
 [^fn-wilds-distribution-shift]: **WILDS**\index{WILDS!distribution shift benchmark}: Stanford's 2021 benchmark of ten datasets with real-world distribution shifts: hospital changes (Camelyon17), wildlife camera location shifts (iWildCam), and satellite imagery temporal drift (PovertyMap). For the reported Camelyon17-WILDS ERM baseline, average accuracy fell from 93.2 percent in-distribution to 70.3 percent out-of-distribution, demonstrating that standard held-out evaluation can overestimate performance when the i.i.d. assumption\index{i.i.d. assumption!held-out evaluation limitation} fails.
 
 To prevent distribution shift from violating service-level agreements, serving pipelines deploy statistical shift detection on incoming inference streams. Two-sample hypothesis tests such as the Kolmogorov-Smirnov test\index{Kolmogorov-Smirnov test!covariate shift detection} [@berger2014kolmogorov] for univariate features and maximum mean discrepancy\index{Maximum mean discrepancy!covariate shift detection} [@gretton2012kernel] for multivariate embeddings detect covariate shift\index{Covariate shift!input distribution change}—changes in the marginal input distribution $p(x)$ even when the conditional target distribution $p(y \mid x)$ remains unobserved. Tracking prediction entropy and confidence distributions further identifies when inputs fall outside the training support, allowing the system to route anomalous queries to fallback models or human review before serving quality degrades.
+
+::: {.column-margin .margin-pointer}
+↪ Live covariate shift detectors feed the statistical distance monitoring and automated drift alerts developed in @sec-ml-operations-feature-distribution-monitoring-b8a0.
+:::
 
 Distribution alignment challenges highlight a persistent tension in ML development between two paradigms: *fixing the data and iterating on models*, or *fixing the model and iterating on data*. The side-by-side schematics in @fig-model-vs-data isolate this divergence through the placement of the padlock and feedback path. In the model-centric panel\index{Model-centric AI!architectural innovation}, the dataset is locked while the feedback loop iteratively refines model parameters on the CPU; in the data-centric panel, the model architecture is locked while the loop routes back to enhance training data quality, diversity, and labeling. As the bidirectional red arrow emphasizes, the two paradigms are complementary engineering strategies rather than mutually exclusive philosophies.
 

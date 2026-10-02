@@ -968,6 +968,10 @@ $\mathbf{h}^{(\ell)}$ represents the layer $\ell$ output, $\mathbf{h}^{(\ell-1)}
 
 The dimensions of these operations reveal the computational scale of dense pattern processing. The input vector $\mathbf{h}^{(0)} \in \mathbb{R}^{d_{\text{in}}}$ (treated as a row vector in this formulation) represents all potential input features. Weight matrices $\mathbf{W}^{(\ell)} \in \mathbb{R}^{d_{\text{in}} \times d_{\text{out}}}$ capture all possible input-output relationships. The output vector $\mathbf{h}^{(\ell)} \in \mathbb{R}^{d_{\text{out}}}$ produces transformed representations. A four-pixel example turns this bookkeeping into arithmetic.
 
+::: {.column-margin .margin-pointer}
+↩ The affine layer transformation mapping input activations to hidden preactivations via dense weight matrices is established in @sec-neural-computation-weight-matrices-9f9a.
+:::
+
 ::: {#exmp-nn-architectures-concrete-computation-example .callout-example title="Concrete computation example"}
 
 Consider a simplified 4-pixel image processed by a 3-neuron hidden layer:
@@ -1948,6 +1952,10 @@ This computational regularity provides rich opportunities for hardware paralleli
 Data movement in a convolutional layer exhibits an arithmetic intensity profile fundamentally different from that of an MLP. In a fully connected layer at batch size one, each loaded weight is used exactly once, yielding an arithmetic intensity bounded below 1 FLOP/byte. In a 2D convolution, each $3{\times}3$ filter weight is reused across all `{python} CNNSysImpl.spatial_positions_str` positions of the $224{\times}224$ feature map. This massive weight reuse increases operational intensity, shifting computation from the memory-bandwidth-bound regime toward the compute-bound ceiling.
 
 The systems challenge shifts from loading weights to staging activations. Because adjacent spatial receptive fields overlap, a naive memory access pattern would re-fetch each input pixel from memory up to $K^2 = 9$ times. Runtimes avoid this redundant memory traffic by tiling computation into 2D spatial blocks sized to fit inside accelerator SRAM. Once an input tile is loaded into shared memory, all overlapping filter dot products for that tile execute in place, amortizing the DRAM/HBM transfer and maximizing the `{python} CNNSysImpl.spatial_positions_str` reuses of each filter weight.
+
+::: {.column-margin .margin-pointer}
+↪ The hardware ridge point ($I_{\text{ridge}}$) determining whether spatial filter reuse saturates arithmetic units or starves on memory bandwidth is quantified in @sec-hardware-acceleration-hardware-ridge-points-b5b6.
+:::
 
 ```{python}
 #| echo: false
@@ -3772,6 +3780,10 @@ class CapacityWall:
 
 Once the tables no longer fit on one device, sparse lookups cross memory and interconnect boundaries. A request may need rows owned by several accelerators, forcing the device executing the downstream MLP to wait while the system gathers them across PCIe or NVLink. Within a multi-accelerator server, gathering rows distributed across multiple GPUs turns memory routing into an interconnect bandwidth bottleneck. The architectural consequence is that a recommendation model's memory layout directly determines its cross-accelerator data-transfer traffic, creating a coordination tax for both training and serving.
 
+::: {.column-margin .margin-pointer}
+↪ Multi-device parameter sharding and the interconnect communication bubbles created by cross-accelerator gathers are evaluated in @sec-model-training-staged-pipeline.
+:::
+
 ::: {#chk-nn-architectures-dlrm-sparse-scatter .callout-checkpoint title="DLRM and sparse scatter"}
 
 Recommendation systems stress a different part of the machine than CNNs or transformers.
@@ -4217,6 +4229,10 @@ Because each token or sample is normalized independently, the computation stays 
 : **Normalization Variant Comparison**: Different normalization techniques trade off between computational efficiency, batch size sensitivity, and architectural compatibility. RMSNorm [@zhang2019root], used in LLaMA-family and other efficient transformer architectures [@touvron2023llama; @touvron2023llama2], omits mean centering: $\text{RMSNorm}(\mathbf{x}) = \mathbf{x} / \sqrt{\frac{1}{d}\sum_i x_i^2 + \epsilon} \odot \boldsymbol{\gamma}$. {#tbl-normalization-comparison tbl-colwidths="[23,34,24,19]"}
 
 The computational profile of normalization is defined by its arithmetic intensity. Because normalization applies elementwise operations to large activation tensors, execution is memory-bandwidth bound rather than compute bound. A straightforward LayerNorm kernel makes two reductions across the hidden dimension $d$, one for the mean $\mu_{\text{LN}}$ and one for the variance $\sigma_{\text{LN}}^2$, although Welford's algorithm can compute both in a single pass. RMSNorm drops the mean-centering reduction, leaving a single sum of squares, which simplifies the kernel and eases fusion with neighboring operations; its authors report 7--64 percent lower running time across the models they tested.
+
+::: {.column-margin .margin-pointer}
+↪ Framework operator fusion strategies that collapse memory-bound normalization and activation chains into single device kernels are analyzed in @sec-ml-frameworks-execution-strategy-matters-memory-wall-1ce8.
+:::
 
 The table's last row is an operational cost. BatchNorm keeps nonlearned running mean and variance buffers and switches from mini-batch statistics in training to those running statistics at inference, so a mismatch between the buffers and deployment data is a frequent source of training-serving skew. LayerNorm and RMSNorm compute identically in both modes and carry no running state.
 
