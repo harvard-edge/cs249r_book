@@ -5,40 +5,47 @@ from collections import defaultdict
 with open("books/shared/_includes/notation_registry.yml") as f:
     data = yaml.safe_load(f)
 
-# Group variables by volume
-# (Assuming the 'volume' field exists, e.g., 'vol4', 'core', 'vol1', etc.)
 vols = defaultdict(list)
 for var in data["variables"]:
     vols[var.get("volume", "core")].append(var)
 
 def write_qmd(vol_key, vars_list):
-    # Sort alphabetically by macro
-    vars_list.sort(key=lambda x: x["macro"])
-    
-    out = []
-    out.append(f"# Notation Guide ({vol_key.upper()})\n")
-    out.append("This is an auto-generated notation guide. Do not edit this manually.\n")
-    out.append("| Symbol | Macro | Definition |")
-    out.append("|:---|:---|:---|")
-    
+    cats = defaultdict(list)
     for var in vars_list:
-        latex = var['latex'].replace('\\', '\\\\') # escape for markdown
-        macro = f"`{var['macro']}`"
-        # Render the latex inside math delimiters
-        symbol = f"${var['latex']}$"
-        defn = var['definition']
-        out.append(f"| {symbol} | {macro} | {defn} |")
+        cats[var.get("category", "General Notation")].append(var)
         
-    out.append("\n")
+    out = []
+    out.append(f"<!-- AUTO-GENERATED NOTATION TABLES FOR {vol_key.upper()} -->\n")
     
+    for cat in sorted(cats.keys()):
+        out.append(f"## {cat} {{.unlisted}}\n")
+        
+        is_disambig = "Disambiguation" in cat
+        if is_disambig:
+            out.append("::: {tbl-colwidths=\"[12,18,18,52]\"}\n")
+            out.append("| **Symbol** | **Canonical Convention** | **Colliding Meaning** | **Disambiguation Rule** |")
+        else:
+            out.append("::: {tbl-colwidths=\"[15,20,15,50]\"}\n")
+            out.append("| **Symbol** | **Definition** | **Unit** | **Notes** |")
+            
+        out.append("|:---|:---|:---|:---|")
+        
+        cat_vars = sorted(cats[cat], key=lambda x: x["macro"])
+        for var in cat_vars:
+            symbol = f"**${var['latex'].replace('$', '')}$**"
+            defn = f"**{var['definition']}**"
+            unit = var.get('unit', '')
+            notes = var.get('notes', '').replace('\n', ' ')
+            out.append(f"| {symbol} | {defn} | {unit} | {notes} |")
+            
+        out.append("\n:::\n")
+        
     return "\n".join(out)
 
 for vol_key, vars_list in vols.items():
     if vol_key.startswith("vol"):
-        path = f"books/{vol_key}/frontmatter/notation.qmd"
-        # Just writing it to stdout for now to show the user, or we can save it.
+        path = f"books/{vol_key}/frontmatter/_notation_auto.qmd"
         if os.path.exists(f"books/{vol_key}/frontmatter/"):
             with open(path, "w") as f:
                 f.write(write_qmd(vol_key, vars_list))
             print(f"Generated {path}")
-
