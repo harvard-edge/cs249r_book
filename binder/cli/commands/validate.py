@@ -12787,7 +12787,7 @@ class ValidateCommand:
                                 message="a $ closer right before an inline {python} value renders as $ + digit; move the value outside the math or use a Unicode symbol",
                                 context=line[:120]))
             for m in re.finditer(r'fig-(?:cap|alt)="([^"]*)"', text):
-                if re.search(r"(?<!\\)\\[,;:! ]", m.group(1)):
+                if re.search(r"(?<!\\)\\[,;:! _]", m.group(1)):
                     issues.append(ValidationIssue(file=self._relative_file(f), line=text.count("\n", 0, m.start()) + 1,
                         code="caption-attr-escape", severity="error",
                         message="inside a fig-cap/fig-alt attribute, \\, and similar escapes lose their backslash; double it (\\\\,)",

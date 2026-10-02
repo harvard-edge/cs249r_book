@@ -508,7 +508,7 @@ Choosing the right parallelism strategy is not a matter of preference; it is a c
 
 | **Strategy**               | **Communication Pattern** |                         **Comm. Volume**                         | **Hardware Constraint**              |
 |:---------------------------|:-------------------------:|:----------------------------------------------------------------:|:-------------------------------------|
-| **Data Parallel (DP)**     |    AllReduce Gradients    |            $\propto M_{\text{grad}}$ (gradient bytes)            | Requires high bisection BW           |
+| **Data Parallel (DP)**     |    AllReduce Gradients    |        $\propto M_{\text{gradients}}$ (gradient bytes)           | Requires high bisection BW           |
 | **Tensor Parallel (TP)**   |   AllReduce Activations   | $\propto B \times S \times d \times N_L$ (per-layer activations) | Fast domain matched to layer traffic |
 | **Pipeline Parallel (PP)** |    Point-to-Point (P2P)   |           $\propto B \times S \times d$ (Activations)            | Link must sustain stage activations  |
 
@@ -542,25 +542,25 @@ Data parallelism applies when examples can be processed independently, as in tra
 
 Consider a model with parameters $\theta$ training on a dataset $D$. The loss function for a single data point $x_i$ is $\mathcal{L}(\theta, x_i)$. In standard stochastic gradient descent (SGD)\index{SGD!data parallelism} with batch size $B$, the gradient update for a minibatch is:
 $$
-g = \frac{1}{B} \sum_{i=1}^B \nabla_{\theta} \mathcal{L}(\theta, x_i)
+\mathbf{g} = \frac{1}{B} \sum_{i=1}^B \nabla_{\theta} \mathcal{L}(\theta, x_i)
 $$
 
 In data parallelism with $N$ devices, each device $k$ computes gradients on its own minibatch $B_k$:
 $$
-g_k = \frac{1}{|B_k|} \sum_{x_i \in B_k} \nabla_{\theta} \mathcal{L}(\theta, x_i)
+\mathbf{g}_k = \frac{1}{|B_k|} \sum_{x_i \in B_k} \nabla_{\theta} \mathcal{L}(\theta, x_i)
 $$
 
 When all workers use the same local batch size, the global update averages these local gradients:
 $$
-g_{\text{global}} = \frac{1}{N} \sum_{k=1}^N g_k
+\mathbf{g}_{\text{global}} = \frac{1}{N} \sum_{k=1}^N \mathbf{g}_k
 $$
 
 Under that equal-batch assumption, the averaging is mathematically equivalent to computing the gradient on the combined batch $B_{\text{total}} = \bigcup_{k=1}^N B_k$:
 $$
-g_{\text{global}} = \frac{1}{|B_{\text{total}}|} \sum_{x_i \in B_{\text{total}}} \nabla_{\theta} \mathcal{L}(\theta, x_i)
+\mathbf{g}_{\text{global}} = \frac{1}{|B_{\text{total}}|} \sum_{x_i \in B_{\text{total}}} \nabla_{\theta} \mathcal{L}(\theta, x_i)
 $$
 
-For unequal local batch sizes, the combined-batch gradient is the weighted average $g_{\text{global}} = (1/|B_{\text{total}}|)\sum_k |B_k|g_k$. The equivalence shows why data parallelism maintains the statistical properties of SGD training: sampling the intended global batch across devices, computing local gradient sums independently, and normalizing by the aggregate denominator reproduces its estimator. The reduction step uses an AllReduce\index{AllReduce!data-parallel gradient averaging} over local gradient sums and valid-item counts; @sec-appdx-comm-foundations-allreduce derives the ring and tree AllReduce cost models that set the price of this synchronization, so the reader can predict when it overtakes the local compute saved by parallelism.
+For unequal local batch sizes, the combined-batch gradient is the weighted average $\mathbf{g}_{\text{global}} = (1/|B_{\text{total}}|)\sum_k |B_k|\mathbf{g}_k$. The equivalence shows why data parallelism maintains the statistical properties of SGD training: sampling the intended global batch across devices, computing local gradient sums independently, and normalizing by the aggregate denominator reproduces its estimator. The reduction step uses an AllReduce\index{AllReduce!data-parallel gradient averaging} over local gradient sums and valid-item counts; @sec-appdx-comm-foundations-allreduce derives the ring and tree AllReduce cost models that set the price of this synchronization, so the reader can predict when it overtakes the local compute saved by parallelism.
 
 ::: {#chk-distributed-training-data-parallelism-mechanics .callout-checkpoint title="Data parallelism mechanics"}
 
@@ -2614,10 +2614,10 @@ That bound still informs a cost-time trade-off rather than setting a mandatory w
 
 ::: {#chk-distributed-training-scaling-decisions .callout-checkpoint title="Scaling decisions"}
 
-Given a 7B-parameter model distributed across a cluster of 64 A100 GPUs (80 GB HBM2e each), estimate the critical-batch crossover. Use a pilot trace with $\text{tr}(\Sigma)=1.6 \times 10^6$, $\|\mu\|^2=100$, per-GPU batch $b=4$, and a proposed gradient-accumulation depth of 32 steps, giving $B_{\text{global}} = 64 \times 4 \times 32 = 8192$ samples.
+Given a 7B-parameter model distributed across a cluster of 64 A100 GPUs (80 GB HBM2e each), estimate the critical-batch crossover. Use a pilot trace with $\text{tr}(\Sigma)=1.6 \times 10^6$, $\|\mu\|^2=100$, per-GPU batch $b=4$, and a proposed gradient-accumulation depth of 32 steps, giving $B_{\text{global}} = 64 \times 4 \times 32 = 8{,}192$ samples.
 
-- [ ] **Critical batch size**: calculate the critical batch size $(B_{\text{crit}})$, where the gradient noise scale equals the batch size.
-- [ ] **Proposed batch**: use the gradient noise scale metric $\mathcal{B} \approx \frac{\text{tr}(\Sigma)}{\|\mu\|^2}$ to evaluate the proposed batch size.
+- [ ] **Critical batch size**: calculate the critical batch size $(B^*)$, where the gradient noise scale equals the batch size.
+- [ ] **Proposed batch**: use the critical batch size proxy $B^* \approx \frac{\text{tr}(\Sigma)}{\|\mu\|^2}$ to evaluate the proposed batch size.
 - [ ] **Efficiency distinction**: explain why the gradient-noise estimate can assess statistical scaling but cannot establish hardware scaling efficiency without compute and communication timings.
 
 :::
@@ -4142,8 +4142,8 @@ Each GPU computes a partial sum, and the system pays one AllReduce to combine th
 
 :::
 
-The column-then-row sequence diagrammed in @fig-tensor-parallel-split embodies the governing architectural invariant\index{Megatron-LM!column-row pairing}: pairing a column-parallel layer directly with a row-parallel layer allows intermediate activations ($Y_1, Y_2$) to remain strictly local on each GPU, confining inter-device synchronization to a single collective at the end of the block. Megatron applies that pattern twice in each transformer block\index{Transformer!tensor-parallel block}. The QKV projection is column-parallel and its attention output projection is row-parallel, then the first feed-forward layer is column-parallel and the second feed-forward layer is row-parallel. The design places AllReduce operations strategically, one after attention and one after the feed-forward network, for two AllReduce operations per transformer layer. Communication volume per transformer layer depends on sequence length $S$, hidden dimension $d$, tensor-parallel degree $N_{\text{TP}}$, and batch size $B$. The activation payload is:
-$$M_{\text{act}} = B \times S \times d \times s_{\text{elem}}$$
+The column-then-row sequence diagrammed in @fig-tensor-parallel-split embodies the governing architectural invariant\index{Megatron-LM!column-row pairing}: pairing a column-parallel layer directly with a row-parallel layer allows intermediate activations ($\mathbf{Y}_1, \mathbf{Y}_2$) to remain strictly local on each GPU, confining inter-device synchronization to a single collective at the end of the block. Megatron applies that pattern twice in each transformer block\index{Transformer!tensor-parallel block}. The QKV projection is column-parallel and its attention output projection is row-parallel, then the first feed-forward layer is column-parallel and the second feed-forward layer is row-parallel. The design places AllReduce operations strategically, one after attention and one after the feed-forward network, for two AllReduce operations per transformer layer. Communication volume per transformer layer depends on sequence length $S$, hidden dimension $d$, tensor-parallel degree $N_{\text{TP}}$, and batch size $B$. The activation payload is:
+$$M = B \times S \times d \times s_{\text{elem}}$$
 
 ```{python}
 #| echo: false
@@ -4196,14 +4196,14 @@ class TensorParallelLayerTraffic:
     per_step_gb_str = fmt_memory(round(per_step.to(GB).magnitude) * GB, unit=GB, precision=0, commas=False)
 ```
 
-A ring AllReduce transfers approximately $2(N_{\text{TP}}-1)/N_{\text{TP}} \times M_{\text{act}}$ bytes per GPU, which is close to $2M_{\text{act}}$ for large $N_{\text{TP}}$. For the GPT-3 shape ($S=$ `{python} TensorParallelLayerTraffic.seq_len_str`, $d=$ `{python} TensorParallelLayerTraffic.hidden_dim_str`, `{python} TensorParallelLayerTraffic.layers_str` layers) with $B=$ `{python} TensorParallelLayerTraffic.micro_batch_str` and FP16, the activation payload is `{python} TensorParallelLayerTraffic.micro_batch_str` $\times$ `{python} TensorParallelLayerTraffic.seq_len_str` $\times$ `{python} TensorParallelLayerTraffic.hidden_dim_str` $\times$ `{python} TensorParallelLayerTraffic.dtype_bytes_str` $\approx$ `{python} TensorParallelLayerTraffic.payload_mb_str` MB. At $N_{\text{TP}}=$ `{python} TensorParallelLayerTraffic.tp_str` the ring factor is `{python} TensorParallelLayerTraffic.ring_factor_str`, giving roughly `{python} TensorParallelLayerTraffic.per_allreduce_mb_str` per AllReduce. With two AllReduce operations in each of the `{python} TensorParallelLayerTraffic.layers_str` layers, this totals approximately `{python} TensorParallelLayerTraffic.forward_gb_str` per forward pass; including the symmetric backward AllReduces brings per-training-step communication to roughly `{python} TensorParallelLayerTraffic.per_step_gb_str`, requiring NVLink bandwidth to avoid becoming the bottleneck.
+A ring AllReduce transfers approximately $2(N_{\text{TP}}-1)/N_{\text{TP}} \times M$ bytes per GPU, which is close to $2M$ for large $N_{\text{TP}}$. For the GPT-3 shape ($S=$ `{python} TensorParallelLayerTraffic.seq_len_str`, $d=$ `{python} TensorParallelLayerTraffic.hidden_dim_str`, `{python} TensorParallelLayerTraffic.layers_str` layers) with $B=$ `{python} TensorParallelLayerTraffic.micro_batch_str` and FP16, the activation payload is `{python} TensorParallelLayerTraffic.micro_batch_str` $\times$ `{python} TensorParallelLayerTraffic.seq_len_str` $\times$ `{python} TensorParallelLayerTraffic.hidden_dim_str` $\times$ `{python} TensorParallelLayerTraffic.dtype_bytes_str` $\approx$ `{python} TensorParallelLayerTraffic.payload_mb_str` MB. At $N_{\text{TP}}=$ `{python} TensorParallelLayerTraffic.tp_str` the ring factor is `{python} TensorParallelLayerTraffic.ring_factor_str`, giving roughly `{python} TensorParallelLayerTraffic.per_allreduce_mb_str` per AllReduce. With two AllReduce operations in each of the `{python} TensorParallelLayerTraffic.layers_str` layers, this totals approximately `{python} TensorParallelLayerTraffic.forward_gb_str` per forward pass; including the symmetric backward AllReduces brings per-training-step communication to roughly `{python} TensorParallelLayerTraffic.per_step_gb_str`, requiring NVLink bandwidth to avoid becoming the bottleneck.
 
 Tensor parallelism scaling degrades rapidly beyond 8-way parallelism because the same split that reduces memory also reduces the computation available to hide communication. As the tensor-parallel degree grows, per-GPU work falls while collective latency and aggregate traffic rise; per-GPU ring AllReduce bytes approach 2$\times$ the activation tensor size rather than growing linearly without bound, but the smaller local matrix multiply leaves less useful work to cover that exchange. Once NVLink bandwidth saturates, adding another tensor-parallel shard mainly exposes more synchronization rather than more throughput. Published systems such as Llama 3 405B use TP=8 within NVLink-connected H100 nodes\index{Llama 3!tensor-parallel scaling} [@dubey2024llama], and similar node-local tensor parallelism is a common design pattern for large LLM training\index{MegaScale!large-scale training} [@jiang2024megascale].
 
 #### Sequence and context parallelism {#sec-distributed-training-systems-sequence-context-parallelism}
 
 While tensor parallelism partitions weight matrices within linear layers, the memory footprint of large-scale transformer training is increasingly dominated by activations. As models scale their context length from thousands to hundreds of thousands or millions of tokens ($S \ge 32\text{k}\dots 1\text{M}+$), the activation footprint scales proportionally:
-$$M_{\text{act}} = \mathcal{O}(B \times S \times d \times N_L)$$
+$$M_{\text{activations}} = \mathcal{O}(B \times S \times d \times N_L)$$
 for linear, normalization, and residual layers, and $\mathcal{O}(B \times N_{\text{heads}} \times S^2 \times N_L)$ for un-tiled attention (or $\mathcal{O}(B \times S \times d \times N_L)$ with tiled FlashAttention\index{FlashAttention!activation memory reduction}). At long contexts, activation memory dwarfs parameter storage, exposing the memory capacity gap (principle \ref{pri-memory-capacity-gap}). Two complementary paradigms address this constraint by sharding along the sequence axis: sequence parallelism (SP) within the tensor-parallel domain, and context parallelism (CP) across dedicated long-sequence process groups.
 
 ::: {#dfn-distributed-training-context-parallelism .callout-definition title="Sequence and context parallelism"}
@@ -4226,7 +4226,7 @@ Crucially, this sharding incurs zero additional communication volume. In standar
 $$\text{AllReduce}(\mathbf{X}) \equiv \text{AllGather}(\text{ReduceScatter}(\mathbf{X}))$$
 Megatron-SP decouples this collective pair across the transformer block. Following the row-parallel linear layer, a ReduceScatter reduces partial sums while scattering the resulting activations along the sequence dimension, leaving each GPU with an $S/N_{\text{TP}}$ token slice. LayerNorm, residual additions, and Dropout then execute on these local slices with zero cross-device communication. Immediately before the next column-parallel linear layer, an AllGather across the sequence dimension reassembles the complete $S$ tokens required for the weight-partitioned matrix multiplication.
 
-Because standard TP executes two AllReduces per transformer block ($2 \times 2(N_{\text{TP}}-1)/N_{\text{TP}} \times M_{\text{act}}$ bytes), while Megatron-SP executes two ReduceScatter and AllGather pairs ($2 \times [(N_{\text{TP}}-1)/N_{\text{TP}} + (N_{\text{TP}}-1)/N_{\text{TP}}] \times M_{\text{act}} = 2 \times 2(N_{\text{TP}}-1)/N_{\text{TP}} \times M_{\text{act}}$ bytes), the aggregate communication volume is identical. Sequence parallelism reduces activation memory outside attention by a factor of $N_{\text{TP}}$ without consuming any additional interconnect bandwidth.
+Because standard TP executes two AllReduces per transformer block ($2 \times 2(N_{\text{TP}}-1)/N_{\text{TP}} \times M$ bytes), while Megatron-SP executes two ReduceScatter and AllGather pairs ($2 \times [(N_{\text{TP}}-1)/N_{\text{TP}} + (N_{\text{TP}}-1)/N_{\text{TP}}] \times M = 2 \times 2(N_{\text{TP}}-1)/N_{\text{TP}} \times M$ bytes), the aggregate communication volume is identical. Sequence parallelism reduces activation memory outside attention by a factor of $N_{\text{TP}}$ without consuming any additional interconnect bandwidth.
 
 ##### Context parallelism with ring attention versus Ulysses {#sec-distributed-training-context-parallelism-ring-ulysses-8b1f}
 
