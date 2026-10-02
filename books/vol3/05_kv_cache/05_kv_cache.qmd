@@ -64,7 +64,11 @@ At runtime, maintaining these state caches introduces fundamental scheduling ten
 
 ## The Footprint of Retained Attention State {#sec-vol3-kvcache-geometry}
 
-The r18 request's 32,768 tokens do not reach the accelerator as raw text. During causal self-attention in a Transformer decoder, each newly generated token attends to earlier tokens through their key and value projections [@vaswani2017]. Recomputing these projections at every decode step would repeat the linear transformations over the entire historical prefix, creating an unsustainable quadratic compute bottleneck. Serving runtimes avoid this recomputation by retaining the computed key and value tensors in accelerator memory across decode cycles.[^fn-kv-memory-bound] While @sec-vol3-foundation-model-autoregressive introduced this retained attention state, sustaining long-horizon agent execution requires managing its physical capacity, allocation overhead, and multi-tenant residency.
+The r18 request's 32,768 tokens do not reach the accelerator as raw text. During causal self-attention in a Transformer decoder, each newly generated token attends to earlier tokens through their key and value projections [@vaswani2017]. Recomputing these projections at every decode step would repeat the linear transformations over the entire historical prefix, creating an unsustainable quadratic compute bottleneck. Serving runtimes avoid this recomputation by retaining the computed key and value tensors in accelerator memory across decode cycles.[^fn-kv-memory-bound] While autoregressive decoding relies on retained attention state, sustaining long-horizon agent execution requires managing its physical capacity, allocation overhead, and multi-tenant residency.
+
+::: {.column-margin .margin-pointer}
+↩ Retained attention state in autoregressive decoding is established in @sec-vol3-foundation-model-autoregressive.
+:::
 
 [^fn-kv-memory-bound]: **Memory-Limited Inference**: Caching keys and values trades quadratic recomputation for persistent memory capacity, and that memory quickly becomes the primary serving bottleneck. An analytical study of large-model serving revealed that sharing a single key-value head across all query heads allowed an identical deployment to serve contexts more than an order of magnitude longer, precisely because retained attention state—rather than compute throughput—bounded context length and batch concurrency [@pope2023efficiently]. Managing this memory footprint determines whether an agent deployment scales. \index{KV cache!memory bound}
 
@@ -505,7 +509,11 @@ Paged allocation decouples logical sequence expansion from physical memory layou
 
 ## Prefix Caching Across Turns {#sec-vol3-kvcache-radix-tree}
 
-In the connection-pool repair scenario, the agent invocation that processes an integration-test result often begins with the identical system prompt, tool definitions, and historical observations present in the preceding turn. If the serving runtime retained the corresponding key-value (KV) activations from that earlier call, it can attach those existing tensors directly to the new request, prefilling only the newly arrived tokens. @Sec-vol3-foundation-model-cost priced this saving economically as prefix caching; in system implementation, it translates into a concrete serving architecture governed by an index, an explicit ownership contract, and an eviction policy.
+In the connection-pool repair scenario, the agent invocation that processes an integration-test result often begins with the identical system prompt, tool definitions, and historical observations present in the preceding turn. If the serving runtime retained the corresponding key-value (KV) activations from that earlier call, it can attach those existing tensors directly to the new request, prefilling only the newly arrived tokens. Economic pricing models treat this saving as prefix caching; in system implementation, it translates into a concrete serving architecture governed by an index, an explicit ownership contract, and an eviction policy.
+
+::: {.column-margin .margin-pointer}
+↩ The economic pricing of prefix caching is established in @sec-vol3-foundation-model-cost.
+:::
 
 ::: {#dfn-prefix-cache .callout-definition title="Prefix cache"}
 
@@ -523,7 +531,7 @@ In causal full-attention architectures, reusable KV state requires an exact, con
 
 Compatibility, physical availability, and tenant isolation represent three distinct verification boundaries. Computationally compatible tensors may have already been evicted from accelerator high-bandwidth memory (HBM), or they may reside in host memory or on solid-state drives, requiring an explicit page-in transfer before the model can consume them. Conversely, tensors residing directly in local GPU memory may belong to a different tenant or security domain, making them ineligible for sharing under isolation rules. The reusable prefix length is the longest contiguous token sequence that simultaneously satisfies compatibility, physical residency, and access permissions—a sequence frequently shorter than the longest match found in the prefix tree. Furthermore, newly generated tokens qualify for subsequent prefix matching only after their corresponding KV blocks have been fully materialized in memory and committed to the index.
 
-These structural requirements operate independently of semantic validity. Updating a target repository from commit `r17` to `r18` does not alter or invalidate the KV activations previously computed for an older prompt describing `r17`. Those tensors remain numerically identical and computationally compatible with the stale prompt, even though the context no longer reflects the current state of the code. The context-selection policies detailed in @sec-vol3-context-engineering govern which evidence to provide to the model. When the agent harness updates or replaces outdated logs in the serialized prompt, the prefix matcher detects the divergence, immediately terminates the match at the first altered token, and triggers a fresh prefill for the updated text. The prompt layout, rather than the cache layer, enforces freshness.
+These structural requirements operate independently of semantic validity. Updating a target repository from commit `r17` to `r18` does not alter or invalidate the KV activations previously computed for an older prompt describing `r17`. Those tensors remain numerically identical and computationally compatible with the stale prompt, even though the context no longer reflects the current state of the code. Context-selection policies govern which evidence to provide to the model. When the agent harness updates or replaces outdated logs in the serialized prompt, the prefix matcher detects the divergence, immediately terminates the match at the first altered token, and triggers a fresh prefill for the updated text. The prompt layout, rather than the cache layer, enforces freshness.
 
 ### Radix prefix lookup {#sec-vol3-kv-cache-radix-lookup}
 
@@ -531,7 +539,11 @@ A **radix prefix cache**\index{Radix prefix cache!definition} organizes stored t
 
 [^fn-radix-patricia-trie]: **Compressed Prefix Tree**: The trie stored one symbol per edge, so a shared prefix was found by walking from the root [@fredkin1960]. PATRICIA collapsed chains of single-child nodes into one edge, so index size grows with the number of stored keys rather than their length [@morrison1968patricia]. The same compression matters for KV reuse, because agent prefixes run to thousands of tokens and a one-token-per-edge index would spend a node on each of them. \index{Radix tree!PATRICIA origin}
 
-Because standard attention mechanisms allow every token to attend to all preceding positions, intermediate KV projections depend intrinsically on the full sequence history that came before them. An identical passage appearing after a modified token cannot reuse its previously computed KV activations, because altering even a single token in the prompt shifts the causal context and positional embeddings for every subsequent position. This mathematical constraint directly motivates the stable-prefix layout rules analyzed in @sec-vol3-context-engineering-staging. Staging volatile components—such as dynamic counters, tool execution outputs, or volatile scratchpad notes—toward the end of the prompt leaves the long, invariant prefix at the beginning intact. Similarly, when context compaction rewrites only trailing conversation turns, the preceding prefix remains fully reusable.
+Because standard attention mechanisms allow every token to attend to all preceding positions, intermediate KV projections depend intrinsically on the full sequence history that came before them. An identical passage appearing after a modified token cannot reuse its previously computed KV activations, because altering even a single token in the prompt shifts the causal context and positional embeddings for every subsequent position. This mathematical constraint directly motivates stable-prefix layout rules. Staging volatile components—such as dynamic counters, tool execution outputs, or volatile scratchpad notes—toward the end of the prompt leaves the long, invariant prefix at the beginning intact. Similarly, when context compaction rewrites only trailing conversation turns, the preceding prefix remains fully reusable.
+
+::: {.column-margin .margin-pointer}
+↩ Stable-prefix layout rules for prompt staging are established in @sec-vol3-context-engineering-staging.
+:::
 
 Physical memory allocation introduces a practical policy choice at block boundaries without altering the underlying definition of compatibility. Consider an agent prompt matching a ten-token prefix when using a system configured with four-token physical blocks, mapped across block identifiers `[3, 7, 9]`. The first two blocks are completely filled with eight tokens, whereas block `9` holds only two initialized entries alongside two vacant slots. A serving engine that supports partial-tail reuse can preserve all ten tokens; when a new turn appends divergent tokens, the system performs a copy-on-write operation on block `9`, copying its two valid entries into a private, mutable tail block. In contrast, an engine that caches only complete blocks reuses eight tokens and prefills the remaining two. Both designs are valid: the partial-tail strategy minimizes redundant prefill at the expense of copy-on-write buffer management, while the full-block strategy simplifies allocation by trading a modest amount of recomputation for uniform block lifecycles.
 
@@ -1124,7 +1136,11 @@ A slot held in accelerator memory while an agent waits for external tool executi
 
 :::
 
-Rearranging the relation as $\lambda_{\text{arr}} = \bar{N}_{\text{slot}}/\bar{T}_{\text{hold}}$ expresses the achievable service rate as a function of allocated capacity and residence duration. In our turn-level analysis, each resident item represents a single generation-and-tool-wait cycle rather than a complete multi-turn trajectory (@sec-vol3-appendix-inference-queueing formalizes end-to-end trajectory queueing). Notebook \ref{nbk-05-residency-tax} evaluates this relationship under retained vs. released allocation policies.
+Rearranging the relation as $\lambda_{\text{arr}} = \bar{N}_{\text{slot}}/\bar{T}_{\text{hold}}$ expresses the achievable service rate as a function of allocated capacity and residence duration. In our turn-level analysis, each resident item represents a single generation-and-tool-wait cycle rather than a complete multi-turn trajectory. Notebook \ref{nbk-05-residency-tax} evaluates this relationship under retained vs. released allocation policies.
+
+::: {.column-margin .margin-pointer}
+↪ End-to-end trajectory queueing is formalized in @sec-vol3-appendix-inference-queueing.
+:::
 
 ::: {#nbk-05-residency-tax .callout-notebook title="The residency tax of a tool wait"}
 
