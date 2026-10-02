@@ -9,15 +9,15 @@ RULE_TEXT = (
     "Raw mathematical notation variables defined in notation_registry.yml "
     "MUST be referenced using their semantic \\macro equivalent. "
     "Do not use the raw string; use the macro to prevent drift. "
-    "If you are an LLM agent, read books/shared/_partials/_macros.tex to see all available macros."
+    "If you are an LLM agent, read books/shared/_includes/_macros.tex to see all available macros."
 )
 
 import os
 # Load registry once at module level
-registry_path = Path(os.environ.get("BOOK_ROOT", ".")) / "books" / "shared" / "_partials" / "notation_registry.yml"
+registry_path = Path(os.environ.get("BOOK_ROOT", ".")) / "books" / "shared" / "_includes" / "notation_registry.yml"
 if not registry_path.exists():
     # fallback for local testing
-    registry_path = Path("books/shared/_partials/notation_registry.yml")
+    registry_path = Path("books/shared/_includes/notation_registry.yml")
 
 banned_raw = {}
 if registry_path.exists():
@@ -33,7 +33,7 @@ def check(file_path: Path, text: str, lines: list[str]) -> list[Issue]:
     issues = []
     
     # Skip notation guide files themselves
-    if "_partials" in str(file_path) or "frontmatter" in str(file_path):
+    if "_includes" in str(file_path) or "frontmatter" in str(file_path):
         return issues
         
     for i, line in enumerate(lines):

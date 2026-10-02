@@ -3,7 +3,7 @@ import glob
 import re
 import os
 
-with open("books/shared/_partials/notation_registry.yml") as f:
+with open("books/shared/_includes/notation_registry.yml") as f:
     data = yaml.safe_load(f)
 
 # Sort variables by length descending to replace longest first
@@ -42,7 +42,7 @@ def replace_in_math(text, latex, macro):
 
 replaced_count = 0
 for fname in files:
-    if "frontmatter" in fname or "backmatter" in fname or "_partials" in fname:
+    if "frontmatter" in fname or "backmatter" in fname or "_includes" in fname:
         continue
     with open(fname, "r") as f:
         content = f.read()

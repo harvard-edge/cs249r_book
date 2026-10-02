@@ -1,7 +1,7 @@
 import yaml
 import re
 
-with open("books/shared/_partials/notation_registry.yml") as f:
+with open("books/shared/_includes/notation_registry.yml") as f:
     data = yaml.safe_load(f)
 
 for var in data["variables"]:
@@ -48,5 +48,5 @@ for var in data["variables"]:
     else:
         seen[m] = 1
 
-with open("books/shared/_partials/notation_registry.yml", "w") as f:
+with open("books/shared/_includes/notation_registry.yml", "w") as f:
     yaml.dump(data, f, sort_keys=False, allow_unicode=True)

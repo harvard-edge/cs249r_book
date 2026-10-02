@@ -4,8 +4,8 @@ import yaml
 import sys
 
 files = [
-    "books/shared/_partials/_notation_core_head.qmd",
-    "books/shared/_partials/_notation_core_tail.qmd",
+    "books/shared/_includes/_notation_core_head.qmd",
+    "books/shared/_includes/_notation_core_tail.qmd",
     "books/vol1/frontmatter/_notation_degradation.qmd",
     "books/vol2/frontmatter/_notation_scaling.qmd",
     "books/vol3/frontmatter/_notation_agentic.qmd",
@@ -60,5 +60,5 @@ for fname in files:
                         "volume": vol
                     })
 
-with open("books/shared/_partials/notation_registry.yml", "w") as f:
+with open("books/shared/_includes/notation_registry.yml", "w") as f:
     yaml.dump(registry, f, sort_keys=False, allow_unicode=True)

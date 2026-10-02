@@ -1,14 +1,14 @@
 import yaml
 from pathlib import Path
 
-with open("books/shared/_partials/notation_registry.yml") as f:
+with open("books/shared/_includes/notation_registry.yml") as f:
     registry = yaml.safe_load(f)
 
 banned = {var["latex"].strip(): var["macro"].strip() for var in registry["variables"] if "\\text{" in var["latex"] or "_" in var["latex"]}
 
 issues = 0
 for qmd in Path('books').rglob('*.qmd'):
-    if "frontmatter" in str(qmd) or "_partials" in str(qmd):
+    if "frontmatter" in str(qmd) or "_includes" in str(qmd):
         continue
     text = qmd.read_text()
     for i, line in enumerate(text.split('\n')):
