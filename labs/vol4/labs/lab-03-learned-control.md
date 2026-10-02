@@ -4,7 +4,7 @@
 **Weeks:** 5–6 (Parts 3A, 3B)\
 **Reading:** [Chapter 5: Physical Data](../../../books/vol4/05_data/05_data.qmd), [Chapter 6: Policy Training](../../../books/vol4/06_training/06_training.qmd), and, before Part 3B, the calibration section of [Chapter 8: Sensor Perception](../../../books/vol4/08_perception/08_perception.qmd)\
 **Competencies:** `A2`, `B2`, `B3`\
-**Milestone:** Contributes to [Milestone 2](../curriculum/syllabus.md#7-assessment-milestones-and-grading) (End of Week 8, with Lab 4)
+**Due:** end of Week 6
 
 ---
 

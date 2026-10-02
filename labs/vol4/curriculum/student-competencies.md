@@ -119,17 +119,17 @@ This card serves as the concrete, observable sign-off sheet for students and ins
 
 ## Where Each Competency Is Signed Off
 
-| Competency | Signed off in | Milestone |
+| Competency | Signed off in | Due |
 |:---|:---|:---:|
-| **A1** Plant Kinematics & Safe Envelope | [Lab 1: The Digital Twin](../labs/lab-01-digital-twin.md) | M1 |
-| **A2** Multi-Modal Sensing & Calibration | [Lab 3: Learned Control with VLAs](../labs/lab-03-learned-control.md) | M2 |
-| **A3** Feedback Timing & Latency | [Lab 2: From Simulation to Real Hardware](../labs/lab-02-sim-to-real.md) | M1 |
-| **B1** Physical Dataset Engineering | [Lab 4: Real-World Data Collection & Fine-Tuning](../labs/lab-04-real-data-and-fine-tuning.md) | M2 |
-| **B2** Deterministic Baseline Benchmarking | [Lab 3](../labs/lab-03-learned-control.md) | M2 |
-| **B3** Edge Model Profiling & Optimization | [Lab 3](../labs/lab-03-learned-control.md) | M2 |
-| **C1** Closed-Loop Physical Action | [Lab 4](../labs/lab-04-real-data-and-fine-tuning.md) | M2 |
-| **C2** Action Chunk Dynamics | [Lab 5: Stress-Testing](../labs/lab-05-stress-testing.md) | M3 |
-| **C3** Disturbance Recovery & Replanning | [Lab 5](../labs/lab-05-stress-testing.md) | M3 |
-| **D1** Hardware Authority Routing | [Lab 6: Safety Governor](../labs/lab-06-safety-governor.md) (first traced in Getting Started) | M4 |
-| **D2** Real-Time Safety Governor & Cutoff | [Lab 6](../labs/lab-06-safety-governor.md) | M4 |
-| **D3** Physical Release Defense | [Capstone](../labs/lab-capstone-studio.md) | M5 |
+| **A1** Plant Kinematics & Safe Envelope | [Lab 1: The Digital Twin](../labs/lab-01-digital-twin.md) | Week 3 |
+| **A2** Multi-Modal Sensing & Calibration | [Lab 3: Learned Control with VLAs](../labs/lab-03-learned-control.md) | Week 6 |
+| **A3** Feedback Timing & Latency | [Lab 2: From Simulation to Real Hardware](../labs/lab-02-sim-to-real.md) | Week 4 |
+| **B1** Physical Dataset Engineering | [Lab 4: Real-World Data Collection & Fine-Tuning](../labs/lab-04-real-data-and-fine-tuning.md) | Week 8 |
+| **B2** Deterministic Baseline Benchmarking | [Lab 3](../labs/lab-03-learned-control.md) | Week 6 |
+| **B3** Edge Model Profiling & Optimization | [Lab 3](../labs/lab-03-learned-control.md) | Week 6 |
+| **C1** Closed-Loop Physical Action | [Lab 4](../labs/lab-04-real-data-and-fine-tuning.md) | Week 8 |
+| **C2** Action Chunk Dynamics | [Lab 5: Stress-Testing](../labs/lab-05-stress-testing.md) | Week 9 |
+| **C3** Disturbance Recovery & Replanning | [Lab 5](../labs/lab-05-stress-testing.md) | Week 9 |
+| **D1** Hardware Authority Routing | [Lab 6: Safety Governor](../labs/lab-06-safety-governor.md) (first traced in Getting Started) | Week 11 |
+| **D2** Real-Time Safety Governor & Cutoff | [Lab 6](../labs/lab-06-safety-governor.md) | Week 11 |
+| **D3** Physical Release Defense | [Capstone](../labs/lab-capstone-studio.md) | Week 14 |

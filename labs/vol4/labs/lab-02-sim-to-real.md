@@ -4,7 +4,7 @@
 **Weeks:** 4 (Part 2A)\
 **Reading:** [Chapter 4: The Nervous System](../../../books/vol4/04_nervous/04_nervous.qmd)\
 **Competencies:** `A3`\
-**Milestone:** Concludes [Milestone 1](../curriculum/syllabus.md#7-assessment-milestones-and-grading) (End of Week 4)
+**Due:** end of Week 4
 
 ---
 

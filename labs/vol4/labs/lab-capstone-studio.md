@@ -4,7 +4,7 @@
 **Weeks:** 12–14 (Parts C1, C2, C3), with the proposal due Week 8 and the task frozen Week 10\
 **Reading:** [Chapter 16: Safe Release](../../../books/vol4/16_release/16_release.qmd), [Chapter 17: The Epistemic Frontier](../../../books/vol4/17_frontier/17_frontier.qmd)\
 **Competencies:** `D3` (and the full card)\
-**Milestone:** [Milestone 5](../curriculum/syllabus.md#7-assessment-milestones-and-grading) (End of Week 14)
+**Due:** end of Week 14 (proposal at the end of Week 8; task frozen at the end of Week 10)
 
 ---
 

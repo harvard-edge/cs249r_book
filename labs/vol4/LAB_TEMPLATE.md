@@ -25,7 +25,7 @@ Every Volume IV lab has five sections in this order. Copy the block below to `la
 **Weeks:** X–Y (Parts NA, NB)\
 **Reading:** [Chapter A: Title](../../../books/vol4/AA_slug/AA_slug.qmd)\
 **Competencies:** `A1`, `D1`\
-**Milestone:** Contributes to / Concludes [Milestone M](../curriculum/syllabus.md#7-assessment-milestones-and-grading) (End of Week W)
+**Due:** end of Week W
 
 ---
 

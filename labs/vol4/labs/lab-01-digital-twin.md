@@ -4,7 +4,7 @@
 **Weeks:** 2–3 (Parts 1A, 1B)\
 **Reading:** [Chapter 2: The Physical Body](../../../books/vol4/02_body/02_body.qmd), [Chapter 3: The Cognitive Brain](../../../books/vol4/03_brain/03_brain.qmd)\
 **Competencies:** `A1`\
-**Milestone:** Contributes to [Milestone 1](../curriculum/syllabus.md#7-assessment-milestones-and-grading) (End of Week 4, with Lab 2)
+**Due:** end of Week 3
 
 ---
 
@@ -12,14 +12,14 @@
 
 **The physical question.** What are the physical limits of this body, and how faithful a model of it can you build? How do you translate "move the hand to $(x, y, z)$" into joint angles, and where does that math break down?
 
-**Purpose.** You have driven the robot; now you model it. First you measure the body's own limits: how far it travels before it stops, how hot a servo gets holding a load, how far the supply voltage sags when a joint stalls, and how old a joint reading is by the time you use it. Then you build its digital twin: a simulated copy of the arm that runs on kinematics you derive yourself, so you can command it, push it to its limits, and break it without consequence. The twin is not finished when this lab ends. You will use it in every lab that follows, and improve it each time the real arm shows you what it was missing.
+**Purpose.** This is where the real work starts. You drive the robot, record a motion and replay it, and then measure the body's own limits: how far it travels before it stops, how hot a servo gets holding a load, how far the supply voltage sags when a joint stalls, and how old a joint reading is by the time you use it. Then you build its digital twin: a simulated copy of the arm that runs on kinematics you derive yourself, so you can command it, push it to its limits, and break it without consequence. The twin is not finished when this lab ends. You will use it in every lab that follows, and improve it each time the real arm shows you what it was missing.
 
 **Core concepts:**
 - **The body's limits:** stopping distance, heat, power, and measurement age bound everything the robot can do
 - **The digital twin:** a model of the body you can command, test, and break safely, and that you keep improving all term
 - **Where the model breaks:** workspace edges and singularities
 
-**Comes in from:** Getting Started: a working station and a replayed episode.\
+**Comes in from:** Getting Started: a ready station, a working computer setup, and the safety rules.\
 **Goes out to the next lab:** the body's measured limits, your IK solver, your digital twin, and a workspace map.\
 **If a part didn't finish:** staff provide a reference IK solver.
 
@@ -28,6 +28,7 @@
 ## 2. Learning Objectives
 
 By the end of this lab, you will be able to:
+- Teleoperate the arm and record and replay a motion
 - Measure the body's physical limits: stopping distance, thermal duty, supply sag under load, and measurement age
 - Derive the arm's forward kinematics and solve inverse kinematics for a target pose
 - Command a digital twin of the course robot with your own IK
@@ -49,7 +50,7 @@ By the end of this lab, you will be able to:
 
 TBD (staff)
 
-<!-- STAFF: expected to cover stopping distance from several speeds; servo temperature while holding a load; supply voltage sag when a joint stalls; the age of a joint reading by the time Linux sees it. The STS3215 servos report temperature, voltage, and load directly. Write steps with real commands, what to record, the expected result, and pitfalls from the Student Zero run. -->
+<!-- STAFF: expected to cover teleoperating the arm and recording and replaying a motion; stopping distance from several speeds; servo temperature while holding a load; supply voltage sag when a joint stalls; the age of a joint reading by the time Linux sees it. The STS3215 servos report temperature, voltage, and load directly. Write steps with real commands, what to record, the expected result, and pitfalls from the Student Zero run. -->
 
 ### Part 1B: Build the Digital Twin (Week 3)
 
