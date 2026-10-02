@@ -48,5 +48,5 @@ for var in data["variables"]:
     else:
         seen[m] = 1
 
-with open("books/shared/_partials/notation_registry_clean.yml", "w") as f:
+with open("books/shared/_partials/notation_registry.yml", "w") as f:
     yaml.dump(data, f, sort_keys=False, allow_unicode=True)

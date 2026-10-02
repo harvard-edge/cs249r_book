@@ -2,7 +2,7 @@ import yaml
 import glob
 import re
 
-with open("books/shared/_partials/notation_registry_clean.yml") as f:
+with open("books/shared/_partials/notation_registry.yml") as f:
     data = yaml.safe_load(f)
 
 # Filter safe variables to auto-replace

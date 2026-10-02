@@ -6,7 +6,7 @@ from audit.ledger import Issue, make_issue_id
 CATEGORY = "notation-macros"
 RULE = "All defined notations must use their respective LaTeX macros"
 RULE_TEXT = (
-    "Raw mathematical notation variables defined in notation_registry_clean.yml "
+    "Raw mathematical notation variables defined in notation_registry.yml "
     "MUST be referenced using their semantic \\macro equivalent. "
     "Do not use the raw string; use the macro to prevent drift. "
     "If you are an LLM agent, read books/shared/_partials/_macros.tex to see all available macros."
@@ -14,10 +14,10 @@ RULE_TEXT = (
 
 import os
 # Load registry once at module level
-registry_path = Path(os.environ.get("BOOK_ROOT", ".")) / "books" / "shared" / "_partials" / "notation_registry_clean.yml"
+registry_path = Path(os.environ.get("BOOK_ROOT", ".")) / "books" / "shared" / "_partials" / "notation_registry.yml"
 if not registry_path.exists():
     # fallback for local testing
-    registry_path = Path("books/shared/_partials/notation_registry_clean.yml")
+    registry_path = Path("books/shared/_partials/notation_registry.yml")
 
 banned_raw = {}
 if registry_path.exists():

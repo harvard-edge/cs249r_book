@@ -2,7 +2,7 @@ import yaml
 import re
 import os
 
-with open("books/shared/_partials/notation_registry_clean.yml") as f:
+with open("books/shared/_partials/notation_registry.yml") as f:
     data = yaml.safe_load(f)
 
 macros = set()
