@@ -242,7 +242,20 @@ def build_qmd_mapping(qmd_roots: list[Path]) -> tuple[dict, dict]:
             except Exception:
                 continue
 
+            # Equations are numbered per page in the HTML edition, in label order.
+            # Cross-chapter links get "equation N.k" (N from the NN_ chapter folder,
+            # matching the PDF), instead of a bare unnumbered "equation" (2026-10-01:
+            # 212 such links across the four web editions).
+            chap_m = re.match(r"(\d\d)_", qmd_file.parent.name)
+            chap_no = str(int(chap_m.group(1))) if chap_m else None
+            eq_counter = 0
+            in_code = False
+
             for line in lines:
+                if line.startswith("```"):
+                    in_code = not in_code
+                if in_code:
+                    continue
                 # Try heading pattern first
                 m = heading_id_re.match(line)
                 if m:
@@ -300,9 +313,11 @@ def build_qmd_mapping(qmd_roots: list[Path]) -> tuple[dict, dict]:
                     m = equation_id_re.search(line)
                     if m:
                         sec_id = m.group(1)
+                        eq_counter += 1
                         if sec_id not in chapter_mapping:
                             chapter_mapping[sec_id] = f"{html_path_str}#{sec_id}"
-                            chapter_titles[sec_id] = _fallback_label(sec_id)
+                            number = f"{chap_no}.{eq_counter}" if chap_no else str(eq_counter)
+                            chapter_titles[sec_id] = f"equation {number}"
 
     return chapter_mapping, chapter_titles
 
@@ -386,6 +401,14 @@ PRINCIPLE_PARTS_ORDER: dict[str, list[str]] = {
         "vol3/parts/learning_principles.qmd",
         "vol3/parts/scale_principles.qmd",
         "vol3/parts/synthesis_principles.qmd",
+    ],
+    # Added 2026-10-01: vol4 was missing, so every vol4 `principle \ref{pri-vol4-...}`
+    # shipped as raw math in the HTML edition (26 leaks).
+    "vol4": [
+        "vol4/parts/anatomy_principles.qmd",
+        "vol4/parts/teaching_principles.qmd",
+        "vol4/parts/running_principles.qmd",
+        "vol4/parts/governing_principles.qmd",
     ],
 }
 

@@ -868,8 +868,8 @@ def ch07_sprt_corridor():
     ax.axhline(A, color=DATA, lw=0.7, ls="--")
     ax.axhline(B, color=RED, lw=0.7, ls="--")
     ax.axhspan(B - 1.0, B, color=REDFILL, alpha=0.34, lw=0)
-    ax.text(0.5, A + 0.18, f"accept A = {A:.2f}", color=DATA, fontsize=4.6, va="bottom")
-    ax.text(0.5, B - 0.2, f"reject B = −{abs(B):.2f}", color=RED, fontsize=4.6, va="top")
+    ax.text(0.5, A + 0.18, rf"accept $\Lambda_{{\mathrm{{up}}}}$ = {A:.2f}", color=DATA, fontsize=4.6, va="bottom")
+    ax.text(0.5, B - 0.2, rf"reject $\Lambda_{{\mathrm{{lo}}}}$ = −{abs(B):.2f}", color=RED, fontsize=4.6, va="top")
     m = np.arange(0, n_acc + 1)
     ax.plot(m[m >= m_f], m[m >= m_f] * up, color=GRID, lw=1.0)
     ax.plot(n_acc, n_acc * up, "o", color=DATA, ms=2.6, zorder=5)
@@ -1206,14 +1206,16 @@ def ch11_replacement_latency_envelope():
 @margin("11_planning", "margin_handoff_exceedance_ladder", "hierarchy-ladder",
         sources=("PlanningMissionExposure.p_late", ".eps_mission", ".eps_handoff"))
 def ch11_exceedance_ladder():
-    # Exceedance probability per handoff: the P99 budget, the mission target,
+    # Exceedance probability per handoff: the p99 budget, the mission target,
     # and the union-bound per-handoff target (replaces the late-count strip).
     P = lego("11_planning", "PlanningMissionExposure")
     p99, eps_m, eps_h = float(P.p_late), float(P.eps_mission), float(P.eps_handoff)
     mant, ex = f"{eps_h:.1e}".split("e")
     fig, ax = new_fig("hierarchy-ladder")
     fig.set_size_inches(1.25, 1.3)
-    ladder(ax, [(f"P99 budget\n{p99:g}", p99), (f"mission\n{eps_m:g}", eps_m),
+    # The leading U+200B keeps ladder()'s sentence-casing from turning the
+    # upright lowercase percentile p99 (series core) into "P99" (2026-10-01).
+    ladder(ax, [(f"\u200bp99 budget\n{p99:g}", p99), (f"mission\n{eps_m:g}", eps_m),
                 (f"per handoff\n{mant}" + rf"$\times10^{{{int(ex)}}}$", eps_h)], domain="rate", color=TIME)
     return fig, [f"{p99:g}", f"{eps_m:g}", f"{mant} times 10 to the minus {abs(int(ex))}"]
 
@@ -1787,14 +1789,14 @@ def ch17_stop_time_overreserve():
     fig.set_size_inches(1.32, 0.95)
     x0, w, h = 0.30, 0.64, 0.13
     sc = w / (1.02 * t_b)
-    rows = ((0.72, "stop lasts", t_b), (0.44, "distance ÷ v", t_eq), (0.16, "whole spare", t_sp))
+    rows = ((0.72, f"stop {t_b:.1f} ms", t_b), (0.44, "distance ÷ v", t_eq), (0.16, "whole spare", t_sp))
     for y, label, v in rows:
         ax.text(x0 - 0.03, y, label, ha="right", va="center", color=INK, fontsize=4.6)
     # stop duration: distance-equivalent part slate, over-reserved part red
     ax.add_patch(plt.Rectangle((x0, 0.72 - h / 2), t_eq * sc, h, facecolor=TIME, edgecolor="white", lw=0.35))
     ax.add_patch(plt.Rectangle((x0 + t_eq * sc, 0.72 - h / 2), t_over * sc, h, facecolor=RED,
                                edgecolor="white", lw=0.35))
-    ax.text(x0 + t_b * sc / 2 * 0.5, 0.72, f"{t_b:.1f}", ha="center", va="center", color="white", fontsize=4.6)
+    ax.text(x0 + t_eq * sc / 2, 0.72, f"{t_eq:.1f}", ha="center", va="center", color="white", fontsize=4.6)
     ax.text(x0 + (t_eq + t_over / 2) * sc, 0.72 + h / 2 + 0.03, f"+{t_over:.1f} over", ha="center",
             va="bottom", color=RED, fontsize=4.5)
     ax.add_patch(plt.Rectangle((x0, 0.44 - h / 2), t_eq * sc, h, facecolor=TIME, edgecolor="white", lw=0.35))

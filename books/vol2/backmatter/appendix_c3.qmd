@@ -35,7 +35,7 @@ With the mapping in place, diagnosis becomes a matter of matching symptoms to th
 | **C$^3$ Axis**            | **Physical Constraint**                                           | **Symptoms**                                                                  | **Key Metric**                                                                                                 | **High-Leverage Optimization**                                                                             |
 |:--------------------------|:------------------------------------------------------------------|:------------------------------------------------------------------------------|:---------------------------------------------------------------------------------------------------------------|:-----------------------------------------------------------------------------------------------------------|
 | **Compute ($C_1$)**       | Arithmetic throughput ($R_{\text{peak}} \times \eta_{\text{hw}}$) | Low MFU, GPU utilization below 80%, poor per-GPU performance                  | MFU (Model FLOPs Utilization)                                                                                  | Kernel optimization, mixed precision, operator fusion (@sec-performance-engineering)                       |
-| **Communication ($C_2$)** | Network bandwidth ($\text{BW}_{\text{net}}$)                      | High AllReduce time, low scaling efficiency, communication > 30% of step      | Scaling efficiency ($\eta_{\text{scaling}}$), communication fraction ($T_{\text{comm}}(N)/T_{\text{step}}(N)$) | Gradient compression, overlap compute/communication, topology optimization (@sec-collective-communication) |
+| **Communication ($C_2$)** | Network bandwidth ($\text{BW}_{\text{network}}$)                  | High AllReduce time, low scaling efficiency, communication > 30% of step      | Scaling efficiency ($\eta_{\text{scaling}}$), communication fraction ($T_{\text{comm}}(N)/T_{\text{step}}(N)$) | Gradient compression, overlap compute/communication, topology optimization (@sec-collective-communication) |
 | **Coordination ($C_3$)**  | Synchronization overhead and failure recovery                     | Low goodput ratio, frequent restarts, large pipeline bubbles, scheduler churn | Goodput ratio ($T_{\text{useful}}/T_{\text{wall}}$)                                                            | Async checkpointing, elastic training, faster failure detection (@sec-fault-tolerance-reliability)         |
 
 : **C$^3$ Diagnostic Summary**: Each axis maps to a distinct physical constraint and a high-leverage optimization strategy. Start diagnosis here: identify which constraint binds, then follow the optimization pointer to the relevant chapter. {#tbl-c3-diagnostic-summary}
@@ -93,9 +93,9 @@ This intersection captures the idle compute caused by orchestration and resilien
 
 Three distinct mechanisms govern this intersection:
 
-1.  **Pipeline bubbles**: In pipeline parallelism (PP), stages idle during pipeline fill (warmup) and drain (cooldown). For $p$ pipeline stages and $m$ microbatches, the bubble fraction $b_{\text{pipe}} = (p - 1)/(p - 1 + m)$ (@sec-appdx-comm-foundations-bubble-fraction) is accelerator time lost to idling; more microbatches or interleaved schedules shrink it.
+1.  **Pipeline bubbles**: In pipeline parallelism (PP), stages idle during pipeline fill (warmup) and drain (cooldown). For $N_{\text{PP}}$ pipeline stages and $m$ microbatches, the bubble fraction $b_{\text{pipe}} = (N_{\text{PP}} - 1)/(N_{\text{PP}} - 1 + m)$ (@sec-appdx-comm-foundations-bubble-fraction) is accelerator time lost to idling; more microbatches or interleaved schedules shrink it.
 2.  **Checkpoint stalls**: Synchronous checkpoint writes that block the training loop to serialize terabytes of weights and optimizer states convert expensive compute time into storage wait time. Asynchronous checkpointing mitigates this by snapshotting host-pinned or local Non-Volatile Memory Express (NVMe) memory in milliseconds, delegating remote persistence to background I/O threads.
-3.  **Recovery rollback**: When a node fails in an $N$-node cluster, training halts and rolls back to the last valid checkpoint, squandering the arithmetic executed since that snapshot. Minimizing the failure blast radius through fast health heartbeats and dynamic node replacement bounds this compute loss (@sec-fault-tolerance-reliability, @sec-fleet-orchestration).
+3.  **Recovery rollback**: When a node fails in an $N$-device cluster, training halts and rolls back to the last valid checkpoint, squandering the arithmetic executed since that snapshot. Minimizing the failure blast radius through fast health heartbeats and dynamic node replacement bounds this compute loss (@sec-fault-tolerance-reliability, @sec-fleet-orchestration).
 
 ### Communication $\cap$ coordination {#sec-appdx-c3-taxonomy-comm-coord}
 
@@ -294,7 +294,7 @@ The **Communication**\index{C³ Taxonomy!communication} axis dominates. Each GPU
 Target the communication axis without touching the per-GPU computation:
 
 - **Compute-communication overlap**: Launch AllReduce during the backward pass rather than waiting until it completes. Modern frameworks (FSDP, DeepSpeed) support this natively.
-- **Gradient compression**: Apply TopK sparsification or quantization to reduce the bytes crossing the network by 10--100$\times$.
+- **Gradient compression**: Apply Top-k sparsification or quantization to reduce the bytes crossing the network by 10--100$\times$.
 - **Hierarchical collectives**: Use intra-node NVLink for the first reduction stage, then inter-node InfiniBand only for cross-node aggregation, reducing inter-node participants relative to a flat rank-level algorithm. Actual traffic savings depend on the collective layout, NIC allocation, and topology.
 
 If communication were eliminated entirely, throughput would increase by `{python} C3CaseStudies.case2_speedup_mult_str` (Amdahl's Law applied to the `{python} C3CaseStudies.case2_compute_pct_str` compute fraction). Realistically, reducing communication from `{python} C3CaseStudies.case2_comm_pct_str` to 20 percent of step time would recover most of the lost scaling.
@@ -365,11 +365,11 @@ The C$^3$ Scorecard grades fleet efficiency against known thresholds, extending 
 
 | **C$^3$ Axis**    |                    **Metric**                    |                                                    **Definition**                                                    |            **Failing Grade**            |            **Passing Grade**            |
 |:------------------|:------------------------------------------------:|:--------------------------------------------------------------------------------------------------------------------:|:---------------------------------------:|:---------------------------------------:|
-| **Compute**       |                     **MFU**                      |                      $\frac{O_{\text{step}}}{N R_{\text{peak,device}} \times T_{\text{step}}}$                       |  $<$ `{python} C3Scorecard.mfu_low_str` | $>$ `{python} C3Scorecard.mfu_high_str` |
+| **Compute**       |                     **MFU**                      |                         $\frac{O_{\text{useful}}}{N R_{\text{peak}} \times T_{\text{step}}}$                         |  $<$ `{python} C3Scorecard.mfu_low_str` | $>$ `{python} C3Scorecard.mfu_high_str` |
 | **Communication** | **Scaling Efficiency** ($\eta_{\text{scaling}}$) |                                              $\frac{T_1}{N \times T_N}$                                              | $<$ `{python} C3Scorecard.eff_8192_str` |  $>$ `{python} C3Scorecard.eff_256_str` |
 | **Coordination**  |                **Goodput Ratio**                 | $\frac{T_{\text{useful}}}{T_{\text{wall}}}$ or $\frac{\text{useful steps/sec}}{\text{ideal or allocated steps/sec}}$ |                 $<$ 75%                 |                 $>$ 90%                 |
 
-: **The C$^3$ Efficiency Rubric**: Use these three numbers to characterize fleet health. The MFU denominator uses aggregate fleet peak, written as $N R_{\text{peak,device}}$ when $R_{\text{peak}}$ is a per-device value. These illustrative thresholds guide investigation; passing all three does not prove that inexpensive optimizations are exhausted. {#tbl-c3-scorecard tbl-colwidths="[16,21,29,17,17]"}
+: **The C$^3$ Efficiency Rubric**: Use these three numbers to characterize fleet health. The MFU denominator uses aggregate fleet peak, written as $N R_{\text{peak}}$ when $R_{\text{peak}}$ is a per-device value. These illustrative thresholds guide investigation; passing all three does not prove that inexpensive optimizations are exhausted. {#tbl-c3-scorecard tbl-colwidths="[16,21,29,17,17]"}
 
 ## C$^3$ Infrastructure Diagnostic Decision Tree and Fleet D·A·M Scorecard {#sec-appdx-c3-diagnostic-tree}
 
@@ -442,9 +442,9 @@ The **Fleet D·A·M Scorecard** in @tbl-c3-dam-scorecard generalizes single-node
 
 | **D·A·M Axis**      | **Fleet Telemetry Signal**                                                   | **C$^3$ Bottleneck Wall**      | **Target Efficiency Benchmark**                                                                                         |
 |:--------------------|:-----------------------------------------------------------------------------|:-------------------------------|:------------------------------------------------------------------------------------------------------------------------|
-| **Data ($D$)**      | Network fabric RX/TX saturation, storage write I/O wait times                | **Communication/Coordination** | I/O wait time $< 2\%$ of step time; NCCL ring bandwidth $> 85\%$ of fabric peak                                         |
-| **Algorithm ($A$)** | Pipeline bubble idle fraction, partitioning imbalance across stages          | **Compute/Coordination**       | Pipeline bubble fraction $< 20\%$ under the balanced-stage model                                                        |
-| **Machine ($M$)**   | Model FLOPs utilization (MFU), PCIe AER errors, thermal and power throttling | **Compute**                    | MFU $>$ `{python} C3Scorecard.mfu_high_str`; thermal throttle events $= 0$; PCIe link width held at maximum (Gen 5 x16) |
+| **Data ($\text{D}$)**      | Network fabric RX/TX saturation, storage write I/O wait times                | **Communication/Coordination** | I/O wait time $< 2\%$ of step time; NCCL ring bandwidth $> 85\%$ of fabric peak                                         |
+| **Algorithm ($\text{A}$)** | Pipeline bubble idle fraction, partitioning imbalance across stages          | **Compute/Coordination**       | Pipeline bubble fraction $< 20\%$ under the balanced-stage model                                                        |
+| **Machine ($\text{M}$)**   | Model FLOPs utilization (MFU), PCIe AER errors, thermal and power throttling | **Compute**                    | MFU $>$ `{python} C3Scorecard.mfu_high_str`; thermal throttle events $= 0$; PCIe link width held at maximum (Gen 5 x16) |
 
 : **Fleet D·A·M Scorecard**: Quantifies how single-node hardware telemetry maps into fleet-level C$^3$ execution constraints. {#tbl-c3-dam-scorecard}
 
@@ -505,9 +505,9 @@ class C3EffectiveFlops:
 
 A fleet's **Effective FLOP/s**\index{Effective FLOP/s} is the usable throughput after compounding three disjoint C$^3$ efficiency factors:
 
-$$\text{Effective} = \text{Peak} \times \underbrace{\eta_{\text{compute-phase}}}_{\text{Compute}} \times \underbrace{\eta_{\text{scaling}}}_{\text{Distributed step}} \times \underbrace{\eta_{\text{operational}}}_{\text{Operational goodput}}$$
+$$R_{\text{eff}} = (N R_{\text{peak}}) \times \underbrace{\text{MFU}}_{\text{Compute}} \times \underbrace{\eta_{\text{scaling}}}_{\text{Distributed step}} \times \underbrace{\eta_{\text{goodput}}}_{\text{Operational goodput}}$$
 
-The compute-phase factor measures useful model arithmetic against peak throughput only while local computation is active. Scaling efficiency captures communication and other distributed-step losses, including pipeline bubbles. Operational goodput captures time outside those measured steps, including checkpointing, failure recovery, scheduler preemptions, and maintenance. These disjoint measurement windows prevent the same loss from being counted twice.
+MFU, the single-device baseline, measures useful model arithmetic against peak throughput only while local computation is active. This compute-phase factor is not the step-averaged fleet MFU of @tbl-c3-scorecard, whose $T_{\text{step}}$ denominator already includes the in-step losses that $\eta_{\text{scaling}}$ counts, so the product does not count them twice. Scaling efficiency captures communication and other distributed-step losses, including pipeline bubbles. Operational goodput captures time outside those measured steps, including checkpointing, failure recovery, scheduler preemptions, and maintenance. These disjoint measurement windows prevent the same loss from being counted twice.
 
 A concrete estimate makes the multiplicative loss visible at fleet scale.
 

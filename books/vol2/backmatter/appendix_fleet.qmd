@@ -250,13 +250,13 @@ Currently, NVLink 4.0 provides `{python} FleetInvariantNumbers.nvlink_to_ib_rati
 
 For $N$ independent components under a constant-failure-rate assumption, system MTBF (@eq-fleet-mtbf-system) scales inversely with component count:
 
-$$ \text{MTBF}_{\text{system}} = \frac{\text{MTBF}_{\text{component}}}{N} $$ {#eq-fleet-mtbf-system}
+$$ \text{MTBF}_{\text{system}} = \frac{\text{MTTF}_{\text{component}}}{N} $$ {#eq-fleet-mtbf-system}
 
 Under this model the relation is exact rather than approximate. Doubling the cluster size halves the time between failures. At `{python} FleetNumbersHighlights.cl_mega_str` GPUs with a per-GPU mean time to failure (MTTF) of `{python} FleetInvariantNumbers.gpu_mttf_hours_str`, the cluster experiences a GPU failure every `{python} FleetNumbersHighlights.mtbf_100k_min_str`. No fault tolerance strategy can avoid this; the question is how quickly the system recovers.
 
 #### AllReduce overhead scaling {.unnumbered}
 
-The bandwidth-optimal Ring AllReduce algorithm transfers $2(N-1)M/N$ bytes per participant, where $M$ is the message size and $N$ is the number of participants [@patarasuk2009]. As $N$ grows large, this approaches $2M$ per GPU, so the per-GPU bandwidth term is nearly independent of the number of GPUs; aggregate cluster traffic still grows with the number of participants. This is why Ring AllReduce scales well in the bandwidth term. The latency term, however, grows as $2(N-1) \times \alpha$, making latency the bottleneck for small messages on large rings. This trade-off motivates hierarchical AllReduce strategies that use Ring AllReduce within nodes and Tree AllReduce across nodes.
+The bandwidth-optimal Ring AllReduce algorithm transfers $2(N-1)M/N$ bytes per participant, where $M$ is the collective payload size and $N$ is the number of participants [@patarasuk2009]. As $N$ grows large, this approaches $2M$ per GPU, so the per-GPU bandwidth term is nearly independent of the number of GPUs; aggregate cluster traffic still grows with the number of participants. This is why Ring AllReduce scales well in the bandwidth term. The latency term, however, grows as $2(N-1) \times \alpha$, making latency the bottleneck for small messages on large rings. This trade-off motivates hierarchical AllReduce strategies that use Ring AllReduce within nodes and Tree AllReduce across nodes.
 
 ### Communication numbers {.unnumbered}
 
@@ -433,7 +433,7 @@ class FleetMtbfTable:
 | **`{python} FleetMtbfTable.n_8192_str` GPUs** | `{python} FleetMtbfTable.mtbf_8192_hours_str` | `{python} FleetMtbfTable.mtbf_8192_min_str` | `{python} FleetMtbfTable.pfail_8192_str` |
 | **`{python} FleetMtbfTable.n_100k_str` GPUs** | `{python} FleetMtbfTable.mtbf_100k_hours_str` | `{python} FleetMtbfTable.mtbf_100k_min_str` | `{python} FleetMtbfTable.pfail_100k_str` |
 
-: **MTBF and Failure Probability by Cluster Size**: GPU-only failure model with per-GPU MTTF of `{python} FleetMtbfTable.gpu_mttf_hours_str`. Real clusters also experience NIC, PSU, cable, and switch failures, so these GPU-only intervals overstate the true cluster MTBF. The probability column uses $\Pr(\geq 1\ \text{failure}) = 1 - e^{-T/\text{MTBF}}$ for $T = 24$ hours. {#tbl-fleet-mtbf}
+: **MTBF and Failure Probability by Cluster Size**: GPU-only failure model with per-GPU MTTF of `{python} FleetMtbfTable.gpu_mttf_hours_str`. Real clusters also experience NIC, PSU, cable, and switch failures, so these GPU-only intervals overstate the true cluster MTBF. The probability column uses $\Pr(\geq 1\ \text{failure}) = 1 - e^{-t/\text{MTBF}}$ for $t = 24$ hours. {#tbl-fleet-mtbf}
 
 Failure is no longer an edge case at `{python} FleetMtbfTable.n_8192_str` GPUs and above. GPU-only MTBF is about `{python} FleetMtbfTable.mtbf_8192_min_str` at `{python} FleetMtbfTable.n_8192_str` GPUs, and the probability of at least one GPU failure within 24 hours is `{python} FleetMtbfTable.pfail_8192_prose_str`. Fault tolerance is not optional at fleet scale; it is a prerequisite for completing any long-running training job. @Sec-fault-tolerance-reliability covers the mechanisms in detail.
 
@@ -802,11 +802,11 @@ $$ \rho = \frac{T_{\text{comm}}(N)}{T_{\text{compute}}/N} $$ {#eq-comm-compute-r
 
 When $\rho < 1$, computation takes longer than communication; hiding that communication still requires independent work and sufficient resources. When $\rho > 1$, the system is **Communication-Bound**\index{Communication-bound workload}, and GPUs spend more time waiting for data than computing on it.
 
-The ratio is the time-domain form of the **communication intensity** (CI)\index{Communication intensity!appendix refresher} defined in @sec-vol2-introduction-ci-ratio, the bytes a step moves across the network per FLOP it executes locally. If each device moves $D_{\text{vol}}$ bytes across the network per step at effective network bandwidth $\text{BW}_{\text{net}}$ and executes its $O$ local FLOPs at realized rate $R$, then in the bandwidth-dominated regime
+The ratio is the time-domain form of the **communication intensity** (CI)\index{Communication intensity!appendix refresher} defined in @sec-vol2-introduction-ci-ratio, the bytes a step moves across the network per FLOP it executes locally. If each device moves $M$ bytes across the network per step at effective network bandwidth $\text{BW}_{\text{network}}$ and executes its $O$ local FLOPs at realized rate $R$, then in the bandwidth-dominated regime
 
-$$ \rho \approx \frac{D_{\text{vol}}/\text{BW}_{\text{net}}}{O/R} = \text{CI} \times \frac{R}{\text{BW}_{\text{net}}}, \qquad \text{CI} = \frac{D_{\text{vol}}}{O} $$ {#eq-fleet-ci-rho}
+$$ \rho \approx \frac{M/\text{BW}_{\text{network}}}{O/R} = \text{CI} \times \frac{R}{\text{BW}_{\text{network}}}, \qquad \text{CI} = \frac{M}{O} $$ {#eq-fleet-ci-rho}
 
-@Eq-fleet-ci-rho shows that exposed communication begins when CI exceeds $\text{BW}_{\text{net}}/R$, the network counterpart of the roofline ridge point. Because a device executes far more FLOP/s than its network link moves bytes per second, that threshold is a small fraction of a byte per FLOP, and a faster accelerator lowers it further. An accelerator upgrade alone can therefore turn a compute-bound job into a communication-bound one.
+@Eq-fleet-ci-rho shows that exposed communication begins when $\text{CI}$ exceeds $\text{BW}_{\text{network}}/R$, the network counterpart of the roofline ridge point. Because a device executes far more FLOP/s than its network link moves bytes per second, that threshold is a small fraction of a byte per FLOP, and a faster accelerator lowers it further. An accelerator upgrade alone can therefore turn a compute-bound job into a communication-bound one.
 
 ```{python}
 #| echo: false
@@ -961,7 +961,7 @@ class FleetEffectiveFlops:
 
 A `{python} FleetEffectiveFlops.n_gpus_str`-GPU H100 cluster has a peak aggregate throughput of `{python} FleetEffectiveFlops.peak_tflop_per_s_str`. This illustrative decomposition keeps the factors disjoint: MFU represents per-device kernel and memory efficiency, scaling efficiency represents distributed communication and pipeline losses, and operational goodput represents checkpointing, failure recovery, and maintenance. The effective throughput is:
 
-$$R_{\text{eff}} = N R_{\text{peak}} \times \text{MFU} \times \eta_{\text{scaling}} \times \eta_{\text{operational}}$$
+$$R_{\text{eff}} = N R_{\text{peak}} \times \text{MFU} \times \eta_{\text{scaling}} \times \eta_{\text{goodput}}$$
 
 `{python} FleetEffectiveFlops.effective_eq_math`
 
