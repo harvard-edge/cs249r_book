@@ -387,6 +387,14 @@ PRINCIPLE_PARTS_ORDER: dict[str, list[str]] = {
         "vol3/parts/scale_principles.qmd",
         "vol3/parts/synthesis_principles.qmd",
     ],
+    # Added 2026-10-01: vol4 was missing, so every vol4 `principle \ref{pri-vol4-...}`
+    # shipped as raw math in the HTML edition (26 leaks).
+    "vol4": [
+        "vol4/parts/anatomy_principles.qmd",
+        "vol4/parts/teaching_principles.qmd",
+        "vol4/parts/running_principles.qmd",
+        "vol4/parts/governing_principles.qmd",
+    ],
 }
 
 
