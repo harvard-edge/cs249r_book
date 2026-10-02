@@ -336,6 +336,23 @@ This repository—the books, software frameworks, and hardware kits—is my open
 </details>
 
 <details>
+<summary><b>Do you use generative AI?</b></summary>
+
+<br>
+
+Yes. I use it for literature searches, drafting passages, generating and iterating on diagrams, and exploring framings I would not have tried otherwise. Without it, a curriculum of this scope from one person would take decades.
+
+I think of it as hill climbing. The tool lets me draft faster and search wider, rapidly testing directions and surfacing material across fields I do not live in full-time. But hill climbing only works if you know which hill to climb. Deciding what to teach, in what order, at what depth, what to leave out, and where students will get stuck comes from teaching this material and watching people learn. The tool accelerates the search. It does not set the direction.
+
+I also use it to learn. One of my reasons for building all of this is that writing and teaching is how I think things through, and AI helps me do that faster. I believe these tools can be used to build something genuinely useful for others, and that is what I am trying to do here.
+
+The commit history reflects hundreds of hours of work over years of rewriting, debugging, verifying, and iterating on feedback. I build in the open on GitHub because I make mistakes. That is also why there are so many contributors listed at the bottom of this page. Every one of them has found something to fix, pointed out something I missed, or helped make the material better. That process is the real quality control.
+
+Each volume includes a detailed [Note on AI Assistance](https://mlsysbook.ai/vol1/frontmatter/ai_use.html) on how AI was used and how the result was verified.
+
+</details>
+
+<details>
 <summary><b>Who is this for, and what should I know first?</b></summary>
 
 <br>
@@ -349,7 +366,7 @@ This is for anyone who wants to engineer intelligent systems, not only train mod
 
 <br>
 
-The two volumes differ in scope, not depth. Both are equally rigorous. Volume I is the single-machine world: how an ML system works on one node with a handful of accelerators, from data and a single neuron's computation up through training, optimization, and deployment. Volume II is the at-scale world: many machines across a network, distributed training, fault tolerance, fleet orchestration, inference at scale, and governance. Volume II does not assume you have read Volume I, so you can start there if you already have the foundations. The natural path, though, is Volume I to build the mental models and Volume II to apply them across the fleet. The analogy we follow is Hennessy and Patterson: *Computer Organization and Design* first, then *Computer Architecture: A Quantitative Approach*.
+The two volumes differ in scope, not depth. Both are equally rigorous. Volume I is the single-machine world: how an ML system works on one node with a handful of accelerators, from data and a single neuron's computation up through training, optimization, and deployment. Volume II is the at-scale world: many machines across a network, distributed training, fault tolerance, fleet orchestration, inference at scale, and governance. Volume II does not assume you have read Volume I, so you can start there if you already have the foundations. The natural path, though, is Volume I to build the mental models and Volume II to apply them across the fleet. The analogy we follow is Hennessy and Patterson: *Computer Organization and Design* first, then *Computer Architecture: A Quantitative Approach*. Volumes III (Agentic Systems) and IV (Physical AI) each expand the boundary further. They are independent of each other and build naturally on Volume II, though neither strictly requires it.
 
 </details>
 
@@ -417,7 +434,7 @@ Bruce Davie makes this case well in ["Textbooks in Tokenland"](https://systemsap
 
 <br>
 
-Yes. Both volumes are free to read online at [mlsysbook.ai](https://mlsysbook.ai), and the textbook is open source under a Creative Commons license (CC BY-NC-SA 4.0), so you can share and adapt it for non-commercial use with attribution. If you prefer print, a hardcopy edition is coming in 2026 with MIT Press. The surrounding tools are open source too, each under its own license.
+Yes. All volumes are free to read online at [mlsysbook.ai](https://mlsysbook.ai), and the textbook is open source under a Creative Commons license (CC BY-NC-SA 4.0), so you can share and adapt it for non-commercial use with attribution. If you prefer print, a hardcopy edition is coming in 2026 with MIT Press. The surrounding tools are open source too, each under its own license.
 
 </details>
 
@@ -475,6 +492,8 @@ Yes. Both volumes are free to read online at [mlsysbook.ai](https://mlsysbook.ai
       <td>
         <b>Volume I</b> — two-volume split (content complete, editorial polish)<br>
         <b>Volume II</b> — Scaling (active development)<br>
+        <b>Volume III</b> — Agentic Systems (in development)<br>
+        <b>Volume IV</b> — Physical AI (in development)<br>
         <b>Curriculum</b> — TinyTorch, Kits, MLSys·im, Labs, StaffML
       </td>
       <td>
@@ -485,7 +504,7 @@ Yes. Both volumes are free to read online at [mlsysbook.ai](https://mlsysbook.ai
   </tbody>
 </table>
 
-<p align="center"><i>The two-volume split replaces the single-volume edition at launch.</i></p>
+<p align="center"><i>The four-volume series replaces the single-volume edition at launch.</i></p>
 
 ---
 

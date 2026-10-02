@@ -174,31 +174,31 @@ The feedback axis incorporates external observations into subsequent model reque
 
 Verification checks yield structured outcomes: failure, success, or inconclusive execution (such as a test timeout). A failure trace pinpoints specific regression bugs or unmet invariants; a passing test confirms that the code satisfies the exercised assertions under tested conditions; and final acceptance remains a distinct policy gate. Executing diagnostics constitutes an active external action: it consumes CPU and memory resources, runs within sandboxed security boundaries, and incurs wall-clock latency even when performed purely for internal deliberation.
 
-Feedback introduces strict serialization: a revision cannot begin until the preceding verification check completes and returns its observation payload. Furthermore, context policies that append prior candidates and diagnostic outputs cause input token counts to expand across successive turns. For an initial prompt length $S_{\text{base}}$, candidate lengths $K_j$, and observation lengths $\lvert o_j\rvert$, an append-only policy yields an input length at round $r$ of
+Feedback introduces strict serialization: a revision cannot begin until the preceding verification check completes and returns its observation payload. Furthermore, context policies that append prior candidates and diagnostic outputs cause input token counts to expand across successive turns. For an initial prompt length $S_{\text{base}}$, candidate lengths $K_j$, and observation lengths $\lvert o_j\rvert$, an append-only policy yields an input length at turn $t$ of
 
-$$S^{(r)} = S_{\text{base}} + \sum_{j=1}^{r-1}(K_j + \lvert o_j\rvert)$$
+$$S^{(t)} = S_{\text{base}} + \sum_{j=1}^{t-1}(K_j + \lvert o_j\rvert)$$
 
 This compounding input context inflates prompt prefill latency, accelerator memory usage, and token billing on every round. Although context-compaction techniques can summarize earlier attempts or drop obsolete diagnostic traces (@sec-vol3-context-engineering), the allocation policy must account for the full token volume dispatched to the model API.
 
 ### The three axes under one output ceiling {#sec-vol3-test-time-compute-common-output-ceiling}
 
-Runtimes schedule these three allocation axes against four resource dimensions: input and output token counts, critical-path wall-clock latency, peak retained accelerator state, and external information acquisition. Let $T_{\text{prefill}}(S)$ be the time required to ingest an $S$-token prompt, $t_{\text{decode}}$ the per-token decoding step time, $T_{\text{decode}}(K)$ the total generation time for $K$ tokens, and $t_{\text{check},r}$ the duration of the external check in feedback round $r$. With $K_{\text{ext}}$ tokens of extended depth, $N$ breadth candidates executed concurrently, and $R$ feedback rounds, the critical paths decompose as
+Runtimes schedule these three allocation axes against four resource dimensions: input and output token counts, critical-path wall-clock latency, peak retained accelerator state, and external information acquisition. Let $T_{\text{prefill}}(S)$ be the time required to ingest an $S$-token prompt, $t_{\text{decode}}$ the per-token decoding step time, $T_{\text{decode}}(K)$ the total generation time for $K$ tokens, and $t_{\text{check},r}$ the duration of the external check in feedback round $r$. With $K_{\text{ext}}$ tokens of extended depth, $N$ breadth candidates executed concurrently, and $H$ feedback turns, the critical paths decompose as
 
 $$
 \begin{aligned}
 T^{\text{depth}} &\approx T_{\text{prefill}}(S) + K_{\text{ext}}\,t_{\text{decode}},\\
 T^{\text{breadth}} &\approx T_{\text{prefill}}(S) + \max_{n} T_{\text{decode}}(K_n),\\
-T^{\text{feedback}} &\approx \sum_{r=1}^{R}\bigl(T_{\text{prefill}}(S^{(r)}) + T_{\text{decode}}(K_r) + t_{\text{check},r}\bigr).
+T^{\text{feedback}} &\approx \sum_{t=1}^{H}\bigl(T_{\text{prefill}}(S^{(t)}) + T_{\text{decode}}(K_t) + t_{\text{check},t}\bigr).
 \end{aligned}
 $$ {#eq-vol3-allocation-critical-path}
 
-The critical path for breadth assumes the serving infrastructure maintains sufficient memory and execution capacity to decode all $N$ streams concurrently at an unchanged step time. When capacity saturates, decoding falls back into serialized waves, shifting the critical path toward the sum across candidate streams. In contrast, the feedback expression grows along two distinct dimensions: sequential check durations $t_{\text{check},r}$ and lengthening prompt prefill times $T_{\text{prefill}}(S^{(r)})$ caused by context accumulation. @Tbl-vol3-allocation-model contrasts the resource footprints modeled by @eq-vol3-allocation-critical-path alongside the work processed, peak memory retained, and external information acquired.
+The critical path for breadth assumes the serving infrastructure maintains sufficient memory and execution capacity to decode all $N$ streams concurrently at an unchanged step time. When capacity saturates, decoding falls back into serialized waves, shifting the critical path toward the sum across candidate streams. In contrast, the feedback expression grows along two distinct dimensions: sequential check durations $t_{\text{check},t}$ and lengthening prompt prefill times $T_{\text{prefill}}(S^{(t)})$ caused by context accumulation. @Tbl-vol3-allocation-model contrasts the resource footprints modeled by @eq-vol3-allocation-critical-path alongside the work processed, peak memory retained, and external information acquired.
 
-| **Axis** | **Tokens processed**                              | **Critical path**                   | **Peak retained model state**                   | **New information**                      |
-|:---------|:--------------------------------------------------|:------------------------------------|:------------------------------------------------|:-----------------------------------------|
-| Depth    | $S + K_{\text{ext}}$                              | One dependent sequence              | One context of $S + K_{\text{ext}}$ tokens      | None beyond the request and weights      |
-| Breadth  | $S + \sum_n K_n$ (prompt shared)                  | Longest candidate, given capacity   | $N$ contexts, $S + \sum_n K_n$ tokens if shared | Sampling variation over the same request |
-| Feedback | $\sum_{r}(S^{(r)} + K_r)$, with $S^{(r)}$ growing | Sum of rounds, including each check | One active context of $S^{(R)} + K_R$ tokens    | Observations from executed checks        |
+| **Axis** | **Tokens processed**                              | **Critical path**                  | **Peak retained model state**                   | **New information**                      |
+|:---------|:--------------------------------------------------|:-----------------------------------|:------------------------------------------------|:-----------------------------------------|
+| Depth    | $S + K_{\text{ext}}$                              | One dependent sequence             | One context of $S + K_{\text{ext}}$ tokens      | None beyond the request and weights      |
+| Breadth  | $S + \sum_n K_n$ (prompt shared)                  | Longest candidate, given capacity  | $N$ contexts, $S + \sum_n K_n$ tokens if shared | Sampling variation over the same request |
+| Feedback | $\sum_{t}(S^{(t)} + K_t)$, with $S^{(t)}$ growing | Sum of turns, including each check | One active context of $S^{(H)} + K_H$ tokens    | Observations from executed checks        |
 
 : **Resource model of the three allocation axes**: Symbolic accounting of processed tokens, critical path, retained model state, and information source. Concurrency and prefix sharing are capacity and implementation assumptions, not properties of the axis. {#tbl-vol3-allocation-model tbl-colwidths="[11,23,22,25,19]"}
 
@@ -227,7 +227,7 @@ class AllocationAxes:
     ceiling = 4_096  # common total generated-token ceiling
     candidates = 4  # breadth concurrency and candidate count
     candidate_tokens = 1_024  # hypothetical generated length per short candidate
-    rounds = 3  # hypothetical feedback rounds actually used
+    turns = 3  # hypothetical feedback turns actually used
     report = 340  # tokens appended per complete observation
     check_time = 1.5 * second  # hypothetical duration per feedback check
     price_in = 3 * USD / 1_000_000  # hypothetical per-input-token price
@@ -240,11 +240,11 @@ class AllocationAxes:
     depth_output = ceiling
     breadth_input = candidates * prompt
     breadth_output = candidates * candidate_tokens
-    feedback_input = rounds * prompt + (candidate_tokens + report) * rounds * (rounds - 1) // 2
-    feedback_output = rounds * candidate_tokens
+    feedback_input = turns * prompt + (candidate_tokens + report) * turns * (turns - 1) // 2
+    feedback_output = turns * candidate_tokens
     depth_time = depth_output * token_time
     breadth_time = candidate_tokens * token_time
-    feedback_time = rounds * (candidate_tokens * token_time + check_time)
+    feedback_time = turns * (candidate_tokens * token_time + check_time)
     depth_cost = depth_input * price_in + depth_output * price_out
     breadth_cost = breadth_input * price_in + breadth_output * price_out
     feedback_cost = feedback_input * price_in + feedback_output * price_out
@@ -265,7 +265,7 @@ class AllocationAxes:
     ceiling_str = fmt_int(ceiling)
     candidates_str = fmt_int(candidates)
     candidate_tokens_str = fmt_int(candidate_tokens)
-    rounds_str = fmt_int(rounds)
+    turns_str = fmt_int(turns)
     report_str = fmt_int(report)
     check_time_str = fmt_time(check_time, unit="s", precision=1)
     price_in_str = fmt_usd(price_in * 1_000_000, precision=0)
@@ -291,7 +291,7 @@ class AllocationAxes:
 
 **Problem**: A repair request starts with `{python} AllocationAxes.prompt_str` input tokens and a common ceiling of `{python} AllocationAxes.ceiling_str` generated tokens. How do depth, breadth, and feedback spend that allowance?
 
-**Variables**: Reuse the illustrative per-token allowance from the preceding example. Breadth has capacity for `{python} AllocationAxes.candidates_str` concurrent streams at that same rate. Each short candidate uses `{python} AllocationAxes.candidate_tokens_str` generated tokens. Feedback uses `{python} AllocationAxes.rounds_str` rounds, each followed by a `{python} AllocationAxes.check_time_str` check returning `{python} AllocationAxes.report_str` tokens. Later feedback requests append earlier candidates and reports. Hypothetical prices are `{python} AllocationAxes.price_in_str` per million input tokens and `{python} AllocationAxes.price_out_str` per million output tokens, without cache discounts. Generation allowances omit prefill, queueing, and transport; the feedback allowance additionally includes its checks. The bill counts model tokens only, and @tbl-vol3-allocation-tradeoffs tallies each allocation's tokens, time, and bill side by side.
+**Variables**: Reuse the illustrative per-token allowance from the preceding example. Breadth has capacity for `{python} AllocationAxes.candidates_str` concurrent streams at that same rate. Each short candidate uses `{python} AllocationAxes.candidate_tokens_str` generated tokens. Feedback uses `{python} AllocationAxes.turns_str` turns, each followed by a `{python} AllocationAxes.check_time_str` check returning `{python} AllocationAxes.report_str` tokens. Later feedback requests append earlier candidates and reports. Hypothetical prices are `{python} AllocationAxes.price_in_str` per million input tokens and `{python} AllocationAxes.price_out_str` per million output tokens, without cache discounts. Generation allowances omit prefill, queueing, and transport; the feedback allowance additionally includes its checks. The bill counts model tokens only, and @tbl-vol3-allocation-tradeoffs tallies each allocation's tokens, time, and bill side by side.
 
 | Allocation |                                 Input tokens |                                 Output tokens |              Generation and included checks |                            Model-token bill |
 |:-----------|---------------------------------------------:|----------------------------------------------:|--------------------------------------------:|--------------------------------------------:|
@@ -300,7 +300,7 @@ class AllocationAxes:
 | Feedback   | `{python} AllocationAxes.feedback_input_str` | `{python} AllocationAxes.feedback_output_str` | `{python} AllocationAxes.feedback_time_str` | `{python} AllocationAxes.feedback_cost_str` |
 : **Allocation accounting under a common output ceiling**: Equal ceilings produce unequal spend. Allowances omit prefill, queueing, selection, and tool charges. {#tbl-vol3-allocation-tradeoffs}
 
-**Math**: In @tbl-vol3-allocation-tradeoffs, depth generates all `{python} AllocationAxes.ceiling_str` tokens along a single path. Breadth generates `{python} AllocationAxes.candidate_tokens_str` tokens on each of `{python} AllocationAxes.candidates_str` concurrent paths, shortening the critical path by `{python} AllocationAxes.path_mult_str`. However, reading the prompt `{python} AllocationAxes.candidates_str` times across unshared streams adds `{python} AllocationAxes.breadth_premium_str` input tokens, multiplying its billing cost to `{python} AllocationAxes.bill_mult_str` that of depth. Feedback accumulates input context over $R$ rounds according to $R\,S_{\text{base}} + (K + \lvert o\rvert)\,R(R-1)/2$, reaching `{python} AllocationAxes.feedback_input_str` tokens at $R =$ `{python} AllocationAxes.rounds_str` because each successive round re-reads all prior candidates and observation reports.
+**Math**: In @tbl-vol3-allocation-tradeoffs, depth generates all `{python} AllocationAxes.ceiling_str` tokens along a single path. Breadth generates `{python} AllocationAxes.candidate_tokens_str` tokens on each of `{python} AllocationAxes.candidates_str` concurrent paths, shortening the critical path by `{python} AllocationAxes.path_mult_str`. However, reading the prompt `{python} AllocationAxes.candidates_str` times across unshared streams adds `{python} AllocationAxes.breadth_premium_str` input tokens, multiplying its billing cost to `{python} AllocationAxes.bill_mult_str` that of depth. Feedback accumulates input context over $H$ turns according to $H\,S_{\text{base}} + (K + \lvert o\rvert)\,H(H-1)/2$, reaching `{python} AllocationAxes.feedback_input_str` tokens at $H =$ `{python} AllocationAxes.turns_str` because each successive round re-reads all prior candidates and observation reports.
 
 **Systems insight**: Breadth trades monetary cost for reduced wall-clock latency, where the entire billing premium stems from the $(N-1)S$ re-read prompt tokens. The key governing lever is the ratio of prompt length to generated output: a large repository context makes breadth's financial overhead scale aggressively with both $N$ and $S$, whereas a short prompt or a shared prefix cache (@sec-vol3-kvcache-radix-tree) eliminates most of this penalty. Feedback achieves an intermediate balance between latency and billing cost while remaining the only topology capable of acquiring empirical ground truth. Because this resource accounting excludes solution success rates, it models infrastructural cost rather than output quality.
 
@@ -776,7 +776,7 @@ Empirical evaluations of best-of-$N$ sampling against learned reward models vali
 ![](images/svg/goodhart_divergence.svg)
 :::
 
-Verifier blind spots compound across large candidate pools following the same binomial dynamics as the pass@$k$ metric. If an unmodeled edge case or exploit is present in a fraction $q_{\text{exp}}$ of proposals, a batch of $N$ candidates contains at least one exploiting solution with probability $1-(1-q_{\text{exp}})^N$. A vulnerability that appears in only `{python} ArgmaxSelection.gap_rate_str` of baseline candidates—practically invisible during single-shot testing—emerges in a batch of `{python} ArgmaxSelection.n_large_str` candidates with probability `{python} ArgmaxSelection.gap_present_str`. When an invalid candidate achieves a passing score by slipping through such a blind spot, competitive selection readily identifies and crowns it. Verifier accuracy measured on unselected baseline distributions systematically overstates verification reliability during search, and this divergence widens with candidate breadth.
+Verifier blind spots compound across large candidate pools following the same binomial dynamics as the pass@$k$ metric. If an unmodeled edge case or exploit is present in a fraction $p_{\text{exp}}$ of proposals, a batch of $N$ candidates contains at least one exploiting solution with probability $1-(1-p_{\text{exp}})^N$. A vulnerability that appears in only `{python} ArgmaxSelection.gap_rate_str` of baseline candidates—practically invisible during single-shot testing—emerges in a batch of `{python} ArgmaxSelection.n_large_str` candidates with probability `{python} ArgmaxSelection.gap_present_str`. When an invalid candidate achieves a passing score by slipping through such a blind spot, competitive selection readily identifies and crowns it. Verifier accuracy measured on unselected baseline distributions systematically overstates verification reliability during search, and this divergence widens with candidate breadth.
 
 In the connection-pool scenario, consider an agent attempting to fix a broken notification path. The test suite pass rate can increase because a patch fixes the missing wake-up signal, or because the patch deletes the unit test assertion that detects blocked worker threads. Both alterations improve the raw score, but only the first resolves the underlying defect. The candidate under evaluation must therefore remain strictly isolated from the verification criteria, preventing generated code from tampering with authoritative test definitions or synthesizing fabricated pass signals. When candidate code executes within the same process address space as the evaluation harness, it can monkey-patch runtime assertion routines—the most acute form of adversarial Goodhart (@sec-vol3-rlvr-rewards analyzes how reinforcement learning amplifies these evasion strategies). While formal isolation mechanisms and security boundaries are established in @sec-vol3-sandboxes, the systems allocation principle remains straightforward: verification cycles generate value only while the resulting evaluation evidence remains trustworthy and uncorrupted.
 
@@ -1325,7 +1325,7 @@ class StrategyComparison:
     output_str = fmt_int(output)
     diagnostic_str = fmt_int(diagnostic)
     breadth_str = fmt_int(breadth)
-    rounds_str = fmt_int(rounds)
+    turns_str = fmt_int(turns)
     max_rounds_str = fmt_int(max_rounds)
     input_ceiling_str = fmt_int(input_ceiling)
     output_ceiling_str = fmt_int(output_ceiling)
@@ -1426,12 +1426,12 @@ Test-time compute transforms the cost of a decision into an explicit architectur
 | **Equation**                                                                                                                                                                                           | **What it bounds or decides**                                                                                 | **Where derived**                     |
 |:-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|:--------------------------------------------------------------------------------------------------------------|:--------------------------------------|
 | $T^{\text{depth}} \approx T_{\text{prefill}}(S) + K_{\text{ext}}\,t_{\text{decode}}$, $\; T^{\text{breadth}} \approx T_{\text{prefill}}(S) + \max_{n} T_{\text{decode}}(K_n)$                          | Critical path of extending one candidate vs. sampling $N$ concurrently, given capacity for all $N$ streams    | @eq-vol3-allocation-critical-path     |
-| $T^{\text{feedback}} \approx \sum_{r=1}^{R}\bigl(T_{\text{prefill}}(S^{(r)}) + T_{\text{decode}}(K_r) + t_{\text{check},r}\bigr)$, $\; S^{(r)} = S_{\text{base}} + \sum_{j<r}(K_j + \lvert o_j\rvert)$ | Latency and input growth of observation-conditioned revision under an append-only context                     | @eq-vol3-allocation-critical-path     |
-| $\operatorname{pass@}k = 1-(1-p)^k$, $\; \widehat{\operatorname{pass@}k} = 1-\binom{n-c}{k}/\binom{n}{k}$                                                                                          | Candidate availability for one task, and the ceiling on any selector that returns an unchanged pool member    | @sec-vol3-test-time-compute-pass-at-k |
+| $T^{\text{feedback}} \approx \sum_{t=1}^{H}\bigl(T_{\text{prefill}}(S^{(t)}) + T_{\text{decode}}(K_t) + t_{\text{check},t}\bigr)$, $\; S^{(t)} = S_{\text{base}} + \sum_{j<t}(K_j + \lvert o_j\rvert)$ | Latency and input growth of observation-conditioned revision under an append-only context                     | @eq-vol3-allocation-critical-path     |
+| $\operatorname{pass@}k = 1-(1-p)^k$, $\; \widehat{\operatorname{pass@}k} = 1-\binom{n-c}{k}/\binom{n}{k}$                                                                                              | Candidate availability for one task, and the ceiling on any selector that returns an unchanged pool member    | @sec-vol3-test-time-compute-pass-at-k |
 | $C_{\text{eff}} = \mathbb{E}[C_{\text{attempt}}]/p_{\text{acc}}$                                                                                                                                       | Whether added deliberation raises $p_{\text{acc}}$ faster than it raises the attempt cost                     | @eq-vol3-cost-per-accepted-task       |
-| $\Pi_V = p(1-\epsilon_{\text{FR}}) / [p(1-\epsilon_{\text{FR}}) + (1-p)\,\epsilon_{\text{FA}}]$                                                                                          | Share of passing candidates that are valid; unchanged by pool size at fixed rates                             | @eq-vol3-verifier-precision           |
+| $\Pi_V = p(1-\epsilon_{\text{FR}}) / [p(1-\epsilon_{\text{FR}}) + (1-p)\,\epsilon_{\text{FA}}]$                                                                                                        | Share of passing candidates that are valid; unchanged by pool size at fixed rates                             | @eq-vol3-verifier-precision           |
 | $\sum_{j=1}^{J}(S + j\,\Delta S_{\text{step}}) = JS + \tfrac{J(J+1)}{2}\,\Delta S_{\text{step}}$                                                                                                       | Scorer input for step-level checks that rescore each growing prefix without reuse                             | @eq-vol3-prm-rescoring                |
-| $\mathbb{E}\bigl[\max_{i \le N} \epsilon_i\bigr] \approx \sigma\sqrt{2\ln N}$, $\; 1-(1-q_{\text{exp}})^N$                                                                                             | Score inflation that argmax selection concentrates in the winner, and the chance a pool holds a check exploit | @eq-vol3-argmax-noise                 |
+| $\mathbb{E}\bigl[\max_{i \le N} \epsilon_i\bigr] \approx \sigma\sqrt{2\ln N}$, $\; 1-(1-p_{\text{exp}})^N$                                                                                             | Score inflation that argmax selection concentrates in the winner, and the chance a pool holds a check exploit | @eq-vol3-argmax-noise                 |
 | $Q(s,a) + c_{\text{explore}}\,p(a \mid s)\,\sqrt{\textstyle\sum_{a'} N(s,a')}\,/\,\bigl(1 + N(s,a)\bigr)$                                                                                              | Which extension of a partial candidate receives the next unit of tree search                                  | @eq-vol3-puct                         |
 | $b_{\text{eff}} = b\,(1 - p_{\text{prune}})$, $\; \sum_{d=1}^{D} b\,b_{\text{eff}}^{\,d-1}$                                                                                                            | Whether pruning keeps a search tree finite, and the expected nodes it generates through depth $D$             | @eq-vol3-effective-branching          |
 | $(\hat p_m - \hat p_{m-1})/(C_m - C_{m-1}) < \epsilon_{\text{stop}}$                                                                                                                                   | Early stop within the hard ceilings and after satisficing, when the next unit of work is not worth its cost   | @eq-vol3-marginal-stopping            |
@@ -1529,7 +1529,7 @@ Unless a problem states otherwise, use the hypothetical givens in @tbl-vol3-test
 
 (a) Using the exact values in place of @eq-vol3-argmax-noise, bound the winner's expected scoring error at each $N$.
 (b) Show that when selection is on $\hat U$, the winner's expected quality gain over $\mu$ is $(\sigma_U^2/s)\,m_N$ and its expected error is $(\sigma^2/s)\,m_N$, where $s = \sqrt{\sigma_U^2 + \sigma^2}$ and $m_N$ is the expected standard-normal maximum. Evaluate both at the three pool sizes, and compare quality gained per dollar in moving from 4 to 16 and from 16 to 64 candidates.
-(c) A fraction $q_{\text{exp}} = 0.002$ of summaries cite a retrieved page whose planted text the judge rewards but which does not support the claim. Compute the probability that a pool of 4, 16, and 64 contains at least one such summary, and explain why selection then tends to return it.
+(c) A fraction $p_{\text{exp}} = 0.002$ of summaries cite a retrieved page whose planted text the judge rewards but which does not support the claim. Compute the probability that a pool of 4, 16, and 64 contains at least one such summary, and explain why selection then tends to return it.
 (d) Redesign the selection policy. Choose a pool size and a check the planted page cannot influence, and state what evidence the returned summary must carry. How does the binding constraint here differ from the repair agent's?
 
 **9. Stopping before an irreversible change (Advanced).** The remediation agent (lighthouse \ref{lhs-vol3-remediation-agent}) generates candidate configuration changes in rounds, each costing \$0.20 in generation and a staging check. Calibrated on held-out incidents, the estimated probability of a staging-accepted candidate after $m$ rounds is $\hat p_m$ = 0.40, 0.58, 0.68, 0.74, 0.77, 0.79 for $m$ = 1 to 6, with $\hat p_0 = 0$, and the hard ceiling is six rounds.
