@@ -1,214 +1,125 @@
-# Master Course Syllabus: Physical AI Systems Studio
+# Physical AI Systems: Course Syllabus
 
-**Course Title:** Physical AI Systems: Machine Learning Systems That Sense and Act
-**Course Code:** MLSYS-401 / ETH-PAI / SEAS-CS249r
-**Term:** 14-Week Laboratory Seminar & Project Studio
-**Instructors:** Prof. Vijay Janapa Reddi (Harvard University) & Dr. Andrea (ETH Zurich / Lab Director)
-**Primary Textbook:** [MLSysBook Volume IV: Physical AI Systems](https://mlsysbook.ai/vol4/)
-**Studio Repository:** [github.com/harvard-edge/MLSysBook-vol4-labs](https://github.com/harvard-edge/MLSysBook-vol4-labs)
-
----
-
-## 1. Course Overview & The Core Premise
-
-> **"Physical AI begins where computation stops being symbolic and becomes physical force."**
-
-In traditional digital AI, an algorithm processes tokens or pixels. Mistakes are harmless, symbolic, and easily undone with a software reset. In **Physical AI**, an algorithm commands real electrical currents to actuators possessing mass, velocity, inertia, and momentum. If the model makes a mistake, physical things collide, tear, or break. **You cannot `Ctrl+Z` physics.**
-
-This course teaches how to build, deploy, evaluate, and govern an embodied machine. Students learn to take high-capacity neural policies (Vision-Language-Action models like **Hugging Face SmolVLA and ACT**), deploy them onto an edge processor (**Arduino UNO Q Qualcomm Linux MPU**), and safely delegate physical actuation authority to a 6-DoF robotic arm (**Seeed Studio SO-101**) within an independent, deterministic microcontroller safety governor (**STM32U585 MCU**).
+**Course:** Physical AI Systems: Machine Learning Systems That Sense and Act\
+**Course numbers:** Harvard CS/EE 288 · ETH Zurich 151-0851 (to confirm)\
+**Instructor:** Prof. Vijay Janapa Reddi\
+**Teaching assistant:** Dr. Andrea Mattia Garavagno\
+**Textbook:** [*Physical AI: Machine Learning Systems That Sense and Act*](https://mlsysbook.ai/vol4/) (MLSysBook Volume IV)\
+**Status:** Draft. Dates, rooms, and policies marked `TBD` are set before the term.
 
 ---
 
-## 2. Hardware & Software Components
+## 1. Course Description
 
-Each bench station provides an integrated physical and computational workstation:
-
-### The Hardware Platform
-
-| Component | Role in Lab Bench Station | Technical Specification | Visual Reference |
-|:---|:---|:---|:---:|
-| **Arduino UNO Q ("Unikue")** | Dual-silicon brain: Linux MPU + Real-time MCU | Qualcomm QRB2210 (Debian Linux) + STM32U585 MCU, inter-core RPC, hardware watchdog | <img src="../assets/images/arduino-uno-q.jpg" alt="Arduino UNO Q Board" style="max-height: 115px; max-width: 140px; object-fit: contain; display: block; margin: auto;" /> |
-| **Seeed Studio SO-101 Arm** | 6-DoF physical robot manipulator | 6 revolute joints, 3D-printed rigid structure, calibrated workspace boundary | <img src="../assets/images/so101-follower.png" alt="Seeed Studio SO-101 Arm" style="max-height: 115px; max-width: 140px; object-fit: contain; display: block; margin: auto;" /> |
-| **Feetech STS3215 Smart Servos** | Daisy-chained serial bus actuators | 12-bit magnetic encoder ($0.088^\circ$), 19 kg·cm stall torque @ 7.4V, 1 Mbps TTL UART | <img src="../assets/images/feetech-sts3215-servo.jpg" alt="Feetech STS3215 Servo" style="max-height: 115px; max-width: 140px; object-fit: contain; display: block; margin: auto;" /> |
-| **Dual Power Infrastructure** | Decoupled logic and motor power rails | 45W USB-C PD (Logic) + Dedicated 7.4V/5A DC (Servos) with common star ground | <img src="../assets/images/feetech-sts3215-bus-ports.jpg" alt="Dual Daisy-Chain Bus Ports" style="max-height: 115px; max-width: 140px; object-fit: contain; display: block; margin: auto;" /> |
-
-1. **The Dual-Brain Compute Board (Arduino UNO Q "Unikue"):**
-   * *Qualcomm Dragonwing QRB2210 MPU:* Quad-core 64-bit ARM Cortex-A53 running Debian Linux. Ingests USB video frames, runs quantized ONNX policy inference, and packages action chunk proposals ($a_{\text{req}}$).
-   * *STM32U585 Real-Time Microcontroller (MCU):* Dedicated ARM Cortex-M33 running bare-metal/RTOS firmware. Mediates the half-duplex TTL motor bus, enforces hard real-time safety limits ($a_{\text{enf}}$), and manages watchdog timers.
-   * *Inter-Core Bridge:* High-speed internal RPC communication port connecting Linux to the MCU with sub-millisecond latency.
-2. **The Robot Body (Seeed Studio SO-101 6-DoF Follower Arm):**
-   * 6× Feetech STS3215 serial bus smart servos in a daisy-chained TTL half-duplex configuration at 1 Mbps.
-   * Bidirectional telemetry reporting measured joint angles ($q$), angular velocity ($\dot{q}$), motor temperature, and mechanical load/torque.
-3. **The Visual Sensor:**
-   * Standard 720p/1080p UVC USB webcam mounted on a rigid overhead/oblique clamp observing the workspace.
-4. **Electrical & Safety Infrastructure:**
-   * Regulated 7.4V/5A DC motor power supply separate from logic power (45W USB-C PD).
-   * Switched motor power toggle sharing a common star ground with the Arduino UNO Q.
-
-### The Software Spine
-1. **Hugging Face LeRobot:** Open-source robot learning framework handling teleoperation capture, data formatting, and deployment loops.
-2. **LeRobot Dataset v3 Format:** Standardized Parquet + MP4 multi-modal episode storage logging all four action taps (`a_req`, `a_map`, `a_enf`, `a_meas`).
-3. **Target Neural Policy Architectures:**
-   * *SmolVLA:* Compact Vision-Language-Action policy conditioned on camera pixels, joint states, and natural language prompts.
-   * *ACT (Action Chunking with Transformers):* Multi-step joint trajectory prediction policy.
-4. **Edge Runtime:** ONNX Runtime / INT8 quantization optimized for Qualcomm ARM Cortex-A53 execution providers.
-
-![Arduino UNO Q Dual-Silicon Architecture and Safety Boundary](../assets/images/vol4-uno-q-dual-core-architecture.svg)
+When a chatbot makes a mistake, you retype the prompt. When a robot makes a mistake, something collides or breaks. This course teaches how to build, deploy, evaluate, and govern a machine that senses and acts. Teams take a Vision-Language-Action policy (SmolVLA or ACT), run it on the Qualcomm Linux side of an **Arduino UNO Q**, and give the right to move a **Seeed SO-101** arm to an independent **STM32** safety governor. Over fourteen weeks you go from deriving the arm's kinematics by hand to defending, with your own measurements, whether your system is safe to release.
 
 ---
 
-## 3. Pedagogy & Studio Philosophy
+## 2. Course at a Glance
 
-1. **The Dual-Brain Architecture as Core Systems Pedagogy:** Physical AI cannot be solved by a single monolithic computing environment. High-capacity foundation policies demand a complex, probabilistic Linux application environment (Brain 1: Qualcomm QRB2210 MPU), while mechanical actuators demand hard real-time determinism, microsecond bus control, and physical safety guarantees (Brain 2: STM32U585 MCU). Students learn to construct, benchmark, and defend this fundamental architectural boundary across every lab.
-
-![The Dual-Brain Architecture of Physical AI: Asymmetric Cognition vs. Deterministic Governance](../assets/images/vol4-dual-brain-architecture.svg)
-
-2. **Bench-First Studio Learning:** There are no passive lecture halls. Conceptual systems principles are grounded immediately in physical experiments at the bench.
-3. **The S·P·A Causal Feedback Loop:** Every physical episode connects:
-   $$\text{Sense (Camera/Telemetry)} \longrightarrow \text{Propose (Linux VLA)} \longrightarrow \text{Permit (STM32 MCU)} \longrightarrow \text{Act (SO-101 Servos)}$$
-
-![The Physical AI Sense-Propose-Permit-Act Loop](../assets/images/vol4-physical-ai-loop.svg)
-
-4. **The Three-Part Scope Test:** A lab submission is rejected if it merely runs a classifier on a screen or wires a model to an unmonitored hardcoded script. Action must be learned, consequential, and permitted by an independent safety boundary.
-5. **Adversarial Verification:** You do not prove a physical AI system works by recording a cherry-picked 5-second video. You prove it by allowing instructors and peer teams to introduce physical disturbances (lighting drops, target displacements, obstacle obstacles) and measuring whether the system recovers or safely abstains.
+| | |
+|:---|:---|
+| **Format** | Two meetings a week: a 90-minute systems seminar and a 3-hour supervised lab. Six labs, then a three-week capstone. No written exam. |
+| **Length** | 14 teaching weeks |
+| **Prerequisites** | Programming in Python and C, basic linear algebra and probability, introductory machine learning, and first-year Newtonian physics. Operating systems or control experience helps but is not required. |
+| **Teams** | Two or three students per bench station, with rotating roles |
+| **Hardware** | One station per team: Arduino UNO Q, SO-101 arm, overhead camera, and separate motor power. See the [Station Reference Card](../labs/station-reference.md). |
+| **Workload** | Seminar and lab each week, plus reading, analysis, and booked bench time. Credits: TBD |
+| **Schedule** | Seminar early in the week (Monday or Tuesday), lab later in the week (Thursday or Friday). Times and rooms: TBD |
 
 ---
 
-## 4. Learning Objectives (The 12 Transferable Competencies)
+## 3. Learning Outcomes
 
-Students are evaluated against the [Physical AI Station Competency Card](student-competencies.md) across four balanced quadrants (**3 competencies per quadrant = 12 total**):
+By the end of the course, you will be able to:
 
-### Quadrant A: Measure the Plant (Physical × Characterize)
-* **A1 — Plant Mechanics, Load & Safe Envelope:** Quantify kinematic degrees of freedom, mechanical travel limits, actuator load/torque saturation, power distribution, homing calibration, and de-energized safe rest state under power loss.
-* **A2 — Multi-Modal Sensing, Calibration & Contact:** Calibrate multi-modal feedback streams ($T_{\text{cam}}^{\text{base}}$ and joint telemetry $q$); quantify measurement noise, mechanical backlash, contact detection, and sensor dropout failure modes.
-* **A3 — Feedback Timing, Synchronization & Latency:** Establish synchronized timestamping across perception and actuation; measure physical sensor-to-torque loop latency; identify and reject stale physical feedback.
+1. Draw a complete path from sensing to actuation and say which component proposes, which permits, and which executes each physical action.
+2. Calibrate sensors, measure actuator limits, safe states, and end-to-end latency, and set an operating envelope from those measurements.
+3. Compare a simulation with the real hardware and explain where and why they disagree.
+4. Collect and audit robot demonstrations, train and deploy a learned policy on edge hardware, and compare it with a nonlearned baseline.
+5. Distinguish offline model metrics from physical task outcomes, including recovery, abstention, and incomplete motion.
+6. Build and attack a real-time safety governor, and defend a bounded release or no-release decision with your own evidence.
 
-### Quadrant B: Characterize the Brain (Computing × Characterize)
-* **B1 — Physical Dataset Engineering & Multi-Tap Logging:** Capture repeatable physical demonstration episodes with synchronized multi-modal streams; continuously record the four action taps ($a_{\text{req}}, a_{\text{map}}, a_{\text{enf}}, a_{\text{meas}}$); construct leak-free train/val/test splits.
-* **B2 — Deterministic Baseline Benchmarking:** Implement an unlearned, deterministic controller (rule-based or scripted) to establish the objective boundary where classical methods fail and learned approaches become necessary.
-* **B3 — Edge Model Profiling & Resource Budgets:** Train and compress a learned policy (SmolVLA or ACT); quantize/export for edge execution; profile memory footprint and inference latency against real-time control deadlines on Qualcomm Linux.
+The twelve competencies on the [Competency Card](student-competencies.md) break these outcomes into skills that staff sign off at the bench.
 
-### Quadrant C: Act in the World (Physical × Control)
-* **C1 — Closed-Loop Autonomous Action:** Close the autonomous loop on physical hardware; deploy learned policy proposals to drive actuators, producing verified, consequential state changes in the physical workspace without host intervention.
-* **C2 — Temporal Horizons & Action Dynamics:** Characterize the trade-off between multi-step trajectory/chunk horizons ($K$) and single-step reactive control; quantify open-loop drift, tracking error accumulation, and re-observation frequency.
-* **C3 — Disturbance Detection, Adaptation & Abstention:** Detect physical discrepancies (e.g., target displacement, slip, partial obstruction) through fresh sensory observations; demonstrate that the learned policy alters its plan to adapt, recover, or safely abstain.
-
-### Quadrant D: Govern the System (Computing × Control)
-* **D1 — Hardware Authority Routing & Boundary Enforcement:** Enforce an asymmetric architecture where neural proposals flow exclusively through an independent real-time microcontroller permission boundary ($a_{\text{req}} \to a_{\text{map}} \to a_{\text{enf}}$); mathematically and physically prove zero unmonitored host bypass.
-* **D2 — Real-Time Safety Governor & Fault Isolation:** Implement hard real-time velocity clamps, acceleration limits, collision geofences, communication watchdogs, and motor power cutoffs; demonstrate safe state transition under injected faults with zero command backlog.
-* **D3 — Physical Release Defense & Evidence Dossier:** Conduct a statistically frozen 20-trial physical evaluation across held-out starting poses and adversarial disturbances; evaluate failure modes against the baseline; defend a formal Physical Release Dossier.
+**Before week 1.** Read the Volume IV [reader guide and prerequisites](../../../books/vol4/frontmatter/prerequisites.qmd) and [Chapter 1](../../../books/vol4/01_boundary/01_boundary.qmd). If you want a refresher, the book's appendices cover [machine learning](../../../books/vol4/backmatter/appendix_ml.qmd), [systems](../../../books/vol4/backmatter/appendix_systems.qmd), and [control](../../../books/vol4/backmatter/appendix_control.qmd); you do not need to master them before the course begins.
 
 ---
 
-## 5. Assessment, Milestones & Grading Scheme {#sec-milestones}
+## 4. How a Week Works
 
-Physical engineering cannot be judged by paper exams. Grades are earned through witnessed bench demonstrations, milestone packets, and the Capstone oral defense:
+The week has a fixed rhythm: **read the chapter, discuss it in seminar, then put it to work in lab.**
 
-| Milestone | Schedule | Weight | Deliverable & Witnessed Physical Evidence | Target Competencies |
+**Seminar (early in the week, about 90 minutes).** Come having read the week's chapter. The instructor frames one physical AI question from the week's reading. A rotating team then presents one raw trace or failed prediction from its own station, and the class challenges it: what does this trace prove, and what other explanation is left? The seminar ends with the experiment each team will run in lab.
+
+**Lab (later in the week, about 3 hours).** The teaching assistant opens with the station briefing: safe state, motion limits, and the week's common measurement. Teams then work through that week's **lab part**. Every part ends with a **checkpoint**, an artifact staff look at before the team moves on.
+
+**Before and after.** Before each lab, write down what you predict will happen. After it, add a short entry to your team's shared notebook: the raw trace, what you measured, how it differed from your prediction, and what you will try next. The notebook is checked at the bench and feeds your lab deliverables; there are no separate weekly lab reports.
+
+---
+
+## 5. Schedule
+
+Read the week's chapter before the seminar: the chapter gives the principles, the seminar tests them, and the lab puts them to work on the bench. Readings follow the book in order, so a chapter sometimes prepares a lab a week or two ahead. The [lab template](../LAB_TEMPLATE.md) explains how each lab is organized.
+
+| Week | Reading | Lab part | Due |
+|:---:|:---|:---|:---|
+| 1 | [Ch 1: The Causal Boundary](../../../books/vol4/01_boundary/01_boundary.qmd) | [**Getting Started**](../labs/week-01-getting-started.md) |  |
+| 2 | [Ch 2: The Physical Body](../../../books/vol4/02_body/02_body.qmd) | [**1A** Measure the body](../labs/lab-01-digital-twin.md) |  |
+| 3 | [Ch 3: The Cognitive Brain](../../../books/vol4/03_brain/03_brain.qmd) | [**1B** Build the digital twin](../labs/lab-01-digital-twin.md) |  |
+| 4 | [Ch 4: The Nervous System](../../../books/vol4/04_nervous/04_nervous.qmd) | [**2A** IK on the real arm](../labs/lab-02-sim-to-real.md) | **Lab 2** |
+| 5 | [Ch 5: Physical Data](../../../books/vol4/05_data/05_data.qmd) | [**3A** VLAs in simulation](../labs/lab-03-learned-control.md) |  |
+| 6 | [Ch 6: Policy Training](../../../books/vol4/06_training/06_training.qmd); read ahead: calibration in Ch 8 | [**3B** The VLA on real hardware](../labs/lab-03-learned-control.md) |  |
+| 7 | [Ch 7: Closed-Loop Evaluation](../../../books/vol4/07_evaluation/07_evaluation.qmd) | [**4A** Real demonstrations](../labs/lab-04-real-data-and-fine-tuning.md) |  |
+| 8 | [Ch 8: Sensor Perception](../../../books/vol4/08_perception/08_perception.qmd), [Ch 9: Spatial Memory](../../../books/vol4/09_memory/09_memory.qmd) | [**4B** Fine-tuned & untethered](../labs/lab-04-real-data-and-fine-tuning.md) | **Lab 4**, capstone proposal |
+| 9 | [Ch 10: Grounded Intent](../../../books/vol4/10_intent/10_intent.qmd), [Ch 11: Trajectory Planning](../../../books/vol4/11_planning/11_planning.qmd) | [**5A** Stress the loop](../labs/lab-05-stress-testing.md) | **Lab 5** |
+| 10 | [Ch 12: Safety Enforcement](../../../books/vol4/12_enforcement/12_enforcement.qmd), [Ch 13: Silicon Placement](../../../books/vol4/13_placement/13_placement.qmd) | [**6A** Build the governor](../labs/lab-06-safety-governor.md) | Capstone task frozen |
+| 11 | [Ch 14: Supervisory Intervention](../../../books/vol4/14_intervention/14_intervention.qmd), [Ch 15: Adversarial Verification](../../../books/vol4/15_verification/15_verification.qmd) | [**6B** Break the governor](../labs/lab-06-safety-governor.md) | **Lab 6** |
+| 12 | [Ch 16: Safe Release](../../../books/vol4/16_release/16_release.qmd) | [**C1** Capstone task build](../labs/lab-capstone-studio.md) |  |
+| 13 | Ch 16, continued | [**C2** Peer fault exchange](../labs/lab-capstone-studio.md) |  |
+| 14 | [Ch 17: The Epistemic Frontier](../../../books/vol4/17_frontier/17_frontier.qmd) | [**C3** Final trials and defense](../labs/lab-capstone-studio.md) | **Capstone** |
+
+---
+
+## 6. The Capstone
+
+Every team ends the course by defending a release decision for a system it built. You propose a task of your own at the end of week 8, once your autonomous loop works, and freeze it at the end of week 10. Weeks 12–14 are bench time: build the task, survive a peer team's attacks, then run final trials and defend your **Physical Release Dossier** in an individual oral exam. A team that shows, with rigorous evidence, that its system should *not* be released can earn full marks. Details are in the [capstone](../labs/lab-capstone-studio.md).
+
+---
+
+## 7. Assessment, Milestones, and Grading
+
+Grades are earned through witnessed bench demonstrations, lab deliverables, and the capstone defense. Labs 1–2 and Labs 3–4 are graded together because each pair builds one working system.
+
+| Graded work | Due | Weight | Witnessed Evidence | Competencies |
 |:---|:---:|:---:|:---|:---:|
-| **Milestone 1: Station Charter & Envelope** | End of Week 3 | **15%** | Measured joint envelope, zero-calibration, power-off drop trace, camera extrinsics, and proof of single live MCU path (zero host USB bypass). | A1, A2, A3, D1 |
-| **Milestone 2: Edge-Ready Policy** | End of Week 6 | **25%** | 30-episode LeRobot dataset (4 action taps logged), scripted baseline benchmark, and quantized ONNX policy running <100ms on Qualcomm Linux. | B1, B2, B3 |
-| **Milestone 3: Autonomous Closed-Loop Reach** | End of Week 9 | **20%** | Live visual reach completed autonomously on hardware, chunk horizon benchmark ($K=1$ vs $16$), and successful recovery from target displacement. | C1, C2, C3 |
-| **Milestone 4: Certified Governed Station** | End of Week 11 | **15%** | Injected fault trial: MCU refuses velocity breaches, communication watchdog halts arm upon Linux freeze with zero backlog. | D1, D2 |
-| **Milestone 5: Capstone Release & Defense** | End of Week 14 | **25%** | 20 live held-out physical disturbance trials, baseline comparison, oral defense, and formal **Physical Release Dossier**. | Full 12-Card Mastery (D3) |
+| **Labs 1–2:** Station & envelope | End of Weeks 3 and 4 | **15%** | Getting Started and Labs 1–2. Safe-state check, the body's measured limits, a digital twin driven by your own kinematics, and the sim-vs-real gap measured with your own IK on the real arm. | A1, A3 |
+| **Labs 3–4:** Learned policy on the edge | End of Weeks 6 and 8 | **25%** | Labs 3–4. Camera calibration, a sim-trained VLA deployed with a measured sim2real gap, a real LeRobot dataset with all four action taps, and a fine-tuned policy running untethered on the UNO Q. | A2, B1, B2, B3, C1 |
+| **Lab 5:** Stress-tested loop | End of Week 9 | **10%** | Lab 5. Chunk-horizon benchmark, live recovery from a displaced target, and a language check. | C2, C3 |
+| **Lab 6:** Your own governor | End of Week 11 | **25%** | Lab 6. Your own governor clamps or vetoes unsafe proposals, the watchdog halts the arm when Linux freezes, and no stale command runs on resume. | D1, D2 |
+| **Capstone:** Release & defense | End of Week 14 | **25%** | Capstone. Proposal and frozen task, then live held-out trials under disturbance, baseline comparison, oral defense, and the Physical Release Dossier. | D3 (full card) |
+
+**Three grading principles.**
+- **Evidence over polish.** A good model metric cannot make up for a bypassed safety path or unexplained motion. Staff may require a repair and a repeated trial before a team moves on.
+- **Honest failure counts.** A well-measured negative result, explained, earns more credit than an unmeasured success.
+- **Individual accountability.** Teams submit one system, but each student explains their own measurements and a randomly selected trace at the final defense.
+
+The notebook, seminar participation, and the week-13 rehearsal receive feedback but are not graded separately.
 
 ---
 
-## 6. Team Station Dynamics (Rotating Roles)
+## 8. Course Policies
 
-Students work in teams of 2 or 3 per bench station. To ensure individual accountability and comprehensive skill mastery, roles rotate on a weekly basis:
+**Collaboration.** Collaboration is encouraged. Bench hardware is limited, so all lab work is done in teams; discussing ideas across teams is welcome. Each student must still be able to explain their own team's work at the final defense.
 
-1. **The Operator:**
-   * Controls hardware power, physical target positioning, teleoperation input devices, and oversees bench motor power cutoffs.
-   * Responsible for mechanical calibration, homing checks, and fixture safety.
-2. **The Systems Lead:**
-   * Operates the Qualcomm Linux terminal, executes LeRobot scripts, manages ONNX model quantization, and monitors inter-core RPC bridge logs.
-   * Responsible for runtime latency profiling and software version control.
-3. **The Evidence Reviewer / Auditor:**
-   * Logs run IDs, verifies timestamp synchronization, records the 4 action taps, captures error plots, and maintains the team's physical lab notebook.
-   * Tracks weekly sign-offs on the team's **Competency Card**.
+**Use of AI tools.** AI tools are allowed. Say which tools you used and how, in your notebook or with the deliverable. There is no penalty for using them; the point is that you learn, and you will be asked to explain your work without them at the defense.
 
-*Individual Accountability:* At the final Capstone defense, each team member is randomly assigned one raw trace or fault recovery to explain and defend individually.
+**Late work and repairs.** The labs build on each other, so falling behind costs more than a late penalty would.
+- **Equipment failures** that are not your team's fault (a dead servo, a broken station) get an automatic extension.
+- **A missed checkpoint** can be finished in booked bench time before the next lab; if your team falls further behind, staff hand you the reference artifact so you can keep going.
+- **Repairs.** Staff may ask you to fix and re-run a result before signing it off. A repair finished within a week earns full credit.
+- **Milestones** otherwise lose 10% per day late, unless you arranged an extension before the deadline.
 
----
+**Accommodations.** Students with approved accommodations should contact the instructor in the first week. Because lab work is a physical demonstration at the bench, lab accommodations are given as extra time on checkpoints and milestones.
 
-## 7. The Physical Safety Contract & Lab Policy
-
-Because actuators impart physical momentum and electrical current:
-1. **The Power Separation Mandate:** Motor DC power may only be energized after the STM32 firmware has initialized and the operator confirms the workspace is clear.
-2. **The Table Geofence:** Actuator trajectories must remain within the marked table boundaries. Driving the gripper into the tabletop or mounting bracket triggers an immediate hardware disarm.
-3. **Hardware Incident Protocol:** If a servo chatters, buzzes, stalls, or overheats, switch off motor power within 2 seconds. A post-incident inspection is mandatory before rearming.
-4. **Zero Live Bypass Rule:** Plugging a host USB cable directly into the servo bus to bypass the STM32 MCU permission boundary results in an immediate milestone failure.
-
----
-
-## 8. Station Logistics, Bench Booking & Spares
-
-* **Supervised Studio Sessions:** Each team receives 3 hours of supervised lab bench time weekly with instructor support.
-* **Open Studio Booking:** Stations are available outside class hours via an online reservation portal. Teams may book up to 6 hours of additional bench time weekly.
-* **Offline Preparation Requirement:** Students must write code, test preprocessing pipelines, and validate model architectures offline using recorded replay datasets before arriving at the bench. Bench time is reserved for physical trials.
-* **Spare Parts Depot:** Teaching staff maintains spare STS3215 servos, gears, cables, and webcams. Damaged components are swapped immediately during office hours.
-
----
-
-## 9. Master Lab Sequence & Textbook Reading Mapping
-
-Formal instruction spans **Weeks 1–11 (8 focused labs)**, followed by the **3-week Capstone Project Studio (Weeks 12–14)**:
-
-![Volume IV Physical AI Studio 14-Week Curriculum Map](../assets/images/vol4-course-structure-map.svg)
-
-### Detailed Lab Directory:
-* **[Lab 1: The Causal Boundary & Servo Bus Bring-Up](../labs/lab-01-boundary.md) (Weeks 1–2):** Chapters 1 & 2 $\to$ Checks A1, D1.
-* **[Lab 2: Multi-Modal Sensing & The Inter-Core Bridge](../labs/lab-02-body-and-sensors.md) (Week 3):** Chapters 3 & 4 $\to$ Checks A2, A3.
-* **[Lab 3: Teleoperation, LeRobot Dataset & Action Taps](../labs/lab-03-physical-episodes.md) (Weeks 4–5):** Chapters 5 & 7 $\to$ Checks B1.
-* **[Lab 4: Deterministic Baseline & SmolVLA/ACT Export](../labs/lab-04-baseline-and-learning.md) (Week 6):** Chapter 6 $\to$ Checks B2, B3.
-* **[Lab 5: Autonomous Closed-Loop Reach on UNO Q](../labs/lab-05-local-feedback-loop.md) (Weeks 7–8):** Chapters 8, 11, 13 $\to$ Checks C1.
-* **[Lab 6: Action Horizons, Language & Disturbances](../labs/lab-06-action-chunks.md) (Week 9):** Chapters 10 & 12 $\to$ Checks C2, C3.
-* **[Lab 7: The Microcontroller Safety Governor](../labs/lab-07-authority-under-fault.md) (Week 10):** Chapters 12 & 14 $\to$ Checks D1.
-* **[Lab 8: Fault Injection & Fail-Safe Cutoffs](../labs/lab-08-verification-and-release.md) (Week 11):** Chapters 15 & 16 $\to$ Checks D2.
-* **[Capstone Project Studio & Release Defense](../labs/lab-capstone-studio.md) (Weeks 12–14):** Chapters 1–17 $\to$ Checks D3.
-
----
-
-## 10. The Capstone Project Studio Specification (Weeks 12–14)
-
-The Capstone is an intensive, 3-week physical integration project where student teams demonstrate full systems autonomy:
-* **Week 12 (Task Definition & Data Engine):** Teams formulate an independent manipulation challenge (e.g., color-conditioned bin sorting, compliant peg insertion, or obstacle-cluttered pick-and-place). Teams record 50 clean demonstration episodes and fine-tune their target policy (SmolVLA or ACT).
-* **Week 13 (Adversarial Peer Testing):** Teams exchange "fault challenges" with peer groups. A peer team introduces safe, unannounced physical disturbances (e.g., unexpected object displacements, illumination changes, soft compliant obstacles). Teams harden their STM32 safety governors and recovery routines.
-* **Week 14 (The Graduation Trial & Defense):**
-  * **20 Live Physical Trials:** 10 baseline trials across varied object poses + 10 disturbance trials.
-  * **The Physical Release Dossier:** A formal, auditable Claim-Argument-Evidence document specifying the tested operating envelope, latency tails, baseline performance comparisons, and failure mode taxonomy.
-  * **Live Oral Defense:** Every student traces an end-to-end physical episode from raw camera pixels to motor torque.
-
----
-
-## 11. Standardized Lab Document Blueprint
-
-Every lab handout (`lab-01` through `lab-08`) adheres to a strict, 7-section operational template:
-
-```markdown
-# Lab X: [Title]
-**Schedule:** Week X | **Part:** [Part I–IV] | **Textbook Reading:** Chapters [X, Y]
-**Target Competencies:** [ ] C_id | **Milestone Alignment:** Milestone X
-
-### 1. The Physical Question
-What fundamental systems relationship are we measuring or proving on hardware today?
-
-### 2. Hardware Setup
-Required wiring, power supply verification, camera framing, and initial arm rest pose.
-
-### 3. Step-by-Step Protocol
-Executable terminal commands, LeRobot CLI invocations, and calibration scripts.
-
-### 4. The Disturbance & Failure Test
-The specific physical perturbation or injected software fault required for this experiment.
-
-### 5. Multi-Tap Telemetry Trace
-Logging requirements for a_req, a_map, a_enf, and a_meas.
-
-### 6. Common Pitfalls & Debugging
-Known timing traps, baud rate mismatches, lighting pitfalls, and motor stall warnings.
-
-### 7. Sign-Off Criteria (The Exit Check)
-The exact observable physical proof required for the instructor to sign the Competency Card.
-```
+**Office hours.** TBD

@@ -1,6 +1,6 @@
 # Volume IV: Physical AI Competency Matrix & Check-Off Card
 
-**Status:** Course design contract for the teaching team. The competencies below describe transferable engineering capabilities and observable physical evidence without restricting the pedagogy to a single board, sensor bus, or arm. The second half of this document shows how the [LeRobot, Seeed SO-101, and Arduino UNO Q platform](course-architecture.md) realizes these competencies.
+**Status:** Course design contract for the teaching team. The competencies below describe transferable engineering capabilities and observable physical evidence without restricting the pedagogy to a single board, sensor bus, or arm. The last section shows where each competency is signed off in the current LeRobot, Seeed SO-101, and Arduino UNO Q lab sequence.
 
 ---
 
@@ -53,7 +53,7 @@ The two axes separate the **domain of study** (the physical plant vs. the comput
 | ID | Competency | Observable Physical Evidence (Platform-Independent) |
 |:---|:---|:---|
 | **C1** | **Closed-Loop Physical Action**<br>Close the autonomous physical loop on hardware; stream policy proposals to produce consequential, intended physical change in the workspace. | Witnessed autonomous physical task completion driven entirely by on-board model inference without host PC tethering. |
-| **C2** | **Action Chunk Dynamics**<br>Evaluate multi-step action chunk horizons ($K$) versus single-step reactive execution; analyze trade-offs between trajectory smoothness and latency drift. | Trajectory tracking comparison across chunk horizons ($K=1, 8, 16, 32$), tracking error vs. horizon curves, and open-loop drift characterization. |
+| **C2** | **Action Chunk Dynamics**<br>Evaluate multi-step action chunk horizons ($K$) versus single-step reactive execution; analyze trade-offs between trajectory smoothness and latency drift. | Trajectory tracking comparison across chunk horizons $K$, tracking error vs. horizon curves, and open-loop drift characterization. |
 | **C3** | **Disturbance Recovery & Replanning**<br>Detect physical discrepancies (e.g., moved target mid-trajectory) from fresh sensory feedback; adapt action proposals or deliberately abstain. | Matched trials with mid-trajectory object displacement, comparing open-loop continuation (failure) against closed-loop adaptation (recovery) or justified abstention. |
 
 ### Quadrant D: Govern the System (Computing × Control)
@@ -62,7 +62,7 @@ The two axes separate the **domain of study** (the physical plant vs. the comput
 |:---|:---|:---|
 | **D1** | **Hardware Authority Routing**<br>Enforce that all actuation flows exclusively through the independent microcontroller permission boundary (`a_req` $\to$ `a_map` $\to$ `a_enf`); prove zero unmonitored host bypass. | Hardware interface and power routing diagram, verified single-path command trace, and proof of blocked host USB direct motor access. |
 | **D2** | **Real-Time Safety Governor & Cutoff**<br>Implement velocity clamps, collision envelopes, communication watchdogs, and emergency cutoffs on the MCU; verify safe-state transition with zero backlog. | Injected fault trials (over-speed request, workspace boundary breach, Linux hang/dropped frames) showing immediate MCU clipping or safe shutdown with 0 queued packets. |
-| **D3** | **Physical Release Defense**<br>Conduct a statistically frozen 20-trial held-out disturbance evaluation; compare against baseline; defend a bounded release dossier. | 20-trial physical benchmark report across varied initial positions and disturbances, failure mode taxonomy, and formal Physical Release Dossier oral defense. |
+| **D3** | **Physical Release Defense**<br>Conduct a statistically frozen held-out disturbance evaluation; compare against baseline; defend a bounded release dossier. | Held-out physical benchmark report across varied initial positions and disturbances, failure mode taxonomy, and formal Physical Release Dossier oral defense. |
 
 ---
 
@@ -86,19 +86,19 @@ This card serves as the concrete, observable sign-off sheet for students and ins
 │ [ ]  │ A3: Feedback Timing & Latency          │ Timestamp sync trace,   │ Date: ______ │
 │      │                                        │ sensor-to-torque delay  │ Staff: _____ │
 ├──────┼────────────────────────────────────────┼─────────────────────────┼──────────────┤
-│ [ ]  │ B1: Physical Dataset Engineering       │ 30 LeRobot episodes,    │ Date: ______ │
+│ [ ]  │ B1: Physical Dataset Engineering       │ LeRobot episodes,       │ Date: ______ │
 │      │                                        │ 4 action taps logged    │ Staff: _____ │
 ├──────┼────────────────────────────────────────┼─────────────────────────┼──────────────┤
 │ [ ]  │ B2: Deterministic Baseline Benchmark   │ Scripted reach baseline │ Date: ______ │
 │      │                                        │ matched trials report   │ Staff: _____ │
 ├──────┼────────────────────────────────────────┼─────────────────────────┼──────────────┤
-│ [ ]  │ B3: Edge Model Profiling & Opt.        │ ONNX export, <100ms     │ Date: ______ │
-│      │                                        │ latency on Qualcomm MPU │ Staff: _____ │
+│ [ ]  │ B3: Edge Model Profiling & Opt.        │ Edge export, latency    │ Date: ______ │
+│      │                                        │ budget on Qualcomm MPU  │ Staff: _____ │
 ├──────┼────────────────────────────────────────┼─────────────────────────┼──────────────┤
 │ [ ]  │ C1: Closed-Loop Physical Action        │ Live autonomous reach   │ Date: ______ │
 │      │                                        │ completion on UNO Q     │ Staff: _____ │
 ├──────┼────────────────────────────────────────┼─────────────────────────┼──────────────┤
-│ [ ]  │ C2: Action Chunk Dynamics              │ K=1 vs K=16 comparison, │ Date: ______ │
+│ [ ]  │ C2: Action Chunk Dynamics              │ Chunk-horizon sweep,    │ Date: ______ │
 │      │                                        │ latency/smoothness plot │ Staff: _____ │
 ├──────┼────────────────────────────────────────┼─────────────────────────┼──────────────┤
 │ [ ]  │ C3: Disturbance Recovery & Replanning  │ Target moved mid-reach, │ Date: ______ │
@@ -110,47 +110,26 @@ This card serves as the concrete, observable sign-off sheet for students and ins
 │ [ ]  │ D2: Real-Time Safety Governor & Cutoff │ MCU over-speed refusal, │ Date: ______ │
 │      │                                        │ watchdog timeout cutoff │ Staff: _____ │
 ├──────┼────────────────────────────────────────┼─────────────────────────┼──────────────┤
-│ [ ]  │ D3: Physical Release Defense           │ 20-trial frozen benchmark│ Date: ______ │
+│ [ ]  │ D3: Physical Release Defense           │ Frozen held-out trials  │ Date: ______ │
 │      │                                        │ & Release Dossier oral  │ Staff: _____ │
 └──────┴────────────────────────────────────────┴─────────────────────────┴──────────────┘
 ```
 
 ---
 
-## Course Realization: LeRobot, Arduino UNO Q, and Seeed SO-101
+## Where Each Competency Is Signed Off
 
-Here is how the 12 competencies map directly into the **four textbook parts** and the **14-week semester schedule**:
-
-```
-┌────────────────────────────────────────────────────────────────────────────────────────┐
-│ PART I: THE MACHINE ANATOMY (Weeks 1–3 · Labs 1–2)                                     │
-│ • Week 1: Hardware Bring-Up & Power Safety ──────────▶ Check off: A1, D1               │
-│ • Week 2: Joint Telemetry & Homing Calibration ──────▶ Check off: A1                   │
-│ • Week 3: Vision Capture & The Inter-Core Bridge ────▶ Check off: A2, A3               │
-│ 🎯 Milestone 1 Sign-Off (Week 3): Station Charter, Calibrated Envelope & Authority Route│
-├────────────────────────────────────────────────────────────────────────────────────────┤
-│ PART II: TEACHING THE MACHINE (Weeks 4–6 · Labs 3–4)                                   │
-│ • Week 4: Teleoperation & Episode Logging ───────────▶ Check off: B1                   │
-│ • Week 5: Scripted Baseline & Dataset Splits ────────▶ Check off: B1, B2               │
-│ • Week 6: Policy Training & Qualcomm Edge Export ────▶ Check off: B3                   │
-│ 🎯 Milestone 2 Sign-Off (Week 6): Edge-Ready Policy on Qualcomm Linux                  │
-├────────────────────────────────────────────────────────────────────────────────────────┤
-│ PART III: RUNNING THE MACHINE (Weeks 7–9 · Labs 5–6)                                   │
-│ • Week 7: Autonomous Closed-Loop Reach on UNO Q ─────▶ Check off: C1                   │
-│ • Week 8: Action Chunk Horizons (K=1 vs K=16) ───────▶ Check off: C2                   │
-│ • Week 9: Disturbance Response & Replanning ─────────▶ Check off: C3                   │
-│ 🎯 Milestone 3 Sign-Off (Week 9): Autonomous Closed-Loop Manipulation Under Disturbance│
-├────────────────────────────────────────────────────────────────────────────────────────┤
-│ PART IV: GOVERNING THE MACHINE (Weeks 10–11 · Labs 7–8)                                │
-│ • Week 10: The STM32 Microcontroller Safety Governor ▶ Check off: D1, D2               │
-│ • Week 11: Fault Injection, Watchdogs & Safe Cutoff ─▶ Check off: D2                   │
-│ 🎯 Milestone 4 Sign-Off (Week 11): Certified Governed Station                          │
-│ *Classroom lectures and new textbook reading conclude here!*                          │
-├────────────────────────────────────────────────────────────────────────────────────────┤
-│ DEDICATED CAPSTONE PROJECT STUDIO (Weeks 12–14 · 3 Full Weeks Runway)                  │
-│ • Week 12: Independent Task Build & Custom Policy Teleoperation                        │
-│ • Week 13: Adversarial Peer Disturbance Swapping & Governor Hardening                  │
-│ • Week 14: 20 Held-Out Physical Disturbance Trials & Oral Defense ──▶ Check off: D3   │
-│ 🎯 Milestone 5 Sign-Off (Week 14): Final System Defense & Release Dossier (A, B, C, D) │
-└────────────────────────────────────────────────────────────────────────────────────────┘
-```
+| Competency | Signed off in | Due |
+|:---|:---|:---:|
+| **A1** Plant Kinematics & Safe Envelope | [Lab 1: The Digital Twin](../labs/lab-01-digital-twin.md) | Week 3 |
+| **A2** Multi-Modal Sensing & Calibration | [Lab 3: Learned Control with VLAs](../labs/lab-03-learned-control.md) | Week 6 |
+| **A3** Feedback Timing & Latency | [Lab 2: From Simulation to Real Hardware](../labs/lab-02-sim-to-real.md) | Week 4 |
+| **B1** Physical Dataset Engineering | [Lab 4: Real-World Data Collection & Fine-Tuning](../labs/lab-04-real-data-and-fine-tuning.md) | Week 8 |
+| **B2** Deterministic Baseline Benchmarking | [Lab 3](../labs/lab-03-learned-control.md) | Week 6 |
+| **B3** Edge Model Profiling & Optimization | [Lab 3](../labs/lab-03-learned-control.md) | Week 6 |
+| **C1** Closed-Loop Physical Action | [Lab 4](../labs/lab-04-real-data-and-fine-tuning.md) | Week 8 |
+| **C2** Action Chunk Dynamics | [Lab 5: Stress-Testing](../labs/lab-05-stress-testing.md) | Week 9 |
+| **C3** Disturbance Recovery & Replanning | [Lab 5](../labs/lab-05-stress-testing.md) | Week 9 |
+| **D1** Hardware Authority Routing | [Lab 6: Safety Governor](../labs/lab-06-safety-governor.md) (first traced in Getting Started) | Week 11 |
+| **D2** Real-Time Safety Governor & Cutoff | [Lab 6](../labs/lab-06-safety-governor.md) | Week 11 |
+| **D3** Physical Release Defense | [Capstone](../labs/lab-capstone-studio.md) | Week 14 |

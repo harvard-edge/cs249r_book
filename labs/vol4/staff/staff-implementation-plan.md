@@ -27,7 +27,7 @@ This studio teaches students to build and evaluate physical AI systems across tw
 Students build, measure, and defend the **Causal Permission Boundary** connecting the two processors over an internal RPC bridge with zero unmonitored host bypass.
 :::
 
-![The Dual-Brain Architecture of Physical AI: Asymmetric Cognition vs. Deterministic Governance](../assets/images/vol4-dual-brain-architecture.svg)
+![The control loop: a learned policy on Linux proposes, the STM32 governor permits, clamps, or vetoes, the SO-101 arm acts, and the next camera image closes the loop.](../assets/images/vol4-control-loop.svg)
 
 The primary objectives for this 13-week execution window:
 1. **Week 1 Planning & Bench Preparation:** Finalize the master curriculum plan, audit the Bill of Materials (BOM), allocate dedicated workbench space at ETH Zurich, and verify electrical power rails before unboxing.
@@ -63,7 +63,7 @@ The studio relies on an open, modular, and safety-hardened hardware stack design
 
 Before assembling the physical arm or connecting motor power, review the electrical wiring schematic. The architecture uses clean galvanic separation between digital computing logic and high-current actuator power:
 
-![Physical Bench Rigging & Electrical Bus Interface](../assets/images/vol4-bench-wiring-harness.svg)
+![Bench wiring: webcam and 45 W logic supply to the UNO Q, STM32 to the servo bus over UART, a separate switched 7.4 V motor supply, and a common star ground.](../assets/images/vol4-bench-wiring.svg)
 
 ::: {.callout-note}
 ### Dual Power Supply Engineering Rationale
@@ -84,7 +84,7 @@ To ensure bulletproof reliability and avoid mysterious CPU brownout resets:
 #### Week 1 (Sep 21 – Sep 25, 2026): Master Plan Alignment & Bench Preparation
 * **Primary Objective:** Finalize the master execution plan, complete the BOM inventory, allocate the physical workbench, and verify laboratory power systems.
 * **Tasks:**
-  - [ ] Review master curriculum architecture: [Master Landing Page](../README.md), [Course Syllabus](../curriculum/syllabus.md), [Pre-Flight Guide](feasibility-plan.md), [8 Lab Briefs](../labs/lab-01-boundary.md), and [Capstone Studio](../labs/lab-capstone-studio.md).
+  - [ ] Review master curriculum architecture: [Master Landing Page](../README.md), [Course Syllabus](../curriculum/syllabus.md), [Pre-Flight Guide](feasibility-plan.md), [6 Lab Briefs](../README.md#3-the-14-week-lab-schedule), and [Capstone Studio](../labs/lab-capstone-studio.md).
   - [ ] Inventory delivered hardware packages: Seeed Studio SO-101 Pro arm kit, Arduino UNO Q (4GB RAM), 45W USB-PD power supply, USB 3.0 powered hub, Logitech C270 camera, 7.4V/5A DC motor power supply, UART level-shifter, and wiring harnesses.
   - [ ] Dedicate a clean $120 \times 80\text{ cm}$ workbench at ETH Zurich with rigid table-edge clamping surface, overhead camera mount fixture, and anti-static mat.
   - [ ] Bench-test the regulated 7.4V DC motor supply and 45W USB-PD adapter with a digital multimeter to confirm clean voltage levels and common star-ground reference.
@@ -122,6 +122,7 @@ To ensure bulletproof reliability and avoid mysterious CPU brownout resets:
   - [ ] Implement the 60-line Python `UnoQMotorsBus` custom LeRobot adapter.
   - [ ] Program Cartesian forward kinematics check in STM32 firmware; implement table collision geofence ($z_{\text{tool}} \ge 15\text{ mm}$).
   - [ ] **Validation Step 3 Check:** Run full 6-DoF LeRobot teleoperation through the governed adapter; verify that table-crash command proposals are actively vetoed by the STM32.
+  - [ ] Package the governed-arm firmware as the **baseline governor** students run from week 1 (joint limits, speed clamp, watchdog).
 * **Weekly Deliverable:** `UnoQMotorsBus.py` source code + demonstration of live table-crash veto.
 
 ---
@@ -130,26 +131,28 @@ To ensure bulletproof reliability and avoid mysterious CPU brownout resets:
 **Focus:** Sensor calibration, human demonstration recording, and baseline imitation policy training.
 
 #### Week 5 (Oct 19 – Oct 23, 2026): "Student Zero" Run for Labs 1 & 2
-* **Primary Objective:** Qualify Lab 1 (Causal Boundary) and Lab 2 (Sensing & Bridge).
+* **Primary Objective:** Qualify Lab 1 (The Digital Twin) and Lab 2 (Simulation to Real Hardware).
 * **Tasks:**
   - [ ] Mount UVC USB webcam at $45^\circ$ oblique angle, $40\text{ cm}$ overlooking workspace; tape $300 \times 200\text{ mm}$ boundary.
   - [ ] Write and test AprilTag camera calibration script (`calibrate_camera.py`).
   - [ ] Write joint homing calibration script; verify $\pm 1.5^\circ$ repeatability across 20 cycles.
   - [ ] Benchmark inter-core RPC latency: measure round-trip times across 1,000 packets; confirm $\le 5\text{ ms}$ at $50\text{ Hz}$.
+  - [ ] Prepare Lab 1 assets: the Getting Started week, the body-limits procedure (Part 1A), the kinematics primer, and the digital twin of the delivered arm (Part 1B).
   - [ ] Package student starter assets: `wiring_diagram_golden.pdf`, `calibrate_camera.py`, `test_bridge_latency.py`.
-* **Weekly Deliverable:** Milestone 1 qualification package (Lab 1 & 2 starter repo + reference calibration card).
+* **Weekly Deliverable:** Milestone 1 qualification package (Labs 1 & 2 starter repo + reference calibration card).
 
-#### Week 6 (Oct 26 – Oct 30, 2026): "Student Zero" Run for Lab 3 (Teleoperation & Datasets)
+#### Week 6 (Oct 26 – Oct 30, 2026): "Student Zero" Run for Lab 4, Data Collection (Teleoperation & Datasets)
 * **Primary Objective:** Record golden demonstration dataset in standardized LeRobot v2 schema.
 * **Tasks:**
   - [ ] Establish reproducible pick-and-place task: pick $30\text{ mm}$ foam cube from marked start zone and place in receptacle.
   - [ ] Record 10 expert demonstration episodes using teleoperation.
+  - [ ] Produce the **sim-trained VLA checkpoint** Lab 3 needs (trained on simulated demonstrations, simulated camera matched to the real one), or qualify a public SO-101 checkpoint as the fallback.
   - [ ] Synchronize $30\text{ Hz}$ RGB frames ($224 \times 224$) with the 4 action taps (`a_req`, `a_map`, `a_enf`, `a_meas`).
   - [ ] Format into `LeRobotDataset` v2 schema; verify zero dropped frames and correct chunk indexing.
   - [ ] Package student starter scripts: `teleop_record.py`, `inspect_dataset.py`, `dataset_golden_10ep/`.
 * **Weekly Deliverable:** Published 10-episode reference dataset with complete dataset card and inspection plots.
 
-#### Week 7 (Nov 2 – Nov 6, 2026): "Student Zero" Run for Lab 4 & Milestone 2
+#### Week 7 (Nov 2 – Nov 6, 2026): "Student Zero" Run for Lab 4, Training & Export
 * **Primary Objective:** Train baseline ACT policy, quantize to ONNX INT8, and build heuristic baseline.
 * **Tasks:**
   - [ ] Implement deterministic heuristic reach script (`heuristic_reach.py`) for baseline comparison.
@@ -157,14 +160,14 @@ To ensure bulletproof reliability and avoid mysterious CPU brownout resets:
   - [ ] Quantize trained PyTorch model to ONNX INT8 format (`export_onnx_quantized.py`).
   - [ ] Verify model file size is $< 50\text{ MB}$ and validates on held-out evaluation episodes.
   - [ ] Package starter assets: `train_act_baseline.py`, `pretrained_act_int8.onnx`, `heuristic_reach.py`.
-* **Weekly Deliverable:** Milestone 2 qualification package (trained checkpoint + offline MSE evaluation curves).
+* **Weekly Deliverable:** Trained checkpoint + offline MSE evaluation curves (first half of the Milestone 2 package).
 
 ---
 
 ### Sprint 3: Untethered Edge Deployment & Dynamic Adaptation (Weeks 8–10)
 **Focus:** Natively running neural policies on Qualcomm Linux, action chunk horizons, and closed-loop disturbance recovery.
 
-#### Week 8 (Nov 9 – Nov 13, 2026): Validation Step 4 & Lab 5 (Untethered Autonomous Reach)
+#### Week 8 (Nov 9 – Nov 13, 2026): Validation Step 4, Lab 4 Untethered Loop & Milestone 2
 * **Primary Objective:** Run closed-loop visual reach completely untethered on the Arduino UNO Q.
 * **Tasks:**
   - [ ] Transfer `policy_int8.onnx` and `pai_edge_runtime.py` to Qualcomm Linux storage.
@@ -173,9 +176,9 @@ To ensure bulletproof reliability and avoid mysterious CPU brownout resets:
     $$\text{Webcam Frames } (30\text{ Hz}) \longrightarrow \text{ONNX Policy } (<45\text{ ms}) \longrightarrow \text{RPC Bridge } (<5\text{ ms}) \longrightarrow \text{STM32 Motion}$$
   - [ ] **Validation Step 4 Check:** Verify end-to-end loop latency $T_{\text{total}} \le 80\text{ ms}$; arm autonomously reaches foam block at arbitrary locations across 10 trials.
   - [ ] Package starter assets: `pai_edge_runtime.py`, `telemetry_logger.py`, `sample_reach_trace.csv`.
-* **Weekly Deliverable:** Step 4 verification report + multi-tap telemetry CSV of untethered reach.
+* **Weekly Deliverable:** Milestone 2 qualification package (Step 4 verification report + multi-tap telemetry CSV of untethered reach).
 
-#### Week 9 (Nov 16 – Nov 20, 2026): "Student Zero" Run for Lab 6 (Action Horizons & Disturbances)
+#### Week 9 (Nov 16 – Nov 20, 2026): "Student Zero" Run for Lab 5 (Stress-Testing: Horizons & Disturbances)
 * **Primary Objective:** Evaluate action chunk horizons and closed-loop disturbance recovery.
 * **Tasks:**
   - [ ] Benchmark action chunk horizons: $K \in \{1, 8, 16, 32\}$. Measure tracking error and physical trajectory smoothness.
@@ -184,7 +187,7 @@ To ensure bulletproof reliability and avoid mysterious CPU brownout resets:
   - [ ] Package starter assets: `benchmark_chunking.py`, `disturbance_eval.py`, `smolvla_eval_harness.py`.
 * **Weekly Deliverable:** Milestone 3 qualification package (horizon comparison plots + disturbance recovery video).
 
-#### Week 10 (Nov 23 – Nov 27, 2026): Mid-Term Rig Reliability & "Student Zero" Run for Lab 7 (MCU Safety Governor)
+#### Week 10 (Nov 23 – Nov 27, 2026): Mid-Term Rig Reliability & "Student Zero" Run for Lab 6, Phase A (Build the Governor)
 * **Primary Objective:** Conduct continuous stress testing and program the real-time STM32 safety governor.
 * **Tasks:**
   - [ ] Run 50 continuous autonomous pick-and-place cycles on the Golden Station.
@@ -194,14 +197,14 @@ To ensure bulletproof reliability and avoid mysterious CPU brownout resets:
   - [ ] Write Python fault injection script (`inject_table_crash.py`) that sends deliberate downward velocity spikes and out-of-bound targets.
   - [ ] Demonstrate real-time MCU veto: verify that illegal proposals are rejected in $< 5\text{ ms}$ while legal joints continue moving safely.
   - [ ] Package starter assets: `stm32_governor_firmware/`, `inject_table_crash.py`, `veto_audit_golden.csv`.
-* **Weekly Deliverable:** 50-cycle reliability & thermal profile report + Lab 7 qualification package (firmware source + live veto audit).
+* **Weekly Deliverable:** 50-cycle reliability & thermal profile report + Lab 6 Phase A qualification package (firmware source + live veto audit).
 
 ---
 
 ### Sprint 4: Real-Time Governance & Fault Hardening (Week 11)
 **Focus:** Microcontroller safety boundary enforcement, hardware watchdogs, and zero-backlog recovery.
 
-#### Week 11 (Nov 30 – Dec 4, 2026): "Student Zero" Run for Lab 8 & Milestone 4
+#### Week 11 (Nov 30 – Dec 4, 2026): "Student Zero" Run for Lab 6, Phase B (Break the Governor) & Milestone 4
 * **Primary Objective:** Hardware watchdog timeout and fail-safe cutoff under system crash.
 * **Tasks:**
   - [ ] Program $150\text{ ms}$ hardware SysTick watchdog timer in STM32 firmware.
@@ -245,13 +248,13 @@ To ensure bulletproof reliability and avoid mysterious CPU brownout resets:
 | **W02: Sep 28 – Oct 02** | Hardware Bring-Up | • Mechanical arm assembled & clamped<br>• 7.4V motor power harness verified<br>• **Step 1:** LeRobot USB teleoperation passing | 60-second teleoperation replay executed without communication dropout | `[ ]` |
 | **W03: Oct 05 – Oct 09** | Bus Authority | • STM32 UART level-shifter circuit wired<br>• Inter-core RPC bridge test script<br>• **Step 2:** 1-joint velocity clamp & veto | Joint 1 clamped at $45^\circ/\text{s}$; out-of-range targets ($> 180^\circ$) rejected | `[ ]` |
 | **W04: Oct 12 – Oct 16** | 6-DoF Integration | • `UnoQMotorsBus` Python adapter deployed<br>• Table geofence ($z \ge 15\text{ mm}$) programmed<br>• **Step 3:** Governed 6-DoF teleoperation | Full 6-DoF teleoperation functional; downward table crash actively vetoed | `[ ]` |
-| **W05: Oct 19 – Oct 23** | **Milestone 1:** Anatomy | • Lab 1 (Boundary) qualified by Student Zero<br>• Lab 2 (Sensing & Bridge) qualified<br>• AprilTag camera & joint offset calibration | Joint repeatability $\pm 1.5^\circ$; inter-core bridge round-trip $\le 5\text{ ms}$ at $50\text{ Hz}$ | `[ ]` |
-| **W06: Oct 26 – Oct 30** | Dataset Pipeline | • Lab 3 (Teleoperation) qualified<br>• 10-episode pick-and-place reference dataset<br>• Standardized LeRobot v2 schema validated | Zero dropped frames at $30\text{ Hz}$; all 4 action taps synchronized | `[ ]` |
-| **W07: Nov 02 – Nov 06** | **Milestone 2:** Training | • Lab 4 (Baseline & Export) qualified<br>• ACT model trained on workstation GPU<br>• Quantized ONNX INT8 policy exported ($< 50\text{ MB}$) | Offline MSE validation curves clean; model file size $< 50\text{ MB}$ | `[ ]` |
-| **W08: Nov 09 – Nov 13** | Edge Inference | • **Step 4:** Untethered reach on Qualcomm Linux<br>• End-to-end loop latency $T_{\text{total}} \le 80\text{ ms}$<br>• Lab 5 (Autonomous Reach) qualified | Host PC tether disconnected; 10/10 autonomous reach completions | `[ ]` |
-| **W09: Nov 16 – Nov 20** | **Milestone 3:** Dynamics | • Lab 6 (Action Horizons) qualified<br>• Horizon benchmark curves ($K=1..32$)<br>• Disturbance recovery mid-trajectory verified | Measurable trajectory adaptation under $50\text{ mm}$ block displacement | `[ ]` |
-| **W10: Nov 23 – Nov 27** | Stress & Governor | • 50-cycle continuous autonomous reliability test<br>• Servo thermal profiling ($< 60^\circ\text{C}$)<br>• Lab 7 (Safety Governor) qualified | Servo casing $< 60^\circ\text{C}$; live table-crash proposals vetoed in $< 5\text{ ms}$ | `[ ]` |
-| **W11: Nov 30 – Dec 04** | **Milestone 4:** Cutoffs | • Lab 8 (Watchdog Cutoffs) qualified<br>• $150\text{ ms}$ hardware SysTick watchdog verified<br>• Linux process freeze & zero backlog proved | Arm halts in $\le 150\text{ ms}$ upon heartbeat loss; zero stale commands on resume | `[ ]` |
+| **W05: Oct 19 – Oct 23** | **Milestone 1:** Anatomy | • Lab 1 (The Digital Twin) qualified by Student Zero<br>• Lab 2 (Simulation to Real Hardware) qualified<br>• AprilTag camera & joint offset calibration | Joint repeatability $\pm 1.5^\circ$; inter-core bridge round-trip $\le 5\text{ ms}$ at $50\text{ Hz}$ | `[ ]` |
+| **W06: Oct 26 – Oct 30** | Dataset Pipeline | • Lab 4 data collection qualified<br>• 10-episode pick-and-place reference dataset<br>• Standardized LeRobot v2 schema validated | Zero dropped frames at $30\text{ Hz}$; all 4 action taps synchronized | `[ ]` |
+| **W07: Nov 02 – Nov 06** | Training | • Lab 4 training & export qualified<br>• ACT model trained on workstation GPU<br>• Quantized ONNX INT8 policy exported ($< 50\text{ MB}$) | Offline MSE validation curves clean; model file size $< 50\text{ MB}$ | `[ ]` |
+| **W08: Nov 09 – Nov 13** | **Milestone 2:** Edge Inference | • **Step 4:** Untethered reach on Qualcomm Linux<br>• End-to-end loop latency $T_{\text{total}} \le 80\text{ ms}$<br>• Lab 4 untethered loop qualified | Host PC tether disconnected; 10/10 autonomous reach completions | `[ ]` |
+| **W09: Nov 16 – Nov 20** | **Milestone 3:** Dynamics | • Lab 5 (Stress-Testing) qualified<br>• Horizon benchmark curves ($K=1..32$)<br>• Disturbance recovery mid-trajectory verified | Measurable trajectory adaptation under $50\text{ mm}$ block displacement | `[ ]` |
+| **W10: Nov 23 – Nov 27** | Stress & Governor | • 50-cycle continuous autonomous reliability test<br>• Servo thermal profiling ($< 60^\circ\text{C}$)<br>• Lab 6 Phase A (Safety Governor) qualified | Servo casing $< 60^\circ\text{C}$; live table-crash proposals vetoed in $< 5\text{ ms}$ | `[ ]` |
+| **W11: Nov 30 – Dec 04** | **Milestone 4:** Cutoffs | • Lab 6 Phase B (Watchdog Cutoffs) qualified<br>• $150\text{ ms}$ hardware SysTick watchdog verified<br>• Linux process freeze & zero backlog proved | Arm halts in $\le 150\text{ ms}$ upon heartbeat loss; zero stale commands on resume | `[ ]` |
 | **W12: Dec 07 – Dec 11** | Capstone Rehearsal | • Capstone Studio protocol simulated<br>• 20 witnessed physical trials executed<br>• Claim-Argument-Evidence dossier template | $\ge 80\%$ task success rate across 20 trials with zero safety violations | `[ ]` |
 | **W13: Dec 14 – Dec 18** | **Final Release Freeze** | • Golden Linux SD card image compiled<br>• STM32 baseline binary locked<br>• Secondary TA replication test completed | Independent replication on Station 2 passes standalone reach without staff intervention | `[ ]` |
 
@@ -270,4 +273,4 @@ To ensure rapid resolution of hardware bugs and maintain transparent progress to
 2. **Bi-Weekly Physical Sync:**
    - 30-minute bench review demonstrating the hardware bring-up steps and milestone deliverables on live hardware.
 3. **Escalation Trigger:**
-   - If any bring-up step (Steps 1–4) is delayed by more than 4 business days, activate the pre-approved fallback matrix in [`feasibility-plan.md`](feasibility-plan.md#sec-fallbacks) immediately.
+   - If any bring-up step (Steps 1–4) is delayed by more than 4 business days, activate the pre-approved fallback matrix in [`feasibility-plan.md`](feasibility-plan.md#6-phase-4-risk-mitigation-and-fallback-matrix) immediately.
