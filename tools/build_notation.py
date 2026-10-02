@@ -1,8 +1,15 @@
+#!/usr/bin/env python3
 import yaml
 import re
 import os
+import sys
+from pathlib import Path
 
-with open("books/shared/_includes/notation_registry.yml") as f:
+# Always resolve paths relative to the project root (parent of tools dir)
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+
+registry_path = PROJECT_ROOT / "books/shared/_includes/notation_registry.yml"
+with open(registry_path) as f:
     data = yaml.safe_load(f)
 
 # 1. Generate macros
@@ -15,15 +22,16 @@ for var in data["variables"]:
         tex_lines.append(f"\\newcommand{{{macro}}}{{{latex}}}")
         macros.add(macro)
 
-with open("books/shared/_includes/_macros.tex", "w") as out:
+with open(PROJECT_ROOT / "books/shared/_includes/_macros.tex", "w") as out:
     out.write("% AUTO-GENERATED NOTATION MACROS\n")
     out.write("\n".join(tex_lines) + "\n")
 
-with open("books/shared/_includes/_macros.html", "w") as out:
+with open(PROJECT_ROOT / "books/shared/_includes/_macros.html", "w") as out:
     out.write("<!-- AUTO-GENERATED NOTATION MACROS -->\n")
     out.write("<div style=\"display: none;\">\n$$\n")
     out.write("\n".join(tex_lines) + "\n")
     out.write("$$\n</div>\n")
+
 print(f"Generated {len(macros)} macros.")
 
 # 2. Inject tables into Markdown files
@@ -37,8 +45,9 @@ files = [
 ]
 
 for filepath in files:
+    full_path = PROJECT_ROOT / filepath
     try:
-        with open(filepath, "r") as f:
+        with open(full_path, "r") as f:
             content = f.read()
     except Exception as e:
         continue
@@ -59,7 +68,6 @@ for filepath in files:
             
         if line.startswith('|') and '| **Symbol**' in line:
             # We found the start of a table!
-            # Generate the new table
             is_disambig = "Disambiguation" in current_category if current_category else False
             if is_disambig:
                 out.append("| **Symbol** | **Canonical Convention** | **Colliding Meaning** | **Disambiguation Rule** |")
@@ -71,7 +79,6 @@ for filepath in files:
             cat_vars.sort(key=lambda x: x["macro"])
             
             for var in cat_vars:
-                # Output exactly the markdown table rows
                 symbol = f"**${var['latex']}$**"
                 defn = f"**{var['definition']}**"
                 unit = var.get('unit', '')
@@ -87,6 +94,6 @@ for filepath in files:
         out.append(line)
         i += 1
         
-    with open(filepath, "w") as f:
+    with open(full_path, "w") as f:
         f.write("\n".join(out).strip() + "\n")
     print(f"Injected tables into {filepath}")
