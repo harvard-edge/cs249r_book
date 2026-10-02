@@ -472,7 +472,7 @@ The flow inversion compounds this problem. Traditional networks are designed for
 
 [^fn-elephant-flow-collision]: [offset=2mm] **Elephant and mice flows**\index{Elephant and mice flows!definition}: The model-wide gradient size is not the size of one network flow. A collective can split each worker's local gradient shard across channels and transport connections; the resulting long-lived flows\index{Elephant flow!network traffic} can still collide under ECMP when their static hashes select the same path.
 
-The loss inversion completes the picture. TCP was designed to recover across an unreliable network. Reliable InfiniBand and RoCE transports also detect loss and retransmit, but recovery granularity and tail latency depend on the transport implementation. A dropped packet can be especially costly on an RNIC that uses Go-Back-N-style recovery, which restarts transmission from the missing sequence point rather than repairing only the lost region. Production fabrics therefore aim to make loss rare and recovery bounded. InfiniBand normally suppresses buffer-overflow loss with credit-based flow control. Many Ethernet-based RoCE deployments instead use carefully tuned priority flow control (PFC)\index{Priority flow control!link-layer backpressure}\index{PFC|see{Priority flow control}}, a link-layer backpressure mechanism that pauses senders before buffers overflow; PFC-free designs rely more heavily on endpoint congestion control and loss recovery [@mittal2018irn].
+The loss inversion completes the picture. TCP was designed to recover across an unreliable network. Reliable InfiniBand and RDMA over Converged Ethernet (RoCE) transports also detect loss and retransmit, but recovery granularity and tail latency depend on the transport implementation. A dropped packet can be especially costly on an RNIC that uses Go-Back-N-style recovery, which restarts transmission from the missing sequence point rather than repairing only the lost region. Production fabrics therefore aim to make loss rare and recovery bounded. InfiniBand normally suppresses buffer-overflow loss with credit-based flow control. Many Ethernet-based RoCE deployments instead use carefully tuned priority flow control (PFC)\index{Priority flow control!link-layer backpressure}\index{PFC|see{Priority flow control}}, a link-layer backpressure mechanism that pauses senders before buffers overflow; PFC-free designs rely more heavily on endpoint congestion control and loss recovery [@mittal2018irn].
 
 ::: {.content-visible when-format="pdf"}
 \newpage
@@ -487,7 +487,7 @@ Each of these inversions traces back to a specific physical or protocol constrai
 - **Level 1: wire and link** (@sec-network-fabrics-wire-link). Signal integrity (PAM4, SerDes) and the speed of light in fiber impose hard constraints on latency and cluster geometry.
 - **Level 2: transport** (@sec-network-fabrics-transport). InfiniBand and RoCE provide remote direct memory access (RDMA) primitives; the $\alpha$-$\beta$ model quantifies the latency-vs.-bandwidth trade-off for different message sizes.
 - **Level 3: switch and topology** (@sec-network-fabrics-topology). Fat-trees, rail-optimized designs, and dragonflies achieve the $\text{BW}_{\text{bisect}}$ needed for global collectives through different structural trade-offs.
-- **Level 4: fabric behavior** (@sec-network-fabrics-behavior). Congestion control mechanisms such as DCTCP-style explicit congestion notification (ECN)\index{Explicit congestion notification|see{ECN}} response, DCQCN, and HPCC determine whether theoretical bandwidth translates to realized throughput; adaptive routing and incast behavior determine whether that throughput survives real collective traffic [@alizadeh2010; @zhu2015; @li2019; @gangidi2024rdma].
+- **Level 4: fabric behavior** (@sec-network-fabrics-behavior). Congestion control mechanisms such as Data Center TCP (DCTCP)-style explicit congestion notification (ECN)\index{Explicit congestion notification|see{ECN}} response, DCQCN, and HPCC determine whether theoretical bandwidth translates to realized throughput; adaptive routing and incast behavior determine whether that throughput survives real collective traffic [@alizadeh2010; @zhu2015; @li2019; @gangidi2024rdma].
 - **Level 5: cluster design** (@sec-network-fabrics-cluster). Production supercomputers like the NVIDIA SuperPOD and Meta Grand Teton integrate these layers into a unified gradient bus [@nvidia2023dgxSuperpodH100; @meta2024genaiInfrastructure].
 
 The levels are not an inventory of networking topics; they are the causal chain that turns synchronous ML traffic into infrastructure requirements. Large gradient messages first stress the wire and transport, then force topology choices that preserve bisection bandwidth, then expose congestion behavior that ordinary enterprise networks can hide, and finally determine whether the whole cluster behaves like one training machine.
@@ -502,6 +502,8 @@ The traffic pattern determines which fabric metric matters. A global reduction s
 | Checkpoint and multi-tenant traffic | Bursts competing with training flows   | per-class bandwidth; pause duration; interference           | virtual lanes, QoS, admission control                             |
 
 : **Traffic patterns determine fabric metrics**: Workload semantics translate into different physical bottlenecks, so no single link-rate benchmark predicts training performance. {#tbl-network-fabrics-traffic-metrics tbl-colwidths="[20,27,28,25]"}
+
+Mapping workload semantics to physical constraints shows why ML fabric design must proceed from the physical layer up. Before higher-level topologies or routing protocols can organize traffic, the physical layer must reliably deliver bits between endpoints without excessive signal attenuation or prohibitive power consumption. Level 1 begins where all fabric architecture originates: at the physical wire.
 
 ## Level 1 Wire and Link {#sec-network-fabrics-wire-link}
 
@@ -523,7 +525,7 @@ class IbNdrWireRecap:
     ib_ndr_gbit_per_s_str = fmt_bandwidth(Systems.Fabrics.InfiniBand_NDR.bandwidth, unit=Gbps, precision=0, commas=False)
 ```
 
-Before protocols and topologies can be evaluated, physical medium constraints must be established. Every network design decision is ultimately constrained by what the wire can carry. At `{python} IbNdrWireRecap.ib_ndr_gbit_per_s_str` and beyond, the physics of signal transmission imposes hard limits on cable length, power consumption, and error rates. These are not engineering inconveniences; they are fundamental constraints that shape cluster geometry.
+At `{python} IbNdrWireRecap.ib_ndr_gbit_per_s_str` and beyond, the physics of signal transmission imposes hard limits on cable length, power consumption, and error rates. Signal attenuation in copper and chromatic dispersion in fiber dictate how far an accelerator can sit from its switches before communication fails. Every higher-level protocol and topology is ultimately constrained by what the physical wire can carry; these limits shape the geometry of the entire cluster.
 
 ### Signal integrity and PAM4 {#sec-network-fabrics-pam4}
 
@@ -788,7 +790,7 @@ The InfiniBand\index{IB|see{InfiniBand}}[^fn-infiniband-protocol-origin] row ref
 
 [^fn-infiniband-protocol-origin]: [offset=-32mm] **InfiniBand**\index{InfiniBand!origin}: Formed in 1999 from the merger of two competing server I/O standards (Future I/O and NGIO), InfiniBand was originally designed to replace PCI as a general-purpose system interconnect. Its pivot to HPC networking preserved the credit-based, hardware-managed flow control that server I/O demanded, and this heritage is precisely why InfiniBand provides native losslessness without the PFC fragility that plagues Ethernet-based RDMA fabrics.
 
-This architectural choice is visible at the protocol boundary. @Fig-ib-roce-stack partitions the protocol stack across user-space, kernel, and hardware bands, contrasting traditional socket overhead against direct verbs hardware offload. While the TCP/IP stack (left) requires two software copies across kernel buffer boundaries and software protocol execution, the RDMA stack (right) traces a single amber bypass arrow straight from NCCL and the user-space **verbs API**\index{Verbs API!definition} to the RDMA NIC, keeping the operating system entirely off the active data path.
+This architectural choice is visible at the protocol boundary. @Fig-ib-roce-stack partitions the protocol stack across user-space, kernel, and hardware bands, contrasting traditional socket overhead against direct verbs hardware offload. While the TCP/IP stack (left) requires two software copies across kernel buffer boundaries and software protocol execution, the RDMA stack (right) traces a single amber bypass arrow straight from the collective communication library (such as the NVIDIA Collective Communications Library, or NCCL) and the user-space **verbs API**\index{Verbs API!definition} to the RDMA NIC, keeping the operating system entirely off the active data path.
 
 ::: {#fig-ib-roce-stack fig-env="figure" fig-pos="htb" fig-cap="**Traditional TCP/IP vs. RDMA verbs stacks**: Read each stack top to bottom through the user-space, kernel, and hardware bands. With TCP/IP sockets (left), every send enters the kernel through a system call, the payload is copied into kernel socket buffers and again toward the NIC's transmit ring, and the CPU runs the transport protocol in software. With RDMA verbs over InfiniBand or RoCEv2 (right), the collective library posts work requests from user space, the kernel stays off the data path, and the RDMA NIC runs the reliable transport in hardware, reading GPU memory directly through GPUDirect instead of staging a host copy." fig-alt="Two panels, each divided by dashed lines into user space, kernel, and hardware bands. Left, TCP/IP sockets: training framework in user space, an arrow tagged copy 1 into the kernel, then socket API, TCP/IP stack, and NIC driver, then an arrow tagged copy 2 down to the Ethernet NIC; the footer reads CPU copies data and runs the transport. Right, RDMA verbs: NCCL above the verbs API in user space, then a single amber arrow straight through the empty kernel band, labeled kernel not on the data path, to the RDMA NIC with transport in hardware; the footer reads NIC reads GPU memory directly (GPUDirect)."}
 ![](images/svg/networking-stacks.svg)
@@ -1220,7 +1222,7 @@ class NetworkTopologyRadixRecap:
     n_leaf_groups_str = fmt(n_leaf_groups, precision=0, commas=False)
 ```
 
-The physical arrangement of switches determines the bisection bandwidth $\text{BW}_{\text{bisect}}$ and whether the fabric is non-blocking. These two properties govern how well the network supports the global communication patterns that dominate distributed training, a constraint captured by the bisection bandwidth theorem (principle \ref{pri-bisection-bandwidth}).
+A cluster can have thousands of fast links at the edge and still starve its AllReduce operations if the cross-sectional capacity at the narrowest point in the switching hierarchy is insufficient. The physical arrangement of switches determines whether that cross-section throttles collective communication or sustains full line-rate exchange across all participating workers. Two properties govern this capability: bisection bandwidth $\text{BW}_{\text{bisect}}$ and whether the fabric is non-blocking, a constraint captured by the bisection bandwidth theorem (principle \ref{pri-bisection-bandwidth}).
 
 ```{python}
 #| echo: false
@@ -1259,7 +1261,7 @@ class NonBlockingOversubscription:
     throughput_loss_pct_str = fmt_percent(throughput_loss_pct / 100, precision=1, commas=False, style='prose')
 ```
 
-The first property, bisection bandwidth, quantifies the worst-case throughput ceiling that the topology imposes on global collectives. A cluster can have thousands of fast links at the edge and still starve its AllReduce operations if the cross-sectional capacity at the narrowest point in the switching hierarchy is insufficient.
+Bisection bandwidth quantifies this worst-case throughput ceiling that the topology imposes on global collectives.
 
 ```{python}
 #| echo: false
@@ -1965,19 +1967,19 @@ When each buffer in the cycle fills beyond its configured pause threshold, each 
 ![](images/svg/pfc-credit-deadlock.svg)
 :::
 
-In production AI fabrics, credit deadlocks typically arise from three distinct operational triggers. Transient routing loops during link failures or BGP convergence can leave routing tables across neighboring switches temporarily inconsistent, circulating packets in a multi-hop forwarding loop; while lossy IP networks drop looping packets once their Time-to-Live expires, lossless PFC fabrics instantly saturate intermediate buffers and lock the entire path into an unrecoverable credit cycle. Uncontrolled multicast or broadcast flooding can similarly trigger lockups when flooded packets replicated across all ports overwhelm egress buffers and pause frames loop back into shared switch memory. Finally, non-tree physical links and asymmetric failover paths, such as sibling cross-connects between leaf switches, can violate strict hierarchical routing rules and establish persistent buffer dependency cycles across switch tiers.
+In production AI fabrics, credit deadlocks typically arise from three distinct operational triggers. Transient routing loops during link failures or Border Gateway Protocol (BGP) convergence can leave routing tables across neighboring switches temporarily inconsistent, circulating packets in a multi-hop forwarding loop; while lossy IP networks drop looping packets once their Time-to-Live expires, lossless PFC fabrics instantly saturate intermediate buffers and lock the entire path into an unrecoverable credit cycle. Uncontrolled multicast or broadcast flooding can similarly trigger lockups when flooded packets replicated across all ports overwhelm egress buffers and pause frames loop back into shared switch memory. Finally, non-tree physical links and asymmetric failover paths, such as sibling cross-connects between leaf switches, can violate strict hierarchical routing rules and establish persistent buffer dependency cycles across switch tiers.
 
 Microsoft's production RoCE deployment encountered the flooding trigger directly (war story \ref{ws-network-fabrics-microsoft-pfc-deadlock}).
 
 ::: {#ws-network-fabrics-microsoft-pfc-deadlock .callout-war-story title="Microsoft's PFC deadlock (2016)"}
 
-**Context**: A team led by Chuanxiong Guo at Microsoft Research deployed RoCEv2 across Microsoft's data centers, a fleet operating at the scale of tens of thousands of servers, to support latency-sensitive services. Their design provided a lossless fabric with PFC, and the team developed a DSCP-based PFC mechanism to extend the deployment beyond VLAN boundaries [@guo2016rdma].
+**Context**: A team led by Chuanxiong Guo at Microsoft Research deployed RoCEv2 across Microsoft's data centers, a fleet operating at the scale of tens of thousands of servers, to support latency-sensitive services. Their design provided a lossless fabric with PFC, and the team developed a Differentiated Services Code Point (DSCP)-based PFC mechanism to extend the deployment beyond virtual local area network (VLAN) boundaries [@guo2016rdma].
 
 **Mechanism**: PFC interacted with Ethernet flooding to create a cyclic buffer dependency. A dead server with an incomplete mapping between an IP address and a media-access-control address caused upstream switches to flood lossless packets to every port; PFC PAUSE frames then propagated upstream in response to the flooded traffic, forming a closed loop of paused buffers.
 
 **Impact**: Lossless traffic through the switches in the cycle stopped entirely and stayed stopped, because no buffer in the dependency loop could drain without outside intervention.
 
-**Fix**: Microsoft blocked broadcast and multicast traffic from entering lossless traffic classes, and dropped lossless packets when the corresponding ARP entry was incomplete rather than falling back to flooding.
+**Fix**: Microsoft blocked broadcast and multicast traffic from entering lossless traffic classes, and dropped lossless packets when the corresponding Address Resolution Protocol (ARP) entry was incomplete rather than falling back to flooding.
 
 **Systems lesson**: PFC backpressure is a structural vulnerability of lossless Ethernet at hyperscale. RoCE fabrics require packet-class discipline, PFC pause telemetry, and hardware-level safeguards because a mechanism designed to avoid packet loss can itself become the failure mode. ML training fabrics built on RoCE inherit this risk directly. A single incomplete ARP entry can freeze the lossless class that carries a multi-thousand-GPU training run's gradients, with the cluster appearing healthy while no gradient flows between workers.
 
