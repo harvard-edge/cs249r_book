@@ -527,9 +527,9 @@ class ServingCostSimple:
 
 The total cost of operating a model comprises training cost (a one-time expense) and serving cost (an ongoing expense), as @eq-total-cost shows:
 
-$$C_{\text{total}} = C_{\text{train}} + C_{\text{serving}} \times T_{\text{deployment}} \times \lambda_{\text{arr}}$$ {#eq-total-cost}
+$$C_{\text{total}} = \DollarCostTrain + C_{\text{serving}} \times T_{\text{deployment}} \times \ArrivalRate$$ {#eq-total-cost}
 
-where $C_{\text{train}}$ is the one-time cost to train the model, $C_{\text{serving}}$ is the cost per query served, $T_{\text{deployment}}$ is the deployment duration in appropriate time units, and $\lambda_{\text{arr}}$ is the query rate.
+where $\DollarCostTrain$ is the one-time cost to train the model, $C_{\text{serving}}$ is the cost per query served, $T_{\text{deployment}}$ is the deployment duration in appropriate time units, and $\ArrivalRate$ is the query rate.
 
 ```{python}
 #| echo: false
@@ -1189,9 +1189,9 @@ Multi-GPU tensor parallelism shards each layer's weight matrices across multiple
 
 :::
 
-The disaggregation decision therefore depends on a quantitative contract, not on the phase labels alone. If prefill produces $M_{\text{KV}}$ bytes of attention state and the usable inter-pool bandwidth is $\beta$, then the handoff consumes at least
+The disaggregation decision therefore depends on a quantitative contract, not on the phase labels alone. If prefill produces $\KvcacheMemory$ bytes of attention state and the usable inter-pool bandwidth is $\beta$, then the handoff consumes at least
 
-$$T_{\text{handoff}} = \alpha + \frac{M_{\text{KV}}}{\beta},$$ {#eq-prefill-decode-handoff}
+$$T_{\text{handoff}} = \alpha + \frac{\KvcacheMemory}{\beta},$$ {#eq-prefill-decode-handoff}
 
 where $\alpha$ includes transfer setup and queueing. @Eq-prefill-decode-handoff makes placement part of the service contract: the prefill pool must sustain the admitted prompt-token rate, the decode pool must sustain the admitted output-token rate, and both pools need headroom for the request-length distribution. The useful capacity metric is SLO goodput\index{Goodput!SLO-constrained}: the request arrival rate for which TTFT and TPOT both remain within their targets. Disaggregation earns its transfer tax only when eliminating phase interference and balancing the two pools raises SLO goodput. Otherwise, colocated chunked prefill is the simpler design.
 
@@ -1574,19 +1574,19 @@ fig.tight_layout()
 
 ### The physics and efficiency curves of batching {#sec-inference-scale-physics-batching-efficiency-curve-021c}
 
-Batching is not merely a heuristic; it is a trade-off governed by the physics of hardware utilization. Modeling the relationship between batch size $(B)$, batch service time $(T_{\text{svc}}(B))$, and batched service rate $(\mu_{\text{eff}}(B))$ identifies the optimal operating point for an inference system.
+Batching is not merely a heuristic; it is a trade-off governed by the physics of hardware utilization. Modeling the relationship between batch size $(B)$, batch service time $(\BatchServiceTimeSvc)$, and batched service rate $(\EffectiveServiceRate)$ identifies the optimal operating point for an inference system.
 
-The first model isolates batch execution. Here $T_{\text{svc}}(B)$ is the service time once a batch begins execution; it excludes queueing and batch formation. Keeping the measurement boundary explicit prevents an execution-time improvement from being mistaken for an end-to-end SLO guarantee.
+The first model isolates batch execution. Here $\BatchServiceTimeSvc$ is the service time once a batch begins execution; it excludes queueing and batch formation. Keeping the measurement boundary explicit prevents an execution-time improvement from being mistaken for an end-to-end SLO guarantee.
 
 The service-time equation decomposes batch execution time into fixed overheads (kernel launch, memory loading) and variable costs (compute per sample):
 
-$$T_{\text{svc}}(B) = T_{\text{fixed}} + B \times t_{\text{req}}$$
+$$\BatchServiceTimeSvc = T_{\text{fixed}} + B \times t_{\text{req}}$$
 
 In this formulation, $T_{\text{fixed}}$ captures costs paid once per batch, such as loading weights from HBM and kernel launch latency, while $t_{\text{req}}$ denotes the marginal cost of adding one request, such as the compute time for that sample.
 
 The throughput equation describes the system's capacity:
 
-$$\mu_{\text{eff}}(B) = \frac{B}{T_{\text{svc}}(B)} = \frac{B}{T_{\text{fixed}} + B \times t_{\text{req}}}$$
+$$\EffectiveServiceRate = \frac{B}{\BatchServiceTimeSvc} = \frac{B}{T_{\text{fixed}} + B \times t_{\text{req}}}$$
 
 The resulting batching efficiency curve\index{Batching!efficiency curve} shows three distinct regimes. For small batch sizes ($B$), throughput is dominated by $T_{\text{fixed}}$, making the system latency-bound (or overhead-bound) where increasing $B$ yields large but diminishing throughput gains. As $B$ becomes large, the $T_{\text{fixed}}$ term becomes negligible, and throughput asymptotically approaches the hardware limit $1/t_{\text{req}}$, leaving the system compute-bound (or bandwidth-bound for LLMs). The optimal batch size sits at the knee of the curve\index{Batching!knee of the curve}, the point where throughput gains diminish while latency continues to grow linearly.
 
@@ -1599,7 +1599,7 @@ The resulting batching efficiency curve\index{Batching!efficiency curve} shows t
 *Past the knee, bigger batches spend latency without buying throughput.*
 :::
 
-The execution-only feasibility condition is $T_{\text{svc}}(B) \le \text{SLO}$\index{SLO!batch size trade-off}. In a live service, execution receives only the budget remaining after routing, queueing, batch formation, and response delivery. The batch-size decision must therefore use that remaining budget rather than consume the full SLO. The model also explains why vision models (high $t_{\text{req}}$) and LLMs (high $T_{\text{fixed}}$ due to weight loading) require different tuning strategies.
+The execution-only feasibility condition is $\BatchServiceTimeSvc \le \text{SLO}$\index{SLO!batch size trade-off}. In a live service, execution receives only the budget remaining after routing, queueing, batch formation, and response delivery. The batch-size decision must therefore use that remaining budget rather than consume the full SLO. The model also explains why vision models (high $t_{\text{req}}$) and LLMs (high $T_{\text{fixed}}$ due to weight loading) require different tuning strategies.
 
 ```{python}
 #| echo: false
@@ -1676,7 +1676,7 @@ Across model architectures, @tbl-batching-by-model shows that batching choice fo
 
 Translating these batch-level equations into system-wide capacity planning requires a classical result from queuing theory: Little's Law\index{Little's Law!capacity planning},[^fn-littles-law-queuing] which relates concurrency, throughput, and latency in any stable system.
 
-[^fn-littles-law-queuing]: **Little's Law**\index{Little's Law!serving concurrency}: In a stable system, $Q_{\text{req}} = \lambda_{\text{arr}} T_{\text{lat}}$ relates average concurrency, arrival rate, and time in the system. For 32 requests present on average and a measured mean residence time of 100 ms, the corresponding rate is 320 requests/s. This identity does not establish maximum service capacity or a tail-latency guarantee.
+[^fn-littles-law-queuing]: **Little's Law**\index{Little's Law!serving concurrency}: In a stable system, $\RequestConcurrency = \ArrivalRate \RequestTimeInSystemLat$ relates average concurrency, arrival rate, and time in the system. For 32 requests present on average and a measured mean residence time of 100 ms, the corresponding rate is 320 requests/s. This identity does not establish maximum service capacity or a tail-latency guarantee.
 
 ```{python}
 #| echo: false
@@ -1741,16 +1741,16 @@ class LittlesLawExample:
 
 ::: {#thrm-inference-littles-law-inference .callout-theorem title="Little's Law for inference"}
 
-**Concept**: In any stable queuing system, the average number of requests in the system $(Q_{\text{req}})$ equals the arrival rate $(\lambda_{\text{arr}})$ multiplied by the average time a request spends in the system $(T_{\text{lat}})$.
+**Concept**: In any stable queuing system, the average number of requests in the system $(\RequestConcurrency)$ equals the arrival rate $(\ArrivalRate)$ multiplied by the average time a request spends in the system $(\RequestTimeInSystemLat)$.
 
-$$ Q_{\text{req}} = \lambda_{\text{arr}} \cdot T_{\text{lat}} $$
+$$ \RequestConcurrency = \ArrivalRate \cdot \RequestTimeInSystemLat $$
 
 **Application**: Concurrency planning. For this illustrative estimate, assume the mean end-to-end latency equals the numerical latency target below. A percentile SLO cannot generally be substituted for the mean in Little's Law.
 
-- **Target Throughput** $(\lambda_{\text{arr}})$: `{python} LittlesLawExample.target_throughput_str` requests/sec
-- **Assumed mean latency** $(T_{\text{lat}})$: `{python} LittlesLawExample.latency_slo_ms_str` (`{python} LittlesLawExample.latency_slo_s_str`)
+- **Target Throughput** $(\ArrivalRate)$: `{python} LittlesLawExample.target_throughput_str` requests/sec
+- **Assumed mean latency** $(\RequestTimeInSystemLat)$: `{python} LittlesLawExample.latency_slo_ms_str` (`{python} LittlesLawExample.latency_slo_s_str`)
 
-**Required Concurrency** $(Q_{\text{req}})$: `{python} LittlesLawExample.required_concurrency_math` `{python} LittlesLawExample.required_concurrency_str` concurrent requests
+**Required Concurrency** $(\RequestConcurrency)$: `{python} LittlesLawExample.required_concurrency_math` `{python} LittlesLawExample.required_concurrency_str` concurrent requests
 
 **Capacity Planning**\index{Capacity Planning}:
 If a single GPU replica handles batch size `{python} LittlesLawExample.batch_size_str` with `{python} LittlesLawExample.replica_latency_ms_str` latency:
@@ -1772,11 +1772,11 @@ Vision models represent the simplest batching case because inputs have uniform s
 
 Static batching collects exactly $B$ requests before processing. This maximizes GPU utilization when request arrival is predictable but causes unbounded latency during low-traffic periods.
 
-Dynamic batching collects requests for a maximum time window $T_{\text{window}}$ or until reaching maximum batch size $B_{\text{max}}$, whichever occurs first. The expected latency under Poisson arrivals with rate $\lambda_{\text{arr}}$ follows @eq-dynamic-batch-latency:
+Dynamic batching collects requests for a maximum time window $T_{\text{window}}$ or until reaching maximum batch size $B_{\text{max}}$, whichever occurs first. The expected latency under Poisson arrivals with rate $\ArrivalRate$ follows @eq-dynamic-batch-latency:
 
-$$\mathbb{E}[T_{\text{lat}}] = \mathbb{E}[L_{\text{lat,queue}}] + T_{\text{batch}} + T_{\text{svc}}(B)$$ {#eq-dynamic-batch-latency}
+$$\mathbb{E}[\RequestTimeInSystemLat] = \mathbb{E}[L_{\text{lat,queue}}] + T_{\text{batch}} + \BatchServiceTimeSvc$$ {#eq-dynamic-batch-latency}
 
-where $\mathbb{E}[L_{\text{lat,queue}}]$ is the expected queuing delay, $T_{\text{batch}}$ is the batch formation delay (up to $T_{\text{window}}$), and $T_{\text{svc}}(B)$ is the inference time for batch size $B$. The two waiting terms respond differently to load. Under Poisson arrivals the mean inter-arrival gap is $1/\lambda_{\text{arr}}$, so a higher arrival rate fills a batch faster and reduces formation delay. Queueing for a busy replica can nevertheless grow as arrival rate approaches service capacity; the batching timeout does not cap that queueing delay. The worked example that follows evaluates the capacity gained by spending part of the latency budget on batch formation.
+where $\mathbb{E}[L_{\text{lat,queue}}]$ is the expected queuing delay, $T_{\text{batch}}$ is the batch formation delay (up to $T_{\text{window}}$), and $\BatchServiceTimeSvc$ is the inference time for batch size $B$. The two waiting terms respond differently to load. Under Poisson arrivals the mean inter-arrival gap is $1/\ArrivalRate$, so a higher arrival rate fills a batch faster and reduces formation delay. Queueing for a busy replica can nevertheless grow as arrival rate approaches service capacity; the batching timeout does not cap that queueing delay. The worked example that follows evaluates the capacity gained by spending part of the latency budget on batch formation.
 
 ```{python}
 #| echo: false
@@ -2210,11 +2210,11 @@ $$O_{\text{traditional}} = B \times S_{\text{max}} \times c_{\text{decode}}$$
 
 where $S_{\text{max}} = \max_i(S_i)$ and $c_{\text{decode}}$ is the compute cost per decode iteration per sequence. However, the useful compute is only:
 
-$$O_{\text{useful}} = \sum_{i=1}^{B} S_i \times c_{\text{decode}}$$
+$$\UsefulModelFlops = \sum_{i=1}^{B} S_i \times c_{\text{decode}}$$
 
 @Eq-waste-ratio defines the waste ratio\index{Waste Ratio} that quantifies the inefficiency:
 
-$$W = 1 - \frac{O_{\text{useful}}}{O_{\text{traditional}}} = 1 - \frac{\sum_{i=1}^{B} S_i}{B \times S_{\text{max}}} = 1 - \frac{\bar{S}}{S_{\text{max}}}$$ {#eq-waste-ratio}
+$$W = 1 - \frac{\UsefulModelFlops}{O_{\text{traditional}}} = 1 - \frac{\sum_{i=1}^{B} S_i}{B \times S_{\text{max}}} = 1 - \frac{\bar{S}}{S_{\text{max}}}$$ {#eq-waste-ratio}
 
 where $\bar{S}$ is the mean output sequence length. This reveals that waste depends entirely on the ratio of mean to maximum output length within the batch. For uniform output lengths $(\bar{S} = S_{\text{max}})$, waste is zero. For highly variable lengths, waste can exceed 50 percent.
 
@@ -2630,7 +2630,7 @@ class A100HardwareScenario:
 
 ::: {#exmp-inference-debugging-high-p99-latency .callout-example title="Debugging high p99 latency"}
 
-**Scenario**: An LLM serving system exhibits high tail latency: p50 = `{python} A100HardwareScenario.p50_latency_ms_str` and p95 = `{python} A100HardwareScenario.p95_latency_ms_str` maintain SLO, but p99 spikes to $T_{\text{p99}} =$ `{python} A100HardwareScenario.p99_latency_ms_str` against a `{python} A100HardwareScenario.p99_target_ms_str` target despite GPU utilization $\eta_{\text{hw}} =$ `{python} A100HardwareScenario.gpu_utilization_pct_str`.
+**Scenario**: An LLM serving system exhibits high tail latency: p50 = `{python} A100HardwareScenario.p50_latency_ms_str` and p95 = `{python} A100HardwareScenario.p95_latency_ms_str` maintain SLO, but p99 spikes to $T_{\text{p99}} =$ `{python} A100HardwareScenario.p99_latency_ms_str` against a `{python} A100HardwareScenario.p99_target_ms_str` target despite GPU utilization $\EfficiencyHw =$ `{python} A100HardwareScenario.gpu_utilization_pct_str`.
 
 **Diagnosis**: The system runs across `{python} A100HardwareScenario.num_gpus_str` A100 GPUs linked via PCIe Gen4 (`{python} A100HardwareScenario.pcie_gen4_gb_per_s_str` per GPU) rather than NVLink. For `{python} A100HardwareScenario.activation_transfer_mb_str` tensor-parallel transfers, inter-GPU communication latency is $T_{\text{comm}} \approx$ `{python} A100HardwareScenario.pcie_transfer_ms_str` over PCIe versus `{python} A100HardwareScenario.nvlink_transfer_ms_str` over NVLink. The scheduling policy uses max batch size `{python} A100HardwareScenario.max_batch_size_str` and timeout `{python} A100HardwareScenario.batch_timeout_ms_str`, causing `{python} A100HardwareScenario.affected_batch_share_pct_str` of batches to experience head-of-line queuing delay $L_{\text{lat,queue}}$: short prompt requests wait behind long-sequence generations.
 
@@ -2717,13 +2717,13 @@ where $B_{\text{dec}}$ is the number of active decode tokens and $C_k$ is the to
 
 Interleaving prefill chunks with decode iterations amortizes each weight load across both phases, an effect termed **decode piggybacking**\index{Decode piggybacking!definition}\index{Decode piggybacking!weight loading amortization}.
 
-In an isolated decode step, streaming the model parameters ($M_{\text{weights}}$ bytes) from HBM to registers achieves low arithmetic intensity\index{Arithmetic intensity!decode phase} because only $B_{\text{dec}}$ tokens perform matrix-vector multiplication against those weights. Compute units sit idle during the majority of the memory transfer cycle.
+In an isolated decode step, streaming the model parameters ($\WeightMemoryWeights$ bytes) from HBM to registers achieves low arithmetic intensity\index{Arithmetic intensity!decode phase} because only $B_{\text{dec}}$ tokens perform matrix-vector multiplication against those weights. Compute units sit idle during the majority of the memory transfer cycle.
 
 In a hybrid iteration, the model weights loaded from HBM into on-chip cache and registers are simultaneously reused for both the compute-dense prefill chunks ($\sum_k C_k$ tokens in total) and the memory-bound decode tokens ($B_{\text{dec}}$ tokens). Ignoring attention-state traffic, communication, and scheduling overhead gives the projection-only lower-bound estimate in @eq-chunked-prefill-step-time:
 
-$$T_{\text{step}} \gtrsim \max\left(\frac{M_{\text{weights}}}{\text{BW}_{\text{mem}}}, \frac{2 \cdot (B_{\text{dec}} + \sum_k C_k) \cdot P_{\text{model}}}{R_{\text{peak}}}\right)$$ {#eq-chunked-prefill-step-time}
+$$T_{\text{step}} \gtrsim \max\left(\frac{\WeightMemoryWeights}{\SustainedMemoryBandwidth}, \frac{2 \cdot (B_{\text{dec}} + \sum_k C_k) \cdot P_{\text{model}}}{\PeakRate}\right)$$ {#eq-chunked-prefill-step-time}
 
-where $P_{\text{model}}$ is the active parameter count, $\text{BW}_{\text{mem}}$ is HBM memory bandwidth, and $R_{\text{peak}}$ is peak accelerator compute throughput. These quantities must describe the same device or shard. Balancing the total prefill token allocation against weight streaming can amortize weight-loading cost across both phases, but this lower bound cannot guarantee $T_{\text{step}} \le \text{SLO}_{\text{TBT}}$. Chunk sizing must leave room for the omitted costs and be validated against measured tail latency under the intended workload.
+where $P_{\text{model}}$ is the active parameter count, $\SustainedMemoryBandwidth$ is HBM memory bandwidth, and $\PeakRate$ is peak accelerator compute throughput. These quantities must describe the same device or shard. Balancing the total prefill token allocation against weight streaming can amortize weight-loading cost across both phases, but this lower bound cannot guarantee $T_{\text{step}} \le \text{SLO}_{\text{TBT}}$. Chunk sizing must leave room for the omitted costs and be validated against measured tail latency under the intended workload.
 
 ::: {#exmp-inference-sarathi-chunked-prefill-implementation .callout-example title="Sarathi: Chunked prefill implementation"}
 
@@ -3049,7 +3049,7 @@ Once batching is workload-specific, fixed parameters become fragile. Production 
 
 Traffic-adaptive batching\index{Adaptive batching!traffic-adaptive window} adjusts the batch window based on arrival rate:
 
-$$T_{\text{window}} = \min\left(T_{\text{max}}, \frac{B_{\text{target}}}{\lambda_{\text{arr}}}\right)$$
+$$T_{\text{window}} = \min\left(T_{\text{max}}, \frac{B_{\text{target}}}{\ArrivalRate}\right)$$
 
 When traffic is high, the window shrinks because the target batch size fills quickly. When traffic is low, the window extends but is capped to bound batch-formation delay. This cap does not bound the separate wait for a busy replica.
 
@@ -3408,13 +3408,13 @@ class KVCacheCapacityEstimator:
 **Problem**: A deployment serves an illustrative 70B-class GQA model with 128K context support (FP16 weights $\approx$ `{python} KVCacheCapacityEstimator.weight_gb_str`) on an `{python} KVCacheCapacityEstimator.node_gpus_str`$\times$ H100 node (`{python} KVCacheCapacityEstimator.total_hbm_gb_str` total HBM). The goal is to determine the maximum batch size for a context length of 128K tokens.
 
 **Formula**:
-$$ m_{\text{token}} = 2 \times N_L \times H_{\text{KV}} \times d_{\text{head}} \times s_{\text{elem}} $$
-$$ M_{\text{total}} = M_{\text{weights}} + M_{\text{KV}}, \qquad M_{\text{KV}} = B \times S \times m_{\text{token}} $$
+$$ \KvcacheBytesPerToken = 2 \times N_L \times \NumberOfKeyvalueHeadsKv \times \AttentionHeadDimension \times \ElementStorageSize $$
+$$ \TotalMemoryFootprint = \WeightMemoryWeights + \KvcacheMemory, \qquad \KvcacheMemory = B \times S \times \KvcacheBytesPerToken $$
 
 **Parameters**:
 
-*   $N_L = 80$, $H_{\text{KV}} = 8$ for the assumed GQA architecture, $d_{\text{head}} = 128$.
-*   $s_{\text{elem}} = 2$ bytes (FP16).
+*   $N_L = 80$, $\NumberOfKeyvalueHeadsKv = 8$ for the assumed GQA architecture, $\AttentionHeadDimension = 128$.
+*   $\ElementStorageSize = 2$ bytes (FP16).
 *   Context $= 131{,}072$ tokens.
 
 **Step 1**: Calculate memory per token.
@@ -3502,7 +3502,7 @@ The fragmentation example exposes the allocator failure: enough KV-cache capacit
 
 1.  **Significance**: It eliminates external fragmentation within the fixed-block pool and bounds internal waste to the unused portion of each sequence's final block. Recovering capacity from contiguous preallocation permits larger concurrent batches; the throughput gain depends on sequence lengths, demand, and the serving bottleneck.
 2.  **Distinction**: Unlike contiguous allocation (which requires prereserving the maximum context length), PagedAttention uses a block table\index{Block table!logical to physical mapping} to map logical sequence indices to physical memory pages, allocating blocks as the sequence grows.
-3.  **Common pitfall**: A frequent misconception is that PagedAttention speeds up *individual token math*. In reality, it is a capacity optimization: it improves *system-level efficiency* by allowing larger batch sizes, though it adds a small indirection overhead $(L_{\text{lat}})$ for the pointer lookups.
+3.  **Common pitfall**: A frequent misconception is that PagedAttention speeds up *individual token math*. In reality, it is a capacity optimization: it improves *system-level efficiency* by allowing larger batch sizes, though it adds a small indirection overhead $(\Latency)$ for the pointer lookups.
 
 :::
 
@@ -4431,11 +4431,11 @@ This multi-tenant serving pattern shifts the fundamental performance constraint 
 
 #### Multi-LoRA serving and batched adapter execution {#sec-inference-multi-lora-serving}
 
-In multi-tenant environments, thousands of fine-tuned adapters share a single base foundation model. For a linear projection layer with base weights $\mathbf{W}_0 \in \mathbb{R}^{d_{\text{out}} \times d_{\text{in}}}$, an adapter $k$ parameterizes the forward transformation using low-rank decomposition matrices $\mathbf{A}_k \in \mathbb{R}^{r_k \times d_{\text{in}}}$ and $\mathbf{B}_k \in \mathbb{R}^{d_{\text{out}} \times r_k}$ with rank $r_k \ll \min(d_{\text{in}}, d_{\text{out}})$ (typically $r \in \{8, 16, 64\}$), as formulated in @eq-lora-forward:
+In multi-tenant environments, thousands of fine-tuned adapters share a single base foundation model. For a linear projection layer with base weights $\mathbf{W}_0 \in \mathbb{R}^{\LayerInputAndOutputWidthsTwo \times \LayerInputAndOutputWidths}$, an adapter $k$ parameterizes the forward transformation using low-rank decomposition matrices $\mathbf{A}_k \in \mathbb{R}^{r_k \times \LayerInputAndOutputWidths}$ and $\mathbf{B}_k \in \mathbb{R}^{\LayerInputAndOutputWidthsTwo \times r_k}$ with rank $r_k \ll \min(\LayerInputAndOutputWidths, \LayerInputAndOutputWidthsTwo)$ (typically $r \in \{8, 16, 64\}$), as formulated in @eq-lora-forward:
 
 $$\mathbf{y} = \mathbf{x} \mathbf{W}_0^T + \frac{\alpha_k}{r_k} \mathbf{x} \mathbf{A}_k^T \mathbf{B}_k^T$$ {#eq-lora-forward}
 
-where $\mathbf{x} \in \mathbb{R}^{1 \times d_{\text{in}}}$ is a row vector, $\mathbf{y} \in \mathbb{R}^{1 \times d_{\text{out}}}$, and $\alpha_k$ is a fixed scaling factor. Each adapted projection adds $r_k(d_{\text{in}} + d_{\text{out}})$ parameters instead of a full $d_{\text{in}}d_{\text{out}}$ weight matrix. The resident adapter budget therefore depends on which layers are adapted, their dimensions and ranks, precision, and the number of simultaneously loaded tenants.
+where $\mathbf{x} \in \mathbb{R}^{1 \times \LayerInputAndOutputWidths}$ is a row vector, $\mathbf{y} \in \mathbb{R}^{1 \times \LayerInputAndOutputWidthsTwo}$, and $\alpha_k$ is a fixed scaling factor. Each adapted projection adds $r_k(\LayerInputAndOutputWidths + \LayerInputAndOutputWidthsTwo)$ parameters instead of a full $\LayerInputAndOutputWidths\LayerInputAndOutputWidthsTwo$ weight matrix. The resident adapter budget therefore depends on which layers are adapted, their dimensions and ranks, precision, and the number of simultaneously loaded tenants.
 
 However, serving requests with heterogeneous adapters in a single continuous batch introduces a critical execution dilemma between batch efficiency and kernel dispatch overhead.
 
@@ -4459,11 +4459,11 @@ Systems such as Punica\index{Punica!multi-tenant LoRA} [@chen2023punica] and S-L
 
 Instead of launching separate kernels for every request, batched or segmented gather-matrix-vector operations\index{BGMV!kernel launch} group heterogeneous adapters within each projection. Down-projection and up-projection can use separate kernels; Punica distinguishes shrink and expand operators [@chen2023punica].
 
-For input activations $\mathbf{X} = [\mathbf{x}_1; \mathbf{x}_2; \dots; \mathbf{x}_B] \in \mathbb{R}^{B \times d_{\text{in}}}$, the scheduler constructs an integer mapping vector $\mathbf{m} \in \mathbb{Z}^B$ where $\mathbf{m}[i] = k(i)$ denotes the adapter ID assigned to request $i$. The mathematical dataflow for each token is:
+For input activations $\mathbf{X} = [\mathbf{x}_1; \mathbf{x}_2; \dots; \mathbf{x}_B] \in \mathbb{R}^{B \times \LayerInputAndOutputWidths}$, the scheduler constructs an integer mapping vector $\mathbf{m} \in \mathbb{Z}^B$ where $\mathbf{m}[i] = k(i)$ denotes the adapter ID assigned to request $i$. The mathematical dataflow for each token is:
 
 1.  **Gather**: Select token activation $\mathbf{x}_i$ and the adapter pointer from $\mathbf{m}[i]$.
-2.  **Down-projection**: Compute the vector-matrix product $\mathbf{v}_i = \mathbf{x}_i \mathbf{A}_{k(i)}^T \in \mathbb{R}^{1 \times r_{k(i)}}$. Because $r \ll d_{\text{in}}$, this intermediate is smaller than the input activation; its physical placement depends on the kernel.
-3.  **Up-projection**: Multiply $\mathbf{v}_i$ by $\mathbf{B}_{k(i)}^T \in \mathbb{R}^{r_{k(i)} \times d_{\text{out}}}$, yielding the adapter delta $\Delta \mathbf{y}_i = \frac{\alpha_{k(i)}}{r_{k(i)}} \mathbf{v}_i \mathbf{B}_{k(i)}^T$.
+2.  **Down-projection**: Compute the vector-matrix product $\mathbf{v}_i = \mathbf{x}_i \mathbf{A}_{k(i)}^T \in \mathbb{R}^{1 \times r_{k(i)}}$. Because $r \ll \LayerInputAndOutputWidths$, this intermediate is smaller than the input activation; its physical placement depends on the kernel.
+3.  **Up-projection**: Multiply $\mathbf{v}_i$ by $\mathbf{B}_{k(i)}^T \in \mathbb{R}^{r_{k(i)} \times \LayerInputAndOutputWidthsTwo}$, yielding the adapter delta $\Delta \mathbf{y}_i = \frac{\alpha_{k(i)}}{r_{k(i)}} \mathbf{v}_i \mathbf{B}_{k(i)}^T$.
 4.  **Accumulation**: Add $\Delta \mathbf{y}_i$ to the output of the base model projection $\mathbf{y}_i = \mathbf{x}_i \mathbf{W}_0^T + \Delta \mathbf{y}_i$.
 
 By gathering adapter weights within batched kernels, BGMV avoids dispatching a separate kernel for each request's adapter. The gain must be measured against the actual adapter mix; irregular access and small ranks can still limit achieved bandwidth.
@@ -4855,7 +4855,7 @@ Model sharding for inference is driven by two distinct requirements. @Tbl-shardi
 
 The first driver is memory capacity. A model that cannot fit in single-GPU memory must be sharded regardless of performance considerations. For a model with $P$ parameters at precision $b$ bits, the weight memory is calculated by @eq-weight-memory:
 
-$$M_{\text{weights}} = P \times \frac{b}{8} \text{ bytes}$$ {#eq-weight-memory}
+$$\WeightMemoryWeights = P \times \frac{b}{8} \text{ bytes}$$ {#eq-weight-memory}
 
 A 70-billion-parameter model in FP16 (16 bits) requires:
 
@@ -4865,9 +4865,9 @@ The result exceeds the `{python} HardwareSetupSharding.h100_mem_gb_str` capacity
 
 The second driver is latency. Even when a model fits in memory, sharding can reduce latency by parallelizing computation. @Eq-parallel-time is the Fleet Law (@eq-fleet-law) applied to a single inference request, separating the compute term that sharding divides from the communication and synchronization terms it adds:
 
-$$T_{\text{step}}(N) = \frac{T_{\text{compute}}}{N} + T_{\text{comm}}(N) + T_{\text{sync}}(N) - T_{\text{overlap}}$$ {#eq-parallel-time}
+$$\DistributedStepTime = \frac{\IronlawTermTimesCompute}{N} + \CommunicationTime + \SynchronizationTime - \OverlappedTime$$ {#eq-parallel-time}
 
-where $N$ is the number of devices in the sharding group, $T_{\text{comm}}(N)$ is the communication overhead, $T_{\text{sync}}(N)$ is synchronization overhead, and $T_{\text{overlap}}$ is communication hidden behind useful compute. In the common no-overlap simplification with negligible extra synchronization, this reduces to $T_{\text{compute}}/N + T_{\text{comm}}(N)$. Sharding provides latency benefit only when the nonoverlapped overhead is smaller than the time saved through parallelization.
+where $N$ is the number of devices in the sharding group, $\CommunicationTime$ is the communication overhead, $\SynchronizationTime$ is synchronization overhead, and $\OverlappedTime$ is communication hidden behind useful compute. In the common no-overlap simplification with negligible extra synchronization, this reduces to $\IronlawTermTimesCompute/N + \CommunicationTime$. Sharding provides latency benefit only when the nonoverlapped overhead is smaller than the time saved through parallelization.
 
 | **Sharding Trigger**    | **Capacity or timing contract**                                         | **Candidate strategy**    |
 |:------------------------|:------------------------------------------------------------------------|:--------------------------|
@@ -4886,9 +4886,9 @@ Tensor parallelism\index{Tensor Parallelism!inference} [@shoeybi2019megatron] di
 ↩ Column-row tensor partitioning and distributed AllReduce collectives are analyzed in @sec-distributed-training-systems and @sec-collective-communication.
 :::
 
-The multi-head attention computation naturally partitions across attention heads. For a model with $N_{\text{heads}}$ attention heads distributed across tensor-parallel degree $N_{\text{TP}}$, each device computes $N_{\text{heads}}/N_{\text{TP}}$ heads:
+The multi-head attention computation naturally partitions across attention heads. For a model with $\NumberOfAttentionHeads$ attention heads distributed across tensor-parallel degree $\TensorparallelDegreeTp$, each device computes $\NumberOfAttentionHeads/\TensorparallelDegreeTp$ heads:
 
-$$\text{Attention}_i = \text{softmax}\left(\frac{\mathbf{Q}_i \mathbf{K}_i^T}{\sqrt{d_{\text{head}}}}\right) \mathbf{V}_i \text{ for heads } i \in \{1, \dots, N_{\text{heads}}/N_{\text{TP}}\}$$
+$$\text{Attention}_i = \text{softmax}\left(\frac{\mathbf{Q}_i \mathbf{K}_i^T}{\sqrt{\AttentionHeadDimension}}\right) \mathbf{V}_i \text{ for heads } i \in \{1, \dots, \NumberOfAttentionHeads/\TensorparallelDegreeTp\}$$
 
 After computing local attention, an AllReduce operation\index{AllReduce!tensor parallelism synchronization} combines results across devices, adding communication overhead proportional to the activation size divided by the interconnect bandwidth.
 
@@ -5019,14 +5019,14 @@ The communication pattern for tensor-parallel inference follows a two-phase sync
 
     % GPU 0 Attention
     \node[opbox, minimum height=1.5cm] (att0) at (2.6, 7.95) {
-        \textbf{\textcolor{DarkNavy}{Heads $1 \dots N_{\text{heads}}/2$}}\\[3pt]
+        \textbf{\textcolor{DarkNavy}{Heads $1 \dots \NumberOfAttentionHeads/2$}}\\[3pt]
         {\fontsize{7}{8.5}\selectfont\textcolor{SlateGrey}{$\mathbf{Q}, \mathbf{K}, \mathbf{V}$ Projections $\to$ Head Concat}}\\[1pt]
         {\fontsize{7}{8.5}\selectfont\textcolor{SlateGrey}{$\mathbf{W}_O$ Row Partition}}
     };
 
     % GPU 1 Attention
     \node[opbox, minimum height=1.5cm] (att1) at (8.0, 7.95) {
-        \textbf{\textcolor{DarkNavy}{Heads $N_{\text{heads}}/2+1 \dots N_{\text{heads}}$}}\\[3pt]
+        \textbf{\textcolor{DarkNavy}{Heads $\NumberOfAttentionHeads/2+1 \dots \NumberOfAttentionHeads$}}\\[3pt]
         {\fontsize{7}{8.5}\selectfont\textcolor{SlateGrey}{$\mathbf{Q}, \mathbf{K}, \mathbf{V}$ Projections $\to$ Head Concat}}\\[1pt]
         {\fontsize{7}{8.5}\selectfont\textcolor{SlateGrey}{$\mathbf{W}_O$ Row Partition}}
     };
@@ -5107,9 +5107,9 @@ The communication pattern for tensor-parallel inference follows a two-phase sync
 
 The inference time with tensor parallelism follows @eq-tensor-parallel-time:
 
-$$T_{\text{inference}} = \frac{T_{\text{compute}}}{N_{\text{TP}}} + 2 \times T_{\text{allreduce}}(A)$$ {#eq-tensor-parallel-time}
+$$T_{\text{inference}} = \frac{\IronlawTermTimesCompute}{\TensorparallelDegreeTp} + 2 \times T_{\text{allreduce}}(A)$$ {#eq-tensor-parallel-time}
 
-where $T_{\text{compute}}$ is the sequential compute time for one layer, $N_{\text{TP}}$ is the tensor-parallel degree, and $A$ is the full activation payload contributed by each rank to each AllReduce. Compute is ideally divided across ranks; the partial activation output still has the full reduced shape. The factor of 2 accounts for the two all-reduce operations per transformer layer (attention and feed-forward).
+where $\IronlawTermTimesCompute$ is the sequential compute time for one layer, $\TensorparallelDegreeTp$ is the tensor-parallel degree, and $A$ is the full activation payload contributed by each rank to each AllReduce. Compute is ideally divided across ranks; the partial activation output still has the full reduced shape. The factor of 2 accounts for the two all-reduce operations per transformer layer (attention and feed-forward).
 
 ```{python}
 #| echo: false
@@ -5350,10 +5350,10 @@ For inference, pipeline parallelism creates bubbles\index{Pipeline Parallelism!b
     \draw[->, line width=0.85pt, color=ForestGreen, shorten >=2pt, shorten <=2pt] (st3.east) -- (out0.west);
 
     % =========================================================================
-    % PANEL (b): PIPELINED CONCURRENCY (N_{\text{PP}} = 4)
+    % PANEL (b): PIPELINED CONCURRENCY (\PipelineparallelDegreePp = 4)
     % =========================================================================
     \node[panelcard, minimum width=21.2cm, minimum height=6.6cm, anchor=north west] (pb) at (0, -4.1) {};
-    \node[panelheader, anchor=north west] (hb) at ([xshift=10pt, yshift=-10pt]pb.north west) {(b) Pipelined Concurrency ($N_{\text{PP}} = 4$)};
+    \node[panelheader, anchor=north west] (hb) at ([xshift=10pt, yshift=-10pt]pb.north west) {(b) Pipelined Concurrency ($\PipelineparallelDegreePp = 4$)};
     \node[anchor=north east, font=\scriptsize\color{SlateGrey}] at ([shift={(-12pt, -10pt)}]pb.north east) {Multiple requests overlap across pipeline stages; throughput scales $4\times$ in steady state};
 
     % Steady state pill above divider
@@ -5407,7 +5407,7 @@ For inference, pipeline parallelism creates bubbles\index{Pipeline Parallelism!b
     \node[draw=BorderGreen, fill=white, line width=0.75pt, rounded corners=3pt, inner sep=8pt, text width=3.4cm, align=center] (scale_card) at (17.5, -7.85) {
         \small\bfseries\textcolor{DarkNavy}{Throughput Scaling}\\[4pt]
         {\fontsize{7.5}{9}\selectfont
-        Pipeline Depth: $N_{\text{PP}} = 4$\\[2pt]
+        Pipeline Depth: $\PipelineparallelDegreePp = 4$\\[2pt]
         \textcolor{ForestGreen}{\textbf{Output: 1 req / step}}}\\[6pt]
         \colorbox{SoftGreen}{\fontsize{7.5}{9}\selectfont\bfseries\textcolor{ForestGreen}{4$\times$ Peak Throughput}}
     };
@@ -5433,7 +5433,7 @@ For inference, pipeline parallelism creates bubbles\index{Pipeline Parallelism!b
 
 For a single request, pipeline parallelism provides no latency benefit: the request must traverse all stages sequentially. The pipeline fill time equals the sequential execution time.
 
-Pipeline parallelism instead scales throughput\index{Pipeline Parallelism!throughput scaling} by sustaining multiple concurrent requests across execution stages, as tracked in the steady-state schedule of @fig-pipeline-bubbles(b). Once the pipeline reaches saturation, throughput is limited by the slowest stage. For $N_{\text{PP}}$ balanced stages with negligible transfer overhead, this is $N_{\text{PP}}$ times the throughput of executing the whole model sequentially on one device, not $N_{\text{PP}}$ times a single stage's throughput. An individual request still traverses every stage, so its execution latency remains approximately the sum of the stage times.
+Pipeline parallelism instead scales throughput\index{Pipeline Parallelism!throughput scaling} by sustaining multiple concurrent requests across execution stages, as tracked in the steady-state schedule of @fig-pipeline-bubbles(b). Once the pipeline reaches saturation, throughput is limited by the slowest stage. For $\PipelineparallelDegreePp$ balanced stages with negligible transfer overhead, this is $\PipelineparallelDegreePp$ times the throughput of executing the whole model sequentially on one device, not $\PipelineparallelDegreePp$ times a single stage's throughput. An individual request still traverses every stage, so its execution latency remains approximately the sum of the stage times.
 
 Pipeline parallelism is particularly appropriate for inference when memory constraints require sharding across devices but latency targets are relaxed, when aggregate throughput matters more than individual request latency, or when inter-device network bandwidth is limited to point-to-point communication rather than high-speed AllReduce fabrics.
 
@@ -5441,13 +5441,13 @@ Pipeline parallelism is particularly appropriate for inference when memory const
 
 | **Aspect**                 |              **Tensor Parallelism**              |         **Pipeline Parallelism**        |
 |:---------------------------|:------------------------------------------------:|:---------------------------------------:|
-| **Single-request latency** | Compute term reduced up to $N_{\text{TP}}\times$ |              No improvement             |
-| **Throughput**             |   Below $N_{\text{TP}}\times$ (AllReduce cost)   | Up to $N_{\text{PP}}\times$ (pipelined) |
+| **Single-request latency** | Compute term reduced up to $\TensorparallelDegreeTp\times$ |              No improvement             |
+| **Throughput**             |   Below $\TensorparallelDegreeTp\times$ (AllReduce cost)   | Up to $\PipelineparallelDegreePp\times$ (pipelined) |
 | **Communication pattern**  |         AllReduce (bandwidth-intensive)          |    Point-to-point (latency-sensitive)   |
 | **Memory efficiency**      |              Activations replicated              |         Activations passed along        |
 | **Complexity**             |         Higher (requires custom kernels)         |     Lower (layer-level partitioning)    |
 
-: **Pipeline vs. tensor parallelism**: Key trade-offs between layer-internal tensor splitting (reduces single-request latency, requires high-bandwidth NVLink) and inter-layer pipeline staging (maximizes batch throughput, introduces pipeline bubbles). Throughput is relative to sequential execution of the whole model on one device; per-layer AllReduces keep tensor parallelism below the $N_{\text{TP}}\times$ ideal, and balanced, full pipelines approach $N_{\text{PP}}\times$. {#tbl-pipeline-tensor-comparison}
+: **Pipeline vs. tensor parallelism**: Key trade-offs between layer-internal tensor splitting (reduces single-request latency, requires high-bandwidth NVLink) and inter-layer pipeline staging (maximizes batch throughput, introduces pipeline bubbles). Throughput is relative to sequential execution of the whole model on one device; per-layer AllReduces keep tensor parallelism below the $\TensorparallelDegreeTp\times$ ideal, and balanced, full pipelines approach $\PipelineparallelDegreePp\times$. {#tbl-pipeline-tensor-comparison}
 
 The decision rule is latency first, topology second. Tensor parallelism is the right default when single-request latency matters and NVLink-class bandwidth is available; pipeline parallelism is a throughput tool for relaxed-latency workloads or placements where only point-to-point stage communication is affordable.
 
@@ -9380,7 +9380,7 @@ Avoiding these pitfalls keeps serving infrastructure resilient to traffic varian
 
 Inference at scale turns trained models and distributed hardware into a service under continuously arriving work. Training optimizes aggregate progress over a run; serving must also meet user-visible latency targets while paying recurring operating costs. The useful capacity of the fleet is the work it completes within its service contract, not the work its accelerators execute in isolation.
 
-Serving performance depends on the balance between compute and memory bandwidth. In the terms of the single-machine iron law recalled in @sec-vol2-introduction-fleet-law, long-prompt prefill can be compute-bound ($O/R_{\text{peak}}$), while small-batch decode is often bandwidth-bound ($D_{\text{vol}}/\text{BW}$). Each decode iteration reads active weights and the sequences' KV state; batching shares weight reads across more tokens, whereas longer contexts increase KV traffic. Single-replica efficiency ($\eta_{\text{hw}}$) therefore depends on phase, batch size, and context length. Variable output lengths make fixed batch membership waste capacity after shorter requests finish.
+Serving performance depends on the balance between compute and memory bandwidth. In the terms of the single-machine iron law recalled in @sec-vol2-introduction-fleet-law, long-prompt prefill can be compute-bound ($O/\PeakRate$), while small-batch decode is often bandwidth-bound ($\DataVolume/\Bandwidth$). Each decode iteration reads active weights and the sequences' KV state; batching shares weight reads across more tokens, whereas longer contexts increase KV traffic. Single-replica efficiency ($\EfficiencyHw$) therefore depends on phase, batch size, and context length. Variable output lengths make fixed batch membership waste capacity after shorter requests finish.
 
 To maximize throughput under memory-bandwidth constraints, modern serving architectures co-design the memory hierarchy and the iteration scheduler. Continuous batching recovers idle slots by inserting new requests at token boundaries; PagedAttention reduces physical memory fragmentation through fixed-block allocation while retaining partial-page waste; and prefill/decode disaggregation assigns prompt processing and token generation to separate hardware pools sized around their measured compute, memory, and communication costs.
 

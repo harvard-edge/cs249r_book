@@ -121,7 +121,7 @@ For the initial gradient budget, consider a ring schedule: each worker passes te
 
 ***Gradient synchronization***\index{Gradient Synchronization!definition} is the collective communication step in synchronous data-parallel training in which every worker contributes its locally computed gradient tensor to an aggregate reduction, then receives the same reduced result so all model replicas apply an identical update.
 
-1.  **Significance**: A 70B-parameter model in BF16 generates `{python} GradSyncSignificance.gradient_gb_str` of total gradient data per replica per step. This is a logical payload budget; a complete replica requires multiple accelerators or offloaded state, rather than fitting on one H100. Synchronizing across `{python} GradSyncSignificance.n_gpus_str` via ring AllReduce at `{python} GradSyncSignificance.beta_gb_per_s_str` per link requires approximately `{python} GradSyncSignificance.ring_operands_math` $\approx$ `{python} GradSyncSignificance.ring_time_s_str` of communication per step, making the bandwidth (data-movement) part of $T_{\text{comm}}(N)$ large enough to dominate the Fleet Law step time (@eq-fleet-law) unless overlap, hierarchy, or compression reduces the exposed transfer.
+1.  **Significance**: A 70B-parameter model in BF16 generates `{python} GradSyncSignificance.gradient_gb_str` of total gradient data per replica per step. This is a logical payload budget; a complete replica requires multiple accelerators or offloaded state, rather than fitting on one H100. Synchronizing across `{python} GradSyncSignificance.n_gpus_str` via ring AllReduce at `{python} GradSyncSignificance.beta_gb_per_s_str` per link requires approximately `{python} GradSyncSignificance.ring_operands_math` $\approx$ `{python} GradSyncSignificance.ring_time_s_str` of communication per step, making the bandwidth (data-movement) part of $\CommunicationTime$ large enough to dominate the Fleet Law step time (@eq-fleet-law) unless overlap, hierarchy, or compression reduces the exposed transfer.
 2.  **Distinction**: Unlike parameter-server approaches (where all workers send gradients to a centralized aggregator whose bandwidth scales as $\mathcal{O}(N)$), ring AllReduce distributes the communication across all workers so that each worker sends $2 \times (N-1)/N \times M$ bytes per step, approaching $2M$ as cluster size grows.
 3.  **Common pitfall**: A frequent misconception is that ring AllReduce behaves like an all-to-all exchange. In ring AllReduce, each worker communicates with neighbors according to a schedule, and the per-node communication volume is approximately constant as the cluster grows. The scaling pressure comes from latency steps, topology, and the gradient volume per step, not from every worker opening a distinct stream to every other worker.
 
@@ -878,12 +878,12 @@ Verify your understanding of network performance regimes:
 
 The α-β model estimates transfer duration without specifying how much independent computation can proceed during that transfer. Adding the entire estimate to compute time therefore overstates step time when overlap is possible. The **LogP model**\index{LogP Model!definition} [@culler1993] separates network transit from processor involvement with four parameters:
 
-*   **$L_{\text{LogGP}}$ (latency)**: The time for a message to traverse the network (similar to $\alpha$).
+*   **$\LogploggpNetworkLatency$ (latency)**: The time for a message to traverse the network (similar to $\alpha$).
 *   **$o$ (overhead)**\index{LogP Model!processor overhead}\index{LogP Model!overhead parameter}: The processor time spent initiating or completing a transfer. During this work, the same execution resource cannot compute, making $o$ the nonoverlappable cost. In a distributed training context, dispatch, device-kernel launch, memory registration, and runtime progress can all contribute. The value is an effective parameter of a particular software and hardware path, so it must be measured with the same collective, process group, and topology used by the workload.
 *   **$g$ (gap)**: The minimum time interval between consecutive message injections (inverse of message rate). This models link contention\index{Link Contention}.
 *   **$N$ (rank count)**: The number of ranks in the communication group.
 
-LogP distinguishes network latency ($L_{\text{LogGP}}$, which can be hidden) from processor overhead ($o$, which cannot). Independent computation can overlap the network transit interval\index{Communication-computation overlap!LogP analysis}, while initiation and completion overhead remain exposed on the execution resource that performs them. A small overlap calculation makes this distinction concrete:
+LogP distinguishes network latency ($\LogploggpNetworkLatency$, which can be hidden) from processor overhead ($o$, which cannot). Independent computation can overlap the network transit interval\index{Communication-computation overlap!LogP analysis}, while initiation and completion overhead remain exposed on the execution resource that performs them. A small overlap calculation makes this distinction concrete:
 
 ```{python}
 #| echo: false
@@ -917,10 +917,10 @@ class LogPOverlap:
 
 **Math**:
 
-1.  **Overlappable portion**\index{LogP Model!overlappable latency}: Network latency $L_{\text{LogGP}}$ = `{python} LogPOverlap.L_us_str` (data in flight while GPU computes).
+1.  **Overlappable portion**\index{LogP Model!overlappable latency}: Network latency $\LogploggpNetworkLatency$ = `{python} LogPOverlap.L_us_str` (data in flight while GPU computes).
 2.  **Non-overlappable portion**\index{LogP Model!nonoverlappable overhead}: $2o$ = `{python} LogPOverlap.two_o_us_str` (GPU busy initiating/receiving).
 3.  **Compute available**: `{python} LogPOverlap.compute_us_str`.
-4.  **Hidden**: All `{python} LogPOverlap.L_us_str` of $L_{\text{LogGP}}$ can overlap with compute.
+4.  **Hidden**: All `{python} LogPOverlap.L_us_str` of $\LogploggpNetworkLatency$ can overlap with compute.
 5.  **Exposed**: The `{python} LogPOverlap.two_o_us_str` of $2o$ overhead cannot overlap.
 
 **Result**: Effective time is `{python} LogPOverlap.two_o_us_str` + max(`{python} LogPOverlap.compute_us_str`, `{python} LogPOverlap.L_us_str`) = `{python} LogPOverlap.effective_us_str`. The network latency is hidden, but the processor overhead remains exposed. The two-lane execution timeline in @fig-comm-compute-overlap sequences this dependency across layers 4 through 1: each layer's gradient AllReduce launches concurrently beneath the next layer's backward compute, leaving only the final layer (Layer 1) exposed on the critical path once backward computation completes.
@@ -1040,7 +1040,7 @@ class LogPOverlap:
 
   % Region Title Badges above
   \node[anchor=south, font=\footnotesize\bfseries\sffamily\color{GreenLine!90!black}, fill=white, inner sep=2.5pt, rounded corners=2pt]
-    at (5.95, 3.05) {Pipelined Overlap Region ($L_{\text{LogGP}}$ Hidden)};
+    at (5.95, 3.05) {Pipelined Overlap Region ($\LogploggpNetworkLatency$ Hidden)};
 
   \node[anchor=south, font=\footnotesize\bfseries\sffamily\color{RedLine!90!black}, fill=white, inner sep=2.5pt, rounded corners=2pt]
     at (10.8, 3.05) {Critical Tail Barrier (Exposed)};
@@ -1089,7 +1089,7 @@ class LogPOverlap:
         $\bullet$ \textbf{Exposed Barrier:} $\text{Time}(\text{Layer 1})$ sets sync stall floor \\
         \tikz[baseline=-2pt]\fill[BlueFill!75,draw=BlueLine,line width=0.5pt,rounded corners=1pt] (0,-0.12) rectangle (0.32,0.12);
         \textbf{Optimizer:} Weights updated after global barrier &
-        $\bullet$ \textbf{Step Time:} $T_{\text{step}}(N) = T_{\text{backward}} + T_{\text{tail}} + T_{\text{optimizer}}$
+        $\bullet$ \textbf{Step Time:} $\DistributedStepTime = T_{\text{backward}} + T_{\text{tail}} + T_{\text{optimizer}}$
       \end{tabular}
     \end{minipage}
   };
@@ -1119,7 +1119,7 @@ Sending a gradient tensor to a peer does not specify which workers must contribu
 
 ***Collective operation***\index{Collective Operation!definition} is a distributed communication pattern in which every rank in a process group invokes a matching operation to aggregate, broadcast, or redistribute data. The operation's contract specifies the output at each rank; it does not require simultaneous entry and does not, by itself, impose a general-purpose barrier before or after the call [@mpiforum2015mpi31].
 
-1.  **Significance**: The right collective algorithm determines whether communication scales with cluster size or remains constant. Ring AllReduce achieves bandwidth-optimal $2(N-1)/N \times M / \beta$ per node (nearly constant in $N$), while a naive reduce-then-broadcast through one root must move $(N-1)M$ bytes into and out of that root, costing at least $(N-1)M/\beta$ even when receiving and sending overlap. That is roughly $N/2$ times the ring's cost, or about 500$\times$ for $N=1024$. Algorithm selection thus directly determines whether the communication term $T_{\text{comm}}(N)$ of the Fleet Law (@eq-fleet-law) becomes the training bottleneck.
+1.  **Significance**: The right collective algorithm determines whether communication scales with cluster size or remains constant. Ring AllReduce achieves bandwidth-optimal $2(N-1)/N \times M / \beta$ per node (nearly constant in $N$), while a naive reduce-then-broadcast through one root must move $(N-1)M$ bytes into and out of that root, costing at least $(N-1)M/\beta$ even when receiving and sending overlap. That is roughly $N/2$ times the ring's cost, or about 500$\times$ for $N=1024$. Algorithm selection thus directly determines whether the communication term $\CommunicationTime$ of the Fleet Law (@eq-fleet-law) becomes the training bottleneck.
 2.  **Distinction**: Unlike point-to-point communication, a collective defines one operation over a process group. Ranks may enter at different times, and some algorithms allow one rank to complete before another has entered; correctness depends on matching the operation sequence and argument contract across ranks, not on barrier semantics.
 3.  **Common pitfall**: Treating a non-blocking collective as complete when its initiation call returns. The returned request or stream event represents work in flight. A dependent consumer must wait for completion, and a late rank can extend that dependency even though the collective is not a barrier.
 
@@ -1545,7 +1545,7 @@ Each of the `{python} MoeAllToAll.remote_gpus_str` transfers is a `{python} MoeA
 
 If serialized: `{python} MoeAllToAll.remote_gpus_str` $\times$ `{python} MoeAllToAll.per_transfer_us_str` = `{python} MoeAllToAll.serialized_us_str`. If all `{python} MoeAllToAll.remote_gpus_str` transfers are issued concurrently, they still share the GPU's `{python} MoeAllToAll.beta_gb_per_s_str` injection port. The aggregate injection lower bound is therefore $\alpha + \text{total bytes sent}/\beta =$ `{python} MoeAllToAll.parallel_us_str`, before contention and additional collective overhead. Full duplex permits simultaneous sending and receiving; it does not provide one full-bandwidth outgoing port per peer.
 
-**Systems insight**: The injection result is only a lower bound. If the topology's usable bisection bandwidth is $\text{BW}_{\text{bisect}}$ and $V_{\text{cut}}$ bytes must cross its minimum cut, the exchange also obeys $T\geq V_{\text{cut}}/\text{BW}_{\text{bisect}}$. Oversubscription reduces $\text{BW}_{\text{bisect}}$, fine-grained peer messages add startup cost, and expert skew raises the maximum receive volume above the uniform estimate. The forward pass runs the AllToAll twice per layer, once for token dispatch and once for result collection; training also communicates gradients during backward.
+**Systems insight**: The injection result is only a lower bound. If the topology's usable bisection bandwidth is $\Bandwidth_{\text{bisect}}$ and $V_{\text{cut}}$ bytes must cross its minimum cut, the exchange also obeys $T\geq V_{\text{cut}}/\Bandwidth_{\text{bisect}}$. Oversubscription reduces $\Bandwidth_{\text{bisect}}$, fine-grained peer messages add startup cost, and expert skew raises the maximum receive volume above the uniform estimate. The forward pass runs the AllToAll twice per layer, once for token dispatch and once for result collection; training also communicates gradients during backward.
 
 :::
 
@@ -1564,11 +1564,11 @@ This capacity factor exposes a fundamental systems trade-off between communicati
 Skew turns the most heavily loaded rank into a straggler. Because token routing is determined by input semantics, some experts inevitably receive disproportionate token volumes. An expert receiving $\gamma \times$ the average load ($\gamma > 1$) increases its host GPU's traffic. The host's total receive volume depends on the combined load of all experts assigned to it, which is the rank-level quantity in the bound that follows.
 
 This skew creates two compounding performance bottlenecks from stragglers\index{Straggler!expert skew}. An inbound reception bottleneck bounds collective completion by the slowest receiver. Even if 95 percent of GPUs complete their AllToAll exchanges in tens of microseconds, the entire cluster stalls waiting for the hottest destination rank to ingest its oversized payload:
-$$T_{\text{dispatch}} \ge \frac{B_{\text{max}} \times d \times s_{\text{elem}}}{\text{BW}_{\text{rx}}}$$
-where $B_{\text{max}} = \max_r \sum_{e \in \text{rank } r} B_e$ is the largest number of tokens any rank $r$ receives. Concurrently, bisection fabric saturation throttles aggregate throughput. Unlike Ring AllReduce (which maps communication onto nearest-neighbor ring links), AllToAll generates a complete bipartite exchange\index{All-to-All!bipartite exchange} in which a fraction $(N-1)/N \approx 1$ of all tokens leaves its source rank and crosses the cluster network fabric. In an oversubscribed fabric with oversubscription ratio $R:1$, the usable bisection bandwidth $\text{BW}_{\text{bisect}} = (N \cdot \text{BW}_{\text{inject}}) / (2R)$ limits the exchange:
-$$T_{\text{dispatch}} \ge \frac{V_{\text{cut}}}{\text{BW}_{\text{bisect}}}$$
+$$T_{\text{dispatch}} \ge \frac{B_{\text{max}} \times d \times \ElementStorageSize}{\Bandwidth_{\text{rx}}}$$
+where $B_{\text{max}} = \max_r \sum_{e \in \text{rank } r} B_e$ is the largest number of tokens any rank $r$ receives. Concurrently, bisection fabric saturation throttles aggregate throughput. Unlike Ring AllReduce (which maps communication onto nearest-neighbor ring links), AllToAll generates a complete bipartite exchange\index{All-to-All!bipartite exchange} in which a fraction $(N-1)/N \approx 1$ of all tokens leaves its source rank and crosses the cluster network fabric. In an oversubscribed fabric with oversubscription ratio $R:1$, the usable bisection bandwidth $\Bandwidth_{\text{bisect}} = (N \cdot \Bandwidth_{\text{inject}}) / (2R)$ limits the exchange:
+$$T_{\text{dispatch}} \ge \frac{V_{\text{cut}}}{\Bandwidth_{\text{bisect}}}$$
 
-Scale compounds both problems. To mitigate bisection saturation and small-message overhead across thousands of GPUs, hierarchical MoE runtimes decompose the flat AllToAll into a two-level collective\index{All-to-All!hierarchical exchange} [@hwang2023tutel]. Intra-node NVLink first coalesces tokens destined for any expert residing on the same remote server node. Participating nodes then execute an inter-node AllToAll over InfiniBand or RoCE, exchanging aggregated, coarse-grained payloads rather than thousands of fine-grained pairwise messages. Finally, receiving GPUs use NVLink to scatter incoming tokens to the specific GPUs hosting the targeted experts. This hierarchical decomposition reduces the number of concurrent inter-node network flows from $N(N-1)$ to $N_{\text{nodes}}(N_{\text{nodes}}-1)$, replacing fine-grained, latency-sensitive packets with bandwidth-saturating message bursts that shield the data center bisection from packet fragmentation.
+Scale compounds both problems. To mitigate bisection saturation and small-message overhead across thousands of GPUs, hierarchical MoE runtimes decompose the flat AllToAll into a two-level collective\index{All-to-All!hierarchical exchange} [@hwang2023tutel]. Intra-node NVLink first coalesces tokens destined for any expert residing on the same remote server node. Participating nodes then execute an inter-node AllToAll over InfiniBand or RoCE, exchanging aggregated, coarse-grained payloads rather than thousands of fine-grained pairwise messages. Finally, receiving GPUs use NVLink to scatter incoming tokens to the specific GPUs hosting the targeted experts. This hierarchical decomposition reduces the number of concurrent inter-node network flows from $N(N-1)$ to $\AcceleratorsPerNodeNodes(\AcceleratorsPerNodeNodes-1)$, replacing fine-grained, latency-sensitive packets with bandwidth-saturating message bursts that shield the data center bisection from packet fragmentation.
 
 #### AllToAll schedule selection {#sec-collective-communication-alltoall-schedule-selection}
 
@@ -1984,7 +1984,7 @@ Verify your understanding of bandwidth-optimal reduction:
 
 The performance follows directly from the two-phase schedule in example \ref{exmp-collective-communication-ring-allreduce-step-by-step-trace-4-gpus}. Each node sends and receives $\frac{M}{N}$ bytes in each of the $2(N-1)$ steps.
 $$
-T_{\text{ring}} = \underbrace{2(N-1)\alpha}_{\text{Latency Term}} + \underbrace{2\frac{N-1}{N} \frac{M}{\beta}}_{\text{Bandwidth Term}}
+\CollectiveCompletionTimeRing = \underbrace{2(N-1)\alpha}_{\text{Latency Term}} + \underbrace{2\frac{N-1}{N} \frac{M}{\beta}}_{\text{Bandwidth Term}}
 $$
 
 The bandwidth term approaches $2M/\beta$ as $N \to \infty$, reaching the full-duplex lower bound: each rank sends nearly $2M$ bytes across the two phases and receives the same amount concurrently. In contrast, the latency term scales linearly with $N$. Across 10,000 nodes, 20,000 sequential hops accumulate substantial latency, which explains why Ring AllReduce becomes uncompetitive for small payloads.
@@ -2171,14 +2171,14 @@ plt.close()
 
 ### The algorithm crossover point {#sec-communication-collective-operations-algorithm-crossover}
 
-The crossover knee in @fig-allreduce-crossover, where the dashed Tree curve intersects the solid Ring curve at approximately 1 MB, marks the boundary where bandwidth consumption overtakes latency overhead. Setting $T_{\text{ring}} = T_{\text{tree}}$ and solving for payload $M$ isolates this inflection algebraically:
+The crossover knee in @fig-allreduce-crossover, where the dashed Tree curve intersects the solid Ring curve at approximately 1 MB, marks the boundary where bandwidth consumption overtakes latency overhead. Setting $\CollectiveCompletionTimeRing = \CollectiveCompletionTimeTree$ and solving for payload $M$ isolates this inflection algebraically:
 
-$$ T_{\text{ring}} = 2(N-1)\alpha + 2\frac{N-1}{N}\frac{M}{\beta} $$
-$$ T_{\text{tree}} = 2\log_2 N \cdot \alpha + 2\log_2 N \cdot \frac{M}{\beta} $$
+$$ \CollectiveCompletionTimeRing = 2(N-1)\alpha + 2\frac{N-1}{N}\frac{M}{\beta} $$
+$$ \CollectiveCompletionTimeTree = 2\log_2 N \cdot \alpha + 2\log_2 N \cdot \frac{M}{\beta} $$
 
 For large $N$, $(N-1) \approx N$ and $\frac{N-1}{N} \approx 1$, so the ring pays a latency term proportional to $N$ while moving each byte close to the bandwidth limit:
 
-$$ T_{\text{ring}} \approx 2N\alpha + \frac{2M}{\beta}, \quad T_{\text{tree}} \approx 2\log_2 N \cdot \alpha + \frac{2\log_2 N \cdot M}{\beta} $$
+$$ \CollectiveCompletionTimeRing \approx 2N\alpha + \frac{2M}{\beta}, \quad \CollectiveCompletionTimeTree \approx 2\log_2 N \cdot \alpha + \frac{2\log_2 N \cdot M}{\beta} $$
 
 The tree has the opposite shape: logarithmic startup cost, but each message byte moves through more stages. Setting the estimates equal isolates the message size where the cheaper latency path stops compensating for the extra bandwidth work:
 
@@ -2189,15 +2189,15 @@ $$ \frac{2M}{\beta}(1 - \log_2 N) = 2\alpha(\log_2 N - N) $$
 Since $N \gg \log_2 N$ for large clusters, $(\log_2 N - N) \approx -N$ and $(1 - \log_2 N) \approx -\log_2 N$, yielding:
 
 $$ \frac{2M}{\beta}(-\log_2 N) \approx 2\alpha(-N) $$
-$$ M_{\text{crossover}} \approx \frac{N \cdot \alpha \cdot \beta}{\log_2 N} $$
+$$ \RingtreeCrossoverPayload \approx \frac{N \cdot \alpha \cdot \beta}{\log_2 N} $$
 
-Dropping the logarithmic factor gives a coarser upper-scale heuristic, $M_{\text{crossover}} \lesssim N\alpha\beta$, which overstates the switch point by a factor of $\log_2 N$. The log-aware form remains the estimate to use:
-$$ \boxed{M_{\text{crossover}} \approx \frac{N \cdot \alpha \cdot \beta}{\log_2 N}} $$
+Dropping the logarithmic factor gives a coarser upper-scale heuristic, $\RingtreeCrossoverPayload \lesssim N\alpha\beta$, which overstates the switch point by a factor of $\log_2 N$. The log-aware form remains the estimate to use:
+$$ \boxed{\RingtreeCrossoverPayload \approx \frac{N \cdot \alpha \cdot \beta}{\log_2 N}} $$
 
-The log-aware crossover formula\index{Critical message size!algorithm crossover} is the large-$N$ form of the exact crossover $M_{\text{crossover}}(N)$ derived in @sec-appdx-comm-foundations-ring-vs-tree; it yields a useful intuition, not a hard selection rule. Above the crossover, message size dominates and Ring's bandwidth efficiency wins; below it, startup latency dominates and Tree's logarithmic depth wins.
+The log-aware crossover formula\index{Critical message size!algorithm crossover} is the large-$N$ form of the exact crossover $\RingtreeCrossoverPayload(N)$ derived in @sec-appdx-comm-foundations-ring-vs-tree; it yields a useful intuition, not a hard selection rule. Above the crossover, message size dominates and Ring's bandwidth efficiency wins; below it, startup latency dominates and Tree's logarithmic depth wins.
 
 For a cluster with $\alpha=5\ \mu\text{s}$, $\beta=50\ \text{GB/s}$, and $N=100$, the direct approximation gives:
-$$M_{\text{crossover}} \approx \frac{100 \times 5\cdot 10^{-6} \times 50\cdot 10^9}{\log_2 100} \approx 3.8 \text{ MB}$$
+$$\RingtreeCrossoverPayload \approx \frac{100 \times 5\cdot 10^{-6} \times 50\cdot 10^9}{\log_2 100} \approx 3.8 \text{ MB}$$
 
 In practice, NCCL's algorithm selection is more nuanced than a simple two-way split. The Double Binary Tree algorithm offers logarithmic latency with near-optimal bandwidth, making it competitive with both Ring and Tree across a broad range of message sizes. NCCL also considers the number of channels (parallel communication streams), the network topology, and whether inter-node or intra-node links are being used. The effective selection logic resembles a multi-way decision tree indexed by (message size, GPU count, topology type) rather than a single crossover point.
 
@@ -2312,7 +2312,7 @@ class RingVsTree:
 
 Tree wins, but only by `{python} RingVsTree.tree_win_margin_pct_str`. For this `{python} RingVsTree.M_mb_str` message, the payload is near the crossover point.
 
-**Systems insight**: Ring's latency penalty (10$\times$ worse than Tree) nearly balances Tree's bandwidth penalty (6$\times$ worse than Ring). The log-aware crossover estimate predicts $M_{\text{crossover}} \approx N \alpha \beta / \log_2 N = 64 \times 10\ \mu\text{s} \times 10\ \text{GB/s} / 6 \approx$ `{python} RingVsTree.crossover_mb_str`. At 1 MB, the payload is just below crossover, so Tree wins. At 10 MB, Ring would dominate.
+**Systems insight**: Ring's latency penalty (10$\times$ worse than Tree) nearly balances Tree's bandwidth penalty (6$\times$ worse than Ring). The log-aware crossover estimate predicts $\RingtreeCrossoverPayload \approx N \alpha \beta / \log_2 N = 64 \times 10\ \mu\text{s} \times 10\ \text{GB/s} / 6 \approx$ `{python} RingVsTree.crossover_mb_str`. At 1 MB, the payload is just below crossover, so Tree wins. At 10 MB, Ring would dominate.
 
 The crossover point sits inside the range that gradient reductions can traverse as bucket sizes change. In this example, the `{python} RingVsTree.M_mb_str` AllReduce lies near crossover, whereas a `{python} RingVsTree.ddp_bucket_mb_str` DDP bucket is already above it. A fused bucket of `{python} RingVsTree.fused_bucket_range_str` or the full `{python} RingVsTree.full_bf16_gradient_gb_str` BF16 gradient of a `{python} RingVsTree.llama_70b_param_str` model favors Ring over the simple Tree model even more strongly. These conclusions apply to the stated AllReduce configuration. An MoE token-routing payload of the same size still requires an AllToAll schedule, and optimized tree or hierarchical implementations require their own cost comparison.
 
@@ -2325,7 +2325,7 @@ The crossover analysis demonstrates that algorithm selection is not a static cho
 Verify your understanding of Ring vs. Tree AllReduce trade-offs:
 
 - [ ] **Ring vs. Tree**: explain why Ring AllReduce achieves bandwidth-optimal communication (approaching $2M/\beta$) while the simple full-message Tree model incurs $\mathcal{O}(\log N)$ bandwidth overhead.
-- [ ] **Crossover point**: calculate $M_{\text{crossover}}$ for a 256-GPU cluster with $\alpha = 5\ \mu\text{s}$ and $\beta = 50\ \text{GB/s}$, then determine whether a 10 MB gradient buffer should use Ring or Tree.
+- [ ] **Crossover point**: calculate $\RingtreeCrossoverPayload$ for a 256-GPU cluster with $\alpha = 5\ \mu\text{s}$ and $\beta = 50\ \text{GB/s}$, then determine whether a 10 MB gradient buffer should use Ring or Tree.
 - [ ] **Scatter-reduce trace**: trace through the Scatter-Reduce phase of Ring AllReduce for 3 GPUs with a 3-element vector and verify that each GPU ends with the correct partial sum.
 - [ ] **Latency limit**: explain why Ring AllReduce's $\mathcal{O}(N)$ latency hurts small, frequent collectives across a large process group, and why that penalty is modest inside an eight-GPU tensor-parallel group.
 
@@ -2394,7 +2394,7 @@ The flat-network assumption holds within a single node, where all GPUs connect v
 
 A naive flat Ring AllReduce ignores this structure, routing unpartitioned traffic across InfiniBand when local NVLink would suffice and saturating scarce inter-node bandwidth. Hierarchical AllReduce\index{Hierarchical AllReduce}\index{Hierarchical AllReduce!three-phase decomposition} instead partitions the global operation into three stages that align communication volume with available link speed (@fig-hierarchical-allreduce).
 
-::: {#fig-hierarchical-allreduce fig-env="figure" fig-pos="htb" fig-cap="**Hierarchical AllReduce**: Three-phase decomposition that exploits the intra-node/inter-node bandwidth gap. Phase 1 performs intra-node aggregation over NVLink (an NVLink ring acting as a ReduceScatter that leaves each GPU holding a node-shard partial sum), leaving a payload of $M/G_{\text{node}}$ on each of the $G_{\text{node}}$ GPUs per node. Phase 2 runs an AllReduce across corresponding GPUs using InfiniBand. Phase 3 completes intra-node distribution over NVLink (the AllGather that returns each GPU to the full result). The schematic shows two representative ranks per node; the same decomposition applies to $G_{\text{node}}$ ranks." fig-alt="Three schematic phases with two representative ranks per node: local ReduceScatter leaves partial shards, corresponding-rank AllReduce produces global shards, and local AllGather reconstructs the full result."}
+::: {#fig-hierarchical-allreduce fig-env="figure" fig-pos="htb" fig-cap="**Hierarchical AllReduce**: Three-phase decomposition that exploits the intra-node/inter-node bandwidth gap. Phase 1 performs intra-node aggregation over NVLink (an NVLink ring acting as a ReduceScatter that leaves each GPU holding a node-shard partial sum), leaving a payload of $M/\AcceleratorsPerNode$ on each of the $\AcceleratorsPerNode$ GPUs per node. Phase 2 runs an AllReduce across corresponding GPUs using InfiniBand. Phase 3 completes intra-node distribution over NVLink (the AllGather that returns each GPU to the full result). The schematic shows two representative ranks per node; the same decomposition applies to $\AcceleratorsPerNode$ ranks." fig-alt="Three schematic phases with two representative ranks per node: local ReduceScatter leaves partial shards, corresponding-rank AllReduce produces global shards, and local AllGather reconstructs the full result."}
 ![](images/svg/hierarchical-allreduce.svg)
 
 <!--
@@ -2590,9 +2590,9 @@ A naive flat Ring AllReduce ignores this structure, routing unpartitioned traffi
 
 :::
 
-By decoupling local aggregation from global synchronization, @fig-hierarchical-allreduce stages the dataflow so that slower inter-node InfiniBand links carry traffic only during Phase 2 (Shard AllReduce). In this middle phase, each corresponding-rank group reduces an $M/G_{\text{node}}$-byte shard across $N_{\text{nodes}}$ nodes. A ring in that group sends $2(N_{\text{nodes}}-1)M/(N_{\text{nodes}}G_{\text{node}})$ bytes per participating GPU and receives the same amount. Summing across the node's $G_{\text{node}}$ GPUs gives $2(N_{\text{nodes}}-1)M/N_{\text{nodes}}$ bytes sent per node. Smaller per-port payloads improve elapsed time when the node has independent ports and sufficient fabric capacity; sharding does not create bandwidth on a shared uplink.
+By decoupling local aggregation from global synchronization, @fig-hierarchical-allreduce stages the dataflow so that slower inter-node InfiniBand links carry traffic only during Phase 2 (Shard AllReduce). In this middle phase, each corresponding-rank group reduces an $M/\AcceleratorsPerNode$-byte shard across $\AcceleratorsPerNodeNodes$ nodes. A ring in that group sends $2(\AcceleratorsPerNodeNodes-1)M/(\AcceleratorsPerNodeNodes\AcceleratorsPerNode)$ bytes per participating GPU and receives the same amount. Summing across the node's $\AcceleratorsPerNode$ GPUs gives $2(\AcceleratorsPerNodeNodes-1)M/\AcceleratorsPerNodeNodes$ bytes sent per node. Smaller per-port payloads improve elapsed time when the node has independent ports and sufficient fabric capacity; sharding does not create bandwidth on a shared uplink.
 
-The three phases form a single causal pipeline. First, an intra-node ReduceScatter over NVLink performs a local reduction among the $G_{\text{node}}$ GPUs in each node, leaving each GPU with a $1/G_{\text{node}}$ shard of partially reduced data while consuming only abundant intra-node bandwidth. Next, each corresponding-rank group applies an inter-node AllReduce over InfiniBand to its $M/G_{\text{node}}$-byte input shard, where the chosen collective algorithm dictates the bytes transmitted across the network fabric. Finally, an intra-node AllGather over NVLink redistributes the globally reduced shards within each node, completing the collective without consuming additional inter-node bandwidth.
+The three phases form a single causal pipeline. First, an intra-node ReduceScatter over NVLink performs a local reduction among the $\AcceleratorsPerNode$ GPUs in each node, leaving each GPU with a $1/\AcceleratorsPerNode$ shard of partially reduced data while consuming only abundant intra-node bandwidth. Next, each corresponding-rank group applies an inter-node AllReduce over InfiniBand to its $M/\AcceleratorsPerNode$-byte input shard, where the chosen collective algorithm dictates the bytes transmitted across the network fabric. Finally, an intra-node AllGather over NVLink redistributes the globally reduced shards within each node, completing the collective without consuming additional inter-node bandwidth.
 
 A simple 8-node budget makes this bandwidth multiplication concrete:
 
@@ -2703,7 +2703,7 @@ class HierarchicalAllreduceCalc:
 **Hierarchical AllReduce (3-step decomposition)**:
 
 1. **Intra-node ReduceScatter**: Each GPU sends `{python} HierarchicalAllreduceCalc.intra_data_mb_str` at `{python} HierarchicalAllreduceCalc.nvlink_bw_gb_per_s_str` per direction → ~`{python} HierarchicalAllreduceCalc.intra_rs_ms_str`
-2. **Inter-Node AllReduce**\index{AllReduce!inter-node}: Each GPU AllReduces a `{python} HierarchicalAllreduceCalc.inter_data_sub_math` = `{python} HierarchicalAllreduceCalc.inter_data_mb_str` shard over InfiniBand; Ring moves roughly $2(N_{\text{nodes}}-1)/N_{\text{nodes}}$ times that payload, and after adding the small latency term the phase takes ~`{python} HierarchicalAllreduceCalc.inter_time_ms_str` at `{python} HierarchicalAllreduceCalc.ib_bw_gb_per_s_str`
+2. **Inter-Node AllReduce**\index{AllReduce!inter-node}: Each GPU AllReduces a `{python} HierarchicalAllreduceCalc.inter_data_sub_math` = `{python} HierarchicalAllreduceCalc.inter_data_mb_str` shard over InfiniBand; Ring moves roughly $2(\AcceleratorsPerNodeNodes-1)/\AcceleratorsPerNodeNodes$ times that payload, and after adding the small latency term the phase takes ~`{python} HierarchicalAllreduceCalc.inter_time_ms_str` at `{python} HierarchicalAllreduceCalc.ib_bw_gb_per_s_str`
 
    (Each GPU contributes a one-eighth-sized input shard; all eight shard groups still share the node's fabric capacity.)
 
@@ -3420,7 +3420,7 @@ class CompressionPayback:
 2. **Total new time**: `{python} CompressionPayback.cp_compressed_comm_ms_str` (comm) + `{python} CompressionPayback.cp_overhead_ms_str` (overhead) = `{python} CompressionPayback.cp_total_new_ms_str`.
 3. **Effective speedup**: `{python} CompressionPayback.cp_comm_time_ms_str` divided by `{python} CompressionPayback.cp_total_new_ms_str` $\approx$ `{python} CompressionPayback.cp_speedup_mult_str`.
 
-**Systems insight**: Compression is a trade of compute for bandwidth. It pays off only when $T_{\text{overhead}} < T_{\text{comm}}(N) \times (1 - 1/r_{\text{comp}})$. In this case, spending `{python} CompressionPayback.cp_overhead_ms_str` to save `{python} CompressionPayback.cp_saved_ms_str` of network time is a clear win. On a high-speed NVLink network where $T_{\text{comm}}(N)$ is only `{python} CompressionPayback.cp_fast_comm_ms_str`, the same compression logic would cost more than it saves and slow down training. Always profile the network before adding compression.
+**Systems insight**: Compression is a trade of compute for bandwidth. It pays off only when $T_{\text{overhead}} < \CommunicationTime \times (1 - 1/\CompressionRatio)$. In this case, spending `{python} CompressionPayback.cp_overhead_ms_str` to save `{python} CompressionPayback.cp_saved_ms_str` of network time is a clear win. On a high-speed NVLink network where $\CommunicationTime$ is only `{python} CompressionPayback.cp_fast_comm_ms_str`, the same compression logic would cost more than it saves and slow down training. Always profile the network before adding compression.
 
 :::
 
@@ -3452,7 +3452,7 @@ Gradient compression is not free; it trades reduced communication for increased 
 
 #### Decision criteria for gradient compression {#sec-collective-communication-use-compression-8519}
 
-The decision rule is not the compression ratio alone\index{Gradient Compression!break-even condition}. Compression is worthwhile only when the wall-clock time it saves across the run exceeds its encoding overhead plus the cost of any extra steps that slower convergence requires, so the comparison must be made in time to the same quality target. A high communication-to-computation ratio $T_{\text{comm}}(N)/(T_{\text{compute}}/N)$ makes that outcome likely but does not guarantee it. Independently of that ratio, any lossy compression beyond FP16 should carry error feedback unless the optimizer analysis and convergence tests justify omitting it, since without correction convergence can fail.
+The decision rule is not the compression ratio alone\index{Gradient Compression!break-even condition}. Compression is worthwhile only when the wall-clock time it saves across the run exceeds its encoding overhead plus the cost of any extra steps that slower convergence requires, so the comparison must be made in time to the same quality target. A high communication-to-computation ratio $\CommunicationTime/(\IronlawTermTimesCompute/N)$ makes that outcome likely but does not guarantee it. Independently of that ratio, any lossy compression beyond FP16 should carry error feedback unless the optimizer analysis and convergence tests justify omitting it, since without correction convergence can fail.
 
 The $\alpha$-$\beta$ analysis from @sec-communication-collective-operations-collective-operations-network-performance-modeling-0d8e helps determine when compression pays off: if the gradients are large enough to be bandwidth-bound ($M > n^*$), compression can reduce the transfer term, provided encoding and convergence costs do not erase the saving. If they are latency-bound ($M < n^*$), compression offers little transfer-time benefit because the startup term remains.
 
@@ -3532,7 +3532,7 @@ class CompressionBreakEven:
 
 A concrete scenario makes that break-even rule quantitative. Suppose a training run requires `{python} CompressionBreakEven.steps_str` steps to reach its quality target without compression, with each step taking `{python} CompressionBreakEven.step_slow_ms_str` (`{python} CompressionBreakEven.t_compute_ms_str` compute and `{python} CompressionBreakEven.t_comm_slow_ms_str` communication), for a total of `{python} CompressionBreakEven.total_slow_s_str`. INT8 compression with error feedback reduces communication by `{python} CompressionBreakEven.ratio_mult_str` (from `{python} CompressionBreakEven.t_comm_slow_ms_str` to `{python} CompressionBreakEven.t_comm_slow_c_ms_str` per step), but suppose it raises the required steps by `{python} CompressionBreakEven.step_penalty_pct_str`, to `{python} CompressionBreakEven.steps_c_str`. The new total is `{python} CompressionBreakEven.steps_c_str` steps at `{python} CompressionBreakEven.step_slow_c_ms_str` each, or `{python} CompressionBreakEven.total_slow_c_s_str`, a `{python} CompressionBreakEven.gain_slow_pct_str` improvement. Compression wins here because the per-step saving of `{python} CompressionBreakEven.saved_slow_ms_str` outweighs the additional steps.
 
-The same model on a faster network, where communication takes only `{python} CompressionBreakEven.t_comm_fast_ms_str` per step, reverses the verdict. Compression cuts that to `{python} CompressionBreakEven.t_comm_fast_c_ms_str`, saving `{python} CompressionBreakEven.saved_fast_ms_str` per step, but still adds `{python} CompressionBreakEven.extra_steps_str` steps at `{python} CompressionBreakEven.step_fast_c_ms_str` each. The run now takes `{python} CompressionBreakEven.total_fast_c_s_str` instead of `{python} CompressionBreakEven.total_fast_s_str`, `{python} CompressionBreakEven.loss_fast_pct_str` longer. Compression therefore belongs only where the communication-to-computation ratio $T_{\text{comm}}(N)/(T_{\text{compute}}/N)$ exceeds a threshold set by the chosen method's convergence penalty. When compression reaches that boundary, eliminating the remaining communication overhead requires altering not how many bytes move, but when they move.
+The same model on a faster network, where communication takes only `{python} CompressionBreakEven.t_comm_fast_ms_str` per step, reverses the verdict. Compression cuts that to `{python} CompressionBreakEven.t_comm_fast_c_ms_str`, saving `{python} CompressionBreakEven.saved_fast_ms_str` per step, but still adds `{python} CompressionBreakEven.extra_steps_str` steps at `{python} CompressionBreakEven.step_fast_c_ms_str` each. The run now takes `{python} CompressionBreakEven.total_fast_c_s_str` instead of `{python} CompressionBreakEven.total_fast_s_str`, `{python} CompressionBreakEven.loss_fast_pct_str` longer. Compression therefore belongs only where the communication-to-computation ratio $\CommunicationTime/(\IronlawTermTimesCompute/N)$ exceeds a threshold set by the chosen method's convergence penalty. When compression reaches that boundary, eliminating the remaining communication overhead requires altering not how many bytes move, but when they move.
 
 ## Communication-Computation Overlap {#sec-communication-overlap}
 
@@ -3642,7 +3642,7 @@ class OverlapBudgetCalc:
 
 **Without overlap (sequential)**:
 
-$T_{\text{sequential}} = T_{\text{backward}} + T_{\text{comm}}(N)$ = `{python} OverlapBudgetCalc.total_backward_ms_str` + `{python} OverlapBudgetCalc.n_layers_str` $\times$ `{python} OverlapBudgetCalc.allreduce_per_layer_ms_str` = `{python} OverlapBudgetCalc.no_overlap_ms_str`.
+$T_{\text{sequential}} = T_{\text{backward}} + \CommunicationTime$ = `{python} OverlapBudgetCalc.total_backward_ms_str` + `{python} OverlapBudgetCalc.n_layers_str` $\times$ `{python} OverlapBudgetCalc.allreduce_per_layer_ms_str` = `{python} OverlapBudgetCalc.no_overlap_ms_str`.
 
 **With overlap (pipelined)**:
 
@@ -3806,7 +3806,7 @@ AllReduce computes one reduction over compatible element counts and datatypes; i
 
 **Fallacy**: *Pipeline parallelism eliminates communication overhead.*
 
-Pipeline parallelism replaces AllReduce with point-to-point activation transfers between adjacent stages, and the per-message cost is genuinely cheaper. Pipeline introduces a different overhead: bubble idleness\index{Pipeline Parallelism!bubble overhead}. With $N_{\text{PP}}$ pipeline stages, at least $(N_{\text{PP}}-1)/(N_{\text{PP}}-1+m)$ of GPU-time is idle while the pipeline fills and drains, where $m$ is the number of microbatches. For the balanced fill-and-drain schedule, keeping the bubble below 20 percent requires $m > 4(N_{\text{PP}}-1)$; for eight stages, 32 microbatches meet this condition, which constrains batch size, activation memory, and convergence. The choice between data parallelism and pipeline parallelism is not "communication vs. no communication" but a trade between bandwidth-bound AllReduce and time-bound bubble overhead.
+Pipeline parallelism replaces AllReduce with point-to-point activation transfers between adjacent stages, and the per-message cost is genuinely cheaper. Pipeline introduces a different overhead: bubble idleness\index{Pipeline Parallelism!bubble overhead}. With $\PipelineparallelDegreePp$ pipeline stages, at least $(\PipelineparallelDegreePp-1)/(\PipelineparallelDegreePp-1+m)$ of GPU-time is idle while the pipeline fills and drains, where $m$ is the number of microbatches. For the balanced fill-and-drain schedule, keeping the bubble below 20 percent requires $m > 4(\PipelineparallelDegreePp-1)$; for eight stages, 32 microbatches meet this condition, which constrains batch size, activation memory, and convergence. The choice between data parallelism and pipeline parallelism is not "communication vs. no communication" but a trade between bandwidth-bound AllReduce and time-bound bubble overhead.
 
 :::
 
@@ -3814,7 +3814,7 @@ Pipeline parallelism replaces AllReduce with point-to-point activation transfers
 
 **Pitfall**: *Using Ring AllReduce by default without checking message size and topology.*
 
-Ring achieves bandwidth-optimal $2\frac{N-1}{N}\frac{M}{\beta}$ but pays $\mathcal{O}(N)$ latency. For a `{python} RingVsTree.M_mb_str` gradient across `{python} RingVsTree.N_str` GPUs with $\alpha =$ `{python} RingVsTree.alpha_us_str` and $\beta =$ `{python} RingVsTree.beta_gb_per_s_str`, Tree AllReduce wins because Ring's extra startup cost (about `{python} RingVsTree.ring_excess_lat_us_str` beyond Tree's) exceeds Tree's extra byte-transfer cost (about `{python} RingVsTree.tree_excess_bw_us_str` beyond Ring's). The log-aware crossover estimate\index{AllReduce!algorithm selection} $M_{\text{crossover}} \approx N \alpha \beta / \log_2 N$ determines when to switch algorithms; $N\alpha\beta$ is only a coarse upper-scale heuristic.
+Ring achieves bandwidth-optimal $2\frac{N-1}{N}\frac{M}{\beta}$ but pays $\mathcal{O}(N)$ latency. For a `{python} RingVsTree.M_mb_str` gradient across `{python} RingVsTree.N_str` GPUs with $\alpha =$ `{python} RingVsTree.alpha_us_str` and $\beta =$ `{python} RingVsTree.beta_gb_per_s_str`, Tree AllReduce wins because Ring's extra startup cost (about `{python} RingVsTree.ring_excess_lat_us_str` beyond Tree's) exceeds Tree's extra byte-transfer cost (about `{python} RingVsTree.tree_excess_bw_us_str` beyond Ring's). The log-aware crossover estimate\index{AllReduce!algorithm selection} $\RingtreeCrossoverPayload \approx N \alpha \beta / \log_2 N$ determines when to switch algorithms; $N\alpha\beta$ is only a coarse upper-scale heuristic.
 
 :::
 
@@ -3838,7 +3838,7 @@ Even a 100$\times$ communication speedup must be evaluated against the complete 
 
 **Fallacy**: *Async collectives always hide latency.*
 
-Python's `dist.all_reduce(..., async_op=True)` only returns control to the CPU. The LogP model distinguishes network latency $L_{\text{LogGP}}$ (overlappable) from processor overhead $o$ (nonoverlappable\index{Asynchronous collective!overlap limits}). The condition $T_{\text{compute}} > o$ alone does not guarantee that a transfer is hidden. The remaining independent work must cover the transfer interval, the runtime must make progress, and dependent consumers must wait for completion.
+Python's `dist.all_reduce(..., async_op=True)` only returns control to the CPU. The LogP model distinguishes network latency $\LogploggpNetworkLatency$ (overlappable) from processor overhead $o$ (nonoverlappable\index{Asynchronous collective!overlap limits}). The condition $\IronlawTermTimesCompute > o$ alone does not guarantee that a transfer is hidden. The remaining independent work must cover the transfer interval, the runtime must make progress, and dependent consumers must wait for completion.
 
 :::
 
@@ -3884,18 +3884,18 @@ A collective benchmark is not reusable evidence unless it records rank order, NI
 
 ## Summary {#sec-communication-collective-operations-summary}
 
-Communication is the friction of scale. Every mechanism in this chapter works on the communication term $T_{\text{comm}}(N)$ of the Fleet Law (@eq-fleet-law), either shrinking it through better schedules, placement, and smaller payloads or enlarging $T_{\text{overlap}}$ so that less of it is exposed, and each spends effort on the Communication axis of C³ so that added compute does not sit waiting. Computation is local, but learning is global, and the $\alpha$-$\beta$ and LogP models transform communication bottleneck analysis from guesswork into quantitative engineering. The critical message size $n^* = \alpha \cdot \beta$ separates latency-bound from bandwidth-bound regimes. Calibrating those models against the same collective, algorithm, process group, and topology captures software overhead without confusing a collective's traffic factor with library inefficiency.
+Communication is the friction of scale. Every mechanism in this chapter works on the communication term $\CommunicationTime$ of the Fleet Law (@eq-fleet-law), either shrinking it through better schedules, placement, and smaller payloads or enlarging $\OverlappedTime$ so that less of it is exposed, and each spends effort on the Communication axis of C³ so that added compute does not sit waiting. Computation is local, but learning is global, and the $\alpha$-$\beta$ and LogP models transform communication bottleneck analysis from guesswork into quantitative engineering. The critical message size $n^* = \alpha \cdot \beta$ separates latency-bound from bandwidth-bound regimes. Calibrating those models against the same collective, algorithm, process group, and topology captures software overhead without confusing a collective's traffic factor with library inefficiency.
 
 The collective primitives (AllReduce, AllGather/ReduceScatter, AllToAll) map directly to parallelism strategies, and each primitive produces a distinct traffic matrix. Large AllReduce payloads are commonly bandwidth-bound. AllToAll can instead bind on injection, bisection, message startup, or routing skew, so its practical ceiling depends on the fabric rather than peer count alone. Direct pairwise exchange suits balanced coarse chunks, hierarchical coalescing amortizes small inter-node transfers, and variable-size exchange avoids padding under skew without eliminating the hotspot itself.
 
-The ring and tree AllReduce algorithms occupy opposite ends of the latency-bandwidth trade-off, with the log-aware crossover estimate $M_{\text{crossover}} \approx N \alpha \beta / \log_2 N$ comparing Ring with the simple Tree model for a fixed configuration. Hierarchical AllReduce and rail-optimized routing exploit independent ports and the bandwidth hierarchy to shorten cross-node transfers, while in-network reduction (SHARP) reduces host-visible communication by performing part of the aggregation inside network switches.
+The ring and tree AllReduce algorithms occupy opposite ends of the latency-bandwidth trade-off, with the log-aware crossover estimate $\RingtreeCrossoverPayload \approx N \alpha \beta / \log_2 N$ comparing Ring with the simple Tree model for a fixed configuration. Hierarchical AllReduce and rail-optimized routing exploit independent ports and the bandwidth hierarchy to shorten cross-node transfers, while in-network reduction (SHARP) reduces host-visible communication by performing part of the aggregation inside network switches.
 
 When even the fastest wires are not enough, gradient compression provides another lever. Quantization, sparsification, and compression-aware optimizers like 1-bit Adam reduce payload volume, but encoding overhead and convergence determine whether training finishes sooner. Error feedback preserves residual information across steps under the assumptions developed in @sec-communication-collective-operations-error-feedback. Communication-computation overlap through layer-by-layer pipelining and bucket fusion can then hide transfer time within the remaining backward computation. The worked overlap budget shows why communication that outlasts that window remains exposed.
 
 ::: {.callout-takeaways title="Every byte has a travel cost"}
 
 * **The $\alpha$-$\beta$ model reveals the bottleneck**: The critical message size $n^* = \alpha \cdot \beta$ separates startup-dominated from bandwidth-dominated transfers (principle \ref{pri-alpha-beta-model}). Collective duration also depends on round count and traffic volume; fit parameters with a benchmark that matches the workload's collective and topology.
-* **Algorithm choice is scale-dependent**: Ring AllReduce is bandwidth-optimal but pays $\mathcal{O}(N)$ latency; the simple full-message Tree model uses fewer rounds ($\mathcal{O}(\log N)$) but more bandwidth work. Use the log-aware crossover estimate $M_{\text{crossover}} \approx N \alpha \beta / \log_2 N$ to reason about the switch point, and treat $N\alpha\beta$ only as a coarse upper-scale heuristic.
+* **Algorithm choice is scale-dependent**: Ring AllReduce is bandwidth-optimal but pays $\mathcal{O}(N)$ latency; the simple full-message Tree model uses fewer rounds ($\mathcal{O}(\log N)$) but more bandwidth work. Use the log-aware crossover estimate $\RingtreeCrossoverPayload \approx N \alpha \beta / \log_2 N$ to reason about the switch point, and treat $N\alpha\beta$ only as a coarse upper-scale heuristic.
 * **Hierarchy exposes parallel network capacity**: Local reductions over fast NVLink leave smaller shards for the slow InfiniBand tier. The effective bandwidth gain requires independent port capacity for concurrent shard exchanges; splitting a payload cannot multiply the capacity of a shared uplink.
 * **AllToAll schedule selection follows the active bound**: Direct exchange preserves simplicity for balanced coarse chunks, hierarchy amortizes startup across scarce inter-node links, and variable-size exchange removes padding under skew. Injection bandwidth, bisection capacity, oversubscription, message granularity, and the hottest receiver determine which schedule wins.
 * **Error feedback controls lossy compression error**: Sparsification can discard 99 percent of each transmitted update while accumulating the compression residual locally and adding it before the next compression step. Under the analyzed assumptions, this bounds accumulated compression error and restores convergence guarantees even though individual compressed updates can remain biased.

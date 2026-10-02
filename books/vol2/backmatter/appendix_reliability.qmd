@@ -210,13 +210,13 @@ The linear approximation in @eq-reliability-at-least-one holds only while $Np$ i
 
 The third is the exponential lifetime model. A component with constant failure rate $\lambda$ survives to time $t$ with probability $e^{-\lambda t}$ and has mean time to failure $1/\lambda$. The model is memoryless. A component that has run for a year is no more likely to fail in the next hour than a new one, which is why it describes the useful-life phase and not burn-in or wear-out. The earliest of $N$ independent exponential failures is itself exponential with rate $N\lambda$, so the time to the first failure among $N$ identical components has mean $1/(N\lambda)$. That single fact is the origin of the $1/N$ scaling of system MTBF in @eq-mtbf-cluster.
 
-The fourth is the Poisson count. Under the same model, the number of failures in an interval $T$ is Poisson distributed with mean $T/\text{MTBF}$, so the probability of no failure is $e^{-T/\text{MTBF}}$. @Eq-failure-probability below is the complement of that event, and the expected number of failures per day in @tbl-mtbf-cluster is the Poisson mean.
+The fourth is the Poisson count. Under the same model, the number of failures in an interval $T$ is Poisson distributed with mean $T/\MeanTimeBetweenFailures$, so the probability of no failure is $e^{-T/\MeanTimeBetweenFailures}$. @Eq-failure-probability below is the complement of that event, and the expected number of failures per day in @tbl-mtbf-cluster is the Poisson mean.
 
 ### Component failure rates {#sec-appdx-reliability-foundations-component-rates}
 
 Reliability engineers characterize components using two complementary metrics. The **Failure in Time (FIT)** rate counts failures per $10^9$ device-hours of operation, a unit chosen because individual components fail so rarely that failures-per-hour would produce inconveniently small numbers. The reciprocal quantity, **Mean Time To Failure (MTTF)**, calculates average lifetime in hours (@eq-mttf-from-fit):
 
-$$ \text{MTTF} = \frac{10^9}{\text{FIT}} $$ {#eq-mttf-from-fit}
+$$ \MeanTimeToFailure = \frac{10^9}{\text{FIT}} $$ {#eq-mttf-from-fit}
 
 Reference FIT rates and MTTF values (@tbl-component-fit) characterize component reliability in typical GPU training nodes, grounded in large-fleet and warehouse-scale experience [@kokolis2025; @zu2024tpuv4; @barroso2019]. These values assume the steady-state "useful life" phase of the bathtub curve, where the failure rate is approximately constant, dominated neither by infant mortality (early life) nor by wear-out (end of life) [@klutke2003].
 
@@ -296,13 +296,13 @@ Each component in isolation appears highly reliable; a GPU lasts `{python} Compo
 
 The following model treats a compute node as a series system, in which any modeled component failure interrupts it. A component enters the sum only when its failure alone stops the node, so redundant power supplies, spare links, and recoverable device errors stay out of it. For independent components with constant failure rates, @eq-mtbf-node sums the individual rates into the node-level failure rate:
 
-$$ \frac{1}{\text{MTBF}_{\text{node}}} = \frac{n_{\text{gpu}}}{\text{MTTF}_{\text{gpu}}} + \frac{n_{\text{nic}}}{\text{MTTF}_{\text{nic}}} + \frac{n_{\text{psu}}}{\text{MTTF}_{\text{psu}}} + \cdots $$ {#eq-mtbf-node}
+$$ \frac{1}{\MeanTimeBetweenFailures_{\text{node}}} = \frac{n_{\text{gpu}}}{\MeanTimeToFailure_{\text{gpu}}} + \frac{n_{\text{nic}}}{\MeanTimeToFailure_{\text{nic}}} + \frac{n_{\text{psu}}}{\MeanTimeToFailure_{\text{psu}}} + \cdots $$ {#eq-mtbf-node}
 
 Think of each component as a ticking clock counting down to failure. A DGX H100 node with `{python} ReliabilityFoundations.gpus_per_node_str` GPUs and `{python} ReliabilityFoundations.nics_per_node_str` network interface cards (NICs) has `{python} ReliabilityFoundations.clocks_per_node_str` independent clocks, and the node fails when the first clock reaches zero. More clocks mean a shorter expected wait. The node's `{python} ReliabilityFoundations.psus_per_node_str` power supply units (PSUs) add no clocks. They run as a `{python} ReliabilityFoundations.psus_required_str`+`{python} ReliabilityFoundations.psus_redundant_str` redundant set, so the node keeps full performance with `{python} ReliabilityFoundations.psus_redundant_str` of them failed, and a failed unit is normally replaced long before enough others fail to stop the node.
 
-For a cluster of $N_{\text{nodes}}$ identical nodes, the same logic applies one level up, as @eq-mtbf-cluster shows:
+For a cluster of $\AcceleratorsPerNodeNodes$ identical nodes, the same logic applies one level up, as @eq-mtbf-cluster shows:
 
-$$ \text{MTBF}_{\text{cluster}} = \frac{\text{MTBF}_{\text{node}}}{N_{\text{nodes}}} $$ {#eq-mtbf-cluster}
+$$ \MeanTimeBetweenFailures_{\text{cluster}} = \frac{\MeanTimeBetweenFailures_{\text{node}}}{\AcceleratorsPerNodeNodes} $$ {#eq-mtbf-cluster}
 
 ```{python}
 #| echo: false
@@ -379,9 +379,9 @@ The MTBF determines the average time between failures, but training jobs have fi
 
 Under the exponential failure model (constant failure rate), @eq-failure-probability gives the probability of at least one failure during a job of duration $T_{\text{job}}$:
 
-$$ \Pr(\geq 1\ \text{failure}) = 1 - e^{-T_{\text{job}}/\text{MTBF}} $$ {#eq-failure-probability}
+$$ \Pr(\geq 1\ \text{failure}) = 1 - e^{-T_{\text{job}}/\MeanTimeBetweenFailures} $$ {#eq-failure-probability}
 
-When $T_{\text{job}} \gg \text{MTBF}$, this probability approaches 1 rapidly. @Tbl-failure-prob shows the concrete numbers for various cluster sizes and job durations.
+When $T_{\text{job}} \gg \MeanTimeBetweenFailures$, this probability approaches 1 rapidly. @Tbl-failure-prob shows the concrete numbers for various cluster sizes and job durations.
 
 ```{python}
 #| echo: false
@@ -447,19 +447,19 @@ Every checkpoint saves progress but costs time. Checkpoint too rarely and a fail
 
 ### The Young-Daly model {#sec-appdx-reliability-foundations-young-daly}
 
-The optimal checkpoint interval balances two competing costs. Writing a checkpoint takes time $T_{\text{write}}$ (the **checkpoint cost**), during which no useful training occurs. The longer the interval between checkpoints, however, the more work is lost when a failure strikes, on average half the interval. @Eq-young-daly states the **Young-Daly formula** that minimizes the expected total overhead:
+The optimal checkpoint interval balances two competing costs. Writing a checkpoint takes time $\CheckpointWriteTime$ (the **checkpoint cost**), during which no useful training occurs. The longer the interval between checkpoints, however, the more work is lost when a failure strikes, on average half the interval. @Eq-young-daly states the **Young-Daly formula** that minimizes the expected total overhead:
 
-$$ T^\ast_{\text{ckpt}} = \sqrt{2 \times T_{\text{write}} \times \text{MTBF}_{\text{system}}} $$ {#eq-young-daly}
+$$ \OptimalCheckpointIntervalCkpt = \sqrt{2 \times \CheckpointWriteTime \times \MeanTimeBetweenFailures_{\text{system}}} $$ {#eq-young-daly}
 
-where $T_{\text{write}}$ is the checkpoint write time in seconds and $\text{MTBF}_{\text{system}}$ is the cluster or job-level system MTBF in seconds.
+where $\CheckpointWriteTime$ is the checkpoint write time in seconds and $\MeanTimeBetweenFailures_{\text{system}}$ is the cluster or job-level system MTBF in seconds.
 
-The intuition behind @eq-young-daly is geometric-mean-like. When checkpoints are cheap relative to the MTBF ($T_{\text{write}} \ll \text{MTBF}_{\text{system}}$, the common case), the optimal interval sits between the two time scales. If checkpoints took zero time, the optimal cadence is every step. If the system never failed, no checkpoints would be required. The square root interpolates between these extremes.
+The intuition behind @eq-young-daly is geometric-mean-like. When checkpoints are cheap relative to the MTBF ($\CheckpointWriteTime \ll \MeanTimeBetweenFailures_{\text{system}}$, the common case), the optimal interval sits between the two time scales. If checkpoints took zero time, the optimal cadence is every step. If the system never failed, no checkpoints would be required. The square root interpolates between these extremes.
 
-The formula assumes that failures follow an exponential distribution (memoryless property) and that checkpoint cost $T_{\text{write}}$ is small compared to $\text{MTBF}_{\text{system}}$. The examples below adopt these assumptions. Correlated outages, changing hazard rates, long writes, and asynchronous persistence can require a more detailed model.
+The formula assumes that failures follow an exponential distribution (memoryless property) and that checkpoint cost $\CheckpointWriteTime$ is small compared to $\MeanTimeBetweenFailures_{\text{system}}$. The examples below adopt these assumptions. Correlated outages, changing hazard rates, long writes, and asynchronous persistence can require a more detailed model.
 
 ### Checkpoint sizing {#sec-appdx-reliability-foundations-checkpoint-sizing}
 
-Checkpoint size determines the write time $T_{\text{write}}$ that feeds into the Young-Daly formula. For common mixed-precision training checkpoints with the adaptive moment estimation (Adam) optimizer, each parameter requires approximately `{python} ReliabilityFoundations.ckpt_bpp_str` bytes of persistent state:
+Checkpoint size determines the write time $\CheckpointWriteTime$ that feeds into the Young-Daly formula. For common mixed-precision training checkpoints with the adaptive moment estimation (Adam) optimizer, each parameter requires approximately `{python} ReliabilityFoundations.ckpt_bpp_str` bytes of persistent state:
 
 - 2 bytes for BF16 model weights
 - 4 bytes for FP32 master weights
@@ -522,7 +522,7 @@ Mixed-precision Adam checkpoint sizing (@tbl-checkpoint-size) demonstrates how s
 
 : **Checkpoint Sizes for Mixed-Precision Adam Training**: Each parameter requires about `{python} ReliabilityFoundations.ckpt_bpp_str` bytes of persistent checkpoint state (model weights, FP32 master weights, and optimizer moments); gradients are normally transient and recomputed after restore rather than serialized as durable checkpoint state. Write times assume `{python} ReliabilityStringsCkptRecap.ckpt_write_bw_gb_per_s_str` aggregate storage bandwidth. {#tbl-checkpoint-size}
 
-At frontier scale (`{python} ReliabilityFoundations.gpt3_params_b_str`+ parameters), these sizes reach the terabyte range. This makes checkpoint write time a significant cost that directly affects the Young-Daly optimal interval. The checkpoint strategies in @sec-fault-tolerance-reliability discuss techniques for reducing $T_{\text{write}}$ (asynchronous checkpointing, incremental deltas, and distributed storage), all of which improve the Young-Daly result by shrinking the $T_{\text{write}}$ factor under the square root.
+At frontier scale (`{python} ReliabilityFoundations.gpt3_params_b_str`+ parameters), these sizes reach the terabyte range. This makes checkpoint write time a significant cost that directly affects the Young-Daly optimal interval. The checkpoint strategies in @sec-fault-tolerance-reliability discuss techniques for reducing $\CheckpointWriteTime$ (asynchronous checkpointing, incremental deltas, and distributed storage), all of which improve the Young-Daly result by shrinking the $\CheckpointWriteTime$ factor under the square root.
 
 ### Calculating the optimal checkpoint interval {#sec-appdx-reliability-foundations-worked-example}
 
@@ -603,19 +603,19 @@ class WorkedExampleYoungDaly:
 
 **Setup**: Consider training a `{python} ReliabilityFoundations.gpt3_params_b_str`-parameter model on a `{python} WorkedExampleYoungDaly.n_gpus_str`-GPU cluster. The cluster MTBF is `{python} WorkedExampleYoungDaly.yd_mtbf_h_str` (@tbl-mtbf-cluster). The checkpoint size is `{python} WorkedExampleYoungDaly.ckpt_175b_gb_str`, and the parallel storage system writes at `{python} WorkedExampleYoungDaly.ckpt_write_bw_gb_per_s_str`.
 
-**Step 1**: Checkpoint write time ($T_{\text{write}}$).
+**Step 1**: Checkpoint write time ($\CheckpointWriteTime$).
 `{python} WorkedExampleYoungDaly.t_write_eq_math`
 
 **Step 2**: Apply the Young-Daly formula (@eq-young-daly).
 `{python} WorkedExampleYoungDaly.tau_opt_eq_math`
 
-**Interpretation**: The optimal checkpoint interval is approximately `{python} WorkedExampleYoungDaly.yd_tau_min_str`. The overhead from checkpointing alone is $T_{\text{write}}/T^\ast_{\text{ckpt}} \approx$ `{python} WorkedExampleYoungDaly.yd_overhead_str` of training time.
+**Interpretation**: The optimal checkpoint interval is approximately `{python} WorkedExampleYoungDaly.yd_tau_min_str`. The overhead from checkpointing alone is $\CheckpointWriteTime/\OptimalCheckpointIntervalCkpt \approx$ `{python} WorkedExampleYoungDaly.yd_overhead_str` of training time.
 
 **Systems insight**: If the cluster were doubled to `{python} WorkedExampleYoungDaly.n_gpus_20k_str` GPUs, the MTBF would halve, and the optimal interval would shrink to `{python} WorkedExampleYoungDaly.tau_20k_min_str`, so the system checkpoints more frequently because failures happen more often. This illustrates the fundamental tension at scale: larger clusters are faster but demand more frequent interruption to protect progress.
 
 :::
 
-The boundary conditions of the Young-Daly formula merit attention. When $T_{\text{write}}$ approaches $\text{MTBF}_{\text{system}}$ (checkpoint cost approaches MTBF), checkpoint and rework overheads become so large that checkpoint/restart alone may fail to maintain useful forward progress. In such cases, redundancy or elastic training becomes necessary, as discussed in @sec-appdx-reliability-foundations-strategies.
+The boundary conditions of the Young-Daly formula merit attention. When $\CheckpointWriteTime$ approaches $\MeanTimeBetweenFailures_{\text{system}}$ (checkpoint cost approaches MTBF), checkpoint and rework overheads become so large that checkpoint/restart alone may fail to maintain useful forward progress. In such cases, redundancy or elastic training becomes necessary, as discussed in @sec-appdx-reliability-foundations-strategies.
 
 ---
 
@@ -794,21 +794,21 @@ Young's approximation is most accurate when checkpoint time is small relative to
 
 ### Renewal model and small-cost expansion {#sec-appdx-reliability-daly-proof}
 
-Let $T_{\text{ckpt}}$ be useful compute time between completed checkpoints. Assume Poisson failures with rate $1/\text{MTBF}_{\text{system}}$, identical failure exposure during computation and writing, and zero detection, restart, or reload delay. A failed attempt loses its partial progress and repeats the interval. The expected elapsed time to complete one uninterrupted compute-plus-checkpoint attempt is:
+Let $\CheckpointIntervalCkpt$ be useful compute time between completed checkpoints. Assume Poisson failures with rate $1/\MeanTimeBetweenFailures_{\text{system}}$, identical failure exposure during computation and writing, and zero detection, restart, or reload delay. A failed attempt loses its partial progress and repeats the interval. The expected elapsed time to complete one uninterrupted compute-plus-checkpoint attempt is:
 
-$$ \mathbb{E}[T_{\text{total}}] = \text{MTBF}_{\text{system}} \left( e^{\frac{T_{\text{ckpt}} + T_{\text{write}}}{\text{MTBF}_{\text{system}}}} - 1 \right) $$ {#eq-daly-total-time}
+$$ \mathbb{E}[T_{\text{total}}] = \MeanTimeBetweenFailures_{\text{system}} \left( e^{\frac{\CheckpointIntervalCkpt + \CheckpointWriteTime}{\MeanTimeBetweenFailures_{\text{system}}}} - 1 \right) $$ {#eq-daly-total-time}
 
-Writing $T_{\text{att}} = T_{\text{ckpt}} + T_{\text{write}}$ for the attempt duration, the renewal equation is $\mathbb{E}[T_{\text{total}}] = \mathbb{E}[\min(F, T_{\text{att}})] + \Pr(F < T_{\text{att}}) \mathbb{E}[T_{\text{total}}]$, where $F$ is an exponential failure time. Since $\mathbb{E}[\min(F, T_{\text{att}})] = \text{MTBF}_{\text{system}} (1 - e^{-T_{\text{att}}/\text{MTBF}_{\text{system}}})$, solving the equation gives @eq-daly-total-time.
+Writing $T_{\text{att}} = \CheckpointIntervalCkpt + \CheckpointWriteTime$ for the attempt duration, the renewal equation is $\mathbb{E}[T_{\text{total}}] = \mathbb{E}[\min(F, T_{\text{att}})] + \Pr(F < T_{\text{att}}) \mathbb{E}[T_{\text{total}}]$, where $F$ is an exponential failure time. Since $\mathbb{E}[\min(F, T_{\text{att}})] = \MeanTimeBetweenFailures_{\text{system}} (1 - e^{-T_{\text{att}}/\MeanTimeBetweenFailures_{\text{system}}})$, solving the equation gives @eq-daly-total-time.
 
 Expanding the exponential through its quadratic term gives the wasted time per completed interval:
 
-$$ \mathbb{E}[T_{\text{total}}] - T_{\text{ckpt}} \approx T_{\text{write}} + \frac{(T_{\text{ckpt}} + T_{\text{write}})^2}{2 \cdot \text{MTBF}_{\text{system}}} $$ {#eq-daly-wasted-time}
+$$ \mathbb{E}[T_{\text{total}}] - \CheckpointIntervalCkpt \approx \CheckpointWriteTime + \frac{(\CheckpointIntervalCkpt + \CheckpointWriteTime)^2}{2 \cdot \MeanTimeBetweenFailures_{\text{system}}} $$ {#eq-daly-wasted-time}
 
-When $T_{\text{write}}/\text{MTBF}_{\text{system}}$ is small, dividing @eq-daly-wasted-time by $T_{\text{ckpt}}$ leaves the leading terms $T_{\text{write}}/T_{\text{ckpt}} + T_{\text{ckpt}}/(2 \cdot \text{MTBF}_{\text{system}})$ of the wasted-time fraction. Minimizing those terms recovers Young's interval $\sqrt{2 \cdot T_{\text{write}} \cdot \text{MTBF}_{\text{system}}}$. For finite checkpoint costs, differentiate the unexpanded elapsed time per unit useful work, $\mathbb{E}[T_{\text{total}}]/T_{\text{ckpt}}$, instead. Its stationary point satisfies:
+When $\CheckpointWriteTime/\MeanTimeBetweenFailures_{\text{system}}$ is small, dividing @eq-daly-wasted-time by $\CheckpointIntervalCkpt$ leaves the leading terms $\CheckpointWriteTime/\CheckpointIntervalCkpt + \CheckpointIntervalCkpt/(2 \cdot \MeanTimeBetweenFailures_{\text{system}})$ of the wasted-time fraction. Minimizing those terms recovers Young's interval $\sqrt{2 \cdot \CheckpointWriteTime \cdot \MeanTimeBetweenFailures_{\text{system}}}$. For finite checkpoint costs, differentiate the unexpanded elapsed time per unit useful work, $\mathbb{E}[T_{\text{total}}]/\CheckpointIntervalCkpt$, instead. Its stationary point satisfies:
 
-$$ e^{(T^\ast_{\text{ckpt}} + T_{\text{write}})/\text{MTBF}_{\text{system}}}\left(1 - \frac{T^\ast_{\text{ckpt}}}{\text{MTBF}_{\text{system}}}\right) = 1, \qquad 0 < T^\ast_{\text{ckpt}} < \text{MTBF}_{\text{system}} $$ {#eq-daly-2nd-order-tau}
+$$ e^{(\OptimalCheckpointIntervalCkpt + \CheckpointWriteTime)/\MeanTimeBetweenFailures_{\text{system}}}\left(1 - \frac{\OptimalCheckpointIntervalCkpt}{\MeanTimeBetweenFailures_{\text{system}}}\right) = 1, \qquad 0 < \OptimalCheckpointIntervalCkpt < \MeanTimeBetweenFailures_{\text{system}} $$ {#eq-daly-2nd-order-tau}
 
-For positive checkpoint cost, the equivalent derivative numerator $e^{(T_{\text{ckpt}} + T_{\text{write}})/\text{MTBF}_{\text{system}}}(T_{\text{ckpt}}/\text{MTBF}_{\text{system}} - 1) + 1$ increases from a negative value at zero to a positive value at $\text{MTBF}_{\text{system}}$. A one-dimensional root search on @eq-daly-2nd-order-tau therefore finds the unique optimum of this simplified model.
+For positive checkpoint cost, the equivalent derivative numerator $e^{(\CheckpointIntervalCkpt + \CheckpointWriteTime)/\MeanTimeBetweenFailures_{\text{system}}}(\CheckpointIntervalCkpt/\MeanTimeBetweenFailures_{\text{system}} - 1) + 1$ increases from a negative value at zero to a positive value at $\MeanTimeBetweenFailures_{\text{system}}$. A one-dimensional root search on @eq-daly-2nd-order-tau therefore finds the unique optimum of this simplified model.
 
 #### Choosing the appropriate approximation {.unnumbered}
 
@@ -836,11 +836,11 @@ If both the original and corrupted exponent fields encode finite normal values, 
 
 ### Softmax saturation and error propagation {#sec-appdx-reliability-sdc-softmax-explosion}
 
-For one attention head, let $\mathbf{Z} = \mathbf{Q}\mathbf{K}^T/\sqrt{d_{\text{head}}} \in \mathbb{R}^{S \times S}$ be the pre-softmax score matrix for sequence length $S$ and head dimension $d_{\text{head}}$. Suppose an SDC event corrupts one element of token row $i$ of the query matrix $\mathbf{Q}$, and write the resulting perturbation as $\Delta\mathbf{Q}$, with only that element nonzero:
+For one attention head, let $\mathbf{Z} = \mathbf{Q}\mathbf{K}^T/\sqrt{\AttentionHeadDimension} \in \mathbb{R}^{S \times S}$ be the pre-softmax score matrix for sequence length $S$ and head dimension $\AttentionHeadDimension$. Suppose an SDC event corrupts one element of token row $i$ of the query matrix $\mathbf{Q}$, and write the resulting perturbation as $\Delta\mathbf{Q}$, with only that element nonzero:
 
-$$ \mathbf{Z}_{\text{corrupt}} = \frac{(\mathbf{Q} + \Delta \mathbf{Q}) \mathbf{K}^T}{\sqrt{d_{\text{head}}}} = \mathbf{Z} + \Delta \mathbf{Z} $$
+$$ \mathbf{Z}_{\text{corrupt}} = \frac{(\mathbf{Q} + \Delta \mathbf{Q}) \mathbf{K}^T}{\sqrt{\AttentionHeadDimension}} = \mathbf{Z} + \Delta \mathbf{Z} $$
 
-where $\Delta \mathbf{Z}$ is nonzero only in row $i$, with entries $\Delta Z_{ij} = \Delta\mathbf{q}_i \cdot \mathbf{k}_j/\sqrt{d_{\text{head}}}$ for the corrupted query row $\Delta\mathbf{q}_i$ and key row $\mathbf{k}_j$.
+where $\Delta \mathbf{Z}$ is nonzero only in row $i$, with entries $\Delta Z_{ij} = \Delta\mathbf{q}_i \cdot \mathbf{k}_j/\sqrt{\AttentionHeadDimension}$ for the corrupted query row $\Delta\mathbf{q}_i$ and key row $\mathbf{k}_j$.
 
 The attention probability perturbation for token row $i$ is:
 
@@ -883,4 +883,4 @@ class ReliabilitySummaryRecap:
 
 Failure is a physical constraint of scale. Under independent, constant component failure rates, a single GPU's mean lifetime is `{python} ReliabilitySummaryRecap.gpu_mttf_yr_str`, yet the modeled `{python} ReliabilityFoundations.canonical_cluster_gpus_str`-GPU cluster fails on average every `{python} ReliabilitySummaryRecap.cluster_mtbf_10k_hours_str`, because node failure rates sum across components and cluster MTBF divides by node count. The probability that a job is interrupted grows with its duration relative to that interval, so long runs on large clusters must plan for recovery rather than hope to avoid it.
 
-Recovery has four modeled phases (detection, rescheduling, reloading, and replay), and replay is controlled by the checkpoint interval. The Young-Daly formula $T^\ast_{\text{ckpt}} = \sqrt{2 T_{\text{write}} \, \text{MTBF}_{\text{system}}}$ (principle \ref{pri-young-daly}) balances write overhead against expected rework when writes are short compared with the MTBF, and @sec-appdx-reliability-daly-2nd-order gives the correction when they are not. Checkpoint/restart suits batch training, redundancy suits latency-sensitive serving, and elastic training sits between them. Independent replicas reduce unavailability multiplicatively, to $(1-A)^k$ for $k$ replicas, but only to the extent that failure-domain isolation keeps their failures independent.
+Recovery has four modeled phases (detection, rescheduling, reloading, and replay), and replay is controlled by the checkpoint interval. The Young-Daly formula $\OptimalCheckpointIntervalCkpt = \sqrt{2 \CheckpointWriteTime \, \MeanTimeBetweenFailures_{\text{system}}}$ (principle \ref{pri-young-daly}) balances write overhead against expected rework when writes are short compared with the MTBF, and @sec-appdx-reliability-daly-2nd-order gives the correction when they are not. Checkpoint/restart suits batch training, redundancy suits latency-sensitive serving, and elastic training sits between them. Independent replicas reduce unavailability multiplicatively, to $(1-A)^k$ for $k$ replicas, but only to the extent that failure-domain isolation keeps their failures independent.

@@ -101,7 +101,7 @@ class A100PeakBenchmark:
 
 ***Machine learning benchmarking***\index{Benchmarking!definition} is the empirical measurement of ML workloads under specified conditions, used to test claims about components, models, or end-to-end systems against representative evidence rather than peak specifications alone.
 
-1.  **Significance**: The gap between peak and sustained performance can be large. An A100 GPU delivers `{python} A100PeakBenchmark.a100_fp16_tflop_per_s_str` (BF16) at peak, but in this illustrative `{python} A100PeakBenchmark.mfu_base_pct_str`--`{python} A100PeakBenchmark.mfu_tuned_pct_str` model FLOPs utilization (MFU) scenario (achieved model FLOP/s divided by the hardware's peak FLOP/s), it sustains `{python} A100PeakBenchmark.achievable_base_tflop_str`--`{python} A100PeakBenchmark.achievable_tuned_tflop_str`, about a `{python} A100PeakBenchmark.sustained_gap_range_mult_str` gap due to factors such as memory stalls, pipeline bubbles, and kernel launch overhead. Benchmarking quantifies the actual $\eta_{\text{hw}}$ gap for a workload; vendor spec sheets do not.
+1.  **Significance**: The gap between peak and sustained performance can be large. An A100 GPU delivers `{python} A100PeakBenchmark.a100_fp16_tflop_per_s_str` (BF16) at peak, but in this illustrative `{python} A100PeakBenchmark.mfu_base_pct_str`--`{python} A100PeakBenchmark.mfu_tuned_pct_str` model FLOPs utilization (MFU) scenario (achieved model FLOP/s divided by the hardware's peak FLOP/s), it sustains `{python} A100PeakBenchmark.achievable_base_tflop_str`--`{python} A100PeakBenchmark.achievable_tuned_tflop_str`, about a `{python} A100PeakBenchmark.sustained_gap_range_mult_str` gap due to factors such as memory stalls, pipeline bubbles, and kernel launch overhead. Benchmarking quantifies the actual $\EfficiencyHw$ gap for a workload; vendor spec sheets do not.
 2.  **Distinction**: ML benchmarking spans multiple scopes. Micro-benchmarks isolate operations such as matrix multiplication, model-level benchmarks evaluate complete training or inference workloads, and end-to-end benchmarks include surrounding work such as data loading, preprocessing, optimization, checkpoint I/O, or serving infrastructure. The scope must match the engineering claim.
 3.  **Common pitfall**: A frequent misconception is that benchmark numbers are stable references. Both the workload (new model architectures) and the hardware (new GPU generations) evolve, so a result that leads a benchmark under one version often becomes the baseline under a later version, making year-over-year comparisons meaningful only when the benchmark version is held constant.
 
@@ -520,10 +520,10 @@ System benchmarks serve two functions. For practitioners, they enable informed h
 
 ::: {#dfn-benchmarking-machine-learning-system-benchmarks .callout-definition title="Machine learning system benchmarks"}
 
-***Machine learning system benchmarks***\index{ML system benchmark!definition} are standardized evaluation protocols that hold the workload and quality target constant while varying the hardware-software stack, measuring $\eta_{\text{hw}} = R_{\text{sustained}} / R_{\text{peak}}$ and $L_{\text{lat}}$ to isolate infrastructure efficiency from algorithmic improvements.
+***Machine learning system benchmarks***\index{ML system benchmark!definition} are standardized evaluation protocols that hold the workload and quality target constant while varying the hardware-software stack, measuring $\EfficiencyHw = R_{\text{sustained}} / \PeakRate$ and $\Latency$ to isolate infrastructure efficiency from algorithmic improvements.
 
 1.  **Significance**: The same ResNet-50 model can deliver very different throughput across hardware stacks, precision formats, batch sizes, and compiler configurations, yet still report the same ImageNet Top-1 accuracy. System benchmarks capture this implementation gap, which is invisible to algorithmic benchmarks that only report accuracy.
-2.  **Distinction**: Unlike algorithmic benchmarks (which vary model architectures and training procedures to improve convergence accuracy), system benchmarks hold the algorithm fixed and vary the implementation (kernel libraries, quantization formats, batch sizes, and hardware generations) to measure how efficiently the hardware-software stack executes the iron law's $O/(R_{\text{peak}} \cdot \eta_{\text{hw}})$ term.
+2.  **Distinction**: Unlike algorithmic benchmarks (which vary model architectures and training procedures to improve convergence accuracy), system benchmarks hold the algorithm fixed and vary the implementation (kernel libraries, quantization formats, batch sizes, and hardware generations) to measure how efficiently the hardware-software stack executes the iron law's $O/(\PeakRate \cdot \EfficiencyHw)$ term.
 3.  **Common pitfall**: A frequent misconception is that a system benchmark result generalizes across workloads. An accelerator that achieves high utilization on ResNet-50 (a compute-friendly vision workload) may achieve much lower utilization on a recommendation system (a memory-bandwidth-bound workload). System benchmarks are workload-specific; no single metric characterizes a hardware platform.
 
 :::
@@ -1069,19 +1069,19 @@ A profiler translates these measurement rules into physical diagnostics by decom
 
 Moving from theory to trace means mapping the iron law equation from @sec-introduction-iron-law-ml-systems-c32a onto a profiler timeline (like Nsight Systems or PyTorch Profiler).
 
-**Measuring the data term** $\left(\frac{D_{\text{vol}}}{\text{BW}}\right)$
+**Measuring the data term** $\left(\frac{\DataVolume}{\Bandwidth}\right)$
 
 *   **Signal**: Look for the "Memory Throughput" or "DRAM Bandwidth" line.
-*   **Formula**: $\text{BW}_{\text{effective}} = \frac{D_{\text{vol}}}{T_{\text{kernel}}}$.
-*   **Diagnosis**: If $\text{BW}_{\text{effective}} \approx \text{BW}_{\text{peak}}$ (for example, close to the A100's `{python} A100Roofline.a100_bw_tb_per_s_str` peak), the kernel is memory bound. Optimizing compute ($O$) will do nothing.
+*   **Formula**: $\Bandwidth_{\text{effective}} = \frac{\DataVolume}{T_{\text{kernel}}}$.
+*   **Diagnosis**: If $\Bandwidth_{\text{effective}} \approx \Bandwidth_{\text{peak}}$ (for example, close to the A100's `{python} A100Roofline.a100_bw_tb_per_s_str` peak), the kernel is memory bound. Optimizing compute ($O$) will do nothing.
 
-**Measuring achieved compute throughput $(R_{\text{peak}} \cdot \eta_{\text{hw}})$**
+**Measuring achieved compute throughput $(\PeakRate \cdot \EfficiencyHw)$**
 
 *   **Signal**: Look for "SM Active" or "Compute Throughput."
-*   **Formula**: $R_{\text{peak}} \cdot \eta_{\text{hw}} = \frac{O}{T_{\text{kernel}}}$, reported in TFLOP/s.
-*   **Diagnosis**: If $\eta_{\text{hw}} \ll 1$ AND $\text{BW}_{\text{effective}} \ll \text{BW}_{\text{peak}}$, the system is in the "utilization trap": likely latency bound (kernels too small) or grid bound (not enough threads).
+*   **Formula**: $\PeakRate \cdot \EfficiencyHw = \frac{O}{T_{\text{kernel}}}$, reported in TFLOP/s.
+*   **Diagnosis**: If $\EfficiencyHw \ll 1$ AND $\Bandwidth_{\text{effective}} \ll \Bandwidth_{\text{peak}}$, the system is in the "utilization trap": likely latency bound (kernels too small) or grid bound (not enough threads).
 
-**Measuring the latency term $(L_{\text{lat}})$**
+**Measuring the latency term $(\Latency)$**
 
 *   **Signal**: Look for gaps (empty space) between colored kernel bars on the timeline.
 *   **Formula**: $\text{Overhead Ratio} = \frac{T_{\text{gap}}}{T_{\text{kernel}} + T_{\text{gap}}}$.
@@ -1525,7 +1525,7 @@ Harness architecture must align with the operational regime of the deployment ta
 
 In contrast, a naive benchmarking client often employs a closed-loop pattern: sending a request, blocking until the response arrives, and only then issuing the next request. This design introduces the severe measurement distortion known as **coordinated omission**\index{Coordinated omission!closed-loop measurement trap}. Consider a server that experiences a transient 500 ms garbage collection pause or memory reallocation stall. In an open-loop production environment, independent users continue submitting queries, causing dozens of requests to accumulate in the server's ingress queue; once the pause ends, every queued query suffers inflated tail latency. In a closed-loop benchmark, however, the client blocks idly during the entire 500 ms pause, sending zero traffic while the server is struggling. The benchmark records a single slow query and zero queue backlog. By coordinating request generation with server responsiveness, the closed-loop harness artificially paces traffic, systematically erasing the very queue collapse and p99 latency spikes it was constructed to measure. Conversely, offline batch processing eliminates arrival scheduling entirely; the harness pre-stages large input batches in memory to saturate accelerator execution units, maximize memory bandwidth utilization, and measure peak sustained throughput.
 
-[^fn-poisson-arrival-benchmark]: **Poisson distribution**\index{Poisson distribution!traffic modeling}: Named after Siméon Denis Poisson, who formalized it in 1837 while modeling wrongful conviction rates in French courts. The distribution models independent events at a constant average rate $(\lambda_{\text{arr}})$ and is a common baseline for server request arrivals. Real ML serving traffic often violates its assumptions through burstiness, correlation, and time-varying rates. A Poisson harness can therefore misestimate tail latency unless traces or stress cases cover those production patterns.
+[^fn-poisson-arrival-benchmark]: **Poisson distribution**\index{Poisson distribution!traffic modeling}: Named after Siméon Denis Poisson, who formalized it in 1837 while modeling wrongful conviction rates in French courts. The distribution models independent events at a constant average rate $(\ArrivalRate)$ and is a common baseline for server request arrivals. Real ML serving traffic often violates its assumptions through burstiness, correlation, and time-varying rates. A Poisson harness can therefore misestimate tail latency unless traces or stress cases cover those production patterns.
 
 In embedded and edge deployments, workloads are neither stochastic network streams nor unconstrained batch queues. Instead, inputs arrive sequentially from physical sensors (such as an audio analog-to-digital converter or an image sensor) governed by fixed hardware sampling clocks. The harness must inject these sensor streams through direct memory access into limited on-chip SRAM buffers, verifying that each inference completes within the inter-sample arrival deadline to prevent buffer overflow. Furthermore, edge harnesses must integrate physical instrumentation, such as shunt resistors or external power analyzers, to sample voltage and current across active execution cycles and low-power sleep states, capturing the true energy consumed per inference.
 
@@ -1825,7 +1825,7 @@ Benchmarking must evaluate pipeline orchestration rather than isolated kernel th
 
 #### Battery and thermal benchmarking {#sec-benchmarking-battery-thermal-benchmarking-79dd}
 
-Battery drain\index{Benchmarking!battery, duty cycle specification} depends on total energy consumed over time rather than peak instantaneous power. Computational photography bursts consume multiple watts for hundreds of milliseconds during image capture, whereas background sensor processing must remain within a milliwatt-scale budget to deliver multi-day battery life. Characterizing battery impact requires measuring the total energy consumption $E_{\text{total}} = \int P_{\text{device}}(t)\,dt$ across representative operational profiles, where $P_{\text{device}}(t)$ is the instantaneous power the device draws at time $t$.
+Battery drain\index{Benchmarking!battery, duty cycle specification} depends on total energy consumed over time rather than peak instantaneous power. Computational photography bursts consume multiple watts for hundreds of milliseconds during image capture, whereas background sensor processing must remain within a milliwatt-scale budget to deliver multi-day battery life. Characterizing battery impact requires measuring the total energy consumption $\TotalEnergy = \int P_{\text{device}}(t)\,dt$ across representative operational profiles, where $P_{\text{device}}(t)$ is the instantaneous power the device draws at time $t$.
 
 The dominant operational variable is the workload duty cycle $\alpha_{\text{duty}}$, defined as the fraction of time the accelerator actively runs inference. For an active power draw $P_{\text{active}}$ and standby power draw $P_{\text{idle}}$, the average power is:
 $$P_{\text{avg}} = \alpha_{\text{duty}} P_{\text{active}} + (1 - \alpha_{\text{duty}}) P_{\text{idle}}$$
@@ -1941,9 +1941,9 @@ class GPT3TrainingSpecs:
 
 ***ML training benchmarks***\index{ML training benchmark!definition} are machine learning system benchmarks that measure the time to reach a target quality metric (for example, a specified validation accuracy or loss threshold) on a fixed dataset and model, quantifying the rate of convergence per unit of resource.
 
-1.  **Significance**: Training benchmarks reveal large gaps invisible to hardware specs. Holding the model and quality target fixed, the time to convergence can vary widely across hardware-software stacks because training performance depends on the full pipeline: data loading $(D_{\text{vol}}/\text{BW})$, compute utilization $(\eta_{\text{hw}})$, gradient synchronization $(\text{BW}, L_{\text{lat}})$, and fault recovery overhead. A peak FLOP/s spec sheet captures none of these interactions.
-2.  **Distinction**: Unlike inference benchmarks, which measure per-query latency and throughput under load, training benchmarks measure time-to-accuracy across the full optimization loop: data loading, forward pass, backward pass, gradient synchronization, and optimizer step. The binding constraint shifts from compute $(R_{\text{peak}})$ at small scale to communication $(\text{BW})$ at large scale.
-3.  **Common pitfall**: A frequent misconception is that training benchmarks measure "how fast the GPU runs." At large scale, interconnect bandwidth $(\text{BW})$ for gradient synchronization and fault tolerance overhead (checkpoint I/O, straggler mitigation) often dominate the benchmark result more than peak FLOP/s.
+1.  **Significance**: Training benchmarks reveal large gaps invisible to hardware specs. Holding the model and quality target fixed, the time to convergence can vary widely across hardware-software stacks because training performance depends on the full pipeline: data loading $(\DataVolume/\Bandwidth)$, compute utilization $(\EfficiencyHw)$, gradient synchronization $(\Bandwidth, \Latency)$, and fault recovery overhead. A peak FLOP/s spec sheet captures none of these interactions.
+2.  **Distinction**: Unlike inference benchmarks, which measure per-query latency and throughput under load, training benchmarks measure time-to-accuracy across the full optimization loop: data loading, forward pass, backward pass, gradient synchronization, and optimizer step. The binding constraint shifts from compute $(\PeakRate)$ at small scale to communication $(\Bandwidth)$ at large scale.
+3.  **Common pitfall**: A frequent misconception is that training benchmarks measure "how fast the GPU runs." At large scale, interconnect bandwidth $(\Bandwidth)$ for gradient synchronization and fault tolerance overhead (checkpoint I/O, straggler mitigation) often dominate the benchmark result more than peak FLOP/s.
 
 :::
 
@@ -2226,8 +2226,8 @@ class ScalingEfficiencyCalc:
 **Problem**: A team trains ResNet-50 on ImageNet. Single-GPU training takes `{python} ScalingEfficiencyCalc.t1_hours_str`. With `{python} ScalingEfficiencyCalc.n_gpus_str`, training takes `{python} ScalingEfficiencyCalc.tn_hours_str`. Is this good scaling? Where did the efficiency go?
 
 **Step 1**: Define scaling efficiency.
-For strong scaling\index{Strong scaling!definition} (fixed problem size, more processors), let $T(1)$ be the training time on a single GPU, and $T(N_{\text{GPU}})$ the training time on $N_{\text{GPU}}$ GPUs. @Eq-scaling-efficiency defines efficiency:
-$$\text{Eff}_{\text{scaling}}(N_{\text{GPU}}) = \frac{T(1)}{N_{\text{GPU}} \times T(N_{\text{GPU}})} \times 100\%$$ {#eq-scaling-efficiency}
+For strong scaling\index{Strong scaling!definition} (fixed problem size, more processors), let $T(1)$ be the training time on a single GPU, and $T(\AcceleratorCountGpu)$ the training time on $\AcceleratorCountGpu$ GPUs. @Eq-scaling-efficiency defines efficiency:
+$$\text{Eff}_{\text{scaling}}(\AcceleratorCountGpu) = \frac{T(1)}{\AcceleratorCountGpu \times T(\AcceleratorCountGpu)} \times 100\%$$ {#eq-scaling-efficiency}
 
 **Step 2**: Calculate efficiency.
 `{python} ScalingEfficiencyCalc.scaling_eq_str` = `{python} ScalingEfficiencyCalc.t1_raw_str`/`{python} ScalingEfficiencyCalc.eff_denom_str` = `{python} ScalingEfficiencyCalc.eff_str`
@@ -2236,7 +2236,7 @@ With perfect scaling, `{python} ScalingEfficiencyCalc.n_gpus_str` would complete
 
 **Step 3**: Account for the efficiency loss. @Tbl-benchmarking-scaling-efficiency-loss decomposes the "missing" `{python} ScalingEfficiencyCalc.loss_str` into measurable overhead categories—gradient synchronization, memory copy, load imbalance, and batch-size effects—each measurable through a distinct profiling signal.
 
-In multi-accelerator data-parallel training (such as 2, 4, or 8 GPUs connected over PCIe or NVLink within a host), each accelerator computes gradients on its own local slice of the minibatch, and the AllReduce\index{AllReduce!gradient synchronization} collective of @sec-model-training-data-parallelism-ad1c must sum them so every worker receives the identical global gradient average before the next step. Because the volume of gradient data equals the model parameter size (often gigabytes per step), moving these tensors across physical interconnects imposes a fixed communication tax. As more accelerators are added, the time spent computing per step shrinks ($T_{\text{compute}} \propto 1/N_{\text{GPU}}$), but the AllReduce synchronization time across the interconnect remains constant or grows with bus contention. Scaling efficiency degrades precisely because the ratio of communication time to computation time increases.
+In multi-accelerator data-parallel training (such as 2, 4, or 8 GPUs connected over PCIe or NVLink within a host), each accelerator computes gradients on its own local slice of the minibatch, and the AllReduce\index{AllReduce!gradient synchronization} collective of @sec-model-training-data-parallelism-ad1c must sum them so every worker receives the identical global gradient average before the next step. Because the volume of gradient data equals the model parameter size (often gigabytes per step), moving these tensors across physical interconnects imposes a fixed communication tax. As more accelerators are added, the time spent computing per step shrinks ($\IronlawTermTimesCompute \propto 1/\AcceleratorCountGpu$), but the AllReduce synchronization time across the interconnect remains constant or grows with bus contention. Scaling efficiency degrades precisely because the ratio of communication time to computation time increases.
 
 ```{=latex}
 \begingroup
@@ -2258,7 +2258,7 @@ In multi-accelerator data-parallel training (such as 2, 4, or 8 GPUs connected o
 
 **Step 4**: The systems insight.
 <!-- lego-ok-block: typical strong-scaling efficiency ranges at different GPU counts -->
-Scaling efficiency decreases as $N_{\text{GPU}}$ grows because communication overhead scales with GPU count while per-GPU compute shrinks. In this worked example, eight GPUs reach 75 percent efficiency; at larger scales, the same arithmetic makes clear why sophisticated communication and input-pipeline optimization become necessary.
+Scaling efficiency decreases as $\AcceleratorCountGpu$ grows because communication overhead scales with GPU count while per-GPU compute shrinks. In this worked example, eight GPUs reach 75 percent efficiency; at larger scales, the same arithmetic makes clear why sophisticated communication and input-pipeline optimization become necessary.
 
 MLPerf reports raw performance, while scaling efficiency can be calculated across matched submissions: a system achieving 2$\times$ throughput at 50 percent efficiency may be worse than 1.5$\times$ throughput at 90 percent efficiency, depending on cost constraints.
 <!-- end lego-ok-block -->
@@ -2490,7 +2490,7 @@ These measurements form the basis for SLOs and SLAs, which formalize performance
 
 ***SLOs and SLAs***\index{SLO!definition}\index{SLA!definition} are performance commitment specifications for production ML serving systems: a service-level objective (SLO) is a target value or range for a service-level indicator, while an SLA is a contract that specifies service objectives and the consequences of failing to meet them.
 
-1.  **Significance**: A latency SLO bounds end-to-end request latency $L_{\text{lat,total}}$ by setting a target for a specified latency indicator, and the iron law's $L_{\text{lat}}$ is only the fixed-overhead part of that budget. A representative production setup might set the internal SLO tighter than the external SLA, leaving operational headroom for transient spikes, maintenance windows, and cascading failures.
+1.  **Significance**: A latency SLO bounds end-to-end request latency $L_{\text{lat,total}}$ by setting a target for a specified latency indicator, and the iron law's $\Latency$ is only the fixed-overhead part of that budget. A representative production setup might set the internal SLO tighter than the external SLA, leaving operational headroom for transient spikes, maintenance windows, and cascading failures.
 2.  **Distinction**: An SLO has no contractual consequence by itself, while missing an SLA objective triggers the consequences specified in the agreement, which may include credits or penalties. Teams commonly set an internal SLO tighter than the external agreement to leave operational headroom, but this is a practice rather than a definitional requirement.
 3.  **Common pitfall**: A frequent misconception is that meeting average latency satisfies a tail-latency SLO. SLOs can use averages, percentiles, rates, or other indicators; when the objective is defined at p99 or p99.9, an excellent mean does not establish compliance.
 
@@ -2628,7 +2628,7 @@ class AmdahlBenchmarkCalc:
 
 **Problem**: A vision pipeline spends `{python} AmdahlBenchmarkCalc.bench_preprocess_ms_str` on preprocessing (JPEG decode, resize, normalize) and `{python} AmdahlBenchmarkCalc.bench_inference_ms_str` on inference. If inference alone is optimized by `{python} AmdahlBenchmarkCalc.bench_inf_speedup_mult_str`, how much does end-to-end latency actually improve?
 
-**Math**: Optimizing inference from `{python} AmdahlBenchmarkCalc.bench_inference_ms_str` to `{python} AmdahlBenchmarkCalc.bench_opt_inf_ms_str` reduces total latency from `{python} AmdahlBenchmarkCalc.bench_total_ms_str` to only `{python} AmdahlBenchmarkCalc.bench_opt_total_ms_str`, a `{python} AmdahlBenchmarkCalc.bench_e2e_improvement_mult_str` improvement rather than `{python} AmdahlBenchmarkCalc.bench_inf_speedup_mult_str`. Amdahl's Law formalizes this ceiling: if inference, the part being accelerated, is fraction $f_{\text{parallel}}$ of total latency, then even infinitely fast inference yields at most $1/(1-f_{\text{parallel}})$ speedup, because the preprocessing fraction $1-f_{\text{parallel}}$ remains. With preprocessing at `{python} AmdahlBenchmarkCalc.preprocess_pct_str` of total latency, the remaining fraction $1-f_{\text{parallel}}$ is `{python} AmdahlBenchmarkCalc.preprocess_fraction_str`, which yields a maximum achievable speedup $1/(1-f_{\text{parallel}})$ of `{python} AmdahlBenchmarkCalc.amdahl_ceiling_mult_str`, regardless of model optimization.
+**Math**: Optimizing inference from `{python} AmdahlBenchmarkCalc.bench_inference_ms_str` to `{python} AmdahlBenchmarkCalc.bench_opt_inf_ms_str` reduces total latency from `{python} AmdahlBenchmarkCalc.bench_total_ms_str` to only `{python} AmdahlBenchmarkCalc.bench_opt_total_ms_str`, a `{python} AmdahlBenchmarkCalc.bench_e2e_improvement_mult_str` improvement rather than `{python} AmdahlBenchmarkCalc.bench_inf_speedup_mult_str`. Amdahl's Law formalizes this ceiling: if inference, the part being accelerated, is fraction $\ParallelFraction$ of total latency, then even infinitely fast inference yields at most $1/(1-\ParallelFraction)$ speedup, because the preprocessing fraction $1-\ParallelFraction$ remains. With preprocessing at `{python} AmdahlBenchmarkCalc.preprocess_pct_str` of total latency, the remaining fraction $1-\ParallelFraction$ is `{python} AmdahlBenchmarkCalc.preprocess_fraction_str`, which yields a maximum achievable speedup $1/(1-\ParallelFraction)$ of `{python} AmdahlBenchmarkCalc.amdahl_ceiling_mult_str`, regardless of model optimization.
 
 **Systems insight**: Aggressive model optimization yields disappointing end-to-end results whenever the nonmodel fraction dominates. Any component speedup quoted in isolation shrinks once the untouched stages are measured alongside it, and the shortfall grows as those stages take a larger share of the pipeline. Comprehensive benchmarks must either include preprocessing in measurements or state explicitly that reported speedups apply only to the inference component.
 
@@ -3324,7 +3324,7 @@ An 8-bit multiplier uses ~`{python} EnergyPerOp.fp32_vs_int8_mult_str` less ener
 
 Memory access dominates: reading one byte from DRAM costs over `{python} EnergyPerOp.dram_vs_reg_ratio_mult_str` more energy than a register access.
 
-**Math**: Component energy follows the energy corollary, with a load term $D_{\text{vol}} \times E_{\text{move}}$ (model bytes times DRAM energy per byte) and a compute term $O \times E_{\text{compute}}$ (operations times energy per operation). The FP32 terms sum as `{python} EnergyBreakdownCalc.e_fp32_load_str` + `{python} EnergyBreakdownCalc.e_fp32_compute_str` = `{python} EnergyBreakdownCalc.e_fp32_total_str`; the INT8 terms sum as `{python} EnergyBreakdownCalc.e_int8_load_str` + `{python} EnergyBreakdownCalc.e_int8_compute_str` = `{python} EnergyBreakdownCalc.e_int8_total_str`. Dividing the totals gives a `{python} EnergyBreakdownCalc.total_savings_factor_mult_str` reduction under this simplified model.
+**Math**: Component energy follows the energy corollary, with a load term $\DataVolume \times \EnergyPerByteMoved$ (model bytes times DRAM energy per byte) and a compute term $O \times \EnergyPerOperationCompute$ (operations times energy per operation). The FP32 terms sum as `{python} EnergyBreakdownCalc.e_fp32_load_str` + `{python} EnergyBreakdownCalc.e_fp32_compute_str` = `{python} EnergyBreakdownCalc.e_fp32_total_str`; the INT8 terms sum as `{python} EnergyBreakdownCalc.e_int8_load_str` + `{python} EnergyBreakdownCalc.e_int8_compute_str` = `{python} EnergyBreakdownCalc.e_int8_total_str`. Dividing the totals gives a `{python} EnergyBreakdownCalc.total_savings_factor_mult_str` reduction under this simplified model.
 
 @Tbl-benchmarking-mobilenet-int8-energy combines the two effects in a deliberately simplified MobileNetV2 model. It counts one DRAM read per weight and charges every cataloged FLOP at the listed multiplier energy, while excluding activation traffic, cache behavior, additions as a distinct cost, control overhead, and static power:
 
@@ -3365,7 +3365,7 @@ General-purpose power benchmarks such as SPECpower_ssj2008 measure server power 
 Characterizing these fluctuations requires calibrated physical instrumentation. While software profilers can read on-chip energy counters such as Intel RAPL or NVIDIA NVML, these interfaces carry two flaws: their sampling queries consume host cycles that distort execution, and their internal models are rarely traceable to calibrated laboratory standards. Standardized benchmarks such as MLPerf Power therefore mandate external, calibrated physical power analyzers (such as Yokogawa or Keithley analyzers) connected via inline current shunts or Hall-effect sensors to AC mains or DC supply rails [@tschand2025].
 
 To avoid aliasing transient spikes across microsecond kernel boundaries, power analyzers must sample current and voltage at kilohertz frequencies, integrating instantaneous power into total energy:
-$$E_{\text{total}} = \int_{t_{\text{start}}}^{t_{\text{end}}} P_{\text{device}}(t) \, dt$$
+$$\TotalEnergy = \int_{t_{\text{start}}}^{t_{\text{end}}} P_{\text{device}}(t) \, dt$$
 To prevent cold-start artifacts from distorting results, the benchmarking harness enforces three protocol stages:
 
 1. A warm-up phase runs unmeasured inferences until instruction caches, weight buffers, and silicon junction temperatures reach steady-state thermal equilibrium.
