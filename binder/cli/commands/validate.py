@@ -429,6 +429,8 @@ class ValidateCommand:
                   note="@-prefix casing must match sentence position: @Fig- at a sentence start, @fig- mid-sentence (both directions; sec/fig/tbl/eq/lst/alg)"),
             Scope("callout-ref-noun", "_run_callout_ref_noun",
                   note="\\ref{} to a custom callout prints a bare number; a noun (notebook, principle, lighthouse, ...) must precede it"),
+            Scope("margin-pointers", "_run_margin_pointers",
+                  note="margin pointers cite exactly one same-volume @sec- label; arrow matches direction (↩ earlier chapter, ↪ later chapter or appendix) and wording; one pointer per target per chapter"),
             Scope("callout-ref-form", "_run_callout_ref_form",
                   note="custom numbered callouts (dfn/exmp/nbk/pri/... from custom-numbered-blocks.yml) are referenced with \\ref{id}, never @id"),
             Scope("redundant-xref-prefix", "_run_redundant_xref_prefix",
@@ -12847,6 +12849,91 @@ class ValidateCommand:
         return ValidationRunResult(
             name="callout-ref-noun",
             description="Custom callout references carry their noun",
+            files_checked=len(files), issues=issues,
+            elapsed_ms=int((time.time() - t0) * 1000),
+        )
+
+    def _run_margin_pointers(self, root: Path) -> ValidationRunResult:
+        """Margin navigation pointers follow the house form (added 2026-10-03).
+
+        Enforces the mechanical half of the Prose Or Margin decision method in
+        .claude/rules/cross-references.md: each `.margin-pointer` block cites
+        exactly one @sec- label defined in the same volume; `↩` points to an
+        earlier chapter ("is/are established in"), `↪` to a later chapter or an
+        appendix ("is/are developed / measured / operationalized / enforced in",
+        or a **Byte layout:** / **Protocol:** label), `⇄` carries **Contrast:**;
+        and a chapter has at most one pointer per target section. Whether the
+        target actually supports the pointer's claim is an editorial check this
+        scope cannot see. Added after the 2026-10-03 cross-reference audit, which
+        found ~170 malformed or duplicate pointers across the four volumes.
+        """
+        t0 = time.time()
+        files = self._qmd_files(root)
+        issues: List[ValidationIssue] = []
+        block = re.compile(r"(?m)^::: \{\.column-margin \.margin-pointer\}\n\s*([^\n]+?)\s*\n:::\s*$")
+        label_re = re.compile(r"@[Ss](ec-[A-Za-z0-9_-]*[A-Za-z0-9])")
+        # The verb marks the role; "is established in @sec-x" and "the bound established in @sec-x" both qualify.
+        fwd = re.compile(r"\b(?:developed|measured|operationalized|enforced)\b[^.@]*\bin @")
+        bwd = re.compile(r"\bestablished\b[^.@]*\bin @")
+        homes: Dict[Path, Dict[str, object]] = {}
+
+        def home_map(vol_dir: Path) -> Dict[str, object]:
+            if vol_dir not in homes:
+                h: Dict[str, object] = {}
+                for q in vol_dir.rglob("*.qmd"):
+                    m = re.match(r"(\d\d)_", q.parent.name)
+                    key: object = int(m.group(1)) if m else ("appendix" if "appendix" in q.name else "front")
+                    for lab in re.findall(r"\{#(sec-[A-Za-z0-9_-]+)", q.read_text(encoding="utf-8")):
+                        h[lab] = key
+                homes[vol_dir] = h
+            return homes[vol_dir]
+
+        for f in files:
+            parts = f.resolve().parts
+            vol = next((p for p in parts if re.fullmatch(r"vol[1-4]", p)), None)
+            m = re.match(r"(\d\d)_", f.parent.name)
+            if not vol or not m:
+                continue
+            ch = int(m.group(1))
+            home = home_map(Path(*parts[: parts.index(vol) + 1]))
+            text = f.read_text(encoding="utf-8")
+            seen: Dict[str, int] = {}
+            for b in block.finditer(text):
+                line = text.count("\n", 0, b.start()) + 2
+                body = b.group(1)
+                labs = label_re.findall(body)
+                problem = None
+                if body[0] not in "↩↪⇄":
+                    problem = "pointer line must start with ↩, ↪, or ⇄"
+                elif len(labs) != 1:
+                    problem = f"pointer cites {len(labs)} @sec- labels; exactly one is required"
+                else:
+                    lab = "s" + labs[0]
+                    tgt = home.get(lab)
+                    if tgt is None:
+                        problem = f"@{lab} is not defined in {vol}"
+                    elif tgt == ch:
+                        problem = "pointer targets its own chapter; same-chapter references stay in prose"
+                    elif body[0] == "↩" and not (isinstance(tgt, int) and tgt < ch):
+                        problem = "↩ must point to an earlier chapter"
+                    elif body[0] == "↪" and not (tgt == "appendix" or (isinstance(tgt, int) and tgt > ch)):
+                        problem = "↪ must point to a later chapter or an appendix"
+                    elif body[0] == "↩" and not bwd.search(body):
+                        problem = '↩ pointer wording uses "established in"'
+                    elif body[0] == "↪" and "**Byte layout:**" not in body and "**Protocol:**" not in body and not fwd.search(body):
+                        problem = '↪ pointer wording uses "developed / measured / operationalized / enforced in"'
+                    elif body[0] == "⇄" and not body.startswith("⇄ **Contrast:**"):
+                        problem = "⇄ pointer must open with **Contrast:**"
+                    elif lab in seen:
+                        problem = f"second pointer to @{lab} in this chapter (first at line {seen[lab]})"
+                    seen.setdefault(lab, line)
+                if problem:
+                    issues.append(ValidationIssue(
+                        file=self._relative_file(f), line=line, code="margin-pointer",
+                        severity="error", message=problem, context=body[:120]))
+        return ValidationRunResult(
+            name="margin-pointers",
+            description="Margin navigation pointers follow the house form",
             files_checked=len(files), issues=issues,
             elapsed_ms=int((time.time() - t0) * 1000),
         )
