@@ -118,7 +118,7 @@ MB_TO_BYTES = 1024 * 1024  # Binary megabyte (mebibyte) in bytes, so printed val
 r"""
 ## 💡 Introduction: What are Transformers?
 
-Transformers are the architecture behind modern large language models (GPT-4, Claude, Llama, and Gemini). The core breakthrough is the synthesis of **parallel self-attention** (allowing every token in a sequence to dynamically attend to every other token) with **deep residual stream communication** and **dense feed-forward computation**.
+Transformers are the architecture behind modern large language models (GPT-6, Claude, Llama, and Gemini). The core breakthrough is the synthesis of **parallel self-attention** (allowing every token in a sequence to dynamically attend to every other token) with **deep residual stream communication** and **dense feed-forward computation**.
 
 ### The Transformer Paradigm Shift
 
