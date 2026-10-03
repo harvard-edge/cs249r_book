@@ -97,6 +97,7 @@ class BlackFridayCalc:
     bf_qps_spike_value = 10000  # Black Friday peak QPS
     bf_spike_factor_value = 10  # spike multiplier (10x)
     bf_collapse_latency_s_value = 10 * second  # scenario assumption: latency during collapse
+    bf_full_util_pct_value = 100
 
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
     bf_latency_ms_str = fmt_time(bf_latency_ms_value, 'millisecond', precision=0, commas=False)
@@ -104,7 +105,6 @@ class BlackFridayCalc:
     bf_qps_spike_str = fmt_rate(bf_qps_spike_value, "QPS")
     bf_spike_factor_mult_str = fmt_multiple(bf_spike_factor_value, precision=0, commas=False)
     bf_collapse_latency_s_str = fmt_time(bf_collapse_latency_s_value, 'second', precision=0, commas=False)
-    bf_full_util_pct_value = 100
     bf_full_util_pct_str = fmt_percent(bf_full_util_pct_value / 100, precision=0, commas=False, style='prose')
 ```
 
@@ -827,7 +827,7 @@ Scenario B (high throughput): Batch size 8.
 # │ How: Compare total batch time to per-request latency for photo classification.
 # │
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import fmt, fmt_count, fmt_time
+from mlsysim.fmt import fmt, fmt_count, fmt_time, check
 
 class StaticBatchCalc:
     """Contrasts static vs. dynamic inference economics for photo classification."""
@@ -839,6 +839,9 @@ class StaticBatchCalc:
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
     batch_total_s_value = n_photos_value * inference_ms_value
+
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(batch_total_s_value == 50 * second, f"Expected 50s total batch time, got {batch_total_s_value}")
 
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
     n_photos_str = fmt_count(n_photos_value, label="photo")
@@ -1506,7 +1509,7 @@ For dynamic inference systems, the serving inversion established in @sec-model-s
 # │ How: Calculate the ratio between mean latency and the p99 threshold.
 # │
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import fmt, fmt_multiple
+from mlsysim.fmt import fmt, fmt_multiple, check
 
 class TailLatencyRatioCalc:
     """Demonstrates why mean latency misleads by showing the p99-to-mean ratio."""
@@ -1517,6 +1520,9 @@ class TailLatencyRatioCalc:
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
     tail_ratio_value = p99_latency_ms_value / mean_latency_ms_value
+
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(tail_ratio_value == 40, f"Expected p99/mean ratio 40x, got {tail_ratio_value}")
 
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
     tail_ratio_mult_str = fmt_multiple(tail_ratio_value, precision=0, commas=False)
@@ -1566,7 +1572,7 @@ Understanding where latency accumulates requires instrumenting each stage along 
 # │
 # └─────────────────────────────────────────────────────────────────────────────
 
-from mlsysim.fmt import fmt_int, MarkdownStr, fmt, fmt_percent, fmt_time
+from mlsysim.fmt import fmt_int, MarkdownStr, fmt, fmt_percent, fmt_time, check
 
 class LatencyTableCalc:
     """Decomposes the ResNet-50 request lifecycle into processing phases with percentages."""
@@ -1587,6 +1593,11 @@ class LatencyTableCalc:
     p_transfer_value = l_transfer_value / l_total_value * 100
     p_inf_value = l_inf_value / l_total_value * 100
     p_post_value = l_post_value / l_total_value * 100
+
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(round(l_total_value.to(ms).magnitude, 1) == 10.1, f"Expected 10.1 ms total latency, got {l_total_value}")
+    check(round(p_jpeg_value) == 30, f"Expected ~30% JPEG decode share, got {p_jpeg_value:.1f}%")
+    check(round(p_inf_value) == 50, f"Expected ~50% inference share, got {p_inf_value:.1f}%")
 
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
     l_jpeg_ms_str = fmt_time(l_jpeg_value, 'millisecond', precision=0, commas=False)
@@ -1618,7 +1629,7 @@ class LatencyTableCalc:
 # │ How: Compare phase durations before and after model acceleration.
 # │
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import fmt, fmt_percent, fmt_time
+from mlsysim.fmt import fmt, fmt_percent, fmt_time, check
 from mlsysim.physics import calc_amdahls_speedup
 
 class LatencyBudgetCalc:
@@ -1639,6 +1650,10 @@ class LatencyBudgetCalc:
     preprocess_pct_value = preprocess_ms_value / total_latency_ms_value * 100
     tensorrt_total_ms_value = preprocess_ms_value + cpu_gpu_ms_value + tensorrt_inference_ms_value + postprocess_ms_value
     tensorrt_preprocess_pct_value = preprocess_ms_value / tensorrt_total_ms_value * 100
+
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(round(preprocess_pct_value, 1) == 44.6, f"Expected 44.6% preprocessing share, got {preprocess_pct_value:.1f}%")
+    check(round(tensorrt_preprocess_pct_value, 1) == 63.4, f"Expected 63.4% TensorRT preprocessing share, got {tensorrt_preprocess_pct_value:.1f}%")
 
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
     preprocess_ms_str = fmt_time(preprocess_ms_value, 'millisecond', precision=1, commas=False)
@@ -1698,7 +1713,7 @@ from mlsysim.fmt import fmt_int
 # │
 # └─────────────────────────────────────────────────────────────────────────────
 
-from mlsysim.fmt import MarkdownStr, fmt, fmt_percent, fmt_time
+from mlsysim.fmt import MarkdownStr, fmt, fmt_percent, fmt_time, check
 
 class DlrmLatencyCalc:
     """Models DLRM serving latency to contrast I/O-bound vs. compute-bound bottlenecks."""
@@ -1712,6 +1727,10 @@ class DlrmLatencyCalc:
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
     dlrm_total_ms_value = dlrm_input_ms_value + dlrm_embed_ms_value + dlrm_mlp_ms_value + dlrm_post_ms_value
     dlrm_mlp_pct_value = dlrm_mlp_ms_value / dlrm_total_ms_value * 100
+
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(dlrm_total_ms_value == 9.0 * ms, f"Expected 9.0 ms total DLRM latency, got {dlrm_total_ms_value}")
+    check(round(dlrm_mlp_pct_value) == 17, f"Expected ~17% MLP share, got {dlrm_mlp_pct_value:.1f}%")
 
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
     dlrm_input_ms_str = fmt_time(dlrm_input_ms_value, 'millisecond', precision=1, commas=False)
@@ -1767,7 +1786,7 @@ Together, @tbl-model-serving-resnet50-latency-budget and @tbl-model-serving-dlrm
 # │ How: Apply Amdahl's Law using the noninference latency share.
 # │
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import fmt, fmt_percent, fmt_time
+from mlsysim.fmt import fmt, fmt_percent, fmt_time, check
 
 class AmdahlServingCalc:
     """Applies Amdahl's Law to show that 10× model speedup yields only ~1.8× end-to-end improvement."""
@@ -1788,6 +1807,10 @@ class AmdahlServingCalc:
     model_10x_ms_value = resnet_inference_ms_value / model_speedup
     amdahl_speedup_value = calc_amdahls_speedup(model_fraction, model_speedup)
     optimized_total_ms_value = total_latency_ms_value / amdahl_speedup_value
+
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(round(amdahl_speedup_value, 1) == 1.8, f"Expected ~1.8x Amdahl speedup, got {amdahl_speedup_value:.2f}")
+    check(round(optimized_total_ms_value.to(ms).magnitude, 1) == 5.6, f"Expected ~5.6 ms optimized latency, got {optimized_total_ms_value}")
 
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
     non_model_pct_str = fmt_percent(non_model_pct_value / 100, precision=1, commas=False, style='prose')
@@ -1908,7 +1931,7 @@ $$\frac{\text{Throughput}(r_2)}{\text{Throughput}(r_1)} = \left(\frac{r_1}{r_2}\
 # │
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim import Datasets
-from mlsysim.fmt import fmt
+from mlsysim.fmt import fmt, fmt_multiple, check
 
 class ResolutionScalingCalc:
     """Quantifies the quadratic relationship between input resolution and inference slowdown."""
@@ -1921,6 +1944,9 @@ class ResolutionScalingCalc:
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
     theoretical_slowdown_value = (r2_value / r1_value) ** 2
+
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(theoretical_slowdown_value == 4.0, f"Expected 4.0 theoretical slowdown, got {theoretical_slowdown_value}")
 
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
     r1_str = fmt(r1_value, precision=0, commas=False)
@@ -2506,7 +2532,9 @@ class CapacityPlanningCalc:
     cp_n_plus_2_headroom_value = cp_final_ceil_value + 2
     cp_precision_ratio_value = cp_fp32_bits_value // cp_int8_bits_value
     mm1_wait_factor_value = mm1_p99_factor_value / (1 - mm1_rho_example_util_value)
+    cp_headroom_pct_value = (cp_headroom_factor_value - 1) * 100
 
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(
         abs(cp_gpus_raw_value - 46.3) < 0.05,
         f"GPU count before rounding should be about 46.3, got {cp_gpus_raw_value:.2f}",
@@ -2526,26 +2554,30 @@ class CapacityPlanningCalc:
     cp_n_plus_2_headroom_gpus_str = fmt_count(cp_n_plus_2_headroom_value, precision=0, commas=False, label="GPU")
     cp_peak_qps_str = fmt_rate(cp_peak_qps_value, 'QPS', precision=0)
     cp_single_gpu_rate_req_per_s_str = fmt_rate(cp_single_gpu_rate_value, 'req/s', precision=0)
-    cp_mu_required_req_per_s_math_fragment = cp_mu_required_req_per_s_str.replace(" req/s", r"\,\mathrm{req}/\mathrm{s}")
-    cp_peak_qps_math_fragment = cp_peak_qps_str.replace(" QPS", r"\,\mathrm{QPS}")
+    _cp_mu_required_req_per_s_math_fragment = cp_mu_required_req_per_s_str.replace(" req/s", r"\,\mathrm{req}/\mathrm{s}")
+    _cp_peak_qps_math_fragment = cp_peak_qps_str.replace(" QPS", r"\,\mathrm{QPS}")
     cp_service_ms_str = fmt_time(cp_service_ms_value, 'millisecond', precision=0, commas=False)
     cp_p99_target_ms_str = fmt_time(cp_p99_target_ms_value, 'millisecond', precision=0, commas=False)
-    cp_service_ms_math_fragment = cp_service_ms_str.replace(" ms", r"\,\mathrm{ms}")
-    cp_p99_target_ms_math_fragment = cp_p99_target_ms_str.replace(" ms", r"\,\mathrm{ms}")
+    _cp_service_ms_math_fragment = cp_service_ms_str.replace(" ms", r"\,\mathrm{ms}")
+    _cp_p99_target_ms_math_fragment = cp_p99_target_ms_str.replace(" ms", r"\,\mathrm{ms}")
     cp_rho_safe_str = fmt(cp_rho_safe_value, precision=2, commas=False)
     cp_rho_safe_pct_str = fmt_percent(cp_rho_safe_value, precision=0, commas=False, style='prose')
     mm1_p99_factor_str = fmt_ratio(mm1_p99_factor_value, precision=1, commas=False)
     cp_rho_safe_math = fmt_math(
         f"\\rho_{{\\text{{serv}}}} \\leq "
-        f"1 - ({mm1_p99_factor_str} \\times {cp_service_ms_math_fragment})/"
-        f"{cp_p99_target_ms_math_fragment} = {cp_rho_safe_str}"
+        f"1 - ({mm1_p99_factor_str} \\times {_cp_service_ms_math_fragment})/"
+        f"{_cp_p99_target_ms_math_fragment} = {cp_rho_safe_str}"
     )
     cp_mu_required_math = fmt_math(
-        f"\\mu_{{\\text{{required}}}} = " f"{cp_peak_qps_math_fragment} / {cp_rho_safe_str} = " f"{cp_mu_required_req_per_s_math_fragment}"
+        f"\\mu_{{\\text{{required}}}} = " f"{_cp_peak_qps_math_fragment} / {cp_rho_safe_str} = " f"{_cp_mu_required_req_per_s_math_fragment}"
     )
-    cp_headroom_pct_value = (cp_headroom_factor_value - 1) * 100
     cp_headroom_pct_str = fmt_percent(cp_headroom_pct_value / 100, precision=0, commas=False, style='prose')
     cp_headroom_factor_str = fmt_ratio(cp_headroom_factor_value, precision=1, commas=False)
+
+CapacityPlanningCalc.cp_mu_required_req_per_s_math_fragment = CapacityPlanningCalc._cp_mu_required_req_per_s_math_fragment
+CapacityPlanningCalc.cp_peak_qps_math_fragment = CapacityPlanningCalc._cp_peak_qps_math_fragment
+CapacityPlanningCalc.cp_service_ms_math_fragment = CapacityPlanningCalc._cp_service_ms_math_fragment
+CapacityPlanningCalc.cp_p99_target_ms_math_fragment = CapacityPlanningCalc._cp_p99_target_ms_math_fragment
 ```
 
 ::: {#nbk-model-serving-resnet-50-capacity-planning .callout-notebook title="ResNet-50 capacity planning"}
@@ -2695,7 +2727,7 @@ In multi-process serving deployments where multiple worker processes share a sin
 # │
 # └─────────────────────────────────────────────────────────────────────────────
 
-from mlsysim.fmt import fmt_time, fmt_time_range
+from mlsysim.fmt import fmt_time, fmt_time_range, check
 
 class ColdStartCalc:
     """Decomposes cold start latency showing precompiled TensorRT reduces startup from ~35 s to ~1.5 s."""
@@ -2711,6 +2743,10 @@ class ColdStartCalc:
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
     cs_local_total_value = cs_ssd_value + cs_cuda_value + cs_warmup_value + cs_runtime_overhead_value
     cs_cloud_total_value = cs_s3_value + cs_cuda_value + cs_compile_value + cs_warmup_value + cs_runtime_overhead_value
+
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(cs_local_total_value == 1.5 * second, f"Expected 1.5s local cold start, got {cs_local_total_value}")
+    check(cs_cloud_total_value == 35.0 * second, f"Expected 35.0s cloud cold start, got {cs_cloud_total_value}")
 
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
     cs_local_s_str = fmt_time(cs_local_total_value, 'second', precision=1, commas=False, approx=True)
@@ -2802,6 +2838,7 @@ When the aggregate size of all models exceeds GPU memory capacity, the serving s
 # │
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim import *
+from mlsysim.fmt import check
 
 class ModelSwapCalc:
     """Quantifies the latency cost of swapping a reference model over PCIe Gen4."""
@@ -2813,6 +2850,9 @@ class ModelSwapCalc:
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
     model_swap = transfer_time(model_size, pcie_bw)
+
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(round(model_swap.to(ms).magnitude, 1) == 312.5, f"Expected 312.5 ms model swap time, got {model_swap}")
 
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
     model_size_gb_str = fmt_memory(model_size, unit=GB, precision=0, commas=False)
@@ -3068,7 +3108,7 @@ $$\mathbb{E}[L_{\text{lat,wait}}] = \frac{T_{\text{window}}}{2}$$ {#eq-avg-wait}
 # │ How: Calculate average wait time assuming uniform request arrival.
 # │
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import fmt, fmt_percent, fmt_time
+from mlsysim.fmt import fmt, fmt_percent, fmt_time, check
 
 class BatchingBudgetCalc:
     """Shows that a 20 ms batching window consumes 20% of a 50 ms SLO before any computation."""
@@ -3082,6 +3122,10 @@ class BatchingBudgetCalc:
     avg_wait_ms_value = batch_window_ms_value / 2
     max_wait_ms_value = batch_window_ms_value
     budget_pct_value = avg_wait_ms_value / slo_ms_value * 100
+
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(avg_wait_ms_value == 10 * ms, f"Expected 10 ms average wait, got {avg_wait_ms_value}")
+    check(budget_pct_value == 20, f"Expected 20% budget consumption, got {budget_pct_value}")
 
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
     avg_wait_ms_str = fmt_time(avg_wait_ms_value, 'millisecond', precision=0, commas=False)
@@ -3141,15 +3185,18 @@ class BatchVariability:
     check(abs(mean_value[0] - 0.5) < 1e-9, "50 QPS x 10 ms must give a mean of 0.5.")
 
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
-    p0_prec = [0, 0, 1, 3]  # display precision per traffic level
-    pge_prec = [0, 0, 0, 1]
+    _p0_prec = [0, 0, 1, 3]  # display precision per traffic level
+    _pge_prec = [0, 0, 0, 1]
     qps_str = [fmt(q, precision=0, commas=False) for q in qps]
     mean_str = [fmt(m, precision=None, commas=False) for m in mean_value]
     std_str = [fmt(s, precision=None, commas=False) for s in std_value]
-    p0_str = [fmt_percent(round(p * 100, pr) / 100, precision=pr, commas=False, style='symbol') for p, pr in zip(p0_value, p0_prec)]
-    p_ge_str = [fmt_percent(round(p * 100, pr) / 100, precision=pr, commas=False, style='symbol') for p, pr in zip(p_ge_value, pge_prec)]
-    p_ge_prose_str = [fmt_percent(round(p * 100, pr) / 100, precision=pr, commas=False, style='prose') for p, pr in zip(p_ge_value, pge_prec)]
+    p0_str = [fmt_percent(round(p * 100, pr) / 100, precision=pr, commas=False, style='symbol') for p, pr in zip(p0_value, _p0_prec)]
+    p_ge_str = [fmt_percent(round(p * 100, pr) / 100, precision=pr, commas=False, style='symbol') for p, pr in zip(p_ge_value, _pge_prec)]
+    p_ge_prose_str = [fmt_percent(round(p * 100, pr) / 100, precision=pr, commas=False, style='prose') for p, pr in zip(p_ge_value, _pge_prec)]
     window_ms_str = fmt_time(window_ms_value, 'millisecond', precision=0, commas=False)
+
+BatchVariability.p0_prec = BatchVariability._p0_prec
+BatchVariability.pge_prec = BatchVariability._pge_prec
 ```
 
 @Tbl-batch-variability quantifies this variability, showing how batch size fluctuates for different traffic levels with a fixed `{python} BatchVariability.window_ms_str` window:
@@ -3185,7 +3232,7 @@ For ResNet-50 on a V100 GPU, service time approximately scales as $T_{\text{svc}
 # │ How: Contrast throughput and latency while applying Iron Law efficiency terms.
 # │
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import fmt, fmt_int, fmt_percent, fmt_time, fmt_rate
+from mlsysim.fmt import fmt, fmt_int, fmt_percent, fmt_time, fmt_rate, check
 
 # Helper functions at module scope (used by class body and slo-violation-calc)
 def service_time_value(b, _fixed=5.0 * ms, _per_image=0.6 * ms):
@@ -3224,6 +3271,11 @@ class BatchingAnalysisCalc:
     throughput_increase_value = throughputs_value[32] / throughputs_value[1]
     il_eff_b1_pct_value = int((il_compute_b1_ms_value / (il_overhead_ms_value + il_compute_b1_ms_value)).to("").magnitude * 100)
     il_eff_b32_pct_value = int((il_compute_b32_ms_value / (il_overhead_ms_value + il_compute_b32_ms_value)).to("").magnitude * 100)
+
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(round(throughput_increase_value, 1) == 7.4, f"Expected ~7.4x throughput increase, got {throughput_increase_value:.2f}")
+    check(il_eff_b1_pct_value == 10, f"Expected 10% batch-1 efficiency, got {il_eff_b1_pct_value}")
+    check(il_eff_b32_pct_value == 79, f"Expected 79% batch-32 efficiency, got {il_eff_b32_pct_value}")
 
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
     throughput_increase_mult_str = fmt_multiple(throughput_increase_value, precision=1, commas=False)
@@ -3392,7 +3444,7 @@ The aggressive configuration assumes `{python} BatchingOptimization.throughput_g
 # │ How: Model request arrival and batch assembly to compare mean vs. envelope.
 # │
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import fmt, fmt_time
+from mlsysim.fmt import fmt, fmt_time, check
 
 class SloViolationCalc:
     """Compares mean latency with a conservative tail envelope under Poisson arrivals."""
@@ -3411,6 +3463,12 @@ class SloViolationCalc:
     p99_service_value = service_time_value(p99_batch_count_value)
     tail_envelope_value = T_slo_value + p99_service_value
     envelope_to_mean_value = tail_envelope_value / mean_latency_value
+
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(mean_batch_value == 6, f"Expected mean batch of 6, got {mean_batch_value}")
+    check(round(mean_latency_value.to(ms).magnitude, 1) == 13.6, f"Expected 13.6 ms mean latency, got {mean_latency_value}")
+    check(round(tail_envelope_value.to(ms).magnitude, 1) == 22.2, f"Expected 22.2 ms tail envelope, got {tail_envelope_value}")
+    check(round(envelope_to_mean_value, 2) == 1.63, f"Expected ~1.63x envelope ratio, got {envelope_to_mean_value:.2f}")
 
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
     qps_str = fmt_rate(qps_value, "QPS", commas=False)
@@ -3608,6 +3666,7 @@ class PracticalConfigCalc:
         count / second
     )
 
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(pc_tail_envelope_ms_value < pc_slo_ms_value, "Conservative tail envelope should stay within the serving SLO.")
 
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
@@ -3882,12 +3941,14 @@ class MobileServingCalc:
     m_total_mj = m_cam_mj + m_jpeg_mj + m_resize_mj + m_npu_mj + m_ui_mj
     battery_wh = 10 * Wh
     sustained_power = m_total_mj / m_total_ms
+    inferences_per_battery_m = (battery_wh / m_total_mj).to(count).magnitude / MILLION
+    sustained_power_display = round(sustained_power.to(mW).magnitude) * mW
+
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(
         sustained_power > 50 * mW,
         "mobile pipeline sustained power should be ~60–70 mW",
     )
-    inferences_per_battery_m = (battery_wh / m_total_mj).to(count).magnitude / MILLION
-    sustained_power_display = round(sustained_power.to(mW).magnitude) * mW
 
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
     m_cam_ms_str = fmt_time(m_cam_ms, ms, precision=0, commas=False)
@@ -4110,6 +4171,7 @@ class CarbonCostCalc:
     cc_low_util_joules = cc_low_util_power / cc_low_util_tokens_sec
     cc_low_util_ratio = (cc_low_util_joules / cc_joules_per_token).to("").magnitude
 
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(
         cc_total_tokens_sec.to(count / second).magnitude == 912,
         f"114 concurrent requests × 8 tokens/s should be 912 tokens/s, got {cc_total_tokens_sec.to(count / second).magnitude:.0f}",
@@ -4225,7 +4287,7 @@ These optimizations produce substantial speedups over an untuned framework-nativ
 # │ How: Compare benchmarked latencies for JIT, ONNX, and TensorRT at multiple precisions.
 # │
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import fmt_int, fmt, fmt_time
+from mlsysim.fmt import fmt_int, fmt, fmt_time, check
 
 class RuntimeComparisonCalc:
     """ResNet-50 runtime comparison: TensorRT INT8 achieves up to 9× speedup over eager PyTorch."""
@@ -4245,6 +4307,11 @@ class RuntimeComparisonCalc:
     rt_trt_fp32_speedup_value = rt_pytorch_ms_value / rt_trt_fp32_ms_value
     rt_trt_fp16_speedup_value = rt_pytorch_ms_value / rt_trt_fp16_ms_value
     rt_trt_int8_speedup_value = rt_pytorch_ms_value / rt_trt_int8_ms_value
+
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(round(rt_trt_int8_speedup_value, 1) == 9.4, f"Expected 9.4x INT8 speedup, got {rt_trt_int8_speedup_value:.2f}")
+    check(round(rt_trt_fp16_speedup_value, 1) == 6.1, f"Expected 6.1x FP16 speedup, got {rt_trt_fp16_speedup_value:.2f}")
+    check(round(rt_trt_fp32_speedup_value) == 3, f"Expected 3x FP32 speedup, got {rt_trt_fp32_speedup_value:.2f}")
 
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
     rt_pytorch_ms_str = fmt_time(rt_pytorch_ms_value, 'millisecond', precision=1, commas=False)
@@ -4328,7 +4395,7 @@ Actual speedup depends on the compute-to-memory ratio, operator mix, hardware in
 # │ How: Contrast ResNet-50 metrics across FP32, FP16, and INT8 precisions.
 # │
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import fmt, fmt_percent, fmt_time, fmt_memory
+from mlsysim.fmt import check, fmt, fmt_multiple, fmt_percent, fmt_pp, fmt_time, fmt_memory
 
 class PrecisionTradeoffCalc:
     """ResNet-50 precision tradeoffs: FP16 gives 2× free speedup; INT8 gives 3× with <0.4pp accuracy loss."""
@@ -4351,6 +4418,11 @@ class PrecisionTradeoffCalc:
     pt_fp16_speedup_value = pt_fp32_ms_value / pt_fp16_ms_value
     pt_int8_vs_fp16_speedup_value = pt_fp16_ms_value / pt_int8_ms_value
     pt_int8_acc_loss_value = pt_fp32_acc_pct_value - pt_int8_ptq_acc_pct_value
+
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(round(pt_int8_speedup_value, 1) == 3.1, f"Expected 3.1x INT8 speedup, got {pt_int8_speedup_value}")
+    check(pt_fp16_speedup_value == 2.0, f"Expected 2.0x FP16 speedup, got {pt_fp16_speedup_value}")
+    check(round(pt_int8_acc_loss_value, 2) == 0.33, f"Expected 0.33pp accuracy loss, got {pt_int8_acc_loss_value}")
 
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
     pt_fp32_ms_str = fmt_time(pt_fp32_ms_value, 'millisecond', precision=1, commas=False)
@@ -4589,7 +4661,7 @@ The **cost per inference**\index{Cost per inference!serving economics} divides t
 # │ How: Calculate unit costs using AWS hourly rates and measured images-per-second.
 # │
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import fmt, fmt_rate, fmt_usd
+from mlsysim.fmt import check, fmt, fmt_multiple, fmt_rate, fmt_usd
 
 class CostAnalysisCalc:
     """ResNet-50 cost analysis: T4 achieves lowest cost-per-image despite higher hourly rate than CPU."""
@@ -4610,6 +4682,11 @@ class CostAnalysisCalc:
     ca_t4_cpm_value = (ca_t4_cost_value * hour) / (ca_t4_images_per_hour_value / (MILLION * count))
     ca_v100_cpm_value = (ca_v100_cost_value * hour) / (ca_v100_images_per_hour_value / (MILLION * count))
     ca_v100_price_increase_value = ca_v100_cost_value / ca_t4_cost_value
+
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(round(ca_cpu_cpm_value.magnitude, 2) == 0.94, f"Expected $0.94 CPU CPM, got {ca_cpu_cpm_value}")
+    check(round(ca_t4_cpm_value.magnitude, 2) == 0.37, f"Expected $0.37 T4 CPM, got {ca_t4_cpm_value}")
+    check(round(ca_v100_cpm_value.magnitude, 2) == 0.71, f"Expected $0.71 V100 CPM, got {ca_v100_cpm_value}")
 
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
     ca_cpu_cost_str = fmt_usd(ca_cpu_cost_value * hour, precision=2, commas=False)
@@ -4734,7 +4811,7 @@ Beyond resident weights, KV-cache memory represents the primary physical capacit
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim import Hardware, Models
 from mlsysim.solvers import ServingModel
-from mlsysim.fmt import fmt, fmt_time, fmt_memory, fmt_memory_capacity, fmt_bandwidth
+from mlsysim.fmt import check, fmt, fmt_time, fmt_memory, fmt_memory_capacity, fmt_bandwidth
 from mlsysim.physics import transfer_time
 
 class LlmCaseStudyHwSpecs:
@@ -4761,6 +4838,10 @@ class LlmCaseStudyHwSpecs:
     case_study_ttft = _serving.ttft
     a100_token_time = transfer_time(case_study_model_weight, a100_bw)
 
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(round(case_study_ttft.to(ms).magnitude, 1) == 41.9, f"Expected 41.9 ms TTFT, got {case_study_ttft}")
+    check(round(a100_token_time.to(ms).magnitude, 2) == 1.97, f"Expected 1.97 ms token time, got {a100_token_time}")
+
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
     a100_mem_gb_str = fmt_memory_capacity(h_a100.memory.capacity, unit=GiB, commas=False)
     a100_bw_tb_per_s_str = fmt_bandwidth(a100_bw, unit=TB / second, precision=2, commas=False)
@@ -4784,7 +4865,7 @@ class LlmCaseStudyHwSpecs:
 # │
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim import Hardware
-from mlsysim.fmt import fmt_bandwidth
+from mlsysim.fmt import check, fmt_bandwidth
 
 class LlmCaseStudyH100BwRecap:
     """Local H100 bandwidth recap for the 8B Llama 3 case study."""
@@ -4794,6 +4875,9 @@ class LlmCaseStudyH100BwRecap:
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
     h100_bw = h_h100.memory.bandwidth
+
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(round(h100_bw.to(TB / second).magnitude, 2) == 3.35, f"Expected 3.35 TB/s H100 bandwidth, got {h100_bw}")
 
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
     h100_bw_tb_per_s_str = fmt_bandwidth(h100_bw, unit=TB / second, precision=2, commas=False)
@@ -5006,6 +5090,7 @@ class LlmServingCalc:
     cost_per_m_tokens_value = (hourly_cost_value * hour) / (tokens_per_hour_value / (MILLION * count))
     remaining_vram = h.memory.capacity - model_weight
 
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(
         abs((decode_tokens_value * count * realized_tpot - total_decode_s).to(second).magnitude) < 1e-6,
         "Decode latency must equal tokens × TPOT",
@@ -5069,7 +5154,7 @@ Serving inverts training priorities in ways that violate intuitions from batch p
 # │ How: Model M/M/1 queuing wait times for 5 ms vs. 2 ms inference latencies.
 # │
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import fmt, fmt_percent, fmt_time
+from mlsysim.fmt import check, fmt, fmt_multiple, fmt_percent, fmt_time
 
 class FallacyLatencyCalc:
     """Shows system-level speedup far exceeds model-level speedup due to nonlinear queuing dynamics."""
@@ -5091,6 +5176,11 @@ class FallacyLatencyCalc:
     fl_system_speedup_value = fl_total_slow_ms_value / fl_total_fast_ms_value
     fl_queuing_improvement_value = fl_wait_slow_ms_value / fl_wait_fast_ms_value
     fl_inference_gain_ms_value = fl_service_slow_ms_value - fl_service_fast_ms_value
+
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(round(fl_wait_slow_ms_value.to(ms).magnitude, 1) == 20.0, f"Expected 20 ms slow wait, got {fl_wait_slow_ms_value}")
+    check(round(fl_system_speedup_value, 1) == 8.5, f"Expected 8.5x system speedup, got {fl_system_speedup_value}")
+    check(round(fl_queuing_improvement_value, 1) == 21.2, f"Expected 21.2x queuing improvement, got {fl_queuing_improvement_value}")
 
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
     fl_utilization_high_pct_str = fmt_percent(fl_utilization_high_value, precision=0, commas=False, style='prose')
@@ -5131,7 +5221,7 @@ This nonlinear interaction between inference speed and queuing behavior produces
 # │ How: Model M/M/1 wait times to identify the practical utilization ceiling.
 # │
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import fmt, fmt_int, fmt_percent, fmt_time
+from mlsysim.fmt import check, fmt, fmt_int, fmt_multiple, fmt_percent, fmt_time
 
 class FallacyUtilizationCalc:
     """Moving from 70% to 90% utilization cuts costs 22% but triples average latency."""
@@ -5150,6 +5240,11 @@ class FallacyUtilizationCalc:
     fu_latency_increase_factor_value = fu_avg_latency_high_value / fu_avg_latency_mod_value
     fu_p99_mod_value = 4.6 * fu_service_ms_value / (1 - fu_util_mod_value)
     fu_p99_high_value = 4.6 * fu_service_ms_value / (1 - fu_util_high_value)
+
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(round(fu_wait_high_factor_value, 1) == 9.0, f"Expected 9.0 wait factor, got {fu_wait_high_factor_value}")
+    check(round(fu_cost_reduction_pct_value, 1) == 22.2, f"Expected 22.2% cost reduction, got {fu_cost_reduction_pct_value}")
+    check(round(fu_latency_increase_factor_value) == 3, f"Expected 3x latency increase, got {fu_latency_increase_factor_value}")
 
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
     fu_util_high_pct_str = fmt_percent(fu_util_high_value, precision=0, commas=False, style='prose')
@@ -5185,7 +5280,7 @@ Teams target `{python} FallacyUtilizationCalc.fu_util_high_pct_str` utilization\
 # │ How: Model validation vs. production accuracy for a mismatched vision pipeline.
 # │
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import fmt, fmt_percent, fmt_pp, fmt_range
+from mlsysim.fmt import check, fmt, fmt_percent, fmt_pp, fmt_range
 
 class FallacySkewCalc:
     """Training-serving skew: 95% validation accuracy drops to 90% from preprocessing mismatches."""
@@ -5198,6 +5293,9 @@ class FallacySkewCalc:
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
     fs_acc_drop_value = fs_val_acc_pct_value - fs_prod_acc_pct_value
+
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(fs_acc_drop_value == 5.0, f"Expected 5.0pp accuracy drop, got {fs_acc_drop_value}")
 
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
     fs_val_acc_str = fmt_percent(fs_val_acc_pct_value / 100, precision=0, commas=False, style='prose')
@@ -5229,7 +5327,7 @@ Engineers assume identical model weights preserve validation-set performance\ind
 # │ How: M/M/1 mean vs. p99 approximation at typical serving utilization.
 # │
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import fmt, fmt_percent, fmt_time
+from mlsysim.fmt import check, fmt, fmt_multiple, fmt_percent, fmt_time
 
 class TailLatencyCalc:
     """At 70% utilization, p99 latency is 4.6× the mean—invisible to average-based monitoring."""
@@ -5244,6 +5342,10 @@ class TailLatencyCalc:
     # M/M/1 p99 approximation: 4.6 * avg
     tl_p99_ms_value = 4.6 * tl_avg_ms_value
     tl_gap_value = tl_p99_ms_value / tl_avg_ms_value
+
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(round(tl_gap_value, 1) == 4.6, f"Expected 4.6 gap, got {tl_gap_value}")
+    check(round(tl_avg_ms_value.to(ms).magnitude, 1) == 16.7, f"Expected 16.7 ms avg latency, got {tl_avg_ms_value}")
 
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
     tl_util_pct_str = fmt_percent(tl_util_value, precision=0, commas=False, style='prose')
@@ -5276,7 +5378,7 @@ Engineers monitor average latency\index{Latency!mean, monitoring pitfall} becaus
 # │ How: Compare throughput and inference time across two batch sizes.
 # │
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import fmt_int, fmt, fmt_percent, fmt_time
+from mlsysim.fmt import check, fmt_int, fmt, fmt_percent, fmt_time
 
 class FallacyBatchingCalc:
     """Batch-16 to batch-32 yields only ~12% more throughput while nearly doubling inference time."""
@@ -5293,6 +5395,9 @@ class FallacyBatchingCalc:
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
     fb_throughput_gain_pct_value = (fb_throughput_large_value / fb_throughput_small_value - 1) * 100
+
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(round(fb_throughput_gain_pct_value) == 12, f"Expected ~12% throughput gain, got {fb_throughput_gain_pct_value}")
 
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
     fb_batch_small_str = fmt(fb_batch_small_count_value, precision=0, commas=False)
@@ -5327,7 +5432,7 @@ Engineers maximize batch size\index{Batching!fallacy of larger batches} assuming
 # │ How: Model validation vs. OOD accuracy for a calibration-mismatched system.
 # │
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import fmt, fmt_percent
+from mlsysim.fmt import check, fmt, fmt_percent, fmt_pp
 
 class FallacyCalibrationCalc:
     """INT8 model calibrated on ImageNet drops 3.2pp when serving out-of-distribution wildlife images."""
@@ -5338,6 +5443,9 @@ class FallacyCalibrationCalc:
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
     fc_ood_acc_pct_value = fc_imagenet_acc_pct_value - fc_acc_loss_pct_value
+
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(round(fc_ood_acc_pct_value, 1) == 72.9, f"Expected 72.9% OOD accuracy, got {fc_ood_acc_pct_value}")
 
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
     fc_acc_loss_str = fmt_pp(fc_acc_loss_pct_value, precision=1, attributive=True)
@@ -5367,7 +5475,7 @@ Teams may calibrate with a convenient sample\index{Calibration!production traffi
 # │ How: Calculate aggregate cold-start work, parallel warm time, and latency multiplier.
 # │
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import fmt, fmt_count, fmt_time
+from mlsysim.fmt import check, fmt, fmt_count, fmt_multiple, fmt_time
 
 class FallacyColdstartCalc:
     """Cold starts compound: 10 new instances at 30 s compile time = 300 instance-seconds."""
@@ -5382,6 +5490,10 @@ class FallacyColdstartCalc:
     cs_aggregate_cold_s_value = cs_new_instance_count_value * cs_compile_time_s_value
     cs_parallel_warm_s_value = cs_compile_time_s_value
     cs_cold_multiplier_value = cs_cold_latency_ms_value / cs_steady_latency_ms_value
+
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(cs_aggregate_cold_s_value == 300 * second, f"Expected 300 s aggregate cold time, got {cs_aggregate_cold_s_value}")
+    check(cs_cold_multiplier_value == 100, f"Expected 100x cold multiplier, got {cs_cold_multiplier_value}")
 
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
     cs_new_instances_str = fmt(cs_new_instance_count_value, precision=0, commas=False)
