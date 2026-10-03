@@ -166,10 +166,9 @@ def test_star_import_does_not_excuse_unexported_helper(tmp_path):
     """`from mlsysim import *` must not be treated as providing a helper the
     package does not actually export.
 
-    Regression guard for the model_compression bug (2026-08-13): the star-import
-    allowlist was hand-maintained and claimed 16 names mlsysim never exported,
-    so a cell calling fmt_memory_capacity() with only a star import passed every
-    static gate and then raised NameError at render.
+    Regression guard for star-import allowlist: must not excuse helpers that
+    mlsysim does not actually export (such as sci_latex, which lives in
+    mlsysim.fmt but is not exported in mlsysim.__all__).
     """
     chapter = tmp_path / "chapter.qmd"
     chapter.write_text(
@@ -180,7 +179,7 @@ from mlsysim.core.units import *
 from mlsysim import Platforms
 
 class Scale:
-    ram_str = fmt_memory_capacity(Platforms.Tiny.ram, unit=KiB, precision=0)
+    ram_str = sci_latex(1e9)
 ```
 """,
         encoding="utf-8",
@@ -190,7 +189,7 @@ class Scale:
 
     missing = [i for i in issues if i.code == "missing_fmt_import"]
     assert len(missing) == 1
-    assert "fmt_memory_capacity" in missing[0].message
+    assert "sci_latex" in missing[0].message
 
 
 def test_star_import_still_excuses_genuinely_exported_helper(tmp_path):

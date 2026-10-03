@@ -278,3 +278,45 @@ def check_yaml_pending(root: Path) -> list[RegistryIssue]:
             "run: python3 binder/tools/audit/refresh_mlsysim_constants_yamls.py --finalize"
         ),
     )]
+
+
+def check_lego_cell_architecture(root: Path, paths: list[Path] | None = None) -> list[RegistryIssue]:
+    """Check single-class and class-first placement invariants on LEGO cells."""
+    from cli.checks import lego_cell_architecture
+
+    if paths is None:
+        paths = sorted((root / "books").rglob("*.qmd"))
+    issues: list[RegistryIssue] = []
+    for path in paths:
+        p = path if path.is_absolute() else root / path
+        if not p.exists() or p.suffix != ".qmd":
+            continue
+        for v in lego_cell_architecture.audit_file(p):
+            issues.append(RegistryIssue(
+                code=v.code,
+                message=v.message,
+                file=str(p.relative_to(root)),
+                line=v.line,
+            ))
+    return issues
+
+
+def check_lego_stage4_purity(root: Path, paths: list[Path] | None = None) -> list[RegistryIssue]:
+    """Check Stage 4 (OUTPUT) purity and suffix invariants."""
+    from cli.checks import lego_stage4_purity
+
+    if paths is None:
+        paths = sorted((root / "books").rglob("*.qmd"))
+    issues: list[RegistryIssue] = []
+    for path in paths:
+        p = path if path.is_absolute() else root / path
+        if not p.exists() or p.suffix != ".qmd":
+            continue
+        for v in lego_stage4_purity.audit_file(p):
+            issues.append(RegistryIssue(
+                code=v.code,
+                message=v.message,
+                file=str(p.relative_to(root)),
+                line=v.line,
+            ))
+    return issues

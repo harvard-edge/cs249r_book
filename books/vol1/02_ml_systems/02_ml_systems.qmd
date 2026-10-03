@@ -351,9 +351,11 @@ class LightLatency:
     check(min_latency_ms > safety_budget_ms, f"Physics forbids cloud ({min_latency_ms:.1f} ms) within {safety_budget_ms} ms budget!")
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
-    min_latency_value = fmt_time(min_latency_ms, 'millisecond', precision=0, commas=False)
-    min_latency_str = fmt_text(min_latency_value, " round-trip")
+    min_latency_ms_str = fmt_time(min_latency_ms, 'millisecond', precision=0, commas=False)
+    min_latency_str = fmt_text(min_latency_ms_str, " round-trip")
     distance_km_str = fmt_length(distance_km, unit=kilometer, precision=0, commas=True)
+
+LightLatency.min_latency_value = LightLatency.min_latency_ms_str
 ```
 
 California to Virginia (~`{python} LightLatency.distance_km_str` straight-line) requires ~`{python} LightLatency.min_latency_str` before any computation begins. Actual services add routing, protocol, queuing, and processing latency. Applications requiring sub-10 ms response *cannot* use distant cloud infrastructure—physics forbids it. This constraint creates the need for edge ML and TinyML: when latency budgets are tight, computation must move closer to the data source.
@@ -788,7 +790,7 @@ A quantitative comparison applies this analysis to ResNet-50 inference on a high
 # │
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim import Models
-from mlsysim.fmt import fmt, fmt_count, fmt_flops, fmt_memory
+from mlsysim.fmt import fmt, fmt_count, fmt_flops, fmt_memory, check
 
 # ┌── LEGO ───────────────────────────────────────────────
 class ResnetSetup:
@@ -802,6 +804,11 @@ class ResnetSetup:
     resnet_fp16_bytes_value = m.size_in_bytes(2 * byte)
     resnet_int8_bytes_value = m.size_in_bytes(1 * byte)
     resnet_params_m_value = m.parameters.to(Mparam).magnitude
+
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(resnet_fp32_bytes_value == 2 * resnet_fp16_bytes_value, "FP32 size must be 2x FP16 size")
+    check(resnet_fp16_bytes_value == 2 * resnet_int8_bytes_value, "FP16 size must be 2x INT8 size")
+    check(25 < resnet_params_m_value < 26, f"ResNet-50 parameters unexpected: {resnet_params_m_value}")
 
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
     resnet_gflop_str = fmt_flops(m.inference_flops, unit=GFLOPs, precision=1, commas=False)
@@ -839,7 +846,7 @@ class ResnetSetup:
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim import Models, Hardware, Engine
 from mlsysim.solvers import SingleNodeModel
-from mlsysim.fmt import fmt, sci_latex, fmt_frac, MarkdownStr, fmt_flop_rate, fmt_bandwidth
+from mlsysim.fmt import fmt, sci_latex, fmt_frac, MarkdownStr, fmt_flop_rate, fmt_bandwidth, fmt_multiple, check
 from mlsysim.core.units import flop, byte, TFLOPs, TB, millisecond, second
 
 # ┌── LEGO ───────────────────────────────────────────────
@@ -859,11 +866,15 @@ class ResnetCloud:
     cloud_ai_display = (m.inference_flops / cloud_traffic_bytes).to(flop / byte).magnitude
     resnet_flops_latex = sci_latex(m.inference_flops.to(flop))
     cloud_traffic_bytes_latex = sci_latex(cloud_traffic_bytes)
+
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(p.bottleneck.lower() == "memory", "Cloud inference must be memory bound")
+    check(cloud_ratio_x_value > 1.0, "Memory time must exceed compute time")
+
+    # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
     cloud_compute_frac = fmt_frac(resnet_flops_latex, sci_latex(p.peak_flops_actual.to(flop / second)), f"{cloud_compute_ms_value:.3f}", "ms")
     cloud_memory_frac = fmt_frac(cloud_traffic_bytes_latex, sci_latex(p.peak_bw_actual.to(byte / second)), f"{cloud_memory_ms_display:.3f}", "ms")
     cloud_ai_frac = fmt_frac(resnet_flops_latex, cloud_traffic_bytes_latex, f"{round(cloud_ai_display):.0f}", "FLOP/byte")
-
-    # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
     cloud_peak_tflop_per_s_str = fmt_flop_rate(p.peak_flops_actual, unit=TFLOPs / second, precision=0, commas=False)
     cloud_bandwidth_tb_per_s_str = fmt_bandwidth(p.peak_bw_actual, unit=TB / second, precision=2, commas=False)
     cloud_ratio_mult_str = fmt_multiple(cloud_ratio_x_value, precision=1, commas=False)
@@ -894,7 +905,7 @@ class ResnetCloud:
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim import Models, Hardware, Engine
 from mlsysim.solvers import SingleNodeModel
-from mlsysim.fmt import MarkdownStr, fmt, fmt_bandwidth, fmt_frac, fmt_ops_rate, sci_latex
+from mlsysim.fmt import MarkdownStr, fmt, fmt_bandwidth, fmt_frac, fmt_multiple, fmt_ops_rate, sci_latex, check
 from mlsysim.core.units import flop, byte, TOPS, GB, millisecond, second
 
 # ┌── LEGO ───────────────────────────────────────────────
@@ -921,10 +932,16 @@ class ResnetMobile:
     mobile_npu_ops_latex = f"{sci_latex(p.peak_flops_actual.to(flop/second))} \\text{{ INT8 ops/s}}"
     mobile_traffic_bytes_latex = sci_latex(mobile_traffic_bytes)
     mobile_npu_bw_latex = sci_latex(p.peak_bw_actual.to(byte / second))
-    mobile_compute_frac = fmt_frac(resnet_int8_ops_latex, mobile_npu_ops_latex, f"{mobile_compute_ms_display:.2f}", "ms")
-    mobile_memory_frac = fmt_frac(mobile_traffic_bytes_latex, mobile_npu_bw_latex, f"{mobile_memory_ms_display:.2f}", "ms")
+
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(p.bottleneck.lower() == "memory", "Mobile inference must be memory bound")
+    check(mobile_ratio_x_value > 1.0, "Mobile memory time must exceed compute time")
+    check(bw_advantage_x_value > 1.0, "Cloud bandwidth must exceed mobile bandwidth")
+    check(inference_speed_x_value > 1.0, "Cloud inference must be faster than mobile")
 
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
+    mobile_compute_frac = fmt_frac(resnet_int8_ops_latex, mobile_npu_ops_latex, f"{mobile_compute_ms_display:.2f}", "ms")
+    mobile_memory_frac = fmt_frac(mobile_traffic_bytes_latex, mobile_npu_bw_latex, f"{mobile_memory_ms_display:.2f}", "ms")
     mobile_tops_str = fmt_ops_rate(p.peak_flops_actual, unit=TOPS, precision=0, commas=False)
     mobile_bw_gb_per_s_str = fmt_bandwidth(p.peak_bw_actual, unit=GB / second, precision=1, commas=False)
     mobile_ratio_mult_str = fmt_multiple(mobile_ratio_x_value, precision=1, commas=False)
@@ -967,6 +984,7 @@ ResNet-50 becomes compute bound when batching and data reuse raise computation p
 
 from mlsysim import Hardware, ReferenceStats, Systems
 from mlsysim.fmt import (
+    check,
     fmt_memory_capacity,
     fmt_usd,
     fmt_count,
@@ -997,6 +1015,10 @@ class HardwareSpectrumSetup:
     # stores dense fp4 (500 TFLOPS) separately per its dense convention.
     edge_peak_ai_flops = Hardware.Workstation.DGX_Spark.compute.precision_flops["fp4_sparse"]
 
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(cloud_peak_flops > edge_peak_ai_flops, "Cloud peak compute must exceed edge workstation")
+    check(round(cloud_peak_flops.to(EFLOP / second).magnitude, 1) == 1.1, f"TPU v4 pod peak FLOP/s mismatch: {cloud_peak_flops}")
+
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
     tpu_chip_count_str = fmt_count(
         Systems.Pods.TPUv4_4096.chips,
@@ -1006,15 +1028,11 @@ class HardwareSpectrumSetup:
     )
     cloud_mem_tb_str = fmt_memory_capacity(Systems.Pods.TPUv4_4096.memory.to(TiB).magnitude * TB, unit=TB, precision=0, commas=False)
     cloud_pwr_mw_str = fmt_power(Systems.Pods.TPUv4_4096.power, unit=MW, precision=0, commas=False)
-
-    # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
     edge_mem_gb_str = fmt_memory_capacity(Hardware.Workstation.DGX_Spark.memory.capacity.to(GiB).magnitude * GB, unit=GB, precision=0, commas=False)
     edge_stor_tb_str = fmt_memory_capacity(Hardware.Workstation.DGX_Spark.storage.capacity.to(TiB).magnitude * TB, unit=TB, precision=0, commas=False)
     edge_pwr_w_str = fmt_power(Hardware.Workstation.DGX_Spark.tdp, unit=watt, precision=0, commas=False)
     edge_price_min_str = fmt_usd(Hardware.Workstation.DGX_Spark.unit_cost.to(USD).magnitude, precision=0)
     edge_price_max_str = fmt_usd(Hardware.Workstation.DGX_Spark.unit_cost_max.to(USD).magnitude, precision=0)
-
-    # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
     tiny_flash_mb_str = fmt_memory_capacity(Hardware.Tiny.ESP32_S3.memory.flash_capacity.to(MiB).magnitude * MB, unit=MB, precision=0, commas=False)
     tiny_pwr_min_w_str = fmt_power(Hardware.Tiny.ESP32_S3.tdp_min, unit=watt, precision=2, commas=False)
     tiny_pwr_max_w_str = fmt_power(Hardware.Tiny.ESP32_S3.tdp_max, unit=watt, precision=1, commas=False)
@@ -2304,7 +2322,7 @@ Edge deployment trades network transit for fixed local capacity\index{Edge ML!di
 # │
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim import Models
-from mlsysim.fmt import fmt, fmt_flop_rate, fmt_flops, fmt_ops_rate, fmt_rate, fmt_ratio, fmt_fps
+from mlsysim.fmt import fmt, fmt_flop_rate, fmt_flops, fmt_ops_rate, fmt_rate, fmt_ratio, fmt_fps, check
 from mlsysim.core.units import GFLOPs, TOPS, second
 
 # ┌── LEGO ───────────────────────────────────────────────
@@ -2323,6 +2341,11 @@ class EdgeSizingThroughput:
     yolo_flops = model.inference_flops if model.inference_flops else model.training_ops
     sustained_flop_rate = inf_per_sec * yolo_flops / second
     required_ops_rate = sustained_flop_rate * headroom
+
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(inf_per_sec == 300, f"Expected 300 inf/sec, got {inf_per_sec}")
+    check(required_ops_rate == sustained_flop_rate * headroom, "Headroom multiplier mismatch")
+    check(required_ops_rate > sustained_flop_rate, "Required throughput must exceed sustained load")
 
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
     stores_str = fmt(stores, precision=0, commas=False)
@@ -2688,9 +2711,11 @@ class BatteryTax:
     budget_pct_str = fmt_percent(daily_budget_ratio, precision=0, commas=False, style='prose', max_ratio=4)
     phone_day_hours_str = fmt_time(HOURS_PER_DAY, hour, precision=0, commas=False, style="word")
 
-    runtime_hours_display = fmt(runtime_h, precision=1, commas=False)
+    _runtime_hours_display = fmt(runtime_h, precision=1, commas=False)
     # Units are set upright inside the math fraction ("15\text{ Wh}"), not as italic variables.
-    runtime_frac = fmt_frac(batt_wh_str.replace(" ", "\\text{ ") + "}", pwr_w_str.replace(" ", "\\text{ ") + "}", runtime_hours_display, "hours")
+    runtime_frac = fmt_frac(batt_wh_str.replace(" ", "\\text{ ") + "}", pwr_w_str.replace(" ", "\\text{ ") + "}", _runtime_hours_display, "hours")
+
+BatteryTax.runtime_hours_display = BatteryTax._runtime_hours_display
 ```
 
 ::: {#nbk-ml-systems-battery-tax .callout-notebook title="The battery tax"}
@@ -3453,6 +3478,11 @@ class BrakingDistance:
     speed_ms = speed_kmh / 3.6  # km/h -> m/s
     distance_m = speed_ms * (latency_ms * ms).to(second).magnitude
     sustained_gflop_s = detection_gflop * detection_fps
+
+    # ┌── 3. GUARD ─────────────────────────────────────────
+    check(round(distance_m, 1) == 2.8, f"Narrative claim: distance traveled at 100 km/h in 100 ms must be 2.8 m, got {distance_m:.2f}")
+    check(sustained_gflop_s == 300, f"Expected 300 GFLOP/s sustained, got {sustained_gflop_s}")
+
     # ┌── 4. OUTPUT ────────────────────────────────────────
     speed_kmh_str = fmt_rate(speed_kmh, "km/h", precision=0, commas=False)
     distance_m_str = fmt_length(distance_m * meter, unit=meter, precision=1, commas=False)
@@ -4217,6 +4247,10 @@ class TcoPitfallCalc:
 
     tco_ratio = edge_total / cloud_compute  # 3x
 
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(round(tco_ratio) == 3, f"Narrative claim: edge total cost must be 3x cloud compute, got {tco_ratio}")
+    check(edge_total > cloud_compute, "Edge total cost must exceed cloud compute cost")
+
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
     cloud_compute_usd_str = fmt_usd(cloud_compute, precision=0, commas=True, per="month")
     edge_hw_usd_str = fmt_usd(edge_hardware, precision=0, commas=False, per="month")
@@ -4278,6 +4312,11 @@ class AmdahlCameraCalc:
     cam_total_optimized = cam_isp + cam_ml_optimized + cam_post  # 146 ms
     range_speedup_low = calc_amdahls_speedup(general_ml_frac_low, general_model_speedup)
     range_speedup_high = calc_amdahls_speedup(general_ml_frac_high, general_model_speedup)
+
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(round(cam_speedup_10x, 2) == 1.37, f"Narrative claim: 10x model speedup yields 1.37x pipeline speedup, got {cam_speedup_10x:.2f}")
+    check(round(cam_speedup_inf, 2) == 1.43, f"Amdahl theoretical max speedup mismatch: {cam_speedup_inf:.2f}")
+    check(cam_total_optimized < cam_total, "Optimized pipeline latency must be lower than baseline")
 
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
     cam_isp_ms_str = fmt_time(cam_isp, millisecond, precision=0, commas=False)

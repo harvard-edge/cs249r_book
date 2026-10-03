@@ -23,7 +23,10 @@ class Cameras(Registry):
         nominal_latency=33.3 * ureg.millisecond,
         interface="MIPI CSI-2 (4-lane, 10-bit full-resolution 60 fps mode)",
         nominal_power=0.6 * ureg.watt,
-        metadata=Metadata(provenance=pc.SONY_IMX477),
+        metadata=Metadata(
+            provenance=pc.SONY_IMX477,
+            description="Sony IMX477 12.3 MP rolling-shutter CMOS perception camera (4-lane MIPI CSI-2).",
+        ),
     )
 
     Sony_IMX296 = CameraSensor(
@@ -37,7 +40,10 @@ class Cameras(Registry):
         nominal_latency=10.0 * ureg.millisecond,
         interface="MIPI CSI-2 (1-lane)",
         nominal_power=0.3 * ureg.watt,
-        metadata=Metadata(provenance=pc.SONY_IMX296),
+        metadata=Metadata(
+            provenance=pc.SONY_IMX296,
+            description="Sony IMX296 1.58 MP global-shutter CMOS camera for high-speed robotic vision.",
+        ),
     )
 
     Intel_RealSense_D435i = CameraSensor(
@@ -53,7 +59,10 @@ class Cameras(Registry):
         nominal_latency=25.0 * ureg.millisecond,
         interface="USB 3.1 Gen 1",
         nominal_power=2.0 * ureg.watt,
-        metadata=Metadata(provenance=pc.INTEL_REALSENSE_D435I),
+        metadata=Metadata(
+            provenance=pc.INTEL_REALSENSE_D435I,
+            description="Intel RealSense D435i active stereo depth camera with integrated IMU and RGB imager.",
+        ),
     )
 
 
@@ -76,7 +85,10 @@ class LiDARs(Registry):
         laser_wavelength=865.0 * ureg.nanometer,  # Rev7 datasheet (Class 1, IEC 60825-1:2014)
         interface="Gigabit Ethernet (UDP)",
         nominal_power=18.0 * ureg.watt,
-        metadata=Metadata(provenance=pc.OUSTER_OS1_64),
+        metadata=Metadata(
+            provenance=pc.OUSTER_OS1_64,
+            description="Ouster OS1-64 64-channel digital LiDAR with 120 m range and 20 Hz scan rate.",
+        ),
     )
 
 
@@ -96,7 +108,10 @@ class IMUs(Registry):
         gyro_zero_rate_offset=1.0 * ureg.degree / ureg.second,
         accel_noise_density=160.0e-6 * ureg.gravity / ureg.hertz**0.5,
         accel_zero_g_offset=20.0e-3 * ureg.gravity,
-        metadata=Metadata(provenance=pc.BOSCH_BMI088),
+        metadata=Metadata(
+            provenance=pc.BOSCH_BMI088,
+            description="Bosch BMI088 6-DoF low-noise automotive-grade IMU for robotic navigation.",
+        ),
     )
 
 
@@ -111,7 +126,10 @@ class SafetyScanners(Registry):
         iec61496_type="Type 3",
         performance_level="PL d, Category 3",
         configuration="High-speed mode, 70/150 mm objects, 2 scans",
-        metadata=Metadata(provenance=pc.KEYENCE_SZ_V32),
+        metadata=Metadata(
+            provenance=pc.KEYENCE_SZ_V32,
+            description="Keyence SZ-V32 Type 3 / PL d optical safety laser scanner (5.7 m protection zone).",
+        ),
     )
 
 

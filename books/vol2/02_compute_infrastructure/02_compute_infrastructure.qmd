@@ -1085,8 +1085,10 @@ from mlsysim.fmt import fmt_bandwidth, fmt_flop_rate
 # ┌── LEGO ───────────────────────────────────────────────
 class V100MemoryWallRecap:
 
-    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
+    # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
     h_v100 = Hardware.Cloud.V100
+
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
     mem_bw_gb_per_s_str = fmt_bandwidth(h_v100.memory.bandwidth, unit=GB / second, precision=0, commas=False)
     flops_fp16_tflop_per_s_str = fmt_flop_rate(h_v100.compute.peak_flops, unit=TFLOP / second, precision=0, commas=False)
 ```
@@ -1404,7 +1406,7 @@ The projected jump to HBM4 doubles the interface width from 1024 bits to 2048 bi
 
 ```{python}
 #| echo: false
-from mlsysim.fmt import fmt, fmt_bandwidth, fmt_int, fmt_memory, fmt_qty_range, fmt_time
+from mlsysim.fmt import check, fmt, fmt_bandwidth, fmt_int, fmt_memory, fmt_qty_range, fmt_time
 
 # ┌── LEGO ───────────────────────────────────────────────
 class TrillionModelFloor:
@@ -1418,6 +1420,11 @@ class TrillionModelFloor:
     weight = model_params_t * 1e12 * BYTES_FP16  # 1T-parameter FP16 model
     token_b200 = (weight / b200_bw).to('millisecond')
     token_hbm4 = (weight / hbm4_bw).to('millisecond')
+
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(round(weight.to(TB).magnitude) == 2, f"Expected 2 TB weight, got {weight}")
+    check(round(token_b200.to(ms).magnitude) == 250, f"Expected 250 ms token latency on B200, got {token_b200}")
+    check(round(token_hbm4.to(ms).magnitude) == 125, f"Expected 125 ms token latency on HBM4, got {token_hbm4}")
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
     model_params_t_str = fmt_int(model_params_t)
@@ -1527,15 +1534,30 @@ from mlsysim.solvers import ServingModel
 from mlsysim.fmt import check, fmt_bandwidth, fmt_flop_rate, fmt_int, fmt_multiple, fmt_params, fmt_power
 
 class H200Comparison:
+    # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
     h_h100 = mlsysim.Hardware.Cloud.H100
     h200 = mlsysim.Hardware.Cloud.H200
     model = mlsysim.Models.Language.Llama3_70B
     seq_len = 2048  # scenario assumption: serving sequence length for this Llama 3 comparison (not GPT-3)
     batch_size = 1  # scenario assumption: single-request decode
 
+    # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
     serving_model = ServingModel()
     res_h100 = serving_model.solve(model, h_h100, seq_len=seq_len, batch_size=batch_size)
     res_h200 = serving_model.solve(model, h200, seq_len=seq_len, batch_size=batch_size)
+
+    itl_h100 = res_h100.itl
+    itl_h200 = res_h200.itl
+    speedup = (itl_h100 / itl_h200).to_base_units().magnitude
+    bw_ratio = (h200.memory.bandwidth / h_h100.memory.bandwidth).to_base_units().magnitude
+
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    # Bracketing estimate: decode is memory-bound, so the solver's ITL speedup
+    # should land on the raw HBM bandwidth ratio.
+    check(
+        abs(speedup - bw_ratio) / bw_ratio < 0.10,
+        "Solver ITL speedup should track the HBM bandwidth ratio for memory-bound decode",
+    )
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
     bw_gain_mult_str = fmt_multiple((h200.memory.bandwidth / h_h100.memory.bandwidth).to_base_units().magnitude, precision=1, commas=True)
@@ -1543,17 +1565,6 @@ class H200Comparison:
     model_params_str = fmt_params(model.parameters, scale="B", precision=1, commas=False)
     seq_len_str = fmt_int(seq_len)
     batch_size_str = fmt_int(batch_size, commas=False)
-
-    itl_h100 = res_h100.itl
-    itl_h200 = res_h200.itl
-    speedup = (itl_h100 / itl_h200).to_base_units().magnitude
-    # Bracketing estimate: decode is memory-bound, so the solver's ITL speedup
-    # should land on the raw HBM bandwidth ratio.
-    bw_ratio = (h200.memory.bandwidth / h_h100.memory.bandwidth).to_base_units().magnitude
-    check(
-        abs(speedup - bw_ratio) / bw_ratio < 0.10,
-        "Solver ITL speedup should track the HBM bandwidth ratio for memory-bound decode",
-    )
     speedup_mult_str = fmt_multiple(speedup, precision=1, commas=True)
     h100_bw_tb_per_s_str = fmt_bandwidth(h_h100.memory.bandwidth, unit=TB / second, precision=2, commas=False)
     h200_bw_tb_per_s_str = fmt_bandwidth(h200.memory.bandwidth, unit=TB / second, precision=1, commas=False)
@@ -1677,6 +1688,8 @@ class RooflineLandscapeMath:
     training_batch_size = 2048
 
     # ┌── 2. EXECUTE ──────────────────────────────────────────
+    peak_rate_for_plot = peak_rate.to(TFLOPs / second).magnitude
+    bandwidth_for_plot = bandwidth.to(TB / second).magnitude
     decode_batch_intensity = decode_batch * decode_intensity
     prefill_intensity = prefill_tokens * decode_intensity
     train_intensity = training_batch_size * decode_intensity
@@ -1700,8 +1713,6 @@ class RooflineLandscapeMath:
     training_batch_size_str = fmt(training_batch_size, precision=0, commas=False)
     train_intensity_str = fmt_arithmetic_intensity(train_intensity * (flop / byte), precision=0, commas=True)
     train_gap_mult_str = fmt_multiple(train_gap, precision=0, commas=True)
-    peak_rate_for_plot = peak_rate.to(TFLOPs / second).magnitude
-    bandwidth_for_plot = bandwidth.to(TB / second).magnitude
 ```
 
 Machine learning workloads land in different regions of the roofline plot depending on the operation and the batch configuration, not on the model family. Single-request autoregressive decode streams the full weight tensor (two bytes per parameter in FP16) from HBM to perform two floating-point operations per parameter, an arithmetic intensity of about `{python} RooflineLandscapeMath.decode_intensity_str`, far below the H100's ridge point of `{python} RooflineLandscapeMath.ridge_str`. The token-latency calculation in notebook \ref{nbk-token-latency} showed that the arithmetic finishes in microseconds while the weight movement takes milliseconds. Every other regime in @tbl-roofline-workloads comes from reusing each byte fetched from HBM across more operations. Decode also reads the key-value (KV) cache\index{KV Cache!roofline placement}, the stored attention keys and values of earlier tokens, and because each request has its own cache, batching does not amortize that traffic.
@@ -2515,7 +2526,7 @@ class TensorCorePrecisionRecap:
 ```{python}
 #| echo: false
 from mlsysim import Infrastructure, Systems
-from mlsysim.fmt import fmt_int, fmt_usd
+from mlsysim.fmt import check, fmt_int, fmt_usd
 
 # ┌── LEGO ───────────────────────────────────────────────
 class Fp8CostEquivalence:
@@ -2527,6 +2538,10 @@ class Fp8CostEquivalence:
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
     nodes = cluster_gpus // gpus_per_node
     total_usd = nodes * node_price
+
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(nodes == 1250, f"Expected 1250 nodes, got {nodes}")
+    check(round(total_usd.magnitude / 1e6) == 438, f"Expected ~$438M total USD, got {total_usd}")
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
     cluster_gpus_str = fmt_int(cluster_gpus)
@@ -3283,7 +3298,7 @@ The NVSwitch chips themselves consume approximately `{python} V100NodePowerRecap
 
 ```{python}
 #| echo: false
-from mlsysim.fmt import MarkdownStr, fmt_int, fmt_memory, fmt_percent, fmt_time
+from mlsysim.fmt import MarkdownStr, fmt_int, fmt_memory, fmt_percent, fmt_time, check
 
 # ┌── LEGO ───────────────────────────────────────────────
 class TensorParallelAllReduce:
@@ -3310,12 +3325,15 @@ class TensorParallelAllReduce:
     pcie_per_allreduce = (allreduce_traffic / pcie_bw).to(millisecond)
     pcie_cumulative = sync_events * pcie_per_allreduce
     pcie_cumulative_display = round(pcie_cumulative.to(millisecond).magnitude) * millisecond
-    check(per_allreduce < 1 * millisecond, "Bandwidth-hierarchy prose says each NVLink TP exchange takes under a millisecond")
     pcie_wait_fraction = (pcie_cumulative / (compute_step + pcie_cumulative)).to_base_units().magnitude
     nvlink_compute_fraction = (compute_step / (compute_step + cumulative)).to_base_units().magnitude
     hidden_disp = format(hidden, ",").replace(",", "{,}")
     shard_disp = format(shard_cols, ",").replace(",", "{,}")
     seq_disp = format(seq_len, ",").replace(",", "{,}")
+
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(per_allreduce < 1 * millisecond, "Bandwidth-hierarchy prose says each NVLink TP exchange takes under a millisecond")
+    check(cumulative < pcie_cumulative, "NVLink cumulative communication must be faster than PCIe")
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
     hidden_str = fmt_int(hidden)
@@ -3402,7 +3420,7 @@ class AlternativeNodeArchitectureRecap:
     tpu_v5p = Hardware.Cloud.TPUv5p
     gaudi2 = Hardware.Cloud.Gaudi2
     gaudi3 = Hardware.Cloud.Gaudi3
-    node_accelerators = Systems.Nodes.DGX_H100.accelerators_per_node
+    node_accelerators = Systems.Nodes.Server_8x_MI300X.accelerators_per_node
 
     # ┌── 2. EXECUTE ──────────────────────────────────────────────────────────
     frontier_weights = frontier.parameters * BYTES_FP16
@@ -3676,7 +3694,7 @@ When transfer throughput can keep pace with consumption, pipelining allows each 
 
 ```{python}
 #| echo: false
-from mlsysim.fmt import fmt_bandwidth, fmt_memory_capacity
+from mlsysim.fmt import check, fmt, fmt_bandwidth, fmt_memory_capacity, fmt_time
 
 # ┌── LEGO ───────────────────────────────────────────────
 class MemoryBandwidthNodeTableRecap:
@@ -3688,6 +3706,10 @@ class MemoryBandwidthNodeTableRecap:
 
     # ┌── 2. EXECUTE ───────────────────────────────────────
     node_hbm = hbm_per_gpu * gpus_per_node
+
+    # ┌── 3. GUARD ─────────────────────────────────────────
+    check(round(node_hbm.to(GiB).magnitude) == 640, f"Expected 640 GiB node HBM, got {node_hbm}")
+    check(host_dram > node_hbm, "Host DRAM capacity must exceed node HBM capacity")
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
     h100_bw_tb_per_s_str = fmt_bandwidth(Hardware.Cloud.H100.memory.bandwidth, unit=TB / second, precision=2, commas=False)
@@ -4778,7 +4800,7 @@ Operators of legacy facilities may assume that adding fans and chiller capacity 
 
 ```{python}
 #| echo: false
-from mlsysim.fmt import fmt_int, fmt_multiple
+from mlsysim.fmt import check, fmt_int, fmt_multiple
 
 # ┌── LEGO ───────────────────────────────────────────────
 class GpuHourEquivalence:
@@ -4792,6 +4814,11 @@ class GpuHourEquivalence:
     ratio_a100 = (h100_flops / a100_flops).to_base_units().magnitude
     ratio_v100 = (h100_flops / v100_flops).to_base_units().magnitude
     equiv_h100_hours = v100_gpu_hours / ratio_v100
+
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(round(ratio_a100, 1) == 3.2, f"Expected 3.2x H100/A100 ratio, got {ratio_a100:.1f}")
+    check(round(ratio_v100, 1) == 7.9, f"Expected 7.9x H100/V100 ratio, got {ratio_v100:.1f}")
+    check(round(equiv_h100_hours) == 1264, f"Expected 1,264 equiv H100 hours, got {equiv_h100_hours:.0f}")
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
     ratio_a100_mult_str = fmt_multiple(ratio_a100, precision=1)
@@ -4811,7 +4838,7 @@ A common error in cost comparisons is to treat one GPU-hour on an H100 as interc
 ```{python}
 #| echo: false
 from mlsysim import Systems
-from mlsysim.fmt import fmt, fmt_bandwidth, fmt_int
+from mlsysim.fmt import check, fmt, fmt_bandwidth, fmt_int
 from mlsysim.core.units import Gbps
 
 # ┌── LEGO ───────────────────────────────────────────────
@@ -4827,6 +4854,12 @@ class NetworkUpgradeStepTime:
     total_before = compute_s + comm_s
     total_after = compute_s + comm_after
     improvement_pct = (total_before - total_after) / total_before * 100
+
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(comm_after == 1.0, f"Expected 1s comm_after, got {comm_after}")
+    check(total_before == 22, f"Expected 22s total_before, got {total_before}")
+    check(total_after == 21.0, f"Expected 21s total_after, got {total_after}")
+    check(round(improvement_pct, 1) == 4.5, f"Expected 4.5% improvement, got {improvement_pct:.1f}%")
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
     ib_hdr_str = fmt_bandwidth(ib_hdr, unit=Gbps, precision=0, commas=False)
@@ -4856,7 +4889,7 @@ Accelerator power draw varies across communication, memory, and compute phases. 
 
 ```{python}
 #| echo: false
-from mlsysim.fmt import fmt_bandwidth, fmt_int, fmt_memory, fmt_memory_capacity, fmt_time
+from mlsysim.fmt import check, fmt_bandwidth, fmt_int, fmt_memory, fmt_memory_capacity, fmt_multiple, fmt_qty_int, fmt_time
 
 # ┌── LEGO ───────────────────────────────────────────────
 class A100FallaciesRecap:
@@ -4873,6 +4906,11 @@ class A100FallaciesRecap:
     option_a_lat = (weights_fp16 / a100_bw).to(millisecond)
     option_b_lat = (weights_int8 / h100_bw).to(millisecond)
     speedup = (option_a_lat / option_b_lat).to_base_units().magnitude
+
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(round(option_a_lat.to(ms).magnitude, 1) == 69.2, f"Expected 69.2 ms option_a_lat, got {option_a_lat}")
+    check(round(option_b_lat.to(ms).magnitude, 1) == 21.1, f"Expected 21.1 ms option_b_lat, got {option_b_lat}")
+    check(round(speedup, 1) == 3.3, f"Expected 3.3x speedup, got {speedup:.1f}")
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
     mem_bw_tb_per_s_str = fmt_bandwidth(a100_bw, unit=TB / second, precision=2, commas=False)
@@ -4960,7 +4998,7 @@ The generality tax explains the trade between flexibility and workload-specific 
 # │ How: pulling constants from mlsysim.core.units.
 # │
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import fmt, fmt_bandwidth, fmt_flop_rate, fmt_multiple, fmt_power
+from mlsysim.fmt import check, fmt, fmt_bandwidth, fmt_flop_rate, fmt_memory, fmt_multiple, fmt_power, fmt_time
 
 class SummaryScaleScenario:
     """Namespace for summary scale reference."""
@@ -4975,28 +5013,26 @@ class SummaryScaleScenario:
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
     params_b = params.to(param).magnitude / BILLION
     rack_power = rack.total_power
+    weights_fp16 = Models.Language.GPT3.size_in_bytes(BYTES_FP16)
+    token_floor = (weights_fp16 / bw).to(millisecond)
+    fleet_mtbf = calc_mtbf_cluster(Systems.Reliability.Gpu.mttf_hours, Systems.Clusters.Training_10K.total_accelerators)
 
     # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
-    from mlsysim.fmt import check
-
     check(params_b == 175, "GPT-3 params should be 175B")
     check(33 <= rack_power.to(kW).magnitude <= 34, "Rack power should match the detailed rack-power table")
+    check(token_floor > 100 * millisecond, "Summary claims a latency floor of over 100 ms per token")
+    check(abs(fleet_mtbf.to(hour).magnitude - 5) < 0.01, "Takeaway says a failure about every five hours")
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
     h100_fp8_tflop_per_s_str = fmt_flop_rate(flops, unit=TFLOP / second, precision=0, commas=True)
     h100_bw_tb_per_s_str = fmt_bandwidth(bw, unit=TB / second, precision=2, commas=False)
     h100_tdp_w_str = fmt_power(tdp, unit=watt, precision=0, commas=False)
     rack_power_kw_str = fmt_power(rack_power, unit=kilowatt, precision=1, commas=False)
-    weights_fp16 = Models.Language.GPT3.size_in_bytes(BYTES_FP16)
-    token_floor = (weights_fp16 / bw).to(millisecond)
-    check(token_floor > 100 * millisecond, "Summary claims a latency floor of over 100 ms per token")
     token_flops_b_str = fmt(Models.Language.GPT3.inference_flops.to(flop).magnitude / 1e9, precision=0, commas=False)
     weights_fp16_gb_str = fmt_memory(weights_fp16, unit=GB, precision=0, commas=False)
     rack_gpus_str = fmt(rack.accelerator_count, precision=0, commas=False)
     gpu_mtbf_hours_str = fmt_time(Systems.Reliability.Gpu.mttf_hours, 'hour', precision=0, commas=True, style='word')
     fleet_gpus_str = fmt(Systems.Clusters.Training_10K.total_accelerators, precision=0, commas=True)
-    fleet_mtbf = calc_mtbf_cluster(Systems.Reliability.Gpu.mttf_hours, Systems.Clusters.Training_10K.total_accelerators)
-    check(abs(fleet_mtbf.to(hour).magnitude - 5) < 0.01, "Takeaway says a failure about every five hours")
     nvlink_ib_gap_mult_str = fmt_multiple(
         round((Hardware.Cloud.H100.nvlink.bandwidth_per_direction / Systems.Fabrics.InfiniBand_NDR.bandwidth).to_base_units().magnitude),
         precision=0,

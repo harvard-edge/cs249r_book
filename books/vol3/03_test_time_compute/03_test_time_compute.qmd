@@ -611,6 +611,7 @@ While @eq-vol3-verifier-precision governs the population of passing candidates, 
 # │ How: IID candidate/check outcomes, fixed rates, abstention if none passes.
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim import *
+from mlsysim.fmt import check
 import math
 
 class CheckYield:
@@ -627,7 +628,6 @@ class CheckYield:
     valid_pass = p * (1 - eps_fr)
     invalid_pass = (1 - p) * eps_fa
     pass_probability = valid_pass + invalid_pass
-    assert pass_probability > 0, "Passing-set precision requires q > 0."
     precision = valid_pass / pass_probability
     defect_given_selection = 1 - precision
     any_selection = 1 - (1 - pass_probability) ** n
@@ -646,38 +646,42 @@ class CheckYield:
     loss_to_bill = (task_loss / output_bill).to(ureg.dimensionless).magnitude
 
     # ┌── 3. GUARD (Invariants) ────────────────────────────────────────────────
-    assert isinstance(n, int) and n > 0
-    assert all(0 <= rate <= 1 for rate in (p, eps_fa, eps_fr))
-    assert all(
-        0 <= probability <= 1
-        for probability in (
-            valid_pass,
-            invalid_pass,
-            pass_probability,
-            precision,
-            defect_given_selection,
-            any_selection,
-            no_selection,
-            wrong_selection,
-            any_false_pass,
-        )
+    check(pass_probability > 0, "Passing-set precision requires q > 0.")
+    check(isinstance(n, int) and n > 0, "n must be a positive int")
+    check(all(0 <= rate <= 1 for rate in (p, eps_fa, eps_fr)), "rates must be in [0, 1]")
+    check(
+        all(
+            0 <= probability <= 1
+            for probability in (
+                valid_pass,
+                invalid_pass,
+                pass_probability,
+                precision,
+                defect_given_selection,
+                any_selection,
+                no_selection,
+                wrong_selection,
+                any_false_pass,
+            )
+        ),
+        "probabilities must be in [0, 1]",
     )
-    assert math.isclose(precision + defect_given_selection, 1)
-    assert math.isclose(any_selection + no_selection, 1)
-    assert 0 <= expected_valid_passes <= n
-    assert 0 <= expected_invalid_passes <= n
-    assert 0 <= expected_passes <= n
-    assert math.isclose(expected_valid_passes + expected_invalid_passes, expected_passes)
-    assert wrong_selection <= any_selection
-    assert wrong_selection <= any_false_pass
-    assert math.isclose(wrong_selection, any_selection * defect_given_selection)
-    assert tokens_per_candidate > 0 * token
-    assert output_price >= 0 * USD / Mtoken
-    assert output_bill >= 0 * USD
-    assert 0 * USD <= task_loss <= conditional_loss <= incident_loss
-    assert math.isclose(task_loss.to(USD).magnitude, (any_selection * conditional_loss).to(USD).magnitude)
-    assert precision < precision_half_fa < 1 and precision < precision_double_p < 1
-    assert loss_to_bill > 100
+    check(math.isclose(precision + defect_given_selection, 1), "precision + defect must sum to 1")
+    check(math.isclose(any_selection + no_selection, 1), "any + no selection must sum to 1")
+    check(0 <= expected_valid_passes <= n, "expected valid passes in bounds")
+    check(0 <= expected_invalid_passes <= n, "expected invalid passes in bounds")
+    check(0 <= expected_passes <= n, "expected passes in bounds")
+    check(math.isclose(expected_valid_passes + expected_invalid_passes, expected_passes), "expected passes must sum")
+    check(wrong_selection <= any_selection, "wrong selection <= any selection")
+    check(wrong_selection <= any_false_pass, "wrong selection <= any false pass")
+    check(math.isclose(wrong_selection, any_selection * defect_given_selection), "wrong selection identity")
+    check(tokens_per_candidate > 0 * token, "tokens per candidate must be positive")
+    check(output_price >= 0 * USD / Mtoken, "output price non-negative")
+    check(output_bill >= 0 * USD, "output bill non-negative")
+    check(0 * USD <= task_loss <= conditional_loss <= incident_loss, "loss hierarchy must hold")
+    check(math.isclose(task_loss.to(USD).magnitude, (any_selection * conditional_loss).to(USD).magnitude), "task loss identity")
+    check(precision < precision_half_fa < 1 and precision < precision_double_p < 1, "sensitivity ordering")
+    check(loss_to_bill > 100, "loss to bill ratio > 100")
 
     # ┌── 4. OUTPUT (Human-Readable Outputs) ───────────────────────────────────
     n_str = fmt_int(n)
@@ -885,6 +889,7 @@ While local repair minimizes token generation, it is not universally the optimal
 # │ Note: Excludes input processing, checks, scheduling, and physical effects.
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim import *
+from mlsysim.fmt import check
 
 class PlanRevision:
     # ┌── 1. LOAD (Constants & Parameters) ─────────────────────────────────
@@ -898,10 +903,10 @@ class PlanRevision:
     output_share = (local_output / full_output).to(ureg.dimensionless).magnitude
     avoided_share = 1 - output_share
 
-    # ┌── 3. AUDIT (Assertions) ────────────────────────────────────
-    assert 0 < replacement_nodes <= total_nodes
-    assert local_output <= full_output
-    assert 0 <= avoided_share < 1
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(0 < replacement_nodes <= total_nodes, "replacement nodes within total")
+    check(local_output <= full_output, "local output <= full output")
+    check(0 <= avoided_share < 1, "avoided share in [0, 1)")
 
     # ┌── 4. EXPORT (Narrative Values) ─────────────────────────────────────
     total_nodes_str = fmt_count(total_nodes)
@@ -1302,6 +1307,7 @@ To see how concurrency limits and real-time deadlines bound what a deliberation 
 # │ How: Fixed round allowance; independent breadth; conditional feedback gain.
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim import *
+from mlsysim.fmt import check
 from mlsysim.core.units import BYTES_INT8
 import math
 
@@ -1351,17 +1357,17 @@ class StrategyComparison:
     b_over_a = (b_bill_per_pass / a_bill_per_pass).to(ureg.dimensionless).magnitude
 
     # ┌── 3. GUARD (Validate Assumptions & Bounds) ─────────────────────────
-    assert rounds == 2  # this notebook's conditional revision model has two rounds
-    assert 0 <= initial_pass <= 1 and 0 <= revision_pass <= 1
-    assert all(0 <= probability <= 1 for probability in (a_pass, b_pass, c_pass))
-    assert max_c_time <= deadline < requested_time
-    assert prompt > 0 and output > 0 and diagnostic >= 0
-    assert round_time > 0 * second and check_time >= 0 * second
-    assert breadth <= min(concurrency, check_ceiling)
-    assert rounds <= check_ceiling
-    assert max(b_input, prompt + revision_input) <= input_ceiling
-    assert max(b_output, rounds * output) <= output_ceiling
-    assert a_bill_per_pass < c_bill_per_pass < b_bill_per_pass
+    check(rounds == 2, "this notebook's conditional revision model has two rounds")
+    check(0 <= initial_pass <= 1 and 0 <= revision_pass <= 1, "pass probabilities in [0, 1]")
+    check(all(0 <= probability <= 1 for probability in (a_pass, b_pass, c_pass)), "probabilities in [0, 1]")
+    check(max_c_time <= deadline < requested_time, "deadline bounds")
+    check(prompt > 0 and output > 0 and diagnostic >= 0, "token counts positive")
+    check(round_time > 0 * second and check_time >= 0 * second, "times non-negative")
+    check(breadth <= min(concurrency, check_ceiling), "breadth within concurrency and check ceiling")
+    check(rounds <= check_ceiling, "rounds within check ceiling")
+    check(max(b_input, prompt + revision_input) <= input_ceiling, "input within ceiling")
+    check(max(b_output, rounds * output) <= output_ceiling, "output within ceiling")
+    check(a_bill_per_pass < c_bill_per_pass < b_bill_per_pass, "cost ordering")
 
     # ┌── 4. OUTPUT (Typed Prose Strings) ──────────────────────────────────
     prompt_str = fmt_int(prompt)

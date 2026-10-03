@@ -47,7 +47,7 @@ from mlsysim.core.units import *
 # └─────────────────────────────────────────────────────────────────────────────
 
 from mlsysim.physics import memory_from_params
-from mlsysim.fmt import fmt_int, fmt, fmt_bandwidth, fmt_ops_rate, MarkdownStr
+from mlsysim.fmt import fmt_int, fmt, fmt_bandwidth, fmt_ops_rate, MarkdownStr, check
 from mlsysim.core.units import (
     TOPS,
     SECONDS_PER_MINUTE,
@@ -125,6 +125,12 @@ class NumbersToKnow:
     adam_state_bytes_per_param = 8
     training_state_bytes_per_param = fp16_bytes_per_param + fp16_bytes_per_param + fp32_bytes_per_param + adam_state_bytes_per_param
     training_state_footprint = memory_from_params(training_model_params, training_state_bytes_per_param * byte / param)
+
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(dram_vs_compute == 581, f"Expected 581x DRAM vs compute ratio, got {dram_vs_compute}")
+    check(training_state_bytes_per_param == 16, f"Expected 16 bytes/param training state, got {training_state_bytes_per_param}")
+    check(round(training_state_footprint.to(GB).magnitude) == 112, f"Expected 112 GB training state footprint, got {training_state_footprint}")
+    check(ridge_h100 > ridge_a100, f"Expected H100 ridge ({ridge_h100}) > A100 ridge ({ridge_a100})")
 
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
     # Canonical _str forms for prose; raw ints/floats above kept for arithmetic.
@@ -371,7 +377,7 @@ Doubling $B$ doubles FLOPs while weight traffic stays nearly constant when weigh
 # ┌── LEGO ───────────────────────────────────────────────
 # │ Context: @sec-appdx-machine-foundations-concrete-example-a100-analysis-5b30
 # │ Goal: A100 ridge point; GEMM vs ReLU intensity comparison
-from mlsysim.fmt import fmt, fmt_arithmetic_intensity, fmt_flop_rate, fmt_bandwidth
+from mlsysim.fmt import fmt, fmt_arithmetic_intensity, fmt_flop_rate, fmt_bandwidth, check
 
 class A100RooflineExample:
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
@@ -385,6 +391,11 @@ class A100RooflineExample:
     gemm_intensity = int(n_gemm / 3) * (flop / byte)
     relu_achieved = (relu_intensity * a100_bw).to(TFLOPs / second)
     relu_utilization_value = (relu_achieved / a100_fp16).to_base_units().magnitude * 100
+
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(gemm_intensity > ridge_point, "GEMM must be compute-bound on A100")
+    check(relu_intensity < ridge_point, "ReLU must be memory-bound on A100")
+    check(round(relu_utilization_value, 2) == 0.16, f"Expected 0.16% ReLU utilization, got {relu_utilization_value:.2f}%")
 
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
     a100_fp16_tflop_per_s_str = fmt_flop_rate(a100_fp16, unit=TFLOPs / second, precision=0)
@@ -448,7 +459,7 @@ As $\WorkerCountWorkers \to \infty$, the term $\frac{\ParallelFraction}{\WorkerC
 # │ How: Pure scalar constants; string formatting for inline Python refs.
 # │
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import fmt_int, fmt
+from mlsysim.fmt import fmt_int, fmt, check
 
 # ┌── LEGO ───────────────────────────────────────────────
 class AmdahlSetup:
@@ -463,8 +474,9 @@ class AmdahlSetup:
     serial_pct = int(serial_fraction * 100)
     parallel_pct = int(parallel_fraction * 100)
 
-    # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
-    # No check() calls needed—values are definitional constants.
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(serial_pct + parallel_pct == 100, "Serial and parallel percentages must sum to 100")
+    check(round(serial_fraction + parallel_fraction, 6) == 1.0, "Fractions must sum to 1.0")
 
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
     s_pct_str = fmt_percent(serial_pct / 100, precision=0, commas=False, style='prose')
@@ -547,7 +559,7 @@ Because the parallel part grows linearly with $\WorkerCountWorkers$ while the se
 # │ How: Pure scalar constants; string formatting for inline Python refs.
 # │
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import fmt_int, fmt
+from mlsysim.fmt import fmt_int, fmt, check
 
 # ┌── LEGO ───────────────────────────────────────────────
 class GustafsonSetup:
@@ -559,8 +571,9 @@ class GustafsonSetup:
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
     serial_pct = int(serial_fraction * 100)
 
-    # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
-    # No check() calls needed—values are definitional constants.
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(serial_pct == 5, f"Expected 5% serial overhead, got {serial_pct}%")
+    check(round(serial_fraction, 2) == 0.05, f"Expected 0.05 serial fraction, got {serial_fraction}")
 
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
     s_g_pct_str = fmt_percent(serial_pct / 100, precision=0, commas=False, style='prose')
@@ -734,7 +747,7 @@ In the limit as $T \to \infty$ for a stable queue, $\lim_{T\to\infty} \frac{N(T)
 # │ How: Q_req = lambda_arr * T_lat; max_concurrent = gpu_mem/mem_per_req.
 # │
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import fmt, fmt_math, fmt_rate, fmt_time, fmt_memory
+from mlsysim.fmt import fmt, fmt_math, fmt_rate, fmt_time, fmt_memory, check
 
 # ┌── LEGO ───────────────────────────────────────────────
 class LittlesLawExample:
@@ -753,8 +766,11 @@ class LittlesLawExample:
     max_concurrent_value = int((gpu_mem / mem_per_req).to_base_units().magnitude)
     max_throughput_value = max_concurrent_value / w_latency_s_value
 
-    # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
-    # No check() calls needed—values are monotone functions of inputs.
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(l_concurrent_value == 50.0, f"Expected 50 concurrent requests, got {l_concurrent_value}")
+    check(max_concurrent_value == 24, f"Expected 24 max concurrent requests, got {max_concurrent_value}")
+    check(int(max_throughput_value) == 480, f"Expected 480 QPS max throughput, got {max_throughput_value}")
+    check(round(total_mem.to(GB).magnitude) == 50, f"Expected 50 GB total memory, got {total_mem}")
 
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
     L_concurrent_str = fmt(l_concurrent_value, precision=0, commas=False)
@@ -787,7 +803,7 @@ A GPU advertises 1,000 TFLOP/s, yet a kernel achieves only 30 TFLOP/s. The gap m
 # │ Context: @tbl-latency-hierarchy, @tbl-hardware-cheatsheet, @tbl-physical-hierarchy-ref
 # │ Goal: Latency analogy, H100/TPUv5p specs, hierarchy energy/bandwidth table
 from mlsysim.core.units import pJ, flop, second, minute, hour, day, GiB, MiB
-from mlsysim.fmt import fmt_flop_rate, fmt_energy, fmt_bandwidth, fmt_multiple, fmt_time, fmt_memory_capacity, fmt_memory
+from mlsysim.fmt import fmt_flop_rate, fmt_energy, fmt_bandwidth, fmt_multiple, fmt_time, fmt_memory_capacity, fmt_memory, check
 
 class ArchReferenceTables:
     """Latency hierarchy, accelerator cheatsheet, and physical hierarchy reference."""
@@ -837,6 +853,11 @@ class ArchReferenceTables:
     tpuv5_bw = Hardware.Cloud.TPUv5p.memory.bandwidth
     tpuv5_cap = Hardware.Cloud.TPUv5p.memory.capacity
     tpuv5_ici = Hardware.Cloud.TPUv5p.nvlink.bandwidth
+
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(energy_ratio_value == 581, f"Expected 581x DRAM vs compute energy ratio, got {energy_ratio_value}")
+    check(h100_bw > tpuv5_bw, f"Expected H100 bandwidth ({h100_bw}) > TPUv5p bandwidth ({tpuv5_bw})")
+    check(ssd_ns_value > ib_ns_value > pcie_ns_value > nvlink_ns_value > hbm_ns_value, "Latency hierarchy violation")
 
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
     dram_pj_str = fmt_energy(ENERGY_DRAM_ACCESS_PJ, unit=pJ, precision=0, commas=False)
@@ -1024,7 +1045,7 @@ For transfers below $D_{\text{vol,cross}}$ (for example, small request or contro
 # │ How: Pure scalar constants; string formatting for inline Python refs.
 # │
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import fmt_int, fmt, fmt_bandwidth, fmt_time, fmt_memory
+from mlsysim.fmt import fmt_int, fmt, fmt_bandwidth, fmt_time, fmt_memory, check
 
 # ┌── LEGO ───────────────────────────────────────────────
 class BandwidthLatencySetup:
@@ -1038,8 +1059,8 @@ class BandwidthLatencySetup:
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
     crossover_data = (base_latency * link_bandwidth).to(MB)
 
-    # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
-    # No check() calls needed—values are definitional constants.
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(round(crossover_data.to(MB).magnitude, 1) == 12.5, f"Expected 12.5 MB crossover data, got {crossover_data}")
 
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
     bw_gbit_per_s_str = fmt_bandwidth(link_bandwidth, unit=Gbps, precision=0, commas=False)
@@ -1064,7 +1085,7 @@ Consider sending data over a `{python} BandwidthLatencySetup.bw_gbit_per_s_str` 
 # │ How: tx_time = data_bytes/bandwidth; large_time = size/bandwidth + base latency.
 # │
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import fmt_int, fmt, fmt_math, fmt_time, fmt_memory
+from mlsysim.fmt import fmt_int, fmt, fmt_math, fmt_time, fmt_memory, check
 
 # ┌── LEGO ───────────────────────────────────────────────
 class BandwidthLatencyExample:
@@ -1081,8 +1102,10 @@ class BandwidthLatencyExample:
     large_tx_time = (large_data / link_bandwidth).to(ms)
     total_large_time = base_latency + large_tx_time
 
-    # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
-    # No check() calls needed—values are monotone functions of inputs.
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(round(tx_time.to(microsecond).magnitude, 1) == 0.8, f"Expected 0.8 us tx_time, got {tx_time}")
+    check(round(large_tx_time.to(ms).magnitude) == 800, f"Expected 800 ms large_tx_time, got {large_tx_time}")
+    check(round(total_large_time.to(ms).magnitude) == 810, f"Expected 810 ms total_large_time, got {total_large_time}")
 
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
     tx_time_us_str = fmt_time(tx_time, 'microsecond', precision=1, commas=False)

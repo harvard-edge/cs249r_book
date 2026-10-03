@@ -340,6 +340,7 @@ class StatisticalConfidenceTrap:
     compressed_accuracy = 0.94
     z_95 = 1.96
     target_margin = 0.01
+    ci_confidence_pct_value = 95
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
     baseline_error_rate = 1 - baseline_accuracy
@@ -371,7 +372,6 @@ class StatisticalConfidenceTrap:
     diff_ci_high_pp_str = fmt_pp(diff_ci_high * 100)
     one_prop_n_str = fmt(one_prop_n, precision=0, commas=True)
     target_margin_pp_str = fmt_pp(target_margin * 100, precision=0)
-    ci_confidence_pct_value = 95
     ci_confidence_pct_str = fmt_percent(ci_confidence_pct_value / 100, precision=0, commas=False, style='prose')
 ```
 
@@ -559,7 +559,7 @@ System benchmarks serve two functions. For practitioners, they enable informed h
 # │ How: Retrieve A100 specs from Digital Twins; compute ridge point.
 # │
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import fmt_bandwidth, fmt_flop_rate, fmt_arithmetic_intensity
+from mlsysim.fmt import fmt_bandwidth, fmt_flop_rate, fmt_arithmetic_intensity, check
 
 class A100Roofline:
     """A100 hardware constants for roofline analysis."""
@@ -571,6 +571,9 @@ class A100Roofline:
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
     _a100_ridge = Hardware.Cloud.A100.ridge_point().to(flop / byte).magnitude
+
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(round(_a100_ridge) == 153, f"A100 ridge point should be ~153 FLOP/byte, got {_a100_ridge:.1f}")
 
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
     a100_fp16_tflop_per_s_str = fmt_flop_rate(_a100_fp16, unit=TFLOP / second, precision=0, commas=False)
@@ -3227,7 +3230,7 @@ The measurement boundary determines which components are counted; workload compo
 # │ How:  Read Horowitz 2014 energy anchors from Hardware.Tech.Op / Hardware.Tech.Memory.
 # │
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import fmt, fmt_multiple, fmt_energy_per_byte, fmt_energy_per_flop
+from mlsysim.fmt import fmt, fmt_multiple, fmt_energy_per_byte, fmt_energy_per_flop, check
 from mlsysim.core.units import pJ, byte, flop
 
 class EnergyPerOp:
@@ -3250,6 +3253,11 @@ class EnergyPerOp:
     l1_rel_value = round(ENERGY_SRAM_L1_PJ_PER_BYTE.to(pJ / byte).magnitude / ENERGY_REG_PJ_PER_BYTE.to(pJ / byte).magnitude)
     l2_rel_value = round(ENERGY_SRAM_L2_PJ_PER_BYTE.to(pJ / byte).magnitude / ENERGY_REG_PJ_PER_BYTE.to(pJ / byte).magnitude)
     dram_vs_reg_ratio_value = round(ENERGY_DRAM_PJ_PER_BYTE.to(pJ / byte).magnitude / ENERGY_REG_PJ_PER_BYTE.to(pJ / byte).magnitude)
+
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(round(fp16_rel_value, 1) == 0.3, f"FP16 relative energy should be ~0.3, got {fp16_rel_value:.2f}")
+    check(round(int8_rel_value, 2) == 0.05, f"INT8 relative energy should be ~0.05, got {int8_rel_value:.3f}")
+    check(dram_vs_reg_ratio_value == 1600, f"DRAM vs register energy ratio should be 1600, got {dram_vs_reg_ratio_value}")
 
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
     fp32_rel_mult_str = fmt_multiple(1, precision=0, commas=False)
@@ -4119,6 +4127,11 @@ class LLMThroughputCalc:
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
     slow_sec = response_tokens / slow_tokens_per_s
     fast_sec = response_tokens / fast_tokens_per_s
+
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(slow_sec == 30.0, f"Slow throughput should yield 30.0s, got {slow_sec}")
+    check(fast_sec == 7.5, f"Fast throughput should yield 7.5s, got {fast_sec}")
+
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
     slow_s_str = fmt_time(slow_sec, "second", precision=0, commas=False, style="word")
     fast_s_str = fmt_time(fast_sec, "second", precision=1, commas=False, style="word")
@@ -4561,6 +4574,7 @@ The gap between benchmark conditions and production reality explains why teams c
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim.fmt import (
     MarkdownStr,
+    check,
     fmt,
     fmt_count,
     fmt_multiple,
@@ -4622,6 +4636,14 @@ class FallaciesPitfallsSetup:
     power_ratio = (high_power / low_power).to_base_units().magnitude
     throughput_loss_pct = round((1 - low_throughput_qps / high_throughput_qps) * 100)
     throughput_degradation_pct = round((1 - production_throughput_high_qps / isolated_throughput_qps) * 100)
+
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(accuracy_drop_pct == 10, f"Accuracy drop should be 10%, got {accuracy_drop_pct}")
+    check(latency_multiplier == 10, f"Latency multiplier should be 10x, got {latency_multiplier}")
+    check(round(power_ratio, 1) == 2.3, f"Power ratio should be ~2.3, got {power_ratio:.2f}")
+    check(throughput_loss_pct == 17, f"Throughput loss should be 17%, got {throughput_loss_pct}")
+    check(throughput_degradation_pct == 38, f"Throughput degradation should be 38%, got {throughput_degradation_pct}")
+
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
     benchmark_accuracy_pct_str = fmt_percent(round(benchmark_accuracy_pct) / 100, precision=0, commas=False, style='prose')
     production_accuracy_range_str = fmt_percent_range(

@@ -23,7 +23,10 @@ class CodingAgents(Registry):
         max_trajectory_steps=30,
         reference_model=Models.Language.Llama3_70B,
         serving_node=Systems.Nodes.HGX_H100_EPYC,
-        metadata=Metadata(provenance=pc.SWE_BENCH_HARNESS),
+        metadata=Metadata(
+            provenance=pc.SWE_BENCH_HARNESS,
+            description="Hermetic SWE-bench coding agent harness running on HGX H100 server.",
+        ),
     )
     SWE_Bench_Workstation = AgentArchitecture(
         name="SWE-bench Workstation Developer Harness",
@@ -55,7 +58,10 @@ class DeliberationAgents(Registry):
         verifier_cost_ratio=0.15,
         reference_model=Models.Language.Llama3_70B,
         serving_node=Systems.Nodes.DGX_H100,
-        metadata=Metadata(provenance=pc.TEST_TIME_DELIBERATION),
+        metadata=Metadata(
+            provenance=pc.TEST_TIME_DELIBERATION,
+            description="Test-time deliberative MCTS reasoning agent with PRM verifier.",
+        ),
     )
 
 
@@ -70,7 +76,10 @@ class MultiAgents(Registry):
         coordination_overhead_beta=0.03,
         reference_model=Models.Language.Llama3_70B,
         serving_node=Systems.Nodes.DGX_H100,
-        metadata=Metadata(provenance=pc.MULTI_AGENT_ORCHESTRATION),
+        metadata=Metadata(
+            provenance=pc.MULTI_AGENT_ORCHESTRATION,
+            description="Hierarchical supervisor-worker cooperative multi-agent fleet configuration.",
+        ),
     )
 
 
@@ -85,7 +94,10 @@ class InteractiveAgents(Registry):
         sandbox_startup_latency=0.0 * ureg.ms,
         reference_model=Models.Language.Llama3_70B,
         serving_node=Systems.Nodes.DGX_H100,
-        metadata=Metadata(provenance=pc.STREAMING_VOICE_AGENT_PROFILE),
+        metadata=Metadata(
+            provenance=pc.STREAMING_VOICE_AGENT_PROFILE,
+            description="Real-time streaming audio-to-audio interactive voice agent pipeline.",
+        ),
     )
 
 
@@ -106,7 +118,10 @@ class ResearchAgents(Registry):
         fanout_token_multiple=15,
         serial_fraction=0.10,
         coherency_coefficient=0.002,
-        metadata=Metadata(provenance=pc.RESEARCH_AGENT_WORKLOAD),
+        metadata=Metadata(
+            provenance=pc.RESEARCH_AGENT_WORKLOAD,
+            description="Fan-out orchestrator-worker research agent workload over untrusted external sources.",
+        ),
     )
 
 
@@ -132,7 +147,10 @@ class RemediationAgents(Registry):
         wrong_change_impact=12_000 * ureg.USD,
         canary_catch_rate=0.80,
         canary_recovery_fraction=0.90,
-        metadata=Metadata(provenance=pc.REMEDIATION_AGENT_WORKLOAD),
+        metadata=Metadata(
+            provenance=pc.REMEDIATION_AGENT_WORKLOAD,
+            description="On-call production remediation agent workload executing approved mutations.",
+        ),
     )
 
 
@@ -154,7 +172,10 @@ class SupportAgents(Registry):
         generation_residence=2 * ureg.second,
         customer_reply_time=20 * ureg.second,
         handoff_cost=4 * ureg.USD,
-        metadata=Metadata(provenance=pc.SUPPORT_AGENT_WORKLOAD),
+        metadata=Metadata(
+            provenance=pc.SUPPORT_AGENT_WORKLOAD,
+            description="High-throughput interactive customer-support agent workload.",
+        ),
     )
 
 

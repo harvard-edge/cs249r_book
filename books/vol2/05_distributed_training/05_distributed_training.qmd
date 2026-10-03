@@ -2131,6 +2131,7 @@ where $\NdeviceTime$ is the training time on $N$ devices. An efficiency of 1.0 m
 # │
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim.fmt import (
+    check,
     fmt,
     fmt_bandwidth,
     fmt_count,
@@ -2173,11 +2174,6 @@ class CommScalingMath:
     _raw_time = (2 * _gradient_size / _ib_bw).to(second)
     _hidden_time = min(_raw_time * _overlap_fraction, _compute_window)
     _effective_time = _raw_time - _hidden_time
-    check(_hidden_time <= _compute_window, "Communication hidden time cannot exceed available compute")
-    check(
-        _raw_time.to(second).magnitude > 5.0,
-        f"Narrative Violation: Communication is too fast ({_raw_time.to(second).magnitude:.1f}s)! The 'bottleneck' narrative is broken.",
-    )
 
     _ib_gb_per_s_value_str = fmt(_ib_bw.to(GB / second).magnitude, precision=0, commas=False)
     _gradient_size_gb_value_str = fmt(_gradient_size.to(GB).magnitude, precision=0, commas=False)
@@ -2198,6 +2194,12 @@ class CommScalingMath:
     overlap_pct = (_hidden_time / _raw_time).to_base_units().magnitude * 100
     raw_comm_s = _raw_time
 
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(_hidden_time <= _compute_window, "Communication hidden time cannot exceed available compute")
+    check(
+        _raw_time.to(second).magnitude > 5.0,
+        f"Narrative Violation: Communication is too fast ({_raw_time.to(second).magnitude:.1f}s)! The 'bottleneck' narrative is broken.",
+    )
     check(exposed_step >= _raw_time, "Overlap cannot make the step shorter than its communication critical path")
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
@@ -2711,6 +2713,8 @@ class ScalingWorkers:
     cost_8 = actual_8bsp * iter_s_8 * n8 / 3600 * gpu_hour_rate
     cost_64bsp = actual_64bsp * iter_s_64bsp * n64 / 3600 * gpu_hour_rate
     cost_64ssp = actual_ssp * iter_s_64ssp * n64 / 3600 * gpu_hour_rate
+    # Useful-worker bound B*/b at fixed local batch (2026-09-29).
+    useful_workers = critical_batch_size / b
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(batch_8 == 256, f"8-worker batch ({batch_8})")
@@ -2738,8 +2742,6 @@ class ScalingWorkers:
     n_workers_64_str = fmt(n64, precision=0, commas=False)
     ssp_staleness_str = fmt(staleness, precision=0, commas=False)
     critical_batch_str = fmt(critical_batch_size, precision=0)
-    # Useful-worker bound B*/b at fixed local batch (2026-09-29).
-    useful_workers = critical_batch_size / b
     useful_workers_str = fmt(useful_workers, precision=0, commas=False)
     base_batch_value_str = fmt(b, precision=0, commas=False)
     actual_8bsp_k_str = fmt_count(actual_8bsp, scale='K', precision=1, commas=False)
@@ -3017,6 +3019,19 @@ class A100CapacityContext:
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
     a100_mem_gb_str = fmt_memory_capacity(mem_capacity, unit=GiB, precision=0, commas=False)
+```
+
+```{python}
+#| echo: false
+#| label: calc-vol2-memory-wall-analysis
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ ZERO-3 MEMORY WALL ANALYSIS (LEGO)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @sec-distributed-training-systems-systems-model-parallelism-7437
+# │ Goal: ZeRO-3 memory wall analysis for 175B model on A100s.
+# │ Show: Parameter, gradient, optimizer, static, activation, and total memory.
+# │ How: Model memory formulas with check() invariants against A100 capacity.
+# └─────────────────────────────────────────────────────────────────────────────
 
 class MemoryWallAnalysis:
     """ZeRO-3 memory wall analysis for 175B model on A100s."""
@@ -4761,6 +4776,7 @@ class TensorParallel3DTraffic:
 
 ```{python}
 #| echo: false
+#| label: calc-vol2-dist-train-nvlink-hybrid-recap
 class DistTrainNvlinkHybridRecap:
     from mlsysim.core.units import GB, second
     from mlsysim.fmt import fmt, fmt_bandwidth, fmt_memory_capacity
@@ -4770,10 +4786,14 @@ class DistTrainNvlinkHybridRecap:
     ib_xdr_bw_gb_per_s_str = fmt_bandwidth(Systems.Fabrics.InfiniBand_XDR.bandwidth, unit=GB / second, precision=0, commas=False)
     hbm_a100_gb_str = fmt_memory_capacity(Hardware.Cloud.A100.memory.capacity, unit=GiB, precision=0, commas=False)
     hbm_h100_gb_str = fmt_memory_capacity(Hardware.Cloud.H100.memory.capacity, unit=GiB, precision=0, commas=False)
+```
 
+```{python}
+#| echo: false
+#| label: calc-vol2-flash-attention-hybrid-recap
 class FlashAttentionHybridRecap:
     from mlsysim.core.units import GB, second
-    from mlsysim.fmt import fmt
+    from mlsysim.fmt import fmt_bandwidth
 
     nvlink_h100_gb_per_s_str = fmt_bandwidth(Hardware.Cloud.H100.nvlink.bandwidth, unit=GB / second, precision=0, commas=False)
 ```
@@ -4927,10 +4947,11 @@ class AutoParallelism:
     best_pp = res.best_config['pp']
     best_dp = res.best_config['dp']
     best_mfu = res.best_mfu
+    total_gpus = fleet.count * fleet.node.accelerators_per_node
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(best_tp == 8, f"Optimizer should align TP with node size (8), got {best_tp}")
-    check(best_pp * best_dp * best_tp == fleet.count * fleet.node.accelerators_per_node, "Split must use all GPUs")
+    check(best_pp * best_dp * best_tp == total_gpus, "Split must use all GPUs")
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
     opt_tp_str = fmt_count(best_tp, commas=False, label="GPU")
@@ -4938,7 +4959,6 @@ class AutoParallelism:
     opt_dp_value_str = fmt(best_dp, precision=0, commas=False)
     opt_mfu_str = fmt_percent(best_mfu, precision=1, style='prose')
     params_b_str = fmt_params(model.parameters, scale="B", precision=0, commas=False)
-    total_gpus = fleet.count * fleet.node.accelerators_per_node
     gpu_count_str = fmt_count(total_gpus, commas=True)
     hbm_gb_str = fmt_memory_capacity(Hardware.Cloud.H100.memory.capacity, unit=GiB, precision=0, commas=False)
 ```
@@ -5134,20 +5154,21 @@ Aligning a frontier language model with reinforcement learning from human feedba
 # │ Context: @sec-distributed-training-rlhf-coordination
 from mlsysim import Hardware, Models
 from mlsysim.core.units import GiB, Bparam, GB, byte, param, BYTES_FP16
-from mlsysim.fmt import fmt, fmt_count, fmt_count_range, fmt_memory, fmt_memory_capacity, fmt_multiple, fmt_params, fmt_percent
+from mlsysim.fmt import check, fmt, fmt_count, fmt_count_range, fmt_memory, fmt_memory_capacity, fmt_multiple, fmt_params, fmt_percent
 from mlsysim.physics import memory_from_params
 import math
 
 class DistTrainH100Capacity:
-    # ┌── 4. OUTPUT ───────────────────────────────────────
-    h100_mem_gb_str = fmt_memory_capacity(Hardware.Cloud.H100.memory.capacity, unit=GiB, precision=0, commas=False)
+    # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
     policy_params = Models.Language.Llama2_70B.parameters
     critic_params = Models.Language.Llama2_13B.parameters  # 13B reward and value models
-    reward_b = critic_params.to(Bparam).magnitude
-    value_b = critic_params.to(Bparam).magnitude
     bytes_train = ReferenceStats.MixedPrecisionAdam.TrainingStateBytesPerParameter
     bytes_infer = BYTES_FP16 / param
     h100_mem_budget = Hardware.Cloud.H100.memory.capacity.to(GiB) * (GB / GiB)
+
+    # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
+    reward_b = critic_params.to(Bparam).magnitude
+    value_b = critic_params.to(Bparam).magnitude
     # Policy-model full training state: weights (FP16) + gradients (FP16) + Adam (FP32 x3)
     bytes_weights_b = BYTES_FP16.to(byte).magnitude
     bytes_grad_b = BYTES_FP16.to(byte).magnitude
@@ -5162,8 +5183,15 @@ class DistTrainH100Capacity:
     dpo_reduction = ((ppo_total_mem - dpo_total_mem) / ppo_total_mem).to_base_units().magnitude
     dpo_reduction_policy_sized = ((ppo_policy_sized_value_mem - dpo_total_mem) / ppo_policy_sized_value_mem).to_base_units().magnitude
     train_to_infer_ratio = (policy_train_mem / ref_mem).to_base_units().magnitude
-    check(bytes_weights_b + bytes_grad_b + bytes_adam_b == bytes_train.to(byte / param).magnitude, "2 + 2 + 12 must equal 16 B/param")
     min_gpus_mem = math.ceil((ppo_total_mem / h100_mem_budget).to_base_units().magnitude)
+
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(bytes_weights_b + bytes_grad_b + bytes_adam_b == bytes_train.to(byte / param).magnitude, "2 + 2 + 12 must equal 16 B/param")
+    check(ppo_total_mem > dpo_total_mem, "PPO memory footprint must exceed DPO")
+    check(min_gpus_mem > 0, "Minimum GPUs must be positive")
+
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
+    h100_mem_gb_str = fmt_memory_capacity(Hardware.Cloud.H100.memory.capacity, unit=GiB, precision=0, commas=False)
     ppo_total_mem_gb_str = fmt_memory(ppo_total_mem, unit=GB, precision=0, commas=True)
     min_gpus_mem_str = fmt_count(min_gpus_mem, commas=False, label="GPU")
     policy_params_b_str = fmt_params(policy_params, scale="B", precision=0, commas=False)

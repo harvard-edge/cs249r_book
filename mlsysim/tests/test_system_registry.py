@@ -179,6 +179,8 @@ def test_node_psu_defaults_and_redundancy_validation():
 
 def test_dgx_a100_power_supplies_match_user_guide():
     """pc.DGX_A100_USER_GUIDE_POWER: six 3 kW PSUs in 3+3 redundancy, 6.5 kW max."""
+    from mlsysim.core import provenance_catalog as pc
+
     dgx = Systems.Nodes.DGX_A100
     assert dgx.psus_per_node == 6
     assert dgx.psu_redundancy == 3
@@ -186,10 +188,13 @@ def test_dgx_a100_power_supplies_match_user_guide():
     assert dgx.psu_rating.m_as("kW") == pytest.approx(3.0)
     assert dgx.max_power.m_as("kW") == pytest.approx(6.5)
     assert (dgx.psus_per_node - dgx.psu_redundancy) * dgx.psu_rating >= dgx.max_power
+    assert dgx.metadata.provenance is pc.DGX_A100_USER_GUIDE_POWER
 
 
 def test_dgx_b200_power_supplies_match_user_guide():
     """pc.DGX_B200_USER_GUIDE_POWER: six 3.3 kW PSUs in 5+1 redundancy, 14.3 kW max."""
+    from mlsysim.core import provenance_catalog as pc
+
     dgx = Systems.Nodes.DGX_B200
     assert dgx.psus_per_node == 6
     assert dgx.psu_redundancy == 1
@@ -197,3 +202,4 @@ def test_dgx_b200_power_supplies_match_user_guide():
     assert dgx.psu_rating.m_as("kW") == pytest.approx(3.3)
     assert dgx.max_power.m_as("kW") == pytest.approx(14.3)
     assert (dgx.psus_per_node - dgx.psu_redundancy) * dgx.psu_rating >= dgx.max_power
+    assert dgx.metadata.provenance is pc.DGX_B200_USER_GUIDE_POWER
