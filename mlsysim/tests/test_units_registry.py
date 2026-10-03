@@ -297,3 +297,31 @@ def test_mobilenetv2_variant_model_profiles():
     assert Models.Vision.MobileNetV2.metadata.provenance.ref
     assert Models.Vision.EfficientNetB0.metadata.provenance.ref
     assert Models.Vision.MobileNetV2_Alpha0_5.metadata.provenance.ref
+
+
+def test_disambiguated_state_and_interconnect_constants():
+    from mlsysim.core.units import (
+        BYTES_ADAM_STATE,
+        BYTES_ADAM_MOMENTS,
+        BYTES_ADAM_TOTAL,
+        BYTES_TRAINING_STATE_MIXED_PRECISION,
+        NVLINK4_BANDWIDTH_UNIDIRECTIONAL,
+        NVLINK4_BANDWIDTH_BIDIRECTIONAL,
+        byte,
+        GB,
+        second,
+    )
+    from mlsysim import Hardware
+
+    assert BYTES_ADAM_STATE.to(byte).magnitude == 8.0
+    assert BYTES_ADAM_MOMENTS.to(byte).magnitude == 8.0
+    assert BYTES_ADAM_TOTAL.to(byte).magnitude == 12.0
+    assert BYTES_TRAINING_STATE_MIXED_PRECISION.to(byte).magnitude == 16.0
+    assert NVLINK4_BANDWIDTH_UNIDIRECTIONAL.to(GB / second).magnitude == 450.0
+    assert NVLINK4_BANDWIDTH_BIDIRECTIONAL.to(GB / second).magnitude == 900.0
+
+    h100 = Hardware.Cloud.H100
+    assert h100.compute.peak_flops.to(ureg.TFLOP / ureg.second).magnitude == pytest.approx(989.0)
+    assert h100.compute.precision_flops["fp16_dense"].to(ureg.TFLOP / ureg.second).magnitude == pytest.approx(989.0)
+    assert h100.compute.precision_flops["fp16_sparse"].to(ureg.TFLOP / ureg.second).magnitude == pytest.approx(1979.0)
+
