@@ -37,3 +37,49 @@ echo "$D_{\\text{vol}}$"
     issues = check(Path("test.qmd"), content)
     assert len(issues) == 0
 
+
+def test_notation_macros_catches_macro_outside_math():
+    content = "The data volume is \\DataVolume in the memory path."
+    issues = check(Path("test.qmd"), content)
+    assert len(issues) >= 1
+    assert any("outside math delimiters" in issue.reason for issue in issues)
+
+
+def test_notation_macros_allows_macros_in_multiline_display_math():
+    content = """
+$$
+\\DataVolume = \\Bandwidth \\times T
+$$
+"""
+    issues = check(Path("test.qmd"), content)
+    assert len(issues) == 0
+
+
+def test_notation_macros_allows_macros_in_latex_math_envs():
+    content = """
+\\begin{gather*}
+\\DataVolume = \\Bandwidth \\times T \\\\
+\\Operations = \\PeakRate \\times \\EfficiencyHw
+\\end{gather*}
+"""
+    issues = check(Path("test.qmd"), content)
+    assert len(issues) == 0
+
+
+def test_notation_macros_catches_raw_latex_in_multiline_display_math():
+    content = """
+$$
+D_{\\text{vol}} = \\Bandwidth \\times T
+$$
+"""
+    issues = check(Path("test.qmd"), content)
+    assert len(issues) >= 1
+    assert any("Found raw notation 'D_{\\text{vol}}'" in issue.reason for issue in issues)
+
+
+def test_notation_macros_ignores_frontmatter_files():
+    content = "Table of notations: $D_{\\text{vol}}$ is raw."
+    issues = check(Path("books/vol1/frontmatter/_notation_degradation.qmd"), content)
+    assert len(issues) == 0
+
+
