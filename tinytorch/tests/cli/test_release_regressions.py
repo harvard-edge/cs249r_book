@@ -275,6 +275,59 @@ def test_open_jupyter_logs_to_file_not_pipe(monkeypatch, tmp_path):
     assert Path(stdout_file.name) == command._jupyter_log_file()
 
 
+def test_open_jupyter_widens_scope_to_modules_dir(monkeypatch, tmp_path):
+    """Verify _open_jupyter roots Jupyter Lab at modules/ with relative notebook paths."""
+    command = ModuleWorkflowCommand(CLIConfig.from_project_root(tmp_path))
+    modules_dir = tmp_path / "modules"
+    module_dir = modules_dir / "01_tensor"
+    module_dir.mkdir(parents=True)
+    (module_dir / "01_tensor.ipynb").touch()
+
+    popen_calls = []
+
+    class DummyProcess:
+        pid = 12345
+
+        def poll(self):
+            return None
+
+    def fake_popen(cmd, **kwargs):
+        popen_calls.append((cmd, kwargs))
+        return DummyProcess()
+
+    monkeypatch.setattr(subprocess, "Popen", fake_popen)
+    monkeypatch.setattr("time.sleep", lambda _: None)
+
+    ret = command._open_jupyter("01_tensor")
+    assert ret == 0
+    assert len(popen_calls) == 1
+    cmd, kwargs = popen_calls[0]
+
+    assert f"--ServerApp.root_dir={modules_dir}" in cmd
+    assert "01_tensor/01_tensor.ipynb" in cmd
+    assert kwargs.get("cwd") == str(modules_dir)
+
+
+def test_open_jupyter_server_reuse_reports_relative_path(monkeypatch, tmp_path):
+    """Verify that when reusing an existing Jupyter server, the relative path within modules/ is shown."""
+    command = ModuleWorkflowCommand(CLIConfig.from_project_root(tmp_path))
+    modules_dir = tmp_path / "modules"
+    module_dir = modules_dir / "02_activations"
+    module_dir.mkdir(parents=True)
+    (module_dir / "activations.ipynb").touch()
+
+    monkeypatch.setattr(command, "_running_jupyter_pid", lambda: 99999)
+
+    printed_messages = []
+    monkeypatch.setattr(command.console, "print", lambda msg="", **kwargs: printed_messages.append(str(msg)))
+
+    ret = command._open_jupyter("02_activations")
+    assert ret == 0
+    all_output = " ".join(printed_messages)
+    assert "02_activations/activations.ipynb" in all_output
+
+
+
 
 def _run_kernels_milestone(patch_lines):
     """Run Milestone 07 with extension behavior patched in-process."""

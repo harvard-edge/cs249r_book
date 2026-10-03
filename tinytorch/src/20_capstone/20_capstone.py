@@ -1080,7 +1080,7 @@ $$\text{Accuracy Delta } (\Delta \text{Acc}) = \text{Accuracy}_{\text{opt}} - \t
 | Quantitative Improvement Metric | Mathematical Definition | Numerical Example | Systems Engineering Interpretation |
 | :--- | :--- | :--- | :--- |
 | **Speedup ($S$)** | $\frac{T_{\text{base}}}{T_{\text{opt}}}$ | $\frac{10.0\text{ ms}}{5.0\text{ ms}} = 2.0\times$ | $2.0\times = \text{Optimized model is twice as fast}$; $< 1.0\times = \text{Regression}$ |
-| **Compression Ratio ($C$)** | $\frac{M_{\text{base}}}{M_{\text{opt}}}$ | $\frac{4.0\text{ MB}}{1.0\text{ MB}} = 4.0\times$ | $4.0\times = \text{Model footprint reduced to } 25\%$; $< 1.0\times = \text{Bloat}$ |
+| **Compression Ratio ($C$)** | $\frac{M_{\text{base}}}{M_{\text{opt}}}$ | $\frac{4.0\text{ MiB}}{1.0\text{ MiB}} = 4.0\times$ | $4.0\times = \text{Model footprint reduced to } 25\%$; $< 1.0\times = \text{Bloat}$ |
 | **Accuracy Delta ($\Delta \text{Acc}$)** | $\text{Acc}_{\text{opt}} - \text{Acc}_{\text{base}}$ | $91.5\% - 92.0\% = -0.5\%$ | $\ge 0.0\% = \text{Lossless quality}$; $-0.5\% = \text{Acceptable degradation}$ |
 
 ### The Optimization Trade-off Space: Pareto Frontiers
