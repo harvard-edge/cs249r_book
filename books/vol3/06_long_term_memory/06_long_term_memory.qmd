@@ -110,11 +110,7 @@ A retrieval index serves as an auxiliary acceleration structure for locating inf
 
 ### Read and write lifecycle {#sec-vol3-long-term-memory-read-write-lifecycle}
 
-Consider the state of a code-repair agent immediately after it writes revision `r18`. If its vector or keyword index was generated from revision `r17`, a retrieval query for `src/pool.py` will return the unpatched file. While that record remains an accurate historical reflection of `r17`, serving it as current context leads the model to believe the bug persists, prompting redundant or conflicting edits. Context rot thus extends beyond the active prompt into the persistent storage tiers that feed subsequent inference calls.
-
-::: {.column-margin .margin-pointer}
-↩ The failure modes and degradation of prompt context rot are established in @sec-vol3-context-engineering-context-rot.
-:::
+Consider the state of a code-repair agent immediately after it writes revision `r18`. If its vector or keyword index was generated from revision `r17`, a retrieval query for `src/pool.py` will return the unpatched file. While that record remains an accurate historical reflection of `r17`, serving it as current context leads the model to believe the bug persists, prompting redundant or conflicting edits. The staleness that context invalidation guards against in @sec-vol3-context-engineering-context-rot thus extends beyond the active prompt into the persistent storage tiers that feed subsequent inference calls.
 
 Precomputing search indexes eliminates the need to scan large repositories or execution histories during inference. However, this optimization incurs an ongoing synchronization cost. Every update to a source file requires indexing new content and invalidating or evicting obsolete embeddings. Executing these updates synchronously blocks read or write operations, while background asynchronous indexing introduces a replication lag window. Systems require explicit consistency semantics to govern queries that arrive while background index updates are in flight.
 
@@ -305,6 +301,10 @@ When an agent probes its environment, the runtime can optimize query execution t
 : **Pre-staging and model-directed retrieval**: Query timing and ownership change between the two policies, while source applicability and runtime-enforced limits remain shared. {#tbl-vol3-long-term-memory-staged-vs-agentic}
 
 Crucially, the execution runtime retains absolute authority over security boundaries and resource consumption under both paradigms. The model acts strictly as an untrusted query generator: it may propose a narrower search path, supply query strings, or request specific filters, but it can never expand the authorized workspace, assume a different principal identity, or increase its own resource ceilings. The runtime enforces these boundaries at the tool interface. Tool calling schemas define and constrain the supported request parameters, while tool execution results transmit truncation warnings, resource limits, and continuation tokens back to the agent.
+
+::: {.column-margin .margin-pointer}
+↪ Tool interface schemas that bound which request parameters a model may supply are developed in @sec-vol3-tool-calling-schemas.
+:::
 
 In production systems, these two strategies often merge into a tiered hybrid policy. The runtime pre-stages a compact workspace outline, an architectural summary, or persistent user preferences directly into the initial context window, giving the model immediate structural grounding. The agent then issues targeted tool calls to inspect specific function implementations or test traces only when those details become necessary. Evaluating such a hybrid design requires balancing the upfront token overhead of pre-staging against the inference latency and token expenditure of avoided tool turns. Whether an architecture relies on static pre-staging, dynamic agentic probing, or a hybrid combination, the effectiveness of any retrieval pipeline ultimately hinges on its matching mechanism—selecting whether lexical filtering, dense semantic embeddings, or structural graph traversal best surfaces the required evidence.
 
@@ -1029,7 +1029,7 @@ This coordination contract must remain robust against system restarts and uncoor
 Replicated retrieval topologies require explicit **read-your-writes**\index{Read-your-writes consistency!definition}[^fn-session-guarantees-memory] guarantees, ensuring that an agent always observes the outcomes of its own preceding actions [@terry1994session]. When an agent issues a search following an edit, the query carries the log sequence number (LSN) corresponding to that write. A replica whose local replay watermark lags that LSN must pause execution within a bounded wait window. If the replica does not catch up before the deadline elapses, the gateway either routes the request to an authoritative primary or returns an explicit partial-status response.
 
 ::: {.column-margin .margin-pointer}
-↪ Write-ahead log sequence numbers and replay watermarks are developed in @sec-vol3-persistence-wal.
+↪ Logging each operation durably before it takes effect, the write-ahead discipline these sequence numbers index, is developed in @sec-vol3-persistence-wal.
 :::
 
 [^fn-session-guarantees-memory]: **Session Guarantees**: The Bayou project established four foundational client-centric guarantees for weakly consistent distributed storage: read your writes, monotonic reads, writes follow reads, and monotonic writes [@terry1994session]. An agentic system requires more than simple read-your-writes behavior. For example, if an agent reads `r18` from an up-to-date replica and subsequently retrieves `r17` from a lagging node on the next step, the system violates monotonic reads—causing the agent's observation of workspace history to move backward. \index{Session guarantees!monotonic reads}

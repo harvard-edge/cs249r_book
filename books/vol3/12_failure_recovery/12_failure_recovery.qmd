@@ -62,7 +62,11 @@ If a network timeout or process crash drops the provisioning reply, the worker f
 
 [^fn-generals-lost-reply]: **Lost acknowledgment**: Gray named this the generals paradox in his 1978 notes on database operating systems: over a channel that can lose messages, no finite exchange lets both parties know that the last message arrived [@gray1978notes]. Fischer, Lynch, and Paterson later proved that in a fully asynchronous system no deterministic protocol can guarantee agreement if even one process may crash, since a crashed process cannot be told apart from a slow one [@fischer1985impossibility]. A tool-call timeout inherits the same ambiguity, which is why the settlement rule below keeps the outcome unknown rather than guessing. \index{Two generals problem!lost reply}
 
-The foundational execution primitives developed in @sec-vol3-durable-execution—durable logs, checkpoints, and deterministic replay—reconstruct what the runtime intended and what it observed. That historical reconstruction provides the essential evidence for recovery, but passive logs cannot alter the outside world. An execution ledger does not tear down an orphaned test cluster, resolve a lost network acknowledgment, or evaluate whether a subsequent attempt justifies its operational cost.
+The foundational execution primitives—durable logs, checkpoints, and deterministic replay—reconstruct what the runtime intended and what it observed. That historical reconstruction provides the essential evidence for recovery, but passive logs cannot alter the outside world. An execution ledger does not tear down an orphaned test cluster, resolve a lost network acknowledgment, or evaluate whether a subsequent attempt justifies its operational cost.
+
+::: {.column-margin .margin-pointer}
+↩ Durable logs, checkpoints, and deterministic replay are established in @sec-vol3-durable-execution.
+:::
 
 Complicating matters further, agent failures frequently manifest without throwing runtime exceptions. An agent trajectory can issue structurally valid tool calls while drifting into destructive patterns: alternating indefinitely between two conflicting edits, bombarding a degraded testing service with aggressive retries, or attempting to transmit private credentials after parsing an untrusted document. Every network call returns a successful status, every worker health check reports green, yet the agent either makes zero forward progress or actively threatens system integrity.
 
@@ -120,6 +124,10 @@ To understand how a runtime manages this uncertainty, consider an agent workflow
 
 If the runtime waited until after receiving a successful provisioning reply to register cleanup, a crash during or immediately following dispatch would orphan the remote resource without any local recovery record. The runtime eliminates this crash window by durably registering a cleanup template *before* forward dispatch. This record includes the exact forward operation and payload, authorized capability scope, execution preconditions, dependencies, and an explicit rule for binding the returned environment identifier. Appended directly to the write-ahead log alongside the forward admission record, this registration shares the forward attempt's storage acknowledgment and resource reservation, avoiding the overhead and complexity of an independent state machine.
 
+::: {.column-margin .margin-pointer}
+↩ The durable intent record written before dispatch is established in @sec-vol3-persistence-wal.
+:::
+
 The resulting template binds cleanup to the specific environment instantiated by this provisioning operation, rather than relying on transient metadata like display names. Durably registering this template establishes a binding commitment for future recovery rather than asserting that the resource already exists. @Tbl-vol3-compensation-registration follows this distinction across each phase of the crash boundary.
 
 | Boundary                                              | Durable obligation and available evidence                                                                                                               | Permitted interpretation                                                                                                  |
@@ -132,7 +140,11 @@ The resulting template binds cleanup to the specific environment instantiated by
 
 : **Registration and deferred result binding**: The recovery obligation precedes the forward effect, while an endpoint-generated resource identifier is bound only when the evidence supports it. {#tbl-vol3-compensation-registration}
 
-When an acknowledgment is lost following dispatch, an idempotent result-recovery probe—distinguishing result retrieval from repeated execution under the recovery foundations of @sec-vol3-appendix-systems-retries—may retrieve the missing outcome. If probing is unsupported or inconclusive, settlement rules mandate that the operation remain open with an assigned recovery owner. A naive runtime might query the external service, observe that the environment is absent, and prematurely close the cleanup record on the assumption that creation failed. Doing so creates a dangerous race condition: if the original provisioning request was merely delayed in transit, the remote service may instantiate the environment seconds later, leaving an **orphaned resource**\index{Orphaned resource!definition} that accrues compute charges indefinitely without any controlling process. If the endpoint supports explicit request cancellation, the runtime can invoke that contract to terminate the pending creation, provided the endpoint guarantees that canceled requests will not take effect downstream.
+When an acknowledgment is lost following dispatch, an idempotent result-recovery probe may retrieve the missing outcome. If probing is unsupported or inconclusive, settlement rules mandate that the operation remain open with an assigned recovery owner. A naive runtime might query the external service, observe that the environment is absent, and prematurely close the cleanup record on the assumption that creation failed. Doing so creates a dangerous race condition: if the original provisioning request was merely delayed in transit, the remote service may instantiate the environment seconds later, leaving an **orphaned resource**\index{Orphaned resource!definition} that accrues compute charges indefinitely without any controlling process. If the endpoint supports explicit request cancellation, the runtime can invoke that contract to terminate the pending creation, provided the endpoint guarantees that canceled requests will not take effect downstream.
+
+::: {.column-margin .margin-pointer}
+↪ Result recovery, as distinct from repeated execution, is developed in @sec-vol3-appendix-systems-retries.
+:::
 
 ### Semantic compensation {#sec-vol3-failure-recovery-semantic-compensation}
 
@@ -161,6 +173,10 @@ Local workspace restoration plays a complementary but narrower role. As shown in
 ### Cleanup failures {#sec-vol3-failure-recovery-cleanup-failures}
 
 Because cleanup actions cross the same external tool boundaries as forward actions, they encounter the same failure modes: network drops, rate limits, and remote service outages. Consequently, every compensating operation must pass admission control, and its intent must be durably committed before dispatch. When retrying a failed cleanup call, the runtime assigns each transport attempt a unique attempt identifier, while `release_test_env_r18` continues to designate the persistent logical operation. Retries adhere to the endpoint's repeat contract; the stable logical key ensures that duplicate deletion requests execute safely without targeting a different resource if the external system reuses names or identifiers.
+
+::: {.column-margin .margin-pointer}
+↩ Idempotency keys and the retry discipline for uncertain outcomes are established in @sec-vol3-tool-calling-idempotency.
+:::
 
 The coordinator retires a compensation entry only upon receiving verifiable outcome evidence, rather than assuming success simply because a remote call returned without a transport error. If a release call times out, three states remain possible: the environment may be gone, it may still be undergoing deallocation, or it may remain allocated. The settlement rules keep all three possibilities open. Furthermore, cleanup actions consume quota and wall-clock execution budget; a timed-out call refunds nothing. If cleanup cannot progress further within its assigned budget, the obligation remains recorded in the ledger alongside accumulated evidence and an assigned escalation owner. In this way, a failed agent trajectory can terminate safely without masking unresolved external leaks.
 
@@ -236,7 +252,11 @@ The colloquial instruction to “try again” obscures five distinct operational
 
 A network timeout raises an effect-status question before any model-repair question can be addressed, and the runtime relies on the settlement rule to resolve whether external state was altered. Similarly, an HTTP 429 rate-limit response proves only what the external service contract guarantees; it does not prove that an attempted state mutation was rejected before execution. Exponential backoff regulates the timing and throughput of a permitted retry, but no backoff schedule can transform an unsafe, non-idempotent repeat into a safe operation.
 
-In contrast to an ambiguous timeout, a pre-dispatch configuration rejection provides a well-defined basis for repair. Because the schema validator rejected the payload locally, the runtime establishes that the proposed action never reached the executor or modified remote state. Applying the structured rejection diagnostics of @sec-vol3-tool-calling-rejection-diagnostics, the runtime can supply the original request, the target schema, the field-level diagnostic, and the task scope within a bounded repair prompt, validating the revised proposal before admitting any side effect. If the repair instead modifies source code rather than an ephemeral test configuration, the modified artifact constitutes a new candidate revision requiring fresh test evidence; previous test passes for `ws_r18` cannot certify altered code.
+In contrast to an ambiguous timeout, a pre-dispatch configuration rejection provides a well-defined basis for repair. Because the schema validator rejected the payload locally, the runtime establishes that the proposed action never reached the executor or modified remote state. The runtime can therefore supply the original request, the target schema, the field-level diagnostic, and the task scope within a bounded repair prompt, validating the revised proposal before admitting any side effect. If the repair instead modifies source code rather than an ephemeral test configuration, the modified artifact constitutes a new candidate revision requiring fresh test evidence; previous test passes for `ws_r18` cannot certify altered code.
+
+::: {.column-margin .margin-pointer}
+↩ Structured, bounded rejection diagnostics are established in @sec-vol3-tool-calling-rejection-diagnostics.
+:::
 
 Providing feedback modifies the model's prompt conditioning without expanding its execution authority. While drawing independent resamples from a fixed prompt yields the same success probability on every attempt, repeated failures in operational agents are rarely independent. Instead, repeated failures typically expose an intrinsically difficult task, a persistent prompt misconception, or an unexpected environment state. The empirical repair success rate $p$ is therefore a measured property of a specific failure class and feedback policy, which systems engineers must estimate from recorded operational episodes.[^fn-self-repair-evidence]
 
@@ -557,7 +577,7 @@ While idempotent interfaces ensure that retrying an operation is safe, extended 
 When normal task execution terminates—whether by completing its primary plan, hitting a deadline timeout, or exhausting its operational authority—the trajectory transitions into the `FINALIZING` state through execution guards. The finalization phase operates under a dedicated, separately metered resource budget. While model-driven repair steps must still pass standard admission checks, pre-registered deterministic cleanup handlers execute under their own restricted, highly targeted cleanup grants.
 
 ::: {.column-margin .margin-pointer}
-↩ Execution guards and trajectory state transitions are established in @sec-vol3-agent-harness.
+↩ The `FINALIZING` state, through which every exit path passes under a dedicated reserve, is established in @sec-vol3-agent-harness-finalization-duties.
 :::
 
 When automated finalization fails to establish the required postconditions, the runtime writes a complete handoff record to durable storage. This record captures all verified state changes, indeterminate external operations, active resource leases, unreleased reservations, and the next responsible owner. The runtime then initiates a formal, acknowledged handoff. When an on-call engineer acknowledges the escalation page, that response transfers operational custody of the incident, leaving the underlying external operations to be reconciled manually.
@@ -615,7 +635,7 @@ Verification metrics demand similarly rigorous interpretation. System designers 
 
 Action comparison operates prior to tool dispatch, whereas outcome comparison evaluates the empirical results of admitted operations. Re-submitting an identical command immediately after it returns a deterministic execution error provides strong evidence of stagnation. However, identical tool invocations are entirely legitimate when external preconditions change, such as polling a long-running batch job or re-reading an updated file. Conversely, minor variations in prompt formatting or parameter nonces can easily evade exact-string matching. While semantic embedding models can identify paraphrased tool arguments, they introduce inference latency and classification errors of their own. Reliable watchdogs anchor their logic directly on observed tool signatures and structured execution returns—data the runtime engine authoritatively controls—rather than attempting to decipher internal model chain-of-thought tokens.
 
-For example, observing that workspace `ws_r18` remains byte-identical while background task `test_r18` executes does not indicate a repair loop; the runtime tracks the pending asynchronous job and respects its execution deadline rather than demanding source modifications on every poll. @Sec-vol3-evaluation develops the calibration of grace periods and detector thresholds against missed loops, unnecessary interruptions, accepted tasks, and total costs.
+For example, observing that workspace `ws_r18` remains byte-identical while background task `test_r18` executes does not indicate a repair loop; the runtime tracks the pending asynchronous job and respects its execution deadline rather than demanding source modifications on every poll.
 
 ### The cost of an undetected loop {#sec-vol3-failure-recovery-loop-cost-section}
 
@@ -625,7 +645,11 @@ For example, observing that workspace `ws_r18` remains byte-identical while back
 *Re-sent input grows with the square of turns; late stops pay for it.*
 :::
 
-The economic damage of an undetected execution loop stems from the compounding nature of model context windows. Because modern foundation model APIs operate statelessly, each successive interaction turn re-submits the entire conversation history along with tool inputs and environment responses. If an agent loops without context pruning or the prefix cache reuse analyzed in @sec-vol3-kvcache-radix-tree, input tokens accumulate quadratically with the number of turns. The worked analysis in notebook \ref{nbk-12-loop-cost} prices this compounding overhead, contrasting a trajectory governed solely by a generous turn ceiling with one terminated promptly by a semantic watchdog.
+The economic damage of an undetected execution loop stems from the compounding nature of model context windows. Because modern foundation model APIs operate statelessly, each successive interaction turn re-submits the entire conversation history along with tool inputs and environment responses. If an agent loops without context pruning or prefix cache reuse, input tokens accumulate quadratically with the number of turns. The worked analysis in notebook \ref{nbk-12-loop-cost} prices this compounding overhead, contrasting a trajectory governed solely by a generous turn ceiling with one terminated promptly by a semantic watchdog.
+
+::: {.column-margin .margin-pointer}
+↩ Prefix cache reuse across turns is established in @sec-vol3-kvcache-radix-tree.
+:::
 
 ```{python}
 #| label: calc-vol3-failure-recovery-loop-cost
@@ -714,7 +738,7 @@ class LoopCost:
 
 ### Watchdog responses {#sec-vol3-failure-recovery-watchdog-responses}
 
-When a semantic watchdog fires, the runtime constructs a structured diagnostic finding recording the triggering observations, candidate workspace revisions, plan version, active detection rule, and sliding window indices. Under control plane rules, the engine places the trajectory into an admission hold without mutating the underlying task state machine. While in this hold, the runtime policy selects an intervention from the three escalation options detailed in @tbl-vol3-watchdog-escalation-protocol. @Fig-vol3-semantic-watchdog models this detection and containment sequence: the top panel identifies a period-2 oscillation between alternating revisions ($h_{\text{state},t} = h_{\text{state},t-2}$) exhibiting identical test failures, and the bottom panel records a structured finding that clamps the trajectory into an admission hold, routing execution to diagnostic continuation, controlled backtracking, or finalization.
+When a semantic watchdog fires, the runtime constructs a structured diagnostic finding recording the triggering observations, candidate workspace revisions, plan version, active detection rule, and sliding window indices. Under the control plane's state machine rules, the engine places the trajectory into an admission hold without mutating the underlying task state machine. While in this hold, the runtime policy selects an intervention from the three escalation options detailed in @tbl-vol3-watchdog-escalation-protocol. @Fig-vol3-semantic-watchdog models this detection and containment sequence: the top panel identifies a period-2 oscillation between alternating revisions ($h_{\text{state},t} = h_{\text{state},t-2}$) exhibiting identical test failures, and the bottom panel records a structured finding that clamps the trajectory into an admission hold, routing execution to diagnostic continuation, controlled backtracking, or finalization.
 
 ::: {.column-margin .margin-pointer}
 ↩ Control plane state machine rules and admission holds are established in @sec-vol3-controlplane-statemachine.
@@ -922,7 +946,11 @@ Isolating worker pools and breaking circuits prevents traffic amplification from
 
 ## Incident Containment {#sec-vol3-sagas-quarantine}
 
-Circuit breakers and resource caps protect failing downstream dependencies; incident containment protects everything a suspect trajectory might touch next. Suppose an automated repair agent attempts to send private test fixture data through an external package-search tool, encountering the exfiltration pathway analyzed in @sec-vol3-security-exfiltration. The disclosure gate rejects the invocation, and the runtime incident policy places the trajectory on hold. The immediate systems challenge is determining what may safely proceed while the control plane assesses the affected state.
+Circuit breakers and resource caps protect failing downstream dependencies; incident containment protects everything a suspect trajectory might touch next. Suppose an automated repair agent attempts to send private test fixture data through an external package-search tool. The disclosure gate rejects the invocation, and the runtime incident policy places the trajectory on hold. The immediate systems challenge is determining what may safely proceed while the control plane assesses the affected state.
+
+::: {.column-margin .margin-pointer}
+↩ Disclosure through a permitted network tool, which leaks on the outbound query, is established in @sec-vol3-security-exfiltration.
+:::
 
 An isolated timeout, a rejected tool proposal, or the ingestion of an untrusted document does not by itself prove system compromise. The incident record must separate the observed violation from its suspected root cause and document why policy mandates a hold. **Incident containment**\index{Incident containment!definition} restricts subsequent activity and prevents the propagation of potentially corrupted artifacts, all while preserving forensic evidence and maintaining explicit responsibility for actions already committed. Containment operates as an operational disposition layered directly onto existing trajectory states rather than introducing an ad hoc state machine.
 
@@ -932,7 +960,7 @@ Sagas and compensating actions rely on deterministically registered runtime hand
 
 [^fn-failsafe-defaults-hold]: **Fail-safe defaults**: Saltzer and Schroeder argued for basing access decisions on permission rather than exclusion because the two designs fail differently: a mistake in a permission-based mechanism refuses a legitimate request, which someone notices and reports, while a mistake in an exclusion-based one grants access silently [@saltzer1975]. An incident hold inherits that asymmetry; a wrongly held trajectory costs time and surfaces in review, whereas a wrongly admitted action may be irreversible. \index{Fail-safe defaults!incident hold}
 
-The supervisor registers a control hold at the guarded boundaries, immediately revoking eligibility from active outputs and held proposals. Pausing an agent leverages the guarded path from `READY` to `PAUSED` without leaving an unmonitored window of execution, while an unrecoverable task transitions directly through `FINALIZING`.
+The supervisor registers a control hold at the guarded transition boundaries established in @sec-vol3-controlplane-statemachine, immediately revoking eligibility from active outputs and held proposals. Pausing an agent leverages the guarded path from `READY` to `PAUSED` without leaving an unmonitored window of execution, while an unrecoverable task transitions directly through `FINALIZING`.
 
 Containment decisions must be pushed all the way to the dispatch boundaries that enforce them. Revoking a capability grant inside the control record accomplishes nothing if a downstream dispatch adapter continues to honor an unexpired token. While suspending a local thread halts process execution on that node, it cannot claw back network packets already in flight, guarantee that a remote worker has ceased computation, or invalidate credentials already distributed to third-party endpoints. Actual cancellation and revocation depend entirely on the operational semantics and APIs of the affected services. The supervisor must therefore record three distinct states: which restrictions were requested, which have been confirmed by downstream services, and which remain uncertain.
 
@@ -1011,17 +1039,17 @@ To support post-incident analysis and remediation, the incident record links the
 
 ### Affected artifacts {#sec-vol3-failure-recovery-affected-artifacts}
 
-Incident quarantine operates under different constraints than the data provenance and confidentiality tracking introduced in @sec-vol3-security-taint-tracking. Where provenance traces the origin of an object and confidentiality restricts who may read it, an incident disposition governs whether a specific version of an artifact is trustworthy enough for continued operational use. For example, a trusted internal test fixture can remain strictly confidential without suffering data corruption, whereas a publicly generated task summary may require immediate quarantine if prompt injection embedded an adversarial instruction into its text.
+Incident quarantine operates under different constraints than data provenance and confidentiality tracking. Where provenance traces the origin of an object and confidentiality restricts who may read it, an incident disposition governs whether a specific version of an artifact is trustworthy enough for continued operational use. For example, a trusted internal test fixture can remain strictly confidential without suffering data corruption, whereas a publicly generated task summary may require immediate quarantine if prompt injection embedded an adversarial instruction into its text.
+
+::: {.column-margin .margin-pointer}
+⇄ **Contrast:** Provenance and confidentiality tracking, which govern where data came from and who may read it, are established in @sec-vol3-security-taint-tracking.
+:::
 
 When containment trips, the runtime computes a conservative dependency closure containing all potentially tainted artifacts, drawing on prompt context histories, workspace modifications, derived objects, and recorded tool calls. The moment a violation is detected rarely marks the initial point of contamination. When the audit log cannot establish a precise, minimal interval of compromise, the runtime expands the blast radius to include all potentially affected artifacts and explicitly logs that epistemic uncertainty. Every artifact within this conservative boundary remains frozen until verified by trusted evidence.
 
 Quarantine policies must intervene at every interface where held artifacts could influence subsequent decisions: dynamic context assembly, vector memory retrieval, external artifact export, release gating, and subsequent repair attempts. Purging a compromised source document, such as a malicious README, is ineffective if a derived intermediate summary or an updated long-term memory embedding still reflects the injected instruction. Similarly, staged proposals and pending human approvals generated from tainted context must be held. If engineers require access to suspect artifacts for diagnosis, the runtime can grant bounded inspection privileges without clearing the artifact for general execution.
 
-Publishing an incident hold does not recall artifacts already transmitted to external services. The incident owner must identify all recorded downstream recipients, dispatch secondary hold requests, and track explicit acknowledgments alongside any unconfirmed deliveries. While cryptographic signatures on a revocation notice verify the sender's identity, they offer no guarantee that a remote downstream consumer has actually applied the restriction.
-
-::: {.column-margin .margin-pointer}
-↪ Distributed coordination across independent agent systems is developed in @sec-vol3-multi-agent.
-:::
+Publishing an incident hold does not recall artifacts already transmitted to external services. The incident owner must identify all recorded downstream recipients, dispatch secondary hold requests, and track explicit acknowledgments alongside any unconfirmed deliveries. While cryptographic signatures on a revocation notice verify the sender's identity, they offer no guarantee that a remote downstream consumer has actually applied the restriction. Propagating a revocation to workers that push delivery may never reach is treated in @sec-vol3-multiagent-revocation-lineage.
 
 Releasing an artifact from quarantine requires auditable evidence tailored to both the artifact's exact cryptographic digest and its intended operational purpose. An authorized human reviewer or a deterministic verification suite must document the validation criteria and findings; any release grant applies strictly to that specific revision and target scope. A generative model's self-reported claim that an environment is clean carries zero evidentiary weight. Furthermore, a candidate patch produced by a repair agent constitutes a brand-new artifact revision that must independently pass admission before deployment.
 

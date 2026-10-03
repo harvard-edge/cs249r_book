@@ -160,6 +160,10 @@ From a systems perspective, generation remains strictly autoregressive. Extendin
 
 Breadth allocates test-time compute across alternative candidate paths. Instead of extending one trajectory, the runtime requests multiple candidate patches from the same source excerpt and task specification, using stochastic decoding controls. Conditional on a fixed prompt and independent random seeds, these samples are statistically independent draws from the model's output distribution. However, they remain bounded by the model's underlying knowledge: if the model assigns negligible probability mass to a correct thread-notification pattern, every independent sample may reproduce the same missing broadcast. Independent draws can easily fail in identical ways.
 
+::: {.column-margin .margin-pointer}
+↩ Temperature, top-$k$, and nucleus sampling controls are established in @sec-vol3-foundation-model-sampling-controls.
+:::
+
 Because parallel candidates share no sequential dependencies, breadth exposes fine-grained concurrency. On modern accelerator hardware, this concurrency comes at minimal latency cost. Under memory-bandwidth-bound decoding (principle \ref{pri-vol3-memory-bandwidth-decoding}), a batch of $N$ concurrent candidate streams reads the model weights once per step for all $N$ tokens. Spending an allocation of $N \times K$ tokens sequentially along the depth axis multiplies the generation latency by roughly $N$. In contrast, generating $N$ concurrent candidates of length $K$ in parallel keeps total generation time near the duration of the longest candidate, $\max_n T_{\text{decode}}(K_n)$. This latency benefit holds as long as the concurrent batch remains memory-bandwidth bound and fits within accelerator memory.
 
 Accelerator memory is where breadth extracts its price. Each active generation stream must maintain its own key-value (KV) cache for the tokens it generates. When the serving system implements prefix sharing, the $S$-token prompt is stored once in memory, and the peak KV cache demand scales as
@@ -169,6 +173,10 @@ M_{\text{KV}}^{\text{breadth}} \propto S + \sum_{n=1}^{N} K_n
 $$
 
 Without shared prefix caching, the serving engine stores $N$ redundant copies of the prompt's KV tensors, causing memory demand to scale as $NS + \sum_n K_n$. When aggregate KV cache allocations exceed hardware capacity, the serving engine must partition candidates into sequential execution waves. Once forced into waves, breadth latency degrades from the duration of the single longest candidate toward the sum of all candidates, while memory thrashing and queueing delays increase individual token latencies. Whether identical prompt prefixes share physical memory or receive provider billing discounts depends on the serving engine's implementation.
+
+::: {.column-margin .margin-pointer}
+↪ Prefix caching, which stores a shared prompt's KV state once and attaches it to later requests, is developed in @sec-vol3-kvcache-radix-tree.
+:::
 
 Breadth also shifts the operational burden downstream: generating a wide pool of candidates pays off only if the system can accurately select the best option or synthesize their differences. A candidate pool containing an optimal patch provides no value without an effective selector. In a study of repeated sampling, @brown2024monkeys showed that while the probability of at least one candidate being correct (pass@$k$) continued to rise across four orders of magnitude of samples, practical selection heuristics such as majority voting and learned reward models plateaued after several hundred samples. Candidate selection is therefore an active consumer of compute and verification budget rather than an incidental final step.
 
@@ -913,6 +921,10 @@ class PlanRevision:
 
 This idealized model isolates the immediate generation savings of localized regeneration. In production systems, however, those savings must be weighed against the overhead of tracking dynamic dependencies, assembling specialized prompts with retained context, and executing verification tests on hybrid plans. When a candidate plan transitions from deliberative search to actual execution, it shifts from an uncommitted dependency graph to active runtime state—a lifecycle managed by the agent harness and persisted across infrastructure faults via durable execution frameworks.
 
+::: {.column-margin .margin-pointer}
+↪ Persisting committed plan state across worker and infrastructure faults is developed in @sec-vol3-durable-execution.
+:::
+
 ### Limits on repeated revision {#sec-vol3-test-time-compute-replanning-thrashing}
 
 Iterative plan revision risks degenerating into unproductive replanning cycles. Without explicit termination policies, a model can oscillate between conflicting diagnoses, generate cosmetically distinct patches that suffer from identical logical flaws, or churn compute by reacting to non-fatal compiler warnings. The runtime must determine whether a newly proposed revision reflects genuine evidence updates or merely stochastic variation. A diagnostic warning warrants plan revision only when it directly challenges a core premise of the candidate; its severity tag alone should not trigger regeneration.
@@ -1208,7 +1220,7 @@ A task-wide quota must restrict new candidate admissions prior to dispatch, beca
 ↪ Bounded-liability reservation and settlement mechanisms are developed in @sec-vol3-agent-harness-reservation-settlement.
 :::
 
-Resource management policies must similarly decouple search depth from elapsed execution time. A depth ceiling bounds the chain of sequential model extensions or tool interactions, whereas a deadline bounds overall user latency. When the deadline expires, the runtime ceases admitting new work, discards late arrivals from the expired search phase, and issues cancellation requests to downstream services. However, transmitting a cancellation signal does not guarantee immediate remote termination or prevent in-flight billing charges. Until remote serving layers settle the transaction and confirm termination through a normalized status envelope, the scheduler must maintain outstanding reservations in the ledger.
+Resource management policies must similarly decouple search depth from elapsed execution time. A depth ceiling bounds the chain of sequential model extensions or tool interactions, whereas a deadline bounds overall user latency. When the deadline expires, the runtime ceases admitting new work, discards late arrivals from the expired search phase, and issues cancellation requests to downstream services. However, transmitting a cancellation signal does not guarantee immediate remote termination or prevent in-flight billing charges. Until remote serving layers settle the transaction and confirm termination through the normalized status envelope defined in @sec-vol3-foundation-model-status-envelope, the scheduler must maintain outstanding reservations in the ledger.
 
 Exhausting allocated resources terminates the search unconditionally without lowering acceptance thresholds. A fully generated candidate can still fail essential regression checks, and favorable model scores cannot substitute for verified test passes when authorizing actions. If no candidate satisfies the acceptance contract when budgets expire, the runtime must report an incomplete outcome, abstain, or escalate to human operators. Mechanical resource limits govern execution independently of the agent's internal desire to continue generating, upholding the invariant closure principle (\ref{pri-invariant-closure}).
 

@@ -57,6 +57,10 @@ A team running the repair agent (lighthouse \ref{lhs-vol3-repair-agent}) is offe
 
 The runtime built so far can already say part of what the team needs. The evaluation discipline of @sec-vol3-evaluation decides which repairs count as accepted and how two policies are compared on matched tasks, and the harness's budget ceilings stop any one task from spending without limit. Neither says whether a policy is worth running. An accuracy figure reported without its cost cannot rank two designs, which is why cost-controlled evaluation reports the two jointly [@kapoor2024agents], and a ceiling that holds says nothing about how much of the spending under it bought accepted work.
 
+::: {.column-margin .margin-pointer}
+↩ Per-task budget ceilings and the bounded-liability admission test that enforces them are established in @sec-vol3-controlplane-accounting.
+:::
+
 This chapter builds the account that joins spending to accepted outcomes. @Sec-vol3-intro-horizon-arithmetic introduced cost per accepted task, the expected cost of an attempt divided by the probability that the attempt is accepted, as one of the book's two quantitative fundamentals. Here that ratio becomes something a team can measure over a real cohort of tasks. Its numerator holds every charge an attempt incurs, its denominator counts only outcomes accepted under one declared contract, and each lever the runtime controls (reuse, retries, acceleration, routing, capacity, and delegation) is worth buying only if it lowers the ratio or buys a deadline the objective values.
 
 The account comes first, in @sec-vol3-agent-economics-accounting, together with the rules that keep failed, canceled, and still-pending work inside it. @Sec-vol3-agent-economics-caching prices what the runtime pays to carry context from call to call and how many attempts it should buy. @Sec-vol3-agent-economics-criticalpath finds where faster execution actually shortens a task, and @sec-vol3-agent-economics-cascades decides which model should attempt the work at all. @Sec-vol3-agent-economics-capacity sizes the services that concurrent trajectories hold and wait on, and @sec-vol3-agent-economics-governance makes spending limits hold across delegated children and late bills. @Sec-vol3-agent-economics-selection then compares whole architectures under one contract, and @sec-vol3-agent-economics-synthesis prices all four lighthouse workloads to show that each is bound by a different term of the same account.
@@ -236,6 +240,10 @@ Decomposing system costs in this manner immediately reveals which architectural 
 ## Caching and Reasoning Budgets {#sec-vol3-agent-economics-caching}
 
 When an agent interacts with a language model across multiple turns, identical prompt prefixes recur across successive invocations. Rather than recomputing attention states on every call, modern inference engines retain and share these activations across requests. While reused key-value (KV) state lowers processing costs significantly, it is not free. System designers must price this reuse accurately to evaluate fundamental operational trade-offs: whether compacting context reduces overall billing, and whether purchasing additional inference attempts lowers the ultimate cost per accepted task under a fixed verification contract. Both context validation principles and cache management mechanics govern when such reuse is physically permissible.
+
+::: {.column-margin .margin-pointer}
+↩ The exact-prefix, execution-parameter, residency, and tenant conditions under which retained attention state may be reused are established in @sec-vol3-kv-cache-prefix-compatibility.
+:::
 
 ### Economic valuation of prefix cache hits {#sec-vol3-agent-economics-prefix-cache-value}
 
@@ -473,7 +481,11 @@ Accelerating a model call rarely yields a proportional reduction in end-to-end t
 
 ### Dependency graphs and elapsed time {#sec-vol3-agent-economics-dependency-graphs}
 
-Distributed tracing distinguishes enclosing parent spans from the nested operations within them (@sec-vol3-evaluation-tracing). Summing a parent span's duration with the durations of its children double-counts time. Similarly, simply summing concurrent sibling spans inflates apparent latency, whereas omitting queueing delays, network transit, or uninstrumented runtime pauses undercounts it. When profiling an agent runtime, uninstrumented intervals must remain explicitly accounted for as unexplained gaps rather than arbitrarily attributed to neighboring components.
+Distributed tracing distinguishes enclosing parent spans from the nested operations within them. Summing a parent span's duration with the durations of its children double-counts time. Similarly, simply summing concurrent sibling spans inflates apparent latency, whereas omitting queueing delays, network transit, or uninstrumented runtime pauses undercounts it. When profiling an agent runtime, uninstrumented intervals must remain explicitly accounted for as unexplained gaps rather than arbitrarily attributed to neighboring components.
+
+::: {.column-margin .margin-pointer}
+↩ Parent-child span nesting and the double-counting it causes in latency attribution are established in @sec-vol3-evaluation-tracing-latency.
+:::
 
 Crucially, a span's parent in a call tree denotes syntactic containment, which does not necessarily reflect an execution dependency. An agent runtime might spawn background log flushes or asynchronous cache warmers that outlive the caller without blocking the next step. To determine end-to-end latency, we must construct a directed acyclic execution graph based on true dispatch and join conditions: a directed edge indicates that the successor task cannot begin until its predecessor completes. Along any path, we count only disjoint, non-overlapping intervals rather than inclusive parent spans alongside their children. For a directed dependency graph with vertex durations $t(v)$ and source-to-sink paths $\Pi$, the longest path defines the **critical path**\index{Critical path!trajectory}:[^fn-critical-path-method]
 
@@ -581,7 +593,11 @@ When tool operations are independent, the runtime can dispatch them concurrently
 
 Environment preparation can overlap model generation if the runtime executes speculative setup within a sandboxed, isolated scope that commits no external side effects before the full model response is validated and authorized. Streaming tokens from an LLM does not constitute an authorized execution intent; even a speculative read operation might violate an access boundary or leak uncommitted state. If the model output subsequently alters the required tool call or aborts, the runtime must discard speculative work, release allocated resources, and record any incurred compute charges in the task account.
 
-Early stopping alters the evidentiary value of an execution as well as its duration. In a validation pipeline, a single failing assertion in a mandatory test immediately proves that a candidate solution is unacceptable, allowing the runtime to short-circuit the remaining suite. Conversely, an early pass confirms only a single check; it provides zero evidence regarding the remainder of the test suite. Intelligent test prioritization and streaming failure detection thus accelerate defect rejection during intermediate iterations. However, final task acceptance still demands full test coverage across the declared verification contract. Furthermore, canceling a running check does not instantly free resources; active worker processes must unwind cleanly, and any intermediate compute costs remain on the ledger until the underlying jobs settle (@sec-vol3-failure-recovery).
+Early stopping alters the evidentiary value of an execution as well as its duration. In a validation pipeline, a single failing assertion in a mandatory test immediately proves that a candidate solution is unacceptable, allowing the runtime to short-circuit the remaining suite. Conversely, an early pass confirms only a single check; it provides zero evidence regarding the remainder of the test suite. Intelligent test prioritization and streaming failure detection thus accelerate defect rejection during intermediate iterations. However, final task acceptance still demands full test coverage across the declared verification contract. Furthermore, canceling a running check does not instantly free resources; active worker processes must unwind cleanly, and any intermediate compute costs remain on the ledger until the underlying jobs settle.
+
+::: {.column-margin .margin-pointer}
+↩ Remote work that outlives a local cancellation, and the obligations it leaves to settle, is established in @sec-vol3-failure-recovery.
+:::
 
 ### Profitability boundaries for speculative decoding {#sec-vol3-agent-economics-speculative}
 
@@ -840,9 +856,13 @@ A routing policy shapes the traffic arriving at each downstream model, tool sand
 
 ### Residence, service, and quota {#sec-vol3-agent-economics-residence-service-quota}
 
-For a stable population with finite long-run averages, Little's law [@little1961] (@sec-vol3-kv-workload-dynamics) relates the mean number of admitted trajectories present, $N_{\text{traj}}$, to their admission rate $\lambda_{\text{traj}}$ and mean time from admission to departure, $\mathbb{E}[T_{\text{traj}}]$:
+For a stable population with finite long-run averages, Little's law [@little1961] relates the mean number of admitted trajectories present, $N_{\text{traj}}$, to their admission rate $\lambda_{\text{traj}}$ and mean time from admission to departure, $\mathbb{E}[T_{\text{traj}}]$:
 
 $$N_{\text{traj}} = \lambda_{\text{traj}}\mathbb{E}[T_{\text{traj}}].$$ {#eq-vol3-trajectory-concurrency}
+
+::: {.column-margin .margin-pointer}
+↩ Little's law is established for KV-cache slot occupancy and residence time in @sec-vol3-kv-workload-dynamics.
+:::
 
 Applying Little's law requires rigorous accounting of system boundaries. Trajectories rejected at admission never enter the system population, whereas admitted attempts that eventually fail or abort contribute fully to concurrency while active. Furthermore, different subsystems hold resources over very different horizons. For instance, a trajectory suspended while waiting for human authorization or asynchronous tool execution remains resident in the orchestrator without consuming model accelerator cycles. We must therefore apply Little's law independently across distinct operational boundaries—sandbox leases, retained key-value cache memory, active model inference workers, and pending external API calls—using the specific arrival rate and holding interval governing each tier. @Sec-vol3-appendix-inference-queueing analyzes this separation in detail, contrasting active trajectory concurrency with memory occupancy across alternative KV-cache retention policies.
 
@@ -1041,7 +1061,11 @@ class TailCompounding:
 *A one-in-a-hundred delay per call becomes routine across a long trajectory.*
 :::
 
-Mean metrics also obscure how tail latency compounds across multi-step execution. If each of $n$ serial calls independently exceeds its 99th-percentile latency with probability $p_{\text{tail}}$, the trajectory encounters at least one such delay with probability $1-(1-p_{\text{tail}})^n$—an application of the horizon compounding principle from @sec-vol3-intro-horizon-arithmetic to latency. For a trajectory of `{python} TailCompounding.n_calls_str` serial calls, each with tail probability `{python} TailCompounding.p_tail_str`, the probability of experiencing at least one tail delay reaches `{python} TailCompounding.p_hit_str`. Sizing a fleet solely for acceptable per-call latency therefore still yields routinely slow end-to-end trajectories. This dynamic is the serial equivalent of the fan-out straggler problem in distributed systems (@sec-vol3-multiagent-backpressure; @dean2013tail). Correlated delays, such as a shared queue that remains backlogged across successive steps, alter the exact probability but preserve the core operational lesson: provision and schedule against trajectory-level percentiles rather than per-call means (principle \ref{pri-vol3-trajectory-goodput})\index{Principle!trajectory goodput and the accepted task}.
+Mean metrics also obscure how tail latency compounds across multi-step execution. If each of $n$ serial calls independently exceeds its 99th-percentile latency with probability $p_{\text{tail}}$, the trajectory encounters at least one such delay with probability $1-(1-p_{\text{tail}})^n$—an application of the horizon compounding principle from @sec-vol3-intro-horizon-arithmetic to latency. For a trajectory of `{python} TailCompounding.n_calls_str` serial calls, each with tail probability `{python} TailCompounding.p_tail_str`, the probability of experiencing at least one tail delay reaches `{python} TailCompounding.p_hit_str`. Sizing a fleet solely for acceptable per-call latency therefore still yields routinely slow end-to-end trajectories. This dynamic is the serial equivalent of the fan-out straggler problem in distributed systems [@dean2013tail]. Correlated delays, such as a shared queue that remains backlogged across successive steps, alter the exact probability but preserve the core operational lesson: provision and schedule against trajectory-level percentiles rather than per-call means (principle \ref{pri-vol3-trajectory-goodput})\index{Principle!trajectory goodput and the accepted task}.
+
+::: {.column-margin .margin-pointer}
+↩ The parallel counterpart, an all-results barrier exposed to fan-out stragglers, is established in @sec-vol3-multiagent-backpressure.
+:::
 
 Integrating queueing delays completes the model-routing framework of @sec-vol3-agent-economics-cascades. A dynamic router compares eligible *remaining paths*—incorporating queue and service delays, retained-resource costs, verification checks, and potential escalation paths—under an identical quality contract. Because dispatching decisions alter the arrival rates that produced the initial delay estimates, the router must refresh queue projections whenever traffic shifts. Separating interactive and batch pools, or enforcing priority scheduling, protects latency-bound work at a quantifiable cost in fairness and cluster utilization.
 
@@ -1515,7 +1539,11 @@ This steady-state model assumes that all verification jobs complete cleanly and 
 
 Furthermore, expected cost per resolved ticket does not tell the whole operational story. The model leaves queueing dynamics, completion-time distributions, and human engineering bandwidth unmodeled. If incoming tickets arrive in sudden bursts, or if the engineering staff has fixed capacity, routing even a small fraction of failures to human triage can saturate the queue and introduce catastrophic review latencies. Under stringent service-level agreements or strict staffing limits, a team may deliberately select a direct frontier model call over a bounded loop or rewriter—even at higher automated spend—simply to minimize the volume of work escaping to human queues.
 
-Multi-agent delegation obeys this same objective-first economic evaluation when benchmarked against a capable single controller (@sec-vol3-multiagent-evaluation). Decomposing a complex task across a coordinator and specialized child agents introduces communication overhead, state synchronization costs, and token amplification. Paying that premium is justified when the multi-agent system unlocks concurrent execution that meets latency deadlines a sequential loop would miss, or when specialized sub-agents achieve higher conditional acceptance on subproblems that confound a monolithic prompt. Economic viability does not require an architecture to dominate every competing design on both cost and latency simultaneously; Pareto dominance is sufficient, but in real systems engineering, meeting a critical operational deadline under an admissible budget is what actually decides the deployment.
+Multi-agent delegation obeys this same objective-first economic evaluation when benchmarked against a capable single controller. Decomposing a complex task across a coordinator and specialized child agents introduces communication overhead, state synchronization costs, and token amplification. Paying that premium is justified when the multi-agent system unlocks concurrent execution that meets latency deadlines a sequential loop would miss, or when specialized sub-agents achieve higher conditional acceptance on subproblems that confound a monolithic prompt. Economic viability does not require an architecture to dominate every competing design on both cost and latency simultaneously; Pareto dominance is sufficient, but in real systems engineering, meeting a critical operational deadline under an admissible budget is what actually decides the deployment.
+
+::: {.column-margin .margin-pointer}
+↩ The matched single-controller baseline against which multi-agent delegation is benchmarked is established in @sec-vol3-multiagent-evaluation.
+:::
 
 ## Cost per Accepted Task by Archetype {#sec-vol3-agent-economics-synthesis}
 
@@ -1889,10 +1917,6 @@ Every given below is a hypothetical problem input rather than a price, rate, or 
    b. After the fix, log analysis receives $\$15$ and canary replay $\$11$. Log analysis closes with $\$9$ settled. An operator then cancels canary replay when it has $\$3$ settled and a remote load test outstanding with an enforced bound of $\$6$; that test later bills $\$4.20$. Tabulate the root's $E$, $R$, and $F$ at each boundary, and compute what a release at local stop would return against what may safely be returned.
    c. A trailing-window limit allows $C_{\text{win}}=\$8$ of admitted bounds per $T_{\text{win}}=10$ minutes across all children. Requests arrive at minute $0$ ($\$3$), minute $2$ ($\$4$), minute $6$ ($\$2$), and minute $11$ ($\$2$); the first operation settles at minute $1$ for $\$1$. Decide each admission, and show what an implementation that credits early settlement back to the window would admit instead.
    d. The agent now proposes renting a load-generation cluster whose provider enforces no duration or spending cap. Redesign the admission path so the task keeps a hard ceiling, and explain why an operator's approval of the production change does not substitute for a budget reservation.
-
-::: {.column-margin .margin-pointer}
-↪ End-to-end integration, trajectory ownership, and specification boundaries are synthesized in @sec-vol3-conclusion.
-:::
 
 ::: {.callout-chapter-connection title="From priced parts to one trajectory"}
 

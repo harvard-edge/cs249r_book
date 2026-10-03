@@ -54,7 +54,11 @@ The connection-pool repair agent (lighthouse \ref{lhs-vol3-repair-agent}) has re
 *State becomes a physical resource claim inside the serving system.*
 :::
 
-Earlier abstractions stop short of that physical commitment. @Sec-vol3-context-engineering established how the harness selects and refreshes prompt context for each call, and @sec-vol3-foundation-model-cost priced a cached prefix as a discounted line on the bill. Neither abstraction captures the physical footprint of the underlying computation: how many gigabytes of memory those intermediate activations consume, how many concurrent trajectories an accelerator can hold at once, or what the runtime should do with that state when an agent pauses to await tool execution. Those mechanical questions dictate whether an inference node that comfortably supports a single repair workflow can scale to sustain dozens.
+Earlier abstractions stop short of that physical commitment. @Sec-vol3-context-engineering established how the harness selects and refreshes prompt context for each call, and the per-call cost model priced a cached prefix as a discounted line on the bill. Neither abstraction captures the physical footprint of the underlying computation: how many gigabytes of memory those intermediate activations consume, how many concurrent trajectories an accelerator can hold at once, or what the runtime should do with that state when an agent pauses to await tool execution. Those mechanical questions dictate whether an inference node that comfortably supports a single repair workflow can scale to sustain dozens.
+
+::: {.column-margin .margin-pointer}
+↩ The discounted pricing of a cached prompt prefix is established in @sec-vol3-foundation-model-trajectory-cost-accumulation.
+:::
 
 Managing retained attention state is not solely an internal runtime problem; it spans an operational boundary between two parties. The application caller controls its submitted context, tool execution timing, and any cache-management hints the serving API exposes. The serving operator controls physical device allocation, memory placement, compute scheduling, and retention policies. When the two belong to separate organizations—as with hosted commercial model APIs—the caller cannot manage physical accelerator memory directly. Instead, the application influences retention only through the interfaces and pricing tiers the service exposes. Distinguishing where these responsibilities divide clarifies which performance levers belong to the agent harness and which belong to the serving runtime.
 
@@ -509,11 +513,7 @@ Paged allocation decouples logical sequence expansion from physical memory layou
 
 ## Prefix Caching Across Turns {#sec-vol3-kvcache-radix-tree}
 
-In the connection-pool repair scenario, the agent invocation that processes an integration-test result often begins with the identical system prompt, tool definitions, and historical observations present in the preceding turn. If the serving runtime retained the corresponding key-value (KV) activations from that earlier call, it can attach those existing tensors directly to the new request, prefilling only the newly arrived tokens. Economic pricing models treat this saving as prefix caching; in system implementation, it translates into a concrete serving architecture governed by an index, an explicit ownership contract, and an eviction policy.
-
-::: {.column-margin .margin-pointer}
-↩ The economic pricing of prefix caching is established in @sec-vol3-foundation-model-cost.
-:::
+In the connection-pool repair scenario, the agent invocation that processes an integration-test result often begins with the identical system prompt, tool definitions, and historical observations present in the preceding turn. If the serving runtime retained the corresponding key-value (KV) activations from that earlier call, it can attach those existing tensors directly to the new request, prefilling only the newly arrived tokens. Priced per call, this saving is prefix caching; in system implementation, it translates into a concrete serving architecture governed by an index, an explicit ownership contract, and an eviction policy.
 
 ::: {#dfn-prefix-cache .callout-definition title="Prefix cache"}
 
@@ -531,7 +531,11 @@ In causal full-attention architectures, reusable KV state requires an exact, con
 
 Compatibility, physical availability, and tenant isolation represent three distinct verification boundaries. Computationally compatible tensors may have already been evicted from accelerator high-bandwidth memory (HBM), or they may reside in host memory or on solid-state drives, requiring an explicit page-in transfer before the model can consume them. Conversely, tensors residing directly in local GPU memory may belong to a different tenant or security domain, making them ineligible for sharing under isolation rules. The reusable prefix length is the longest contiguous token sequence that simultaneously satisfies compatibility, physical residency, and access permissions—a sequence frequently shorter than the longest match found in the prefix tree. Furthermore, newly generated tokens qualify for subsequent prefix matching only after their corresponding KV blocks have been fully materialized in memory and committed to the index.
 
-These structural requirements operate independently of semantic validity. Updating a target repository from commit `r17` to `r18` does not alter or invalidate the KV activations previously computed for an older prompt describing `r17`. Those tensors remain numerically identical and computationally compatible with the stale prompt, even though the context no longer reflects the current state of the code. Context-selection policies govern which evidence to provide to the model. When the agent harness updates or replaces outdated logs in the serialized prompt, the prefix matcher detects the divergence, immediately terminates the match at the first altered token, and triggers a fresh prefill for the updated text. The prompt layout, rather than the cache layer, enforces freshness.
+These structural requirements operate independently of semantic validity. Updating a target repository from commit `r17` to `r18` does not alter or invalidate the KV activations previously computed for an older prompt describing `r17`. Those tensors remain numerically identical and computationally compatible with the stale prompt, even though the context no longer reflects the current state of the code. The harness's context-selection policies govern which evidence to provide to the model. When the agent harness updates or replaces outdated logs in the serialized prompt, the prefix matcher detects the divergence, immediately terminates the match at the first altered token, and triggers a fresh prefill for the updated text. The prompt layout, rather than the cache layer, enforces freshness.
+
+::: {.column-margin .margin-pointer}
+↩ How the harness withdraws a stale observation, such as the `r17` test failure, while keeping it as history is established in @sec-vol3-context-engineering-context-rot.
+:::
 
 ### Radix prefix lookup {#sec-vol3-kv-cache-radix-lookup}
 
@@ -899,7 +903,7 @@ $$\frac{T_{\text{reload}}}{T_{\text{recompute}}} = \frac{S \, m_{\text{token}} /
 *Reloading paused state beats rebuilding it by about `{python} PausedStateChoice.ratio_mult_str` at every context length.*
 :::
 
-Here $R_{\text{attain}}$ represents the sustained prefill throughput, and $m_{\text{token}}$ is the cache footprint per token. @Eq-kv-reload-ratio applies the queueing comparison of @sec-vol3-appendix-inference-queueing to this reference architecture. Offloading and reloading is approximately `{python} PausedStateChoice.ratio_mult_str` faster than recomputing from raw tokens. Even when heavy bus contention degrades link bandwidth to a quarter of its rated capacity, reloading remains `{python} PausedStateChoice.ratio_quarter_mult_str` faster than prefill. On this architecture, recomputation is advantageous only when host DRAM capacity or PCIe bandwidth is saturated by competing workloads, leaving accelerator compute as the less congested resource.
+Here $R_{\text{attain}}$ represents the sustained prefill throughput, and $m_{\text{token}}$ is the cache footprint per token. @Eq-kv-reload-ratio applies the reload-versus-reconstruction comparison of @sec-vol3-appendix-inference-queueing to this reference architecture. Offloading and reloading is approximately `{python} PausedStateChoice.ratio_mult_str` faster than recomputing from raw tokens. Even when heavy bus contention degrades link bandwidth to a quarter of its rated capacity, reloading remains `{python} PausedStateChoice.ratio_quarter_mult_str` faster than prefill. On this architecture, recomputation is advantageous only when host DRAM capacity or PCIe bandwidth is saturated by competing workloads, leaving accelerator compute as the less congested resource.
 
 Retaining the cache on-chip throughout the `{python} PausedStateChoice.wait_str` wait ties up `{python} PausedStateChoice.state_str` $\times$ `{python} PausedStateChoice.wait_str` $\approx$ `{python} PausedStateChoice.held_str` of memory-time capacity (calculated using the unrounded payload). This cumulative occupancy translates into lost serving capacity whenever concurrent requests queue for device memory.
 
