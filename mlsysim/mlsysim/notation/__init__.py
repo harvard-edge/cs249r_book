@@ -38,35 +38,13 @@ class NotationRegistry:
                 category=v.get('category', '')
             )
             
+            # Add to flat registry
             attr_name = sym.macro.lstrip('\\')
             self._all_symbols[attr_name] = sym
             setattr(self, attr_name, sym)
 
     def __iter__(self):
         return iter(self._all_symbols.values())
-
-    def render_table(self, category: str):
-        """Prints a Markdown table for a specific category, for Quarto's output: asis"""
-        vars_list = [v for v in self._all_symbols.values() if v.category == category]
-        vars_list.sort(key=lambda x: x.macro)
-        
-        is_disambig = "disambiguation" in category.lower() or "resolving collisions" in category.lower()
-        
-        print("::: {tbl-colwidths=\"[10,20,13,57]\"}\n")
-        if is_disambig:
-            print("| **Symbol** | **Canonical Convention** | **Colliding Meaning** | **Disambiguation Rule** |")
-        else:
-            print("| **Symbol** | **Definition** | **Unit** | **Notes** |")
-        print("|:---|:---|:---|:---|")
-        
-        for var in vars_list:
-            symbol = f"**${var.latex}$**"
-            defn = f"**{var.definition}**"
-            unit = getattr(var, 'unit', '') or ''
-            notes = (getattr(var, 'notes', '') or '').replace('\n', ' ')
-            print(f"| {symbol} | {defn} | {unit} | {notes} |")
-        
-        print("\n:::\n")
 
 # Global singleton
 SYMBOLS = NotationRegistry()
