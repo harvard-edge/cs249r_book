@@ -109,7 +109,10 @@ class Nodes(Registry):
         psu_redundancy=3,
         psu_rating=3.0 * kilowatt,
         max_power=6.5 * kilowatt,
-        metadata=Metadata(provenance=pc.DGX_GPUS_PER_HOST),
+        metadata=Metadata(
+            provenance=pc.DGX_A100_USER_GUIDE_POWER,
+            description="Official NVIDIA DGX A100 server: 8x A100 80GB SXM4, six 3 kW PSUs in 3+3 redundancy (6.5 kW max).",
+        ),
     )
     DGX_B200 = Node(
         name="DGX B200",
@@ -123,7 +126,10 @@ class Nodes(Registry):
         psu_redundancy=1,
         psu_rating=3.3 * kilowatt,
         max_power=14.3 * kilowatt,
-        metadata=Metadata(provenance=pc.DGX_GPUS_PER_HOST),
+        metadata=Metadata(
+            provenance=pc.DGX_B200_USER_GUIDE_POWER,
+            description="Official NVIDIA DGX B200 server: 8x B200 180GB SXM6, six 3.3 kW PSUs in 5+1 redundancy (14.3 kW max).",
+        ),
     )
     Kempner_H100_4GPU = Node(
         name="Kempner H100 4-GPU Server",
@@ -166,43 +172,43 @@ class Fabrics(Registry):
     """Vetted network fabrics (canonical bandwidth + latency)."""
     Ethernet_10G = NetworkFabric(
         name="10GbE", bandwidth=10 * Gbps, latency=Q_(TCP_LATENCY_US, "us"),
-        metadata=Metadata(provenance=pc.FABRIC_LATENCY_ASSUMPTIONS),
+        metadata=Metadata(provenance=pc.FABRIC_LATENCY_ASSUMPTIONS, description="Standard 10 Gb/s Ethernet fabric with TCP latency."),
     )
     Ethernet_100G = NetworkFabric(
         name="100GbE", bandwidth=100 * Gbps, latency=Q_(TCP_LATENCY_US, "us"),
-        metadata=Metadata(provenance=pc.FABRIC_LATENCY_ASSUMPTIONS),
+        metadata=Metadata(provenance=pc.FABRIC_LATENCY_ASSUMPTIONS, description="Standard 100 Gb/s Ethernet fabric with TCP latency."),
     )
     Ethernet_400G = NetworkFabric(
         name="400GbE", bandwidth=400 * Gbps, latency=Q_(TCP_LATENCY_US, "us"),
-        metadata=Metadata(provenance=_FABRIC_PROV["eth400"]),
+        metadata=Metadata(provenance=_FABRIC_PROV["eth400"], description="High-speed 400 Gb/s Ethernet fabric."),
     )
     Ethernet_800G = NetworkFabric(
         name="800GbE", bandwidth=800 * Gbps, latency=Q_(TCP_LATENCY_US, "us"),
-        metadata=Metadata(provenance=_FABRIC_PROV["eth800"]),
+        metadata=Metadata(provenance=_FABRIC_PROV["eth800"], description="High-speed 800 Gb/s Ethernet fabric."),
     )
     Ethernet_1P6T = NetworkFabric(
         name="1.6TbE", bandwidth=1600 * Gbps, latency=Q_(TCP_LATENCY_US, "us"),
-        metadata=Metadata(provenance=_FABRIC_PROV["eth800"]),
+        metadata=Metadata(provenance=_FABRIC_PROV["eth800"], description="Next-generation 1.6 Tb/s Ethernet fabric."),
     )
     RoCE_100G = NetworkFabric(
         name="100GbE RoCE", bandwidth=100 * Gbps, latency=Q_(ROCE_LATENCY_US, "us"),
-        metadata=Metadata(provenance=_FABRIC_PROV["roce"]),
+        metadata=Metadata(provenance=_FABRIC_PROV["roce"], description="100 Gb/s RDMA over Converged Ethernet (RoCE v2) fabric."),
     )
     InfiniBand_HDR = NetworkFabric(
         name="IB HDR", bandwidth=_INFINIBAND_HDR_BW, latency=Q_(IB_HDR_LATENCY_US, "us"),
-        metadata=Metadata(provenance=_FABRIC_PROV["hdr"]),
+        metadata=Metadata(provenance=_FABRIC_PROV["hdr"], description="200 Gb/s InfiniBand HDR fabric."),
     )
     InfiniBand_NDR = NetworkFabric(
         name="IB NDR", bandwidth=_INFINIBAND_NDR_BW, latency=Q_(IB_NDR_LATENCY_US, "us"),
-        metadata=Metadata(provenance=_FABRIC_PROV["ndr"]),
+        metadata=Metadata(provenance=_FABRIC_PROV["ndr"], description="400 Gb/s NVIDIA Quantum-2 InfiniBand NDR fabric."),
     )
     InfiniBand_XDR = NetworkFabric(
         name="IB XDR", bandwidth=_INFINIBAND_XDR_BW, latency=Q_(IB_NDR_LATENCY_US, "us"),
-        metadata=Metadata(provenance=_FABRIC_PROV["xdr"]),
+        metadata=Metadata(provenance=_FABRIC_PROV["xdr"], description="800 Gb/s InfiniBand XDR fabric."),
     )
     InfiniBand_GXDR = NetworkFabric(
         name="IB GXDR", bandwidth=_INFINIBAND_GXDR_BW, latency=Q_(IB_NDR_LATENCY_US, "us"),
-        metadata=Metadata(provenance=_FABRIC_PROV["xdr"]),
+        metadata=Metadata(provenance=_FABRIC_PROV["xdr"], description="1.6 Tb/s InfiniBand GXDR fabric."),
     )
     # --- Added 2026-09-28 ---
     InfiniBand_EDR = NetworkFabric(
@@ -216,12 +222,12 @@ class Fabrics(Registry):
     InfiniBand_NDR_Oversub2to1 = NetworkFabric(
         name="IB NDR (2:1 oversubscribed)", bandwidth=_INFINIBAND_NDR_BW,
         latency=Q_(IB_NDR_LATENCY_US, "us"), oversubscription_ratio=2.0,
-        metadata=Metadata(provenance=pc.FABRIC_OVERSUBSCRIPTION_PROFILES),
+        metadata=Metadata(provenance=pc.FABRIC_OVERSUBSCRIPTION_PROFILES, description="400 Gb/s InfiniBand NDR fabric with 2:1 oversubscription."),
     )
     InfiniBand_NDR_Oversub4to1 = NetworkFabric(
         name="IB NDR (4:1 oversubscribed)", bandwidth=_INFINIBAND_NDR_BW,
         latency=Q_(IB_NDR_LATENCY_US, "us"), oversubscription_ratio=4.0,
-        metadata=Metadata(provenance=pc.FABRIC_OVERSUBSCRIPTION_PROFILES),
+        metadata=Metadata(provenance=pc.FABRIC_OVERSUBSCRIPTION_PROFILES, description="400 Gb/s InfiniBand NDR fabric with 4:1 oversubscription."),
     )
 
 
@@ -510,7 +516,10 @@ class Storage(Registry):
         media="NVMe SSD",
         interface="PCIe Gen5",
         durability="local",
-        metadata=Metadata(provenance=pc.STORAGE_TIER_CONVENTIONS),
+        metadata=Metadata(
+            provenance=pc.STORAGE_TIER_CONVENTIONS,
+            description="Enterprise PCIe Gen5 local NVMe SSD storage subsystem.",
+        ),
     )
     LocalNvmeGen4 = StorageSubsystem(
         name="Local NVMe SSD (Gen4)",
@@ -520,7 +529,10 @@ class Storage(Registry):
         media="NVMe SSD",
         interface="PCIe Gen4",
         durability="local",
-        metadata=Metadata(provenance=pc.STORAGE_TIER_CONVENTIONS),
+        metadata=Metadata(
+            provenance=pc.STORAGE_TIER_CONVENTIONS,
+            description="Enterprise PCIe Gen4 local NVMe SSD storage subsystem.",
+        ),
     )
     LocalNvmeGen3 = StorageSubsystem(
         name="Local NVMe SSD (Gen3)",
@@ -530,7 +542,10 @@ class Storage(Registry):
         media="NVMe SSD",
         interface="PCIe Gen3",
         durability="local",
-        metadata=Metadata(provenance=pc.STORAGE_TIER_CONVENTIONS),
+        metadata=Metadata(
+            provenance=pc.STORAGE_TIER_CONVENTIONS,
+            description="Enterprise PCIe Gen3 local NVMe SSD storage subsystem.",
+        ),
     )
     SataSsd = StorageSubsystem(
         name="SATA SSD",
@@ -539,7 +554,10 @@ class Storage(Registry):
         media="SATA SSD",
         interface="SATA",
         durability="local",
-        metadata=Metadata(provenance=pc.STORAGE_TIER_CONVENTIONS),
+        metadata=Metadata(
+            provenance=pc.STORAGE_TIER_CONVENTIONS,
+            description="Standard SATA III 6 Gb/s solid-state drive storage subsystem.",
+        ),
     )
     SataSsdEffective = StorageSubsystem(
         name="SATA SSD (effective sequential)",
@@ -547,7 +565,10 @@ class Storage(Registry):
         media="SATA SSD",
         interface="SATA",
         durability="local",
-        metadata=Metadata(provenance=pc.STORAGE_TIER_CONVENTIONS),
+        metadata=Metadata(
+            provenance=pc.STORAGE_TIER_CONVENTIONS,
+            description="Effective sequential bandwidth profile for SATA SSD storage.",
+        ),
     )
     Hdd7200Rpm = StorageSubsystem(
         name="7.2k RPM HDD",
@@ -556,14 +577,20 @@ class Storage(Registry):
         media="HDD",
         interface="SATA",
         durability="local",
-        metadata=Metadata(provenance=pc.STORAGE_TIER_CONVENTIONS),
+        metadata=Metadata(
+            provenance=pc.STORAGE_TIER_CONVENTIONS,
+            description="Enterprise 7,200 RPM mechanical hard disk drive storage subsystem.",
+        ),
     )
     CloudBlockStorageBaseline = StorageSubsystem(
         name="Cloud block storage baseline",
         bandwidth=250 * (MB / ureg.second),
         media="cloud block volume",
         durability="durable",
-        metadata=Metadata(provenance=pc.STORAGE_TIER_CONVENTIONS),
+        metadata=Metadata(
+            provenance=pc.STORAGE_TIER_CONVENTIONS,
+            description="Baseline high-performance cloud network block storage volume.",
+        ),
     )
     ObjectStoreSingleStream = StorageSubsystem(
         name="Object storage single-stream read",
@@ -571,7 +598,10 @@ class Storage(Registry):
         media="object storage",
         interface="HTTP range request",
         durability="durable",
-        metadata=Metadata(provenance=pc.STORAGE_TIER_CONVENTIONS),
+        metadata=Metadata(
+            provenance=pc.STORAGE_TIER_CONVENTIONS,
+            description="Single-stream cloud object store read performance profile.",
+        ),
     )
     LocalNvmeTrainingLow = StorageSubsystem(
         name="Local NVMe training tier (low)",
@@ -579,7 +609,10 @@ class Storage(Registry):
         media="NVMe SSD",
         interface="PCIe",
         durability="local",
-        metadata=Metadata(provenance=pc.STORAGE_TIER_CONVENTIONS),
+        metadata=Metadata(
+            provenance=pc.STORAGE_TIER_CONVENTIONS,
+            description="Lower-tier local NVMe training scratch storage subsystem.",
+        ),
     )
     LocalNvmeTrainingTypical = StorageSubsystem(
         name="Local NVMe training tier (typical)",
@@ -587,19 +620,28 @@ class Storage(Registry):
         media="NVMe SSD",
         interface="PCIe",
         durability="local",
-        metadata=Metadata(provenance=pc.STORAGE_TIER_CONVENTIONS),
+        metadata=Metadata(
+            provenance=pc.STORAGE_TIER_CONVENTIONS,
+            description="Typical-tier local NVMe training scratch storage subsystem.",
+        ),
     )
     LocalNvmeGen4x4 = NodeStorageConfig(
         name="4x local Gen4 NVMe drives per node",
         device=LocalNvmeGen4,
         devices_per_node=4,
-        metadata=Metadata(provenance=pc.STORAGE_TIER_CONVENTIONS),
+        metadata=Metadata(
+            provenance=pc.STORAGE_TIER_CONVENTIONS,
+            description="4x local enterprise PCIe Gen4 NVMe SSDs in RAID 0 per node.",
+        ),
     )
     LocalNvmeGen5x4 = NodeStorageConfig(
         name="4x local Gen5 NVMe drives per node",
         device=LocalNvmeGen5,
         devices_per_node=4,
-        metadata=Metadata(provenance=pc.STORAGE_TIER_CONVENTIONS),
+        metadata=Metadata(
+            provenance=pc.STORAGE_TIER_CONVENTIONS,
+            description="4x local enterprise PCIe Gen5 NVMe SSDs in RAID 0 per node.",
+        ),
     )
     # --- Added 2026-09-28 ---
     LocalNvmeGen4_7T68 = StorageSubsystem(
@@ -620,7 +662,10 @@ class Storage(Registry):
         name="4x local Gen4 7.68 TB NVMe drives per node",
         device=LocalNvmeGen4_7T68,
         devices_per_node=4,
-        metadata=Metadata(provenance=pc.STORAGE_TIER_CONVENTIONS),
+        metadata=Metadata(
+            provenance=pc.STORAGE_TIER_CONVENTIONS,
+            description="4x local enterprise PCIe Gen4 7.68 TB NVMe SSDs per node.",
+        ),
     )
     PfsPerNodeShare = StorageSubsystem(
         name="Parallel file system per-client share (uncontended)",
@@ -666,5 +711,8 @@ class Systems(Registry):
     Racks = Racks
     Reliability = Reliability
     Orchestration = OrchestrationProfile(
-        metadata=Metadata(provenance=pc.ORCHESTRATION_ASSUMPTIONS)
+        metadata=Metadata(
+            provenance=pc.ORCHESTRATION_ASSUMPTIONS,
+            description="Reference Kubernetes and SLURM orchestration overhead and scheduling latency assumptions.",
+        )
     )

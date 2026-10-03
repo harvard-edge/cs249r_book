@@ -28,7 +28,10 @@ class Quadrupeds(Registry):
         nominal_power=400.0 * ureg.watt,
         transmission="Quasi-Direct Drive (QDD) / Brushless Outrunner",
         compute_soc=Hardware.Edge.JetsonAGXOrin,
-        metadata=Metadata(provenance=pc.BOSTON_DYNAMICS_SPOT),
+        metadata=Metadata(
+            provenance=pc.BOSTON_DYNAMICS_SPOT,
+            description="Boston Dynamics Spot quadruped robot (Class 1 dynamic mobility, 14 kg payload).",
+        ),
     )
 
 
@@ -47,7 +50,10 @@ class Humanoids(Registry):
         nominal_power=1500.0 * ureg.watt,
         transmission="High-bandwidth electro-hydraulic / QDD electric",
         compute_soc=Hardware.Edge.JetsonAGXOrin,
-        metadata=Metadata(provenance=pc.BOSTON_DYNAMICS_ATLAS),
+        metadata=Metadata(
+            provenance=pc.BOSTON_DYNAMICS_ATLAS,
+            description="Boston Dynamics Atlas bipedal humanoid robot (Class 4 humanoid capstone, 28 DoF).",
+        ),
     )
 
     Unitree_H1 = EmbodiedPlatform(
@@ -65,7 +71,10 @@ class Humanoids(Registry):
             0.9 * ureg.meter, pc.UNITREE_H1_COM_HEIGHT_ESTIMATE,
             name="Unitree H1 standing center-of-mass height (estimate)",
         ),
-        metadata=Metadata(provenance=pc.UNITREE_H1_HUMANOID),
+        metadata=Metadata(
+            provenance=pc.UNITREE_H1_HUMANOID,
+            description="Unitree H1 full-size general-purpose humanoid robot (18 DoF, 30 kg payload).",
+        ),
     )
 
 
@@ -108,7 +117,10 @@ class Manipulators(Registry):
             1.7 * (ureg.meter / ureg.second), pc.FRANKA_FER_CONTROL_LIMITS,
             name="FER Cartesian translational velocity limit",
         ),
-        metadata=Metadata(provenance=pc.FRANKA_EMIKA_PANDA),
+        metadata=Metadata(
+            provenance=pc.FRANKA_EMIKA_PANDA,
+            description="Franka Emika Panda 7-DoF collaborative robotic manipulator arm with torque sensing.",
+        ),
     )
 
     ALOHA_Bimanual = EmbodiedPlatform(
@@ -122,7 +134,10 @@ class Manipulators(Registry):
         nominal_power=150.0 * ureg.watt,
         transmission="Dynamixel servo actuators / 4-bar linkage gripper",
         compute_soc=Hardware.Edge.JetsonAGXOrin,
-        metadata=Metadata(provenance=pc.ALOHA_BIMANUAL_MANIPULATOR),
+        metadata=Metadata(
+            provenance=pc.ALOHA_BIMANUAL_MANIPULATOR,
+            description="ALOHA low-cost bimanual teleoperation and learning manipulation platform (14 DoF).",
+        ),
     )
 
 
@@ -140,7 +155,10 @@ class Drones(Registry):
         nominal_power=1000.0 * ureg.watt,
         transmission="Direct-drive brushless DC motors (FOC)",
         compute_soc=Hardware.Edge.JetsonOrinNano,
-        metadata=Metadata(provenance=pc.DJI_MATRICE_350_RTK),
+        metadata=Metadata(
+            provenance=pc.DJI_MATRICE_350_RTK,
+            description="DJI Matrice 350 RTK industrial drone platform (Class 1 aerial mobility, 2.7 kg payload).",
+        ),
     )
 
 
@@ -158,7 +176,10 @@ class AMRs(Registry):
         nominal_power=500.0 * ureg.watt,
         transmission="Differential wheel drive with planetary gearboxes",
         compute_soc=Hardware.Edge.JetsonAGXOrin,
-        metadata=Metadata(provenance=pc.INDUSTRIAL_AMR),
+        metadata=Metadata(
+            provenance=pc.INDUSTRIAL_AMR,
+            description="500 kg payload industrial logistics autonomous mobile robot platform.",
+        ),
     )
 
     WarehouseAMR = EmbodiedPlatform(
@@ -172,7 +193,10 @@ class AMRs(Registry):
         nominal_power=600.0 * ureg.watt,
         transmission="Differential dual-drive in-wheel brushless motors",
         compute_soc=Hardware.Edge.JetsonAGXOrin,
-        metadata=Metadata(provenance=pc.WAREHOUSE_AMR),
+        metadata=Metadata(
+            provenance=pc.WAREHOUSE_AMR,
+            description="1000 kg payload warehouse fulfillment autonomous mobile robot platform.",
+        ),
     )
 
     HeavyAMR = EmbodiedPlatform(
@@ -186,7 +210,10 @@ class AMRs(Registry):
         nominal_power=550.0 * ureg.watt,
         transmission="Differential drive with planetary reduction",
         compute_soc=Hardware.Edge.JetsonAGXOrin,
-        metadata=Metadata(provenance=pc.HEAVY_AMR),
+        metadata=Metadata(
+            provenance=pc.HEAVY_AMR,
+            description="800 kg payload heavy industrial logistics autonomous mobile robot platform.",
+        ),
     )
 
 
@@ -203,7 +230,10 @@ class Vehicles(Registry):
         nominal_power=2500.0 * ureg.watt,
         transmission="Electric multi-motor powertrain",
         compute_soc=Hardware.Embodied.DriveThor,
-        metadata=Metadata(provenance=pc.AUTONOMOUS_VEHICLE_ROBOTAXI),
+        metadata=Metadata(
+            provenance=pc.AUTONOMOUS_VEHICLE_ROBOTAXI,
+            description="Level 4 autonomous passenger vehicle and robotaxi platform (Class 1 heavy mobility).",
+        ),
     )
 
     UberATG_VolvoXC90 = EmbodiedPlatform(
@@ -216,7 +246,10 @@ class Vehicles(Registry):
         nominal_power=2500.0 * ureg.watt,
         transmission="Hydraulic friction braking with steer-by-wire",
         compute_soc=Hardware.Edge.JetsonAGXOrin,
-        metadata=Metadata(provenance=pc.UBER_ATG_VOLVO_XC90),
+        metadata=Metadata(
+            provenance=pc.UBER_ATG_VOLVO_XC90,
+            description="Uber Advanced Technologies Group Volvo XC90 automated test vehicle.",
+        ),
     )
 
 
@@ -231,7 +264,10 @@ class ContinuousProcesses(Registry):
         nominal_power=5000.0 * ureg.watt,
         transmission="CNC gantry with fiber laser and powder nozzle",
         compute_soc=Hardware.Edge.JetsonAGXOrin,
-        metadata=Metadata(provenance=pc.DED_MELT_POOL_PROCESS),
+        metadata=Metadata(
+            provenance=pc.DED_MELT_POOL_PROCESS,
+            description="Laser directed energy deposition (DED) additive manufacturing continuous process (Class 3).",
+        ),
     )
 
 
@@ -322,7 +358,10 @@ class MobileManipulators(Registry):
         drive_bus_converter_efficiency=0.91,                   # DDR-240C-24 typical efficiency (MEANWELL_DDR240)
         drive_bus_clamp=60.0 * ureg.volt,                      # chosen: above 54 V full charge, below 67.2 V converter maximum
         drive_bus_switch_rating=100.0 * ureg.volt,             # chosen: 100 V switch class, >= 1.5x the clamp
-        metadata=Metadata(provenance=pc.WAREHOUSE_MOBILE_MANIPULATOR),
+        metadata=Metadata(
+            provenance=pc.WAREHOUSE_MOBILE_MANIPULATOR,
+            description="Composite warehouse mobile manipulator: WarehouseAMR base with Franka Panda arm and Jetson AGX Orin.",
+        ),
     )
 
 
@@ -463,7 +502,10 @@ class SiteScenarios(Registry):
         v_takeover_resolution=0.05 * (ureg.meter / ureg.second),  # chosen
         v_takeover_out_of_loop=0.15 * (ureg.meter / ureg.second),  # chosen crawl, under the sourced out-of-loop ceiling (was 0.3)
         i_rail_transient=70.0 * ureg.ampere,                   # illustrative coincident inference + drive transient
-        metadata=Metadata(provenance=pc.WAREHOUSE_AISLE_SCENARIO),
+        metadata=Metadata(
+            provenance=pc.WAREHOUSE_AISLE_SCENARIO,
+            description="Warehouse aisle operation site scenario: delay, clearance, friction, and safety stopping budgets.",
+        ),
     )
 
 
