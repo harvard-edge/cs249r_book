@@ -320,8 +320,36 @@ def test_disambiguated_state_and_interconnect_constants():
     assert NVLINK4_BANDWIDTH_UNIDIRECTIONAL.to(GB / second).magnitude == 450.0
     assert NVLINK4_BANDWIDTH_BIDIRECTIONAL.to(GB / second).magnitude == 900.0
 
+    from mlsysim.core.units import (
+        NVLINK3_BANDWIDTH_UNIDIRECTIONAL,
+        NVLINK3_BANDWIDTH_BIDIRECTIONAL,
+        NVLINK5_BANDWIDTH_UNIDIRECTIONAL,
+        NVLINK5_BANDWIDTH_BIDIRECTIONAL,
+    )
+    assert NVLINK3_BANDWIDTH_UNIDIRECTIONAL.to(GB / second).magnitude == 300.0
+    assert NVLINK3_BANDWIDTH_BIDIRECTIONAL.to(GB / second).magnitude == 600.0
+    assert NVLINK5_BANDWIDTH_UNIDIRECTIONAL.to(GB / second).magnitude == 900.0
+    assert NVLINK5_BANDWIDTH_BIDIRECTIONAL.to(GB / second).magnitude == 1800.0
+
+    # Accelerators precision FLOPs (dense vs sparse)
+    a100 = Hardware.Cloud.A100
+    assert a100.compute.precision_flops["fp16_dense"].to(ureg.TFLOP / ureg.second).magnitude == pytest.approx(312.0)
+    assert a100.compute.precision_flops["fp16_sparse"].to(ureg.TFLOP / ureg.second).magnitude == pytest.approx(624.0)
+
     h100 = Hardware.Cloud.H100
     assert h100.compute.peak_flops.to(ureg.TFLOP / ureg.second).magnitude == pytest.approx(989.0)
     assert h100.compute.precision_flops["fp16_dense"].to(ureg.TFLOP / ureg.second).magnitude == pytest.approx(989.0)
     assert h100.compute.precision_flops["fp16_sparse"].to(ureg.TFLOP / ureg.second).magnitude == pytest.approx(1979.0)
+
+    b200 = Hardware.Cloud.B200
+    assert b200.compute.precision_flops["fp16_dense"].to(ureg.TFLOP / ureg.second).magnitude == pytest.approx(2250.0)
+    assert b200.compute.precision_flops["fp16_sparse"].to(ureg.TFLOP / ureg.second).magnitude == pytest.approx(4500.0)
+
+    # Transformer FLOPs: 6PD baseline vs 8PD recomputation
+    from mlsysim.physics import calc_transformer_training_flops
+    from mlsysim.core.units import param, token
+    flops_6pd = calc_transformer_training_flops(1 * param, 1 * token)
+    flops_8pd = calc_transformer_training_flops(1 * param, 1 * token, activation_checkpointing=True)
+    assert flops_6pd.to(ureg.flop).magnitude == pytest.approx(6.0)
+    assert flops_8pd.to(ureg.flop).magnitude == pytest.approx(8.0)
 

@@ -8,11 +8,32 @@ from mlsysim.literature.registry import Literature
 from ._units import _ensure_unit
 
 
-def calc_transformer_training_flops(n_params, n_tokens):
-    """Training FLOPs for a Transformer (6PD rule, Kaplan et al. 2020)."""
+def calc_transformer_training_flops(n_params, n_tokens, activation_checkpointing: bool = False):
+    """Training FLOPs for a Transformer.
+
+    By default, applies the standard dense baseline 6PD rule (Kaplan et al. 2020;
+    Chinchilla: 2P forward + 4P backward). When activation_checkpointing=True,
+    accounts for the additional forward pass recomputed during backpropagation
+    (2P forward + 2P recompute + 4P backward = 8PD rule).
+
+    Parameters
+    ----------
+    n_params : Quantity or int
+        Total parameter count of the model (P).
+    n_tokens : Quantity or int
+        Training tokens processed (D).
+    activation_checkpointing : bool, optional
+        Whether full activation recomputation is enabled (default: False -> 6PD; True -> 8PD).
+
+    Returns
+    -------
+    Quantity
+        Total training compute in FLOPs.
+    """
     p = _ensure_unit(n_params, ureg.param, "n_params").to(ureg.count).magnitude
     d = _ensure_unit(n_tokens, ureg.count, "n_tokens").magnitude
-    return (Literature.Chinchilla.ComputeConstant * p * d) * ureg.flop
+    factor = 8.0 if activation_checkpointing else float(Literature.Chinchilla.ComputeConstant)
+    return (factor * p * d) * ureg.flop
 
 
 def calc_transformer_decode_flops(n_params, n_tokens=1):

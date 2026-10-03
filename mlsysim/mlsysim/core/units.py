@@ -21,7 +21,9 @@ __all__ = [
     "BYTES_FP32", "BYTES_INT32", "BYTES_FP16", "BYTES_INT8", "BYTES_INT4",
     "BYTES_ADAM_STATE", "BYTES_ADAM_MOMENTS", "BYTES_ADAM_TOTAL", "BYTES_TRAINING_STATE_MIXED_PRECISION",
     # Interconnect standards
+    "NVLINK3_BANDWIDTH_UNIDIRECTIONAL", "NVLINK3_BANDWIDTH_BIDIRECTIONAL",
     "NVLINK4_BANDWIDTH_UNIDIRECTIONAL", "NVLINK4_BANDWIDTH_BIDIRECTIONAL",
+    "NVLINK5_BANDWIDTH_UNIDIRECTIONAL", "NVLINK5_BANDWIDTH_BIDIRECTIONAL",
     # Bit widths, precision map, encoding/format facts
     "FP32_BITS", "INT8_BITS", "SIMD_REGISTER_BITS", "PRECISION_MAP",
     "normalize_precision", "resolve_precision",
@@ -116,8 +118,12 @@ BYTES_ADAM_TOTAL = 12 * byte   # FP32 master weight (4B) + two FP32 moments (8B)
 BYTES_TRAINING_STATE_MIXED_PRECISION = 16 * byte  # FP16 weights (2B) + FP16 grads (2B) + FP32 master (4B) + FP32 moments (8B)
 
 # Interconnect standards (explicit unidirectional link vs bidirectional total)
+NVLINK3_BANDWIDTH_UNIDIRECTIONAL = 300 * GB / second
+NVLINK3_BANDWIDTH_BIDIRECTIONAL = 600 * GB / second
 NVLINK4_BANDWIDTH_UNIDIRECTIONAL = 450 * GB / second
 NVLINK4_BANDWIDTH_BIDIRECTIONAL = 900 * GB / second
+NVLINK5_BANDWIDTH_UNIDIRECTIONAL = 900 * GB / second
+NVLINK5_BANDWIDTH_BIDIRECTIONAL = 1800 * GB / second
 
 # Bit widths (companion to the byte widths above)
 FP32_BITS = 32
