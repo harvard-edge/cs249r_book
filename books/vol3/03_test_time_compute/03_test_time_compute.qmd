@@ -235,7 +235,7 @@ class AllocationAxes:
     ceiling = 4_096  # common total generated-token ceiling
     candidates = 4  # breadth concurrency and candidate count
     candidate_tokens = 1_024  # hypothetical generated length per short candidate
-    turns = 3  # hypothetical feedback turns actually used
+    rounds = 3  # hypothetical feedback rounds actually used
     report = 340  # tokens appended per complete observation
     check_time = 1.5 * second  # hypothetical duration per feedback check
     price_in = 3 * USD / 1_000_000  # hypothetical per-input-token price
@@ -248,11 +248,11 @@ class AllocationAxes:
     depth_output = ceiling
     breadth_input = candidates * prompt
     breadth_output = candidates * candidate_tokens
-    feedback_input = turns * prompt + (candidate_tokens + report) * turns * (turns - 1) // 2
-    feedback_output = turns * candidate_tokens
+    feedback_input = rounds * prompt + (candidate_tokens + report) * rounds * (rounds - 1) // 2
+    feedback_output = rounds * candidate_tokens
     depth_time = depth_output * token_time
     breadth_time = candidate_tokens * token_time
-    feedback_time = turns * (candidate_tokens * token_time + check_time)
+    feedback_time = rounds * (candidate_tokens * token_time + check_time)
     depth_cost = depth_input * price_in + depth_output * price_out
     breadth_cost = breadth_input * price_in + breadth_output * price_out
     feedback_cost = feedback_input * price_in + feedback_output * price_out
@@ -273,7 +273,7 @@ class AllocationAxes:
     ceiling_str = fmt_int(ceiling)
     candidates_str = fmt_int(candidates)
     candidate_tokens_str = fmt_int(candidate_tokens)
-    turns_str = fmt_int(turns)
+    rounds_str = fmt_int(rounds)
     report_str = fmt_int(report)
     check_time_str = fmt_time(check_time, unit="s", precision=1)
     price_in_str = fmt_usd(price_in * 1_000_000, precision=0)
@@ -299,7 +299,7 @@ class AllocationAxes:
 
 **Problem**: A repair request starts with `{python} AllocationAxes.prompt_str` input tokens and a common ceiling of `{python} AllocationAxes.ceiling_str` generated tokens. How do depth, breadth, and feedback spend that allowance?
 
-**Variables**: Reuse the illustrative per-token allowance from the preceding example. Breadth has capacity for `{python} AllocationAxes.candidates_str` concurrent streams at that same rate. Each short candidate uses `{python} AllocationAxes.candidate_tokens_str` generated tokens. Feedback uses `{python} AllocationAxes.turns_str` turns, each followed by a `{python} AllocationAxes.check_time_str` check returning `{python} AllocationAxes.report_str` tokens. Later feedback requests append earlier candidates and reports. Hypothetical prices are `{python} AllocationAxes.price_in_str` per million input tokens and `{python} AllocationAxes.price_out_str` per million output tokens, without cache discounts. Generation allowances omit prefill, queueing, and transport; the feedback allowance additionally includes its checks. The bill counts model tokens only, and @tbl-vol3-allocation-tradeoffs tallies each allocation's tokens, time, and bill side by side.
+**Variables**: Reuse the illustrative per-token allowance from the preceding example. Breadth has capacity for `{python} AllocationAxes.candidates_str` concurrent streams at that same rate. Each short candidate uses `{python} AllocationAxes.candidate_tokens_str` generated tokens. Feedback uses `{python} AllocationAxes.rounds_str` turns, each followed by a `{python} AllocationAxes.check_time_str` check returning `{python} AllocationAxes.report_str` tokens. Later feedback requests append earlier candidates and reports. Hypothetical prices are `{python} AllocationAxes.price_in_str` per million input tokens and `{python} AllocationAxes.price_out_str` per million output tokens, without cache discounts. Generation allowances omit prefill, queueing, and transport; the feedback allowance additionally includes its checks. The bill counts model tokens only, and @tbl-vol3-allocation-tradeoffs tallies each allocation's tokens, time, and bill side by side.
 
 | Allocation |                                 Input tokens |                                 Output tokens |              Generation and included checks |                            Model-token bill |
 |:-----------|---------------------------------------------:|----------------------------------------------:|--------------------------------------------:|--------------------------------------------:|
@@ -308,7 +308,7 @@ class AllocationAxes:
 | Feedback   | `{python} AllocationAxes.feedback_input_str` | `{python} AllocationAxes.feedback_output_str` | `{python} AllocationAxes.feedback_time_str` | `{python} AllocationAxes.feedback_cost_str` |
 : **Allocation accounting under a common output ceiling**: Equal ceilings produce unequal spend. Allowances omit prefill, queueing, selection, and tool charges. {#tbl-vol3-allocation-tradeoffs}
 
-**Math**: In @tbl-vol3-allocation-tradeoffs, depth generates all `{python} AllocationAxes.ceiling_str` tokens along a single path. Breadth generates `{python} AllocationAxes.candidate_tokens_str` tokens on each of `{python} AllocationAxes.candidates_str` concurrent paths, shortening the critical path by `{python} AllocationAxes.path_mult_str`. However, reading the prompt `{python} AllocationAxes.candidates_str` times across unshared streams adds `{python} AllocationAxes.breadth_premium_str` input tokens, multiplying its billing cost to `{python} AllocationAxes.bill_mult_str` that of depth. Feedback accumulates input context over $H$ turns according to $H\,S_{\text{base}} + (K + \lvert o\rvert)\,H(H-1)/2$, reaching `{python} AllocationAxes.feedback_input_str` tokens at $H =$ `{python} AllocationAxes.turns_str` because each successive round re-reads all prior candidates and observation reports.
+**Math**: In @tbl-vol3-allocation-tradeoffs, depth generates all `{python} AllocationAxes.ceiling_str` tokens along a single path. Breadth generates `{python} AllocationAxes.candidate_tokens_str` tokens on each of `{python} AllocationAxes.candidates_str` concurrent paths, shortening the critical path by `{python} AllocationAxes.path_mult_str`. However, reading the prompt `{python} AllocationAxes.candidates_str` times across unshared streams adds `{python} AllocationAxes.breadth_premium_str` input tokens, multiplying its billing cost to `{python} AllocationAxes.bill_mult_str` that of depth. Feedback accumulates input context over $H$ turns according to $H\,S_{\text{base}} + (K + \lvert o\rvert)\,H(H-1)/2$, reaching `{python} AllocationAxes.feedback_input_str` tokens at $H =$ `{python} AllocationAxes.rounds_str` because each successive round re-reads all prior candidates and observation reports.
 
 **Systems insight**: Breadth trades monetary cost for reduced wall-clock latency, where the entire billing premium stems from the $(N-1)S$ re-read prompt tokens. The key governing lever is the ratio of prompt length to generated output: a large repository context makes breadth's financial overhead scale aggressively with both $N$ and $S$, whereas a short prompt or a shared prefix cache eliminates most of this penalty. Feedback achieves an intermediate balance between latency and billing cost while remaining the only topology capable of acquiring empirical ground truth. Because this resource accounting excludes solution success rates, it models infrastructural cost rather than output quality.
 
@@ -1345,7 +1345,7 @@ class StrategyComparison:
     output_str = fmt_int(output)
     diagnostic_str = fmt_int(diagnostic)
     breadth_str = fmt_int(breadth)
-    turns_str = fmt_int(turns)
+    rounds_str = fmt_int(rounds)
     max_rounds_str = fmt_int(max_rounds)
     input_ceiling_str = fmt_int(input_ceiling)
     output_ceiling_str = fmt_int(output_ceiling)
