@@ -88,7 +88,7 @@ rng = np.random.default_rng(7)
 
 # Constants for memory calculations
 BYTES_PER_FLOAT32 = 4  # Standard float32 size in bytes
-MB_TO_BYTES = 1024 * 1024  # Megabytes to bytes conversion
+MB_TO_BYTES = 1_000_000  # Decimal megabyte (10^6 bytes), the convention used throughout TinyTorch
 
 # %% [markdown]
 r"""

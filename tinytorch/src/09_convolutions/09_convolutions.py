@@ -2707,7 +2707,7 @@ def analyze_convolution_complexity() -> None:
         input_memory = np.prod(config["input"]) * 4  # float32 = 4 bytes
         weight_memory = out_channels * in_channels * kernel_size * kernel_size * 4
         output_memory = batch * out_channels * h * w * 4
-        total_memory = (input_memory + weight_memory + output_memory) / (1024 * 1024)  # MB
+        total_memory = (input_memory + weight_memory + output_memory) / 1_000_000  # decimal MB
 
         # Measure execution time
         start_time = time.time()

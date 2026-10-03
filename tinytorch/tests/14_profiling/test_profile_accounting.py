@@ -105,12 +105,14 @@ def test_memory_includes_preexisting_parameters_and_actual_output(caller_tracing
         if caller_tracing:
             tracemalloc.reset_peak()
         report = Profiler().measure_memory(model, (1, 1))
-        assert report['parameter_memory_mb'] == 16
-        assert report['activation_memory_mb'] == pytest.approx(4 + 4 / 1024**2)
-        assert report['peak_memory_mb'] >= 20
+        weight_bytes = 2048 * 2048 * 4
+        output_bytes = 1024 * 1024 * 4
+        assert report['parameter_memory_mb'] == pytest.approx(weight_bytes / 1e6)
+        assert report['activation_memory_mb'] == pytest.approx((output_bytes + 4) / 1e6)
+        assert report['peak_memory_mb'] >= (weight_bytes + output_bytes) / 1e6
         # Tensor construction can briefly hold both its input array and copy.
-        # That allows ~8 MiB new allocation, but not another 16 MiB of weights.
-        assert report['peak_memory_mb'] < 26
+        # That allows ~8 MB of new allocation, but not another 16.8 MB of weights.
+        assert report['peak_memory_mb'] < (weight_bytes + output_bytes + 6 * 1024**2) / 1e6
         assert tracemalloc.is_tracing() == caller_tracing
     finally:
         if caller_tracing:
@@ -122,7 +124,7 @@ def test_identity_output_is_not_counted_twice():
         def forward(self, x):
             return x
     report = Profiler().measure_memory(Identity(), (1, 1024))
-    assert report['activation_memory_mb'] == 1024 * 4 / 1024**2
+    assert report['activation_memory_mb'] == pytest.approx(1024 * 4 / 1e6)
 
 
 @pytest.mark.parametrize('model', [ReLU(), Sequential()])

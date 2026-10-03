@@ -118,8 +118,8 @@ from tinytorch.core.spatial import Conv2d
 
 # Constants for memory and performance measurement
 BYTES_PER_FLOAT32 = 4  # Standard float32 size in bytes
-KB_TO_BYTES = 1024  # Kilobytes to bytes conversion
-MB_TO_BYTES = 1024 * 1024  # Megabytes to bytes conversion
+KB_TO_BYTES = 1000  # Decimal kilobyte (10^3 bytes)
+MB_TO_BYTES = 1_000_000  # Decimal megabyte (10^6 bytes), the convention used throughout TinyTorch
 
 # %% [markdown]
 r"""
@@ -157,7 +157,7 @@ Before building the profiler class, let us establish the five pillars of machine
 
 Parameters determine persistent storage requirements, weight transfer latency from high-bandwidth memory (HBM/DRAM) to on-chip SRAM, and minimum GPU VRAM capacity.
 
-$$\text{Memory}_{\text{FP32}} = P \times 4\text{ bytes} = \frac{P \times 4}{1024^2}\text{ MB}$$
+$$\text{Memory}_{\text{FP32}} = P \times 4\text{ bytes} = \frac{P \times 4}{10^6}\text{ MB}$$
 
 | Layer Type | Learnable Weights | Learnable Biases | Total Parameters ($P$) | Memory at FP32 ($4\text{ B/elem}$) |
 | :--- | :--- | :--- | :--- | :--- |
@@ -1477,7 +1477,7 @@ class Profiler:
 
         ```
         Parameter Memory Formula:
-        Memory (MB) = parameter_count × 4 bytes / (1024 × 1024)
+        Memory (MB) = parameter_count × 4 bytes / 1,000,000
                            ↑              ↑
                      From count_parameters  FP32 size
         ```
@@ -2171,14 +2171,14 @@ def test_unit_calculate_parameter_memory():
     # Test 1: Known parameter count -> known memory
     class KnownModel:
         def __init__(self):
-            # 1024 * 1024 = 1,048,576 parameters = exactly 4 MB at FP32
+            # 1024 * 1024 = 1,048,576 parameters x 4 bytes = 4,194,304 bytes = 4.19 MB
             self.weight = Tensor(rng.standard_normal((1024, 1024)))
 
     model = KnownModel()
     memory_mb = profiler._calculate_parameter_memory(model)
-    expected_mb = (1024 * 1024 * 4) / (1024 * 1024)  # 4.0 MB
+    expected_mb = (1024 * 1024 * 4) / 1_000_000  # 4.194304 MB (decimal)
     assert abs(memory_mb - expected_mb) < 0.01, f"Expected {expected_mb} MB, got {memory_mb}"
-    print(f"✅ 1M params = {memory_mb:.1f} MB")
+    print(f"✅ 1M params = {memory_mb:.2f} MB")
 
     # Test 2: Zero parameter model
     class EmptyModel:

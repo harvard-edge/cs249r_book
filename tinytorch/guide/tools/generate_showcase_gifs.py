@@ -53,7 +53,7 @@ def compile_gif(frame_svgs: list[str], output_gif: Path, fps: int = 4):
             str(output_gif),
         ]
         subprocess.run(cmd, check=True, capture_output=True)
-        size_kb = os.path.getsize(output_gif) // 1024
+        size_kb = os.path.getsize(output_gif) // 1000
         print(f"Generated: {output_gif.name} ({size_kb} KB)")
 
 

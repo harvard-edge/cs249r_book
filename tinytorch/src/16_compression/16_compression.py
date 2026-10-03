@@ -112,7 +112,7 @@ import tinytorch.core.autograd  # Module 06: record gradients for student traini
 
 # Constants for memory calculations
 BYTES_PER_FLOAT32 = 4  # Standard float32 size in bytes
-MB_TO_BYTES = 1024 * 1024  # Megabytes to bytes conversion
+MB_TO_BYTES = 1_000_000  # Decimal megabyte (10^6 bytes), the convention used throughout TinyTorch
 
 # %% [markdown]
 """
@@ -1220,9 +1220,9 @@ $$\text{Total Compression} = \frac{\text{Initial Size}}{\text{Final Size}} = \fr
 
 The accuracy column is illustrative. It shows the shape of the trade (each stage gives up a little more) and is not a measurement from this module or a published result; the one pruning retention figure this module can stand behind is Han et al. (2015), quoted in the introduction. Milestone 06 measures accuracy for real.
 
-**Where the byte figures come from.** One MB is $1024^2$ bytes throughout, so $100\text{ MB}$ of FP32 holds $26{,}214{,}400$ parameters.
+**Where the byte figures come from.** One MB is $10^6$ bytes throughout, so $100\text{ MB}$ of FP32 holds $25{,}000{,}000$ parameters.
 
-- **Stage 1.** Eighty percent sparsity leaves $5{,}242{,}880$ nonzeros. Their values alone occupy $5{,}242{,}880 \times 4\text{ B} = 20\text{ MB}$, but a bare value array is not something a kernel can multiply with, because nothing records where the values belong. COO pays a $4$-byte index per value, so $5{,}242{,}880 \times 8\text{ B} = 40\text{ MB}$ ($2.5\times$). CSR pays a $2$-byte column index per value plus one $4$-byte row pointer per row, so $5{,}242{,}880 \times 6\text{ B} = 30\text{ MB}$ ($3.3\times$), with the pointer array under $20\text{ KB}$ for a $5120$-wide layer. The table quotes CSR, the cheapest format that actually works. The $5.0\times$ this row used to claim was the value-only number.
+- **Stage 1.** Eighty percent sparsity leaves $5{,}000{,}000$ nonzeros. Their values alone occupy $5{,}000{,}000 \times 4\text{ B} = 20\text{ MB}$, but a bare value array is not something a kernel can multiply with, because nothing records where the values belong. COO pays a $4$-byte index per value, so $5{,}000{,}000 \times 8\text{ B} = 40\text{ MB}$ ($2.5\times$). CSR pays a $2$-byte column index per value plus one $4$-byte row pointer per row, so $5{,}000{,}000 \times 6\text{ B} = 30\text{ MB}$ ($3.3\times$), with the pointer array about $20\text{ KB}$ for a $5120$-wide layer. The table quotes CSR, the cheapest format that actually works. The $5.0\times$ this row used to claim was the value-only number.
 - **Stage 1 latency.** Unchanged. A dense kernel loads the zeros like any other number, and $80\%$ sparsity sits below the $\ge 85\%$ break-even a sparse kernel needs. This stage bought bytes, not time.
 - **Stage 2.** Excising $30\%$ of the channels drops $30\%$ of every affected matrix, so bytes and FLOPs both scale by $0.70$: $30\text{ MB} \to 21\text{ MB}$ and $500\text{ ms} \to 350\text{ ms}$.
 - **Stage 3.** At $r = \min(M, N)/8$, a square projection stores $r(M + N) = N^2/4$, a factor of $0.25$. Applied to the half of the parameters that sit in large projections, $10.5 + 0.25 \times 10.5 = 13.1\text{ MB}$, and the same factor on those layers' FLOPs gives $350 \to 220\text{ ms}$. The rank matters far more than the word "reduction". At the $50\%$ rank this row used to claim, $r = N/2$ is exactly the break-even $r^*$ derived in 📐, and the factorization would come out slightly *larger* than the dense matrix it replaced.

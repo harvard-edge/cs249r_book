@@ -3258,8 +3258,8 @@ def analyze_computation_graph_memory():
             y = y * 2  # Each operation appends one node to the tape
         tape_bytes, nodes = retained_bytes(y)
         base_memory = x.data.nbytes
-        print(f"{num_ops:>4}  {nodes:>6}  {base_memory / 1024:>9.1f}  "
-              f"{tape_bytes / 1024:>9.1f}  {tape_bytes / base_memory:>6.1f}x")
+        print(f"{num_ops:>4}  {nodes:>6}  {base_memory / 1000:>9.1f}  "
+              f"{tape_bytes / 1000:>9.1f}  {tape_bytes / base_memory:>6.1f}x")
 
     # The same chain inside no_grad() records nothing at all.
     x = Tensor(rng.standard_normal(shape), requires_grad=True)
@@ -3269,7 +3269,7 @@ def analyze_computation_graph_memory():
             y = y * 2
     no_grad_bytes, no_grad_nodes = retained_bytes(y)
     print(f"\n   Same 16-op chain inside no_grad(): "
-          f"{no_grad_bytes / 1024:.1f} KB retained, {no_grad_nodes} nodes")
+          f"{no_grad_bytes / 1000:.1f} KB retained, {no_grad_nodes} nodes")
 
     print("\n" + "=" * 60)
     print("📊 KEY INSIGHTS:")
