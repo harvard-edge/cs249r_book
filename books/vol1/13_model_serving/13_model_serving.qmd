@@ -867,7 +867,7 @@ In networked serving\index{Serving!cloud/data center}\index{Microservice!model s
 
 #### Application-embedded serving (mobile/edge) {#sec-model-serving-applicationembedded-serving-mobileedge-8bd1}
 
-In application-embedded serving\index{Serving!mobile/edge}\index{Serving!edge inference, embedded serving}, the model runs within the user application process (for example, a smartphone app using CoreML or TensorFlow Lite), following the embedded paradigm for its latency, privacy, and offline advantages. There is no "server." The interface is a function call, so optimization focuses on energy and responsiveness (the MLPerf SingleStream shape) rather than shared-server throughput.
+In application-embedded serving\index{Serving!mobile/edge}\index{Serving!edge inference, embedded serving}, the model runs within the user application process (for example, a smartphone app using CoreML or TensorFlow Lite), following the embedded paradigm, which is chosen for its latency, privacy, and offline advantages. There is no "server." The interface is a function call, so optimization focuses on energy and responsiveness (the MLPerf SingleStream shape) rather than shared-server throughput.
 
 Embedded execution enables **zero-copy inference**\index{Inference!zero-copy, mobile optimization}: when data moves through a system, each copy consumes CPU cycles and memory bandwidth. In cloud serving, separate physical memory spaces force repeated transfers: a camera frame passes from a network socket buffer to user space, through a preprocessing buffer into page-locked host DRAM, and across PCIe into accelerator memory. A mobile pipeline can eliminate these intermediate copies when its camera, image signal processor (ISP), CPU, and NPU exchange shared buffer descriptors in unified system memory. In unified-memory system-on-chip (SoC) architectures—such as Apple A- and M-series processors or Qualcomm Snapdragon—all compute engines share a single physical DRAM pool. When software passes buffer handles rather than duplicating bytes, inference latency drops and memory bus power decreases, although format conversions may still require CPU or ISP intervention.
 
@@ -1869,7 +1869,11 @@ The latency budget framework provides a systematic approach to this compound pro
 
 ### Resolution and input size trade-offs {#sec-model-serving-resolution-input-size-tradeoffs-155d}
 
-Input resolution affects both preprocessing and inference latency, but the relationship depends on which side of the roofline (@sec-hardware-acceleration-roofline-model-42ff) the model stage sits. A compute-bound\index{Compute-bound!resolution scaling} stage slows as computation grows; a memory-bound\index{Memory-bound!activation tensors} stage slows as transferred bytes grow. Capacity fit alone does not remove bandwidth cost.
+Input resolution affects both preprocessing and inference latency, but the relationship depends on which side of the roofline the model stage sits. A compute-bound\index{Compute-bound!resolution scaling} stage slows as computation grows; a memory-bound\index{Memory-bound!activation tensors} stage slows as transferred bytes grow. Capacity fit alone does not remove bandwidth cost.
+
+::: {.column-margin .margin-pointer}
+↩ The roofline boundary and arithmetic intensity ridge points that separate compute-bound from memory-bound stages are established in @sec-hardware-acceleration-roofline-model-42ff.
+:::
 
 For convolution-dominated, compute-bound models, @eq-resolution-throughput gives a first-order approximation in which throughput scales inversely with resolution squared, comparing two input resolutions $r_1$ and $r_2$ (image side lengths in pixels):
 $$\frac{\text{Throughput}(r_2)}{\text{Throughput}(r_1)} = \left(\frac{r_1}{r_2}\right)^2$$ {#eq-resolution-throughput}
@@ -2335,10 +2339,6 @@ While Little's Law relates queue depth to throughput, it does not account for th
 
 At batch size $B=1$, neural network inference is severely memory-bandwidth bound, the regime in which the arithmetic intensity law (principle \ref{pri-arithmetic-intensity}) caps attainable throughput at intensity times bandwidth. Accelerators must transfer gigabytes of model weights from HBM to on-chip SRAM to execute matrix-vector multiplications, achieving only a fraction of their peak FLOPS. Batching $B$ inputs converts these operations into general matrix multiplication (GEMM), reusing weights across inputs and increasing arithmetic intensity. However, gathering $B$ requests requires holding earlier arrivals in an input queue.
 
-::: {.column-margin .margin-pointer}
-↩ The roofline boundary and arithmetic intensity ridge points governing batched accelerator throughput are established in @sec-hardware-acceleration-roofline-model-42ff.
-:::
-
 When an inference server uses request-triggered fixed-size batching, it introduces two distinct sources of latency. **Batch formation delay**\index{Batching!batch formation delay, definition} $(L_{\text{lat,form}})$ is the time each request waits for the batch to fill; the first request waits longest, and the last waits zero. **Inference inflation**\index{Inference inflation!definition} is the growth in batch service time $T_{\text{svc}}(B)$ when the accelerator processes $B$ samples instead of 1. The resulting latency-throughput Pareto frontier\index{Pareto Frontier!serving trade-offs} represents the operating envelope where throughput gains require paying a tax in response latency. Under stationary Poisson arrivals, @eq-batching-tax approximates the average per-request latency for batch size $B$ and arrival rate $\lambda_{\text{arr}}$:
 $$ L_{\text{lat,total}} \approx \underbrace{ \frac{B-1}{2\lambda_{\text{arr}}} }_{\text{Formation delay}} + \underbrace{ T_{\text{svc}}(B) }_{\text{Inference time}} $$ {#eq-batching-tax}
 
@@ -2627,7 +2627,7 @@ A model that performed well during validation may silently degrade when deployed
 
 :::
 
-@Sec-ml-operations-feature-stores-c01c develops skew diagnosis, monitoring, and organizational prevention. Its serving-specific manifestation is **preprocessing divergence**\index{Preprocessing!divergence, training vs. serving}: the real-time inference pipeline processes raw data differently than the batch training pipeline, a common failure mode when training uses Python/Pandas while serving uses C++/Java or optimized inference servers. Unlike data drift, this divergence is internally introduced and often preventable through shared transformations, parity tests, and careful engineering.
+@Sec-ml-operations-trainingserving-skew-diagnosis-prevention-9dc1 develops skew diagnosis, monitoring, and organizational prevention. Its serving-specific manifestation is **preprocessing divergence**\index{Preprocessing!divergence, training vs. serving}: the real-time inference pipeline processes raw data differently than the batch training pipeline, a common failure mode when training uses Python/Pandas while serving uses C++/Java or optimized inference servers. Unlike data drift, this divergence is internally introduced and often preventable through shared transformations, parity tests, and careful engineering.
 
 ::: {#exmp-model-serving-resnet-50-image-preprocessing-skew .callout-example title="ResNet-50: Image preprocessing skew"}
 
@@ -3678,6 +3678,10 @@ Session affinity—routing successive requests from a client to the same physica
 
 A parallel physical constraint governs personalized serving using fine-tuned Low-Rank Adaptation (LoRA) modules\index{Personalized model!user adapters}: small per-user adapters, each a pair of low-rank matrices whose product is added to a frozen base weight matrix. While base-model weights remain pinned in device HBM, individual user adapters must be dynamically staged into memory. If incoming requests for a user scatter across multiple replicas, each node must repeatedly transfer adapter tensors over the host-to-device PCIe bus or fetch them across the network, displacing other active working sets in memory. Stateful preprocessing pipelines—such as tokenizer vocabularies and per-session normalization state—impose the same penalty, requiring redundant CPU-side allocations and cache rebuilds whenever execution moves across node boundaries.
 
+::: {.column-margin .margin-pointer}
+↩ Factoring a weight matrix into the product of two low-rank matrices is established in @sec-model-compression-lowrank-factorization-955e.
+:::
+
 Strict affinity\index{Session affinity!sticky sessions} creates a direct conflict with dynamic batching. Continuous batch schedulers maximize accelerator throughput by packing concurrent requests into unified matrix multiplications, raising operational arithmetic intensity in proportion to batch size ($I \propto B$). When requests are pinned to designated replicas, the scheduler's pool of batchable candidates fragments across the cluster. A replica assigned to an idle or low-concurrency user session must either process underfilled batches—collapsing arithmetic intensity back into the memory-bandwidth-bound regime—or stall waiting for affinity-matched tokens. To prevent this collapse in utilization, production routers use soft affinity\index{Soft affinity!load balancing}. Under soft affinity, the ingress gateway prioritizes the cache-holding replica when capacity allows, but sheds requests to alternate nodes when local queue delays exceed the physical latency required to transfer adapter weights or recompute prefix tokens.
 
 ### Traffic patterns and batching strategy {#sec-model-serving-traffic-patterns-batching-strategy-2e6b}
@@ -4275,7 +4279,11 @@ Once an execution engine is selected, configuration tunes its resource allocatio
 
 ### Precision selection for serving {#sec-model-serving-precision-selection-serving-55ba}
 
-Precision selection builds on the quantization techniques covered in @sec-model-compression-quantization-precision-cd46. On NVIDIA V100 GPUs, Tensor Cores accelerate FP16 matrix operations, whereas INT8 computations execute on standard integer ALUs (via `DP4A` vector instructions). In an illustrative serving scenario, transitioning a ResNet-50 model from FP32 to INT8 triples inference throughput while sacrificing less than 0.4 percentage points of top-1 accuracy. This dynamic establishes a direct coupling between numerical precision and infrastructure economics. @Sec-appdx-machine-foundations-numerical-representations-c889 compares the underlying numerical formats (FP32, FP16, BF16, FP8, INT8) and their precision-range trade-offs, while @sec-appdx-machine-foundations-integer-quantization-5442 details the mathematical mechanics of symmetric and asymmetric integer quantization. At the serving layer, precision engineering introduces operational constraints: calibration data fidelity, layer sensitivity under live inputs, and dynamic precision dispatch.
+Precision selection builds on the quantization techniques covered in @sec-model-compression-quantization-precision-cd46. On NVIDIA V100 GPUs, Tensor Cores accelerate FP16 matrix operations, whereas INT8 computations execute on standard integer ALUs (via `DP4A` vector instructions). In an illustrative serving scenario, transitioning a ResNet-50 model from FP32 to INT8 triples inference throughput while sacrificing less than 0.4 percentage points of top-1 accuracy. This dynamic establishes a direct coupling between numerical precision and infrastructure economics. At the serving layer, precision engineering introduces operational constraints: calibration data fidelity, layer sensitivity under live inputs, and dynamic precision dispatch.
+
+::: {.column-margin .margin-pointer}
+↪ The numerical formats from FP32 to INT8, their precision-range trade-offs, and the mechanics of symmetric and asymmetric integer quantization are developed in @sec-appdx-machine-foundations-numerical-representations-c889.
+:::
 
 #### Precision-throughput relationship {#sec-model-serving-precisionthroughput-relationship-b503}
 
@@ -4284,7 +4292,11 @@ $$
 \frac{\text{Throughput}_{\text{INT8}}}{\text{Throughput}_{\text{FP32}}} = \frac{32}{8} = 4\times \text{ (theoretical maximum)}
 $$ {#eq-precision-throughput}
 
-Actual speedup depends on the compute-to-memory ratio, operator mix, hardware instruction throughput, and matrix alignment, falling below the bandwidth-only bound whenever arithmetic throughput or memory alignment binds. Low-precision kernels achieve peak arithmetic efficiency only when matrix dimensions align with the accelerator's warp-level execution tiles (for example, multiples of 8 or 16 elements). When dimensions do not align with hardware tiles, libraries such as cuBLAS and cuDNN pad tensors or fall back to slower execution paths. @Sec-hardware-acceleration-tensor-cores-771f details the Tensor Core architectures and alignment constraints that govern these boundaries. The precision trade-offs for a standard vision model illustrate how these theoretical limits manifest in practice.
+Actual speedup depends on the compute-to-memory ratio, operator mix, hardware instruction throughput, and matrix alignment, falling below the bandwidth-only bound whenever arithmetic throughput or memory alignment binds. Low-precision kernels achieve peak arithmetic efficiency only when matrix dimensions align with the accelerator's warp-level execution tiles (for example, multiples of 8 or 16 elements). When dimensions do not align with hardware tiles, libraries such as cuBLAS and cuDNN pad tensors or fall back to slower execution paths. The precision trade-offs for a standard vision model illustrate how these theoretical limits manifest in practice.
+
+::: {.column-margin .margin-pointer}
+↩ Tensor Core tile architectures and their matrix-dimension alignment constraints are established in @sec-hardware-acceleration-tensor-cores-771f.
+:::
 
 ```{python}
 #| echo: false
@@ -4604,7 +4616,7 @@ CPU inference makes economic sense for small models with few parameters and simp
 
 Beyond steady-state costs, startup time\index{Autoscaling!startup latency} affects scaling economics. Instance launch, image pull, driver initialization, model loading, compilation, and warmup can make accelerator replicas slower to become ready than CPU replicas, although exact times depend on the platform and deployment artifact. If traffic rises faster than useful capacity can come online, latency SLOs can fail despite sufficient eventual capacity.
 
-When accelerator replicas have a long readiness delay, predictive scaling or a warm pool may be more reliable than purely reactive scaling. For a model that runs acceptably on both device types, a hybrid design\index{Scaling!hybrid, GPU+CPU} can use always-on accelerator capacity for baseline load and CPU overflow for spikes, trading a different unit cost and latency profile for faster reserve capacity. This GPU+CPU hybrid is one instance of the broader patterns cataloged in @sec-ml-systems-hybrid-architectures-combining-paradigms-7cdd; whether it works depends on model compatibility and identical output semantics across runtimes.
+When accelerator replicas have a long readiness delay, predictive scaling or a warm pool may be more reliable than purely reactive scaling. For a model that runs acceptably on both device types, a hybrid design\index{Scaling!hybrid, GPU+CPU} can use always-on accelerator capacity for baseline load and CPU overflow for spikes, trading a different unit cost and latency profile for faster reserve capacity. Whether this GPU+CPU hybrid works depends on model compatibility and identical output semantics across runtimes.
 
 ::: {#exmp-model-serving-resnet-50-cost-analysis .callout-example title="ResNet-50: Cost analysis"}
 

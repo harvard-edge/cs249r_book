@@ -294,6 +294,10 @@ class DeploymentOverviewTable:
 
 To navigate these operating regimes, we anchor our engineering decisions in a four-layer model of the **single-node stack**\index{Single-node stack!architecture layers}, which refines the machine side of the D·A·M taxonomy for one host while data and algorithm enter through workload requirements. At the top of the stack, the application defines the mission through a training-throughput or inference-latency target. @Sec-model-training and @sec-model-serving develop the mechanisms that determine whether the system can meet it. The ML framework\index{ML framework!compiler role} translates model code into executable operations. The operating system\index{Operating system!runtime role} orchestrates resources and moves data between host memory and accelerator memory. The hardware itself, defined by high-bandwidth memory (HBM) capacity, memory bandwidth, intra-node interconnects such as NVLink, and compute throughput, sets the physical limits, with the memory wall as a recurring constraint.
 
+::: {.column-margin .margin-pointer}
+↪ How an ML framework translates model code into executable operations is developed in @sec-ml-frameworks.
+:::
+
 This stack establishes the chapter's **silicon contract**\index{Silicon contract!definition}: the fixed performance bargain a given piece of silicon offers a model, set by memory bandwidth, peak compute rate, and fixed overhead. Every chapter that follows analyzes one or more of these layers, because the single machine is where the silicon contract is set and where most engineering decisions in this book are made.
 
 These physical constraints interact with the iron law of ML systems, which decomposes end-to-end latency into data movement, computation, and overhead. Different deployment environments emphasize different constraints: cloud training can be compute-bound, mobile systems face power walls, and TinyML devices often reach memory-capacity limits. By pairing the physical constraints with the iron law, we develop a quantitative vocabulary for reasoning about which paradigm fits a given workload and *why*.
@@ -495,7 +499,7 @@ These physical constraints do not operate in isolation. In practice, an ML syste
 
 ## Analyzing Workloads {#sec-ml-systems-analyzing-workloads-cbb8}
 
-Given a recommendation engine or wake-word detector, the workload question is which term will bind first on the target hardware. The central analytical tool for answering that silicon-contract\index{Silicon contract!iron law} question is the iron law of ML systems\index{Iron law of ML systems!deployment analysis}, established in @sec-introduction-iron-law-ml-systems-c32a. Here, $T$ is total time, $D_{\text{vol}}$ is bytes moved, $\text{BW}$ is bandwidth, $O$ is total operations, $R_{\text{peak}}$ is peak compute rate, $\eta_{\text{hw}}$ is hardware efficiency, and $L_{\text{lat}}$ is fixed overhead; @eq-iron-law adds these costs for a serialized execution path:
+Given a recommendation engine or wake-word detector, the workload question is which term will bind first on the target hardware. The central analytical tool for answering that silicon-contract\index{Silicon contract!iron law} question is the iron law of ML systems\index{Iron law of ML systems!deployment analysis}. Here, $T$ is total time, $D_{\text{vol}}$ is bytes moved, $\text{BW}$ is bandwidth, $O$ is total operations, $R_{\text{peak}}$ is peak compute rate, $\eta_{\text{hw}}$ is hardware efficiency, and $L_{\text{lat}}$ is fixed overhead; @eq-iron-law adds these costs for a serialized execution path:
 $$T = \frac{D_{\text{vol}}}{\text{BW}} + \frac{O}{R_{\text{peak}} \cdot \eta_{\text{hw}}} + L_{\text{lat}}$$ {#eq-iron-law}
 
 @Eq-iron-law decomposes total latency into three terms: data movement $(D_{\text{vol}}/\text{BW})$, compute $(O/(R_{\text{peak}} \cdot \eta_{\text{hw}}))$, and fixed overhead $(L_{\text{lat}})$. For a single inference, these costs simply add up—each is paid sequentially. In production systems, however, tasks are processed continuously as a stream, and the analysis shifts from single-task latency to identifying which term limits the system. The answer depends entirely on the deployment environment: a model that is **compute bound**\index{Compute-bound vs. memory-bound!definition} during training may become memory bound during inference; a system that runs efficiently in the cloud may hit power limits on mobile devices. Batch size is one lever that moves a workload between these regimes. Larger batches reuse each loaded weight across more inputs, shifting a memory-bound kernel toward compute-bound behavior, at the price of a larger working set and a longer service time per batch. In pipelined production serving, hardware concurrency alters this linear sum: faster stages hide behind whichever subsystem saturates first.
@@ -727,7 +731,7 @@ The iron law and workload archetypes gain practical meaning when matched against
 
 ## System Balance and Hardware {#sec-ml-systems-system-balance-hardware-96ab}
 
-Physical constraints translate latency-vs-throughput trade-offs\index{Latency vs. throughput!trade-offs} into engineering decisions through concrete numbers. Operation latencies\index{Latency!decision thresholds} span roughly eight orders of magnitude, from about a nanosecond for an on-chip cache hit or a single accelerator multiply, through milliseconds for one mobile vision inference, to tens or hundreds of milliseconds for a cross-region network call. @Sec-appdx-machine-foundations-numbers-know-b531 collects the memory-hierarchy and network round-trip anchors along with illustrative application latency budgets, and @sec-hardware-acceleration covers the hardware latencies and bandwidth constraints behind them. The span matters because of one strict rule: an operation with latency $> X$ *cannot* appear on the critical path of a system whose latency budget is $X$ ms.[^fn-critical-path-ml]
+Physical constraints translate latency-vs-throughput trade-offs\index{Latency vs. throughput!trade-offs} into engineering decisions through concrete numbers. Operation latencies\index{Latency!decision thresholds} span roughly eight orders of magnitude, from about a nanosecond for an on-chip cache hit or a single accelerator multiply, through milliseconds for one mobile vision inference, to tens or hundreds of milliseconds for a cross-region network call. @Sec-appdx-machine-foundations-numbers-know-b531 collects the memory-hierarchy and network round-trip anchors along with illustrative application latency budgets. The span matters because of one strict rule: an operation with latency $> X$ *cannot* appear on the critical path of a system whose latency budget is $X$ ms.[^fn-critical-path-ml]
 
 [^fn-critical-path-ml]: **Critical path**\index{Critical path!optimization}: The longest sequential chain of dependent operations in a pipeline. The decision rule in the triggering sentence is strict: if a 200 ms cross-region network call appears anywhere on the critical path, a system with a 100 ms total budget is guaranteed to fail regardless of how fast every other stage runs. Model inference need not be the longest stage; preprocessing and postprocessing can dominate, making the critical path longer than model execution alone suggests.
 
@@ -758,7 +762,11 @@ This operational shift reflects the tripartite balance of the D·A·M taxonomy\i
 \endgroup
 ```
 
-A quantitative comparison applies this analysis to ResNet-50 inference on a high-end data center accelerator and a mobile neural processing unit (NPU). Treat these as point-in-time hardware anchors: the arithmetic is about compute rate, memory bandwidth, and batch size, while @sec-hardware-acceleration explains the accelerator architecture behind the numbers.
+A quantitative comparison applies this analysis to ResNet-50 inference on a high-end data center accelerator and a mobile neural processing unit (NPU). Treat these as point-in-time hardware anchors: the arithmetic is about compute rate, memory bandwidth, and batch size.
+
+::: {.column-margin .margin-pointer}
+↪ The accelerator architectures behind these compute-rate and bandwidth figures are developed in @sec-hardware-acceleration.
+:::
 
 ::: {#nbk-ml-systems-resnet-50-cloud-vs-mobile .callout-notebook title="ResNet-50 on cloud vs. mobile"}
 
@@ -1151,7 +1159,11 @@ class DeploymentThresholdsTable:
 
 The four deployment paradigms gain precision when grounded in concrete hardware. Where @tbl-deployment-paradigms-overview defined the paradigms by operating regime, @tbl-representative-systems places one real platform in each and pairs it with the per-device envelope that marks the tier.[^fn-cost-spectrum-ml] Moving from cloud to edge to TinyML contracts available resources across every dimension. Memory drops from `{python} HardwareSpectrumSetup.cloud_mem_tb_str` (cloud) to 512 KB (TinyML), a 250 million-fold reduction; power spans nine orders of magnitude; and hardware cost spans six, from multimillion-dollar clusters to \$10 microcontrollers. Together with facility overheads such as power usage effectiveness (PUE),[^fn-pue-facility-efficiency] these spreads decide which paradigm can serve a workload economically, and they explain why model compression becomes essential as the budget tightens.
 
-The hardware spectrum\index{Hardware spectrum!resource progression}\index{Hardware spectrum!deployment platforms} turns the bottleneck diagnosis into a fit test. These platforms are products of decades of hardware evolution, from floating-point coprocessors in the 1980s through graphics processors in the 2000s to today's domain-specific AI accelerators, a progression @sec-hardware-acceleration traces. Here the consequence matters most: each workload must be matched to the tier whose compute, bandwidth, power, and cost envelope it can satisfy.
+The hardware spectrum\index{Hardware spectrum!resource progression}\index{Hardware spectrum!deployment platforms} turns the bottleneck diagnosis into a fit test. These platforms are products of decades of hardware evolution, from floating-point coprocessors in the 1980s through graphics processors in the 2000s to today's domain-specific AI accelerators. Here the consequence matters most: each workload must be matched to the tier whose compute, bandwidth, power, and cost envelope it can satisfy.
+
+::: {.column-margin .margin-pointer}
+↪ The progression from floating-point coprocessors to domain-specific AI accelerators is developed in @sec-hardware-acceleration-evolution-hardware-specialization-fdb7.
+:::
 
 ```{=latex}
 \begingroup
@@ -1380,7 +1392,11 @@ Cloud ML concentrates computational resources at physical dimensions no local de
 
 [^fn-tpu-hardware-specialization]: **Tensor processing unit (TPU)**\index{TPU!specialization trade-off}: An application-specific integrated circuit (ASIC) that delivers PFLOP/s-scale throughput by hard-wiring its architecture for the matrix multiplication operations that dominate ML workloads. This extreme specialization trades general-purpose flexibility for a $>10\times$ improvement in performance-per-watt compared to a general-purpose accelerator on the same ML task. The high cost of deploying these accelerators at data center scale is therefore only economical for massive, sustained ML computation.
 
-@Fig-cloudml-example captures the physical reality of warehouse-scale infrastructure, showing aisles of liquid-cooled racks packed with thousands of interconnected TPU accelerator chips[^fn-tpu-hardware-specialization] and dense optical cabling bundles that draw megawatts to sustain exaFLOP-scale matrix throughput. That physical scale is what makes training on hundreds of terabytes of data practical; @sec-model-training and @sec-hardware-acceleration examine how distributed systems coordinate and sustain it.
+@Fig-cloudml-example captures the physical reality of warehouse-scale infrastructure, showing aisles of liquid-cooled racks packed with thousands of interconnected TPU accelerator chips[^fn-tpu-hardware-specialization] and dense optical cabling bundles that draw megawatts to sustain exaFLOP-scale matrix throughput. That physical scale is what makes training on hundreds of terabytes of data practical.
+
+::: {.column-margin .margin-pointer}
+↪ How training extends beyond a single node across distributed workers is developed in @sec-model-training-scaling-beyond-single-node-a671.
+:::
 
 ::: {#fig-cloudml-example fig-env="figure" fig-pos="htb" fig-cap="**Cloud Data Center Scale**: Dedicated accelerator facilities aggregate thousands of specialized TPU chips in liquid-cooled racks to deliver exaFLOP-scale matrix throughput. This centralized infrastructure makes large-scale model training and high-throughput serving viable, but incurs megawatt-scale power consumption and speed-of-light network distance penalties. Image source: [@pichai2023gemini]." fig-alt="Perspective view down a central aisle between densely cabled server racks illuminated by blue and purple indicator lights."}
 
@@ -3480,7 +3496,7 @@ The central trade-off is often accuracy vs. complexity.
 
 :::
 
-Navigating these trade-offs demonstrates that paradigm selection is an architectural optimization bounded by the physical invariants of computation, communication, and storage. While the decision framework establishes baseline feasibility—with @sec-benchmarking and @sec-ml-operations detailing the corresponding measurement and operational lifecycle practices—real-world applications often present mutually incompatible constraints. An intelligent system may demand petabyte-scale training capacity alongside sub-millisecond response times and offline privacy. When no individual tier can satisfy these conflicting physical boundaries alone, systems engineering bridges the gap by partitioning the workload across multiple operating environments.
+Navigating these trade-offs demonstrates that paradigm selection is an architectural optimization bounded by the physical invariants of computation, communication, and storage. While the decision framework establishes baseline feasibility, real-world applications often present mutually incompatible constraints. An intelligent system may demand petabyte-scale training capacity alongside sub-millisecond response times and offline privacy. When no individual tier can satisfy these conflicting physical boundaries alone, systems engineering bridges the gap by partitioning the workload across multiple operating environments.
 
 ## Hybrid Architectures {#sec-ml-systems-hybrid-architectures-combining-paradigms-7cdd}
 
