@@ -44,6 +44,7 @@ from .agents.registry import (
 )
 from .ops import Ops
 from .engine import calibration
+from .notation.registry import Notation, Symbols
 
 # AUTHORITATIVE MEASUREMENT (units + physics-only constants)
 from .core.units import *  # noqa: F401,F403
