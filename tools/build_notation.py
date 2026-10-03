@@ -1,23 +1,25 @@
 #!/usr/bin/env python3
-import yaml
-import re
-import os
 import sys
+import re
 from pathlib import Path
 
 # Always resolve paths relative to the project root (parent of tools dir)
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
-registry_path = PROJECT_ROOT / "books/shared/_includes/notation_registry.yml"
-with open(registry_path) as f:
-    data = yaml.safe_load(f)
+# Add project root to sys.path so we can import mlsysim
+sys.path.insert(0, str(PROJECT_ROOT / "mlsysim"))
+from mlsysim.notation import SYMBOLS
 
 # 1. Generate macros
 macros = set()
 tex_lines = []
-for var in data["variables"]:
-    macro = var["macro"]
-    latex = var["latex"]
+
+# SYMBOLS._all_symbols is a dict of all symbols
+data_variables = list(SYMBOLS._all_symbols.values())
+
+for var in data_variables:
+    macro = var.macro
+    latex = var.latex
     if macro not in macros:
         tex_lines.append(f"\\newcommand{{{macro}}}{{{latex}}}")
         macros.add(macro)
@@ -75,14 +77,14 @@ for filepath in files:
                 out.append("| **Symbol** | **Definition** | **Unit** | **Notes** |")
             out.append("|:---|:---|:---|:---|")
             
-            cat_vars = [v for v in data['variables'] if v.get('category') == current_category]
-            cat_vars.sort(key=lambda x: x["macro"])
+            cat_vars = [v for v in data_variables if v.category == current_category]
+            cat_vars.sort(key=lambda x: x.macro)
             
             for var in cat_vars:
-                symbol = f"**${var['latex']}$**"
-                defn = f"**{var['definition']}**"
-                unit = var.get('unit', '')
-                notes = var.get('notes', '').replace('\n', ' ')
+                symbol = f"**${var.latex}$**"
+                defn = f"**{var.definition}**"
+                unit = getattr(var, 'unit', '') or ''
+                notes = (getattr(var, 'notes', '') or '').replace('\n', ' ')
                 out.append(f"| {symbol} | {defn} | {unit} | {notes} |")
                 
             # Skip the old table lines
