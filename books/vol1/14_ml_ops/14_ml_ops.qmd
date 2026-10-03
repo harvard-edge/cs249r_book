@@ -148,7 +148,7 @@ where $v$ identifies an immutable version hash and $\xi$ captures execution nond
 Fixing random seeds (such as `torch.manual_seed(42)`) still fails to guarantee bitwise reproducibility across training runs on accelerator hardware. The root cause lies in finite-precision arithmetic: in pure mathematics, addition is associative: $(a + b) + c = a + (b + c)$. On digital hardware, finite-precision floating-point formats (such as IEEE 754 FP32, FP16, or BF16) break associativity because intermediate operations round fractional bits to fit within a finite mantissa width. When training on an accelerator, thousands of concurrent threads update shared gradient tensors in global memory using hardware atomic instructions (`atomicAdd`). Because thread scheduling across parallel execution units is asynchronous and arbitrated dynamically by bus contention and clock variations, Thread A and Thread B reach global memory in unpredictable order. If Run 1 executes $(A + B) + C$ and Run 2 executes $A + (B + C)$, the accumulated gradients differ in their least significant bits. Over thousands of optimization steps, these microscopic round-off variances compound through non-linear activation functions, causing two runs with identical seeds and identical code to diverge into measurably different model weights unless deterministic reduction algorithms (which enforce a fixed summation tree at the cost of parallel throughput) are explicitly enabled.
 
 ::: {.column-margin .margin-pointer}
-↩ The numerical precision formats, dynamic ranges, and hardware rounding properties underlying these non-associative accumulation variances are established in @sec-model-training-mixedprecision-training-9218.
+↩ The floating-point formats, their dynamic ranges, and where accumulated rounding error matters in training are established in @sec-model-training-mixedprecision-training-9218.
 :::
 
 [^fn-artifact-reproducibility-hashing]: **Artifact**\index{Artifact!reproducibility}: Model weights are realized training outputs; the inputs and randomness that produced them cannot generally be inferred from the parameters. Versioning only code is therefore insufficient, and even versioning code, data, configuration, and environment may not guarantee exact replay when kernels or training are nondeterministic.
@@ -832,6 +832,10 @@ In an industrial predictive maintenance system, these three principles operate i
 
 The data dependency debt and training-serving skew analyzed in @sec-ml-operations-technical-debt-system-complexity-2762 share a common root cause: inconsistent feature computation across pipeline stages. Without a unified feature layer, feature definitions are typically implemented twice: a data scientist computes `user_session_length` in Python using batch aggregations over historical logs, while a systems engineer reimplements the calculation in Java or C++ to satisfy real-time serving latencies. Subtle differences emerge: one uses wall-clock time between raw events, the other tracks server processing time and filters idle timeouts. The model trains on one definition but serves with another, causing silent accuracy degradation in production. Feature stores\index{Feature store!training-serving consistency}[^fn-feature-store-ops] address this divergence by providing an abstraction layer between data engineering and machine learning, implementing the consistency imperative through a single source of truth for feature transformations. In pipelines lacking this abstraction, duplicated feature logic across environments introduces training-serving skew\index{Training-serving skew!accuracy impact}, temporal data leakage, and distribution drift.
 
+::: {.column-margin .margin-pointer}
+↩ The formal definition of training-serving skew as a violation of the consistency imperative is established in @sec-model-serving-trainingserving-skew-7b99.
+:::
+
 [^fn-feature-store-ops]: **Feature store**\index{Feature store!scale}: Uber's Michelangelo platform described a centralized feature store for sharing and serving features across production models [@hermann2017michelangelo]. At that scale, the consistency guarantee must hold under an online latency budget: what distinguishes a feature store from a shared library of feature code is that the shared feature path also has to serve fresh features fast enough for real-time inference.
 
 Feature stores resolve a fundamental systems tension between batch throughput and online latency by maintaining two synchronized storage tiers behind a unified API. Offline training requires high-throughput sequential reads across terabytes or petabytes of historical logs, which is optimized for columnar storage formats (such as Parquet) hosted on distributed object storage or data warehouses. In contrast, online inference requires sub-millisecond point lookups keyed by entity identifier (such as `user_id`), bounded by strict tail-latency service-level objectives (SLOs). An online store satisfies this access pattern using in-memory or distributed key-value stores (such as Redis or Cassandra). While the underlying physical engines differ to match these access patterns, both read from the same versioned transformation logic.
@@ -849,10 +853,6 @@ Beyond consistency, feature stores support versioning, metadata management, and 
 ##### Training-serving skew: Diagnosis and prevention {#sec-ml-operations-trainingserving-skew-diagnosis-prevention-9dc1}
 
 Training-serving skew\index{Training-serving skew!silent accuracy degradation}\index{Training-serving skew!diagnosis and prevention} manifests operationally through feature store inconsistencies and pipeline divergence. @Tbl-training-serving-skew summarizes common causes and their detection methods:
-
-::: {.column-margin .margin-pointer}
-↩ The formal definition of training-serving skew as a violation of the consistency imperative is established in @sec-model-serving-trainingserving-skew-7b99.
-:::
 
 ```{=latex}
 \begingroup
@@ -1194,7 +1194,7 @@ CI/CD becomes foundational when systems release models repeatedly or carry meani
 CI/CD pipelines orchestrate the overall workflow, but training itself requires specialized compute infrastructure. Model training\index{Training pipeline!automated ML workflows} builds on distributed execution primitives. Within MLOps, training activities become components of a reproducible pipeline supporting continual experimentation and production deployment.
 
 ::: {.column-margin .margin-pointer}
-↩ The single-node data- and model-parallel execution that training pipelines schedule is established in @sec-model-training.
+↩ The single-node data- and model-parallel execution that training pipelines schedule is established in @sec-model-training-singlenode-multigpu-training-c87f.
 :::
 
 Frameworks such as TensorFlow [@abadi2016tensorflow], PyTorch [@paszke2019pytorch], and Keras [@keras] supply modular components for model architectures and optimization routines, carrying framework-selection criteria into production. Operational discipline determines which exploratory training routines graduate into versioned, tested retraining jobs—and under what execution triggers.
@@ -1838,7 +1838,7 @@ Model serving performance depends critically on GPU memory hierarchy utilization
 ↪ The full latency hierarchy across the storage spectrum, from on-chip registers to persistent storage, is developed in @sec-appdx-machine-foundations-memory-hierarchy-2278.
 :::
 
-For large language model (LLM)\index{LLM!KV-cache serving} serving, the KV cache\index{KV cache!LLM serving bottleneck} often becomes the per-node memory bottleneck; @sec-model-serving-memory-kv-cache-d1ea sizes it and shows how PagedAttention manages it [@kwon2023]. Operationally, monitoring KV-cache utilization on each serving node enables capacity planning. Near the memory limit, the scheduler may queue or reject requests, reduce batch size, or shorten the admissible context, each with a different latency or service-quality cost.
+For large language model (LLM)\index{LLM!KV-cache serving} serving, the KV cache\index{KV cache!LLM serving bottleneck} often becomes the per-node memory bottleneck; @sec-model-serving-memory-kv-cache-d1ea sizes it, and PagedAttention manages its allocation [@kwon2023]. Operationally, monitoring KV-cache utilization on each serving node enables capacity planning. Near the memory limit, the scheduler may queue or reject requests, reduce batch size, or shorten the admissible context, each with a different latency or service-quality cost.
 
 Utilization and memory telemetry also feed the number the business sees. Cost per inference\index{Cost per inference!operational tracking}, the hourly accelerator bill divided by sustained throughput, is derived in @sec-model-serving-cost-per-inference-27fc; operationally it belongs on the same dashboard as the utilization signatures above, because a rising cost per thousand inferences at constant pricing is often the first visible symptom of efficiency erosion (smaller effective batches, a shift in traffic mix, or a regression that stays inside the latency SLO).
 

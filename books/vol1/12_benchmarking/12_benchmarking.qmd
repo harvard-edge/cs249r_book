@@ -1021,7 +1021,11 @@ Optimization techniques operate across distinct granularities: kernel fusion tar
 
 ### Micro benchmarks {#sec-benchmarking-micro-benchmarks-7f5a}
 
-While end-to-end metrics govern service-level agreements, optimizing an accelerator pipeline requires isolating the specific mathematical operations that consume execution time and energy. Micro-benchmarks\index{Micro benchmark!diagnostic purpose} serve this diagnostic role by evaluating individual tensor operations in isolation, measuring the hardware primitives introduced in @sec-hardware-acceleration. When profiling a slow inference service, macro-benchmarks report aggregate latency violations, but only micro-benchmarks reveal whether execution time is dominated by matrix multiplications, self-attention projections, memory copies across the host-accelerator interconnect, or elementwise activation kernels.
+While end-to-end metrics govern service-level agreements, optimizing an accelerator pipeline requires isolating the specific mathematical operations that consume execution time and energy. Micro-benchmarks\index{Micro benchmark!diagnostic purpose} serve this diagnostic role by evaluating individual tensor operations in isolation, measuring the accelerator's hardware primitives directly. When profiling a slow inference service, macro-benchmarks report aggregate latency violations, but only micro-benchmarks reveal whether execution time is dominated by matrix multiplications, self-attention projections, memory copies across the host-accelerator interconnect, or elementwise activation kernels.
+
+::: {.column-margin .margin-pointer}
+↩ The accelerator primitives that micro-benchmarks isolate, from matrix engines to the memory hierarchy, are established in @sec-hardware-acceleration.
+:::
 
 Tensor operations constitute the primary target of micro-benchmarking because matrix multiplications and convolutions dominate the arithmetic budget of deep neural networks. Highly optimized runtime libraries such as cuDNN[^fn-cudnn-library-kernel] [@chetlur2014cudnn] provide hand-tuned kernel implementations tailored to specific microarchitectures. Micro-benchmarks also evaluate standalone activation functions (such as ReLU, Sigmoid, and GELU) and structural submodules (such as multi-head attention projections or transformer feed-forward blocks) across standardized input shapes. Benchmark suites such as Baidu's DeepBench\index{DeepBench!operator-level testing}\index{Micro-benchmark suite!operator-level testing} [@deepbench_github] formalized this methodology by evaluating raw GEMM, convolution, and collective communication primitives across diverse hardware platforms, isolating silicon-level execution efficiency from higher-level framework dispatch overhead.
 
@@ -1104,7 +1108,7 @@ While standardized benchmarks measure aggregate throughput, profilers reveal the
 Framework profilers, such as the PyTorch Profiler\index{PyTorch profiler!performance analysis}\index{Framework profiler!performance analysis tool}, capture the logical execution trace of a training or inference iteration. They track operator dispatch on the host CPU, determine whether host preparation overlaps asynchronously with accelerator execution, and identify whether the data loader pipeline starves compute queues. The primary diagnostic metric is the step-time breakdown partitioned across data loading, host launch latency, device compute, and inter-device communication. This breakdown pinpoints which subsystem bounds iteration latency before inspecting individual kernels.
 
 ::: {.column-margin .margin-pointer}
-↩ Compute queue starvation and data-loading bottlenecks build upon the feeding tax analysis established in @sec-data-engineering-feeding-problem.
+↩ The feeding tax, the wall-clock time an accelerator loses waiting on input I/O, is established in @sec-data-engineering-feeding-problem.
 :::
 
 #### Kernel profilers {.unnumbered}
@@ -1485,7 +1489,7 @@ Task-specific metrics evaluate the algorithmic dimension, quantifying whether th
 
 [^fn-bleu-score-translation]: **BLEU (bilingual evaluation understudy)**\index{BLEU!Goodhart's law example}: Introduced by IBM in 2002, BLEU measures translation quality through modified n-gram precision with a brevity penalty against reference translations [@papineni2001]. BLEU is a canonical example of Goodhart's Law in ML: optimizing for n-gram matches can reward surface-level word overlap even when meaning, fluency, or deployment usefulness diverges from the target.
 
-Task metrics evaluate algorithmic quality in isolation, but deployment viability depends on physical machine constraints. Model capacity, measured in parameter count and memory footprint, determines whether weights fit into on-chip SRAM or accelerator memory, or whether they spill across high-latency interconnects. Per-inference execution latency dictates whether a system meets real-time deadlines, while energy consumption per inference (measured in joules or millijoules) bounds thermal dissipation and battery life. The operational challenges of maintaining these metrics across production environments are explored in deployment strategies (@sec-ml-operations).
+Task metrics evaluate algorithmic quality in isolation, but deployment viability depends on physical machine constraints. Model capacity, measured in parameter count and memory footprint, determines whether weights fit into on-chip SRAM or accelerator memory, or whether they spill across high-latency interconnects. Per-inference execution latency dictates whether a system meets real-time deadlines, while energy consumption per inference (measured in joules or millijoules) bounds thermal dissipation and battery life. The operational challenges of maintaining these metrics across production environments are treated in @sec-ml-operations.
 
 Benchmarks must also account for measurement sensitivity across software runtimes. Different frameworks handle loss computation, operator fusion, and gradient accumulation differently, altering reported benchmark numbers. Subtle implementation differences—such as whether evaluation-mode batch normalization uses its stored running statistics or the current mini-batch's statistics, or how non-associative floating-point additions are reordered in reduction kernels—shift measured accuracy and latency enough to invert benchmark rankings when candidate models differ by narrow margins.
 
@@ -1959,7 +1963,7 @@ class GPT3TrainingSpecs:
 
 :::
 
-Training benchmarks validate whether hardware acceleration delivers promised training throughput. The accelerators and multi-chip systems examined in @sec-hardware-acceleration all claim dramatic speedups, and training benchmarks reveal which claims hold under realistic workloads. They evaluate how hardware configurations, data loading mechanisms, and distributed training strategies perform when training production-scale models. These benchmarks are vital because training represents the largest capital expenditure in ML systems, and only rigorous time-to-accuracy measurement reveals whether that capital delivers proportional value rather than dissipating into scaling inefficiencies, memory bottlenecks, or communication overhead.
+Training benchmarks validate whether hardware acceleration delivers promised training throughput. Accelerators and multi-chip systems all claim dramatic speedups, and training benchmarks reveal which claims hold under realistic workloads. They evaluate how hardware configurations, data loading mechanisms, and distributed training strategies perform when training production-scale models. These benchmarks are vital because training represents the largest capital expenditure in ML systems, and only rigorous time-to-accuracy measurement reveals whether that capital delivers proportional value rather than dissipating into scaling inefficiencies, memory bottlenecks, or communication overhead.
 
 For instance, large-scale models like OpenAI's GPT-3[^fn-gpt3-benchmark-scale] [@brown2020language], which consists of `{python} GPT3TrainingSpecs.gpt3_params_b_str` parameters trained on approximately 570 GB of filtered CommonCrawl text (from a ~45 TB raw dataset, combined with other sources to form `{python} GPT3TrainingSpecs.gpt3_tokens_b_str` training tokens), highlight the immense computational demands of modern training. Standardized ML training benchmarks provide systematic evaluation of the underlying systems to ensure that hardware and software configurations can meet these unprecedented demands efficiently.
 
@@ -2248,7 +2252,11 @@ With perfect scaling, `{python} ScalingEfficiencyCalc.n_gpus_str` would complete
 
 **Step 3**: Account for the efficiency loss. @Tbl-benchmarking-scaling-efficiency-loss decomposes the "missing" `{python} ScalingEfficiencyCalc.loss_str` into measurable overhead categories—gradient synchronization, memory copy, load imbalance, and batch-size effects—each measurable through a distinct profiling signal.
 
-In multi-accelerator data-parallel training (such as 2, 4, or 8 GPUs connected over PCIe or NVLink within a host), each accelerator computes gradients on its own local slice of the minibatch, and the AllReduce\index{AllReduce!gradient synchronization} collective of @sec-model-training-data-parallelism-ad1c must sum them so every worker receives the identical global gradient average before the next step. Because the volume of gradient data equals the model parameter size (often gigabytes per step), moving these tensors across physical interconnects imposes a fixed communication tax. As more accelerators are added, the time spent computing per step shrinks ($T_{\text{compute}} \propto 1/N_{\text{GPU}}$), but the AllReduce synchronization time across the interconnect remains constant or grows with bus contention. Scaling efficiency degrades precisely because the ratio of communication time to computation time increases.
+In multi-accelerator data-parallel training (such as 2, 4, or 8 GPUs connected over PCIe or NVLink within a host), each accelerator computes gradients on its own local slice of the minibatch, and the AllReduce\index{AllReduce!gradient synchronization} collective must sum them so every worker receives the identical global gradient average before the next step. Because the volume of gradient data equals the model parameter size (often gigabytes per step), moving these tensors across physical interconnects imposes a fixed communication tax. As more accelerators are added, the time spent computing per step shrinks ($T_{\text{compute}} \propto 1/N_{\text{GPU}}$), but the AllReduce synchronization time across the interconnect remains constant or grows with bus contention. Scaling efficiency degrades precisely because the ratio of communication time to computation time increases.
+
+::: {.column-margin .margin-pointer}
+↩ The AllReduce collective that averages gradients across data-parallel workers is established in @sec-model-training-data-parallelism-ad1c.
+:::
 
 ```{=latex}
 \begingroup
@@ -2529,7 +2537,7 @@ Tail latency's connection to user experience at scale becomes critical in produc
 SLOs in production systems therefore focus on tail latency rather than mean latency to ensure consistent user experience. Interactive services often define percentile-based latency objectives because occasional slow responses have disproportionate impact on user satisfaction. Large-scale systems may track even deeper tails, such as p99.9, when traffic spikes and infrastructure variation affect reliability.
 
 ::: {.column-margin .margin-pointer}
-↪ Tail-latency percentiles dictate queue headroom and dynamic batching thresholds operationalized in @sec-model-serving-load-latency-architecture-a4d8.
+↪ Provisioning serving capacity so that p99 latency meets its SLO under peak load is developed in @sec-model-serving-tail-latency-5376.
 :::
 
 The challenge of meeting these tail latency targets is that the source of the tail is often architectural, not algorithmic. A garbage-collected runtime, a shared kernel driver, or a priority-inversion bug in the serving stack can inject latency spikes that no model optimization will remove.
@@ -3313,7 +3321,7 @@ class EnergyBreakdownCalc:
 ```
 **Problem**: Under the stated 45 nm component-energy model, how much does replacing FP32 with INT8 reduce MobileNetV2 weight-read and arithmetic energy?
 
-Recall from @sec-hardware-acceleration that moving data costs far more energy than computing on it (principle \ref{pri-energy-movement}, grounded in Horowitz's energy estimates [@horowitz2014]). Understanding *why* quantization reduces energy consumption\index{Quantization!INT8 energy savings} requires decomposing energy into its physical sources. Two dominant factors determine inference energy: compute operations and memory access.
+Recall from @sec-hardware-acceleration-ai-memory-systems-0057 that moving data costs far more energy than computing on it (principle \ref{pri-energy-movement}, grounded in Horowitz's energy estimates [@horowitz2014]). Understanding *why* quantization reduces energy consumption\index{Quantization!INT8 energy savings} requires decomposing energy into its physical sources. Two dominant factors determine inference energy: compute operations and memory access.
 
 Narrower datatypes generally require less switching and storage energy per operation, so @tbl-benchmarking-energy-per-precision reveals an `{python} EnergyPerOp.fp32_vs_int8_mult_str` gap between FP32 and INT8 multiply cost:
 
@@ -3795,7 +3803,11 @@ A compressed model running on accelerated hardware can still fail if it was trai
 
 ### Model benchmarking {#sec-benchmarking-model-benchmarking-4847}
 
-Model benchmarks\index{Model benchmarking!multi-dimensional evaluation} validate whether compression techniques from @sec-model-compression preserved the properties that matter for deployment. This evaluation extends beyond top-line accuracy. A pruned model might maintain ImageNet accuracy while losing robustness to adversarial inputs. A quantized model might preserve average-case performance while degrading on rare but critical edge cases. A distilled model might match the teacher's accuracy while losing calibration. Historically, benchmarks focused almost exclusively on accuracy, but compression makes multi-dimensional evaluation essential.
+Model benchmarks\index{Model benchmarking!multi-dimensional evaluation} validate whether compression preserved the properties that matter for deployment. This evaluation extends beyond top-line accuracy. A pruned model might maintain ImageNet accuracy while losing robustness to adversarial inputs. A quantized model might preserve average-case performance while degrading on rare but critical edge cases. A distilled model might match the teacher's accuracy while losing calibration. Historically, benchmarks focused almost exclusively on accuracy, but compression makes multi-dimensional evaluation essential.
+
+::: {.column-margin .margin-pointer}
+↩ Pruning, quantization, and distillation, the compression techniques these benchmarks validate, are established in @sec-model-compression.
+:::
 
 ```{python}
 #| echo: false
@@ -4429,7 +4441,7 @@ Cross-dimensional coupling implies that a passing benchmark in one domain can be
 - **Model success + system failure**: The model produces accurate predictions, but tail latency variance under concurrent load violates service-level agreements.
 - **Model success + data failure**: Validation yields high accuracy on held-out test sets, but production distribution shift causes silent degradation.
 
-These failure modes map directly onto the tripartite D·A·M taxonomy introduced in @sec-introduction and diagrammed in the Venn intersections of @fig-ai-triad, though benchmark evaluation lenses do not align one-to-one with isolated physical vertices. Data benchmarks evaluate input distribution quality and coverage ($\text{D}$); model benchmarks assess learned algorithmic representations and numerical robustness ($\text{A}$); and system benchmarks expose hardware execution, kernel efficiency, and memory-interconnect traffic ($\text{M}$). Holistic evaluation validates the pairwise and central intersections where these domains meet—ensuring that optimizations across the Part III pipeline (data selection $\rightarrow$ model compression $\rightarrow$ hardware acceleration) do not introduce hidden cross-axis regressions.
+These failure modes map directly onto the tripartite D·A·M taxonomy introduced in @sec-introduction-defining-ml-systems-d4af and diagrammed in the Venn intersections of @fig-ai-triad, though benchmark evaluation lenses do not align one-to-one with isolated physical vertices. Data benchmarks evaluate input distribution quality and coverage ($\text{D}$); model benchmarks assess learned algorithmic representations and numerical robustness ($\text{A}$); and system benchmarks expose hardware execution, kernel efficiency, and memory-interconnect traffic ($\text{M}$). Holistic evaluation validates the pairwise and central intersections where these domains meet—ensuring that optimizations across the Part III pipeline (data selection $\rightarrow$ model compression $\rightarrow$ hardware acceleration) do not introduce hidden cross-axis regressions.
 
 The D·A·M taxonomy\index{DAM taxonomy@D·A·M taxonomy!diagnostic framework} provides a diagnostic framework for systematically identifying which axis limits performance. @Sec-appdx-dam-taxonomy-diagnostic-summary-9f73 maps each axis to its binding physical constraint and the optimization pathway that relieves it, giving the first diagnostic step when a benchmark reveals underutilization. @Tbl-dam-bottleneck formalizes this approach by crossing each D·A·M axis with the three fundamental bottleneck types.
 
