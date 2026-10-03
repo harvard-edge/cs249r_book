@@ -147,6 +147,19 @@ class Nodes(Registry):
             description="Meta Grand Teton GPU server: eight H100 GPUs per node.",
         ),
     )
+    Server_8x_MI300X = Node(
+        name="8x MI300X Server",
+        accelerator=Hardware.Cloud.MI300X,
+        accelerators_per_node=8,
+        intra_node_bw=896 * (GB / ureg.second),
+        nics_per_node=8,
+        host_memory=1.5 * TiB,
+        max_power=10.0 * kilowatt,
+        metadata=Metadata(
+            provenance=pc.AMD_MI300X,
+            description="8x AMD Instinct MI300X OAM server node (1.5 TB HBM3, Infinity Fabric).",
+        ),
+    )
 
 
 class Fabrics(Registry):
@@ -349,6 +362,26 @@ class Clusters(Registry):
         metadata=Metadata(
             provenance=pc.META_GENAI_INFRA_2024,
             description="Meta 24K-GPU GenAI cluster on NVIDIA Quantum-2 400 Gb/s InfiniBand.",
+        ),
+    )
+    Training_1K_B200 = Fleet(
+        name="Training Cluster (1024 B200 GPUs)",
+        node=Nodes.DGX_B200,
+        count=128,
+        fabric=Fabrics.InfiniBand_XDR,
+        metadata=Metadata(
+            provenance=_TIER_PROV,
+            description="B200/XDR mid-cluster training tier (1024 GPUs).",
+        ),
+    )
+    Meta_Llama3_16K_H100 = Fleet(
+        name="Meta Llama 3 cluster (16,384 H100)",
+        node=Nodes.DGX_H100,
+        count=2048,
+        fabric=Fabrics.InfiniBand_NDR,
+        metadata=Metadata(
+            provenance=pc.DUBEY_LLAMA3_2024,
+            description="Meta 16K-GPU Llama 3 405B training cluster on 400 Gb/s InfiniBand NDR.",
         ),
     )
 

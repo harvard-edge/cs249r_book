@@ -238,6 +238,12 @@ AMD_MI250X = _ds(
     "https://www.amd.com/en/products/accelerators/instinct/mi200/mi250x.html",
 )
 
+AMD_MI300X = _ds(
+    "prov:amd-mi300x-datasheet",
+    "AMD Instinct MI300X product documentation",
+    "https://www.amd.com/en/products/accelerators/instinct/mi300/mi300x.html",
+)
+
 INTEL_GAUDI2 = _ds(
     "prov:intel-gaudi2-datasheet",
     "Intel Gaudi 2 AI accelerator product documentation",

@@ -92,9 +92,8 @@ A7_WIDE_MAX_TP = 64
 
 
 def llama3_16k_fleet() -> Fleet:
-    """2,048 DGX H100 nodes on a 400 Gb/s per-GPU InfiniBand NDR fabric."""
-    return Fleet(name="Llama 3 16K H100", node=Systems.Nodes.DGX_H100, count=2048,
-                 fabric=Systems.Fabrics.InfiniBand_NDR)
+    """Meta Llama 3 405B training fleet: 2,048 DGX H100 nodes on InfiniBand NDR."""
+    return Systems.Clusters.Meta_Llama3_16K_H100
 
 
 def palm_540b() -> TransformerWorkload:
@@ -147,7 +146,7 @@ def anchor_three() -> dict:
         "memory_gb": result.node_profile.memory_footprint.m_as("GB"),
         "rel_error": abs(mfu - A3_REPORTED_MFU) / A3_REPORTED_MFU,
         "abs_error_points": abs(mfu - A3_REPORTED_MFU) * 100,
-        "source": ("DistributedModel().solve(Models.Language.Llama3_405B, Fleet(DGX_H100 x 2048, InfiniBand_NDR), "
+        "source": ("DistributedModel().solve(Models.Language.Llama3_405B, Systems.Clusters.Meta_Llama3_16K_H100, "
                    "batch_size=2048, efficiency=0.50, tp_size=8, pp_size=16, v_stages=8, microbatch_count=16, "
                    "zero_stage=2, overlap_comm=True, overlap_efficiency=0.85, seq_len=8192)"),
     }
@@ -208,7 +207,7 @@ def anchor_seven(fleet: Fleet | None = None) -> dict:
         "margin_points": (top["mfu"] - second["mfu"]) * 100,
         "reported_tp": A7_REPORTED_TP, "reported_pp": A7_REPORTED_PP,
         "match": best.best_config["tp"] == A7_REPORTED_TP and best.best_config["pp"] == A7_REPORTED_PP,
-        "source": ("ParallelismOptimizer().solve(Models.Language.Llama3_405B, Fleet(DGX_H100 x 2048, InfiniBand_NDR), "
+        "source": ("ParallelismOptimizer().solve(Models.Language.Llama3_405B, Systems.Clusters.Meta_Llama3_16K_H100, "
                    "batch_size=2048, efficiency=0.50, overlap_comm=True, seq_len=8192, "
                    "activation_recomputation=True)"),
     }
