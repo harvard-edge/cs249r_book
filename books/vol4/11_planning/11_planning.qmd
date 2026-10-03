@@ -124,7 +124,7 @@ Decoupling the execution rate from the inference rate allows the low-level track
 Every admitted proposal must therefore arrive as a self-contained bundle: the active trajectory segment continuous through acceleration ($C^2$),[^fn-plan-c2-spline] its explicit validity deadlines, and a pre-verified stopping suffix whose required deceleration distance fits within verified obstacle clearance ($d_{\text{stop}} \le D_{\text{clear}}$). An isolated safety microcontroller (MCU) inspects and validates this bundle across the proposal boundary before arming actuator outputs, caching the emergency stopping continuation in local real-time memory so it can be autonomously dispatched if communications falter.
 
 ::: {.column-margin .margin-pointer}
-↩ Expiring intent leases provide the bounded time windows discharged by trajectories in @sec-intent-lease.
+↩ The intent lease, whose expiry bounds the validity window of every trajectory, is established in @sec-intent-lease.
 :::
 
 [^fn-plan-c2-spline]: **$C^2$ derivative continuity**\index{C2 continuity@$C^2$ continuity}\index{Drivetrain!jerk dynamics}: $C^2$ continuity means that position, velocity, and acceleration remain unbroken functions of time across trajectory boundaries. In permanent-magnet synchronous motors (PMSM), electromagnetic torque couples directly to quadrature stator current ($\tau = K_t i_q$). An acceleration step requires a finite torque and current step under this model, while a velocity step implies an ideal acceleration impulse.
@@ -522,6 +522,10 @@ The permission path permits nominal **TRACK** only while the intent lease and tr
 
 1.  **Fast Nervous System periodic chunk lease ($T_{\text{lease}}$, `{python} PlanningLeaseRule.t_lease_str`):** This high-rate heartbeat governs the real-time execution contract between Brain and Nervous System. The chunk policy proposes base velocity and arm joint targets together, so one chunk lease governs both bodies, and only an admitted replacement chunk renews it, with a desired admission interval of `{python} PlanningLeaseRule.t_renew_str` on this machine. Qualification must bound successful-admission interarrival, not merely inference or request cadence. If an upstream inference pass hangs or communication drops, the lease lapses `{python} PlanningLeaseRule.t_lease_slack_str` after its expected renewal, immediately requesting a controlled stop whose onset follows the reserved response delay.
 2.  **Trajectory commitment deadline:** The record names the latest physical onset of its matched stop. Replacement admission must close early enough to dispatch that stop and absorb actuator response delay. This geometric limit does not replace the running machine's shorter chunk lease; the later worked timeline examines an explicitly different, longer-lease configuration.
+
+::: {.column-margin .margin-pointer}
+↩ The chunk lease and its sizing from the stopping budget are established in @sec-nervous-lease-sizing.
+:::
 
 Two stopping responses back these deadlines. A matched stop suffix, latched at admission, begins at $t_{\text{commit}}$ if no successor has been admitted; a state-matched fallback, built from the measured state, answers any earlier invalidation, such as a lapsed lease (@sec-planning-two-tier-deadlines). Either stop remains authorized after nominal tracking expires, provided its own state, clearance, sensing, and drive-energy premises still hold.
 
@@ -1166,11 +1170,15 @@ Bounding trajectory jerk directly protects actuator health, preserves motor inve
 
 $$\frac{di_q}{dt} = \frac{J_{\text{eff}}}{K_t} j(t)$$
 
-Here, $K_t$ incorporates both the gear reduction ratio and transmission mechanical efficiency; directly substituting a raw motor-side torque constant without gear scaling would incorrectly pair motor torque with output-side inertia. Motor winding inductance $L_{\text{phase}}$ (the phase inductance defined in @sec-body-electrical-time-constants) and available DC bus voltage impose hard electrical limits on current slew rate. During positive motoring operations with resistive and back-electromotive force (back-EMF) drops, a simplified necessary condition for voltage headroom is:
+Here, $K_t$ incorporates both the gear reduction ratio and transmission mechanical efficiency; directly substituting a raw motor-side torque constant without gear scaling would incorrectly pair motor torque with output-side inertia. Motor winding inductance $L_{\text{phase}}$ and available DC bus voltage impose hard electrical limits on current slew rate. During positive motoring operations with resistive and back-electromotive force (back-EMF) drops, a simplified necessary condition for voltage headroom is:
 
 $$V_{\text{bus}} \ge L_{\text{phase}} \frac{di_q}{dt} + R_{\text{phase}}\, i_q + K_e \omega$$ {#eq-plan-inverter-headroom}
 
 where $R_{\text{phase}}$ represents phase winding resistance, $K_e$ is the motor back-EMF constant, and $\omega$ denotes motor electrical speed. In operational motor drives, space-vector pulse-width modulation limits the maximum usable quadrature-axis voltage to a fraction of the total DC bus voltage. A rigorous electrical feasibility check must evaluate available voltage against the fully coupled, signed motor equations—accounting for regenerative braking and inductive flyback—rather than relying on scalar approximations as sufficient qualification.
+
+::: {.column-margin .margin-pointer}
+↩ Phase inductance, back-EMF, and the current-slew limits they impose are established in @sec-body-electrical-time-constants.
+:::
 
 An acceleration discontinuity in a motion plan demands an instantaneous step in electromagnetic torque and stator current. Because finite bus voltage and nonzero winding inductance prevent physical inverters from supplying infinite current slew rates ($di_q/dt$), the physical actuator lags the commanded reference. The resulting tracking error, inverter saturation, and thermal protection response depend on drive gains and mechanical compliance; an unbounded mathematical jerk demand does not instantly cause an overcurrent shutdown, but it induces severe tracking lag, mechanical vibration, and drive stress. A valid bridge must satisfy both continuous mathematical derivative bounds and the physical bandwidth limits of the actuator drive.
 
@@ -2189,6 +2197,10 @@ plt.show()
 
 Even the shortest stop the load tolerates leaves a `{python} PlanningC2Stop.excess_str` deficit at the `{python} PlanningC2Stop.v_drive_str` drive limit, so the robot cannot cruise at that limit in this aisle under the stated deceleration and jerk bounds. The deficit is narrow and it rests on a stipulated jerk bound, so a measured jerk tolerance could move it in either direction. The machine must either derate its operating speed or extend its perception horizon, and this deficit sets up the runtime enforcement speed governor. This is the stopping condition of Principle \ref{pri-vol4-irreversibility} with one more term, because a stop the load can tolerate is a longer stop and the distance it adds comes out of the same clear distance. This calculation concerns the fixed rack-end boundary. A person entering the aisle requires separately qualified moving-actor bounds and crossing control or an operating restriction; this static clearance ledger does not establish that protection. Under the selected body and aisle constraints, reducing speed can recover clearance. @Sec-enforcement-stopping-envelopes adds the tracking allowance and derives a candidate speed; permission to operate still requires complete capture-to-admission timing, positive stopping reserve, and qualification under the declared conditions.
 
+::: {.column-margin .margin-pointer}
+↩ The intrusion distance an approaching pedestrian adds to the stopping budget, and the site controls it demands, are established in @sec-memory-belief-through-occlusion.
+:::
+
 For either body, the admission and fallback decisions in @tbl-11-seam-fallback-hierarchy are distinct from an emergency power cut.
 
 | State                      | Trigger                                                                                           | MCU action and required evidence                                                                                                                             |
@@ -2561,11 +2573,11 @@ Every field in the contract captures an explicit condition of admission. Kinemat
 
 Hierarchically, the trajectory record answers to the intent lease described in @sec-intent-lease. By embedding the cryptographic digest of that parent lease, the record guarantees that every proposed setpoint advances the intended objective without exceeding negotiated effort ceilings. The motion itself is stored as discrete setpoint arrays or continuous spline coefficients, parameterized by an explicit sample cadence—configured on our reference robot as a `{python} PlanningArmTimeline.t_period_str` timestep $\Delta t_{\text{step}}$, yielding a `{python} PlanningArmTimeline.f_step_str` stream—alongside the nominal trajectory expiration $t_{\text{plan\_exp}}$ (`{python} PlanningArmTimeline.t_plan_exp_str` for a single chunk) and canonical SI units. Pairing this explicit cadence and unit specification with the reference coordinate frame and evidence timestamp established in @sec-planning-handoff allows the joint controller to interpolate setpoints and evaluate higher-order derivatives cleanly, eliminating coordinate-frame ambiguities and any reliance on unsynchronized host clocks.
 
-::: {.column-margin .margin-pointer}
-↪ Trajectory feasibility proposals are separately checked against conditional control barrier functions in @sec-enforcement-safe-sets-conditional-permission.
-:::
-
 Physical feasibility is never unconditional; it holds only under the environmental geometry and dynamic loads assumed during planning. The immutable sidecar captures these conditions, recording the obstacle-map epoch, payload mass, surface friction coefficients, kinematic limits, validator software version, certified clearance margins, and the source observation identifiers. A cryptographic digest in the fixed header immutably binds this sidecar to the setpoint payload. Because safety proofs cannot extrapolate beyond validated boundaries, the payload and friction values declared in the sidecar must fall strictly within the target Operational Design Domain (ODD) characterized in @sec-evaluation-logs. If live sensor feedback indicates that the robot has drifted outside these operating assumptions, the permission path immediately revokes the TRACK state, recognizing that clearance margins computed for one world state do not hold in another. Diagnostic metadata, such as random solver seeds and neural model weight hashes, belongs in this audit sidecar for offline postmortem analysis, keeping the per-tick servo loop lean and deterministic.
+
+::: {.column-margin .margin-pointer}
+↪ Conditional permission, the per-tick safe-set test that holds a clearance margin valid only for the live state, is developed in @sec-enforcement-safe-sets-conditional-permission.
+:::
 
 On this machine, the chunk policy generates only the nominal motion profile. The planning runtime then packages this output by appending the seam state, the four operational deadlines, and a matched stopping suffix, delivering a self-contained record to the permission path. The fixed header organizes these fields by functional role. Lineage fields record a monotonic sequence number, the evidence timestamp $t_0$, and the digest of the parent intent lease. Timing fields encode the four deadlines from @sec-planning-handoff; tracking authority expires at whichever comes first among the pre-onset stop-dispatch cutoff, the chunk lease timeout `{python} PlanningLeaseRule.t_lease_str` after the last admitted chunk, the parent intent lease expiration, or evidence staleness. Seam fields define the reference frame, each joint's initial state $(q,\dot q,\ddot q)$ at handoff, and the polynomial coefficients for an admission-checked stopping suffix satisfying $d_{\text{stop}} \le D_{\text{clear}}$. Finally, content fields specify the payload format, byte length, and an integrity digest spanning both the setpoint payload and the sidecar.
 
