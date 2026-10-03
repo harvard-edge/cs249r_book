@@ -118,7 +118,7 @@ That test-gap failure is the model-facing version of a broader reliability probl
 
 ### Cloud infrastructure failures {#sec-robust-ai-cloud-infrastructure-failures-1c8c}
 
-The 2017 AWS S3 outage[^fn-aws-s3-outage] shows how a shared storage dependency can halt otherwise healthy services [@aws2017s3outage]. Its detection and recovery mechanics belong to @sec-fault-tolerance-reliability. The robustness problem becomes different when the dependency returns plausible but corrupted data: the service continues operating while incorrect results propagate.
+The 2017 AWS S3 outage[^fn-aws-s3-outage] shows how a shared storage dependency can halt otherwise healthy services [@aws2017s3outage]. The robustness problem becomes different when the dependency returns plausible but corrupted data: the service continues operating while incorrect results propagate.
 
 [^fn-aws-s3-outage]: **AWS S3 Outage (2017)**\index{AWS S3 Outage!cascade failure}: A mistyped command during routine maintenance removed too much capacity from S3's index and placement subsystems in US-East-1. While those subsystems restarted, S3 could not service requests and dependent AWS services experienced elevated errors or impaired functionality. The incident exposed a single-region dependency pattern: systems that assume regional storage availability as an invariant can fail even when their own application code and model-serving logic remain unchanged.
 
@@ -180,9 +180,17 @@ A flipped bit in a GPU memory module can cause a language model to generate toxi
 *One corrupted gradient in AllReduce reaches every replica's weights.*
 :::
 
-The fault tolerance mechanisms from @sec-fault-tolerance-reliability, originally designed to recover training jobs from hardware crashes, serve a second role in robustness: inference-time availability. Training recovery focuses on checkpoint restoration, but robustness extends this to graceful degradation\index{Graceful Degradation}, ensuring a serving system remains operational even when inputs are adversarial or components degrade. The distributed training architectures from @sec-distributed-training-systems introduce unique vulnerabilities: a single node transmitting corrupted gradients during an AllReduce operation can poison the global model weights, requiring evidence that corrupted updates are detected or contained. Byzantine fault tolerance protocols\index{Byzantine Fault Tolerance!gradient aggregation} address arbitrary contributor behavior; ordinary hardware corruption also demands the fault diagnosis and recovery mechanisms already established for the fleet.
+The fault tolerance mechanisms from @sec-fault-tolerance-reliability, originally designed to recover training jobs from hardware crashes, serve a second role in robustness: inference-time availability. Training recovery focuses on checkpoint restoration, but robustness extends this to graceful degradation\index{Graceful Degradation}, ensuring a serving system remains operational even when inputs are adversarial or components degrade. Distributed training architectures introduce unique vulnerabilities: a single node transmitting corrupted gradients during an AllReduce operation can poison the global model weights, requiring evidence that corrupted updates are detected or contained. Byzantine fault tolerance protocols\index{Byzantine Fault Tolerance!gradient aggregation} address arbitrary contributor behavior; ordinary hardware corruption also demands the fault diagnosis and recovery mechanisms already established for the fleet.
 
-The security frameworks from @sec-security-privacy provide threat modeling principles that inform adversarial defense strategies. Operational monitoring systems from @sec-ops-scale provide the infrastructure foundation for detecting robustness threats in production. The serving infrastructure from @sec-inference-scale creates new attack surfaces: batching, model routing, and pipeline parallelism expose scheduling logic and individual pipeline stages to adversarial queries.
+::: {.column-margin .margin-pointer}
+↩ Gradient synchronization through AllReduce, which lets one corrupted contribution reach every replica, is established in @sec-distributed-training-systems-systems-gradient-synchronization-614b.
+:::
+
+The security frameworks from @sec-security-privacy provide threat modeling principles that inform adversarial defense strategies. Operational monitoring systems provide the infrastructure foundation for detecting robustness threats in production. The serving infrastructure creates new attack surfaces: batching, model routing, and pipeline parallelism expose scheduling logic and individual pipeline stages to adversarial queries.
+
+::: {.column-margin .margin-pointer}
+↩ The batching, model routing, and pipelined serving that expose these attack surfaces are established in @sec-inference-scale.
+:::
 
 ```{python}
 #| echo: false
@@ -294,7 +302,7 @@ class SilentErrorProbability:
     p_total_large_str = fmt_percent(p_at_least_one_val, precision=1, style='prose')
     n_gpus_certain_str = fmt(n_gpus_certain_val, precision=0)
 ```
-@Sec-fault-tolerance-reliability establishes that per-device silent corruption compounds across a fleet of $N$ devices\index{Silent Data Corruption!cluster-scale probability} as $\Pr(\geq 1) = 1 - (1 - p)^N$ when each device has independent residual-error probability $p$ over the same observation interval. A high fleet-level probability follows only for a specified device count, interval, and residual-error model; raw bit flips corrected by hardware are not silent errors. @Fig-silent-error-probability charts how this compounding risk scales across fleet sizes up to $10^5$ accelerators under three representative per-device failure rates: the resulting S-curves cross the 50 percent "more likely than not" threshold and enter the shaded 95 percent "effectively certain" saturation band as cluster scale expands. At an illustrative stress-test rate of `{python} SilentErrorProbability.p_per_hr_prose_str` per device-hour, a `{python} SilentErrorProbability.n_gpus_large_str`-device cluster incurs an hourly corruption probability of `{python} SilentErrorProbability.p_total_large_str` (marked at 10K GPUs), with failure becoming nearly certain at roughly `{python} SilentErrorProbability.n_gpus_certain_str` devices. Meta's SDC report confirms corruption at observable fleet scale [@dixit2021silent].
+@Sec-ft-sdc-verification establishes that per-device silent corruption compounds across a fleet of $N$ devices\index{Silent Data Corruption!cluster-scale probability} as $\Pr(\geq 1) = 1 - (1 - p)^N$ when each device has independent residual-error probability $p$ over the same observation interval. A high fleet-level probability follows only for a specified device count, interval, and residual-error model; raw bit flips corrected by hardware are not silent errors. @Fig-silent-error-probability charts how this compounding risk scales across fleet sizes up to $10^5$ accelerators under three representative per-device failure rates: the resulting S-curves cross the 50 percent "more likely than not" threshold and enter the shaded 95 percent "effectively certain" saturation band as cluster scale expands. At an illustrative stress-test rate of `{python} SilentErrorProbability.p_per_hr_prose_str` per device-hour, a `{python} SilentErrorProbability.n_gpus_large_str`-device cluster incurs an hourly corruption probability of `{python} SilentErrorProbability.p_total_large_str` (marked at 10K GPUs), with failure becoming nearly certain at roughly `{python} SilentErrorProbability.n_gpus_certain_str` devices. Meta's SDC report confirms corruption at observable fleet scale [@dixit2021silent].
 
 ::: {#fig-silent-error-probability fig-env="figure" fig-pos="htb" fig-cap="**Silent Error Probability at Scale**: Probability of at least one silent data corruption event per hour as a function of cluster size, for three illustrative per-device error rates. The curves are analytical, $\Pr(\geq 1) = 1 - (1-p)^N$, and show how quickly cluster-scale probabilities compound as per-device rates increase; fleet observations of silent corruption [@dixit2021silent] motivate stress-testing at rates above soft-error predictions." fig-alt="Semilog plot showing three S-curves for per-device SDC rates of 1e-3, 1e-4, and 1e-5. The 1e-3 and 1e-4 curves approach probability 1.0 by 100000 devices; the 1e-5 curve rises to about 0.63."}
 
@@ -392,7 +400,7 @@ The unified framework helps engineers decide which failure signal they are seein
 
 The subtype names matter less than the evidence each pillar produces, because the evidence is what an operator actually observes and what selects the defense family. Environmental shifts produce a statistical signal. The input or label distribution changes against a reference, so the evidence is distributional distance and the response family is monitoring, recalibration, and retraining.
 
-Input-level attacks produce an adversarial signal. A crafted input or poisoned sample is engineered to maximize error, so the evidence is gradient-aligned perturbation or anomalous training samples, and the response family is adversarial training, certification, and input sanitization. Because the attacker operates within the model's own input space, authentication and access control (@sec-security-privacy) do not reach this failure.
+Input-level attacks produce an adversarial signal. A crafted input or poisoned sample is engineered to maximize error, so the evidence is gradient-aligned perturbation or anomalous training samples, and the response family is adversarial training, certification, and input sanitization. Because the attacker operates within the model's own input space, authentication and access control do not reach this failure.
 
 System-level faults encompass failures originating from the hardware, code, frameworks, and deployment infrastructure that support ML systems: numerical instability in gradient computations, data pipeline corruption from preprocessing bugs, race conditions in distributed training, memory leaks that degrade long-running services, dependency failures from version mismatches, and hardware faults such as bit flips or power events. The fault mechanics themselves, and their detection and recovery, belong to @sec-fault-tolerance-reliability. What makes the third pillar a robustness problem rather than a pure reliability problem is that these faults rarely announce themselves as faults. They masquerade as the other two pillars, and an engineer who misreads the disguise spends the wrong defense budget.
 
@@ -406,7 +414,7 @@ The boundary and timing of a change often provide the first diagnostic clue. Whi
 
 Reproducibility under fixed inputs\index{Fault Diagnosis!fixed-input replay} tests whether the fault is deterministic. Replaying golden inputs through version-pinned preprocessing pipelines and model artifacts isolates the failure boundary. A deterministic software bug or numerical defect reliably reproduces at the exact same pipeline stage, whereas transient hardware faults typically vanish on replay and require repeated execution or redundant hardware to isolate. Because drift and adversarial inputs also reproduce deterministically for a fixed payload, replay alone cannot settle the diagnosis; operators must compare raw and preprocessed tensors, artifact versions, and population-level statistics alongside the replay output.
 
-Finally, cross-layer correlation\index{Fault Diagnosis!cross-layer correlation} links model behavior to surrounding infrastructure telemetry. An adversarial campaign frequently correlates with input-space anomalies such as query-rate spikes or gradient-aligned perturbations. In contrast, a system-level fault correlates with deployment releases, error-correcting code (ECC) memory counters, SDC checkers, or memory-pressure alarms of the kind instrumented in @sec-fault-tolerance-reliability.
+Finally, cross-layer correlation\index{Fault Diagnosis!cross-layer correlation} links model behavior to surrounding infrastructure telemetry. An adversarial campaign frequently correlates with input-space anomalies such as query-rate spikes or gradient-aligned perturbations. In contrast, a system-level fault correlates with deployment releases, error-correcting code (ECC) memory counters, SDC checkers, or memory-pressure alarms.
 
 ::: {#exmp-robust-ai-masquerade-replay .callout-example title="A drift alert that was a pipeline fault"}
 
@@ -558,13 +566,17 @@ These shifts occur naturally as environments evolve. User preferences change sea
 
 #### Technical categories {#sec-robust-ai-technical-categories-cc06}
 
-Covariate shift\index{Covariate Shift!importance weighting}\index{Covariate Drift!importance weighting}, defined for fleet monitoring in @sec-ml-operations-scale-drift-detection-793f, changes the input distribution while the relationship between inputs and outputs stays fixed [@quinonero2009dataset]. Autonomous vehicle perception models trained mostly on daytime images lose accuracy at night\index{Covariate Shift!day-night illumination} even though the object recognition task is unchanged, and rain, snow, and fog degrade detection further. The size of the loss depends on the luminance shift, the sensor, and how much adverse-condition data the training set contained, so each deployment must measure it on held-out night and weather slices rather than assume a published figure. These environmental changes displace feature vectors into underrepresented regions of input space—the covariate shift illustrated in panel (a) of @fig-shift-types—inducing systematic inference degradation even when the ground-truth labeling rule remains unaltered. Because the shift moves whole populations of inputs rather than individual examples, it degrades accuracy on every affected request at once.
+Covariate shift\index{Covariate Shift!importance weighting}\index{Covariate Drift!importance weighting} changes the input distribution while the relationship between inputs and outputs stays fixed [@quinonero2009dataset]. Autonomous vehicle perception models trained mostly on daytime images lose accuracy at night\index{Covariate Shift!day-night illumination} even though the object recognition task is unchanged, and rain, snow, and fog degrade detection further. The size of the loss depends on the luminance shift, the sensor, and how much adverse-condition data the training set contained, so each deployment must measure it on held-out night and weather slices rather than assume a published figure. These environmental changes displace feature vectors into underrepresented regions of input space—the covariate shift illustrated in panel (a) of @fig-shift-types—inducing systematic inference degradation even when the ground-truth labeling rule remains unaltered. Because the shift moves whole populations of inputs rather than individual examples, it degrades accuracy on every affected request at once.
+
+::: {.column-margin .margin-pointer}
+↩ Covariate shift and concept drift, the input-distribution and input-output changes a fleet drift monitor must tell apart, are established in @sec-ml-operations-scale-drift-detection-793f.
+:::
 
 Covariate shift moves the inputs while the true mapping $p(y \mid x)$ stays fixed. A more insidious variant occurs when the mapping itself changes: the correct label for a given input today is different from what it was during training.
 
 ::: {#dfn-robust-ai-concept-drift .callout-definition title="Concept drift"}
 
-***Concept drift***\index{Concept Drift!definition} is the deployed-model subtype of distribution shift in which the statistical relationship $p(y \mid x)$ changes over time, potentially changing the correct class decision or its probability even when the input distribution stays fixed. Data drift\index{Data Drift} (see @sec-ml-operations-scale-monitoring-scale-73c5) names a change in $p(x)$; the more restrictive covariate-shift case additionally assumes that $p(y \mid x)$ remains stable.
+***Concept drift***\index{Concept Drift!definition} is the deployed-model subtype of distribution shift in which the statistical relationship $p(y \mid x)$ changes over time, potentially changing the correct class decision or its probability even when the input distribution stays fixed. Data drift\index{Data Drift} names a change in $p(x)$; the more restrictive covariate-shift case additionally assumes that $p(y \mid x)$ remains stable.
 
 1.  **Significance**: It causes silent model degradation because the historical mapping learned by the model is no longer representative of current reality. In amortized cost terms, it compresses the effective deployment window before retraining is required: fraud-detection models, recommender systems, and other behavior-dependent models may need periodic retraining or recalibration as adversaries, users, and policies change. The remediation cost\index{Concept Drift!remediation cost} can range from recalibration or incremental fine-tuning to a full training run, so drift velocity affects amortized per-prediction cost without fixing every response at the cost of the original run.
 2.  **Distinction**: Under covariate shift, $p(x)$ changes while $p(y \mid x)$ remains stable, so resampling or reweighting may help where the reference data cover the new inputs. Detecting data drift alone does not establish that the conditional relationship stayed fixed. Concept drift instead requires adapting to a new $p(y \mid x)$, usually using recent ground-truth outcomes. This can make concept drift structurally more expensive to remediate than resampling an existing labeled distribution.
@@ -630,7 +642,7 @@ class DistributionShiftMetrics:
     psi_critical_thresh_str = fmt(psi_critical, precision=2, commas=False)
 ```
 
-Statistical distance metrics quantify the degree of distribution shift by measuring differences between training and deployment data distributions. In this illustrative H100-class monitoring scenario, MMD with radial basis function kernels ($\gamma = 1.0$) processes `{python} DistributionShiftMetrics.mmd_n_samples_str` samples in `{python} DistributionShiftMetrics.mmd_latency_ms_str`; its sensitivity depends on the shift model and kernel choice. Kolmogorov-Smirnov tests\index{Kolmogorov-Smirnov Test!univariate drift limitation} can detect univariate shifts with `{python} DistributionShiftMetrics.ks_n_samples_str`+ samples, but scale poorly to high-dimensional data and miss joint changes that preserve marginals. The service in this example uses PSI (@sec-ml-operations-scale-drift-detection-793f) values from `{python} DistributionShiftMetrics.psi_warn_thresh_str` to `{python} DistributionShiftMetrics.psi_critical_thresh_str` as investigation triggers, not as universal statistical thresholds.
+Statistical distance metrics quantify the degree of distribution shift by measuring differences between training and deployment data distributions. In this illustrative H100-class monitoring scenario, MMD with radial basis function kernels ($\gamma = 1.0$) processes `{python} DistributionShiftMetrics.mmd_n_samples_str` samples in `{python} DistributionShiftMetrics.mmd_latency_ms_str`; its sensitivity depends on the shift model and kernel choice. Kolmogorov-Smirnov tests\index{Kolmogorov-Smirnov Test!univariate drift limitation} can detect univariate shifts with `{python} DistributionShiftMetrics.ks_n_samples_str`+ samples, but scale poorly to high-dimensional data and miss joint changes that preserve marginals. The service in this example uses PSI values from `{python} DistributionShiftMetrics.psi_warn_thresh_str` to `{python} DistributionShiftMetrics.psi_critical_thresh_str` as investigation triggers, not as universal statistical thresholds.
 
 High-dimensional and temporal traffic requires more than one fleet-wide scalar. Marginal feature monitors can remain flat while correlations, sequence structure, or a small cohort changes. A production design therefore combines cheap per-feature alarms with embedding- or kernel-space tests, cohort slices, rolling windows at several durations, and change-point checks. At fleet scale these monitors are also a communication workload: every serving replica must ship samples or sketches of its traffic to wherever the reference comparison runs, so the choice of statistic sets the telemetry bandwidth as well as the detection power. The windows must preserve seasonality and event context: comparing Monday traffic with Sunday traffic can manufacture an alert, while averaging a week can hide an abrupt one-hour failure. Monitor design is part of the hypothesis, not a neutral wrapper around the model.
 
@@ -645,10 +657,6 @@ Federated learning enables distributed adaptation when the data cannot be centra
 Quantitative drift detection must answer an operational question: whether the model should keep serving, be monitored more closely, or enter a root-cause investigation that may justify recalibration, data repair, or retraining. PSI supplies a cheap fleet-wide alert that starts that decision; the mathematical foundations below show how a service can calibrate thresholds without mistaking them for universal policy.
 
 #### Population stability index (PSI) {#sec-robust-ai-population-stability-index-psi-077d}
-
-::: {.column-margin .margin-pointer}
-↩ Fleet drift detection metrics and production alerting thresholds are introduced in @sec-ml-operations-scale-drift-detection-793f.
-:::
 
 @Eq-psi-monitoring defined PSI as a symmetric log-ratio difference between baseline and current bucket proportions\index{Population Stability Index!binning sensitivity}, and @sec-ml-operations-scale-drift-detection-793f used it as a cheap fleet-wide alert. The investigation here needs the same quantity in a form that exposes each bin's contribution. Writing $p_i$ for the baseline proportion in bin $i$ ($E_i$ in @eq-psi-monitoring) and $q_i$ for the current proportion ($A_i$), a feature discretized into $K_{\text{bucket}}$ bins has
 
@@ -1782,10 +1790,6 @@ Robustness is not universal; it is strictly bound to the specific threat model u
 
 :::
 
-::: {.column-margin .margin-pointer}
-↩ Silent data corruption, hardware ECC errors, and pipeline fault tolerance are analyzed in @sec-fault-tolerance-reliability.
-:::
-
 ::: {.fallacy-pitfall}
 
 **Fallacy**: *Software faults do not matter when the model is correct.*
@@ -1821,10 +1825,6 @@ Inside the training step, robustness is paid for in the terms of the Fleet Law (
 
 No finite evaluation establishes robustness to every shock. A deployable claim must bind behavioral evidence to the evaluated artifact and operating conditions, then provision the detection and fallback paths without violating service-level objectives (SLOs). The release record in @sec-ops-scale-end-to-end-evaluation-contract preserves that link so a changed model or workload cannot silently inherit obsolete evidence. Governance uses the resulting record to assign acceptable residual risk and decision authority; a robustness score alone cannot make those decisions.
 
-::: {.column-margin .margin-pointer}
-↪ Energy tracking, carbon-aware scheduling, and sustainable computing metrics are explored in @sec-sustainable-ai.
-:::
-
 ::: {.callout-chapter-connection title="From resilience to sustainability"}
 
 How do we balance system armor against the physical resources required to run it? Robustness builds on threat modeling and fault tolerance to protect the fleet against distribution drift, input manipulation, and system-level faults. However, multiplying compute and latency budgets to achieve resilience increases energy consumption and hardware footprint. A reliable system must also operate within long-term planetary and resource constraints: lifecycle carbon accounting, carbon-aware workload shifting, and energy efficiency.
@@ -1832,7 +1832,7 @@ How do we balance system armor against the physical resources required to run it
 :::
 
 ::: {.column-margin .margin-pointer}
-↪ Energy tracking, carbon-aware scheduling, and sustainable computing metrics are explored in @sec-sustainable-ai.
+↪ Energy tracking, carbon-aware scheduling, and sustainable computing metrics are developed in @sec-sustainable-ai.
 :::
 
 <!-- This is here to make sure that quizzes are inserted properly before a part begins. -->

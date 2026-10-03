@@ -107,8 +107,12 @@ A collective is a communication operation performed by a group of workers. Its n
 
 ::: {#psp-network-fabrics-network-as-gradient-bus .callout-perspective title="The network as a gradient bus"}
 
-In a single machine, the memory bus moves data between the processor and memory. In a distributed training cluster, the network fabric serves the analogous role: it is the gradient bus\index{Gradient!bus} that moves parameter updates between workers. As the memory wall in @sec-compute-memory-wall limits single-device throughput, network fabric bandwidth limits multi-device throughput. This is the scale-out communication wall mapped across the pod tier in @fig-three-walls-grid, which @sec-introduction-communication-becomes-dominant-e1b6 introduced as the network wall\index{Communication wall!gradient bus}. Protocols, topologies, congestion control, and collective-routing choices all determine how close that bus comes to its physical limits. That physical asymmetry is what the fabric layer contributes to the cost model: a gradient that stays on NVLink moves an order of magnitude faster than the same gradient crossing InfiniBand. Across the historical scaling trajectories plotted in @fig-network-bandwidth-scaling, the solid NVLink curve pulls roughly an order of magnitude above inter-node InfiniBand and Ethernet, widening that physical gap across every hardware generation since 2016.
+In a single machine, the memory bus moves data between the processor and memory. In a distributed training cluster, the network fabric serves the analogous role: it is the gradient bus\index{Gradient!bus} that moves parameter updates between workers. As the memory wall limits single-device throughput, network fabric bandwidth limits multi-device throughput. This is the scale-out communication wall, the network wall\index{Communication wall!gradient bus} mapped across the pod tier in @fig-three-walls-grid. Protocols, topologies, congestion control, and collective-routing choices all determine how close that bus comes to its physical limits. That physical asymmetry is what the fabric layer contributes to the cost model: a gradient that stays on NVLink moves an order of magnitude faster than the same gradient crossing InfiniBand. Across the historical scaling trajectories plotted in @fig-network-bandwidth-scaling, the solid NVLink curve pulls roughly an order of magnitude above inter-node InfiniBand and Ethernet, widening that physical gap across every hardware generation since 2016.
 
+:::
+
+::: {.column-margin .margin-pointer}
+↩ Communication dominance at scale, the network wall, is established in @sec-introduction-communication-becomes-dominant-e1b6.
 :::
 
 ::: {#fig-network-bandwidth-scaling fig-env="figure" fig-pos="htb" fig-cap="**Historical network bandwidth scaling**: Intra-node NVLink, inter-node InfiniBand and Ethernet, and the PCIe host bus, plotted per direction on a common log scale from 2010 to 2024. NVLink pulls roughly an order of magnitude clear of the others, so the same collective costs far more when it crosses a machine boundary than when it stays inside one." fig-alt="Log-scale chart of interconnect bandwidth from 2010 to 2024 for Ethernet, InfiniBand, NVLink, and PCIe. All four rise steadily, with NVLink roughly an order of magnitude above the others by 2024."}
@@ -208,10 +212,6 @@ class NetworkFabricsContextScenario:
 ```
 
 The concrete bandwidth cliff that separates intra-node from inter-node communication makes this gradient bus analogy precise. A single H100 delivers `{python} NetworkFabricsContextScenario.h100_fp16_tflop_per_s_str` of FP16 throughput with `{python} NetworkFabricsContextScenario.h100_mem_bw_tb_per_s_str` of memory bandwidth. Within a node, eight such accelerators communicate through NVLink at `{python} NetworkFabricsContextScenario.nvlink_h100_gb_per_s_str` of aggregate bidirectional bandwidth. The moment computation crosses a node boundary, however, the available per-direction bandwidth drops by a factor of `{python} NetworkFabricsContextScenario.nvlink_to_ib_ratio_mult_str`, from `{python} NetworkFabricsContextScenario.nvlink_h100_perdir_gb_per_s_str` of NVLink (one direction of that bidirectional link) to `{python} NetworkFabricsContextScenario.ib_ndr_gb_per_s_str` (NDR InfiniBand per port). This cliff, the same boundary that @sec-compute-bandwidth-hierarchy measured from inside the node, is the central challenge of network fabric design. @Sec-appdx-fleet-foundations-numbers-to-know collects the canonical NVLink and InfiniBand bandwidth specifications and the 1K-GPU cluster reference configuration that anchor these figures. For the 175B model, moving `{python} NetworkRunningExampleCluster.grad_gb_str` of gradients through `{python} NetworkFabricsContextScenario.ib_ndr_gb_per_s_str` links means that the AllReduce alone can take seconds, during which every GPU in the cluster sits idle unless the fabric and collective algorithms can overlap that transfer with computation. @Fig-bandwidth-hierarchy charts this multi-tier divergence on a logarithmic scale across four GPU generations (V100 through B200), isolating the red annotated drop between the solid NVLink bars and hatched InfiniBand port bars.
-
-::: {.column-margin .margin-pointer}
-↩ Single-node accelerator throughput and intra-node interconnect scaling are established in @sec-compute-infrastructure.
-:::
 
 ::: {.content-visible when-format="pdf"}
 \newpage
@@ -349,7 +349,7 @@ plt.close()
 ```
 :::
 
-Across the four generations charted in @fig-bandwidth-hierarchy, the red cliff indicators reveal that this steep bandwidth drop is not an artifact of a single accelerator design. Measured per direction, crossing from the local NVLink domain to one InfiniBand port reduces bandwidth by roughly 9$\times$ for the H100 generation and by 12--18$\times$ in the others, despite absolute bandwidth improvements at every tier. The comparison is between an aggregate accelerator-local interconnect budget and one external network port. Intra-node NVLink connects accelerator packages through board-level links and, in switched systems, NVSwitch; it is not an on-package memory path. External fabrics must additionally satisfy cable reach, port-count, and multi-node routing constraints. The size of the bandwidth gap depends on how many links and ports the system provisions at each boundary. The ratio determines which parallelism strategies are efficient (see @sec-appdx-fleet-system-assumptions for the physical specification sheet detailing directional vs. aggregate bandwidth, latency, framing, and energy cost per bit across host buses, accelerator interconnects, and network fabrics).
+Across the four generations charted in @fig-bandwidth-hierarchy, the red cliff indicators reveal that this steep bandwidth drop is not an artifact of a single accelerator design. Measured per direction, crossing from the local NVLink domain to one InfiniBand port reduces bandwidth by roughly 9$\times$ for the H100 generation and by 12--18$\times$ in the others, despite absolute bandwidth improvements at every tier. The comparison is between an aggregate accelerator-local interconnect budget and one external network port. Intra-node NVLink connects accelerator packages through board-level links and, in switched systems, NVSwitch; it is not an on-package memory path. External fabrics must additionally satisfy cable reach, port-count, and multi-node routing constraints. The size of the bandwidth gap depends on how many links and ports the system provisions at each boundary. The ratio determines which parallelism strategies are efficient.
 
 The distinction follows from what each parallelism strategy divides. Tensor parallelism splits an individual layer across accelerators, requiring frequent exchanges of intermediate results; this favors the fastest local interconnect. Pipeline parallelism places successive groups of layers on different workers and transfers activations between them. Data parallelism runs model replicas on different input batches and combines their gradients; because each replica can sum gradients over several microbatches before an exchange (gradient accumulation\index{Gradient accumulation!communication frequency}), it tolerates the lowest bandwidth of the three. Pipeline and data parallelism therefore offer ways to cross the slower node boundary with less frequent communication. Combining these three strategies is called 3D parallelism; their execution schedules are developed in @sec-distributed-training-systems-systems-hybrid-parallelism-3d-loop, while their traffic requirements already constrain the fabric. Every topology and protocol decision in this chapter attempts to minimize the impact of this hierarchy on collective communication performance.
 
@@ -815,7 +815,11 @@ Consider a 2,048-GPU training cluster that will run both large language model tr
 
 ### The $\alpha$-$\beta$ performance model {#sec-network-fabrics-performance-model}
 
-Protocol choice determines how the fabric provides reliable completion and bounds loss-recovery time; performance modeling then asks how fast it can carry a given message. The $\alpha$-$\beta$ model\index{Alpha-Beta Model!message transfer time} (principle \ref{pri-alpha-beta-model}) decomposes message transfer time as $T(n) = \alpha + n/\beta$, where $n$ is the message size in bytes, $\alpha$ is the fixed startup latency, and $\beta$ is the sustained bandwidth in bytes per unit time [@hockney1994]. @Sec-appdx-comm-foundations-alpha-beta develops the full derivation and works the model through concrete message regimes, separating latency-dominated from bandwidth-dominated transfers; @sec-communication-collective-operations-collective-operations-alphabeta-model-f9b4 later applies the same decomposition to collective algorithms. The physical topology influences both parameters through path length and available capacity. A ring collective, which passes chunks around a logical cycle of participants, adds a separate scheduling cost: as its participant count grows, it pays the per-message startup cost over more rounds, even when the underlying fabric provides short physical paths.
+Protocol choice determines how the fabric provides reliable completion and bounds loss-recovery time; performance modeling then asks how fast it can carry a given message. The $\alpha$-$\beta$ model\index{Alpha-Beta Model!message transfer time} (principle \ref{pri-alpha-beta-model}) decomposes message transfer time as $T(n) = \alpha + n/\beta$, where $n$ is the message size in bytes, $\alpha$ is the fixed startup latency, and $\beta$ is the sustained bandwidth in bytes per unit time [@hockney1994]. @Sec-appdx-comm-foundations-alpha-beta develops the full derivation and works the model through concrete message regimes, separating latency-dominated from bandwidth-dominated transfers. The physical topology influences both parameters through path length and available capacity. A ring collective, which passes chunks around a logical cycle of participants, adds a separate scheduling cost: as its participant count grows, it pays the per-message startup cost over more rounds, even when the underlying fabric provides short physical paths.
+
+::: {.column-margin .margin-pointer}
+↪ The same decomposition, multiplied by each schedule's round count and traffic factor, is developed for collective algorithms in @sec-communication-collective-operations-collective-operations-alphabeta-model-f9b4.
+:::
 
 ```{python}
 #| echo: false
@@ -1164,7 +1168,7 @@ Here $N$ is the number of participating workers, or ranks, and $M$ is the gradie
 
 `{python} AllReduceBottleneck.comm_frac_display_math`
 
-Each phase takes $N-1$ rounds and transfers a total of $(N-1)/N$ of that payload per rank. The expression therefore counts both the bytes transmitted and the startup cost paid across the two phases. This estimate assumes a uniform path bandwidth and no overlap with computation; it tests whether the fabric can keep pace without requiring the full scheduling derivation.
+Each phase takes $N-1$ rounds and transfers a total of $(N-1)/N$ of that payload per rank. The expression therefore counts both the bytes transmitted and the startup cost paid across the two phases. This estimate assumes a uniform path bandwidth and no overlap with computation; it tests whether the fabric can keep pace without requiring the full scheduling derivation developed in @sec-communication-collective-operations-collective-operations-ring-allreduce-ffce.
 
 **Systems insight**: Increasing the payload to the `{python} AllReduceBottleneck.params_70b_billion_str` case (`{python} AllReduceBottleneck.grad_70b_gb_str`) raises the modeled ring time to:
 
@@ -1346,12 +1350,16 @@ To mitigate congestion at this edge, network architects maximize the switch **ra
 The same rack boundary also shapes recovery. The job scheduler must be topology-aware for performance, while reliable replica placement must keep redundant state and replacement capacity outside the same rack failure domain so that a single lost rack does not take down the entire training run.
 
 ::: {.column-margin .margin-pointer}
-↪ Failure domain isolation and replica placement policies are analyzed in @sec-fault-tolerance-reliability-reliability-replica-placement-failure-domains-73a7.
+↪ Failure domain isolation and replica placement policies are developed in @sec-fault-tolerance-reliability-reliability-replica-placement-failure-domains-73a7.
 :::
 
 ### Fat-tree (Clos) networks {#sec-network-fabrics-fat-tree}
 
-@Sec-compute-pod previewed the fat-tree and torus as the two dominant pod designs; this section develops the fat-tree quantitatively. The ToR provides non-blocking bandwidth within a single rack, but connecting 32 racks into a cluster that preserves full $\text{BW}_{\text{bisect}}$ across every possible communication pair requires a topology that scales cross-sectional capacity with cluster size. The fat-tree (also called a Clos network) achieves this by adding parallel spine switches at each tier, so the aggregate uplink capacity always matches the total edge bandwidth feeding into it. In this vocabulary, leaf switches attach servers or racks, spine switches connect leaves within a pod\index{Pod!fat-tree domain}, and core switches connect multiple pods when a third tier is needed.
+The ToR provides non-blocking bandwidth within a single rack, but connecting 32 racks into a cluster that preserves full $\text{BW}_{\text{bisect}}$ across every possible communication pair requires a topology that scales cross-sectional capacity with cluster size. The fat-tree (also called a Clos network) achieves this by adding parallel spine switches at each tier, so the aggregate uplink capacity always matches the total edge bandwidth feeding into it. In this vocabulary, leaf switches attach servers or racks, spine switches connect leaves within a pod\index{Pod!fat-tree domain}, and core switches connect multiple pods when a third tier is needed.
+
+::: {.column-margin .margin-pointer}
+↩ The fat-tree and the torus, the two dominant pod designs, are established in @sec-compute-pod.
+:::
 
 ::: {#dfn-network-fabrics-fat-tree .callout-definition title="Fat-tree"}
 
@@ -1605,7 +1613,7 @@ Communication latency ($\alpha$) is proportional to the number of switch travers
 2. **Rail-optimized**: `{python} RailLatency.rol_rail_hops_str` traversal $\times$ `{python} RailLatency.rol_hop_lat_us_str` = `{python} RailLatency.rol_rail_lat_us_str`.
 3. **Result**: `{python} RailLatency.rol_speedup_mult_str` lower latency.
 
-**Systems insight**: For synchronous data-parallel AllReduce, this `{python} RailLatency.rol_speedup_mult_str` reduction applies to the modeled switch-latency contribution, not to total collective time. Its effect on scaling efficiency depends on payload size, delivered bandwidth, compute time, and overlap. This matters for scaling efficiency ($\eta_{\text{scaling}}$, @sec-introduction-energyscale-invariant-a0d6) because physically aligning the network to the model's same-rank traffic pattern eliminates the spine tax for the most bandwidth-hungry communication. For Archetype A, how the fabric is wired to the parallelism plan matters as much as how many accelerators it connects.
+**Systems insight**: For synchronous data-parallel AllReduce, this `{python} RailLatency.rol_speedup_mult_str` reduction applies to the modeled switch-latency contribution, not to total collective time. Its effect on scaling efficiency depends on payload size, delivered bandwidth, compute time, and overlap. This matters for scaling efficiency ($\eta_{\text{scaling}}$) because physically aligning the network to the model's same-rank traffic pattern eliminates the spine tax for the most bandwidth-hungry communication. For Archetype A, how the fabric is wired to the parallelism plan matters as much as how many accelerators it connects.
 
 :::
 
@@ -2225,7 +2233,11 @@ $$
 Q(t) = \min\!\left(Q_{\text{max}},\; Q(0) + (\lambda_{\text{arr}}-\mu)t\right),
 $$
 
-where $Q_{\text{max}}$ is the finite buffer capacity. The ratio $\rho_{\text{serv}}=\lambda_{\text{arr}}/\mu$ distinguishes a drainable workload from sustained overload: for $\rho_{\text{serv}}<1$, idle intervals can drain the queue; as long-run $\rho_{\text{serv}}$ approaches one, less slack remains to absorb bursts; and for $\rho_{\text{serv}}>1$, occupancy must reach a control threshold or the buffer limit if the overload persists. This is a packet queue, distinct from the request queues analyzed in @sec-inference-scale. Serialization and propagation set the unloaded path latency, whereas queued bytes add approximately $Q/\mu$ of waiting time.
+where $Q_{\text{max}}$ is the finite buffer capacity. The ratio $\rho_{\text{serv}}=\lambda_{\text{arr}}/\mu$ distinguishes a drainable workload from sustained overload: for $\rho_{\text{serv}}<1$, idle intervals can drain the queue; as long-run $\rho_{\text{serv}}$ approaches one, less slack remains to absorb bursts; and for $\rho_{\text{serv}}>1$, occupancy must reach a control threshold or the buffer limit if the overload persists. This is a packet queue, distinct from the request queues of an inference server. Serialization and propagation set the unloaded path latency, whereas queued bytes add approximately $Q/\mu$ of waiting time.
+
+::: {.column-margin .margin-pointer}
+⇄ **Contrast:** Request queues, whose arrival and service rates set serving latency rather than switch buffer occupancy, are developed in @sec-inference-scale.
+:::
 
 In the deliberately worst-case incast above, $\rho_{\text{serv}}$ is `{python} IncastBurst.oversubscription_mult_str`, so the `{python} IncastBurst.buffer_mb_str` buffer fills in about `{python} IncastBurst.overflow_us_str`. Once full, that buffer represents `{python} IncastBurst.buffer_hold_us_str` of egress waiting time. By contrast, the bandwidth-delay product\index{Bandwidth-delay product!buffer distinction} for the `{python} IncastBurst.port_gbit_per_s_str` egress and an illustrative `{python} IncastBurst.feedback_rtt_us_str` feedback round trip is only `{python} IncastBurst.bandwidth_delay_product_kb_str`: it measures data in flight on the path, not the buffering needed to absorb an arbitrary fan-in burst. ECN\index{ECN!reaction window} must mark early enough for feedback to arrive before exhaustion; PFC can prevent a drop, but its backpressure can spread congestion. A larger buffer extends the reaction window at the cost of a larger tail-latency bound.
 
@@ -2245,9 +2257,13 @@ class NetworkIncastClusterRecap:
 
 Synchronized ML traffic is susceptible to both true fan-in and shared-egress hot spots. When a layer finishes backward computation, many ranks can inject traffic at once, and flat or hierarchical aggregation phases can create true fan-in. Production clusters mitigate both cases along three complementary dimensions:
 
-1. **Time.** Layer-staggering\index{Incast!layer-staggering mitigation} triggers each gradient bucket's AllReduce as soon as backpropagation produces it. Final-layer gradients reduce while earlier layers are still computing, so communication is spread across the backward pass instead of released as one synchronized burst. This **communication-computation overlap**\index{Communication-computation overlap!definition} also hides transfer time behind the backward computation that remains, a mechanism quantified in @sec-communication-overlap.
+1. **Time.** Layer-staggering\index{Incast!layer-staggering mitigation} triggers each gradient bucket's AllReduce as soon as backpropagation produces it. Final-layer gradients reduce while earlier layers are still computing, so communication is spread across the backward pass instead of released as one synchronized burst. This **communication-computation overlap**\index{Communication-computation overlap!definition} also hides transfer time behind the backward computation that remains.
 2. **Space.** Collective algorithm selection\index{Incast!algorithm selection mitigation} bounds fan-in at individual switch ports. Hierarchical and rail-local reductions aggregate gradients in stages so that no single port must absorb all senders at once, and topology-aware placement keeps concurrent ring flows off oversubscribed ports.
 3. **Priority.** Quality of service (QoS) classification\index{Quality of service!priority traffic} tags gradient traffic with the highest service class so background storage or management traffic cannot delay the synchronization path.
+
+::: {.column-margin .margin-pointer}
+↪ Communication-computation overlap and the residual delay it hides are measured in @sec-communication-overlap.
+:::
 
 These mitigations spread the burst in time, space, and priority, but they do not eliminate congestion or tail latency. The question becomes how to build end-to-end clusters that perform despite these realities.
 
@@ -2870,7 +2886,7 @@ Adaptive routing distributes traffic across available paths, but it cannot creat
 :::
 
 ::: {.column-margin .margin-pointer}
-↪ Topology-aware gang scheduling and contention minimization are explored in @sec-fleet-orchestration-topology-aware.
+↪ Topology-aware gang placement that keeps collective traffic off contended cross-rack paths is operationalized in @sec-fleet-orchestration-topology-aware.
 :::
 
 ::: {.fallacy-pitfall}
@@ -2916,7 +2932,7 @@ The network fabric now binds isolated compute nodes into a cohesive fleet, carry
 :::
 
 ::: {.column-margin .margin-pointer}
-↪ Parallel storage systems and high-throughput data-loading pipelines are examined in @sec-data-storage.
+↪ Parallel storage systems and high-throughput data-loading pipelines are developed in @sec-data-storage.
 :::
 
 ::: { .quiz-end }

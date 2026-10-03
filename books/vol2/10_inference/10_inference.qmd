@@ -1768,7 +1768,11 @@ Total system concurrency $=$ `{python} LittlesLawExample.total_concurrency_calc_
 
 :::
 
-This stability boundary can be measured faithfully only when the load generator preserves the workload claim. The contract in @sec-performance-engineering-measurement-scale distinguishes a fixed external arrival process from fixed-concurrency testing because response-paced generation can reduce arrivals during a stall and make the system appear to have more headroom than it does. The distinction between throughput capacity and latency capacity is exactly what queuing theory formalizes; @sec-appdx-inference-scale-queuing-theory-batched-inference-bbf0 derives the mean queuing delay under a batched M/G/1 surrogate and shows how utilization headroom and batch size trade against latency.
+This stability boundary can be measured faithfully only when the load generator preserves the workload claim. The contract in @sec-performance-engineering-measurement-scale distinguishes a fixed external arrival process from fixed-concurrency testing because response-paced generation can reduce arrivals during a stall and make the system appear to have more headroom than it does. The distinction between throughput capacity and latency capacity is exactly what queuing theory formalizes.
+
+::: {.column-margin .margin-pointer}
+↪ The mean queuing delay under a batched M/G/1 surrogate, and how utilization headroom and batch size trade against latency, is developed in @sec-appdx-inference-scale-queuing-theory-batched-inference-bbf0.
+:::
 
 ### Static and dynamic batching for vision models {#sec-inference-scale-static-dynamic-batching-vision-models-4623}
 
@@ -1862,7 +1866,11 @@ class DynamicBatchingResNet50:
 
 :::
 
-@Sec-appdx-inference-scale-decision-framework-batch-size-selection-given-sla-8e4e turns this tuning into a procedure that runs from fitting the service-time model to checking the p99 target, and @sec-appdx-inference-scale-worked-example-gpt3-serving-100-qps-edcf works the stability and latency trade-off for one configuration.
+@Sec-appdx-inference-scale-decision-framework-batch-size-selection-given-sla-8e4e turns this tuning into a procedure that runs from fitting the service-time model to checking the p99 target.
+
+::: {.column-margin .margin-pointer}
+↪ The stability and latency trade-off for GPT-3 serving at 100 QPS is developed in @sec-appdx-inference-scale-worked-example-gpt3-serving-100-qps-edcf.
+:::
 
 At scale with multiple replicas, batch formation can occur either at individual replicas or at a centralized batching layer. Replica-local batching has each replica independently form batches from its assigned traffic. This approach is simpler to implement but may result in uneven batch sizes across replicas when load is imbalanced. Centralized batching uses a batching service to collect requests and dispatch formed batches to replicas. This can produce more uniform batch sizes but adds a centralization bottleneck and additional network hop. Production systems typically use replica-local batching with load balancing that ensures roughly equal traffic distribution, achieving the benefits of centralized batching without the complexity.
 
@@ -1887,6 +1895,10 @@ Consider a batch of 8 sequences. If one sequence completes after 10 tokens while
 $$\text{Wasted compute} = \frac{(100 - 10) \times 1}{100 \times 8} = 11.25\%$$
 
 For realistic output length distributions with high variance, wasted compute can exceed 50 percent. @Algo-continuous-batching-decode-scheduler states the continuous-batching scheduler as a decode loop. Completed requests release KV-cache pages, waiting requests enter freed slots, and the next batched kernel runs over the reorganized active set. For Archetype A workloads (GPT-4/Llama-3), refilling slots lets more useful tokens share each weight read. The gain comes from reusing transferred weights, not merely from saturating bandwidth, which a smaller batch may already do.
+
+::: {.column-margin .margin-pointer}
+↩ The three systems archetypes, including Archetype A (GPT-4/Llama-3), are established in @sec-vol2-introduction-archetypes.
+:::
 
 ```pseudocode
 #| label: algo-continuous-batching-decode-scheduler
@@ -4189,11 +4201,15 @@ Compressing the KV cache to INT4 reduces it to approximately `{python} KVCacheCa
 
 #### Grouped query attention (GQA) {#sec-inference-scale-gqa}
 
-Grouped query attention\index{Grouped-query attention!KV cache reduction} [@ainslie2023], the shared-KV-head architecture established in @sec-performance-engineering-quant-strategies, is the second lever on cache size, complementary to quantization: where quantization shrinks the bytes per cached element, GQA shrinks how many key-value heads are cached per layer. The serving consequence is the head-count arithmetic. For the representative 70B model, switching from the MHA baseline of 64 KV heads to GQA with 8 KV heads shrinks the KV cache by 8$\times$:
+Grouped query attention\index{Grouped-query attention!KV cache reduction} [@ainslie2023] is the second lever on cache size, complementary to quantization: where quantization shrinks the bytes per cached element, GQA shrinks how many key-value heads are cached per layer. The serving consequence is the head-count arithmetic. For the representative 70B model, switching from the MHA baseline of 64 KV heads to GQA with 8 KV heads shrinks the KV cache by 8$\times$:
 
 `{python} KVCacheCalc.gqa_kv_fp16_display_math`
 
 At `{python} KVCacheCalc.gqa_kv_fp16_gb_str`, the GQA cache is dramatically more manageable than the `{python} KVCacheCalc.kv_fp16_gb_str` required by MHA. Combining GQA with INT8 KV cache quantization yields sub-gigabyte per-request cache sizes, often enabling substantially larger batches on a single GPU. GQA has become a common architectural choice for inference-optimized LLMs because it reduces KV-cache bandwidth and capacity pressure with comparatively small quality impact in many deployments.
+
+::: {.column-margin .margin-pointer}
+↩ Grouped query attention as a reduction in cached key-value heads is established in @sec-performance-engineering-quant-strategies.
+:::
 
 ```{python}
 #| echo: false
@@ -4274,6 +4290,10 @@ class PrecisionDividend:
 ### Speculative decoding as a serving policy {#sec-inference-scale-speculative-decoding-c438}
 
 Speculative decoding pairs a small draft model\index{Speculative Decoding!draft model} proposing $K$ tokens with a target model verifying them\index{Speculative Decoding!verification step} in one parallel forward pass; rejection sampling guarantees the emitted tokens follow the target model's distribution exactly, so the technique is lossless and bounded by the draft acceptance rate\index{Speculative Decoding!acceptance rate} $\alpha_{\text{acc}}$. The serving question is different. Speculation becomes a resource-admission policy under SLO pressure. The scheduler must decide when to enable it, how its memory cost interacts with KV-cache admission, and what it does to the SLO the endpoint must meet.
+
+::: {.column-margin .margin-pointer}
+↩ The draft-and-verify mechanics of speculative decoding are established in @sec-performance-engineering-speculative.
+:::
 
 ::: {.column-margin}
 ![](images/svg/inference_decode_roofline.svg){width="100%" fig-alt="A roofline silhouette: a blue memory-bound slope rising to a dashed ridge line, then an orange compute-bound ceiling. A workload dot sits deep on the memory-bound slope, the regime batch-1 decode occupies before parallel verification raises its arithmetic intensity toward the ridge."}
@@ -4396,10 +4416,6 @@ The second concern is which service-level objective the endpoint must meet. At s
 
 The third concern is that acceptance and load change over time. A scheduler can enable speculation when measured TPOT or goodput improves, then disable it when verification cost outweighs accepted-token progress. Disabling draft execution alone does not free resident draft weights; recovering that capacity requires unloading them, and releasing draft KV pages requires ending or migrating the associated speculative state. Alternative draft mechanisms change this budget: self-speculative decoding\index{Self-Speculative Decoding} reuses the target model, Medusa\index{Medusa} [@cai2024medusa] adds prediction heads, and lookahead decoding\index{Lookahead Decoding} avoids a separate draft model. Each requires its own quality, acceptance, and resource evaluation.
 
-::: {.column-margin .margin-pointer}
-↩ Algorithmic foundations and verification mechanics of speculative decoding are introduced in @sec-performance-engineering-speculative.
-:::
-
 ### Memory management best practices {#sec-inference-scale-memory-management-best-practices-67e2}
 
 Effective KV-cache management begins with capacity accounting rather than an eviction policy. The serving process first reserves memory for weights, activations, runtime overhead, and safety headroom, then treats the remaining HBM as a managed pool for active sequences:
@@ -4501,7 +4517,7 @@ In serving systems, quantization is not merely a model-compression technique; it
 :::
 
 ::: {.column-margin .margin-pointer}
-↩ Hardware precision formats, PTQ, and QAT calibration foundations are covered in @sec-performance-engineering-precision and @sec-performance-engineering-ptq-qat.
+↩ The trade-off between post-training quantization and quantization-aware training is established in @sec-performance-engineering-ptq-qat.
 :::
 
 Quantization reduces numerical precision of model weights and activations, decreasing their memory footprint by 2--4$\times$. Reducing weight traffic can improve bandwidth-bound decode, provided kernel support and dequantization overhead preserve the saving. The serving decision is which quantity should shrink: resident weights for fit, bytes moved per decode step for bandwidth, activations for prefill throughput, or the precision path supported by target hardware. Serving at scale also introduces distinct challenges: a deployment team may need post-training quantization without the original training corpus, quality must be preserved across diverse inputs, and hardware deployment targets vary from data center GPUs to edge accelerators. Lack of the original corpus does not imply data-free calibration; the methods that follow may still require representative deployment inputs. Production inference therefore needs a decision model, not a method roster. The decision model in @tbl-serving-quantization-decision-model keeps the method choice tied to the serving constraint that binds the system.
@@ -4887,7 +4903,7 @@ where $N$ is the number of devices in the sharding group, $T_{\text{comm}}(N)$ i
 Tensor parallelism\index{Tensor Parallelism!inference} [@shoeybi2019megatron] distributes individual layers across multiple devices, enabling parallel computation within each layer. The column-row partitioning\index{Tensor Parallelism!column-row partitioning} scheme introduced for training applies here: splitting the first feed-forward linear layer by columns and the second by rows requires one AllReduce for that feed-forward sublayer. The attention output requires another, giving two AllReduce operations per transformer block in the scheme analyzed here. For transformer models, the primary target is the attention mechanism and feed-forward layers, which contain the majority of computation.
 
 ::: {.column-margin .margin-pointer}
-↩ Column-row tensor partitioning and distributed AllReduce collectives are analyzed in @sec-distributed-training-systems and @sec-collective-communication.
+↩ Column-row tensor partitioning and its two AllReduce operations per transformer block are established in @sec-distributed-training-systems-systems-tensor-parallelism-d76e.
 :::
 
 The multi-head attention computation naturally partitions across attention heads. For a model with $N_{\text{heads}}$ attention heads distributed across tensor-parallel degree $N_{\text{TP}}$, each device computes $N_{\text{heads}}/N_{\text{TP}}$ heads:
@@ -8810,7 +8826,11 @@ def route_request(user_region, request):
 
 :::
 
-Rerouting is the simpler half of regional failover. For stateful LLM serving, the receiving region must also rebuild lost session state, regenerating KV caches from retained conversation history, and it must have the headroom to absorb the failed region's load. @Sec-fault-tolerance-reliability-reliability-session-affinity-stateful-failover-27b2 covers the state recovery, and @sec-fault-tolerance-reliability-reliability-replication-strategies-aaa2 covers the regional headroom and the gradual return of traffic that keeps a recovered region from failing over again.
+Rerouting is the simpler half of regional failover. For stateful LLM serving, the receiving region must also rebuild lost session state, regenerating KV caches from retained conversation history, and it must have the headroom to absorb the failed region's load.
+
+::: {.column-margin .margin-pointer}
+↩ Regional headroom, session rebuilding, and the gradual return of traffic to a recovered region are established in @sec-fault-tolerance-reliability-reliability-replication-strategies-aaa2.
+:::
 
 #### Cost optimization across regions {#sec-inference-scale-cost-optimization-across-regions-c1c2}
 
@@ -9405,7 +9425,7 @@ The serving designs developed here coordinate accelerator replicas under data-ce
 :::
 
 ::: {.column-margin .margin-pointer}
-↪ On-device adaptation under device resource budgets and federated learning across device populations are covered in @sec-edge-intelligence.
+↪ On-device adaptation under device resource budgets and federated learning across device populations are developed in @sec-edge-intelligence.
 :::
 
 <!-- This is here to make sure that quizzes are inserted properly before a part begins. -->

@@ -202,9 +202,13 @@ A single accelerator with 100 terabytes of memory and an exaflop of compute woul
 
 ### The physics of the cluster {#sec-distributed-training-systems-physics-cluster-a42d}
 
-Before optimizing algorithms, the physical constraints of the machine learning fleet must be understood. The performance of any distributed training job is governed by the Fleet Law (principle \ref{pri-distributed-step-time}), introduced in @sec-vol2-introduction-fleet-law, which decomposes the per-step time:
+Before optimizing algorithms, the physical constraints of the machine learning fleet must be understood. The performance of any distributed training job is governed by the Fleet Law (principle \ref{pri-distributed-step-time}), which decomposes the per-step time:
 
 $$ T_{\text{step}}(N) = \frac{T_{\text{compute}}}{N} + T_{\text{comm}}(N) + T_{\text{sync}}(N) - T_{\text{overlap}} $$
+
+::: {.column-margin .margin-pointer}
+↩ The Fleet Law and its compute, bandwidth, and coordination terms are established in @sec-vol2-introduction-fleet-law.
+:::
 
 The critical term is the **communication-computation ratio**\index{Communication-computation ratio!definition}, $\rho = T_{\text{comm}}(N)/(T_{\text{compute}}/N)$. This ratio\index{Communication intensity!fleet scaling} determines whether a cluster behaves as a supercomputer or a collection of idling heaters. @Sec-appdx-fleet-foundations-comm-compute-ratio evaluates $\rho$ for representative data-parallel and point-to-point transfers and relates it to communication intensity.
 
@@ -287,7 +291,7 @@ Whichever signal forces the move, distribution must preserve one invariant. The 
 
 ### Distributed training complexity trade-offs {#sec-distributed-training-systems-systems-distributed-training-complexity-tradeoffs-0138}
 
-Distribution changes the optimization problem by adding costs that do not exist inside one machine. Three complexity dimensions decide whether a parallelism strategy is viable, because any one of them can become the binding ceiling. Communication overhead\index{Communication overhead!gradient synchronization} is the cost of synchronizing gradients through a collective such as AllReduce, which returns the same reduced tensor to every participating rank (@sec-network-fabrics-introduction). For a model with $P$ parameters distributed across $N$ devices, all-reduce operations\index{AllReduce!gradient exchange volume} must transfer approximately $2P(N-1)/N$ gradient values per step, multiplied by the bytes per gradient element, and on commodity networks this can dominate computation time. Fault tolerance\index{Fault tolerance!cluster MTBF} grows harder as the cluster grows, because the expected number of failures per unit time rises linearly with cluster size while the probability that the entire cluster survives an interval without any failure decays exponentially\index{Reliability!exponential survival decay}; counting GPU failures alone, if each of the `{python} DistTrainReliabilityFacts.reliability_gpu_count_str` GPUs in the reference cluster has a mean time between failures (MTBF)\index{MTBF!cluster scaling} of `{python} DistTrainReliabilityFacts.gpu_mtbf_hours_str`, the probability that at least one fails in a given hour is `{python} DistTrainReliabilityFacts.cluster_failure_prob_pct_str`, and the cluster as a whole fails about every `{python} DistTrainReliabilityFacts.cluster_mtbf_hours_str`. @Sec-appdx-reliability-foundations-mtbf-cascade derives this cascade from component failure rates to cluster MTBF and works the same calculation through a full example, so the reader can reproduce why MTBF collapses as the cluster grows. Algorithmic stability\index{Algorithmic stability!large-batch dynamics} closes the set, because large batch sizes from data parallelism affect convergence behavior, requiring learning rate scaling and warmup strategies\index{Warmup schedule!convergence stability} that single-machine training does not require [@goyal2017accurate]. Together, these costs explain why distributed training is a constraint satisfaction problem rather than a hardware multiplication exercise.
+Distribution changes the optimization problem by adding costs that do not exist inside one machine. Three complexity dimensions decide whether a parallelism strategy is viable, because any one of them can become the binding ceiling. Communication overhead\index{Communication overhead!gradient synchronization} is the cost of synchronizing gradients through a collective such as AllReduce, which returns the same reduced tensor to every participating rank. For a model with $P$ parameters distributed across $N$ devices, all-reduce operations\index{AllReduce!gradient exchange volume} must transfer approximately $2P(N-1)/N$ gradient values per step, multiplied by the bytes per gradient element, and on commodity networks this can dominate computation time. Fault tolerance\index{Fault tolerance!cluster MTBF} grows harder as the cluster grows, because the expected number of failures per unit time rises linearly with cluster size while the probability that the entire cluster survives an interval without any failure decays exponentially\index{Reliability!exponential survival decay}; counting GPU failures alone, if each of the `{python} DistTrainReliabilityFacts.reliability_gpu_count_str` GPUs in the reference cluster has a mean time between failures (MTBF)\index{MTBF!cluster scaling} of `{python} DistTrainReliabilityFacts.gpu_mtbf_hours_str`, the probability that at least one fails in a given hour is `{python} DistTrainReliabilityFacts.cluster_failure_prob_pct_str`, and the cluster as a whole fails about every `{python} DistTrainReliabilityFacts.cluster_mtbf_hours_str`. @Sec-appdx-reliability-foundations-mtbf-cascade derives this cascade from component failure rates to cluster MTBF and works the same calculation through a full example, so the reader can reproduce why MTBF collapses as the cluster grows. Algorithmic stability\index{Algorithmic stability!large-batch dynamics} closes the set, because large batch sizes from data parallelism affect convergence behavior, requiring learning rate scaling and warmup strategies\index{Warmup schedule!convergence stability} that single-machine training does not require [@goyal2017accurate]. Together, these costs explain why distributed training is a constraint satisfaction problem rather than a hardware multiplication exercise.
 
 ### Single-machine to distributed transition {#sec-distributed-training-systems-systems-singlemachine-distributed-transition-1ee4}
 
@@ -974,7 +978,11 @@ The panels separate an aggregation algorithm, a centralized architecture, and a 
 
 #### Synchronization models {#sec-distributed-training-systems-systems-synchronization-models-396f}
 
-Distributed training systems operate under explicit synchronization models that govern when workers observe each other's updates. The choice of model determines whether the system guarantees mathematical equivalence to single-device training or trades consistency for throughput. The baseline is bulk synchronous parallel (BSP)\index{Bulk synchronous parallel|see{BSP}}\index{BSP!synchronization}, the superstep-and-barrier model defined in @sec-network-fabrics-behavior. In training it requires all workers to complete their local computation in forward and backward passes, synchronize gradients through a barrier with AllReduce, and then simultaneously update parameters.
+Distributed training systems operate under explicit synchronization models that govern when workers observe each other's updates. The choice of model determines whether the system guarantees mathematical equivalence to single-device training or trades consistency for throughput. The baseline is bulk synchronous parallel (BSP)\index{Bulk synchronous parallel|see{BSP}}\index{BSP!synchronization}, the superstep-and-barrier model. In training it requires all workers to complete their local computation in forward and backward passes, synchronize gradients through a barrier with AllReduce, and then simultaneously update parameters.
+
+::: {.column-margin .margin-pointer}
+↩ Bulk synchronous parallel execution and its barrier cost are established in @sec-network-workload-inversion.
+:::
 
 BSP provides synchronous update semantics: every worker computes from the same parameter version and reaches the next update boundary together. With the same global batch and reduction, this matches the corresponding synchronous single-device update mathematically. It does not by itself guarantee bitwise reproducibility. Floating-point reduction order, nondeterministic kernels, data-order state, and failure recovery can still change the result. The synchronization cost is that the slowest worker determines iteration time. A worker that keeps producing correct results but runs markedly slower than its peers is a **straggler**\index{Straggler!synchronization delay}, and under BSP every straggler delays the entire step.
 
@@ -1242,7 +1250,7 @@ Straggler-induced delays arise because iteration time equals the slowest worker'
 Deployed systems address these issues through timeouts, heartbeat monitoring, and elastic training mechanisms.
 
 ::: {.column-margin .margin-pointer}
-↪ Failure detection, heartbeat monitors, and elastic recovery mechanisms are detailed in @sec-fault-tolerance-reliability.
+↪ Failure detection, heartbeat monitors, and elastic recovery mechanisms are developed in @sec-fault-tolerance-reliability.
 :::
 
 #### Parameter updating {#sec-distributed-training-systems-systems-parameter-updating-bb64}
@@ -2067,7 +2075,7 @@ When doubling the number of GPUs yields only 1.5$\times$ speedup, communication 
 
 ### The mathematics of scaling efficiency {#sec-distributed-training-scaling-math}
 
-Whether scaling from one device to many is worthwhile is measured by scaling efficiency, which @sec-vol2-introduction-fleet-law introduced as a fleet-level ratio. If a model trains in time $T_1$ on one device, ideal (linear) scaling would train it in time $T_1/N$ on $N$ devices; communication overhead, pipeline bubbles, and load imbalance reduce the speedup. @Eq-distributed-training-scaling-efficiency restates the ratio\index{Scaling efficiency!mathematical definition}:
+Whether scaling from one device to many is worthwhile is measured by scaling efficiency, a fleet-level ratio. If a model trains in time $T_1$ on one device, ideal (linear) scaling would train it in time $T_1/N$ on $N$ devices; communication overhead, pipeline bubbles, and load imbalance reduce the speedup. @Eq-distributed-training-scaling-efficiency restates the ratio\index{Scaling efficiency!mathematical definition}:
 
 $$\eta_{\text{scaling}} = \frac{T_1}{N \times T_N}$$ {#eq-distributed-training-scaling-efficiency}
 
@@ -2217,7 +2225,7 @@ These factors interact, so efficiency cannot be inferred from model size or GPU 
 The scaling efficiency analysis shows that the effective parallelism strategy is not determined by the *model architecture alone* but by the *interaction*\index{Parallelism!infrastructure interaction} between the model's communication requirements and the infrastructure's bandwidth hierarchy. Each combination of parallelism strategy and infrastructure topology produces a different scaling efficiency curve, and selecting the wrong combination can waste a significant fraction of the cluster's capacity. The preceding napkin math showed pure data parallelism stalling near `{python} CommScalingMath.scaling_efficiency_str` efficiency at this scale; recovering that lost capacity means mapping each parallelism dimension onto the bandwidth tier that can carry its traffic. @Sec-distributed-training-systems-systems-hybrid-parallelism-12a0 works that combination through three concrete configurations and formalizes it as hierarchy-aware parallelism, once tensor and pipeline parallelism have been developed.
 
 ::: {.column-margin .margin-pointer}
-↩ Cluster topology design and physical bisection bandwidth limits are analyzed in @sec-network-fabrics.
+↩ Cluster topology design and physical bisection bandwidth limits are established in @sec-network-fabrics.
 :::
 
 Selecting and combining parallelism strategies therefore leads directly to the traffic they create. Topology is co-designed with the parallelism mapping to maximize scaling efficiency; the next question is how the collective operations themselves shape the step time. AllReduce operations can consume 10--40 percent of total training time in data parallel systems, and this overhead grows with cluster size. BERT-Large on 128 GPUs can experience communication overhead reaching a large fraction of total runtime, while GPT-3-scale models require tensor, pipeline, and data parallelism plus communication overlap to avoid data-parallel gradient synchronization dominating the step.
@@ -2360,11 +2368,11 @@ plt.close()
 
 :::
 
-The Fleet Law (principle \ref{pri-distributed-step-time}), which @sec-vol2-introduction-fleet-law introduced as the fleet-scale counterpart of the single-machine iron law, separates compute, bandwidth, and coordination into additive terms:
+The Fleet Law (principle \ref{pri-distributed-step-time}), the fleet-scale counterpart of the single-machine iron law, separates compute, bandwidth, and coordination into additive terms:
 
 $$ T_{\text{step}}(N) = \underbrace{\frac{T_{\text{compute}}}{N}}_{\text{Compute-Time Term}} + \underbrace{T_{\text{comm}}(N)}_{\text{Bandwidth Term}} + \underbrace{T_{\text{sync}}(N)}_{\text{Coordination Term}} - T_{\text{overlap}} $$
 
-In this decomposition, the compute-time term $T_{\text{compute}}/N$ captures the total computation required for the batch after ideal partitioning across $N$ devices. The bandwidth term $T_{\text{comm}}(N)$ reflects the time spent moving data across the fabric, the fleet-scale analogue of the iron law's data-movement ratio $D_{\text{vol}}/\text{BW}$ recalled from @sec-vol2-introduction-fleet-law; for Ring AllReduce, this communication cost is $\frac{2(N-1)}{N} \frac{M}{\beta}$, where $M$ denotes the communicated gradient or model-state bytes and $\beta$ is the per-link bandwidth. The coordination term $T_{\text{sync}}(N)$ accounts for the nonoverlapped penalty of barriers, synchronization ordering, and straggler delays. Finally, the overlap term $T_{\text{overlap}}$ represents the portion of communication successfully hidden behind concurrent computation.
+In this decomposition, the compute-time term $T_{\text{compute}}/N$ captures the total computation required for the batch after ideal partitioning across $N$ devices. The bandwidth term $T_{\text{comm}}(N)$ reflects the time spent moving data across the fabric, the fleet-scale analogue of the iron law's data-movement ratio $D_{\text{vol}}/\text{BW}$; for Ring AllReduce, this communication cost is $\frac{2(N-1)}{N} \frac{M}{\beta}$, where $M$ denotes the communicated gradient or model-state bytes and $\beta$ is the per-link bandwidth. The coordination term $T_{\text{sync}}(N)$ accounts for the nonoverlapped penalty of barriers, synchronization ordering, and straggler delays. Finally, the overlap term $T_{\text{overlap}}$ represents the portion of communication successfully hidden behind concurrent computation.
 
 The Fleet Law leads to the scaling efficiency metric for fixed global work, where $T_{\text{compute}}$ is the single-device compute time for that work:
 
@@ -4523,7 +4531,11 @@ Network efficiency relies on the assumption of uniform token distribution, but n
 
 MoE systems therefore enforce a hard limit defined by the capacity factor\index{Capacity factor!mixture of experts} $C_{\text{cap}}$, typically set between 1.25 and 1.5. This parameter caps the maximum number of tokens an expert processes at roughly $C_{\text{cap}} \cdot (B \times S)/E$ for the routing group. If the routing gate assigns more tokens than this buffer allows, the excess tokens are dropped, passing through the layer unprocessed via the residual connection. To reduce that data loss, training objectives include an auxiliary load balancing loss\index{Auxiliary load balancing loss!router skew}, weighted at 0.01–0.1 relative to the main cross-entropy loss, that penalizes the router for favoring specific experts. Models such as Mixtral 8x7B use top-2 routing across 8 experts\index{Mixtral 8x7B!top-2 routing}, achieving a favorable balance between capacity scaling and routing stability.
 
-Sparse routing gives MoE layers a coordination problem much like the one recommendation models face (Archetype B (DLRM at Scale)\index{Archetype B!DLRM scaling}), even though MoE language models remain Archetype A (GPT-4/Llama-3) workloads (@sec-vol2-introduction-archetypes).
+Sparse routing gives MoE layers a coordination problem much like the one recommendation models face (Archetype B (DLRM at Scale)\index{Archetype B!DLRM scaling}), even though MoE language models remain Archetype A (GPT-4/Llama-3) workloads.
+
+::: {.column-margin .margin-pointer}
+↩ The three systems archetypes and their binding constraints are established in @sec-vol2-introduction-archetypes.
+:::
 
 ::: {#lhs-distributed-training-archetype-b-dlrm-at-scale-dlrm-vs-llm-scaling .callout-lighthouse title="Archetype B (DLRM at Scale): DLRM vs. LLM scaling"}
 
@@ -4844,7 +4856,7 @@ The Blackwell architecture provides a concrete example of how accelerator packag
 For a `{python} ThreeDParallelism.params_trillion_str`-parameter model, a Blackwell-class configuration can use $N_{\text{TP}}=$ `{python} ThreeDParallelism.tp_blackwell_value_str` (spanning two `{python} ThreeDParallelism.gpus_per_node_value_str`-GPU nodes via NVLink Switch) and $N_{\text{PP}}=$ `{python} ThreeDParallelism.pp_blackwell_value_str`. Relative to the Hopper reference's $N_{\text{TP}}=8$ and $N_{\text{PP}}=16$, this keeps the model-partition product at 128 while halving the number of pipeline stages and its associated bubble term. The `{python} ThreeDParallelism.die_to_die_bw_tb_per_s_str` die-to-die interconnect within the Blackwell GPU further collapses the distinction between intra-chip and intra-package communication, allowing the two reticle-limited dies to function as a single high-bandwidth tensor parallel unit. The general systems lesson is that improving local bandwidth shifts pressure outward: once intra-node communication is less binding, rail-optimized topologies and All-to-All optimization become more important for larger fleet configurations.
 
 ::: {.column-margin .margin-pointer}
-↩ Rail-optimized fabric topologies and rail-switch architectures are detailed in @sec-network-fabrics-rail-optimized.
+↩ Rail-optimized fabric topologies and rail-switch architectures are established in @sec-network-fabrics-rail-optimized.
 :::
 
 The same placement constraints can be made operational through design-space search.
@@ -5633,7 +5645,11 @@ Production frameworks expose these same strategies under different names, which 
 
 : **Framework names for the parallelism strategies**: A translation aid, not a ranking. Each entry names the mechanism a framework uses for the partition developed in this chapter; exact class and option names vary across releases. {#tbl-framework-strategy-map tbl-colwidths="[16,20,18,22,24]"}
 
-The training design therefore determines message size, readiness order, and frequency; @sec-collective-communication determines how the collective moves those messages, and @sec-performance-engineering determines how to measure the resulting critical path. *No framework abstraction changes the underlying physics*: distributed-training efficiency ultimately depends on interconnect bandwidth, memory capacity, synchronization latency, and the useful overlap admitted by the computation graph.
+The training design therefore determines message size, readiness order, and frequency, while @sec-collective-communication determines how the collective moves those messages. *No framework abstraction changes the underlying physics*: distributed-training efficiency ultimately depends on interconnect bandwidth, memory capacity, synchronization latency, and the useful overlap admitted by the computation graph.
+
+::: {.column-margin .margin-pointer}
+↪ Measuring the critical path of a distributed training step is operationalized in @sec-performance-engineering.
+:::
 
 ## Fallacies and Pitfalls {#sec-distributed-training-systems-systems-fallacies-pitfalls-e2bc}
 
@@ -5786,10 +5802,6 @@ The displacement of overhead\index{Displacement of overhead!parallelism trade-of
 
 Splitting the mathematics defines the *logical* traffic patterns of the machine learning fleet. These patterns eventually reach the *physical* wires of the data center, where collective operations preserve consistency and route communication through rings, trees, and rails.
 
-:::
-
-::: {.column-margin .margin-pointer}
-↪ Collective communication routing, ring and tree algorithms, and NCCL scheduling are explored in @sec-collective-communication.
 :::
 
 ::: { .quiz-end }
