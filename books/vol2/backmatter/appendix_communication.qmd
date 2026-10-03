@@ -10,7 +10,7 @@ Distributed training spends a substantial fraction of execution time synchronizi
 
 This appendix is designed as a reference when translating a distributed training symptom ("AllReduce is slow," "pipeline bubbles are killing throughput," "should we compress gradients?") into a quantitative diagnosis.
 
-Conventions used here follow the book-wide notation: $\alpha$ denotes per-message startup latency, $\beta$ denotes link bandwidth in bytes per second, $n$ denotes point-to-point message size, $n^*$ denotes the $\alpha$-$\beta$ crossover point, $N$ denotes the number of participating GPUs, and $M$ denotes collective payload size in bytes.
+Conventions used here follow the book-wide notation: $\alpha$ denotes per-message startup latency, $\beta$ denotes link bandwidth in bytes per second, $n$ denotes point-to-point message size, $\CrossoverPoint$ denotes the $\alpha$-$\beta$ crossover point, $N$ denotes the number of participating GPUs, and $M$ denotes collective payload size in bytes.
 
 - **When AllReduce is slow**: Use @sec-appdx-comm-foundations-collective-complexity to compute the expected time and compare ring vs. tree costs.
 - **When choosing ring vs. tree**: Use @sec-appdx-comm-foundations-algorithm-selection and the crossover analysis to match algorithm to message size.
@@ -130,11 +130,11 @@ Parameterizing physical interconnects (@tbl-alpha-beta-params) provides the base
 
 The $\alpha$-$\beta$ model reveals two distinct operating regimes. For small messages, the startup latency $\alpha$ dominates, and the link spends most of its time starting transfers rather than sustaining them. For large messages, the bandwidth term $n/\beta$ dominates, and the startup cost becomes negligible.
 
-The **Crossover Message Size**\index{Alpha-Beta Model!crossover message size} $n^*$, defined by @eq-crossover, is the point where both terms contribute equally:
+The **Crossover Message Size**\index{Alpha-Beta Model!crossover message size} $\CrossoverPoint$, defined by @eq-crossover, is the point where both terms contribute equally:
 
-$$ n^* = \alpha \times \beta $$ {#eq-crossover}
+$$ \CrossoverPoint = \alpha \times \beta $$ {#eq-crossover}
 
-Below $n^*$, communication is **Latency-Dominated**\index{Latency-dominated communication}: sending more small messages wastes time on repeated startups. Above $n^*$, communication is **Bandwidth-Dominated**\index{Bandwidth-dominated communication}: payload transfer dominates; reducing bytes or increasing effective bandwidth can lower its cost.
+Below $\CrossoverPoint$, communication is **Latency-Dominated**\index{Latency-dominated communication}: sending more small messages wastes time on repeated startups. Above $\CrossoverPoint$, communication is **Bandwidth-Dominated**\index{Bandwidth-dominated communication}: payload transfer dominates; reducing bytes or increasing effective bandwidth can lower its cost.
 
 ::: {#nbk-appendix-communication-crossover-infiniband-ndr .callout-notebook title="Worked example: Crossover on InfiniBand NDR"}
 
@@ -144,7 +144,7 @@ Below $n^*$, communication is **Latency-Dominated**\index{Latency-dominated comm
 
 **Math**:
 
-$n^* = \alpha \times \beta =$ `{python} CommAlphaBeta.ib_ndr_alpha_us_str` $\times$ `{python} CommAlphaBeta.ib_ndr_beta_gb_per_s_str` $=$ `{python} CommAlphaBeta.crossover_kb_str`
+$\CrossoverPoint = \alpha \times \beta =$ `{python} CommAlphaBeta.ib_ndr_alpha_us_str` $\times$ `{python} CommAlphaBeta.ib_ndr_beta_gb_per_s_str` $=$ `{python} CommAlphaBeta.crossover_kb_str`
 
 **Analysis**: Messages smaller than `{python} CommAlphaBeta.crossover_kb_str` are latency-dominated on IB NDR. Gradient tensors from a single layer of a large model are typically `{python} CommAlphaBeta.grad_layer_mb_range_str`, well above this threshold. Control messages, heartbeats, and barrier synchronizations, however, are well below it.
 
@@ -321,7 +321,7 @@ The ring algorithm minimizes bandwidth usage but pays a latency cost that grows 
 
 The decision boundary between ring and tree depends on both message size and participant count. For the power-of-two case modeled by @eq-ring-allreduce and @eq-tree-allreduce, equating the two times gives the crossover in @eq-ring-tree-crossover:
 
-$$ \RingtreeCrossoverPayload(N) = n^* \times \frac{(N-1)-\log_2 N}{\log_2 N-(N-1)/N}, \qquad n^*=\alpha\beta $$ {#eq-ring-tree-crossover}
+$$ \RingtreeCrossoverPayload(N) = \CrossoverPoint \times \frac{(N-1)-\log_2 N}{\log_2 N-(N-1)/N}, \qquad \CrossoverPoint=\alpha\beta $$ {#eq-ring-tree-crossover}
 
 - **$M > \RingtreeCrossoverPayload(N)$** (large gradients): The ring has the lower modeled cost because its smaller bandwidth coefficient outweighs its additional startup steps.
 - **$M < \RingtreeCrossoverPayload(N)$** (barriers, scalars): The tree has the lower modeled cost because its logarithmic startup term outweighs its additional bandwidth cost.
@@ -479,7 +479,7 @@ Compression is beneficial when $\CompressedCommunicationTime < T_{\text{transfer
 
 $$ \CodecEncodeTime + \CodecDecodeTime < T_{\text{transfer}}(M) - T_{\text{transfer}}\!\left(\frac{M}{\CompressionRatio}\right) $$ {#eq-compression-breakeven}
 
-In the bandwidth-dominated regime ($M \gg n^*$), the communication time scales linearly with message size, and the right-hand side simplifies to approximately $T_{\text{transfer}}(M) \times (1 - 1/\CompressionRatio)$. For high compression ratios ($\CompressionRatio \gg 1$), this approaches $T_{\text{transfer}}(M)$, so compression is worthwhile as long as the codec overhead is less than the uncompressed communication time.
+In the bandwidth-dominated regime ($M \gg \CrossoverPoint$), the communication time scales linearly with message size, and the right-hand side simplifies to approximately $T_{\text{transfer}}(M) \times (1 - 1/\CompressionRatio)$. For high compression ratios ($\CompressionRatio \gg 1$), this approaches $T_{\text{transfer}}(M)$, so compression is worthwhile as long as the codec overhead is less than the uncompressed communication time.
 
 ```{python}
 #| echo: false
@@ -590,4 +590,4 @@ Ultimately, these break-even limits show that gradient compression delivers the 
 
 ## Summary {.unnumbered}
 
-The communication models in this appendix rest on two hardware parameters, the startup latency $\alpha$ and the bandwidth $\beta$ of the $\alpha$-$\beta$ model (principle \ref{pri-alpha-beta-model}), and on two workload parameters, the payload ($n$ or $M$) and, for collectives, the participant count $N$. The crossover size $n^* = \alpha\beta$ separates latency-dominated from bandwidth-dominated transfers. Ring collectives carry a $(N-1)/N$ bandwidth factor and a latency term linear in $N$, while tree algorithms trade bandwidth for logarithmic latency, so message size relative to the crossover $\RingtreeCrossoverPayload(N)$ selects the algorithm. Pipeline parallelism adds the bubble fraction $\PipelineBubbleFraction = (\PipelineparallelDegreePp-1)/(\PipelineparallelDegreePp-1+m)$, which the rule $m \geq 4\PipelineparallelDegreePp$ keeps below 20 percent, and gradient compression pays only when codec overhead is smaller than the communication time it saves and convergence is unaffected. Measuring $\alpha$ and $\beta$ for a cluster therefore yields a first-order prediction of its communication overhead.
+The communication models in this appendix rest on two hardware parameters, the startup latency $\alpha$ and the bandwidth $\beta$ of the $\alpha$-$\beta$ model (principle \ref{pri-alpha-beta-model}), and on two workload parameters, the payload ($n$ or $M$) and, for collectives, the participant count $N$. The crossover size $\CrossoverPoint = \alpha\beta$ separates latency-dominated from bandwidth-dominated transfers. Ring collectives carry a $(N-1)/N$ bandwidth factor and a latency term linear in $N$, while tree algorithms trade bandwidth for logarithmic latency, so message size relative to the crossover $\RingtreeCrossoverPayload(N)$ selects the algorithm. Pipeline parallelism adds the bubble fraction $\PipelineBubbleFraction = (\PipelineparallelDegreePp-1)/(\PipelineparallelDegreePp-1+m)$, which the rule $m \geq 4\PipelineparallelDegreePp$ keeps below 20 percent, and gradient compression pays only when codec overhead is smaller than the communication time it saves and convergence is unaffected. Measuring $\alpha$ and $\beta$ for a cluster therefore yields a first-order prediction of its communication overhead.
