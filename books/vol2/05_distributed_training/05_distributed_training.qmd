@@ -210,7 +210,11 @@ $$ T_{\text{step}}(N) = \frac{T_{\text{compute}}}{N} + T_{\text{comm}}(N) + T_{\
 ↩ The Fleet Law and its compute, bandwidth, and coordination terms are established in @sec-vol2-introduction-fleet-law.
 :::
 
-The critical term is the **communication-computation ratio**\index{Communication-computation ratio!definition}, $\rho = T_{\text{comm}}(N)/(T_{\text{compute}}/N)$. This ratio\index{Communication intensity!fleet scaling} determines whether a cluster behaves as a supercomputer or a collection of idling heaters. @Sec-appdx-fleet-foundations-comm-compute-ratio evaluates $\rho$ for representative data-parallel and point-to-point transfers and relates it to communication intensity.
+The critical term is the **communication-computation ratio**\index{Communication-computation ratio!definition}, $\rho = T_{\text{comm}}(N)/(T_{\text{compute}}/N)$. This ratio\index{Communication intensity!fleet scaling} determines whether a cluster behaves as a supercomputer or a collection of idling heaters.
+
+::: {.column-margin .margin-pointer}
+↪ The communication-computation ratio, evaluated for representative data-parallel and point-to-point transfers and related to communication intensity, is developed in @sec-appdx-fleet-foundations-comm-compute-ratio.
+:::
 
 ::: {.column-margin}
 ![](images/svg/vol2_distributed_training_margin_001.svg){width="100%" fig-alt="Two equal-width zones labeled compute and communication with a dashed rho equals one threshold between ideal scaling and waiting."}
@@ -218,11 +222,19 @@ The critical term is the **communication-computation ratio**\index{Communication
 *Past a communication-to-compute threshold, scaling stops being ideal.*
 :::
 
-Two regimes follow from this ratio. A compute-bound cluster, where $T_{\text{compute}}/N \gg T_{\text{comm}}(N)$, spends most of its time multiplying matrices; this is the ideal state, typical for large batch sizes on dense models such as ResNet. A communication-bound cluster, where $\rho \gtrsim 1$ so that $T_{\text{comm}}(N)$ matches or exceeds $T_{\text{compute}}/N$, spends significant time waiting for gradients or activations to arrive, the common state for large language models (LLMs) and Deep Learning Recommendation Model (DLRM)-style recommendation models, where parameter synchronization saturates the network. @Sec-appdx-c3-taxonomy-bottleneck-table turns these regimes into a diagnostic table that names, for a compute-bound, communication-bound, or coordination-bound fleet, the optimizations that work and the ones that are wasted.
+Two regimes follow from this ratio. A compute-bound cluster, where $T_{\text{compute}}/N \gg T_{\text{comm}}(N)$, spends most of its time multiplying matrices; this is the ideal state, typical for large batch sizes on dense models such as ResNet. A communication-bound cluster, where $\rho \gtrsim 1$ so that $T_{\text{comm}}(N)$ matches or exceeds $T_{\text{compute}}/N$, spends significant time waiting for gradients or activations to arrive, the common state for large language models (LLMs) and Deep Learning Recommendation Model (DLRM)-style recommendation models, where parameter synchronization saturates the network.
+
+::: {.column-margin .margin-pointer}
+↪ The optimizations that help, and the ones that are wasted, for a compute-bound, communication-bound, or coordination-bound fleet are operationalized in @sec-appdx-c3-taxonomy-bottleneck-table.
+:::
 
 ### Multi-machine training requirements {#sec-distributed-training-systems-systems-multimachine-training-requirements-0277}
 
-Three concrete signals indicate when distributed training becomes necessary rather than merely beneficial. The first signal is memory exhaustion\index{Memory exhaustion!capacity limit}: model parameters, optimizer states, and activation storage exceed single-device capacity. For full mixed-precision training with Adaptive Moment Estimation (Adam)\index{Mixed-precision training!memory footprint}, the parameter, gradient, and optimizer-state budget of `{python} DenseLLMReferenceFacts.bytes_per_param_str` bytes per parameter alone can exceed an `{python} DenseLLMReferenceFacts.h100_mem_gb_str` accelerator at roughly `{python} DenseLLMReferenceFacts.crossover_params_str` parameters before activations; larger 10--20B models require sharding, offload, or other memory-saving techniques [@rajbhandari2020]. @Sec-appdx-fleet-assumption-provenance records the `{python} DenseLLMReferenceFacts.h100_mem_gb_str` H100\index{H100} and A100\index{A100} capacity figures used in these budgets throughout the chapter, so the reader can trace every memory ceiling back to a single documented source.
+Three concrete signals indicate when distributed training becomes necessary rather than merely beneficial. The first signal is memory exhaustion\index{Memory exhaustion!capacity limit}: model parameters, optimizer states, and activation storage exceed single-device capacity. For full mixed-precision training with Adaptive Moment Estimation (Adam)\index{Mixed-precision training!memory footprint}, the parameter, gradient, and optimizer-state budget of `{python} DenseLLMReferenceFacts.bytes_per_param_str` bytes per parameter alone can exceed an `{python} DenseLLMReferenceFacts.h100_mem_gb_str` accelerator\index{H100}\index{A100} at roughly `{python} DenseLLMReferenceFacts.crossover_params_str` parameters before activations; larger 10--20B models require sharding, offload, or other memory-saving techniques [@rajbhandari2020].
+
+::: {.column-margin .margin-pointer}
+↪ The accelerator memory capacities behind these budgets are developed in @sec-appdx-fleet-system-assumptions.
+:::
 
 The second signal is unacceptable training duration\index{Training duration!wall-clock limit}. Even when a model fits, single-device training may require weeks or months to converge, making wall-clock time itself a systems constraint. GPT-3's\index{GPT-3} 175B-parameter training run used a cluster of V100 GPUs [@brown2020language], illustrating why the calendar, not just HBM capacity, forces distribution at this scale.
 
@@ -291,7 +303,7 @@ Whichever signal forces the move, distribution must preserve one invariant. The 
 
 ### Distributed training complexity trade-offs {#sec-distributed-training-systems-systems-distributed-training-complexity-tradeoffs-0138}
 
-Distribution changes the optimization problem by adding costs that do not exist inside one machine. Three complexity dimensions decide whether a parallelism strategy is viable, because any one of them can become the binding ceiling. Communication overhead\index{Communication overhead!gradient synchronization} is the cost of synchronizing gradients through a collective such as AllReduce, which returns the same reduced tensor to every participating rank. For a model with $P$ parameters distributed across $N$ devices, all-reduce operations\index{AllReduce!gradient exchange volume} must transfer approximately $2P(N-1)/N$ gradient values per step, multiplied by the bytes per gradient element, and on commodity networks this can dominate computation time. Fault tolerance\index{Fault tolerance!cluster MTBF} grows harder as the cluster grows, because the expected number of failures per unit time rises linearly with cluster size while the probability that the entire cluster survives an interval without any failure decays exponentially\index{Reliability!exponential survival decay}; counting GPU failures alone, if each of the `{python} DistTrainReliabilityFacts.reliability_gpu_count_str` GPUs in the reference cluster has a mean time between failures (MTBF)\index{MTBF!cluster scaling} of `{python} DistTrainReliabilityFacts.gpu_mtbf_hours_str`, the probability that at least one fails in a given hour is `{python} DistTrainReliabilityFacts.cluster_failure_prob_pct_str`, and the cluster as a whole fails about every `{python} DistTrainReliabilityFacts.cluster_mtbf_hours_str`. @Sec-appdx-reliability-foundations-mtbf-cascade derives this cascade from component failure rates to cluster MTBF and works the same calculation through a full example, so the reader can reproduce why MTBF collapses as the cluster grows. Algorithmic stability\index{Algorithmic stability!large-batch dynamics} closes the set, because large batch sizes from data parallelism affect convergence behavior, requiring learning rate scaling and warmup strategies\index{Warmup schedule!convergence stability} that single-machine training does not require [@goyal2017accurate]. Together, these costs explain why distributed training is a constraint satisfaction problem rather than a hardware multiplication exercise.
+Distribution changes the optimization problem by adding costs that do not exist inside one machine. Three complexity dimensions decide whether a parallelism strategy is viable, because any one of them can become the binding ceiling. Communication overhead\index{Communication overhead!gradient synchronization} is the cost of synchronizing gradients through a collective such as AllReduce, which returns the same reduced tensor to every participating rank. For a model with $P$ parameters distributed across $N$ devices, all-reduce operations\index{AllReduce!gradient exchange volume} must transfer approximately $2P(N-1)/N$ gradient values per step, multiplied by the bytes per gradient element, and on commodity networks this can dominate computation time. Fault tolerance\index{Fault tolerance!cluster MTBF} grows harder as the cluster grows, because the expected number of failures per unit time rises linearly with cluster size while the probability that the entire cluster survives an interval without any failure decays exponentially\index{Reliability!exponential survival decay}; counting GPU failures alone, if each of the `{python} DistTrainReliabilityFacts.reliability_gpu_count_str` GPUs in the reference cluster has a mean time between failures (MTBF)\index{MTBF!cluster scaling} of `{python} DistTrainReliabilityFacts.gpu_mtbf_hours_str`, the probability that at least one fails in a given hour is `{python} DistTrainReliabilityFacts.cluster_failure_prob_pct_str`, and the cluster as a whole fails about every `{python} DistTrainReliabilityFacts.cluster_mtbf_hours_str`. @Sec-appdx-reliability-foundations-mtbf-cascade derives this cascade from component failure rates to cluster MTBF and tabulates it across cluster sizes. Algorithmic stability\index{Algorithmic stability!large-batch dynamics} closes the set, because large batch sizes from data parallelism affect convergence behavior, requiring learning rate scaling and warmup strategies\index{Warmup schedule!convergence stability} that single-machine training does not require [@goyal2017accurate]. Together, these costs explain why distributed training is a constraint satisfaction problem rather than a hardware multiplication exercise.
 
 ### Single-machine to distributed transition {#sec-distributed-training-systems-systems-singlemachine-distributed-transition-1ee4}
 
@@ -301,7 +313,11 @@ A useful mental model treats these strategies as *loop transformations*, the sam
 
 Data parallelism is the parallel for-loop\index{Data parallelism!batch loop transformation}, unrolling the outer loop (the batch dimension) across devices so that each device runs the same code body on different data indices. Tensor parallelism is vectorization, or single instruction, multiple data (SIMD)\index{Tensor parallelism!SIMD loop transformation}, splitting the inner loops (matrix multiplication) across devices in a cluster-scale SIMD where NVLink acts as the vector register file. Pipeline parallelism is instruction pipelining\index{Pipeline parallelism!pipelined loop transformation}, splitting the sequential operations (layers) across devices; just as a CPU pipeline stages fetch, decode, and execute, the cluster stages Layer 1, Layer 2, and Layer 3 to keep all compute engines busy.
 
-Whichever loop a strategy unrolls, distributed training[^fn-distbelief-parameter-server] spreads the workload across machines that must coordinate to train a single model. Coordination here means keeping every model shard or replica on a compatible training step. Basic barriers can keep a small research run ordered, but long-running training jobs also need timeout, checkpoint, and recovery mechanisms so one failed worker does not waste days of compute. @Sec-fault-tolerance-reliability examines those reliability engineering challenges in depth.
+Whichever loop a strategy unrolls, distributed training[^fn-distbelief-parameter-server] spreads the workload across machines that must coordinate to train a single model. Coordination here means keeping every model shard or replica on a compatible training step. Basic barriers can keep a small research run ordered, but long-running training jobs also need timeout, checkpoint, and recovery mechanisms so one failed worker does not waste days of compute.
+
+::: {.column-margin .margin-pointer}
+↪ Checkpointing and recovery for long-running training jobs are developed in @sec-fault-tolerance-reliability.
+:::
 
 [^fn-distbelief-parameter-server]: **Distributed training**\index{DistBelief!distributed training}: Google's DistBelief (2012) was an early framework for training neural networks across thousands of machines, but its parameter server architecture\index{Parameter server!centralized synchronization} created bandwidth bottlenecks at central nodes. This limitation drove the shift to decentralized AllReduce patterns\index{AllReduce!decentralized scaling} in successors like Horovod\index{Horovod!gradient all-reduce} and PyTorch\index{PyTorch} DistributedDataParallel (DDP)\index{DDP!gradient bucketing}\index{DistributedDataParallel|see{DDP}}, where each data-parallel worker sends and receives about $2(N-1)/N$ times the gradient size per step rather than concentrating traffic at a single server [@dean2012large; @sergeev2018horovod; @li2020pytorch; @patarasuk2009].
 
@@ -520,6 +536,10 @@ Choosing the right parallelism strategy is not a matter of preference; it is a c
 
 The bandwidth requirements impose a hard constraint on hardware placement\index{Hardware placement!bandwidth hierarchy}: each parallelism strategy must be matched to the interconnect available between the GPUs that need to communicate, or the design fails before it leaves the whiteboard. A quick back-of-envelope bandwidth feasibility check catches that mismatch before any code is written.
 
+::: {.column-margin .margin-pointer}
+↩ The bandwidth hierarchy, in which bandwidth drops by roughly an order of magnitude at each physical boundary and so dictates where each parallelism dimension can run, is established in @sec-compute-bandwidth-hierarchy.
+:::
+
 ::: {#psp-distributed-training-bandwidth-feasibility .callout-perspective title="Bandwidth feasibility check"}
 
 Frequent tensor-parallel collectives\index{Tensor parallelism!bandwidth requirement} must fit the layer-time budget. NVLink is one suitable fast domain, but the feasibility test uses message bytes, exposed latency, and sustained link rate rather than an interconnect brand or chassis boundary. Cross-rack placement may favor pipeline or data parallelism when the available fabric cannot meet the tensor-parallel budget; their activation and gradient traffic must also be checked.
@@ -564,7 +584,11 @@ $$
 \mathbf{g}_{\text{global}} = \frac{1}{|B_{\text{total}}|} \sum_{x_i \in B_{\text{total}}} \nabla_{\theta} \mathcal{L}(\theta, x_i)
 $$
 
-For unequal local batch sizes, the combined-batch gradient is the weighted average $\mathbf{g}_{\text{global}} = (1/|B_{\text{total}}|)\sum_k |B_k|\mathbf{g}_k$. The equivalence shows why data parallelism maintains the statistical properties of SGD training: sampling the intended global batch across devices, computing local gradient sums independently, and normalizing by the aggregate denominator reproduces its estimator. The reduction step uses an AllReduce\index{AllReduce!data-parallel gradient averaging} over local gradient sums and valid-item counts; @sec-appdx-comm-foundations-allreduce derives the ring and tree AllReduce cost models that set the price of this synchronization, so the reader can predict when it overtakes the local compute saved by parallelism.
+For unequal local batch sizes, the combined-batch gradient is the weighted average $\mathbf{g}_{\text{global}} = (1/|B_{\text{total}}|)\sum_k |B_k|\mathbf{g}_k$. The equivalence shows why data parallelism maintains the statistical properties of SGD training: sampling the intended global batch across devices, computing local gradient sums independently, and normalizing by the aggregate denominator reproduces its estimator. The reduction step uses an AllReduce\index{AllReduce!data-parallel gradient averaging} over local gradient sums and valid-item counts.
+
+::: {.column-margin .margin-pointer}
+↪ The ring and tree AllReduce cost models that set the price of this synchronization are developed in @sec-appdx-comm-foundations-allreduce.
+:::
 
 ::: {#chk-distributed-training-data-parallelism-mechanics .callout-checkpoint title="Data parallelism mechanics"}
 
@@ -974,7 +998,7 @@ Stepping back from that specific cluster to the architectural design space, @fig
 
 :::
 
-The panels separate an aggregation algorithm, a centralized architecture, and a collective traffic pattern. They do not provide interchangeable implementations of the same operation. Libraries choose algorithms and routes for the requested collective on the available fabric; a logical complete graph does not guarantee one-round physical delivery. @Sec-collective-communication develops these semantic and cost distinctions.
+The panels separate an aggregation algorithm, a centralized architecture, and a collective traffic pattern. They do not provide interchangeable implementations of the same operation. Libraries choose algorithms and routes for the requested collective on the available fabric; a logical complete graph does not guarantee one-round physical delivery.
 
 #### Synchronization models {#sec-distributed-training-systems-systems-synchronization-models-396f}
 
@@ -1250,7 +1274,7 @@ Straggler-induced delays arise because iteration time equals the slowest worker'
 Deployed systems address these issues through timeouts, heartbeat monitoring, and elastic training mechanisms.
 
 ::: {.column-margin .margin-pointer}
-↪ Failure detection, heartbeat monitors, and elastic recovery mechanisms are developed in @sec-fault-tolerance-reliability.
+↪ Heartbeat and collective-timeout failure detection, and the trade-off between restarting healthy workers and leaving peers blocked, are developed in @sec-fault-tolerance-reliability-reliability-failure-detection-mechanisms-efed.
 :::
 
 #### Parameter updating {#sec-distributed-training-systems-systems-parameter-updating-bb64}
@@ -2224,16 +2248,12 @@ These factors interact, so efficiency cannot be inferred from model size or GPU 
 
 The scaling efficiency analysis shows that the effective parallelism strategy is not determined by the *model architecture alone* but by the *interaction*\index{Parallelism!infrastructure interaction} between the model's communication requirements and the infrastructure's bandwidth hierarchy. Each combination of parallelism strategy and infrastructure topology produces a different scaling efficiency curve, and selecting the wrong combination can waste a significant fraction of the cluster's capacity. The preceding napkin math showed pure data parallelism stalling near `{python} CommScalingMath.scaling_efficiency_str` efficiency at this scale; recovering that lost capacity means mapping each parallelism dimension onto the bandwidth tier that can carry its traffic. @Sec-distributed-training-systems-systems-hybrid-parallelism-12a0 works that combination through three concrete configurations and formalizes it as hierarchy-aware parallelism, once tensor and pipeline parallelism have been developed.
 
-::: {.column-margin .margin-pointer}
-↩ Cluster topology design and physical bisection bandwidth limits are established in @sec-network-fabrics.
-:::
-
 Selecting and combining parallelism strategies therefore leads directly to the traffic they create. Topology is co-designed with the parallelism mapping to maximize scaling efficiency; the next question is how the collective operations themselves shape the step time. AllReduce operations can consume 10--40 percent of total training time in data parallel systems, and this overhead grows with cluster size. BERT-Large on 128 GPUs can experience communication overhead reaching a large fraction of total runtime, while GPT-3-scale models require tensor, pipeline, and data parallelism plus communication overlap to avoid data-parallel gradient synchronization dominating the step.
 
 AllReduce complexity depends on two components: latency $(\alpha)$ and bandwidth $(\beta)$. Ring AllReduce achieves bandwidth-efficient communication with $(N-1)/N$ utilization\index{Ring AllReduce!bandwidth utilization}, while tree-based approaches offer lower latency at $\mathcal{O}(\log N)$ steps\index{Tree AllReduce!latency bound}. The choice depends on message size: tree algorithms win for latency-dominated small messages, ring algorithms win for bandwidth-dominated large gradients. High-performance implementations such as NCCL select ring or tree algorithms by message size and topology; their tree algorithms, for example, chain GPUs within each node over NVLink and build trees across nodes to shorten the inter-node latency path.
 
 ::: {.column-margin .margin-pointer}
-↪ Complexity models, ring versus tree topologies, and NCCL primitives are developed in @sec-collective-communication.
+↪ The message size at which ring AllReduce overtakes tree AllReduce, derived from the latency and bandwidth terms of each algorithm, is developed in @sec-communication-collective-operations-algorithm-crossover.
 :::
 
 ```{python}
@@ -2282,7 +2302,7 @@ Synchronization frequency presents a trade-off between communication efficiency 
 
 ### Scaling physics and Amdahl's Law with communication {#sec-distributed-training-systems-systems-physics-scaling-amdahls-law-communication-4d7f}
 
-Distributed training is governed by an extended version of Amdahl's Law\index{Amdahl's Law}\index{Amdahl, Gene|seealso{Amdahl's Law}} that explicitly accounts for communication overhead. The time to complete one training step on $N$ devices is not simply $T_{\text{single}} / N$, but is constrained by the sequential nature of synchronization. @Sec-appdx-fleet-foundations-amdahls-fleet derives the speedup ceiling at fleet scale and works it through a concrete example; the essential consequence here is that a fixed synchronization fraction caps speedup no matter how many accelerators are added.
+Distributed training is governed by an extended version of Amdahl's Law\index{Amdahl's Law}\index{Amdahl, Gene|seealso{Amdahl's Law}} that explicitly accounts for communication overhead. The time to complete one training step on $N$ devices is not simply $T_{\text{single}} / N$, but is constrained by the sequential nature of synchronization. @Sec-appdx-fleet-foundations-amdahls-fleet applies Amdahl's Law at fleet scale and works the speedup ceiling through a concrete example; the essential consequence here is that a fixed synchronization fraction caps speedup no matter how many accelerators are added.
 
 @Fig-scaling-tax plots this divergence across cluster sizes up to 512 GPUs on log-log axes, isolating the scaling tax\index{Scaling tax!communication overhead} enforced by the scaling efficiency bound (principle \ref{pri-scaling-efficiency}). While negligible communication overhead ($r = 0.1\%$) closely tracks the dashed ideal linear speedup line, modest overhead ($r = 1\%$) bends the speedup curve downward past 32 devices, and a 10 percent synchronization fraction ($r = 0.10$) causes speedup to saturate against the asymptotic scaling wall near $1/r = 10\times$.
 
@@ -3766,7 +3786,11 @@ class PipelineBubble:
 *More stages require enough microbatches or the bubble dominates utilization.*
 :::
 
-The same bubble term becomes concrete in the following worked example, where an 8-stage pipeline and 32 microbatches still leave a measurable idle-time tax. @Sec-appdx-comm-foundations-pipeline-arithmetic tabulates the bubble fraction across stage and microbatch counts and derives the interleaved-schedule variant.
+The same bubble term becomes concrete in the following worked example, where an 8-stage pipeline and 32 microbatches still leave a measurable idle-time tax.
+
+::: {.column-margin .margin-pointer}
+↪ The bubble fraction across stage and microbatch counts, and its interleaved-schedule variant, are developed in @sec-appdx-comm-foundations-pipeline-arithmetic.
+:::
 
 ::: {#nbk-distributed-training-cost-pipeline-bubble .callout-notebook title="The cost of the pipeline bubble"}
 
@@ -4670,6 +4694,10 @@ The three-way comparison shows that configurations that keep high-bandwidth comm
 
 The dependence runs both ways: a parallelism configuration also determines which traffic the fabric must carry. In the TP-8, PP-4, DP-32 layout, tensor reductions stay within each fast local domain, pipeline traffic crosses neighboring stages, and data-parallel groups synchronize corresponding shards across replicas. Rail-optimized\index{Rail-optimized network!hybrid parallelism} and hierarchical fabrics can exploit that structure, but a workload mix that adds expert All-to-All traffic changes the global bandwidth requirement. Infrastructure planning must therefore evaluate the anticipated communication groups together rather than optimizing the fabric for a single layout.
 
+::: {.column-margin .margin-pointer}
+↩ Rail-optimized fabrics, which cable each GPU slot position to its own rail switch, are established in @sec-network-fabrics-rail-optimized.
+:::
+
 ### The 3D training loop {#sec-distributed-training-systems-systems-hybrid-parallelism-3d-loop}
 
 Training a `{python} FrontierTrainingContext.frontier_params_b_str`-parameter model requires **3D parallelism**\index{3D parallelism!definition}: the coordinated composition of data, pipeline, and tensor parallelism across thousands of devices. This approach does not merely sum the benefits of individual parallelism strategies; it composes them geometrically to match the physical topology of the hardware.
@@ -4858,10 +4886,6 @@ class ThreeDParallelism:
 The Blackwell architecture provides a concrete example of how accelerator packaging changes the 3D parallelism trade-offs. First, NVLink 5 provides `{python} ThreeDParallelism.nvlink5_bw_tb_per_s_str` of bidirectional bandwidth per GPU, doubling the intra-node capacity of the Hopper generation. This allows for larger tensor parallelism ($N_{\text{TP}}$) groups (for example, $N_{\text{TP}}=$ `{python} ThreeDParallelism.tp_blackwell_value_str` or $N_{\text{TP}}=$ `{python} ThreeDParallelism.tp_alt_value_str` across multiple nodes) with lower latency overhead. Second, Blackwell adds FP4 Tensor Core support, improving low-precision throughput and memory efficiency for supported workloads; whether FP4 is used for training depends on the numerical recipe and software stack.
 
 For a `{python} ThreeDParallelism.params_trillion_str`-parameter model, a Blackwell-class configuration can use $N_{\text{TP}}=$ `{python} ThreeDParallelism.tp_blackwell_value_str` (spanning two `{python} ThreeDParallelism.gpus_per_node_value_str`-GPU nodes via NVLink Switch) and $N_{\text{PP}}=$ `{python} ThreeDParallelism.pp_blackwell_value_str`. Relative to the Hopper reference's $N_{\text{TP}}=8$ and $N_{\text{PP}}=16$, this keeps the model-partition product at 128 while halving the number of pipeline stages and its associated bubble term. The `{python} ThreeDParallelism.die_to_die_bw_tb_per_s_str` die-to-die interconnect within the Blackwell GPU further collapses the distinction between intra-chip and intra-package communication, allowing the two reticle-limited dies to function as a single high-bandwidth tensor parallel unit. The general systems lesson is that improving local bandwidth shifts pressure outward: once intra-node communication is less binding, rail-optimized topologies and All-to-All optimization become more important for larger fleet configurations.
-
-::: {.column-margin .margin-pointer}
-↩ Rail-optimized fabric topologies and rail-switch architectures are established in @sec-network-fabrics-rail-optimized.
-:::
 
 The same placement constraints can be made operational through design-space search.
 
@@ -5624,7 +5648,7 @@ The operating point in the 3D parallelism cube shifts depending on the system's 
 |:--------------------------------------|:---------------------------------:|:---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
 | **Archetype A (GPT-4/Llama-3)**       |       Hybrid 3D Parallelism       | Combine Tensor (width), Pipeline (depth), and Data (throughput) to fit roughly `{python} DistTrainReliabilityFacts.gpt4_mem_tb_str` of weights under third-party estimates (OpenAI has not disclosed the parameter count). |
 | **Archetype B (DLRM at Scale)**       |         Embedding Sharding        | Partition massive `{python} DistTrainReliabilityFacts.dlrm_mem_tb_str`+ tables across a Parameter Server fleet\index{Parameter server!DLRM embedding}; use sparse AllToAll updates.                                        |
-| **Archetype C (Federated MobileNet)** |         Federated Learning        | The same logic extends to coordinating on-device MobileNet updates across unreliable, privacy-constrained edge devices\index{Federated learning!edge constraints}; @sec-edge-intelligence develops this regime.            |
+| **Archetype C (Federated MobileNet)** |         Federated Learning        | The same logic extends to coordinating on-device MobileNet updates across unreliable, privacy-constrained edge devices\index{Federated learning!edge constraints}; @sec-edge-intelligence-federated-systems develops this regime. |
 
 : **Partitioning strategy by archetype**: The operating point in the 3D-parallelism cube shifts with the dominant bottleneck. {#tbl-partitioning-archetypes}
 
@@ -5649,10 +5673,10 @@ Production frameworks expose these same strategies under different names, which 
 
 : **Framework names for the parallelism strategies**: A translation aid, not a ranking. Each entry names the mechanism a framework uses for the partition developed in this chapter; exact class and option names vary across releases. {#tbl-framework-strategy-map tbl-colwidths="[16,20,18,22,24]"}
 
-The training design therefore determines message size, readiness order, and frequency, while the collective algorithms developed in @sec-collective-communication determine how those messages move. *No framework abstraction changes the underlying physics*: distributed-training efficiency ultimately depends on interconnect bandwidth, memory capacity, synchronization latency, and the useful overlap admitted by the computation graph.
+The training design therefore determines message size, readiness order, and frequency, while collective algorithms determine how those messages move. *No framework abstraction changes the underlying physics*: distributed-training efficiency ultimately depends on interconnect bandwidth, memory capacity, synchronization latency, and the useful overlap admitted by the computation graph.
 
 ::: {.column-margin .margin-pointer}
-↪ Measuring the critical path of a distributed training step is operationalized in @sec-performance-engineering.
+↪ How much communication overlap can remove from a step's critical path, and how to quantify that opportunity, is developed in @sec-performance-engineering-overlap.
 :::
 
 ## Fallacies and Pitfalls {#sec-distributed-training-systems-systems-fallacies-pitfalls-e2bc}

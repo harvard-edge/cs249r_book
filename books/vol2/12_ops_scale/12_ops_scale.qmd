@@ -1417,7 +1417,7 @@ A backfill is a production migration over history: changing a feature definition
 Feature replay requires a concrete execution safety contract. Each backfill partition needs a stable identity and an idempotent or transactional write path so retries cannot duplicate feature effects; event-time bounds and the late-data policy must also match the point-in-time join used for training. Otherwise, a mechanically successful replay can produce a history that is complete in processing time but incorrect at the prediction time the model is meant to reproduce.
 
 ::: {.column-margin .margin-pointer}
-↩ Distributed transformation contracts, exactly-once semantics, and storage partitions are established in @sec-storage-distributed-transformation-semantics.
+↩ Exactly-once commit boundaries, event-time watermarks, and late-data policies for distributed transformations are established in @sec-storage-distributed-transformation-semantics.
 :::
 
 At scale, historical data may have moved into cold storage, so recomputation first becomes a data-placement problem. The long historical window then competes with production workloads for compute. Even after the job finishes, the platform cannot simply trust the new values: it must compare overlapping periods against the intended new computation, explain differences from the old definition, and coordinate with dependent pipelines so training jobs do not mix old and new semantics mid-run.
@@ -1624,7 +1624,7 @@ Feature definitions, historical availability, and freshness now belong to the sa
 
 Versioned model dependencies and feature contracts define a candidate release, but they do not establish that it is safe to expose. Each model update must navigate the dependency web: an embedding model update might require re-evaluation of four transitive downstream components, including the business rules layer, before any component can safely reach production. This coordination challenge transforms CI/CD from a per-model concern into a platform orchestration problem. Software integration tests already validate interacting components. ML CI/CD adds learned behavior and changing data to that contract, requiring evidence that upstream changes preserve downstream quality and that each deployment state remains compatible.
 
-@Sec-distributed-training-systems detailed how data, tensor, and pipeline parallelism enable training models too large for single machines, producing artifacts that require validation and deployment at scale. Continuous integration\index{CI/CD!continuous integration}\index{Continuous integration!ML systems} and continuous deployment practices for machine learning differ from traditional software CI/CD in what they must validate. Software CI/CD focuses on code correctness and deployment reliability, whereas ML CI/CD must additionally validate data, verify model performance, and manage the interactions between code, data, and learned parameters. At platform scale, these challenges multiply as pipelines must coordinate across hundreds of models with varying requirements.
+Continuous integration\index{CI/CD!continuous integration}\index{Continuous integration!ML systems} and continuous deployment practices for machine learning differ from traditional software CI/CD in what they must validate. Software CI/CD focuses on code correctness and deployment reliability, whereas ML CI/CD must additionally validate data, verify model performance, and manage the interactions between code, data, and learned parameters. At platform scale, these challenges multiply as pipelines must coordinate across hundreds of models with varying requirements.
 
 ### Training pipeline automation {#sec-ml-operations-scale-training-pipeline-automation-9da3}
 
@@ -2042,7 +2042,11 @@ Automated rollback must balance sensitivity against false triggers. Minimum samp
 
 ### Multi-region deployment coordination {#sec-ml-operations-scale-multiregion-deployment-coordination-ab6a}
 
-@Sec-fault-tolerance-reliability developed checkpointing, elastic training, and recovery mechanisms for handling failures within distributed training jobs. Multi-region deployment uses the same fault-tolerance idea (preserve useful work and state across failures) in the inference plane, where coordination across geographic regions introduces challenges absent from single-region operations. Model version consistency, traffic routing during transitions, and coordinated rollback require explicit protocol design to prevent mixed-version serving that can corrupt A/B test validity and user experience.
+Multi-region deployment carries the fault-tolerance idea behind training checkpoints and recovery (preserve useful work and state across failures) into the inference plane, where coordination across geographic regions introduces challenges absent from single-region operations. Model version consistency, traffic routing during transitions, and coordinated rollback require explicit protocol design to prevent mixed-version serving that can corrupt A/B test validity and user experience.
+
+::: {.column-margin .margin-pointer}
+↩ Checkpointing, elastic training, and recovery mechanisms for distributed training jobs are established in @sec-fault-tolerance-reliability.
+:::
 
 #### Coordination challenges {#sec-ml-operations-scale-coordination-challenges-085c}
 
@@ -2546,7 +2550,7 @@ class FleetFailureInterval:
     recovery_low_min_str = fmt(recovery_low_min, precision=0, commas=False)
 ```
 
-Because failure is routine at pod scale, fleet monitoring\index{Monitoring!fleet} and hardware observability\index{Observability!hardware substrate} are not operational conveniences but prerequisites for productive training. As an illustrative independent-failure model, a `{python} FleetFailureInterval.gpu_mttf_h_str`-hour per-GPU planning interval means that a `{python} FleetFailureInterval.fleet_gpus_str`-GPU cluster sees a hardware failure roughly every five hours. That interval is a planning assumption rather than a measured universal device rate; @sec-appdx-reliability-foundations-component-rates develops the component-to-fleet calculation, and correlated faults and repair-time distributions require separate evidence. At that cadence, the difference between a `{python} FleetFailureInterval.recovery_low_min_str`-minute recovery and a multi-hour disruption depends on whether the operations team can detect degradation before it becomes failure. The monitoring system is itself a distributed system, collecting telemetry from every GPU, switch, and cooling component in the fleet.
+Because failure is routine at pod scale, fleet monitoring\index{Monitoring!fleet} and hardware observability\index{Observability!hardware substrate} are not operational conveniences but prerequisites for productive training. As an illustrative independent-failure model, a `{python} FleetFailureInterval.gpu_mttf_h_str`-hour per-GPU planning interval means that a `{python} FleetFailureInterval.fleet_gpus_str`-GPU cluster sees a hardware failure roughly every five hours. That interval is a planning assumption rather than a measured universal device rate; @sec-appdx-reliability-foundations-mtbf-cascade develops the component-to-fleet calculation, and correlated faults and repair-time distributions require separate evidence. At that cadence, the difference between a `{python} FleetFailureInterval.recovery_low_min_str`-minute recovery and a multi-hour disruption depends on whether the operations team can detect degradation before it becomes failure. The monitoring system is itself a distributed system, collecting telemetry from every GPU, switch, and cooling component in the fleet.
 
 The telemetry spans three physical levels. At the GPU level, the most diagnostic signals are junction temperature (which reveals cooling degradation), error-correcting code (ECC) counts in high-bandwidth memory (HBM) and SRAM (where a rising rate of correctable errors often precedes a crash-inducing uncorrectable error), and streaming multiprocessor (SM) utilization (which distinguishes hardware faults from software inefficiencies). At the network level, packet retry rates on individual ports reveal failing cables or switches. At the facility level, coolant temperature deviations trigger automated load shedding before thermal damage occurs. The challenge is not collecting these signals individually but correlating them across spatial and temporal dimensions.
 
@@ -2582,10 +2586,6 @@ class InfraFrontierStragglerRecap15:
 In multi-tenant clusters, shared links can couple otherwise separate workloads. A collective burst can delay another job's storage traffic even when CPU and memory limits hold. Rail alignment\index{Rail alignment!network isolation}\index{Network fabric!rail alignment} maps corresponding ranks across nodes to favorable communication paths; it does not by itself reserve those paths for one tenant. Congestion signaling and endpoint rate control, admission policy, scheduling, or dedicated capacity can limit interference. Physical partitions offer stronger isolation at the cost of stranded capacity and placement flexibility. The appropriate choice follows the workload's latency and throughput contract.
 
 Checkpoint cadence is the point where hardware telemetry becomes visible to ML operators rather than only to data-center technicians. A degraded node that forces frequent checkpoint recovery, or a storage path that lengthens checkpoint writes, turns directly into lost training throughput. @Sec-appdx-reliability-foundations-young-daly derives the checkpoint-compute trade-off and the Young/Daly interval; the operations responsibility here is to expose the telemetry those formulas depend on: write time, failure rate, straggler behavior, and recovery duration. Without that visibility, a platform may report that a job is "running" while useful learning has quietly collapsed behind retries and slow checkpoints.
-
-::: {.column-margin .margin-pointer}
-↩ The Young-Daly interval applied to training checkpoints is established in @sec-fault-tolerance-young-daly.
-:::
 
 With the physical substrate accounted for, monitoring returns to the deployed model fleet. Models that pass validation gates and survive canary deployment enter a production environment where gradual degradation, data drift, and emergent interactions can erode performance over weeks or months. The staged rollout strategies and rollback triggers examined in CI/CD detect acute failures during deployment; monitoring systems must detect chronic degradation during operation. At platform scale, where hundreds of models operate simultaneously, the naive approach of applying single-model monitoring practices to each model independently leads to alert fatigue\index{Alert fatigue!monitoring thresholds}, missed correlations, and operational chaos. Monitoring strategies appropriate for enterprise-scale ML platforms require hierarchical aggregation and systemic governance.
 
@@ -3024,7 +3024,11 @@ Efficient resource utilization is essential for platform economics because share
 
 #### Training resource management {#sec-ml-operations-scale-training-resource-management-a972}
 
-Training resource policy must expose which jobs may wait or be preempted,[^fn-preemption-spot-instance] which deadlines are binding, and who accepts the recovery cost. The scheduler mechanisms in @sec-fleet-orchestration enforce those choices. The platform records checkpoint readiness, budget, priority, and accountable owner with each job so a utilization improvement does not silently transfer deadline or lost-work risk to a model team.
+Training resource policy must expose which jobs may wait or be preempted,[^fn-preemption-spot-instance] which deadlines are binding, and who accepts the recovery cost. Scheduler mechanisms enforce those choices. The platform records checkpoint readiness, budget, priority, and accountable owner with each job so a utilization improvement does not silently transfer deadline or lost-work risk to a model team.
+
+::: {.column-margin .margin-pointer}
+↩ Scheduler mechanisms for queueing, priority preemption, and elastic resizing of training jobs are established in @sec-fleet-orchestration.
+:::
 
 [^fn-preemption-spot-instance]: **Job Preemption**\index{Job Preemption!checkpoint trade-off}: The ability to terminate lower-priority workloads to free resources for urgent work. Preemptible capacity is also how cloud providers sell deep discounts, which @sec-ml-operations-scale-cloud-options prices. Either way, a preemptible training job must support checkpoint-and-resume; without periodic checkpointing, a preempted 72-hour run restarts from scratch and converts the discount into a net loss. Checkpoint frequency itself trades I/O overhead against wasted-compute risk.
 
@@ -3032,7 +3036,11 @@ Training resource policy must expose which jobs may wait or be preempted,[^fn-pr
 
 Serving workloads bind on latency rather than batch flexibility. Demand fluctuates with time of day, events, and seasonality, but a live request cannot be preempted without user impact. The serving control loop therefore starts from the latency SLO and asks how much capacity must be online before requests arrive.
 
-The serving mechanisms in @sec-inference-scale translate request load and queue pressure into capacity decisions. Operations owns their policy envelope: the latency SLO, warm rollback capacity, tenant limits, budget, and authority to override normal scaling during an incident. Those commitments must remain visible in the release record so a cheaper allocation cannot silently remove the headroom on which validation relied.
+Serving autoscalers translate request load and queue pressure into capacity decisions. Operations owns their policy envelope: the latency SLO, warm rollback capacity, tenant limits, budget, and authority to override normal scaling during an incident. Those commitments must remain visible in the release record so a cheaper allocation cannot silently remove the headroom on which validation relied.
+
+::: {.column-margin .margin-pointer}
+↩ Autoscaling controllers that convert queue growth and token arrival rates into replica counts are established in @sec-inference-scale-autoscaling-capacity-control.
+:::
 
 #### Platform utilization metrics {#sec-ml-operations-scale-platform-utilization-metrics-ed31}
 
@@ -3095,7 +3103,11 @@ Use daily cluster spend (`{python} GpuClusterEfficiency.daily_spend_str`) and ca
 
 ### Advanced fleet metrics and ML productivity goodput {#sec-ml-operations-scale-advanced-fleet-metrics-ml-productivity-goodput-mpg-fabf}
 
-While utilization metrics capture resource busyness, they often fail to reflect true engineering value. A GPU spinning at 100 percent utilization on a hyperparameter tuning job that eventually fails due to a configuration error is "efficient" in terms of hardware but "wasteful" in terms of productivity. ML productivity goodput (MPG)\index{ML Productivity Goodput!fleet operations}, introduced alongside the Fleet Law in @sec-vol2-introduction-fleet-law, turns that distinction into a fleet metric [@wongpanich2025fleet].
+While utilization metrics capture resource busyness, they often fail to reflect true engineering value. A GPU spinning at 100 percent utilization on a hyperparameter tuning job that eventually fails due to a configuration error is "efficient" in terms of hardware but "wasteful" in terms of productivity. ML productivity goodput (MPG)\index{ML Productivity Goodput!fleet operations} turns that distinction into a fleet metric [@wongpanich2025fleet].
+
+::: {.column-margin .margin-pointer}
+↩ The Fleet Law and the ML productivity goodput metric introduced beside it are established in @sec-vol2-introduction-fleet-law.
+:::
 
 The Fleet Law accounts for time within one distributed step; MPG complements it by locating lost productivity across a whole portfolio of jobs. Its three multiplicative factors share a common workload and time boundary, and they cut across C³ rather than mapping onto one axis:
 
@@ -4132,7 +4144,7 @@ class InfraFrontierTcoNodeRecap:
 
 At that point, planning becomes a sequence of coupled design constraints rather than a shopping list. Node sizing decides how many accelerators share a host and which memory tier carries optimizer state, activations, and data staging. For the `{python} InfraFrontierTcoNodeRecap.frontier_params_b_str` model, that points toward eight GPUs per node with tensor parallelism and roughly 2 TB of host DRAM for optimizer-state offload. Cluster sizing then divides the total compute budget by sustained per-node throughput after model FLOPs utilization (MFU) losses and adds 5--10 percent for a maintenance pool and spares.
 
-Network design follows the primary collective and validates expected scaling against @sec-distributed-training-scaling-math. The switch and optical-link inventory in @sec-network-fabrics-topology provides a capacity basis; procurement must price the actual topology and redundancy. RoCE (remote direct memory access (RDMA) over Converged Ethernet) requires correctly configured congestion control and fabric behavior under synchronized traffic. Packet loss and retransmissions can extend the slowest rank's completion time, but their effect depends on the transport, load, and collective schedule. Compare measured end-to-end performance and operational cost rather than assuming either fabric is universally cheaper or faster.
+Network design follows the primary collective and validates expected scaling against @sec-distributed-training-scaling-math. The fat-tree switch count and switch-cost estimate in @sec-network-fabrics-fat-tree provide a capacity basis; procurement must price the actual topology and redundancy. RoCE (remote direct memory access (RDMA) over Converged Ethernet) requires correctly configured congestion control and fabric behavior under synchronized traffic. Packet loss and retransmissions can extend the slowest rank's completion time, but their effect depends on the transport, load, and collective schedule. Compare measured end-to-end performance and operational cost rather than assuming either fabric is universally cheaper or faster.
 
 Power and cooling translate IT load through PUE, then sanity-check rack density locally: a four-node DGX H100 rack is roughly a `{python} InfraFrontierTcoNodeRecap.rack_power_kw_str` design point once GPUs, host systems, networking, power conversion, and cooling overhead are included. Higher density alters the cooling architecture in addition to increasing power consumption. TCO and schedule remain design variables because the cluster must arrive in time to matter, and GPU supply or electrical work often dominates lead time.
 
@@ -4560,7 +4572,7 @@ class TrainingCostExample:
 The PUE factor captures data center efficiency: a PUE of `{python} TrainingCostExample.pue_str` means `{python} TrainingCostExample.pue_overhead_pct_str` additional power for cooling and infrastructure. It applies to energy consumption, not to the whole accelerator-hour rate. The failure overhead $F_{\text{fail}}$ accounts for checkpoint-and-restart costs, reflecting how component failures compound into recovery overhead for long-running fleet jobs.
 
 ::: {.column-margin .margin-pointer}
-↩ Mean time between failures, checkpoint intervals, and restart overhead are established in @sec-fault-tolerance-reliability.
+↩ Cluster mean time between failures and the checkpoint interval it implies are established in @sec-fault-tolerance-reliability-reliability-failure-analysis-scale-6b4b.
 :::
 
 #### Training cost calculation {#sec-ml-operations-scale-worked-example-training-cost-calculation-6535}

@@ -222,7 +222,7 @@ Imagine a voice assistant trained on millions of generic audio samples in a clou
 The serving fleet already has to meet latency targets despite failures and uneven demand. At the edge, the operator also loses control over when a device has power, connectivity, or spare memory. The unit of design remains the fleet, but its participants can disappear between selection and completion. Local adaptation matters here because its cost determines which users can contribute to population learning.
 
 ::: {.column-margin .margin-pointer}
-↩ Data center serving architectures, continuous batching, and cluster service-level objectives (SLOs) are established in @sec-inference-scale.
+↩ Serving fleets that hold latency service-level objectives (SLOs) through replica failures and uneven demand are established in @sec-inference-scale.
 :::
 
 Consider one federated round for the voice assistant. A coordinator selects eligible devices and distributes a shared model version and a bounded training policy. Each selected device trains on local examples when its policy admits background work, then returns a model update tagged with the starting version. Some devices lose connectivity or exhaust their resource allowance. The coordinator closes the round according to its deadline and participation requirements, combines compatible updates, evaluates the candidate shared model, and publishes an accepted version for later download. Local personalization can remain on the device instead of entering that aggregate.
@@ -995,7 +995,11 @@ class EdgeH100BwRecap:
     ratio_high_mult_str = fmt_multiple(round(ratio_vs_a17), precision=0, commas=False)
 ```
 
-While mobile NPUs deliver impressive TOPS, the "memory wall" that @sec-compute-memory-wall examines becomes an impassable barrier for large-scale models on edge devices. The same bandwidth wall that limits training updates is easiest to see in mobile language-model decode: if weights and KV state cannot stream through memory fast enough, no advertised TOPS figure can rescue the workload. Recent analysis highlights how autoregressive decode shifts large language model (LLM) inference pressure toward memory and interconnect rather than peak arithmetic throughput [@ma2026challenges]. The quantitative disparity is stark: data-center HBM3 on an H100 provides `{python} EdgeH100BwRecap.h100_mem_bw_gb_per_s_str` of peak unidirectional DRAM memory bandwidth, while flagship mobile systems sit near `{python} EdgeH100BwRecap.a17_mem_bw_gb_per_s_str` (A17 Pro, LPDDR5) to `{python} EdgeH100BwRecap.sd8g3_mem_bw_gb_per_s_str` (Snapdragon 8 Gen 3, LPDDR5X), a gap of roughly `{python} EdgeH100BwRecap.ratio_low_str`--`{python} EdgeH100BwRecap.ratio_high_mult_str`.
+While mobile NPUs deliver impressive TOPS, the memory wall becomes an impassable barrier for large-scale models on edge devices. The same bandwidth wall that limits training updates is easiest to see in mobile language-model decode: if weights and KV state cannot stream through memory fast enough, no advertised TOPS figure can rescue the workload. Recent analysis highlights how autoregressive decode shifts large language model (LLM) inference pressure toward memory and interconnect rather than peak arithmetic throughput [@ma2026challenges]. The quantitative disparity is stark: data-center HBM3 on an H100 provides `{python} EdgeH100BwRecap.h100_mem_bw_gb_per_s_str` of peak unidirectional DRAM memory bandwidth, while flagship mobile systems sit near `{python} EdgeH100BwRecap.a17_mem_bw_gb_per_s_str` (A17 Pro, LPDDR5) to `{python} EdgeH100BwRecap.sd8g3_mem_bw_gb_per_s_str` (Snapdragon 8 Gen 3, LPDDR5X), a gap of roughly `{python} EdgeH100BwRecap.ratio_low_str`--`{python} EdgeH100BwRecap.ratio_high_mult_str`.
+
+::: {.column-margin .margin-pointer}
+↩ The memory wall, the widening gap between arithmetic throughput and the memory bandwidth that feeds it, is established in @sec-compute-memory-wall.
+:::
 
 ::: {.column-margin}
 ![](images/svg/edge_intelligence_bandwidth_ladder.svg){width="100%" fig-alt="Two-rung violet bandwidth ladder on a log scale. Top rung, data-center HBM3 at 3,350 GB/s. Bottom rung, mobile memory at 77 GB/s."}
@@ -1007,7 +1011,7 @@ A bandwidth gap of this size gives a corresponding gap in the bandwidth-only tok
 
 ::: {#psp-edge-intelligence-bandwidth-binding-constraint .callout-perspective title="Why bandwidth, not TOPS, is the binding constraint"}
 
-The bandwidth gap binds because each generated token streams the model's weights from memory to the compute units, so the data term $(D_{\text{vol}} / \text{BW})$ of the single-machine iron law (@sec-vol2-introduction-fleet-law) dominates the compute term whenever weights exceed on-chip cache, which is the case for billion-parameter models on mobile-class silicon. That is also why quantization shrinks $D_{\text{vol}}$ rather than arithmetic per token.
+The bandwidth gap binds because each generated token streams the model's weights from memory to the compute units, so the data term $(D_{\text{vol}} / \text{BW})$ of the single-machine iron law (@sec-performance-engineering-efficiency-frontier) dominates the compute term whenever weights exceed on-chip cache, which is the case for billion-parameter models on mobile-class silicon. That is also why quantization shrinks $D_{\text{vol}}$ rather than arithmetic per token.
 
 The practical corollary follows: when ranking edge accelerator options for transformer decoding, the figure of merit is the GB/s a chip can sustain to its on-package memory, not the peak TOPS on its spec sheet. The two can diverge by orders of magnitude on mobile-class silicon.
 
@@ -1286,7 +1290,7 @@ $$
 Weights stored in nonvolatile memory still consume deployment storage; any staging buffers belong in $M_{\text{workspace}}(t)$. The maximum must follow the actual execution schedule because activation and workspace peaks need not coincide. Admission also reserves memory for the runtime and foreground application. Freezing weights removes their gradient and optimizer state, but does not make the frozen base or every backward dependency disappear.
 
 ::: {.column-margin .margin-pointer}
-↪ The bytes per parameter that weights, gradients, and optimizer state occupy at each numeric precision are developed in @sec-appdx-dam-taxonomy-training-memory.
+↪ The bytes per parameter that weights, gradients, and optimizer state occupy in mixed-precision Adam training are developed in @sec-appdx-dam-taxonomy-training-memory.
 :::
 
 ::: {#fig-tinytl-memory fig-env="figure" fig-pos="htb" fig-cap="**Adaptation memory budget**: Working memory must hold the resident weights $M_{\text{weights,resident}}$, the trainable state $M_{\text{train}}$, and the peak of live activations plus workspace; together these form $M_{\text{peak}}$, which must fit under the device limit once the runtime and foreground application are reserved. Frozen weights kept in nonvolatile flash count toward storage, not working memory, until they are staged, and staging buffers belong to the workspace term. Segment heights are schematic, not to scale." fig-alt="Left: a green nonvolatile flash box holding frozen weights M weights,storage, with a dashed stage arrow into a working-memory stack. The stack, from bottom, holds resident weights M weights,resident in gray, trainable state M train in light blue, and max over t of M activations plus M workspace in blue; a bracket labels these three as M peak. Above them a dashed reserved block for runtime and app reaches a red dashed line labeled M device."}
@@ -1834,7 +1838,7 @@ This cyclical coordination protocol forms the foundation of federated learning. 
 This basic structure introduces a number of design choices and trade-offs. The number of local epochs $E$ impacts the balance between computation and communication: larger $E$ reduces communication frequency but risks divergence if local data distributions vary too much. The selection of participating clients affects convergence stability and fairness. In real-world deployments, not all devices are available at all times, and hardware capabilities may differ substantially, requiring robust participation scheduling and failure tolerance.
 
 ::: {.column-margin .margin-pointer}
-⇄ **Contrast:** Federated rounds over intermittent wide-area clients contrast with the synchronous collectives on low-latency cluster fabrics established in @sec-collective-communication.
+⇄ **Contrast:** Federated rounds over intermittent wide-area clients contrast with the synchronous AllReduce collectives on low-latency cluster fabrics established in @sec-communication-collective-operations-collective-operations-allreduce-algorithms-7545.
 :::
 
 #### Federated learning convergence analysis {#sec-edge-intelligence-federated-learning-convergence-analysis-c1fc}
@@ -1946,7 +1950,11 @@ $$
 M_r = M_{\text{download},r} + M_{\text{upload},r} + M_{\text{protocol},r} + M_{\text{retry},r},
 $$ {#eq-edge-federated-communication-ledger}
 
-@Eq-edge-federated-communication-ledger makes download, upload, protocol, and retry traffic explicit. The download distributes model state, the upload carries client updates, protocol traffic covers authentication and cryptographic setup, and retries account for failed or repeated transfers. Optimizing only $M_{\text{upload},r}$ can therefore move rather than remove the bottleneck. While amortizing network transfers through additional local computation relieves bandwidth pressure, alternative communication-efficient update strategies introduce their own systems trade-offs: compression may degrade gradient fidelity, selective updates can limit model capacity, and split architectures complicate coordination. Effective federated learning requires balancing communication, privacy, and convergence against the capabilities and variability of the client population. @Sec-appdx-comm-foundations-compression works the compression break-even threshold through a worked example.
+@Eq-edge-federated-communication-ledger makes download, upload, protocol, and retry traffic explicit. The download distributes model state, the upload carries client updates, protocol traffic covers authentication and cryptographic setup, and retries account for failed or repeated transfers. Optimizing only $M_{\text{upload},r}$ can therefore move rather than remove the bottleneck. While amortizing network transfers through additional local computation relieves bandwidth pressure, alternative communication-efficient update strategies introduce their own systems trade-offs: compression may degrade gradient fidelity, selective updates can limit model capacity, and split architectures complicate coordination. Effective federated learning requires balancing communication, privacy, and convergence against the capabilities and variability of the client population.
+
+::: {.column-margin .margin-pointer}
+↪ The break-even condition under which encoding and decoding time costs less than the transfer time compression saves is developed, with a worked example, in @sec-appdx-comm-foundations-compression.
+:::
 
 While the analytical flowchart in @fig-comm-compute-tradeoff defines the measurement dependencies, @fig-fl-communication-computation charts the resulting optimization curves across fast, medium, and slow network regimes. On a log-scaled training time axis, each network curve traces a distinct U-shaped trade-off where the optimal local workload $E^*$ shifts rightward—from $E=10$ on high-speed connections to $E=40$ on constrained links—demonstrating how slower networks demand greater local computation to amortize transfer latency before client drift counteracts the gains.
 
@@ -2638,7 +2646,11 @@ Shadow model\index{Shadow Model!evaluation} evaluation maintains multiple model 
 
 Confidence-based gates provide another change signal when labels are unavailable. Even a calibrated model's confidence is interpretable only relative to the population and task on which calibration was measured. A drop can reflect distribution shift, ambiguity, or a changed score scale; stable confidence can coexist with overconfident errors. Systems may use confidence to trigger investigation or halt adaptation conservatively, but they should not call the adapted model worse without delayed labels, randomized evaluation, trusted user corrections, or another validated outcome signal.
 
-Federated A/B testing\index{Federated A/B testing!client cohort validation} randomly assigns devices to treatment and control adaptation policies, balanced across device tiers, and compares privacy-preserving aggregates of adaptation success rate, time to improvement, and final quality. A strategy that wins is then released through the staged rollout process that fleet operations owns (@sec-ml-operations-scale-staged-rollout-strategies-2d1f).
+Federated A/B testing\index{Federated A/B testing!client cohort validation} randomly assigns devices to treatment and control adaptation policies, balanced across device tiers, and compares privacy-preserving aggregates of adaptation success rate, time to improvement, and final quality. A strategy that wins is then released through the staged rollout process that fleet operations owns.
+
+::: {.column-margin .margin-pointer}
+↪ Staged rollout, which widens a release's exposure only after each stage performs acceptably, is operationalized in @sec-ml-operations-scale-staged-rollout-strategies-2d1f.
+:::
 
 Aggregated validation signals are themselves releases. They need data minimization, secure aggregation where appropriate, a declared privacy unit, and privacy accounting across repeated rounds, and even then a population summary can miss a failure confined to a few users. Local gates and population summaries therefore provide different evidence, and evaluating an adaptive fleet requires measuring adaptation benefit, resource cost, and cohort coverage together.
 
@@ -2995,7 +3007,7 @@ The deployment decision must treat these on-device learning challenges\index{On-
 
 Poisoning, inversion, drift, and validation failures also occur in centralized ML systems, but local adaptation makes them harder to observe, attribute, and roll back across a heterogeneous fleet. A faulty or malicious client can submit a poisoned update,[^fn-byzantine-federated-resilience] an update can disclose information despite data locality, and local distribution shift can remain invisible in population averages.
 
-The edge architecture must therefore bind adaptation range, update integrity, privacy accounting, robust aggregation, validation evidence, and rollback into one control path. These mechanisms do not substitute for one another: secure aggregation hides individual contributions, robust statistics limit some malicious influence, and validated outcomes establish whether behavior improved. @Sec-ops-scale takes up the operational problem that remains after these safeguards exist, sustaining their monitoring and lifecycle across the fleet.
+The edge architecture must therefore bind adaptation range, update integrity, privacy accounting, robust aggregation, validation evidence, and rollback into one control path. These mechanisms do not substitute for one another: secure aggregation hides individual contributions, robust statistics limit some malicious influence, and validated outcomes establish whether behavior improved.
 
 [^fn-byzantine-federated-resilience]: **Byzantine Fault Tolerance in Federated Learning (FL)**\index{Byzantine Fault Tolerance in FL!definition}: Named after the Byzantine Generals Problem [@lamport1982byzantine], this property enables useful aggregation despite malicious or faulty participants; Krum's original analysis requires conditions such as $2f + 2 < n$ [@blanchard2017machine], while coordinate-wise median and trimmed-mean aggregators use different robustness assumptions; the tolerated Byzantine fraction depends on the aggregation rule, dimensionality, and statistical model. These defenses can increase communication and compute overhead because they require extra validation, robust statistics, or redundant participation. That overhead is the price of trust in open federated systems where any client device could be compromised.
 

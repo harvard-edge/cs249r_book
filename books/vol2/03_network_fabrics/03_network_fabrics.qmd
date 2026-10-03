@@ -102,7 +102,7 @@ At scale, communication cost can dominate computation cost. The fleet-law decomp
 A collective is a communication operation performed by a group of workers. Its name specifies the result each worker receives, while an algorithm determines the messages that produce that result. The physical network fabric carries three recurring collective communication patterns. An AllReduce\index{AllReduce!definition} combines corresponding values from all participants and returns the same result to each; synchronous training uses a sum, followed by normalization, to average gradient contributions across workers. An AllGather\index{AllGather!definition} collects a distinct portion from each participant and returns the concatenated collection to every participant, as required when reconstructing a sharded parameter tensor. Finally, an AllToAll\index{AllToAll!definition} lets each participant send a distinct portion to every other participant, an exchange central to expert parallelism when workers host different expert subnetworks and must route tokens to their assigned destinations. Collective communication algorithms orchestrate these patterns, while the fabric layer supplies the physical wires and switches that carry them. The distinction matters because the fabric's physical properties (bandwidth, latency, and topology) determine which patterns are efficient and which become bottlenecks.
 
 ::: {.column-margin .margin-pointer}
-↪ Algorithmic cost models and collective communication schedules are developed in @sec-collective-communication.
+↪ The full set of collective primitives, with the output contract each one guarantees, is developed in @sec-communication-collective-operations-collective-operations-collective-operation-vocabulary-fdc7.
 :::
 
 ::: {#psp-network-fabrics-network-as-gradient-bus .callout-perspective title="The network as a gradient bus"}
@@ -211,7 +211,7 @@ class NetworkFabricsContextScenario:
     h100_mem_bw_tb_per_s_str = fmt_bandwidth(h100_mem_bw_raw, unit=TB / second, precision=2, commas=False)
 ```
 
-The concrete bandwidth cliff that separates intra-node from inter-node communication makes this gradient bus analogy precise. A single H100 delivers `{python} NetworkFabricsContextScenario.h100_fp16_tflop_per_s_str` of FP16 throughput with `{python} NetworkFabricsContextScenario.h100_mem_bw_tb_per_s_str` of memory bandwidth. Within a node, eight such accelerators communicate through NVLink at `{python} NetworkFabricsContextScenario.nvlink_h100_gb_per_s_str` of aggregate bidirectional bandwidth. The moment computation crosses a node boundary, however, the available per-direction bandwidth drops by a factor of `{python} NetworkFabricsContextScenario.nvlink_to_ib_ratio_mult_str`, from `{python} NetworkFabricsContextScenario.nvlink_h100_perdir_gb_per_s_str` of NVLink (one direction of that bidirectional link) to `{python} NetworkFabricsContextScenario.ib_ndr_gb_per_s_str` (NDR InfiniBand per port). This cliff is the central challenge of network fabric design. @Sec-appdx-fleet-foundations-numbers-to-know collects the canonical NVLink and InfiniBand bandwidth specifications and the 1K-GPU cluster reference configuration that anchor these figures. For the 175B model, moving `{python} NetworkRunningExampleCluster.grad_gb_str` of gradients through `{python} NetworkFabricsContextScenario.ib_ndr_gb_per_s_str` links means that the AllReduce alone can take seconds, during which every GPU in the cluster sits idle unless the fabric and collective algorithms can overlap that transfer with computation. @Fig-bandwidth-hierarchy charts this multi-tier divergence on a logarithmic scale across four GPU generations (V100 through B200), isolating the red annotated drop between the solid NVLink bars and hatched InfiniBand port bars.
+The concrete bandwidth cliff that separates intra-node from inter-node communication makes this gradient bus analogy precise. A single H100 delivers `{python} NetworkFabricsContextScenario.h100_fp16_tflop_per_s_str` of FP16 throughput with `{python} NetworkFabricsContextScenario.h100_mem_bw_tb_per_s_str` of memory bandwidth. Within a node, eight such accelerators communicate through NVLink at `{python} NetworkFabricsContextScenario.nvlink_h100_gb_per_s_str` of aggregate bidirectional bandwidth. The moment computation crosses a node boundary, however, the available per-direction bandwidth drops by a factor of `{python} NetworkFabricsContextScenario.nvlink_to_ib_ratio_mult_str`, from `{python} NetworkFabricsContextScenario.nvlink_h100_perdir_gb_per_s_str` of NVLink (one direction of that bidirectional link) to `{python} NetworkFabricsContextScenario.ib_ndr_gb_per_s_str` (NDR InfiniBand per port). This cliff is the central challenge of network fabric design. For the 175B model, moving `{python} NetworkRunningExampleCluster.grad_gb_str` of gradients through `{python} NetworkFabricsContextScenario.ib_ndr_gb_per_s_str` links means that the AllReduce alone can take seconds, during which every GPU in the cluster sits idle unless the fabric and collective algorithms can overlap that transfer with computation. @Fig-bandwidth-hierarchy charts this multi-tier divergence on a logarithmic scale across four GPU generations (V100 through B200), isolating the red annotated drop between the solid NVLink bars and hatched InfiniBand port bars.
 
 ::: {.column-margin .margin-pointer}
 ↩ The bandwidth hierarchy, in which bandwidth drops by roughly an order of magnitude at each physical boundary, is established in @sec-compute-bandwidth-hierarchy.
@@ -354,6 +354,10 @@ plt.close()
 :::
 
 Across the four generations charted in @fig-bandwidth-hierarchy, the red cliff indicators reveal that this steep bandwidth drop is not an artifact of a single accelerator design. Measured per direction, crossing from the local NVLink domain to one InfiniBand port reduces bandwidth by roughly 9$\times$ for the H100 generation and by 12--18$\times$ in the others, despite absolute bandwidth improvements at every tier. The comparison is between an aggregate accelerator-local interconnect budget and one external network port. Intra-node NVLink connects accelerator packages through board-level links and, in switched systems, NVSwitch; it is not an on-package memory path. External fabrics must additionally satisfy cable reach, port-count, and multi-node routing constraints. The size of the bandwidth gap depends on how many links and ports the system provisions at each boundary. The ratio determines which parallelism strategies are efficient.
+
+::: {.column-margin .margin-pointer}
+↪ The network hierarchy ratio between intra-node and inter-node bandwidth, with the reference NVLink and InfiniBand values behind it, is developed in @sec-appdx-fleet-foundations-numbers-to-know.
+:::
 
 The distinction follows from what each parallelism strategy divides. Tensor parallelism splits an individual layer across accelerators, requiring frequent exchanges of intermediate results; this favors the fastest local interconnect. Pipeline parallelism places successive groups of layers on different workers and transfers activations between them. Data parallelism runs model replicas on different input batches and combines their gradients; because each replica can sum gradients over several microbatches before an exchange (gradient accumulation\index{Gradient accumulation!communication frequency}), it tolerates the lowest bandwidth of the three. Pipeline and data parallelism therefore offer ways to cross the slower node boundary with less frequent communication. Combining these three strategies is called 3D parallelism; their execution schedules are developed in @sec-distributed-training-systems-systems-hybrid-parallelism-3d-loop, while their traffic requirements already constrain the fabric. Every topology and protocol decision in this chapter attempts to minimize the impact of this hierarchy on collective communication performance.
 
@@ -819,7 +823,7 @@ Consider a 2,048-GPU training cluster that will run both large language model tr
 
 ### The $\alpha$-$\beta$ performance model {#sec-network-fabrics-performance-model}
 
-Protocol choice determines how the fabric provides reliable completion and bounds loss-recovery time; performance modeling then asks how fast it can carry a given message. The $\alpha$-$\beta$ model\index{Alpha-Beta Model!message transfer time} (principle \ref{pri-alpha-beta-model}) decomposes message transfer time as $T(n) = \alpha + n/\beta$, where $n$ is the message size in bytes, $\alpha$ is the fixed startup latency, and $\beta$ is the sustained bandwidth in bytes per unit time [@hockney1994]. @Sec-appdx-comm-foundations-alpha-beta develops the full derivation and works the model through concrete message regimes, separating latency-dominated from bandwidth-dominated transfers. The physical topology influences both parameters through path length and available capacity. A ring collective, which passes chunks around a logical cycle of participants, adds a separate scheduling cost: as its participant count grows, it pays the per-message startup cost over more rounds, even when the underlying fabric provides short physical paths.
+Protocol choice determines how the fabric provides reliable completion and bounds loss-recovery time; performance modeling then asks how fast it can carry a given message. The $\alpha$-$\beta$ model\index{Alpha-Beta Model!message transfer time} (principle \ref{pri-alpha-beta-model}) decomposes message transfer time as $T(n) = \alpha + n/\beta$, where $n$ is the message size in bytes, $\alpha$ is the fixed startup latency, and $\beta$ is the sustained bandwidth in bytes per unit time [@hockney1994]. The physical topology influences both parameters through path length and available capacity. A ring collective, which passes chunks around a logical cycle of participants, adds a separate scheduling cost: as its participant count grows, it pays the per-message startup cost over more rounds, even when the underlying fabric provides short physical paths.
 
 ::: {.column-margin .margin-pointer}
 ↪ The same decomposition, multiplied by each schedule's round count and traffic factor, is developed for collective algorithms in @sec-communication-collective-operations-collective-operations-alphabeta-model-f9b4.
@@ -915,6 +919,10 @@ class NetworkAlphaBeta:
 ```
 
 The model reveals two regimes that lead to different engineering responses. For messages with $n < \alpha\beta$, startup cost $\alpha$ dominates the transfer time; small control and synchronization messages fall in this latency-bound region. For messages with $n > \alpha\beta$, the $n/\beta$ term dominates; gradient AllReduce falls in this bandwidth-bound region.
+
+::: {.column-margin .margin-pointer}
+↪ The full derivation of the $\alpha$-$\beta$ model, worked through latency-dominated and bandwidth-dominated message regimes, is developed in @sec-appdx-comm-foundations-alpha-beta.
+:::
 
 For the modeled NDR InfiniBand path with $\alpha =$ `{python} NetworkAlphaBeta.ib_alpha_us_str` and $\beta =$ `{python} NetworkAlphaBeta.ib_beta_gb_per_s_str`, the crossover point $n^* = \alpha \cdot \beta \approx$ `{python} NetworkAlphaBeta.n_cross_ib_kb_str`. These are scenario parameters, not protocol constants: measured startup latency and delivered bandwidth vary with the NIC, switch path, software stack, and contention. Messages smaller than the measured crossover gain little from more bandwidth; messages larger than it gain little from lower latency. That crossover separates two fundamentally different optimization strategies: reducing hop count to lower $\alpha$, or adding delivered path bandwidth to raise $\beta$.
 
@@ -1331,7 +1339,11 @@ class BisectionDefinitionExample:
 
 ML training includes global collectives and AllToAll phases that can drive traffic across topology partitions, making full $\text{BW}_{\text{bisect}}$ a common performance target. A fabric that falls short forces synchronization traffic crossing the narrowest section to bottleneck there, idling accelerators while gradients pass through the constrained links.
 
-Bisection bandwidth is a metric; the topology property that delivers full $\text{BW}_{\text{bisect}}$ under arbitrary traffic patterns is a non-blocking fabric. A non-blocking design guarantees that the uplink capacity at every switch tier matches or exceeds the downlink capacity, so no internal contention reduces the cross-sectional throughput below its theoretical maximum. When a fabric is oversubscribed, the effective $\text{BW}_{\text{bisect}}$ drops by the oversubscription ratio, and a fixed transfer that saturates that cut slows proportionally. A collective that keeps most traffic within each half need not experience the same slowdown. @Sec-appdx-c3-taxonomy-comp-comm shows how to diagnose the regime where communication, rather than computation, becomes the binding constraint, so that an oversubscribed spine can be recognized as a fabric problem before it is mistaken for slow accelerators.
+Bisection bandwidth is a metric; the topology property that delivers full $\text{BW}_{\text{bisect}}$ under arbitrary traffic patterns is a non-blocking fabric. A non-blocking design guarantees that the uplink capacity at every switch tier matches or exceeds the downlink capacity, so no internal contention reduces the cross-sectional throughput below its theoretical maximum. When a fabric is oversubscribed, the effective $\text{BW}_{\text{bisect}}$ drops by the oversubscription ratio, and a fixed transfer that saturates that cut slows proportionally. A collective that keeps most traffic within each half need not experience the same slowdown.
+
+::: {.column-margin .margin-pointer}
+↪ The communication-to-compute diagnostic, which separates a communication-bound step from slow accelerators, is developed in @sec-appdx-c3-taxonomy-comp-comm.
+:::
 
 ::: {#dfn-network-fabrics-non-blocking-fabric .callout-definition title="Non-blocking fabric"}
 
@@ -1354,7 +1366,7 @@ To mitigate congestion at this edge, network architects maximize the switch **ra
 The same rack boundary also shapes recovery. The job scheduler must be topology-aware for performance, while reliable replica placement must keep redundant state and replacement capacity outside the same rack failure domain so that a single lost rack does not take down the entire training run.
 
 ::: {.column-margin .margin-pointer}
-↪ Failure domain isolation and replica placement policies are developed in @sec-fault-tolerance-reliability-reliability-replica-placement-failure-domains-73a7.
+↪ Nested failure domains, and why redundant state must span them to survive a correlated rack or ToR outage, are developed in @sec-fault-tolerance-reliability-reliability-correlated-failures-95e8.
 :::
 
 ### Fat-tree (Clos) networks {#sec-network-fabrics-fat-tree}
@@ -1558,7 +1570,11 @@ Scaling beyond this requires a three-tier architecture with core switches, enabl
 
 Rail-optimized topology\index{Rail-optimized topology!cabling architecture} begins from the communication pattern rather than from a generic switch hierarchy. Dense accelerator nodes partition GPUs by local slot position into independent horizontal rails, as diagrammed in @fig-rail-optimized-cabling. In this physical cabling scheme, high-bandwidth internal NVSwitch planes bind GPUs 0 through 3 within Node 0 and Node 1, while external network ports route horizontally: GPU 0 in every node connects strictly to the Rail 0 switch, GPU 1 connects to Rail 1, and so on across the cluster.
 
-::: {#fig-rail-optimized-cabling fig-env="figure" fig-pos="htb" fig-cap="**Rail-optimized physical wiring**: In dense accelerator nodes such as the DGX H100, each GPU's network port is cabled by local slot position: GPU 0 in every node connects to the rail 0 switch, GPU 1 to the rail 1 switch, and so on, the rail pattern that @sec-compute-rack-design previewed at the top-of-rack switch. Two nodes and four of each node's eight GPUs are drawn; further nodes attach to the same rail switches. Tensor-parallel traffic stays on each node's NVSwitch, same-rank data-parallel traffic stays on its own rail, and a spine layer (not drawn) bridges the rails for cross-rank traffic." fig-alt="Two node boxes, Node 0 on the left and Node 1 on the right, each holding GPU 0 through GPU 3 joined by a vertical NVSwitch bar. Between them sits a column of four rail switches. Straight horizontal cables connect GPU 0 of both nodes to the rail 0 switch, GPU 1 of both nodes to the rail 1 switch, and likewise for rails 2 and 3."}
+::: {.column-margin .margin-pointer}
+↩ Assigning each GPU in a node to its own rail switch, rather than one shared top-of-rack switch, is established in @sec-compute-rack-design.
+:::
+
+::: {#fig-rail-optimized-cabling fig-env="figure" fig-pos="htb" fig-cap="**Rail-optimized physical wiring**: In dense accelerator nodes such as the DGX H100, each GPU's network port is cabled by local slot position: GPU 0 in every node connects to the rail 0 switch, GPU 1 to the rail 1 switch, and so on. Two nodes and four of each node's eight GPUs are drawn; further nodes attach to the same rail switches. Tensor-parallel traffic stays on each node's NVSwitch, same-rank data-parallel traffic stays on its own rail, and a spine layer (not drawn) bridges the rails for cross-rank traffic." fig-alt="Two node boxes, Node 0 on the left and Node 1 on the right, each holding GPU 0 through GPU 3 joined by a vertical NVSwitch bar. Between them sits a column of four rail switches. Straight horizontal cables connect GPU 0 of both nodes to the rail 0 switch, GPU 1 of both nodes to the rail 1 switch, and likewise for rails 2 and 3."}
 ![](images/svg/rail-optimized.svg)
 
 :::
@@ -2266,7 +2282,7 @@ Synchronized ML traffic is susceptible to both true fan-in and shared-egress hot
 3. **Priority.** Quality of service (QoS) classification\index{Quality of service!priority traffic} tags gradient traffic with the highest service class so background storage or management traffic cannot delay the synchronization path.
 
 ::: {.column-margin .margin-pointer}
-↪ Communication-computation overlap and the residual delay it hides are measured in @sec-communication-overlap.
+↪ Communication-computation overlap, and the communication it still leaves exposed, are measured in @sec-communication-overlap.
 :::
 
 These mitigations spread the burst in time, space, and priority, but they do not eliminate congestion or tail latency. The question becomes how to build end-to-end clusters that perform despite these realities.
