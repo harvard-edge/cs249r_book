@@ -15,25 +15,9 @@ class NotationSymbol:
     notes: str
     category: str
 
-class SymbolNamespace:
-    """Namespace for symbols belonging to a specific volume."""
-    def __init__(self, name: str):
-        self._name = name
-        self._symbols = {}
-
-    def _add_symbol(self, symbol: NotationSymbol):
-        attr_name = symbol.macro.lstrip('\\')
-        setattr(self, attr_name, symbol)
-        self._symbols[attr_name] = symbol
-
 class NotationRegistry:
-    """Global registry of all notations."""
+    """Global flat registry of all notations."""
     def __init__(self):
-        self.core = SymbolNamespace("core")
-        self.vol1 = SymbolNamespace("vol1")
-        self.vol2 = SymbolNamespace("vol2")
-        self.vol3 = SymbolNamespace("vol3")
-        self.vol4 = SymbolNamespace("vol4")
         self._all_symbols = {}
         self._load()
 
@@ -58,11 +42,9 @@ class NotationRegistry:
             attr_name = sym.macro.lstrip('\\')
             self._all_symbols[attr_name] = sym
             setattr(self, attr_name, sym)
-            
-            # Add to namespace
-            ns = getattr(self, sym.volume, None)
-            if ns:
-                ns._add_symbol(sym)
+
+    def __iter__(self):
+        return iter(self._all_symbols.values())
 
 # Global singleton
 SYMBOLS = NotationRegistry()
