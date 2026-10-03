@@ -325,6 +325,7 @@ def test_open_jupyter_server_reuse_reports_relative_path(monkeypatch, tmp_path):
     assert ret == 0
     all_output = " ".join(printed_messages)
     assert "02_activations/activations.ipynb" in all_output
+    assert "http://localhost:8888/lab/tree/02_activations/activations.ipynb" in all_output
 
 
 

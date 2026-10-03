@@ -886,10 +886,11 @@ class ModuleWorkflowCommand(BaseCommand):
             existing_pid = self._running_jupyter_pid()
             if existing_pid is not None:
                 self.console.print(f"\n[cyan]Jupyter Lab is already running (pid {existing_pid}).[/cyan]")
-                self.console.print("  Open [cyan]http://localhost:8888[/cyan] in your browser")
                 if notebook_path:
                     relative_nb = notebook_path.relative_to(modules_dir).as_posix()
-                    self.console.print(f"  [dim]then open {relative_nb}[/dim]")
+                    self.console.print(f"  Open [cyan]http://localhost:8888/lab/tree/{relative_nb}[/cyan] in your browser")
+                else:
+                    self.console.print("  Open [cyan]http://localhost:8888[/cyan] in your browser")
                 self.console.print("  [dim]Stop that server first if you want a fresh one.[/dim]")
                 return 0
 
@@ -927,7 +928,11 @@ class ModuleWorkflowCommand(BaseCommand):
             self.console.print(f"[dim]Log file: {log_file}[/dim]")
             self.console.print()
             self.console.print("[bold]If Jupyter doesn't open automatically:[/bold]")
-            self.console.print("  Open [cyan]http://localhost:8888[/cyan] in your browser")
+            if notebook_path and notebook_path.exists():
+                relative_nb = notebook_path.relative_to(modules_dir).as_posix()
+                self.console.print(f"  Open [cyan]http://localhost:8888/lab/tree/{relative_nb}[/cyan] in your browser")
+            else:
+                self.console.print("  Open [cyan]http://localhost:8888[/cyan] in your browser")
             self.console.print(f"  [dim]Or check {log_file.name} for the full URL with token[/dim]")
             return 0
 

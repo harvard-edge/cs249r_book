@@ -1161,7 +1161,7 @@ Understanding how loss functions behave in production helps make informed engine
 
 As models grow larger, loss function memory and compute bottlenecks become critical:
 
-| Scaling Dimension | Small Model (MNIST) | Large Model (ImageNet) | Production Scale (LLM / GPT-6) |
+| Scaling Dimension | Small Model (MNIST) | Large Model (ImageNet) | Production Scale (Frontier LLMs) |
 | :--- | :---: | :---: | :---: |
 | **Output Classes ($C$)** | $10$ | $1{,}000$ | $32{,}000$ to $128{,}000$ |
 | **Batch Size ($B$)** | $64$ | $256$ | $2{,}048$ to $8{,}192$ |
