@@ -12882,7 +12882,9 @@ class ValidateCommand:
                 h: Dict[str, object] = {}
                 for q in vol_dir.rglob("*.qmd"):
                     m = re.match(r"(\d\d)_", q.parent.name)
-                    key: object = int(m.group(1)) if m else ("appendix" if "appendix" in q.name else "front")
+                    # Appendix files live in backmatter/appendix_*.qmd or (vol3) appendices/.
+                    is_app = "appendix" in q.name or q.parent.name == "appendices"
+                    key: object = int(m.group(1)) if m else ("appendix" if is_app else "front")
                     for lab in re.findall(r"\{#(sec-[A-Za-z0-9_-]+)", q.read_text(encoding="utf-8")):
                         h[lab] = key
                 homes[vol_dir] = h
