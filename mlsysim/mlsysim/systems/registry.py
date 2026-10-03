@@ -156,7 +156,7 @@ class Nodes(Registry):
         host_memory=1.5 * TiB,
         max_power=10.0 * kilowatt,
         metadata=Metadata(
-            provenance=pc.AMD_MI300X,
+            provenance=Hardware.Cloud.MI300X.metadata.provenance,
             description="8x AMD Instinct MI300X OAM server node (1.5 TB HBM3, Infinity Fabric).",
         ),
     )
