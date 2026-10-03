@@ -147,6 +147,10 @@ where $v$ identifies an immutable version hash and $\xi$ captures execution nond
 
 Fixing random seeds (such as `torch.manual_seed(42)`) still fails to guarantee bitwise reproducibility across training runs on accelerator hardware. The root cause lies in finite-precision arithmetic: in pure mathematics, addition is associative: $(a + b) + c = a + (b + c)$. On digital hardware, finite-precision floating-point formats (such as IEEE 754 FP32, FP16, or BF16) break associativity because intermediate operations round fractional bits to fit within a finite mantissa width. When training on an accelerator, thousands of concurrent threads update shared gradient tensors in global memory using hardware atomic instructions (`atomicAdd`). Because thread scheduling across parallel execution units is asynchronous and arbitrated dynamically by bus contention and clock variations, Thread A and Thread B reach global memory in unpredictable order. If Run 1 executes $(A + B) + C$ and Run 2 executes $A + (B + C)$, the accumulated gradients differ in their least significant bits. Over thousands of optimization steps, these microscopic round-off variances compound through non-linear activation functions, causing two runs with identical seeds and identical code to diverge into measurably different model weights unless deterministic reduction algorithms (which enforce a fixed summation tree at the cost of parallel throughput) are explicitly enabled.
 
+::: {.column-margin .margin-pointer}
+↩ The numerical precision formats, dynamic ranges, and hardware rounding properties underlying these non-associative accumulation variances are established in @sec-model-training-mixedprecision-training-9218.
+:::
+
 [^fn-artifact-reproducibility-hashing]: **Artifact**\index{Artifact!reproducibility}: Model weights are realized training outputs; the inputs and randomness that produced them cannot generally be inferred from the parameters. Versioning only code is therefore insufficient, and even versioning code, data, configuration, and environment may not guarantee exact replay when kernels or training are nondeterministic.
 
 #### Separation of concerns {#sec-ml-operations-principle-2-separation-concerns-6f84}
@@ -669,6 +673,10 @@ Eliminating interface debt requires infrastructure-enforced boundaries: strict a
 Even well-designed ML systems with documented interfaces encounter evolution challenges absent from deterministic software.
 
 The most insidious of these dynamics is the feedback loop\index{Feedback loop!self-reinforcing bias}, where a deployed model influences the data distribution that trains its successors. Recommendation systems illustrate this pattern directly: suggested content dictates user engagement, clicks generate subsequent training sets, and the model reinforces its own historical selections while starving unselected content of exposure. In production, this failure mode often surfaces as a widening performance disparity across demographic cohorts: underrepresented groups receive suboptimal predictions, generating skewed engagement logs that further degrade cohort representation in subsequent retraining runs, the self-reinforcing loop that the bias feedback model (principle \ref{pri-bias-feedback}) describes. Detecting feedback loops requires cohort-stratified monitoring that tracks error distributions across user segments rather than relying on aggregate validation metrics.
+
+::: {.column-margin .margin-pointer}
+↪ Mathematical modeling of compounding bias feedback factors and loop stability across retraining cycles is developed in @sec-responsible-engineering-monitoring-incident-response-54f4.
+:::
 
 Over repeated deployment cycles, workflows accumulate **pipeline and configuration debt**\index{Pipeline!debt, workflow fragmentation}\index{Configuration debt!parameter sprawl}, evolving into jungles of ad hoc glue scripts and divergent hyperparameter files. When pipelines lack modular interfaces, teams copy existing scripts rather than refactor brittle data loaders, producing redundant pipelines that process the same raw inputs with subtle inconsistencies. Compounding this, rapid prototyping frequently embeds business logic directly into feature preparation scripts. Controlling pipeline evolution requires workflow orchestration engines with immutable directed acyclic graph (DAG) definitions, strict parameter validation, and configuration versioning managed under the same source control as model code.
 
@@ -1752,6 +1760,10 @@ To understand why standard monitoring tools can be dangerously deceptive, consid
 
 However, off-chip high-bandwidth memory (HBM) is separated from the SMs by physical traces, imposing an access latency of several hundred clock cycles. If an ML inference or training kernel exhibits poor memory locality, uncoalesced memory access, or low arithmetic intensity (such as gathering non-contiguous embedding vectors or executing un-fused elementwise operations), every resident warp on an SM may eventually stall waiting for memory transactions to traverse the bus. During these stall cycles, the arithmetic units sit completely idle. Standard administrative tools such as `nvidia-smi` nevertheless sample temporal occupancy—reporting 100 percent GPU utilization simply because a kernel is resident and has at least one warp assigned to an SM. The operations dashboard displays a reassuring green gauge, while the underlying silicon is severely starved for data.
 
+::: {.column-margin .margin-pointer}
+↩ The analytical model separating compute-bound execution from memory-bandwidth saturation across operational arithmetic intensities is established in @sec-hardware-acceleration-roofline-model-42ff.
+:::
+
 Distinguishing compute execution from memory or pipeline stalls requires evaluating SM execution efficiency alongside memory bandwidth and I/O saturation. @Tbl-gpu-utilization-patterns distinguishes these utilization signatures and identifies the corresponding optimization strategy for each:
 
 | **Pattern**       |   **GPU Util**   | **Memory bandwidth util.** | **Optimization Strategy**                           |
@@ -2691,6 +2703,10 @@ shap.summary_plot(shap_values, errors[feature_columns])
 :::
 
 The attribution plot identifies features the model relied on within the failing slice; it does not establish whether those features caused the errors. Diagnosing stale features, missing coverage, or semantic shift requires checking feature lineage and production distributions.
+
+::: {.column-margin .margin-pointer}
+↪ Post-hoc feature attribution methods, Shapley value computational costs, and model interpretability boundaries are developed in @sec-responsible-engineering-explainability-requirements-0b67.
+:::
 
 ::: {#psp-ml-ops-zombie-feature .callout-perspective title="Zombie features"}
 

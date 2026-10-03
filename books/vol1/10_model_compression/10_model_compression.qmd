@@ -276,6 +276,10 @@ Cloud inference centers on throughput (requests per second per dollar), where su
 
 TinyML makes compression an absolute deployment requirement. A microcontroller with only a few hundred kilobytes of SRAM *cannot* run a 100 MB model regardless of predictive accuracy [@banbury2020benchmarking]. Without virtual memory or paging hardware, model weights and peak activation buffers must reside entirely within physical SRAM; if the working set exceeds physical capacity, the program fails immediately with an out-of-memory fault.
 
+::: {.column-margin .margin-pointer}
+↩ The latency, memory, and power envelopes defining cloud, edge, mobile, and TinyML tiers are established in @sec-ml-systems-deployment-paradigm-framework-0d25.
+:::
+
 AlexNet, the model that won the 2012 ImageNet challenge, encountered a memory wall during training, and its architecture records the resulting two-GPU design choice.
 
 ::: {#exmp-model-compression-alexnet-2012 .callout-example title="AlexNet's two-GPU split (2012)"}
@@ -979,6 +983,10 @@ $$
 where $\delta_{\text{prune}}$ is chosen to ensure that only the largest $(1 - \rho_{\text{sparse}})$ fraction of weights remain. This method assumes that larger-magnitude weights contribute more to the network's function, making them preferable for retention.
 
 Unstructured pruning reduces the count of nonzero parameters, but translating that reduction into physical storage savings requires an indexed sparse encoding such as Compressed Sparse Row (CSR) or coordinate list (COO). Because these formats must store positional metadata—such as column indices and row pointers—alongside the nonzero values, metadata overhead offsets savings at low sparsity. For example, storing a 16-bit floating-point weight with a 16-bit column index doubles the per-element byte footprint, requiring over 50 percent sparsity just to break even on artifact size ($D_{\text{vol}}$). Storing a dense tensor with zeroed entries saves zero memory.
+
+::: {.column-margin .margin-pointer}
+↪ The memory footprint and index-pointer layouts for compressed sparse row (CSR) representations are developed in @sec-appdx-algorithm-foundations-sparse-matrix-formats-0bd0.
+:::
 
 Nor does unstructured sparsity translate directly to inference acceleration on modern hardware. Commodity accelerators achieve peak throughput ($R_{\text{peak}}$) through dense systolic arrays and wide SIMD execution units that rely on *memory coalescing*. Hardware memory controllers never fetch individual scalars from off-chip DRAM; they retrieve data in contiguous physical segments called *cache lines* (typically 64 or 128 bytes at a time). When parallel execution threads access contiguous, aligned memory addresses, a single DRAM transaction satisfies all threads simultaneously. Arbitrary zero distributions from unstructured pruning break this alignment: remaining nonzeros are scattered unpredictably across memory, forcing Sparse Matrix-Dense Matrix Multiplication (SpMM) kernels to perform indirect memory addressing and pointer chasing. The memory controller is forced to issue multiple separate DRAM bursts that transfer mostly discarded bytes—wasting bus bandwidth and causing thread divergence. Unless the network achieves extreme sparsity (often exceeding 80 to 90 percent) and executes on specialized sparse kernels, unstructured pruning yields a model that is smaller on disk but slower in runtime execution.
 
@@ -1857,6 +1865,10 @@ While the Lottery Ticket Hypothesis illuminates the optimization landscape, prac
 
 This artifact boundary separates the pruning strategies. Unstructured pruning removes individual weights and needs sparse kernels plus an appropriate storage format to translate zeros into speed. Structured pruning removes whole channels, heads, neurons, or blocks, which can reshape tensors into smaller dense operations that ordinary accelerators already execute well. Gradual pruning during fine-tuning adds a training schedule: sparsity increases over time so the remaining weights can recover accuracy as capacity is removed. The systems audit is therefore concrete: identify what is pruned, identify the runtime format, and verify that the target hardware has kernels that make the sparsity useful.
 
+::: {.column-margin .margin-pointer}
+↪ Standardized evaluation protocols for verifying whether structured and unstructured pruning yield wall-clock speedups on target hardware are operationalized in @sec-benchmarking-compression-validation-efficiencyquality-frontier-e9c4.
+:::
+
 These trade-offs become concrete when examining real-world deployments. Some model families reduce deployment cost through architecture rather than post-hoc pruning: MobileNet uses depthwise separable convolutions for mobile and embedded vision [@howard2017mobilenets], while EfficientNet uses compound scaling to improve the accuracy-efficiency trade-off under resource constraints [@tan2019efficientnet]. Pruning remains a separate optimization lever. BERT-style transformers[^fn-bert-pruning-scale] have been pruned by removing redundant attention heads or intermediate dimensions, while separate distillation methods such as DistilBERT and TinyBERT train smaller dense student models that retain much of BERT's performance [@sanh2019distilbert; @jiao2020].
 
 [^fn-bert-pruning-scale]: **BERT pruning**\index{BERT!compression techniques}: BERT's 12 attention heads per layer can contain substantial redundancy—@michel2019are found on MultiNLI that many heads could be removed without a statistically significant performance change. The removable fraction depends on the layer and task, so deployment pruning must measure both task quality and whether the resulting structure reduces runtime work.
@@ -2170,6 +2182,10 @@ This bandwidth-compute trade-off exemplifies the memory wall at the operator lev
 :::
 
 LRMF applies directly to fully connected projection layers and to flattened convolutional weight tensors. Evaluating the factored layer replaces a single dense matrix-vector product with two chained multiplications, dropping parameter storage and arithmetic operations from $\mathcal{O}(mn)$ to $\mathcal{O}(k(m+n))$. On modern accelerators, however, this split introduces concrete systems trade-offs: the intermediate activation vector $\mathbf{z} = \mathbf{V}^T \mathbf{x}$ must be staged in on-chip SRAM or round-tripped through memory, and dispatching two separate kernels incurs launch latency unless the operations are fused. Furthermore, if the approximation rank $k$ is small or unaligned with hardware tile dimensions (such as $16{\times}16$ systolic arrays), the hardware compute units operate well below peak throughput. Selecting rank $k$ therefore balances memory footprint and bandwidth reduction against approximation error, kernel dispatch overhead, and hardware tile utilization.
+
+::: {.column-margin .margin-pointer}
+↪ The hardware tiling dimensions and fringe-tax penalties that govern unaligned matrix factors on systolic silicon are analyzed in @sec-hardware-acceleration-tiling-principle.
+:::
 
 #### Tensor decomposition {#sec-model-compression-tensor-decomposition-5e9e}
 
@@ -4665,6 +4681,10 @@ Channelwise quantization preserves accuracy over layerwise quantization when cha
 
 Executing low-precision inference requires transforming floating-point inputs before kernel execution and requantizing intermediate accumulator outputs. During integer matrix multiplication, multiplying two 8-bit integers produces a 16-bit product. Summing these products across an inner dimension of length $K$ causes bit-growth that quickly overflows 8-bit registers; hardware therefore accumulates into 32-bit integer registers (`INT32`). Before feeding the result into subsequent layers, requantization rescales the 32-bit accumulated sum by the layer's effective scale factor ($s_{\text{eff}} = \frac{s_W \cdot s_X}{s_Y}$) and clamps the values back into the 8-bit integer range. @Fig-weight-activations-quantization diagrams this pipeline across four stages: violet quantizers convert floating-point activations and weights into INT8 operands, a blue core executes integer matrix multiplication, a red stage buffers the 32-bit accumulated sum, and a green stage requantizes the result back to INT8 before non-linear activation.
 
+::: {.column-margin .margin-pointer}
+↪ The datapath architectures and accumulator register conventions that execute low-precision matrix inputs into higher-precision accumulators are developed in @sec-hardware-acceleration-tensor-cores-771f.
+:::
+
 ::: {#fig-weight-activations-quantization fig-env="figure" fig-pos="htb" fig-cap="**Quantized Matrix Multiplication Pipeline**: Color-coded computation stage. Floating-point weights and activation inputs are quantized to INT8 (violet), fed into integer SIMD/Tensor Core matrix multiplication (blue), accumulated in 32-bit registers (red), and requantized back to INT8 (green) before non-linear activation. From the HarvardX TinyML course." fig-alt="Matrix multiplication diagram. Violet boxes quantize floating-point inputs to INT8 before matrix multiplication, a blue block performs the multiplication, a red box shows the INT32 intermediate output, a green block requantizes before activation, and a green box shows the final INT8 output."}
 
 ```{.tikz}
@@ -5345,6 +5365,10 @@ Because input data exhibit non-uniform semantic complexity, allocating an invari
 To control execution depth, **early exit**\index{Adaptive computation!early exit} architectures attach auxiliary classification heads to intermediate layers, terminating execution when intermediate representations yield sufficient prediction confidence [@teerapittayanon2016]. BranchyNet implements this mechanism across convolutional backbones using shallow exit branches, whereas multi-exit vision transformers attach linear probes and entropy estimators between transformer blocks [@xin2021]. When an input satisfies an exit criterion—such as softmax prediction entropy dropping below a pre-tuned threshold—the runtime halts evaluation and returns the intermediate prediction. The net operational benefit requires that the arithmetic operations and memory transfers avoided in subsequent layers exceed the computational overhead of evaluating the intermediate classifiers and gating thresholds.
 
 The systems trade-off diverges sharply across hardware deployment targets. On single-sample edge processors (batch size $B=1$, typical of microcontrollers and mobile NPUs), early exit immediately terminates the execution thread [@hu2020triple]. Skipping remaining layers eliminates both the arithmetic operations and the off-chip DRAM transactions required to load subsequent layer weights into on-chip SRAM cache. Conversely, on parallel throughput accelerators (GPUs and TPUs) processing batched workloads ($B > 1$), early exit introduces severe batch fragmentation [@chen2024eellm]. If only a subset of samples in a batch reaches the exit threshold, the remaining samples must still traverse deeper layers. Unless the runtime executes dynamic batch compaction—gathering unresolved activation tensors into a contiguous memory buffer via memory copies and kernel synchronizations—inactive samples remain allocated in memory, or the accelerator must mask inactive SIMD or single instruction, multiple threads (SIMT) lanes. Consequently, tail latency for the batch remains dictated by the deepest traversing sample. @Fig-early-exit-transformers traces this branching topology along the backbone: each transformer block taps intermediate representations into an auxiliary classifier and confidence estimator (LTE) to trigger an early exit, while unresolved tokens traverse horizontal connections to deeper layers.
+
+::: {.column-margin .margin-pointer}
+↪ The batching dynamics and tail-latency trade-offs that govern variable-depth execution under production request streams are developed in @sec-model-serving-dynamic-batching-latencythroughput-tradeoffs-986d.
+:::
 
 ::: {#fig-early-exit-transformers fig-env="figure" fig-pos="htb" fig-cap="**Early Exit Architecture**: Transformer layers dynamically adjust computation by classifying each layer's output and enabling early termination if sufficient confidence is reached, reducing average latency and power when many inputs can exit before the final layer. Source: [@xin2021]." fig-alt="Flowchart with input feeding transformer layers 1 through N sub L in sequence. Each layer connects to a classifier, confidence estimator, and exit point. Arrows show continue paths for low confidence."}
 

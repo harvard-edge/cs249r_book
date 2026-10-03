@@ -187,6 +187,10 @@ Not all bits deliver equal utility per unit of movement cost. While physical sto
 $$ \text{Data Selection Gain} \propto \frac{\text{Task-Relevant Signal}}{\text{Data Gravity}} $$ {#eq-data-selection-gain}
 This relationship favors datasets whose marginal learning value justifies their transfer overhead. Deduplication and active learning (which asks the current model to choose the examples it is least certain about for labeling, @sec-data-engineering-scaling-aiassisted-labeling-9360) directly optimize this ratio by eliminating redundant byte volume and prioritizing high-signal training examples.
 
+::: {.column-margin .margin-pointer}
+↪ Algorithmic methods that evaluate sample learning value against compute cost to select high-signal training subsets are developed in @sec-data-selection-data-selection-fundamentals-e839.
+:::
+
 ```{python}
 #| echo: false
 #| label: feeding-tax-calc
@@ -383,6 +387,10 @@ Machine learning systems face a distinctive failure pattern called data cascades
 [^fn-data-cascades-silent]: **Data cascades**\index{Data cascade!silent failure}: The failure is "silent" because it degrades model *inputs*, not model *code*—corrupted data can pass unit tests and appear healthy in ordinary system monitoring. @sambasivan2021 describe cascades as often invisible and delayed: flawed data practices may surface only after downstream evaluation, deployment, or user-facing failures reveal that the model learned from the wrong signal. Remediation then requires tracing the issue back through data collection, labeling, feature engineering, and evaluation decisions, with some teams restarting or abandoning affected work.
 
 Data errors rarely stay confined to their point of origin; they compound across pipeline stages. In the lifecycle progression sequenced in @fig-cascades, early defects in problem framing and collection bypass intermediate validation, casting failure arcs directly into model evaluation and deployment that force teams into costly pipeline restarts.
+
+::: {.column-margin .margin-pointer}
+↩ The compounding cost of late-stage data rework builds directly on the constraint propagation principle established in @sec-ml-workflow-decisions-cascade-system-98f4.
+:::
 
 ::: {#fig-cascades fig-env="figure" fig-pos="htb" fig-cap="**Data Quality Cascades**: Upstream defects along the seven-stage workflow timeline cast failure arcs directly into late-stage evaluation and deployment. Early flaws in problem framing and collection compound through downstream processing, forcing costly project restarts (dashed red return paths) when defects finally surface in production. Source: [@sambasivan2021]." fig-alt="Timeline with seven stages from problem statement to deployment. Colored arcs originate at several workflow stages and end at evaluation or deployment; arrow markers indicate downstream cascade impacts and process abandonment or restart."}
 
@@ -2541,6 +2549,10 @@ plt.close()
 
 Relieving the choke point takes three mechanisms: multi-process worker pools that scale decode across host cores, asynchronous pinned-memory prefetching that overlaps the host-to-accelerator copy with compute, and hardware decode engines that move JPEG decompression off the host CPU entirely. The last of these removes the CPU bound and hands the constraint back to storage, which is the budget @sec-data-engineering-ml-storage-requirements-performance-1b0d prices.
 
+::: {.column-margin .margin-pointer}
+↪ How asynchronous prefetching and overlapping pipeline stages hide host preparation latency behind accelerator compute is quantified in @sec-model-training-data-prefetching-pipeline-overlapping-e984.
+:::
+
 #### Batch vs. streaming ingestion patterns {#sec-data-engineering-batch-vs-streaming-ingestion-patterns-e1b2}
 
 The choice between batch and streaming is not a preference for one architecture over another; it is a judgment about how quickly data loses value and how much infrastructure cost that freshness justifies. Batch systems buy efficiency by tolerating staleness, while streaming systems buy freshness by accepting continuous operational complexity.
@@ -3059,6 +3071,10 @@ To address these subtle degradation patterns, production quality monitoring requ
 [^fn-data-drift-degradation]: **Statistical drift detection**\index{Data drift!degradation equation}: The means, variances, and quantiles tracked in quality monitoring are early-warning signals for the degradation equation's divergence term $\mathcal{D}(P_t \lVert P_0)$. A mean session length shifting from eight to 12 minutes over six months may indicate drift; a sudden drop to three minutes may indicate a collection fault. Outcome checks and source investigation are needed before choosing retraining or a source-system fix.
 
 Quality validation must enforce identical schemas and validation predicates across training and serving pipelines. While training environments can afford compute-intensive profiling passes over entire datasets, serving paths must execute lightweight assertion checks (such as type validation, range bounding, and required-field existence) within the request's latency budget. Mismatches between training-time validation and serving-time assertions allow corrupted inputs to reach the model undetected.
+
+::: {.column-margin .margin-pointer}
+↪ Predeployment feature parity tests and runtime assertions that prevent silent training-serving skew are operationalized in @sec-ml-operations-principle-3-consistency-imperative-a292.
+:::
 
 Transformation techniques\index{Data!transformation, techniques} convert data from its raw form into a model-ready representation, but the systems risk lies in the parameters those transformations learn. Common transformation tasks include normalization\index{Normalization!feature scaling} and standardization\index{Standardization!feature scaling}, which scale numerical features to a common range or distribution. For example, square footage and room count may differ greatly in scale; normalization places them on comparable numerical ranges, though their influence still depends on the model and learned parameters [@bishop2006pattern]. Maintaining training-serving consistency requires that normalization parameters\index{Normalization!parameter persistence} computed on training data be stored and applied identically during serving. Operationally, these parameters must be persisted alongside the model itself and loaded during serving initialization.
 
@@ -4060,6 +4076,10 @@ Once $R_{\text{data}}$ is the smaller rate, additional accelerator compute canno
 When storage bandwidth becomes the limiting factor, teams must either improve storage performance through faster media, parallelization, or caching, or reduce the amount of data that must move. Large language model training may require processing hundreds of gigabytes of text per hour, while computer vision models processing high-resolution imagery can demand sustained data rates exceeding 50 gigabytes per second across distributed clusters. These requirements make data loading a systems-placement decision: framework data loaders parallelize I/O across asynchronous worker processes, using **double-buffering prefetch queues**\index{Prefetching!double-buffering} to overlap the $D_{\text{vol}}/\text{BW}_{\text{storage}}$ data fetch phase of batch $k+1$ in host RAM while the accelerator computes the $O/(R_{\text{peak}} \cdot \eta_{\text{hw}})$ pass of batch $k$ on GPU memory, so the accelerator never stalls waiting for data. Framework loaders can also move expensive augmentation work closer to the accelerator rather than storing every augmented variant.
 
 File format selection directly scales the data term $\left(\frac{D_{\text{vol}}}{\text{BW}}\right)$ of the iron law. Columnar formats like Parquet\index{Parquet!columnar format} excel for tabular features by allowing column projection and pushdown filtering, whereas shard-based sequential formats like WebDataset\index{WebDataset!sequential sharding} or **TFRecord**\index{TFRecord!definition} pack millions of small binary objects (such as images or audio) into contiguous sequential streams. This sharding eliminates random disk seek overhead ($L_{\text{lat}}$), transforming slow random I/O into sustained sequential storage throughput ($\text{BW}_{\text{storage}}$). Quantifying this impact as *format efficiency* $(\eta_{\text{format}})$ provides a multiplier on effective bandwidth. While Parquet optimizes columnar layout on disk, in-memory representations face an analogous serialization bottleneck when passing data between ingestion engines, dataframes, and ML frameworks. The Apache Arrow\index{Apache Arrow!in-memory columnar format} standard solves this in-memory boundary by defining a language-independent columnar memory layout, enabling zero-copy data sharing across pipeline processes without expensive serialization and deserialization cycles.
+
+::: {.column-margin .margin-pointer}
+↪ Comparative CPU decoding throughput and deserialization overhead across storage formats are measured in @sec-appdx-data-foundations-cost-serialization-b921.
+:::
 
 ```{python}
 #| echo: false
