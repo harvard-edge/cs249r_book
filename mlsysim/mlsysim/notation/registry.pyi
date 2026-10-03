@@ -319,7 +319,6 @@ class NotationRegistry:
     Parameters: NotationSymbol  # Parameters ($P$) [Power ($P_{\text{elec}}, P_{\text{cont}}$), Riccati error covariance $\mathbf{P}(t)$, failure rate $p_{\text{fail}}$, or 3D point $\mathbf{p}$]
     PassAt: NotationSymbol  # Pass at $k$ ($**pass@k**$) [Probability]
     PassToThe: NotationSymbol  # Pass to the $k$ ($**pass^k**$) [Probability]
-    PeakArithmeticRate: NotationSymbol  # Peak arithmetic rate ($\pi$)
     PeakCurrent: NotationSymbol  # Peak Motor Current ($I_{\text{peak}}$) [A]
     PeakInternodePhaseJitter: NotationSymbol  # Peak Inter-Node Phase Jitter ($\Delta t_{\text{peak}}$) [$\mu\text{s}$]
     PeakRate: NotationSymbol  # Peak Rate ($R_{\text{peak}}$) [FLOP/s]

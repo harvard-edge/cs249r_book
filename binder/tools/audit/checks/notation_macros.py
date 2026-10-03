@@ -38,8 +38,8 @@ if Notation:
     for var in Notation.list():
         latex = var.latex.strip()
         macro = var.macro.strip()
-        # Target complex expressions (subscripts, text macros, Greek) to prevent false positives on single letters
-        if "\\text{" in latex or "_" in latex or len(latex) > 2 or "\\" in latex:
+        # Target composite expressions (subscripts, text macros, bold vectors) to prevent false positives on single letters/Greek
+        if "_" in latex or "\\text{" in latex or "\\mathbf{" in latex or "^" in latex:
             _BANNED_RAW[latex] = macro
 
 

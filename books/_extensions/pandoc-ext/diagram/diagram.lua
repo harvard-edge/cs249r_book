@@ -410,18 +410,25 @@ end
 
 --- Converts a PDF to SVG.
 local pdf2svg = function (imgdata)
-  -- Using `os.tmpname()` instead of a hash would be slightly cleaner, but the
-  -- function causes problems on Windows (and wasm). See, e.g.,
-  -- https://github.com/pandoc-ext/diagram/issues/49
-  local pdf_file = 'diagram-' .. pandoc.utils.sha1(imgdata) .. '.pdf'
+  local hash = pandoc.utils.sha1(imgdata)
+  local pdf_file = 'diagram-' .. hash .. '.pdf'
+  local svg_file = 'diagram-' .. hash .. '.svg'
   write_file(pdf_file, imgdata)
-  local args = {
-    '--export-type=svg',
-    '--export-plain-svg',
-    '--export-filename=-',
-    pdf_file
-  }
-  return pandoc.pipe('inkscape', args, ''), os.remove(pdf_file)
+  local success = os.execute('pdftocairo -svg ' .. pdf_file .. ' ' .. svg_file .. ' > /dev/null 2>&1')
+  if not success then
+    local args = {
+      '--batch-process',
+      '--export-type=svg',
+      '--export-plain-svg',
+      '--export-filename=' .. svg_file,
+      pdf_file
+    }
+    pandoc.pipe('inkscape', args, '')
+  end
+  local svgdata = read_file(svg_file)
+  os.remove(pdf_file)
+  os.remove(svg_file)
+  return svgdata
 end
 
 local function properties_from_code (code, comment_start)

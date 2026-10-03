@@ -21,9 +21,9 @@ class NotationSymbol(BaseModel):
 
     macro: str
     latex: str
-    definition: str
-    unit: str = ""
-    notes: str = ""
+    definition: MarkdownStr
+    unit: MarkdownStr = MarkdownStr("")
+    notes: MarkdownStr = MarkdownStr("")
     category: str
     volume: str = "core"
 
