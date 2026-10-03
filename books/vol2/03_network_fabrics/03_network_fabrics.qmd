@@ -264,7 +264,9 @@ class BandwidthHierarchyData:
     check(round(hbm_growth) == 9, "Caption says HBM grew about 9x")
 
     # ┌── 4. OUTPUT ────────────────────────────────────────────────────────
-    cliff_labels = [f"{round(c)}×" for c in cliff]
+    _cliff_labels = [f"{round(c)}×" for c in cliff]
+
+BandwidthHierarchyData.cliff_labels = BandwidthHierarchyData._cliff_labels
 ```
 
 ::: {#fig-bandwidth-hierarchy fig-env="figure" fig-pos="htb" fig-cap="**The bandwidth hierarchy**: Bandwidth at four levels of the communication hierarchy across four GPU generations, on a logarithmic scale. While HBM and NVLink bandwidth have grown roughly 9$\times$ and 6$\times$ respectively from V100 to B200, InfiniBand has grown only 4$\times$. All link rates are per direction. The annotations show the ratio of a GPU's NVLink bandwidth to one InfiniBand port (about 9$\times$ for the H100 with NDR), quantifying the cliff that distributed training must cross at every synchronization point." fig-alt="Grouped bar chart with log-scale y-axis showing per-direction bandwidth in GB per second for HBM, NVLink, one InfiniBand port, and PCIe across four GPU generations from V100 to B200. Red arrows between the NVLink and InfiniBand bars mark cliffs of 12, 12, 9, and 18 times."}
@@ -2259,6 +2261,7 @@ The final level of the stack is cluster design\index{Cluster design!gradient bus
 
 ```{python}
 #| echo: false
+#| label: calc-vol2-network-fabrics-cluster-recap
 # ┌── LEGO ───────────────────────────────────────────────
 # │ Context: Gradient bus — NVLink/IB cliff and SuperPOD specs.
 class NetworkFabricsClusterRecap:
@@ -2270,18 +2273,33 @@ class NetworkFabricsClusterRecap:
     nvlink_to_ib_ratio_mult_str = fmt_multiple(round((nvlink_perdir / ib_ndr).to_base_units().magnitude), precision=0, commas=False)
     nvlink_h100_gb_per_s_str = fmt_bandwidth(nvlink, unit=GB / second, precision=0, commas=False)
     ib_ndr_gbit_per_s_str = fmt_bandwidth(Systems.Fabrics.InfiniBand_NDR.bandwidth, unit=Gbps, precision=0, commas=False)
+```
 
+```{python}
+#| echo: false
+#| label: calc-vol2-overlap-example
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ COMMUNICATION-COMPUTATION OVERLAP EXAMPLE
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: §The GPU-to-GPU gradient bus
+# │ Goal: Demonstrate ideal AllReduce latency hiding behind backward-pass compute.
+# │ Show: Backward time, AllReduce time, exposed overhead math.
+# │ How: max(0, allreduce - backward) with check() invariant.
+# └─────────────────────────────────────────────────────────────────────────────
 class OverlapExample:
     # ┌── 1. LOAD ──────────────────────────────────────────────────────────
     backward = 500 * millisecond  # scenario assumption: backward-pass compute per step
     allreduce = 300 * millisecond  # scenario assumption: gradient AllReduce per step
+
     # ┌── 2. EXECUTE ───────────────────────────────────────────────────────
     exposed = max(0 * millisecond, allreduce - backward)
-    # ┌── 3. GUARD ─────────────────────────────────────────────────────────
-    check(exposed.magnitude == 0, "Ideal overlap should hide the whole AllReduce in this scenario")
-    # ┌── 4. OUTPUT ────────────────────────────────────────────────────────
     _b = int(backward.to(millisecond).magnitude)
     _a = int(allreduce.to(millisecond).magnitude)
+
+    # ┌── 3. GUARD ─────────────────────────────────────────────────────────
+    check(exposed.magnitude == 0, "Ideal overlap should hide the whole AllReduce in this scenario")
+
+    # ┌── 4. OUTPUT ────────────────────────────────────────────────────────
     backward_ms_str = MarkdownStr(f"{_b} ms")
     allreduce_ms_str = MarkdownStr(f"{_a} ms")
     exposed_math = fmt_math(f"\\max(0, {_a} - {_b}) = {int(exposed.to(millisecond).magnitude)}")

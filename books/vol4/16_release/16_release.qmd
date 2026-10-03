@@ -190,71 +190,70 @@ from mlsysim.core.units import *
 from mlsysim.fmt import fmt, fmt_velocity, fmt_length, fmt_mass, fmt_force, fmt_latency, fmt_acceleration, check
 from mlsysim.physics.robotics import calc_c2_stop_suffix, calc_scurve_max_permitted_velocity
 
-# ┌── 1. LOAD: the running machine and its site ─────────────────────────────────
-RM = Embodied.MobileManipulator.WarehouseMobileManipulator  # category: illustrative (running machine)
-AISLE = Embodied.Scenario.WarehouseAisle  # category: illustrative (aisle scene; speeds, lease, and tick chosen)
-g_std = (1 * ureg.standard_gravity).to(meter / second**2)  # category: datasheet (standard gravity, a defined physical constant; Pint)
-v_restricted = 1.0 * meter / second  # category: chosen (scenario assumption: restricted mode on inspected floors, the value @sec-frontier uses)
-
-# ┌── 2. EXECUTE: ceilings and friction bands ───────────────────────────────────
-# Jerk bound: the reference C2 polynomial's peak jerk at the drive limit (@sec-planning-c2-stopping-suffix)
-j_brake = calc_c2_stop_suffix(RM.base.max_velocity, AISLE.a_brake)["peak_jerk"].to(meter / second**3)
-overhead_loc = AISLE.delta_loc + AISLE.eps_track
-v_ceiling = calc_scurve_max_permitted_velocity(AISLE.d_clear, AISLE.tau_delay, AISLE.a_brake, j_brake, overhead_loc, AISLE.delta_margin).to(
-    meter / second
-)
-mu_min = (AISLE.a_brake / g_std).to("dimensionless").magnitude
-# The floor caps the deceleration; the jerk bound belongs to the load and is unchanged.
-a_inspected = min(AISLE.a_brake, (AISLE.mu_inspected_floor * g_std).to(meter / second**2))
-v_inspected_ceiling = calc_scurve_max_permitted_velocity(AISLE.d_clear, AISLE.tau_delay, a_inspected, j_brake, overhead_loc, AISLE.delta_margin).to(
-    meter / second
-)
-# Handover ceilings are enforcement premises (calc-release-contact-premises).
-v_handover_ceiling = EnforcementContactForce.v_ceiling
-v_handover_ceiling_clamped = EnforcementContactForce.v_ceiling_clamped
-
-# ┌── 3. GUARD: canon values quoted in the prose and the table ──────────────────
-check(abs(v_ceiling.magnitude - 1.4367) < 5e-5, "Unconditional aisle speed ceiling is 1.44 m/s")
-check(AISLE.v_aisle < v_ceiling, "Chosen aisle speed sits under its ceiling")
-check(abs(mu_min - 0.204) < 5e-4, "Friction floor is 0.204")
-check(mu_min < AISLE.mu_dry, "Dry concrete exceeds the friction floor")
-check(mu_min > AISLE.mu_inspected_floor, "Inspected floor requires speed restriction")
-check(abs(v_inspected_ceiling.magnitude - 1.2309) < 5e-5, "Restricted ceiling on inspected floors is 1.23 m/s")
-check(abs(a_inspected.to(meter / second**2).magnitude - 1.1768) < 5e-5, "Inspected-floor deceleration mu*g is 1.18 m/s^2")
-check(a_inspected < AISLE.a_brake, "The inspected floor, not the brake, caps the deceleration")
-check(v_restricted < v_inspected_ceiling, "Chosen restricted mode sits under its ceiling")
-check(abs(v_handover_ceiling.magnitude - 0.2415) < 5e-5, "Transient (free-hand) handover ceiling is 0.24 m/s")
-check(AISLE.v_handover < v_handover_ceiling, "Chosen handover speed sits under its transient ceiling")
-check(abs(v_handover_ceiling_clamped.magnitude - 0.0527) < 5e-5, "Clamped-hand handover ceiling is 0.053 m/s")
-check(AISLE.v_handover > v_handover_ceiling_clamped, "Chosen handover speed exceeds the clamped ceiling, so clamping must be excluded")
-check(abs(RM.loaded_mass.to(kilogram).magnitude - 368.0) < 1e-9, "Running-machine loaded mass is 368 kg")
-check(AISLE.v_takeover_in_loop < AISLE.v_aisle, "Slow-down before an in-loop takeover")
-check(AISLE.mu_oil_film < AISLE.mu_inspected_floor < mu_min < AISLE.mu_dry, "Friction bands are ordered")
-check(abs(AISLE.v_aisle.to(meter / second).magnitude - 1.3) < 1e-9, "Signed aisle speed 1.3 m/s")
-check(abs(AISLE.d_clear.to(meter).magnitude - 1.10) < 1e-9, "Clear distance 1.10 m")
-check(
-    abs(AISLE.v_takeover_in_loop.to(meter / second).magnitude - 0.75) < 1e-9,
-    "In-loop takeover slow-down 0.75 m/s (Delta_da-charged ceiling, rounded down)",
-)
-check(abs(AISLE.v_takeover_out_of_loop.to(meter / second).magnitude - 0.15) < 1e-9, "Out-of-loop takeover slow-down 0.15 m/s")
-check(abs(AISLE.t_tick.to(millisecond).magnitude - 1.0) < 1e-9, "Permission tick 1 ms")
-check(AISLE.t_tick < AISLE.t_lease, "Servo tick sits inside the chunk lease")
-check(abs(RM.onboard_payload_capacity.to(kilogram).magnitude - 50.0) < 1e-9, "Tote-rack capacity is 50 kg")
-check(
-    abs(AISLE.mu_dry - 0.60) < 1e-9 and abs(AISLE.mu_inspected_floor - 0.12) < 1e-9 and abs(AISLE.mu_oil_film - 0.05) < 1e-9,
-    "Friction bands 0.60, 0.12, 0.05",
-)
-check(abs(AISLE.v_latch_approach.to(meter / second).magnitude - 0.03) < 1e-9, "Guarded latch approach 0.03 m/s")
-check(abs(AISLE.v_latch_high.to(meter / second).magnitude - 0.10) < 1e-9, "Unsupported latch approach 0.10 m/s")
-check(abs(AISLE.f_latch_tripwire.to(newton).magnitude - 15.0) < 1e-9, "Latch tripwire 15 N")
-check(abs(AISLE.t_contact_response.to(millisecond).magnitude - 2.0) < 1e-9, "Contact-loop response 2 ms")
-check(abs(AISLE.f_latch_limit.to(newton).magnitude - 100.0) < 1e-9, "Latch limit 100 N")
-check(abs(AISLE.v_handover.to(meter / second).magnitude - 0.10) < 1e-9, "Handover speed 0.10 m/s")
-check(abs(AISLE.f_contact_criterion.to(newton).magnitude - 50.0) < 1e-9, "Handover criterion 50 N")
-
-# ┌── 4. OUTPUT: rendered values ────────────────────────────────────────────────
 class ReleaseEnvelope:
-    v_restricted = v_restricted  # chosen; read by calc-release-worked-verdict
+    # ┌── 1. LOAD: the running machine and its site ─────────────────────────────────
+    RM = Embodied.MobileManipulator.WarehouseMobileManipulator  # category: illustrative (running machine)
+    AISLE = Embodied.Scenario.WarehouseAisle  # category: illustrative (aisle scene; speeds, lease, and tick chosen)
+    g_std = (1 * ureg.standard_gravity).to(meter / second**2)  # category: datasheet (standard gravity, a defined physical constant; Pint)
+    v_restricted = 1.0 * meter / second  # category: chosen (scenario assumption: restricted mode on inspected floors, the value @sec-frontier uses)
+
+    # ┌── 2. EXECUTE: ceilings and friction bands ───────────────────────────────────
+    # Jerk bound: the reference C2 polynomial's peak jerk at the drive limit (@sec-planning-c2-stopping-suffix)
+    j_brake = calc_c2_stop_suffix(RM.base.max_velocity, AISLE.a_brake)["peak_jerk"].to(meter / second**3)
+    overhead_loc = AISLE.delta_loc + AISLE.eps_track
+    v_ceiling = calc_scurve_max_permitted_velocity(AISLE.d_clear, AISLE.tau_delay, AISLE.a_brake, j_brake, overhead_loc, AISLE.delta_margin).to(
+        meter / second
+    )
+    mu_min = (AISLE.a_brake / g_std).to("dimensionless").magnitude
+    # The floor caps the deceleration; the jerk bound belongs to the load and is unchanged.
+    a_inspected = min(AISLE.a_brake, (AISLE.mu_inspected_floor * g_std).to(meter / second**2))
+    v_inspected_ceiling = calc_scurve_max_permitted_velocity(AISLE.d_clear, AISLE.tau_delay, a_inspected, j_brake, overhead_loc, AISLE.delta_margin).to(
+        meter / second
+    )
+    # Handover ceilings are enforcement premises (calc-release-contact-premises).
+    v_handover_ceiling = EnforcementContactForce.v_ceiling
+    v_handover_ceiling_clamped = EnforcementContactForce.v_ceiling_clamped
+
+    # ┌── 3. GUARD: canon values quoted in the prose and the table ──────────────────
+    check(abs(v_ceiling.magnitude - 1.4367) < 5e-5, "Unconditional aisle speed ceiling is 1.44 m/s")
+    check(AISLE.v_aisle < v_ceiling, "Chosen aisle speed sits under its ceiling")
+    check(abs(mu_min - 0.204) < 5e-4, "Friction floor is 0.204")
+    check(mu_min < AISLE.mu_dry, "Dry concrete exceeds the friction floor")
+    check(mu_min > AISLE.mu_inspected_floor, "Inspected floor requires speed restriction")
+    check(abs(v_inspected_ceiling.magnitude - 1.2309) < 5e-5, "Restricted ceiling on inspected floors is 1.23 m/s")
+    check(abs(a_inspected.to(meter / second**2).magnitude - 1.1768) < 5e-5, "Inspected-floor deceleration mu*g is 1.18 m/s^2")
+    check(a_inspected < AISLE.a_brake, "The inspected floor, not the brake, caps the deceleration")
+    check(v_restricted < v_inspected_ceiling, "Chosen restricted mode sits under its ceiling")
+    check(abs(v_handover_ceiling.magnitude - 0.2415) < 5e-5, "Transient (free-hand) handover ceiling is 0.24 m/s")
+    check(AISLE.v_handover < v_handover_ceiling, "Chosen handover speed sits under its transient ceiling")
+    check(abs(v_handover_ceiling_clamped.magnitude - 0.0527) < 5e-5, "Clamped-hand handover ceiling is 0.053 m/s")
+    check(AISLE.v_handover > v_handover_ceiling_clamped, "Chosen handover speed exceeds the clamped ceiling, so clamping must be excluded")
+    check(abs(RM.loaded_mass.to(kilogram).magnitude - 368.0) < 1e-9, "Running-machine loaded mass is 368 kg")
+    check(AISLE.v_takeover_in_loop < AISLE.v_aisle, "Slow-down before an in-loop takeover")
+    check(AISLE.mu_oil_film < AISLE.mu_inspected_floor < mu_min < AISLE.mu_dry, "Friction bands are ordered")
+    check(abs(AISLE.v_aisle.to(meter / second).magnitude - 1.3) < 1e-9, "Signed aisle speed 1.3 m/s")
+    check(abs(AISLE.d_clear.to(meter).magnitude - 1.10) < 1e-9, "Clear distance 1.10 m")
+    check(
+        abs(AISLE.v_takeover_in_loop.to(meter / second).magnitude - 0.75) < 1e-9,
+        "In-loop takeover slow-down 0.75 m/s (Delta_da-charged ceiling, rounded down)",
+    )
+    check(abs(AISLE.v_takeover_out_of_loop.to(meter / second).magnitude - 0.15) < 1e-9, "Out-of-loop takeover slow-down 0.15 m/s")
+    check(abs(AISLE.t_tick.to(millisecond).magnitude - 1.0) < 1e-9, "Permission tick 1 ms")
+    check(AISLE.t_tick < AISLE.t_lease, "Servo tick sits inside the chunk lease")
+    check(abs(RM.onboard_payload_capacity.to(kilogram).magnitude - 50.0) < 1e-9, "Tote-rack capacity is 50 kg")
+    check(
+        abs(AISLE.mu_dry - 0.60) < 1e-9 and abs(AISLE.mu_inspected_floor - 0.12) < 1e-9 and abs(AISLE.mu_oil_film - 0.05) < 1e-9,
+        "Friction bands 0.60, 0.12, 0.05",
+    )
+    check(abs(AISLE.v_latch_approach.to(meter / second).magnitude - 0.03) < 1e-9, "Guarded latch approach 0.03 m/s")
+    check(abs(AISLE.v_latch_high.to(meter / second).magnitude - 0.10) < 1e-9, "Unsupported latch approach 0.10 m/s")
+    check(abs(AISLE.f_latch_tripwire.to(newton).magnitude - 15.0) < 1e-9, "Latch tripwire 15 N")
+    check(abs(AISLE.t_contact_response.to(millisecond).magnitude - 2.0) < 1e-9, "Contact-loop response 2 ms")
+    check(abs(AISLE.f_latch_limit.to(newton).magnitude - 100.0) < 1e-9, "Latch limit 100 N")
+    check(abs(AISLE.v_handover.to(meter / second).magnitude - 0.10) < 1e-9, "Handover speed 0.10 m/s")
+    check(abs(AISLE.f_contact_criterion.to(newton).magnitude - 50.0) < 1e-9, "Handover criterion 50 N")
+
+    # ┌── 4. OUTPUT: rendered values ────────────────────────────────────────────────
     v_aisle_str = fmt_velocity(AISLE.v_aisle, unit=meter / second, precision=1)
     v_ceiling_str = fmt_velocity(round(v_ceiling.magnitude, 2) * meter / second, unit=meter / second, precision=2)
     v_takeover_in_str = fmt_velocity(AISLE.v_takeover_in_loop, unit=meter / second, precision=2)
@@ -281,6 +280,18 @@ class ReleaseEnvelope:
     v_handover_ceiling_str = fmt_velocity(round(v_handover_ceiling.magnitude, 2) * meter / second, unit=meter / second, precision=2)
     v_handover_ceiling_clamped_str = fmt_velocity(round(v_handover_ceiling_clamped.magnitude, 3) * meter / second, unit=meter / second, precision=3)
     f_contact_str = fmt_force(AISLE.f_contact_criterion, precision=0)
+
+# Module-level exports for downstream cells
+v_restricted = ReleaseEnvelope.v_restricted
+overhead_loc = ReleaseEnvelope.overhead_loc
+v_handover_ceiling_clamped = ReleaseEnvelope.v_handover_ceiling_clamped
+mu_min = ReleaseEnvelope.mu_min
+g_std = ReleaseEnvelope.g_std
+j_brake = ReleaseEnvelope.j_brake
+a_inspected = ReleaseEnvelope.a_inspected
+v_ceiling = ReleaseEnvelope.v_ceiling
+v_handover_ceiling = ReleaseEnvelope.v_handover_ceiling
+v_inspected_ceiling = ReleaseEnvelope.v_inspected_ceiling
 ```
 
 A release case is scoped by the operating envelope: the target operational design domain (ODD)\index{Operational design domain!release envelope} paired with the machine's internal hardware, thermal, and timing invariants. Deployment release authorizes a system configuration under standing operating conditions, complementing rather than replacing the short execution leases that bound individual action chunks. Site inspections, calibration checks, and per-tick permission checks operate at the distinct cadences dictated by their respective failure mechanisms. An unconditional (`UNCOND`) verdict authorizes tracking proposals across the full verified operating envelope (@sec-verification-operating-envelope), a conditional (`COND`) verdict restricts operation to a designated subset with constrained kinematics or environmental fences, and a refusal (`REFUSE`) denies tracking permission entirely.\index{Operational design domain!release verdicts} For the mobile manipulator, the nominal operating envelope admits aisle travel up to `{python} ReleaseEnvelope.v_aisle_str` (chosen; see the Reader Guide) with the tote rack loaded to at most `{python} ReleaseEnvelope.payload_str`, on floors surveyed to a friction coefficient of at least `{python} ReleaseEnvelope.mu_min_str`, and past rack ends with at least `{python} ReleaseEnvelope.d_clear_str` of clear distance. For manipulation, it admits door approaches at `{python} ReleaseEnvelope.v_latch_str` and coworker handovers at `{python} ReleaseEnvelope.v_handover_str` tool center point (TCP) speed.
@@ -361,89 +372,96 @@ from mlsysim.physics.robotics import (
     calc_scurve_stop_distance,
 )
 
-# ┌── 1. LOAD: the running machine and its site ─────────────────────────────────
-RM = Embodied.MobileManipulator.WarehouseMobileManipulator  # category: illustrative (running machine)
-AISLE = Embodied.Scenario.WarehouseAisle  # category: illustrative (aisle scene; speeds, lease, and tick chosen)
-
-# ┌── 2. EXECUTE: contact forces, then the budget at aisle speed ────────────────
-# Contact premises from the enforcement record (calc-release-contact-premises).
-m_eff = EnforcementContactForce.m_eff
-f_at_tcp_limit = EnforcementContactForce.f_at_tcp_limit
-f_ratio = EnforcementContactForce.f_ratio
-f_at_handover = EnforcementContactForce.f_handover
-f_at_handover_clamped = EnforcementContactForce.f_handover_clamped
-v_handover_ceiling = EnforcementContactForce.v_ceiling
-v_handover_ceiling_clamped = EnforcementContactForce.v_ceiling_clamped
-
-# Jerk bound: the reference C2 polynomial's peak jerk at the drive limit (@sec-planning-c2-stopping-suffix)
-j_brake = calc_c2_stop_suffix(RM.base.max_velocity, AISLE.a_brake)["peak_jerk"].to(meter / second**3)
-c2_braking = calc_scurve_stop_distance(AISLE.v_aisle, AISLE.a_brake, j_brake).to(meter)
-overhead_loc = AISLE.delta_loc + AISLE.eps_track
-d_reaction = (AISLE.v_aisle * AISLE.tau_delay).to(millimeter)
-budget_aisle = (d_reaction + c2_braking + overhead_loc + AISLE.delta_margin).to(millimeter)
-spare_aisle = (AISLE.d_clear - budget_aisle).to(millimeter)
-t_spare = (spare_aisle / AISLE.v_aisle).to(millisecond)
-spare_share = (spare_aisle / AISLE.d_clear).to("dimensionless").magnitude
-# Deceleration at which the budget exactly fills the clear distance, jerk bound
-# fixed. Above a^2/j the S-curve distance is v^2/(2a) + v a/(2j), so setting it
-# equal to the braking room gives (v/(2j)) a^2 - room a + v^2/2 = 0; the smaller
-# root is the one on the branch where distance falls as a rises (a < sqrt(v j)).
-braking_room = (AISLE.d_clear - AISLE.v_aisle * AISLE.tau_delay - overhead_loc - AISLE.delta_margin).to(meter)
-_qa = (AISLE.v_aisle / (2 * j_brake)).to(second**2)
-_qc = (AISLE.v_aisle**2 / 2).to(meter**2 / second**2)
-a_break_even = ((braking_room - (braking_room**2 - 4 * _qa * _qc) ** 0.5) / (2 * _qa)).to(meter / second**2)
-a_shortfall = ((AISLE.a_brake - a_break_even) / AISLE.a_brake).to("dimensionless").magnitude
-# Notebook terms (nbk-release-aisle-spare): the two S-curve pieces, the delay
-# split, and the dispatch-to-admission allocation Delta_da charged against the
-# partial spare (the same allocation @sec-enforcement charges).
-d_brake_quad = (AISLE.v_aisle**2 / (2 * AISLE.a_brake)).to(millimeter)
-d_brake_jerk = (AISLE.v_aisle * AISLE.a_brake / (2 * j_brake)).to(millimeter)
-t_renewal_to_onset = (AISLE.t_lease + AISLE.t_tick + AISLE.t_bus + AISLE.t_brake_onset).to(millisecond)
-delta_da = AISLE.t_dispatch_to_admission.to(millisecond)  # category: illustrative (allocation of @sec-placement-isolation-decisions)
-travel_da = (AISLE.v_aisle * delta_da).to(millimeter)
-reserve_aisle = (spare_aisle - travel_da).to(millimeter)
-t_reserve = (reserve_aisle / AISLE.v_aisle).to(millisecond)
-
-# ┌── 3. GUARD: canon values quoted in the prose ────────────────────────────────
-check(abs(m_eff.to(kilogram).magnitude - 12.0) < 1e-9, "Effective contact mass is 12.0 kg")
-check(abs(f_at_tcp_limit.magnitude - 207.02) < 0.01, "Transient force at the TCP limit")
-check(abs(f_ratio - 4.14) < 0.01, "About 4.1x the 50 N criterion")
-check(abs(f_at_handover.magnitude - 20.70) < 0.01, "Transient handover force is 20.7 N")
-check(abs(f_at_handover_clamped.magnitude - 94.87) < 0.01, "Clamped handover force is 94.9 N")
-check(f_at_handover < AISLE.f_contact_criterion < f_at_handover_clamped, "Transient passes, clamped fails the criterion")
-check(abs(v_handover_ceiling.magnitude - 0.2415) < 5e-5, "Transient handover ceiling is 0.24 m/s")
-check(abs(v_handover_ceiling_clamped.magnitude - 0.0527) < 5e-5, "Clamped handover ceiling is 0.053 m/s")
-check(abs(j_brake.magnitude - 64.0 / 9.0) < 1e-9, "Jerk bound is the reference polynomial's 7.11 m/s^3 peak")
-check(abs(budget_aisle.magnitude - 968.9925) < 5e-3, "Finished budget at 1.3 m/s")
-check(abs(spare_aisle.magnitude - 131.0075) < 5e-3, "Spare at 1.3 m/s")
-check(abs(t_spare.magnitude - 100.775) < 5e-3, "Spare spent as delay is 100.8 ms")
-# margin_aisle_budget_spare_envelope.svg fig-alt hand-types the five terms and the spare
-check(abs(d_reaction.magnitude - 173.68) < 5e-3, "Reaction travel 173.7 mm at 1.3 m/s")
-check(abs(c2_braking.to(millimeter).magnitude - 605.3125) < 5e-3, "S-curve braking 605.3 mm")
-check(abs(AISLE.delta_loc.to(millimeter).magnitude - 50.0) < 1e-9, "Localization allowance 50 mm")
-check(abs(AISLE.eps_track.to(millimeter).magnitude - 40.0) < 1e-9, "Tracking allowance 40 mm")
-check(abs(AISLE.delta_margin.to(millimeter).magnitude - 100.0) < 1e-9, "Physical margin 100 mm")
-check(0.11 < spare_share < 0.125, "The spare is about an eighth of the clear distance")
-check(AISLE.v_aisle >= a_break_even**2 / j_brake, "Break-even stop stays in the trapezoidal regime")
-check(
-    abs((calc_scurve_stop_distance(AISLE.v_aisle, a_break_even, j_brake) - braking_room).to(millimeter).magnitude) < 1e-6,
-    "At the break-even deceleration the S-curve stop fills the braking room exactly",
-)
-check(abs(a_break_even.magnitude - 1.386) < 5e-4, "Break-even deceleration is 1.386 m/s^2")
-check(abs(a_shortfall - 0.307) < 5e-4, "A 31 percent deceleration shortfall fills the spare")
-check(AISLE.v_aisle >= AISLE.a_brake**2 / j_brake, "Aisle stop is in the trapezoidal regime, so the two-term S-curve form applies")
-check(abs((d_brake_quad + d_brake_jerk - c2_braking).to(millimeter).magnitude) < 1e-6, "The two S-curve pieces sum to the braking term")
-check(abs(d_brake_quad.magnitude - 422.5) < 5e-3 and abs(d_brake_jerk.magnitude - 182.8125) < 5e-3, "S-curve pieces 422.5 and 182.8 mm")
-check(abs(AISLE.tau_delay.to(millisecond).magnitude - 133.6) < 1e-9, "Pre-brake delay 133.6 ms")
-check(abs((AISLE.perception_age + t_renewal_to_onset - AISLE.tau_delay).to(millisecond).magnitude) < 1e-9, "Delay = age + renewal-to-onset")
-check(abs(braking_room.to(millimeter).magnitude - 736.32) < 5e-3, "Braking room 736.3 mm")
-check(abs(travel_da.magnitude - 82.304) < 5e-3, "Delta_da travel 82.3 mm at 1.3 m/s")
-check(abs(reserve_aisle.magnitude - 48.7036) < 5e-3, "Reserve 48.7 mm after Delta_da")
-check(abs(t_reserve.magnitude - 37.464) < 5e-3, "Reserve 37.5 ms at aisle speed")
-check(0 < reserve_aisle < spare_aisle, "Delta_da leaves a positive but smaller reserve")
-
-# ┌── 4. OUTPUT: rendered values ────────────────────────────────────────────────
 class BiomechanicalImpactEnvelope:
+    # ┌── 1. LOAD: the running machine and its site ─────────────────────────────────
+    RM = Embodied.MobileManipulator.WarehouseMobileManipulator  # category: illustrative (running machine)
+    AISLE = Embodied.Scenario.WarehouseAisle  # category: illustrative (aisle scene; speeds, lease, and tick chosen)
+
+    # ┌── 2. EXECUTE: contact forces, then the budget at aisle speed ────────────────
+    # Contact premises from the enforcement record (calc-release-contact-premises).
+    m_eff = EnforcementContactForce.m_eff
+    f_at_tcp_limit = EnforcementContactForce.f_at_tcp_limit
+    f_ratio = EnforcementContactForce.f_ratio
+    f_at_handover = EnforcementContactForce.f_handover
+    f_at_handover_clamped = EnforcementContactForce.f_handover_clamped
+    v_handover_ceiling = EnforcementContactForce.v_ceiling
+    v_handover_ceiling_clamped = EnforcementContactForce.v_ceiling_clamped
+
+    # Jerk bound: the reference C2 polynomial's peak jerk at the drive limit (@sec-planning-c2-stopping-suffix)
+    j_brake = calc_c2_stop_suffix(RM.base.max_velocity, AISLE.a_brake)["peak_jerk"].to(meter / second**3)
+    c2_braking = calc_scurve_stop_distance(AISLE.v_aisle, AISLE.a_brake, j_brake).to(meter)
+    overhead_loc = AISLE.delta_loc + AISLE.eps_track
+    d_reaction = (AISLE.v_aisle * AISLE.tau_delay).to(millimeter)
+    budget_aisle = (d_reaction + c2_braking + overhead_loc + AISLE.delta_margin).to(millimeter)
+    spare_aisle = (AISLE.d_clear - budget_aisle).to(millimeter)
+    t_spare = (spare_aisle / AISLE.v_aisle).to(millisecond)
+    spare_share = (spare_aisle / AISLE.d_clear).to("dimensionless").magnitude
+    # Deceleration at which the budget exactly fills the clear distance, jerk bound
+    # fixed. Above a^2/j the S-curve distance is v^2/(2a) + v a/(2j), so setting it
+    # equal to the braking room gives (v/(2j)) a^2 - room a + v^2/2 = 0; the smaller
+    # root is the one on the branch where distance falls as a rises (a < sqrt(v j)).
+    braking_room = (AISLE.d_clear - AISLE.v_aisle * AISLE.tau_delay - overhead_loc - AISLE.delta_margin).to(meter)
+    _qa = (AISLE.v_aisle / (2 * j_brake)).to(second**2)
+    _qc = (AISLE.v_aisle**2 / 2).to(meter**2 / second**2)
+    a_break_even = ((braking_room - (braking_room**2 - 4 * _qa * _qc) ** 0.5) / (2 * _qa)).to(meter / second**2)
+    a_shortfall = ((AISLE.a_brake - a_break_even) / AISLE.a_brake).to("dimensionless").magnitude
+    # Notebook terms (nbk-release-aisle-spare): the two S-curve pieces, the delay
+    # split, and the dispatch-to-admission allocation Delta_da charged against the
+    # partial spare (the same allocation @sec-enforcement charges).
+    d_brake_quad = (AISLE.v_aisle**2 / (2 * AISLE.a_brake)).to(millimeter)
+    d_brake_jerk = (AISLE.v_aisle * AISLE.a_brake / (2 * j_brake)).to(millimeter)
+    t_renewal_to_onset = (AISLE.t_lease + AISLE.t_tick + AISLE.t_bus + AISLE.t_brake_onset).to(millisecond)
+    delta_da = AISLE.t_dispatch_to_admission.to(millisecond)  # category: illustrative (allocation of @sec-placement-isolation-decisions)
+    travel_da = (AISLE.v_aisle * delta_da).to(millimeter)
+    reserve_aisle = (spare_aisle - travel_da).to(millimeter)
+    t_reserve = (reserve_aisle / AISLE.v_aisle).to(millisecond)
+    d_braking = c2_braking.to(millimeter)
+    d_loc = AISLE.delta_loc.to(millimeter)
+    d_track = AISLE.eps_track.to(millimeter)
+    d_margin = AISLE.delta_margin.to(millimeter)
+    d_clear = AISLE.d_clear.to(millimeter)
+    budget = budget_aisle
+    spare = spare_aisle
+
+    # ┌── 3. GUARD: canon values quoted in the prose ────────────────────────────────
+    check(abs(m_eff.to(kilogram).magnitude - 12.0) < 1e-9, "Effective contact mass is 12.0 kg")
+    check(abs(f_at_tcp_limit.magnitude - 207.02) < 0.01, "Transient force at the TCP limit")
+    check(abs(f_ratio - 4.14) < 0.01, "About 4.1x the 50 N criterion")
+    check(abs(f_at_handover.magnitude - 20.70) < 0.01, "Transient handover force is 20.7 N")
+    check(abs(f_at_handover_clamped.magnitude - 94.87) < 0.01, "Clamped handover force is 94.9 N")
+    check(f_at_handover < AISLE.f_contact_criterion < f_at_handover_clamped, "Transient passes, clamped fails the criterion")
+    check(abs(v_handover_ceiling.magnitude - 0.2415) < 5e-5, "Transient handover ceiling is 0.24 m/s")
+    check(abs(v_handover_ceiling_clamped.magnitude - 0.0527) < 5e-5, "Clamped handover ceiling is 0.053 m/s")
+    check(abs(j_brake.magnitude - 64.0 / 9.0) < 1e-9, "Jerk bound is the reference polynomial's 7.11 m/s^3 peak")
+    check(abs(budget_aisle.magnitude - 968.9925) < 5e-3, "Finished budget at 1.3 m/s")
+    check(abs(spare_aisle.magnitude - 131.0075) < 5e-3, "Spare at 1.3 m/s")
+    check(abs(t_spare.magnitude - 100.775) < 5e-3, "Spare spent as delay is 100.8 ms")
+    # margin_aisle_budget_spare_envelope.svg fig-alt hand-types the five terms and the spare
+    check(abs(d_reaction.magnitude - 173.68) < 5e-3, "Reaction travel 173.7 mm at 1.3 m/s")
+    check(abs(c2_braking.to(millimeter).magnitude - 605.3125) < 5e-3, "S-curve braking 605.3 mm")
+    check(abs(AISLE.delta_loc.to(millimeter).magnitude - 50.0) < 1e-9, "Localization allowance 50 mm")
+    check(abs(AISLE.eps_track.to(millimeter).magnitude - 40.0) < 1e-9, "Tracking allowance 40 mm")
+    check(abs(AISLE.delta_margin.to(millimeter).magnitude - 100.0) < 1e-9, "Physical margin 100 mm")
+    check(0.11 < spare_share < 0.125, "The spare is about an eighth of the clear distance")
+    check(AISLE.v_aisle >= a_break_even**2 / j_brake, "Break-even stop stays in the trapezoidal regime")
+    check(
+        abs((calc_scurve_stop_distance(AISLE.v_aisle, a_break_even, j_brake) - braking_room).to(millimeter).magnitude) < 1e-6,
+        "At the break-even deceleration the S-curve stop fills the braking room exactly",
+    )
+    check(abs(a_break_even.magnitude - 1.386) < 5e-4, "Break-even deceleration is 1.386 m/s^2")
+    check(abs(a_shortfall - 0.307) < 5e-4, "A 31 percent deceleration shortfall fills the spare")
+    check(AISLE.v_aisle >= AISLE.a_brake**2 / j_brake, "Aisle stop is in the trapezoidal regime, so the two-term S-curve form applies")
+    check(abs((d_brake_quad + d_brake_jerk - c2_braking).to(millimeter).magnitude) < 1e-6, "The two S-curve pieces sum to the braking term")
+    check(abs(d_brake_quad.magnitude - 422.5) < 5e-3 and abs(d_brake_jerk.magnitude - 182.8125) < 5e-3, "S-curve pieces 422.5 and 182.8 mm")
+    check(abs(AISLE.tau_delay.to(millisecond).magnitude - 133.6) < 1e-9, "Pre-brake delay 133.6 ms")
+    check(abs((AISLE.perception_age + t_renewal_to_onset - AISLE.tau_delay).to(millisecond).magnitude) < 1e-9, "Delay = age + renewal-to-onset")
+    check(abs(braking_room.to(millimeter).magnitude - 736.32) < 5e-3, "Braking room 736.3 mm")
+    check(abs(travel_da.magnitude - 82.304) < 5e-3, "Delta_da travel 82.3 mm at 1.3 m/s")
+    check(abs(reserve_aisle.magnitude - 48.7036) < 5e-3, "Reserve 48.7 mm after Delta_da")
+    check(abs(t_reserve.magnitude - 37.464) < 5e-3, "Reserve 37.5 ms at aisle speed")
+    check(0 < reserve_aisle < spare_aisle, "Delta_da leaves a positive but smaller reserve")
+
+    # ┌── 4. OUTPUT: rendered values ────────────────────────────────────────────────
     v_tcp_str = fmt_velocity(RM.tcp_speed_limit, unit=meter / second, precision=0)
     f_tcp_str = fmt_force(round(f_at_tcp_limit.magnitude) * newton, precision=0)
     f_ratio_mult_str = fmt_multiple(f_ratio, precision=1)
@@ -479,15 +497,15 @@ class BiomechanicalImpactEnvelope:
     travel_da_str = fmt_length(travel_da, unit=millimeter, precision=1)
     reserve_str = fmt_length(reserve_aisle, unit=millimeter, precision=1)
     t_reserve_str = fmt_latency(t_reserve, unit=millisecond, precision=1)
-    # Budget terms for the margin envelope (generator reads the quantities)
-    d_reaction = d_reaction
-    d_braking = c2_braking.to(millimeter)
-    d_loc = AISLE.delta_loc.to(millimeter)
-    d_track = AISLE.eps_track.to(millimeter)
-    d_margin = AISLE.delta_margin.to(millimeter)
-    d_clear = AISLE.d_clear.to(millimeter)
-    budget = budget_aisle
-    spare = spare_aisle
+
+# Module-level exports for downstream cells
+budget_aisle = BiomechanicalImpactEnvelope.budget_aisle
+spare_aisle = BiomechanicalImpactEnvelope.spare_aisle
+t_renewal_to_onset = BiomechanicalImpactEnvelope.t_renewal_to_onset
+j_brake = BiomechanicalImpactEnvelope.j_brake
+m_eff = BiomechanicalImpactEnvelope.m_eff
+overhead_loc = BiomechanicalImpactEnvelope.overhead_loc
+v_handover_ceiling = BiomechanicalImpactEnvelope.v_handover_ceiling
 ```
 
 The contact criteria arrive as premises from the enforcement record rather than as calculations derived during release review. In @sec-enforcement-intentional-contact, the peak force generated during an unbraked elastic contact with a coworker's hand (@eq-release-unbraked-force) is derived from the arm's effective mass and the standard ISO/TS 15066 biomechanical hand model.[^fn-std-isots15066-biomech] The release case evaluates the operational consequences of those physical results. At the arm's maximum free-space limit of `{python} BiomechanicalImpactEnvelope.v_tcp_str`, even the transient impact model predicts `{python} BiomechanicalImpactEnvelope.f_tcp_str`—exceeding the `{python} BiomechanicalImpactEnvelope.f_limit_str` criterion by a factor of `{python} BiomechanicalImpactEnvelope.f_ratio_mult_str`. Consequently, unseparated coworker proximity cannot be permitted at full free-space speed without additional physical containment. When encountering a free hand that recoils upon impact, the criterion admits approach speeds up to `{python} BiomechanicalImpactEnvelope.v_handover_ceiling_str`, and the chosen handover speed of `{python} BiomechanicalImpactEnvelope.v_handover_str` delivers a safe transient force of `{python} BiomechanicalImpactEnvelope.f_handover_str`. If the coworker's hand is clamped against a rack upright or structural frame, however, the ceiling drops to `{python} BiomechanicalImpactEnvelope.v_handover_ceiling_clamped_str`. At that same `{python} BiomechanicalImpactEnvelope.v_handover_str` approach speed, a clamped collision generates `{python} BiomechanicalImpactEnvelope.f_handover_clamped_str`, which breaches the limit. The handover claim is therefore strictly a transient-contact claim, inheriting two essential premises: that the lumped-mass body model and effective mass accurately describe the collision, and that the handover geometry excludes pinching or clamping hazards. Because physical calculations alone cannot guarantee workspace clearance, the release case must establish both premises through empirical evidence and site inspection.
@@ -588,37 +606,37 @@ from mlsysim.core.units import *
 from mlsysim.fmt import fmt_latency, fmt_length, fmt_velocity, fmt_percent, check
 from mlsysim.physics.robotics import calc_c2_stop_suffix, calc_scurve_stop_distance
 
-# ┌── 1. LOAD: the running machine, plus one chapter-local input ────────────────
-RM = Embodied.MobileManipulator.WarehouseMobileManipulator  # category: illustrative (running machine)
-AISLE = Embodied.Scenario.WarehouseAisle  # category: illustrative (aisle scene; speeds, lease, and tick chosen)
-low_light_exposure_factor = 2.0  # category: illustrative (scenario assumption: a dim aisle doubles the exposure)
-
-# ┌── 2. EXECUTE ────────────────────────────────────────────────────────────────
-t_exp_nominal = RM.nav_camera.exposure_time.to(millisecond)
-t_exp_low = (low_light_exposure_factor * t_exp_nominal).to(millisecond)
-dt_age = ((t_exp_low - t_exp_nominal) / 2).to(millisecond)  # mid-exposure timestamp
-d_added = (AISLE.v_aisle * dt_age).to(millimeter)
-# Jerk bound: the reference C2 polynomial's peak jerk at the drive limit (@sec-planning-c2-stopping-suffix)
-j_brake = calc_c2_stop_suffix(RM.base.max_velocity, AISLE.a_brake)["peak_jerk"].to(meter / second**3)
-budget = (
-    AISLE.v_aisle * AISLE.tau_delay
-    + calc_scurve_stop_distance(AISLE.v_aisle, AISLE.a_brake, j_brake)
-    + AISLE.delta_loc
-    + AISLE.eps_track
-    + AISLE.delta_margin
-).to(millimeter)
-spare = (AISLE.d_clear - budget).to(millimeter)
-share_of_spare = (d_added / spare).to("dimensionless").magnitude
-
-# ┌── 3. GUARD ──────────────────────────────────────────────────────────────────
-check(abs(t_exp_nominal.magnitude - 16.0) < 1e-9, "Navigation-camera exposure 16 ms")
-check(abs(dt_age.magnitude - 8.0) < 1e-9, "Low light adds 8 ms of observation age")
-check(abs(d_added.magnitude - 10.4) < 1e-9, "10.4 mm of added travel at 1.3 m/s")
-check(abs(spare.magnitude - 131.0075) < 5e-3, "Spare at 1.3 m/s")
-check(abs(share_of_spare - 0.079) < 5e-3, "About 8 percent of the spare")
-
-# ┌── 4. OUTPUT ─────────────────────────────────────────────────────────────────
 class ReleaseLowLight:
+    # ┌── 1. LOAD: the running machine, plus one chapter-local input ────────────────
+    RM = Embodied.MobileManipulator.WarehouseMobileManipulator  # category: illustrative (running machine)
+    AISLE = Embodied.Scenario.WarehouseAisle  # category: illustrative (aisle scene; speeds, lease, and tick chosen)
+    low_light_exposure_factor = 2.0  # category: illustrative (scenario assumption: a dim aisle doubles the exposure)
+
+    # ┌── 2. EXECUTE ────────────────────────────────────────────────────────────────
+    t_exp_nominal = RM.nav_camera.exposure_time.to(millisecond)
+    t_exp_low = (low_light_exposure_factor * t_exp_nominal).to(millisecond)
+    dt_age = ((t_exp_low - t_exp_nominal) / 2).to(millisecond)  # mid-exposure timestamp
+    d_added = (AISLE.v_aisle * dt_age).to(millimeter)
+    # Jerk bound: the reference C2 polynomial's peak jerk at the drive limit (@sec-planning-c2-stopping-suffix)
+    j_brake = calc_c2_stop_suffix(RM.base.max_velocity, AISLE.a_brake)["peak_jerk"].to(meter / second**3)
+    budget = (
+        AISLE.v_aisle * AISLE.tau_delay
+        + calc_scurve_stop_distance(AISLE.v_aisle, AISLE.a_brake, j_brake)
+        + AISLE.delta_loc
+        + AISLE.eps_track
+        + AISLE.delta_margin
+    ).to(millimeter)
+    spare = (AISLE.d_clear - budget).to(millimeter)
+    share_of_spare = (d_added / spare).to("dimensionless").magnitude
+
+    # ┌── 3. GUARD ──────────────────────────────────────────────────────────────────
+    check(abs(t_exp_nominal.magnitude - 16.0) < 1e-9, "Navigation-camera exposure 16 ms")
+    check(abs(dt_age.magnitude - 8.0) < 1e-9, "Low light adds 8 ms of observation age")
+    check(abs(d_added.magnitude - 10.4) < 1e-9, "10.4 mm of added travel at 1.3 m/s")
+    check(abs(spare.magnitude - 131.0075) < 5e-3, "Spare at 1.3 m/s")
+    check(abs(share_of_spare - 0.079) < 5e-3, "About 8 percent of the spare")
+
+    # ┌── 4. OUTPUT ─────────────────────────────────────────────────────────────────
     t_exp_nominal_str = fmt_latency(t_exp_nominal, unit=millisecond, precision=0)
     t_exp_low_str = fmt_latency(t_exp_low, unit=millisecond, precision=0)
     dt_age_str = fmt_latency(dt_age, unit=millisecond, precision=0)
@@ -657,23 +675,23 @@ Assumptions that lack runtime monitors carry far greater danger. Mechanical drif
 from mlsysim.physics import calc_conjunctive_confidence, calc_multilegged_confidence
 from mlsysim.fmt import fmt, check
 
-# ┌── 1. LOAD: chapter-local inputs (a teaching illustration, not a machine value)
-p_premise = 0.99  # category: illustrative (confidence in each required premise)
-n_premises = 10  # category: illustrative (number of required premises)
-p_leg = 0.90  # category: illustrative (confidence in each of two independent legs)
-
-# ┌── 2. EXECUTE ────────────────────────────────────────────────────────────────
-p_conjunction = calc_conjunctive_confidence([p_premise] * n_premises)
-p_two_legs = calc_multilegged_confidence([p_leg, p_leg])
-
-# ┌── 3. GUARD ──────────────────────────────────────────────────────────────────
-check(abs(p_conjunction - 0.904) < 5e-4, "Ten premises at 0.99 give about 0.90")
-check(p_conjunction < p_premise, "The conjunction is weaker than its weakest premise")
-check(abs(p_two_legs - 0.99) < 1e-9, "Two independent legs at 0.90 give 0.99")
-check(p_two_legs > p_leg, "Independent legs support the claim better than either leg")
-
-# ┌── 4. OUTPUT ─────────────────────────────────────────────────────────────────
 class ReleaseArgumentConfidence:
+    # ┌── 1. LOAD: chapter-local inputs (a teaching illustration, not a machine value)
+    p_premise = 0.99  # category: illustrative (confidence in each required premise)
+    n_premises = 10  # category: illustrative (number of required premises)
+    p_leg = 0.90  # category: illustrative (confidence in each of two independent legs)
+
+    # ┌── 2. EXECUTE ────────────────────────────────────────────────────────────────
+    p_conjunction = calc_conjunctive_confidence([p_premise] * n_premises)
+    p_two_legs = calc_multilegged_confidence([p_leg, p_leg])
+
+    # ┌── 3. GUARD ──────────────────────────────────────────────────────────────────
+    check(abs(p_conjunction - 0.904) < 5e-4, "Ten premises at 0.99 give about 0.90")
+    check(p_conjunction < p_premise, "The conjunction is weaker than its weakest premise")
+    check(abs(p_two_legs - 0.99) < 1e-9, "Two independent legs at 0.90 give 0.99")
+    check(p_two_legs > p_leg, "Independent legs support the claim better than either leg")
+
+    # ┌── 4. OUTPUT ─────────────────────────────────────────────────────────────────
     p_premise_str = fmt(p_premise, precision=2)
     n_premises_str = fmt(n_premises, precision=0)
     p_conjunction_str = fmt(round(p_conjunction, 2), precision=2)
@@ -727,58 +745,58 @@ from mlsysim.physics.robotics import (
     calc_scurve_stop_distance,
 )
 
-# ┌── 1. LOAD: the running machine and its site ─────────────────────────────────
-RM = Embodied.MobileManipulator.WarehouseMobileManipulator  # category: illustrative (running machine)
-AISLE = Embodied.Scenario.WarehouseAisle  # category: illustrative (aisle scene; speeds, lease, and tick chosen)
-g_std = (1 * ureg.standard_gravity).to(meter / second**2)  # category: datasheet (standard gravity, a defined physical constant; Pint)
-
-# ┌── 2. EXECUTE: one warrant quantity per claim ────────────────────────────────
-# Jerk bound: the reference C2 polynomial's peak jerk at the drive limit (@sec-planning-c2-stopping-suffix)
-j_brake = calc_c2_stop_suffix(RM.base.max_velocity, AISLE.a_brake)["peak_jerk"].to(meter / second**3)
-overheads = (AISLE.delta_loc + AISLE.eps_track + AISLE.delta_margin).to(millimeter)
-# C1 base: finished budget at aisle speed.
-budget_aisle = (AISLE.v_aisle * AISLE.tau_delay + calc_scurve_stop_distance(AISLE.v_aisle, AISLE.a_brake, j_brake) + overheads).to(millimeter)
-spare_aisle = (AISLE.d_clear - budget_aisle).to(millimeter)
-# C1 door: force at brake command and the arm stop that keeps it under the limit.
-f_cmd = EnforcementContactForce.f_cmd
-x_remaining = EnforcementContactForce.x_rem
-a_arm_needed = EnforcementContactForce.a_arm
-# C1 handover: transient (free-hand) force at the handover speed, ISO hand body model.
-f_handover = EnforcementContactForce.f_handover
-# C2: last valid renewal to brake onset.
-t_renewal_to_onset = (AISLE.t_lease + AISLE.t_tick + AISLE.t_bus + AISLE.t_brake_onset).to(millisecond)
-# C3: friction the credible deceleration needs.
-mu_min = (AISLE.a_brake / g_std).to("dimensionless").magnitude
-v_handover_ceiling = EnforcementContactForce.v_ceiling
-# C6: an unacknowledged handover falls back by the spare spent as time, at the
-# in-loop takeover slow-down (operative) and at aisle speed (a policy request).
-t_timeout = (spare_aisle / AISLE.v_aisle).to(millisecond)
-budget_takeover = (
-    AISLE.v_takeover_in_loop * AISLE.tau_delay + calc_scurve_stop_distance(AISLE.v_takeover_in_loop, AISLE.a_brake, j_brake) + overheads
-).to(millimeter)
-spare_takeover = (AISLE.d_clear - budget_takeover).to(millimeter)
-t_latest_takeover = (spare_takeover / AISLE.v_takeover_in_loop).to(millisecond)
-
-# ┌── 3. GUARD: canon values quoted in the table ────────────────────────────────
-check(abs(budget_aisle.magnitude - 968.9925) < 5e-3, "C1 base budget at 1.3 m/s")
-check(budget_aisle < AISLE.d_clear, "C1 budget fits inside the clear distance")
-check(abs(f_cmd.magnitude - 39.0) < 1e-9, "C1 latch force at brake command")
-check(abs(x_remaining.magnitude - 0.1525) < 1e-6, "C1 remaining compression 0.15 mm")
-check(abs(a_arm_needed.magnitude - 2.95) < 0.005, "C1 arm stop premise about 3 m/s^2 (computed 2.95)")
-check(abs(f_handover.magnitude - 20.70) < 0.01, "C1 transient handover force 20.7 N")
-check(f_handover < AISLE.f_contact_criterion, "C1 handover force under the criterion")
-check(abs(t_renewal_to_onset.magnitude - 82.0) < 1e-9, "C2 renewal-to-onset 82 ms")
-check(AISLE.enforcer_wcet < AISLE.enforcer_deadline < AISLE.t_tick, "C2 WCET < deadline < tick")
-check(abs(mu_min - 0.204) < 5e-4, "C3 friction floor 0.204")
-check(abs(AISLE.perception_age.to(millisecond).magnitude - 51.6) < 1e-9, "C4 age 51.6 ms")
-check(abs(t_timeout.magnitude - 100.775) < 5e-3, "C6 fallback by 100.8 ms at 1.3 m/s")
-check(abs(spare_takeover.magnitude - 563.71) < 0.05, "C6 spare 563.7 mm at the 0.75 m/s slow-down")
-check(abs(t_latest_takeover.magnitude - 751.6) < 0.05, "C6 fallback by 751.6 ms at 0.75 m/s")
-check(abs(RM.tcp_speed_limit.to(meter / second).magnitude - 1.0) < 1e-9, "C1 mug pick under the 1.0 m/s TCP limit")
-check(abs(v_handover_ceiling.magnitude - 0.2415) < 5e-5, "C1 transient handover ceiling 0.24 m/s")
-
-# ┌── 4. OUTPUT: rendered values ────────────────────────────────────────────────
 class ReleaseClaims:
+    # ┌── 1. LOAD: the running machine and its site ─────────────────────────────────
+    RM = Embodied.MobileManipulator.WarehouseMobileManipulator  # category: illustrative (running machine)
+    AISLE = Embodied.Scenario.WarehouseAisle  # category: illustrative (aisle scene; speeds, lease, and tick chosen)
+    g_std = (1 * ureg.standard_gravity).to(meter / second**2)  # category: datasheet (standard gravity, a defined physical constant; Pint)
+
+    # ┌── 2. EXECUTE: one warrant quantity per claim ────────────────────────────────
+    # Jerk bound: the reference C2 polynomial's peak jerk at the drive limit (@sec-planning-c2-stopping-suffix)
+    j_brake = calc_c2_stop_suffix(RM.base.max_velocity, AISLE.a_brake)["peak_jerk"].to(meter / second**3)
+    overheads = (AISLE.delta_loc + AISLE.eps_track + AISLE.delta_margin).to(millimeter)
+    # C1 base: finished budget at aisle speed.
+    budget_aisle = (AISLE.v_aisle * AISLE.tau_delay + calc_scurve_stop_distance(AISLE.v_aisle, AISLE.a_brake, j_brake) + overheads).to(millimeter)
+    spare_aisle = (AISLE.d_clear - budget_aisle).to(millimeter)
+    # C1 door: force at brake command and the arm stop that keeps it under the limit.
+    f_cmd = EnforcementContactForce.f_cmd
+    x_remaining = EnforcementContactForce.x_rem
+    a_arm_needed = EnforcementContactForce.a_arm
+    # C1 handover: transient (free-hand) force at the handover speed, ISO hand body model.
+    f_handover = EnforcementContactForce.f_handover
+    # C2: last valid renewal to brake onset.
+    t_renewal_to_onset = (AISLE.t_lease + AISLE.t_tick + AISLE.t_bus + AISLE.t_brake_onset).to(millisecond)
+    # C3: friction the credible deceleration needs.
+    mu_min = (AISLE.a_brake / g_std).to("dimensionless").magnitude
+    v_handover_ceiling = EnforcementContactForce.v_ceiling
+    # C6: an unacknowledged handover falls back by the spare spent as time, at the
+    # in-loop takeover slow-down (operative) and at aisle speed (a policy request).
+    t_timeout = (spare_aisle / AISLE.v_aisle).to(millisecond)
+    budget_takeover = (
+        AISLE.v_takeover_in_loop * AISLE.tau_delay + calc_scurve_stop_distance(AISLE.v_takeover_in_loop, AISLE.a_brake, j_brake) + overheads
+    ).to(millimeter)
+    spare_takeover = (AISLE.d_clear - budget_takeover).to(millimeter)
+    t_latest_takeover = (spare_takeover / AISLE.v_takeover_in_loop).to(millisecond)
+
+    # ┌── 3. GUARD: canon values quoted in the table ────────────────────────────────
+    check(abs(budget_aisle.magnitude - 968.9925) < 5e-3, "C1 base budget at 1.3 m/s")
+    check(budget_aisle < AISLE.d_clear, "C1 budget fits inside the clear distance")
+    check(abs(f_cmd.magnitude - 39.0) < 1e-9, "C1 latch force at brake command")
+    check(abs(x_remaining.magnitude - 0.1525) < 1e-6, "C1 remaining compression 0.15 mm")
+    check(abs(a_arm_needed.magnitude - 2.95) < 0.005, "C1 arm stop premise about 3 m/s^2 (computed 2.95)")
+    check(abs(f_handover.magnitude - 20.70) < 0.01, "C1 transient handover force 20.7 N")
+    check(f_handover < AISLE.f_contact_criterion, "C1 handover force under the criterion")
+    check(abs(t_renewal_to_onset.magnitude - 82.0) < 1e-9, "C2 renewal-to-onset 82 ms")
+    check(AISLE.enforcer_wcet < AISLE.enforcer_deadline < AISLE.t_tick, "C2 WCET < deadline < tick")
+    check(abs(mu_min - 0.204) < 5e-4, "C3 friction floor 0.204")
+    check(abs(AISLE.perception_age.to(millisecond).magnitude - 51.6) < 1e-9, "C4 age 51.6 ms")
+    check(abs(t_timeout.magnitude - 100.775) < 5e-3, "C6 fallback by 100.8 ms at 1.3 m/s")
+    check(abs(spare_takeover.magnitude - 563.71) < 0.05, "C6 spare 563.7 mm at the 0.75 m/s slow-down")
+    check(abs(t_latest_takeover.magnitude - 751.6) < 0.05, "C6 fallback by 751.6 ms at 0.75 m/s")
+    check(abs(RM.tcp_speed_limit.to(meter / second).magnitude - 1.0) < 1e-9, "C1 mug pick under the 1.0 m/s TCP limit")
+    check(abs(v_handover_ceiling.magnitude - 0.2415) < 5e-5, "C1 transient handover ceiling 0.24 m/s")
+
+    # ┌── 4. OUTPUT: rendered values ────────────────────────────────────────────────
     budget_str = fmt_length(budget_aisle, unit=millimeter, precision=1)
     v_aisle_str = fmt_velocity(AISLE.v_aisle, unit=meter / second, precision=1)
     d_clear_str = fmt_length(AISLE.d_clear, unit=meter, precision=2)
@@ -800,6 +818,16 @@ class ReleaseClaims:
     v_takeover_in_str = fmt_velocity(AISLE.v_takeover_in_loop, unit=meter / second, precision=2)
     v_tcp_str = fmt_velocity(RM.tcp_speed_limit, unit=meter / second, precision=0)
     v_handover_ceiling_str = fmt_velocity(round(v_handover_ceiling.magnitude, 2) * meter / second, unit=meter / second, precision=2)
+
+# Module-level exports for downstream cells and figure guards
+budget_aisle = ReleaseClaims.budget_aisle
+spare_aisle = ReleaseClaims.spare_aisle
+f_cmd = ReleaseClaims.f_cmd
+x_remaining = ReleaseClaims.x_remaining
+a_arm_needed = ReleaseClaims.a_arm_needed
+f_handover = ReleaseClaims.f_handover
+t_renewal_to_onset = ReleaseClaims.t_renewal_to_onset
+mu_min = ReleaseClaims.mu_min
 ```
 
 For collaborative manipulation tasks, biomechanical thresholds govern the contact force argument once the claim explicitly details the target body region, contact classification (transient vs. quasi-static), pressure distribution, impact geometry, and measurement methodology [@iso10218part2]. The mobile base's claims, which form the core of the release argument, derive directly from empirical stopping distance budgets and site survey logs. Two conceptual frameworks borrowed from automotive engineering organize the fault analysis. Functional safety mitigates hazards arising from hardware malfunctions or systematic software defects [@iso26262]. In contrast, Safety of the Intended Functionality (SOTIF) addresses hazards stemming from performance insufficiencies or specification gaps in the absence of hardware faults—such as an obstacle detector failing to recognize a worker partially obscured by shrink-wrapped pallet staging [@iso21448]. Every leaf of the release argument must be empirically validated against hardware test benches before gating motor power. The formal standards governing these subsystems are machinery safety standards, mapped in @sec-release-standards-map to each component.
@@ -1008,22 +1036,22 @@ from mlsysim import *
 from mlsysim.core.units import *
 from mlsysim.fmt import fmt, fmt_mass, fmt_length, check
 
-# ┌── 1. LOAD: the running machine and its site ─────────────────────────────────
-RM = Embodied.MobileManipulator.WarehouseMobileManipulator  # category: illustrative (running machine)
-AISLE = Embodied.Scenario.WarehouseAisle  # category: illustrative (aisle scene; speeds, lease, and tick chosen)
-g_std = (1 * ureg.standard_gravity).to(meter / second**2)  # category: datasheet (standard gravity, a defined physical constant; Pint)
-
-# ┌── 2. EXECUTE ────────────────────────────────────────────────────────────────
-mu_min = (AISLE.a_brake / g_std).to("dimensionless").magnitude
-
-# ┌── 3. GUARD ──────────────────────────────────────────────────────────────────
-check(abs(mu_min - 0.204) < 5e-4, "Friction floor 0.204")
-check(mu_min < AISLE.mu_dry, "Dry concrete exceeds the friction floor")
-check(abs(RM.onboard_payload_capacity.to(kilogram).magnitude - 50.0) < 1e-9, "Tote-rack capacity 50 kg")
-check(abs(AISLE.eps_track.to(millimeter).magnitude - 40.0) < 1e-9, "Tracking bound 40 mm")
-
-# ┌── 4. OUTPUT ─────────────────────────────────────────────────────────────────
 class ReleaseStandingPremises:
+    # ┌── 1. LOAD: the running machine and its site ─────────────────────────────────
+    RM = Embodied.MobileManipulator.WarehouseMobileManipulator  # category: illustrative (running machine)
+    AISLE = Embodied.Scenario.WarehouseAisle  # category: illustrative (aisle scene; speeds, lease, and tick chosen)
+    g_std = (1 * ureg.standard_gravity).to(meter / second**2)  # category: datasheet (standard gravity, a defined physical constant; Pint)
+
+    # ┌── 2. EXECUTE ────────────────────────────────────────────────────────────────
+    mu_min = (AISLE.a_brake / g_std).to("dimensionless").magnitude
+
+    # ┌── 3. GUARD ──────────────────────────────────────────────────────────────────
+    check(abs(mu_min - 0.204) < 5e-4, "Friction floor 0.204")
+    check(mu_min < AISLE.mu_dry, "Dry concrete exceeds the friction floor")
+    check(abs(RM.onboard_payload_capacity.to(kilogram).magnitude - 50.0) < 1e-9, "Tote-rack capacity 50 kg")
+    check(abs(AISLE.eps_track.to(millimeter).magnitude - 40.0) < 1e-9, "Tracking bound 40 mm")
+
+    # ┌── 4. OUTPUT ─────────────────────────────────────────────────────────────────
     mu_min_str = fmt(round(mu_min, 3), precision=3)
     mu_dry_str = fmt(AISLE.mu_dry, precision=2)
     payload_str = fmt_mass(RM.onboard_payload_capacity, unit=kilogram, precision=0)
@@ -1077,41 +1105,47 @@ from mlsysim.core.units import *
 from mlsysim.fmt import fmt_energy, fmt_mass, fmt_length, fmt_velocity, fmt_latency, check
 from mlsysim.physics.robotics import calc_kinetic_energy
 
-# ┌── 1. LOAD: the running machine, plus one chapter-local input ────────────────
-RM = Embodied.MobileManipulator.WarehouseMobileManipulator  # category: illustrative (running machine)
-AISLE = Embodied.Scenario.WarehouseAisle  # category: illustrative (aisle scene; speeds, lease, and tick chosen)
-degraded_fraction = 0.5  # category: chosen (degraded mode halves the aisle speed)
-
-# ┌── 2. EXECUTE ────────────────────────────────────────────────────────────────
-e_k_loaded = calc_kinetic_energy(RM.loaded_mass, AISLE.v_aisle).to(joule)
-travel_per_ms = (AISLE.v_aisle * (1 * millisecond)).to(millimeter)
-v_degraded = (degraded_fraction * AISLE.v_aisle).to(meter / second)
-t_renewal_to_onset = (AISLE.t_lease + AISLE.t_tick + AISLE.t_bus + AISLE.t_brake_onset).to(millisecond)
-t_monitor_response = (AISLE.t_tick + AISLE.t_bus + AISLE.t_brake_onset).to(millisecond)  # enforcer-detected premise
-# Notebook (nbk-release-silent-proposer-window): travel to brake onset on each
-# route, and the flag latency at which the monitored route stops no sooner.
-d_silent = (AISLE.v_aisle * t_renewal_to_onset).to(millimeter)
-d_monitored = (AISLE.v_aisle * t_monitor_response).to(millimeter)
-t_flag_crossover = (t_renewal_to_onset - t_monitor_response).to(millisecond)
-d_saved = (d_silent - d_monitored).to(millimeter)
-
-# ┌── 3. GUARD ──────────────────────────────────────────────────────────────────
-check(abs(e_k_loaded.magnitude - 310.96) < 0.01, "Loaded kinetic energy at 1.3 m/s")
-check(abs(travel_per_ms.magnitude - 1.3) < 1e-9, "1.3 mm of travel per millisecond")
-check(abs(v_degraded.magnitude - 0.65) < 1e-9, "Degraded mode at 0.65 m/s")
-check(abs(t_renewal_to_onset.magnitude - 82.0) < 1e-9, "Renewal to brake onset 82 ms")
-check(abs(t_monitor_response.magnitude - 22.0) < 1e-9, "Enforcer tick + bus + brake onset 22 ms")
-# margin_silent_proposer_response_strip.svg fig-alt hand-types the lease and each window
-check(abs(AISLE.t_lease.to(millisecond).magnitude - 60.0) < 1e-9, "Chunk lease 60 ms")
-check(abs(AISLE.t_bus.to(millisecond).magnitude - 1.0) < 1e-9, "Bus transfer 1 ms")
-check(abs(AISLE.t_brake_onset.to(millisecond).magnitude - 20.0) < 1e-9, "Brake onset 20 ms")
-check(abs(d_silent.magnitude - 106.6) < 1e-9, "Silent proposer: 106.6 mm to brake onset")
-check(abs(d_monitored.magnitude - 28.6) < 1e-9, "Monitored premise, immediate flag: 28.6 mm")
-check(abs(t_flag_crossover.magnitude - 60.0) < 1e-9, "Flag-latency crossover equals the 60 ms lease")
-check(abs(d_saved.magnitude - 78.0) < 1e-9, "Monitoring saves at most 78.0 mm")
-
-# ┌── 4. OUTPUT ─────────────────────────────────────────────────────────────────
 class ReleaseBlindTravel:
+    # ┌── 1. LOAD: the running machine, plus one chapter-local input ────────────────
+    RM = Embodied.MobileManipulator.WarehouseMobileManipulator  # category: illustrative (running machine)
+    AISLE = Embodied.Scenario.WarehouseAisle  # category: illustrative (aisle scene; speeds, lease, and tick chosen)
+    degraded_fraction = 0.5  # category: chosen (degraded mode halves the aisle speed)
+
+    # ┌── 2. EXECUTE ────────────────────────────────────────────────────────────────
+    e_k_loaded = calc_kinetic_energy(RM.loaded_mass, AISLE.v_aisle).to(joule)
+    travel_per_ms = (AISLE.v_aisle * (1 * millisecond)).to(millimeter)
+    v_degraded = (degraded_fraction * AISLE.v_aisle).to(meter / second)
+    t_renewal_to_onset = (AISLE.t_lease + AISLE.t_tick + AISLE.t_bus + AISLE.t_brake_onset).to(millisecond)
+    t_monitor_response = (AISLE.t_tick + AISLE.t_bus + AISLE.t_brake_onset).to(millisecond)  # enforcer-detected premise
+    # Notebook (nbk-release-silent-proposer-window): travel to brake onset on each
+    # route, and the flag latency at which the monitored route stops no sooner.
+    d_silent = (AISLE.v_aisle * t_renewal_to_onset).to(millimeter)
+    d_monitored = (AISLE.v_aisle * t_monitor_response).to(millimeter)
+    t_flag_crossover = (t_renewal_to_onset - t_monitor_response).to(millisecond)
+    d_saved = (d_silent - d_monitored).to(millimeter)
+    t_lease = AISLE.t_lease.to(millisecond)
+    t_tick = AISLE.t_tick.to(millisecond)
+    t_bus = AISLE.t_bus.to(millisecond)
+    t_onset = AISLE.t_brake_onset.to(millisecond)
+    t_silent = t_renewal_to_onset
+    t_monitored = t_monitor_response
+
+    # ┌── 3. GUARD ──────────────────────────────────────────────────────────────────
+    check(abs(e_k_loaded.magnitude - 310.96) < 0.01, "Loaded kinetic energy at 1.3 m/s")
+    check(abs(travel_per_ms.magnitude - 1.3) < 1e-9, "1.3 mm of travel per millisecond")
+    check(abs(v_degraded.magnitude - 0.65) < 1e-9, "Degraded mode at 0.65 m/s")
+    check(abs(t_renewal_to_onset.magnitude - 82.0) < 1e-9, "Renewal to brake onset 82 ms")
+    check(abs(t_monitor_response.magnitude - 22.0) < 1e-9, "Enforcer tick + bus + brake onset 22 ms")
+    # margin_silent_proposer_response_strip.svg fig-alt hand-types the lease and each window
+    check(abs(AISLE.t_lease.to(millisecond).magnitude - 60.0) < 1e-9, "Chunk lease 60 ms")
+    check(abs(AISLE.t_bus.to(millisecond).magnitude - 1.0) < 1e-9, "Bus transfer 1 ms")
+    check(abs(AISLE.t_brake_onset.to(millisecond).magnitude - 20.0) < 1e-9, "Brake onset 20 ms")
+    check(abs(d_silent.magnitude - 106.6) < 1e-9, "Silent proposer: 106.6 mm to brake onset")
+    check(abs(d_monitored.magnitude - 28.6) < 1e-9, "Monitored premise, immediate flag: 28.6 mm")
+    check(abs(t_flag_crossover.magnitude - 60.0) < 1e-9, "Flag-latency crossover equals the 60 ms lease")
+    check(abs(d_saved.magnitude - 78.0) < 1e-9, "Monitoring saves at most 78.0 mm")
+
+    # ┌── 4. OUTPUT ─────────────────────────────────────────────────────────────────
     m1_str = fmt_mass(RM.loaded_mass, unit=kilogram, precision=0)
     v_aisle_str = fmt_velocity(AISLE.v_aisle, unit=meter / second, precision=1)
     e_k_str = fmt_energy(round(e_k_loaded.magnitude) * joule, unit=joule, precision=0)
@@ -1127,13 +1161,6 @@ class ReleaseBlindTravel:
     d_monitored_str = fmt_length(d_monitored, unit=millimeter, precision=1)
     t_flag_crossover_str = fmt_latency(t_flag_crossover, unit=millisecond, precision=0)
     d_saved_str = fmt_length(d_saved, unit=millimeter, precision=0)
-    # Response windows for the margin strip (generator reads the quantities)
-    t_lease = AISLE.t_lease.to(millisecond)
-    t_tick = AISLE.t_tick.to(millisecond)
-    t_bus = AISLE.t_bus.to(millisecond)
-    t_onset = AISLE.t_brake_onset.to(millisecond)
-    t_silent = t_renewal_to_onset
-    t_monitored = t_monitor_response
 ```
 
 The system's response to an unevaluable premise must follow from the physical mechanics of unmonitored motion rather than arbitrary severity categories. When the mobile manipulator traverses an aisle at `{python} ReleaseBlindTravel.v_aisle_str` with its tote rack fully loaded, its `{python} ReleaseBlindTravel.m1_str` mass carries `{python} ReleaseBlindTravel.e_k_str` of kinetic energy. If its primary lidar halts updates, every millisecond of blind travel translates into `{python} ReleaseBlindTravel.travel_per_ms_str` of displacement toward potential obstacles. The assurance case pre-certifies three potential mitigation paths. Two of these apply only when explicitly authorized by the signed release: a **degraded mode**\index{Degraded mode!velocity reduction} that permits continued motion when diverse redundant sensors maintain bounded state uncertainty (such as throttling aisle velocity to `{python} ReleaseBlindTravel.v_degraded_str` while secondary sensors monitor the path), and a conditional operating mode under a `COND` verdict\index{Release verdict!conditional} that clamps motor torque or confines trajectory proposals to an analytically verified envelope. Because dead reckoning and wheel odometry drift without bound, they cannot verify obstacle clearance on their own. The third alternative, the hardware STOP response (@sec-enforcement-fallback-ladder)\index{Fallback ladder!STOP rung}, governs complete loss of observability, executing a configured drive and brake sequence. Safely arresting the vehicle within available clearance margins requires calibrated response timing, sufficient drive traction, and known brake deceleration capability.
@@ -1221,76 +1248,79 @@ from mlsysim.physics.robotics import (
     calc_scurve_max_permitted_velocity,
 )
 
-# ┌── 1. LOAD: the running machine and its site ─────────────────────────────────
-RM = Embodied.MobileManipulator.WarehouseMobileManipulator  # category: illustrative (running machine)
-AISLE = Embodied.Scenario.WarehouseAisle  # category: illustrative (aisle scene; speeds, lease, and tick chosen)
-g_std = (1 * ureg.standard_gravity).to(meter / second**2)  # category: datasheet (standard gravity, a defined physical constant; Pint)
-v_restricted = ReleaseEnvelope.v_restricted  # chosen; set once in calc-release-operating-envelope
-
-# ┌── 2. EXECUTE: the door branch, then the base spare ──────────────────────────
-# Door branch: premises from the enforcement record (calc-release-contact-premises).
-f_cmd_lo = EnforcementContactForce.f_cmd
-x_rem_lo = EnforcementContactForce.x_rem
-a_arm_lo = EnforcementContactForce.a_arm
-t_arm_stop = EnforcementContactForce.t_arm_stop
-f_cmd_hi = EnforcementContactForce.f_cmd_hi
-a_arm_hi = EnforcementContactForce.a_arm_hi
-
-overhead_loc = AISLE.delta_loc + AISLE.eps_track
-# Jerk bound: the reference C2 polynomial's peak jerk at the drive limit (@sec-planning-c2-stopping-suffix)
-j_brake = calc_c2_stop_suffix(RM.base.max_velocity, AISLE.a_brake)["peak_jerk"].to(meter / second**3)
-budget_aisle = (
-    AISLE.v_aisle * AISLE.tau_delay + calc_scurve_stop_distance(AISLE.v_aisle, AISLE.a_brake, j_brake) + overhead_loc + AISLE.delta_margin
-).to(millimeter)
-spare_aisle = (AISLE.d_clear - budget_aisle).to(millimeter)
-mu_min = (AISLE.a_brake / g_std).to("dimensionless").magnitude
-# The floor caps the deceleration; the jerk bound belongs to the load and is unchanged.
-a_inspected = min(AISLE.a_brake, (AISLE.mu_inspected_floor * g_std).to(meter / second**2))
-v_inspected_ceiling = calc_scurve_max_permitted_velocity(AISLE.d_clear, AISLE.tau_delay, a_inspected, j_brake, overhead_loc, AISLE.delta_margin).to(
-    meter / second
-)
-v_ceiling = calc_scurve_max_permitted_velocity(AISLE.d_clear, AISLE.tau_delay, AISLE.a_brake, j_brake, overhead_loc, AISLE.delta_margin).to(
-    meter / second
-)
-t_renewal_to_onset = (AISLE.t_lease + AISLE.t_tick + AISLE.t_bus + AISLE.t_brake_onset).to(millisecond)
-f_handover = EnforcementContactForce.f_handover
-# Checkpoint estimate (chk-release-refusal-and-path-to-cond): a loaded trial whose
-# low tail falls short of a_brake. The answer is not printed; the guard keeps the
-# item's premise (the reserve after Delta_da turns negative) true.
-a_trial = 1.6 * meter / second**2  # category: illustrative (hypothetical low-tail loaded deceleration)
-reserve_trial = (
-    AISLE.d_clear
-    - AISLE.v_aisle * AISLE.tau_delay
-    - calc_scurve_stop_distance(AISLE.v_aisle, a_trial, j_brake)
-    - overhead_loc
-    - AISLE.delta_margin
-    - AISLE.v_aisle * AISLE.t_dispatch_to_admission
-).to(millimeter)
-
-# ┌── 3. GUARD: canon values quoted in the prose and the table ──────────────────
-check(abs(f_cmd_lo.magnitude - 39.0) < 1e-9, "Latch force at brake command, guarded approach")
-check(abs(x_rem_lo.magnitude - 0.1525) < 1e-6, "Remaining compression 0.15 mm")
-check(abs(a_arm_lo.magnitude - 2.95) < 0.005, "Arm stop premise about 3 m/s^2 (computed 2.95)")
-check(abs(t_arm_stop.magnitude - 10.0) < 0.5, "Arm stop takes about 10 ms")
-check(abs(f_cmd_hi.magnitude - 95.0) < 1e-9, "Latch force at brake command, unsupported approach")
-check(abs(a_arm_hi.magnitude - 400.0) < 1e-6, "Unsupported approach needs 400 m/s^2")
-check(abs(spare_aisle.magnitude - 131.0075) < 5e-3, "Spare at 1.3 m/s")
-check(abs(mu_min - 0.204) < 5e-4, "Friction floor 0.204")
-check(abs(v_inspected_ceiling.magnitude - 1.2309) < 5e-5, "Inspected-floor ceiling 1.23 m/s")
-check(abs(v_ceiling.magnitude - 1.4367) < 5e-5, "Aisle ceiling 1.44 m/s")
-check(abs(t_renewal_to_onset.magnitude - 82.0) < 1e-9, "Renewal to brake onset 82 ms")
-check(RM.chunk_inference_latency < AISLE.t_lease, "Chunk inference fits inside the lease")
-check(abs(f_handover.magnitude - 20.70) < 0.01, "Transient handover force 20.7 N")
-check(v_restricted < v_inspected_ceiling < AISLE.v_aisle, "Restricted mode sits below the inspected-floor ceiling")
-a_arm_ratio = (a_arm_hi / a_arm_lo).to("dimensionless").magnitude
-# margin_arm_stop_demand_ladder.svg fig-alt hand-types 3, 9.8 and 400 m/s^2; caption says over a hundredfold
-check(abs(a_arm_ratio - 135.6) < 0.1, "The unsupported approach needs about 136 times the guarded arm stop")
-check(abs(g_std.magnitude - 9.80665) < 1e-9, "Standard gravity 9.8 m/s^2")
-check(AISLE.v_aisle >= a_trial**2 / j_brake, "Checkpoint trial stop stays in the trapezoidal regime")
-check(reserve_trial.magnitude < 0 < spare_aisle.magnitude, "Checkpoint: a 1.6 m/s^2 low tail leaves no reserve once Delta_da is charged")
-
-# ┌── 4. OUTPUT: rendered values ────────────────────────────────────────────────
 class ReleaseWorkedVerdict:
+    # ┌── 1. LOAD: the running machine and its site ─────────────────────────────────
+    RM = Embodied.MobileManipulator.WarehouseMobileManipulator  # category: illustrative (running machine)
+    AISLE = Embodied.Scenario.WarehouseAisle  # category: illustrative (aisle scene; speeds, lease, and tick chosen)
+    g_std = (1 * ureg.standard_gravity).to(meter / second**2)  # category: datasheet (standard gravity, a defined physical constant; Pint)
+    g = g_std
+    v_latch = AISLE.v_latch_approach
+    v_latch_high = AISLE.v_latch_high
+    v_restricted = ReleaseEnvelope.v_restricted  # chosen; set once in calc-release-operating-envelope
+
+    # ┌── 2. EXECUTE: the door branch, then the base spare ──────────────────────────
+    # Door branch: premises from the enforcement record (calc-release-contact-premises).
+    f_cmd_lo = EnforcementContactForce.f_cmd
+    x_rem_lo = EnforcementContactForce.x_rem
+    a_arm_lo = EnforcementContactForce.a_arm
+    t_arm_stop = EnforcementContactForce.t_arm_stop
+    f_cmd_hi = EnforcementContactForce.f_cmd_hi
+    a_arm_hi = EnforcementContactForce.a_arm_hi
+
+    overhead_loc = AISLE.delta_loc + AISLE.eps_track
+    # Jerk bound: the reference C2 polynomial's peak jerk at the drive limit (@sec-planning-c2-stopping-suffix)
+    j_brake = calc_c2_stop_suffix(RM.base.max_velocity, AISLE.a_brake)["peak_jerk"].to(meter / second**3)
+    budget_aisle = (
+        AISLE.v_aisle * AISLE.tau_delay + calc_scurve_stop_distance(AISLE.v_aisle, AISLE.a_brake, j_brake) + overhead_loc + AISLE.delta_margin
+    ).to(millimeter)
+    spare_aisle = (AISLE.d_clear - budget_aisle).to(millimeter)
+    mu_min = (AISLE.a_brake / g_std).to("dimensionless").magnitude
+    # The floor caps the deceleration; the jerk bound belongs to the load and is unchanged.
+    a_inspected = min(AISLE.a_brake, (AISLE.mu_inspected_floor * g_std).to(meter / second**2))
+    v_inspected_ceiling = calc_scurve_max_permitted_velocity(AISLE.d_clear, AISLE.tau_delay, a_inspected, j_brake, overhead_loc, AISLE.delta_margin).to(
+        meter / second
+    )
+    v_ceiling = calc_scurve_max_permitted_velocity(AISLE.d_clear, AISLE.tau_delay, AISLE.a_brake, j_brake, overhead_loc, AISLE.delta_margin).to(
+        meter / second
+    )
+    t_renewal_to_onset = (AISLE.t_lease + AISLE.t_tick + AISLE.t_bus + AISLE.t_brake_onset).to(millisecond)
+    f_handover = EnforcementContactForce.f_handover
+    # Checkpoint estimate (chk-release-refusal-and-path-to-cond): a loaded trial whose
+    # low tail falls short of a_brake. The answer is not printed; the guard keeps the
+    # item's premise (the reserve after Delta_da turns negative) true.
+    a_trial = 1.6 * meter / second**2  # category: illustrative (hypothetical low-tail loaded deceleration)
+    reserve_trial = (
+        AISLE.d_clear
+        - AISLE.v_aisle * AISLE.tau_delay
+        - calc_scurve_stop_distance(AISLE.v_aisle, a_trial, j_brake)
+        - overhead_loc
+        - AISLE.delta_margin
+        - AISLE.v_aisle * AISLE.t_dispatch_to_admission
+    ).to(millimeter)
+
+    # ┌── 3. GUARD: canon values quoted in the prose and the table ──────────────────
+    check(abs(f_cmd_lo.magnitude - 39.0) < 1e-9, "Latch force at brake command, guarded approach")
+    check(abs(x_rem_lo.magnitude - 0.1525) < 1e-6, "Remaining compression 0.15 mm")
+    check(abs(a_arm_lo.magnitude - 2.95) < 0.005, "Arm stop premise about 3 m/s^2 (computed 2.95)")
+    check(abs(t_arm_stop.magnitude - 10.0) < 0.5, "Arm stop takes about 10 ms")
+    check(abs(f_cmd_hi.magnitude - 95.0) < 1e-9, "Latch force at brake command, unsupported approach")
+    check(abs(a_arm_hi.magnitude - 400.0) < 1e-6, "Unsupported approach needs 400 m/s^2")
+    check(abs(spare_aisle.magnitude - 131.0075) < 5e-3, "Spare at 1.3 m/s")
+    check(abs(mu_min - 0.204) < 5e-4, "Friction floor 0.204")
+    check(abs(v_inspected_ceiling.magnitude - 1.2309) < 5e-5, "Inspected-floor ceiling 1.23 m/s")
+    check(abs(v_ceiling.magnitude - 1.4367) < 5e-5, "Aisle ceiling 1.44 m/s")
+    check(abs(t_renewal_to_onset.magnitude - 82.0) < 1e-9, "Renewal to brake onset 82 ms")
+    check(RM.chunk_inference_latency < AISLE.t_lease, "Chunk inference fits inside the lease")
+    check(abs(f_handover.magnitude - 20.70) < 0.01, "Transient handover force 20.7 N")
+    check(v_restricted < v_inspected_ceiling < AISLE.v_aisle, "Restricted mode sits below the inspected-floor ceiling")
+    a_arm_ratio = (a_arm_hi / a_arm_lo).to("dimensionless").magnitude
+    # margin_arm_stop_demand_ladder.svg fig-alt hand-types 3, 9.8 and 400 m/s^2; caption says over a hundredfold
+    check(abs(a_arm_ratio - 135.6) < 0.1, "The unsupported approach needs about 136 times the guarded arm stop")
+    check(abs(g_std.magnitude - 9.80665) < 1e-9, "Standard gravity 9.8 m/s^2")
+    check(AISLE.v_aisle >= a_trial**2 / j_brake, "Checkpoint trial stop stays in the trapezoidal regime")
+    check(reserve_trial.magnitude < 0 < spare_aisle.magnitude, "Checkpoint: a 1.6 m/s^2 low tail leaves no reserve once Delta_da is charged")
+
+    # ┌── 4. OUTPUT: rendered values ────────────────────────────────────────────────
     # Door branch of C1
     v_latch_str = fmt_velocity(AISLE.v_latch_approach, unit=meter / second, precision=2)
     k_latch_str = fmt_sci_qty(AISLE.k_latch, newton / meter, precision=1)
@@ -1330,12 +1360,6 @@ class ReleaseWorkedVerdict:
     v_aisle_str = fmt_velocity(AISLE.v_aisle, unit=meter / second, precision=1)
     a_arm_ratio_str = fmt_int(round(a_arm_ratio))
     a_trial_str = fmt_acceleration(a_trial, unit=meter / second**2, precision=1)
-    # Arm-stop demands for the margin ladder (generator reads the quantities)
-    a_arm_lo = a_arm_lo
-    a_arm_hi = a_arm_hi
-    g = g_std
-    v_latch = AISLE.v_latch_approach
-    v_latch_high = AISLE.v_latch_high
 ```
 
 To evaluate the safety case, an adjudicator inspects each of the six claims in @tbl-16-cae-scorecard, identifies the physical premise underlying its warrant, and examines the empirical rigor of the supporting data. The door-opening branch of C1 illustrates this systematic review.
@@ -1440,19 +1464,19 @@ Reviewers operationalize these vulnerabilities by constructing explicit defeater
 from mlsysim.core.units import *
 from mlsysim.fmt import fmt, fmt_percent, check
 
-# ┌── 1. LOAD: chapter-local inputs ─────────────────────────────────────────────
-optical_transmission_alarm = 0.85  # category: illustrative (lens transmission below which the check alarms; needs source)
-mount_deflection_limit = 0.15 * ureg.degree  # category: illustrative (mount deflection fault limit; needs source)
-
-# ┌── 2. EXECUTE ────────────────────────────────────────────────────────────────
-mount_deflection_limit_deg = mount_deflection_limit.to(ureg.degree).magnitude
-
-# ┌── 3. GUARD ──────────────────────────────────────────────────────────────────
-check(0 < optical_transmission_alarm < 1, "Transmission threshold is a fraction")
-check(abs(mount_deflection_limit_deg - 0.15) < 1e-12, "Mount deflection limit 0.15 degree")
-
-# ┌── 4. OUTPUT ─────────────────────────────────────────────────────────────────
 class ReleaseCompoundDefeater:
+    # ┌── 1. LOAD: chapter-local inputs ─────────────────────────────────────────────
+    optical_transmission_alarm = 0.85  # category: illustrative (lens transmission below which the check alarms; needs source)
+    mount_deflection_limit = 0.15 * ureg.degree  # category: illustrative (mount deflection fault limit; needs source)
+
+    # ┌── 2. EXECUTE ────────────────────────────────────────────────────────────────
+    mount_deflection_limit_deg = mount_deflection_limit.to(ureg.degree).magnitude
+
+    # ┌── 3. GUARD ──────────────────────────────────────────────────────────────────
+    check(0 < optical_transmission_alarm < 1, "Transmission threshold is a fraction")
+    check(abs(mount_deflection_limit_deg - 0.15) < 1e-12, "Mount deflection limit 0.15 degree")
+
+    # ┌── 4. OUTPUT ─────────────────────────────────────────────────────────────────
     transmission_str = fmt_percent(optical_transmission_alarm, precision=0, style="prose")
     mount_limit_str = fmt(mount_deflection_limit_deg, precision=2)
 ```

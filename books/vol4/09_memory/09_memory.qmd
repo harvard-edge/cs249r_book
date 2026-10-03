@@ -1247,6 +1247,7 @@ class HashedVoxelPayload:
     payload = (blocks * block_side**3 * voxel_bytes).to(ureg.megabyte)
     block_bytes = (block_side**3 * voxel_bytes).to(ureg.byte)
     band_fraction = (v_band / v_ws).to(ureg.dimensionless).magnitude
+    ratio = (m_dense / payload).to(ureg.dimensionless).magnitude
 
     # ┌── 3. GUARD (Invariants) ─────────────────────────────────────────────────
     check(abs(m_dense.magnitude - 2.4) < 1e-9, f"Dense grid should be 2.4 GB, got {m_dense}.")
@@ -1254,6 +1255,7 @@ class HashedVoxelPayload:
     check(abs(blocks - 18_750) < 1e-6, f"Block count should be 18,750, got {blocks}.")
     check(abs(payload.magnitude - 76.8) < 1e-9, "Voxel payload is 76.8 MB before overhead.")
     check(abs(block_bytes.magnitude - 4096) < 1e-9, "One 8^3 block of 8 B voxels is 4,096 B.")
+    check(30 < ratio < 32, f"Dense-to-hashed payload ratio should be about 31x, got {ratio}.")
 
     # ┌── 4. OUTPUT (Formatting) ───────────────────────────────────────────────
     v_ws_str = fmt_qty_int(v_ws, ureg.meter**3)
@@ -1270,7 +1272,6 @@ class HashedVoxelPayload:
     band_pct_str = fmt_percent(band_fraction, precision=1, style="prose")
 
     # visible arithmetic for notebook nbk-memory-empty-air-tax
-    ratio = (m_dense / payload).to(ureg.dimensionless).magnitude
     ratio_str = fmt_int(ratio)
     empty_pct_str = fmt_percent(1 - band_fraction, precision=1, style="prose")
     l_x_str = fmt_qty_int(l_x, ureg.meter)
@@ -1286,7 +1287,6 @@ class HashedVoxelPayload:
     hashed_math = fmt_display_math(
         rf"N_{{\text{{blocks}}}} = \frac{{{fmt_magnitude(v_band, ureg.meter**3, precision=1)}\ \text{{m}}^3}}{{({block_side} \times {_m(pitch)}\ \text{{m}})^3}} = \text{{{fmt_int(blocks)}}}, \qquad \text{{{fmt_int(blocks)}}} \times {block_side}^3 \times {fmt_int(voxel_bytes.magnitude)}\ \text{{B}} = {fmt_magnitude(payload, ureg.megabyte, precision=1)}\ \text{{MB}}"
     )
-    check(30 < ratio < 32, f"Dense-to-hashed payload ratio should be about 31x, got {ratio}.")
 ```
 
 For the illustrative host-map sizing calculation, consider an operational workspace of physical volume $V_{\text{ws}} = L_x L_y L_z$. Discretizing this domain into cubic voxels of uniform pitch $r$ requires memory proportional to workspace volume and to the inverse cube of voxel width:
@@ -1599,6 +1599,7 @@ class RackEndBelief:
     # stop, T_stop = v / a_brake.
     t_stop_const = (v_drive / a_brake).to(ureg.second)
     d_walk_term = (v_h * (tau_delay + t_stop_const)).to(ureg.meter)
+    ms_per_mm = (1 / v_h).to(millisecond / ureg.millimeter)
 
     # ┌── 3. GUARD (Invariants) ────────────────────────────────────────────────
     check(abs(slack_abreast.magnitude) < 1e-9, f"Abreast of the rack end the free depth should be exactly spent, got {slack_abreast}.")
@@ -1609,6 +1610,7 @@ class RackEndBelief:
     check(abs(running_total.to(ureg.millimeter).magnitude - 912.9) < 5e-3, f"Running total after Ch8 should be 912.9 mm, got {running_total}.")
     check(abs(d_walk_term.to(ureg.meter).magnitude - 1.41) < 5e-3, f"Walking term at the drive limit should be 1.41 m, got {d_walk_term}.")
     check(d_walk_term > d_clear, "The walking term alone must exceed the rack-end clear distance.")
+    check(abs(ms_per_mm.magnitude - 0.625) < 1e-9, f"Each millimeter of free depth should buy 0.625 ms, got {ms_per_mm}.")
 
     # ┌── 4. OUTPUT (Formatting) ───────────────────────────────────────────────
     delta_loc_str = fmt_length(delta_loc, unit=ureg.millimeter, precision=0)
@@ -1630,7 +1632,6 @@ class RackEndBelief:
     # visible arithmetic for notebook nbk-memory-erosion-deadline
     _mm = lambda q: fmt_magnitude(q, ureg.meter, precision=2)
     _vh = fmt_magnitude(v_h, ureg.meter / ureg.second, precision=1)
-    ms_per_mm = (1 / v_h).to(millisecond / ureg.millimeter)
     ms_per_mm_str = fmt(ms_per_mm.magnitude, precision=3)
     erosion_abreast_math = fmt_display_math(
         rf"T_{{\text{{inv}}}} = \frac{{({_mm(side_clearance)} - {_mm(delta_loc)} - {_mm(delta_margin)})\ \text{{m}}}}{{{_vh}\ \text{{m/s}}}} = {fmt_magnitude(t_exp_abreast, millisecond, precision=0)}\ \text{{ms}}"
@@ -1641,7 +1642,6 @@ class RackEndBelief:
     erosion_left_math = fmt_display_math(
         rf"{fmt_magnitude(t_exp_ahead, millisecond, precision=2)} - {fmt_magnitude(t_age, millisecond, precision=1)} = {fmt_magnitude(t_left_at_dispatch, millisecond, precision=2)}\ \text{{ms}} \approx {frames_bridged_str} \times {fmt_magnitude(frame_period, millisecond, precision=1)}\ \text{{ms}}"
     )
-    check(abs(ms_per_mm.magnitude - 0.625) < 1e-9, f"Each millimeter of free depth should buy 0.625 ms, got {ms_per_mm}.")
 ```
 
 The fundamental divergence between propagated prediction and live physical observation dictates what a robot may safely execute at an aisle intersection. At the end of a storage rack, a worker may step abruptly into the clear distance $D_{\text{clear}} =$ `{python} RackEndBelief.d_clear_str` defended by the machine's stopping budget. Once the rack structure occludes the cross aisle, the central systems question becomes concrete: for how long may remembered free space certify that the vehicle's path remains clear?
@@ -2442,9 +2442,16 @@ class MugHandleBelief:
     e0 = AISLE.grasp_initial_error  # category: illustrative (handle-pose error at the wrist capture)
     v_conv = AISLE.v_conveyor  # category: illustrative (takeaway-conveyor speed bound)
     e_max = AISLE.grasp_tolerance  # category: chosen (task-profile grasp tolerance)
+    t_use = 35.0 * millisecond  # category: illustrative (capture-to-use age on the consumer's clock)
+    eps_sync = LatchSlotBelief.eps_sync  # category: illustrative (clock-conversion bound, as in the latch record)
 
     # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────────
     t_exp = ((e_max - e0) / v_conv).to(millisecond)
+    age_upper = (t_use + eps_sync).to(millisecond)
+    e_use = (e0 + v_conv * age_upper).to(ureg.millimeter)
+    e_margin = (e_max - e_use).to(ureg.millimeter)
+    t_left = (t_exp - age_upper).to(millisecond)
+    t_latest = (t_exp - eps_sync).to(millisecond)
 
     # ┌── 3. GUARD (Invariants) ────────────────────────────────────────────────
     check(abs(e0.to(ureg.millimeter).magnitude - 3.0) < 1e-9, f"Handle initial error should be 3 mm, got {e0}.")
@@ -2452,23 +2459,14 @@ class MugHandleBelief:
     check(abs(v_conv.to(ureg.meter / ureg.second).magnitude - 0.20) < 1e-9, f"Conveyor speed should be 0.20 m/s, got {v_conv}.")
     check(abs(t_exp.magnitude - 60.0) < 1e-9, f"Mug-handle expiry should be 60 ms, got {t_exp}.")
     check(LatchSlotBelief.t_exp > t_exp, "The mug handle must expire before the latch-slot finger.")
+    check(e_use < e_max and t_left.magnitude > 0, "The worked grasp must pass the admission check.")
+    check(abs(e_use.magnitude - 10.04) < 1e-9, f"Error at use should be 10.04 mm, got {e_use}.")
 
     # ┌── 4. OUTPUT (Formatting) ───────────────────────────────────────────────
     e0_str = fmt_length(e0, unit=ureg.millimeter, precision=0)
     v_conv_str = fmt_velocity(v_conv, unit=ureg.meter / ureg.second, precision=2)
     e_max_str = fmt_length(e_max, unit=ureg.millimeter, precision=0)
     t_exp_str = fmt_latency(t_exp, unit=millisecond, precision=0)
-
-    # admission check for notebook nbk-memory-admission-margin
-    t_use = 35.0 * millisecond  # category: illustrative (capture-to-use age on the consumer's clock)
-    eps_sync = LatchSlotBelief.eps_sync  # category: illustrative (clock-conversion bound, as in the latch record)
-    age_upper = (t_use + eps_sync).to(millisecond)
-    e_use = (e0 + v_conv * age_upper).to(ureg.millimeter)
-    e_margin = (e_max - e_use).to(ureg.millimeter)
-    t_left = (t_exp - age_upper).to(millisecond)
-    t_latest = (t_exp - eps_sync).to(millisecond)
-    check(e_use < e_max and t_left.magnitude > 0, "The worked grasp must pass the admission check.")
-    check(abs(e_use.magnitude - 10.04) < 1e-9, f"Error at use should be 10.04 mm, got {e_use}.")
     t_use_str = fmt_latency(t_use, unit=millisecond, precision=0)
     e_margin_str = fmt_length(e_margin, unit=ureg.millimeter, precision=2)
     t_left_str = fmt_latency(t_left, unit=millisecond, precision=1)

@@ -723,6 +723,10 @@ class ValidateCommand:
             Scope("lego-guard-strength", "_run_lego_guard_strength",
                   note="stage-3 check() guards must bound the prose claim, "
                        "not merely assert existence or positivity", default=False),
+            Scope("lego-cell-architecture", "_run_lego_cell_architecture",
+                  note="single-class and class-first placement invariants", default=False),
+            Scope("lego-stage4-purity", "_run_lego_stage4_purity",
+                  note="Stage 4 (OUTPUT) contains strictly display string assignments", default=False),
             # Added 2026-05-26: \\${python} collision — escaped dollar before
             # {python} silently fails to render; correct form is \\$\\`{python}.
             Scope("python-dollar-collision", "_run_python_dollar_collision",
@@ -13557,6 +13561,53 @@ class ValidateCommand:
             issues=issues,
             elapsed_ms=int((time.time() - t0) * 1000),
         )
+
+    def _run_lego_cell_architecture(self, root: Path) -> ValidationRunResult:
+        """code --scope lego-cell-architecture: single-class and class-first placement."""
+        from cli.commands._registry_checks import check_lego_cell_architecture, repo_root_from_here
+
+        t0 = time.time()
+        repo = repo_root_from_here()
+        qmd_files = self._qmd_files(root)
+        raw = check_lego_cell_architecture(repo, paths=qmd_files)
+        issues = [
+            ValidationIssue(
+                file=i.file, line=i.line, code=i.code,
+                message=i.message, severity=i.severity,
+            )
+            for i in raw
+        ]
+        return ValidationRunResult(
+            name="lego-cell-architecture",
+            description=f"LEGO cell architecture scan ({len(qmd_files)} files)",
+            files_checked=len(qmd_files),
+            issues=issues,
+            elapsed_ms=int((time.time() - t0) * 1000),
+        )
+
+    def _run_lego_stage4_purity(self, root: Path) -> ValidationRunResult:
+        """code --scope lego-stage4-purity: Stage 4 display string purity."""
+        from cli.commands._registry_checks import check_lego_stage4_purity, repo_root_from_here
+
+        t0 = time.time()
+        repo = repo_root_from_here()
+        qmd_files = self._qmd_files(root)
+        raw = check_lego_stage4_purity(repo, paths=qmd_files)
+        issues = [
+            ValidationIssue(
+                file=i.file, line=i.line, code=i.code,
+                message=i.message, severity=i.severity,
+            )
+            for i in raw
+        ]
+        return ValidationRunResult(
+            name="lego-stage4-purity",
+            description=f"LEGO Stage 4 purity scan ({len(qmd_files)} files)",
+            files_checked=len(qmd_files),
+            issues=issues,
+            elapsed_ms=int((time.time() - t0) * 1000),
+        )
+
 
     # Binary units are banned in rendered prose (prose-craft.md: "Never binary
     # units in prose. Write GB and TB, not GiB or TiB"). Exactly one helper is
