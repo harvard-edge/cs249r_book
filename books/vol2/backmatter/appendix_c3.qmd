@@ -26,17 +26,17 @@ The C$^3$ taxonomy does not replace D·A·M; it extends it. When a workload move
 
 : **Mapping D·A·M to C$^3$**: How single-machine diagnostic concerns generalize to fleet-scale challenges. {#tbl-c3-dam-mapping tbl-colwidths="[15,28,22,35]"}
 
-The most important row in @tbl-c3-dam-mapping is the last one. On a single machine, the overhead term ($L_{\text{lat}}$) in the iron law is typically small, consisting of kernel launch latency, Python dispatch, and synchronization barriers. At fleet scale, coordination becomes an axis in its own right: checkpoint writes, failure detection and recovery, pipeline bubble overhead, scheduler preemptions, and maintenance windows collectively consume a significant fraction of wall time. Coordination is the axis that single-machine diagnosis lacks, and much of this book is devoted to it.
+The most important row in @tbl-c3-dam-mapping is the last one. On a single machine, the overhead term ($\Latency$) in the iron law is typically small, consisting of kernel launch latency, Python dispatch, and synchronization barriers. At fleet scale, coordination becomes an axis in its own right: checkpoint writes, failure detection and recovery, pipeline bubble overhead, scheduler preemptions, and maintenance windows collectively consume a significant fraction of wall time. Coordination is the axis that single-machine diagnosis lacks, and much of this book is devoted to it.
 
 ## Diagnostic Summary {#sec-appdx-c3-taxonomy-diagnostic-summary}
 
 With the mapping in place, diagnosis becomes a matter of matching symptoms to the axis that constrains the fleet. @Tbl-c3-diagnostic-summary provides the main reference table for fleet-scale diagnosis. Each C$^3$ axis maps to a physical constraint, observable symptoms, measurable metrics, and engineering levers.
 
-| **C$^3$ Axis**            | **Physical Constraint**                                           | **Symptoms**                                                                  | **Key Metric**                                                                                                 | **High-Leverage Optimization**                                                                             |
-|:--------------------------|:------------------------------------------------------------------|:------------------------------------------------------------------------------|:---------------------------------------------------------------------------------------------------------------|:-----------------------------------------------------------------------------------------------------------|
-| **Compute ($C_1$)**       | Arithmetic throughput ($R_{\text{peak}} \times \eta_{\text{hw}}$) | Low MFU, GPU utilization below 80%, poor per-GPU performance                  | MFU (Model FLOPs Utilization)                                                                                  | Kernel optimization, mixed precision, operator fusion (@sec-performance-engineering)                       |
-| **Communication ($C_2$)** | Network bandwidth ($\text{BW}_{\text{network}}$)                  | High AllReduce time, low scaling efficiency, communication > 30% of step      | Scaling efficiency ($\eta_{\text{scaling}}$), communication fraction ($T_{\text{comm}}(N)/T_{\text{step}}(N)$) | Gradient compression, overlap compute/communication, topology optimization (@sec-collective-communication) |
-| **Coordination ($C_3$)**  | Synchronization overhead and failure recovery                     | Low goodput ratio, frequent restarts, large pipeline bubbles, scheduler churn | Goodput ratio ($T_{\text{useful}}/T_{\text{wall}}$)                                                            | Async checkpointing, elastic training, faster failure detection (@sec-fault-tolerance-reliability)         |
+| **C$^3$ Axis**            | **Physical Constraint**                                  | **Symptoms**                                                                  | **Key Metric**                                                                                                | **High-Leverage Optimization**                                                                             |
+|:--------------------------|:---------------------------------------------------------|:------------------------------------------------------------------------------|:--------------------------------------------------------------------------------------------------------------|:-----------------------------------------------------------------------------------------------------------|
+| **Compute ($C_1$)**       | Arithmetic throughput ($\PeakRate \times \EfficiencyHw$) | Low MFU, GPU utilization below 80%, poor per-GPU performance                  | MFU (Model FLOPs Utilization)                                                                                 | Kernel optimization, mixed precision, operator fusion (@sec-performance-engineering)                       |
+| **Communication ($C_2$)** | Network bandwidth ($\Bandwidth_{\text{network}}$)        | High AllReduce time, low scaling efficiency, communication > 30% of step      | Scaling efficiency ($\ScalingEfficiency$), communication fraction ($\CommunicationTime/\DistributedStepTime$) | Gradient compression, overlap compute/communication, topology optimization (@sec-collective-communication) |
+| **Coordination ($C_3$)**  | Synchronization overhead and failure recovery            | Low goodput ratio, frequent restarts, large pipeline bubbles, scheduler churn | Goodput ratio ($T_{\text{useful}}/T_{\text{wall}}$)                                                           | Async checkpointing, elastic training, faster failure detection (@sec-fault-tolerance-reliability)         |
 
 : **C$^3$ Diagnostic Summary**: Each axis maps to a distinct physical constraint and a high-leverage optimization strategy. Start diagnosis here: identify which constraint binds, then follow the optimization pointer to the relevant chapter. {#tbl-c3-diagnostic-summary}
 
@@ -44,7 +44,7 @@ With the mapping in place, diagnosis becomes a matter of matching symptoms to th
 
 Under ideal partitioning of fixed work, the same classification can be written as a time budget for each distributed step. The Fleet Law, introduced in @sec-vol2-introduction-fleet-law, decomposes every distributed training step into the distributed-step time budget:
 
-$$ T_{\text{step}}(N) = \frac{T_{\text{compute}}}{N} + T_{\text{comm}}(N) + T_{\text{sync}}(N) - T_{\text{overlap}} $$
+$$ \DistributedStepTime = \frac{\IronlawTermTimesCompute}{N} + \CommunicationTime + \SynchronizationTime - \OverlappedTime $$
 
 This equation is the fleet-scale counterpart of the iron law. Where the iron law decomposes single-machine execution into data movement, compute, and overhead, the Fleet Law decomposes distributed execution into local arithmetic, network data transfer, and synchronization logic. The diagnostic strategy is identical: measure each term, identify which dominates, and direct engineering effort at the dominant term.
 
@@ -52,16 +52,16 @@ This equation is the fleet-scale counterpart of the iron law. Where the iron law
 
 Each Fleet Law term maps to specific measurable activities:
 
-- **$T_{\text{compute}}/N$**: Forward pass, backward pass, and optimizer step, all local arithmetic after distribution across $N$ devices. Governed by MFU and per-GPU kernel efficiency. Improvements come from better kernels, mixed precision, and operator fusion.
-- **$T_{\text{comm}}(N)$**: AllReduce of gradients, AllGather of parameters (in FSDP/ZeRO), activation transfers in tensor/pipeline parallelism. Governed by network bandwidth and collective algorithm choice. Improvements come from gradient compression, hierarchical collectives, and compute-communication overlap.
-- **$T_{\text{sync}}(N)$**: Synchronization barriers, checkpoint writes, failure detection and recovery, pipeline bubble idle time, scheduler preemptions, and maintenance windows. Governed by cluster reliability and orchestration software. Improvements come from asynchronous checkpointing, elastic training, and faster failure detection.
-- **$T_{\text{overlap}}$**: Communication or coordination time hidden behind useful arithmetic. Governed by scheduling and implementation overlap.
+- **$\IronlawTermTimesCompute/N$**: Forward pass, backward pass, and optimizer step, all local arithmetic after distribution across $N$ devices. Governed by MFU and per-GPU kernel efficiency. Improvements come from better kernels, mixed precision, and operator fusion.
+- **$\CommunicationTime$**: AllReduce of gradients, AllGather of parameters (in FSDP/ZeRO), activation transfers in tensor/pipeline parallelism. Governed by network bandwidth and collective algorithm choice. Improvements come from gradient compression, hierarchical collectives, and compute-communication overlap.
+- **$\SynchronizationTime$**: Synchronization barriers, checkpoint writes, failure detection and recovery, pipeline bubble idle time, scheduler preemptions, and maintenance windows. Governed by cluster reliability and orchestration software. Improvements come from asynchronous checkpointing, elastic training, and faster failure detection.
+- **$\OverlappedTime$**: Communication or coordination time hidden behind useful arithmetic. Governed by scheduling and implementation overlap.
 
 Operational events may be amortized into the step budget or accounted for separately in operational goodput. The same checkpoint or recovery delay must not appear in both. The compute-time fraction follows:
 
-$$ f_{\text{compute}} = \frac{T_{\text{compute}}/N}{T_{\text{step}}(N)} $$
+$$ \UsefulComputetimeFraction = \frac{\IronlawTermTimesCompute/N}{\DistributedStepTime} $$
 
-When $f_{\text{compute}}$ drops below 0.5, the fleet spends more time on communication and coordination than on useful arithmetic. This compute-time fraction is not total fleet efficiency; useful fleet efficiency also depends on MFU, scaling efficiency, and goodput. The C$^3$ taxonomy identifies which noncompute term is responsible.
+When $\UsefulComputetimeFraction$ drops below 0.5, the fleet spends more time on communication and coordination than on useful arithmetic. This compute-time fraction is not total fleet efficiency; useful fleet efficiency also depends on MFU, scaling efficiency, and goodput. The C$^3$ taxonomy identifies which noncompute term is responsible.
 
 ## Intersection Landscape {#sec-appdx-c3-taxonomy-intersection-landscape}
 
@@ -83,7 +83,7 @@ The tripartite Venn diagram in @fig-c3-taxonomy establishes the co-design landsc
 
 ### Compute $\cap$ communication {#sec-appdx-c3-taxonomy-comp-comm}
 
-This intersection governs whether the system can hide communication behind computation. The communication-to-compute ratio ($\rho = T_{\text{comm}}(N)/(T_{\text{compute}}/N)$) is the key diagnostic metric (@sec-appdx-fleet-foundations-comm-compute-ratio). When $\rho < 1$, computation takes longer than communication and there is enough arithmetic duration to hide the transfer in principle; dependencies and resource contention determine whether that overlap is achievable. When $\rho > 1$, GPUs complete their local work before the network delivers the next round of operands, and the system becomes communication-bound.
+This intersection governs whether the system can hide communication behind computation. The communication-to-compute ratio ($\rho = \CommunicationTime/(\IronlawTermTimesCompute/N)$) is the key diagnostic metric (@sec-appdx-fleet-foundations-comm-compute-ratio). When $\rho < 1$, computation takes longer than communication and there is enough arithmetic duration to hide the transfer in principle; dependencies and resource contention determine whether that overlap is achievable. When $\rho > 1$, GPUs complete their local work before the network delivers the next round of operands, and the system becomes communication-bound.
 
 In a GPU trace, this bottleneck appears as exposed communication intervals where tensor cores sit idle awaiting collective completion (such as `ncclKernel_AllReduce` or `ncclKernel_AllGather`). Engineering at this intersection focuses on overlap and compression: launching AllReduce during the backward pass before all gradients are finalized, pipelining activation transfers in 1F1B schedules, increasing microbatch sizes or gradient accumulation steps to dilute communication frequency, and applying wire quantization to reduce payload bytes, while accounting for metadata, codec time, and numerical error (@sec-distributed-training-systems, @sec-collective-communication).
 
@@ -93,7 +93,7 @@ This intersection captures the idle compute caused by orchestration and resilien
 
 Three distinct mechanisms govern this intersection:
 
-1.  **Pipeline bubbles**: In pipeline parallelism (PP), stages idle during pipeline fill (warmup) and drain (cooldown). For $N_{\text{PP}}$ pipeline stages and $m$ microbatches, the bubble fraction $b_{\text{pipe}} = (N_{\text{PP}} - 1)/(N_{\text{PP}} - 1 + m)$ (@sec-appdx-comm-foundations-bubble-fraction) is accelerator time lost to idling; more microbatches or interleaved schedules shrink it.
+1.  **Pipeline bubbles**: In pipeline parallelism (PP), stages idle during pipeline fill (warmup) and drain (cooldown). For $\PipelineparallelDegreePp$ pipeline stages and $m$ microbatches, the bubble fraction $\PipelineBubbleFraction = (\PipelineparallelDegreePp - 1)/(\PipelineparallelDegreePp - 1 + m)$ (@sec-appdx-comm-foundations-bubble-fraction) is accelerator time lost to idling; more microbatches or interleaved schedules shrink it.
 2.  **Checkpoint stalls**: Synchronous checkpoint writes that block the training loop to serialize terabytes of weights and optimizer states convert expensive compute time into storage wait time. Asynchronous checkpointing mitigates this by snapshotting host-pinned or local Non-Volatile Memory Express (NVMe) memory in milliseconds, delegating remote persistence to background I/O threads.
 3.  **Recovery rollback**: When a node fails in an $N$-device cluster, training halts and rolls back to the last valid checkpoint, squandering the arithmetic executed since that snapshot. Minimizing the failure blast radius through fast health heartbeats and dynamic node replacement bounds this compute loss (@sec-fault-tolerance-reliability, @sec-fleet-orchestration).
 
@@ -113,11 +113,11 @@ The central engineering challenges encompass:
 
 -  **4D parallelism co-design**: Balancing Data Parallelism (DP), Tensor Parallelism (TP), Pipeline Parallelism (PP), and Expert Parallelism (EP) so that memory consumption fits within accelerator high-bandwidth memory (HBM) ($C_1$), high-frequency communications map to intra-node NVLink and low-frequency communications map to inter-node fabrics ($C_2$), and pipeline bubbles and barrier dependencies are minimized ($C_3$).
 -  **Memory sharding vs. communication volume**: Frameworks like PyTorch FSDP2 and DeepSpeed ZeRO-3 eliminate memory redundancy ($C_1$) by partitioning model states across workers, but pay a strict tax in repeated AllGather communication ($C_2$) and state coordination metadata ($C_3$).
--  **Holistic goodput optimization**: Google's ML Productivity Goodput metric decomposes fleet productivity into program goodput ($\eta_{\text{program}}$), runtime goodput ($\eta_{\text{runtime}}$), and scheduling goodput ($\eta_{\text{scheduling}}$). These factors cut across the C$^3$ axes rather than mapping one to one onto them. Communication overlap improves program goodput, while checkpointing and recovery, which are Coordination costs, determine runtime goodput (@sec-vol2-introduction-fleet-law).
+-  **Holistic goodput optimization**: Google's ML Productivity Goodput metric decomposes fleet productivity into program goodput ($\MlProductivityGoodputFactorsProgram$), runtime goodput ($\MlProductivityGoodputFactorsRuntime$), and scheduling goodput ($\MlProductivityGoodputFactorsScheduling$). These factors cut across the C$^3$ axes rather than mapping one to one onto them. Communication overlap improves program goodput, while checkpointing and recovery, which are Coordination costs, determine runtime goodput (@sec-vol2-introduction-fleet-law).
 
 ### C$^3$ coordination and overlap {#sec-appdx-c3-taxonomy-coordination-overlap}
 
-Just as single-node execution transforms the additive iron law into a maximum bounded by dependencies (@sec-appdx-dam-taxonomy-dam-coordination-sum-max), overlap at fleet scale transforms the Fleet Law (@eq-fleet-law) by maximizing $T_{\text{overlap}}$. @Tbl-c3-overlap summarizes the primary overlap techniques across the C$^3$ dimensions.
+Just as single-node execution transforms the additive iron law into a maximum bounded by dependencies (@sec-appdx-dam-taxonomy-dam-coordination-sum-max), overlap at fleet scale transforms the Fleet Law (@eq-fleet-law) by maximizing $\OverlappedTime$. @Tbl-c3-overlap summarizes the primary overlap techniques across the C$^3$ dimensions.
 
 | **Technique**                      | **C$^3$ Overlap**    | **Mechanism**                                                                                            | **Implementation**                                                                              |
 |:-----------------------------------|:---------------------|:---------------------------------------------------------------------------------------------------------|:------------------------------------------------------------------------------------------------|
@@ -127,7 +127,7 @@ Just as single-node execution transforms the additive iron law into a maximum bo
 | **Hierarchical Collectives**       | $C_2$ overlaps $C_3$ | Partitions collective into local NVLink reduction and inter-node fabric transfer, isolating tail jitter  | Hierarchical NCCL communicators (@sec-collective-communication)                                 |
 | **Double-Buffered Data Streaming** | $C_1$ overlaps $C_2$ | Prefetches and decompresses next batch shard in pinned host memory while GPUs compute current batch      | Host pinned memory + async D2D transfer (@sec-data-storage)                                     |
 
-: **C$^3$ Overlap Techniques**: System techniques that hide communication or coordination behind useful computation, maximizing $T_{\text{overlap}}$ in the Fleet Law. {#tbl-c3-overlap tbl-colwidths="[24,18,34,24]"}
+: **C$^3$ Overlap Techniques**: System techniques that hide communication or coordination behind useful computation, maximizing $\OverlappedTime$ in the Fleet Law. {#tbl-c3-overlap tbl-colwidths="[24,18,34,24]"}
 
 ### Storage as the persistent substrate {#sec-appdx-c3-taxonomy-storage-substrate}
 
@@ -176,11 +176,11 @@ In the middle of a production incident, fast heuristics narrow the search space 
 
 Once the bottleneck axis is identified, @tbl-c3-bottleneck-actions shows which optimizations help and which ones are wasted.
 
-| **If the fleet is...**  |   **Dominant Term**    | **Optimization That Works**                                                              | **Optimization That is Wasted**                                                        |
-|:------------------------|:----------------------:|:-----------------------------------------------------------------------------------------|:---------------------------------------------------------------------------------------|
-| **Compute-bound**       | $T_{\text{compute}}/N$ | Better kernels, mixed precision, operator fusion, next-gen accelerators                  | More network bandwidth (GPUs are not waiting on the network)                           |
-| **Communication-bound** |  $T_{\text{comm}}(N)$  | Gradient compression, compute-comm overlap, hierarchical collectives, InfiniBand upgrade | Faster GPUs (they will just idle faster while waiting for the network)                 |
-| **Coordination-bound**  |  $T_{\text{sync}}(N)$  | Async checkpointing, elastic training, faster failure detection, fewer pipeline stages   | Faster arithmetic alone; faster networks help only transfer-related coordination costs |
+| **If the fleet is...**  |      **Dominant Term**       | **Optimization That Works**                                                              | **Optimization That is Wasted**                                                        |
+|:------------------------|:----------------------------:|:-----------------------------------------------------------------------------------------|:---------------------------------------------------------------------------------------|
+| **Compute-bound**       | $\IronlawTermTimesCompute/N$ | Better kernels, mixed precision, operator fusion, next-gen accelerators                  | More network bandwidth (GPUs are not waiting on the network)                           |
+| **Communication-bound** |     $\CommunicationTime$     | Gradient compression, compute-comm overlap, hierarchical collectives, InfiniBand upgrade | Faster GPUs (they will just idle faster while waiting for the network)                 |
+| **Coordination-bound**  |    $\SynchronizationTime$    | Async checkpointing, elastic training, faster failure detection, fewer pipeline stages   | Faster arithmetic alone; faster networks help only transfer-related coordination costs |
 
 : **What Works vs. What Is Wasted at Fleet Scale**: Optimizing a nondominant C$^3$ axis yields limited improvement and often worsens cost efficiency. A communication-bound fleet will gain little from faster GPUs until AllReduce and other communication bottlenecks are addressed. {#tbl-c3-bottleneck-actions tbl-colwidths="[19,11,35,35]"}
 
@@ -322,14 +322,14 @@ Target the coordination axis:
 
 @Tbl-c3-troubleshooting provides a diagnostic matrix for common fleet-scale failure modes.
 
-| **Symptom**                                    |     **C$^3$ Axis**    | **Diagnostic Question**                                                      | **Measurement**                                         | **Action**                                                             |
-|:-----------------------------------------------|:---------------------:|:-----------------------------------------------------------------------------|:--------------------------------------------------------|:-----------------------------------------------------------------------|
-| **Low MFU despite fast network**               |      **Compute**      | Are Tensor Cores engaged? Is batch size sufficient for arithmetic intensity? | Per-GPU kernel trace (Nsight/PyTorch Profiler)          | Enable mixed precision, increase per-GPU batch size                    |
-| **Throughput plateaus when adding GPUs**       |   **Communication**   | Does AllReduce time grow faster than computation shrinks?                    | NCCL trace, $\rho$ ratio                                | Gradient compression, hierarchical collectives, overlap                |
-| **Frequent job restarts**                      |    **Coordination**   | What is the cluster MTBF? Is detection fast enough?                          | Failure logs, MTBF calculation                          | Elastic training, faster detection, smaller blast radius               |
-| **High GPU-hours but slow progress**           |    **Coordination**   | What fraction of GPU-hours produce useful training steps?                    | Goodput ratio ($T_{\text{useful}}/T_{\text{wall}}$)     | Async checkpointing, reduce pipeline stages, eliminate scheduler churn |
-| **Scaling efficiency drops with cluster size** |     **Comm/Coord**    | Is the bottleneck network bandwidth or synchronization barriers?             | Separate $T_{\text{comm}}(N)$ from $T_{\text{sync}}(N)$ | If comm: compress or overlap. If coord: async methods                  |
-| **Stragglers slow entire job**                 | **Comm $\cap$ Coord** | Is one node consistently last to reach the AllReduce barrier?                | Per-node step time histogram                            | Straggler detection + replacement, bounded staleness, backup workers   |
+| **Symptom**                                    |     **C$^3$ Axis**    | **Diagnostic Question**                                                      | **Measurement**                                           | **Action**                                                             |
+|:-----------------------------------------------|:---------------------:|:-----------------------------------------------------------------------------|:----------------------------------------------------------|:-----------------------------------------------------------------------|
+| **Low MFU despite fast network**               |      **Compute**      | Are Tensor Cores engaged? Is batch size sufficient for arithmetic intensity? | Per-GPU kernel trace (Nsight/PyTorch Profiler)            | Enable mixed precision, increase per-GPU batch size                    |
+| **Throughput plateaus when adding GPUs**       |   **Communication**   | Does AllReduce time grow faster than computation shrinks?                    | NCCL trace, $\rho$ ratio                                  | Gradient compression, hierarchical collectives, overlap                |
+| **Frequent job restarts**                      |    **Coordination**   | What is the cluster MTBF? Is detection fast enough?                          | Failure logs, MTBF calculation                            | Elastic training, faster detection, smaller blast radius               |
+| **High GPU-hours but slow progress**           |    **Coordination**   | What fraction of GPU-hours produce useful training steps?                    | Goodput ratio ($T_{\text{useful}}/T_{\text{wall}}$)       | Async checkpointing, reduce pipeline stages, eliminate scheduler churn |
+| **Scaling efficiency drops with cluster size** |     **Comm/Coord**    | Is the bottleneck network bandwidth or synchronization barriers?             | Separate $\CommunicationTime$ from $\SynchronizationTime$ | If comm: compress or overlap. If coord: async methods                  |
+| **Stragglers slow entire job**                 | **Comm $\cap$ Coord** | Is one node consistently last to reach the AllReduce barrier?                | Per-node step time histogram                              | Straggler detection + replacement, bounded staleness, backup workers   |
 
 : **C$^3$ Troubleshooting Matrix**: Root cause identification and remediation for common fleet-scale bottlenecks. Each row connects a user-visible symptom to the C$^3$ axis most likely responsible, reducing the search space before reaching for a profiler. {#tbl-c3-troubleshooting tbl-colwidths="[22,12,23,20,23]"}
 
@@ -363,13 +363,13 @@ class C3Scorecard:
 
 The C$^3$ Scorecard grades fleet efficiency against known thresholds, extending the single-machine scorecard (@sec-appdx-dam-taxonomy) to the distributed environment. @Tbl-c3-scorecard defines the three metrics that characterize fleet health.
 
-| **C$^3$ Axis**    |                    **Metric**                    |                                                    **Definition**                                                    |            **Failing Grade**            |            **Passing Grade**            |
-|:------------------|:------------------------------------------------:|:--------------------------------------------------------------------------------------------------------------------:|:---------------------------------------:|:---------------------------------------:|
-| **Compute**       |                     **MFU**                      |                         $\frac{O_{\text{useful}}}{N R_{\text{peak}} \times T_{\text{step}}}$                         |  $<$ `{python} C3Scorecard.mfu_low_str` | $>$ `{python} C3Scorecard.mfu_high_str` |
-| **Communication** | **Scaling Efficiency** ($\eta_{\text{scaling}}$) |                                              $\frac{T_1}{N \times T_N}$                                              | $<$ `{python} C3Scorecard.eff_8192_str` |  $>$ `{python} C3Scorecard.eff_256_str` |
-| **Coordination**  |                **Goodput Ratio**                 | $\frac{T_{\text{useful}}}{T_{\text{wall}}}$ or $\frac{\text{useful steps/sec}}{\text{ideal or allocated steps/sec}}$ |                 $<$ 75%                 |                 $>$ 90%                 |
+| **C$^3$ Axis**    |                   **Metric**                  |                                                    **Definition**                                                    |            **Failing Grade**            |            **Passing Grade**            |
+|:------------------|:---------------------------------------------:|:--------------------------------------------------------------------------------------------------------------------:|:---------------------------------------:|:---------------------------------------:|
+| **Compute**       |                    **MFU**                    |                            $\frac{\UsefulModelFlops}{N \PeakRate \times T_{\text{step}}}$                            |  $<$ `{python} C3Scorecard.mfu_low_str` | $>$ `{python} C3Scorecard.mfu_high_str` |
+| **Communication** | **Scaling Efficiency** ($\ScalingEfficiency$) |                                              $\frac{\SingledeviceTimeOne}{N \times \NdeviceTime}$                                              | $<$ `{python} C3Scorecard.eff_8192_str` |  $>$ `{python} C3Scorecard.eff_256_str` |
+| **Coordination**  |               **Goodput Ratio**               | $\frac{T_{\text{useful}}}{T_{\text{wall}}}$ or $\frac{\text{useful steps/sec}}{\text{ideal or allocated steps/sec}}$ |                 $<$ 75%                 |                 $>$ 90%                 |
 
-: **The C$^3$ Efficiency Rubric**: Use these three numbers to characterize fleet health. The MFU denominator uses aggregate fleet peak, written as $N R_{\text{peak}}$ when $R_{\text{peak}}$ is a per-device value. These illustrative thresholds guide investigation; passing all three does not prove that inexpensive optimizations are exhausted. {#tbl-c3-scorecard tbl-colwidths="[16,21,29,17,17]"}
+: **The C$^3$ Efficiency Rubric**: Use these three numbers to characterize fleet health. The MFU denominator uses aggregate fleet peak, written as $N \PeakRate$ when $\PeakRate$ is a per-device value. These illustrative thresholds guide investigation; passing all three does not prove that inexpensive optimizations are exhausted. {#tbl-c3-scorecard tbl-colwidths="[16,21,29,17,17]"}
 
 ## C$^3$ Infrastructure Diagnostic Decision Tree and Fleet D·A·M Scorecard {#sec-appdx-c3-diagnostic-tree}
 
@@ -440,8 +440,8 @@ The hardware-first diagnostic tree below guides triage from initial telemetry si
 
 The **Fleet D·A·M Scorecard** in @tbl-c3-dam-scorecard generalizes single-node Data, Algorithm, and Machine (D·A·M) diagnostics to fleet-scale C$^3$ bottlenecks.
 
-| **D·A·M Axis**      | **Fleet Telemetry Signal**                                                   | **C$^3$ Bottleneck Wall**      | **Target Efficiency Benchmark**                                                                                         |
-|:--------------------|:-----------------------------------------------------------------------------|:-------------------------------|:------------------------------------------------------------------------------------------------------------------------|
+| **D·A·M Axis**             | **Fleet Telemetry Signal**                                                   | **C$^3$ Bottleneck Wall**      | **Target Efficiency Benchmark**                                                                                         |
+|:---------------------------|:-----------------------------------------------------------------------------|:-------------------------------|:------------------------------------------------------------------------------------------------------------------------|
 | **Data ($\text{D}$)**      | Network fabric RX/TX saturation, storage write I/O wait times                | **Communication/Coordination** | I/O wait time $< 2\%$ of step time; NCCL ring bandwidth $> 85\%$ of fabric peak                                         |
 | **Algorithm ($\text{A}$)** | Pipeline bubble idle fraction, partitioning imbalance across stages          | **Compute/Coordination**       | Pipeline bubble fraction $< 20\%$ under the balanced-stage model                                                        |
 | **Machine ($\text{M}$)**   | Model FLOPs utilization (MFU), PCIe AER errors, thermal and power throttling | **Compute**                    | MFU $>$ `{python} C3Scorecard.mfu_high_str`; thermal throttle events $= 0$; PCIe link width held at maximum (Gen 5 x16) |
@@ -456,7 +456,7 @@ Scaling laws are usually written in algorithmic FLOPs, but a training fleet deli
 
 Scaling laws (Kaplan, Chinchilla, and their successors) predict model quality as a function of algorithmic training compute. They usually abstract away systems efficiency: wall-clock time, accelerator peak FLOP/s, compute-phase efficiency, communication overhead, and scheduler losses enter later when teams provision hardware to deliver the target compute budget. In C$^3$ terms, scaling-law FLOPs must be converted into raw fleet capacity after compute-phase, distributed-step, and operational-goodput losses.
 
-The gap between scaling-law predictions and observed training outcomes is, in large part, a C$^3$ gap. A team that budgets $10^{24}$ peak hardware FLOPs of capacity will deliver fewer useful model FLOPs after three multiplicative losses: per-GPU compute-phase efficiency, inter-node scaling efficiency ($\eta_{\text{scaling}}$), and operational goodput.
+The gap between scaling-law predictions and observed training outcomes is, in large part, a C$^3$ gap. A team that budgets $10^{24}$ peak hardware FLOPs of capacity will deliver fewer useful model FLOPs after three multiplicative losses: per-GPU compute-phase efficiency, inter-node scaling efficiency ($\ScalingEfficiency$), and operational goodput.
 
 ### The effective FLOP/s concept {#sec-appdx-c3-taxonomy-effective-flops}
 
@@ -505,9 +505,9 @@ class C3EffectiveFlops:
 
 A fleet's **Effective FLOP/s**\index{Effective FLOP/s} is the usable throughput after compounding three disjoint C$^3$ efficiency factors:
 
-$$R_{\text{eff}} = (N R_{\text{peak}}) \times \underbrace{\text{MFU}}_{\text{Compute}} \times \underbrace{\eta_{\text{scaling}}}_{\text{Distributed step}} \times \underbrace{\eta_{\text{goodput}}}_{\text{Operational goodput}}$$
+$$\EffectiveFleetThroughput = (N \PeakRate) \times \underbrace{\ModelFlopsUtilization}_{\text{Compute}} \times \underbrace{\ScalingEfficiency}_{\text{Distributed step}} \times \underbrace{\GoodputRatio}_{\text{Operational goodput}}$$
 
-MFU, the single-device baseline, measures useful model arithmetic against peak throughput only while local computation is active. This compute-phase factor is not the step-averaged fleet MFU of @tbl-c3-scorecard, whose $T_{\text{step}}$ denominator already includes the in-step losses that $\eta_{\text{scaling}}$ counts, so the product does not count them twice. Scaling efficiency captures communication and other distributed-step losses, including pipeline bubbles. Operational goodput captures time outside those measured steps, including checkpointing, failure recovery, scheduler preemptions, and maintenance. These disjoint measurement windows prevent the same loss from being counted twice.
+MFU, the single-device baseline, measures useful model arithmetic against peak throughput only while local computation is active. This compute-phase factor is not the step-averaged fleet MFU of @tbl-c3-scorecard, whose $T_{\text{step}}$ denominator already includes the in-step losses that $\ScalingEfficiency$ counts, so the product does not count them twice. Scaling efficiency captures communication and other distributed-step losses, including pipeline bubbles. Operational goodput captures time outside those measured steps, including checkpointing, failure recovery, scheduler preemptions, and maintenance. These disjoint measurement windows prevent the same loss from being counted twice.
 
 A concrete estimate makes the multiplicative loss visible at fleet scale.
 

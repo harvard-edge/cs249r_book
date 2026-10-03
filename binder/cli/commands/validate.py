@@ -12618,7 +12618,7 @@ class ValidateCommand:
         books = next((p for p in [root, *root.parents] if p.name == "books" and (p / "vol1").is_dir()),
                      root / "books")
         files = {
-            "core": [books / "shared/_partials/_notation_core_head.qmd", books / "shared/_partials/_notation_core_tail.qmd"],
+            "core": [books / "shared/_includes/_notation_core_head.qmd", books / "shared/_includes/_notation_core_tail.qmd"],
             "vol1": [books / "vol1/frontmatter/_notation_degradation.qmd"],
             "vol2": [books / "vol2/frontmatter/_notation_scaling.qmd"],
             "vol3": [books / "vol3/frontmatter/_notation_agentic.qmd"],
@@ -12960,7 +12960,7 @@ class ValidateCommand:
         rules = [
             ("mathrm-subscript", re.compile(r"_\{?\s*(?:\\mathrm\{|\\rm\s)"),
              "subscript uses \\mathrm/\\rm; write \\text{...}"),
-            ("capital-P-probability", re.compile(r"(?<![A-Za-z0-9\\_{])P\((?!t\)|N-1\)|N_\{\\text\{workers\}\}\)|s\)|s_0\)|\\operatorname)"),
+            ("capital-P-probability", re.compile(r"(?<![A-Za-z0-9\\_{])P\((?!t\)|N-1\)|N_\{\\text\{workers\}\}\)|\\WorkerCountWorkers\)|s\)|s_0\)|\\operatorname)"),
              "probability written P(...); use \\Pr(...) for events or p(...) for distributions"),
             ("bare-big-O", re.compile(r"(?<![A-Za-z\\_{}])(?<!\\mathcal )O\((?=\s*(?:1|n|N|S|d|\\log|log|k|m|B|P|D)\b)"),
              "asymptotic order written O(...); use \\mathcal{O}(...)"),

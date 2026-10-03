@@ -44,7 +44,7 @@ CURRENCY_MATH_SPAN_PATTERN = re.compile(
     r"\\\([^)]*\b\d[\d,]*(?:\.\d+)?[KMBT]\),\s+[A-Za-z][\w-]*"
 )
 # The series notation core is shared by all volumes; its Units section holds the USD line.
-NOTATION_REL_PATH = Path("books/shared/_partials/_notation_core_tail.qmd")
+NOTATION_REL_PATH = Path("books/shared/_includes/_notation_core_tail.qmd")
 NOTATION_DEFINITION = (
     "*   Currency: Dollar amounts use the dollar sign (`$`); unless otherwise "
     "noted, dollar-denominated costs are U.S. dollars (USD)."
