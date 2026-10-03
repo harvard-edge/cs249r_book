@@ -206,25 +206,29 @@ from mlsysim.physics import calc_ring_allreduce_time, calc_tree_allreduce_time
 class CommCollectives:
     from mlsysim import Hardware
 
+    # ┌── 1. LOAD ──────────────────────────────────────────
     ib_ndr = Systems.Fabrics.InfiniBand_NDR
     ring_n_gpus = Systems.Clusters.Research_256.total_accelerators
     ring_msg = 1 * GB  # scenario assumption: gradient tensor size
     ib_ndr_alpha_us = Systems.SwitchFabric.AlphaNdr.to(microsecond).magnitude
     ib_ndr_beta = ib_ndr.bandwidth
 
+    # ┌── 2. EXECUTE ───────────────────────────────────────
     ring_time = calc_ring_allreduce_time(ring_msg, ring_n_gpus, ib_ndr_beta, ib_ndr_alpha_us * microsecond)
     tree_time = calc_tree_allreduce_time(ring_msg, ring_n_gpus, ib_ndr_beta, ib_ndr_alpha_us * microsecond)
-
-    check(ring_time < tree_time, "Ring should be faster than tree for 1 GB message")
+    ring_msg_params = int(ring_msg.to(GB).magnitude * BILLION / 2)
     min_transfer = ring_msg / ib_ndr_beta
+
+    # ┌── 3. GUARD ─────────────────────────────────────────
+    check(ring_time < tree_time, "Ring should be faster than tree for 1 GB message")
     check(ring_time >= min_transfer, "Ring time must cover link transfer floor")
+    check(ring_msg_params > 0, "Ring message params must be positive")
 
     # ┌── 4. OUTPUT (Formatting) ───────────────────────────
     ring_n_str = fmt(ring_n_gpus, precision=0, commas=False)
     ib_ndr_alpha_us_str = fmt_time(ib_ndr_alpha_us * microsecond, unit=microsecond, precision=None, commas=False)
     ib_ndr_beta_gb_per_s_str = fmt_bandwidth(ib_ndr_beta, unit=GB / second, precision=0, commas=False)
     ring_msg_gb_str = fmt_memory(ring_msg, unit=GB, precision=0, commas=False)
-    ring_msg_params = int(ring_msg.to(GB).magnitude * BILLION / 2)
     ring_msg_params_m_str = fmt_params(ring_msg_params * param, scale="M", precision=0, commas=False)
     ring_time_ms_str = fmt_time(ring_time, ms, precision=1, commas=False)
     tree_time_ms_str = fmt_time(tree_time, ms, precision=None, commas=False)

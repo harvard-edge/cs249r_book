@@ -501,6 +501,11 @@ class GPT2Compute:
     # Hardware (V100)
     v100_peak_flops = Hardware.Cloud.V100.compute.peak_flops
 
+    # Formula structure constants
+    mac_factor = 2
+    n_projections = 3
+    ffn_coeff = 2 * 2 * 4  # 2 MAC × 2 linear layers × 4 expansion
+
     # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
     # A. Attention Layer
     # Step 1: QKV: 3 * (Batch * Seq * Hidden * Hidden)
@@ -511,6 +516,7 @@ class GPT2Compute:
     macs_score = batch * heads * seq_len * seq_len * head_dim
     flops_score = 2 * macs_score
     flops_attn_pair = 2 * flops_score
+    attn_qk_billion_value = round(flops_score / BILLION, 1)
 
     # Step 3: Output projection (Attn output → hidden)
     macs_out_proj = batch * seq_len * hidden_dim * hidden_dim
@@ -544,7 +550,6 @@ class GPT2Compute:
     # The callout prints QK^T and Attn x V as equal halves of a pair total, so the
     # pair is derived from the *displayed* single value. Rounding each independently
     # at integer precision printed 107 + 107 = 215.
-    attn_qk_billion_value = round(flops_score / BILLION, 1)
     attn_qk_billion_str = fmt(attn_qk_billion_value, precision=1, commas=False)
     attn_pair_billion_str = fmt(2 * attn_qk_billion_value, precision=1, commas=False)
     out_proj_billion_str = fmt_int(flops_out_proj / BILLION, commas=False)
@@ -554,11 +559,6 @@ class GPT2Compute:
     per_step_tflop_str = fmt_flops(flops_step_total_qty, unit=TFLOPs, precision=1, commas=False)
     total_pflop_str = fmt_flops(flops_training_total_qty, unit=PFLOPs, precision=1, commas=False)
     v100_time_s_str = fmt_time(v100_time, second, precision=1, commas=False)
-
-    # Formula structure constants
-    mac_factor = 2
-    n_projections = 3
-    ffn_coeff = 2 * 2 * 4  # 2 MAC × 2 linear layers × 4 expansion
 
     # Context exports
     batch_str = fmt(batch, precision=0, commas=False)
@@ -891,7 +891,7 @@ v_t = \beta_2 v_{t-1} + (1-\beta_2)\big(\nabla \mathcal{L}(\theta_t)\big)^2
 # │
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim.physics import memory_from_params
-from mlsysim.fmt import fmt_memory
+from mlsysim.fmt import fmt_memory, check
 
 # ┌── LEGO ───────────────────────────────────────────────
 class AdamMemory:
@@ -907,6 +907,9 @@ class AdamMemory:
     # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
     # Overhead = params * 2 vectors * 4 bytes
     overhead = memory_from_params(params, vectors * BYTES_FP32 / param)
+
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(round(overhead.to(MB).magnitude) == 800, f"Adam overhead mismatch: {overhead}")
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
     adam_overhead_mb_str = fmt_memory(overhead, unit=MB, precision=0, commas=False)
@@ -1023,6 +1026,11 @@ class GPT2Optimizer:
     master_fp32 = model.size_in_bytes(BYTES_FP32)
     # Optimizer remains FP32
     total_static_amp = param_fp16 + grad_fp16 + master_fp32 + adam_m_fp32 + adam_v_fp32
+
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(round(total_static_fp32.to(GB).magnitude) == 24, f"Total static FP32 memory mismatch: {total_static_fp32}")
+    check(round(total_static_amp.to(GB).magnitude) == 24, f"Total static AMP memory mismatch: {total_static_amp}")
+    check(round(param_fp32.to(GB).magnitude) == 6, f"FP32 param memory mismatch: {param_fp32}")
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
     model_params_b_str = fmt_params(model_params)
@@ -1579,7 +1587,7 @@ plt.close()
 # │       a100_bw_tb_per_s_str, a100_ridge_flops_per_byte_str, h100_fp16_tflop_per_s_str,
 # │       h100_bw_tb_per_s_str, h100_ridge_flops_per_byte_str—all defined in training-setup.
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import fmt, fmt_arithmetic_intensity
+from mlsysim.fmt import check, fmt, fmt_arithmetic_intensity
 
 # ┌── LEGO ───────────────────────────────────────────────
 class AttentionIntensity:
@@ -1597,6 +1605,9 @@ class AttentionIntensity:
     # Materialized score attention: QK^T costs 2*S*S*d_head FLOPs per head,
     # while writing and later reading the S*S FP16 score matrix costs 4 bytes.
     intensity = (head_dim / 2) * flop / byte
+
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(round(intensity.magnitude) == 32, f"Attention intensity mismatch: {intensity}")
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
     attn_intensity_str = fmt_arithmetic_intensity(intensity, commas=False)
@@ -2622,7 +2633,7 @@ Optimized operator libraries such as cuDNN\index{cuDNN!optimized implementations
 # │      7-billion-parameter model.
 # │
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import fmt_int, fmt, fmt_count, fmt_memory, fmt_multiple, fmt_params, MarkdownStr
+from mlsysim.fmt import check, fmt_int, fmt, fmt_count, fmt_memory, fmt_multiple, fmt_params, MarkdownStr
 
 # ┌── LEGO ───────────────────────────────────────────────
 class VRAMRequirements:
@@ -2660,6 +2671,10 @@ class VRAMRequirements:
         n_layers=layers, seq_len=seq, batch_size=batch, hidden_dim=hidden, n_heads=model.heads, precision_bytes=int(bytes_fp16_value), strategy="none"
     )
     activation_factor = round((total_act / (batch * seq * hidden * layers * BYTES_FP16)).to("").magnitude)
+
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(round(subtotal.to(GB).magnitude) == 112, f"VRAM subtotal mismatch: {subtotal}")
+    check(subtotal > gpu_capacity, f"Expected subtotal {subtotal} to exceed GPU capacity {gpu_capacity}")
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
     vram_params_b_str = fmt_params(params, precision=0)
@@ -2738,6 +2753,18 @@ class ResNetMemoryScaling:
     gpt3 = Models.Language.GPT3
     gpt3_params = gpt3.parameters
 
+    # Context constants
+    resnet_input_dim = 224
+    resnet_batch_32 = 32
+    resnet_batch_64 = 64
+    resnet_layers = 50
+    bytes_fp32 = BYTES_FP32.to(byte).magnitude
+    gpu_mem_range_min = 40 * GB
+    gpu_mem_range_max = 80 * GB
+    mid_layer_filters = 256
+    bwd_filters = 64
+    bwd_total_grad = 3.2 * GB
+
     # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
     # Conv1 size
     first_conv = first_conv_h * first_conv_w * first_conv_c * BYTES_FP32
@@ -2779,16 +2806,6 @@ class ResNetMemoryScaling:
     gpt3_params_b_str = fmt_params(gpt3_params, precision=0)
 
     # Context Exports
-    resnet_input_dim = 224
-    resnet_batch_32 = 32
-    resnet_batch_64 = 64
-    resnet_layers = 50
-    bytes_fp32 = BYTES_FP32.to(byte).magnitude
-    gpu_mem_range_min = 40 * GB
-    gpu_mem_range_max = 80 * GB
-    mid_layer_filters = 256
-    bwd_filters = 64
-    bwd_total_grad = 3.2 * GB
     resnet_input_dim_str = fmt(resnet_input_dim, precision=0, commas=False)
     resnet_batch_32_str = fmt(resnet_batch_32, precision=0, commas=False)
     resnet_batch_64_str = fmt(resnet_batch_64, precision=0, commas=False)
@@ -3095,12 +3112,12 @@ class LlamaTraining:
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
     # Helper for scientific notation parts
     _flops_raw = f"{total_flops:.1e}"
-    flops_mantissa = _flops_raw.split("e+")[0]
-    flops_exp = int(_flops_raw.split("e+")[1])
+    _flops_mantissa = _flops_raw.split("e+")[0]
+    _flops_exp = int(_flops_raw.split("e+")[1])
 
     _time_raw = f"{time_seconds:.2e}"
-    time_mantissa = _time_raw.split("e+")[0]
-    time_exp = int(_time_raw.split("e+")[1])
+    _time_mantissa = _time_raw.split("e+")[0]
+    _time_exp = int(_time_raw.split("e+")[1])
 
     # Formatted strings
     ub_years_str = fmt_time(time_years, 'year', precision=1, commas=False, style='word')
@@ -3124,13 +3141,19 @@ class LlamaTraining:
     # Pre-composed math expressions (avoids Pandoc \(...\) + {python} parsing failure)
     ub_compute_math = fmt_math(
         f"6 \\times {model.parameters.to(Bparam).magnitude:.0f} \\times 10^9 \\times {ub_tokens_t_scalar_str} \\times 10^{{12}}"
-        f" \\approx {flops_mantissa} \\times 10^{{{flops_exp}}}"
+        f" \\approx {_flops_mantissa} \\times 10^{{{_flops_exp}}}"
     )
     ub_effective_scalar_str = fmt(effective_flops.to(TFLOP / second).magnitude, precision=1, commas=False)
     ub_time_math = fmt_math(
-        f"{flops_mantissa} \\times 10^{{{flops_exp}}} / ({ub_effective_scalar_str} \\times 10^{{12}})"
-        f" \\approx {time_mantissa} \\times 10^{{{time_exp}}}"
+        f"{_flops_mantissa} \\times 10^{{{_flops_exp}}} / ({ub_effective_scalar_str} \\times 10^{{12}})"
+        f" \\approx {_time_mantissa} \\times 10^{{{_time_exp}}}"
     )
+
+# Backward compatibility aliases
+LlamaTraining.flops_mantissa = LlamaTraining._flops_mantissa
+LlamaTraining.flops_exp = LlamaTraining._flops_exp
+LlamaTraining.time_mantissa = LlamaTraining._time_mantissa
+LlamaTraining.time_exp = LlamaTraining._time_exp
 
 # Note: Use LlamaTraining.ub_rental_usd_str directly.
 ```
@@ -3300,8 +3323,25 @@ class UtilizationGap:
     gpu_advertised_tflop_per_s_str = fmt_flop_rate(gpu_advertised_flops, unit=TFLOP / second, precision=0, commas=False)
     gpu_real_min_tflop_per_s_str = fmt_flop_rate(gpu_real_flops_min, unit=TFLOP / second, precision=None, commas=False)
     gpu_real_max_tflop_per_s_str = fmt_flop_rate(gpu_real_flops_max, unit=TFLOP / second, precision=None, commas=False)
+```
 
-# ── Profiling + Pipeline Timing ─────────────────────────────────────────────
+```{python}
+#| echo: false
+#| label: calc-vol1-profiling-scenarios
+from mlsysim.fmt import fmt_percent, fmt_time
+
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ PROFILING AND PIPELINE TIMING SCENARIOS
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: §Systematic Optimization Framework (profiling split),
+# │          §Data Prefetching (sequential vs overlapped pipeline times).
+# │
+# │ Goal: Provide profiling time breakdown and pipeline speedup data.
+# │ Show: Attention, data, compute profiling percentages; sequential vs opt time.
+# │ How:  Scenario values derived from representative GPT-2 profile.
+# │
+# └─────────────────────────────────────────────────────────────────────────────
+
 class ProfilingScenarios:
     # ┌── 1. LOAD ──────────────────────────────────────────────────────────────
     gpt2_attn_time_pct = 50
@@ -4287,6 +4327,10 @@ class CrossGenPrecisionCalc:
     a100_over_v100 = a100_bf16_sps / v100_fp32_sps
     h100_over_v100 = h100_fp8_sps / v100_fp32_sps
 
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(round(v100_fp16_speedup, 1) == 2.5, f"V100 FP16 speedup mismatch: {v100_fp16_speedup}")
+    check(round(h100_over_v100, 1) == 21.1, f"H100 speedup over V100 mismatch: {h100_over_v100}")
+
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
     v100_fp32_sps_str = fmt_rate(v100_fp32_sps, 'samples/s', precision=0, commas=False)
     v100_fp16_sps_str = fmt_rate(v100_fp16_sps, 'samples/s', precision=0, commas=False)
@@ -4370,7 +4414,7 @@ Here, $\mathbf{Q}$, $\mathbf{K}$, and $\mathbf{V}$ are the query, key, and value
 # │ How: Calculate total bytes for S×S scores across multiple attention heads.
 # │
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import fmt, fmt_count, MarkdownStr, fmt_memory
+from mlsysim.fmt import check, fmt, fmt_count, MarkdownStr, fmt_memory
 
 # ┌── LEGO ───────────────────────────────────────────────
 class AttentionMemoryCalc:
@@ -4384,6 +4428,10 @@ class AttentionMemoryCalc:
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
     attn_matrix = seq_len**2 * BYTES_FP32
     total_attn = attn_matrix * n_heads
+
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(round(attn_matrix.to(MB).magnitude, 1) == 67.1, f"Attention matrix MB mismatch: {attn_matrix}")
+    check(round(total_attn.to(GB).magnitude, 1) == 1.1, f"Total attention GB mismatch: {total_attn}")
 
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
     fa_seq_len_str = fmt(seq_len, precision=0)
@@ -4472,7 +4520,7 @@ FlashAttention improves both activation memory and memory IO\index{FlashAttentio
 # │ How: Compare S×S matrix size to 3×S×d input tensor size.
 # │
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import fmt_multiple, fmt_memory
+from mlsysim.fmt import check, fmt_multiple, fmt_memory
 
 # ┌── LEGO ───────────────────────────────────────────────
 class FlashAttentionCalc:
@@ -4491,6 +4539,11 @@ class FlashAttentionCalc:
 
     # Reduction factor
     fa_reduction = (fa_standard / fa_flash).to("").magnitude
+
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(round(fa_standard.to(MB).magnitude, 1) == 67.1, f"Standard attention memory mismatch: {fa_standard}")
+    check(round(fa_flash.to(MB).magnitude, 1) == 3.1, f"FlashAttention memory mismatch: {fa_flash}")
+    check(round(fa_reduction, 1) == 21.3, f"Reduction factor mismatch: {fa_reduction}")
 
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
     fa_standard_mb_str = fmt_memory(fa_standard, unit=MB, precision=1, commas=False)
@@ -6487,14 +6540,16 @@ class TrainingCarbonFootprint:
 
     # Step 6: Scientific notation decomposition for total FLOPs
     _cf_flops_sci = f"{cf_total_flops:.1e}"
-    cf_flops_mantissa_str = fmt(float(_cf_flops_sci.split("e+")[0]), precision=1, commas=False)
-    cf_flops_exp_str = fmt_int(_cf_flops_sci.split("e+")[1], commas=False)
+    _cf_flops_mantissa = float(_cf_flops_sci.split("e+")[0])
+    _cf_flops_exp = _cf_flops_sci.split("e+")[1]
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(abs(cf_time_days - 3.04) < 0.1, f"Expected ~3 days training time, got {cf_time_days:.2f}")
     check(cf_energy.to(kWh).magnitude > 0, "Energy consumption must be positive")
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
+    cf_flops_mantissa_str = fmt(_cf_flops_mantissa, precision=1, commas=False)
+    cf_flops_exp_str = fmt_int(_cf_flops_exp, commas=False)
     cf_params_b_str = fmt_count(cf_params, scale='B', precision=0, commas=False, scale_style='word')
     cf_tokens_str = fmt_count(cf_tokens, scale='T', precision=0, commas=False, scale_style='word')
     cf_num_gpus_str = fmt_count(cf_num_gpus, label="GPU")
