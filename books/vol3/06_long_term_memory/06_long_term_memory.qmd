@@ -548,15 +548,15 @@ $$ {#eq-vol3-pq-adc}
 # │ Context: @tbl-vol3-ann-tradeoffs and the cost line before it.
 # │ Goal: Size HNSW links and PQ codes for the exact-scan notebook's corpus.
 # │ Show: 2.56 GB of links beside 15.36 GB of vectors; 0.64 GB of codes (24x).
-# │ How: Stipulated \CollectivePayloadSize=32 links of 8 bytes; \MicrobatchCount=64 one-byte PQ subcodes.
+# │ How: Stipulated M=32 links of 8 bytes; K=64 one-byte PQ subcodes.
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim.core.units import BYTES_FP32, GB, KB, byte
 from mlsysim.fmt import check, fmt_int, fmt_memory, fmt_multiple
 
 class AnnFootprint:
     # ┌── 1. LOAD (Corpus from the exact-scan notebook; stipulated index shape) ─
-    \PointtopointMessageSize = VectorScanLatencyFloor.n_vectors
-    \HiddenDimension = VectorScanLatencyFloor.d_dim
+    n = VectorScanLatencyFloor.n_vectors
+    d = VectorScanLatencyFloor.d_dim
     raw = VectorScanLatencyFloor.footprint
     links_per_node = 32
     link_bytes = 8 * byte
@@ -566,14 +566,14 @@ class AnnFootprint:
     lut_entry = BYTES_FP32
 
     # ┌── 2. EXECUTE ──────────────────────────────────────────────────────
-    graph = \PointtopointMessageSize * links_per_node * link_bytes
-    codes = \PointtopointMessageSize * pq_subvectors * code_bytes_per_sub
+    graph = n * links_per_node * link_bytes
+    codes = n * pq_subvectors * code_bytes_per_sub
     ratio = (raw / codes).to("").magnitude
     lut = (pq_subvectors * pq_centroids * lut_entry).to(KB)
-    sub_dim = \HiddenDimension // pq_subvectors
+    sub_dim = d // pq_subvectors
 
     # ┌── 3. GUARD ────────────────────────────────────────────────────────
-    check(\HiddenDimension % pq_subvectors == 0, "subvectors tile the dimension")
+    check(d % pq_subvectors == 0, "subvectors tile the dimension")
     check(abs(graph.to(GB).magnitude - 2.56) < 1e-9, "graph links")
     check(abs(codes.to(GB).magnitude - 0.64) < 1e-9, "PQ codes")
     check(ratio == 24, "FP16 vectors to PQ codes")
@@ -636,48 +636,48 @@ from mlsysim.fmt import check, fmt_int, fmt_ratio
 class HybridRankFusion:
     # LOAD: Assumed input ranks, not measurements of either retriever's quality.
     k = 60
-    lexical = {"\BatchSize": 1, "\Advantage": 2, "\DatasetSize": 3}
-    dense = {"\AFourthTaxonomyAxis": 1, "\Advantage": 2, "E": 3}
+    lexical = {"B": 1, "A": 2, "D": 3}
+    dense = {"C": 1, "A": 2, "E": 3}
 
     # EXECUTE: Missing candidates contribute zero.
     scores = {}
     for ranking in (lexical, dense):
         for candidate, rank in ranking.items():
             scores[candidate] = scores.get(candidate, Fraction(0)) + Fraction(1, k + rank)
-    ordered = sorted(scores.items(), key=lambda item: (-item[\CoefficientOfRestitutionTwo, item[0]))
+    ordered = sorted(scores.items(), key=lambda item: (-item[1], item[0]))
     fused_ranks = {}
     for rank, (candidate, score) in enumerate(ordered, start=1):
         fused_ranks[candidate] = rank
 
     # GUARD: Check agreement benefit and explicitly deterministic tied pairs.
-    check(scores["\Advantage"] == Fraction(1, 31), "two second-place contributions")
-    check(scores["\BatchSize"] == scores["\AFourthTaxonomyAxis"], "first-place tie")
-    check(scores["\DatasetSize"] == scores["E"], "third-place tie")
-    check(list(fused_ranks) == ["\Advantage", "\BatchSize", "\AFourthTaxonomyAxis", "\DatasetSize", "E"], "stable tie order")
+    check(scores["A"] == Fraction(1, 31), "two second-place contributions")
+    check(scores["B"] == scores["C"], "first-place tie")
+    check(scores["D"] == scores["E"], "third-place tie")
+    check(list(fused_ranks) == ["A", "B", "C", "D", "E"], "stable tie order")
 
     # OUTPUT: Derived scores and final positions feed the table directly.
-    k_str = fmt_int(\NoisePredictionNetworkThree
-    a_score_str = fmt_ratio(float(scores["\Advantage"]), precision=5)
-    b_score_str = fmt_ratio(float(scores["\BatchSize"]), precision=5)
-    c_score_str = fmt_ratio(float(scores["\AFourthTaxonomyAxis"]), precision=5)
-    d_score_str = fmt_ratio(float(scores["\DatasetSize"]), precision=5)
+    k_str = fmt_int(k)
+    a_score_str = fmt_ratio(float(scores["A"]), precision=5)
+    b_score_str = fmt_ratio(float(scores["B"]), precision=5)
+    c_score_str = fmt_ratio(float(scores["C"]), precision=5)
+    d_score_str = fmt_ratio(float(scores["D"]), precision=5)
     e_score_str = fmt_ratio(float(scores["E"]), precision=5)
-    a_rank_str = fmt_int(fused_ranks["\Advantage"])
-    b_rank_str = fmt_int(fused_ranks["\BatchSize"])
-    c_rank_str = fmt_int(fused_ranks["\AFourthTaxonomyAxis"])
-    d_rank_str = fmt_int(fused_ranks["\DatasetSize"])
+    a_rank_str = fmt_int(fused_ranks["A"])
+    b_rank_str = fmt_int(fused_ranks["B"])
+    c_rank_str = fmt_int(fused_ranks["C"])
+    d_rank_str = fmt_int(fused_ranks["D"])
     e_rank_str = fmt_int(fused_ranks["E"])
 ```
 
-To see how RRF rewards consensus across divergent retrieval mechanisms, consider an illustrative repair query evaluated on the authorized `r18` snapshot. Let \Advantage be the return-and-notify implementation span, \BatchSize the reproducer test, and \AFourthTaxonomyAxis, \DatasetSize, and E three additional candidate records. Suppose lexical search produces the ranking \BatchSize, \Advantage, \DatasetSize, while dense retrieval produces \AFourthTaxonomyAxis, \Advantage, E. With the standard choice $k_{\text{rrf}} =$ `{python} HybridRankFusion.k_str`, @eq-vol3-reciprocal-rank-fusion assigns candidate \Advantage two second-place contributions, $1/(60+2) + 1/(60+2)$, whereas candidate \BatchSize receives only a single first-place contribution of $1/(60+1)$. Summing every candidate's contributions in @tbl-vol3-rrf-scoring puts candidate \Advantage at the top fused rank on consensus across both retrieval paths, even though neither individual retriever ranked it first.
+To see how RRF rewards consensus across divergent retrieval mechanisms, consider an illustrative repair query evaluated on the authorized `r18` snapshot. Let A be the return-and-notify implementation span, B the reproducer test, and C, D, and E three additional candidate records. Suppose lexical search produces the ranking B, A, D, while dense retrieval produces C, A, E. With the standard choice $k_{\text{rrf}} =$ `{python} HybridRankFusion.k_str`, @eq-vol3-reciprocal-rank-fusion assigns candidate A two second-place contributions, $1/(60+2) + 1/(60+2)$, whereas candidate B receives only a single first-place contribution of $1/(60+1)$. Summing every candidate's contributions in @tbl-vol3-rrf-scoring puts candidate A at the top fused rank on consensus across both retrieval paths, even though neither individual retriever ranked it first.
 
-| Candidate | Lexical rank | Dense rank |                               RRF score |                         Fused position |
-|:----------|-------------:|-----------:|----------------------------------------:|---------------------------------------:|
-| \Advantage         |            2 |          2 | `{python} HybridRankFusion.a_score_str` | `{python} HybridRankFusion.a_rank_str` |
-| \BatchSize         |            1 |          — | `{python} HybridRankFusion.b_score_str` | `{python} HybridRankFusion.b_rank_str` |
-| \AFourthTaxonomyAxis         |            — |          1 | `{python} HybridRankFusion.c_score_str` | `{python} HybridRankFusion.c_rank_str` |
+| Candidate            | Lexical rank | Dense rank |                               RRF score |                         Fused position |
+|:---------------------|-------------:|-----------:|----------------------------------------:|---------------------------------------:|
+| \Advantage           |            2 |          2 | `{python} HybridRankFusion.a_score_str` | `{python} HybridRankFusion.a_rank_str` |
+| \BatchSize           |            1 |          — | `{python} HybridRankFusion.b_score_str` | `{python} HybridRankFusion.b_rank_str` |
+| \AFourthTaxonomyAxis |            — |          1 | `{python} HybridRankFusion.c_score_str` | `{python} HybridRankFusion.c_rank_str` |
 | \DatasetSize         |            3 |          — | `{python} HybridRankFusion.d_score_str` | `{python} HybridRankFusion.d_rank_str` |
-| E         |            — |          3 | `{python} HybridRankFusion.e_score_str` | `{python} HybridRankFusion.e_rank_str` |
+| E                    |            — |          3 | `{python} HybridRankFusion.e_score_str` | `{python} HybridRankFusion.e_rank_str` |
 
 : **Fusion of hypothetical candidate rankings**: \Advantage benefits from appearing in both lists. \Advantage dash means absence from that truncated list and contributes zero. Equal scores are ordered by candidate ID, not by inferred relevance. {#tbl-vol3-rrf-scoring}
 
@@ -886,11 +886,11 @@ These record kinds impose distinct demands across different operational archetyp
 
 @Tbl-vol3-memory-by-archetype sets the three workloads side by side, from the record each one keeps to the policy it leans on.
 
-| **Lighthouse**     | **Dominant durable record**                             | **Source of record**                                   | **Binding hazard**                                              | **Write-policy emphasis**                                                     |
-|:-------------------|:--------------------------------------------------------|:-------------------------------------------------------|:----------------------------------------------------------------|:------------------------------------------------------------------------------|
-| **Repair agent**   | Test observations and progress notes tied to revisions  | The repository at a source generation                  | Its own edits make indexed copies stale                         | Tag every observation with its revision; invalidate on the agent's own writes |
-| **Research agent** | Notes and summaries distilled from fetched pages        | Each external page as fetched, with its time           | Untrusted text becomes a confident lesson through summarization | Admit distilled claims as hypotheses with links to the fetched pages          |
-| **Support agent**  | Customer history, preferences, and answers about policy | The customer record and the published policy documents | \Advantage superseded preference or ungrounded policy answer is reused   | Supersede by explicit replacement; propagate deletion to every derived copy   |
+| **Lighthouse**     | **Dominant durable record**                             | **Source of record**                                   | **Binding hazard**                                                     | **Write-policy emphasis**                                                     |
+|:-------------------|:--------------------------------------------------------|:-------------------------------------------------------|:-----------------------------------------------------------------------|:------------------------------------------------------------------------------|
+| **Repair agent**   | Test observations and progress notes tied to revisions  | The repository at a source generation                  | Its own edits make indexed copies stale                                | Tag every observation with its revision; invalidate on the agent's own writes |
+| **Research agent** | Notes and summaries distilled from fetched pages        | Each external page as fetched, with its time           | Untrusted text becomes a confident lesson through summarization        | Admit distilled claims as hypotheses with links to the fetched pages          |
+| **Support agent**  | Customer history, preferences, and answers about policy | The customer record and the published policy documents | \Advantage superseded preference or ungrounded policy answer is reused | Supersede by explicit replacement; propagate deletion to every derived copy   |
 
 : **Persistent memory by archetype**: The binding hazard, not the storage technology, decides which part of the write policy each workload stresses. {#tbl-vol3-memory-by-archetype tbl-colwidths="[14,22,20,22,22]"}
 
@@ -1021,7 +1021,7 @@ Excluding an obsolete candidate prevents an agent from consuming erroneous data,
 | Retrieval outcome             | Evidence supplied                                                                        | Remaining limitation                                                                                             |
 |:------------------------------|:-----------------------------------------------------------------------------------------|:-----------------------------------------------------------------------------------------------------------------|
 | Current indexed result        | Payload whose source generation and index configuration satisfy the request              | Ranking and bounded search can still omit relevant records; completion status must reflect the search performed. |
-| Authorized direct source read | \Advantage bounded source excerpt with its observed version and provenance                        | Direct access can be expensive, unavailable, or too narrow to answer the whole query.                            |
+| Authorized direct source read | \Advantage bounded source excerpt with its observed version and provenance               | Direct access can be expensive, unavailable, or too narrow to answer the whole query.                            |
 | Explicit incomplete result    | Admissible partial evidence, or no payload, with an explanation of the unavailable scope | The caller lacks the requested evidence and must not infer that the source contains no match.                    |
 
 : **Retrieval choices during index refresh**: Exclusion protects against known version mismatch; replacement retrieval and search completeness remain separate obligations. {#tbl-vol3-invalidation-tradeoffs tbl-colwidths="[24,36,40]"}
@@ -1204,7 +1204,7 @@ class StorageAmplification:
     edges_per_file = 4
     edge_bytes = 32 * byte
     passage_tokens = 100
-    \HiddenDimension = 768
+    d = 768
     vec_width = BYTES_FP32
     links = AnnFootprint.links_per_node
     link_bytes = AnnFootprint.link_bytes
@@ -1219,7 +1219,7 @@ class StorageAmplification:
     postings = tokens * postings_per_token
     graph = files * edges_per_file * edge_bytes
     chunks = tokens // passage_tokens
-    vectors = chunks * \HiddenDimension * vec_width
+    vectors = chunks * d * vec_width
     hnsw = chunks * links * link_bytes
     aux_a = postings + graph
     aux_b = postings + vectors + hnsw
@@ -1242,7 +1242,7 @@ class StorageAmplification:
     raw_str = fmt_memory(raw, unit=MB, precision=0)
     edges_str = fmt_int(edges_per_file)
     passage_str = fmt_int(passage_tokens)
-    d_str = fmt_int(\HiddenDimension)
+    d_str = fmt_int(d)
     aux_a_str = fmt_memory(aux_a, unit=MB, precision=1)
     aux_b_str = fmt_memory(aux_b, unit=MB, precision=1)
     vectors_str = fmt_memory(vectors, unit=MB, precision=1)
@@ -1336,18 +1336,18 @@ Benchmarking a memory subsystem against a static snapshot conceals the operation
 
 @Tbl-vol3-long-term-memory-key-equations collects the quantitative relations governing long-term memory systems, linking each computational bound and operational threshold to the systems decision it informs.
 
-| **Equation**                                                                                                                                              | **What it bounds or decides**                                                                                                | **Where derived**                    |
-|:----------------------------------------------------------------------------------------------------------------------------------------------------------|:-----------------------------------------------------------------------------------------------------------------------------|:-------------------------------------|
-| $\operatorname{score}(x,Q)=\sum_{q\in Q}\operatorname{IDF}(q)\frac{f(q,x)(k_1+1)}{f(q,x)+k_1(1-b+b\lvert x\rvert/\overline{\lvert x\rvert})}$             | Lexical rank order; saturation ($k_1$) and length normalization ($b$) outweigh raw repetition                                | @sec-vol3-persistent-bm25            |
-| $Ndw$ bytes, $2Nd$ FLOPs, intensity $2/w$                                                                                                                 | Exact-scan time floor $Ndw/\Bandwidth$ and the eligible-set size at which an ANN index pays                                  | @sec-vol3-persistent-dense-retrieval |
-| $\tilde{d}(\mathbf{q}, \mathbf{x}) = \sum_{j=1}^{m} \text{LUT}[j, c_j]$                                                                                   | Bytes touched per scored vector under IVF-PQ; $m$ trades fidelity against code size                                          | @eq-vol3-pq-adc                      |
-| $\operatorname{RRF}(x) = \sum_{i:\,x\in \mathcal{R}_i} 1/(k_{\text{rrf}} + r_i(x))$                                                                       | Fused candidate order across methods whose scores share no scale                                                             | @eq-vol3-reciprocal-rank-fusion      |
-| $\lfloor(\text{allowance} - \text{envelope})/(\text{body} + \text{metadata})\rfloor$                                                                      | Complete records that fit a retrieval allowance once output and envelope are reserved                                        | @sec-vol3-persistent-quarantine      |
-| $(\text{children}^{\text{depth}+1}-1)/(\text{children}-1)$                                                                                                | Nodes in a bounded traversal neighborhood, set against the payload budget                                                    | @sec-vol3-persistent-graphrag        |
-| $\text{IsValid}(c, \ValidityIntervalOfAMemoryEntryQ) = \big(\ValidityIntervalOfAMemoryEntryBirth \le \ValidityIntervalOfAMemoryEntryQ < \ValidityIntervalOfAMemoryEntryDeath\big)$                                  | Whether a derived entry may answer a query that requires generation $\ValidityIntervalOfAMemoryEntryQ$                                                    | @eq-vol3-index-validity              |
-| $\rho_{\text{dead}} = \lvert V_{\text{tomb}}\rvert/\lvert V\rvert$                                                                                        | When tombstoned entries cost enough memory and recall to trigger compaction                                                  | @sec-vol3-persistent-invalidation    |
-| $\text{P}@k = \lvert\mathcal{R}_k \cap \mathcal{D}^*\rvert/k$, $\text{Recall}@k = \lvert\mathcal{R}_k \cap \mathcal{D}^*\rvert/\lvert\mathcal{D}^*\rvert$ | Retrieval quality against a declared relevant set, with precision over the requested $k$ and the stale-return rate beside it | @sec-vol3-persistent-governance-eval |
-| $\CostPerAcceptedTaskEff = \mathbb{E}[\AttemptCost]/\AcceptanceProbability$                                                                               | Whether a memory policy's added retrieval and maintenance cost is repaid in accepted tasks                                   | @eq-vol3-cost-per-accepted-task      |
+| **Equation**                                                                                                                                                                       | **What it bounds or decides**                                                                                                | **Where derived**                    |
+|:-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|:-----------------------------------------------------------------------------------------------------------------------------|:-------------------------------------|
+| $\operatorname{score}(x,Q)=\sum_{q\in Q}\operatorname{IDF}(q)\frac{f(q,x)(k_1+1)}{f(q,x)+k_1(1-b+b\lvert x\rvert/\overline{\lvert x\rvert})}$                                      | Lexical rank order; saturation ($k_1$) and length normalization ($b$) outweigh raw repetition                                | @sec-vol3-persistent-bm25            |
+| $Ndw$ bytes, $2Nd$ FLOPs, intensity $2/w$                                                                                                                                          | Exact-scan time floor $Ndw/\Bandwidth$ and the eligible-set size at which an ANN index pays                                  | @sec-vol3-persistent-dense-retrieval |
+| $\tilde{d}(\mathbf{q}, \mathbf{x}) = \sum_{j=1}^{m} \text{LUT}[j, c_j]$                                                                                                            | Bytes touched per scored vector under IVF-PQ; $m$ trades fidelity against code size                                          | @eq-vol3-pq-adc                      |
+| $\operatorname{RRF}(x) = \sum_{i:\,x\in \mathcal{R}_i} 1/(k_{\text{rrf}} + r_i(x))$                                                                                                | Fused candidate order across methods whose scores share no scale                                                             | @eq-vol3-reciprocal-rank-fusion      |
+| $\lfloor(\text{allowance} - \text{envelope})/(\text{body} + \text{metadata})\rfloor$                                                                                               | Complete records that fit a retrieval allowance once output and envelope are reserved                                        | @sec-vol3-persistent-quarantine      |
+| $(\text{children}^{\text{depth}+1}-1)/(\text{children}-1)$                                                                                                                         | Nodes in a bounded traversal neighborhood, set against the payload budget                                                    | @sec-vol3-persistent-graphrag        |
+| $\text{IsValid}(c, \ValidityIntervalOfAMemoryEntryQ) = \big(\ValidityIntervalOfAMemoryEntryBirth \le \ValidityIntervalOfAMemoryEntryQ < \ValidityIntervalOfAMemoryEntryDeath\big)$ | Whether a derived entry may answer a query that requires generation $\ValidityIntervalOfAMemoryEntryQ$                       | @eq-vol3-index-validity              |
+| $\rho_{\text{dead}} = \lvert V_{\text{tomb}}\rvert/\lvert V\rvert$                                                                                                                 | When tombstoned entries cost enough memory and recall to trigger compaction                                                  | @sec-vol3-persistent-invalidation    |
+| $\text{P}@k = \lvert\mathcal{R}_k \cap \mathcal{D}^*\rvert/k$, $\text{Recall}@k = \lvert\mathcal{R}_k \cap \mathcal{D}^*\rvert/\lvert\mathcal{D}^*\rvert$                          | Retrieval quality against a declared relevant set, with precision over the requested $k$ and the stale-return rate beside it | @sec-vol3-persistent-governance-eval |
+| $\CostPerAcceptedTaskEff = \mathbb{E}[\AttemptCost]/\AcceptanceProbability$                                                                                                        | Whether a memory policy's added retrieval and maintenance cost is repaid in accepted tasks                                   | @eq-vol3-cost-per-accepted-task      |
 
 : **Key equations of long-term memory**: Each relation either sizes the work a retrieval or maintenance step performs or decides whether a stored record may be used. {#tbl-vol3-long-term-memory-key-equations tbl-colwidths="[46,36,18]"}
 
