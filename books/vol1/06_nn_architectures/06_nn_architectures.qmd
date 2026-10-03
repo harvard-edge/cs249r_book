@@ -384,7 +384,7 @@ class AutoregressiveInferenceCost:
 DLRM [@naumov2019deep] anchors the sparse-recommendation lighthouse. Meta open-sourced DLRM to expose a workload that differs from CNNs and transformers in a critical way. While vision and language models are compute-heavy, recommendation systems are memory-heavy. They must look up user and item preferences in massive embedding tables that can reach terabytes in size, creating unique challenges for latency-critical serving. DLRM is a useful benchmark for memory capacity and sparse memory access patterns in the data center.
 
 ::: {.column-margin .margin-pointer}
-↪ The latency cost of embedding lookups in DLRM serving is measured in @sec-model-serving-latency-distribution-analysis-b0f8.
+↪ The share of DLRM serving latency spent on embedding lookups is developed in @sec-model-serving-latency-distribution-analysis-b0f8.
 :::
 
 MobileNet [@howard2017mobilenets]\index{MobileNet} anchors the edge-efficiency lighthouse. MobileNet challenged the trend of ever-larger models by prioritizing efficiency. It popularized depthwise separable convolutions\index{Depthwise separable convolution!MobileNet} (a per-channel spatial filter followed by a $1{\times}1$ channel mix, detailed in @sec-network-architectures-efficient-architectures-keyword-spotting-0625) for efficient vision models, an architectural innovation that reduced FLOPs by 8--9$\times$ for $3{\times}3$ kernels with minimal accuracy loss. That smaller compute footprint made MobileNet a natural fit for compression and lower-precision deployment techniques (storing and computing with fewer bits per value). It became a reference family for co-designing vision models with the battery and latency constraints of smartphones and embedded devices.
@@ -600,7 +600,11 @@ Match the architectural choice to its systems implication:
 
 :::
 
-This spectrum determines whether the system needs a faster processor or faster memory to improve performance. The framework this book uses to quantify these limits on specific hardware is the **roofline model**\index{Roofline model!definition}, which plots achievable throughput against arithmetic intensity to show where a workload turns from memory bound to compute bound. @Sec-appdx-machine-foundations-roofline-model-2529 gives the analytical treatment.
+This spectrum determines whether the system needs a faster processor or faster memory to improve performance. The framework this book uses to quantify these limits on specific hardware is the **roofline model**\index{Roofline model!definition}, which plots achievable throughput against arithmetic intensity to show where a workload turns from memory bound to compute bound.
+
+::: {.column-margin .margin-pointer}
+↪ The roofline model's analytical treatment, from the memory-bound slope to the ridge point, is developed in @sec-appdx-machine-foundations-roofline-model-2529.
+:::
 
 The lighthouse signatures make the next step concrete: inspect each architecture family by the data pattern it targets, the computation it performs, the hardware mapping it induces, and the bottleneck it exposes. This four-part lens ensures that every architecture is evaluated for what it costs to run, not only for what it learns.
 
@@ -804,7 +808,7 @@ class MLPvsCNN:
 
 **Scenario**: Classifying $28{\times}28$ MNIST digits with a fully connected MLP vs. a CNN.
 
-**Diagnosis**: Whole-network parameter counts depend mostly on width choices. The 784-128-64-10 MLP of @sec-neural-computation has `{python} MLPvsCNN.mlp_params_str` weights, fewer than the `{python} MLPvsCNN.cnn_params_str` of a small two-convolution CNN, whose dense classifier head holds `{python} MLPvsCNN.cnn_head_pct_str` of them. The locality saving appears per feature detector. A dense unit learns one weight for every pixel, so `{python} MLPvsCNN.first_features_str` features cost `{python} MLPvsCNN.dense_first_str` weights; a convolutional layer learns one $3{\times}3$ filter per feature, `{python} MLPvsCNN.conv_first_str` weights in total, and reuses each filter at all `{python} MLPvsCNN.conv_positions_str` positions. At equal feature count, the convolutional layer needs `{python} MLPvsCNN.param_ratio_mult_str` fewer weights.
+**Diagnosis**: Whole-network parameter counts depend mostly on width choices. The 784-128-64-10 MLP has `{python} MLPvsCNN.mlp_params_str` weights, fewer than the `{python} MLPvsCNN.cnn_params_str` of a small two-convolution CNN, whose dense classifier head holds `{python} MLPvsCNN.cnn_head_pct_str` of them. The locality saving appears per feature detector. A dense unit learns one weight for every pixel, so `{python} MLPvsCNN.first_features_str` features cost `{python} MLPvsCNN.dense_first_str` weights; a convolutional layer learns one $3{\times}3$ filter per feature, `{python} MLPvsCNN.conv_first_str` weights in total, and reuses each filter at all `{python} MLPvsCNN.conv_positions_str` positions. At equal feature count, the convolutional layer needs `{python} MLPvsCNN.param_ratio_mult_str` fewer weights.
 
 **Systems lesson**: Inductive bias buys parameter efficiency per feature and reuse per weight. Fewer weights per detector reduce the data needed to learn spatial structure, and each weight fetched from memory feeds hundreds of multiply-accumulates, which raises arithmetic intensity.
 
@@ -988,10 +992,6 @@ $\mathbf{h}^{(\ell)}$ represents the layer $\ell$ output, $\mathbf{h}^{(\ell-1)}
 
 The dimensions of these operations reveal the computational scale of dense pattern processing. The input vector $\mathbf{h}^{(0)} \in \mathbb{R}^{d_{\text{in}}}$ (treated as a row vector in this formulation) represents all potential input features. Weight matrices $\mathbf{W}^{(\ell)} \in \mathbb{R}^{d_{\text{in}} \times d_{\text{out}}}$ capture all possible input-output relationships. The output vector $\mathbf{h}^{(\ell)} \in \mathbb{R}^{d_{\text{out}}}$ produces transformed representations. A four-pixel example turns this bookkeeping into arithmetic.
 
-::: {.column-margin .margin-pointer}
-↩ The affine layer transformation mapping input activations to hidden preactivations via dense weight matrices is established in @sec-neural-computation-weight-matrices-9f9a.
-:::
-
 ::: {#exmp-nn-architectures-concrete-computation-example .callout-example title="Concrete computation example"}
 
 Consider a simplified 4-pixel image processed by a 3-neuron hidden layer:
@@ -1127,7 +1127,11 @@ def mlp_layer_compute(X, W, b):
 
 :::
 
-In the reference MNIST layer, computing 100 hidden neurons requires `{python} MLPLayerStats.mnist_mlp_macs_str` in total; each individual output neuron requires 784 multiply-accumulate operations and at least `{python} MLPLayerStats.mnist_neuron_mem_acc_str` memory accesses (784 for inputs, 784 for weights). Production implementations call optimized matrix libraries such as Basic Linear Algebra Subprograms (BLAS),[^fn-blas-matrix-libraries] but the same nested-loop pattern still determines the system design problem. The hardware architectures that accelerate these matrix operations, including GPU Tensor Cores[^fn-tensor-cores-alignment] and specialized AI accelerators, are covered in @sec-hardware-acceleration.
+In the reference MNIST layer, computing 100 hidden neurons requires `{python} MLPLayerStats.mnist_mlp_macs_str` in total; each individual output neuron requires 784 multiply-accumulate operations and at least `{python} MLPLayerStats.mnist_neuron_mem_acc_str` memory accesses (784 for inputs, 784 for weights). Production implementations call optimized matrix libraries such as Basic Linear Algebra Subprograms (BLAS),[^fn-blas-matrix-libraries] but the same nested-loop pattern still determines the system design problem. Hardware such as GPU Tensor Cores[^fn-tensor-cores-alignment] and specialized AI accelerators is built to accelerate exactly these matrix operations.
+
+::: {.column-margin .margin-pointer}
+↪ The matrix units, from Tensor Cores to systolic arrays, that accelerate dense matrix operations are developed in @sec-hardware-acceleration-matrix-operations-hardware-acceleration-514a.
+:::
 
 [^fn-blas-matrix-libraries]: **BLAS (basic linear algebra subprograms)**\index{BLAS!neural networks}\index{BLAS!utilization}: This standard API for matrix operations enables the use of highly optimized libraries (for example, cuBLAS) to accelerate the 784 multiply-accumulates per neuron. The $784{\times}100$ matrix in the MNIST example may use the hardware less efficiently than larger, well-aligned transformer matrices because utilization depends on matrix shape, batching, datatype, library, and accelerator.
 
@@ -1957,13 +1961,17 @@ class CNNSysImpl:
 
 Memory consumption in convolutional layers divides into two distinct state components: static filter parameters and transient feature maps (activations). Weight sharing ensures that parameter storage remains compact: for an ImageNet input, a convolutional layer with 64 filters of size $3{\times}3$ applied to a single input channel requires only `{python} CNNSysImpl.weights_single_ch_str` parameters. Even across 64 input channels, storing 36,864 weights requires roughly 147 KB in FP32, fitting comfortably within on-chip L2 or L1 cache. In contrast, intermediate feature maps scale with input resolution and channel depth: a $224{\times}224$ feature map with 64 channels materializes `{python} CNNSysImpl.activations_str` activation values (approximately 12.8 MB in FP32 per sample in the batch). During training, these activations must remain live in memory for backward-pass gradient evaluation, making activation memory—not weight capacity—the binding memory constraint for deep CNNs on accelerators.
 
-Accelerators exploit this footprint disparity through hierarchical caching. CPUs retain compact filter weights in L2/L3 caches while streaming activation tensors. GPUs stage filter weights and input tiles in on-chip scratchpad SRAM (shared memory) and register files, reusing loaded weights across thousands of spatial coordinates and eliminating redundant round-trips to off-chip HBM. Hardware design principles supporting these caching patterns are detailed in @sec-hardware-acceleration.
+Accelerators exploit this footprint disparity through hierarchical caching. CPUs retain compact filter weights in L2/L3 caches while streaming activation tensors. GPUs stage filter weights and input tiles in on-chip scratchpad SRAM (shared memory) and register files, reusing loaded weights across thousands of spatial coordinates and eliminating redundant round-trips to off-chip HBM.
+
+::: {.column-margin .margin-pointer}
+↪ The memory hierarchy of register files, on-chip SRAM, and HBM that these caching patterns exploit is developed in @sec-hardware-acceleration-memory-hierarchy-1839.
+:::
 
 #### Computation needs {#sec-network-architectures-computation-needs-85cd}
 
 Evaluating a convolutional layer requires repeatedly evaluating local dot products across spatial positions. For an ImageNet input with $3{\times}3$ filters and 64 output channels, computing a single spatial position requires `{python} CNNSysImpl.weights_single_ch_str` multiply-accumulate operations per input channel. Repeating this evaluation across all `{python} CNNSysImpl.spatial_positions_str` spatial positions yields millions of operations per layer. Although each spatial stencil touches fewer parameters than a dense layer, spatial repetition multiplies the total floating-point operation count.
 
-This computational regularity provides rich opportunities for hardware parallelization. Because each spatial coordinate is independent, processors parallelize work along multiple axes simultaneously: across the batch dimension, across spatial coordinates $(x, y)$, and across output channels. CPUs execute vectorized SIMD instructions[^fn-simd-vector-instructions] to evaluate multiple spatial outputs per clock cycle, while GPUs dispatch thread warps across thousands of concurrent execution lanes. Model compression techniques that alter this computational profile, such as pruning and channel sparsity, are examined in @sec-model-compression.
+This computational regularity provides rich opportunities for hardware parallelization. Because each spatial coordinate is independent, processors parallelize work along multiple axes simultaneously: across the batch dimension, across spatial coordinates $(x, y)$, and across output channels. CPUs execute vectorized SIMD instructions[^fn-simd-vector-instructions] to evaluate multiple spatial outputs per clock cycle, while GPUs dispatch thread warps across thousands of concurrent execution lanes.
 
 [^fn-simd-vector-instructions]: **SIMD (single instruction, multiple data)**\index{SIMD!CNN inference}: CPU instructions that apply the same operation to multiple data elements simultaneously; AVX-512 can process 16 single-precision values per vector instruction; realized speedup over scalar code also depends on instruction throughput, vectorization, and memory access. For CNN inference on edge CPUs without GPU access, SIMD utilization can affect whether a model meets real-time latency targets. Frameworks like TFLite and Open Neural Network Exchange (ONNX) Runtime use vectorized convolution kernels to exploit this parallelism. \index{SIMD!edge deployment}
 
@@ -1974,7 +1982,7 @@ Data movement in a convolutional layer exhibits an arithmetic intensity profile 
 The systems challenge shifts from loading weights to staging activations. Because adjacent spatial receptive fields overlap, a naive memory access pattern would re-fetch each input pixel from memory up to $K^2 = 9$ times. Runtimes avoid this redundant memory traffic by tiling computation into 2D spatial blocks sized to fit inside accelerator SRAM. Once an input tile is loaded into shared memory, all overlapping filter dot products for that tile execute in place, amortizing the DRAM/HBM transfer and maximizing the `{python} CNNSysImpl.spatial_positions_str` reuses of each filter weight.
 
 ::: {.column-margin .margin-pointer}
-↪ The hardware ridge point ($I_{\text{ridge}}$) determining whether spatial filter reuse saturates arithmetic units or starves on memory bandwidth is developed in @sec-hardware-acceleration-hardware-ridge-points-b5b6.
+↪ The hardware ridge point ($I_{\text{ridge}}$), which decides whether spatial filter reuse saturates the arithmetic units or starves on memory bandwidth, is developed in @sec-hardware-acceleration-hardware-balance.
 :::
 
 ```{python}
@@ -2251,7 +2259,7 @@ This sequential structure produces fundamentally different memory characteristic
 $$
 \frac{\partial \mathcal{L}}{\partial \mathbf{h}_0} = \frac{\partial \mathcal{L}}{\partial \mathbf{h}_S} \prod_{t=1}^{S} \frac{\partial \mathbf{h}_t}{\partial \mathbf{h}_{t-1}}
 $$
-To evaluate these Jacobian products, the training engine must retain the intermediate activations $\mathbf{h}_1, \mathbf{h}_2, \dots, \mathbf{h}_S$ in accelerator memory. BPTT thus converts an $\mathcal{O}(d)$ runtime state into an $\mathcal{O}(S \cdot d)$ memory footprint during training. Furthermore, repeated multiplication by $\mathbf{W}_{\text{hh}}$ causes gradients to vanish or explode exponentially over long horizons, bounding the effective context window of simple RNNs. The recurrent weight matrix often contains connections with minimal contribution to temporal dependencies, allowing significant compression through methods covered in @sec-model-compression.
+To evaluate these Jacobian products, the training engine must retain the intermediate activations $\mathbf{h}_1, \mathbf{h}_2, \dots, \mathbf{h}_S$ in accelerator memory. BPTT thus converts an $\mathcal{O}(d)$ runtime state into an $\mathcal{O}(S \cdot d)$ memory footprint during training. Furthermore, repeated multiplication by $\mathbf{W}_{\text{hh}}$ causes gradients to vanish or explode exponentially over long horizons, bounding the effective context window of simple RNNs. The recurrent weight matrix often contains connections with minimal contribution to temporal dependencies, allowing significant compression.
 
 ### Computational mapping {#sec-network-architectures-computational-mapping-701d}
 
@@ -2361,11 +2369,11 @@ During inference, recurrent networks achieve exceptional memory efficiency. Beca
 
 Recurrent execution exhibits distinct memory-hierarchy behaviors: high temporal locality for parameters, but poor operational intensity under standard framework dispatch. Weight matrices $\mathbf{W}_{\text{hh}}$ and $\mathbf{W}_{\text{hx}}$ are reused at every time step, residing comfortably in SRAM or L2 cache if the model fits on-chip. However, naively launching separate kernels for input projection, recurrent projection, bias addition, and activation at each time step incurs severe kernel-launch overhead and forces intermediate tensors back and forth across HBM. To mitigate this memory-bandwidth bottleneck, production recurrent runtimes fuse the projections, bias addition, and activation into a single monolithic kernel that maintains $\mathbf{h}_t$ within GPU registers and shared memory throughout the sequence execution.
 
-This architectural tension between fixed-capacity state and serialized execution defined sequence processing before transformers. While recurrent networks maintain constant memory overhead regardless of sequence length, the sequential dependency\index{RNN!sequential dependency bottleneck} prevents hardware from parallelizing across time steps, the fixed-capacity state becomes an information bottleneck in which early inputs fade over long spans, and gradients through long chains of recurrent steps vanish or explode (the vanishing gradient problem\index{Vanishing gradient problem}). Overcoming both constraints required an architecture capable of establishing direct, content-addressable links across arbitrary sequence positions without intervening recurrent steps: the attention mechanism (@sec-network-architectures-attention-mechanisms-dynamic-pattern-processing-22df).
-
 ::: {.column-margin .margin-pointer}
 ↪ Kernel fusion and tiling, which cut the per-step memory round-trips of recurrent and other iterative workloads, are developed in @sec-hardware-acceleration-dataflow-optimization-strategies-ce52.
 :::
+
+This architectural tension between fixed-capacity state and serialized execution defined sequence processing before transformers. While recurrent networks maintain constant memory overhead regardless of sequence length, the sequential dependency\index{RNN!sequential dependency bottleneck} prevents hardware from parallelizing across time steps, the fixed-capacity state becomes an information bottleneck in which early inputs fade over long spans, and gradients through long chains of recurrent steps vanish or explode (the vanishing gradient problem\index{Vanishing gradient problem}). Overcoming both constraints required an architecture capable of establishing direct, content-addressable links across arbitrary sequence positions without intervening recurrent steps: the attention mechanism (@sec-network-architectures-attention-mechanisms-dynamic-pattern-processing-22df).
 
 ## Attention: Dynamic Processing {#sec-network-architectures-attention-mechanisms-dynamic-pattern-processing-22df}
 
@@ -3106,7 +3114,7 @@ The $\sqrt{d_{\text{head}}}$ scaling introduced with the attention operator foll
 
 Conceptually, attention implements a differentiable content-addressable memory\index{Attention mechanism!content-addressable memory}. Whereas conventional memory architectures retrieve stored values at explicit addresses, self-attention uses the query vector $\mathbf{q}_i$ to score similarity against all candidate keys $\mathbf{K} \in \mathbb{R}^{S \times d_{\text{head}}}$. The resulting softmax distribution generates a continuous interpolation over the value vectors $\mathbf{V} \in \mathbb{R}^{S \times d_{\text{head}}}$, functioning as a differentiable lookup operation.
 
-In practice, full-rank multi-head attention frequently exhibits structural redundancy, with multiple heads learning correlated attention maps. Furthermore, the exponential in softmax creates acute sensitivity to underflow and overflow in reduced-precision formats. These hardware-relevant behaviors motivate structural pruning, low-rank factorization, sparse attention patterns, and specialized quantization strategies detailed in @sec-model-compression.
+In practice, full-rank multi-head attention frequently exhibits structural redundancy, with multiple heads learning correlated attention maps. Furthermore, the exponential in softmax creates acute sensitivity to underflow and overflow in reduced-precision formats. These hardware-relevant behaviors motivate structural pruning, low-rank factorization, sparse attention patterns, and specialized quantization strategies.
 
 Self-attention learns dynamic activation patterns across the input sequence. Unlike CNNs which apply fixed filters or RNNs which use fixed recurrence patterns, attention learns which elements should activate together based on their content. Trained attention heads often specialize in distinct syntactic or semantic patterns [@clark2019], dynamically adapting the effective connectivity graph for each input sequence.
 
@@ -3405,10 +3413,6 @@ The quadratic bottleneck analyzed in @sec-network-architectures-system-implicati
 #### Training: The quadratic compute wall {#sec-network-architectures-training-quadratic-compute-wall-de9d}
 
 During training and prompt prefill, all token positions are processed in parallel, allowing accelerator tensor cores to achieve high floating-point utilization, but dense attention's score computation grows as $\mathcal{O}(S^2)$ with sequence length $S$. At 32k tokens, a materialized score matrix would occupy gigabytes per layer across multiple heads, and writing it to HBM and reading it back for softmax would make the layer bandwidth bound. I/O-aware tiling such as FlashAttention [@dao2022] fuses the dot-product, softmax, and value-weighting steps into on-chip SRAM tiles (@sec-network-architectures-memory-requirements-72c3), which removes that round-trip and leaves quadratic compute as the wall that remains.
-
-::: {.column-margin .margin-pointer}
-↪ The memory hierarchy of register files, on-chip SRAM, and HBM that makes such tiling effective is developed in @sec-hardware-acceleration-memory-hierarchy-1839.
-:::
 
 #### Small-batch autoregressive decoding: The memory bandwidth wall {#sec-network-architectures-inference-memory-bandwidth-wall-98d1}
 
@@ -3907,7 +3911,7 @@ class EnergyConsumptionAnalysis:
 
 A core systems principle: *moving data costs more than computing on it*. In the reference model of @horowitz2014, an FP32 multiply costs about `{python} EnergyConsumptionAnalysis.energy_multiply_pj_str`, while fetching one 32-bit operand from off-chip DRAM costs `{python} EnergyConsumptionAnalysis.energy_dram_pj_str`, a gap of `{python} EnergyConsumptionAnalysis.energy_ratio_mult_str`. Low-intensity rows are therefore energy-dominated by DRAM traffic. An unbatched MLP or a decode step loads each weight once per request and spends most of its energy moving it. A CNN amortizes each filter load over $H_{\text{img}} \times W_{\text{img}}$ applications, so the locality that makes it compute bound also makes it energy efficient, unless a fully materialized im2col buffer inflates temporary traffic by up to $K^2$. An RNN keeps its compact state in SRAM but idles execution units across serial steps, which raises energy per token. Tiled attention keeps score blocks on chip, so its energy tracks matrix multiplication rather than DRAM round-trips.
 
-Later optimizations exploit this principle directly. Quantization reduces the bits moved per value, the subject of @sec-model-compression-quantization-precision-cd46; pruning removes unnecessary movement; and tiling keeps working sets in faster, lower-energy memory.
+Later optimizations exploit this principle directly. Quantization reduces the bits moved per value; pruning removes unnecessary movement; and tiling keeps working sets in faster, lower-energy memory.
 
 :::
 
@@ -4132,9 +4136,9 @@ The depth problem\index{Network depth!training difficulty} follows from the chai
 $$
 \frac{\partial \mathcal{L}}{\partial \mathbf{W}^{(1)}} = \frac{\partial \mathcal{L}}{\partial \mathbf{a}^{(N_L)}} \cdot \frac{\partial \mathbf{a}^{(N_L)}}{\partial \mathbf{z}^{(N_L)}} \cdot \frac{\partial \mathbf{z}^{(N_L)}}{\partial \mathbf{a}^{(N_L-1)}} \cdot \ldots \cdot \frac{\partial \mathbf{z}^{(2)}}{\partial \mathbf{a}^{(1)}} \cdot \frac{\partial \mathbf{a}^{(1)}}{\partial \mathbf{z}^{(1)}} \cdot \frac{\partial \mathbf{z}^{(1)}}{\partial \mathbf{W}^{(1)}}
 $$
-where $\mathbf{z}^{(\ell)}$ represents the preactivation and $\mathbf{a}^{(\ell)} = \sigma(\mathbf{z}^{(\ell)})$ the postactivation output of layer $\ell$. The gradient is a product of $N_L$ terms, each depending on the activation derivative $\sigma'(\mathbf{z}^{(\ell)})$. With sigmoid activations, whose derivative peaks at 0.25 (@sec-neural-computation-sigmoid-a98f), the gradient magnitude shrinks by roughly $(0.25)^{N_L}$, so early layers receive negligible updates and silently stop training. Exploding gradients\index{Exploding gradient problem} are the destabilizing counterpart. If each layer Jacobian expands a shared direction by about 1.5, that component grows exponentially, producing overflow, NaN (not-a-number) values, and training divergence rather than a silent stall.
+where $\mathbf{z}^{(\ell)}$ represents the preactivation and $\mathbf{a}^{(\ell)} = \sigma(\mathbf{z}^{(\ell)})$ the postactivation output of layer $\ell$. The gradient is a product of $N_L$ terms, each depending on the activation derivative $\sigma'(\mathbf{z}^{(\ell)})$. With sigmoid activations, whose derivative peaks at 0.25, the gradient magnitude shrinks by roughly $(0.25)^{N_L}$, so early layers receive negligible updates and silently stop training. Exploding gradients\index{Exploding gradient problem} are the destabilizing counterpart. If each layer Jacobian expands a shared direction by about 1.5, that component grows exponentially, producing overflow, NaN (not-a-number) values, and training divergence rather than a silent stall.
 
-ReLU\index{ReLU} removes the activation's share of this decay, since its derivative is one on active paths (@sec-neural-computation-relu-7184), and that change made networks of 10–20 layers trainable. It does not remove the problem. Inactive units pass zero gradient, and a poorly initialized weight or a large update can leave a unit permanently dead\index{Dead neuron}\index{ReLU!dead neuron}; more fundamentally, ReLU does nothing to regulate the singular values of the weight matrices, which continue to attenuate or amplify gradients across depth. The original ResNet study showed the consequence on CIFAR-10: a 56-layer plain network had higher training and test error than a 20-layer plain network throughout training [@he2016]. Because the deeper network was worse on the *training* set, the failure was an optimization barrier, not overfitting.
+ReLU\index{ReLU} removes the activation's share of this decay, since its derivative is one on active paths, and that change made networks of 10–20 layers trainable. It does not remove the problem. Inactive units pass zero gradient, and a poorly initialized weight or a large update can leave a unit permanently dead\index{Dead neuron}\index{ReLU!dead neuron}; more fundamentally, ReLU does nothing to regulate the singular values of the weight matrices, which continue to attenuate or amplify gradients across depth. The original ResNet study showed the consequence on CIFAR-10: a 56-layer plain network had higher training and test error than a 20-layer plain network throughout training [@he2016]. Because the deeper network was worse on the *training* set, the failure was an optimization barrier, not overfitting.
 
 ResNet blocks introduce residual learning\index{Residual learning} through skip connections that transform gradient flow\index{Gradient!flow in residual networks}. @Eq-residual adds the identity path $\mathbf{x}$ to the residual mapping $\mathcal{F}(\mathbf{x})$:
 $$
@@ -4281,7 +4285,7 @@ Skip connections and normalization stabilize depth, the first by preserving grad
 
 [^fn-gru-gated-recurrence]: **GRU (gated recurrent unit)**\index{GRU!efficiency}: @cho2014 describes a gated hidden unit for encoder-decoder translation that uses reset and update gates to control how the hidden state is updated. Relative to an LSTM's input, forget, and output gates plus candidate cell update, this gives a simpler gated recurrence. The broader systems lesson: architectural simplification can reduce state and matrix operations when it preserves task performance, a principle that recurs in efficiency-oriented designs from MobileNet to distilled transformers. \index{GRU!parameter efficiency}
 
-Gating generalizes beyond recurrence as the basic mechanism for data-dependent routing. Highway Networks used gates to interpolate between a transformation and an identity bypass, directly inspiring residual shortcuts. Encoder-decoder\index{Encoder-decoder!definition} attention\index{Architecture!encoder-decoder} [@bahdanau2015neural] computes a dynamic routing distribution over input representations, and in transformers the softmax attention weights act as data-dependent routing coefficients that decide how features aggregate across tokens. Mixture-of-experts architectures extend the idea to dispatch each token to a subset of feedforward experts. The hardware cost of gating is irregularity. Dense attention keeps static tensor shapes even though its weights vary per token, but sparse attention, expert routing, and dynamic graph execution\index{Dynamic computation} introduce data-dependent control flow and runtime tensor sizes that defeat static memory allocation and balanced work dispatch. @Sec-model-compression-pruning-d1cb treats structured and unstructured sparsity.
+Gating generalizes beyond recurrence as the basic mechanism for data-dependent routing. Highway Networks used gates to interpolate between a transformation and an identity bypass, directly inspiring residual shortcuts. Encoder-decoder\index{Encoder-decoder!definition} attention\index{Architecture!encoder-decoder} [@bahdanau2015neural] computes a dynamic routing distribution over input representations, and in transformers the softmax attention weights act as data-dependent routing coefficients that decide how features aggregate across tokens. Mixture-of-experts architectures extend the idea to dispatch each token to a subset of feedforward experts. The hardware cost of gating is irregularity. Dense attention keeps static tensor shapes even though its weights vary per token, but sparse attention, expert routing, and dynamic graph execution\index{Dynamic computation} introduce data-dependent control flow and runtime tensor sizes that defeat static memory allocation and balanced work dispatch.
 
 ::: {.column-margin .margin-pointer}
 ↪ The irregular memory access that unstructured sparsity, embedding lookups, and dynamic routing impose on hardware is developed in @sec-hardware-acceleration-irregular-memory-access-c6ec.
@@ -4371,13 +4375,13 @@ LineA/.style={BrownLine!80, line width=1.0pt,{-{Triangle[width=0.7*6pt,length=1.
 
 :::
 
-When constraints require scaling down, the model compression techniques in @sec-model-compression provide systematic approaches for reducing memory, compute, and latency while preserving accuracy. The framework executes in three ordered phases:
+When constraints require scaling down, model compression techniques provide systematic approaches for reducing memory, compute, and latency while preserving accuracy. The framework executes in three ordered phases:
 
 1.  **Data symmetry identification ($\text{D}$)**: Identify structural symmetries and invariances in the input data. Spatial locality routes candidates to CNNs; temporal sequence structure to RNNs; unconstrained cross-token dependency to transformers; tabular features without spatial geometry to MLPs; and high-cardinality categorical IDs to sparse embedding tables.
 2.  **Progressive physical constraint filtering ($\text{A} \times \text{M}$)**: Filter candidate models against hardware budgets: static parameter storage in flash/DRAM, peak dynamic activation footprint in SRAM/HBM, arithmetic intensity against the hardware roofline, and tail latency deadlines. A violation requires scaling down model width or depth, applying quantization and compression, or switching to a lower-overhead architecture family.
 3.  **Empirical capacity and deployment validation**: Verify that candidate capacity meets target accuracy on representative evaluation distributions. If predictive accuracy falls short, scale model capacity and re-evaluate physical hardware constraints. If target accelerator hardware cannot sustain the required arithmetic throughput or memory bandwidth, select an alternative architecture rather than relying on marginal hyperparameter adjustments.
 
-Kernel-level choices come after this decision. Im2col or direct convolution, fused normalization, and IO-aware tiled attention change how efficiently an architecture's contract is paid, not which iron-law term binds; @sec-hardware-acceleration develops them. Recurrent models make the limit plain. Unrolling loops or batching independent sequences across vector lanes amortizes per-step overhead, but no such technique shortens the serial path that the architecture itself imposes.
+Kernel-level choices come after this decision. Im2col or direct convolution, fused normalization, and IO-aware tiled attention change how efficiently an architecture's contract is paid, not which iron-law term binds. Recurrent models make the limit plain. Unrolling loops or batching independent sequences across vector lanes amortizes per-step overhead, but no such technique shortens the serial path that the architecture itself imposes.
 
 ### Architecture selection in practice {#sec-network-architectures-putting-together-architecture-selection-practice-052f}
 

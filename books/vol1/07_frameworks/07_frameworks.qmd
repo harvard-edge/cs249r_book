@@ -1147,10 +1147,6 @@ Compilers such as **XLA**\index{XLA!definition}\index{XLA!graph compilation}[^fn
 
 [^fn-xla-graph-compiler]: **XLA (accelerated linear algebra)**\index{XLA!compilation speedup}: The "optimized machine code" in the triggering sentence means XLA can fuse subgraphs, specialize layouts, and lower high-level operations into backend-specific code; fusion attacks both launch overhead $(L_{\text{lat}})$ and intermediate memory writes $(D_{\text{vol}})$, but the realized speedup depends on whether the graph contains enough fusible, memory-bound work for the compiler to remove. Large GEMM-heavy regions may already be compute bound, while chains of small elementwise operations can benefit more because fusion removes repeated trips through external memory. The benefit is not a fixed multiplier: XLA helps when it can fuse operations, specialize layouts and shapes, and reduce launch or memory overhead, so gains depend on graph structure, backend support, and input-shape stability.
 
-::: {.column-margin .margin-pointer}
-↪ Memory-traffic reduction models and arithmetic-intensity gains for multi-operator kernel fusion are developed in @sec-appdx-algorithm-foundations-operator-fusion-5d73.
-:::
-
 ##### Systems implications {.unnumbered}
 
 Static graphs\index{Static graph!optimization benefits} can achieve high performance through ahead-of-time optimization. Kernel fusion reduces memory bandwidth requirements when intermediate traffic is the bottleneck, and hardware-specific compilation can approach high utilization when shapes, operators, and layouts match efficient backend paths.
@@ -1393,7 +1389,11 @@ The resulting workflow is a systems decision. Rapid prototyping favors eager exe
 
 : **Execution Model Trade-Offs**: Each execution model occupies a distinct position in the flexibility-optimization trade-off space. Eager execution maximizes debugging flexibility but limits cross-operation optimization; static graphs maximize optimization but require control flow to be represented in the graph; hybrid JIT compilation compiles captured regions while falling back to eager execution for unsupported patterns. {#tbl-framework-execution-models tbl-colwidths="[25,25,25,25]"}
 
-Eager mode's primary value is in the iteration loop quantified in @sec-ml-workflow-quantifying-ml-lifecycle-bd69: it allows using standard Python debuggers (such as pdb) to inspect variables mid-execution, whereas graph-mode debugging often requires specialized framework tools. This immediate feedback accelerates the prototyping phase of the ML lifecycle.
+Eager mode's primary value is in the iteration loop: it allows using standard Python debuggers (such as pdb) to inspect variables mid-execution, whereas graph-mode debugging often requires specialized framework tools. This immediate feedback accelerates the prototyping phase of the ML lifecycle.
+
+::: {.column-margin .margin-pointer}
+↩ The iteration tax, the cost that slow experiment cycles impose on how many candidate models a team can test, is established in @sec-ml-workflow-quantifying-ml-lifecycle-bd69.
+:::
 
 Beyond these core execution trade-offs, @tbl-mlfm-graphs highlights additional systems-level distinctions between static and dynamic approaches.
 
@@ -2050,7 +2050,7 @@ def deep_network(x, w1, w2, w3):
 Frameworks mitigate this memory wall through two primary architectural strategies. The first is activation checkpointing\index{Activation checkpointing!definition}\index{Activation checkpointing!memory-compute trade-off} (or gradient checkpointing): rather than buffering every intermediate activation, the runtime stores only selected segment boundary tensors and recomputes dropped intermediates on demand during the backward pass. The essential systems mechanism is the runtime contract: the framework marks boundary activations as persistent and regenerates intermediate values when backward execution reaches that segment. @Lst-checkpoint-recompute illustrates this contract: the forward pass preserves only segment boundaries, and the backward pass re-executes the forward segment to regenerate activations rather than loading them from global memory.
 
 ::: {.column-margin .margin-pointer}
-↪ Activation checkpointing schedules and their recomputation cost are operationalized in @sec-model-training-gradient-accumulation-checkpointing-mechanics-fb09.
+↪ Activation checkpointing schedules and their recomputation cost are operationalized in @sec-model-training-optimal-checkpoint-placement-strategy-4a0d.
 :::
 
 ::: {#lst-checkpoint-recompute lst-cap="**Activation Checkpointing**: The forward pass stores only segment boundaries; the backward pass re-runs each segment to regenerate the dropped activations, trading recomputation for memory."}
@@ -2194,9 +2194,13 @@ class ResNetMemory:
 
 Consider an illustrative ResNet-50\index{ResNet-50!training memory footprint} training scenario with `{python} ResNetMemory.resnet_params_m_str` parameters (~`{python} ResNetMemory.resnet_fp32_mb_str` of FP32 weights), batch size 64, and $224{\times}224$ images. With `{python} ResNetMemory.resnet_act_min_gb_str`--`{python} ResNetMemory.resnet_act_max_gb_str` of saved activations, gradients add ~`{python} ResNetMemory.resnet_fp32_mb_str`, and two Adaptive Moment Estimation (Adam) FP32 moment buffers add ~`{python} ResNetMemory.resnet_adam_mb_str`. Summing those four components gives an `{python} ResNetMemory.resnet_training_min_gb_str`--`{python} ResNetMemory.resnet_training_max_gb_str` training scenario, roughly `{python} ResNetMemory.resnet_training_ratio_range_mult_str` the FP32 weight storage alone. This metric reflects peak training memory, distinct from inference memory which requires no optimizer states, gradients, or backward activation buffers.
 
-This disparity underscores why accelerator training capacity cannot be deduced from parameter counts alone. Total training memory obeys the four-component formulation ($M_{\text{total}} = M_{\text{weights}} + M_{\text{gradients}} + M_{\text{optimizer}} + M_{\text{activations}}$) plus allocator overhead, as derived in @sec-appdx-algorithm-foundations-true-cost-training-memory-e54e.
+This disparity underscores why accelerator training capacity cannot be deduced from parameter counts alone. Total training memory obeys the four-component formulation derived in @sec-appdx-algorithm-foundations-true-cost-training-memory-e54e ($M_{\text{total}} = M_{\text{weights}} + M_{\text{gradients}} + M_{\text{optimizer}} + M_{\text{activations}}$), plus allocator overhead.
 
-Frameworks provide three graph-level controls to manage this trade-off. Gradient checkpointing\index{Activation checkpointing!recomputation strategy} [@chen2016training] alters what the graph retains: the engine stores only coarse segment boundaries and regenerates intermediate activations during the backward pass. In iron law terms, checkpointing increases the arithmetic operation count ($O$) to curtail memory footprint and transfer volume ($D_{\text{vol}}$). Tensor detachment provides a complementary optimization: calling `.detach()` removes a tensor from autograd tracking, preventing the engine from retaining activations along upstream graph paths. This is essential for transfer learning where frozen feature extractors require no gradient computation, eliminating unnecessary activation storage ($D_{\text{vol}}$). Mixed-precision training provides a third lever: representing activations and weights in 16-bit formats directly halves tensor volume ($D_{\text{vol}}$) while accelerating arithmetic throughput on Tensor Cores ($R_{\text{peak}}$). @Sec-model-training-scale-physical-ceiling-e06c turns these graph mechanisms into the decision of when to scale beyond one machine.
+Frameworks provide three graph-level controls to manage this trade-off. Gradient checkpointing\index{Activation checkpointing!recomputation strategy} [@chen2016training] alters what the graph retains: the engine stores only coarse segment boundaries and regenerates intermediate activations during the backward pass. In iron law terms, checkpointing increases the arithmetic operation count ($O$) to curtail memory footprint and transfer volume ($D_{\text{vol}}$). Tensor detachment provides a complementary optimization: calling `.detach()` removes a tensor from autograd tracking, preventing the engine from retaining activations along upstream graph paths. This is essential for transfer learning where frozen feature extractors require no gradient computation, eliminating unnecessary activation storage ($D_{\text{vol}}$). Mixed-precision training provides a third lever: representing activations and weights in 16-bit formats directly halves tensor volume ($D_{\text{vol}}$) while accelerating arithmetic throughput on Tensor Cores ($R_{\text{peak}}$).
+
+::: {.column-margin .margin-pointer}
+↪ The decision of when these single-machine levers stop being enough and training must scale beyond one machine is developed in @sec-model-training-scale-physical-ceiling-e06c.
+:::
 
 ##### Extensibility and control {.unnumbered}
 
@@ -2355,7 +2359,11 @@ class Model7B:
 
 Resuming training after preemption or hardware failure requires restoring model weights and optimizer states in lockstep: first-moment vectors, second-moment variance estimates, and step counters. In the standard mixed-precision Adam recipe, a checkpoint holds the FP16 working weights (2 bytes per parameter), the FP32 master weights (4 bytes), and the two FP32 moments (8 bytes), 14 bytes per parameter; only the gradients, which every step recomputes, are left out of the 16-byte training state. For a 7-billion-parameter model, the checkpoint therefore carries approximately `{python} Model7B.model_7b_total_gb_str` (`{python} Model7B.model_7b_fp16_gb_str` + `{python} Model7B.model_7b_master_gb_str` + `{python} Model7B.model_7b_adam_gb_str`), `{python} Model7B.model_7b_ckpt_mult_str` the FP16 weights alone. Checkpoint volume directly governs recovery latency across distributed storage, connecting fault tolerance to the iron law's $D_{\text{vol}}$ term.
 
-@Sec-model-training-optimizer-memory-training-loop-4383 analyzes how to budget and reduce optimizer memory. At the framework level, optimizers expose internal state dictionaries via `state_dict()` for serialization. @Lst-state-dict-interface demonstrates accessing optimizer state dictionaries, and @lst-checkpoint-save-load shows saving and restoring both model parameters and optimizer states to preserve training trajectory continuity.
+::: {.column-margin .margin-pointer}
+↪ How to budget and reduce optimizer memory during training is developed in @sec-model-training-optimizer-memory-training-loop-4383.
+:::
+
+At the framework level, optimizers expose internal state dictionaries via `state_dict()` for serialization. @Lst-state-dict-interface demonstrates accessing optimizer state dictionaries, and @lst-checkpoint-save-load shows saving and restoring both model parameters and optimizer states to preserve training trajectory continuity.
 
 ::: {#lst-state-dict-interface lst-cap="**State Dictionary Interface**: Optimizers expose internal state through state_dict(), enabling serialization of momentum buffers and adaptive learning rate estimates for checkpointing."}
 
@@ -2464,7 +2472,7 @@ Modern machine learning applications demand portability across radically dispara
 
 The problem decomposes into two interacting dimensions\index{Hardware abstraction!two dimensions (data, execution)}. The first is *data representation*: how frameworks encode tensors, parameters, and computational state in forms that work across hardware. The second is *execution mapping*: how high-level operations translate into hardware-specific implementations. These dimensions are not independent concerns. The way data is represented (memory layout, precision, device placement) directly affects *what* execution strategies are possible. A tensor stored in row-major format on a GPU requires different kernels than one in column-major format on a CPU. A model quantized to INT8 enables entirely different execution paths than FP32.
 
-Solving the abstraction problem requires sophisticated software infrastructure: tensor representations that encode both mathematical semantics and hardware constraints, intermediate representations that enable hardware-specific compilation, and runtime systems that manage data movement across the memory hierarchy. To make this concrete, trace what must happen when a programmer writes `model(input)`. The framework must resolve five decisions in rapid succession, and the rest of this section takes them in order: data representation (tensor shape, memory layout, numeric precision), device placement (the bandwidth hierarchy connecting CPU, GPU, and accelerator memory), input delivery (data pipelines that sustain hundreds of MB/s to keep the accelerator fed), parameter organization (weights, gradients, and optimizer state that persist across steps and may span devices), and kernel execution (dispatch, scheduling, and resource optimization). Distributed placement previews the same abstraction boundary: frameworks expose placement scopes so system components can manage device boundaries, while @sec-model-training-scaling-training-systems-adfd analyzes the scaling algorithms and communication costs that make those scopes efficient.
+Solving the abstraction problem requires sophisticated software infrastructure: tensor representations that encode both mathematical semantics and hardware constraints, intermediate representations that enable hardware-specific compilation, and runtime systems that manage data movement across the memory hierarchy. To make this concrete, trace what must happen when a programmer writes `model(input)`. The framework must resolve five decisions in rapid succession, and the rest of this section takes them in order: data representation (tensor shape, memory layout, numeric precision), device placement (the bandwidth hierarchy connecting CPU, GPU, and accelerator memory), input delivery (data pipelines that sustain hundreds of MB/s to keep the accelerator fed), parameter organization (weights, gradients, and optimizer state that persist across steps and may span devices), and kernel execution (dispatch, scheduling, and resource optimization). Distributed placement previews the same abstraction boundary: frameworks expose placement scopes so system components can manage device boundaries.
 
 ### Data structures and tensor abstractions {#sec-ml-frameworks-data-structures-tensor-abstractions-9cbf}
 
@@ -2929,6 +2937,10 @@ Tensors and their memory layouts establish what the framework computes with. Whe
 
 While the high-level API focuses on math, the framework backend plays the role that an operating system plays for a single machine. It schedules compute and moves data, building on the CUDA runtime's\index{CUDA!runtime, OS layer} primitives for launching kernels and managing device memory.
 
+::: {.column-margin .margin-pointer}
+↩ The single-node stack, in which the operating system moves data between host memory and accelerator memory, is established in @sec-ml-systems-architectural-anchor.
+:::
+
 On the data-movement side, the framework coordinates with this runtime to implement **DMA**\index{DMA!PCIe data movement interface} over the PCIe\index{PCIe!host-device interconnect} bus. The bandwidth gap between the host (CPU) and device (GPU) is the primary "Data Loading Bottleneck": @sec-appdx-machine-foundations-bandwidth-vs-latency-5320 models this transfer, separating the two constraints, $T = L_{\text{lat}} + D_{\text{vol}}/\text{BW}$, that determine whether a given data-loading strategy is limited by per-transfer latency or by sustained bandwidth. Frameworks mitigate this through pinned memory\index{Pinned memory!definition} (page-locked host memory), which enables DMA transfers without pageable-memory staging. This "HW/OS" interface is what makes high-throughput training loops possible on a single machine.
 
 Every tensor resides on a specific device, and cross-device operations incur transfer costs that can dominate execution time. PCIe 4.0 delivers `{python} DeviceBandwidthHierarchy.pcie4_gb_per_s_str` between CPU and GPU, while HBM2e provides `{python} DeviceBandwidthHierarchy.a100_bw_tb_per_s_str` within the GPU. This `{python} DeviceBandwidthHierarchy.pcie_to_hbm_gap_mult_str` bandwidth gap means a single misplaced tensor transfer can erase the entire speedup from GPU acceleration.
@@ -2959,10 +2971,6 @@ The cost of moving data between devices varies by orders of magnitude depending 
 These numbers connect directly to the iron law of performance. Every cross-device transfer contributes to $(D_{\text{vol}}/\text{BW})$ at a fraction of on-device bandwidth. Dividing 1 GB by the stated PCIe 4.0 peak gives `{python} DeviceBandwidthHierarchy.pcie4_1gb_ms_str`, a bandwidth-only lower bound that omits protocol, launch, synchronization, topology, and contention overhead. Transfers can dominate lightweight or small-batch workloads, so deployed latency must be measured rather than inferred from peak bandwidth alone.
 
 Device placement discipline protects the bandwidth hierarchy from accidental PCIe traffic. Every tensor carries a device attribute, and frameworks enforce a strict invariant: operations can only combine tensors on the same device. A `RuntimeError` results from mixing `cuda:0` and `cuda:1` tensors, preventing silent cross-device transfers.
-
-::: {.column-margin .margin-pointer}
-↩ The single-node stack and memory boundaries governing host-accelerator data movement are established in @sec-ml-systems-architectural-anchor.
-:::
 
 The movement mechanism is explicit. Calling `.to()` on a tensor returns the original tensor when its data type and device already match the request; otherwise it returns a converted copy unless `copy=True` forces a copy. In contrast, `nn.Module.to()` modifies registered parameters and buffers in place and returns the module.
 
@@ -3047,7 +3055,11 @@ for mb in range(num_microbatches):
 
 :::
 
-This overlap principle extends naturally to model-stage overlap within a single node. Different model stages on separate GPUs can process different microbatches concurrently, with each stage's computation overlapping the next stage's data reception (see @lst-pipeline-parallelism-streams). @Sec-model-training-singlenode-multigpu-training-c87f analyzes the multi-GPU training strategies built from this scheduling pattern; here, the single-node implementation is enough to expose the synchronization principle that survives at larger scale. Once computation and communication overlap, the remaining challenge is ensuring correctness when operations complete out of order.
+This overlap principle extends naturally to model-stage overlap within a single node. Different model stages on separate GPUs can process different microbatches concurrently, with each stage's computation overlapping the next stage's data reception (@lst-pipeline-parallelism-streams). The single-node implementation is enough to expose the synchronization principle that survives at larger scale. Once computation and communication overlap, the remaining challenge is ensuring correctness when operations complete out of order.
+
+::: {.column-margin .margin-pointer}
+↪ The multi-GPU training strategies built from this stage-overlap pattern, including layer-wise pipeline partitioning, are developed in @sec-model-training-singlenode-multigpu-training-c87f.
+:::
 
 ##### Synchronization and correctness {.unnumbered}
 
@@ -3157,7 +3169,11 @@ The second mechanism is prefetching\index{Prefetching!data loader pipeline}. Wit
 
 The third mechanism is pinned memory for DMA transfers. The `pin_memory=True` option places batches in page-locked host memory, which can avoid pageable-memory staging and enable host-to-device copies to overlap device work. For a batch of 64 FP32 images at $224{\times}224{\times}3$ (`{python} DataloaderThroughput.batch_mb_str`), dividing by the stated PCIe 4.0 x16 peak gives `{python} DataloaderThroughput.batch_transfer_ms_str`; this is a bandwidth-only lower bound, not a measured pinned-transfer latency. The realized benefit over pageable memory depends on the platform, batch size, pipeline, and overlap. Pinned pages also reduce pageable system memory.
 
-The DataLoader configuration is useful only when each parameter is tied to a bottleneck: `num_workers` sets loading parallelism, `prefetch_factor` sets pipeline depth, and `pin_memory` enables DMA transfers. Each worker also holds its own copy of the Dataset object, so the worker count trades throughput against host memory. @Sec-model-training-pipeline-practical-considerations-4ba0 treats how to size these knobs against a measured profile.
+The DataLoader configuration is useful only when each parameter is tied to a bottleneck: `num_workers` sets loading parallelism, `prefetch_factor` sets pipeline depth, and `pin_memory` enables DMA transfers. Each worker also holds its own copy of the Dataset object, so the worker count trades throughput against host memory.
+
+::: {.column-margin .margin-pointer}
+↪ Sizing worker count and prefetch depth against measured throughput and memory is operationalized in @sec-model-training-pipeline-practical-considerations-4ba0.
+:::
 
 Once throughput is high enough, worker process management becomes a correctness constraint. PyTorch assigns each worker a distinct PyTorch seed. A `worker_init_fn` is still useful when dataset or augmentation code also uses NumPy or Python's `random` module, as @lst-dataloader-throughput demonstrates. Shared Python state is generally process-local, so modifications in one worker do not automatically propagate to the others or the main process; explicitly shared or memory-mapped storage is needed when workers must share mutable state.
 
@@ -3249,7 +3265,7 @@ The computational graph defines *what* to compute, but *where* and *how* that co
 
 When training scales beyond a single machine, these same abstractions extend to named groups of devices. Frameworks use constructs such as `ProcessGroup`\index{ProcessGroup!distributed execution} (PyTorch) or `Mesh` (JAX) to describe which tensors and operations belong together, relying on communication libraries such as the NVIDIA Collective Communications Library (NCCL) to execute collective primitives—such as **ring-AllReduce**\index{AllReduce!collective communication} for gradient aggregation and **AllGather**\index{AllGather!collective communication} for parameter gathering. The runtime manages these primitives to maximize interconnect utilization: intra-node NVLink links deliver up to $900\text{ GB/s}$ of bidirectional bandwidth per GPU on H100-class systems (`{python} DeviceBandwidthHierarchy.nvlink_a100_gb_per_s_str` on the A100 of @tbl-device-transfer-overhead), whereas inter-node InfiniBand or Ethernet networks drop to $50\text{--}400\text{ Gbps}$ ($6.25\text{--}50\text{ GB/s}$), making collective communication efficiency the primary bottleneck in distributed training scaling. The important framework idea is the abstraction boundary: user code names placement relationships, and the framework preserves those relationships while the hardware path changes underneath.
 
-These concepts shape framework API design by establishing the placement primitives required for multi-accelerator execution. At the framework level, the central requirement is placement expressiveness: when models exceed single-device memory, frameworks must provide structured abstractions to partition data, operators, and state across hardware boundaries. A GPT-3 scale model, for instance, cannot fit on a single GPU—its `{python} GPT3ParameterStructures.gpt3_params_b_str` parameters alone require `{python} GPT3ParameterStructures.gpt3_fp16_gb_str` in FP16, far exceeding any GPU's memory. To address this memory bottleneck, @fig-3d-parallelism diagrams how framework placement abstractions partition model state across a 3D accelerator grid (depicting 32 GPUs from GPU 0 through GPU 28). Three orthogonal braces define the placement axes: the vertical brace splits work "Across replicas" (data parallelism), the horizontal brace distributes stages "Across layer groups" (pipeline parallelism), and the depth brace shards hidden dimensions "Within tensors" (tensor parallelism). @Sec-model-training-scaling-training-systems-adfd later formalizes these dimensions as concrete distributed training strategies and analyzes their communication costs.
+These concepts shape framework API design by establishing the placement primitives required for multi-accelerator execution. At the framework level, the central requirement is placement expressiveness: when models exceed single-device memory, frameworks must provide structured abstractions to partition data, operators, and state across hardware boundaries. A GPT-3 scale model, for instance, cannot fit on a single GPU—its `{python} GPT3ParameterStructures.gpt3_params_b_str` parameters alone require `{python} GPT3ParameterStructures.gpt3_fp16_gb_str` in FP16, far exceeding any GPU's memory. To address this memory bottleneck, @fig-3d-parallelism diagrams how framework placement abstractions partition model state across a 3D accelerator grid (depicting 32 GPUs from GPU 0 through GPU 28). Three orthogonal braces define the placement axes: the vertical brace splits work "Across replicas" (data parallelism), the horizontal brace distributes stages "Across layer groups" (pipeline parallelism), and the depth brace shards hidden dimensions "Within tensors" (tensor parallelism). @Sec-model-training-scaling-training-systems-adfd formalizes these dimensions as concrete distributed training strategies and analyzes their communication costs.
 
 ::: {#fig-3d-parallelism fig-env="figure" fig-pos="htb" fig-cap="**Device Placement Dimensions**: A grid of eight accelerator clusters arranged in two rows and four columns, each containing stacked computational units. The braces preview three ways a framework can place work when a model no longer fits one device: across layer groups, across replicated batches, and within very large tensors." fig-alt="Grid of 8 GPU clusters in two rows and four columns. A horizontal brace labels splitting across layer groups, a vertical brace labels replicated batch groups, and a depth brace labels splitting within large tensors."}
 
@@ -3904,7 +3920,7 @@ Within a captured `tf.function`, TensorFlow can apply graph optimizations such a
 
 :::
 
-While TensorFlow 2.0 introduced eager execution to bridge the gap between research and production, TensorFlow 2.x still exposes `tf.function` as the graph-conversion path for performance-sensitive code [@tensorflowFunctionGuide]. Its core strength remains the robust, compiled path from research to global-scale deployment. @Sec-model-serving later examines the production infrastructure that uses these export paths.
+While TensorFlow 2.0 introduced eager execution to bridge the gap between research and production, TensorFlow 2.x still exposes `tf.function` as the graph-conversion path for performance-sensitive code [@tensorflowFunctionGuide]. Its core strength remains the robust, compiled path from research to global-scale deployment.
 
 ### PyTorch: The eager research standard {#sec-ml-frameworks-pytorch-85cd}
 
@@ -4066,10 +4082,6 @@ These efficiency gaps become hard constraints beyond the server room. A multi-fo
 
 Deploying a model from an 8-GPU training cluster to an autonomous vehicle's 30-watt embedded compute module or a 50-milliwatt IoT sensor completely reweights the three core framework problems across the cloud-to-edge spectrum\index{Deployment target!cloud to edge spectrum}. While the trade-offs mapped in @sec-ml-frameworks-quantitative-platform-performance-analysis-816d determine training throughput and operational cost in a data center, deploying to edge environments turns runtime efficiency into a binary feasibility test. The execution problem shifts from trading debuggability against graph optimization to fitting computation strictly within latency and memory envelopes. The differentiation problem disappears for pure inference workloads, eliminating the storage overhead of activation stashes and backward graphs. Meanwhile, the abstraction problem intensifies as software targets heterogeneous compute engines: server x86 and ARM CPUs, mobile NPUs, edge TPUs, and bare-metal microcontrollers operating within tens of kilobytes of SRAM.
 
-::: {.column-margin .margin-pointer}
-↪ Specialized inference engines and cross-platform serving runtimes that execute these exported graphs are operationalized in @sec-model-serving-inference-runtime-selection-5eef.
-:::
-
 @Tbl-deployment-frameworks maps these runtime assumptions across the cloud-to-edge spectrum, detailing the optimization levers and binding physical constraints that define each hardware tier.
 
 | **Environment**              | **Runtime assumptions that usually fit** | **Optimization lever**                       | **Binding constraint**               |
@@ -4083,7 +4095,11 @@ Deploying a model from an 8-GPU training cluster to an autonomous vehicle's 30-w
 
 These boundaries demonstrate why target selection acts as a hard filter on framework architecture rather than a late packaging detail. For example, the Smart Doorbell KWS model in @sec-ml-frameworks-tinyml-micro-runtimes-2a1b exemplifies the microcontroller tier. Operating within kilobytes of memory requires a runtime with a fixed, preallocated arena and a compact C/C++ footprint, eliminating dynamic memory allocation and Python runtime overhead entirely. This physical restriction forces a practical separation: engineering teams train models in expressive, dynamic environments on cloud GPUs, but must deploy them into runtimes with drastically narrower execution assumptions.
 
-The **ONNX**\index{ONNX!definition}\index{ONNX!cross-framework portability}[^fn-onnx-format-portability] format addresses this fragmentation by standardizing model exchange across runtimes [@bai2019onnx]. A pipeline can train an architecture in PyTorch, export the computation graph to an ONNX intermediate representation, and execute the serialized graph in ONNX Runtime or compile it for a target accelerator. In contrast, TensorFlow Lite relies on its own conversion path, translating TensorFlow SavedModels into FlatBuffers rather than routing through ONNX. Although standard interchange formats reduce manual model conversion between development and production environments, they do not eliminate compatibility testing, operator coverage gaps, or custom-kernel fallback overhead. The model compression strategies developed in @sec-model-compression build directly on this export boundary.
+The **ONNX**\index{ONNX!definition}\index{ONNX!cross-framework portability}[^fn-onnx-format-portability] format addresses this fragmentation by standardizing model exchange across runtimes [@bai2019onnx]. A pipeline can train an architecture in PyTorch, export the computation graph to an ONNX intermediate representation, and execute the serialized graph in ONNX Runtime or compile it for a target accelerator. In contrast, TensorFlow Lite relies on its own conversion path, translating TensorFlow SavedModels into FlatBuffers rather than routing through ONNX. Although standard interchange formats reduce manual model conversion between development and production environments, they do not eliminate compatibility testing, operator coverage gaps, or custom-kernel fallback overhead.
+
+::: {.column-margin .margin-pointer}
+↪ Selecting among portable runtimes such as ONNX Runtime and specialized inference engines that execute these exported graphs is operationalized in @sec-model-serving-inference-runtime-selection-5eef.
+:::
 
 @Fig-onnx diagrams this hub-and-spoke interoperability\index{ONNX!hub-and-spoke interoperability} topology centered on the common ONNX intermediate representation. On the left, training frameworks—including PyTorch, TensorFlow, Keras, Caffe2, MXNet, and CNTK—route inward spokes along the "Export to ONNX" pathway. On the right, outward spokes fan out through the "Load from ONNX" boundary to target execution engines, delivering the serialized computation graph to ONNX Runtime and downstream target frameworks without reimplementing model code.
 
@@ -4178,7 +4194,11 @@ These hardware boundaries reflect the fundamental physical constraints—the lig
 
 Satisfying model requirements, software dependencies, and hardware constraints establishes technical feasibility, but production viability requires evaluating operational reliability under sustained serving workloads. Runtimes that rely on dynamic memory allocation or host-language interpreters introduce tail-latency (p99) variance through garbage collection pauses and heap fragmentation. In contrast, production-oriented runtimes enforce static tensor arenas and ahead-of-time graph lowering to ensure deterministic execution times.
 
-Precision optimization forms a central operational lever. Lowering numerical precision from FP32 to FP16 or BF16 halves memory traffic, and lowering it to FP8 or INT8 quarters it while increasing arithmetic throughput on accelerator tensor cores. The 8-bit formats, however, require native quantization tooling. A production framework must support both post-training quantization (PTQ), which converts an already-trained model using a small representative calibration dataset to set value ranges, and quantization-aware training (QAT), which simulates low-precision arithmetic during training to recover accuracy margins before deployment; @sec-model-compression-quantization-precision-cd46 develops both. Beyond per-device execution, production viability depends on toolchain stability: whether model checkpoints maintain backward compatibility across runtime updates, whether the framework exposes telemetry hooks for profiling kernel execution, and whether serving infrastructure can deploy updated graph definitions without downtime.
+Precision optimization forms a central operational lever. Lowering numerical precision from FP32 to FP16 or BF16 halves memory traffic, and lowering it to FP8 or INT8 quarters it while increasing arithmetic throughput on accelerator tensor cores. The 8-bit formats, however, require native quantization tooling. A production framework must support both post-training quantization (PTQ), which converts an already-trained model using a small representative calibration dataset to set value ranges, and quantization-aware training (QAT), which simulates low-precision arithmetic during training to recover accuracy margins before deployment. Beyond per-device execution, production viability depends on toolchain stability: whether model checkpoints maintain backward compatibility across runtime updates, whether the framework exposes telemetry hooks for profiling kernel execution, and whether serving infrastructure can deploy updated graph definitions without downtime.
+
+::: {.column-margin .margin-pointer}
+↪ Post-training quantization, its calibration, and quantization-aware training are developed in @sec-model-compression-precision-reduction-strategies-db83.
+:::
 
 ### Development support and long-term viability assessment {#sec-ml-frameworks-development-support-longterm-viability-assessment-d1d7}
 
@@ -4538,7 +4558,7 @@ Engineers assume the most popular framework works for any project. In reality, d
 
 **Fallacy**: *Framework abstractions eliminate the need for systems knowledge.*
 
-Engineers assume high-level APIs handle all optimization automatically. The Roofline Model\index{Roofline model!compute vs. memory bound} (@sec-appdx-machine-foundations-roofline-model-2529) proves otherwise. Element-wise operations such as ReLU perform little arithmetic per byte moved, so memory traffic and launch overhead can dominate even on accelerators with abundant compute. @Sec-ml-frameworks-execution-strategy-matters-memory-wall-1ce8 explains how this imbalance can leave compute resources idle. Engineers must identify the limiting resource before choosing fusion, batching, layout, or precision optimizations.
+Engineers assume high-level APIs handle all optimization automatically. The Roofline Model\index{Roofline model!compute vs. memory bound} proves otherwise. Element-wise operations such as ReLU perform little arithmetic per byte moved, so memory traffic and launch overhead can dominate even on accelerators with abundant compute. @Sec-ml-frameworks-execution-strategy-matters-memory-wall-1ce8 explains how this imbalance can leave compute resources idle. Engineers must identify the limiting resource before choosing fusion, batching, layout, or precision optimizations.
 
 :::
 
@@ -4554,8 +4574,12 @@ Engineers assume framework migration is straightforward since models are "just m
 
 **Fallacy**: *Training framework choice is independent of production infrastructure.*
 
-Engineers assume training framework choice is independent of deployment infrastructure. In practice, framework-infrastructure mismatches can impose substantial operational overhead. Some serving stacks provide atomic model swaps, while others require a process or container restart unless the deployment architecture adds version routing around them. Some frameworks and runtimes expose monitoring hooks directly; others require custom instrumentation. These are preview consequences of the deployment and monitoring practices developed in @sec-ml-operations; the local lesson is to evaluate the complete deployment stack during framework selection, including serving infrastructure, monitoring, and operational tooling.
+Engineers assume training framework choice is independent of deployment infrastructure. In practice, framework-infrastructure mismatches can impose substantial operational overhead. Some serving stacks provide atomic model swaps, while others require a process or container restart unless the deployment architecture adds version routing around them. Some frameworks and runtimes expose monitoring hooks directly; others require custom instrumentation. The lesson is to evaluate the complete deployment stack during framework selection, including serving infrastructure, monitoring, and operational tooling.
 
+:::
+
+::: {.column-margin .margin-pointer}
+↪ Model versioning, staged release strategies, and serving integration that a framework's deployment path must support are operationalized in @sec-ml-operations-model-deployment-b9b9.
 :::
 
 ```{python}

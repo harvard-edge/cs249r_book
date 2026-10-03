@@ -136,7 +136,7 @@ Hardware alone cannot achieve these gains. Algorithms must structure operations 
 Co-design explains why model compression techniques deliver real speedups. Quantization shows why converting FP32 to INT8\index{Quantization!INT8 co-design} accelerates execution on supported hardware: reduced precision cuts memory traffic, while specialized arithmetic units execute more low-precision operations per cycle than FP32 equivalents [@NVIDIA2020]. Structured pruning\index{Structured pruning!hardware alignment} improves performance when it produces smaller dense shapes or a sparsity pattern recognized by silicon, whereas arbitrary unstructured sparsity incurs metadata handling and non-coalesced memory accesses that often erase theoretical gains. Evaluating accelerator performance requires tracing this path from workload to silicon: compute primitives, memory hierarchies, roofline diagnosis, mapping and dataflow, and compiler scheduling. The recurring question is why algorithmic improvements frequently fail to deliver proportional end-to-end speedups. Amdahl's cap bounds a model-only speedup, and the same cap governs hardware. The theorem below specializes Amdahl's law (principle \ref{pri-amdahl}) to an accelerator by setting the principle's gain $G$ to the accelerator's path gain $G_{\text{accel}}$.
 
 ::: {.column-margin .margin-pointer}
-↩ The quantization techniques whose hardware payoff co-design explains are established in @sec-model-compression-quantization-precision-cd46.
+↩ Quantization and its effect on weight payload, memory traffic, and compute cost are established in @sec-model-compression-quantization-precision-cd46.
 :::
 
 ::: {#thrm-hw-acceleration-fundamental-limit-acceleration-amdahls-law .callout-theorem title="The fundamental limit of acceleration (Amdahl's law)"}
@@ -152,7 +152,7 @@ $$ \text{Speedup} = \frac{1}{(1 - f_{\text{parallel}}) + \frac{f_{\text{parallel
 
 :::
 
-Hardware acceleration targets specific terms in the iron law of ML systems\index{Iron law of ML systems!hardware acceleration}, which decomposes end-to-end time into data volume $(D_{\text{vol}}/\text{BW})$, computation $(O/(R_{\text{peak}} \cdot \eta_{\text{hw}}))$, and fixed latency $(L_{\text{lat}})$. While data selection reduced total data volume and model compression reduced operations $O$ per sample, hardware acceleration increases the rate of execution by improving $R_{\text{peak}}$, $\eta_{\text{hw}}$, and $\text{BW}$. @Sec-appdx-machine-foundations-physics-computing-c77f supplies the analytical performance models that diagnose which of these terms dominates a given workload, including the dimensional analysis that confirms each iron law term resolves to seconds. Which of these terms an upgrade actually improves determines its accelerated fraction under Amdahl's law.[^fn-amdahls-law-acceleration]
+Hardware acceleration targets specific terms in the iron law of ML systems\index{Iron law of ML systems!hardware acceleration}, which decomposes end-to-end time into data volume $(D_{\text{vol}}/\text{BW})$, computation $(O/(R_{\text{peak}} \cdot \eta_{\text{hw}}))$, and fixed latency $(L_{\text{lat}})$. While data selection reduced total data volume and model compression reduced operations $O$ per sample, hardware acceleration increases the rate of execution by improving $R_{\text{peak}}$, $\eta_{\text{hw}}$, and $\text{BW}$. Which of these terms an upgrade actually improves determines its accelerated fraction under Amdahl's law.[^fn-amdahls-law-acceleration]
 
 ::: {.column-margin .margin-pointer}
 ↩ The decomposition of execution time into data, compute, and latency terms is established in @sec-introduction-iron-law-ml-systems-c32a.
@@ -255,7 +255,11 @@ These checks turn Amdahl's bound into a hardware-selection test.
 
 :::
 
-The serial bottleneck becomes concrete on real hardware, where the same accelerator that nears its parallel ceiling on one workload can stall on another. @Sec-appdx-machine-foundations-numbers-know-b531 collects the reference $R_{\text{peak}}$ figures across accelerator generations and the latency hierarchy that ground these hardware comparisons in order-of-magnitude terms. Evaluating an NVIDIA H100 on two workloads whose unaccelerated fractions differ illustrates how that fraction governs realized speedup, and a second look at the decode case separates that limit from a different one, memory-boundedness.
+The serial bottleneck becomes concrete on real hardware, where the same accelerator that nears its parallel ceiling on one workload can stall on another. Evaluating an NVIDIA H100 on two workloads whose unaccelerated fractions differ illustrates how that fraction governs realized speedup, and a second look at the decode case separates that limit from a different one, memory-boundedness.
+
+::: {.column-margin .margin-pointer}
+↪ Order-of-magnitude reference values for accelerator throughput, memory latency, and bandwidth are developed in @sec-appdx-machine-foundations-numbers-know-b531.
+:::
 
 ```{python}
 #| echo: false
@@ -3536,7 +3540,7 @@ Specialized CNN accelerators configure their hardware dataflow around these reus
 The transformer architecture replaces local sliding windows with global self-attention[^fn-attention-memory-pressure] and dense feed-forward blocks, creating dual memory bottlenecks: quadratic intermediate attention matrices and massive parameter footprints.
 
 ::: {.column-margin .margin-pointer}
-↩ The transformer's attention-only architecture is established in @sec-network-architectures-transformers-attentiononly-architecture-1b56.
+↩ The transformer architecture, which pairs self-attention with feed-forward blocks and drops recurrence, is established in @sec-network-architectures-transformers-attentiononly-architecture-1b56.
 :::
 
 [^fn-attention-memory-pressure]: **Attention mechanism**\index{Attention mechanism!memory pressure}: Bahdanau, Cho, and Bengio introduced attention for sequence-to-sequence models; Transformer self-attention later allowed each token to attend to every token in the sequence [@bahdanau2015neural; @vaswani2017]; materializing full attention scores for a sequence of length $S$ requires an $S{\times}S$ matrix, producing quadratic intermediate storage. FlashAttention tiles the computation to avoid materializing that full matrix in HBM [@dao2022]. The inference KV cache is separate: its capacity grows linearly with sequence length per layer, although each decode step reads an increasing cache.
@@ -3578,10 +3582,6 @@ Because off-chip DRAM traffic dominates an accelerator's energy dissipation—ex
 :::
 
 Peak FLOP/s indicates what execution units can deliver when operands are already on chip, but sustained accelerator throughput is ultimately bounded by the rate at which the memory hierarchy delivers data. The Roofline Model[^fn-roofline-performance-model]\index{Roofline Model!efficiency measurement} [@williams2009] formalizes this relationship by plotting attainable performance against arithmetic intensity, establishing whether an operation is compute bound\index{Compute-Bound!roofline classification} or memory bound\index{Memory-Bound!roofline classification}. Rather than evaluating compute capacity in isolation, the model intersects hardware arithmetic throughput with memory bandwidth, revealing which physical ceiling binds execution before an engineer commits optimization effort.
-
-::: {.column-margin .margin-pointer}
-↪ The Roofline bound is developed from first principles in @sec-appdx-machine-foundations-roofline-model-2529.
-:::
 
 [^fn-roofline-performance-model]: **Roofline model**\index{Roofline model!optimization diagnostic}: Introduced by @williams2009 at UC Berkeley, building on earlier I/O complexity work from the 1980s. Their specific contribution was making the compute vs. bandwidth trade-off visual and actionable: the characteristic roofline plot immediately reveals whether a kernel is compute bound (hitting the flat ceiling) or memory bound (hitting the sloped bandwidth line) and quantifies the gap to hardware limits. A kernel operating at only 50 percent of its ceiling has a clear 2$\times$ utilization gap to close, making this the standard diagnostic tool for accelerator optimization.
 
@@ -3700,7 +3700,11 @@ $$R_{\text{attain}} = \min(R_{\text{peak}}, \text{BW} \times I)$$ {#eq-roofline}
 With $O$ as the operation count and $D_{\text{vol}}$ as data volume in bytes, @eq-arithmetic-intensity makes the definition operational.
 $$I = \frac{O}{D_{\text{vol}}}$$ {#eq-arithmetic-intensity}
 
-The roofline visualization shows performance (TFLOP/s) on the vertical axis and arithmetic intensity (FLOP/byte) on the horizontal axis. At low arithmetic intensity, performance increases linearly along the memory bandwidth slope ($\text{BW} \times I$), where execution is memory bound. Above the ridge point, performance saturates at peak compute ($R_{\text{peak}}$), where execution is compute bound. @Sec-appdx-dam-taxonomy-bottleneck-diagnostic-3fc9 maps each regime to the optimizations that pay off and the ones that waste effort, so that classifying a workload as memory-bound or compute-bound tells the engineer directly whether a faster accelerator or more bandwidth is the binding investment.
+The roofline visualization shows performance (TFLOP/s) on the vertical axis and arithmetic intensity (FLOP/byte) on the horizontal axis. At low arithmetic intensity, performance increases linearly along the memory bandwidth slope ($\text{BW} \times I$), where execution is memory bound. Above the ridge point, performance saturates at peak compute ($R_{\text{peak}}$), where execution is compute bound. Classifying a workload as memory-bound or compute-bound therefore tells the engineer directly whether a faster accelerator or more bandwidth is the binding investment.
+
+::: {.column-margin .margin-pointer}
+↪ The optimizations that pay off in each regime, and the ones that waste effort, are operationalized in @sec-appdx-dam-taxonomy-bottleneck-diagnostic-3fc9.
+:::
 
 ### Hardware ridge points {#sec-hardware-acceleration-hardware-ridge-points-b5b6}
 
@@ -3846,7 +3850,7 @@ For a transformer with hidden dimension $d$ = `{python} TransformerLayerCalc.t_h
 The roofline classification dictates which physical subsystem limits performance and which optimizations can relieve it. For memory-bound operations, execution time is dominated by data transfers across the off-chip memory bus; ALU pipelines spend idle cycles waiting for operands. Optimization must therefore focus on conserving memory bandwidth: fusing adjacent operators keeps intermediate activations in on-chip registers or shared memory (SRAM), lower-precision numeric formats reduce the physical byte count of memory transfers, and algorithmic refactorings like FlashAttention restructure access patterns to compute within SRAM tiles. For compute-bound operations, off-chip bandwidth is no longer the bottleneck because high data reuse keeps execution units supplied. Performance here depends on saturating arithmetic execution pipelines: structuring matrix tiles to sustain Tensor Core throughput, hiding instruction latencies through software pipelining, and scaling batch sizes to distribute work across all available streaming multiprocessors.
 
 ::: {.column-margin .margin-pointer}
-↪ Where real accelerator workloads actually sit against their roofline ceilings is measured in @sec-benchmarking-system-benchmarks-393c.
+↪ How a benchmark determines where a workload actually sits against its roofline ceiling is developed in @sec-benchmarking-system-benchmarks-393c.
 :::
 
 ### Calculating memory bandwidth bounds {#sec-hardware-acceleration-calculating-memory-bandwidth-bounds-7fc0}
@@ -4229,7 +4233,7 @@ Example: Dense layer with $d_{\text{in}} = d_{\text{out}}$ = `{python} BatchAiCa
 :::
 
 ::: {.column-margin .margin-pointer}
-↪ The MLPerf Inference execution scenarios that separate throughput runs from latency-constrained runs are measured in @sec-benchmarking-mlperf-execution-scenarios-89f0.
+↪ The MLPerf Inference execution scenarios that separate throughput runs from latency-constrained runs are developed in @sec-benchmarking-mlperf-execution-scenarios-89f0.
 :::
 
 The batch size analysis reveals why inference serving systems are designed around batching: it changes the arithmetic intensity regime of memory-bound workloads. However, batching introduces latency trade-offs, since requests must wait in a queue until a batch forms. This tension between throughput (favoring large batches) and latency (favoring small batches) is a central challenge in ML serving systems, explored in depth in @sec-model-serving-dynamic-batching-latencythroughput-tradeoffs-986d.
@@ -4653,7 +4657,11 @@ Reducing intermediate data movement between operations is one of the primary mec
 
 Neural network execution is frequently bound by memory bandwidth rather than arithmetic throughput. When operations execute as isolated kernels, each intermediate result is written to device memory (DRAM or HBM) and subsequently read back by the downstream operator. This round trip introduces memory latency, stalls compute units, and consumes bus bandwidth on data with zero reuse outside that immediate pair of operations.
 
-This hardware reality provides the physical motivation for the operator fusion techniques introduced in @sec-model-compression-operator-fusion-ac1d. While @sec-hardware-acceleration-understanding-ai-memory-wall-3ea9 analyzed bandwidth limits in terms of low operational intensity, chained elementwise operations aggravate the memory wall by multiplying global memory transactions [@nvidia2017gpu].
+This hardware reality provides the physical motivation for operator fusion. While @sec-hardware-acceleration-understanding-ai-memory-wall-3ea9 analyzed bandwidth limits in terms of low operational intensity, chained elementwise operations aggravate the memory wall by multiplying global memory transactions [@nvidia2017gpu].
+
+::: {.column-margin .margin-pointer}
+↩ Operator fusion as a deployment lever applied to the compressed graph is established in @sec-model-compression-operator-fusion-ac1d.
+:::
 
 ```{python}
 #| echo: false
@@ -5020,7 +5028,11 @@ The memory traffic created by standard attention implementations explains why fu
 
 #### Multilayer perceptrons and DLRM {#sec-hardware-acceleration-multilayer-perceptrons-dlrm-7c0d}
 
-MLPs\index{MLP!GEMM-dominated computation} present the most straightforward mapping problem because their computation reduces largely to dense GEMM.[^fn-gemm-ml-primitive] Each fully connected layer multiplies an activation matrix by a weight matrix. The weight matrix is fixed across samples, so batching reuses each loaded weight across more activations and raises arithmetic intensity. A batch size of one provides little cross-sample weight reuse and often underutilizes wide matrix engines, while larger batches can move execution toward the compute-bound regime. @Sec-appdx-algorithm-foundations-general-matrix-multiply-gemm-b55d derives the scaling that governs this sensitivity.
+MLPs\index{MLP!GEMM-dominated computation} present the most straightforward mapping problem because their computation reduces largely to dense GEMM.[^fn-gemm-ml-primitive] Each fully connected layer multiplies an activation matrix by a weight matrix. The weight matrix is fixed across samples, so batching reuses each loaded weight across more activations and raises arithmetic intensity. A batch size of one provides little cross-sample weight reuse and often underutilizes wide matrix engines, while larger batches can move execution toward the compute-bound regime.
+
+::: {.column-margin .margin-pointer}
+↪ How GEMM arithmetic intensity scales with matrix dimension is developed in @sec-appdx-algorithm-foundations-general-matrix-multiply-gemm-b55d.
+:::
 
 [^fn-gemm-ml-primitive]: **GEMM**\index{GEMM!ML performance predictor}: The operation $\mathbf{C} = \alpha \mathbf{A}\mathbf{B} + \beta \mathbf{C}$, with scalars $\alpha$ and $\beta$, is the dense linear-algebra primitive that many deep-learning layers lower to. Optimized GEMM libraries such as cuBLAS and oneDNN use register blocking, vectorization, and hierarchical tiling to approach hardware limits on favorable shapes [@nvidia_cublas; @oneDNN2021]. Modern AI accelerators are heavily specialized for GEMM-like tiles: Tensor Cores, systolic arrays, and matrix extensions all exist to accelerate this primitive, which is why GEMM performance is an important predictor of end-to-end throughput across architectures.
 
@@ -5208,7 +5220,7 @@ For CPUs and GPUs, compilers emit machine code or optimized assembly; for TPUs, 
 
 A compiler transforms a high-level model into an execution plan tailored to target hardware, but that plan embeds static assumptions about runtime conditions: tensor shapes, workspace allocation limits, device capabilities, and execution concurrency. Ahead-of-time (AOT) compilation optimizes graph structures, fusion boundaries, and memory layouts for fixed shapes and known hardware configurations. While just-in-time (JIT) compilation can compile specialized variants dynamically as new shapes arrive, each compiled kernel still executes a fixed execution plan.
 
-Production AI serving environments, however, operate under dynamic constraints that differ from static compiler assumptions. Request arrival rates fluctuate, batch sizes vary dynamically, multiple inference workloads compete for shared accelerator memory, and thermal throttling can reduce clock frequencies below rated specifications. Serving runtimes manage these variations through dynamic request batching, multi-stream concurrency, admission control, and execution engine selection, rather than regenerating kernel fusion or tiling strategies on the fly. @Sec-model-serving addresses dynamic batching, admission control, and service-level objectives as system-level engineering challenges; the immediate systems concern is how the accelerator runtime dispatches compiled execution plans efficiently once a batch reaches the hardware.
+Production AI serving environments, however, operate under dynamic constraints that differ from static compiler assumptions. Request arrival rates fluctuate, batch sizes vary dynamically, multiple inference workloads compete for shared accelerator memory, and thermal throttling can reduce clock frequencies below rated specifications. Serving runtimes manage these variations through dynamic request batching, multi-stream concurrency, admission control, and execution engine selection, rather than regenerating kernel fusion or tiling strategies on the fly. Dynamic batching, admission control, and service-level objectives are system-level engineering challenges of the serving layer; the immediate systems concern is how the accelerator runtime dispatches compiled execution plans efficiently once a batch reaches the hardware.
 
 ## Runtime Support {#sec-hardware-acceleration-runtime-support-f94f}
 
@@ -5362,7 +5374,7 @@ Beyond the node, the boundary expands into the cluster. Purpose-built data cente
 
 The transition from single-chip to multi-chip architectures introduces communication overhead\index{Multi-chip scaling!communication overhead} and other constraints that reshape optimization. Communication, synchronization, load balance, and parallel work per device can all limit scaling. Amdahl's Law\index{Amdahl's law!distributed training limit}[^fn-amdahls-law-scaling] provides one first-order model for exposed work that does not shrink with additional devices. For hundred-billion-parameter models, an unsharded full-gradient payload can occupy hundreds of gigabytes per step, and an AllReduce[^fn-allreduce-gradient-sync] must aggregate it; precision, sharding, compression, and the collective algorithm change the bytes each device transfers.
 
-[^fn-amdahls-law-scaling]: **Amdahl's law (scaling limit)**\index{Amdahl's law!multi-accelerator scaling}: @sec-appdx-machine-foundations-amdahls-law-gustafsons-law-b741 formalizes the bound for a fixed nonaccelerated fraction. If 5 percent of a fixed workload remains exposed and unaffected by device count, that model caps speedup at 20$\times$. Distributed training is more complicated because communication can overlap computation and its cost can itself change with scale, but the example explains why exposed synchronization must be reduced or hidden.
+[^fn-amdahls-law-scaling]: **Amdahl's law (scaling limit)**\index{Amdahl's law!multi-accelerator scaling}: @sec-appdx-machine-foundations-strong-scaling-amdahls-law-c6c2 formalizes the bound for a fixed nonaccelerated fraction. If 5 percent of a fixed workload remains exposed and unaffected by device count, that model caps speedup at 20$\times$. Distributed training is more complicated because communication can overlap computation and its cost can itself change with scale, but the example explains why exposed synchronization must be reduced or hidden.
 
 The first-order quantity is the gradient payload. For a model with $P$ parameters, that payload is roughly the parameter count multiplied by the bytes stored for each gradient element before optimizer state, padding, and protocol overhead enter. Scaling therefore improves only when the saved compute time exceeds the time to move this payload through the chosen interconnect and collective algorithm.
 
@@ -5961,7 +5973,7 @@ The Roofline Model provides a first diagnostic by using arithmetic intensity and
 
 ::: {.callout-chapter-connection title="From optimization to validation"}
 
-The ML optimization stack rests on three complementary efficiency strategies: data selection (@sec-data-selection) minimizes training sample requirements, model compression (@sec-model-compression) reduces algorithmic parameter and precision complexity, and hardware acceleration maximizes physical machine throughput. Optimization without empirical measurement, however, remains incomplete. @Sec-benchmarking moves from theoretical FLOP bounds to measured wall-clock latency, applying standardized benchmark suites and statistical protocols to test optimization claims against operational reality.
+The ML optimization stack rests on three complementary efficiency strategies: data selection minimizes training sample requirements, model compression reduces algorithmic parameter and precision complexity, and hardware acceleration maximizes physical machine throughput. Optimization without empirical measurement, however, remains incomplete. @Sec-benchmarking moves from theoretical FLOP bounds to measured wall-clock latency, applying standardized benchmark suites and statistical protocols to test optimization claims against operational reality.
 
 :::
 

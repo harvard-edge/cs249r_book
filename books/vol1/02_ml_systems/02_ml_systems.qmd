@@ -292,10 +292,10 @@ class DeploymentOverviewTable:
 
 ### The architectural anchor: The single-node stack {#sec-ml-systems-architectural-anchor}
 
-To navigate these operating regimes, we anchor our engineering decisions in a four-layer model of the **single-node stack**\index{Single-node stack!architecture layers}, which refines the machine side of the D·A·M taxonomy for one host while data and algorithm enter through workload requirements. At the top of the stack, the application defines the mission through a training-throughput or inference-latency target. @Sec-model-training and @sec-model-serving develop the mechanisms that determine whether the system can meet it. The ML framework\index{ML framework!compiler role} translates model code into executable operations. The operating system\index{Operating system!runtime role} orchestrates resources and moves data between host memory and accelerator memory. The hardware itself, defined by high-bandwidth memory (HBM) capacity, memory bandwidth, intra-node interconnects such as NVLink, and compute throughput, sets the physical limits, with the memory wall as a recurring constraint.
+To navigate these operating regimes, we anchor our engineering decisions in a four-layer model of the **single-node stack**\index{Single-node stack!architecture layers}, which refines the machine side of the D·A·M taxonomy for one host while data and algorithm enter through workload requirements. At the top of the stack, the application defines the mission through a training-throughput or inference-latency target. The ML framework\index{ML framework!compiler role} translates model code into executable operations. The operating system\index{Operating system!runtime role} orchestrates resources and moves data between host memory and accelerator memory. The hardware itself, defined by high-bandwidth memory (HBM) capacity, memory bandwidth, intra-node interconnects such as NVLink, and compute throughput, sets the physical limits, with the memory wall as a recurring constraint.
 
 ::: {.column-margin .margin-pointer}
-↪ How an ML framework translates model code into executable operations is developed in @sec-ml-frameworks.
+↪ How an ML framework turns model code into executed operations, eagerly or through a captured graph, is developed in @sec-ml-frameworks-execution-problem-e1e1.
 :::
 
 This stack establishes the chapter's **silicon contract**\index{Silicon contract!definition}: the fixed performance bargain a given piece of silicon offers a model, set by memory bandwidth, peak compute rate, and fixed overhead. Every chapter that follows analyzes one or more of these layers, because the single machine is where the silicon contract is set and where most engineering decisions in this book are made.
@@ -475,7 +475,11 @@ class MemoryWallTrends:
     mem_bw_growth_pct_str = fmt_percent(mem_bw_growth_pct / 100, precision=0, style="prose")
 ```
 
-The representative trends behind this ratio are that processors have doubled in compute capacity roughly every `{python} MemoryWallTrends.compute_doubling_months_str`, but memory bandwidth has improved only ~`{python} MemoryWallTrends.mem_bw_growth_pct_str` annually. This widening gap makes data movement\index{Data movement!energy dominance} a frequent bottleneck and energy cost in ML workloads. Physically, while an arithmetic operation in an on-chip arithmetic logic unit (ALU) moves charges across mere micrometers of local wire (consuming tens to hundreds of femtojoules), fetching an operand from off-chip DRAM requires charging capacitive printed circuit board (PCB) traces and I/O pads centimeters long, consuming hundreds of picojoules—two to three orders of magnitude more energy per access. The constraint affects all paradigms, and it takes a different form on TinyML devices, where capacity, not bandwidth, is usually exhausted first. @Sec-hardware-acceleration-understanding-ai-memory-wall-3ea9 develops the architectural responses to the memory wall, including HBM and on-chip SRAM hierarchies.
+The representative trends behind this ratio are that processors have doubled in compute capacity roughly every `{python} MemoryWallTrends.compute_doubling_months_str`, but memory bandwidth has improved only ~`{python} MemoryWallTrends.mem_bw_growth_pct_str` annually. This widening gap makes data movement\index{Data movement!energy dominance} a frequent bottleneck and energy cost in ML workloads. Physically, while an arithmetic operation in an on-chip arithmetic logic unit (ALU) moves charges across mere micrometers of local wire (consuming tens to hundreds of femtojoules), fetching an operand from off-chip DRAM requires charging capacitive printed circuit board (PCB) traces and I/O pads centimeters long, consuming hundreds of picojoules—two to three orders of magnitude more energy per access. The constraint affects all paradigms, and it takes a different form on TinyML devices, where capacity, not bandwidth, is usually exhausted first.
+
+::: {.column-margin .margin-pointer}
+↪ The architectural responses to the memory wall, HBM and on-chip SRAM hierarchies, are developed in @sec-hardware-acceleration-memory-hierarchy-1839.
+:::
 
 ::: {#chk-ml-systems-physical-constraints-deployment .callout-checkpoint title="Physical constraints and deployment"}
 
@@ -506,7 +510,7 @@ $$T = \frac{D_{\text{vol}}}{\text{BW}} + \frac{O}{R_{\text{peak}} \cdot \eta_{\t
 
 ### The bottleneck principle {#sec-ml-systems-bottleneck-principle-3514}
 
-The iron law tells us the cost of each term. The **bottleneck principle**\index{Bottleneck principle!definition} tells us which term matters. In a pipelined ML workload, identifying the system bottleneck\index{System Bottleneck!identifying} matters because optimizing fast operations yields zero benefit while the slowest stage remains unchanged. Modern accelerators use **pipelined execution**\index{Pipelined execution!throughput analysis} to overlap data movement with computation: while the accelerator computes on batch $n$, the memory system prefetches batch $n+1$. When data movement, computation, and I/O are fully overlapped in steady state, the faster stages hide behind the slowest overlapped stage, so the iron law's sum becomes a maximum. @Eq-bottleneck extends the pipelined form from @sec-introduction-iron-law-ml-systems-c32a with one more overlapped stage, $T_{\text{IO}}$, the time to transfer data over a storage or network link; equality requires ideal overlap:
+The iron law tells us the cost of each term. The **bottleneck principle**\index{Bottleneck principle!definition} tells us which term matters. In a pipelined ML workload, identifying the system bottleneck\index{System Bottleneck!identifying} matters because optimizing fast operations yields zero benefit while the slowest stage remains unchanged. Modern accelerators use **pipelined execution**\index{Pipelined execution!throughput analysis} to overlap data movement with computation: while the accelerator computes on batch $n$, the memory system prefetches batch $n+1$. When data movement, computation, and I/O are fully overlapped in steady state, the faster stages hide behind the slowest overlapped stage, so the iron law's sum becomes a maximum. @Eq-bottleneck extends the pipelined form in @eq-intro-iron-law-pipelined with one more overlapped stage, $T_{\text{IO}}$, the time to transfer data over a storage or network link; equality requires ideal overlap:
 $$ T_{\text{pipelined}} \ge \max\left(\frac{D_{\text{vol}}}{\text{BW}}, \frac{O}{R_{\text{peak}} \cdot \eta_{\text{hw}}}, T_{\text{IO}}\right) + L_{\text{lat}} $$ {#eq-bottleneck}
 
 ::: {.content-visible when-format="pdf"}
@@ -546,7 +550,7 @@ The second split covers workloads where the binding constraint is not dense arit
 
 ::: {#lhs-ml-systems-five-reference-workloads .callout-lighthouse title="Five reference workloads"}
 
-@Sec-introduction introduced five lighthouse models\index{Lighthouse model!reference workloads} by the system bottleneck each isolates (@tbl-lighthouse-examples); @tbl-ml-systems-lighthouse-archetypes pairs each with its workload archetype and the deployment paradigm where it predominantly runs. MobileNetV2 is an efficient compute beast, dense in arithmetic but sized so that latency and power, the bottlenecks @tbl-lighthouse-examples assigns it, stay within a phone's budget. @Sec-network-architectures provides full architectural details and model biographies.
+@Sec-introduction-lighthouse-models-9b1c introduced five lighthouse models\index{Lighthouse model!reference workloads} by the system bottleneck each isolates (@tbl-lighthouse-examples); @tbl-ml-systems-lighthouse-archetypes pairs each with its workload archetype and the deployment paradigm where it predominantly runs. MobileNetV2 is an efficient compute beast, dense in arithmetic but sized so that latency and power, the bottlenecks @tbl-lighthouse-examples assigns it, stay within a phone's budget. @Sec-network-architectures-lighthouse-roster-model-biographies-a763 gives each model's full architectural biography.
 
 | **Lighthouse**             | **Archetype**             | **Deployment Paradigm**        |
 |:---------------------------|:--------------------------|:-------------------------------|
@@ -643,7 +647,7 @@ The first lighthouse, **ResNet-50**\index{ResNet-50!systems characteristics}, cl
 The language models **GPT-2/Llama**\index{GPT-2!autoregressive bottleneck}\index{Llama!memory-bound inference} exemplify autoregressive text generation [@radford2019language; @touvron2023llama]. These models generate text one token at a time. Because multi-billion parameter models exceed on-chip cache, weights reside in external memory; generating text token-by-token forces the processor to stream every weight across the memory bus for each token with minimal arithmetic reuse (`{python} LighthouseModels.gpt2_params_b_str` for GPT-2, `{python} LighthouseModels.llama_range_str` for Llama). This sequential access pattern creates an autoregressive bottleneck that shapes serving cost [@pope2023efficiently].
 
 ::: {.column-margin .margin-pointer}
-↪ Specialized runtime mechanisms for continuous batching, KV-cache paging, and streaming token generation are developed in @sec-model-serving-continuous-batching-8bb6.
+↪ Continuous batching and KV-cache paging, the runtime mechanisms that serve token-by-token generation, are developed in @sec-model-serving-continuous-batching-8bb6.
 :::
 
 The recommendation lighthouse, **DLRM**\index{DLRM!memory capacity bound}\index{Recommendation system!DLRM}, represents the embedding-heavy recommendation workload behind large-scale "You might also like" systems [@naumov2019deep]. It maps users and items to embedding vectors stored in tables that can exceed `{python} LighthouseModels.dlrm_embedding_gb_str` of embeddings, making memory capacity rather than computation the binding constraint.
@@ -741,7 +745,7 @@ Physical constraints translate latency-vs-throughput trade-offs\index{Latency vs
 *Batch-1 inference sits on the memory-bound side of the roofline.*
 :::
 
-Latency budgets decide which operations may sit on the critical path; system balance decides which resource limits the operations that remain. Roofline analysis classifies bottlenecks by comparing a workload's **arithmetic intensity**\index{Arithmetic intensity}—the ratio of floating-point operations performed per byte of memory moved (FLOP/byte)—against the hardware machine balance point ($R_{\text{peak}} / \text{BW}$), the ridge point [@williams2009]. The framing is informal here; @sec-appdx-machine-foundations-roofline-model-2529 derives the model in full, defining arithmetic intensity formally and deriving the ridge point that separates the memory-bound and compute-bound regimes. In that framing, the same ResNet-50 model can shift from compute-bound\index{Compute-Bound vs. Memory-Bound!training vs. inference}\index{Roofline Model!bottleneck analysis} training behavior at high batch sizes to more memory-sensitive single-image inference at batch=1. Deployment paradigm selection must account for this shift.
+Latency budgets decide which operations may sit on the critical path; system balance decides which resource limits the operations that remain. Roofline analysis classifies bottlenecks by comparing a workload's **arithmetic intensity**\index{Arithmetic intensity}—the ratio of floating-point operations performed per byte of memory moved (FLOP/byte)—against the hardware machine balance point ($R_{\text{peak}} / \text{BW}$), the ridge point [@williams2009]. The framing is informal here; @sec-appdx-machine-foundations-roofline-model-2529 develops the model, defining arithmetic intensity formally and deriving the ridge point that separates the memory-bound and compute-bound regimes. In that framing, the same ResNet-50 model can shift from compute-bound\index{Compute-Bound vs. Memory-Bound!training vs. inference}\index{Roofline Model!bottleneck analysis} training behavior at high batch sizes to more memory-sensitive single-image inference at batch=1. Deployment paradigm selection must account for this shift.
 
 This operational shift reflects the tripartite balance of the D·A·M taxonomy\index{DAM taxonomy@D·A·M taxonomy!training vs. inference} diagrammed in @fig-ai-triad, where physical constraints reconfigure how Data, Algorithm, and Machine interact across execution phases. @Tbl-dam-phase details how each component transforms between training (learning patterns over large mutable batches) and serving (applying immutable weights under latency deadlines).
 
@@ -763,10 +767,6 @@ This operational shift reflects the tripartite balance of the D·A·M taxonomy\i
 ```
 
 A quantitative comparison applies this analysis to ResNet-50 inference on a high-end data center accelerator and a mobile neural processing unit (NPU). Treat these as point-in-time hardware anchors: the arithmetic is about compute rate, memory bandwidth, and batch size.
-
-::: {.column-margin .margin-pointer}
-↪ The accelerator architectures behind these compute-rate and bandwidth figures are developed in @sec-hardware-acceleration.
-:::
 
 ::: {#nbk-ml-systems-resnet-50-cloud-vs-mobile .callout-notebook title="ResNet-50 on cloud vs. mobile"}
 
@@ -2285,9 +2285,13 @@ class DataLocalityInvariant:
 
 Edge deployment trades network transit for fixed local capacity\index{Edge ML!distributed processing}\index{Edge ML!deployment challenges}. Edge hardware spans a wide power envelope, from 5--50 W embedded modules to site-powered servers drawing hundreds of watts, and its binding limit is the fixed capacity of a site rather than the elastic capacity of a cloud region. Embedded modules, the most common edge form factor, operate within 1--8 GB of memory,[^fn-edge-resource-limits] and their power and board budgets cannot support the wide, high-power interfaces of HBM. They rely on LPDDR or shared system DRAM instead, so memory capacity limits parameter scale and memory bandwidth limits throughput, and fitting modern neural networks into these bounds requires quantization, pruning, and distillation. Model footprint, activation buffers, runtime state, and thermal duty cycles all become binding. Operationally, coordinating software updates and model versions across thousands of heterogeneous, physically exposed devices requires specialized deployment pipelines,[^fn-edge-fleet-ops] where rollback costs and silent failures present challenges absent in centralized data centers.
 
+::: {.column-margin .margin-pointer}
+↪ Over-the-air updates, dual-bank rollback, and lightweight fleet telemetry for edge devices are operationalized in @sec-ml-operations-edge-ai-deployment-patterns-dc1d.
+:::
+
 [^fn-edge-resource-limits]: **Edge server constraints**\index{Edge hardware!resource limits}: Across representative edge envelopes, 1--8 GB can hold roughly 1--8 billion INT8 weights before activations, runtime state, and other buffers, so parameter count alone does not define a universal millions-only ceiling. Sustainable compute is further limited by power, cooling, and duty cycle.
 
-[^fn-edge-fleet-ops]: **Edge fleet coordination**\index{Edge orchestration!fleet challenges}: Managing thousands of distributed edge devices introduces failure modes absent from centralized cloud: intermittent connectivity causes model version drift, hardware heterogeneity requires per-target optimization, and physical accessibility makes firmware rollbacks costly. These operational patterns are examined in @sec-ml-operations.
+[^fn-edge-fleet-ops]: **Edge fleet coordination**\index{Edge orchestration!fleet challenges}: Managing thousands of distributed edge devices introduces failure modes absent from centralized cloud: intermittent connectivity causes model version drift, hardware heterogeneity requires per-target optimization, and physical accessibility makes firmware rollbacks costly.
 
 ```{python}
 #| echo: false
@@ -2552,7 +2556,7 @@ The mobile environment introduces a critical constraint absent from stationary d
 
 [^fn-computational-photo-ml]: **Computational photography**\index{Computational photography!pipeline constraint}: Uses ML algorithms (for example, multi-frame fusion, neural denoising) to overcome the physical limits of small mobile camera sensors. This exemplifies the mobile computing trade-off, as a multi-stage pipeline must execute within the user's perceived shutter delay while adhering to a shared `{python} MobileEfficiencyRecap.mobile_tdp_range_str` thermal budget.
 
-[^fn-depthwise-mobile-efficiency]: **Mobile vision model reduction**\index{Model compression!mobile vision}: MobileNet-style architectures\index{MobileNetV2!mobile power reduction} reduce the computation in common vision layers while preserving useful accuracy for mobile tasks. The architectural details appear in @sec-network-architectures; the systems point here is that mobile deployment often requires changing the model family, not merely moving the same model to a phone.
+[^fn-depthwise-mobile-efficiency]: **Mobile vision model reduction**\index{Model compression!mobile vision}: MobileNet-style architectures\index{MobileNetV2!mobile power reduction} reduce the computation in common vision layers while preserving useful accuracy for mobile tasks. The systems point here is that mobile deployment often requires changing the model family, not merely moving the same model to a phone.
 
 ::: {#dfn-ml-systems-mobile-ml .callout-definition title="Mobile ML"}
 
@@ -2704,7 +2708,7 @@ class BatteryTax:
 ```{=latex}
 \vspace*{-1ex}
 ```
-**Systems insight**: The model cannot simply be "deployed." The techniques in @sec-model-compression must reduce both model work and duty cycle so the feature can stay on all day.
+**Systems insight**: The model cannot simply be "deployed." Compression must reduce model work, and duty cycling must reduce on-time, so the feature can stay on all day.
 
 :::
 
@@ -4065,7 +4069,11 @@ Across all four deployment tiers mapped into the convergence hierarchy of @fig-m
 ↩ The divergence between static code binaries and non-stationary production distributions is established in @sec-introduction-ml-vs-traditional-software-e19a.
 :::
 
-The degradation equation (@eq-degradation) already quantifies this decay\index{Degradation equation!distribution shift}: accuracy falls from its deployment value $\text{Accuracy}_0$ in proportion to the statistical distance $\mathcal{D}(P_t \lVert P_0)$ between the live and training distributions, scaled by the model's sensitivity $\lambda$. Because inference engines report success as long as matrix multiplications finish without numeric exceptions or memory faults, statistical degradation remains invisible to traditional infrastructure monitoring. An unmonitored model continues generating predictions with high confidence while its operational utility steadily erodes. Safeguarding system reliability therefore requires continuous statistical telemetry to detect when distribution drift demands model updates, an operational discipline analyzed in @sec-ml-operations.
+The degradation equation (@eq-degradation) already quantifies this decay\index{Degradation equation!distribution shift}: accuracy falls from its deployment value $\text{Accuracy}_0$ in proportion to the statistical distance $\mathcal{D}(P_t \lVert P_0)$ between the live and training distributions, scaled by the model's sensitivity $\lambda$. Because inference engines report success as long as matrix multiplications finish without numeric exceptions or memory faults, statistical degradation remains invisible to traditional infrastructure monitoring. An unmonitored model continues generating predictions with high confidence while its operational utility steadily erodes. Safeguarding system reliability therefore requires continuous statistical telemetry to detect when distribution drift demands model updates.
+
+::: {.column-margin .margin-pointer}
+↪ The layered telemetry that detects and quantifies distribution drift in production is operationalized in @sec-ml-operations-quantifying-drift-physics-psi-8c11.
+:::
 
 When an unmonitored model is coupled directly to automated execution, statistical decay escalates rapidly into physical or financial failure. The collapse of Zillow Offers illustrates how compounding estimation error in an open-loop system can destroy an entire business unit.
 
@@ -4095,7 +4103,7 @@ Beyond statistical decay, engineers frequently fall prey to architectural miscon
 
 Physical constraints create hard boundaries that no single paradigm can span. The memory-wall discussion in @sec-ml-systems-deployment-spectrum-71be demonstrates that memory bandwidth, memory capacity, and access latency scale far more slowly than raw arithmetic compute, producing distinct physical bottlenecks across deployment tiers. @Tbl-deployment-paradigms-overview lists illustrative deployment envelopes rather than physics-only latency bounds. A real-time robotics system requiring sub-10 ms response cannot use a remote cloud path whose end-to-end network round-trip exceeds that budget, while a billion-parameter language model cannot reside within the 256 KB SRAM of a microcontroller regardless of compression. Robust architectures frequently combine paradigms, leveraging cloud resources for distributed training and burst capacity while executing localized inference or sensor preprocessing on client devices.
 
-A related misconception assumes that moving computation closer to the user always reduces latency, overlooking the execution delay introduced by thermally constrained or lower-bandwidth edge processors—a trade-off measured by the inference benchmarks in @sec-benchmarking-inference-benchmarks-2c1f.
+A related misconception assumes that moving computation closer to the user always reduces latency, overlooking the execution delay introduced by thermally constrained or lower-bandwidth edge processors—a trade-off exposed when end-to-end latency is separated from model execution time, as in @sec-benchmarking-endtoend-vs-component-latency-9952.
 
 :::
 
