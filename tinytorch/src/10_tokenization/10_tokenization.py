@@ -1515,7 +1515,7 @@ def analyze_tokenization_memory():
     """📊 Measure actual memory usage of different tokenizers."""
     import tracemalloc
 
-    KB_TO_BYTES = 1024
+    KB_TO_BYTES = 1000  # Decimal kilobyte
 
     print("📊 Analyzing Tokenization Memory Usage...")
     print("=" * 70)
@@ -1645,7 +1645,7 @@ def analyze_bpe_scaling():
     import string
     import time
 
-    KB_TO_BYTES = 1024
+    KB_TO_BYTES = 1000  # Decimal kilobyte
 
     print("📊 Analyzing BPE Training Scaling...")
     print("=" * 70)

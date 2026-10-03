@@ -138,8 +138,8 @@ class InfoCommand(BaseCommand):
         # Disk Space
         try:
             disk_usage = shutil.disk_usage(working_dir)
-            free_gb = disk_usage.free / (1024**3)
-            total_gb = disk_usage.total / (1024**3)
+            free_gb = disk_usage.free / 1e9
+            total_gb = disk_usage.total / 1e9
             used_percent = (disk_usage.used / disk_usage.total) * 100
             info_table.add_row("Disk Space", f"{free_gb:.1f} GB free / {total_gb:.1f} GB total ({used_percent:.1f}% used)")
         except Exception:
@@ -149,8 +149,8 @@ class InfoCommand(BaseCommand):
         try:
             import psutil
             mem = psutil.virtual_memory()
-            free_gb = mem.available / (1024**3)
-            total_gb = mem.total / (1024**3)
+            free_gb = mem.available / 1e9
+            total_gb = mem.total / 1e9
             used_percent = mem.percent
             info_table.add_row("Memory", f"{free_gb:.1f} GB free / {total_gb:.1f} GB total ({used_percent:.1f}% used)")
         except ImportError:
