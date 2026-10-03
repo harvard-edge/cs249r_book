@@ -1168,7 +1168,7 @@ The reader's possible failures fall into four classes (@tbl-04-boundary-fallback
 Frequency mismatches between the learned policy renewal rate (`{python} MachineTiers.f_chunk_str`) and the real-time permission tick (`{python} TickDelayBudget.t_tick_str`) induce three classic sampled-data failure modes: reference lag, spectral aliasing, and buffer starvation. Under simple discrete-to-continuous reconstruction, a zero-order hold maintains setpoints constant across the planning interval $T_{\text{plan}}$, injecting staircase position discontinuities rather than smooth trajectories. Holding a waypoint over a `{python} MachineTiers.t_chunk_period_str` renewal window delays reference tracking by half a period on average ($T_{\text{plan}}/2$) while harmonic steps excite high-frequency structural resonances. Because this latency resides entirely on the feedforward reference path outside the feedback loop, it manifests as tracking error rather than eroding feedback phase margins (@sec-nervous-time-constants-phase-lag). Conflating reference tracking lag with closed-loop stability margins often causes engineers to misdiagnose tracking errors as plant instability. To eliminate discrete steps across chunk boundaries, the permission enforcer constructs a quintic Hermite spline bridge matching boundary position, velocity, and acceleration. These six boundary constraints guarantee $C^2$ continuity across chunk transitions. Evaluating this admitted spline at `{python} MachineTiers.f_perm_str` yields continuous position references, smooth velocity feeds, and feedforward acceleration profiles for the underlying joint controllers.
 
 ::: {.column-margin .margin-pointer}
-↩ The action chunks this interpolator densifies are generated in @sec-brain-action-chunking.
+↩ Action chunking, which produces the trajectory segments this interpolator densifies, is established in @sec-brain-action-chunking.
 :::
 
 Spectral aliasing occurs when unmodeled high-frequency mechanical vibration or sensor noise folds into low-rate estimator bands. The architecture mitigates aliasing through front-end analog filtering followed by multi-rate digital decimation[^fn-fir-smoothing-delay] within the high-rate microcontroller domain. Classical sampled-data control models assume constant, deterministic sampling periods. Temporal jitter—sampling intervals that fluctuate stochastically cycle to cycle—degrades phase margin more severely than a constant delay of equivalent mean duration [@cervin2003control]. Furthermore, discrete trajectory execution assumes setpoints replenish continuously before downstream buffers drain. The permission path enforces these invariants via cycle-deterministic hardware timer interrupts and real-time buffer-depth accounting. If the upstream planner stalls and the trajectory buffer reaches its terminal waypoint, the enforcer rejects stale extrapolation and commands a validated local stopping profile.
@@ -1272,8 +1272,12 @@ Notebook \ref{nbk-nervous-response-margin} applies @eq-nervous-response-budget t
 **Math**:
 `{python} TickResponseBudget.resp_math`
 
-**Systems insight**: The margin is only as dependable as its weakest constituent bound. For instance, moving the mailbox copy into a low-priority task guarded by a standard mutex without priority inheritance or priority ceilings leaves $B_i$ completely unbounded, because medium-priority work can preempt the lock holder indefinitely—precisely the Mars Pathfinder pathology examined below. Similarly, permitting unscheduled DMA traffic on the tick's memory path destroys the upper bound on $I_i$. If even a single term loses its bound, the tick lacks a defensible worst-case response time, leaving the stopping budget's $T_{\text{tick}}$ parameter with no engineering foundation.
+**Systems insight**: The margin is only as dependable as its weakest constituent bound. For instance, moving the mailbox copy into a low-priority task guarded by a standard mutex without priority inheritance or priority ceilings leaves $B_i$ completely unbounded, because medium-priority work can preempt the lock holder indefinitely—precisely the Mars Pathfinder pathology of war story \ref{ws-nervous-1997-mars-pathfinder-priority-inversion}. Similarly, permitting unscheduled DMA traffic on the tick's memory path destroys the upper bound on $I_i$. If even a single term loses its bound, the tick lacks a defensible worst-case response time, leaving the stopping budget's $T_{\text{tick}}$ parameter with no engineering foundation.
 
+:::
+
+::: {.column-margin .margin-pointer}
+↪ How host memory traffic would inflate the permission tick's interference if both paths shared one die is developed in @sec-placement-resource-contention.
 :::
 
 Neither a low average latency nor a modest processor utilization can substitute for a rigorous mathematical bound.[^fn-math-liu-layland]
@@ -1281,10 +1285,6 @@ Neither a low average latency nor a modest processor utilization can substitute 
 A missed deadline degrades the machine across multiple architectural layers. When a deadline slips, distributed motor drives must hold their previous position setpoint for an entire additional bus cycle. Consequently, the actuator setpoint lags by a full period (`{python} TickResponseBudget.t_period_str`) rather than the conventional half-period delay associated with a zero-order hold. Repeated deadline misses manifest as timing jitter, which @cervin2003control analyze as a direct erosion of phase margin in digital feedback loops closed through the tick. Within the safety subsystem, a delayed tick evaluates an expired lease or safety violation late; at the drive velocity limit, each `{python} TickResponseBudget.t_period_str` delay incurs an irreversible loss of `{python} TickResponseBudget.d_miss_str` in physical stopping clearance.
 
 [^fn-math-liu-layland]: **Rate-Monotonic Scheduling**\index{Rate-monotonic scheduling}: @liu1973scheduling established that static-priority rate-monotonic scheduling guarantees periodic task schedulability when total processor utilization satisfies $U \le n(2^{1/n} - 1)$, converging to $\ln(2) \approx 0.693$ for large $n$. The utilization bound is sufficient, not necessary, so a task set that exceeds it may still meet every deadline; with shared-resource blocking and deadlines shorter than periods, only the exact response-time test of @sec-appendix-systems-timers decides.
-
-::: {.column-margin .margin-pointer}
-↪ How host memory traffic would inflate the permission tick's interference if both paths shared one die is developed in @sec-placement-resource-contention.
-:::
 
 Bounding these response terms requires categorizing every potential source of timing variability according to whether an analytical bound exists:
 
@@ -1660,7 +1660,7 @@ A shared mailbox cannot protect a mobile manipulator if the host processor retai
 :::
 
 ::: {.column-margin .margin-pointer}
-↪ Actuator override masking registers implement the hardware preemption tiers formulated in @sec-intervention-authority-log.
+↪ The preemption tiers that actuator override masks implement are developed in @sec-intervention-authority-log.
 :::
 
 The microcontroller continuously evaluates physical safety invariants: verifying that commanded joint positions lie within certified reach envelopes, that joint velocities stay within qualified limits, and that projected decelerations remain safely within dynamic stopping clearance ($d_{\text{stop}} \le D_{\text{clear}}$). When a proposal satisfies all invariants, the microcontroller admits the command and interpolates waypoints into cyclic position setpoints for each bus cycle, which the drives track through their internal velocity and current loops. When a candidate proposal violates an invariant or expires, the enforcer refuses it ($\bot$). A refusal does not automatically revoke a previously admitted, actively executing trajectory chunk. Instead, the active chunk continues running as long as its state, sensor evidence, and time lease remain valid. When those conditions lapse or fail, the enforcer terminates execution authority and transitions the system into a controlled deceleration or hold. In parallel, a separate hardware trip zone stands ready to cut motor drive torque upon catastrophic electrical faults, though simply de-energizing an inverter does not by itself brake moving mass.[^fn-hw-tripzone-break]
