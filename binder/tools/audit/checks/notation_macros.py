@@ -90,7 +90,7 @@ def check(file_path: Path, content: str) -> list[Issue]:
         return issues
 
     lines = content.splitlines()
-    in_python = False
+    in_code = False
     in_yaml = False
 
     for i, line in enumerate(lines):
@@ -103,14 +103,11 @@ def check(file_path: Path, content: str) -> list[Issue]:
                 in_yaml = False
             continue
 
-        # Ignore python execution cells — matplotlib uses raw latex strings
-        if line.startswith("```{python}"):
-            in_python = True
+        # Ignore fenced code blocks (python, tikz, bash, etc.)
+        if line.startswith("```"):
+            in_code = not in_code
             continue
-        if line.startswith("```") and in_python:
-            in_python = False
-            continue
-        if in_python:
+        if in_code:
             continue
 
         # Ignore HTML comments

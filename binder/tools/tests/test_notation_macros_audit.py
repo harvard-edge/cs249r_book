@@ -24,3 +24,16 @@ def test_notation_macros_passes_clean_macros():
     content = "The data volume is $\\DataVolume$ and bandwidth is $\\Bandwidth$."
     issues = check(Path("test.qmd"), content)
     assert len(issues) == 0
+
+
+def test_notation_macros_ignores_generic_fenced_code_blocks():
+    content = """```{.tikz}
+\\node {$D_{\\text{vol}}$};
+```
+```bash
+echo "$D_{\\text{vol}}$"
+```
+"""
+    issues = check(Path("test.qmd"), content)
+    assert len(issues) == 0
+
