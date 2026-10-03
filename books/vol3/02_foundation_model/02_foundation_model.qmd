@@ -140,7 +140,7 @@ The model in the subsequent invocation observes the tool output solely because t
 This operational reality exemplifies fail-plausible dynamics. A model can emit a syntactically pristine proposal targeting the wrong source module, or generate a compelling analysis grounded in an obsolete observation. Emitted tokens often appear convincing even when the underlying reasoning or environment state is completely disconnected from reality. Robust agent engineering therefore requires treating status, schema structure, security authorization, and empirical evidence as distinct, non-fungible properties of the interaction.
 
 ::: {.column-margin .margin-pointer}
-↩ Fail-plausible failure modes and ungrounded execution risks are established in @sec-vol3-intro-fail-plausible.
+↩ The fail-plausible fault, output that looks well formed and credible while the intended property fails, is established in @sec-vol3-intro-fail-plausible.
 :::
 
 The operational responsibilities summarized in @tbl-vol3-foundation-model-responsibilities emerge directly from these architectural distinctions. These requirements apply universally, whether the model executes within the local process or behind a remote network API.
@@ -392,7 +392,7 @@ Halving the temperature to $\tau_{\text{temp}} =$ `{python} LogitScalingTruncati
 
 Returning to unit temperature and applying nucleus truncation with $p =$ `{python} LogitScalingTruncation.p_nucleus_str` evaluates cumulative probability mass. The lead token $v_1$ provides `{python} LogitScalingTruncation.first_prob_str`, which falls short of the threshold. Incorporating $v_2$ (`{python} LogitScalingTruncation.second_prob_str`) brings cumulative coverage to `{python} LogitScalingTruncation.nucleus_mass_str`, which satisfies the threshold and defines the active nucleus as $\{v_1, v_2\}$. Renormalizing across this active set assigns probability `{python} LogitScalingTruncation.nucleus_first_str` to $v_1$ and `{python} LogitScalingTruncation.nucleus_second_str` to $v_2$, while strictly zeroing the remaining tail tokens $\{v_3, v_4, v_5\}$.
 
-**Systems insight**: Temperature governs candidate diversity. Halving temperature compresses the non-top probability tail from `{python} LogitScalingTruncation.tail_base_pct_str` to `{python} LogitScalingTruncation.tail_sharp_pct_str`, achieving a `{python} LogitScalingTruncation.tail_ratio_mult_str` reduction, whereas nucleus truncation eliminates the tail entirely. Repeated calls produce diverse outputs only when probability mass occupies this tail—the exact stochastic resource harvested by the search and consensus strategies in @sec-vol3-test-time-compute. Because neither transformation ensures that the highest-scoring candidate is correct, engineering teams configure decoding parameters based on empirical task pass rates rather than raw model likelihood.
+**Systems insight**: Temperature governs candidate diversity. Halving temperature compresses the non-top probability tail from `{python} LogitScalingTruncation.tail_base_pct_str` to `{python} LogitScalingTruncation.tail_sharp_pct_str`, achieving a `{python} LogitScalingTruncation.tail_ratio_mult_str` reduction, whereas nucleus truncation eliminates the tail entirely. Repeated calls produce diverse outputs only when probability mass occupies this tail—the exact stochastic resource that parallel candidate sampling draws on in @sec-vol3-test-time-compute-breadth-axis. Because neither transformation ensures that the highest-scoring candidate is correct, engineering teams configure decoding parameters based on empirical task pass rates rather than raw model likelihood.
 
 :::
 
@@ -743,7 +743,7 @@ Setting the logits of invalid tokens to $-\infty$ forces their sampling probabil
 Generating viable prefixes guarantees that the output will not contain invalid syntax, but it does not guarantee that generation finishes cleanly. For the output to form a complete, usable payload, two operational conditions must hold: the parser must reach an accepting state, and the generation sequence must terminate according to the protocol rules. The constraint engine must disallow end-of-sequence (`<eos>`) tokens whenever required fields or closing delimiters remain unwritten. As a result, maintaining viable prefixes provides a conditional guarantee: completed outputs are structurally sound, but the system cannot assume that every generation request finishes within its allocated token budget.
 
 ::: {.column-margin .margin-pointer}
-↪ Token-to-parser state transitions and the formal proof for accepting-state termination are developed in @sec-vol3-appendix-math-dfa.
+↪ The automaton behind the token mask, and the induction showing that a constrained output ending in a permitted end token belongs to the grammar, are developed in @sec-vol3-appendix-math-dfa.
 :::
 
 Consider what happens when an inference request hits its maximum output token limit while emitting arguments, leaving the decoding buffer at `{"path":"src/po`. Although this string remains a viable prefix under the schema, the inference service flags the response envelope with `status: TRUNCATED`. The payload contains only an incomplete fragment. The agent runtime cannot dispatch this fragment as a valid `tool_request`. Furthermore, attempting to "heal" the payload by running a heuristic repair parser that appends closing quotes and braces creates severe reliability hazards. Heuristic completion fabricates a candidate invocation (`"src/po"`) that the model never intended to finalize, risking unintended execution side effects. The runtime should log the truncated fragment for debugging under status-first handling, but grammar constraints do not bypass the fundamental requirement to quarantine incomplete artifacts (principle \ref{pri-invariant-closure}).
@@ -1098,6 +1098,10 @@ The constraint mechanism introduces a third independent axis. An agent architect
 
 To evaluate competing interfaces fairly, an experimental harness must enforce matched budgets across all trials. In our connection-pool repair benchmark, every trial starts from an identical repository snapshot and defect description. We hold constant the model weights, sampling parameters, diagnostic tooling, and acceptance test suites. Crucially, each interface operates under identical resource ceilings (such as maximum wall-clock time and token allocations) and the same retry policy. Instruction prompts and response payloads will naturally exhibit different token counts, because prompt overhead and verbosity are intrinsic properties of the interface under test. Matched budgets do not require equal token consumption across designs; rather, they subject each candidate to identical operating boundaries and accounting rules.
 
+::: {.column-margin .margin-pointer}
+↪ Matched-budget comparison of complete agent policies, charging every initiated trial to the cost per accepted task, is developed in @sec-vol3-evaluation-matched-budgets.
+:::
+
 The accounting boundary must be defined explicitly. An invocation deadline measures single-turn inference latency, concluding when the runtime receives and normalizes the model's generated response. A task deadline governs the complete agent lifecycle, including payload parsing, workspace patching, test compilation, and test execution. Every retry, unparsable output, and failing test execution draws against this cumulative task budget. Benchmarks that grant free retries following malformed responses subsidize brittle interfaces and corrupt comparative latency metrics.
 
 To pinpoint system failures without masking catastrophic errors, the benchmark harness must decouple intermediate execution stages from final task acceptance (@tbl-vol3-interface-evaluation). The total number of initiated trials must remain the denominator for all top-level success metrics. Discarding unparsable responses or timed-out calls artificially inflates reported accuracy. Conditional rates—such as the proportion of cleanly applied edits that pass functional tests—serve as valuable diagnostic telemetry, but engineers must always state the conditioning filter explicitly.
@@ -1112,10 +1116,6 @@ To pinpoint system failures without masking catastrophic errors, the benchmark h
 : **Interface evaluation measurements**: Distinct observations prevent a formatting improvement from being mistaken for a task-level improvement. The same task fixtures, acceptance standard, and resource ceilings govern each design. {#tbl-vol3-interface-evaluation tbl-colwidths="[23,39,38]"}
 
 Production serving conditions must also be recorded alongside payload statistics. Shared inference infrastructure introduces substantial latency variance: KV-cache hits, dynamic batching contention, and host-level queueing delays alter observed wall-clock execution even when prompt and completion lengths remain constant. A few favorable measurements during quiet periods do not prove deadline reliability. In shared production clusters, tail latency governs service-level objective violations, because the slowest requests dictate pipeline throughput [@dean2013tail]. The immediate engineering question is whether an interface representation leaves sufficient headroom under the tail-latency envelope to generate and validate candidate fixes.
-
-::: {.column-margin .margin-pointer}
-↪ Formal experimental methodology and uncertainty estimation are developed in @sec-vol3-evaluation-rigor.
-:::
 
 ### A deadline-constrained representation choice {#sec-vol3-foundation-model-deadline-representation-choice}
 

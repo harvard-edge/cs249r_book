@@ -110,7 +110,11 @@ A retrieval index serves as an auxiliary acceleration structure for locating inf
 
 ### Read and write lifecycle {#sec-vol3-long-term-memory-read-write-lifecycle}
 
-Consider the state of a code-repair agent immediately after it writes revision `r18`. If its vector or keyword index was generated from revision `r17`, a retrieval query for `src/pool.py` will return the unpatched file. While that record remains an accurate historical reflection of `r17`, serving it as current context leads the model to believe the bug persists, prompting redundant or conflicting edits. The staleness that context invalidation guards against in @sec-vol3-context-engineering-context-rot thus extends beyond the active prompt into the persistent storage tiers that feed subsequent inference calls.
+Consider the state of a code-repair agent immediately after it writes revision `r18`. If its vector or keyword index was generated from revision `r17`, a retrieval query for `src/pool.py` will return the unpatched file. While that record remains an accurate historical reflection of `r17`, serving it as current context leads the model to believe the bug persists, prompting redundant or conflicting edits. The staleness that context invalidation guards against thus extends beyond the active prompt into the persistent storage tiers that feed subsequent inference calls.
+
+::: {.column-margin .margin-pointer}
+↩ Context invalidation, which withdraws a staged observation's authority over current state once its source changes, is established in @sec-vol3-context-engineering-context-rot.
+:::
 
 Precomputing search indexes eliminates the need to scan large repositories or execution histories during inference. However, this optimization incurs an ongoing synchronization cost. Every update to a source file requires indexing new content and invalidating or evicting obsolete embeddings. Executing these updates synchronously blocks read or write operations, while background asynchronous indexing introduces a replication lag window. Systems require explicit consistency semantics to govern queries that arrive while background index updates are in flight.
 
@@ -180,7 +184,7 @@ The agent runtime—never the retrieval backend or an uncalibrated ranking score
 Returned text remains untrusted data, even when fetched from a local repository. While defensive serialization formats cleanly separate retrieved payloads from system instructions, language models can still be misled by adversarial or malformed text embedded inside document bodies. This hazard—prompt injection—occurs when retrieved text hijacks the agent's control flow, attempting to redirect execution away from the authorized task.
 
 ::: {.column-margin .margin-pointer}
-↪ Prompt injection attack vectors and operational defenses for untrusted retrieved content are developed in @sec-vol3-security.
+↪ Indirect prompt injection, delivered through retrieved documents and other observations an agent reads, is developed in @sec-vol3-security-injection-entry-points.
 :::
 
 Accurate payload accounting must measure the entire serialized envelope, including wrapper tags, source paths, version identifiers, and status headers, alongside the raw text bodies. Underestimating this structural overhead leads directly to context exhaustion. The ledger in notebook \ref{nbk-06-retrieval-payload-ledger} demonstrates how metadata overhead alters the number of complete records an agent can stage within a fixed prompt allocation.
@@ -525,7 +529,7 @@ The raw vectors occupy `{python} VectorScanLatencyFloor.footprint_str`. Counting
 ↪ The roofline model and the ridge point that separates bandwidth-bound from compute-bound work are developed in @sec-vol3-appendix-inference-roofline.
 :::
 
-This arithmetic extends the memory-bandwidth bottleneck analyzed in @sec-vol3-foundation-model-cost from autoregressive token generation directly into retrieval. The analysis also establishes where an exact scan remains the right architectural choice. When selective metadata filters restrict the search space to thousands of eligible vectors, an exact scan streams megabytes rather than gigabytes, achieving sub-millisecond latencies without the operational overhead of graph maintenance or quantization codebooks. Furthermore, because an exact scan provides perfect recall under the chosen distance metric, it serves as the essential ground truth for evaluating any approximate index.
+This arithmetic extends the memory-bandwidth bottleneck of autoregressive token generation directly into retrieval. The analysis also establishes where an exact scan remains the right architectural choice. When selective metadata filters restrict the search space to thousands of eligible vectors, an exact scan streams megabytes rather than gigabytes, achieving sub-millisecond latencies without the operational overhead of graph maintenance or quantization codebooks. Furthermore, because an exact scan provides perfect recall under the chosen distance metric, it serves as the essential ground truth for evaluating any approximate index.
 
 ::: {.column-margin}
 ![](images/svg/vol3_ltm_margin_scan_crossover.svg){width="100%" fig-alt="Log-log line chart of exact scan time against eligible vectors. A straight rising line passes a green dot at 10,000 vectors and 0.31 ms and a red dot at 10 million vectors and 307.2 ms. A dashed horizontal line marks a 10 ms budget and crosses the scan line near 326,000 vectors."}
@@ -1036,10 +1040,6 @@ This coordination contract must remain robust against system restarts and uncoor
 
 Replicated retrieval topologies require explicit **read-your-writes**\index{Read-your-writes consistency!definition}[^fn-session-guarantees-memory] guarantees, ensuring that an agent always observes the outcomes of its own preceding actions [@terry1994session]. When an agent issues a search following an edit, the query carries the log sequence number (LSN) corresponding to that write. A replica whose local replay watermark lags that LSN must pause execution within a bounded wait window. If the replica does not catch up before the deadline elapses, the gateway either routes the request to an authoritative primary or returns an explicit partial-status response.
 
-::: {.column-margin .margin-pointer}
-↪ Logging each operation durably before it takes effect, the write-ahead discipline these sequence numbers index, is developed in @sec-vol3-persistence-wal.
-:::
-
 [^fn-session-guarantees-memory]: **Session Guarantees**: The Bayou project established four foundational client-centric guarantees for weakly consistent distributed storage: read your writes, monotonic reads, writes follow reads, and monotonic writes [@terry1994session]. An agentic system requires more than simple read-your-writes behavior. For example, if an agent reads `r18` from an up-to-date replica and subsequently retrieves `r17` from a lagging node on the next step, the system violates monotonic reads—causing the agent's observation of workspace history to move backward. \index{Session guarantees!monotonic reads}
 
 ### Retrieval during index refresh {#sec-vol3-long-term-memory-refresh-retrieval}
@@ -1136,6 +1136,10 @@ class IndexMaintenanceCost:
 :::
 
 Retrieved evidence represents the source state observed at the moment of the read. In an agentic system, a concurrent write can land before the model finishes deliberating and invokes its chosen action. Any tool call whose correctness depends on an unmodified workspace must therefore enforce an execution-time precondition—such as an optimistic version check—at the tool boundary. The storage subsystem's core duty is to preserve and surface the exact generation metadata that this precondition requires.
+
+::: {.column-margin .margin-pointer}
+↪ The atomic conditional update that enforces this version precondition at the tool boundary is developed in @sec-vol3-tool-calling-conditional-updates.
+:::
 
 Source-generation checks suppress obsolete records, atomic publication prevents straggling workers from reinstating stale representations, and explicit fallback contracts clarify whether fresh evidence is available. Together, these mechanisms enforce internal storage consistency rather than task success. In accordance with the end-to-end argument [@saltzer1984endtoend], whether the `r18` patch truly resolves the connection leak can be established only at the system boundary through integration tests executed against the real runtime environment. What the storage layer guarantees to that boundary is an uncompromised, auditable record of the exact source generation reflected in every retrieved fact.
 
@@ -1297,7 +1301,11 @@ Store B carries `{python} StorageAmplification.bytes_ratio_mult_str` the auxilia
 **Systems insight**: Dense vectors dominate both the bytes and the maintenance time, because each chunk becomes hundreds of floating-point components produced by a model pass. Compressing the vectors attacks the byte term; only a faster encoder or fewer re-embedded chunks attacks the time term, which sets the stale window after every edit. A dense index is worth its order of magnitude only when it raises task acceptance enough to repay that maintenance in the cost per accepted task.
 :::
 
-Staging depth warrants independent empirical measurement because task success does not increase monotonically with the retrieval cutoff $k$. While Recall@$k$ cannot decrease as $k$ increases, expanding the prompt window introduces substantial cognitive interference. Each retrieved passage that is superficially similar but contextually irrelevant competes for the model's limited attention against critical task evidence. Furthermore, language models exhibit pronounced positional bias, using relevant facts located in the middle of lengthy staged context far less reliably than those placed near the prompt boundaries [@liu2024lost]. Providing too few records starves the model of necessary context; providing too many dilutes key signals with noise. The optimal operating range depends heavily on the model's attention architecture, task complexity, and reranker quality. This mirrors the context working-set principles introduced in @sec-vol3-context-engineering-physics (principle \ref{pri-vol3-attention-working-set}). In practice, systems engineers should configure candidate retrieval to maximize recall, use a precise reranker to stage only a compact working set into the prompt, and systematically sweep staging depth across evaluation trials rather than assuming a single static cutoff.
+Staging depth warrants independent empirical measurement because task success does not increase monotonically with the retrieval cutoff $k$. While Recall@$k$ cannot decrease as $k$ increases, expanding the prompt window introduces substantial cognitive interference. Each retrieved passage that is superficially similar but contextually irrelevant competes for the model's limited attention against critical task evidence. Furthermore, language models exhibit pronounced positional bias, using relevant facts located in the middle of lengthy staged context far less reliably than those placed near the prompt boundaries [@liu2024lost]. Providing too few records starves the model of necessary context; providing too many dilutes key signals with noise. The optimal operating range depends heavily on the model's attention architecture, task complexity, and reranker quality. This mirrors the working-set view of context (principle \ref{pri-vol3-attention-working-set}). In practice, systems engineers should configure candidate retrieval to maximize recall, use a precise reranker to stage only a compact working set into the prompt, and systematically sweep staging depth across evaluation trials rather than assuming a single static cutoff.
+
+::: {.column-margin .margin-pointer}
+↩ Usable working context, the content and length at which a model still meets a stated quality criterion, is established in @sec-vol3-context-engineering-physics.
+:::
 
 Ultimately, memory evaluation yields a multidimensional trade-off space rather than a single scalar benchmark score. A more expansive memory store retains helpful edge-case experiences, but it also accumulates obsolete or contradictory records. Conversely, a strict admission gate shields the agent from spurious lessons at the expense of rejecting valuable domain context. Systems architects must systematically vary read and write policies under identical operational budgets, evaluating whether variations in accepted task outcomes stem from evidence coverage, temporal applicability, lifecycle maintenance failures, or compute and storage costs.
 

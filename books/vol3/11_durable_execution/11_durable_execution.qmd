@@ -134,7 +134,11 @@ Defining an event schema specifies what state reconstruction requires, but schem
 
 Consider a repair agent whose next operation submits a targeted test against workspace `ws_r18`. If the execution harness dispatches that test request across the network and crashes before persisting it, a replacement worker inspecting the log will recover a plan that still says "run the test"—even though the original job is already executing remotely and accruing charges. Recording only the eventual result leaves a critical blind spot during execution. To prevent duplicate runs and untracked financial liability, the runtime must commit the admitted request and its reservation to persistent storage before that request ever leaves its control.
 
-Recording the admitted request durably before dispatching it is classical **write-ahead logging**\index{Write-ahead logging!definition} applied to trajectory dispatch; @sec-vol3-appendix-systems-transactions reviews the database form of the protocol. A durable history ensures that recovery can identify every external operation that may have begun, even if network partitions or crashes prevent the worker from ever receiving the reply. Under the runtime's declared failure model, an external mutation that occurs without a recoverable record of intent is a **phantom effect**\index{Phantom effect!definition}. Eliminating phantom effects requires two foundational guarantees: strict write-ahead ordering in the runtime execution pipeline, and a storage substrate that reliably outlives the failures the system claims to tolerate.
+Recording the admitted request durably before dispatching it is classical **write-ahead logging**\index{Write-ahead logging!definition} applied to trajectory dispatch. A durable history ensures that recovery can identify every external operation that may have begun, even if network partitions or crashes prevent the worker from ever receiving the reply. Under the runtime's declared failure model, an external mutation that occurs without a recoverable record of intent is a **phantom effect**\index{Phantom effect!definition}. Eliminating phantom effects requires two foundational guarantees: strict write-ahead ordering in the runtime execution pipeline, and a storage substrate that reliably outlives the failures the system claims to tolerate.
+
+::: {.column-margin .margin-pointer}
+↪ The database form of write-ahead logging, and why a runtime borrows its ordering but not its control over remote state, is developed in @sec-vol3-appendix-systems-transactions.
+:::
 
 ::: {#dfn-durable-intent .callout-definition title="Durable intent"}
 
@@ -166,11 +170,15 @@ Each step up the failure hierarchy demands a correspondingly stronger persistenc
 
 : **Durable Acknowledgment by Failure Domain**: Each row names the weakest acknowledgment that survives its failure. Moving down the table adds a wait, first for the storage device and then for network round trips to the slowest replica in the quorum, so the declared failure domain sets the latency floor of every dispatch. {#tbl-vol3-durable-ack-domains}
 
-The implementation must define precisely which failure modes its persistence layer covers, how storage errors surface to the application, and how a replacement worker discovers the complete authoritative history. Underlying storage engines provide the mechanical primitives, but the systems architect must establish the durability contract. @Sec-vol3-appendix-systems-boundaries compares atomicity, isolation, and durability, providing a boundary test to separate local storage commitments from side effects produced at external endpoints. When an acknowledgment fails or times out with an ambiguous status, the runtime must hold dispatch and resolve the append according to the storage contract. Holding back a dispatch during a storage outage may temporarily stall progress, but dispatching before confirmation permanently destroys the evidence required to govern in-flight work after a crash.
+The implementation must define precisely which failure modes its persistence layer covers, how storage errors surface to the application, and how a replacement worker discovers the complete authoritative history. Underlying storage engines provide the mechanical primitives, but the systems architect must establish the durability contract. When an acknowledgment fails or times out with an ambiguous status, the runtime must hold dispatch and resolve the append according to the storage contract. Holding back a dispatch during a storage outage may temporarily stall progress, but dispatching before confirmation permanently destroys the evidence required to govern in-flight work after a crash.
+
+::: {.column-margin .margin-pointer}
+↪ The boundary test that separates a local storage commitment from side effects at external endpoints, with atomicity, isolation, and durability compared, is developed in @sec-vol3-appendix-systems-boundaries.
+:::
 
 ### Durable admission ordering {#sec-vol3-durable-execution-admission-ordering}
 
-@Sec-vol3-controlplane-statemachine established the live admission decision: validate the completed proposal, check current authority and control state, register its identity, and reserve bounded liability before releasing the request. Durability adds an acknowledged history of that decision and the exact intended operation. For an attempt that proceeds to dispatch and later produces an observation, the ordering is
+@Sec-vol3-agent-harness-transition-guards established the live admission decision: validate the completed proposal, check current authority and control state, register its identity, and reserve bounded liability before releasing the request. Durability adds an acknowledged history of that decision and the exact intended operation. For an attempt that proceeds to dispatch and later produces an observation, the ordering is
 
 $$
 e_{\text{prop}} \prec e_{\text{auth}} \prec e_{\text{flush}} \prec a_{\text{ext}} \prec e_{\text{obs}}.
@@ -202,7 +210,7 @@ Following a crash, a recovering worker can treat the absence of a logged intent 
 
 In the crash worksheet scenario, the dispatched test may have failed to reach the service, may still be executing on a remote runner, or may have finished just before the worker crashed. Furthermore, a lost acknowledgment means the returned job handle, `job_tests_18`, was never durably written to the log. To resolve this ambiguity, the runtime performs a targeted lookup using the logged operation identity, authenticating and correlating any newly discovered evidence before updating the ledger. A verified test result establishes the check for `ws_r18`; whether to accept the overall repair remains a distinct policy decision.
 
-An **in-doubt action**\index{In-doubt action!definition} is an admitted operation whose outcome cannot be settled by the surviving evidence; it reflects runtime uncertainty rather than external failure. @Sec-vol3-tool-calling-idempotency details the endpoint requirements needed to execute a safe repeat: strict identity scoping, immutable payload binding, retention of prior execution results, handling of concurrent in-flight requests, and coordination between state mutations and returned values. A client-provided idempotency key protects only those endpoints that implement these semantics. Probing an endpoint by resource name provides much weaker guarantees, as a matching name might belong to an unrelated operation, while an absent resource could simply indicate that a delayed initial request is still in transit. Settlement before retry (principle \ref{pri-vol3-exactly-once-settlement}) formalizes this operational rule.
+An **in-doubt action**\index{In-doubt action!definition} is an admitted operation whose outcome cannot be settled by the surviving evidence; it reflects runtime uncertainty rather than external failure. @Sec-vol3-tool-calling-operation-ids details the endpoint requirements needed to execute a safe repeat: strict identity scoping, immutable payload binding, retention of prior execution results, handling of concurrent in-flight requests, and coordination between state mutations and returned values. A client-provided idempotency key protects only those endpoints that implement these semantics. Probing an endpoint by resource name provides much weaker guarantees, as a matching name might belong to an unrelated operation, while an absent resource could simply indicate that a delayed initial request is still in transit. Settlement before retry (principle \ref{pri-vol3-exactly-once-settlement}) formalizes this operational rule.
 
 ::: {.column-margin .margin-pointer}
 ↪ The idempotence and deduplication contracts behind a safe repeat are developed in @sec-vol3-appendix-systems-retries.
@@ -214,7 +222,7 @@ Database write-ahead logging forces a modification's log record to stable storag
 
 :::
 
-When surviving evidence proves insufficient to resolve an action, the ledger maintains ownership for reconciliation or explicit operator intervention across timeouts, pauses, and terminal execution paths. Independent branches of execution can proceed under their own guards while dependent operations await resolution. @Sec-vol3-failure-recovery develops the operational strategies for repairing established effects that require remediation.
+When surviving evidence proves insufficient to resolve an action, the ledger maintains ownership for reconciliation or explicit operator intervention across timeouts, pauses, and terminal execution paths. Independent branches of execution can proceed under their own guards while dependent operations await resolution. @Sec-vol3-sagas-architecture develops the operational strategies for repairing established effects that require remediation.
 
 ### Group commit {#sec-vol3-durable-execution-group-commit}
 
@@ -311,7 +319,11 @@ Restoration proceeds deterministically. The replacement supervisor first verifie
 
 Consider the crash worksheet scenario: the checkpoint at $j_{\text{ckpt}}$ binds the record snapshot `record_R_ckpt` to workspace snapshot `ws_r18`. The subsequent log suffix captures the model prompt and response, token budget reservations, and the durable intent for operation `test_r18` under `attempt1`. Suppose the host crashes while the test executes, before any execution result reaches disk. Because the test executed against an immutable snapshot using isolated scratch storage, the main candidate workspace experienced zero mutations during this suffix. To recover, the replacement worker restores `ws_r18` and folds the suffix events. This reconstructs the pending test obligation and its outstanding resource lease, recognizing that the operation remains unresolved. Any intermediate scratch data or uncommitted output artifacts must either possess durable references or be marked unavailable.
 
-When an execution suffix modifies workspace files, durable recovery requires comprehensive delta tracking: the base snapshot identifier, ordered byte replacements or unified diffs, file deletions, metadata flags, and SHA-256 integrity checksums. A success return code or a dangling content hash whose backing payload was lost to a crash cannot reconstruct state. If the control log points to a workspace revision whose delta payload is missing from storage, the runtime must fail fast and flag the state as unrecoverable, rather than erroneously pairing a forward log position with an obsolete directory tree. Recomputing missing workspace artifacts constitutes new nondeterministic execution, which falls under the admission and repair policies developed in @sec-vol3-failure-recovery.
+When an execution suffix modifies workspace files, durable recovery requires comprehensive delta tracking: the base snapshot identifier, ordered byte replacements or unified diffs, file deletions, metadata flags, and SHA-256 integrity checksums. A success return code or a dangling content hash whose backing payload was lost to a crash cannot reconstruct state. If the control log points to a workspace revision whose delta payload is missing from storage, the runtime must fail fast and flag the state as unrecoverable, rather than erroneously pairing a forward log position with an obsolete directory tree. Recomputing missing workspace artifacts constitutes new nondeterministic execution, which falls under admission and repair policy rather than reconstruction.
+
+::: {.column-margin .margin-pointer}
+↪ Whether to repair a failed step or rebuild its state, and the admission check every recovery action must pass first, are developed in @sec-vol3-sagas-forward-vs-backward.
+:::
 
 ### Full and incremental snapshots {#sec-vol3-durable-execution-snapshot-representation}
 
@@ -462,7 +474,7 @@ $$T^\ast_{\text{ckpt}} \approx \sqrt{2\,T_{\text{write}}\,\text{MTBF}}$$ {#eq-vo
 
 *   **Checkpoint write time** ($T_{\text{write}}$): Time execution stops to capture and durably publish one checkpoint.
 *   **Mean time between failures** ($\text{MTBF}$): Expected time between crashes that lose unrecorded work.
-*   **Overhead at the optimum**: The cadence-dependent overhead is $\sqrt{2\,T_{\text{write}}/\text{MTBF}}$ of useful time. @Sec-vol3-appendix-math-daly derives both results, and @daly2006 refines them for failures during saving and recovery.
+*   **Overhead at the optimum**: The cadence-dependent overhead is $\sqrt{2\,T_{\text{write}}/\text{MTBF}}$ of useful time. @Sec-vol3-appendix-math-daly derives the interval, from which this overhead follows, and @daly2006 refines them for failures during saving and recovery.
 *   **Sensitivity**: For a `{python} YoungInterval.t_save_str` s pause and a mean time between failures of `{python} YoungInterval.mtbf_str` minutes, $T^\ast_{\text{ckpt}} \approx$ `{python} YoungInterval.tau_star_str` s and the overhead is `{python} YoungInterval.w_star_str`. The minimum is flat: an interval off by a factor of `{python} YoungInterval.miss_small_str` in either direction raises overhead by only `{python} YoungInterval.small_penalty_str`, while a factor-of-`{python} YoungInterval.miss_big_str` miss raises it to `{python} YoungInterval.w_big_str`.
 
 :::
@@ -599,7 +611,11 @@ Before parsing records, the worker must locate the authoritative committed log p
 
 Reading durable state does not confer the authority to act on it. Trajectory ownership requires an explicit grant from the coordinator, which authenticates the claimant and issues a new `owner_epoch`. This epoch bump assigns execution responsibility to the replacement worker while leaving `record_version`, `control_epoch`, and the identities of admitted operations unchanged.
 
-The distinction between active ownership and historical inspection is vital because the previous worker may have been partitioned rather than permanently destroyed. A worker that suffered a long garbage collection pause or transient network failure can wake up after its ownership lease[^fn-lease-ownership-grant] expires and attempt to write to storage. To prevent split-brain anomalies, distributed systems rely on a **fencing token**\index{Fencing token!definition}[^fn-fencing-sequencer-origin]—a monotonically increasing ownership generation that stateful resources compare against the newest generation they have observed, unconditionally rejecting requests stamped with stale epochs [@kleppmann2017designing]; @sec-vol3-appendix-systems-fencing traces the handoff in which a delayed write meets the new fence. Fencing exclusion holds strictly at the boundaries that verify the token: the write-ahead log, the dispatch gate, and each participating downstream resource. The replacement worker must install the new ownership generation at those boundaries before relying on mutual exclusion, and any boundary unable to verify current ownership must withhold protected operations.
+The distinction between active ownership and historical inspection is vital because the previous worker may have been partitioned rather than permanently destroyed. A worker that suffered a long garbage collection pause or transient network failure can wake up after its ownership lease[^fn-lease-ownership-grant] expires and attempt to write to storage. To prevent split-brain anomalies, distributed systems rely on a **fencing token**\index{Fencing token!definition}[^fn-fencing-sequencer-origin]—a monotonically increasing ownership generation that stateful resources compare against the newest generation they have observed, unconditionally rejecting requests stamped with stale epochs [@kleppmann2017designing]. Fencing exclusion holds strictly at the boundaries that verify the token: the write-ahead log, the dispatch gate, and each participating downstream resource. The replacement worker must install the new ownership generation at those boundaries before relying on mutual exclusion, and any boundary unable to verify current ownership must withhold protected operations.
+
+::: {.column-margin .margin-pointer}
+↪ The handoff in which the old owner's delayed write meets the newly installed fence is developed in @sec-vol3-appendix-systems-fencing.
+:::
 
 [^fn-lease-ownership-grant]: **Lease**: Gray and Cheriton introduced leases for distributed file caches: a grant valid for a fixed term, which a server can reassign after expiry without the cooperation of a failed or partitioned holder [@gray1989leases]. Expiry bounds how long a lost worker blocks recovery of its trajectory, but it relies on clocks the old holder may misjudge, which is why the new owner still fences. \index{Lease!trajectory ownership}
 
@@ -620,7 +636,7 @@ Because worker processes can crash at any moment, outstanding operations require
 For `test_r18`, the worker queries the tool endpoint to recover the job and its execution output under the tool's result-recovery contract. If the endpoint returns a verified completion record, that result confirms the status of `ws_r18` for that specific test run, though it does not imply that the broader repair objective has been met. If the endpoint cannot be reached or returns an ambiguous status, the operation remains unresolved. In that situation, the endpoint retry contract—rather than the absence of a response or a matching identifier—governs whether launching another attempt is safe.
 
 ::: {.column-margin .margin-pointer}
-↩ Endpoint retry contracts and safe repeat requirements are established in @sec-vol3-tool-calling-idempotency.
+↩ Reconciliation, the bounded inspection of external state that settles an ambiguous operation, is established in @sec-vol3-tool-calling-reconciliation.
 :::
 
 The same rigorous accounting applies to financial and computational budgets. The worker reconstructs `actual_consumption`, `outstanding_reservations`, and the protected `finalization_reserve` by replaying all recorded `BudgetReserved` and `BudgetSettled` transitions. External model providers and compute clusters do not refund resources because an orchestrator crashed mid-flight. A partial usage report settles only the verified fraction of a call, while the unverified remainder stays locked in outstanding reservations. The replacement worker explicitly inherits the duty to retrieve final usage evidence or formally forfeit the reserved allocation.
@@ -758,7 +774,7 @@ By leveraging durable logs, the runtime reconstructs the unchanged prefix determ
 A **counterfactual branch**\index{Counterfactual branch!definition} is thus a distinct, newly identified execution thread that inherits a validated historical prefix while exploring an alternative downstream path. Inspecting an individual branch helps engineers diagnose why a specific bug occurred or test how a targeted prompt patch performs on a known failure mode. Establishing broader claims about agent reliability or task success rates, however, requires running statistically grounded benchmarks across distribution-scale test suites. Replay establishes the precise boundary where historical evidence ends and new computation begins; the next section examines how to leverage this retained log evidence to pinpoint the exact step where two executions diverge.
 
 ::: {.column-margin .margin-pointer}
-↪ Statistically grounded benchmarks and distribution-scale agent evaluation are developed in @sec-vol3-evaluation.
+↪ The statistical methods that turn repeated runs over a task distribution into reliability claims are developed in @sec-vol3-evaluation-rigor.
 :::
 
 ## Locating a Divergence {#sec-vol3-persistence-non-determinism}
@@ -791,7 +807,7 @@ A cryptographic context digest verifies the byte-level integrity of the payload 
 Live model invocations can diverge even on identical prompts due to hardware and algorithmic factors. Lowering the temperature to zero or pinning a random seed standardizes the sampling policy, but it cannot eliminate variations from cluster-level GPU scheduling, non-deterministic floating-point summation in parallel kernels, or silent provider-side model updates. Because an early divergence in a model response alters all subsequent prompts and tool invocations, downstream differences often reflect these cascading input changes rather than fresh errors. Debugging must center on explaining this initial point of departure.
 
 ::: {.column-margin .margin-pointer}
-↩ Floating-point reduction order and other sources of serving-path non-determinism are established in @sec-vol3-foundation-model-autoregressive.
+↩ Floating-point reduction order and other sources of serving-path non-determinism are established in @sec-vol3-foundation-model-repetition-replay.
 :::
 
 Regression replay controls this cascading variance by supplying captured outputs at a declared boundary, following the principles developed in @sec-vol3-persistence-replay. However, this isolation holds only if the harness captures every external dependency. If an authorization decision or scheduling check consults an unrecorded host clock, an unversioned environment variable, or a dynamic feature flag, determinism across that boundary collapses. When such leaks occur, developers must either capture the missing environmental inputs into the event log or narrow the replay scope to subcomponents with fully hermetic boundaries. Targeted interface interception in the harness achieves this control without requiring heavy, whole-machine snapshot infrastructure.
@@ -834,7 +850,7 @@ Storing multi-megabyte payloads directly within sequential log envelopes quickly
 For bounded observations, the tool contract governs what the runtime captured, what it omitted, and what remains accessible through subsequent reads. While an unparsed raw tail might be optional for a particular replay target, a file delta, model input, or result body consumed by a state reducer cannot be treated as optional simply because it is large.
 
 ::: {.column-margin .margin-pointer}
-↩ Bounded observation streaming and retention contracts are established in @sec-vol3-tool-calling-streaming.
+↩ The truncation notices and inspection handles that record what a bounded observation omitted, and what stays retrievable, are established in @sec-vol3-tool-calling-truncation-notices.
 :::
 
 Write ordering between payloads and log envelopes is critical for durability. A required payload must receive durable write acknowledgment from the storage system before any committed event envelope or checkpoint publishes a reference to it. Committing the reference first opens a crash window: if the worker fails while the payload write is still in flight, the log survives but records a dangling reference to missing bytes.
@@ -952,7 +968,7 @@ Engineers should evaluate storage engines against five core systems criteria: th
 
 :::
 
-Retention completes the reconstruction contract by guaranteeing that committed evidence and required artifacts remain accessible when disaster strikes. A storage engine faithfully preserves recorded uncertainties, but determining whether an external operation actually succeeded or produced correct side effects requires active reconciliation. Resolving in-flight ambiguities and reconciling orphan operations belong to the effect-recovery policies developed in @sec-vol3-sagas-architecture.
+Retention completes the reconstruction contract by guaranteeing that committed evidence and required artifacts remain accessible when disaster strikes. A storage engine faithfully preserves recorded uncertainties, but determining whether an external operation actually succeeded or produced correct side effects requires active reconciliation. Resolving in-flight ambiguities and reconciling orphan operations belong to effect-recovery policy, not to the storage engine.
 
 ## Fallacies and Pitfalls {#sec-vol3-durable-execution-fallacies}
 
@@ -1010,7 +1026,7 @@ Naively snapshotting full agent state after every turn introduces severe latency
 ::: {.fallacy-pitfall}
 **Fallacy**: *Rerunning the model at temperature zero reproduces a trajectory.*
 
-Greedy decoding fixes only the argmax token-selection rule for a given logit distribution; it does not guarantee numerical determinism in the underlying serving infrastructure. As @sec-vol3-foundation-model-autoregressive explains, minor variations in batch composition, kernel reductions, floating-point non-determinism, or silent model revisions behind a stable endpoint identifier can alter top-ranked logits. Because autoregressive generation conditions every token on all preceding tokens, a single flipped token early in execution steers the entire subsequent trajectory into a different subspace.
+Greedy decoding fixes only the argmax token-selection rule for a given logit distribution; it does not guarantee numerical determinism in the underlying serving infrastructure. Minor variations in batch composition, kernel reductions, floating-point non-determinism, or silent model revisions behind a stable endpoint identifier can alter top-ranked logits. Because autoregressive generation conditions every token on all preceding tokens, a single flipped token early in execution steers the entire subsequent trajectory into a different subspace.
 
 Across multi-step agent horizons, trajectory reproduction compounds multiplicatively (@eq-vol3-horizon-compounding). Even under the optimistic assumption that individual greedy calls reproduce their recorded outputs `{python} RerunReproduction.q_str` of the time, a `{python} RerunReproduction.horizon_str`-turn trajectory matches its recording end to end only `{python} RerunReproduction.p_all_str` of the time. That estimate ignores external non-determinism such as shifting system clocks, generated identifiers, and mutating external environments. Rerunning an agent prompt creates an entirely new execution trajectory that generates fresh side effects; reliable reproduction requires replaying the exact model completions and tool results recorded in the log.
 :::
