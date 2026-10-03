@@ -53,7 +53,7 @@ from mlsysim.embodied.registry import Embodied
 from mlsysim.agents.registry import Agents
 from mlsysim.ops.monitoring import Monitoring
 from mlsysim.ops.runtime import MemoryProtection, RuntimeOverheads
-from mlsysim.ops.training import TrainingRunOverheads
+from mlsysim.ops.training import Preemption, TrainingRunOverheads
 from mlsysim.platforms.registry import Platforms
 from mlsysim.reference_stats.registry import ReferenceStats
 from mlsysim.systems.registry import (
@@ -264,6 +264,8 @@ def audit_infra_facilities() -> list[str]:
         for node in _registry_nodes(reg):
             name = getattr(node, "name", type(node).__name__)
             issues.extend(_check_node(f"{prefix}.{name}", node))
+    from mlsysim.infrastructure.registry import AIR_COOLING_LIMIT_KW
+    issues.extend(_check_node("Infrastructure.AIR_COOLING_LIMIT_KW", AIR_COOLING_LIMIT_KW))
     return issues
 
 
@@ -335,6 +337,7 @@ def audit_ops_sourced() -> list[str]:
         ("Ops.RuntimeOverheads", RuntimeOverheads),
         ("Ops.MemoryProtection", MemoryProtection),
         ("Ops.TrainingRunOverheads", TrainingRunOverheads),
+        ("Ops.Preemption", Preemption),
     ):
         for item in _registry_nodes(reg):
             name = getattr(item, "name", type(item).__name__)
