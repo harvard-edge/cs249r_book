@@ -115,7 +115,7 @@ EPSILON = 1e-8  # Stabilize relative-error measurements near zero variance
 # Constants for memory calculations
 BYTES_PER_FLOAT32 = 4  # Standard float32 size in bytes
 BYTES_PER_INT8 = 1  # INT8 size in bytes
-MB_TO_BYTES = 1024 * 1024  # Megabytes to bytes conversion
+MB_TO_BYTES = 1_000_000  # Decimal megabyte (10^6 bytes), the convention used throughout TinyTorch
 
 # %% [markdown]
 """
@@ -1528,8 +1528,8 @@ The aggregation function `analyze_model_sizes` traverses original and quantized 
 
 | Metric Name | Mathematical Definition | Physical Systems Meaning |
 | :--- | :--- | :--- |
-| **`original_mb`** | $\sum_{\ell \in \mathcal{M}_{\text{orig}}} \text{bytes}(\ell) / 1024^2$ | Total memory consumed by FP32 baseline weights |
-| **`quantized_mb`** | $\sum_{\ell \in \mathcal{M}_{\text{quant}}} \text{bytes}(\ell) / 1024^2$ | Memory consumed by modeled INT8 packed weights + metadata |
+| **`original_mb`** | $\sum_{\ell \in \mathcal{M}_{\text{orig}}} \text{bytes}(\ell) / 10^6$ | Total memory consumed by FP32 baseline weights |
+| **`quantized_mb`** | $\sum_{\ell \in \mathcal{M}_{\text{quant}}} \text{bytes}(\ell) / 10^6$ | Memory consumed by modeled INT8 packed weights + metadata |
 | **`compression_ratio`** | $\text{original\_bytes} / \text{quantized\_bytes}$ | Multiplicative factor of model size reduction ($\approx 3.8\times \text{--} 4.0\times$) |
 | **`memory_saved_mb`** | $\text{original\_mb} - \text{quantized\_mb}$ | Physical memory footprint liberated for KV cache or other models |
 """
@@ -2042,8 +2042,8 @@ r"""
 ### Question 1: Memory Architecture Impact
 You modeled packed INT8 storage that uses 1 byte per code instead of 4 bytes per FP32 parameter (before metadata).
 For a model with 100M parameters:
-- **Original memory usage**: $100 \times 10^6 \times 4 \text{ bytes} = 400{,}000{,}000 \text{ bytes} \approx \mathbf{0.400 \text{ GB}}$ ($381.47 \text{ MiB}$).
-- **Quantized memory usage**: $100 \times 10^6 \times 1 \text{ byte} + \text{metadata} \approx \mathbf{0.100 \text{ GB}}$ ($95.37 \text{ MiB}$).
+- **Original memory usage**: $100 \times 10^6 \times 4 \text{ bytes} = 400{,}000{,}000 \text{ bytes} \approx \mathbf{0.400 \text{ GB}}$.
+- **Quantized memory usage**: $100 \times 10^6 \times 1 \text{ byte} + \text{metadata} \approx \mathbf{0.100 \text{ GB}}$.
 - **Memory bandwidth reduction when loading from disk/DRAM**: $\mathbf{4.0\times}$ reduction in bytes transferred ($75\%$ bandwidth savings).
 - **Architectural Analysis**: On mobile or edge accelerators (e.g. Apple Neural Engine, Raspberry Pi, Qualcomm Hexagon NPU), disk IO and DRAM bus transfer times dominate cold-start latency. Compressing the model from $400\text{ MB}$ to $100\text{ MB}$ cuts loading latency by $\approx 4\times$, and every weight fetch afterward moves a quarter of the bytes across the DRAM bus. A $100\text{ MB}$ model still lives in DRAM (mobile last-level caches hold tens of megabytes at most), so the steady-state win is bus traffic, not cache residency.
 

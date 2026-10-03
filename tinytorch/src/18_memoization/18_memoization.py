@@ -104,8 +104,7 @@ from tinytorch.core.attention import MASK_VALUE
 
 # Internal constants for memory calculations (not exported)
 _BYTES_PER_FLOAT32 = 4  # Standard float32 size in bytes
-_BYTES_PER_MB = 1_000_000  # Decimal megabyte: this module quotes MB and GB as 10^6 and 10^9 bytes
-_MB_TO_BYTES = 1024 * 1024  # Binary MiB, kept for KVCache.get_memory_usage's reported figure
+_BYTES_PER_MB = 1_000_000  # Decimal megabyte: MB and GB are 10^6 and 10^9 bytes throughout TinyTorch
 
 # %% [markdown]
 r"""
@@ -600,13 +599,11 @@ class KVCache:
         """
         Calculate memory usage of the cache system.
 
-        Unit note: this method reports BINARY megabytes (MiB, 2^20 bytes), which
-        is what the key name 'total_mb' has always held. Every table and every
-        printed figure elsewhere in this module quotes DECIMAL MB and GB
-        (10^6 and 10^9 bytes), so the same buffer reads about 4.8% smaller here.
+        Unit note: 'total_mb' and 'per_layer_mb' are decimal megabytes
+        (10^6 bytes), the same convention as every table in this module.
 
         Returns:
-            Dictionary with 'total_mb' and 'per_layer_mb' in MiB, plus the
+            Dictionary with 'total_mb' and 'per_layer_mb' in MB, plus the
             integer 'cache_tensors' and 'total_elements' counts
         """
         # Calculate size of one cache tensor
@@ -616,7 +613,7 @@ class KVCache:
         total_cache_tensors = self.num_layers * 2
         total_elements = cache_size * total_cache_tensors
         total_bytes = total_elements * _BYTES_PER_FLOAT32
-        total_mb = total_bytes / _MB_TO_BYTES
+        total_mb = total_bytes / _BYTES_PER_MB
 
         return {
             'total_mb': total_mb,
@@ -652,7 +649,7 @@ def test_unit_kvcache():
     assert cache.seq_pos == 0, "Cache should start at position 0"
     mem_usage = cache.get_memory_usage()
     assert mem_usage['total_mb'] > 0, "Cache should have non-zero memory usage"
-    print(f"   Cache initialized: {mem_usage['total_mb']:.2f} MiB")
+    print(f"   Cache initialized: {mem_usage['total_mb']:.2f} MB")
 
     # Test 2: Single token update and retrieval
     key1 = Tensor(rng.standard_normal((batch_size, num_heads, 1, head_dim)))
@@ -816,7 +813,7 @@ $$\mathcal{M}_{\text{cache}} = 2 \cdot L \cdot B \cdot H \cdot S_{\max} \cdot d_
 | **Llama 2 (7B)** | 32 | 32 | 128 | 4,096 | $\approx 4.29 \text{ GB}$ |
 | **GPT-3 (175B)** | 96 | 96 | 128 | 2,048 | $\approx 19.33 \text{ GB}$ |
 
-Every row above is float32 at $B = 1$, in **decimal** units ($1 \text{ MB} = 10^6$ bytes, $1 \text{ GB} = 10^9$ bytes), which is the convention this module's prose and printed tables use throughout. Work the Llama 2 row yourself as a check: $2 \times 32 \times 1 \times 32 \times 4096 \times 128 \times 4 = 4{,}294{,}967{,}296$ bytes. Halving any row gives the float16 figure, and serving stacks quote float16 far more often than float32, so always ask which precision a published cache number assumes. The one place this module reports binary units is `KVCache.get_memory_usage`, whose `total_mb` is MiB ($2^{20}$ bytes) and is labeled MiB wherever it is printed.
+Every row above is float32 at $B = 1$, in **decimal** units ($1 \text{ MB} = 10^6$ bytes, $1 \text{ GB} = 10^9$ bytes), which is the convention this module, including `KVCache.get_memory_usage`, uses throughout. Work the Llama 2 row yourself as a check: $2 \times 32 \times 1 \times 32 \times 4096 \times 128 \times 4 = 4{,}294{,}967{,}296$ bytes. Halving any row gives the float16 figure, and serving stacks quote float16 far more often than float32, so always ask which precision a published cache number assumes.
 """
 
 # %% nbgrader={"grade": false, "grade_id": "cached-generation-step", "solution": false}
@@ -1441,7 +1438,7 @@ def enable_kv_cache(model: Any) -> KVCache:
     # Step 3: Print confirmation
     print("⚡ KV Cache enabled for model!")
     print(f"   Architecture: {model.num_layers} layers × {model.num_heads} heads × {head_dim}D")
-    print(f"   Memory: {cache.get_memory_usage()['total_mb']:.2f} MiB")
+    print(f"   Memory: {cache.get_memory_usage()['total_mb']:.2f} MB")
     print("   Cache stored in: model._kv_cache")
     print()
     print("💡 To disable: call disable_kv_cache(model)")
@@ -1778,7 +1775,7 @@ def test_module():
     mem_info = cache.get_memory_usage()
     assert mem_info['total_mb'] > 0
     assert mem_info['cache_tensors'] == num_layers * 2
-    print(f"✅ Memory tracking: {mem_info['total_mb']:.2f} MiB for {mem_info['cache_tensors']} tensors")
+    print(f"✅ Memory tracking: {mem_info['total_mb']:.2f} MB for {mem_info['cache_tensors']} tensors")
     print()
 
     print("=" * 50)
@@ -1824,12 +1821,12 @@ A 12-layer transformer serves a batch of 8 sequences. It has 12 attention heads 
   $$24 \times 12,582,912 = 301,989,888 \text{ elements}$$
 - **Memory footprint in float32 (4 bytes per element)**:
   $$\text{Total Bytes} = 301,989,888 \times 4 \text{ bytes} = 1,207,959,552 \text{ bytes}$$
-  $$\text{Memory in MiB} = \frac{1,207,959,552}{1024^2} = \mathbf{1,152.0 \text{ MiB}} \quad (\mathbf{1.208 \text{ GB}} \text{ decimal})$$
+  $$\text{Memory} = \frac{1,207,959,552}{10^6} = \mathbf{1,208.0 \text{ MB}} \approx \mathbf{1.21 \text{ GB}}$$
 
 **Follow-up Analysis (Overhead vs Model Parameters)**:
 If this model has 125M parameters ($125 \times 10^6 \times 4 \text{ bytes} = 500 \text{ MB}$), compare like with like, in bytes:
 $$\text{Cache-to-Model Ratio} = \frac{1,207,959,552 \text{ B}}{500,000,000 \text{ B}} = \mathbf{241.6\%}$$
-The KV cache occupies **more than double** the memory of the neural network weights themselves. (Divide 1,152 MiB by 500 MB and you get 230.4%, but that mixes binary and decimal units and is not a ratio of anything. Keep both sides in bytes.)
+The KV cache occupies **more than double** the memory of the neural network weights themselves. Because both sides use the same unit, $1{,}208 \text{ MB} / 500 \text{ MB}$ gives the same $241.6\%$; dividing a binary figure by a decimal one would not.
 
 **Projection accounting**: naive decoding costs $\frac{2048 \times 2049}{2} = 2{,}098{,}176$ key/value projections per sequence, of which only $2{,}048$ are necessary, so $2{,}096{,}128$ (about 2.1 million) are pure recomputation.
 

@@ -1168,7 +1168,7 @@ This single analysis reveals why attention becomes the bottleneck in modern tran
 
 ### Attention Memory Footprint Scaling (per Layer)
 
-Every memory figure in this module is decimal, so $1\text{ kB} = 10^3$ bytes and $1\text{ MB} = 10^6$ bytes. Powers-of-two units are marked KiB / MiB / GiB where they appear.
+Every memory figure in this module is decimal, so $1\text{ kB} = 10^3$ bytes and $1\text{ MB} = 10^6$ bytes.
 
 | Sequence Length ($T$) | Attention Matrix ($T \times T$) | Element Count | Memory (FP32, 1 Head) | Relative Scaling |
 | :--- | :--- | :--- | :--- | :--- |
@@ -1178,7 +1178,7 @@ Every memory figure in this module is decimal, so $1\text{ kB} = 10^3$ bytes and
 
 For full-scale models like GPT-3 ($L = 96$ layers, $H = 96$ heads):
 
-$$\text{Total Attention Memory} = L \times H \times (T^2 \times 4\text{ bytes}) = 96 \times 96 \times 16.78\text{ MB} \approx \mathbf{154.62\text{ GB}} \quad (144.0\text{ GiB})$$
+$$\text{Total Attention Memory} = L \times H \times (T^2 \times 4\text{ bytes}) = 96 \times 96 \times 16.78\text{ MB} \approx \mathbf{154.62\text{ GB}}$$
 
 Just for raw intermediate attention score matrices for a single sequence!
 """
@@ -1433,10 +1433,10 @@ Materializing the full $(S \times S)$ attention matrix is the primary architectu
 
 **1. Exact Numerical Memory Footprint**:
 - **$4{,}096$-token sequence with $32$ heads at float32**:
-  $$\text{Memory} = 32 \times 4{,}096^2 \times 4\text{ B} = 32 \times 16{,}777{,}216 \times 4\text{ B} = 2{,}147{,}483{,}648\text{ B} = \mathbf{2.15\text{ GB}} \quad (2.0\text{ GiB / layer})$$
+  $$\text{Memory} = 32 \times 4{,}096^2 \times 4\text{ B} = 32 \times 16{,}777{,}216 \times 4\text{ B} = 2{,}147{,}483{,}648\text{ B} = \mathbf{2.15\text{ GB}} \text{ per layer}$$
   Across a 32-layer model: $32 \times 2.15\text{ GB} = \mathbf{68.72\text{ GB}}$ for a single sequence!
 - **$512$-token sequence with $8$ heads at float32**:
-  $$\text{Memory} = 8 \times 512^2 \times 4\text{ B} = 8 \times 262{,}144 \times 4\text{ B} = 8{,}388{,}608\text{ B} = \mathbf{8.39\text{ MB}} \quad (8.0\text{ MiB / layer})$$
+  $$\text{Memory} = 8 \times 512^2 \times 4\text{ B} = 8 \times 262{,}144 \times 4\text{ B} = 8{,}388{,}608\text{ B} = \mathbf{8.39\text{ MB}} \text{ per layer}$$
   Across a 6-layer TinyTorch model: $6 \times 8.39\text{ MB} = \mathbf{50.33\text{ MB}}$.
 - **Scaling Behavior**: Doubling sequence length increases attention matrix memory by exactly **$4\times$**.
 

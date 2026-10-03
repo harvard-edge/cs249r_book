@@ -305,10 +305,10 @@ class TestSystemResources:
         import shutil
 
         stat = shutil.disk_usage(Path.cwd())
-        free_gb = stat.free / (1024**3)
+        free_gb = stat.free / 1e9
 
-        assert free_gb >= 1.0, f"Low disk space: {free_gb:.1f}GB (need at least 1GB)"
-        print(f"✅ Disk space: {free_gb:.1f}GB available")
+        assert free_gb >= 1.0, f"Low disk space: {free_gb:.1f} GB (need at least 1 GB)"
+        print(f"✅ Disk space: {free_gb:.1f} GB available")
 
 class TestGitConfiguration:
     """Verify Git is configured for version control."""

@@ -610,7 +610,7 @@ def step_4_kv_cache(KVCache, MinimalTransformer, GPT=None,
          "exact K and V after update + advance",
          "KVCache.update must write K and V at the current position, and get() must return "
          "every position written so far, unchanged.")
-    cache_bytes = int(round(cache.get_memory_usage()['total_mb'] * 1024 * 1024))
+    cache_bytes = int(round(cache.get_memory_usage()['total_mb'] * 1_000_000))
     cache.reset()
     gate("KV cache reset rewinds the cursor", cache.seq_pos == 0,
          f"seq_pos={cache.seq_pos}", "seq_pos == 0",
@@ -1133,7 +1133,7 @@ def step_7_triad_and_pareto(mlp_baseline, mlp_quant, mlp_prune, measurements,
         ('INT8 Quantized', mlp_q_bytes, measurements['Rounded weights'], f"{mlp_q_acc:.1f}%", mlp_q_acc, 100.0 - mlp_q_acc),
         ('50% Pruned', mlp_bytes, measurements['Pruned weights'], f"{mlp_p_acc:.1f}%", mlp_p_acc, 100.0 - mlp_p_acc),
     ]
-    mlp_pts = {r[0]: (r[1] / 1024.0, r[5]) for r in mlp_records}
+    mlp_pts = {r[0]: (r[1] / 1000.0, r[5]) for r in mlp_records}
     mlp_frontier = set(pareto_frontier(mlp_pts, (True, True)))
 
     console.print(Panel(
@@ -1202,7 +1202,7 @@ def step_7_triad_and_pareto(mlp_baseline, mlp_quant, mlp_prune, measurements,
         ('INT8 Quantized', cnn_q_bytes, cnn_lat_results['INT8 Quantized'], f"{fid_quant:.2f}%", fid_quant, 100.0 - fid_quant),
         ('50% Pruned', cnn_bytes, cnn_lat_results['50% Pruned'], f"{fid_pruned:.2f}%", fid_pruned, 100.0 - fid_pruned),
     ]
-    cnn_pts = {r[0]: (r[1] / 1024.0, r[5]) for r in cnn_records}
+    cnn_pts = {r[0]: (r[1] / 1000.0, r[5]) for r in cnn_records}
     cnn_frontier = set(pareto_frontier(cnn_pts, (True, True)))
 
     console.print(Panel(
@@ -1251,7 +1251,7 @@ def step_7_triad_and_pareto(mlp_baseline, mlp_quant, mlp_prune, measurements,
 
         c_base = enable_kv_cache(gpt_base)
         out_cached = replay_prefixes(gpt_base, tokens, Tensor, cache=c_base)
-        cache_bytes = int(round(c_base.get_memory_usage()['total_mb'] * 1024 * 1024))
+        cache_bytes = int(round(c_base.get_memory_usage()['total_mb'] * 1_000_000))
         disable_kv_cache(gpt_base)
 
         c_quant = enable_kv_cache(gpt_quant)
@@ -1291,7 +1291,7 @@ def step_7_triad_and_pareto(mlp_baseline, mlp_quant, mlp_prune, measurements,
         ('KV-Cached (Mod 18)', gpt_bytes + cache_bytes, r_cached, f"{fid_gpt_cached:.2f}%", fid_gpt_cached, 100.0 - fid_gpt_cached),
         ('Full Stack (Quant+Cache)', gpt_q_bytes + cache_bytes, r_qc, f"{fid_gpt_qc:.2f}%", fid_gpt_qc, 100.0 - fid_gpt_qc),
     ]
-    gpt_pts = {r[0]: (r[2].mean, r[1] / 1024.0, r[5]) for r in gpt_records}
+    gpt_pts = {r[0]: (r[2].mean, r[1] / 1000.0, r[5]) for r in gpt_records}
     gpt_frontier = set(pareto_frontier(gpt_pts, (True, True, True)))
 
     console.print(Panel(

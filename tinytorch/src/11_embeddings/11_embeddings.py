@@ -1862,7 +1862,7 @@ You implemented an embedding table with $V = 50{,}000$ and $d_{\text{embed}} = 5
 - Parameter count:
   $$\text{Parameters} = V \times d_{\text{embed}} = 50{,}000 \times 512 = 25{,}600{,}000 \quad (\mathbf{25.6\text{M parameters}})$$
 - Float32 VRAM footprint ($4\text{ bytes/param}$):
-  $$\text{Memory}_{\text{FP32}} = 25{,}600{,}000 \times 4\text{ B} = 102{,}400{,}000\text{ B} = \mathbf{102.4\text{ MB}} \quad (97.66\text{ MiB})$$
+  $$\text{Memory}_{\text{FP32}} = 25{,}600{,}000 \times 4\text{ B} = 102{,}400{,}000\text{ B} = \mathbf{102.4\text{ MB}}$$
 - Doubling hidden dimension to $d_{\text{embed}} = 1{,}024$:
   $$\text{Memory}_{\text{double}} = 50{,}000 \times 1{,}024 \times 4\text{ B} = \mathbf{204.8\text{ MB}} \quad (2\times\text{ linear scaling})$$
 

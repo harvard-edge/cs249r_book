@@ -427,7 +427,11 @@ Failure handling diverges correspondingly. Training failures trigger checkpoint 
 
 Distributing inference across multiple machines introduces overhead absent from single-machine serving. This "serving tax" must be understood and budgeted within latency constraints.
 
-Network communication adds latency for every cross-machine interaction. Within a data center, network round-trip times range from 50–500 microseconds depending on topology and congestion. For model sharding that requires synchronization between GPUs\index{Synchronization!multi-node latency overhead} on different machines, each synchronization point adds this overhead. A model sharded across 8 machines with 4 synchronization points per inference adds 200 microseconds to 2 milliseconds of network latency. @Sec-appdx-comm-foundations-alpha-beta develops the $\alpha$-$\beta$ model that decomposes each such transfer into a fixed startup latency plus a bandwidth-dependent term, giving the quantitative framework for budgeting these synchronization costs against a latency SLO.
+Network communication adds latency for every cross-machine interaction. Within a data center, network round-trip times range from 50–500 microseconds depending on topology and congestion. For model sharding that requires synchronization between GPUs\index{Synchronization!multi-node latency overhead} on different machines, each synchronization point adds this overhead. A model sharded across 8 machines with 4 synchronization points per inference adds 200 microseconds to 2 milliseconds of network latency.
+
+::: {.column-margin .margin-pointer}
+↪ The $\alpha$-$\beta$ model, which splits each transfer into a fixed startup latency plus a bandwidth-dependent term, is developed in @sec-appdx-comm-foundations-alpha-beta.
+:::
 
 Serialization overhead compounds the problem by converting in-memory tensors to network-transmittable formats. Traditional serializers like Protocol Buffers, JSON, and Python's `pickle` perform a parse-allocate-copy cycle on every transfer, and a 1 GB activation tensor takes approximately 100 milliseconds to serialize and deserialize through such formats. Zero-copy alternatives like FlatBuffers and Cap'n Proto[^fn-serialization-zerocopy-buffer] sidestep most of this cost by accessing wire-format data in place, but they impose stricter schema layout requirements that not every production stack adopts.
 
@@ -852,7 +856,11 @@ Verify your understanding of where specific optimizations sit within the serving
 
 :::
 
-The hierarchy guides the rest of the design while allowing a few techniques to cross levels. Batching, KV-cache layout, and decode-time optimizations start at the request level. Adapter state, weight quantization, and model sharding change the replica's memory and compute budget. Disaggregated serving, load balancing, and autoscaling coordinate replicas into a service, while multi-tenancy and resource isolation govern the platform. Precision is an input to every capacity calculation that follows: reducing weight precision frees resident memory, whereas reducing KV precision lowers the memory required per active sequence. These are separate budgets. The precision foundations in @sec-performance-engineering-precision supply the representation choices; @sec-inference-scale-weight-quantization-serving-097b compares their serving trade-offs before sharding divides a replica across devices.
+The hierarchy guides the rest of the design while allowing a few techniques to cross levels. Batching, KV-cache layout, and decode-time optimizations start at the request level. Adapter state, weight quantization, and model sharding change the replica's memory and compute budget. Disaggregated serving, load balancing, and autoscaling coordinate replicas into a service, while multi-tenancy and resource isolation govern the platform. Precision is an input to every capacity calculation that follows: reducing weight precision frees resident memory, whereas reducing KV precision lowers the memory required per active sequence. These are separate budgets. @Sec-inference-scale-weight-quantization-serving-097b compares the serving trade-offs of these representation choices before sharding divides a replica across devices.
+
+::: {.column-margin .margin-pointer}
+↩ Reduced-precision representations for weights, activations, and the KV cache, and the quantization methods that produce them, are established in @sec-performance-engineering-precision.
+:::
 
 ## Serving Architecture Dimensions {#sec-inference-scale-serving-framework-selection-45d3}
 
@@ -1197,7 +1205,11 @@ where $\alpha$ includes transfer setup and queueing. @Eq-prefill-decode-handoff 
 
 ### Stateful versus stateless architectural trade-offs {#sec-inference-scale-triton-inference-server-f0ba}
 
-A serving system's statefulness determines whether horizontal scaling is trivial or requires careful engineering. Vision models and embedding lookups are typically stateless\index{Stateless serving!horizontal scaling}: any replica can serve any request because no per-session state persists between requests. Horizontal scaling is straightforward, since adding replicas behind a load balancer adds capacity, and failure recovery reduces to rerouting once health checks remove the failed replica (@sec-fault-tolerance-reliability-reliability-stateless-vs-stateful-serving-0a60 examines the same divide from the failure side).
+A serving system's statefulness determines whether horizontal scaling is trivial or requires careful engineering. Vision models and embedding lookups are typically stateless\index{Stateless serving!horizontal scaling}: any replica can serve any request because no per-session state persists between requests. Horizontal scaling is straightforward, since adding replicas behind a load balancer adds capacity, and failure recovery reduces to rerouting once health checks remove the failed replica.
+
+::: {.column-margin .margin-pointer}
+↩ Stateless and stateful failure recovery mechanics are established in @sec-fault-tolerance-reliability-reliability-stateless-vs-stateful-serving-0a60.
+:::
 
 An autoregressive request is stateful\index{Stateful serving!KV cache lifetime} while it is generating because its KV cache belongs to that in-flight sequence. Cross-request statefulness is optional. An API may send the full conversation history with every turn and rebuild KV state during prefill, making any replica eligible for the next request. A serving platform may instead retain a completed turn's KV state as a session cache\index{Session caching!conversation history}, reducing repeated prefill at the cost of replica affinity, cache lifetime management, and recovery complexity. Sticky routing\index{Sticky routing!session affinity} is an optimization for that retained cache, not a correctness requirement of autoregressive models.
 
@@ -1764,7 +1776,11 @@ Total system concurrency $=$ `{python} LittlesLawExample.total_concurrency_calc_
 
 :::
 
-This stability boundary can be measured faithfully only when the load generator preserves the workload claim. The contract in @sec-performance-engineering-measurement-scale distinguishes a fixed external arrival process from fixed-concurrency testing because response-paced generation can reduce arrivals during a stall and make the system appear to have more headroom than it does. The distinction between throughput capacity and latency capacity is exactly what queuing theory formalizes; @sec-appdx-inference-scale-queuing-theory-batched-inference-bbf0 derives the mean queuing delay under a batched M/G/1 surrogate and shows how utilization headroom and batch size trade against latency.
+This stability boundary can be measured faithfully only when the load generator preserves the workload claim. The contract in @sec-performance-engineering-measurement-scale distinguishes a fixed external arrival process from fixed-concurrency testing because response-paced generation can reduce arrivals during a stall and make the system appear to have more headroom than it does. The distinction between throughput capacity and latency capacity is exactly what queuing theory formalizes.
+
+::: {.column-margin .margin-pointer}
+↪ The mean queuing delay under a batched M/G/1 surrogate, and how utilization headroom and batch size trade against latency, is developed in @sec-appdx-inference-scale-queuing-theory-batched-inference-bbf0.
+:::
 
 ### Static and dynamic batching for vision models {#sec-inference-scale-static-dynamic-batching-vision-models-4623}
 
@@ -1858,7 +1874,9 @@ class DynamicBatchingResNet50:
 
 :::
 
-@Sec-appdx-inference-scale-decision-framework-batch-size-selection-given-sla-8e4e turns this tuning into a procedure that runs from fitting the service-time model to checking the p99 target, and @sec-appdx-inference-scale-worked-example-gpt3-serving-100-qps-edcf works the stability and latency trade-off for one configuration.
+::: {.column-margin .margin-pointer}
+↪ A procedure for this tuning, from fitting the service-time model to checking the p99 target, is developed in @sec-appdx-inference-scale-decision-framework-batch-size-selection-given-sla-8e4e.
+:::
 
 At scale with multiple replicas, batch formation can occur either at individual replicas or at a centralized batching layer. Replica-local batching has each replica independently form batches from its assigned traffic. This approach is simpler to implement but may result in uneven batch sizes across replicas when load is imbalanced. Centralized batching uses a batching service to collect requests and dispatch formed batches to replicas. This can produce more uniform batch sizes but adds a centralization bottleneck and additional network hop. Production systems typically use replica-local batching with load balancing that ensures roughly equal traffic distribution, achieving the benefits of centralized batching without the complexity.
 
@@ -1882,7 +1900,11 @@ Consider a batch of 8 sequences. If one sequence completes after 10 tokens while
 
 $$\text{Wasted compute} = \frac{(100 - 10) \times 1}{100 \times 8} = 11.25\%$$
 
-For realistic output length distributions with high variance, wasted compute can exceed 50 percent. @Algo-continuous-batching-decode-scheduler states the continuous-batching scheduler as a decode loop. Completed requests release KV-cache pages, waiting requests enter freed slots, and the next batched kernel runs over the reorganized active set. For Archetype A workloads (GPT-4/Llama-3, @sec-vol2-introduction-archetypes), refilling slots lets more useful tokens share each weight read. The gain comes from reusing transferred weights, not merely from saturating bandwidth, which a smaller batch may already do.
+For realistic output length distributions with high variance, wasted compute can exceed 50 percent. @Algo-continuous-batching-decode-scheduler states the continuous-batching scheduler as a decode loop. Completed requests release KV-cache pages, waiting requests enter freed slots, and the next batched kernel runs over the reorganized active set. For Archetype A workloads (GPT-4/Llama-3), refilling slots lets more useful tokens share each weight read. The gain comes from reusing transferred weights, not merely from saturating bandwidth, which a smaller batch may already do.
+
+::: {.column-margin .margin-pointer}
+↩ The three systems archetypes, including Archetype A (GPT-4/Llama-3), are established in @sec-vol2-introduction-archetypes.
+:::
 
 ```pseudocode
 #| label: algo-continuous-batching-decode-scheduler
@@ -3427,7 +3449,7 @@ $$ \TotalMemoryFootprint = \WeightMemoryWeights + \KvcacheMemory, \qquad \Kvcach
 Available Memory for KV = `{python} KVCacheCapacityEstimator.total_hbm_decimal_gb_str` (Total) - `{python} KVCacheCapacityEstimator.weight_gb_str` (Weights) - `{python} KVCacheCapacityEstimator.system_gb_str` (System) = `{python} KVCacheCapacityEstimator.available_kv_gb_str`.
 `{python} KVCacheCapacityEstimator.step3_max_batch_math`
 
-**Systems insight**: Even with grouped query attention (GQA), the shared-KV-head attention variant from @sec-performance-engineering-quant-strategies that the 8-head count in this calculation already reflects, 128K-context requests consume tens of gigabytes of KV cache, so the system serves only a small number of concurrent long-context requests before memory becomes the binding constraint. Addressing this requires PagedAttention (to reduce fragmentation) and KV-cache quantization or sharding.
+**Systems insight**: Even with grouped query attention (GQA), whose shared key-value heads the 8-head count in this calculation already reflects, 128K-context requests consume tens of gigabytes of KV cache, so the system serves only a small number of concurrent long-context requests before memory becomes the binding constraint. Addressing this requires PagedAttention (to reduce fragmentation) and KV-cache quantization or sharding.
 
 :::
 
@@ -4185,12 +4207,11 @@ Compressing the KV cache to INT4 reduces it to approximately `{python} KVCacheCa
 
 #### Grouped query attention (GQA) {#sec-inference-scale-gqa}
 
-Grouped query attention\index{Grouped-query attention!KV cache reduction} [@ainslie2023], the shared-KV-head architecture established in @sec-performance-engineering-quant-strategies, is the second lever on cache size, complementary to quantization: where quantization shrinks the bytes per cached element, GQA shrinks how many key-value heads are cached per layer. The serving consequence is the head-count arithmetic. For the representative 70B model, switching from the MHA baseline of 64 KV heads to GQA with 8 KV heads shrinks the KV cache by 8$\times$:
+Grouped query attention\index{Grouped-query attention!KV cache reduction} [@ainslie2023] is the second lever on cache size, complementary to quantization: where quantization shrinks the bytes per cached element, GQA shrinks how many key-value heads are cached per layer. The serving consequence is the head-count arithmetic. For the representative 70B model, switching from the MHA baseline of 64 KV heads to GQA with 8 KV heads shrinks the KV cache by 8$\times$:
 
 `{python} KVCacheCalc.gqa_kv_fp16_display_math`
 
 At `{python} KVCacheCalc.gqa_kv_fp16_gb_str`, the GQA cache is dramatically more manageable than the `{python} KVCacheCalc.kv_fp16_gb_str` required by MHA. Combining GQA with INT8 KV cache quantization yields sub-gigabyte per-request cache sizes, often enabling substantially larger batches on a single GPU. GQA has become a common architectural choice for inference-optimized LLMs because it reduces KV-cache bandwidth and capacity pressure with comparatively small quality impact in many deployments.
-
 ```{python}
 #| echo: false
 #| label: precision-dividend
@@ -4269,7 +4290,11 @@ class PrecisionDividend:
 
 ### Speculative decoding as a serving policy {#sec-inference-scale-speculative-decoding-c438}
 
-Speculative decoding (@sec-performance-engineering-speculative) pairs a small draft model\index{Speculative Decoding!draft model} proposing $K$ tokens with a target model verifying them\index{Speculative Decoding!verification step} in one parallel forward pass; rejection sampling guarantees the emitted tokens follow the target model's distribution exactly, so the technique is lossless and bounded by the draft acceptance rate\index{Speculative Decoding!acceptance rate} $\alpha_{\text{acc}}$. The serving question is different. Speculation becomes a resource-admission policy under SLO pressure. The scheduler must decide when to enable it, how its memory cost interacts with KV-cache admission, and what it does to the SLO the endpoint must meet.
+Speculative decoding pairs a small draft model\index{Speculative Decoding!draft model} proposing $K$ tokens with a target model verifying them\index{Speculative Decoding!verification step} in one parallel forward pass; rejection sampling guarantees the emitted tokens follow the target model's distribution exactly, so the technique is lossless and bounded by the draft acceptance rate\index{Speculative Decoding!acceptance rate} $\alpha_{\text{acc}}$. The serving question is different. Speculation becomes a resource-admission policy under SLO pressure. The scheduler must decide when to enable it, how its memory cost interacts with KV-cache admission, and what it does to the SLO the endpoint must meet.
+
+::: {.column-margin .margin-pointer}
+↩ The draft-and-verify mechanics of speculative decoding are established in @sec-performance-engineering-speculative.
+:::
 
 ::: {.column-margin}
 ![](images/svg/inference_decode_roofline.svg){width="100%" fig-alt="A roofline silhouette: a blue memory-bound slope rising to a dashed ridge line, then an orange compute-bound ceiling. A workload dot sits deep on the memory-bound slope, the regime batch-1 decode occupies before parallel verification raises its arithmetic intensity toward the ridge."}
@@ -4392,10 +4417,6 @@ The second concern is which service-level objective the endpoint must meet. At s
 
 The third concern is that acceptance and load change over time. A scheduler can enable speculation when measured TPOT or goodput improves, then disable it when verification cost outweighs accepted-token progress. Disabling draft execution alone does not free resident draft weights; recovering that capacity requires unloading them, and releasing draft KV pages requires ending or migrating the associated speculative state. Alternative draft mechanisms change this budget: self-speculative decoding\index{Self-Speculative Decoding} reuses the target model, Medusa\index{Medusa} [@cai2024medusa] adds prediction heads, and lookahead decoding\index{Lookahead Decoding} avoids a separate draft model. Each requires its own quality, acceptance, and resource evaluation.
 
-::: {.column-margin .margin-pointer}
-↩ Algorithmic foundations and verification mechanics of speculative decoding are introduced in @sec-performance-engineering-speculative.
-:::
-
 ### Memory management best practices {#sec-inference-scale-memory-management-best-practices-67e2}
 
 Effective KV-cache management begins with capacity accounting rather than an eviction policy. The serving process first reserves memory for weights, activations, runtime overhead, and safety headroom, then treats the remaining HBM as a managed pool for active sequences:
@@ -4497,7 +4518,7 @@ In serving systems, quantization is not merely a model-compression technique; it
 :::
 
 ::: {.column-margin .margin-pointer}
-↩ Hardware precision formats, PTQ, and QAT calibration foundations are covered in @sec-performance-engineering-precision and @sec-performance-engineering-ptq-qat.
+↩ The trade-off between post-training quantization and quantization-aware training is established in @sec-performance-engineering-ptq-qat.
 :::
 
 Quantization reduces numerical precision of model weights and activations, decreasing their memory footprint by 2--4$\times$. Reducing weight traffic can improve bandwidth-bound decode, provided kernel support and dequantization overhead preserve the saving. The serving decision is which quantity should shrink: resident weights for fit, bytes moved per decode step for bandwidth, activations for prefill throughput, or the precision path supported by target hardware. Serving at scale also introduces distinct challenges: a deployment team may need post-training quantization without the original training corpus, quality must be preserved across diverse inputs, and hardware deployment targets vary from data center GPUs to edge accelerators. Lack of the original corpus does not imply data-free calibration; the methods that follow may still require representative deployment inputs. Production inference therefore needs a decision model, not a method roster. The decision model in @tbl-serving-quantization-decision-model keeps the method choice tied to the serving constraint that binds the system.
@@ -4513,7 +4534,7 @@ Quantization reduces numerical precision of model weights and activations, decre
 
 ### LLM-specific quantization challenges {#sec-inference-scale-llmspecific-quantization-challenges-b7a2}
 
-Large language models present unique quantization challenges distinct from vision or recommendation models. The outlier activation problem\index{Activation outliers!quantization degradation} occurs because a few hidden-dimension channels carry activation magnitudes orders of magnitude larger than typical values [@xiao2023smoothquant]. Naive quantization clips these outliers, causing significant quality degradation. @Sec-performance-engineering-precision develops the outlier mechanism and the algorithms that answer it (LLM.int8(), GPTQ, AWQ, and SmoothQuant); the subsections that follow keep only what each method changes for a serving deployment.
+Large language models present unique quantization challenges distinct from vision or recommendation models. The outlier activation problem\index{Activation outliers!quantization degradation} occurs because a few hidden-dimension channels carry activation magnitudes orders of magnitude larger than typical values [@xiao2023smoothquant]. Naive quantization clips these outliers, causing significant quality degradation. @Sec-performance-engineering-block-quant develops the outlier mechanism and the algorithms that answer it (LLM.int8(), GPTQ, AWQ, and SmoothQuant); the subsections that follow keep only what each method changes for a serving deployment.
 
 Consider a large language-model layer where most activation values are modest but specific channels produce much larger outliers [@xiao2023smoothquant]. Symmetric INT8 quantization with range [-127, 127] has no painless scale choice: a wide range preserves outliers but collapses typical values into too few bins, while a narrow range preserves resolution for typical values but clips outliers and introduces large errors.
 
@@ -4521,7 +4542,7 @@ The outlier distribution explains why the specialized methods that follow differ
 
 ### GPTQ layer-by-layer weight quantization {#sec-inference-scale-gptq-layerbylayer-weight-quantization-9284}
 
-GPTQ\index{GPTQ!layer-by-layer quantization} [@frantar2023gptq], whose second-order error compensation is introduced in @sec-performance-engineering-precision, is the weight-only choice when deployment needs 4-bit compression after training and can afford calibration data. Its serving value is that the model gets smaller without a full retraining run.
+GPTQ\index{GPTQ!layer-by-layer quantization} [@frantar2023gptq], which uses second-order error compensation, is the weight-only choice when deployment needs 4-bit compression after training and can afford calibration data. Its serving value is that the model gets smaller without a full retraining run.
 
 Because GPTQ rounds each weight matrix column by column and compensates the still-unquantized columns, its serving consequence is a two-part deploy-time cost: a calibration pass over 128--256 representative samples that must match production traffic, and a per-layer second-order update that makes quantization minutes-to-hours of offline work rather than a one-shot cast. Both are paid once before deployment, so they do not touch serving latency, but a calibration set that misrepresents the deployed traffic mix is the failure mode to test for before rollout.
 
@@ -4540,7 +4561,7 @@ GPTQ's strengths include fast quantization without retraining, minimal quality l
 
 ### AWQ activation-aware weight quantization {#sec-inference-scale-awq-activationaware-weight-quantization-abec}
 
-Activation-aware weight quantization (AWQ)\index{AWQ!salient weight protection} [@lin2023awq] attacks the same weight-only serving goal from the activation side. As @sec-performance-engineering-precision describes, it scales up the weights feeding the few high-magnitude channels before quantization, with the inverse scale applied to the inputs (often fused into a preceding operation). Its serving advantage over GPTQ is that protecting salient channels avoids the per-column error-feedback pass, so it uses activation statistics rather than sequential error compensation; calibration cost still depends on the implementation and dataset, and the risk to test is that the salient-channel scaling must fuse into the deployed graph without a separate runtime op, or the memory win is eaten by an extra kernel.
+Activation-aware weight quantization (AWQ)\index{AWQ!salient weight protection} [@lin2023awq] attacks the same weight-only serving goal from the activation side. It scales up the weights feeding the few high-magnitude channels before quantization, with the inverse scale applied to the inputs (often fused into a preceding operation). Its serving advantage over GPTQ is that protecting salient channels avoids the per-column error-feedback pass, so it uses activation statistics rather than sequential error compensation; calibration cost still depends on the implementation and dataset, and the risk to test is that the salient-channel scaling must fuse into the deployed graph without a separate runtime op, or the memory win is eaten by an extra kernel.
 
 @Tbl-awq-vs-gptq summarizes how AWQ compares to GPTQ across error compensation, calibration cost, quality, speed, and hardware compatibility.
 
@@ -4557,7 +4578,7 @@ The engineering choice follows the measured quality budget and deployed kernel p
 
 ### SmoothQuant activation-weight migration {#sec-inference-scale-smoothquant-migrating-quantization-difficulty-f37f}
 
-SmoothQuant\index{SmoothQuant!activation-to-weight scaling} [@xiao2023smoothquant] is the serving path for W8A8 deployments where activation quantization matters, especially compute-bound prefill. Its per-channel migration of outlier range from activations into weights (@sec-performance-engineering-precision) leaves the layer output unchanged. Its serving consequence is that the scales fold into the existing weights and a cheap activation division, so the smoothed model runs on a standard INT8 path at near-zero runtime overhead; the risk to test is that the migration only shifts outliers rather than removing them, so a calibration set whose activation extremes differ from production can still clip.
+SmoothQuant\index{SmoothQuant!activation-to-weight scaling} [@xiao2023smoothquant] is the serving path for W8A8 deployments where activation quantization matters, especially compute-bound prefill. Its per-channel migration of outlier range from activations into weights leaves the layer output unchanged. Its serving consequence is that the scales fold into the existing weights and a cheap activation division, so the smoothed model runs on a standard INT8 path at near-zero runtime overhead; the risk to test is that the migration only shifts outliers rather than removing them, so a calibration set whose activation extremes differ from production can still clip.
 
 ```{python}
 #| echo: false
@@ -4883,7 +4904,7 @@ where $N$ is the number of devices in the sharding group, $\CommunicationTime$ i
 Tensor parallelism\index{Tensor Parallelism!inference} [@shoeybi2019megatron] distributes individual layers across multiple devices, enabling parallel computation within each layer. The column-row partitioning\index{Tensor Parallelism!column-row partitioning} scheme introduced for training applies here: splitting the first feed-forward linear layer by columns and the second by rows requires one AllReduce for that feed-forward sublayer. The attention output requires another, giving two AllReduce operations per transformer block in the scheme analyzed here. For transformer models, the primary target is the attention mechanism and feed-forward layers, which contain the majority of computation.
 
 ::: {.column-margin .margin-pointer}
-↩ Column-row tensor partitioning and distributed AllReduce collectives are analyzed in @sec-distributed-training-systems and @sec-collective-communication.
+↩ Column-row tensor partitioning and its two AllReduce operations per transformer block are established in @sec-distributed-training-systems-systems-tensor-parallelism-d76e.
 :::
 
 The multi-head attention computation naturally partitions across attention heads. For a model with $\NumberOfAttentionHeads$ attention heads distributed across tensor-parallel degree $\TensorparallelDegreeTp$, each device computes $\NumberOfAttentionHeads/\TensorparallelDegreeTp$ heads:
@@ -6971,7 +6992,7 @@ The shard group boundary also defines readiness. A group can accept work only wh
 
 ### Health checking and failover {#sec-inference-scale-health-checking-failover-070e}
 
-Load balancers can route around failure only if the health signal\index{Health checking!failover detection} matches the failure mode. @Sec-fault-tolerance-reliability-reliability-health-checking-a604 separates liveness, readiness, and inference-correctness checks and shows how probe settings bound failover time. On an accelerator replica, each tier must test a different part of the serving state, because a process that is alive may still be unusable when its weights are not loaded, its memory pool is exhausted, or its first request will trigger a long warmup. The probes therefore escalate from cheapest to most realistic:
+Load balancers can route around failure only if the health signal\index{Health checking!failover detection} matches the failure mode. Health checks separate liveness, readiness, and inference correctness. On an accelerator replica, each tier must test a different part of the serving state, because a process that is alive may still be unusable when its weights are not loaded, its memory pool is exhausted, or its first request will trigger a long warmup. The probes therefore escalate from cheapest to most realistic:
 
 ```
 GET  /health/live       -> 200 (process alive) or timeout (process dead)
@@ -6979,7 +7000,11 @@ GET  /health/ready      -> 200 (weights loaded, device initialized) or 503
 POST /health/inference  -> 200 with valid output for a fixed test prompt, or error
 ```
 
-Only the deep inference probe detects a replica that answers liveness checks while failing on real requests, for example because its memory pool is too fragmented to admit a request or its model state never finished warming, and a strong deep probe checks the output itself, comparing logits for the fixed prompt against expected bounds. Readiness should likewise test free accelerator memory and warmup state, not process start alone. Once a replica fails these probes, the failover mechanics of @sec-fault-tolerance-reliability-reliability-failover-mechanisms-5ddd take over, including reconstruction of any KV-cache state the failed replica held.
+Only the deep inference probe detects a replica that answers liveness checks while failing on real requests, for example because its memory pool is too fragmented to admit a request or its model state never finished warming, and a strong deep probe checks the output itself, comparing logits for the fixed prompt against expected bounds. Readiness should likewise test free accelerator memory and warmup state, not process start alone. Once a replica fails these probes, failover takes over, including reconstruction of any KV-cache state the failed replica held.
+
+::: {.column-margin .margin-pointer}
+↩ Liveness, readiness, and inference-correctness probes, the failover time their settings bound, and stateful failover are established in @sec-fault-tolerance-reliability-reliability-failover-mechanisms-5ddd.
+:::
 
 ### Circuit breakers and backpressure {#sec-inference-scale-circuit-breakers-backpressure-e61c}
 
@@ -6992,13 +7017,17 @@ The circuit breaker pattern\index{Circuit Breaker!circuit breaker pattern} [@nyg
 
 :::
 
-Backpressure propagation\index{Backpressure!propagation} complements the breaker by making overload visible upstream. When queue depth crosses a threshold, the server returns a signal such as `503 Service Unavailable`; the load balancer marks the replica as degraded and routes fewer requests to it. If all replicas become degraded, the system shifts from routing control to admission control\index{Admission Control!overload shedding}, rejecting some requests at the edge rather than accepting work it cannot serve within the latency SLO; the load-shedding policies of @sec-fault-tolerance-reliability-reliability-load-shedding-8476 decide which requests to reject first. Circuit breakers isolate unhealthy replicas; backpressure tells the rest of the system to slow down before retries amplify the failure.
+Backpressure propagation\index{Backpressure!propagation} complements the breaker by making overload visible upstream. When queue depth crosses a threshold, the server returns a signal such as `503 Service Unavailable`; the load balancer marks the replica as degraded and routes fewer requests to it. If all replicas become degraded, the system shifts from routing control to admission control\index{Admission Control!overload shedding}, rejecting some requests at the edge rather than accepting work it cannot serve within the latency SLO; load-shedding policies decide which requests to reject first. Circuit breakers isolate unhealthy replicas; backpressure tells the rest of the system to slow down before retries amplify the failure.
+
+::: {.column-margin .margin-pointer}
+↩ Load shedding, model fallback, and the other strategies that trade quality for availability are established in @sec-fault-tolerance-reliability-reliability-graceful-degradation-strategies-e85e.
+:::
 
 Backpressure works only when the request contract propagates through the whole serving graph. The gateway converts the client timeout into an absolute deadline and every downstream stage subtracts elapsed time before admitting more work. If the client disconnects or the deadline expires, cancellation must reach queued CPU work, accelerator batches, retrieval calls, and streamed output. A canceled request that remains in a continuous batch is zombie work\index{Zombie work!cancelled request drain}: it consumes KV pages and decode bandwidth while producing no useful response. Some kernels cannot be interrupted mid-launch, so cancellation commonly takes effect at the next batch or token boundary; the scheduler must measure that cancellation lag rather than promise instantaneous preemption.
 
 The same request identifier must connect routing, queueing, prefill, decode, cache allocation, and response streaming. A useful serving trace records admitted and rejected requests, queue delay, TTFT, TPOT, input and output tokens, cache pages, batch membership, preemptions, cancellations, and fallback decisions. Aggregate accelerator utilization cannot distinguish useful work from late or canceled work. SLO goodput and wasted-token rate close that gap by reporting how much completed work met its contract and how much execution the system performed after the result had lost value.
 
-A saturated LLM fleet operating under severe KV cache pressure has three domain-specific relief valves that generic backpressure cannot provide. First, engines can apply context eviction\index{Context eviction!KV cache pressure} by using an explicitly supported sliding-window or approximate cache-eviction policy with a quality check, or by truncating the retained history and recomputing its state. Silently dropping old KV entries is not equivalent to recomputing a shorter conversation, because later cached states already depend on the earlier context. Schedulers can also temporarily disable speculative decoding, reclaiming the GPU memory that its draft model occupies. Finally, fallback routing\index{Fallback routing!graceful degradation} redirects incoming requests to a smaller quantized fallback model until the primary queue drains, an instance of the model-fallback ladder in @sec-fault-tolerance-reliability-reliability-model-fallback-bc6e.
+A saturated LLM fleet operating under severe KV cache pressure has three domain-specific relief valves that generic backpressure cannot provide. First, engines can apply context eviction\index{Context eviction!KV cache pressure} by using an explicitly supported sliding-window or approximate cache-eviction policy with a quality check, or by truncating the retained history and recomputing its state. Silently dropping old KV entries is not equivalent to recomputing a shorter conversation, because later cached states already depend on the earlier context. Schedulers can also temporarily disable speculative decoding, reclaiming the GPU memory that its draft model occupies. Finally, fallback routing\index{Fallback routing!graceful degradation} redirects incoming requests to a smaller quantized fallback model until the primary queue drains, an instance of model fallback.
 
 Each response trades output quality or latency for continued availability, which is often preferable to rejection from the user's perspective. The system designer must specify which degradation modes are acceptable at each pressure tier, because the correct trade-off depends on the application. A real-time assistant, for example, tolerates context truncation better than silent quality degradation.
 
@@ -7006,11 +7035,15 @@ Efficient routing assumes that each replica's hardware serves one workload, yet 
 
 ## Multi-Tenancy and Isolation {#sec-inference-scale-multitenancy-isolation-688c}
 
-Consider a critical customer-support chatbot running on the same GPU server as an experimental computer vision script. If the experimental workload accidentally monopolizes the PCIe bus or memory bandwidth, the customer-facing chatbot begins timing out, violating its SLO. Multi-tenancy and isolation ensure that co-located workloads save money without sacrificing the predictability of flagship services. Fleet quotas, fair-share hierarchies, and priority preemption (@sec-fleet-orchestration-multi-tenancy) decide how much of the cluster a serving system receives; the problem here is keeping the tenants who share that allocation from degrading each other, request by request.
+Consider a critical customer-support chatbot running on the same GPU server as an experimental computer vision script. If the experimental workload accidentally monopolizes the PCIe bus or memory bandwidth, the customer-facing chatbot begins timing out, violating its SLO. Multi-tenancy and isolation ensure that co-located workloads save money without sacrificing the predictability of flagship services. Fleet quotas, fair-share hierarchies, and priority preemption decide how much of the cluster a serving system receives; the problem here is keeping the tenants who share that allocation from degrading each other, request by request.
+
+::: {.column-margin .margin-pointer}
+↩ Fleet quotas, hierarchical fair-share, and the priority classes that govern preemption are established in @sec-fleet-orchestration-multi-tenancy.
+:::
 
 ### The multi-tenancy challenge {#sec-inference-scale-multitenancy-challenge-8dca}
 
-Sharing a serving pool among tenants raises utilization, reduces the number of clusters to operate, and makes aggregate traffic more predictable than any one tenant's traffic, the same statistical-multiplexing gain that motivates device sharing at fleet level (@sec-fleet-orchestration-gpu-sharing).
+Sharing a serving pool among tenants raises utilization, reduces the number of clusters to operate, and makes aggregate traffic more predictable than any one tenant's traffic, the same statistical-multiplexing gain that motivates device sharing at fleet level.
 
 ::: {.column-margin}
 ![](images/svg/vol2_inference_margin_004.svg){width="100%" fig-alt="A red tenant workload fans gray arrows to five blue peer workloads, showing one source degrading many shared dependents."}
@@ -7088,7 +7121,11 @@ class NoisyNeighborImpact:
     protected_p99_ms_str = fmt_time(protected_p99_ms * millisecond, millisecond, precision=0, commas=False)
 ```
 
-GPU memory contention\index{Resource contention!GPU memory} is the most severe: a tenant with unexpectedly long sequences can consume a disproportionate share of the KV cache pool. Consider three tenants sharing a `{python} NoisyNeighborImpact.kv_pool_gb_str` KV cache pool with equal `{python} NoisyNeighborImpact.base_share_gb_str` allocations. When one tenant begins issuing long-context requests, its allocation can swell to `{python} NoisyNeighborImpact.swollen_share_gb_str`, forcing evictions that reduce the other tenants from `{python} NoisyNeighborImpact.base_seqs_str` concurrent sequences each to `{python} NoisyNeighborImpact.other_seqs_str`, a `{python} NoisyNeighborImpact.batch_reduction_pct_str` batch-size reduction that directly degrades their throughput. Egress bandwidth and accelerator time-sharing add the device-level interference channels of @sec-fleet-orchestration-resource-isolation, so a noisy-neighbor measurement must capture all three dimensions at once.
+GPU memory contention\index{Resource contention!GPU memory} is the most severe: a tenant with unexpectedly long sequences can consume a disproportionate share of the KV cache pool. Consider three tenants sharing a `{python} NoisyNeighborImpact.kv_pool_gb_str` KV cache pool with equal `{python} NoisyNeighborImpact.base_share_gb_str` allocations. When one tenant begins issuing long-context requests, its allocation can swell to `{python} NoisyNeighborImpact.swollen_share_gb_str`, forcing evictions that reduce the other tenants from `{python} NoisyNeighborImpact.base_seqs_str` concurrent sequences each to `{python} NoisyNeighborImpact.other_seqs_str`, a `{python} NoisyNeighborImpact.batch_reduction_pct_str` batch-size reduction that directly degrades their throughput. Egress bandwidth and accelerator time-sharing add the other two dimensions, and time-sharing inherits the device-level interference channels of shared accelerators, so a noisy-neighbor measurement must capture all three dimensions at once.
+
+::: {.column-margin .margin-pointer}
+↩ The device-level interference channels of shared accelerators (memory bandwidth, cache hierarchy, host-device interconnect, and thermal dissipation) are established in @sec-fleet-orchestration-resource-isolation.
+:::
 
 ::: {#exmp-inference-quantifying-noisy-neighbor-impact .callout-example title="Quantifying noisy neighbor impact"}
 
@@ -7141,11 +7178,11 @@ def check_quota_snapshot(tenant_id, request):
 
 This listing assumes that `reserved_kv_mb` includes the requested prompt and output-token budget, and that usage counters include outstanding reservations in their stated time windows. A passing snapshot is not an admission guarantee: simultaneous callers can observe the same free capacity. Production admission must check and reserve resources atomically, roll back failed admissions, and release reservations on completion or cancellation. The batch scheduler separately enforces the aggregate batch-token limit. Quotas protect the resources they account for; shared compute, networking, and control-plane contention still require isolation and measurement.
 
-Soft quotas relax these limits with the same guarantee-versus-maximum logic that governs fleet quotas (@sec-fleet-orchestration-burst-capacity): a tenant may burst above its nominal token rate while the pool has slack and is held to that rate when the pool saturates. What changes inside a serving system is the unit of account. Equal request counts are not equal load, because a tenant issuing long-context summarization requests consumes far more prefill compute and KV capacity than one issuing short classification queries. Token rates are better units, but input and output tokens must remain separate because they stress different phases, and memory reservation and concurrency require their own limits. With those units, the progressive-filling logic of dominant-resource fairness (@sec-fleet-orchestration-drf-worked-allocation) reduces to max-min fairness\index{Max-min fairness!token allocation} on each pool. For three tenants with output demands of 30,000, 20,000, and 80,000 tokens/sec competing for a decode pool capable of 100,000 tokens/sec, max-min fairness yields allocations of 30,000, 20,000, and 50,000. That allocation protects decode bandwidth; a separate input-token budget protects the prefill pool.
+Soft quotas relax these limits with the same guarantee-versus-maximum logic that governs fleet quotas: a tenant may burst above its nominal token rate while the pool has slack and is held to that rate when the pool saturates. What changes inside a serving system is the unit of account. Equal request counts are not equal load, because a tenant issuing long-context summarization requests consumes far more prefill compute and KV capacity than one issuing short classification queries. Token rates are better units, but input and output tokens must remain separate because they stress different phases, and memory reservation and concurrency require their own limits. With those units, the progressive-filling logic of dominant-resource fairness, worked through in @sec-fleet-orchestration-drf-worked-allocation, reduces to max-min fairness\index{Max-min fairness!token allocation} on each pool. For three tenants with output demands of 30,000, 20,000, and 80,000 tokens/sec competing for a decode pool capable of 100,000 tokens/sec, max-min fairness yields allocations of 30,000, 20,000, and 50,000. That allocation protects decode bandwidth; a separate input-token budget protects the prefill pool.
 
 ### Priority scheduling {#sec-inference-scale-priority-scheduling-3e37}
 
-When tenants have different SLO requirements, priority scheduling\index{Priority scheduling!multi-tenant isolation} ensures that high-priority requests receive resources first. Fleet priority classes (@sec-fleet-orchestration-burst-capacity) already decide which workloads may preempt serving capacity; request priority operates inside one serving allocation, at token granularity. @Tbl-priority-scheduling-classes shows that preemption rights and resource guarantees move together down the three classes: critical traffic both preempts any lower class and reserves capacity, while best-effort never preempts and gets no guarantee, so an SLO tier maps directly onto a position in the preemption ladder.
+When tenants have different SLO requirements, priority scheduling\index{Priority scheduling!multi-tenant isolation} ensures that high-priority requests receive resources first. Fleet priority classes already govern preemption between serving and other workloads across the cluster; request priority operates inside one serving allocation, at token granularity. @Tbl-priority-scheduling-classes shows that preemption rights and resource guarantees move together down the three classes: critical traffic both preempts any lower class and reserves capacity, while best-effort never preempts and gets no guarantee, so an SLO tier maps directly onto a position in the preemption ladder.
 
 | **Class**       |    **Use Case**    |      **Preemption**     | **Resource Guarantee** |
 |:----------------|:------------------:|:-----------------------:|:----------------------:|
@@ -7408,7 +7445,11 @@ Multi-tenant isolation limits the blast radius of excess demand, but it does not
 
 ## Autoscaling and Capacity Control {#sec-inference-scale-autoscaling-capacity-control}
 
-A serving autoscaler\index{Autoscaling!capacity control} that reacts only to average accelerator utilization can scale in the wrong direction. Decode can saturate memory bandwidth while arithmetic units appear idle, long prompts can consume prefill capacity before request count rises, and queued work can violate an SLO while fleet-wide utilization remains moderate. The control signal must represent outstanding work relative to phase-specific service capacity. Every replica the controller adds is also a claim on accelerators that training jobs may hold, so the fleet-level arbitration of @sec-fleet-orchestration-serving bounds how quickly and how far serving can grow.
+A serving autoscaler\index{Autoscaling!capacity control} that reacts only to average accelerator utilization can scale in the wrong direction. Decode can saturate memory bandwidth while arithmetic units appear idle, long prompts can consume prefill capacity before request count rises, and queued work can violate an SLO while fleet-wide utilization remains moderate. The control signal must represent outstanding work relative to phase-specific service capacity. Every replica the controller adds is also a claim on accelerators that training jobs may hold, so fleet-level arbitration with training bounds how quickly and how far serving can grow.
+
+::: {.column-margin .margin-pointer}
+↩ The arbitration between serving replicas and training jobs for shared accelerators, including the minutes-long cost of switching a device between them, is established in @sec-fleet-orchestration-boundary.
+:::
 
 For a conventional fixed-cost model, queueing delay and request rate per ready replica can be sufficient. Autoregressive serving needs at least separate prompt-token and output-token arrival rates, active KV-cache occupancy, and the observed service rates of the prefill and decode pools. The controller converts each signal into a required replica count, then takes the maximum requirement plus failure and forecast headroom. Scaling on SLO goodput prevents the controller from counting requests that complete after their TTFT or TPOT targets as usable capacity. For the same reason, a threshold set as a fraction of the p99 target adapts automatically when a new model version runs slower, whereas a utilization target must be retuned by hand. The controller acts by changing the replica count; resizing an accelerator allocation in place requires restarting the process and reloading its weights, so vertical scaling helps mainly the CPU stages around the model.
 
@@ -7697,7 +7738,7 @@ Provisioning dominates this budget, so warm pools, which remove provisioning for
 
 Discounted interruptible capacity[^fn-spot-instance-inference] enters serving through the same purchasing tiers that fleet capacity planning uses (@tbl-cloud-capacity-reservation-tiers): reserved capacity for the steady baseline, on-demand capacity for bursts, and spot capacity for work that tolerates revocation. None of these tiers makes a replica immune to failure, so the serving question is whether a revoked replica can drain, reroute, or recompute its requests without violating their SLO. The provider's warning window is the binding constraint.
 
-[^fn-spot-instance-inference]: **Spot-instance economics**\index{Spot Instance Economics}\index{Spot Instances!inference}: @eq-fleet-orchestration-spot-cost in @sec-fleet-orchestration-spot-instances derives the effective cost of preemptible capacity from its productive fraction. For inference, revocation can also destroy in-flight requests and KV-cache state, so the productive fraction must be charged for draining, rerouting, and restoring capacity.
+[^fn-spot-instance-inference]: **Spot-instance economics**\index{Spot Instance Economics}\index{Spot Instances!inference}: @Eq-fleet-orchestration-spot-cost derives the effective cost of preemptible capacity from its productive fraction. For inference, revocation can also destroy in-flight requests and KV-cache state, so the productive fraction must be charged for draining, rerouting, and restoring capacity.
 
 Spot termination handling is a race against the provider's warning window. @Lst-spot-termination orders the shutdown path so new work stops first, in-flight work drains while time remains, recoverable state is persisted, and the load balancer stops sending traffic before the instance disappears.
 
@@ -8806,7 +8847,11 @@ def route_request(user_region, request):
 
 :::
 
-Rerouting is the simpler half of regional failover. For stateful LLM serving, the receiving region must also rebuild lost session state, regenerating KV caches from retained conversation history, and it must have the headroom to absorb the failed region's load. @Sec-fault-tolerance-reliability-reliability-session-affinity-stateful-failover-27b2 covers the state recovery, and @sec-fault-tolerance-reliability-reliability-replication-strategies-aaa2 covers the regional headroom and the gradual return of traffic that keeps a recovered region from failing over again.
+Rerouting is the simpler half of regional failover. For stateful LLM serving, the receiving region must also rebuild lost session state, regenerating KV caches from retained conversation history, and it must have the headroom to absorb the failed region's load.
+
+::: {.column-margin .margin-pointer}
+↩ Regional headroom, session rebuilding, and the gradual return of traffic to a recovered region are established in @sec-fault-tolerance-reliability-reliability-replication-strategies-aaa2.
+:::
 
 #### Cost optimization across regions {#sec-inference-scale-cost-optimization-across-regions-c1c2}
 
@@ -9295,10 +9340,6 @@ Continuous batching dramatically improves GPU utilization for LLM serving, but i
 
 :::
 
-::: {.column-margin .margin-pointer}
-↩ Predictive autoscaling, cold-start delays, and warm pools are developed in @sec-inference-scale-autoscaling-capacity-control.
-:::
-
 ::: {.fallacy-pitfall}
 
 **Pitfall**: *Sizing the fleet by average throughput.*
@@ -9405,7 +9446,7 @@ The serving designs developed here coordinate accelerator replicas under data-ce
 :::
 
 ::: {.column-margin .margin-pointer}
-↪ On-device adaptation under device resource budgets and federated learning across device populations are covered in @sec-edge-intelligence.
+↪ On-device adaptation under device resource budgets and federated learning across device populations are developed in @sec-edge-intelligence.
 :::
 
 <!-- This is here to make sure that quizzes are inserted properly before a part begins. -->

@@ -111,7 +111,7 @@ Before comparing implementations, we fix the model and quality criterion, prompt
 
 ### The single-machine iron law {#sec-performance-engineering-efficiency-frontier}
 
-The memory wall is one term in a larger budget. @Eq-iron-law-perf restates, for one replica, the single-machine iron law that @sec-vol2-introduction-fleet-law extends into the Fleet Law\index{Iron law!performance decomposition}. It decomposes execution time into three competing costs:
+The memory wall is one term in a larger budget. @Eq-iron-law-perf restates, for one replica, the single-machine iron law that the Fleet Law extends across many devices\index{Iron law!performance decomposition}. It decomposes execution time into three competing costs:
 
 $$
 T = \frac{\DataVolume}{\Bandwidth} + \frac{O}{\PeakRate \cdot \EfficiencyHw} + \Latency
@@ -124,6 +124,10 @@ T \approx \max\left( \frac{O}{\PeakRate \cdot \EfficiencyHw}, \; \frac{\DataVolu
 $$
 
 Here, $\DataVolume$ is the data volume crossing the chosen memory boundary, $\Bandwidth$ is its bandwidth, $O$ is the operation count, and $\PeakRate \cdot \EfficiencyHw$ is the realized compute rate after accounting for hardware execution efficiency. The overhead term $\Latency$ includes exposed launch, synchronization, communication, and software costs outside those compute and memory terms. This local execution budget supplies the service time of a replica; request queueing and routing add time outside that boundary. The roofline approximation asks which exposed term dominates at a given operating point: increasing compute throughput for a memory-bound workload does not materially improve performance until the memory term is reduced. Eager framework execution can expose a large slice of the overhead term when a Python loop and the framework dispatcher submit many short kernels, but not every launch traverses the Python global interpreter lock (GIL); asynchronous runtime threads, compiled regions, and native extensions can submit work outside that path. `torch.compile(mode="reduce-overhead")` and CUDA Graphs target repeated host-submission costs by capturing a stable region and replaying its GPU work with fewer CPU interactions. They amortize or avoid repeated dispatch within that region rather than removing all runtime overhead.
+
+::: {.column-margin .margin-pointer}
+↩ The Fleet Law, which extends this single-machine iron law across $N$ devices, is established in @sec-vol2-introduction-fleet-law.
+:::
 
 ::: {.column-margin}
 ![](images/svg/performance_engineering_iron_law_bars.svg){width="100%" fig-alt="Iron-law bar split into three segments, Data, Compute, and Latency. The Data segment is the widest and shaded; Compute and Latency are narrow and gray."}
@@ -556,7 +560,11 @@ class MemoryWallScenario:
 
 An NVIDIA H100\index{H100!memory hierarchy} delivers `{python} MemoryWallScenario.h100_fp8_tflop_per_s_str` of FP8 compute at a `{python} MemoryWallScenario.h100_tdp_w_str` thermal design power budget but only `{python} MemoryWallScenario.h100_hbm_bw_tb_per_s_str` of memory bandwidth. If an operation achieves an arithmetic intensity below `{python} MemoryWallScenario.h100_ridge_fp8_str`, the compute units sit idle, starved for data. This gap between compute capability and memory delivery rate is the memory wall, and it defines the landscape within which all performance engineering operates.
 
-@Sec-appdx-dam-taxonomy-memory-hierarchy recaps the accelerator memory hierarchy that sits behind this gap. For performance engineering, what matters is the constraint each level places on a kernel's schedule, which @tbl-performance-engineering-memory-hierarchy summarizes for the H100.
+For performance engineering, what matters about the accelerator memory hierarchy behind this gap is the constraint each level places on a kernel's schedule, which @tbl-performance-engineering-memory-hierarchy summarizes for the H100.
+
+::: {.column-margin .margin-pointer}
+↪ The accelerator memory hierarchy, from registers and SRAM to HBM, is developed as background in @sec-appdx-dam-taxonomy-memory-hierarchy.
+:::
 
 | **Level**                            | **Scale on H100**                                                                                                                                                               | **Access cost**                                                                                                               | **Optimization constraint**                                                                                                                                                                                                                          |
 |:-------------------------------------|:--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|:------------------------------------------------------------------------------------------------------------------------------|:-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
@@ -573,10 +581,9 @@ The optimization problem therefore reduces to data placement, keeping the data t
 
 ### The roofline model {#sec-performance-engineering-roofline}
 
-The memory wall becomes a diagnostic instrument once each kernel is placed on the roofline model[^fn-roofline-williams-origin] [@williams2009]. @Sec-appdx-dam-taxonomy-roofline states the bound in @eq-appdx-dam-roofline. A kernel with arithmetic intensity $I$ attains at most $\min(\PeakRate, I \times \Bandwidth)$, and the ridge point $\RooflineRidgePoint = \PeakRate/\Bandwidth$\index{Roofline Model!ridge point} separates memory-bound\index{Memory-Bound} kernels on its left from compute-bound\index{Compute-Bound} kernels on its right. Performance engineering needs four refinements of that bound: the distinction between algorithmic and measured intensity, the movement of the ridge with precision and hardware generation, the placement of production kernels relative to the ridge, and the way batch size walks decode across it.
-
+The memory wall becomes a diagnostic instrument once each kernel is placed on the roofline model[^fn-roofline-williams-origin] [@williams2009]. A kernel with arithmetic intensity $I$ attains at most $\min(\PeakRate, I \times \Bandwidth)$, and the ridge point $\RooflineRidgePoint = \PeakRate/\Bandwidth$\index{Roofline Model!ridge point} separates memory-bound\index{Memory-Bound} kernels on its left from compute-bound\index{Compute-Bound} kernels on its right. Performance engineering needs four refinements of that bound: the distinction between algorithmic and measured intensity, the movement of the ridge with precision and hardware generation, the placement of production kernels relative to the ridge, and the way batch size walks decode across it.
 ::: {.column-margin .margin-pointer}
-↩ The roofline formulation and hardware arithmetic intensity ceilings are derived in @sec-compute-roofline.
+↩ The roofline model and the H100 ridge point are established in @sec-compute-roofline.
 :::
 
 [^fn-roofline-williams-origin]: **Roofline model**\index{Roofline Model!performance engineering}: The original paper framed the model for multicore CPUs [@williams2009]; the same two-ceiling diagram extends directly to accelerators.
@@ -1030,9 +1037,17 @@ class ServingNodeWeights:
 
 The constraint is memory: each additional request in the batch requires its own KV cache (the per-request store of attention keys and values for every token generated so far), and the total KV cache across all requests must fit in GPU memory alongside the model weights. The chapter's recurring deployment is a 70B-parameter model on one node of eight H100 GPUs. It belongs to Archetype A (GPT-4/Llama-3) but deliberately scales down that archetype's 175B reference model to the size a single serving node can hold, and it is revisited with full quantitative detail in the precision dividend (@sec-performance-engineering-quant-strategies) and the case study (@sec-performance-engineering-case-study). A 70B model with `{python} ServingNodeWeights.weight_fp16_total_gb_str` of FP16 weights must be sharded across multiple GPUs; on an 8-GPU node, whatever memory each GPU has left after its `{python} ServingNodeWeights.weight_fp16_shard_gb_str` weight shard is what the KV cache has to live in, before runtime overhead. Precision engineering addresses exactly this constraint: INT4 weights shrink each GPU's shard to a quarter of its FP16 size, and the precision dividend (notebook \ref{nbk-performance-engineering-precision-dividend}) computes how much larger a batch the freed memory, together with a compressed KV cache, can admit.
 
-A serving scheduler can keep the effective batch full by adding new requests as older requests finish, but that policy only works when memory is available for the active requests. Performance engineering's role is to make that scheduler's job feasible by minimizing the per-request memory footprint, primarily through KV cache compression and weight quantization. Inference serving (@sec-inference-scale) develops the full scheduler; the local point here is that memory optimization expands the batch sizes the scheduler can safely admit.
+::: {.column-margin .margin-pointer}
+↩ Archetype A and its 175B-parameter reference model are established in @sec-introduction-archetype-gpt4llama3-b02f.
+:::
 
-A critical enabler for large batch sizes is PagedAttention\index{PagedAttention!memory allocation} [@kwon2023], which stores each request's KV cache in fixed-size blocks allocated on demand, much as an operating system pages virtual memory, instead of reserving contiguous space for the longest sequence a request might reach. Reserving 4,096 tokens for requests that average 500 would leave most of each reservation idle; paging returns that idle capacity to the scheduler and so raises the batch size the same HBM can admit. @Sec-inference-scale-pagedattention-3c94 develops the allocator and its measured throughput effect.
+A serving scheduler can keep the effective batch full by adding new requests as older requests finish, but that policy only works when memory is available for the active requests. Performance engineering's role is to make that scheduler's job feasible by minimizing the per-request memory footprint, primarily through KV cache compression and weight quantization. @Sec-inference-scale-continuous-batching-llm-inference-f8e6 develops the full scheduler; the local point here is that memory optimization expands the batch sizes the scheduler can safely admit.
+
+A critical enabler for large batch sizes is PagedAttention\index{PagedAttention!memory allocation} [@kwon2023], which stores each request's KV cache in fixed-size blocks allocated on demand, much as an operating system pages virtual memory, instead of reserving contiguous space for the longest sequence a request might reach. Reserving 4,096 tokens for requests that average 500 would leave most of each reservation idle; paging returns that idle capacity to the scheduler and so raises the batch size the same HBM can admit.
+
+::: {.column-margin .margin-pointer}
+↪ The PagedAttention allocator and its measured throughput effect are developed in @sec-inference-scale-pagedattention-3c94.
+:::
 
 PagedAttention and KV cache quantization address complementary sources of memory pressure. PagedAttention reduces memory waste from fragmentation, while quantization reduces memory usage from precision. Their joint batch-size gain depends on the model-weight footprint, request-length distribution, and scheduler headroom, so it cannot be inferred by multiplying a published paging throughput result by the 2$\times$ precision reduction.
 
@@ -1046,7 +1061,11 @@ The decode phase\index{Decode Phase!memory bandwidth bottleneck} generates outpu
 
 The prefill-decode decomposition has direct implications for system design, separating workloads across the two operational regimes mapped in @fig-roofline-model: batch-one decode sits low along the diagonal memory-bandwidth slope, whereas tiled prefill attention and large GEMMs operate past the ridge on the compute ceiling. Long-prompt prefill GEMMs can operate at high arithmetic intensity in the compute-bound regime. Low-batch decode often lies below the ridge point in the memory-bound regime. Prompt length, batch size, and kernel implementation determine the actual positions. A real serving system must handle both phases, often simultaneously across different active requests.
 
-Disaggregated serving\index{Disaggregated Serving!prefill-decode disaggregation} addresses this mismatch by running prefill and decode on separate hardware pools. Here, disaggregation is evidence that prefill and decode have different bottlenecks; @sec-inference-scale develops the routing, admission-control, and serving-policy machinery. Prefill servers are optimized for compute (fewer, higher-FLOP/s GPUs), while decode servers are optimized for memory bandwidth and capacity (more memory per GPU, aggressive quantization). The KV cache computed during prefill is transferred to a decode server, which handles the subsequent autoregressive generation. This disaggregation allows each phase to use hardware and software configurations tuned for its specific bottleneck.
+Disaggregated serving\index{Disaggregated Serving!prefill-decode disaggregation} addresses this mismatch by running prefill and decode on separate hardware pools. Here, disaggregation is evidence that prefill and decode have different bottlenecks. Prefill servers are optimized for compute (fewer, higher-FLOP/s GPUs), while decode servers are optimized for memory bandwidth and capacity (more memory per GPU, aggressive quantization). The KV cache computed during prefill is transferred to a decode server, which handles the subsequent autoregressive generation. This disaggregation allows each phase to use hardware and software configurations tuned for its specific bottleneck.
+
+::: {.column-margin .margin-pointer}
+↪ Disaggregated prefill and decode pools, joined by a KV-cache transfer on the critical path, are developed in @sec-inference-scale-tensorrtllm-architecture-2794.
+:::
 
 The performance characteristics of each phase determine which optimization techniques apply. FlashAttention provides its largest gains during prefill, where the quadratic attention computation dominates. Speculative decoding targets the decode phase. KV cache quantization reduces decode storage and read traffic, while its encoding cost begins when prefill creates the cache. Precision engineering (FP8/INT4 weights) benefits both phases, but through different mechanisms: prefill benefits from doubled compute throughput (FP8 Tensor Cores), while decode benefits from doubled effective bandwidth (half the bytes per weight read).
 
@@ -1513,12 +1532,15 @@ While hardware utilization reports how often GPUs are busy, it fails to distingu
 
 ::: {#dfn-performance-engineering-model-flops-utilization-mfu .callout-definition title="MFU"}
 
-***MFU***\index{Model FLOPs Utilization!fleet-scale behavior}, introduced in @sec-distributed-training-systems-systems-distributed-training-efficiency-metrics-9488, is the fraction of the hardware's theoretical peak throughput ($\PeakRate$) consumed by FLOPs that directly advance model training or inference, excluding overhead from recomputation, padding, and synchronization. The new content here is its fleet-scale behavior: how the per-node figure aggregates across thousands of accelerators and how the scaling tax pulls it down.
-
+***MFU***\index{Model FLOPs Utilization!fleet-scale behavior} is the fraction of the hardware's theoretical peak throughput ($\PeakRate$) consumed by FLOPs that directly advance model training or inference, excluding overhead from recomputation, padding, and synchronization. The new content here is its fleet-scale behavior: how the per-node figure aggregates across thousands of accelerators and how the scaling tax pulls it down.
 1.  **Significance**: At fleet scale, MFU aggregates across all nodes: communication overhead, load imbalance, and pipeline bubbles each compound the utilization loss, so fleet MFU is consistently below single-node MFU. It is the primary diagnostic for whether hardware investment is translating into model progress, and a one-percentage-point MFU increase across 10,000 identical GPUs adds useful throughput equivalent to 100 GPUs at peak. Realized cost savings depend on whether the recovered capacity displaces hardware or shortens paid runtime.\index{MFU!economic impact}
 2.  **Distinction**: Unlike hardware utilization\index{Hardware Utilization}\index{Hardware Utilization!vs. MFU} (which reports how often the accelerator is "busy"), MFU reports how much of that activity contributes to model convergence or inference, excluding waste FLOPs from recomputation, padding, and gradient checkpointing overhead.
 3.  **Common pitfall**: A frequent misconception is that high GPU utilization implies high efficiency. A system can show 90 percent hardware utilization while achieving 30 percent MFU if it is wasting cycles on communication bubbles or inefficient kernel implementations, making MFU the correct metric for optimization decisions, not raw utilization.
 
+:::
+
+::: {.column-margin .margin-pointer}
+↩ Model FLOPs utilization is established as the compute-axis efficiency measure in @sec-vol2-introduction-dim-compute.
 :::
 
 ```{python}
@@ -2215,12 +2237,16 @@ plt.close()
 FlashAttention reduces the memory wall within a single GPU by tiling across the SRAM-HBM boundary. For sequence lengths that exceed the memory capacity of a single GPU, the same tiling principle extends across multiple GPUs via Ring Attention\index{Ring Attention} [@liu2023ringAttention]. Distributing the sequence blocks across a ring of accelerators and overlapping communication with computation enables Ring Attention to handle context windows that would be impractical on single-GPU configurations.
 
 ::: {.column-margin .margin-pointer}
-↩ Distributed sequence parallelism and Ring Attention mechanics are developed in @sec-distributed-training-systems-sequence-context-parallelism.
+↩ Ring Attention's rotation of key/value blocks around a ring of accelerators, and its overlap condition, are established in @sec-distributed-training-context-parallelism-ring-ulysses-8b1f.
 :::
 
 ## Precision Engineering {#sec-performance-engineering-precision}
 
-Fusion reduces the number of trips through HBM; precision engineering\index{Precision Engineering!bandwidth multiplication} reduces the payload of each trip. Moving FP16 weights through HBM consumes twice as many bytes as FP8. For bandwidth-bound kernels, shrinking weights from 2 bytes to 1 byte can roughly halve weight-read traffic and increase effective memory bandwidth. The engineering decision is where numerical noise can be tolerated to reduce bandwidth pressure and where quality demands higher precision. While @sec-distributed-training-fp8 treats 8-bit floating point as a training-time primitive, the quantization techniques in this section enable efficient inference at scale.
+Fusion reduces the number of trips through HBM; precision engineering\index{Precision Engineering!bandwidth multiplication} reduces the payload of each trip. Moving FP16 weights through HBM consumes twice as many bytes as FP8. For bandwidth-bound kernels, shrinking weights from 2 bytes to 1 byte can roughly halve weight-read traffic and increase effective memory bandwidth. The engineering decision is where numerical noise can be tolerated to reduce bandwidth pressure and where quality demands higher precision. The quantization techniques in this section apply reduced precision to efficient inference at scale.
+
+::: {.column-margin .margin-pointer}
+↩ FP8 as a training-time format, with distinct roles for E4M3 and E5M2, is established in @sec-distributed-training-fp8.
+:::
 
 ### Block-wise quantization {#sec-performance-engineering-block-quant}
 
@@ -2541,7 +2567,11 @@ Weight-activation quantization (SmoothQuant, FP8 training\index{Quantization!FP8
 
 The choice depends on the operational regime. For memory-bound inference (small batch sizes), weight-only INT4 quantization often provides the largest speedup per unit of quality degradation. For compute-bound inference (large batch sizes) or training, weight-activation FP8 quantization provides throughput gains that weight-only quantization cannot match. High-performance serving systems often use different quantization strategies for different operating points: INT4 weight-only at low batch sizes (for latency) and FP8 weight-activation at high batch sizes (for throughput).
 
-The same precision problem extends to the key-value (KV) cache, which determines whether weight savings become larger batches. In decode, weights may be compressed aggressively while per-request cache state still grows with sequence length, so a precision change that leaves the cache untouched may fail to move the serving bottleneck. Numerical compression\index{KV Cache!quantization} reduces the bytes stored per cached key or value, while grouped query attention (GQA)\index{GQA!KV cache memory reduction} reduces how many key-value heads must be cached for each layer. Both mechanisms matter because the scheduler admits requests against the combined memory footprint of weights plus active cache state. The KV cache capacity calculation isolates the local capacity effect before @sec-inference-scale returns to full serving policy.
+The same precision problem extends to the key-value (KV) cache, which determines whether weight savings become larger batches. In decode, weights may be compressed aggressively while per-request cache state still grows with sequence length, so a precision change that leaves the cache untouched may fail to move the serving bottleneck. Numerical compression\index{KV Cache!quantization} reduces the bytes stored per cached key or value, while grouped query attention (GQA)\index{GQA!KV cache memory reduction} reduces how many key-value heads must be cached for each layer. Both mechanisms matter because the scheduler admits requests against the combined memory footprint of weights plus active cache state. The KV cache capacity calculation isolates the local capacity effect, holding serving policy fixed.
+
+::: {.column-margin .margin-pointer}
+↪ KV cache quantization and grouped query attention as serving-memory techniques are developed in @sec-inference-scale-kv-cache-compression-943a.
+:::
 
 ```{python}
 #| echo: false
@@ -3409,7 +3439,7 @@ For performance engineering, the local question is whether active-parameter savi
 In a multi-GPU training step or tensor-parallel inference pass, an accelerator can finish a local matrix multiplication in microseconds, only to sit idle while waiting for an AllReduce collective to transfer gradients or activations across the network. If communication runs sequentially after computation, interconnect latency directly limits throughput. Communication-computation overlap removes this communication time from the critical path by executing GPU compute kernels concurrently with data transfers over NVLink or InfiniBand, building on CUDA streams, SM partitioning, and bucket hooks.
 
 ::: {.column-margin .margin-pointer}
-↩ Collective communication pipelining, CUDA streams, and bucket fusion are analyzed in @sec-communication-overlap.
+↩ Layer-by-layer gradient overlap and bucket fusion are established in @sec-communication-overlap.
 :::
 
 ```{python}
@@ -3761,7 +3791,7 @@ The diagnostic sequence closes by applying and verifying the selected interventi
 
 Production systems combine techniques because no single intervention covers every term in the iron law. An optimized language-model kernel path may combine tiled attention, lower-precision weight or cache representations, graph compilation, and replay. The durable question is which intervention changes measured bytes, operations, or launch time at the active bottleneck; named frameworks are implementations of those mechanisms rather than the organizing principle.
 
-The serving layer adds admission, cache-state, routing, batching, and SLO controls. Those policies belong to @sec-inference-scale. This chapter retains only their physical inputs: how batch and sequence shape change arithmetic intensity, how speculative verification changes exposed work, and how precision or kernel structure changes memory capacity and execution time. The distinction prevents a favorable local kernel result from being mistaken for a serving-policy result at a named offered load.
+The serving layer adds admission, cache-state, routing, batching, and SLO controls. This chapter retains only their physical inputs: how batch and sequence shape change arithmetic intensity, how speculative verification changes exposed work, and how precision or kernel structure changes memory capacity and execution time. The distinction prevents a favorable local kernel result from being mistaken for a serving-policy result at a named offered load.
 
 The speedups from these techniques are not additive; they interact in ways that demand careful sequencing.\index{Optimization!systematic ordering} For instance, INT4 weight quantization reduces per-token HBM traffic by 4$\times$, which might shift the bottleneck from memory-bound to compute-bound. Once compute-bound, further bandwidth optimizations (KV cache compression) yield diminishing returns, and compute optimizations (FP8 Tensor Cores) become the priority. This is why the iterative profile-optimize-verify loop is essential: the optimal combination depends on the specific model, hardware, and workload characteristics.
 
@@ -3914,7 +3944,7 @@ Speculation offers a different way to amortize target-model execution. Assume a 
 
 Applying @eq-speculative-expected-tokens, the scenario emits `{python} DecodeBudgetExample.emitted_str` tokens per round on average. Dividing draft-plus-verification time by that expectation gives `{python} DecodeBudgetExample.speculative_ms_str` per emitted token, an amortized `{python} DecodeBudgetExample.speedup_str`-fold improvement over the round-two duration. Tokens arrive in blocks; this average does not establish the longest visible pause or an inter-token latency percentile.
 
-Batching can consume the spare compute that made verification economical. No batch-size crossover follows from the batch-one budget. @Sec-inference-scale shows how a controller uses measured crossover curves, offered load, and cache state to select a serving policy.
+Batching can consume the spare compute that made verification economical. No batch-size crossover follows from the batch-one budget.
 
 #### Case study synthesis {#sec-performance-engineering-case-lessons}
 
@@ -3954,7 +3984,7 @@ The profiler detective in example \ref{exmp-performance-engineering-profiler-det
 
 **Pitfall**: *Applying speculative decoding without considering batch dynamics.*
 
-Speculative decoding can reduce latency in a measured low-batch, memory-bound regime when the draft model is cheap, its proposals achieve a high acceptance rate, and the target has spare compute for batched verification. Verification is never free; its exposed cost depends on draft length, acceptance, batch and sequence distributions, and the target kernel's operating point. As batching consumes compute headroom, the same configuration can cross from a gain to a loss, while variable accepted lengths introduce additional scheduler work. This chapter establishes how to measure that crossover for a fixed workload and machine; @sec-inference-scale owns the admission policy that applies the resulting curve under changing offered load and service objectives.
+Speculative decoding can reduce latency in a measured low-batch, memory-bound regime when the draft model is cheap, its proposals achieve a high acceptance rate, and the target has spare compute for batched verification. Verification is never free; its exposed cost depends on draft length, acceptance, batch and sequence distributions, and the target kernel's operating point. As batching consumes compute headroom, the same configuration can cross from a gain to a loss, while variable accepted lengths introduce additional scheduler work. This chapter establishes how to measure that crossover for a fixed workload and machine; applying the resulting curve under changing offered load and service objectives is a matter of admission policy.
 
 :::
 
@@ -4008,15 +4038,18 @@ A serving system may achieve excellent average inter-token latency (30 ms) while
 
 ## Summary {#sec-performance-engineering-summary}
 
-Performance engineering closes the gap between a model's theoretical efficiency and its hardware implementation\index{Performance Engineering!hardware-software efficiency gap} by systematically optimizing the terms of the single-machine iron law recalled from @sec-vol2-introduction-fleet-law (@eq-iron-law-perf): total execution time $T$ is governed by data movement ($\DataVolume / \Bandwidth$), compute execution ($O / (\PeakRate \cdot \EfficiencyHw)$), and latency overhead ($\Latency$). On modern accelerators like the NVIDIA H100, where the FP16 ridge point of the roofline model sits at `{python} RooflineDiagnostic.ridge_str`, small-batch autoregressive decode is often bound by the memory wall ($\DataVolume / \Bandwidth$).
-
+Performance engineering closes the gap between a model's theoretical efficiency and its hardware implementation\index{Performance Engineering!hardware-software efficiency gap} by systematically optimizing the terms of the single-machine iron law (@eq-iron-law-perf): total execution time $T$ is governed by data movement ($\DataVolume / \Bandwidth$), compute execution ($O / (\PeakRate \cdot \EfficiencyHw)$), and latency overhead ($\Latency$). On modern accelerators like the NVIDIA H100, where the FP16 ridge point of the roofline model sits at `{python} RooflineDiagnostic.ridge_str`, small-batch autoregressive decode is often bound by the memory wall ($\DataVolume / \Bandwidth$).
 Fusion and precision act on data movement ($\DataVolume/\Bandwidth$) through different mechanisms. Operator fusion avoids intermediate HBM transfers, while FlashAttention tiles attention into SRAM without materializing the quadratic $\mathcal{O}(S^2)$ score and probability matrices. Its persistent workspace grows as $\mathcal{O}(S)$, but actual HBM traffic includes tile reloads. The simplified 8K sequence example gives a `{python} FlashAttentionSavings.savings_mult_str` traffic ratio under its idealized accounting assumptions. Lower-precision weights and cache state reduce payload size $\DataVolume$ and can expand feasible batch capacity.
 
 Overhead ($\Latency$) requires a different intervention. Graph compilers fuse eligible operations and plan memory, while CUDA Graphs amortize host submission for stable captured regions. Communication-computation overlap can hide inter-GPU AllReduce latency only when independent work is ready and resource interference does not erase the gain.
 
 Algorithmic transformations change the work behind the compute term ($O/\PeakRate$). Speculative decoding can obtain multiple emitted tokens from one target-model verification pass; mixture-of-experts routing limits active per-token FLOPs $O$ while expanding parameter capacity. Their benefit depends on whether draft work, routing, communication, and imbalance cost less than the work they remove.
 
-The case study in @sec-performance-engineering-case-study combines these mechanisms as a sequence of hypotheses, each requiring a new profile. Precision savings can enable larger batches, which change arithmetic intensity and the opportunity for speculation. The useful result is a measured execution envelope at a stated workload and quality level; separate low-batch latency and batched-throughput measurements do not establish simultaneous service-objective compliance. That envelope, a replica's measured capacity at a stated workload mix and latency target, is also the quantity the fleet orchestrator uses to size and place serving replicas (@sec-fleet-orchestration-serving).
+The case study in @sec-performance-engineering-case-study combines these mechanisms as a sequence of hypotheses, each requiring a new profile. Precision savings can enable larger batches, which change arithmetic intensity and the opportunity for speculation. The useful result is a measured execution envelope at a stated workload and quality level; separate low-batch latency and batched-throughput measurements do not establish simultaneous service-objective compliance. That envelope, a replica's measured capacity at a stated workload mix and latency target, is also the quantity the fleet orchestrator uses to size and place serving replicas.
+
+::: {.column-margin .margin-pointer}
+↩ The serving replica's measured capacity as the fleet orchestrator's unit of placement is established in @sec-fleet-orchestration-serving.
+:::
 
 In the Fleet Law's terms (@eq-fleet-law), fusion, precision, compilation, and algorithmic change shrink the per-replica compute term $\IronlawTermTimesCompute/N$, while communication-computation overlap enlarges $\OverlappedTime$. The chapter therefore spends its effort on the Compute ($C_1$) axis and its Co-Design boundary with Communication, and those gains reach the fleet only when the Communication and Coordination terms do not absorb them.
 
@@ -4039,7 +4072,7 @@ The measured execution envelope gives a serving controller the costs and capacit
 :::
 
 ::: {.column-margin .margin-pointer}
-↪ Fleet-scale serving policies, cache retention, and SLO protection are analyzed in @sec-inference-scale.
+↪ Fleet-scale serving policies, cache retention, and SLO protection are developed in @sec-inference-scale.
 :::
 
 <!-- This is here to make sure that quizzes are inserted properly before a part begins. -->

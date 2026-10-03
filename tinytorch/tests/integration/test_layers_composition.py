@@ -100,7 +100,7 @@ def test_complete_neural_networks():
     for name, net in networks.items():
         params = net.parameters()
         total_params = sum(p.data.size for p in params)
-        memory_mb = total_params * 4 / (1024 * 1024)  # float32 = 4 bytes
+        memory_mb = total_params * 4 / 1_000_000  # float32 = 4 bytes, decimal MB
         print(f"   {name}: {len(params)} param tensors, {total_params:,} total params, {memory_mb:.2f} MB")
 
     print("\n🎉 ALL INTEGRATION TESTS PASSED!")
@@ -182,8 +182,8 @@ def run_performance_benchmarks():
 
     # Memory usage estimate
     total_params = sum(p.data.size for p in large_mlp.parameters())
-    param_memory_mb = total_params * 4 / (1024 * 1024)
-    activation_memory_mb = (large_batch.data.size + output.data.size) * 4 / (1024 * 1024)
+    param_memory_mb = total_params * 4 / 1_000_000
+    activation_memory_mb = (large_batch.data.size + output.data.size) * 4 / 1_000_000
 
     print(f"   Parameter memory: {param_memory_mb:.2f} MB")
     print(f"   Activation memory: {activation_memory_mb:.2f} MB")

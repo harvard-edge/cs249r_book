@@ -112,13 +112,13 @@ from tinytorch.core.attention import MultiHeadAttention
 
 # Constants for memory calculations
 BYTES_PER_FLOAT32 = 4  # Standard float32 size in bytes
-MB_TO_BYTES = 1024 * 1024  # Binary megabyte (mebibyte) in bytes, so printed values read MiB
+MB_TO_BYTES = 1_000_000  # Decimal megabyte (10^6 bytes), the convention used throughout TinyTorch
 
 # %% [markdown]
 r"""
 ## 💡 Introduction: What are Transformers?
 
-Transformers are the architecture behind modern large language models (GPT-4, Claude, Llama, and Gemini). The core breakthrough is the synthesis of **parallel self-attention** (allowing every token in a sequence to dynamically attend to every other token) with **deep residual stream communication** and **dense feed-forward computation**.
+Transformers are the architecture behind modern large language models (GPT-6, Claude, Llama, and Gemini). The core breakthrough is the synthesis of **parallel self-attention** (allowing every token in a sequence to dynamically attend to every other token) with **deep residual stream communication** and **dense feed-forward computation**.
 
 ### The Transformer Paradigm Shift
 
@@ -1436,8 +1436,8 @@ def analyze_parameter_scaling():
               f"{block_params:9,} | {growth:>6}")
         previous_total = total_params
 
-    memory_mib = (previous_total * BYTES_PER_FLOAT32) / MB_TO_BYTES
-    print(f"\nWidest model above: {memory_mib:.1f} MiB of float32 weights")
+    memory_mb = (previous_total * BYTES_PER_FLOAT32) / MB_TO_BYTES
+    print(f"\nWidest model above: {memory_mb:.1f} MB of float32 weights")
     print("💡 Doubling d only about doubles the total here, because the 2Vd vocabulary")
     print("   projections dominate every row. Scaling is effectively LINEAR in d at this")
     print("   width; the quadratic 12Ld^2 block term takes over only at production width,")
@@ -1460,7 +1460,7 @@ def analyze_attention_memory():
     sequence_lengths = [128, 256, 512, 1024, 2048]
 
     print("Attention Matrix Memory Usage:")
-    print("Seq Len | Attention Matrix Size | Memory (MiB)")
+    print("Seq Len | Attention Matrix Size | Memory (MB)")
     print("-" * 45)
 
     for seq_len in sequence_lengths:
@@ -1570,10 +1570,10 @@ You evaluated multi-head attention activation memory across batch and sequence d
 **1. Exact Activation Memory Derivation**:
 For sequence length $S = 1{,}024$, batch size $B = 4$, and $H = 8$ attention heads at float32 precision ($4\text{ bytes/element}$):
 $$\text{Elements per Layer} = B \times H \times S \times S = 4 \times 8 \times 1{,}024^2 = 33{,}554{,}432 \text{ elements} \quad (\mathbf{33.55\text{M values}})$$
-$$\text{Memory per Layer} = 33{,}554{,}432 \times 4\text{ B} = 134{,}217{,}728\text{ B} = \mathbf{134.22\text{ MB}} \quad (128.0\text{ MiB})$$
+$$\text{Memory per Layer} = 33{,}554{,}432 \times 4\text{ B} = 134{,}217{,}728\text{ B} = \mathbf{134.22\text{ MB}}$$
 
 **2. Context Doubling Impact ($S \to 2{,}048$)**:
-$$\text{Memory}_{S=2048} = 4 \times 8 \times 2{,}048^2 \times 4\text{ B} = 536{,}870{,}912\text{ B} = \mathbf{536.87\text{ MB}} \quad (512.0\text{ MiB})$$
+$$\text{Memory}_{S=2048} = 4 \times 8 \times 2{,}048^2 \times 4\text{ B} = 536{,}870{,}912\text{ B} = \mathbf{536.87\text{ MB}}$$
 $$\text{Scaling Factor} = \frac{2{,}048^2}{1{,}024^2} = \mathbf{4\times \text{ (quadratic quadrupling)}}$$
 
 **3. Architectural Implications**:

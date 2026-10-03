@@ -156,7 +156,7 @@ For autoregressive generation, calculate the KV cache memory footprint across co
   For its full $S = 256$ positions: $256 \times 4\text{ KB} = 1.0\text{ MB}$ per sequence.
 
 - **Production LLaMA-3-8B ($L=32, H_{kv}=8, d_k=128, D_{kv}=1024, \text{BF16 } b=2$)**:
-  $$2 \times 32 \times 1024 \times 2\text{ B} = 131{,}072\text{ bytes per token} = 128\text{ KB/token}.$$
+  $$2 \times 32 \times 1024 \times 2\text{ B} = 131{,}072\text{ bytes per token} \approx 131\text{ KB/token}.$$
   For $S = 8{,}192$ context length: $8{,}192 \times 131{,}072\text{ B} = 1.07\text{ GB}$ per sequence.
   Serving a batch of 64 concurrent requests requires $64 \times 1.07\text{ GB} = 68.7\text{ GB}$ dedicated exclusively to the KV cache, far exceeding the model weights ($16\text{ GB}$).
 
@@ -196,7 +196,7 @@ Three details carry the design. The cursor `seq_pos` is shared by all layers, an
 
 Each layer's key buffer and value buffer are separate `Tensor` objects of shape `(batch_size, num_heads, max_seq_len, head_dim)`, so the write is a slice assignment along the sequence axis and the read is a slice of the same array. `reset` zeroes the buffers as well as the cursor, a pass over memory that the cursor alone would make unnecessary; the module pays it so that a stale row can never be mistaken for a live one while debugging.
 
-For batch size one, four layers of four heads of width 32 over 256 positions reserve $2 \times 4 \times 4 \times 256 \times 32 \times 4 = 1{,}048{,}576$ bytes. `get_memory_usage` divides by $1024^2$ and reports `total_mb=1.0`. That number measures reserved key/value storage only; temporary prefix copies and model parameters are separate.
+For batch size one, four layers of four heads of width 32 over 256 positions reserve $2 \times 4 \times 4 \times 256 \times 32 \times 4 = 1{,}048{,}576$ bytes. `get_memory_usage` divides by $10^6$ and reports `total_mb` of about 1.05. That number measures reserved key/value storage only; temporary prefix copies and model parameters are separate.
 
 ![**The KV cache buffer state machine**: Sizing key and value buffers up front for `max_seq_len` eliminates $O(S^2)$ memory reallocation during autoregressive generation. A write cursor `seq_pos` tracks the filled history. For each new token, keys and values are written into slot $t$, the past prefix is retrieved without causal masking, and the pointer advances once per sequence step.](assets/images/diagrams/18_kv-cache-state-machine.svg){#fig-kv-cache-state-machine width="100%" fig-alt="Diagram of KV cache pre-allocated buffer with write pointer seq_pos advancing token-by-token and single-query vector-matrix attention."}
 
