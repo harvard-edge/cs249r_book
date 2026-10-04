@@ -995,40 +995,50 @@ def main():
         # actually just rendered with literal `?@sec-...` refs. CI never hit this
         # because each volume builds in a fresh checkout. (Fixed 2026-09-07.)
         active_out = _active_output_dir()
-
-        def _rank(paths: list[Path]) -> list[Path]:
-            ordered = sorted(paths, key=lambda p: p.stat().st_mtime, reverse=True)
-            if active_out is not None:
-                for i, p in enumerate(ordered):
-                    if p.resolve() == active_out.resolve():
-                        return [ordered.pop(i)] + ordered
-            return ordered
-
-        html_candidates = _rank([p for p in build_root.glob("html*") if p.is_dir()])
-        epub_candidates = _rank([p for p in build_root.glob("epub*") if p.is_dir()])
+        if active_out is None and os.environ.get("QUARTO_PROJECT_OUTPUT_DIR"):
+            p = Path(os.environ["QUARTO_PROJECT_OUTPUT_DIR"])
+            if p.is_dir():
+                active_out = p
 
         epub_mapping = None
-        if html_candidates:
-            build_dir = html_candidates[0]
-            file_pattern = "*.html"
-            file_type = "HTML"
-        elif epub_candidates and list(epub_candidates[0].glob("*.xhtml")):
-            build_dir = epub_candidates[0]
-            file_pattern = "*.xhtml"
-            file_type = "XHTML (EPUB)"
-            print("📚 Building EPUB section mapping...")
-            epub_mapping = build_epub_section_mapping(build_dir)
-            print(f"   Found {len(epub_mapping)} section IDs across chapters")
-        elif Path("EPUB").exists() and list(Path("EPUB").rglob("*.xhtml")):
-            build_dir = Path(".")
-            file_pattern = "*.xhtml"
-            file_type = "XHTML (EPUB - extracted)"
-            print("📚 Building EPUB section mapping...")
-            epub_mapping = build_epub_section_mapping(Path("."))
-            print(f"   Found {len(epub_mapping)} section IDs across chapters")
+        if active_out is not None and active_out.is_dir():
+            build_dir = active_out
+            if list(build_dir.rglob("*.xhtml")):
+                file_pattern = "*.xhtml"
+                file_type = "XHTML (EPUB)"
+                epub_base = build_dir / "EPUB" if (build_dir / "EPUB").exists() else build_dir
+                epub_mapping = build_epub_section_mapping(epub_base)
+            else:
+                file_pattern = "*.html"
+                file_type = "HTML"
         else:
-            print("⚠️  No HTML or EPUB build directory found — skipping")
-            sys.exit(0)
+            def _rank(paths: list[Path]) -> list[Path]:
+                return sorted(paths, key=lambda p: p.stat().st_mtime, reverse=True)
+
+            html_candidates = _rank([p for p in build_root.glob("html*") if p.is_dir()])
+            epub_candidates = _rank([p for p in build_root.glob("epub*") if p.is_dir()])
+
+            if html_candidates:
+                build_dir = html_candidates[0]
+                file_pattern = "*.html"
+                file_type = "HTML"
+            elif epub_candidates and list(epub_candidates[0].glob("*.xhtml")):
+                build_dir = epub_candidates[0]
+                file_pattern = "*.xhtml"
+                file_type = "XHTML (EPUB)"
+                print("📚 Building EPUB section mapping...")
+                epub_mapping = build_epub_section_mapping(build_dir)
+                print(f"   Found {len(epub_mapping)} section IDs across chapters")
+            elif Path("EPUB").exists() and list(Path("EPUB").rglob("*.xhtml")):
+                build_dir = Path(".")
+                file_pattern = "*.xhtml"
+                file_type = "XHTML (EPUB - extracted)"
+                print("📚 Building EPUB section mapping...")
+                epub_mapping = build_epub_section_mapping(Path("."))
+                print(f"   Found {len(epub_mapping)} section IDs across chapters")
+            else:
+                print("⚠️  No HTML or EPUB build directory found — skipping")
+                sys.exit(0)
 
         files = list(build_dir.rglob(file_pattern))
         search_files = [build_dir / "search.json"] if (build_dir / "search.json").exists() else []
