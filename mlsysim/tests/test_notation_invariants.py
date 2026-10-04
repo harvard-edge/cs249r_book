@@ -13,7 +13,7 @@ _parser = MathTextParser("path")
 
 def test_notation_registry_loaded():
     """Verify notation registry loads non-empty collection of validated symbols."""
-    assert len(Notation) >= 490
+    assert len(Notation) >= 480
     assert Notation is Symbols
 
 
