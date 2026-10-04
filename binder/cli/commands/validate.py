@@ -12900,12 +12900,34 @@ class ValidateCommand:
             home = home_map(Path(*parts[: parts.index(vol) + 1]))
             text = f.read_text(encoding="utf-8")
             seen: Dict[str, int] = {}
+            # Pointer blocks that open while another fenced div (callout, figure,
+            # layout) is still open sit inside it; the rule puts them after it.
+            nested: set = set()
+            stack: List[str] = []
+            in_code = False
+            for n_line, raw in enumerate(text.split("\n"), 1):
+                if raw.startswith("```"):
+                    in_code = not in_code
+                    continue
+                if in_code:
+                    continue
+                fence = re.match(r"^(:{3,})\s*(\S.*)?$", raw)
+                if not fence:
+                    continue
+                if fence.group(2):
+                    if "margin-pointer" in fence.group(2) and stack:
+                        nested.add(n_line + 1)
+                    stack.append(fence.group(2))
+                elif stack:
+                    stack.pop()
             for b in block.finditer(text):
                 line = text.count("\n", 0, b.start()) + 2
                 body = b.group(1)
                 labs = label_re.findall(body)
                 problem = None
-                if body[0] not in "↩↪⇄":
+                if line in nested:
+                    problem = "pointer sits inside a callout or other fenced div; place it after the block"
+                elif body[0] not in "↩↪⇄":
                     problem = "pointer line must start with ↩, ↪, or ⇄"
                 elif len(labs) != 1:
                     problem = f"pointer cites {len(labs)} @sec- labels; exactly one is required"
@@ -12926,6 +12948,11 @@ class ValidateCommand:
                         problem = '↪ pointer wording uses "developed / measured / operationalized / enforced in"'
                     elif body[0] == "⇄" and not body.startswith("⇄ **Contrast:**"):
                         problem = "⇄ pointer must open with **Contrast:**"
+                    elif re.match(r"↪ \*\*(Byte layout|Protocol):\*\*", body) and tgt != "appendix":
+                        # 2026-10-04: labeled pointers name an appendix wire format or protocol.
+                        problem = "**Byte layout:** / **Protocol:** pointers must target an appendix section"
+                    elif re.search(r"\*\*(Byte layout|Protocol):\*\*", body) and not re.match(r"↪ \*\*(Byte layout|Protocol):\*\*", body):
+                        problem = "**Byte layout:** / **Protocol:** labels go only on ↪ pointers, right after the arrow"
                     elif lab in seen:
                         problem = f"second pointer to @{lab} in this chapter (first at line {seen[lab]})"
                     seen.setdefault(lab, line)
