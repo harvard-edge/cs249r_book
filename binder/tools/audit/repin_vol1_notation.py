@@ -14,9 +14,10 @@ PIN = ROOT / "binder" / "tools" / "audit" / "data" / "vol1_notation_pin.json"
 
 def digest() -> str:
     text = WRAPPER.read_text(encoding="utf-8")
-    parts = [(WRAPPER.parent / inc).resolve().read_text(encoding="utf-8")
-             for inc in re.findall(r"\{\{<\s*include\s+(\S+)\s*>\}\}", text)]
-    assembled = re.sub(r"<!--.*?-->", "", "\n\n".join(parts), flags=re.S)
+    body = re.sub(r"^---.*?---\s*", "", text, flags=re.S)
+    body = re.sub(r"^#\s+Notation[^\n]*\n", "", body)
+    assembled = re.sub(r"```\{=latex\}\s*\\part\{key:mainmatter\}\s*```", "", body, flags=re.S)
+    assembled = re.sub(r"<!--.*?-->", "", assembled, flags=re.S)
     assembled = re.sub(r"-{3,}", "---", assembled)
     return hashlib.sha256(re.sub(r"\s+", " ", assembled).strip().encode("utf-8")).hexdigest()
 

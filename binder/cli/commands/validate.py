@@ -816,6 +816,8 @@ class ValidateCommand:
                   note="iron-law symbols (BW, R_peak, L_lat, D_vol)"),
             Scope("registry", "_run_notation_registry",
                   note="the notation files themselves: no extension redefines a core symbol, no file defines a symbol two ways"),
+            Scope("coverage", "_run_notation_coverage",
+                  note="bidirectional volume coverage: every macro used in a volume is defined in its notation.qmd, and every notation.qmd row is used in that volume"),
             Scope("forms", "_run_notation_forms",
                   note="banned notation forms inside math (\\mathrm subscripts, P(.) probability, bare O(.) big-O, per-volume transpose, raw thousands commas); default since 2026-10-01, when vol1-4 reached zero"),
             Scope("vol1-print-pin", "_run_notation_vol1_pin",
@@ -12618,15 +12620,15 @@ class ValidateCommand:
         books = next((p for p in [root, *root.parents] if p.name == "books" and (p / "vol1").is_dir()),
                      root / "books")
         files = {
-            "core": [books / "shared/_includes/_notation_core_head.qmd", books / "shared/_includes/_notation_core_tail.qmd"],
-            "vol1": [books / "vol1/frontmatter/_notation_degradation.qmd"],
-            "vol2": [books / "vol2/frontmatter/_notation_scaling.qmd"],
-            "vol3": [books / "vol3/frontmatter/_notation_agentic.qmd"],
-            "vol4": [books / "vol4/frontmatter/_notation_physical.qmd"],
+            "vol1": [books / "vol1" / "frontmatter" / "notation.qmd"],
+            "vol2": [books / "vol2" / "frontmatter" / "notation.qmd"],
+            "vol3": [books / "vol3" / "frontmatter" / "notation.qmd"],
+            "vol4": [books / "vol4" / "frontmatter" / "notation.qmd"],
         }
+        core_owner = "vol1"
 
         def norm(s: str) -> str:
-            return re.sub(r"\\s+", " ", re.sub(r"[*$]", "", s.lower())).strip()
+            return re.sub(r"\s+", " ", re.sub(r"[*$]", "", s.lower())).strip()
 
         defs: Dict[str, Dict[str, list]] = defaultdict(lambda: defaultdict(list))
         for owner, paths in files.items():
@@ -12658,25 +12660,55 @@ class ValidateCommand:
         issues: List[ValidationIssue] = []
         for sym, owners in sorted(defs.items()):
             for owner, entries in owners.items():
-                meanings = {m for m, *_ in entries}
-                if len(meanings) > 1:
-                    _, f, line, _ = entries[-1]
-                    issues.append(ValidationIssue(
-                        file=f, line=line, code="notation-registry-duplicate",
-                        message=f"${sym}$ is defined {len(meanings)} ways in one file: " + " | ".join(sorted(meanings)),
-                        severity="error"))
-            if "core" in owners:
-                core_meanings = {m for m, *_ in owners["core"]}
+                if len(entries) > 1:
+                    meanings = {m for m, *_ in entries}
+                    if len(meanings) > 1:
+                        _, f, line, _ = entries[-1]
+                        issues.append(ValidationIssue(
+                            file=f, line=line, code="notation-registry-duplicate",
+                            message=f"${sym}$ is defined {len(meanings)} different ways in {owner}: " + " | ".join(sorted(meanings)),
+                            severity="error"))
+                    else:
+                        lines_str = ", ".join(str(e[2]) for e in entries)
+                        _, f, line, _ = entries[-1]
+                        issues.append(ValidationIssue(
+                            file=f, line=line, code="notation-registry-repeated-row",
+                            message=f"${sym}$ table row is duplicated {len(entries)} times in {owner} (lines {lines_str})",
+                            severity="error",
+                            suggestion="Remove duplicate rows to keep the notation chapter clean and prevent table bloat."))
+            if core_owner in owners:
+                core_meanings = {m for m, *_ in owners[core_owner]}
                 for owner, entries in owners.items():
-                    if owner == "core":
+                    if owner == core_owner:
                         continue
                     for meaning, f, line, row in entries:
-                        if meaning not in core_meanings and "core's" not in row:
+                        if meaning not in core_meanings and "core" not in row.lower():
                             issues.append(ValidationIssue(
                                 file=f, line=line, code="notation-registry-core-redefined",
                                 message=f"${sym}$ is a core symbol ({' | '.join(sorted(core_meanings))}); {owner} redefines it as '{meaning}'",
                                 severity="error",
                                 suggestion="Use the core meaning, choose a non-core symbol, or state in the row that it is the core's quantity."))
+
+        iron_law_symbols = [
+            (r"\Bandwidth", r"\text{BW}"),
+            (r"\DataVolume", r"D_{\text{vol}}"),
+            (r"\EfficiencyHw", r"\eta_{\text{hw}}"),
+            (r"\Latency", r"L_{\text{lat}}"),
+            (r"\Operations", "O"),
+            (r"\PeakRate", r"R_{\text{peak}}"),
+        ]
+        for macro, latex in iron_law_symbols:
+            norm_macro = re.sub(r"\s+", "", macro)
+            norm_latex = re.sub(r"\s+", "", latex)
+            for vol in ["vol1", "vol2", "vol3", "vol4"]:
+                has_sym = (norm_macro in defs and vol in defs[norm_macro]) or (norm_latex in defs and vol in defs[norm_latex])
+                if not has_sym:
+                    issues.append(ValidationIssue(
+                        file=f"books/{vol}/frontmatter/notation.qmd", line=1,
+                        code="notation-registry-core-missing",
+                        message=f"Iron Law core symbol ${macro}$ is missing from {vol}'s notation table",
+                        severity="error",
+                        suggestion=f"Include ${macro}$ in {vol}'s Iron Law table so all volumes share the core foundation."))
         return ValidationRunResult(
             name="notation-registry",
             description="Series notation files are mutually consistent",
@@ -12684,6 +12716,128 @@ class ValidateCommand:
             issues=issues,
             elapsed_ms=int((time.time() - t0) * 1000),
         )
+
+    def _run_notation_coverage(self, root: Path) -> ValidationRunResult:
+        """Enforce bidirectional notation coverage between chapters and notation.qmd.
+
+        For each volume:
+        1. (Under-coverage) Every notation macro from mlsysim.Notation used in the
+           volume's chapters must appear in that volume's frontmatter/notation.qmd tables.
+        2. (Over-coverage / Dead notation) Every notation macro listed in that volume's
+           frontmatter/notation.qmd tables must actually be used in that volume.
+        """
+        t0 = time.time()
+        books = next((p for p in [root, *root.parents] if p.name == "books" and (p / "vol1").is_dir()),
+                     root / "books")
+
+        vol_dirs: Dict[str, Path] = {}
+        for v in ["vol1", "vol2", "vol3", "vol4"]:
+            v_dir = books / v
+            if v_dir.is_dir() and (root == books or root == books.parent or root == v_dir or v_dir in root.parents or root in v_dir.parents or str(root).startswith(str(v_dir))):
+                vol_dirs[v] = v_dir
+
+        project_root = books.parent
+        if str(project_root / "mlsysim") not in sys.path:
+            sys.path.insert(0, str(project_root / "mlsysim"))
+        try:
+            from mlsysim.notation import Notation
+            all_macros = {s.macro for s in Notation.list()}
+        except Exception:
+            all_macros = set()
+
+        macro_aliases = {
+            r"\ActivationMemoryActivations": r"\ActivationMemory",
+            r"\WeightMemoryWeights": r"\WeightMemory",
+            r"\GradientMemoryGradients": r"\GradientMemory",
+            r"\BatchServiceTimeSvc": r"\BatchServiceTime",
+            r"\RequestTimeInSystemLat": r"\RequestTimeInSystem",
+            r"\TrainingDistributionZero": r"\TrainingDistribution",
+            r"\TsdfAccumulatedVolumeVox": r"\TsdfAccumulatedWeight",
+            r"\SamplingPeriodAndRate": r"\SamplingPeriod",
+            r"\TorqueAndBackemfConstants": r"\MotorTorqueConstant",
+            r"\WindingAndAmbientTemperature": r"\WindingTemperature",
+            r"\RotorAndLoadInertia": r"\RotorInertia",
+        }
+
+        issues: List[ValidationIssue] = []
+        files_checked = 0
+
+        for vol, v_dir in sorted(vol_dirs.items()):
+            not_file = v_dir / "frontmatter" / "notation.qmd"
+            if not not_file.exists():
+                continue
+            files_checked += 1
+
+            not_text = not_file.read_text(encoding="utf-8")
+            table_macros: Dict[str, int] = {}
+            for lineno, line in enumerate(not_text.splitlines(), 1):
+                if line.startswith("|") and not line.startswith("|---") and not line.startswith("| Symbol"):
+                    parts = [c.strip() for c in line.strip("|").split("|")]
+                    if parts:
+                        for m in re.finditer(r"\\([A-Za-z]+)", parts[0]):
+                            macro_name = "\\" + m.group(1)
+                            canon = macro_aliases.get(macro_name, macro_name)
+                            if canon in all_macros or not all_macros:
+                                table_macros[canon] = lineno
+
+            vol_usage: Dict[str, List[Tuple[str, int]]] = defaultdict(list)
+            for qmd in sorted(v_dir.rglob("*.qmd")):
+                files_checked += 1
+                qmd_text = qmd.read_text(encoding="utf-8")
+                qmd_rel = str(qmd.relative_to(project_root))
+                if "frontmatter/notation" in str(qmd):
+                    # For notation.qmd, remove symbol column so definitions do not self-match as usage
+                    clean_lines = []
+                    for ln in qmd_text.splitlines():
+                        if ln.startswith("|") and not ln.startswith("|---") and not ln.startswith("| Symbol"):
+                            parts = ln.strip("|").split("|")
+                            clean_lines.append("|".join(parts[1:]) if len(parts) > 1 else ln)
+                        else:
+                            clean_lines.append(ln)
+                    qmd_text = "\n".join(clean_lines)
+
+                for lineno, line in enumerate(qmd_text.splitlines(), 1):
+                    for m in re.finditer(r"\\([A-Za-z]+)(?![A-Za-z])", line):
+                        macro_name = "\\" + m.group(1)
+                        canon = macro_aliases.get(macro_name, macro_name)
+                        if canon in all_macros:
+                            vol_usage[canon].append((qmd_rel, lineno))
+
+            # 1. Under-coverage: Used in volume, but missing from notation table
+            missing = set(vol_usage.keys()) - set(table_macros.keys())
+            for m in sorted(missing):
+                first_file, first_line = vol_usage[m][0]
+                total_uses = len(vol_usage[m])
+                issues.append(ValidationIssue(
+                    file=str(not_file.relative_to(project_root)),
+                    line=1,
+                    code="notation-coverage-missing",
+                    message=f"Macro {m} is used {total_uses} times in {vol} (first at {first_file}:{first_line}) but is missing from its notation table",
+                    severity="error",
+                    suggestion=f"Add a row for {m} to books/{vol}/frontmatter/notation.qmd",
+                ))
+
+            # 2. Over-coverage: Defined in notation table, but unused in volume
+            unused = set(table_macros.keys()) - set(vol_usage.keys())
+            for m in sorted(unused):
+                line = table_macros[m]
+                issues.append(ValidationIssue(
+                    file=str(not_file.relative_to(project_root)),
+                    line=line,
+                    code="notation-coverage-unused",
+                    message=f"Macro {m} is defined in {vol}'s notation table (line {line}) but is never used in {vol}",
+                    severity="error",
+                    suggestion=f"Remove unused macro {m} from books/{vol}/frontmatter/notation.qmd to prevent table bloat",
+                ))
+
+        return ValidationRunResult(
+            name="notation-coverage",
+            description="Bidirectional coverage between chapters and notation tables",
+            files_checked=files_checked,
+            issues=issues,
+            elapsed_ms=int((time.time() - t0) * 1000),
+        )
+
 
     def _run_heading_blank_before(self, root: Path) -> ValidationRunResult:
         """Flag ATX headings that directly follow a non-blank line (added 2026-10-01).
@@ -13029,12 +13183,9 @@ class ValidateCommand:
         files = [wrapper]
         try:
             text = wrapper.read_text(encoding="utf-8")
-            parts = []
-            for inc in re.findall(r"\{\{<\s*include\s+(\S+)\s*>\}\}", text):
-                inc_path = (wrapper.parent / inc).resolve()
-                files.append(inc_path)
-                parts.append(inc_path.read_text(encoding="utf-8"))
-            assembled = "\n\n".join(parts)
+            body = re.sub(r"^---.*?---\s*", "", text, flags=re.S)
+            body = re.sub(r"^#\s+Notation[^\n]*\n", "", body)
+            assembled = re.sub(r"```\{=latex\}\s*\\part\{key:mainmatter\}\s*```", "", body, flags=re.S)
             assembled = re.sub(r"<!--.*?-->", "", assembled, flags=re.S)
             # Pipe-table padding and separator widths do not print.
             assembled = re.sub(r"-{3,}", "---", assembled)
