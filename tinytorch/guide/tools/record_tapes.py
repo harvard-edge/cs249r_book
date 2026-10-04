@@ -431,7 +431,7 @@ def record_tape(tape_path: Path, output_gif: Path, fps: int = 16) -> Path:
             print(f"  STDERR: {ff_proc.stderr}")
             sys.exit(1)
 
-        size_kb = output_gif.stat().st_size / 1024
+        size_kb = output_gif.stat().st_size / 1000
         print(f"  ✨ Generated {output_gif.name}: {size_kb:.1f} KB ({total_frames} frames)")
 
         # Also compile TrueColor MP4 for modern video player support with zero color quantization
@@ -458,7 +458,7 @@ def record_tape(tape_path: Path, output_gif: Path, fps: int = 16) -> Path:
 
         ff_mp4_proc = subprocess.run(ffmpeg_mp4_cmd, capture_output=True, text=True)
         if ff_mp4_proc.returncode == 0:
-            mp4_size_kb = output_mp4.stat().st_size / 1024
+            mp4_size_kb = output_mp4.stat().st_size / 1000
             print(f"  ✨ Generated {output_mp4.name}: {mp4_size_kb:.1f} KB (TrueColor H.264)")
         else:
             print(f"  ⚠️ MP4 compilation notice: {ff_mp4_proc.stderr[:120]}")

@@ -88,7 +88,7 @@ DevOps automates the integration and delivery of deterministic software. MLOps e
 
 1.  **Significance**: The cost of leaving this loop open manifests as stale predictions, silent accuracy degradation, and prolonged recovery times. Drift thresholds, retraining triggers, and mean time to recovery (MTTR) targets are deployment-specific quantities calibrated from prediction value, label delay, validation risk, and retraining compute expense. The central engineering discipline is the closed control loop: measure distribution shift, estimate staleness cost, trigger retraining only when expected accuracy gains outweigh execution cost and rollout risk, and validate replacement models before promotion.
 2.  **Distinction**: DevOps monitors functional correctness, system throughput, and infrastructure availability. MLOps introduces statistical controls for *predictive correctness*, which can decay silently while server uptime, request latency, and HTTP status codes remain completely healthy.
-3.  **Common pitfall**: A frequent misconception is that retraining on new data automatically resolves distribution shift. Retraining without diagnosing which distribution shifted—input features ($p(x)$), label conditionals ($p(y \mid x)$), or both—preserves underlying failure modes or amplifies collection bias. Under covariate shift and common support, sample reweighting or stratified resampling restores calibration; concept drift requires fresh labels and model adaptation.
+3.  **Common pitfall**: A frequent misconception is that retraining on new data automatically resolves distribution shift. Retraining without diagnosing which distribution shifted—input features ($\Distribution$), label conditionals ($\ConditionalDistribution$), or both—preserves underlying failure modes or amplifies collection bias. Under covariate shift and common support, sample reweighting or stratified resampling restores calibration; concept drift requires fresh labels and model adaptation.
 
 :::
 
@@ -919,7 +919,7 @@ As quantified by the consistency imperative in @sec-ml-operations-principle-3-co
 
 ##### Skew detection in CI/CD {#sec-ml-operations-skew-detection-cicd-e361}
 
-Continuous integration pipelines must validate feature consistency before deployment. @Lst-ops-validate-skew defines a gate that compares offline training distributions against online serving samples using the two-sample Kolmogorov-Smirnov test\index{Kolmogorov-Smirnov test!feature distribution}, blocking deployment if any feature diverges beyond a predefined threshold. The two-sample Kolmogorov-Smirnov test measures the maximum vertical distance between the empirical cumulative distribution functions (eCDFs) of the training and serving samples, $F_{P_0}$ and $F_{P_t}$: $\mathcal{D}_{\text{KS}} = \max_x |F_{P_0}(x) - F_{P_t}(x)|$. Setting the threshold to $0.1$ asserts that cumulative probabilities do not diverge by more than 10 percentage points at any value across the feature's support, providing a parameter-free divergence metric for continuous features without requiring empirical binning. This validation gate converts distribution divergence into an automated test failure prior to production rollout. However, the threshold must be calibrated against sample size and feature sensitivity; passing the distribution check validates statistical alignment but cannot verify semantic parity or point-in-time correctness.
+Continuous integration pipelines must validate feature consistency before deployment. @Lst-ops-validate-skew defines a gate that compares offline training distributions against online serving samples using the two-sample Kolmogorov-Smirnov test\index{Kolmogorov-Smirnov test!feature distribution}, blocking deployment if any feature diverges beyond a predefined threshold. The two-sample Kolmogorov-Smirnov test measures the maximum vertical distance between the empirical cumulative distribution functions (eCDFs) of the training and serving samples, $F_{\TrainingDistributionZero}$ and $F_{\CurrentDistribution}$: $\mathcal{D}_{\text{KS}} = \max_x |F_{\TrainingDistributionZero}(x) - F_{\CurrentDistribution}(x)|$. Setting the threshold to $0.1$ asserts that cumulative probabilities do not diverge by more than 10 percentage points at any value across the feature's support, providing a parameter-free divergence metric for continuous features without requiring empirical binning. This validation gate converts distribution divergence into an automated test failure prior to production rollout. However, the threshold must be calibrated against sample size and feature sensitivity; passing the distribution check validates statistical alignment but cannot verify semantic parity or point-in-time correctness.
 
 ::: {#lst-ops-validate-skew lst-cap="**Feature Skew Validation**: This function compares training and serving feature distributions using the Kolmogorov-Smirnov test, rejecting deployment when any feature diverges beyond a configurable threshold."}
 
@@ -1325,28 +1325,31 @@ class RetrainingInterval:
     gamma_pct_prose_str = fmt_percent(gamma, precision=0, commas=False, style='prose')
     # Display math (uses $$...$$) — wrap in MarkdownStr to preserve _math semantics.
     # Digit groups inside math use {,} so LaTeX does not set "5, 000".
-    retrain_cost_grp = format(int(retrain_cost), ',').replace(',', '{,}')
-    Q_grp = format(int(Q), ',').replace(',', '{,}')
+    _retrain_cost_grp = format(int(retrain_cost), ',').replace(',', '{,}')
+    _Q_grp = format(int(Q), ',').replace(',', '{,}')
     T_star_math = fmt_display_math(
-        f" T^* \\approx \\sqrt{{\\frac{{2 \\times {retrain_cost_grp}}}"
-        f"{{{Q_grp} \\times {V:.2f} \\times {A0:.2f} \\times {gamma:.2f}}}}}"
+        f" T^* \\approx \\sqrt{{\\frac{{2 \\times {_retrain_cost_grp}}}"
+        f"{{{_Q_grp} \\times {V:.2f} \\times {A0:.2f} \\times {gamma:.2f}}}}}"
         f" \\approx \\mathbf{{{int(T_star)}}}\\text{{ day}} "
     )
+
+RetrainingInterval.retrain_cost_grp = RetrainingInterval._retrain_cost_grp
+RetrainingInterval.Q_grp = RetrainingInterval._Q_grp
 ```
 
 ::: {#nbk-ml-ops-half-life-model .callout-notebook title="The optimal retraining interval"}
 
 **Problem**: How often should the team retrain the model to maximize profit?
 
-**Physics**: Model accuracy $\text{Accuracy}(t)$ decays at rate $\gamma$ due to data drift.
+**Physics**: Model accuracy $\AccuracyAtTime$ decays at rate $\gamma$ due to data drift.
 
 *   $Q_{\text{day}}$: Daily Query Volume (Traffic).
 *   $V$: Financial value per query for a unit change in accuracy fraction. With this convention, $V = \$0.50$ means 1 percentage point of accuracy is worth $\$0.005$ per query.
 *   $C$: Fixed cost of a retraining run, including compute and operational overhead.
 
 **Formula**: The approximation in @eq-optimal-retrain gives the optimal retraining interval $(T^*)$ that minimizes the sum of staleness losses and training costs:
-$$ T^* \approx \sqrt{\frac{2 \cdot C}{Q_{\text{day}} \cdot V \cdot \text{Accuracy}_0 \cdot \gamma}} $$ {#eq-optimal-retrain}
-**Math**: Consider a lighthouse fraud model ($\text{Accuracy}_0$ = `{python} RetrainingInterval.A0_str`):
+$$ T^* \approx \sqrt{\frac{2 \cdot C}{Q_{\text{day}} \cdot V \cdot \InitialAccuracyZero \cdot \gamma}} $$ {#eq-optimal-retrain}
+**Math**: Consider a lighthouse fraud model ($\InitialAccuracyZero$ = `{python} RetrainingInterval.A0_str`):
 
 *   **Traffic** $(Q_{\text{day}})$: `{python} RetrainingInterval.Q_str` transactions/day.
 *   **Utility** $(V)$: `{python} RetrainingInterval.V_usd_str` for a unit accuracy change.
@@ -1362,20 +1365,20 @@ Formalizing this optimization requires deriving the total cost function from fir
 
 ###### The staleness cost function {.unnumbered}
 
-Model accuracy can degrade over time, creating a staleness cost\index{Staleness cost!accuracy decay model}. For economic planning, a team may fit the observable impact over a stable local regime as an exponential decay process. Here $\gamma$ is a temporal decay rate under the assumption that measured degradation accumulates steadily; it is not determined by distribution divergence alone. The exponential model is a simplification that enables closed-form economic analysis. Let $\text{Accuracy}(t)$ represent accuracy at time $t$ since last training, and $\text{Accuracy}_0$ represent initial accuracy. @Eq-accuracy-decay captures this fitted scenario, where the rate $\gamma$ depends on domain volatility and observed outcomes:
-$$\text{Accuracy}(t) = \text{Accuracy}_0 \cdot e^{-\gamma t}$$ {#eq-accuracy-decay}
+Model accuracy can degrade over time, creating a staleness cost\index{Staleness cost!accuracy decay model}. For economic planning, a team may fit the observable impact over a stable local regime as an exponential decay process. Here $\gamma$ is a temporal decay rate under the assumption that measured degradation accumulates steadily; it is not determined by distribution divergence alone. The exponential model is a simplification that enables closed-form economic analysis. Let $\AccuracyAtTime$ represent accuracy at time $t$ since last training, and $\InitialAccuracyZero$ represent initial accuracy. @Eq-accuracy-decay captures this fitted scenario, where the rate $\gamma$ depends on domain volatility and observed outcomes:
+$$\AccuracyAtTime = \InitialAccuracyZero \cdot e^{-\gamma t}$$ {#eq-accuracy-decay}
 
-This temporal model and the divergence-based drift model in @sec-ml-operations-resource-management-performance-monitoring-afe7 describe the same decline along different axes; they agree when divergence grows roughly steadily with time over the fitted range. In balanced classification with $K$ classes, accuracy does not decay to zero but asymptotically approaches the random-guess floor $\text{Accuracy}_{\min} = 1/K$, yielding the bounded process $\text{Accuracy}(t) = \text{Accuracy}_{\min} + (\text{Accuracy}_0 - \text{Accuracy}_{\min}) \cdot e^{-\gamma t}$. The unshifted form in @eq-accuracy-decay is a local first-order linearization that enables closed-form integration; it is credible precisely in the early, small-loss operational regime ($\gamma t \ll 1$) that a proactive retraining interval is designed to enforce.
+This temporal model and the divergence-based drift model in @sec-ml-operations-resource-management-performance-monitoring-afe7 describe the same decline along different axes; they agree when divergence grows roughly steadily with time over the fitted range. In balanced classification with $K$ classes, accuracy does not decay to zero but asymptotically approaches the random-guess floor $\text{Accuracy}_{\min} = 1/K$, yielding the bounded process $\AccuracyAtTime = \text{Accuracy}_{\min} + (\InitialAccuracyZero - \text{Accuracy}_{\min}) \cdot e^{-\gamma t}$. The unshifted form in @eq-accuracy-decay is a local first-order linearization that enables closed-form integration; it is credible precisely in the early, small-loss operational regime ($\gamma t \ll 1$) that a proactive retraining interval is designed to enforce.
 
-The cost of staleness accumulates based on the daily query volume $Q_{\text{day}}$ and the value impact $V$ of a unit change in accuracy fraction. Integrating the instantaneous accuracy loss $(\text{Accuracy}_0 - \text{Accuracy}(t))$ over the retraining interval $T$ yields @eq-staleness-cost:
+The cost of staleness accumulates based on the daily query volume $Q_{\text{day}}$ and the value impact $V$ of a unit change in accuracy fraction. Integrating the instantaneous accuracy loss $(\InitialAccuracyZero - \AccuracyAtTime)$ over the retraining interval $T$ yields @eq-staleness-cost:
 $$
 \begin{array}{>{\displaystyle}c}
-\text{Staleness Cost}(T) = \int_0^T Q_{\text{day}} \cdot V \cdot (\text{Accuracy}_0 - \text{Accuracy}(t)) \, dt =
+\text{Staleness Cost}(T) = \int_0^T Q_{\text{day}} \cdot V \cdot (\InitialAccuracyZero - \AccuracyAtTime) \, dt =
 \\
-Q_{\text{day}} \cdot V \cdot \text{Accuracy}_0 \cdot \left(T - \frac{1-e^{-\gamma T}}{\gamma}\right)
+Q_{\text{day}} \cdot V \cdot \InitialAccuracyZero \cdot \left(T - \frac{1-e^{-\gamma T}}{\gamma}\right)
 \end{array}$$ {#eq-staleness-cost}
 
-The integral accumulates cost over time $t$ from 0 to $T$, and the closed form follows from substituting @eq-accuracy-decay for $\text{Accuracy}(t)$.
+The integral accumulates cost over time $t$ from 0 to $T$, and the closed form follows from substituting @eq-accuracy-decay for $\AccuracyAtTime$.
 
 ###### The retraining cost function {.unnumbered}
 
@@ -1397,20 +1400,20 @@ where $C_{\text{compute}}$ is the cost of the training run itself, $C_{\text{val
 The optimal retraining interval $T^*$ minimizes total cost per unit time, as @eq-optimal-interval shows:
 $$T^* = \operatorname{arg\,min}_T \frac{\text{Staleness Cost}(T) + \text{Retraining Cost}}{T}$$ {#eq-optimal-interval}
 
-Under the assumption $\gamma T \ll 1$, a Taylor expansion of the exponential yields the square-root approximation used in the earlier napkin calculation. Specifically, the second-order Taylor approximation $e^{-\gamma T} \approx 1 - \gamma T + \frac{1}{2}(\gamma T)^2$ reduces the bracketed staleness term $\left(T - \frac{1-e^{-\gamma T}}{\gamma}\right)$ to $\frac{1}{2}\gamma T^2$. Dividing total costs by $T$ yields an average cost rate of $\frac{1}{2} Q_{\text{day}} V \text{Accuracy}_0 \gamma T + \frac{C}{T}$, where $C$ is the Retraining Cost of @eq-retrain-cost; differentiating with respect to $T$ and setting the derivative to zero balances marginal staleness loss against amortized setup expense, directly yielding the square-root economic interval in @eq-optimal-retrain. With the parameters in @tbl-retraining-parameters, the approximation places the economic optimum near one day; an exact optimum requires minimizing @eq-optimal-interval without the expansion.
+Under the assumption $\gamma T \ll 1$, a Taylor expansion of the exponential yields the square-root approximation used in the earlier napkin calculation. Specifically, the second-order Taylor approximation $e^{-\gamma T} \approx 1 - \gamma T + \frac{1}{2}(\gamma T)^2$ reduces the bracketed staleness term $\left(T - \frac{1-e^{-\gamma T}}{\gamma}\right)$ to $\frac{1}{2}\gamma T^2$. Dividing total costs by $T$ yields an average cost rate of $\frac{1}{2} Q_{\text{day}} V \InitialAccuracyZero \gamma T + \frac{C}{T}$, where $C$ is the Retraining Cost of @eq-retrain-cost; differentiating with respect to $T$ and setting the derivative to zero balances marginal staleness loss against amortized setup expense, directly yielding the square-root economic interval in @eq-optimal-retrain. With the parameters in @tbl-retraining-parameters, the approximation places the economic optimum near one day; an exact optimum requires minimizing @eq-optimal-interval without the expansion.
 
 ```{=latex}
 \begingroup
 \renewcommand{\arraystretch}{1.2}
 ```
 
-| **Parameter**           |                   **Value**                    | **Description**                                                        |
-|:------------------------|:----------------------------------------------:|:-----------------------------------------------------------------------|
-| **$Q_{\text{day}}$**    |      `{python} RetrainingInterval.Q_str`       | Transactions per day                                                   |
-| **$V$**                 |    `{python} RetrainingInterval.V_usd_str`     | Value per query for a unit accuracy change                             |
-| **$\text{Accuracy}_0$** |      `{python} RetrainingInterval.A0_str`      | Initial accuracy                                                       |
-| **$\gamma$**            |    `{python} RetrainingInterval.gamma_str`     | Daily decay rate (`{python} RetrainingInterval.gamma_pct_str` per day) |
-| **$C$**                 | `{python} RetrainingInterval.retrain_cost_str` | Total retraining expense                                               |
+| **Parameter**              |                   **Value**                    | **Description**                                                        |
+|:---------------------------|:----------------------------------------------:|:-----------------------------------------------------------------------|
+| **$Q_{\text{day}}$**       |      `{python} RetrainingInterval.Q_str`       | Transactions per day                                                   |
+| **$V$**                    |    `{python} RetrainingInterval.V_usd_str`     | Value per query for a unit accuracy change                             |
+| **$\InitialAccuracyZero$** |      `{python} RetrainingInterval.A0_str`      | Initial accuracy                                                       |
+| **$\gamma$**               |    `{python} RetrainingInterval.gamma_str`     | Daily decay rate (`{python} RetrainingInterval.gamma_pct_str` per day) |
+| **$C$**                    | `{python} RetrainingInterval.retrain_cost_str` | Total retraining expense                                               |
 
 : **Retraining Decision Parameters**: Example values for a fraud detection system processing 1,000,000 transactions daily. {#tbl-retraining-parameters}
 
@@ -1807,7 +1810,7 @@ Distinguishing compute execution from memory or pipeline stalls requires evaluat
 
 : **GPU Utilization Patterns**: Different utilization signatures require different optimizations. High GPU utilization with low memory bandwidth suggests compute-bound workloads that benefit from parallelism. High memory bandwidth with moderate GPU utilization indicates memory-bound workloads requiring model optimization. {#tbl-gpu-utilization-patterns tbl-colwidths="[15,15,23,47]"}
 
-Each row maps to a term of the iron law of ML systems\index{Iron law of ML systems!production monitoring} (principle \ref{pri-iron-law}): the compute-bound signature to $O/(R_{\text{peak}} \cdot \eta_{\text{hw}})$, the memory-bound signature to $D_{\text{vol}}/\text{BW}$, and low utilization of both to the data pipeline, so a violated latency SLO tells the operator which term to investigate.
+Each row maps to a term of the iron law of ML systems\index{Iron law of ML systems!production monitoring} (principle \ref{pri-iron-law}): the compute-bound signature to $\Operations/(\PeakRate \cdot \EfficiencyHw)$, the memory-bound signature to $\DataVolume/\Bandwidth$, and low utilization of both to the data pipeline, so a violated latency SLO tells the operator which term to investigate.
 
 ##### Utilization targets by workload {.unnumbered}
 
@@ -2020,15 +2023,15 @@ Both forms of drift motivate a formal definition:
 
 ***Data drift***\index{Data Drift!definition} is a change in the input distribution $p(x)$. Covariate shift is the special case in which $p(x)$ changes while $p(y \mid x)$ remains stable. The broader drift taxonomy from @sec-data-engineering-detecting-responding-data-drift-509a also includes concept drift, in which $p(y \mid x)$ changes; both dimensions can occur together.
 
-1.  **Significance**: It violates the identical-distribution assumption and can cause accuracy to erode as the distributional divergence $(\mathcal{D}(P_t \lVert P_0))$ grows. Under covariate shift and support coverage assumptions, importance weighting or retraining with current labeled data may recover performance.
+1.  **Significance**: It violates the identical-distribution assumption and can cause accuracy to erode as the distributional divergence $(\StatisticalDivergence)$ grows. Under covariate shift and support coverage assumptions, importance weighting or retraining with current labeled data may recover performance.
 2.  **Distinction**: Model decay\index{Model decay!definition} describes observed quality decline over time; the model code need not change. Data drift is one possible external cause, alongside concept drift and changes in the surrounding pipeline.
-3.  **Common pitfall**: Monitoring model outputs alone may miss input drift or confuse benign output changes with quality loss. Input feature statistics ($\mathcal{D}(P_t \lVert P_0)$ via PSI\index{Population stability index!drift detection}, KS tests\index{Kolmogorov-Smirnov test!continuous drift}, or Wasserstein distance/Earth Mover's Distance (EMD)\index{Earth mover's distance!multi-dimensional drift}) can provide earlier warning than labeled performance because ground-truth feedback is often delayed.
+3.  **Common pitfall**: Monitoring model outputs alone may miss input drift or confuse benign output changes with quality loss. Input feature statistics ($\StatisticalDivergence$ via PSI\index{Population stability index!drift detection}, KS tests\index{Kolmogorov-Smirnov test!continuous drift}, or Wasserstein distance/Earth Mover's Distance (EMD)\index{Earth mover's distance!multi-dimensional drift}) can provide earlier warning than labeled performance because ground-truth feedback is often delayed.
 
 :::
 
 Because of drift, a deployed model behaves like *decaying inventory* rather than *static software*. **Statistical drift risk**\index{Statistical drift risk!definition} formalizes this hazard: operators model accuracy decline through empirical divergence, using the degradation equation of @eq-degradation,
-$$\text{Accuracy}(t) \approx \text{Accuracy}_0 - \lambda \cdot \mathcal{D}(P_t \lVert P_0)$$
-where $\lambda$ is fitted per deployment from historical degradation data, as the statistical drift diagnostic (principle \ref{pri-statistical-drift}) requires. While not a universal law, tracking distributional divergence $\mathcal{D}(P_t \lVert P_0)$ provides an operational leading indicator of degradation before accuracy losses compound into business impact.
+$$\AccuracyAtTime \approx \InitialAccuracyZero - \lambda \cdot \StatisticalDivergence$$
+where $\lambda$ is fitted per deployment from historical degradation data, as the statistical drift diagnostic (principle \ref{pri-statistical-drift}) requires. While not a universal law, tracking distributional divergence $\StatisticalDivergence$ provides an operational leading indicator of degradation before accuracy losses compound into business impact.
 
 @Fig-rotting-asset-curve\index{Rotting asset curve!accuracy decay} charts this operational trade-off over a 365-day deployment lifecycle, contrasting two distinct retraining cadences against a red dashed drift threshold (0.88 accuracy). Under a scheduled policy (orange sawtooth), the model retrains at rigid 90-day intervals, repeatedly dipping below the quality floor before each reset. In contrast, a triggered policy (green sawtooth) evaluates real-time divergence and initiates retraining the moment accuracy touches the threshold, enforcing a guaranteed performance floor without expending premature compute.
 
@@ -2184,8 +2187,8 @@ class ObservabilitySampling:
 
 ::: {#nbk-ml-ops-economics-observability .callout-notebook title="The economics of observability"}
 
-**Trade-off**: "Measure everything" is economically infeasible at scale. Let $N_{\text{series}}$ be the expanded series count, $f_{\text{sample}}$ the sampling frequency per series, $s_{\text{sample}}$ the bytes per sample, and $T_{\text{retention}}$ the retention duration; $C_{\text{ingest/sample}}$ and $C_{\text{storage/byte-time}}$ are provider-specific ingestion and storage prices. @Eq-observability-cost combines these terms into an operating cost rate:
-$$ \text{Cost rate} \approx N_{\text{series}} f_{\text{sample}} \left(C_{\text{ingest/sample}} + s_{\text{sample}} T_{\text{retention}} C_{\text{storage/byte-time}}\right) $$ {#eq-observability-cost}
+**Trade-off**: "Measure everything" is economically infeasible at scale. Let $N_{\text{series}}$ be the expanded series count, $f_{\text{sample}}$ the sampling frequency per series, $\SampleStorageSize$ the bytes per sample, and $T_{\text{retention}}$ the retention duration; $C_{\text{ingest/sample}}$ and $C_{\text{storage/byte-time}}$ are provider-specific ingestion and storage prices. @Eq-observability-cost combines these terms into an operating cost rate:
+$$ \text{Cost rate} \approx N_{\text{series}} f_{\text{sample}} \left(C_{\text{ingest/sample}} + \SampleStorageSize T_{\text{retention}} C_{\text{storage/byte-time}}\right) $$ {#eq-observability-cost}
 
 The product is an operating cost rate, not a one-time setup cost.
 
@@ -2279,10 +2282,10 @@ Production monitors require a documented zero-bin policy, such as Laplace smooth
 
 [^fn-psi-statistic-origin]: **PSI (population stability index)**\index{Population stability index!credit risk origin}: PSI is widely used in credit-risk scorecard monitoring to compare expected and observed binned populations; Yurdakul and Naranjo analyze its statistical properties [@yurdakul2020]. The common 0.1 and 0.25 bands are useful operational conventions, not universal statistical laws. ML operations adopted PSI because it works on binned categorical or continuous features and provides an interpretable drift score that non-specialists can review.
 
-For discrete or binned distributions, KL divergence\index{Kullback-Leibler divergence!distribution comparison} provides another comparison. Let $P_t$ be the monitored serving distribution and $P_0$ the training reference distribution, the same pair that the degradation equation compares. @Eq-kl-divergence defines $\mathcal{D}_{\text{KL}}$, one concrete choice for the generic divergence $\mathcal{D}(P_t \lVert P_0)$, with $\log$ taken as the natural logarithm, as in PSI:
-$$ \mathcal{D}_{\text{KL}}(P_t \lVert P_0) = \sum_{x} P_t(x) \log\left(\frac{P_t(x)}{P_0(x)}\right) $$ {#eq-kl-divergence}
+For discrete or binned distributions, KL divergence\index{Kullback-Leibler divergence!distribution comparison} provides another comparison. Let $\CurrentDistribution$ be the monitored serving distribution and $\TrainingDistribution$ the training reference distribution, the same pair that the degradation equation compares. @Eq-kl-divergence defines $\mathcal{D}_{\text{KL}}$, one concrete choice for the generic divergence $\StatisticalDivergence$, with $\log$ taken as the natural logarithm, as in PSI:
+$$ \mathcal{D}_{\text{KL}}(\CurrentDistribution \lVert \TrainingDistribution) = \sum_{x} \CurrentDistribution(x) \log\left(\frac{\CurrentDistribution(x)}{\TrainingDistribution(x)}\right) $$ {#eq-kl-divergence}
 
-Because KL divergence is asymmetric and becomes infinite when $P_t(x)>0$ where $P_0(x)=0$, operational monitors must preserve direction and apply an explicit support policy, such as smoothing previously unseen bins. Algebraically, PSI is identical to the symmetric Kullback-Leibler divergence (also known as Jeffreys divergence), expressing $\mathcal{D}_{\text{KL}}(\text{actual} \lVert \text{expected}) + \mathcal{D}_{\text{KL}}(\text{expected} \lVert \text{actual})$, which guarantees that probability shifts in either direction yield positive drift contributions. Similarly, Jensen-Shannon divergence avoids KL divergence's infinite explosion on non-overlapping distributions by evaluating divergence against the average distribution $\bar{P} = \frac{1}{2}(P_t + P_0)$, yielding a smooth, symmetric divergence bounded between 0 and 1 (using base-2 logarithms). A shift that is plainly visible on a histogram can still produce a small aggregate PSI, which is why thresholds must be calibrated per feature. In a recommendation system monitoring user age, a shift toward older cohorts produces the bin-by-bin PSI decomposition shown in @tbl-psi-age-example:
+Because KL divergence is asymmetric and becomes infinite when $\CurrentDistribution(x)>0$ where $\TrainingDistribution(x)=0$, operational monitors must preserve direction and apply an explicit support policy, such as smoothing previously unseen bins. Algebraically, PSI is identical to the symmetric Kullback-Leibler divergence (also known as Jeffreys divergence), expressing $\mathcal{D}_{\text{KL}}(\text{actual} \lVert \text{expected}) + \mathcal{D}_{\text{KL}}(\text{expected} \lVert \text{actual})$, which guarantees that probability shifts in either direction yield positive drift contributions. Similarly, Jensen-Shannon divergence avoids KL divergence's infinite explosion on non-overlapping distributions by evaluating divergence against the average distribution $\bar{P} = \frac{1}{2}(\CurrentDistribution + \TrainingDistribution)$, yielding a smooth, symmetric divergence bounded between 0 and 1 (using base-2 logarithms). A shift that is plainly visible on a histogram can still produce a small aggregate PSI, which is why thresholds must be calibrated per feature. In a recommendation system monitoring user age, a shift toward older cohorts produces the bin-by-bin PSI decomposition shown in @tbl-psi-age-example:
 
 ```{python}
 #| echo: false
@@ -2752,7 +2755,7 @@ The attribution plot identifies features the model relied on within the failing 
 
 Long-lived production models often accumulate features whose original owners, semantics, or intended use have faded. A feature can be deprecated in application code while still flowing through a feature store, training dataset, or serialized model input contract. The model may learn to ignore it, split signal across a duplicate, or depend on a preprocessing artifact that nobody still owns. Removing such a feature is therefore no longer a local cleanup: it becomes a compatibility change that can affect retraining, serving, monitoring, and downstream analysis.
 
-Features in ML systems do not disappear just because code owners stop thinking about them. Unused feature payload volume $D_{\text{vol}}$ inflates serialization overhead and consumes memory bandwidth $\text{BW}$ without improving accuracy. Without explicit deprecation policies and feature-store governance, models accumulate "dead code" that degrades $D_{\text{vol}}/\text{BW}$ and complicates debugging [@sculley2015hidden].
+Features in ML systems do not disappear just because code owners stop thinking about them. Unused feature payload volume $\DataVolume$ inflates serialization overhead and consumes memory bandwidth $\Bandwidth$ without improving accuracy. Without explicit deprecation policies and feature-store governance, models accumulate "dead code" that degrades $\DataVolume/\Bandwidth$ and complicates debugging [@sculley2015hidden].
 
 :::
 
@@ -3879,7 +3882,7 @@ Engineers often assume that standard CI/CD pipelines transfer directly to machin
 
 **Pitfall**: *Treating model deployment as a one-time event rather than an ongoing process.*
 
-Treating deployment as a terminal milestone\index{MLOps pitfalls!one-time deployment} assumes that deployed weights remain permanently aligned with the production input distribution. Unlike compiled binaries whose execution semantics remain fixed, model quality degrades as real-world distributions shift. Monitoring statistical indicators such as PSI (@sec-ml-operations-data-quality-monitoring-c6b6) provides an early signal of feature drift, distinguishing benign variance from actionable distribution change. Crossing a warning threshold requires operational diagnosis rather than unvalidated retraining. As established in @sec-ml-operations-training-pipelines-2dcf, scheduling updates is an economic balancing problem: the optimal retraining interval $T^* \approx \sqrt{\frac{2C}{Q_{\text{day}} \cdot V \cdot \text{Accuracy}_0 \cdot \gamma}}$ weighs the fixed compute and engineering cost $C$ against the business losses accumulated from daily query volume $Q_{\text{day}}$, unit accuracy value $V$, and staleness decay rate $\gamma$. Operating a production model demands treating deployment as a continuous control loop that balances monitoring signals against retraining economics.
+Treating deployment as a terminal milestone\index{MLOps pitfalls!one-time deployment} assumes that deployed weights remain permanently aligned with the production input distribution. Unlike compiled binaries whose execution semantics remain fixed, model quality degrades as real-world distributions shift. Monitoring statistical indicators such as PSI (@sec-ml-operations-data-quality-monitoring-c6b6) provides an early signal of feature drift, distinguishing benign variance from actionable distribution change. Crossing a warning threshold requires operational diagnosis rather than unvalidated retraining. As established in @sec-ml-operations-training-pipelines-2dcf, scheduling updates is an economic balancing problem: the optimal retraining interval $T^* \approx \sqrt{\frac{2C}{Q_{\text{day}} \cdot V \cdot \InitialAccuracyZero \cdot \gamma}}$ weighs the fixed compute and engineering cost $C$ against the business losses accumulated from daily query volume $Q_{\text{day}}$, unit accuracy value $V$, and staleness decay rate $\gamma$. Operating a production model demands treating deployment as a continuous control loop that balances monitoring signals against retraining economics.
 
 :::
 
@@ -3964,15 +3967,15 @@ class OuraCaseRecap:
 
 MLOps exists because machine learning systems introduce failure modes fundamentally absent from deterministic software. A crashed server or network timeout turns availability dashboards red immediately, alerting operators to take corrective action. A degraded model introduces a silent statistical failure mode: the serving infrastructure returns 200 OK responses within latency deadlines, yet prediction accuracy steadily erodes undetected. Machine learning operations keeps that decay observable by treating model quality as a dynamic runtime variable rather than a static deployment artifact.
 
-The five foundational principles (@sec-ml-operations-foundational-principles-44e6) provide an evaluation framework that applies regardless of scale or domain. Reproducibility through versioning addresses the root cause of many production incidents: untracked artifacts—including data versions, configuration shifts, and environment drift—that make debugging impossible and rollbacks unreliable. Separation of concerns contains the blast radius when changes occur, preventing the boundary erosion and correction cascades that transform local fixes into system-wide regressions. The consistency imperative targets training-serving skew, the silent accuracy erosion that occurs when feature computation diverges between offline training pipelines and online serving systems; feature stores centralize feature definitions and serving paths, though parity still requires continuous validation. Observable degradation transforms the abstract silent-failure problem into actionable alerts through layered monitoring that tracks data freshness, feature distributions, model outputs, and business metrics. Finally, cost-aware automation replaces arbitrary retraining schedules with a fitted staleness cost model $(T^* \approx \sqrt{\frac{2C}{Q_{\text{day}} \cdot V \cdot \text{Accuracy}_0 \cdot \gamma}})$ whose practical application depends on its underlying assumptions.
+The five foundational principles (@sec-ml-operations-foundational-principles-44e6) provide an evaluation framework that applies regardless of scale or domain. Reproducibility through versioning addresses the root cause of many production incidents: untracked artifacts—including data versions, configuration shifts, and environment drift—that make debugging impossible and rollbacks unreliable. Separation of concerns contains the blast radius when changes occur, preventing the boundary erosion and correction cascades that transform local fixes into system-wide regressions. The consistency imperative targets training-serving skew, the silent accuracy erosion that occurs when feature computation diverges between offline training pipelines and online serving systems; feature stores centralize feature definitions and serving paths, though parity still requires continuous validation. Observable degradation transforms the abstract silent-failure problem into actionable alerts through layered monitoring that tracks data freshness, feature distributions, model outputs, and business metrics. Finally, cost-aware automation replaces arbitrary retraining schedules with a fitted staleness cost model $(T^* \approx \sqrt{\frac{2C}{Q_{\text{day}} \cdot V \cdot \InitialAccuracyZero \cdot \gamma}})$ whose practical application depends on its underlying assumptions.
 
 Infrastructure components implement these principles across three critical operational boundaries. Feature stores and data versioning govern the data-model interface by reducing training-serving inconsistency. CI/CD pipelines and model registries govern the model-infrastructure interface by enforcing reproducibility and enabling rollback. Monitoring systems, incident response frameworks, and on-call practices govern the production-monitoring interface by making degradation observable and actionable. The retraining decision framework enables cost-aware automation by connecting measured degradation to economic thresholds. Domain constraints reshape *how* these principles are implemented without changing *which* principles matter: the Oura-inspired design uses the study's `{python} OuraCaseRecap.accel_only_pct_str` to `{python} OuraCaseRecap.enhanced_pct_str` offline accuracy improvement to motivate resource-aware validation and update controls rather than claiming an unverified production lifecycle. Similarly, ClinAIOps demonstrates why high-stakes clinical deployments require graceful-degradation and human-oversight controls, with three feedback loops functioning as architectural patterns rather than operational overhead.
 
 ::: {.callout-takeaways title="Perfectly available, perfectly wrong"}
 
-* **ML systems fail silently without outcome monitoring**: Model quality degrades as distributional divergence $\mathcal{D}(P_t \lVert P_0)$ grows, although divergence alone does not determine accuracy loss. Because a serving node can maintain perfect uptime while predictions fail, tracking ground-truth outcomes is essential rather than relying on server health checks alone.
+* **ML systems fail silently without outcome monitoring**: Model quality degrades as distributional divergence $\StatisticalDivergence$ grows, although divergence alone does not determine accuracy loss. Because a serving node can maintain perfect uptime while predictions fail, tracking ground-truth outcomes is essential rather than relying on server health checks alone.
 * **Training-serving skew corrupts inference without crashing**: Feature stores mitigate skew by unifying feature definitions and transformations across environments, but maintaining parity still requires continuous validation across online and offline data pipelines.
-* **Retraining is an engineering optimization, not a guess**: The fitted staleness cost model $(T^* \approx \sqrt{2C/(Q_{\text{day}} \cdot V \cdot \text{Accuracy}_0 \cdot \gamma)})$ balances retraining compute against prediction quality decay, connecting update cadence to quantitative economics under its stated assumptions.
+* **Retraining is an engineering optimization, not a guess**: The fitted staleness cost model $(T^* \approx \sqrt{2C/(Q_{\text{day}} \cdot V \cdot \InitialAccuracyZero \cdot \gamma)})$ balances retraining compute against prediction quality decay, connecting update cadence to quantitative economics under its stated assumptions.
 * **Deploy through graduated rollout with pretested rollback**: Canary, blue-green, and shadow deployments partition release risk across production traffic, backed by tiered rollback procedures that must be verified through regular operational drills.
 * **Stage infrastructure investments by system risk**: Instrumentation and continuous deployment form the initial operational baseline. High-consequence systems justify greater operational rigor; feature stores and automated retraining should be added as skew and scale demand.
 * **The five principles transfer across domains**: Reproducibility, separation of concerns, consistency, observable degradation, and cost-aware automation remain invariants across applications; domain constraints reshape only their concrete mechanisms and tool implementations.

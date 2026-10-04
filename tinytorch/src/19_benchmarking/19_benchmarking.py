@@ -4176,8 +4176,8 @@ def analyze_optimization_tradeoffs():
     def stored_mb(model):
         """Modeled packed INT8 bytes; actual dense parameter bytes otherwise."""
         if isinstance(model, QuantizedLinear):
-            return model.memory_usage()['quantized_bytes'] / (1024 * 1024)
-        return sum(p.data.nbytes for p in model.parameters()) / (1024 * 1024)
+            return model.memory_usage()['quantized_bytes'] / 1_000_000
+        return sum(p.data.nbytes for p in model.parameters()) / 1_000_000
 
     print("\nMeasured on one Linear(512, 256) layer:\n")
     print(f"{'Technique':<20} {'Latency (ms)':<14} {'Payload (MB)':<13} {'Output error'}")

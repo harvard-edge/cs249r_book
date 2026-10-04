@@ -26,9 +26,20 @@ from mlsysim.literature.registry import (
     Benchmarks,
     Chinchilla,
     Communication,
+    ComputeTrend,
+    Crypto,
+    DatacenterElectricity,
+    EdgeInferenceBenchmarks,
+    Fairness,
+    FleetOperations,
+    KaplanScalingLaws,
+    ResponsibleAIOverhead,
+    Surveys,
     Training,
+    TrainingRuns,
 )
 from mlsysim.models.registry import (
+    EmbodiedModels,
     GenerativeVisionModels,
     LanguageModels,
     RecommendationModels,
@@ -36,9 +47,13 @@ from mlsysim.models.registry import (
     TinyModels,
     VisionModels,
 )
+from mlsysim.sensors.registry import Sensors
+from mlsysim.actuators.registry import Actuators
+from mlsysim.embodied.registry import Embodied
+from mlsysim.agents.registry import Agents
 from mlsysim.ops.monitoring import Monitoring
 from mlsysim.ops.runtime import MemoryProtection, RuntimeOverheads
-from mlsysim.ops.training import TrainingRunOverheads
+from mlsysim.ops.training import Preemption, TrainingRunOverheads
 from mlsysim.platforms.registry import Platforms
 from mlsysim.reference_stats.registry import ReferenceStats
 from mlsysim.systems.registry import (
@@ -123,6 +138,7 @@ def audit_registries(*, scope_cloud: bool = False) -> list[str]:
             ("Models.RecommendationModels", RecommendationModels),
             ("Models.StateSpaceModels", StateSpaceModels),
             ("Models.GenerativeVisionModels", GenerativeVisionModels),
+            ("Models.EmbodiedModels", EmbodiedModels),
         ]
     )
     for prefix, reg in groups:
@@ -145,6 +161,46 @@ def audit_platforms() -> list[str]:
     for platform in _registry_nodes(Platforms):
         name = getattr(platform, "name", type(platform).__name__)
         issues.extend(_check_node(f"Platforms.{name}", platform))
+    return issues
+
+
+def audit_sensors() -> list[str]:
+    issues: list[str] = []
+    for sub in ("Camera", "LiDAR", "IMU", "SafetyScanner"):
+        reg = getattr(Sensors, sub)
+        for node in _registry_nodes(reg):
+            name = getattr(node, "name", type(node).__name__)
+            issues.extend(_check_node(f"Sensors.{sub}.{name}", node))
+    return issues
+
+
+def audit_actuators() -> list[str]:
+    issues: list[str] = []
+    for sub in ("HarmonicDrive", "QuasiDirectDrive", "Servo", "FramelessMotor", "PandaClassJoint", "HubMotor"):
+        reg = getattr(Actuators, sub)
+        for node in _registry_nodes(reg):
+            name = getattr(node, "name", type(node).__name__)
+            issues.extend(_check_node(f"Actuators.{sub}.{name}", node))
+    return issues
+
+
+def audit_embodied() -> list[str]:
+    issues: list[str] = []
+    for sub in ("Quadruped", "Humanoid", "Manipulator", "Drone", "AMR", "Vehicle", "ContinuousProcess", "MobileManipulator", "Scenario"):
+        reg = getattr(Embodied, sub)
+        for node in _registry_nodes(reg):
+            name = getattr(node, "name", type(node).__name__)
+            issues.extend(_check_node(f"Embodied.{sub}.{name}", node))
+    return issues
+
+
+def audit_agents() -> list[str]:
+    issues: list[str] = []
+    for sub in ("Coding", "Deliberation", "MultiAgent", "Interactive", "Research", "Remediation", "Support"):
+        reg = getattr(Agents, sub)
+        for node in _registry_nodes(reg):
+            name = getattr(node, "name", type(node).__name__)
+            issues.extend(_check_node(f"Agents.{sub}.{name}", node))
     return issues
 
 
@@ -208,6 +264,8 @@ def audit_infra_facilities() -> list[str]:
         for node in _registry_nodes(reg):
             name = getattr(node, "name", type(node).__name__)
             issues.extend(_check_node(f"{prefix}.{name}", node))
+    from mlsysim.infrastructure.registry import AIR_COOLING_LIMIT_KW
+    issues.extend(_check_node("Infrastructure.AIR_COOLING_LIMIT_KW", AIR_COOLING_LIMIT_KW))
     return issues
 
 
@@ -243,10 +301,24 @@ def audit_literature_sourced() -> list[str]:
         ("Literature.Chinchilla", Chinchilla),
         ("Literature.Communication", Communication),
         ("Literature.BatchSize", BatchSize),
+        ("Literature.Fairness", Fairness),
+        ("Literature.Surveys", Surveys),
+        ("Literature.Crypto", Crypto),
+        ("Literature.ResponsibleAIOverhead", ResponsibleAIOverhead),
+        ("Literature.TrainingRuns", TrainingRuns),
+        ("Literature.FleetOperations", FleetOperations),
+        ("Literature.DatacenterElectricity", DatacenterElectricity),
     ):
         for item in _registry_nodes(reg):
             if isinstance(item, Sourced):
                 issues.extend(_validate_provenance_record(f"{prefix}", item.provenance))
+    for prefix, series_cls in (
+        ("Literature.ComputeTrend", ComputeTrend),
+        ("Literature.EdgeInferenceBenchmarks", EdgeInferenceBenchmarks),
+        ("Literature.KaplanScalingLaws", KaplanScalingLaws),
+    ):
+        prov = getattr(series_cls, "provenance", None)
+        issues.extend(_validate_provenance_record(prefix, prov))
     return issues
 
 
@@ -265,6 +337,7 @@ def audit_ops_sourced() -> list[str]:
         ("Ops.RuntimeOverheads", RuntimeOverheads),
         ("Ops.MemoryProtection", MemoryProtection),
         ("Ops.TrainingRunOverheads", TrainingRunOverheads),
+        ("Ops.Preemption", Preemption),
     ):
         for item in _registry_nodes(reg):
             name = getattr(item, "name", type(item).__name__)
@@ -333,6 +406,10 @@ def main(argv: list[str] | None = None) -> int:
         issues.extend(audit_registries(scope_cloud=False))
         issues.extend(audit_datasets())
         issues.extend(audit_platforms())
+        issues.extend(audit_sensors())
+        issues.extend(audit_actuators())
+        issues.extend(audit_embodied())
+        issues.extend(audit_agents())
         issues.extend(audit_hardware_tech())
         issues.extend(audit_systems_topology())
         issues.extend(audit_systems_reference_values())

@@ -28,6 +28,14 @@ class MarkdownStr(str):
         """Jupyter notebook hook to render the object as Markdown."""
         return str.__str__(self)
 
+    @classmethod
+    def __get_pydantic_core_schema__(cls, source_type, handler):
+        from pydantic_core import core_schema
+        return core_schema.no_info_after_validator_function(
+            cls,
+            core_schema.str_schema(),
+        )
+
 
 def _get_markdown():
     """Return the MarkdownStr class. Retained for backward compatibility."""

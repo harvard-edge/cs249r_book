@@ -37,6 +37,27 @@ def local_render_env(root_dir: Path, base: Optional[Mapping[str, str]] = None) -
     if env.get("PYTHONPATH"):
         paths.append(env["PYTHONPATH"])
     env["PYTHONPATH"] = os.pathsep.join(paths)
+
+    venv_py = root / ".venv" / "bin" / "python"
+    if not venv_py.is_file():
+        try:
+            git_res = subprocess.run(
+                ["git", "-C", str(root), "rev-parse", "--path-format=absolute", "--git-common-dir"],
+                capture_output=True, text=True, timeout=2,
+            )
+            if git_res.returncode == 0:
+                common_git = Path(git_res.stdout.strip())
+                common_root = common_git.parent if common_git.name == ".git" else common_git
+                candidate = common_root / ".venv" / "bin" / "python"
+                if candidate.is_file():
+                    venv_py = candidate
+        except Exception:
+            pass
+    if venv_py.is_file():
+        if not env.get("QUARTO_PYTHON"):
+            env["QUARTO_PYTHON"] = str(venv_py.absolute())
+        env["PATH"] = f"{venv_py.parent.absolute()}:{env.get('PATH', '')}" if env.get("PATH") else str(venv_py.parent.absolute())
+
     return env
 
 

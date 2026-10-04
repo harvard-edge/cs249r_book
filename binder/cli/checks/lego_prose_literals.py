@@ -304,8 +304,11 @@ def _line_violations(
 
     hits: list[str] = []
     # Tier 1: calc lines mixing {python} refs with arithmetic operators.
-    if "{python}" in line and _is_walkthrough_line(line, in_callout):
-        hits.extend(_literal_hits(line, LITERAL_PATTERNS))
+    if "{python}" in line:
+        sentences = re.split(r"(?<=[.!?])\s+(?=[A-Z@\\])", line) if "\n" not in line else [line]
+        for sent in sentences:
+            if "{python}" in sent and _is_walkthrough_line(sent, in_callout):
+                hits.extend(_literal_hits(sent, LITERAL_PATTERNS))
 
     # Tier 2: setup/problem/bullet lines in a python-backed callout.
     if (

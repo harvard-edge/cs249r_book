@@ -123,15 +123,7 @@ def list_chapters() -> list[tuple[str, str, Path]]:
         contents = REPO  / "books" / vol
         for qmd in sorted(contents.glob("*/*.qmd")):
             # Skip non-chapter files (parts, frontmatter sub-files starting with _)
-            if qmd.name.startswith("_") and qmd.name not in (
-                "_notation_core_head.qmd",
-                "_notation_core_tail.qmd",
-                "_notation_degradation.qmd",
-                "_notation_distributed.qmd",
-                "_notation_scaling.qmd",
-                "_notation_agentic.qmd",
-                "_notation_physical.qmd",
-            ):
+            if qmd.name.startswith("_"):
                 continue
             # Use the chapter slug (filename stem) -- binder accepts that
             chapters.append((qmd.stem, vol, qmd))

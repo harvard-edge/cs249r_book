@@ -273,7 +273,7 @@ class FleetFailureRates:
     llama3_hours_between_str = fmt(round(llama3_hours_between, 1), precision=1, commas=False)
 ```
 
-At scale, failure is normal operation, not exceptional. This principle has direct consequences for scheduling: the scheduler must not merely tolerate failure but actively plan for it in every allocation decision. Component reliability does not change with cluster size, but the rate at which some component fails grows in proportion to the number of components. For $N$ GPUs that fail independently, each with mean time to failure $\text{MTTF}_{\text{GPU}}$ in hours:
+At scale, failure is normal operation, not exceptional. This principle has direct consequences for scheduling: the scheduler must not merely tolerate failure but actively plan for it in every allocation decision. Component reliability does not change with cluster size, but the rate at which some component fails grows in proportion to the number of components. For $N$ GPUs that fail independently, each with mean time to failure $\MeanTimeToFailure_{\text{GPU}}$ in hours:
 
 ::: {.column-margin}
 ![](images/svg/vol2_fleet_orchestration_margin_001.svg){width="100%" fig-alt="Fleet failure rate rises from single GPU to 10,000 GPUs."}
@@ -281,7 +281,7 @@ At scale, failure is normal operation, not exceptional. This principle has direc
 *Normal component failure rates make fleet failures routine.*
 :::
 
-$$ \text{Expected GPU failures per day} = N \times \frac{24}{\text{MTTF}_{\text{GPU}}} $$
+$$ \text{Expected GPU failures per day} = N \times \frac{24}{\MeanTimeToFailure_{\text{GPU}}} $$
 
 With the per-GPU planning value of `{python} FleetFailureRates.gpu_mtbf_str` hours used throughout this book, that is about `{python} FleetFailureRates.per_thousand_per_day_str` failures per day for every thousand GPUs. The `{python} FleetFailureRates.reference_gpus_str`-GPU reference cluster therefore loses a GPU roughly every `{python} FleetFailureRates.reference_mtbf_h_str` hours, and a `{python} FleetFailureRates.large_gpus_str`-GPU fleet sees about `{python} FleetFailureRates.large_per_day_str` GPU failures every day, as @tbl-cluster-mtbf-scaling tabulates. Host, network, power, and software faults add to these rates, so the GPU-only count is a floor. Production runs confirm the cadence: at sixteen times the reference cluster, the Llama 3 pretraining run on `{python} FleetFailureRates.llama3_gpus_str` H100 GPUs recorded `{python} FleetFailureRates.llama3_interruptions_str` unexpected interruptions in `{python} FleetFailureRates.llama3_days_str` days, about one every `{python} FleetFailureRates.llama3_hours_between_str` hours [@dubey2024llama].
 
@@ -344,15 +344,15 @@ class QueuingTheory:
 
 ::: {#nbk-fleet-orchestration-queuing-theory-gpu-clusters .callout-notebook title="The queuing theory of GPU clusters"}
 
-A GPU cluster can be modeled as an M/G/1 queue, where jobs arrive according to a Poisson process $(\lambda_{\text{arr}})$ and service times follow a general distribution $(G)$ with mean $1/\mu$ and standard deviation $\sigma$. The Pollaczek-Khinchine formula defines the expected waiting time in the queue $(W_q)$:
+A GPU cluster can be modeled as an M/G/1 queue, where jobs arrive according to a Poisson process $(\ArrivalRate)$ and service times follow a general distribution $(G)$ with mean $1/\mu$ and standard deviation $\sigma$. The Pollaczek-Khinchine formula defines the expected waiting time in the queue $(W_q)$:
 
-$$ \frac{W_q}{1/\mu} = \frac{\rho_{\text{serv}}}{1-\rho_{\text{serv}}} \cdot \frac{1+C_s^2}{2} $$
+$$ \frac{W_q}{1/\mu} = \frac{\ServingUtilization}{1-\ServingUtilization} \cdot \frac{1+C_s^2}{2} $$
 
-Here, $\rho_{\text{serv}} = \lambda_{\text{arr}}/\mu$ represents cluster utilization, $1/\mu$ is the average job duration, and $C_s = \sigma \mu$ is the **coefficient of variation**\index{Coefficient of Variation!definition} of job duration. The right-hand side is therefore the waiting time expressed as a multiple of the average job duration.
+Here, $\ServingUtilization = \ArrivalRate/\mu$ represents cluster utilization, $1/\mu$ is the average job duration, and $C_s = \sigma \mu$ is the **coefficient of variation**\index{Coefficient of Variation!definition} of job duration. The right-hand side is therefore the waiting time expressed as a multiple of the average job duration.
 
 In standard web serving, request service times are often approximated by an exponential distribution, yielding $C_s \approx 1$. In ML clusters, job durations follow a heavy-tailed distribution: a vast number of short debugging jobs (minutes) mixed with a few massive training runs (weeks). The representative $C_s=3$ calculation in this callout captures that variance without claiming a universal fleet constant. The impact on wait times is multiplicative. For the scheduling argument here, the single-server multiplier is sufficient; @sec-appdx-inference-scale-queuing-theory-batched-inference-bbf0 names the multi-server, finite-buffer M/G/c/K case, applies the same Pollaczek-Khinchine formula to batched serving queues, and checks the result against Little's Law.
 
-At `{python} QueuingTheory.rho_pct_str` utilization $(\rho_{\text{serv}} = 0.8)$: with an exponential workload $(C_s = 1)$, $W_q =$ `{python} QueuingTheory.wq_uniform_str` $\times$ the average job duration. With an illustrative high-variability workload $(C_s = 3)$, $W_q =$ `{python} QueuingTheory.wq_ml_str` $\times$ the average job duration. In this M/G/1 model, service-time variability multiplies waiting time at the same offered load. The example does not prescribe a universal GPU-utilization threshold or model gang placement directly. It explains why capacity planning needs the service-time distribution and queue-delay objective as well as average load.
+At `{python} QueuingTheory.rho_pct_str` utilization $(\ServingUtilization = 0.8)$: with an exponential workload $(C_s = 1)$, $W_q =$ `{python} QueuingTheory.wq_uniform_str` $\times$ the average job duration. With an illustrative high-variability workload $(C_s = 3)$, $W_q =$ `{python} QueuingTheory.wq_ml_str` $\times$ the average job duration. In this M/G/1 model, service-time variability multiplies waiting time at the same offered load. The example does not prescribe a universal GPU-utilization threshold or model gang placement directly. It explains why capacity planning needs the service-time distribution and queue-delay objective as well as average load.
 
 :::
 
@@ -1463,7 +1463,7 @@ Each action must respect the framework contract. The most consequential of the t
 
 ### Elastic scaling policies {#sec-fleet-orchestration-elastic-policies}
 
-Adding resources to a running job does not always accelerate time-to-convergence. The naive assumption that throughput scales linearly with worker count collapses under the weight of communication and synchronization overhead, requiring the scheduler to enforce elastic scaling policies based on empirical efficiency curves rather than resource availability alone. A job's scaling efficiency\index{Scaling Efficiency!operating regimes} $\eta_{\text{scaling}}(k)$, defined as the ratio of observed throughput at $k$ workers to the ideal linear speedup, typically passes through three regimes: a near-linear regime where per-worker computation dwarfs every fixed per-step cost, a sublinear regime where pipeline fill and drain and the unhidden part of gradient synchronization become a visible share of each step, and a saturation regime where those fixed costs rival the shrinking computation itself. A scheduler that blindly assigns available GPUs to a job in the saturation regime wastes cluster capacity that could have cleared the queue. Conversely, a job held below its **minimum viable scale**\index{Minimum Viable Scale!definition} runs each worker efficiently yet cannot finish within its deadline or declared resource contract.
+Adding resources to a running job does not always accelerate time-to-convergence. The naive assumption that throughput scales linearly with worker count collapses under the weight of communication and synchronization overhead, requiring the scheduler to enforce elastic scaling policies based on empirical efficiency curves rather than resource availability alone. A job's scaling efficiency\index{Scaling Efficiency!operating regimes} $\ScalingEfficiency(k)$, defined as the ratio of observed throughput at $k$ workers to the ideal linear speedup, typically passes through three regimes: a near-linear regime where per-worker computation dwarfs every fixed per-step cost, a sublinear regime where pipeline fill and drain and the unhidden part of gradient synchronization become a visible share of each step, and a saturation regime where those fixed costs rival the shrinking computation itself. A scheduler that blindly assigns available GPUs to a job in the saturation regime wastes cluster capacity that could have cleared the queue. Conversely, a job held below its **minimum viable scale**\index{Minimum Viable Scale!definition} runs each worker efficiently yet cannot finish within its deadline or declared resource contract.
 
 ::: {.column-margin}
 ![](images/svg/vol2_fleet_orchestration_margin_002.svg){width="100%" fig-alt="Concave elastic-scaling curve that rises steeply and then flattens toward saturation."}
@@ -1471,9 +1471,9 @@ Adding resources to a running job does not always accelerate time-to-convergence
 *Elastic scaling's benefit flattens into saturation.*
 :::
 
-@Fig-fleet-orchestration-scaling-efficiency-curve separates an empirical efficiency curve from an admission policy across two complementary panels: panel (a) tracks scaling efficiency ($\eta_{\text{scaling}}$) declining from `{python} ElasticScalingCurve.eff_min_str` at `{python} ElasticNodeRange.min_gpus_str` GPUs down to `{python} ElasticScalingCurve.eff_max_str` at `{python} ElasticNodeRange.max_gpus_str` GPUs and `{python} ElasticScalingCurve.eff_top_str` at `{python} ElasticScalingCurve.top_gpus_str` across the shaded $[256, 1024]$-GPU policy window, while panel (b) isolates the step-time breakdown, demonstrating that while tensor-parallel communication remains steady near 10 percent, the pipeline bubble expands rapidly to consume nearly 20 percent of step execution at 4,096 GPUs. Quadrupling from `{python} ElasticNodeRange.max_gpus_str` to `{python} ElasticScalingCurve.top_gpus_str` still raises throughput `{python} ElasticScalingCurve.thr_gain_mult_str`. Tensor-parallel communication shrinks along with each worker's computation, so its share of the step never rises above `{python} ElasticScalingCurve.tp_share_str`. The decline comes instead from pipeline fill and drain and unhidden gradient synchronization, which take roughly fixed time per step while each worker's share of the batch shrinks. The displayed $[256, 1024]$ range is therefore a policy choice, not an interval derived from these efficiencies alone. A minimum allocation could follow from a completion deadline or the job's declared resource contract. It does not follow from insufficient per-worker computation at smaller scale: with fixed global work, fewer workers generally perform more work each. The upper limit likewise requires comparing additional useful progress with resize cost and the value of serving queued jobs. A real scheduler must obtain those inputs from profiling and the workload's quality target.
+@Fig-fleet-orchestration-scaling-efficiency-curve separates an empirical efficiency curve from an admission policy across two complementary panels: panel (a) tracks scaling efficiency ($\ScalingEfficiency$) declining from `{python} ElasticScalingCurve.eff_min_str` at `{python} ElasticNodeRange.min_gpus_str` GPUs down to `{python} ElasticScalingCurve.eff_max_str` at `{python} ElasticNodeRange.max_gpus_str` GPUs and `{python} ElasticScalingCurve.eff_top_str` at `{python} ElasticScalingCurve.top_gpus_str` across the shaded $[256, 1024]$-GPU policy window, while panel (b) isolates the step-time breakdown, demonstrating that while tensor-parallel communication remains steady near 10 percent, the pipeline bubble expands rapidly to consume nearly 20 percent of step execution at 4,096 GPUs. Quadrupling from `{python} ElasticNodeRange.max_gpus_str` to `{python} ElasticScalingCurve.top_gpus_str` still raises throughput `{python} ElasticScalingCurve.thr_gain_mult_str`. Tensor-parallel communication shrinks along with each worker's computation, so its share of the step never rises above `{python} ElasticScalingCurve.tp_share_str`. The decline comes instead from pipeline fill and drain and unhidden gradient synchronization, which take roughly fixed time per step while each worker's share of the batch shrinks. The displayed $[256, 1024]$ range is therefore a policy choice, not an interval derived from these efficiencies alone. A minimum allocation could follow from a completion deadline or the job's declared resource contract. It does not follow from insufficient per-worker computation at smaller scale: with fixed global work, fewer workers generally perform more work each. The upper limit likewise requires comparing additional useful progress with resize cost and the value of serving queued jobs. A real scheduler must obtain those inputs from profiling and the workload's quality target.
 
-::: {#fig-fleet-orchestration-scaling-efficiency-curve fig-env="figure" fig-pos="htb" fig-cap="**Modeled scaling efficiency and elastic operating range**: (a) Scaling efficiency ($\eta_{\text{scaling}}$) of the 175B reference job from 64 to 4,096 GPUs, computed with `{python} ElasticScalingCurve.tp_str`-way tensor parallelism within each DGX H100 node, `{python} ElasticScalingCurve.pp_str` pipeline stages, HDR InfiniBand, and a fixed global batch of `{python} ElasticScalingCurve.batch_seqs_str` sequences. The shaded window is an assumed admission policy; efficiency alone establishes neither its minimum nor its maximum. (b) Share of each step lost to tensor-parallel communication, pipeline bubble, and exposed gradient synchronization. Lower efficiency does not imply that adding workers reduces throughput." fig-alt="Two-panel chart. Left, a line of modeled scaling efficiency against GPU count on a log scale from 64 to 4,096 GPUs, declining gently and then more steeply, with a shaded policy window from 256 to 1,024 GPUs. Right, stacked bars of the share of step time lost to tensor-parallel communication, pipeline bubble, and exposed gradient synchronization at each GPU count; the tensor-parallel share stays nearly flat while the pipeline bubble grows fastest."}
+::: {#fig-fleet-orchestration-scaling-efficiency-curve fig-env="figure" fig-pos="htb" fig-cap="**Modeled scaling efficiency and elastic operating range**: (a) Scaling efficiency ($\ScalingEfficiency$) of the 175B reference job from 64 to 4,096 GPUs, computed with `{python} ElasticScalingCurve.tp_str`-way tensor parallelism within each DGX H100 node, `{python} ElasticScalingCurve.pp_str` pipeline stages, HDR InfiniBand, and a fixed global batch of `{python} ElasticScalingCurve.batch_seqs_str` sequences. The shaded window is an assumed admission policy; efficiency alone establishes neither its minimum nor its maximum. (b) Share of each step lost to tensor-parallel communication, pipeline bubble, and exposed gradient synchronization. Lower efficiency does not imply that adding workers reduces throughput." fig-alt="Two-panel chart. Left, a line of modeled scaling efficiency against GPU count on a log scale from 64 to 4,096 GPUs, declining gently and then more steeply, with a shaded policy window from 256 to 1,024 GPUs. Right, stacked bars of the share of step time lost to tensor-parallel communication, pipeline bubble, and exposed gradient synchronization at each GPU count; the tensor-parallel share stays nearly flat while the pipeline bubble grows fastest."}
 
 ```{python}
 #| echo: false
@@ -1544,7 +1544,7 @@ ax.set_ylim(0.5, 1.05)
 ax.set_yticks([0.5, 0.6, 0.7, 0.8, 0.9, 1.0])
 ax.set_yticklabels([f"{t:.0%}" for t in [0.5, 0.6, 0.7, 0.8, 0.9, 1.0]])
 ax.set_xlabel("GPUs (log scale)")
-ax.set_ylabel(r"Scaling efficiency $\eta_{\text{scaling}}$")
+ax.set_ylabel(r"Scaling efficiency $\eta_{\mathrm{scaling}}$")
 ax.set_title("(a)", loc="left", fontsize=10)
 
 top = bottom.max() * 1.15
@@ -1593,6 +1593,9 @@ class ElasticScaling:
     tp_128 = 1.0  # scenario assumption: relative throughput multipliers
     tp_256 = 1.8  # scenario assumption
     tp_512 = 3.2  # scenario assumption
+    s1_gpus = 128
+    s2_gpus = 512
+    s3_gpus = 256
     # ┌── 2. EXECUTE ───────────────────────────────────────
     s1_work = window_h * tp_128
     s2_run_h = window_h - wait_h
@@ -1631,9 +1634,6 @@ class ElasticScaling:
     es_s1_math = fmt_math(rf"{window_h:.0f} \times {tp_128:.1f} = {s1_work:.0f}")
     es_s2_math = fmt_math(rf"{s2_run_h:.0f} \times {tp_512:.1f} = {s2_work:.0f}")
     es_s3p1_math = fmt_math(rf"{wait_h:.0f} \times {tp_128:.1f} = {s3_phase1:.0f}")
-    s1_gpus = 128
-    s2_gpus = 512
-    s3_gpus = 256
     es_s1_gpus_str = fmt_count(s1_gpus, commas=False, label="GPU")
     es_window_h_str = fmt_time(window_h, 'hour', precision=0, commas=False, style='word')
     es_wait_h_str = fmt_time(wait_h, 'hour', precision=0, commas=False, style='word')
@@ -1715,9 +1715,11 @@ class IdleCostAnchors:
     waste_low_str = fmt_usd(waste_low, scale="M", precision=1, commas=False)
     recovered_str = fmt_usd(recovered_floor, scale="M", precision=0)
     philly_util_str = fmt_percent(philly_util, precision=0, style="prose")
-    philly_util_pct_label = f"{philly_util * 100:.0f}%"
+    philly_util_pct_str = fmt_percent(philly_util, precision=0, style="symbol")
     perlmutter_jobs_str = fmt_percent(perlmutter_jobs, precision=0, style="prose")
     perlmutter_mem_str = fmt_percent(perlmutter_mem_threshold, precision=0, style="prose")
+
+IdleCostAnchors.philly_util_pct_label = IdleCostAnchors.philly_util_pct_str
 ```
 
 @Fig-cost-idle-gpus plots annual wasted cost against cluster size across four utilization trajectories (30, 50, 70, and 90 percent), bounding the financial loss within the shaded 30–70 percent operating range. At the highlighted callout marker of `{python} IdleCostAnchors.n_gpus_str` GPUs operating at `{python} IdleCostAnchors.util_low_str` utilization, annual waste reaches `{python} IdleCostAnchors.waste_low_str` under the chapter's `{python} IdleCostAnchors.gpu_hour_str`/GPU-hour accounting scenario. Published measurements from production clusters show that underutilization is a real operational problem: Microsoft's Philly cluster study [@jeon2019analysis] measured mean GPU utilization of approximately `{python} IdleCostAnchors.philly_util_str`, and @li2023 found that `{python} IdleCostAnchors.perlmutter_jobs_str` of jobs on NERSC's Perlmutter supercomputer used less than `{python} IdleCostAnchors.perlmutter_mem_str` of allocated GPU memory. The 30 to 70 percent shaded band in the figure is an illustrative operating range for the cost model, not a universal empirical claim about all production clusters. Moving from `{python} IdleCostAnchors.util_low_str` to `{python} IdleCostAnchors.util_mid_str` utilization on a `{python} IdleCostAnchors.n_gpus_str`-GPU cluster, the improvement priced at the start of the chapter, recovers over `{python} IdleCostAnchors.recovered_str` annually in equivalent capacity value under this pricing scenario. Cash savings require avoiding billed usage or a planned purchase.
@@ -2439,6 +2441,7 @@ class DiurnalGpuShift:
     dynamic_active = serving_avg + training_fixed + reclaimed
     dynamic_util_pct = dynamic_active / fleet * 100
     annual_value = reclaimed * gpu_rate * HOURS_PER_YEAR * USD
+    ds_unallocated = fleet - serving_peak - training_fixed
     # ┌── 3. GUARD ─────────────────────────────────────────
     check(static_active == 768, f"Static: expected 768, got {static_active}")
     check(static_util_pct == 75, f"Static util: expected 75%, got {static_util_pct}")
@@ -2464,7 +2467,6 @@ class DiurnalGpuShift:
     ds_serving_reclaimable_str = fmt_count(serving_reclaimable, commas=False, label="GPU")
     ds_training_full_util_str = fmt_percent(1.0, precision=0, style='prose')
     ds_peak_demand_str = fmt_count(peak_demand, commas=False, label="GPU")
-    ds_unallocated = fleet - serving_peak - training_fixed
     ds_unallocated_str = fmt_count(ds_unallocated, commas=False, label="GPU")
 ```
 
@@ -3015,7 +3017,7 @@ The zombie job\index{Cluster Utilization!zombie jobs} represents the most egregi
 
 The data starvation\index{Cluster Utilization!data starvation} pattern manifests as a high-frequency sawtooth wave in GPU utilization, where the device oscillates between 100 percent load (forward/backward pass) and 0 percent load (waiting for the next batch). While the average utilization might appear acceptable at 60 to 70 percent, the GPU is effectively idling for a third of its life. This occurs when the CPU-bound data pipeline cannot sustain the throughput required by the GPU, a common scenario in computer vision where JPEG decoding and augmentation saturate host CPUs. A timeline that aligns these idle intervals with input waits supports this diagnosis; utilization variance alone does not identify the cause. The remedy depends on whether decoding, storage, or transfer limits the input path.
 
-The communication bottleneck\index{Cluster Utilization!communication bottleneck} reveals itself through periodic, synchronized drops in SM utilization across all ranks in a distributed group. For the 175B model, synchronizing gradients for `{python} GpuSharingDensity.large_weights_gb_str` of parameters requires massive bandwidth; if the network is undersized or congested, the GPUs spend more time waiting for AllReduce to complete than performing computation. The diagnostic metric is the step time ratio. If total iteration time exceeds 1.5$\times$ compute-only time (forward plus backward passes in isolation), non-compute overhead exceeds 0.5$\times$ compute time, which is material but not dominant. Under the simplified decomposition $T_{\text{step}} = T_{\text{compute}} + T_{\text{comm}}$, communication exceeds computation only when the ratio is greater than 2$\times$; profiling must also separate communication from input and runtime overhead. Remediation requires topology-aware placement to keep traffic on high-bandwidth switch tiers or algorithmic changes like gradient accumulation to increase the compute-to-communication ratio.
+The communication bottleneck\index{Cluster Utilization!communication bottleneck} reveals itself through periodic, synchronized drops in SM utilization across all ranks in a distributed group. For the 175B model, synchronizing gradients for `{python} GpuSharingDensity.large_weights_gb_str` of parameters requires massive bandwidth; if the network is undersized or congested, the GPUs spend more time waiting for AllReduce to complete than performing computation. The diagnostic metric is the step time ratio. If total iteration time exceeds 1.5$\times$ compute-only time (forward plus backward passes in isolation), non-compute overhead exceeds 0.5$\times$ compute time, which is material but not dominant. Under the simplified decomposition $T_{\text{step}} = \IronlawTermTimesCompute + T_{\text{comm}}$, communication exceeds computation only when the ratio is greater than 2$\times$; profiling must also separate communication from input and runtime overhead. Remediation requires topology-aware placement to keep traffic on high-bandwidth switch tiers or algorithmic changes like gradient accumulation to increase the compute-to-communication ratio.
 
 The memory fragmentation\index{Cluster Utilization!memory fragmentation} trap is an insidious failure mode in long-running inference servers. A 175B model serving diverse request lengths can end up with 80 percent of its HBM allocated to the KV cache, yet be unable to accept a new request because the free memory is scattered in small, noncontiguous blocks. The GPU appears full to the scheduler but underutilized in terms of throughput. This resembles the classic heap fragmentation problem but with higher stakes: a single restart to defragment dumps hundreds of gigabytes of state. Monitoring the ratio of requested token slots to allocated memory bytes often exposes this gap, which paged cache allocators address by decoupling logical sequence contiguity from physical memory layout, recovering usable memory. The throughput benefit depends on request lengths, batching, and the allocator baseline.
 
@@ -3135,7 +3137,7 @@ Scheduler configuration requires continuous tuning as workloads evolve. Default 
 
 **Pitfall**: *Treating high utilization as proof of cluster health.*
 
-A high allocated-GPU percentage does not establish that the cluster has enough headroom to admit new work promptly. A simple M/M/1 queue illustrates the pressure near saturation: mean queue wait divided by mean service time is $\rho_{\text{serv}}/(1-\rho_{\text{serv}})$, where $\rho_{\text{serv}}$ is offered service load relative to service capacity. This model assumes Poisson arrivals, exponential service times, and a single server; it does not turn a GPU-busy percentage into a prediction for a gang-scheduled fleet. Real headroom targets depend on arrival bursts, job sizes, placement constraints, and the queue-delay or serving-latency objective. The operator must measure those outcomes instead of applying a universal utilization threshold.
+A high allocated-GPU percentage does not establish that the cluster has enough headroom to admit new work promptly. A simple M/M/1 queue illustrates the pressure near saturation: mean queue wait divided by mean service time is $\ServingUtilization/(1-\ServingUtilization)$, where $\ServingUtilization$ is offered service load relative to service capacity. This model assumes Poisson arrivals, exponential service times, and a single server; it does not turn a GPU-busy percentage into a prediction for a gang-scheduled fleet. Real headroom targets depend on arrival bursts, job sizes, placement constraints, and the queue-delay or serving-latency objective. The operator must measure those outcomes instead of applying a universal utilization threshold.
 
 Recognizing these fallacies prevents platform teams from chasing false optimizations that look good on dashboards but degrade developer velocity. The core orchestration principles that successfully navigate these trade-offs share a common thread: they treat scheduling as an engineering discipline, not an administrative function.
 

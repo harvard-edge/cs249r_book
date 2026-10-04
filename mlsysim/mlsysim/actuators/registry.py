@@ -22,7 +22,10 @@ class HarmonicDrives(Registry):
         internal_resistance=0.45 * ureg.ohm,
         max_current=12.0 * ureg.ampere,
         mass=0.68 * ureg.kg,
-        metadata=Metadata(provenance=pc.HARMONIC_DRIVE_CSG),
+        metadata=Metadata(
+            provenance=pc.HARMONIC_DRIVE_CSG,
+            description="Harmonic Drive CSG-17-50 zero-backlash robotic joint (50:1 gear ratio, 21 N·m rated torque).",
+        ),
     )
 
     CSG_20_100 = ActuatorJoint(
@@ -36,7 +39,10 @@ class HarmonicDrives(Registry):
         internal_resistance=0.55 * ureg.ohm,
         max_current=15.0 * ureg.ampere,
         mass=0.98 * ureg.kg,
-        metadata=Metadata(provenance=pc.HARMONIC_DRIVE_CSG),
+        metadata=Metadata(
+            provenance=pc.HARMONIC_DRIVE_CSG,
+            description="Harmonic Drive CSG-20-100 zero-backlash robotic joint (100:1 gear ratio, 40 N·m rated torque).",
+        ),
     )
 
     CSG_25_50 = ActuatorJoint(
@@ -50,7 +56,10 @@ class HarmonicDrives(Registry):
         internal_resistance=0.60 * ureg.ohm,
         max_current=18.0 * ureg.ampere,
         mass=1.5 * ureg.kg,
-        metadata=Metadata(provenance=pc.HARMONIC_DRIVE_CSG),
+        metadata=Metadata(
+            provenance=pc.HARMONIC_DRIVE_CSG,
+            description="Harmonic Drive CSG-25-50 zero-backlash robotic joint (50:1 gear ratio, 51 N·m rated torque).",
+        ),
     )
 
 
@@ -71,7 +80,10 @@ class FramelessMotors(Registry):
         rotor_inertia=0.321e-4 * (ureg.kg * ureg.meter**2),   # 0.321 kg cm^2
         pole_pairs=10,
         mass=0.330 * ureg.kg,
-        metadata=Metadata(provenance=pc.TQ_ROBODRIVE_ILM),
+        metadata=Metadata(
+            provenance=pc.TQ_ROBODRIVE_ILM,
+            description="TQ-RoboDrive ILM 70x18 frameless brushless servo kit (star-serial winding, 1.25 N·m rated torque).",
+        ),
     )
 
 
@@ -96,7 +108,10 @@ class QuasiDirectDrives(Registry):
         internal_resistance=0.18 * ureg.ohm,
         max_current=60.0 * ureg.ampere,
         mass=1.9 * ureg.kg,
-        metadata=Metadata(provenance=pc.UNITREE_M107_MOTOR),
+        metadata=Metadata(
+            provenance=pc.UNITREE_M107_MOTOR,
+            description="Unitree M107 high-torque quasi-direct-drive joint motor for dynamic legged robotics (360 N·m peak).",
+        ),
     )
 
     TMotor_AK80_9 = ActuatorJoint(
@@ -110,7 +125,10 @@ class QuasiDirectDrives(Registry):
         internal_resistance=0.15 * ureg.ohm,
         max_current=24.0 * ureg.ampere,
         mass=0.485 * ureg.kg,
-        metadata=Metadata(provenance=pc.TMOTOR_AK80_9),
+        metadata=Metadata(
+            provenance=pc.TMOTOR_AK80_9,
+            description="T-Motor AK80-9 low-gear-ratio quasi-direct-drive dynamic actuator (9:1 ratio, 18 N·m peak).",
+        ),
     )
 
 
@@ -133,7 +151,10 @@ class PandaClassJoints(Registry):
         rotor_inertia=(FramelessMotors.TQ_ILM70x18.rotor_inertia + _CSG25_INPUT_INERTIA).to(ureg.kg * ureg.meter**2),
         internal_resistance=FramelessMotors.TQ_ILM70x18.loss_resistance,  # copper-loss resistance, amplitude-invariant i_q
         mass=1.5 * ureg.kg + FramelessMotors.TQ_ILM70x18.mass,
-        metadata=Metadata(provenance=pc.FRANKA_CLASS_STRAIN_WAVE_JOINT),
+        metadata=Metadata(
+            provenance=pc.FRANKA_CLASS_STRAIN_WAVE_JOINT,
+            description="Franka Panda-class strain-wave joint stand-in pairing CSG-25-50 gear unit with TQ-RoboDrive ILM 70x18.",
+        ),
     )
 
 
@@ -157,7 +178,10 @@ class HubMotors(Registry):
         mass=9.5 * ureg.kg,
         load_rating_per_pair=300.0 * ureg.kg,
         rotor_inertia=None,  # needs source: the datasheet does not publish it
-        metadata=Metadata(provenance=pc.ZLTECH_ZLLG10ASM800),
+        metadata=Metadata(
+            provenance=pc.ZLTECH_ZLLG10ASM800,
+            description="ZLTECH ZLLG10ASM800-48 10-inch direct-drive wheel hub servo motor for industrial AMRs (60 N·m peak).",
+        ),
     )
 
 
@@ -173,7 +197,10 @@ class Servos(Registry):
         internal_resistance=1.2 * ureg.ohm,
         max_current=2.3 * ureg.ampere,
         mass=0.082 * ureg.kg,
-        metadata=Metadata(provenance=pc.DYNAMIXEL_XM430),
+        metadata=Metadata(
+            provenance=pc.DYNAMIXEL_XM430,
+            description="ROBOTIS Dynamixel XM430-W350 smart networked bus servo actuator (353.5:1 ratio, 4.1 N·m peak).",
+        ),
     )
 
 

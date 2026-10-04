@@ -48,7 +48,10 @@ class Platforms(Registry):
         ram_range=f"{CLOUD_MEM_GIB.to('GiB').magnitude:.0f}+ GiB",
         compute_threshold=1000 * (TFLOPs / second),
         bandwidth_threshold=1000 * (GB / second),
-        metadata=Metadata(provenance=pc.DEPLOYMENT_ENVELOPES),
+        metadata=Metadata(
+            provenance=pc.DEPLOYMENT_ENVELOPES,
+            description="Cloud datacenter deployment envelope (100+ GiB RAM, 10 TB storage, sub-second latency budget).",
+        ),
     )
     Edge = PlatformEnvelope(
         name="Edge",
@@ -58,7 +61,10 @@ class Platforms(Registry):
         latency_range_ms=EDGE_LATENCY_RANGE_MS,
         compute_threshold=1 * (PFLOP / second),
         bandwidth_threshold=270 * (GB / second),
-        metadata=Metadata(provenance=pc.DEPLOYMENT_ENVELOPES),
+        metadata=Metadata(
+            provenance=pc.DEPLOYMENT_ENVELOPES,
+            description="Edge server and robotic compute envelope (32 GiB RAM, 1 TB storage, 50 ms latency budget).",
+        ),
     )
     Mobile = PlatformEnvelope(
         name="Mobile",
@@ -69,7 +75,10 @@ class Platforms(Registry):
         ram_range=MOBILE_RAM_RANGE_GB,
         storage_range=MOBILE_STORAGE_RANGE,
         tdp_range_w=MOBILE_TDP_RANGE_W,
-        metadata=Metadata(provenance=pc.DEPLOYMENT_ENVELOPES),
+        metadata=Metadata(
+            provenance=pc.DEPLOYMENT_ENVELOPES,
+            description="Smartphone and handheld device envelope (8-16 GB RAM, 256 GB storage, 3-5 W TDP).",
+        ),
     )
     Tiny = PlatformEnvelope(
         name="TinyML",
@@ -80,5 +89,8 @@ class Platforms(Registry):
         ram_range=f"{TINY_MEM_KIB.to('KiB').magnitude:.0f} KiB",
         compute_threshold=1 * TOPS,
         power_threshold=1 * milliwatt,
-        metadata=Metadata(provenance=pc.DEPLOYMENT_ENVELOPES),
+        metadata=Metadata(
+            provenance=pc.DEPLOYMENT_ENVELOPES,
+            description="Microcontroller and sub-watt TinyML envelope (512 KiB RAM, 4 MiB flash, milliwatt power).",
+        ),
     )

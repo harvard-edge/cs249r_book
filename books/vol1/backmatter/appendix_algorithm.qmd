@@ -10,7 +10,7 @@ A profile showing low utilization is often misdiagnosed as a hardware limit when
 
 This appendix is designed as a reference. Reach for it when translating a profiler symptom ("slow matmul," "shape mismatch," "OOM during training") into a concrete computational or memory cause.
 
-Conventions used here follow the book-wide notation (for example, $B$ is reserved for batch size and $\text{BW}$ denotes bandwidth).
+Conventions used here follow the book-wide notation (for example, $B$ is reserved for batch size and $\Bandwidth$ denotes bandwidth).
 
 - **When general matrix multiply (GEMM) kernels are slow**: Use @sec-appdx-algorithm-foundations-general-matrix-multiply-gemm-b55d and compare intensity to the hardware's ridge point.
 - **When memory blows up in training**: Use @sec-appdx-algorithm-foundations-true-cost-training-memory-e54e and the training memory decomposition.
@@ -188,12 +188,12 @@ A shape mismatch crash, a silently wrong broadcast, a kernel running at 5 percen
 \renewcommand{\arraystretch}{1.6}
 ```
 
-| **Layer type**                |        **Output shape**       |                                 **Parameters ($P$)**                                 |                              **FLOPs (per forward pass)**                              |
-|:------------------------------|:-----------------------------:|:------------------------------------------------------------------------------------:|:--------------------------------------------------------------------------------------:|
-| **Linear**                    |     $(B, d_{\text{out}})$     |      $d_{\text{in}} \times d_{\text{out}} + d_{\text{out}}$ if bias is enabled       |                $2 \times B \times d_{\text{in}} \times d_{\text{out}}$                 |
-| **Conv2D**                    | $(B, C_{\text{out}}, H', W')$ | $K^2 \times C_{\text{in}} \times C_{\text{out}} + C_{\text{out}}$ if bias is enabled | $2 \times B \times H' \times W' \times K^2 \times C_{\text{in}} \times C_{\text{out}}$ |
-| **Multi-head self-attention** |          $(B, S, d)$          |          $4 \times d^2$, plus $4 \times d$ if projection biases are enabled          |                             $B \times (4 S^2 d + 8 S d^2)$                             |
-| **LayerNorm**                 |          $(B, S, d)$          |                  $2 \times d$ if affine scale and bias are enabled                   |                           $\mathcal{O}(B \times S \times d)$                           |
+| **Layer type**                |           **Output shape**           |                                                 **Parameters ($P$)**                                                 |                              **FLOPs (per forward pass)**                              |
+|:------------------------------|:------------------------------------:|:--------------------------------------------------------------------------------------------------------------------:|:--------------------------------------------------------------------------------------:|
+| **Linear**                    | $(B, \LayerInputAndOutputWidthsTwo)$ | $\LayerInputAndOutputWidths \times \LayerInputAndOutputWidthsTwo + \LayerInputAndOutputWidthsTwo$ if bias is enabled |  $2 \times B \times \LayerInputAndOutputWidths \times \LayerInputAndOutputWidthsTwo$   |
+| **Conv2D**                    |    $(B, C_{\text{out}}, H', W')$     |                 $K^2 \times C_{\text{in}} \times C_{\text{out}} + C_{\text{out}}$ if bias is enabled                 | $2 \times B \times H' \times W' \times K^2 \times C_{\text{in}} \times C_{\text{out}}$ |
+| **Multi-head self-attention** |             $(B, S, d)$              |                          $4 \times d^2$, plus $4 \times d$ if projection biases are enabled                          |                             $B \times (4 S^2 d + 8 S d^2)$                             |
+| **LayerNorm**                 |             $(B, S, d)$              |                                  $2 \times d$ if affine scale and bias are enabled                                   |                           $\mathcal{O}(B \times S \times d)$                           |
 
 : **Deep Learning Tensor Primitives**: Summary of shapes, parameters, and FLOP counts. Note: $B$ is batch size, $S$ is sequence length, and $K$ is kernel size. The attention FLOPs include QKV projections and score interactions. The $S^2$ term applies to full-sequence training and prefill, while KV-cached generation is linear per token in cached context; $d^2$ projection work dominates at large hidden dimensions. {#tbl-tensor-op-ref tbl-colwidths="[13,18,36,33]"}
 
@@ -294,7 +294,7 @@ Each backward step requires two operands: the gradient flowing in from downstrea
 ### The true cost of training memory {#sec-appdx-algorithm-foundations-true-cost-training-memory-e54e}
 
 A common mistake is to assume that training memory equals model size. This assumption leads to immediate OOM errors because weights are only one of four components. Training memory\index{Training!memory decomposition} comprises weights, gradients, optimizer state, and retained activations:
-$$ M_{\text{total}} = M_{\text{weights}} + M_{\text{gradients}} + M_{\text{optimizer}} + M_{\text{activations}} $$
+$$ \TotalMemoryFootprint = \WeightMemoryWeights + \GradientMemoryGradients + \OptimizerstateMemory + \ActivationMemoryActivations $$
 
 For a standard Adaptive Moment Estimation (Adam) optimizer [@kingma2014adam] in mixed precision [@micikevicius2017mixed]:
 
@@ -310,16 +310,19 @@ class TrainingMemoryBytes:
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
     bytes_fp16_str = fmt_memory(BYTES_FP16, unit=byte, precision=0, commas=False)
     bytes_fp32_str = fmt_memory(BYTES_FP32, unit=byte, precision=0, commas=False)
-    optimizer_overhead_min = int(BYTES_ADAM_STATE.to(byte).magnitude)
-    optimizer_overhead_max = optimizer_overhead_min + int(BYTES_FP32.to(byte).magnitude)
-    optimizer_overhead_min_str = fmt(optimizer_overhead_min, precision=0, commas=False)
-    optimizer_overhead_str = fmt_range(optimizer_overhead_min, optimizer_overhead_max, precision=0, commas=False)
+    _optimizer_overhead_min = int(BYTES_ADAM_STATE.to(byte).magnitude)
+    _optimizer_overhead_max = _optimizer_overhead_min + int(BYTES_FP32.to(byte).magnitude)
+    optimizer_overhead_min_str = fmt(_optimizer_overhead_min, precision=0, commas=False)
+    optimizer_overhead_str = fmt_range(_optimizer_overhead_min, _optimizer_overhead_max, precision=0, commas=False)
+
+TrainingMemoryBytes.optimizer_overhead_min = TrainingMemoryBytes._optimizer_overhead_min
+TrainingMemoryBytes.optimizer_overhead_max = TrainingMemoryBytes._optimizer_overhead_max
 ```
 
 *   **Weights**: `{python} TrainingMemoryBytes.bytes_fp16_str` (FP16/BF16) or `{python} TrainingMemoryBytes.bytes_fp32_str` (FP32).
 *   **Gradients**: Same size as weights.
 *   **Optimizer State**: Adam moments require `{python} TrainingMemoryBytes.optimizer_overhead_min_str` bytes per parameter; an FP32 master copy adds another `{python} TrainingMemoryBytes.bytes_fp32_str`, giving `{python} TrainingMemoryBytes.optimizer_overhead_str` bytes per parameter.
-*   **Activations**: Activations typically dominate the dynamic memory footprint during training. A recomputation- or tiled-attention-friendly estimate scales as $\mathcal{O}(B \times S \times N_L \times d)$; a full no-recompute attention implementation also materializes attention-score tensors that scale with $S^2$.
+*   **Activations**: Activations typically dominate the dynamic memory footprint during training. A recomputation- or tiled-attention-friendly estimate scales as $\mathcal{O}(B \times S \times \NumberOfLayers \times d)$; a full no-recompute attention implementation also materializes attention-score tensors that scale with $S^2$.
 
 To see how these components interact in practice, consider a concrete model.
 
@@ -416,7 +419,7 @@ class GPT2TrainingMem:
 
 **Activations (scale with batch)**:
 
-Per-layer retained activations for this quick estimate are approximately $12 \times B \times S \times d$ BF16 elements, or $12 \times B \times S \times d \times 2$ bytes, where $B$ is batch size and $S$ is sequence length. The factor twelve accounts for the major intermediate tensors retained for backpropagation: input activations, QKV projections ($3d$), attention output, FFN intermediate ($4d$), and layer norm/dropout masks. This estimate assumes the implementation does not retain the full $B \times N_{\text{heads}} \times S^2$ attention-score tensor, as in recomputation- or tiled-attention-friendly accounting. With `{python} GPT2TrainingMem.layers_str` layers, batch size `{python} GPT2TrainingMem.batch_small_str`, and sequence length `{python} GPT2TrainingMem.seq_len_str`:
+Per-layer retained activations for this quick estimate are approximately $12 \times B \times S \times d$ BF16 elements, or $12 \times B \times S \times d \times 2$ bytes, where $B$ is batch size and $S$ is sequence length. The factor twelve accounts for the major intermediate tensors retained for backpropagation: input activations, QKV projections ($3d$), attention output, FFN intermediate ($4d$), and layer norm/dropout masks. This estimate assumes the implementation does not retain the full $B \times \NumberOfAttentionHeads \times S^2$ attention-score tensor, as in recomputation- or tiled-attention-friendly accounting. With `{python} GPT2TrainingMem.layers_str` layers, batch size `{python} GPT2TrainingMem.batch_small_str`, and sequence length `{python} GPT2TrainingMem.seq_len_str`:
 
 `{python} GPT2TrainingMem.act_small_display_math`
 
@@ -442,7 +445,7 @@ Compilers transform graphs into static single-assignment (SSA) form\index{Static
 
 Without fusion, each operation in a chain like `MatMul → Add (bias) → ReLU` produces an intermediate tensor that is written to HBM and then read back for the next operation. For elementwise operations like `Add` and `ReLU`, the compute is trivial (one FLOP per element) but the memory traffic is not (read the tensor, write it back). The arithmetic intensity of unfused elementwise operations is therefore close to zero—deeply memory bound.
 
-Fusion combines consecutive operations into a single kernel that reads the input once, applies all operations in registers or shared memory, and writes the final result once. For a sequence of $k$ elementwise operations on a tensor of $N$ elements of $s_{\text{elem}}$ bytes each, fusion reduces memory traffic from $2kN s_{\text{elem}}$ bytes (each operation reads and writes) to $2N s_{\text{elem}}$ bytes (one read, one write)—a $k\times$ reduction.
+Fusion combines consecutive operations into a single kernel that reads the input once, applies all operations in registers or shared memory, and writes the final result once. For a sequence of $k$ elementwise operations on a tensor of $N$ elements of $\ElementStorageSize$ bytes each, fusion reduces memory traffic from $2kN \ElementStorageSize$ bytes (each operation reads and writes) to $2N \ElementStorageSize$ bytes (one read, one write)—a $k\times$ reduction.
 
 FlashAttention\index{FlashAttention!appendix refresher} is an I/O-aware tiled attention algorithm: it computes the score, softmax, and value-product stages in SRAM tiles without materializing the full attention matrix in HBM, reducing HBM traffic and auxiliary attention memory from $\mathcal{O}(S^2)$ to $\mathcal{O}(S)$. The original work reports up to 3$\times$ wall-clock speedups on its evaluated workloads [@dao2022]; realized gains depend on shape and hardware (see @sec-appdx-algorithm-flash-attention for the step-by-step derivation). Together, the linear algebra foundations, tensor programming mechanics, and training memory model covered in this appendix form the algorithmic substrate on which all ML systems are built.
 
@@ -518,8 +521,8 @@ Standard self-attention in transformers requires materializing an $S \times S$ a
 
 ### Standard softmax HBM I/O bottleneck {#sec-appdx-algorithm-flash-attention-hbm-bottleneck}
 
-Given queries $\mathbf{Q} \in \mathbb{R}^{S \times d_{\text{head}}}$, keys $\mathbf{K} \in \mathbb{R}^{S \times d_{\text{head}}}$, and values $\mathbf{V} \in \mathbb{R}^{S \times d_{\text{head}}}$ for sequence length $S$ and head dimension $d_{\text{head}}$, standard attention evaluates:
-$$ \mathbf{S} = \mathbf{Q} \mathbf{K}^T \in \mathbb{R}^{S \times S}, \qquad \mathbf{A} = \text{softmax}(\mathbf{S}) \in \mathbb{R}^{S \times S}, \qquad \mathbf{O} = \mathbf{A} \mathbf{V} \in \mathbb{R}^{S \times d_{\text{head}}} $$
+Given queries $\mathbf{Q} \in \mathbb{R}^{S \times \AttentionHeadDimension}$, keys $\mathbf{K} \in \mathbb{R}^{S \times \AttentionHeadDimension}$, and values $\mathbf{V} \in \mathbb{R}^{S \times \AttentionHeadDimension}$ for sequence length $S$ and head dimension $\AttentionHeadDimension$, standard attention evaluates:
+$$ \mathbf{S} = \mathbf{Q} \mathbf{K}^T \in \mathbb{R}^{S \times S}, \qquad \mathbf{A} = \text{softmax}(\mathbf{S}) \in \mathbb{R}^{S \times S}, \qquad \mathbf{O} = \mathbf{A} \mathbf{V} \in \mathbb{R}^{S \times \AttentionHeadDimension} $$
 
 To prevent numerical overflow, row-wise softmax subtracts the row maximum $m_i = \max_{1 \le j \le S} S_{ij}$:
 $$ A_{ij} = \frac{\exp(S_{ij} - m_i)}{\sum_{k=1}^S \exp(S_{ik} - m_i)} $$
@@ -528,9 +531,9 @@ Standard GPU implementations execute this in three discrete kernel launches:
 
 1. Compute $\mathbf{S} = \mathbf{Q}\mathbf{K}^T$ in SRAM, then write $\mathbf{S} \in \mathbb{R}^{S \times S}$ to HBM ($\Theta(S^2)$ writes).
 2. Read $\mathbf{S}$ from HBM, compute row max $m$ and row sum $z$, compute $\mathbf{A} = \text{softmax}(\mathbf{S})$, write $\mathbf{A} \in \mathbb{R}^{S \times S}$ to HBM ($\Theta(S^2)$ reads + writes).
-3. Read $\mathbf{A}$ and $\mathbf{V}$ from HBM, compute $\mathbf{O} = \mathbf{A}\mathbf{V}$, write $\mathbf{O} \in \mathbb{R}^{S \times d_{\text{head}}}$ to HBM ($\Theta(S^2 + S d_{\text{head}})$ reads + writes).
+3. Read $\mathbf{A}$ and $\mathbf{V}$ from HBM, compute $\mathbf{O} = \mathbf{A}\mathbf{V}$, write $\mathbf{O} \in \mathbb{R}^{S \times \AttentionHeadDimension}$ to HBM ($\Theta(S^2 + S \AttentionHeadDimension)$ reads + writes).
 
-Total HBM memory traffic is $\Theta(S^2 + S d_{\text{head}})$ elements. For $S = 8192$, $d_{\text{head}} = 128$ in FP16, $\mathbf{S}$ requires $8192^2 \times 2 \text{ B} = 134 \text{ MB}$ per head per layer. Because modern GPUs feature massive compute throughput relative to HBM bandwidth, repeatedly reading and writing intermediate matrices $\mathbf{S}$ and $\mathbf{A}$ leaves GPU execution units memory-bound.
+Total HBM memory traffic is $\Theta(S^2 + S \AttentionHeadDimension)$ elements. For $S = 8192$, $\AttentionHeadDimension = 128$ in FP16, $\mathbf{S}$ requires $8192^2 \times 2 \text{ B} = 134 \text{ MB}$ per head per layer. Because modern GPUs feature massive compute throughput relative to HBM bandwidth, repeatedly reading and writing intermediate matrices $\mathbf{S}$ and $\mathbf{A}$ leaves GPU execution units memory-bound.
 
 ### Online softmax recurrence proof {#sec-appdx-algorithm-flash-attention-online-softmax-proof}
 
@@ -566,9 +569,9 @@ $$ \mathbf{O}^{\text{new}} = \frac{z^{(1)} e^{m^{(1)} - m^{\text{new}}}}{z^{\tex
 
 ### Formal HBM access complexity proof {#sec-appdx-algorithm-flash-attention-complexity-proof}
 
-Let $M_{\text{SRAM}}$ be the fast SRAM capacity (in words). Following Algorithm 1 of @dao2022, FlashAttention sets $B_c = \lfloor M_{\text{SRAM}}/(4d_{\text{head}}) \rfloor$ and $B_r = \min(\lfloor M_{\text{SRAM}}/(4d_{\text{head}}) \rfloor,d_{\text{head}})$. The proof abstracts constant factors and buffer reuse, using $B_c=\Theta(M_{\text{SRAM}}/d_{\text{head}})$, $B_r=\Theta(\min(M_{\text{SRAM}}/d_{\text{head}},d_{\text{head}}))$, and $B_rB_c=\mathcal{O}(M_{\text{SRAM}})$ for the on-chip working set.
+Let $M_{\text{SRAM}}$ be the fast SRAM capacity (in words). Following Algorithm 1 of @dao2022, FlashAttention sets $B_c = \lfloor M_{\text{SRAM}}/(4\AttentionHeadDimension) \rfloor$ and $B_r = \min(\lfloor M_{\text{SRAM}}/(4\AttentionHeadDimension) \rfloor,\AttentionHeadDimension)$. The proof abstracts constant factors and buffer reuse, using $B_c=\Theta(M_{\text{SRAM}}/\AttentionHeadDimension)$, $B_r=\Theta(\min(M_{\text{SRAM}}/\AttentionHeadDimension,\AttentionHeadDimension))$, and $B_rB_c=\mathcal{O}(M_{\text{SRAM}})$ for the on-chip working set.
 
-The algorithm partitions $\mathbf{Q}$ into $T_r = \lceil S/B_r \rceil$ blocks of size $B_r \times d_{\text{head}}$, and partitions $\mathbf{K}, \mathbf{V}$ into $T_c = \lceil S/B_c \rceil$ blocks of size $B_c \times d_{\text{head}}$. It executes two nested loops:
+The algorithm partitions $\mathbf{Q}$ into $T_r = \lceil S/B_r \rceil$ blocks of size $B_r \times \AttentionHeadDimension$, and partitions $\mathbf{K}, \mathbf{V}$ into $T_c = \lceil S/B_c \rceil$ blocks of size $B_c \times \AttentionHeadDimension$. It executes two nested loops:
 
 - **Outer loop** over $j = 1, \dots, T_c$: Load $\mathbf{K}_j$ and $\mathbf{V}_j$ into SRAM.
 - **Inner loop** over $i = 1, \dots, T_r$: Load $\mathbf{Q}_i$, $\mathbf{O}_i$, and its softmax statistics; compute $\mathbf{S}_{ij} = \mathbf{Q}_i \mathbf{K}_j^T$ in SRAM; then update and write $\mathbf{O}_i$ and the statistics without materializing $\mathbf{S}_{ij}$ in HBM.
@@ -577,22 +580,22 @@ This loop order is the source of the I/O reduction. A key-value tile remains res
 
 #### Total memory access accounting {.unnumbered}
 
-Total HBM accesses comprise two components: key and value reads, where each element of $\mathbf{K}$ and $\mathbf{V}$ is loaded once (contributing $2S d_{\text{head}}$ accesses); and query, output, and statistics passes, where each of the $T_c$ column blocks reads all of $\mathbf{Q}$, reads and writes $\mathbf{O}$, and updates $\mathcal{O}(S)$ softmax statistics. The matrices dominate the statistics for head dimension $d_{\text{head}}\geq 1$, so each pass contributes $\Theta(S d_{\text{head}})$ accesses and all passes contribute $\Theta(S d_{\text{head}} T_c)$.
+Total HBM accesses comprise two components: key and value reads, where each element of $\mathbf{K}$ and $\mathbf{V}$ is loaded once (contributing $2S \AttentionHeadDimension$ accesses); and query, output, and statistics passes, where each of the $T_c$ column blocks reads all of $\mathbf{Q}$, reads and writes $\mathbf{O}$, and updates $\mathcal{O}(S)$ softmax statistics. The matrices dominate the statistics for head dimension $\AttentionHeadDimension\geq 1$, so each pass contributes $\Theta(S \AttentionHeadDimension)$ accesses and all passes contribute $\Theta(S \AttentionHeadDimension T_c)$.
 
-Because $T_c=\lceil S/B_c\rceil=\Theta(S d_{\text{head}}/M_{\text{SRAM}})$, the total is
-$$ \text{HBM}_{\text{Flash}} = \Theta\left(S d_{\text{head}} + S d_{\text{head}} T_c\right) = \Theta\left(S d_{\text{head}} + \frac{S^2 d_{\text{head}}^2}{M_{\text{SRAM}}}\right) = \Theta\left(\frac{S^2 d_{\text{head}}^2}{M_{\text{SRAM}}}\right), $$
-where the final equality follows for $d_{\text{head}} \leq M_{\text{SRAM}} \leq S d_{\text{head}}$.
+Because $T_c=\lceil S/B_c\rceil=\Theta(S \AttentionHeadDimension/M_{\text{SRAM}})$, the total is
+$$ \text{HBM}_{\text{Flash}} = \Theta\left(S \AttentionHeadDimension + S \AttentionHeadDimension T_c\right) = \Theta\left(S \AttentionHeadDimension + \frac{S^2 \AttentionHeadDimension^2}{M_{\text{SRAM}}}\right) = \Theta\left(\frac{S^2 \AttentionHeadDimension^2}{M_{\text{SRAM}}}\right), $$
+where the final equality follows for $\AttentionHeadDimension \leq M_{\text{SRAM}} \leq S \AttentionHeadDimension$.
 
 The bound counts communication rather than arithmetic. FlashAttention still evaluates the same dense score blocks and may recompute intermediate quantities during backpropagation; its advantage comes from keeping those intermediates out of HBM.
 
 #### I/O reduction ratio {.unnumbered}
 
 Comparing standard attention I/O to FlashAttention I/O:
-$$ \frac{\text{HBM}_{\text{Standard}}}{\text{HBM}_{\text{Flash}}} = \frac{\Theta(S^2 + S d_{\text{head}})}{\Theta\left(S d_{\text{head}} + \frac{S^2 d_{\text{head}}^2}{M_{\text{SRAM}}}\right)} = \Theta\left(\frac{M_{\text{SRAM}}}{d_{\text{head}}^2}\right) \quad \text{for } S \gg \max\left(d_{\text{head}},\frac{M_{\text{SRAM}}}{d_{\text{head}}}\right) $$
+$$ \frac{\text{HBM}_{\text{Standard}}}{\text{HBM}_{\text{Flash}}} = \frac{\Theta(S^2 + S \AttentionHeadDimension)}{\Theta\left(S \AttentionHeadDimension + \frac{S^2 \AttentionHeadDimension^2}{M_{\text{SRAM}}}\right)} = \Theta\left(\frac{M_{\text{SRAM}}}{\AttentionHeadDimension^2}\right) \quad \text{for } S \gg \max\left(\AttentionHeadDimension,\frac{M_{\text{SRAM}}}{\AttentionHeadDimension}\right) $$
 
 ::: {#psp-appendix-algorithm-flash-attention-io-reduction .callout-perspective title="A100 I/O reduction"}
 
-The asymptotic ratio $M_{\text{SRAM}}/d_{\text{head}}^2$ predicts how greater SRAM capacity can reduce HBM traffic, but hidden constants and kernel details prevent it from serving as an exact transfer count. In an NVIDIA A100 measurement, @dao2022 report the effect for a forward-and-backward attention workload with sequence length 1,024, head dimension 64, 16 heads, batch size 64, a key-padding mask, and no dropout:
+The asymptotic ratio $M_{\text{SRAM}}/\AttentionHeadDimension^2$ predicts how greater SRAM capacity can reduce HBM traffic, but hidden constants and kernel details prevent it from serving as an exact transfer count. In an NVIDIA A100 measurement, @dao2022 report the effect for a forward-and-backward attention workload with sequence length 1,024, head dimension 64, 16 heads, batch size 64, a key-padding mask, and no dropout:
 
 * **Standard attention**: 35.3 GB of HBM reads and writes; 35.1 ms runtime.
 * **FlashAttention**: 4.4 GB of HBM reads and writes; 11.7 ms runtime.

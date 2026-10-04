@@ -1,7 +1,10 @@
 import unittest
 
 from mlsysim.tools.audit_provenance import (
+    audit_actuators,
+    audit_agents,
     audit_datasets,
+    audit_embodied,
     audit_hardware_tech,
     audit_infra_capacity,
     audit_infra_facilities,
@@ -12,6 +15,7 @@ from mlsysim.tools.audit_provenance import (
     audit_platforms,
     audit_reference_stats,
     audit_registries,
+    audit_sensors,
     audit_systems_reference_values,
     audit_systems_topology,
     audit_systems_reliability,
@@ -32,6 +36,22 @@ class TestProvenanceAudit(unittest.TestCase):
 
     def test_platforms_have_provenance(self):
         issues = audit_platforms()
+        self.assertEqual(issues, [], "\n".join(issues))
+
+    def test_sensors_have_provenance(self):
+        issues = audit_sensors()
+        self.assertEqual(issues, [], "\n".join(issues))
+
+    def test_actuators_have_provenance(self):
+        issues = audit_actuators()
+        self.assertEqual(issues, [], "\n".join(issues))
+
+    def test_embodied_have_provenance(self):
+        issues = audit_embodied()
+        self.assertEqual(issues, [], "\n".join(issues))
+
+    def test_agents_have_provenance(self):
+        issues = audit_agents()
         self.assertEqual(issues, [], "\n".join(issues))
 
     def test_systems_topology_has_provenance(self):

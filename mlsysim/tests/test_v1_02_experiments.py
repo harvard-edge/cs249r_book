@@ -18,6 +18,7 @@ from mlsysim.engine.v1_02_experiments import (
     sustained_operation,
     workload_feasibility,
 )
+pytest.importorskip("marimo", reason="marimo not installed (optional dependency)")
 from mlsysbook_labs.experiment_evidence import capture_evidence
 
 

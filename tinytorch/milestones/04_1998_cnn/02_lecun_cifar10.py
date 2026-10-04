@@ -373,10 +373,10 @@ def visualize_dataloader(train_size, test_size, batch_size):
     print(f"  Compute: Process {batch_size} images at a time; the dataset stays in memory.")
     print()
     print("  Why This Matters:")
-    mem_all = train_size * 32 * 32 * 3 * 4 / (1024 * 1024)
-    mem_batch = batch_size * 32 * 32 * 3 * 4 / (1024 * 1024)
-    print(f"    * Resident float32 dataset: {mem_all:.1f} MiB ({train_size:,} images)")
-    print(f"    * Additional float32 batch: {mem_batch:.2f} MiB ({batch_size} images)")
+    mem_all = train_size * 32 * 32 * 3 * 4 / 1_000_000
+    mem_batch = batch_size * 32 * 32 * 3 * 4 / 1_000_000
+    print(f"    * Resident float32 dataset: {mem_all:.1f} MB ({train_size:,} images)")
+    print(f"    * Additional float32 batch: {mem_batch:.2f} MB ({batch_size} images)")
     print(f"    * Shuffling: Prevents model from memorizing order")
     print("=" * 70)
 
@@ -582,10 +582,10 @@ def analyze_cnn_systems(model, batch_size=32):
     print(f"   • Total: ~4.5M multiply-accumulates per image (~9M FLOPs)")
 
     # Count specific float32 buffers; this is not an allocator measurement.
-    params_mem = sum(p.data.nbytes for p in model.parameters()) / 1024
-    batch_mem = batch_size * 32 * 32 * 3 * 4 / 1024
-    feature_mem = batch_size * 32 * 30 * 30 * 4 / 1024
-    print("\n   MEMORY ESTIMATES (KiB, float32):")
+    params_mem = sum(p.data.nbytes for p in model.parameters()) / 1000
+    batch_mem = batch_size * 32 * 32 * 3 * 4 / 1000
+    feature_mem = batch_size * 32 * 30 * 30 * 4 / 1000
+    print("\n   MEMORY ESTIMATES (KB, float32):")
     print(f"   Parameters: {params_mem:.1f}")
     print(f"   Input batch: {batch_mem:.1f}")
     print(f"   One conv1 output: {feature_mem:.1f}")

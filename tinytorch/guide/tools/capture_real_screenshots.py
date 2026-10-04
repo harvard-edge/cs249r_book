@@ -304,7 +304,7 @@ Sleep {int(sleep_s * 1000)}ms
 
         out_path.parent.mkdir(parents=True, exist_ok=True)
         canvas.save(out_path)
-        size_kb = out_path.stat().st_size / 1024
+        size_kb = out_path.stat().st_size / 1000
         print(
             f"  ✅ Saved: {filename} "
             f"({size_kb:.1f} KB, {canvas.width}x{canvas.height})"

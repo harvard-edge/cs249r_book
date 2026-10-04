@@ -36,7 +36,9 @@ def calc_ring_allreduce_time(message_bytes, n_gpus, bandwidth_bytes_s, latency_s
     n_gpus : int
         Number of participating GPUs (N) in the ring.
     bandwidth_bytes_s : Quantity
-        Link bandwidth between nodes in the ring (β).
+        Unidirectional link bandwidth between adjacent nodes in the ring (β).
+        Note: For full-duplex interconnects like NVLink, provide the unidirectional
+        link throughput (e.g. 450 GB/s for NVLink 4.0), not the bidirectional summed total.
     latency_s : Quantity
         Per-hop network latency (α).
 

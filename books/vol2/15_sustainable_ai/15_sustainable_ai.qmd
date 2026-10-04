@@ -432,6 +432,7 @@ class AutoPlacement:
     # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
     optimizer = PlacementOptimizer()
     res = optimizer.solve(fleet, duration_days=duration_days, regions=["US_Avg", "Quebec", "Iowa"], carbon_tax_per_ton=carbon_tax, mfu=mfu)
+    best_region = res.best_region
     check_it_energy = EconomicsModel().solve(fleet, duration_days=duration_days, grid=Infrastructure.Grids.Quebec, mfu=mfu).it_energy_kwh.to(MWh)
     res_no_tax = optimizer.solve(fleet, duration_days=duration_days, regions=["US_Avg", "Quebec", "Iowa"], carbon_tax_per_ton=0.0, mfu=mfu)
     objective_by_region = {c["region"]: c["objective"] for c in res.top_candidates}
@@ -442,15 +443,14 @@ class AutoPlacement:
     carbon_share_of_us_gap = 1 - no_tax_us_gap_usd / us_gap_usd
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
-    check(res.best_region == "Quebec", f"Quebec should be optimal with ${carbon_tax}/ton tax")
+    check(best_region == "Quebec", f"Quebec should be optimal with ${carbon_tax}/ton tax")
     check(abs((check_it_energy / energy).to("").magnitude - 1) < 1e-6, "Modeled run IT energy must equal the reference run energy")
     check(res_no_tax.best_region == "Quebec", "Prose says Quebec already wins on facility overhead without a carbon price")
     check(0 < no_tax_us_gap_usd < us_gap_usd < iowa_gap_usd, "Prose orders the no-tax, US-average, and Iowa gaps")
     check(carbon_share_of_us_gap > 0.5, "Prose says most of the taxed gap is the carbon charge")
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
-    best_region = res.best_region  # kept raw for invariant check above
-    best_region_str = MarkdownStr(res.best_region)
+    best_region_str = MarkdownStr(best_region)
     total_tco_str = fmt_usd(res.objective_value, precision=1, scale="M")
     carbon_tax_str = fmt_usd(carbon_tax, precision=0, commas=False, per="tonne")
     energy_mwh_str = fmt_energy(energy, unit=MWh, precision=0, commas=True)
@@ -1488,19 +1488,19 @@ The resulting design levers target data movement rather than raw arithmetic thro
 
 #### Arithmetic intensity and energy roofline {#sec-sustainable-ai-arithmetic-intensity-energy-roofline-6d13-roofline-6d13}
 
-The balance between computation and data movement determines whether energy consumption is compute-bound or memory-bound. @Eq-energy-arithmetic-intensity defines arithmetic intensity, the ratio that determines which resource dominates energy consumption. In these equations, $O$ is the operation count in FLOPs, $D_{\text{vol}}$ is data volume in bytes, $E_{\text{compute}}$ is energy per FLOP, and $E_{\text{move}}$ is energy per byte moved:
+The balance between computation and data movement determines whether energy consumption is compute-bound or memory-bound. @Eq-energy-arithmetic-intensity defines arithmetic intensity, the ratio that determines which resource dominates energy consumption. In these equations, $O$ is the operation count in FLOPs, $\DataVolume$ is data volume in bytes, $\EnergyPerOperationCompute$ is energy per FLOP, and $\EnergyPerByteMoved$ is energy per byte moved:
 
-$$I = \frac{O}{D_{\text{vol}}}$$ {#eq-energy-arithmetic-intensity}
+$$I = \frac{O}{\DataVolume}$$ {#eq-energy-arithmetic-intensity}
 
-Arithmetic intensity measured in FLOP/byte determines the dominant energy consumer. @Eq-energy-total expresses total energy $E_{\text{total}}$ at the chip-and-memory boundary as the sum of compute and memory contributions (the facility total $E_{\text{facility}}$ appears later in @eq-total-energy), while @eq-energy-roofline isolates the roofline-style dominant term:
+Arithmetic intensity measured in FLOP/byte determines the dominant energy consumer. @Eq-energy-total expresses total energy $\TotalEnergy$ at the chip-and-memory boundary as the sum of compute and memory contributions (the facility total $E_{\text{facility}}$ appears later in @eq-total-energy), while @eq-energy-roofline isolates the roofline-style dominant term:
 
-$$E_{\text{total}} = O \times E_{\text{compute}} + D_{\text{vol}} \times E_{\text{move}}$$ {#eq-energy-total}
+$$\TotalEnergy = O \times \EnergyPerOperationCompute + \DataVolume \times \EnergyPerByteMoved$$ {#eq-energy-total}
 
-$$E_{\text{dominant}} = \max\left(O \times E_{\text{compute}}, D_{\text{vol}} \times E_{\text{move}}\right)$$ {#eq-energy-roofline}
+$$E_{\text{dominant}} = \max\left(O \times \EnergyPerOperationCompute, \DataVolume \times \EnergyPerByteMoved\right)$$ {#eq-energy-roofline}
 
 The maximum term identifies the dominant bottleneck for roofline reasoning; it is not the full energy in balanced cases. @Eq-ai-crossover defines the crossover arithmetic intensity\index{Energy Roofline Model!crossover arithmetic intensity}\index{Crossover arithmetic intensity!compute and memory balance} where compute and memory energy balance:
 
-$$I_{\text{crossover}} = \frac{E_{\text{move}}}{E_{\text{compute}}}$$ {#eq-ai-crossover}
+$$I_{\text{crossover}} = \frac{\EnergyPerByteMoved}{\EnergyPerOperationCompute}$$ {#eq-ai-crossover}
 
 ```{python}
 #| echo: false
@@ -1572,7 +1572,7 @@ class MatMulEnergyAnalysis:
     mem_vec_eq_math = fmt_math(rf"{vec_bytes:.0f} \times {e_move:.0f} \text{{ pJ}} = {mem_vec_pj/1e9:.5f}\text{{ mJ}}")
 ```
 
-For a GPU with $E_{\text{compute}}$ of `{python} MatMulEnergyAnalysis.e_compute_str` and $E_{\text{move}}$ of `{python} MatMulEnergyAnalysis.e_move_str` (DRAM access):
+For a GPU with $\EnergyPerOperationCompute$ of `{python} MatMulEnergyAnalysis.e_compute_str` and $\EnergyPerByteMoved$ of `{python} MatMulEnergyAnalysis.e_move_str` (DRAM access):
 
 `{python} MatMulEnergyAnalysis.crossover_eq_math`
 
@@ -1628,7 +1628,7 @@ This framework applies directly to the most common operation in deep learning: m
 
 ::: {#nbk-sustainable-ai-matmul-energy-analysis .callout-notebook title="MatMul energy analysis"}
 
-**Problem**: How do matrix dimensions $N_{\text{mat}}$ dictate whether arithmetic energy $E_{\text{compute}}$ or memory energy $E_{\text{move}}$ dominates matrix multiplication $\mathbf{C} = \mathbf{A}\mathbf{B}$?
+**Problem**: How do matrix dimensions $N_{\text{mat}}$ dictate whether arithmetic energy $\EnergyPerOperationCompute$ or memory energy $\EnergyPerByteMoved$ dominates matrix multiplication $\mathbf{C} = \mathbf{A}\mathbf{B}$?
 
 **Math**:
 
@@ -2382,7 +2382,7 @@ Large-scale AI training inherently requires distributed systems coordination, cr
 
 The Fleet Law (@eq-fleet-law) turns this overhead into an energy account. If the fleet draws average power $P_{\text{avg}}$ while executing one step on $N$ accelerators, the energy of that step is approximately
 
-$$E_{\text{step}} \approx P_{\text{avg}} \times T_{\text{step}}(N) = P_{\text{avg}} \left( \frac{T_{\text{compute}}}{N} + T_{\text{comm}}(N) + T_{\text{sync}}(N) - T_{\text{overlap}} \right)$$
+$$E_{\text{step}} \approx P_{\text{avg}} \times \DistributedStepTime = P_{\text{avg}} \left( \frac{\IronlawTermTimesCompute}{N} + \CommunicationTime + \SynchronizationTime - \OverlappedTime \right)$$
 
 Only the first term retires useful arithmetic. Exposed communication and synchronization are powered time. Accelerators, hosts, and the fabric keep drawing a large share of their active power while the model makes no progress. A step that spends a quarter of its wall-clock time in unhidden communication therefore spends a comparable share of its energy on the Communication and Coordination axes of C³ rather than on Compute. Overlap, smaller messages, and fewer stragglers reduce energy for the same reason they reduce step time, which is why parallelism choices are also sustainability choices.
 
@@ -4316,7 +4316,7 @@ Semiconductor fabrication demands vast volumes of ultrapure water for chemical-m
 
 :::
 
-As the decoupled flow loops in @fig-water-cycle demonstrate, high recycling fractions do not preclude significant net water loss. Even an advanced plant operating at 90% water reclamation consumes millions of liters daily through cooling tower evaporation and exhaust plumes, meaning facility siting decisions must evaluate localized watershed stress rather than relying on plant-level reuse percentages alone.
+As the decoupled flow loops in @fig-water-cycle demonstrate, high recycling fractions do not preclude significant net water loss. Even an advanced plant operating at 90 percent water reclamation consumes millions of liters daily through cooling tower evaporation and exhaust plumes, meaning facility siting decisions must evaluate localized watershed stress rather than relying on plant-level reuse percentages alone.
 
 Fabrication is also heavily reliant on hazardous chemicals for etching, doping, and cleaning. Strong acids (hydrofluoric, sulfuric), volatile organic compounds (VOCs) like xylene, and highly toxic gases (arsine, phosphine) are used in massive quantities; a large fab may consume over 2,000 metric tons of acids annually [@kim2018]. These substances create hazardous waste streams requiring extensive treatment to prevent ecological harm.
 
@@ -5008,7 +5008,7 @@ The lifecycle boundary connects training, serving, embodied carbon, grid mix, ha
 
 The measurement contract makes comparisons meaningful by fixing useful work, required quality, system boundaries, attribution, time, location, and uncertainty. Operational and embodied carbon accounting then identify which lifecycle term an intervention can change. Memory traffic, idle equipment, cooling, and power delivery can all consume energy beyond useful arithmetic; lower FLOP counts alone do not establish lower environmental impact.
 
-The Fleet Law gives that accounting its fleet-scale form. Because a step's energy is approximately its average power times $T_{\text{step}}(N)$, every second of exposed communication, synchronization, or recovery is paid for in joules as well as in time. Sustainability therefore spends the same C³ budget as performance. Communication and Coordination overheads that stretch the step consume energy without advancing the model, and PUE, the grid factor, and embodied carbon convert the resulting joules into the lifecycle account.
+The Fleet Law gives that accounting its fleet-scale form. Because a step's energy is approximately its average power times $\DistributedStepTime$, every second of exposed communication, synchronization, or recovery is paid for in joules as well as in time. Sustainability therefore spends the same C³ budget as performance. Communication and Coordination overheads that stretch the step consume energy without advancing the model, and PUE, the grid factor, and embodied carbon convert the resulting joules into the lifecycle account.
 
 Mitigation follows that diagnosis. Algorithm and hardware changes must reduce measured resource use while preserving quality, latency, and reliability; scheduling must account for grid intensity and the cost of moving work; hardware replacement must weigh operational savings against new manufacturing emissions. Water availability and the distribution of environmental burdens also matter when choosing where and how a fleet can grow.
 

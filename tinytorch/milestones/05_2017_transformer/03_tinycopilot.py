@@ -524,7 +524,7 @@ def run_milestone(args=None):
         "[yellow]Train TinyGPT on Python Code: "
         "Foundation of GitHub Copilot & Codex![/yellow]",
         "",
-        "• Model: Causal Pre-LN Transformer (Vaswani / Codex / GPT-4)",
+        "• Model: Causal Pre-LN Transformer (Vaswani / Codex / GPT-6)",
         f"• Workload: Autoregressive Next-Char Code Completion on {dataset_title}",
         "• Syntax Gate: Rigorous syntax parsing to verify formal correctness",
         "• Systems: Parallel training with temperature and top-k decode",

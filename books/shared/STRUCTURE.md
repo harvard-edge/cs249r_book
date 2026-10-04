@@ -110,7 +110,7 @@ and `binder/tests/test_content_structure.py` enforces it.
 
 ## Volume III: Agentic Machine Learning Systems (`vol3`)
 
-21 chapters. Reading order:
+22 chapters. Reading order:
 
 | # | Kind | Path |
 |---:|---|---|
@@ -121,7 +121,7 @@ and `binder/tests/test_content_structure.py` enforces it.
 |  | frontmatter | `frontmatter/ai_use.qmd` |
 |  | frontmatter | `frontmatter/notation.qmd` |
 | 1 | chapter | `01_introduction/01_introduction.qmd` |
-|  | part | `parts/engine_principles.qmd` |
+|  | part | `parts/model_principles.qmd` |
 | 2 | chapter | `02_foundation_model/02_foundation_model.qmd` |
 | 3 | chapter | `03_test_time_compute/03_test_time_compute.qmd` |
 |  | part | `parts/memory_principles.qmd` |
@@ -146,10 +146,12 @@ and `binder/tests/test_content_structure.py` enforces it.
 | 18 | chapter | `18_agent_economics/18_agent_economics.qmd` |
 |  | part | `parts/synthesis_principles.qmd` |
 | 19 | chapter | `19_conclusion/19_conclusion.qmd` |
+|  | backmatter | `backmatter/appendix_math.qmd` |
+|  | backmatter | `backmatter/appendix_inference.qmd` |
+|  | backmatter | `backmatter/appendix_systems.qmd` |
 | 20 | chapter | `appendices/app_a_reference_architecture.qmd` |
 | 21 | chapter | `appendices/app_b_tool_design.qmd` |
 | 22 | chapter | `appendices/app_c_failure_taxonomy.qmd` |
-|  | backmatter | `backmatter/appendix_math.qmd` |
 |  | backmatter | `backmatter/glossary/glossary.qmd` |
 
 ## Volume IV: Physical AI Systems (`vol4`)

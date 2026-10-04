@@ -432,7 +432,7 @@ class EstimatorConsistency:
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
     n_runs_str = fmt_int(n_runs)
-    conf_pct_str = fmt_percent(conf, precision=0)
+    conf_pct_str = fmt_percent(conf, precision=0, style="prose")
     nees_lo_str = fmt(nees_lo, precision=2)
     nees_hi_str = fmt(nees_hi, precision=2)
     nis_95_str = fmt(nis_95, precision=2)
@@ -442,7 +442,7 @@ class EstimatorConsistency:
     p_catch_99_str = fmt(p_catch_99, precision=2)
 ```
 
-A filter achieves statistical consistency\index{Filter consistency} when its reported covariance matches the dispersion of its actual state errors. When offline ground truth is accessible—such as a laser-tracker surveyed rack upright coupled with an optical motion-capture reference for mobile base pose—the normalized estimation error squared (NEES)\index{NEES!definition}, $\epsilon_k = (\mathbf{x}_k - \hat{\mathbf{x}}_k)^\top \mathbf{P}_k^{-1} (\mathbf{x}_k - \hat{\mathbf{x}}_k)$, evaluates the system. For a consistent filter tracking an $n$-dimensional state, the error normalized by the covariance matrix forms a vector of $n$ independent standard normal variates; their sum of squares is distributed according to a chi-squared distribution with $n$ degrees of freedom and theoretical mean $n$. Evaluated across $N$ statistically independent experimental trials, the scaled sample mean $N\bar{\epsilon}$ follows a chi-squared distribution with $Nn$ degrees of freedom [@barshalom2001estimation]. For our scalar rack clearance over `{python} EstimatorConsistency.n_runs_str` experimental trials, the two-sided `{python} EstimatorConsistency.conf_pct_str` percent acceptance interval for sample mean NEES $\bar{\epsilon}$ spans from `{python} EstimatorConsistency.nees_lo_str` to `{python} EstimatorConsistency.nees_hi_str`. An empirical NEES exceeding this upper boundary flags an overconfident filter—a critical safety defect that compresses physical safety clearance buffers. Conversely, an average falling below the lower bound indicates an underconfident filter whose inflated covariance unnecessarily throttles vehicle operating speed.
+A filter achieves statistical consistency\index{Filter consistency} when its reported covariance matches the dispersion of its actual state errors. When offline ground truth is accessible—such as a laser-tracker surveyed rack upright coupled with an optical motion-capture reference for mobile base pose—the normalized estimation error squared (NEES)\index{NEES!definition}, $\epsilon_k = (\mathbf{x}_k - \hat{\mathbf{x}}_k)^\top \mathbf{P}_k^{-1} (\mathbf{x}_k - \hat{\mathbf{x}}_k)$, evaluates the system. For a consistent filter tracking an $n$-dimensional state, the error normalized by the covariance matrix forms a vector of $n$ independent standard normal variates; their sum of squares is distributed according to a chi-squared distribution with $n$ degrees of freedom and theoretical mean $n$. Evaluated across $N$ statistically independent experimental trials, the scaled sample mean $N\bar{\epsilon}$ follows a chi-squared distribution with $Nn$ degrees of freedom [@barshalom2001estimation]. For our scalar rack clearance over `{python} EstimatorConsistency.n_runs_str` experimental trials, the two-sided `{python} EstimatorConsistency.conf_pct_str` acceptance interval for sample mean NEES $\bar{\epsilon}$ spans from `{python} EstimatorConsistency.nees_lo_str` to `{python} EstimatorConsistency.nees_hi_str`. An empirical NEES exceeding this upper boundary flags an overconfident filter—a critical safety defect that compresses physical safety clearance buffers. Conversely, an average falling below the lower bound indicates an underconfident filter whose inflated covariance unnecessarily throttles vehicle operating speed.
 
 While absolute ground truth remains unavailable during live deployment, the estimator can continuously audit its measurement innovations. The normalized innovation squared (NIS)\index{NIS!definition}, $\boldsymbol{\nu}_k^\top\mathbf{S}_k^{-1}\boldsymbol{\nu}_k$, follows a chi-squared distribution with $m$ degrees of freedom for an $m$-dimensional measurement vector under valid model assumptions; this constitutes the identical metric evaluated by the data-association gate in @eq-percep-mahalanobis-gate. The misdated stereo observation in @fig-08-kalman-predict-update produces an expected NIS of `{python} EstimatorConsistency.nis_expected_str`. Because individual innovations compound deterministic bias with stochastic sensor noise, a single misdated update breaches the 95 percent validation gate of `{python} EstimatorConsistency.nis_95_str` with probability `{python} EstimatorConsistency.p_catch_95_str`, and trips the 99 percent threshold of `{python} EstimatorConsistency.nis_99_str` only `{python} EstimatorConsistency.p_catch_99_str` of the time. Single-frame residual gating therefore admits a substantial fraction of corrupted measurements. Averaged over a sliding temporal window, however, the sample mean NIS consistently scales well above the theoretical consistency boundary. A runtime sliding-window NIS supervisor reliably flags systematic timestamp errors that easily bypass single-frame validation gates.
 
@@ -1271,6 +1271,7 @@ class HashedVoxelPayload:
     payload = (blocks * block_side**3 * voxel_bytes).to(ureg.megabyte)
     block_bytes = (block_side**3 * voxel_bytes).to(ureg.byte)
     band_fraction = (v_band / v_ws).to(ureg.dimensionless).magnitude
+    ratio = (m_dense / payload).to(ureg.dimensionless).magnitude
 
     # ┌── 3. GUARD (Invariants) ─────────────────────────────────────────────────
     check(abs(m_dense.magnitude - 2.4) < 1e-9, f"Dense grid should be 2.4 GB, got {m_dense}.")
@@ -1278,6 +1279,7 @@ class HashedVoxelPayload:
     check(abs(blocks - 18_750) < 1e-6, f"Block count should be 18,750, got {blocks}.")
     check(abs(payload.magnitude - 76.8) < 1e-9, "Voxel payload is 76.8 MB before overhead.")
     check(abs(block_bytes.magnitude - 4096) < 1e-9, "One 8^3 block of 8 B voxels is 4,096 B.")
+    check(30 < ratio < 32, f"Dense-to-hashed payload ratio should be about 31x, got {ratio}.")
 
     # ┌── 4. OUTPUT (Formatting) ───────────────────────────────────────────────
     v_ws_str = fmt_qty_int(v_ws, ureg.meter**3)
@@ -1294,7 +1296,6 @@ class HashedVoxelPayload:
     band_pct_str = fmt_percent(band_fraction, precision=1, style="prose")
 
     # visible arithmetic for notebook nbk-memory-empty-air-tax
-    ratio = (m_dense / payload).to(ureg.dimensionless).magnitude
     ratio_str = fmt_int(ratio)
     empty_pct_str = fmt_percent(1 - band_fraction, precision=1, style="prose")
     l_x_str = fmt_qty_int(l_x, ureg.meter)
@@ -1310,7 +1311,6 @@ class HashedVoxelPayload:
     hashed_math = fmt_display_math(
         rf"N_{{\text{{blocks}}}} = \frac{{{fmt_magnitude(v_band, ureg.meter**3, precision=1)}\ \text{{m}}^3}}{{({block_side} \times {_m(pitch)}\ \text{{m}})^3}} = \text{{{fmt_int(blocks)}}}, \qquad \text{{{fmt_int(blocks)}}} \times {block_side}^3 \times {fmt_int(voxel_bytes.magnitude)}\ \text{{B}} = {fmt_magnitude(payload, ureg.megabyte, precision=1)}\ \text{{MB}}"
     )
-    check(30 < ratio < 32, f"Dense-to-hashed payload ratio should be about 31x, got {ratio}.")
 ```
 
 For the illustrative host-map sizing calculation, consider an operational workspace of physical volume $V_{\text{ws}} = L_x L_y L_z$. Discretizing this domain into cubic voxels of uniform pitch $r$ requires memory proportional to workspace volume and to the inverse cube of voxel width:
@@ -1406,14 +1406,14 @@ class RaymarchBandwidth:
     n_steps_str = fmt_int(n_steps)
     bw_str = fmt_bandwidth(bw, unit=ureg.gigabyte / ureg.second, precision=2)
     soc_bw_str = fmt_bandwidth(soc_bw, unit=ureg.gigabyte / ureg.second, precision=0)
-    share_str = fmt_percent(share, precision=1, style="prose")
+    share_pct_str = fmt_percent(share, precision=1, style="prose")
 ```
 
 When depth cameras stream range frames at framerate $f_{\text{cam}}$ with $N_{\text{rays}} = W_{\text{img}} \times H_{\text{img}}$ pixels per frame, updating the volumetric map requires ray marching from the sensor origin to each observed surface point [@curless1996volumetric]. Each ray traverses a line-of-sight distance $d_{\text{ray}}$ at voxel stepping pitch $r$, requiring $N_{\text{steps}} = d_{\text{ray}} / r$ discrete cell evaluations. The raw DRAM update bandwidth consumed by naive ray marching is:
 $$\text{BW}_{\text{DRAM}} = f_{\text{cam}} \cdot N_{\text{rays}} \cdot \left(\frac{d_{\text{ray}}}{r}\right) \cdot s_{\text{rw}}$$ {#eq-mem-dram-bandwidth}
 where $s_{\text{rw}}$ is the read-modify-write memory traffic per traversed voxel (8 to 16 bytes for reading the current occupancy or distance, updating running weights, and writing back).
 
-For an illustrative VGA depth stream of `{python} RaymarchBandwidth.n_rays_str` rays at `{python} RaymarchBandwidth.f_cam_str`, marched over `{python} RaymarchBandwidth.d_ray_str` at a `{python} RaymarchBandwidth.pitch_str` pitch (`{python} RaymarchBandwidth.n_steps_str` steps per ray) with 8 bytes per step, @eq-mem-dram-bandwidth gives `{python} RaymarchBandwidth.bw_str`, `{python} RaymarchBandwidth.share_str` of the peak `{python} RaymarchBandwidth.soc_bw_str` of the host system-on-chip (SoC). This share of peak understates the actual performance impact: these volumetric map updates share the memory interconnect with vision foundation models and motion controllers, and their throughput penalty stems from non-sequential access locality and memory bus contention rather than aggregate bandwidth alone. This update bandwidth represents a substantial baseline load that system architects must incorporate into hardware contention profiling, as memory bus saturation and cache thrashing degrade perception pipelines long before theoretical DRAM bandwidth is exhausted. Block hashing reduces this traffic by keeping active blocks in on-chip memory, and projective TSDF updates project voxels inside the viewing frustum onto the depth image instead of marching every ray. These methods reduce repeated memory traffic, but the reduction depends on scene coverage and update strategy. Sparse allocation still grows as the machine explores new regions; a bounded host store needs an explicit retention policy.
+For an illustrative VGA depth stream of `{python} RaymarchBandwidth.n_rays_str` rays at `{python} RaymarchBandwidth.f_cam_str`, marched over `{python} RaymarchBandwidth.d_ray_str` at a `{python} RaymarchBandwidth.pitch_str` pitch (`{python} RaymarchBandwidth.n_steps_str` steps per ray) with 8 bytes per step, @eq-mem-dram-bandwidth gives `{python} RaymarchBandwidth.bw_str`, `{python} RaymarchBandwidth.share_pct_str` of the peak `{python} RaymarchBandwidth.soc_bw_str` of the host system-on-chip (SoC). This share of peak understates the actual performance impact: these volumetric map updates share the memory interconnect with vision foundation models and motion controllers, and their throughput penalty stems from non-sequential access locality and memory bus contention rather than aggregate bandwidth alone. This update bandwidth represents a substantial baseline load that system architects must incorporate into hardware contention profiling, as memory bus saturation and cache thrashing degrade perception pipelines long before theoretical DRAM bandwidth is exhausted. Block hashing reduces this traffic by keeping active blocks in on-chip memory, and projective TSDF updates project voxels inside the viewing frustum onto the depth image instead of marching every ray. These methods reduce repeated memory traffic, but the reduction depends on scene coverage and update strategy. Sparse allocation still grows as the machine explores new regions; a bounded host store needs an explicit retention policy.
 
 ::: {.column-margin}
 ![](images/svg/margin_volumetric_raycasting_bandwidth_ladder.svg){width="100%" fig-alt="Two horizontal bars on a linear scale. An outlined bar reaching a red limit line is labeled SoC peak 204 GB/s. A short blue bar beneath it is labeled ray-march updates, 7.37 GB/s, 3.6 percent."}
@@ -1627,6 +1627,7 @@ class RackEndBelief:
     # stop, T_stop = v / a_brake.
     t_stop_const = (v_drive / a_brake).to(ureg.second)
     d_walk_term = (v_h * (tau_delay + t_stop_const)).to(ureg.meter)
+    ms_per_mm = (1 / v_h).to(millisecond / ureg.millimeter)
 
     # ┌── 3. GUARD (Invariants) ────────────────────────────────────────────────
     check(abs(slack_abreast.magnitude) < 1e-9, f"Abreast of the rack end the free depth should be exactly spent, got {slack_abreast}.")
@@ -1637,6 +1638,7 @@ class RackEndBelief:
     check(abs(running_total.to(ureg.millimeter).magnitude - 912.9) < 5e-3, f"Running total after Ch8 should be 912.9 mm, got {running_total}.")
     check(abs(d_walk_term.to(ureg.meter).magnitude - 1.41) < 5e-3, f"Walking term at the drive limit should be 1.41 m, got {d_walk_term}.")
     check(d_walk_term > d_clear, "The walking term alone must exceed the rack-end clear distance.")
+    check(abs(ms_per_mm.magnitude - 0.625) < 1e-9, f"Each millimeter of free depth should buy 0.625 ms, got {ms_per_mm}.")
 
     # ┌── 4. OUTPUT (Formatting) ───────────────────────────────────────────────
     delta_loc_str = fmt_length(delta_loc, unit=ureg.millimeter, precision=0)
@@ -1658,7 +1660,6 @@ class RackEndBelief:
     # visible arithmetic for notebook nbk-memory-erosion-deadline
     _mm = lambda q: fmt_magnitude(q, ureg.meter, precision=2)
     _vh = fmt_magnitude(v_h, ureg.meter / ureg.second, precision=1)
-    ms_per_mm = (1 / v_h).to(millisecond / ureg.millimeter)
     ms_per_mm_str = fmt(ms_per_mm.magnitude, precision=3)
     erosion_abreast_math = fmt_display_math(
         rf"T_{{\text{{inv}}}} = \frac{{({_mm(side_clearance)} - {_mm(delta_loc)} - {_mm(delta_margin)})\ \text{{m}}}}{{{_vh}\ \text{{m/s}}}} = {fmt_magnitude(t_exp_abreast, millisecond, precision=0)}\ \text{{ms}}"
@@ -1669,7 +1670,6 @@ class RackEndBelief:
     erosion_left_math = fmt_display_math(
         rf"{fmt_magnitude(t_exp_ahead, millisecond, precision=2)} - {fmt_magnitude(t_age, millisecond, precision=1)} = {fmt_magnitude(t_left_at_dispatch, millisecond, precision=2)}\ \text{{ms}} \approx {frames_bridged_str} \times {fmt_magnitude(frame_period, millisecond, precision=1)}\ \text{{ms}}"
     )
-    check(abs(ms_per_mm.magnitude - 0.625) < 1e-9, f"Each millimeter of free depth should buy 0.625 ms, got {ms_per_mm}.")
 ```
 
 The fundamental divergence between propagated prediction and live physical observation dictates what a robot may safely execute at an aisle intersection. At the end of a storage rack, a worker may step abruptly into the clear distance $D_{\text{clear}} =$ `{python} RackEndBelief.d_clear_str` defended by the machine's stopping budget. Once the rack structure occludes the cross aisle, the central systems question becomes concrete: for how long may remembered free space certify that the vehicle's path remains clear?
@@ -1969,7 +1969,7 @@ class LatchSlotBelief:
     horizon_ratio_mult_str = fmt_multiple(horizon_ratio, precision=1)
     t_linear_str = fmt_latency(t_linear, unit=millisecond, precision=0)
     e_linear_str = fmt_length(e_linear, unit=ureg.millimeter, precision=3)
-    overshoot_str = fmt_percent(overshoot, precision=1, style="prose")
+    overshoot_pct_str = fmt_percent(overshoot, precision=1, style="prose")
     t_extra_str = fmt_qty_int(t_extra, millisecond)
     eps_sync_str = fmt_latency(eps_sync, unit=millisecond, precision=1)
     e_one_frame_str = fmt_length(e_one_frame, unit=ureg.millimeter, precision=2)
@@ -1990,7 +1990,7 @@ Because the belief representation transforms the slot relative to the wrist pose
 
 Evaluating this bounded growth model with our scenario parameters yields `{python} LatchSlotBelief.growth_math`, where elapsed time $\Delta t$ is in seconds and error $E(\Delta t)$ is in millimeters. Setting $E(\Delta t) = e_{\max}$ produces the quadratic characteristic equation `{python} LatchSlotBelief.quad_math`. The positive real root establishes an invalidation horizon of $T_{\text{inv}} =$ `{python} LatchSlotBelief.t_exp_str`. Motion plans relying on this visual estimate must complete or transition to compliant control before this deadline, with deceleration commands dispatched in advance.
 
-If the mechanical slot is machined to a tighter clearance of `{python} LatchSlotBelief.e_max_tight_str`, the invalidation horizon contracts sharply to `{python} LatchSlotBelief.t_exp_tight_str` (`{python} LatchSlotBelief.quad_tight_math`). Tightening the mechanical clearance by a factor of `{python} LatchSlotBelief.tol_ratio_mult_str` reduces the available prediction window by a factor of `{python} LatchSlotBelief.horizon_ratio_mult_str`, demonstrating the nonlinear impact of acceleration disturbances. In contrast, an estimator that naively assumes constant velocity ($a_{\text{dist}} = 0$) predicts an overly optimistic horizon of $(e_{\max} - e_0)/v_{\text{drift}} =$ `{python} LatchSlotBelief.t_linear_str`. By that time, unmodeled acceleration drives true error to `{python} LatchSlotBelief.e_linear_str`, exceeding the allowable clearance by `{python} LatchSlotBelief.overshoot_str`. A controller operating on constant-velocity extrapolation would continue unguided insertion for `{python} LatchSlotBelief.t_extra_str` beyond safe physical bounds, risking mechanical jam or tool damage.
+If the mechanical slot is machined to a tighter clearance of `{python} LatchSlotBelief.e_max_tight_str`, the invalidation horizon contracts sharply to `{python} LatchSlotBelief.t_exp_tight_str` (`{python} LatchSlotBelief.quad_tight_math`). Tightening the mechanical clearance by a factor of `{python} LatchSlotBelief.tol_ratio_mult_str` reduces the available prediction window by a factor of `{python} LatchSlotBelief.horizon_ratio_mult_str`, demonstrating the nonlinear impact of acceleration disturbances. In contrast, an estimator that naively assumes constant velocity ($a_{\text{dist}} = 0$) predicts an overly optimistic horizon of $(e_{\max} - e_0)/v_{\text{drift}} =$ `{python} LatchSlotBelief.t_linear_str`. By that time, unmodeled acceleration drives true error to `{python} LatchSlotBelief.e_linear_str`, exceeding the allowable clearance by `{python} LatchSlotBelief.overshoot_pct_str`. A controller operating on constant-velocity extrapolation would continue unguided insertion for `{python} LatchSlotBelief.t_extra_str` beyond safe physical bounds, risking mechanical jam or tool damage.
 
 ::: {#fig-uncertainty-growth fig-env="figure" fig-pos="t" fig-cap="**Belief uncertainty and invalidation horizon**: Illustrative spatial error bound $E(\\Delta t)$ of a gripper finger entering the cage door's latch-release slot, expanding quadratically under unobserved forward propagation until intersecting the slot clearance $e_{\\max}$ = `{python} LatchSlotBelief.e_max_str` at invalidation horizon $T_{\\text{inv}}$ = `{python} LatchSlotBelief.t_exp_str`; the shaded region beyond it is elapsed time for which the belief no longer supports motion. A dashed constant-velocity estimate grows more slowly, and the red marker shows that estimate still admitting the belief at `{python} LatchSlotBelief.t_linear_str`, after the bounded error has passed the clearance. Belief has a shelf life governed by physical disturbance dynamics, and only qualified new evidence can renew the relevant state claim." fig-alt="Belief uncertainty growth and invalidation horizon plot. Spatial error bound E(Δt) plotted against elapsed time Δt since last measurement. The quadratic curve expands from e0 = 0.1 mm to intersect task clearance e_max = 1 mm at invalidation horizon T_inv = 66 ms, beyond which the plot is shaded light red. A dashed constant-velocity line rises more slowly, and a red marker on the bounded curve shows the belief that estimate still admits after the curve has crossed the clearance."}
 
@@ -2486,9 +2486,16 @@ class MugHandleBelief:
     e0 = AISLE.grasp_initial_error  # category: illustrative (handle-pose error at the wrist capture)
     v_conv = AISLE.v_conveyor  # category: illustrative (takeaway-conveyor speed bound)
     e_max = AISLE.grasp_tolerance  # category: chosen (task-profile grasp tolerance)
+    t_use = 35.0 * millisecond  # category: illustrative (capture-to-use age on the consumer's clock)
+    eps_sync = LatchSlotBelief.eps_sync  # category: illustrative (clock-conversion bound, as in the latch record)
 
     # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────────
     t_exp = ((e_max - e0) / v_conv).to(millisecond)
+    age_upper = (t_use + eps_sync).to(millisecond)
+    e_use = (e0 + v_conv * age_upper).to(ureg.millimeter)
+    e_margin = (e_max - e_use).to(ureg.millimeter)
+    t_left = (t_exp - age_upper).to(millisecond)
+    t_latest = (t_exp - eps_sync).to(millisecond)
 
     # ┌── 3. GUARD (Invariants) ────────────────────────────────────────────────
     check(abs(e0.to(ureg.millimeter).magnitude - 3.0) < 1e-9, f"Handle initial error should be 3 mm, got {e0}.")
@@ -2496,23 +2503,14 @@ class MugHandleBelief:
     check(abs(v_conv.to(ureg.meter / ureg.second).magnitude - 0.20) < 1e-9, f"Conveyor speed should be 0.20 m/s, got {v_conv}.")
     check(abs(t_exp.magnitude - 60.0) < 1e-9, f"Mug-handle expiry should be 60 ms, got {t_exp}.")
     check(LatchSlotBelief.t_exp > t_exp, "The mug handle must expire before the latch-slot finger.")
+    check(e_use < e_max and t_left.magnitude > 0, "The worked grasp must pass the admission check.")
+    check(abs(e_use.magnitude - 10.04) < 1e-9, f"Error at use should be 10.04 mm, got {e_use}.")
 
     # ┌── 4. OUTPUT (Formatting) ───────────────────────────────────────────────
     e0_str = fmt_length(e0, unit=ureg.millimeter, precision=0)
     v_conv_str = fmt_velocity(v_conv, unit=ureg.meter / ureg.second, precision=2)
     e_max_str = fmt_length(e_max, unit=ureg.millimeter, precision=0)
     t_exp_str = fmt_latency(t_exp, unit=millisecond, precision=0)
-
-    # admission check for notebook nbk-memory-admission-margin
-    t_use = 35.0 * millisecond  # category: illustrative (capture-to-use age on the consumer's clock)
-    eps_sync = LatchSlotBelief.eps_sync  # category: illustrative (clock-conversion bound, as in the latch record)
-    age_upper = (t_use + eps_sync).to(millisecond)
-    e_use = (e0 + v_conv * age_upper).to(ureg.millimeter)
-    e_margin = (e_max - e_use).to(ureg.millimeter)
-    t_left = (t_exp - age_upper).to(millisecond)
-    t_latest = (t_exp - eps_sync).to(millisecond)
-    check(e_use < e_max and t_left.magnitude > 0, "The worked grasp must pass the admission check.")
-    check(abs(e_use.magnitude - 10.04) < 1e-9, f"Error at use should be 10.04 mm, got {e_use}.")
     t_use_str = fmt_latency(t_use, unit=millisecond, precision=0)
     e_margin_str = fmt_length(e_margin, unit=ureg.millimeter, precision=2)
     t_left_str = fmt_latency(t_left, unit=millisecond, precision=1)

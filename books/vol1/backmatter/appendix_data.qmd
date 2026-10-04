@@ -10,7 +10,7 @@ Data problems rarely present as data problems; they surface as a training run th
 
 This appendix is designed as a reference. Reach for it when debugging "slow training," "low accelerator utilization," or "production accuracy drift" calls for the quickest path from symptom to measurement.
 
-Conventions used here follow the book-wide notation (for example, $B$ is reserved for batch size and $\text{BW}$ denotes bandwidth).
+Conventions used here follow the book-wide notation (for example, $B$ is reserved for batch size and $\Bandwidth$ denotes bandwidth).
 
 - **When data will not move**: Start with @tbl-data-gravity and the transfer-time equation in @sec-appdx-data-foundations-napkin-math-physics-data-gravity-9ae0.
 - **When the accelerator is starving**: Use @tbl-serialization-cost and the layout discussion in @sec-appdx-data-foundations-row-vs-columnar-formats-bca2.
@@ -104,7 +104,7 @@ Data gravity[^fn-data-gravity-anchor] is a metaphor grounded in transfer-time ca
 
 [^fn-data-gravity-anchor]: **Data gravity**\index{Data gravity!appendix refresher}: Coined by Dave McCrory\index{McCrory, Dave|seealso{Data gravity}} in 2010 to describe how large datasets attract services and applications toward them, much as massive bodies attract smaller ones in physics [@mccrory2010datagravity]. The analogy is apt: the "escape velocity" required to move a petabyte-scale dataset is often measured in weeks.
 
-The ideal line-rate transfer time is $T = D_{\text{vol}}/\text{BW}$ after converting data volume and bandwidth to compatible units (the calculations below convert decimal bytes and bits per second explicitly). For the large volumes here, latency is negligible; the full equation appears in @sec-appdx-machine-foundations-bandwidth-vs-latency-5320. @Tbl-data-gravity gives lower bounds; protocol overhead and endpoint limits increase them.
+The ideal line-rate transfer time is $T = \DataVolume/\Bandwidth$ after converting data volume and bandwidth to compatible units (the calculations below convert decimal bytes and bits per second explicitly). For the large volumes here, latency is negligible; the full equation appears in @sec-appdx-machine-foundations-bandwidth-vs-latency-5320. @Tbl-data-gravity gives lower bounds; protocol overhead and endpoint limits increase them.
 
 | **Data Volume** |       **1 Gbps (Standard WAN)**       |       **10 Gbps (High-End WAN)**       |      **100 Gbps (Direct Connect)**      |       **Truck (Illustrative)**       |
 |:----------------|:-------------------------------------:|:--------------------------------------:|:---------------------------------------:|:------------------------------------:|
@@ -130,7 +130,7 @@ The ideal line-rate transfer time is $T = D_{\text{vol}}/\text{BW}$ after conver
 # │
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim.core.units import MB, second
-from mlsysim.fmt import MarkdownStr, fmt_bandwidth
+from mlsysim.fmt import MarkdownStr, check, fmt_bandwidth
 
 class SerializationCost:
     # ┌── 1. LOAD (Constants) ──────────────────────────────
@@ -145,7 +145,7 @@ class SerializationCost:
     speedup = (parquet_speed / csv_speed).to("").magnitude
 
     # ┌── 3. GUARD (Invariants) ────────────────────────────
-    # (no derived values requiring guards)
+    check(speedup == 10.0, f"Expected 10x speedup for Parquet over CSV, got {speedup}")
 
     # ┌── 4. OUTPUT (Formatting) ───────────────────────────
     # Categorical labels are non-numeric table values.
@@ -329,7 +329,7 @@ Feature engineering turns raw records into the columns a model can learn from, a
     *   **Shuffle Join**: Both tables are partitioned by key and exchanged over the network.
         *   **Cost**: Reshuffling both `{python} DataAlgebra.join_table_tb_str` tables moves about `{python} DataAlgebra.join_network_tb_str`; partitioning and locality can reduce this.
     *   **Broadcast Join**: One small table is sent to all workers.
-        *   **Cost**: $s_{\text{table}}(N_{\text{workers}}-1)$ bytes; the $s_{\text{table}}$-byte table must fit on each of $N_{\text{workers}}$ workers.
+        *   **Cost**: $s_{\text{table}}(\WorkerCountWorkers-1)$ bytes; the $s_{\text{table}}$-byte table must fit on each of $\WorkerCountWorkers$ workers.
 
 Understanding data formats, serialization costs, and algebraic primitives tells how to move data efficiently. Even a perfectly engineered pipeline, however, can silently fail if the data it carries changes character over time. Detecting that change—and quantifying how much it matters—requires a different set of tools: probability and statistics.
 
@@ -385,7 +385,7 @@ In systems, the mean is often misleading. Latency distributions are often long-t
 # │ How:     Binomial complement: Pr(Slow) = 1 - (1 - p99)^N_session.
 # │
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import fmt, fmt_math, fmt_percent
+from mlsysim.fmt import check, fmt, fmt_math, fmt_percent
 
 class TailLatency:
     # ┌── 1. LOAD (Constants) ──────────────────────────────
@@ -397,7 +397,7 @@ class TailLatency:
     p_slow = 1 - p_all_fast
 
     # ┌── 3. GUARD (Invariants) ────────────────────────────
-    # (probability must be in [0, 1])
+    check(round(p_slow * 100, 1) == 63.4, f"Expected ~63.4% slow probability, got {p_slow * 100:.2f}%")
 
     # ┌── 4. OUTPUT (Formatting) ───────────────────────────
     p_all_fast_str = fmt(p_all_fast, precision=3, commas=False)
@@ -416,10 +416,10 @@ For $N_{\text{session}} = 100$ independent requests, each with a 0.01 chance of 
 
 ### Measuring drift (divergence) {#sec-appdx-data-foundations-measuring-drift-divergence-a6dd}
 
-Because distributions have long tails where the most dangerous failures hide, simple metrics like "mean shift" are insufficient. We need tools that compare the entire shape of the distribution. Detecting drift between the serving distribution ($P_t$) and training distribution ($P_0$) requires measuring the "distance" between distributions.
+Because distributions have long tails where the most dangerous failures hide, simple metrics like "mean shift" are insufficient. We need tools that compare the entire shape of the distribution. Detecting drift between the serving distribution ($\CurrentDistribution$) and training distribution ($\TrainingDistribution$) requires measuring the "distance" between distributions.
 
-For discrete outcomes $x$, @eq-appdx-data-kl-divergence expresses KL divergence\index{Kullback-Leibler divergence!appendix refresher}[^fn-kl-divergence-relative] as the expected extra coding cost of approximating $P_t$ with $P_0$ [@kullback1951; @cover2006]. The displayed form is finite only when $P_0(x) > 0$ wherever $P_t(x) > 0$; production implementations therefore need explicit smoothing or zero handling.
-$$ \mathcal{D}_{\text{KL}}(P_t \lVert P_0) = \sum_x P_t(x) \log \frac{P_t(x)}{P_0(x)} $$ {#eq-appdx-data-kl-divergence}
+For discrete outcomes $x$, @eq-appdx-data-kl-divergence expresses KL divergence\index{Kullback-Leibler divergence!appendix refresher}[^fn-kl-divergence-relative] as the expected extra coding cost of approximating $\CurrentDistribution$ with $\TrainingDistribution$ [@kullback1951; @cover2006]. The displayed form is finite only when $\TrainingDistribution(x) > 0$ wherever $\CurrentDistribution(x) > 0$; production implementations therefore need explicit smoothing or zero handling.
+$$ \mathcal{D}_{\text{KL}}(\CurrentDistribution \lVert \TrainingDistribution) = \sum_x \CurrentDistribution(x) \log \frac{\CurrentDistribution(x)}{\TrainingDistribution(x)} $$ {#eq-appdx-data-kl-divergence}
 
 ```{python}
 #| echo: false
@@ -463,14 +463,14 @@ class KLDrift:
 
     # ┌── 4. OUTPUT ────────────────────────────────────────
     # Internal interpolation helpers (no _str suffix — not exported to prose).
-    P0_fmt = [f"{p0:.2f}" for p0 in P0]
-    Pt_fmt = [f"{pt:.2f}" for pt in Pt]
-    lr_fmt = [f"{l:.4f}" for l in lr]
+    _P0_fmt = [f"{p0:.2f}" for p0 in P0]
+    _Pt_fmt = [f"{pt:.2f}" for pt in Pt]
+    _lr_fmt = [f"{l:.4f}" for l in lr]
 
-    kl_pq_t_fmt = [f"{t:.4f}" for t in kl_pq_t]
-    kl_qp_t_fmt = [f"{t:.4f}" for t in kl_qp_t]
-    diff_fmt = [f"{d:.2f}" for d in diffs]
-    psi_t_fmt = [f"{t:.5f}" for t in psi_t]
+    _kl_pq_t_fmt = [f"{t:.4f}" for t in kl_pq_t]
+    _kl_qp_t_fmt = [f"{t:.4f}" for t in kl_qp_t]
+    _diff_fmt = [f"{d:.2f}" for d in diffs]
+    _psi_t_fmt = [f"{t:.5f}" for t in psi_t]
 
     # Scalar prose exports
     kl_pq_str = fmt(kl_pq, precision=4, commas=False)
@@ -484,44 +484,44 @@ class KLDrift:
     pt_neutral_pct_str = fmt_percent(Pt[2], precision=0, commas=False, style="prose")
 
     # Bracketed vectors and display equations are structural math strings.
-    P0_vec_str = MarkdownStr(f"[{P0_fmt[0]}, {P0_fmt[1]}, {P0_fmt[2]}]")
-    Pt_vec_str = MarkdownStr(f"[{Pt_fmt[0]}, {Pt_fmt[1]}, {Pt_fmt[2]}]")
+    P0_vec_str = MarkdownStr(f"[{_P0_fmt[0]}, {_P0_fmt[1]}, {_P0_fmt[2]}]")
+    Pt_vec_str = MarkdownStr(f"[{_Pt_fmt[0]}, {_Pt_fmt[1]}, {_Pt_fmt[2]}]")
 
     # Renamed from kl_pq_formula → kl_pq_eq (canonical _eq suffix for fmt_math expression)
     kl_pq_eq = MarkdownStr(
         "\\begin{gather*}\n"
-        f"\\mathcal{{D}}_{{\\text{{KL}}}}(P_0 \\lVert P_t) = {P0_fmt[0]} \\log\\frac{{{P0_fmt[0]}}}{{{Pt_fmt[0]}}} "
-        f"+ {P0_fmt[1]} \\log\\frac{{{P0_fmt[1]}}}{{{Pt_fmt[1]}}} "
-        f"+ {P0_fmt[2]} \\log\\frac{{{P0_fmt[2]}}}{{{Pt_fmt[2]}}}"
+        f"\\mathcal{{D}}_{{\\text{{KL}}}}(P_0 \\lVert P_t) = {_P0_fmt[0]} \\log\\frac{{{_P0_fmt[0]}}}{{{_Pt_fmt[0]}}} "
+        f"+ {_P0_fmt[1]} \\log\\frac{{{_P0_fmt[1]}}}{{{_Pt_fmt[1]}}} "
+        f"+ {_P0_fmt[2]} \\log\\frac{{{_P0_fmt[2]}}}{{{_Pt_fmt[2]}}}"
         "\\end{gather*}"
     )
     # Renamed from kl_pq_calc → kl_pq_calc_eq
     kl_pq_calc_eq = MarkdownStr(
         "\\begin{gather*}\n"
-        f"= {P0_fmt[0]} \\times {lr_fmt[0]} "
-        f"+ {P0_fmt[1]} \\times ({lr_fmt[1]}) "
-        f"+ {P0_fmt[2]} \\times ({lr_fmt[2]}) "
+        f"= {_P0_fmt[0]} \\times {_lr_fmt[0]} "
+        f"+ {_P0_fmt[1]} \\times ({_lr_fmt[1]}) "
+        f"+ {_P0_fmt[2]} \\times ({_lr_fmt[2]}) "
         "\\\\[-1pt]\n"
-        f"= {kl_pq_t_fmt[0]} + ({kl_pq_t_fmt[1]}) + ({kl_pq_t_fmt[2]}) "
+        f"= {_kl_pq_t_fmt[0]} + ({_kl_pq_t_fmt[1]}) + ({_kl_pq_t_fmt[2]}) "
         f"= {kl_pq_str}\\text{{ nats}}"
         "\\end{gather*}"
     )
     # Renamed from kl_qp_formula → kl_qp_eq
     kl_qp_eq = MarkdownStr(
         "\\begin{gather*}\n"
-        f"\\mathcal{{D}}_{{\\text{{KL}}}}(P_t \\lVert P_0) = {Pt_fmt[0]} \\log\\frac{{{Pt_fmt[0]}}}{{{P0_fmt[0]}}} "
-        f"+ {Pt_fmt[1]} \\log\\frac{{{Pt_fmt[1]}}}{{{P0_fmt[1]}}} "
-        f"+ {Pt_fmt[2]} \\log\\frac{{{Pt_fmt[2]}}}{{{P0_fmt[2]}}}"
+        f"\\mathcal{{D}}_{{\\text{{KL}}}}(P_t \\lVert P_0) = {_Pt_fmt[0]} \\log\\frac{{{_Pt_fmt[0]}}}{{{_P0_fmt[0]}}} "
+        f"+ {_Pt_fmt[1]} \\log\\frac{{{_Pt_fmt[1]}}}{{{_P0_fmt[1]}}} "
+        f"+ {_Pt_fmt[2]} \\log\\frac{{{_Pt_fmt[2]}}}{{{_P0_fmt[2]}}}"
         "\\end{gather*}"
     )
     # Renamed from kl_qp_calc → kl_qp_calc_eq
     kl_qp_calc_eq = MarkdownStr(
         "\\begin{gather*}\n"
-        f"= {Pt_fmt[0]} \\times ({-lr[0]:.4f}) "
-        f"+ {Pt_fmt[1]} \\times ({-lr[1]:.4f}) "
-        f"+ {Pt_fmt[2]} \\times ({-lr[2]:.4f}) "
+        f"= {_Pt_fmt[0]} \\times ({-lr[0]:.4f}) "
+        f"+ {_Pt_fmt[1]} \\times ({-lr[1]:.4f}) "
+        f"+ {_Pt_fmt[2]} \\times ({-lr[2]:.4f}) "
         "\\\\[-1pt]\n"
-        f"= {kl_qp_t_fmt[0]} + {kl_qp_t_fmt[1]} + {kl_qp_t_fmt[2]} "
+        f"= {_kl_qp_t_fmt[0]} + {_kl_qp_t_fmt[1]} + {_kl_qp_t_fmt[2]} "
         f"= {kl_qp_str}\\text{{ nats}}"
         "\\end{gather*}"
     )
@@ -529,14 +529,22 @@ class KLDrift:
         "\\begin{gather*}\n"
         f"\\text{{PSI}} = \\sum (P_{{0,i}} - P_{{t,i}}) "
         f"\\log\\frac{{P_{{0,i}}}}{{P_{{t,i}}}} "
-        f"= ({diff_fmt[0]})({lr_fmt[0]}) "
-        f"+ ({diff_fmt[1]})({lr_fmt[1]}) "
-        f"+ ({diff_fmt[2]})({lr_fmt[2]}) "
+        f"= ({_diff_fmt[0]})({_lr_fmt[0]}) "
+        f"+ ({_diff_fmt[1]})({_lr_fmt[1]}) "
+        f"+ ({_diff_fmt[2]})({_lr_fmt[2]}) "
         "\\\\[-1pt]\n"
-        f"= {psi_t_fmt[0]} + {psi_t_fmt[1]} + {psi_t_fmt[2]} "
+        f"= {_psi_t_fmt[0]} + {_psi_t_fmt[1]} + {_psi_t_fmt[2]} "
         f"= {psi_str}\n"
         "\\end{gather*}"
     )
+
+KLDrift.P0_fmt = KLDrift._P0_fmt
+KLDrift.Pt_fmt = KLDrift._Pt_fmt
+KLDrift.lr_fmt = KLDrift._lr_fmt
+KLDrift.kl_pq_t_fmt = KLDrift._kl_pq_t_fmt
+KLDrift.kl_qp_t_fmt = KLDrift._kl_qp_t_fmt
+KLDrift.diff_fmt = KLDrift._diff_fmt
+KLDrift.psi_t_fmt = KLDrift._psi_t_fmt
 ```
 
 ::: {#nbk-appendix-data-kl-divergence-drift-detection .callout-notebook title="Worked example: KL divergence for drift detection"}
@@ -545,7 +553,7 @@ class KLDrift:
 
 **Math**:
 
-Training distribution $P_0$: `{python} KLDrift.P0_vec_str`. Serving distribution $P_t$: `{python} KLDrift.Pt_vec_str`.
+Training distribution $\TrainingDistribution$: `{python} KLDrift.P0_vec_str`. Serving distribution $\CurrentDistribution$: `{python} KLDrift.Pt_vec_str`.
 ```{python}
 #| echo: false
 #| output: asis
@@ -559,7 +567,7 @@ print(r"\vspace{-6mm}")
 print(KLDrift.kl_pq_calc_eq)
 ```
 
-Notice the asymmetry: $\mathcal{D}_{\text{KL}}(P_0 \lVert P_t) \neq \mathcal{D}_{\text{KL}}(P_t \lVert P_0)$. The population stability index (PSI)\index{Population stability index!appendix refresher} symmetrizes this; the calculation below uses natural logarithms:
+Notice the asymmetry: $\mathcal{D}_{\text{KL}}(\TrainingDistribution \lVert \CurrentDistribution) \neq \mathcal{D}_{\text{KL}}(\CurrentDistribution \lVert \TrainingDistribution)$. The population stability index (PSI)\index{Population stability index!appendix refresher} symmetrizes this; the calculation below uses natural logarithms:
 ```{python}
 #| echo: false
 #| output: asis
@@ -597,7 +605,7 @@ class PsiThreshold:
 
 The threshold remains illustrative: its meaning depends on sample size, binning, smoothing, and zero handling, and retraining requires model-quality evidence.
 
-[^fn-kl-divergence-relative]: **KL divergence**\index{Kullback-Leibler divergence!appendix refresher}: Named after Solomon Kullback\index{Kullback, Solomon|seealso{Kullback-Leibler divergence}} and Richard Leibler\index{Leibler, Richard|seealso{Kullback-Leibler divergence}}, who introduced it in 1951. Also called *relative entropy*, it quantifies the expected extra information needed to encode samples from one distribution using a code optimized for another; for drift monitoring in this book, the canonical direction is $\mathcal{D}_{\text{KL}}(P_t \lVert P_0)$. With natural logarithms, as in the example above, the unit is nats; with base-2 logarithms, the unit is bits. In production ML, KL divergence is the theoretical backbone of many drift-detection metrics.
+[^fn-kl-divergence-relative]: **KL divergence**\index{Kullback-Leibler divergence!appendix refresher}: Named after Solomon Kullback\index{Kullback, Solomon|seealso{Kullback-Leibler divergence}} and Richard Leibler\index{Leibler, Richard|seealso{Kullback-Leibler divergence}}, who introduced it in 1951. Also called *relative entropy*, it quantifies the expected extra information needed to encode samples from one distribution using a code optimized for another; for drift monitoring in this book, the canonical direction is $\mathcal{D}_{\text{KL}}(\CurrentDistribution \lVert \TrainingDistribution)$. With natural logarithms, as in the example above, the unit is nats; with base-2 logarithms, the unit is bits. In production ML, KL divergence is the theoretical backbone of many drift-detection metrics.
 
 Both KL divergence and PSI are grounded in a deeper framework—information theory\index{Information theory}—which provides the units and bounds that make these metrics principled rather than *ad hoc*.
 
