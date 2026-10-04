@@ -141,13 +141,13 @@ Machine learning systems face a core engineering trade-off: **representational p
 
 Choosing an architectural backbone sets the primary memory layout and compute pattern for downstream hardware. @Tbl-architecture-families contrasts the five major neural network families across their spatial/temporal inductive biases, tensor operations, and memory access characteristics.
 
-| **Architecture** | **Data Type**                 | **Core Innovation**            | **System Bottleneck**                           |
-|:-----------------|:------------------------------|:-------------------------------|:------------------------------------------------|
-| **MLPs**         | Tabular/Unstructured          | Dense connectivity             | Memory bandwidth                                |
-| **CNNs**         | Spatial (images)              | Local filters + weight sharing | Compute throughput                              |
-| **RNNs**         | Sequential (time series)      | Recurrent state                | Sequential dependencies                         |
+| **Architecture** | **Data Type**                 | **Core Innovation**            | **System Bottleneck**                                         |
+|:-----------------|:------------------------------|:-------------------------------|:--------------------------------------------------------------|
+| **MLPs**         | Tabular/Unstructured          | Dense connectivity             | Memory bandwidth                                              |
+| **CNNs**         | Spatial (images)              | Local filters + weight sharing | Compute throughput                                            |
+| **RNNs**         | Sequential (time series)      | Recurrent state                | Sequential dependencies                                       |
 | **Transformers** | Relational (language)         | Dynamic attention              | Quadratic score compute; optional $\SequenceLength^2$ storage |
-| **DLRM**         | Categorical (recommendations) | Embedding tables               | Memory capacity (TB+)                           |
+| **DLRM**         | Categorical (recommendations) | Embedding tables               | Memory capacity (TB+)                                         |
 
 : **Neural Architecture Families**: Each family targets a distinct data structure and exposes a distinct system bottleneck. The bottleneck column reads directly from the iron law: MLPs stress memory bandwidth through dense activations, CNNs stress compute throughput because convolution reuses filters across many pixels, RNNs stress sequential dependencies that prevent parallelism, transformers compute quadratic score interactions and may materialize quadratic score storage, and DLRM stresses memory capacity at terabyte scale through embedding tables. {#tbl-architecture-families}
 
@@ -467,7 +467,7 @@ class WorkloadSignatures:
 
 These bottlenecks reflect the underlying math, but the calculation here is a weight-only proxy rather than a complete measurement of main-memory traffic. It divides floating-point work by FP32 model-weight bytes, omitting activation, intermediate, and KV-cache traffic. Batching can amortize weight traffic across examples or tokens, while additional state movement can lower realized intensity. @Sec-appdx-algorithm-foundations-computational-complexity-cheat-sheet-0c6c gives the per-operation FLOP and parameter formulas used in the proxy. @Tbl-workload-signatures compares the three lighthouse scenarios and exposes a roughly `{python} WorkloadSignatures.resnet_to_gpt2_ratio_mult_str` gap under these assumptions.
 
-| **Model Family**     | **Lighthouse** |                  **Intensity** $(\ArithmeticIntensity)$                   | **Hardware Affinity**      |
+| **Model Family**     | **Lighthouse** |         **Intensity** $(\ArithmeticIntensity)$         | **Hardware Affinity**      |
 |:---------------------|:--------------:|:------------------------------------------------------:|:---------------------------|
 | **Dense CNN**        |   ResNet-50    |  ~`{python} WorkloadSignatures.resnet_intensity_str`   | Compute-Rich (GPUs/TPUs)   |
 | **Efficient Vision** |  MobileNetV2   | ~`{python} WorkloadSignatures.mobilenet_intensity_str` | Balanced (Mobile NPUs)     |
@@ -2517,6 +2517,7 @@ The inputs $\mathbf{Q}$ (queries), $\mathbf{K}$ (keys), and $\mathbf{V}$ (values
 2.  **Decoupling routing from content**: The dot products $\mathbf{Q}\mathbf{K}^T$ determine *where* to look (routing coefficients), while the value projection $\mathbf{V}$ determines *what* information to retrieve. Without a separate value projection, a token acting as a strong structural signpost (such as a preposition or punctuation mark) would force its entire raw embedding into downstream layers. Projecting through $\mathbf{W}_V$ allows the network to strip away irrelevant lexical identity and extract only task-relevant features.
 
 For an input sequence of length $\SequenceLength$ projected to the head dimension $\AttentionHeadDimension$ (the full width $\HiddenDimension$ when there is one head), the dot product $\mathbf{Q}\mathbf{K}^T$ computes all $\SequenceLength^2$ pairwise token similarities. Scaling by $1/\sqrt{\AttentionHeadDimension}$ prevents dot products from growing large in magnitude at high dimensions, which would push softmax into regions with vanishingly small gradients. The softmax operator[^fn-softmax-normalization-reduction] normalizes each row of the score matrix into a probability distribution over key positions. Finally, multiplying these normalized weights by $\mathbf{V}$ produces output vectors formed as weighted combinations of the value representations.
+
 [^fn-softmax-normalization-reduction]: **Softmax**\index{Softmax function!systems}: Named as a "soft" (differentiable) version of argmax, with mathematical roots in Boltzmann's statistical mechanics, softmax normalizes each query row over all $\SequenceLength$ scores and therefore requires a reduction over each row. Online softmax lets that reduction run over tiles with running statistics, which is why it need not force quadratic storage (@sec-network-architectures-memory-requirements-72c3). \index{Softmax function!quadratic bottleneck}
 
 [^fn-attention-qkv-projections]: **Query-key-value (QKV)**\index{Attention mechanism!query-key-value}\index{Query-key-value}: The terminology is borrowed from information retrieval, explaining why the equation uses three distinct learned projections to calculate pairwise scores. Creating these projections requires three independent weight matrices, costing $3 \times \HiddenDimension^2$ parameters per layer. The direct systems consequence is the "KV cache"\index{QKV!KV cache} for autoregressive inference: all prior key and value vectors must be stored for the next token, causing memory to grow linearly ($\mathcal{O}(\SequenceLength)$) with sequence length and potentially dominate serving memory at long contexts or high concurrency.
@@ -2526,6 +2527,7 @@ For an input sequence of length $\SequenceLength$ projected to the head dimensio
 :::
 
 @Fig-attention traces this dataflow for a sequence of length $S = 6$: cyan query rows match against red key columns to populate the $6{\times}6$ similarity matrix, whose rows subsequently weight the green value vectors to produce the contextualized output vectors on the right. Each row of the resulting $\SequenceLength{\times}\SequenceLength$ matrix determines how strongly an individual token attends to every token in the sequence. In a trained model, the largest affinity values reflect strong contextual dependencies, while near-zero entries suppress irrelevant positions.
+
 ::: {#fig-attention fig-env="figure" fig-pos="htb" fig-cap="**Query-Key-Value Attention Mechanism**: For a 6-token sequence, queries (cyan) match against keys (red) to produce a $6{\times}6$ attention matrix with $\mathcal{O}(S^2)$ entries. Cell color runs from blue to red across the grid as an illustrative gradient rather than as computed weights. Each output position aggregates information from all values (green) weighted by its own row of that matrix. The matrix structure reveals both the computational pattern (thirty-six similarity computations) and the naive memory bottleneck (storing $\SequenceLength^2$ attention weights). Source: Transformer Explainer [@cho2025]." fig-alt="6-by-6 attention matrix with an illustrative gradient coloring from blue to red across the grid. Cyan query vectors enter from left, red key vectors from top, green value vectors from below. Output vectors exit right, showing weighted aggregation pattern."}
 
 ```{.tikz}
@@ -3737,6 +3739,7 @@ class DLRMLighthouseProfile:
 :::
 
 Once embedding tables exceed one device, capacity, not arithmetic, becomes the primary systems constraint. While a ResNet-50 (`{python} DLRMLighthouseProfile.resnet_fp32_mb_str`) fits on a single accelerator and a dense language model like GPT-3 (`{python} DLRMLighthouseProfile.gpt3_fp16_gb_str`) fits within a single multi-GPU node, production recommendation models reach terabytes of embedding parameters. In iron law terms, capacity acts as a feasibility constraint that comes before either execution term. It decides where the tables live, and therefore which bandwidth the data term $\DataVolume/\Bandwidth$ must use: HBM when the tables fit, host DRAM over PCIe or a peer accelerator over NVLink when they do not.
+
 ::: {.column-margin}
 ![](images/svg/vol1_nn_architectures_margin_003.svg){width="100%" fig-alt="Four embedding partitions connected by all-to-all exchange links, showing that sparse feature lookups may depend on data stored outside the local partition."}
 

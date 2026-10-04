@@ -845,6 +845,7 @@ Increasing batch size transforms memory-bound vector operations into compute-bou
 :::
 
 Because activation memory scales linearly with $\BatchSize$, the capacity of accelerator HBM bounds the maximum batch size that can execute in a single forward/backward pass. When the batch size required for high hardware occupancy or stable convergence exceeds device memory, systems decouple execution batch size from optimization batch size using gradient accumulation. The system executes multiple smaller micro-batches ($\BatchSize_{\text{micro}}$), serializing their execution to keep peak activation memory bounded as described in @eq-gd-memory, accumulates the resulting gradients in place, and triggers the optimizer update only once the cumulative effective batch is complete.
+
 #### Adaptive and momentum-based optimizers {#sec-model-training-adaptive-momentumbased-optimizers-f079}
 
 Basic SGD applies a uniform scalar learning rate to every parameter tensor, which can stall training when loss curvature differs by orders of magnitude across dimensions. Momentum\index{Optimizer!momentum-based methods}\index{Optimizer!adaptive learning rate} smooths updates using directional gradient history, RMSprop adapts individual step sizes using squared-gradient magnitudes, and Adam combines first-moment tracking with adaptive second-moment scaling [@kingma2014adam]. While these algorithmic enhancements can reduce the total optimization steps required to converge, they do so by introducing persistent auxiliary state that directly increases accelerator memory pressure and memory-bus traffic.
@@ -1279,6 +1280,7 @@ class GPT2ActivationMemory:
 ```
 
 A simple three-layer network processing MNIST requires kilobytes of activation storage. In contrast, GPT-2 processing a single batch requires over `{python} GPT2ActivationMemory.total_act_gb_str`—surpassing the total high-bandwidth memory capacity of a standard accelerator. @Sec-appdx-algorithm-foundations-true-cost-training-memory-e54e prices each term of the full training memory equation ($\TotalMemoryFootprint = \WeightMemoryWeights + \GradientMemoryGradients + \OptimizerstateMemory + \ActivationMemoryActivations$) for GPT-2. Modern ML frameworks automate gradient evaluation through automatic differentiation, but managing the resulting memory footprint and arithmetic schedule remains an unavoidable systems engineering responsibility.
+
 ::: {.column-margin}
 ```{=latex}
 \vspace*{-33mm}
@@ -3398,7 +3400,7 @@ The selection phase maps the identified bottleneck to an architectural mechanism
 
 The composition phase evaluates how multiple interventions interact across shared hardware resources. Because system resources are tightly coupled, an optimization that relieves one bottleneck often imposes demands elsewhere. Asynchronous prefetching hides data movement latency behind computation, but maintaining double-buffered batch queues consumes pinned host memory and device HBM. In contrast, synergistic combinations compound performance gains: pairing 16-bit mixed precision with activation checkpointing curtails memory usage sufficiently to allow larger per-device batch sizes, restoring high arithmetic intensity to underutilized tensor cores. Successful composition therefore requires verifying that secondary resource overheads do not trigger a new binding constraint.
 
-@Fig-optimization-flowchart formalizes this diagnostic playbook into a triage flowchart, first screening accelerator utilization below 70% to route data-bound pipelines toward prefetching and overlap, then adjudicating memory headroom (above 90% or OOM) to isolate memory-bound mitigations from compute-bound kernel optimizations.
+@Fig-optimization-flowchart formalizes this diagnostic playbook into a triage flowchart, first screening accelerator utilization below 70 percent to route data-bound pipelines toward prefetching and overlap, then adjudicating memory headroom (above 90 percent or OOM) to isolate memory-bound mitigations from compute-bound kernel optimizations.
 
 ::: {#fig-optimization-flowchart fig-env="figure" fig-pos="htb" fig-cap="**Training Optimization Decision Flowchart**: A heuristic path from profiling signals to candidate optimizations. Begin with accelerator utilization, then distinguish memory pressure from compute saturation before selecting an intervention. The 70 percent utilization and 90 percent memory thresholds are illustrative triage values rather than universal definitions of data-, memory-, or compute-bound execution." fig-alt="Heuristic flowchart starting from a profiled training run and using illustrative accelerator-utilization and memory-pressure thresholds to suggest candidate optimizations before re-profiling."}
 
@@ -4892,9 +4894,9 @@ The synergy between gradient accumulation and checkpointing enables training of 
 
 For a network with $\NumberOfLayers$ layers, each storing $\ActivationMemoryActivations^{(\ell)}$ bytes of activations, @tbl-checkpoint-tradeoffs quantifies how the number and placement of checkpoints determines the memory-compute trade-off. Sub-linear checkpointing strategies can reduce memory consumption from $\mathcal{O}(\NumberOfLayers)$ to $\mathcal{O}(\sqrt{\NumberOfLayers})$ with only a fractional increase in total compute time, enabling the training of much deeper models on existing hardware.
 
-| **Strategy**                             |                                                          **Memory Cost**                                                          | **Recompute Cost**                  |
-|:-----------------------------------------|:---------------------------------------------------------------------------------------------------------------------------------:|:------------------------------------|
-| **No checkpointing**                     |                                         $\NumberOfLayers \times \ActivationMemoryActivations^{(\ell)}$                                        | 0 forward ops                       |
+| **Strategy**                             |                                                                **Memory Cost**                                                                | **Recompute Cost**                              |
+|:-----------------------------------------|:---------------------------------------------------------------------------------------------------------------------------------------------:|:------------------------------------------------|
+| **No checkpointing**                     |                                         $\NumberOfLayers \times \ActivationMemoryActivations^{(\ell)}$                                        | 0 forward ops                                   |
 | **One checkpoint ($n_{\text{ckpt}}=1$)** |                     $\ActivationMemoryActivations^{(\ell)} + \NumberOfLayers \times \ActivationMemoryActivations^{(\ell)}$                    | $(\NumberOfLayers-1)$ forward ops               |
 | **$n_{\text{ckpt}}$ checkpoints**        | $n_{\text{ckpt}}\times \ActivationMemoryActivations^{(\ell)} + (\NumberOfLayers/n_{\text{ckpt}})\times \ActivationMemoryActivations^{(\ell)}$ | $(\NumberOfLayers-n_{\text{ckpt}})$ forward ops |
 
