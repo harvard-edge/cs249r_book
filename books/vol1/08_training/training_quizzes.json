@@ -28,27 +28,27 @@
         "questions": [
           {
             "question_type": "MCQ",
-            "question": "A 7-billion-parameter model uses 14 GB of FP16 weights for inference and fits comfortably on a single 40 GB accelerator. Switching the same model to Adam-based mixed-precision training causes immediate out-of-memory failures even before activations are accounted for. Using the section's memory decomposition, which factor is most directly responsible?",
+            "question": "A 7-billion-parameter model uses 14 GB of FP16 weights for inference and fits comfortably on a single 40 GB accelerator. Switching the same model to standard mixed-precision Adam training causes immediate out-of-memory failures even before activations are accounted for. Using the section's memory decomposition, which factor is most directly responsible?",
             "choices": [
-              "Adam internally re-runs the forward pass three times per step, tripling the working set of weights held in memory.",
-              "Adam adds 14 GB of FP16 gradients, 28 GB of FP32 master weights, and 56 GB of FP32 first- and second-moment estimates, pushing the standard mixed-precision training state to roughly 112 GB before activations.",
-              "Adam requires the entire training dataset to be cached in accelerator memory, which exceeds the 40 GB budget even for moderately sized corpora.",
-              "Adam disables Tensor Core execution and forces FP64 storage for every weight matrix during the backward pass."
+              "Adam internally re-runs the forward and backward passes, so the same weights must be stored several extra times during each step.",
+              "Adam adds 14 GB of FP16 gradients, 28 GB of FP32 master weights, and 56 GB of FP32 first- and second-moment state, pushing the static training state to about 112 GB before activations.",
+              "Adam requires the full training corpus to be cached in accelerator memory so batches can be reused across optimizer steps.",
+              "Adam forces all model tensors into FP64 during backpropagation, which multiplies the weight footprint beyond device capacity."
             ],
-            "answer": "The correct answer is B. A standard mixed-precision Adam decomposition requires 14 GB of FP16 weights ($2\\text{ bytes/param}$) + 14 GB of FP16 gradients ($2\\text{ bytes/param}$) + 28 GB of FP32 master weights ($4\\text{ bytes/param}$) + 56 GB of FP32 first- and second-moment estimates ($8\\text{ bytes/param}$), totaling 16 bytes per parameter (roughly 112 GB for a 7B model) before activations. The suggestion that Adam reruns forward passes is incorrect because Adam executes only one forward and backward pass per step. The dataset caching claim confuses streaming input batches loaded in host memory with resident accelerator state. The FP64 claim is incorrect because mixed-precision Adam executes on Tensor Cores using FP16/BF16 and accumulates in FP32.",
-            "learning_objective": "Calculate the per-step training memory footprint of an Adam-trained model from weights, gradients, and optimizer state, and identify which component dominates."
+            "answer": "The correct answer is B. In the section's standard mixed-precision Adam recipe, training state includes 14 GB of FP16 weights, 14 GB of FP16 gradients, 28 GB of FP32 master weights, and 56 GB of FP32 moment state, for about 112 GB before activations. The idea that Adam re-runs model passes confuses optimizer state with the forward/backward computation, and dataset caching is part of the input pipeline rather than resident model-training state on the accelerator.",
+            "learning_objective": "Calculate the static mixed-precision Adam training-state footprint from weights, gradients, master weights, and optimizer state."
           },
           {
             "question_type": "SHORT",
-            "question": "A team's profiler shows the GPU at 18 percent utilization with periodic drops to zero, while the CPU is pinned near 100 percent on a single core and the PCIe link is mostly idle. Using the section's staged-pipeline framework, explain how to diagnose the bubble's source and what fix should be targeted.",
-            "answer": "The signature—a single CPU core pinned near 100%, idle PCIe, and GPU utilization dropping to zero—points directly to the data loading and preprocessing stage as the binding bottleneck. In a staged pipeline, the slowest stage caps end-to-end throughput; a single-threaded Python preprocessor constrained by the Global Interpreter Lock (GIL) cannot produce batches fast enough to keep the accelerator supplied. The primary fix is to introduce process-based multiprocessing (`num_workers > 0` in the DataLoader) and asynchronous prefetching, ensuring the next batch is queued in host/pinned memory before the accelerator completes its current step.",
-            "learning_objective": "Analyze the pipeline stage responsible for accelerator bubbles from CPU, PCIe, and GPU utilization signals, and select the optimization that addresses that specific stage."
+            "question": "A team's profiler shows the GPU at 18 percent utilization with periodic drops to zero, while one CPU core is pinned near 100 percent and the PCIe link is mostly idle. Using the section's staged-pipeline framework, explain how to diagnose the bubble's source and what fix should be targeted.",
+            "answer": "This pattern suggests the input side of the staged pipeline may be starving the accelerator, because the GPU has bubbles while host work is active and PCIe is not the limiting stage. To confirm the source, correlate the GPU idle gaps with batch-preparation time versus host dispatch or synchronization delays; if the gaps line up with preprocessing, then the right fix is input-pipeline work such as additional workers or prefetching. The practical implication is that high CPU usage alone is not enough to blame tokenization or the GIL with certainty—the stage correlation must come first.",
+            "learning_objective": "Analyze staged-pipeline signals to distinguish likely input starvation from other host-side causes of accelerator bubbles."
           },
           {
             "question_type": "TF",
-            "question": "Sudden NaN loss spikes during large-scale mixed-precision transformer training are typically caused by GPU memory capacity exhaustion spilling tensors into host memory.",
-            "answer": "False. As demonstrated in the PaLM case study and training failure analysis, loss spikes and NaN propagation during mixed-precision training stem from numerical instability—such as extreme activation values exceeding FP16 dynamic range ($\\approx 6.5 \\times 10^4$) or gradient explosions—rather than memory capacity exhaustion. Memory capacity exhaustion produces deterministic Out-Of-Memory (OOM) allocation errors that crash the process, whereas numerical overflow silently generates $+ \\text{Inf}$ and NaNs that propagate through backpropagation.",
-            "learning_objective": "Distinguish numerical-range overflow failures from memory-capacity exhaustion in mixed-precision training."
+            "question": "True or False: Sudden NaN loss spikes during mixed-precision training are usually the same failure mode as an out-of-memory error, because both come from the GPU running out of memory during backpropagation.",
+            "answer": "False. An out-of-memory failure is a capacity problem that triggers an allocation error, while NaNs indicate numerical instability somewhere in the training computation. Mixed precision can contribute to numerical issues, but a NaN spike is not the same diagnosis as memory exhaustion.",
+            "learning_objective": "Distinguish memory-capacity failures from numerical-instability failures in mixed-precision training."
           },
           {
             "question_type": "MCQ",
@@ -92,15 +92,15 @@
         "questions": [
           {
             "question_type": "MCQ",
-            "question": "A 1,024-GPU training run has its prefetching pipeline well staged: PCIe is saturated overlapping with compute and gradient AllReduce is hidden behind the next forward pass. Profiling reports 38 percent MFU. Under the simplified training-time law ($T_{\\text{train}} = \\frac{O}{R_{\\text{peak}} \\times \\eta_{\\text{hw}}}$), which lever is the most actionable target for the next engineering investment, and why?",
+            "question": "A training run has confirmed that input delivery and communication are off the critical path. The model FLOP count and the peak-throughput convention are being held fixed, yet profiling still reports only 38 percent effective end-to-end utilization relative to the stated peak. Under the training-time law $T_{\\text{train}} = \\frac{O}{R_{\\text{peak}} \\times \\eta_{\\text{hw}}}$, which lever is the most direct target for the next round of profiling?",
             "choices": [
-              "Hardware utilization $\\eta_{\\text{hw}}$, because with external data movement and communication already overlapped, the remaining gap to peak throughput consists of kernel-level memory stalls, launch latency, and small tile overheads that profiling can isolate.",
-              "Peak hardware throughput $R_{\\text{peak}}$, because purchasing next-generation accelerators is the only mechanism that directly changes realized MFU.",
-              "Total operations $O$, because reducing model operations is the only permissible systems modification when communication is hidden.",
-              "Dataset size $D_{\\text{tokens}}$, because shrinking training tokens mathematically raises the hardware utilization factor $\\eta_{\\text{hw}}$."
+              "Hardware utilization $\\eta_{\\text{hw}}$, because with $O$ and the relevant $R_{\\text{peak}}$ convention fixed, the remaining gap points to how efficiently kernels are being executed end to end.",
+              "Peak throughput $R_{\\text{peak}}$, because low effective end-to-end utilization relative to the stated peak automatically means the hardware peak specification is too small for the workload.",
+              "Total operations $O$, because once data and communication are hidden, utilization is no longer relevant to training time.",
+              "Dataset size, because shrinking the number of tokens directly raises effective end-to-end utilization relative to the stated peak even when execution efficiency is unchanged."
             ],
-            "answer": "The correct answer is A. In the training-time law ($T_{\\text{train}} = \\frac{O}{R_{\\text{peak}} \\times \\eta_{\\text{hw}}}$), once external communication and data loading are overlapped behind compute, the actionable lever for systems engineers is $\\eta_{\\text{hw}}$ (effective hardware utilization). Profiling can identify kernel-level memory bandwidth bottlenecks, suboptimal tile shapes, and kernel launch overheads that keep utilization at 38%. The proposal to upgrade $R_{\\text{peak}}$ raises the theoretical ceiling without addressing why the current hardware achieves only 38% efficiency. Modifying $O$ changes the mathematical model rather than systems efficiency. Shrinking the dataset reduces total time by lowering $O$, not by increasing $\\eta_{\\text{hw}}$.",
-            "learning_objective": "Apply the training-time law to select the actionable engineering lever given measured MFU and overlapped pipeline stages."
+            "answer": "The correct answer is A. In the current equation, $O$ and the chosen $R_{\\text{peak}}$ convention are fixed, so 38 percent effective end-to-end utilization relative to the stated peak points to the effective utilization term $\\eta_{\\text{hw}}$. That does not prove one unique cause, but it does justify profiling device execution for stalls, inefficient kernels, launch overhead, or other losses inside the end-to-end throughput term. Reducing $O$ may shorten total training time, but it answers a different question than why this execution reaches only 38 percent of the chosen peak.",
+            "learning_objective": "Apply the training-time law to identify utilization as the immediate profiling target when workload size and peak-throughput convention are fixed."
           },
           {
             "question_type": "MCQ",
@@ -116,21 +116,21 @@
           },
           {
             "question_type": "SHORT",
-            "question": "Explain the scope conditions under which the simplified Training-Time Law ($T_{\\text{train}} = \\frac{O}{R_{\\text{peak}} \\times \\eta_{\\text{hw}}}$) accurately models training duration, and identify why it fails for a small-batch debugging session.",
-            "answer": "The simplified Iron Law models training time purely as compute throughput by assuming that non-compute stages (data loading, PCIe transfers, host-side preprocessing, and communication) are fully overlapped behind accelerator compute. This assumption holds during large-scale pretraining where large batch sizes yield long compute times per kernel that completely hide pipeline latencies. In a small-batch debugging session (e.g., batch size 1 or 2), compute time collapses below the serialized overheads of kernel launches, host transfers, and framework dispatch. The overlap assumption breaks down, causing serialized non-compute latencies to dominate execution time and rendering the compute-only formula inaccurate.",
-            "learning_objective": "Explain the overlap assumptions underlying the simplified training-time law and identify when they break down."
+            "question": "Explain the scope conditions under which the simplified training-time law $T_{\\text{train}} = \\frac{O}{R_{\\text{peak}} \\times \\eta_{\\text{hw}}}$ is useful, and identify why the formula alone cannot diagnose a slow small-batch debugging run.",
+            "answer": "The equation is useful as an accounting identity: it relates total work, a chosen peak-throughput reference, and effective achieved throughput into one training-time estimate. But because the end-to-end utilization term can already include stalls from launches, transfers, synchronization, and underfilled kernels, the formula alone does not reveal which mechanism caused a slow run. In a small-batch debug session, the problem is not that the law becomes invalid; it is that a low measured utilization could come from many overheads, so diagnosis still requires profiling rather than reading the formula by itself.",
+            "learning_objective": "Explain what the simplified training-time law captures and why it does not by itself localize the cause of low-throughput execution."
           },
           {
             "question_type": "TF",
-            "question": "All large-scale deep learning models, including recommendation models with multi-terabyte embedding tables (such as DLRM), are primarily compute-bound workloads where training speed is strictly governed by Tensor Core TFLOP/s.",
-            "answer": "False. As highlighted in the comparison between GPT-2 and DLRM, recommendation architectures are dominated by massive embedding tables ($10^9$ to $10^{12}$ parameters) that exhibit low arithmetic intensity. Consequently, DLRM training is memory capacity and memory bandwidth bound rather than compute bound, requiring devices to shard embedding tables across memory hierarchies rather than maximizing Tensor Core arithmetic utilization.",
-            "learning_objective": "Distinguish compute-bound dense transformer workloads from memory-capacity-bound recommendation workloads."
+            "question": "True or False: All large deep learning models are primarily compute-bound, so training speed is always governed mainly by Tensor Core TFLOP/s.",
+            "answer": "False. Dense transformer training often spends much of its work in matrix multiplications, but other workloads can be limited by memory capacity or bandwidth instead. The section's DLRM example is dominated by large embedding tables, where fitting and moving the state can matter more than raw dense-math throughput.",
+            "learning_objective": "Distinguish compute-bound dense training from regimes where memory capacity or bandwidth is the binding constraint."
           },
           {
             "question_type": "ORDER",
-            "question": "Place the following milestones in the historical evolution of deep learning training systems in chronological order, reflecting how the binding constraint shifted:\n(1) Transformers shift sequence modeling toward high-throughput dense matrix multiplication and large activation footprints.\n(2) Backpropagation is popularized for multilayer neural networks, establishing the algorithmic foundations of gradient descent.\n(3) Large-scale foundation models (such as GPT-3 requiring $\\approx 3.14 \\times 10^{23}$ FLOPs) make hardware utilization $\\eta_{\\text{hw}}$ and multi-accelerator scaling critical.\n(4) AlexNet demonstrates that neural network training parallelism maps effectively to GPUs, training ImageNet in under a week.\n(5) IO-aware algorithms (such as FlashAttention) and memory-compute trade-offs (gradient checkpointing) co-evolve to overcome memory bandwidth and capacity walls.",
-            "answer": "The correct answer is 2, 4, 1, 3, 5:\n(2) Backpropagation is popularized for multilayer neural networks (1986).\n(4) AlexNet demonstrates GPU acceleration for deep networks (2012).\n(1) Transformers shift sequence modeling toward dense matrix multiplication (2017).\n(3) Large-scale foundation models (GPT-3) make hardware utilization and scaling critical (2020).\n(5) IO-aware algorithms (FlashAttention) and gradient checkpointing co-evolve to bypass memory walls (2022-2023).",
-            "learning_objective": "Trace the chronological evolution of deep learning training bottlenecks and system solutions from backpropagation to IO-aware attention."
+            "question": "Place the following milestones in chronological order, reflecting how training-system constraints evolved: (1) Transformers shift sequence modeling toward high-throughput dense matrix multiplication and large activation footprints. (2) Backpropagation is popularized for multilayer neural networks. (3) Large-scale foundation models such as GPT-3 make utilization and multi-accelerator scaling central engineering concerns. (4) AlexNet demonstrates that deep neural network training maps effectively to GPUs. (5) IO-aware FlashAttention appears as a response to attention memory-bandwidth limits.",
+            "answer": "The correct order is: (2) Backpropagation is popularized for multilayer neural networks, (4) AlexNet demonstrates that deep neural network training maps effectively to GPUs, (1) Transformers shift sequence modeling toward high-throughput dense matrix multiplication and large activation footprints, (3) Large-scale foundation models such as GPT-3 make utilization and multi-accelerator scaling central engineering concerns, (5) IO-aware FlashAttention appears as a response to attention memory-bandwidth limits. This sequence matters because each later systems response addresses a constraint exposed by the earlier stage: GPU acceleration follows practical deep learning, transformers amplify activation and attention costs, frontier-scale models make utilization and scaling decisive, and FlashAttention targets the resulting IO bottleneck in attention.",
+            "learning_objective": "Trace the historical sequence linking major training-system milestones to the constraints they exposed."
           }
         ]
       }
@@ -156,21 +156,21 @@
         "questions": [
           {
             "question_type": "MCQ",
-            "question": "Why do batched matrix-matrix multiplications (GEMM, BLAS Level 3) dominate accelerator-based neural network training workloads, whereas matrix-vector operations (GEMV, BLAS Level 2) struggle to achieve high hardware utilization?",
+            "question": "Why do batched matrix-matrix multiplications (GEMM, BLAS Level 3) usually achieve much higher accelerator utilization in neural network training than matrix-vector operations (GEMV, BLAS Level 2)?",
             "choices": [
-              "Matrix-matrix operations avoid computing gradients during backpropagation, halving the memory footprint.",
-              "Batched matrix-matrix operations exhibit $\\mathcal{O}(N)$ arithmetic intensity, allowing high operand reuse in on-chip SRAM/registers to saturate compute units, whereas matrix-vector operations have $\\mathcal{O}(1)$ arithmetic intensity and are strictly memory-bandwidth bound.",
-              "Matrix-vector operations cannot be executed on GPUs without constant CPU synchronization barriers at every layer.",
-              "Batched matrix-matrix operations reduce total model parameters, fitting larger architectures into accelerator HBM."
+              "Matrix-matrix operations avoid gradient computation during backpropagation, so they save both memory traffic and arithmetic work.",
+              "Under the ideal traffic model in the section, GEMM reuses loaded operands across many outputs, so arithmetic intensity can grow with matrix size, whereas GEMV offers much less reuse and tends to stay near constant arithmetic intensity.",
+              "Matrix-vector operations cannot run efficiently on GPUs because every layer result must be synchronized back to the CPU before the next layer starts.",
+              "Batched matrix-matrix operations reduce the model's parameter count, which is why they keep more of the network in HBM."
             ],
-            "answer": "The correct answer is B. Matrix-matrix multiplications (GEMM) perform $\\mathcal{O}(N^3)$ operations on $\\mathcal{O}(N^2)$ data, yielding an arithmetic intensity that scales as $\\mathcal{O}(N)$. This enables accelerators to load tiles into fast on-chip SRAM and reuse operands across thousands of parallel ALUs. In contrast, matrix-vector multiplications (GEMV) perform $\\mathcal{O}(N^2)$ operations on $\\mathcal{O}(N^2)$ data, giving $\\mathcal{O}(1)$ arithmetic intensity. GEMV spends more time moving weights across HBM than computing, leaving the vast majority of accelerator compute units starved for data. The claim that GEMM avoids gradients is false because backpropagation requires GEMM for weight and activation gradients. The CPU synchronization claim is incorrect because GPUs natively execute GEMV kernels. The parameter reduction claim confuses computational batching with model architecture.",
-            "learning_objective": "Compare batched matrix-matrix and matrix-vector operations in terms of arithmetic intensity and accelerator hardware utilization."
+            "answer": "The correct answer is B. Under the section's idealized traffic analysis, GEMM performs many more FLOPs per byte moved because tiles of weights and activations are reused across multiple outputs, so its arithmetic intensity can scale upward with problem size. GEMV offers far less reuse, so moving bytes can dominate execution. The claim that GEMM avoids gradients is wrong because training uses matrix multiplies heavily in backward as well as forward, and the CPU-synchronization explanation confuses low arithmetic intensity with an unsupported execution model.",
+            "learning_objective": "Compare GEMM and GEMV using arithmetic intensity and operand reuse in the accelerator memory hierarchy."
           },
           {
             "question_type": "SHORT",
-            "question": "A team trains a 7-billion-parameter model on accelerators with 80 GB of HBM each. Weights, gradients, and activations together occupy 64 GB per accelerator at the planned batch size. Using the section's optimizer-memory accounting, explain the systems trade-off between choosing standard SGD and Adam for this run.",
-            "answer": "Adam maintains two FP32 state vectors per parameter (first moment $m_t$ and second moment $v_t$), requiring $2 \\times 4\\text{ bytes} = 8\\text{ bytes/parameter}$. For a 7B model, Adam's optimizer state alone occupies $7 \\times 10^9 \\times 8\\text{ bytes} = 56\\text{ GB}$. Adding this to the 64 GB of weights, gradients, and activations gives $120\\text{ GB}$, exceeding the 80 GB physical HBM capacity and causing an immediate Out-of-Memory (OOM) crash. In contrast, standard SGD without momentum maintains zero optimizer state ($0\\text{ bytes/parameter}$), allowing the total footprint ($64\\text{ GB}$) to fit within the 80 GB limit. The systems trade-off is convergence speed versus memory feasibility: Adam converges in fewer training steps but is infeasible on a single 80 GB GPU without activation checkpointing, CPU offload, or multi-GPU sharding, whereas SGD fits directly but requires more steps and careful learning rate tuning.",
-            "learning_objective": "Calculate the memory footprint of Adam vs SGD optimizer states and evaluate the systems feasibility trade-off on a fixed accelerator memory budget."
+            "question": "A team trains a 7-billion-parameter model on accelerators with 80 GB of HBM each. Weights, gradients, activations, and common workspaces already occupy 64 GB per accelerator, and this total already includes any FP32 master weights if the recipe uses them. The model is unsharded per device. Using the section's optimizer-memory accounting, explain the systems trade-off between choosing plain SGD and Adam for this run.",
+            "answer": "Adam adds two FP32 moment tensors, or 8 bytes per parameter, so a 7B-parameter model needs about 56 GB more optimizer state. That pushes the per-device total from 64 GB to about 120 GB, which exceeds an 80 GB accelerator before any sharding decision is considered, whereas plain SGD adds no auxiliary optimizer state and still fits at 64 GB. The practical consequence is that this choice is first a capacity question; once a feasible optimizer is chosen, the team should then measure time to target quality rather than assume one optimizer will always converge faster.",
+            "learning_objective": "Calculate whether SGD or Adam fits within a fixed HBM budget when common training state is already accounted for."
           },
           {
             "question_type": "FILL",
@@ -186,15 +186,15 @@
           },
           {
             "question_type": "MCQ",
-            "question": "For a transformer with hidden dimension $d_{\\text{model}} = 768$ and 12 heads ($d_{\\text{head}} = 64$), the arithmetic intensity of materialized attention score computation ($\\mathbf{Q}\\mathbf{K}^\\top$ and score matrix I/O) is approximately $d_{\\text{head}}/2 = 32\\text{ FLOP/byte}$. If executed on an accelerator with a ridge point of $153\\text{ FLOP/byte}$, how does this kernel behave, and what optimization strategy is appropriate?",
+            "question": "For a transformer with hidden dimension $d_{\\text{model}} = 768$ and 12 heads ($d_{\\text{head}} = 64$), the section's restricted accounting gives the materialized attention-score computation an arithmetic intensity of about $d_{\\text{head}}/2 = 32\\text{ FLOP/byte}$. If the target accelerator's ridge point is $153\\text{ FLOP/byte}$ under the same traffic model, what does that imply and what optimization direction best matches the section?",
             "choices": [
-              "The kernel is compute-bound; upgrade to an accelerator with higher peak TFLOP/s to accelerate execution.",
-              "The kernel is latency-bound; reduce the batch size to 1 so the matrix fits in registers.",
-              "The kernel is network-bound; upgrade the inter-node InfiniBand fabric to prevent AllReduce stalls.",
-              "The kernel is memory-bandwidth bound because $32 < 153\\text{ FLOP/byte}$; apply IO-aware tiling (such as FlashAttention) to avoid writing and reading intermediate score matrices from HBM, increasing arithmetic intensity."
+              "The kernel is compute-bound, so increasing peak TFLOP/s is the main expected lever under this model.",
+              "The kernel is latency-bound, so shrinking the batch is the main way to move it onto the compute roof.",
+              "The kernel is network-bound, so the right first response is a faster inter-node AllReduce fabric.",
+              "The kernel falls on the memory-bandwidth side of the roofline under this accounting, so reducing materialized score traffic through IO-aware tiling is the appropriate optimization direction."
             ],
-            "answer": "The correct answer is D. Because the operation's arithmetic intensity ($32\\text{ FLOP/byte}$) sits well below the hardware ridge point ($153\\text{ FLOP/byte}$), the kernel is memory-bandwidth bound on the sloped ceiling of the roofline. Increasing peak compute TFLOP/s provides zero speedup because compute ALUs are stalled waiting for HBM data transfers. The correct optimization is IO-aware tiling (FlashAttention), which computes attention in SRAM tiles and avoids materializing the intermediate $S \\times S$ score matrix in HBM, sharply reducing bytes moved and increasing effective arithmetic intensity. The latency-bound choice is incorrect because reducing batch size lowers arithmetic intensity further. The network-bound choice is irrelevant because attention score computation is a local intra-GPU operation.",
-            "learning_objective": "Apply roofline model analysis and ridge-point comparison to classify a transformer attention kernel as memory-bound and identify IO-aware tiling as the solution."
+            "answer": "The correct answer is D. With an estimated intensity of $32\\text{ FLOP/byte}$ against a ridge point of $153\\text{ FLOP/byte}$, the roofline classifies this implementation as memory-bandwidth-limited under the stated traffic model. That does not prove a measured kernel already saturates bandwidth or that hardware upgrades can never help, but it does indicate that reducing score-matrix traffic is the matching optimization direction. The network answer is irrelevant because this is a local attention-kernel analysis, and shrinking batch size does not address the materialized-attention IO term the section highlights.",
+            "learning_objective": "Use ridge-point comparison to classify an attention implementation and select the matching traffic-reduction optimization direction."
           }
         ]
       }
@@ -232,27 +232,27 @@
           },
           {
             "question_type": "MCQ",
-            "question": "In a profiled training pipeline, CPU data preprocessing delivers batches at $4\\text{ GB/s}$, host-to-device PCIe transfer operates at $32\\text{ GB/s}$, and GPU compute consumes data at an equivalent rate of $12\\text{ GB/s}$. According to the pipeline bottleneck model, what determines end-to-end throughput, and what is the optimal first engineering action?",
+            "question": "In a profiled training pipeline, CPU data preprocessing sustains $4\\text{ GB/s}$ on the same logical batch representation that host-to-device transfer and GPU consumption are being compared against. Host-to-device PCIe transfer sustains $32\\text{ GB/s}$, and GPU compute consumes data at an equivalent rate of $12\\text{ GB/s}$. Under the section's ideal-overlap pipeline model, what determines end-to-end throughput, and what is the best first engineering action?",
             "choices": [
-              "The average rate of the three stages ($(4+32+12)/3 = 16\\text{ GB/s}$); apply incremental tuning across all stages simultaneously.",
-              "The PCIe transfer rate ($32\\text{ GB/s}$), because every batch must physically cross the bus; upgrade from PCIe Gen4 to Gen5.",
-              "The minimum rate ($4\\text{ GB/s}$ at preprocessing); parallelize CPU preprocessing (e.g., via multi-worker DataLoader and prefetching) because the slowest stage caps total system throughput.",
-              "The GPU compute rate ($12\\text{ GB/s}$), because accelerator computation is always the primary cost driver in deep learning."
+              "The average of the three rates, so the effective throughput is $16\\text{ GB/s}$ and all stages should be tuned evenly.",
+              "The PCIe transfer rate, because every batch must cross the bus before any compute can happen.",
+              "The minimum rate, $4\\text{ GB/s}$ from preprocessing, so the first action is to reduce the input-side bottleneck before tuning faster stages.",
+              "The GPU compute rate, because training pipelines are ultimately limited by accelerator execution speed rather than host stages."
             ],
-            "answer": "The correct answer is C. In a staged pipeline, total throughput is strictly bounded by the slowest stage ($\\min(R_{\\text{prep}}, R_{\\text{transfer}}, R_{\\text{compute}})$). Here, CPU preprocessing at $4\\text{ GB/s}$ starves the rest of the pipeline, capping system throughput regardless of PCIe bandwidth ($32\\text{ GB/s}$) or GPU compute capability ($12\\text{ GB/s}$). Upgrading the GPU or PCIe bus will yield zero speedup because the accelerator will spend more time idling. The correct intervention is to parallelize CPU preprocessing (using multi-process data loaders and asynchronous prefetching) to lift the binding $4\\text{ GB/s}$ constraint. Averaging stage rates misrepresents pipeline physics.",
-            "learning_objective": "Apply the pipeline throughput model to determine end-to-end throughput and identify the binding constraint."
+            "answer": "The correct answer is C. In the section's pipeline model, comparable stage rates are combined through a minimum: the slowest stage caps throughput even if transfer and compute are faster. Here preprocessing at $4\\text{ GB/s}$ is the binding constraint, so the first goal is to raise input-side service rate and remove that bottleneck. An answer based on averaging ignores how pipelines work, and upgrading a non-binding PCIe or compute stage does not change a system still waiting on preprocessing.",
+            "learning_objective": "Apply the pipeline bottleneck model to identify the slowest comparable stage as the limit on end-to-end throughput."
           },
           {
             "question_type": "SHORT",
             "question": "Explain why CPU-side tokenization and data augmentation can severely bottleneck GPU training even when the resulting tensor transfer across PCIe takes less than one millisecond.",
-            "answer": "While the physical DMA transfer of processed integer tensors across PCIe is fast (often $< 1\\text{ ms}$ for a mini-batch), CPU tokenization and augmentation can take tens or hundreds of milliseconds per batch (e.g., $65\\text{ ms}$ on a single Python thread). If data preprocessing runs serially with training or if Python threads are serialized by the Global Interpreter Lock (GIL), the GPU must wait completely idle until the CPU finishes constructing the batch. Because training throughput is bounded by the slowest stage, a $65\\text{ ms}$ CPU preprocessing stage paired with an $80\\text{ ms}$ GPU step reduces utilization to $\\approx 55\\%$ unless multiple CPU worker processes (`num_workers > 0`) pre-compute and buffer batches asynchronously into pinned host memory.",
-            "learning_objective": "Analyze how CPU-side preprocessing latency creates accelerator starvation despite low PCIe transfer times."
+            "answer": "A fast PCIe copy only shows that the transfer stage is short once a batch already exists; it says nothing about how long the CPU needed to create that batch. If CPU preprocessing takes 65 ms and GPU compute takes 80 ms, then with proper overlap the next batch can still be ready in time, but without overlap or with an unstable host service interval the GPU can see bubbles despite the sub-millisecond transfer. The practical consequence is that busy-time fractions alone are not peak arithmetic efficiency and do not prove a specific worker count; what matters is whether preprocessing can consistently supply the next batch before compute needs it.",
+            "learning_objective": "Analyze why preprocessing latency can dominate input delivery even when the PCIe transfer itself is short."
           },
           {
             "question_type": "TF",
-            "question": "Scaling the training batch size by $8\\times$ (e.g., from 512 to 4,096) while keeping the learning rate and schedule constant guarantees identical validation convergence in $8\\times$ less wall-clock time.",
-            "answer": "False. An $8\\times$ larger batch size reduces the number of parameter updates per epoch by $8\\times$. Holding the learning rate constant results in an optimization-starved regime where the model takes too few gradient steps to navigate the loss landscape effectively. To maintain convergence dynamics when scaling batch sizes, practitioners typically must scale the learning rate (such as via the linear scaling rule $\\eta \\propto B$ up to the critical batch size) and adjust warmup schedules, rather than leaving hyperparameters unchanged.",
-            "learning_objective": "Evaluate how scaling batch size alters optimization update frequency and requires corresponding learning rate adjustments."
+            "question": "True or False: Scaling the training batch size by $8\\times$ while keeping the learning rate and schedule unchanged guarantees the same model quality in less wall-clock time.",
+            "answer": "False. A larger batch changes both the number of updates per epoch and the gradient statistics seen by the optimizer, so the old learning-rate schedule may no longer be appropriate. The section says validation is needed after a large batch-size change, and retuning may be needed rather than guaranteed.",
+            "learning_objective": "Evaluate why changing batch size can alter optimization behavior even when hardware throughput improves."
           },
           {
             "question_type": "FILL",
@@ -295,9 +295,9 @@
           },
           {
             "question_type": "SHORT",
-            "question": "An engineer profiles two training workloads. Workload A exhibits 92 percent GPU utilization, near-saturated HBM bandwidth, low CPU activity, and continuous kernel timelines. Workload B exhibits 20 percent GPU utilization with regular 50 ms idle gaps on the GPU timeline, low HBM bandwidth, and 100 percent CPU utilization. Apply the D·A·M taxonomy to classify each workload's bottleneck and state the primary optimization category for each.",
-            "answer": "Workload A is classified under the Machine axis as Memory-bound (or Algorithm axis depending on arithmetic intensity): the GPU is continuously active with saturated HBM bandwidth, meaning kernels are bottlenecked by data movement between HBM and on-chip SRAM. The primary optimization category is memory traffic reduction and fusion (e.g., FlashAttention, operator fusion, or reduced precision formats like BF16/FP8). Workload B is classified under the Data axis as Data-bound: periodic white gaps on the GPU timeline paired with pinned CPU utilization indicate the GPU is starving while waiting for host-side batch preparation. The primary optimization category is data pipeline parallelism and prefetching (e.g., multi-process DataLoader `num_workers`, asynchronous prefetching, or moving preprocessing to GPU/DALI).",
-            "learning_objective": "Apply the D·A·M taxonomy to classify profile signatures into memory-bound vs data-bound bottlenecks and match them to target optimizations."
+            "question": "An engineer profiles two training workloads. Workload A shows 92 percent GPU busy time, near-saturated HBM bandwidth, low CPU activity, and continuous kernel timelines. Workload B shows 20 percent GPU busy time with regular 50 ms idle gaps, low HBM bandwidth, and 100 percent CPU utilization. Apply the D·A·M taxonomy to classify each workload's likely bottleneck and state the next optimization category for each.",
+            "answer": "Workload A supports a bandwidth-bound hypothesis on the Machine side: kernels are running continuously and HBM is heavily used, so the next step is to confirm that critical kernels are limited by memory traffic and then target traffic reduction or fusion. Workload B is consistent with a Data-side bottleneck only if the GPU gaps correlate with batch preparation rather than host dispatch or synchronization, so the next step is stage correlation and then input-pipeline optimization if starvation is confirmed. The practical consequence is that D·A·M categories are diagnostic guides, not exclusive labels you can assign from one metric alone.",
+            "learning_objective": "Apply D·A·M reasoning to profile signatures while distinguishing likely bottlenecks from confirmed diagnoses."
           },
           {
             "question_type": "ORDER",
@@ -342,33 +342,33 @@
         "questions": [
           {
             "question_type": "MCQ",
-            "question": "A training step consists of three stages executed sequentially: data preprocessing ($T_{\\text{prep}} = 30\\text{ ms}$), PCIe host-to-device transfer ($T_{\\text{xfer}} = 10\\text{ ms}$), and GPU compute ($T_{\\text{comp}} = 50\\text{ ms}$). If the team implements multi-worker asynchronous prefetching with double buffering over dedicated CUDA streams, what is the theoretical iteration time and speedup?",
+            "question": "For each batch, a training step has three dependent stages in a serial baseline: data preprocessing ($T_{\\text{prep}} = 30\\text{ ms}$), host-to-device transfer ($T_{\\text{xfer}} = 10\\text{ ms}$), and GPU compute ($T_{\\text{comp}} = 50\\text{ ms}$). Different batches can occupy independent resources and overlap with correct handoff. If the team implements steady-state overlapping with prefetching and double buffering, what iteration interval is theoretically possible after fill and before drain?",
             "choices": [
-              "Iteration time becomes $T_{\\text{prep}} + T_{\\text{xfer}} = 40\\text{ ms}$ (a $2.25\\times$ speedup), because compute runs completely for free in background streams.",
-              "Iteration time drops from the serial sum ($30 + 10 + 50 = 90\\text{ ms}$) to $\\max(T_{\\text{prep}}, T_{\\text{xfer}}, T_{\\text{comp}}) = 50\\text{ ms}$ (a $44.4\\%$ latency reduction or $1.8\\times$ throughput speedup), bounded by the slowest stage.",
-              "Iteration time drops to $\\min(T_{\\text{prep}}, T_{\\text{xfer}}, T_{\\text{comp}}) = 10\\text{ ms}$, because all three stages execute in lockstep at the fastest rate.",
-              "Iteration time remains $90\\text{ ms}$, because CUDA streams cannot execute DMA transfers concurrently with kernel computations."
+              "$40\\text{ ms}$, because preprocessing and transfer replace compute once overlap is enabled.",
+              "$50\\text{ ms}$, because in ideal steady state the interval is bounded by the slowest overlapped stage rather than the serial sum.",
+              "$10\\text{ ms}$, because all stages run concurrently and the fastest one sets the pace.",
+              "$90\\text{ ms}$, because DMA transfers cannot overlap useful GPU computation."
             ],
-            "answer": "The correct answer is B. Without overlapping, each iteration pays the sequential sum of all stages ($T_{\\text{iter}} = T_{\\text{prep}} + T_{\\text{xfer}} + T_{\\text{comp}} = 30 + 10 + 50 = 90\\text{ ms}$). With asynchronous prefetching, double buffering, and dedicated CUDA copy streams, batch $N+1$ is preprocessed on CPU and transferred over PCIe concurrently while batch $N$ computes on the GPU. The iteration duration is governed by the maximum of the overlapped stages ($\\max(30, 10, 50) = 50\\text{ ms}$). This reduces iteration time from $90\\text{ ms}$ to $50\\text{ ms}$ ($44.4\\%$ time reduction, or $90/50 = 1.8\\times$ throughput). Compute does not run for free. Iteration time is bounded by the slowest stage ($\\max$), not the fastest ($\\min$). Modern GPUs natively support concurrent compute and copy streams.",
-            "learning_objective": "Calculate iteration time and throughput gains resulting from asynchronous prefetching and stage overlapping."
+            "answer": "The correct answer is B. The serial baseline takes $30 + 10 + 50 = 90\\text{ ms}$ per batch, but ideal steady-state overlap changes the limiting interval to $\\max(30, 10, 50) = 50\\text{ ms}$. That is a throughput improvement to $90/50 = 1.8\\times$, not a promise that the latency of one isolated batch falls to 50 ms from startup. The $10\\text{ ms}$ answer uses the fastest stage instead of the slowest, and the no-overlap answer ignores the purpose of prefetching and copy/compute concurrency.",
+            "learning_objective": "Calculate the steady-state throughput interval of an overlapped training pipeline from its stage times."
           },
           {
             "question_type": "SHORT",
-            "question": "Explain how FlashAttention computes exact self-attention with substantially lower memory footprint and higher speed than standard attention, and describe how its backward pass handles the attention score matrix.",
-            "answer": "Standard attention materializes the full $S \\times S$ attention score matrix in GPU High-Bandwidth Memory (HBM) for softmax and masking, generating $\\mathcal{O}(S^2)$ memory traffic and storage. FlashAttention uses an IO-aware tiling algorithm: it loads blocks of Query, Key, and Value tensors into fast on-chip SRAM, computes local attention scores, and evaluates softmax incrementally using an online softmax algorithm (tracking running max $m$ and sum $\\ell$). This keeps intermediate scores entirely in SRAM, writing only the final output to HBM and reducing HBM access from $\\mathcal{O}(S^2)$ to $\\mathcal{O}(S)$. During the backward pass, rather than reading a massive $S \\times S$ matrix from HBM, FlashAttention recomputes the score blocks on-the-fly in SRAM from the saved Q, K, V blocks, trading a small amount of fast SRAM arithmetic for a massive reduction in slow HBM memory traffic.",
-            "learning_objective": "Explain the IO-aware SRAM tiling, online softmax, and backward recomputation mechanisms of FlashAttention."
+            "question": "Explain how FlashAttention computes exact self-attention with substantially lower memory footprint than standard attention, and describe what its backward pass does instead of reading a full stored score matrix from HBM.",
+            "answer": "FlashAttention keeps the same attention mathematics, with possible floating-point rounding differences, but changes where intermediate work lives: it processes query, key, and value tiles in on-chip SRAM and maintains the softmax statistics online instead of materializing the full $S \\times S$ score matrix in HBM. That cuts saved activation storage and reduces off-chip traffic tied to those score blocks rather than implying a linear law for all HBM IO. In backward, it recomputes the needed tiled score and probability blocks from saved inputs and normalization statistics rather than loading a full stored score matrix, so the systems gain comes from less HBM traffic, not from changing the attention mathematics.",
+            "learning_objective": "Explain how IO-aware tiling and backward recomputation reduce attention memory traffic without changing attention mathematics."
           },
           {
             "question_type": "MCQ",
-            "question": "Why does standard mixed-precision training (FP16 or BF16) maintain a master copy of model weights and execute LayerNorm/Softmax reductions in FP32, rather than keeping the entire training state exclusively in 16-bit precision?",
+            "question": "Why does the chapter's conventional FP16 mixed-precision recipe keep FP32 master weights and perform selected reductions in FP32 instead of forcing every part of training into 16-bit precision?",
             "choices": [
-              "Tensor Cores cannot execute backpropagation without storing gradients in 64-bit double precision.",
-              "FP16 memory allocations cause hardware bus lockups if master weights are not stored in CPU host RAM.",
-              "Automatic differentiation graphs require FP32 weights to compute symbolic derivatives in PyTorch.",
-              "Small gradient updates ($\\eta \\cdot \\nabla \\mathcal{L}$) can underflow or become zero when added directly to 16-bit weights due to limited precision/mantissa bits, and normalization reductions are prone to overflow/underflow; FP32 master weights preserve small accumulated updates across steps."
+              "Tensor Cores cannot execute backpropagation unless gradients are stored in FP64.",
+              "FP16 allocations can lock the accelerator memory bus unless the master weights are moved to host RAM.",
+              "Automatic differentiation requires symbolic derivatives to be represented only in FP32.",
+              "Very small parameter updates can be rounded away when applied directly to FP16 weights, and selected reductions benefit from the wider range or precision of FP32 accumulation."
             ],
-            "answer": "The correct answer is D. In mixed-precision training, weight updates calculated by the optimizer ($\\Delta W = -\\eta g$) are often orders of magnitude smaller than the weight values themselves ($| \\Delta W | \\ll | W |$). If added directly in FP16 (which has only 10 mantissa bits), the update underflows and rounds to zero, halting learning. Maintaining FP32 master weights (23 mantissa bits) ensures small updates accumulate accurately before being cast back to FP16 for the next forward pass. Furthermore, reductions in LayerNorm and Softmax sum many values and can easily overflow FP16's narrow dynamic range ($[-65504, 65504]$), requiring FP32 accumulation for numerical stability. Tensor Cores do not require FP64. Master weights are stored in GPU memory, not forced to host RAM. Autodiff does not require FP32 graphs.",
-            "learning_objective": "Justify the role of FP32 master weights and selective FP32 operations in maintaining numerical stability during mixed-precision training."
+            "answer": "The correct answer is D. The section's FP16 recipe keeps FP32 master weights because an update can be too small to change a stored FP16 weight after rounding even when the update itself is representable; preserving the update in FP32 avoids losing it across many steps. The same section also notes that selected reductions are often kept in FP32 because wider accumulation improves numerical behavior, though it does not guarantee stability everywhere. The FP64 and host-RAM claims invent hardware requirements the chapter does not make, and autodiff does not require a purely FP32 graph representation.",
+            "learning_objective": "Justify FP32 master weights and selected FP32 reductions in the conventional FP16 mixed-precision training recipe."
           },
           {
             "question_type": "TF",
@@ -378,15 +378,15 @@
           },
           {
             "question_type": "FILL",
-            "question": "In FP16 mixed-precision training, to prevent small gradient values from underflowing to zero before backpropagation, gradients are multiplied by a scale factor during the forward/loss pass and unscaled before the optimizer update using a technique known as loss ____.",
-            "answer": "The correct answer is scaling (or dynamic loss scaling). Loss scaling shifts gradient magnitudes into the representable dynamic range of FP16.",
-            "learning_objective": "Identify the technique (loss scaling) used to prevent gradient underflow in FP16 training."
+            "question": "In FP16 mixed-precision training, the loss is multiplied before backpropagation so the resulting gradients are shifted into a safer numeric range, then divided back down before the optimizer update. This technique is known as loss ____.",
+            "answer": "scaling. Loss scaling multiplies the loss before backward so the resulting gradients are less likely to underflow in FP16, then unscales them before the optimizer step.",
+            "learning_objective": "Identify loss scaling as the technique used to reduce FP16 gradient underflow risk."
           },
           {
             "question_type": "SHORT",
-            "question": "A team enables mixed precision on a transformer model and observes compute time drop by 45 percent, but total step time decreases by only 10 percent because the GPU now exhibits large idle gaps. Explain what occurred in the system pipeline and what the team must do next.",
-            "answer": "This scenario illustrates the iterative nature of pipeline optimization and Amdahl's Law: removing or accelerating one stage exposes the next slowest stage as the new binding bottleneck. When compute time was $100\\text{ ms}$, it easily hid a $55\\text{ ms}$ CPU data loading stage. Once mixed precision accelerated compute to $55\\text{ ms}$, data preprocessing became the binding constraint. The GPU began experiencing idle bubbles waiting for batches, preventing further throughput gains. The team must re-profile the pipeline, recognize that the bottleneck has shifted from compute to data, and apply data-side optimizations—such as increasing DataLoader `num_workers`, enabling pinned memory prefetching, or using GPU-accelerated decoding.",
-            "learning_objective": "Explain why optimizing a compute bottleneck can expose a data-loading bottleneck and formulate the re-profiling response."
+            "question": "A team enables mixed precision on a transformer model and observes compute time drop by 45 percent, but total step time decreases by only 10 percent because the GPU now shows large idle gaps. Explain what likely happened in the system pipeline and what the team should do next.",
+            "answer": "The compute optimization removed part of the old critical path, but the new timeline shows that another stage is now exposed because the GPU is spending meaningful time idle. Those gaps are not proof of a data-loader problem by themselves: they could come from input waits, dispatch overhead, synchronization, or another serial stage. The right next step is to re-profile and correlate the gaps with pipeline stages so the next optimization targets the newly binding bottleneck rather than assuming mixed precision failed.",
+            "learning_objective": "Explain why speeding up compute can expose a different bottleneck and why re-profiling is required before choosing the next optimization."
           }
         ]
       }
@@ -412,33 +412,33 @@
         "questions": [
           {
             "question_type": "MCQ",
-            "question": "A team trains a 1.5-billion-parameter model that fits comfortably in the 80 GB memory of a single GPU with batch size 16 and Adam optimizer state, but training takes 12 days per epoch. The team has an 8-GPU node. Which parallelism strategy should be adopted first, and why?",
+            "question": "A team trains a 1.5-billion-parameter model that already fits on one 80 GB GPU with batch size 16 and its Adam training state, but one epoch still takes 12 days. The team has an 8-GPU node available. Which strategy is the best first baseline, and why?",
             "choices": [
-              "Tensor parallelism; split each weight matrix across the 8 GPUs to maximize matrix multiplication speed.",
-              "Pipeline parallelism; split the 48 transformer layers across the 8 GPUs (6 layers per GPU) to reduce per-device parameter storage.",
-              "Data parallelism (such as PyTorch DDP); replicate the model across all 8 GPUs, assign each GPU a micro-batch of 16, and overlap gradient AllReduce with the backward pass, because the model already fits in single-GPU memory and data parallelism avoids pipeline bubble overhead.",
-              "ZeRO-3 parameter sharding; shard weights, gradients, and optimizer states across all GPUs to minimize communication volume."
+              "Tensor parallelism, because splitting every weight matrix across the 8 GPUs is always the fastest way to improve training throughput.",
+              "Pipeline parallelism, because dividing layers across devices is the default first step whenever a model is a transformer.",
+              "Data parallelism such as DDP, because the model already fits per device and replication avoids unnecessary pipeline bubbles or intra-layer communication as the initial throughput baseline.",
+              "Full parameter sharding first, because any multi-GPU run should avoid keeping complete replicas even when memory is sufficient."
             ],
-            "answer": "The correct answer is C. When a model fits entirely within single-GPU memory, Data Parallelism (DistributedDataParallel) is the preferred strategy because it requires minimal code modification, achieves near-linear throughput scaling by processing independent micro-batches in parallel, and hides gradient synchronization (AllReduce) behind backward pass computation. Model parallelism (tensor or pipeline) is designed for memory-overflow regimes where models cannot fit on a single device; applying naive pipeline or tensor parallelism when memory is not constrained introduces unnecessary pipeline bubbles, communication synchronizations at every layer, and implementation complexity. ZeRO-3 increases per-step communication overhead and is unnecessary when memory capacity is ample.",
-            "learning_objective": "Select between Data Parallelism and Model Parallelism based on model size, memory capacity, and throughput requirements."
+            "answer": "The correct answer is C. When the full model and training state already fit on one device, data parallelism is the natural first baseline because each GPU can run the local forward and backward pass without introducing the extra sequential dependencies of pipeline parallelism or the frequent collectives of tensor partitioning. An answer based on splitting layers or tensors solves a memory problem the scenario does not currently have. Sharding may still become useful later, but it is not the first throughput baseline when replication already fits.",
+            "learning_objective": "Select data parallelism as the first multi-GPU baseline when memory already fits on each device and the main goal is throughput."
           },
           {
             "question_type": "MCQ",
-            "question": "In a Distributed Data Parallel training setup with $N$ GPUs and a model of $P$ parameters (where each parameter gradient is $B_{\\text{bytes}}$ bytes), what is the total data volume transferred by each individual GPU during a Ring AllReduce gradient synchronization?",
+            "question": "In distributed data parallel training with $N$ GPUs and a model with $P$ parameters whose gradients use $B_{\\text{bytes}}$ bytes each, what is the number of bytes sent by each GPU during a Ring AllReduce?",
             "choices": [
-              "$2 \\times \\frac{N-1}{N} \\times P \\times B_{\\text{bytes}}$, which approaches $2 P B_{\\text{bytes}}$ as $N$ becomes large and is independent of the number of GPUs $N$.",
-              "$N \\times P \\times B_{\\text{bytes}}$, scaling linearly with the total number of GPUs in the cluster.",
-              "$\\frac{P \\times B_{\\text{bytes}}}{N^2}$, decreasing quadratically as more GPUs are added.",
-              "Zero bytes, because GPUs synchronize gradients directly through CPU shared memory without network transfers."
+              "$2 \\times \\frac{N-1}{N} \\times P \\times B_{\\text{bytes}}$, which approaches $2 P B_{\\text{bytes}}$ as $N$ grows.",
+              "$N \\times P \\times B_{\\text{bytes}}$, because each GPU must broadcast the full gradient to every other GPU.",
+              "$\\frac{P \\times B_{\\text{bytes}}}{N^2}$, because the ring divides both the model and the communication quadratically.",
+              "Zero, because GPU replicas synchronize through shared CPU memory rather than explicit data movement."
             ],
-            "answer": "The correct answer is A. In the Ring AllReduce algorithm, synchronization proceeds in two phases: scatter-reduce and allgather. In each phase, every GPU sends and receives $\\frac{N-1}{N} \\times (\\text{data size})$ bytes. For a gradient buffer of size $P \\times B_{\\text{bytes}}$, the total volume transferred per GPU is $2 \\times \\frac{N-1}{N} \\times P \\times B_{\\text{bytes}}$. As $N \\to \\infty$, this value asymptotically approaches $2 \\times P \\times B_{\\text{bytes}}$, meaning the per-GPU communication volume remains bounded regardless of cluster size. The linear scaling claim describes a naive parameter server architecture. The quadratic reduction claim is mathematically incorrect. The zero bytes claim ignores physical communication requirements.",
-            "learning_objective": "Calculate per-GPU communication volume in Ring AllReduce and explain its asymptotic scaling behavior."
+            "answer": "The correct answer is A. In a ring AllReduce, each GPU participates in a scatter-reduce phase and an all-gather phase, and the bytes sent per GPU total $2 \\times \\frac{N-1}{N} \\times P \\times B_{\\text{bytes}}$. That expression tends toward $2 P B_{\\text{bytes}}$ as $N$ becomes large, so the per-GPU sent volume stays bounded rather than growing linearly with the cluster size. The broadcast-style answer describes a different and less efficient mental model of synchronization.",
+            "learning_objective": "Calculate the per-GPU bytes sent in Ring AllReduce and interpret its scaling with device count."
           },
           {
             "question_type": "SHORT",
-            "question": "Explain what the \"communication tax\" is in distributed training, and analyze why adding more GPUs to a distributed run can lead to diminishing returns in throughput.",
-            "answer": "The communication tax is the time and bandwidth overhead required to synchronize gradients (in Data Parallelism) or exchange intermediate activations/tensors (in Model/Tensor Parallelism) across devices over PCIe, NVLink, or network fabrics. In Ring AllReduce data parallelism, while per-device compute time decreases as $1/N$ (for a fixed total batch size), the per-device communication volume remains roughly constant at $2P$ bytes. Consequently, communication occupies an increasing percentage of total step time as $N$ grows. Once per-step compute time shrinks below communication latency and transfer time, communication becomes the binding bottleneck, causing parallel scaling efficiency to drop significantly below $100\\%$ (diminishing returns).",
-            "learning_objective": "Analyze the communication tax in distributed scaling and explain why scaling efficiency degrades as accelerator count increases."
+            "question": "Explain what the communication tax is in distributed training, and analyze why adding more GPUs can lead to diminishing throughput returns.",
+            "answer": "The communication tax is the time spent synchronizing gradients or exchanging partitioned activations and tensors instead of doing local model computation. As more GPUs are added, ideal compute work per device can fall, but communication latency, transfer volume, and incomplete overlap do not disappear, so synchronization becomes a larger fraction of each step. The practical consequence is that scaling efficiency drops once communication and coordination consume enough of the step that extra devices save less compute time than they add in communication cost.",
+            "learning_objective": "Analyze how communication overhead limits scaling efficiency as distributed training spans more accelerators."
           },
           {
             "question_type": "TF",
@@ -448,9 +448,9 @@
           },
           {
             "question_type": "ORDER",
-            "question": "Arrange the following engineering steps in the order prescribed by the chapter's \"single-machine-first\" scaling discipline:\n(1) Evaluate whether the workload still hits a physical hard limit (memory capacity exhaustion, wall-clock deadline, or dataset scale).\n(2) Implement distributed data parallelism or model sharding across multiple accelerator nodes.\n(3) Benchmark and optimize single-accelerator execution using mixed precision (FP16/BF16), FlashAttention, and data prefetching.\n(4) Apply single-device memory reduction techniques such as gradient accumulation and activation checkpointing.",
-            "answer": "The correct answer is 3, 4, 1, 2:\n(3) Benchmark and optimize single-accelerator execution using mixed precision (FP16/BF16), FlashAttention, and data prefetching.\n(4) Apply single-device memory reduction techniques such as gradient accumulation and activation checkpointing.\n(1) Evaluate whether the workload still hits a physical hard limit (memory capacity exhaustion, wall-clock deadline, or dataset scale).\n(2) Implement distributed data parallelism or model sharding across multiple accelerator nodes.",
-            "learning_objective": "Order the single-machine-first optimization progression before adopting distributed multi-node scaling."
+            "question": "Arrange the following engineering steps in the chapter's preferred order for deciding whether to scale beyond one device, assuming the initial bounds do not already prove that single-device training is infeasible: (1) Re-evaluate whether memory or time limits still justify scaling. (2) Add distributed parallelism or sharding if the remaining limit still requires it. (3) Establish a single-device baseline and quantify the current bottleneck. (4) Apply relevant local optimizations such as mixed precision, prefetching, checkpointing, or accumulation.",
+            "answer": "The correct order is: (3) Establish a single-device baseline and quantify the current bottleneck, (4) Apply relevant local optimizations such as mixed precision, prefetching, checkpointing, or accumulation, (1) Re-evaluate whether memory or time limits still justify scaling, (2) Add distributed parallelism or sharding if the remaining limit still requires it. This order matters because the chapter's scaling discipline uses baseline measurement first, then local fixes targeted to the observed constraint, then a new decision about whether a hard limit remains. Jumping straight to distributed scaling can add communication and operational complexity before the single-device bottleneck is even understood.",
+            "learning_objective": "Sequence the chapter's single-machine-first process for deciding when distributed scaling is actually justified."
           }
         ]
       }
@@ -475,21 +475,21 @@
         "questions": [
           {
             "question_type": "MCQ",
-            "question": "A team scales an existing 7-billion-parameter model to a 20-billion-parameter model on the same 100-million-token dataset, expecting improved validation accuracy. Under the chapter's discussion of training fallacies, what is the guaranteed systems consequence versus the scientific outcome?",
+            "question": "A team scales a dense model from 7 billion to 20 billion parameters while keeping the same training-token budget, precision recipe, and optimizer structure. Under the chapter's fallacies discussion, what is the most defensible conclusion?",
             "choices": [
-              "Validation accuracy improves by exactly $2.85\\times$, while memory footprint remains unchanged.",
-              "Training automatically switches to CPU execution because 20B parameters cannot fit on GPU clusters.",
-              "Validation accuracy is guaranteed to degrade to zero due to catastrophic parameter interference.",
-              "The team is guaranteed to pay roughly $3\\times$ the memory footprint for weights, gradients, and optimizer state and $\\approx 3\\times$ the compute FLOPs, while validation performance depends on data quality, optimization, and dataset size and is not guaranteed to improve."
+              "Validation accuracy must improve in proportion to parameter count because the larger model can represent more functions.",
+              "The run will necessarily move to CPU execution because 20B parameters cannot be trained on accelerators.",
+              "The larger model guarantees worse accuracy because fixed-token training always causes catastrophic interference at higher parameter counts.",
+              "The training-state and compute budgets rise substantially under the same dense-model accounting, but model quality is not guaranteed to improve because it still depends on data, optimization, and evaluation."
             ],
-            "answer": "The correct answer is D. The first fallacy discussed in the chapter is that model scale is a monotonic lever for performance. Scaling parameter count from 7B to 20B on a fixed dataset guarantees a $\\approx 3\\times$ increase in non-activation training memory (weights, gradients, and Adam moments) and an equivalent increase in FLOPs and cloud bills. However, validation accuracy depends heavily on data volume and quality; without increasing training tokens, a larger model may overfit or fail to realize quality gains. Validation gain does not scale linearly. 20B models run on multi-GPU clusters, not CPUs. Degradation to zero is not guaranteed.",
-            "learning_objective": "Analyze the cost guarantees versus validation performance uncertainty when scaling model parameters on a fixed dataset."
+            "answer": "The correct answer is D. Under the chapter's dense-model accounting with fixed precision and optimizer assumptions, a larger parameter count clearly raises memory and leading FLOP requirements, so systems cost goes up in a predictable direction. But the scientific outcome is not guaranteed: keeping the same token budget does not prove either improvement or collapse in validation quality. The \"must improve\" answer mistakes model size for a universal quality guarantee, while the CPU answer invents a hardware consequence the chapter does not state.",
+            "learning_objective": "Distinguish the predictable systems costs of scaling parameter count from the uncertain effect on final model quality."
           },
           {
             "question_type": "SHORT",
-            "question": "Explain why directly transferring hyperparameters (such as learning rate and weight decay) from a batch-size 512 baseline to a batch-size 4,096 distributed run can cause training to fail or underperform, even when GPU utilization remains above 90 percent.",
-            "answer": "Scaling batch size from 512 to 4,096 reduces the number of optimizer parameter updates per epoch by $8\\times$ for the same dataset. When hyperparameters are left unchanged, the optimizer takes too few steps, leaving the model optimization-starved and unable to match the convergence trajectory of the small-batch run. Furthermore, the gradient noise floor drops at larger batch sizes, which alters the optimal step size. High GPU utilization ($\\eta_{\\text{hw}} > 90\\%$) only measures hardware execution efficiency, not optimization progress. To avoid this pitfall, teams must adjust the learning rate (such as applying linear scaling $\\eta \\propto B$ or square-root scaling) and retune warmup schedules when scaling batch sizes.",
-            "learning_objective": "Explain the mathematical and optimization reasons why hyperparameter transfer fails when scaling batch sizes."
+            "question": "Explain why directly transferring hyperparameters such as learning rate and weight decay from a batch-size 512 baseline to a batch-size 4,096 distributed run can cause training to underperform, even when raw GPU busy time stays above 90 percent.",
+            "answer": "An eightfold batch increase means eight times fewer parameter updates per fixed epoch, and it also changes the gradient statistics seen by the optimizer, so the old hyperparameters no longer operate in the same regime. High GPU busy time only shows that hardware is active; it does not prove that the optimizer is making equally effective progress per unit data. The practical response is to validate the learning-rate schedule, warmup, and target quality metric on the larger-batch run instead of assuming the small-batch recipe transfers unchanged.",
+            "learning_objective": "Explain why batch-size scaling can invalidate a previously successful optimization recipe even when hardware utilization looks strong."
           },
           {
             "question_type": "MCQ",
@@ -505,9 +505,9 @@
           },
           {
             "question_type": "SHORT",
-            "question": "A team proposes moving a single-GPU training job to a 16-GPU cluster to achieve a $16\\times$ reduction in development cycle time. Explain two reasons why distributed training rarely delivers a linear $16\\times$ speedup in developer velocity.",
-            "answer": "First, distributed training incurs a communication tax (gradient AllReduce and synchronization overhead) that prevents linear hardware scaling, often yielding only a $10\\text{–}12\\times$ throughput speedup on 16 GPUs rather than $16\\times$. Second, distributed systems dramatically increase operational and debugging complexity: multi-node jobs introduce network stragglers, hardware fault probabilities that scale with node count, non-deterministic race conditions, checkpointing coordination overheads, and complex distributed environment configurations. The additional engineering time spent diagnosing cluster failures and tuning communication often exceeds the wall-clock time saved on individual training runs.",
-            "learning_objective": "Evaluate why distributed training introduces communication and operational overheads that prevent linear speedups in development velocity."
+            "question": "A team proposes moving a single-GPU training job to a 16-GPU cluster to achieve a $16\\times$ reduction in development cycle time. Explain two reasons why distributed training rarely delivers a linear $16\\times$ improvement in developer velocity.",
+            "answer": "First, distributed execution adds communication and synchronization overhead, so throughput rarely scales linearly with GPU count even when the code is correct. Second, developer velocity depends on more than throughput: distributed jobs bring extra debugging, launch, checkpointing, and failure-handling overhead that can delay iteration even if step time improves. The practical consequence is that cluster scaling should be justified by measured end-to-end iteration gains, not by hardware count alone.",
+            "learning_objective": "Evaluate why communication overhead and operational complexity both limit the developer-velocity gains of distributed training."
           }
         ]
       }
@@ -531,33 +531,33 @@
         "questions": [
           {
             "question_type": "MCQ",
-            "question": "Which statement best summarizes the chapter's core methodology for optimizing machine learning training systems?",
+            "question": "Which statement best summarizes the chapter's recommended method for optimizing machine learning training systems?",
             "choices": [
-              "Deconstruct training performance via the Iron Law ($T_{\\text{train}} = \\frac{O}{R_{\\text{peak}} \\times \\eta_{\\text{hw}}}$), profile end-to-end to classify bottlenecks via the D·A·M taxonomy, exhaust single-machine optimizations (mixed precision, prefetching, FlashAttention, checkpointing), and only scale out when hitting physical memory or time limits.",
-              "Scale out to multi-node clusters immediately, because distributed hardware automatically compensates for pipeline inefficiencies.",
-              "Replace Adam with SGD on all workloads to minimize memory usage, and disable gradient checkpointing to avoid recomputation FLOPs.",
-              "Maximize raw GPU busy percentage using synthetic benchmarks rather than measuring Model FLOPs Utilization (MFU)."
+              "Use the training-time law to structure the cost account, profile to identify the binding bottleneck, apply the relevant local optimizations first, and scale out only when measured or calculated physical bounds still require it.",
+              "Scale to a distributed cluster immediately, because more hardware is the fastest way to hide data, memory, and utilization problems.",
+              "Prefer SGD to Adam in every workload so memory stays low, and avoid checkpointing because recomputation always wastes time.",
+              "Maximize raw GPU busy percentage without worrying about whether the work being counted is useful model computation."
             ],
-            "answer": "The correct answer is A. The chapter's central methodology consists of: (1) using the training-time law to isolate total operations, peak hardware throughput, and utilization; (2) using profiling and the D·A·M taxonomy to diagnose whether bottlenecks lie in Data, Algorithm, or Machine stages; (3) applying single-node optimizations (prefetching, mixed precision, FlashAttention, gradient accumulation/checkpointing); and (4) scaling to distributed architectures only when physical hard limits (memory exhaustion, wall-clock time, dataset scale) require it. Premature distributed scaling introduces communication overhead without fixing pipeline stalls. Replacing Adam with SGD can compromise model convergence. Raw GPU busy time conflates unproductive stalls with useful model computation.",
-            "learning_objective": "Synthesize the chapter's end-to-end training optimization methodology from the Iron Law to single-node and distributed scaling."
+            "answer": "The correct answer is A. The chapter's method is to start with accounting through the training-time law, then diagnose the actual bottleneck with profiling, then apply targeted optimizations such as prefetching, mixed precision, FlashAttention, checkpointing, or accumulation before introducing distributed complexity. If measured or calculated capacity or deadline lower bounds already show that no amount of local tuning can fit the run on one device or finish it in time, that lower bound can justify scaling earlier. The scale-first answer still ignores communication tax and unresolved local bottlenecks when no such bound has been established, and the raw-busy-time answer confuses activity with useful progress. A blanket optimizer rule is also unsupported because memory, throughput, and convergence trade-offs depend on the workload.",
+            "learning_objective": "Synthesize when to use performance accounting, profiling, local intervention, and decisive capacity or deadline lower bounds to justify scaling training systems."
           },
           {
             "question_type": "SHORT",
-            "question": "A cloud training run on 1,024 GPUs improves its MFU from 25 percent to 50 percent through pipeline prefetching, mixed precision, and FlashAttention. Explain how this utilization improvement propagates through wall-clock time, energy consumption, and infrastructure cost.",
-            "answer": "In the Iron Law ($T_{\\text{train}} = \\frac{O}{R_{\\text{peak}} \\times \\eta_{\\text{hw}}}$), doubling $\\eta_{\\text{hw}}$ (MFU from 25% to 50%) at fixed model FLOPs ($O$) and hardware peak ($R_{\\text{peak}}$) cuts total training wall-clock time in half ($T_{\\text{train}} \\to T_{\\text{train}} / 2$). Because the 1,024 GPUs run for half as many hours while drawing comparable instantaneous power, total energy consumption (kWh) and associated carbon emissions are roughly halved. Cloud infrastructure rental costs—billed per GPU-hour—are likewise reduced by 50%, saving hundreds of thousands of dollars on large-scale foundation model runs.",
-            "learning_objective": "Analyze how MFU improvements propagate through training wall-clock time, energy consumption, and financial cost."
+            "question": "A cloud training run improves its MFU from 25 percent to 50 percent while holding the total useful model FLOP count fixed, along with the same peak-throughput convention, convergence target, hardware fleet, and hourly pricing. Explain how that change propagates through wall-clock time, and under what conditions similar reductions would or would not follow for energy, cost, and carbon.",
+            "answer": "With the total useful model FLOP count and the peak-throughput convention held fixed, doubling MFU doubles realized model-computation rate, so the training wall-clock time is cut in half in the training-time law. A similar halving follows for rental cost if the fleet size and hourly price stay fixed, and for energy or carbon only if comparable average power draw and carbon intensity assumptions also hold across the two runs. The practical implication is that MFU improvements reliably shorten time under a consistent accounting setup, but cost, energy, and emissions need their own matched assumptions rather than being inferred automatically.",
+            "learning_objective": "Analyze how an MFU increase changes training time directly and what additional assumptions are needed to infer cost, energy, or carbon effects."
           },
           {
             "question_type": "MCQ",
-            "question": "Why does the chapter emphasize exhausting single-machine optimization techniques before scaling training workloads across distributed multi-node clusters?",
+            "question": "Why does the chapter emphasize establishing a single-machine baseline and considering relevant local optimizations before accepting distributed complexity in multi-node training?",
             "choices": [
-              "Distributed training algorithms cannot execute mixed precision or FlashAttention.",
-              "Multi-node clusters are legally restricted to inference workloads and cannot run backpropagation.",
-              "Single-machine optimizations eliminate pipeline bubbles and reduce memory footprints without adding network communication overhead, synchronization latency, or distributed fault management complexity.",
-              "Single-machine training always trains faster in absolute wall-clock time than a 1,000-GPU cluster."
+              "Distributed training systems cannot use mixed precision or optimized attention kernels.",
+              "Multi-node systems are intended for inference rather than backpropagation.",
+              "Relevant local optimizations can remove bubbles or reduce memory pressure without adding communication, synchronization, or distributed-operations overhead, so scaling should solve only the limits that remain.",
+              "Single-machine training is always faster in absolute wall-clock time than any distributed cluster."
             ],
-            "answer": "The correct answer is C. Single-machine optimizations (such as asynchronous prefetching, mixed precision, FlashAttention, gradient accumulation, and activation checkpointing) frequently resolve binding memory and throughput bottlenecks at zero communication penalty. Scaling to multi-node clusters prematurely introduces distributed communication taxes (AllReduce latency), networking bottlenecks, straggler effects, and fault-tolerance overheads that can erase expected gains. Distributed clusters do support mixed precision and FlashAttention. Multi-node clusters are standard for training. A properly scaled cluster can train faster than a single machine once single-machine limits are reached, but single-machine efficiency must be maximized first.",
-            "learning_objective": "Justify the single-machine-first engineering principle over premature distributed scaling."
+            "answer": "The correct answer is C. The chapter argues for a single-machine-first approach because local optimizations can often fix the actual bottleneck without introducing the communication tax and operational complexity that come with distributed training. This does not mean every possible local trick must be exhausted before any scaling decision; a clear hard limit can justify scaling earlier. But scaling before relevant local diagnosis and optimization is often wasteful because it adds new bottlenecks before resolving the old ones.",
+            "learning_objective": "Justify the chapter's single-machine-first principle while recognizing that decisive hard limits can justify earlier scaling."
           }
         ]
       }

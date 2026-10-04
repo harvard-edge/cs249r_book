@@ -40,9 +40,9 @@
           },
           {
             "question_type": "SHORT",
-            "question": "Explain why upgrading from a CPU to an accelerator with $1{,}000\\times$ higher peak arithmetic throughput ($R_{\\text{peak}}$) yields a much smaller speedup for autoregressive token generation (e.g., GPT-2 decoding) than for convolutional training (e.g., ResNet-50).",
-            "answer": "ResNet-50 training exhibits a high parallel fraction ($p \\approx 0.95$) and high arithmetic intensity because convolutional weights and activation tiles are heavily reused across batch elements and spatial channels, keeping matrix units saturated. In contrast, autoregressive token generation processes tokens sequentially with batch-size 1, reading large weight matrices from memory for each token with minimal arithmetic reuse ($p \\approx 0.80$). Consequently, unaccelerated memory transfers and serial dispatch overhead set a low Amdahl speedup ceiling ($1/(1-p) \\approx 5\\times$), severely limiting the impact of higher peak compute throughput.",
-            "learning_objective": "Compare the impact of hardware acceleration on compute-bound versus memory-bound workloads using Amdahl's Law."
+            "question": "Explain why a compute-only accelerator upgrade can help high-reuse convolutional training more than batch-1 autoregressive decoding, even when the new device advertises much higher peak arithmetic throughput $R_{\\text{peak}}$.",
+            "answer": "High-reuse convolutional training can often turn loaded weights and activations into many arithmetic operations before eviction, so raising supported compute throughput can materially lift the achievable ceiling when the profile is already near the compute side of the roofline. Batch-1 autoregressive decoding instead tends to stream large weights with little cross-sample reuse, so increasing $R_{\\text{peak}}$ alone may leave runtime dominated by memory traffic, host overhead, or other unaccelerated work. The practical implication is that the same hardware upgrade must be evaluated against the workload's measured baseline fractions and arithmetic intensity, not against peak FLOP/s alone.",
+            "learning_objective": "Compare why a compute-focused hardware upgrade benefits high-reuse training kernels more than low-reuse batch-1 decoding."
           },
           {
             "question_type": "TF",
@@ -53,20 +53,20 @@
           {
             "question_type": "FILL",
             "question": "The metric defined as the ratio of floating-point operations performed to bytes of memory traffic transferred across a specific memory hierarchy interface is called ____.",
-            "answer": "arithmetic intensity. Arithmetic intensity (measured in FLOP/byte) characterizes the computational density of an operation and determines whether execution is bound by memory bandwidth or peak compute throughput on a given hardware accelerator.",
-            "learning_objective": "Explain the definition and diagnostic role of arithmetic intensity in hardware performance analysis."
+            "answer": "arithmetic intensity. Arithmetic intensity is measured in FLOP/byte and, at a chosen memory interface, helps identify which modeled roofline ceiling is lower; profiling is still needed to confirm the actual bottleneck.",
+            "learning_objective": "Identify arithmetic intensity from its FLOP-per-byte definition and use it to reason about modeled hardware ceilings."
           },
           {
             "question_type": "MCQ",
-            "question": "In the iron law of ML systems, end-to-end execution latency is modeled as $\\text{Time} = \\frac{D_{\\text{vol}}}{\\text{BW}} + \\frac{O}{R_{\\text{peak}} \\cdot \\eta_{\\text{hw}}} + L_{\\text{lat}}$. Which term is directly improved when replacing standard FP32 GEMM instructions with dedicated Tensor Core mixed-precision matrix instructions without altering model parameters or batch size?",
+            "question": "In the iron law of ML systems, end-to-end execution latency is modeled as $\\text{Time} = \\frac{D_{\\text{vol}}}{\\text{BW}} + \\frac{O}{R_{\\text{peak}} \\cdot \\eta_{\\text{hw}}} + L_{\\text{lat}}$. Which term is most directly improved when replacing standard FP32 GEMM instructions with a supported mixed-precision Tensor Core path for the same operation?",
             "choices": [
               "Only the data volume $D_{\\text{vol}}$ transferred over PCIe",
               "Only the fixed invocation latency $L_{\\text{lat}}$ of the kernel driver",
               "Only the memory interface bandwidth $\\text{BW}$ of the HBM subsystem",
-              "The hardware compute capability $R_{\\text{peak}}$ and hardware efficiency $\\eta_{\\text{hw}}$"
+              "The compute term through higher relevant $R_{\\text{peak}}$, while realized $\\eta_{\\text{hw}}$ may improve but is not guaranteed"
             ],
-            "answer": "The correct answer is D. Tensor Cores provide specialized hardware execution pipelines that dramatically increase the peak arithmetic throughput ($R_{\\text{peak}}$) for matrix-multiply-accumulate operations and improve hardware execution efficiency ($\\eta_{\\text{hw}}$) through dense physical layout and reduced instruction issue overhead. The claim regarding data volume over PCIe is incorrect because switching execution units on-chip does not modify host-to-device dataset transfer sizes. The claim regarding memory interface bandwidth confuses on-chip compute pipelines with physical DRAM/HBM bus bandwidth. The claim regarding fixed driver latency is incorrect because kernel launch overhead occurs on the host CPU and driver stack before execution begins.",
-            "learning_objective": "Classify the components of the iron law of ML systems affected by execution unit specialization."
+            "answer": "The correct answer is D. A supported mixed-precision Tensor Core path raises the relevant arithmetic-throughput ceiling for that matrix operation, so it most directly improves the compute term via a higher applicable $R_{\\text{peak}}$. Realized efficiency can also improve if the kernel maps well, but that is not automatic. The PCIe answer confuses on-chip execution with host transfer volume, the HBM-bandwidth answer confuses compute units with memory-interface capability, and the driver-latency answer targets a fixed overhead rather than the matrix-multiply execution path.",
+            "learning_objective": "Classify which part of the iron law is most directly affected by moving a GEMM onto a supported mixed-precision Tensor Core path."
           }
         ]
       }
@@ -173,8 +173,8 @@
           {
             "question_type": "TF",
             "question": "True or False: In modern AI accelerators, element-wise vector operations such as residual additions ($Y = X_1 + X_2$) achieve higher arithmetic intensity than large matrix-matrix multiplications ($C = A \\cdot B$).",
-            "answer": "False. Element-wise vector operations perform only one arithmetic operation per two operand reads and one write (arithmetic intensity $\\approx 1/12 \\text{ FLOP/byte}$ in FP32), making them heavily memory bandwidth bound. In contrast, an $N \\times N$ matrix-matrix multiplication performs $\\mathcal{O}(N^3)$ operations on $\\mathcal{O}(N^2)$ data elements, allowing extensive data reuse in on-chip registers and shared memory to achieve high arithmetic intensity ($\\mathcal{O}(N) \\text{ FLOP/byte}$).",
-            "learning_objective": "Compare the arithmetic intensity of element-wise vector operations with matrix multiplications."
+            "answer": "False. A residual addition does very little arithmetic per byte moved; under a simple FP32 traffic model with two reads and one write, it is about $1/12$ FLOP/byte. Large matrix multiplication can reuse loaded tiles many times, so its arithmetic intensity is much higher even though measured performance still depends on implementation and memory behavior.",
+            "learning_objective": "Compare the low arithmetic intensity of element-wise vector operations with the higher reuse available in matrix multiplication."
           },
           {
             "question_type": "FILL",
@@ -218,39 +218,39 @@
         "questions": [
           {
             "question_type": "MCQ",
-            "question": "In NVIDIA's Ampere and Hopper architectures, how does 2:4 structured sparsity achieve an up to $2\\times$ theoretical speedup in Tensor Core matrix multiplication?",
+            "question": "In NVIDIA's Ampere and Hopper architectures, how does 2:4 structured sparsity achieve an up to $2\\times$ dense-equivalent Tensor Core throughput path for supported matrix multiplication?",
             "choices": [
-              "Exactly two non-zero values are preserved in every contiguous four-element block, allowing weights to be stored in half the memory with 2-bit index metadata while sparse Tensor Cores perform math only on non-zeros",
+              "Exactly two non-zero values are preserved in every contiguous four-element block, so the value payload is halved while compact metadata records positions and sparse Tensor Cores compute only on the retained values",
               "Every alternate row of the weight matrix is dropped completely, allowing the GPU to halve the grid launch dimensions",
               "Four separate threads simultaneously execute one scalar multiply-accumulate instruction in a single clock cycle",
               "Floating-point numbers are converted to 2-bit integers, quadrupling register file capacity"
             ],
-            "answer": "The correct answer is A. The 2:4 structured sparsity pattern mandates that exactly two out of every four contiguous values in a weight tensor are non-zero. The compressed weight matrix stores only the two non-zero values per 4-element block along with 2-bit index metadata (4 bits total per 4 values), halving memory storage and bandwidth requirements, while Sparse Tensor Cores use the metadata to select matching activations and compute matrix multiply-accumulate operations at twice the throughput of dense Tensor Cores. The row-dropping choice describes coarse block pruning rather than fine-grained structured sparsity. The four-thread SIMT scalar choice confuses thread scheduling with tensor hardware sparsity mechanics. The 2-bit integer conversion choice describes extreme quantization rather than sparsity.",
-            "learning_objective": "Explain the mechanics and hardware benefits of 2:4 structured sparsity in Tensor Cores."
+            "answer": "The correct answer is A. The 2:4 pattern keeps exactly two nonzeros in each contiguous four-value group along the supported dimension, so the stored value payload is cut roughly in half while compact metadata indicates which positions were kept. Sparse Tensor Cores then use that metadata to select matching activations and skip the removed values. The row-dropping idea describes a different pruning pattern, the four-thread explanation confuses SIMT scheduling with sparsity hardware, and the 2-bit-integer claim is quantization rather than structured sparsity.",
+            "learning_objective": "Explain how 2:4 structured sparsity reduces transferred value payload and enables a higher dense-equivalent sparse Tensor Core path."
           },
           {
             "question_type": "SHORT",
             "question": "Contrast the data movement mechanics and primary use cases of Weight-Stationary (WS) and Output-Stationary (OS) systolic array dataflows.",
-            "answer": "In a Weight-Stationary dataflow, model weights are loaded into local PE registers and held stationary while input activations and partial sums stream through the array, maximizing weight reuse and making it optimal for CNNs where small filter weights are reused extensively across spatial dimensions. In an Output-Stationary dataflow, partial sums remain stationary in PE accumulators while weights and inputs stream through, eliminating intermediate memory traffic for partial sum write-backs and making it optimal for large-batch matrix multiplications with high accumulation depth.",
-            "learning_objective": "Compare Weight-Stationary and Output-Stationary systolic array dataflow strategies."
+            "answer": "In a weight-stationary dataflow, weights are kept local in processing elements while activations stream past them and partial sums move through the array, so the mapping favors cases where one weight tile is reused many times before eviction. In an output-stationary dataflow, partial sums stay local until all contributions arrive, reducing repeated write-back of intermediates while weights and activations stream. A CNN layer with strong filter reuse is a common WS candidate, whereas a deep accumulation pattern can make OS attractive because it preserves the running output locally. The practical consequence is that neither dataflow is universally best; the right choice depends on reuse, buffer capacity, and tensor shape.",
+            "learning_objective": "Compare how weight-stationary and output-stationary dataflows move operands and why different reuse patterns favor each one."
           },
           {
             "question_type": "ORDER",
-            "question": "Place the following steps in the correct execution sequence for processing a matrix multiplication on an accelerator with Sparse Tensor Cores using 2:4 structured sparsity:\n(1) Fine-tune or prune the weight matrix to ensure exactly two non-zero values exist in every four-element contiguous group\n(2) Sparse Tensor Cores load compressed weights and decode metadata to gather matching input activation elements\n(3) Multiply non-zero weights by gathered activations and accumulate into output partial sums at $2\\times$ dense throughput\n(4) Compress the sparse weight matrix by storing only the non-zero values alongside 2-bit per-value selection metadata",
-            "answer": "The correct order is (1) Fine-tune or prune the weight matrix to ensure exactly two non-zero values exist in every four-element contiguous group -> (4) Compress the sparse weight matrix by storing only the non-zero values alongside 2-bit per-value selection metadata -> (2) Sparse Tensor Cores load compressed weights and decode metadata to gather matching input activation elements -> (3) Multiply non-zero weights by gathered activations and accumulate into output partial sums at $2\\times$ dense throughput. Structured sparsity begins with pruning/fine-tuning to satisfy the 2:4 constraint, followed by offline compression and metadata creation. At runtime, hardware loads compressed data, uses metadata to multiplex input activations, and computes the sparse GEMM.",
-            "learning_objective": "Apply the end-to-end execution workflow of 2:4 structured sparse matrix multiplication."
+            "question": "Place the following steps in the correct execution sequence for processing a matrix multiplication on an accelerator with Sparse Tensor Cores using 2:4 structured sparsity:\n(1) Fine-tune or prune the weight matrix to ensure exactly two non-zero values exist in every four-element contiguous group\n(2) Sparse Tensor Cores load compressed weights and decode metadata to gather matching input activation elements\n(3) Multiply non-zero weights by gathered activations and accumulate into output partial sums on the sparse path\n(4) Compress the sparse weight matrix by storing only the non-zero values alongside metadata describing their positions",
+            "answer": "The correct order is: (1) Fine-tune or prune the weight matrix to ensure exactly two non-zero values exist in every four-element contiguous group, (4) Compress the sparse weight matrix by storing only the non-zero values alongside metadata describing their positions, (2) Sparse Tensor Cores load compressed weights and decode metadata to gather matching input activation elements, (3) Multiply non-zero weights by gathered activations and accumulate into output partial sums on the sparse path. The sequence is necessary because the runtime path assumes weights already satisfy the 2:4 constraint and have been compressed with consistent metadata. Swapping compression ahead of pruning would encode the wrong pattern, and executing the sparse multiply before metadata-guided selection would leave the hardware without the positional information needed to match retained weights with the correct activations.",
+            "learning_objective": "Sequence the workflow for 2:4 structured sparse matrix multiplication from constraint formation through runtime sparse execution."
           },
           {
             "question_type": "MCQ",
-            "question": "What is the primary difference between the FP8 E4M3 and FP8 E5M2 numerical formats used in modern AI accelerators (such as NVIDIA Hopper and Ada Lovelace)?",
+            "question": "What is the primary numerical difference between FP16 and BF16 as presented in this section?",
             "choices": [
-              "E4M3 uses 4 sign bits and 3 exponent bits, whereas E5M2 uses 5 sign bits and 2 exponent bits",
-              "E4M3 has 4 exponent bits and 3 mantissa bits providing higher precision for forward-pass activations/weights, whereas E5M2 has 5 exponent bits and 2 mantissa bits providing wider dynamic range for gradients",
-              "E4M3 is exclusively an integer fixed-point format, whereas E5M2 is a standard IEEE floating-point format",
-              "E4M3 requires twice as many memory bytes per element as E5M2"
+              "FP16 uses fewer total bits than BF16, so it always transfers less data",
+              "BF16 has a wider exponent range, while FP16 has more fraction precision within the same 16-bit width",
+              "FP16 is an integer format, whereas BF16 is floating point",
+              "BF16 always prevents gradient underflow, whereas FP16 cannot be used for training"
             ],
-            "answer": "The correct answer is B. Both formats occupy 8 bits (1 sign bit + exponent + mantissa). FP8 E4M3 allocates 4 exponent bits and 3 mantissa bits, providing higher precision (lower rounding error) suitable for forward-pass weights and activations where values are well-scaled. FP8 E5M2 allocates 5 exponent bits (matching FP16 dynamic range) and 2 mantissa bits, offering a wider dynamic range essential for preventing underflow in backward-pass gradients. The sign bit claim is incorrect as floating-point formats use a single sign bit. The integer format claim is incorrect as both are floating-point representations. The byte size claim is incorrect because both are 8-bit (1-byte) formats.",
-            "learning_objective": "Compare the numerical properties and intended use cases of FP8 E4M3 and E5M2 formats."
+            "answer": "The correct answer is B. Both FP16 and BF16 are 16-bit floating-point formats, but BF16 keeps an 8-bit exponent like FP32, giving it a wider dynamic range, while FP16 devotes more bits to the stored fraction and therefore offers finer precision within a narrower range. The lower-byte-count claim is false because both use 16 bits, the integer claim is wrong because both are floating point, and the underflow claim is too strong because numerical behavior depends on the workload and execution path.",
+            "learning_objective": "Compare FP16 and BF16 in terms of dynamic range versus fraction precision using the format properties introduced in the section."
           },
           {
             "question_type": "TF",
@@ -260,9 +260,9 @@
           },
           {
             "question_type": "SHORT",
-            "question": "Describe the Tiling Principle in deep learning hardware mapping and explain why multi-level hierarchical tiling (from global memory down to registers) is necessary for high-throughput GEMM kernels.",
-            "answer": "The Tiling Principle partitions large matrix multiplication loops into smaller, block-sized submatrices that fit into each successive level of the hardware memory hierarchy (HBM $\\to$ shared memory/SRAM $\\to$ register files). Hierarchical tiling ensures that data loaded from high-latency, limited-bandwidth memory (such as HBM) is reused dozens of times in high-bandwidth, low-latency on-chip storage before being evicted, preventing arithmetic pipelines from stalling on memory bandwidth.",
-            "learning_objective": "Explain how hierarchical tiling maximizes data reuse and sustains peak compute utilization."
+            "question": "Describe the Tiling Principle in deep learning hardware mapping and explain why multi-level hierarchical tiling (from global memory down to registers) is often necessary for high-throughput GEMM kernels.",
+            "answer": "The Tiling Principle partitions a large matrix multiplication into submatrices sized for successive memory tiers so loaded data can be reused before eviction instead of being fetched repeatedly from slower memory. Hierarchical tiling can stage larger blocks from HBM into on-chip SRAM or shared memory, then into registers for the innermost computation. For example, a GEMM may need one tile size for HBM-to-SRAM reuse and a smaller one for register-level reuse inside the compute kernel. The practical consequence is that tiling helps only when capacity, reuse, and occupancy line up well; it can reduce stalls and traffic, but it does not guarantee peak throughput on every shape.",
+            "learning_objective": "Explain how hierarchical tiling uses multiple memory tiers to increase reuse in GEMM kernels under capacity constraints."
           }
         ]
       }
@@ -295,14 +295,14 @@
               "$500\\text{ FLOP/byte}$",
               "$2{,}000\\text{ FLOP/byte}$"
             ],
-            "answer": "The correct answer is C. The hardware ridge point is defined as $I_{\\text{ridge}} = \\frac{R_{\\text{peak}}}{\\text{BW}} = \\frac{10^{15}\\text{ FLOP/s}}{2.0 \\times 10^{12}\\text{ bytes/s}} = 500\\text{ FLOP/byte}$. Any kernel with an arithmetic intensity below $500\\text{ FLOP/byte}$ will be memory-bandwidth bound on this hardware, whereas kernels with arithmetic intensity above $500\\text{ FLOP/byte}$ can potentially achieve peak compute throughput. The other choices result from arithmetic miscalculations ($50$, $200$, or $2{,}000$).",
-            "learning_objective": "Calculate the hardware ridge point given peak compute throughput and memory bandwidth."
+            "answer": "The correct answer is C. The ridge point is the hardware ratio $I_{\\text{ridge}} = \\frac{R_{\\text{peak}}}{\\text{BW}} = \\frac{10^{15}\\text{ FLOP/s}}{2.0 \\times 10^{12}\\text{ bytes/s}} = 500\\text{ FLOP/byte}$. That value marks where the simple roofline's compute and bandwidth ceilings are equal for this interface. It is a modeled threshold, not proof that a measured kernel actually reaches either ceiling; the other options come from arithmetic errors in the same ratio.",
+            "learning_objective": "Calculate the hardware ridge point from peak compute throughput and memory bandwidth."
           },
           {
             "question_type": "SHORT",
-            "question": "When training a 7-billion parameter model using standard mixed-precision (FP16/BF16) with the Adam optimizer, calculate the minimum memory required purely for model states (weights, gradients, and optimizer states) and explain why optimizer states dominate this footprint.",
-            "answer": "Model states require 16 bytes per parameter: 2 bytes for FP16 weights, 2 bytes for FP16 gradients, 4 bytes for FP32 master weights, 4 bytes for FP32 first momentum, and 4 bytes for FP32 second momentum ($2 + 2 + 4 + 4 + 4 = 16\\text{ bytes/param}$). For a 7B model, this requires $7 \\times 10^9 \\times 16\\text{ bytes} = 112\\text{ GB}$. Optimizer states dominate ($12\\text{ bytes/param}$, or $75\\%$ of the total) because maintaining FP32 precision for master weights and running statistical moments is numerically necessary to prevent gradient underflow and truncation errors during updates.",
-            "learning_objective": "Calculate and justify the memory footprint of model weights, gradients, and optimizer states during mixed-precision training."
+            "question": "When training a $7$-billion-parameter model using a hypothetical mixed-precision Adam recipe stated for this question—$2$ bytes for weights, $2$ for gradients, $4$ for FP32 master weights, $4$ for the first moment, and $4$ for the second moment per parameter—calculate the model-state memory for weights, gradients, and optimizer states, and explain why optimizer-related state dominates this footprint.",
+            "answer": "Using the provided recipe, each parameter carries $2$ bytes for FP16/BF16 weights, $2$ bytes for gradients, $4$ bytes for FP32 master weights, $4$ bytes for the first Adam moment, and $4$ bytes for the second Adam moment, for a total of $16$ bytes per parameter. A $7$B-parameter model therefore requires $7 \\times 10^9 \\times 16\\text{ bytes} = 112\\text{ GB}$ for these model states alone. Of that total, optimizer-related state plus master weights account for $12$ bytes per parameter, which is most of the footprint. The practical implication is that optimizer choice can dominate memory planning even before activations, workspace, or other runtime buffers are included.",
+            "learning_objective": "Calculate model-state memory under a stated mixed-precision Adam byte recipe and identify why optimizer-related state dominates the footprint."
           },
           {
             "question_type": "ORDER",
@@ -331,8 +331,8 @@
           {
             "question_type": "TF",
             "question": "True or False: The AI Memory Wall refers solely to the limited physical capacity (GBs) of GPU DRAM, meaning that if an accelerator has sufficient gigabytes to store model weights, memory bandwidth will never bottleneck execution.",
-            "answer": "False. The AI Memory Wall encompasses both capacity and bandwidth disparities. While capacity determines whether a model fits on a chip, memory bandwidth ($\\text{TB/s}$) dictates how fast data can be fed to compute units. Even if a model fits entirely in DRAM, low-arithmetic-intensity kernels (such as LayerNorm or token-by-token decoding) remain heavily bottlenecked by memory bandwidth, underutilizing peak compute throughput.",
-            "learning_objective": "Analyze the dual dimensions (capacity and bandwidth) of the AI memory wall."
+            "answer": "False. In this section, the AI memory wall is the gap between arithmetic throughput and memory bandwidth. Capacity is a separate feasibility constraint: a model can fit in memory and still run slowly if low-reuse kernels, such as LayerNorm or token-by-token decoding, are limited by bytes delivered per second rather than by available gigabytes.",
+            "learning_objective": "Distinguish memory-capacity limits from bandwidth bottlenecks in the AI memory wall."
           }
         ]
       }
@@ -357,27 +357,27 @@
         "questions": [
           {
             "question_type": "MCQ",
-            "question": "A developer runs a LayerNorm kernel on an accelerator with $R_{\\text{peak}} = 312\\text{ TFLOP/s}$ and $\\text{BW} = 1.5\\text{ TB/s}$ ($I_{\\text{ridge}} = 208\\text{ FLOP/byte}$). The LayerNorm has an arithmetic intensity of $I = 4\\text{ FLOP/byte}$. What is the maximum attainable performance of this kernel, and what is the binding bottleneck?",
+            "question": "A developer runs a LayerNorm kernel on an accelerator with $R_{\\text{peak}} = 312\\text{ TFLOP/s}$ and $\\text{BW} = 1.5\\text{ TB/s}$ ($I_{\\text{ridge}} = 208\\text{ FLOP/byte}$). The LayerNorm has an arithmetic intensity of $I = 4\\text{ FLOP/byte}$. What is the maximum attainable performance under this simple roofline model, and what modeled ceiling is lower?",
             "choices": [
-              "$6.0\\text{ TFLOP/s}$, bound by memory bandwidth",
-              "$312\\text{ TFLOP/s}$, bound by peak compute capacity",
-              "$78\\text{ TFLOP/s}$, bound by warp scheduler instruction issue rate",
-              "$1.5\\text{ TFLOP/s}$, bound by PCIe bus transfer limits"
+              "$6.0\\text{ TFLOP/s}$, the bandwidth ceiling",
+              "$312\\text{ TFLOP/s}$, the compute ceiling",
+              "$78\\text{ TFLOP/s}$, the warp-scheduler ceiling",
+              "$1.5\\text{ TFLOP/s}$, the PCIe ceiling"
             ],
-            "answer": "The correct answer is A. According to the Roofline model, $\\text{Attainable Performance} = \\min(R_{\\text{peak}}, I \\cdot \\text{BW}) = \\min(312\\text{ TFLOP/s}, 4\\text{ FLOP/byte} \\times 1.5\\text{ TB/s}) = \\min(312, 6.0) = 6.0\\text{ TFLOP/s}$. Because $I = 4 < I_{\\text{ridge}} = 208\\text{ FLOP/byte}$, the kernel operates deep within the memory-bound regime, achieving less than $2\\%$ of the chip's peak arithmetic throughput. The peak compute choice incorrectly assumes compute limits apply regardless of arithmetic intensity. The instruction issue and PCIe bus choices confuse the primary memory bandwidth limit with secondary bottlenecks.",
-            "learning_objective": "Calculate attainable performance using the Roofline model and identify the binding bottleneck."
+            "answer": "The correct answer is A. The simple roofline gives $R_{\\text{attain}} = \\min(R_{\\text{peak}}, I \\cdot \\text{BW}) = \\min(312, 4 \\times 1.5) = 6.0\\text{ TFLOP/s}$. Because $I = 4$ FLOP/byte is far below the ridge point of 208 FLOP/byte, the lower modeled ceiling is the bandwidth line, not the compute peak. The compute-peak answer ignores arithmetic intensity, and the warp-scheduler and PCIe answers introduce bottlenecks that are not part of the stated roofline calculation. Profiling would still be needed to determine whether measured execution is actually limited by this interface ceiling or by additional overheads.",
+            "learning_objective": "Apply the roofline equation to compute a modeled upper bound and identify whether the bandwidth or compute ceiling is lower."
           },
           {
             "question_type": "SHORT",
-            "question": "Why has the hardware ridge point ($I_{\\text{ridge}}$) increased dramatically across successive GPU generations (e.g., from Volta to Ampere to Hopper), and what pressure does this trend place on compiler and kernel developers?",
-            "answer": "The ridge point $I_{\\text{ridge}} = R_{\\text{peak}}/\\text{BW}$ has increased because peak arithmetic throughput (driven by specialized Tensor Cores and lower-precision FP8/INT8 math) has grown much faster than physical HBM bandwidth. This shifts the knee of the roofline curve to the right, meaning kernels require significantly higher arithmetic intensity to achieve compute-bound peak efficiency. Developers and compilers are forced to implement aggressive kernel fusion, multi-level tiling, and activation caching to avoid being trapped in the memory-bound regime.",
-            "learning_objective": "Analyze the historical trend of increasing hardware ridge points and its architectural implications."
+            "question": "Why has the hardware ridge point ($I_{\\text{ridge}}$) increased across successive GPU generations, and what pressure does this trend place on compiler and kernel developers?",
+            "answer": "The ridge point rises when peak arithmetic throughput grows faster than memory bandwidth, because $I_{\\text{ridge}} = R_{\\text{peak}}/\\text{BW}$. That means newer devices require more operations per byte to reach their compute ceiling on the same precision path. For example, a kernel that once cleared an older ridge may fall below a newer one if its reuse pattern does not improve. The practical consequence is that compilers and kernel authors face stronger pressure to preserve locality through layout choices, tiling, and fusion while comparing like-for-like precision paths instead of explaining the trend with lower-precision headline peaks alone.",
+            "learning_objective": "Analyze why rising compute-to-bandwidth ratios push newer hardware ridge points upward and increase the need for reuse-aware kernel design."
           },
           {
             "question_type": "TF",
             "question": "True or False: When a kernel operates in the memory-bound regime of the Roofline model ($I < I_{\\text{ridge}}$), doubling the accelerator's peak tensor compute capability ($R_{\\text{peak}}$) without changing memory bandwidth will double the kernel's execution speed.",
-            "answer": "False. In the memory-bound regime, performance is capped by $I \\cdot \\text{BW}$, which depends strictly on arithmetic intensity and memory bandwidth. Increasing $R_{\\text{peak}}$ only raises the horizontal compute ceiling; the kernel's execution time is dictated by the slanted bandwidth ceiling and will experience $0\\%$ speedup unless memory bandwidth is increased or the kernel is restructured to improve data reuse.",
-            "learning_objective": "Evaluate the effect of hardware upgrades on memory-bound workloads using the Roofline model."
+            "answer": "False. In the simple roofline, a kernel below the ridge is bounded by $I \\cdot \\text{BW}$, so raising only $R_{\\text{peak}}$ lifts the compute ceiling but does not raise the bandwidth ceiling. That does not prove measured speedup is exactly zero in every implementation, but the modeled bandwidth bound itself is unchanged.",
+            "learning_objective": "Evaluate why increasing peak compute alone does not raise the simple roofline bound for a memory-bound kernel."
           },
           {
             "question_type": "FILL",
@@ -387,15 +387,15 @@
           },
           {
             "question_type": "MCQ",
-            "question": "An engineer profiles a transformer inference workload and discovers that the attention Softmax kernel is heavily memory bandwidth bound. Which of the following optimization techniques directly increases arithmetic intensity to move the kernel closer to the compute-bound regime?",
+            "question": "An engineer profiles a transformer inference workload and discovers that the attention Softmax kernel is heavily memory bandwidth bound. Which of the following optimization techniques directly targets intermediate-memory traffic in this kernel?",
             "choices": [
               "Upgrading host CPU RAM to DDR5 to decrease kernel enqueue latency",
-              "Fusing the scale, mask, Softmax, and dropout operations into a single kernel to keep intermediate activations in registers/SRAM",
+              "Fusing the scale, mask, and Softmax stages into a single kernel to keep intermediates in registers or SRAM when resources allow",
               "Increasing the clock frequency of the GPU Tensor Cores by $15\\%$",
               "Disabling warp scheduler out-of-order instruction issue"
             ],
-            "answer": "The correct answer is B. Fusing scale, mask, Softmax, and dropout into a single kernel eliminates intermediate writes to and reads from DRAM (HBM), keeping intermediate values in fast on-chip registers and shared memory. This drastically reduces the total memory traffic $D_{\\text{vol}}$, increasing the arithmetic intensity $I = \\text{FLOP}/\\text{Byte}$ and moving the kernel closer to or into the compute-bound regime. Upgrading host CPU RAM does not affect GPU HBM memory traffic. Increasing Tensor Core clock frequency only raises the peak compute ceiling without improving memory-bound throughput. Disabling warp scheduling hurts instruction issue efficiency.",
-            "learning_objective": "Design optimization strategies to shift memory-bound kernels toward the compute-bound regime."
+            "answer": "The correct answer is B. Fusing scale, mask, and Softmax can reduce intermediate global-memory traffic by keeping temporary values on chip when cache, register, and shared-memory resources permit. That targets the bytes-moved side of the problem directly, even though it does not guarantee the kernel becomes compute-bound. Upgrading host RAM changes a different interface, increasing Tensor Core clock raises the compute ceiling rather than the memory-traffic pattern, and disabling scheduler flexibility does not address the diagnosed bottleneck.",
+            "learning_objective": "Select a memory-traffic-reduction optimization for a bandwidth-bound inference Softmax kernel."
           }
         ]
       }
@@ -494,21 +494,21 @@
           },
           {
             "question_type": "ORDER",
-            "question": "Place the following loop transformation steps in the logical order applied by an optimizing compiler when targeting a matrix multiplication dataflow to an accelerator:\n(1) Loop Reordering: Permute loop indices to establish a specific stationary dataflow (e.g., Output-Stationary)\n(2) Loop Unrolling: Fully or partially unroll the innermost loop to expose instruction-level parallelism and map to hardware registers\n(3) Loop Tiling (Blocking): Partition global loop iterations into sub-tiles that fit into on-chip shared memory / SRAM\n(4) Spatial Partitioning: Assign outer tile loops to physical hardware compute clusters (e.g., GPU thread blocks / SMs)",
-            "answer": "The correct order is (3) Loop Tiling (Blocking): Partition global loop iterations into sub-tiles that fit into on-chip shared memory / SRAM -> (4) Spatial Partitioning: Assign outer tile loops to physical hardware compute clusters (e.g., GPU thread blocks / SMs) -> (1) Loop Reordering: Permute loop indices to establish a specific stationary dataflow (e.g., Output-Stationary) -> (2) Loop Unrolling: Fully or partially unroll the innermost loop to expose instruction-level parallelism and map to hardware registers. Optimization starts with hierarchical tiling to match memory capacities, partitions tiles spatially across SMs/PEs, reorders the inner loops to minimize data movement (dataflow choice), and finally unrolls inner loops for instruction issue efficiency.",
-            "learning_objective": "Apply loop transformation pipelines for optimizing matrix dataflow on accelerators."
+            "question": "For the given candidate matrix-multiplication mapping policy on an accelerator—first choose tiles that fit on-chip memory, then assign outer tiles across hardware, then organize the inner reuse pattern, and finally unroll the remaining innermost work—match the following numbered loop transformations to that policy:\n(1) Loop Reordering: Permute loop indices to establish a specific stationary dataflow (e.g., Output-Stationary)\n(2) Loop Unrolling: Fully or partially unroll the innermost loop to expose instruction-level parallelism and map to hardware registers\n(3) Loop Tiling (Blocking): Partition global loop iterations into sub-tiles that fit into on-chip shared memory / SRAM\n(4) Spatial Partitioning: Assign outer tile loops to physical hardware compute clusters (e.g., GPU thread blocks / SMs)",
+            "answer": "The correct order is: (3) Loop Tiling (Blocking): Partition global loop iterations into sub-tiles that fit into on-chip shared memory / SRAM, (4) Spatial Partitioning: Assign outer tile loops to physical hardware compute clusters, (1) Loop Reordering: Permute loop indices to establish a specific stationary dataflow, (2) Loop Unrolling: Fully or partially unroll the innermost loop to expose instruction-level parallelism and map to hardware registers. This answer matches the candidate workflow stated in the question: first choose tiles that fit the memory hierarchy, then assign those tiles across hardware, then organize the inner reuse pattern, and finally unroll the innermost work that remains. Other compiler sequences are possible in practice, so the point here is not that this is a uniquely mandatory compiler order, but that it is the sequence implied by the given policy.",
+            "learning_objective": "Match loop tiling, spatial assignment, inner-loop ordering, and unrolling to a stated candidate accelerator-mapping policy."
           },
           {
             "question_type": "MCQ",
-            "question": "In a multi-head self-attention layer where a single input activation tensor is projected across multiple query, key, and value weight matrices ($W_q, W_k, W_v$), which stationary dataflow strategy provides the highest data reuse in local scratchpad memory?",
+            "question": "In a multi-head self-attention layer where one input activation tile is reused across separate query, key, and value projections, which stationary dataflow strategy most directly keeps that shared input tile local across those projections?",
             "choices": [
               "Input-Stationary (Activation-Stationary)",
               "Output-Stationary",
               "No Local Reuse (NLR)",
               "Weight-Stationary"
             ],
-            "answer": "The correct answer is A. In an Input-Stationary (Activation-Stationary) dataflow, an input activation tile is loaded into fast local memory once and kept stationary while multiple weight matrices ($W_q, W_k, W_v$) stream through. This maximizes the reuse of the common activation tensor across multiple matrix multiplications, minimizing activation re-reads. Weight-Stationary would require repeatedly reloading activations for each distinct weight matrix. Output-Stationary minimizes accumulation write-backs but does not exploit cross-projection activation sharing. No Local Reuse streams all operands from memory without local caching.",
-            "learning_objective": "Design dataflow strategies for multi-head attention workloads."
+            "answer": "The correct answer is A. If the same input activation tile feeds multiple projections, an input-stationary mapping keeps that activation local while different weight matrices stream past it, directly exploiting the cross-projection reuse described in the question. Output-stationary focuses on retaining partial sums, and weight-stationary instead prioritizes reusing a weight tile. A no-local-reuse approach would forfeit the shared-input benefit entirely.",
+            "learning_objective": "Choose the stationary dataflow that best preserves a shared input activation tile across multiple attention projections."
           },
           {
             "question_type": "TF",
@@ -558,9 +558,9 @@
           },
           {
             "question_type": "ORDER",
-            "question": "Place the following compilation stages in the correct order as an end-to-end ML compiler (such as TVM or XLA) transforms a high-level deep learning model into executable machine code:\n(1) Target Code Generation: Emit hardware-specific binary (e.g., PTX or machine instructions)\n(2) High-Level Graph Optimization: Perform operator fusion, constant folding, and dead code elimination on the computation graph\n(3) Front-End Ingestion: Parse framework model (e.g., PyTorch/ONNX) into High-Level Graph IR\n(4) Low-Level IR & Auto-Tuning: Lower fused operators to loop-level IR and optimize tile sizes, thread bindings, and unroll factors\n(5) Static Memory Planning: Analyze tensor lifetimes and allocate shared physical buffers",
-            "answer": "The correct order is (3) Front-End Ingestion: Parse framework model (e.g., PyTorch/ONNX) into High-Level Graph IR -> (2) High-Level Graph Optimization: Perform operator fusion, constant folding, and dead code elimination on the computation graph -> (4) Low-Level IR & Auto-Tuning: Lower fused operators to loop-level IR and optimize tile sizes, thread bindings, and unroll factors -> (5) Static Memory Planning: Analyze tensor lifetimes and allocate shared physical buffers -> (1) Target Code Generation: Emit hardware-specific binary (e.g., PTX or machine instructions). Compilation begins with parsing graph IR, performs target-independent graph optimizations, lowers to loop IR for hardware auto-tuning and tiling, plans memory buffers, and generates native device code.",
-            "learning_objective": "Apply the multi-stage compilation pipeline of modern ML compilers."
+            "question": "Order the following compilation stages for the illustrative compiler workflow. In this workflow, static memory planning uses the tuned lowered schedule, so it comes after lowering and auto-tuning:\n(1) Target Code Generation: Emit hardware-specific target code (e.g., PTX or machine instructions)\n(2) High-Level Graph Optimization: Perform operator fusion, constant folding, and dead code elimination on the computation graph\n(3) Front-End Ingestion: Parse framework model (e.g., PyTorch/ONNX) into High-Level Graph IR\n(4) Low-Level IR & Auto-Tuning: Lower fused operators to loop-level IR and optimize tile sizes, thread bindings, and unroll factors\n(5) Static Memory Planning: Analyze tensor lifetimes and allocate shared physical buffers",
+            "answer": "The correct order is: (3) Front-End Ingestion: Parse framework model into High-Level Graph IR, (2) High-Level Graph Optimization: Perform operator fusion, constant folding, and dead code elimination on the computation graph, (4) Low-Level IR & Auto-Tuning: Lower fused operators to loop-level IR and optimize tile sizes, thread bindings, and unroll factors, (5) Static Memory Planning: Analyze tensor lifetimes and allocate shared physical buffers, (1) Target Code Generation: Emit hardware-specific target code. In this illustrative workflow, the compiler first needs a graph representation before it can optimize it, then lowers optimized operators into loop-level forms where schedule choices can be tuned. Static memory planning then consumes that tuned lowered schedule to plan memory over the resulting execution, and the compiler finally emits target-specific code. Some real systems iterate among these stages or place memory planning differently, but for this workflow code generation cannot happen before the compiler has settled the lowered execution plan it intends to emit.",
+            "learning_objective": "Sequence the illustrative end-to-end stages of an ML compiler from graph ingestion through target code generation."
           },
           {
             "question_type": "MCQ",
@@ -568,17 +568,17 @@
             "choices": [
               "Auto-tuning compilers execute code only on the host CPU, whereas handwritten libraries run on GPUs",
               "Handwritten libraries search an infinite combinatorial loop space at runtime, whereas auto-tuning compilers use static heuristics",
-              "Auto-tuning compilers explore large parameterized search spaces of loop transformations and tile sizes using cost models to generate custom kernels, whereas handwritten libraries rely on expert-tuned templates for specific fixed shapes",
+              "Auto-tuning compilers explore large parameterized search spaces of loop transformations and tile sizes using cost models or measurements to generate custom kernels, whereas handwritten libraries emphasize expert-tuned implementations and heuristics",
               "Auto-tuning compilers require all tensors to be quantized to 1-bit integers"
             ],
-            "answer": "The correct answer is C. Auto-tuning ML compilers define parameterized spaces of loop transformations (tiling, unrolling, vectorization, thread mapping) and evaluate configurations using statistical cost models or hardware measurements to generate custom kernels optimized for any arbitrary tensor shape and target architecture. In contrast, vendor libraries rely on human experts who write and optimize specific kernel templates for common fixed shapes and precisions. The host CPU only claim is false. The runtime infinite search claim is reversed. The 1-bit quantization claim is unrelated.",
-            "learning_objective": "Compare auto-tuning ML compilers with handwritten vendor libraries."
+            "answer": "The correct answer is C. Auto-tuning compiler systems search parameterized spaces of schedules such as tiling, unrolling, and thread mapping, then rank or measure candidates to produce kernels specialized to the target and shape. Handwritten libraries also use parameters, heuristics, and benchmarking tactics, but their emphasis is expert-designed implementations rather than open-ended schedule search by the compiler. The host-CPU claim is false, the infinite-runtime-search claim misstates how libraries operate, and 1-bit quantization is unrelated.",
+            "learning_objective": "Compare compiler-driven auto-tuning search with the expert-tuned implementation strategy emphasized by vendor libraries."
           },
           {
             "question_type": "FILL",
-            "question": "The optimization where an ML compiler merges two or more independent operators at the same graph depth into a single batched kernel to maximize GPU parallelism is known as ____ fusion.",
-            "answer": "horizontal. Horizontal fusion combines independent parallel operators (such as parallel projection layers or multi-head $Q, K, V$ linear transformations) into a single batched kernel, improving hardware occupancy and amortizing kernel launch overhead.",
-            "learning_objective": "Classify horizontal versus vertical kernel fusion techniques."
+            "question": "When an ML compiler evaluates tensor lifetimes so non-overlapping intermediates can share the same physical buffer, it is performing ____ analysis.",
+            "answer": "liveness. Liveness analysis tracks when each tensor is created and when its last consumer finishes, which lets the compiler safely reuse memory for tensors whose lifetimes do not overlap.",
+            "learning_objective": "Identify liveness analysis from its role in compiler memory planning and buffer reuse."
           }
         ]
       }
@@ -608,16 +608,16 @@
               "`cudaMalloc` operates only in FP32 precision and cannot allocate FP16 memory buffers",
               "Direct OS memory allocation encrypts all tensor data, introducing cryptographic decryption latency",
               "GPU DRAM can only be allocated once during system boot time",
-              "`cudaMalloc` is a synchronous operation that stalls GPU execution and causes expensive driver and OS page-table synchronization overhead"
+              "Repeated driver-managed allocations can introduce expensive synchronization or other overhead, while a caching allocator reuses reserved blocks to reduce repeated allocation costs"
             ],
-            "answer": "The correct answer is D. `cudaMalloc` and `cudaFree` are synchronous system calls that require driver synchronization, virtual memory address mapping, and device-wide mutex locking, introducing significant latency ($\\approx 10\\text{--}100\\,\\mu\\text{s}$) that stalls asynchronous execution streams. A caching memory allocator pre-allocates large memory blocks and manages a userspace pool of memory chunks on the device, servicing tensor allocations and deallocations in sub-microsecond time without GPU-host synchronization. Precision is independent of raw memory allocation. OS encryption is not part of standard cudaMalloc. GPU memory can be dynamically allocated at runtime.",
-            "learning_objective": "Analyze the architectural necessity and performance advantages of caching memory allocators in ML runtimes."
+            "answer": "The correct answer is D. Repeated device allocations through the driver can introduce synchronization and other costly management work on the execution path, so frameworks often reserve larger blocks and reuse them through a caching allocator instead of repeatedly calling the driver for every intermediate tensor. The precision claim is false because allocation is not tied to FP32, the encryption claim is unrelated, and the boot-time-only claim misstates how device memory allocation works.",
+            "learning_objective": "Explain why ML runtimes use caching allocators to reduce repeated device-allocation overhead."
           },
           {
             "question_type": "SHORT",
-            "question": "Explain how CUDA Graphs eliminate CPU kernel launch overhead during repeated training or inference iterations on small or low-latency models.",
-            "answer": "In standard execution, every GPU kernel requires the CPU to enqueue a launch request via the driver, incurring $\\approx 5\\text{--}10\\,\\mu\\text{s}$ of CPU overhead per kernel, which severely bottlenecks short-duration kernels. CUDA Graphs capture the entire directed acyclic graph (DAG) of kernel launches, memory copies, and stream dependencies during an initial trace pass. In subsequent iterations, the entire graph is instantiated and replayed via a single driver call, offloading execution sequencing entirely to the GPU hardware scheduler and eliminating host-side dispatch overhead.",
-            "learning_objective": "Explain how CUDA Graphs capture and replay execution workflows to eliminate host launch latency."
+            "question": "Explain how host command queues, asynchronous streams, and device events preserve execution dependencies without forcing the host to block after each kernel launch, and how that permits overlap in repeated training or inference iterations on accelerators.",
+            "answer": "The host can enqueue kernel launches and memory copies onto asynchronous streams so dependencies are enforced by device events and queue ordering rather than by making the CPU wait for each completion. For a repeated workflow, this allows copies and kernels to overlap when dependencies permit, while the host continues launching work instead of synchronizing after every step. The practical implication is that repeated execution is less likely to be dominated by serialized host-side waiting, especially when many short operations would otherwise stall on frequent CPU synchronization.",
+            "learning_objective": "Explain how asynchronous queues and device events preserve dependencies without blocking the host after each kernel launch, enabling overlap in repeated accelerator workflows."
           },
           {
             "question_type": "TF",
@@ -633,15 +633,15 @@
           },
           {
             "question_type": "MCQ",
-            "question": "An inference serving system processes dynamic batch sizes ranging from 1 to 32 tokens per request. Why does dynamic batching pose a significant challenge to runtime kernel selection and hardware efficiency?",
+            "question": "An inference serving system processes dynamic batch sizes ranging from a batch of 1 to 32 concurrent decode requests, each contributing one token at the current step. Why does dynamic batching pose a significant challenge to runtime kernel selection and hardware efficiency?",
             "choices": [
-              "Optimal tile sizes, thread block configurations, and memory bandwidth requirements change across batch sizes, making a single static kernel inefficient across all shapes",
+              "Optimal tile sizes, thread block configurations, and memory-reuse opportunities change across batch sizes, making a single static kernel inefficient across all shapes",
               "Dynamic batching forces the GPU to switch from FP16 to FP64 precision for even batch sizes",
               "Tensor Cores cannot execute matrix multiplication when batch dimensions are not powers of two",
               "The GPU memory controller must physically power down DRAM banks when batch size decreases"
             ],
-            "answer": "The correct answer is A. For small batch sizes (e.g., $B=1$), operations are memory-bandwidth bound and require kernels tuned for low latency and high memory throughput, whereas for large batch sizes (e.g., $B=32$), operations become compute bound and require larger tile sizes and high-occupancy thread block configurations to saturate Tensor Cores. A single static kernel configuration cannot achieve peak efficiency across disparate tensor shapes, requiring runtime kernel dispatch or multi-version code generation. Precision switching, power-of-two Tensor Core limitations, and DRAM bank power-downs are incorrect.",
-            "learning_objective": "Analyze the performance challenges of dynamic shapes on runtime kernel selection."
+            "answer": "The correct answer is A. Changing batch size changes shape, available reuse, and parallel work, so a kernel configuration that is effective at one batch can be inefficient at another. Small batches may emphasize low-latency execution and limited reuse, while larger batches can expose more parallelism and justify different tiling or tactic choices. The precision-switching claim is invented, Tensor Cores are not limited to powers of two in that way, and DRAM bank power-down is not the core runtime-kernel-selection issue described here.",
+            "learning_objective": "Analyze why dynamic batch sizes make a single static kernel configuration inefficient across inference requests."
           }
         ]
       }
@@ -678,27 +678,27 @@
           },
           {
             "question_type": "SHORT",
-            "question": "Explain how the non-uniform memory access (NUMA) effect and interconnect bandwidth degradation impact performance when scaling a neural network workload across multiple chiplets or accelerator chips.",
-            "answer": "While on-chip or intra-die memory access delivers high bandwidth ($>2\\text{--}3\\text{ TB/s}$) and low latency, crossing chiplet boundaries via inter-die bridges or board interconnects (e.g., NVLink or PCIe) suffers an order-of-magnitude reduction in bandwidth and increased latency. If a tensor computation frequently requires operands from remote chiplets without local caching, execution stalls on inter-chip communication, creating a NUMA bottleneck that degrades parallel scaling efficiency unless data is carefully partitioned.",
-            "learning_objective": "Analyze the NUMA and interconnect bandwidth constraints in multi-chip scaling."
+            "question": "Explain how communication boundaries change performance as a neural network workload scales from chiplets within a package to multiple accelerators within a node and then across nodes.",
+            "answer": "As scaling moves outward from package-level chiplets to multiple accelerators in a node and then to separate nodes, communication generally crosses slower and more expensive boundaries. A tensor read that stays local to one chip or package can become more costly when it must traverse an intra-node fabric, and cost rises again when collectives extend across the network. For example, a partitioning that is acceptable within one node may become communication-heavy once activations or gradients must repeatedly cross the internode boundary. The practical consequence is that topology, locality, and collective patterns matter: performance depends not just on how much compute is added, but on which communication boundary the workload is forced to cross repeatedly.",
+            "learning_objective": "Analyze how widening communication boundaries from package to node to cluster changes the cost of scaling neural network workloads."
           },
           {
             "question_type": "SHORT",
-            "question": "Describe the architectural rationale behind Cerebras's Wafer-Scale Engine and explain how fabricating an accelerator across an entire uncut silicon wafer overcomes traditional multi-chip scaling bottlenecks.",
-            "answer": "Standard multi-chip scaling suffers significant latency and bandwidth penalties when signals cross chip package boundaries and PCB traces. Cerebras fabricates hundreds of thousands of cores across an entire uncut $300\\text{ mm}$ silicon wafer, utilizing on-wafer routing to connect adjacent reticle fields. This provides uniform, ultra-high-bandwidth, single-cycle communication and massive distributed on-chip SRAM across the entire wafer, eliminating discrete chip packaging, external SerDes transceivers, and NUMA interconnect bottlenecks.",
-            "learning_objective": "Explain the architectural rationale and communication advantages of wafer-scale computing systems."
+            "question": "Describe the architectural rationale behind a wafer-scale accelerator and explain which multi-chip bottlenecks it reduces and which constraints remain.",
+            "answer": "A wafer-scale design keeps much more computation and communication on one physical substrate instead of splitting it across many separately packaged chips, so it can reduce external communication boundaries that would otherwise require off-chip links and package crossings. That can lower some latency and increase local bandwidth for workloads that would have exchanged data across chip boundaries in a conventional multi-chip system. However, it does not make the entire wafer a uniform zero-cost machine: distance, routing capacity, thermal limits, fault tolerance, and manufacturing constraints still shape which communication patterns remain efficient. The practical implication is that wafer scale reduces some multi-chip bottlenecks, but it does not eliminate locality or systems-design constraints.",
+            "learning_objective": "Explain how wafer-scale integration reduces some off-chip communication bottlenecks while leaving routing, thermal, and fault-tolerance constraints in place."
           },
           {
             "question_type": "MCQ",
-            "question": "What is the primary bottleneck introduced by inter-node scaling (scaling out across separate servers over Ethernet or InfiniBand) compared to intra-node NVLink scaling?",
+            "question": "What is the primary bottleneck introduced when scaling out from accelerators within one server to accelerators across separate servers?",
             "choices": [
               "Inter-node network adapters cannot transmit FP16 or BF16 floating-point values",
               "Inter-node communication requires GPUs to switch to single-threaded CPU emulation mode",
-              "Inter-node network bandwidth (e.g., $400\\text{ Gbps} \\approx 50\\text{ GB/s}$) is roughly an order of magnitude lower than intra-node NVLink bandwidth ($\\approx 900\\text{ GB/s}$), increasing collective communication latency",
+              "The communication boundary moves onto a much narrower and higher-latency network path, making collective communication more expensive",
               "Inter-node scaling eliminates the need for gradient synchronization in distributed training"
             ],
-            "answer": "The correct answer is C. Intra-node GPU interconnects like NVLink 4 deliver up to $900\\text{ GB/s}$ of bidirectional bandwidth per GPU, whereas inter-node network interfaces (e.g., $400\\text{ Gbps}$ InfiniBand or RoCE NICs) deliver $\\approx 50\\text{ GB/s}$ per port. This sharp bandwidth drop across the node boundary makes inter-node collective communication (such as All-Reduce or All-to-All) a dominant bottleneck in distributed scaling, requiring hierarchical communication algorithms. The network adapter precision and CPU emulation choices are false. The gradient synchronization elimination choice is incorrect because distributed data parallelism requires gradient synchronization.",
-            "learning_objective": "Compare the bandwidth constraints of intra-node interconnects with inter-node scale-out networks."
+            "answer": "The correct answer is C. Scaling across servers pushes communication onto a narrower, higher-latency network boundary than the local accelerator fabric, so collectives such as all-reduce or all-to-all become more expensive and more likely to limit scaling. The floating-point-format claim is false, the CPU-emulation claim invents a mechanism that does not exist, and the synchronization claim gets the direction wrong because distributed training still has to exchange information across ranks.",
+            "learning_objective": "Identify why moving from intra-node to inter-node communication makes distributed collectives more costly."
           }
         ]
       }
@@ -723,21 +723,21 @@
         "questions": [
           {
             "question_type": "MCQ",
-            "question": "On a modern mobile heterogeneous System-on-Chip (SoC) featuring big.LITTLE CPUs, a mobile GPU, and a dedicated NPU, which compute engine is most energy-efficient for running continuous, low-latency 8-bit quantized convolutional inference?",
+            "question": "On a modern mobile heterogeneous System-on-Chip (SoC) featuring big.LITTLE CPUs, a mobile GPU, and a dedicated NPU, which compute engine is typically the most energy-efficient choice for a supported INT8 convolution workload?",
             "choices": [
               "The high-performance 'big' CPU core running single-threaded FP32 instructions",
               "The out-of-order system memory controller",
-              "The dedicated Neural Processing Unit (NPU) optimized for quantized INT8 matrix operations",
+              "The dedicated Neural Processing Unit (NPU) optimized for quantized INT8 tensor operations",
               "The host operating system virtualization hypervisor"
             ],
-            "answer": "The correct answer is C. The Neural Processing Unit (NPU) is a domain-specific accelerator with fixed-point MAC arrays, specialized activation units, and local scratchpad SRAM designed specifically for INT8/INT4 neural network operations. It delivers an order-of-magnitude higher energy efficiency (TOPS/Watt) than general-purpose CPU cores or high-power GPUs by avoiding instruction fetch/decode overhead and general register file transfers. The big CPU core consumes substantially more power per operation. Memory controllers and hypervisors do not execute tensor math.",
-            "learning_objective": "Classify mobile SoC compute engines based on workload efficiency and architectural specialization."
+            "answer": "The correct answer is C. For a supported INT8 convolution path, the NPU is designed specifically to execute quantized tensor operations with better energy efficiency than a general-purpose CPU or GPU path. The measured pipeline energy still depends on fallback operators, data movement, and thermal behavior, so specialization does not by itself determine the whole-system result. The big CPU core is less specialized for this workload, and the memory controller and hypervisor are not the units that execute the convolution itself.",
+            "learning_objective": "Classify which SoC engine is typically most energy-efficient for a supported INT8 convolution workload."
           },
           {
             "question_type": "SHORT",
-            "question": "In automotive autonomous driving SoCs, explain why deterministic worst-case execution time and lockstep redundancy are required, even if they reduce peak average-case throughput.",
-            "answer": "Automotive systems are subject to strict functional safety standards (such as ISO 26262 ASIL-D), where missing a perception or control deadline in real-time sensor processing can lead to catastrophic physical collisions. Dual-core lockstep execution runs identical computations redundantly across replicated hardware cores to detect transient hardware faults and bit flips immediately. While these safety mechanisms and strict scheduling guarantees introduce hardware overhead and reduce peak average throughput, they guarantee deterministic worst-case latency and fault tolerance necessary for life-critical autonomy.",
-            "learning_objective": "Explain the architectural trade-offs between safety-critical determinism and peak throughput in automotive AI SoCs."
+            "question": "In automotive autonomous-driving SoCs, explain why mixed-criticality isolation, bandwidth reservations, and worst-case deadlines matter even when they can reduce average throughput.",
+            "answer": "Automotive platforms run safety-critical perception and control alongside less critical workloads, so the system must guarantee that urgent tasks still meet their deadlines under contention rather than only performing well on average. Isolation mechanisms and bandwidth reservations prevent a noncritical workload from monopolizing shared memory or compute resources needed by a real-time pipeline. For example, reserving memory bandwidth for a perception path may lower average accelerator utilization, but it protects the worst-case execution time that braking or steering logic depends on. The practical consequence is that the design target is deadline reliability under mixed-criticality load, not maximum average throughput alone.",
+            "learning_objective": "Explain why automotive SoCs prioritize isolation and worst-case deadline guarantees over average-case throughput."
           },
           {
             "question_type": "TF",
@@ -786,15 +786,15 @@
           },
           {
             "question_type": "SHORT",
-            "question": "Explain why maximizing accelerator utilization (e.g., via multi-tenant sharing or continuous pipeline saturation) reduces the amortized carbon footprint per trained model.",
-            "answer": "The total carbon footprint of a machine learning model includes both operational carbon (energy consumed per training step) and a fractional share of the hardware's embodied carbon amortized over its operational lifespan. When accelerator utilization is low (e.g., GPUs idling on data stalls), the embodied carbon is wasted on idle time. Maximizing utilization ensures that more useful compute operations are extracted over the device's operational lifetime, minimizing the embodied carbon cost allocated to each trained model.",
-            "learning_objective": "Explain how hardware utilization impacts the amortized carbon footprint of AI workloads."
+            "question": "Explain why maximizing useful accelerator utilization can reduce the amortized carbon footprint per completed AI workload, while not automatically reducing total carbon emissions.",
+            "answer": "When a device spends more of its lifetime doing useful completed work, the embodied impact of manufacturing that hardware is spread across more results, so the allocated embodied carbon per trained model or served workload can fall. For example, if the same accelerator fleet completes more validated training runs or inferences over its service life, each result carries a smaller share of the hardware's fixed manufacturing burden. The practical implication is that higher useful utilization can improve carbon efficiency per result, but it does not automatically lower total emissions because total power draw, workload quality, and the amount of work done can all rise at the same time.",
+            "learning_objective": "Explain how higher useful utilization can lower embodied carbon per result without guaranteeing lower total emissions."
           },
           {
             "question_type": "TF",
-            "question": "True or False: In a datacenter with a Power Usage Effectiveness (PUE) of 1.1, the cooling and electrical distribution infrastructure consumes more power than the actual computing IT equipment (servers and accelerators).",
-            "answer": "False. $\\text{PUE} = \\frac{\\text{Total Facility Power}}{\\text{IT Equipment Power}}$. A PUE of 1.1 means that for every $1.0\\text{ Watt}$ consumed by the computing IT equipment, only $0.1\\text{ Watts}$ (roughly $9\\%$ of total power) is consumed by cooling, lighting, and power distribution overhead, indicating a highly efficient facility where computing equipment dominates power consumption.",
-            "learning_objective": "Calculate and interpret Power Usage Effectiveness (PUE) for AI datacenters."
+            "question": "True or False: Power Usage Effectiveness (PUE) is defined as total facility power divided by IT equipment power, so a datacenter with PUE = 1.1 uses more power in cooling and power distribution than in the computing equipment itself.",
+            "answer": "False. If $\\text{PUE} = \\frac{\\text{Total Facility Power}}{\\text{IT Equipment Power}} = 1.1$, then every 1 unit of IT power is accompanied by only 0.1 additional units of overhead for cooling, lighting, and power distribution. That means the computing equipment still dominates the power draw.",
+            "learning_objective": "Interpret a PUE value by comparing facility overhead power with IT equipment power."
           }
         ]
       }
@@ -821,13 +821,13 @@
             "question_type": "MCQ",
             "question": "A team prunes $70\\%$ of the weights in a large language model using unstructured magnitude pruning, setting those weights to zero. However, when executing the pruned model on standard GPU dense Tensor Cores, inference latency is identical to or slower than the unpruned baseline. What is the primary cause of this pitfall?",
             "choices": [
-              "Standard dense hardware cannot skip individual zero elements without structured patterns (e.g., 2:4) or specialized sparse matrix indexing, so dense matrix units still execute all multiplications while sparse formats add indexing overhead",
+              "Standard dense hardware cannot skip arbitrary zero elements efficiently, and compact sparse formats add metadata and irregular access overhead",
               "Floating-point units automatically convert zero values into infinite loops",
               "Unstructured pruning forces the GPU driver to downclock memory bandwidth to prevent overheating",
               "The operating system kernel intercepts every zero multiplication and raises a hardware page fault"
             ],
-            "answer": "The correct answer is A. Dense Tensor Cores and SIMT pipelines execute instructions in lockstep on dense contiguous matrices. Unstructured zero values do not change the dense matrix dimensions, so standard hardware still loads and computes all values. If converted to general sparse formats (e.g., CSR), irregular non-coalesced memory access and index metadata decoding overhead negate any FLOP reduction on GPUs unless sparsity is extremely high ($>90\\text{--}95\\%$) or structured (such as 2:4). The infinite loop, driver downclocking, and OS page fault choices are physically incorrect.",
-            "learning_objective": "Explain why unstructured sparsity fails to accelerate execution on dense hardware architectures."
+            "answer": "The correct answer is A. Standard dense Tensor Core paths still operate on dense matrix shapes, so setting many entries to zero does not by itself cause the hardware to skip those multiplies. If the model is converted to a general sparse format, metadata and irregular gathers can offset or erase the theoretical arithmetic reduction. The infinite-loop, thermal-downclock, and page-fault explanations invent mechanisms unrelated to why dense hardware often fails to speed up unstructured sparsity.",
+            "learning_objective": "Explain why unstructured sparsity often fails to accelerate inference on dense accelerator paths."
           },
           {
             "question_type": "SHORT",
@@ -837,21 +837,21 @@
           },
           {
             "question_type": "ORDER",
-            "question": "Place the following diagnostic steps in the recommended sequence when troubleshooting an underperforming neural network training workload on an accelerator cluster:\n(1) Roofline & Hardware Counter Analysis: Determine whether individual kernels are compute-bound, memory-bandwidth-bound, or latency-bound\n(2) Amdahl & Host-Side Profiling: Identify serial bottlenecks, data loading stalls, and CPU-GPU synchronization delays\n(3) Kernel-Level Optimization: Apply operator fusion, hierarchical tiling, or precision reduction targeted to the identified bottleneck\n(4) Multi-Device Communication Profiling: Check for gradient all-reduce synchronization delays and interconnect saturation",
-            "answer": "The correct order is (2) Amdahl & Host-Side Profiling: Identify serial bottlenecks, data loading stalls, and CPU-GPU synchronization delays -> (1) Roofline & Hardware Counter Analysis: Determine whether individual kernels are compute-bound, memory-bandwidth-bound, or latency-bound -> (3) Kernel-Level Optimization: Apply operator fusion, hierarchical tiling, or precision reduction targeted to the identified bottleneck -> (4) Multi-Device Communication Profiling: Check for gradient all-reduce synchronization delays and interconnect saturation. Diagnostics begin at the macro level (Amdahl unaccelerated fractions and host bottlenecks), zoom in to single-device kernel roofline profiling, optimize the binding kernel bottlenecks, and finally scale up to inter-device communication analysis.",
-            "learning_objective": "Apply a systematic diagnostic sequence to identify and resolve accelerator performance bottlenecks."
+            "question": "For the given diagnostic procedure for an underperforming training workload on an already distributed accelerator cluster—broad trace first, then communication check, then exposed-kernel analysis, then intervention—place the following steps in that sequence:\n(1) Roofline & Hardware Counter Analysis: Determine whether exposed kernels are compute-bound, memory-bandwidth-bound, or latency-bound\n(2) End-to-End Profiling: Identify data loading stalls, host-device synchronization, and the full critical path\n(3) Targeted Optimization: Apply the intervention that matches the identified critical bottleneck\n(4) Multi-Device Communication Profiling: Inspect collective communication delays and interconnect saturation",
+            "answer": "The correct order is: (2) End-to-End Profiling: Identify data loading stalls, host-device synchronization, and the full critical path, (4) Multi-Device Communication Profiling: Inspect collective communication delays and interconnect saturation, (1) Roofline & Hardware Counter Analysis: Determine whether exposed kernels are compute-bound, memory-bandwidth-bound, or latency-bound, (3) Targeted Optimization: Apply the intervention that matches the identified critical bottleneck. This answer preserves the given diagnostic procedure: first trace the full path, then check communication, then inspect exposed kernels, and only then choose the intervention. It is not a universal order required in every debugging case: if the broad trace already proves the root cause is host-side or communication-side, the intervention can be chosen without unnecessary deep kernel analysis. The point is to follow the stated procedure and avoid prematurely tuning a kernel that is not actually the limiting step.",
+            "learning_objective": "Apply a given diagnostic procedure that starts with end-to-end profiling, checks distributed communication, then uses kernel analysis to choose the right intervention."
           },
           {
             "question_type": "MCQ",
             "question": "Which of the following statements represents a classic fallacy regarding peak accelerator specifications?",
             "choices": [
-              "High-bandwidth memory reduces the latency of memory-bound operations compared to standard DDR5",
+              "Higher memory bandwidth can raise the bandwidth ceiling for some memory-bound workloads",
               "An accelerator with $2\\times$ higher peak theoretical TFLOP/s will automatically deliver a $2\\times$ speedup on any neural network workload",
               "Kernel fusion can improve arithmetic intensity by reducing global memory traffic",
               "Warp divergence reduces the execution efficiency of SIMT processor lanes"
             ],
-            "answer": "The correct answer is B. Assuming that doubling peak theoretical TFLOP/s automatically doubles real-world workload performance is a classic fallacy. If the workload is memory-bandwidth bound (e.g., LayerNorm, embedding lookup, or autoregressive decoding), bound by host communication (Amdahl's law), or limited by kernel launch overhead, increasing peak compute capacity produces negligible or zero speedup. The other choices represent well-established architectural facts.",
-            "learning_objective": "Evaluate common fallacies regarding peak accelerator hardware specifications."
+            "answer": "The correct answer is B. Treating a $2\\times$ increase in peak TFLOP/s as an automatic $2\\times$ workload speedup ignores memory-bandwidth limits, host and launch overheads, unsupported operators, and other bottlenecks that often dominate real execution. The higher-bandwidth statement is a conditional architectural fact rather than a fallacy, and the fusion and warp-divergence statements describe real mechanisms discussed in the chapter.",
+            "learning_objective": "Evaluate why peak TFLOP/s alone cannot predict end-to-end workload speedup."
           }
         ]
       }
@@ -887,9 +887,9 @@
           },
           {
             "question_type": "SHORT",
-            "question": "Summarize how the Roofline model serves as a unified diagnostic bridge connecting high-level neural network operations to low-level hardware architecture choices.",
-            "answer": "The Roofline model characterizes any neural network operation by its arithmetic intensity ($I = \\text{FLOP}/\\text{byte}$) and maps it against the hardware's peak compute capacity ($R_{\\text{peak}}$) and memory bandwidth ($\\text{BW}$). By comparing $I$ to the hardware ridge point ($I_{\\text{ridge}} = R_{\\text{peak}}/\\text{BW}$), the model immediately diagnoses whether an operator is memory-bound or compute-bound, directing engineers to the appropriate optimization: kernel fusion and tiling to increase data reuse for memory-bound operators, or Tensor Core utilization and parallelism tuning for compute-bound operators.",
-            "learning_objective": "Explain how the Roofline model bridges neural network algorithms and accelerator hardware design."
+            "question": "Summarize how the Roofline model serves as a diagnostic bridge connecting neural network operations to hardware choices and profiling decisions.",
+            "answer": "The Roofline model places an operation's arithmetic intensity against a device's compute and bandwidth ceilings, so it narrows the initial bottleneck hypothesis before deeper profiling begins. If a kernel sits below the ridge on the relevant interface and precision path, traffic reduction and reuse are natural candidates; if it sits above, compute-side utilization becomes the next question. For example, the same low realized TFLOP/s could come from a low-intensity bandwidth limit or from a poorly utilized compute path, and the roofline helps separate those cases. The practical implication is that the model guides where to measure next rather than diagnosing the actual bottleneck by itself.",
+            "learning_objective": "Explain how the Roofline model narrows bottleneck hypotheses and guides follow-up profiling and hardware choices."
           },
           {
             "question_type": "MCQ",
