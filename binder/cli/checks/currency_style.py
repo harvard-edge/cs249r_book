@@ -108,13 +108,17 @@ def iter_html_files(paths: Iterable[Path]) -> list[Path]:
 
 
 def _is_allowed_notation_definition(path: Path, line: str) -> bool:
-    """Return True if *line* is the one sanctioned ``USD`` definition in the notation partial."""
+    """Return True if *line* is the one sanctioned ``USD`` definition in the notation chapter or partial."""
+    if line.strip() != NOTATION_DEFINITION:
+        return False
+    if path.name == "notation.qmd":
+        return True
     # Match on the trailing "_partials/_notation_core_tail.qmd" rather than the whole
     # path, so the check holds whether it runs from the repository root or from
     # books/.
     tail = Path(*path.parts[-2:]) if len(path.parts) >= 2 else path
     expected_tail = Path(*NOTATION_REL_PATH.parts[-2:])
-    return tail == expected_tail and line.strip() == NOTATION_DEFINITION
+    return tail == expected_tail
 
 
 def _audit_file(path: Path) -> list[Violation]:

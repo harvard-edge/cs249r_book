@@ -4,11 +4,387 @@ number-sections: false
 
 # Notation {.unnumbered}
 
-{{< include ../../shared/_includes/_notation_core_head.qmd >}}
+Agentic Machine Learning Systems marks a major architectural transition: from static, single-pass model inference to dynamic, multi-turn **compound AI systems**. In an agentic architecture, foundation models act as cognitive reasoning and planning engines that interact with runtime environments, invoke external tools, execute code in secure sandboxes, inspect multimodal observations, verify intermediate claims, and collaborate across multi-agent networks.
 
-{{< include _notation_agentic.qmd >}}
+This shift introduces an entirely new domain of systems engineering where classical computer science and machine learning notations collide:
+To a robotics or hardware engineer, $\tau$ denotes torque or a physical time constant; in an agentic system, $\tau$ is the central atom of execution—the multi-step **trajectory** $\tau = (s_0, a_0, o_1, s_1, \dots, s_H)$. In deep learning, $H$ denotes the number of attention heads ($\NumberOfAttentionHeads$), whereas in agent workflows, $H$ denotes the **task horizon** (the budget of discrete interaction turns). In single-node ML, $B$ denotes batch size, while in agentic systems, $B$ denotes the token or monetary **budget** allocated to an agent run. In networking, $\mathcal{G}$ represents data goodput, whereas in agentic systems, **trajectory goodput** measures the rate of contractually accepted tasks per unit observation time ($\AcceptedTasks / T_{\text{obs}}$). Furthermore, executing $H$ turns sequentially introduces the fundamental reliability law of agentic compounding: with per-step error probability $\epsilon$, success decays exponentially as $(1 - \epsilon)^H$.
 
-{{< include ../../shared/_includes/_notation_core_tail.qmd >}}
+This book establishes a rigorous, unified mathematical framework for agentic machine learning systems. The conventions defined below eliminate ambiguity across agent trajectories, task contracts, execution budgets, verification cascades, and multi-agent distributed systems.
+
+## The Governing Laws of Agentic Systems {#sec-notation-governing-laws .unlisted}
+
+Engineering agentic systems requires modeling five governing relationships that link trajectory structure, execution time, task goodput, compounding failure, and resource economics.
+
+### 1. The trajectory formulation {#sec-notation-trajectory-form}
+
+A **trajectory**, the ordered record of one delegated task, is formalized as:
+
+$$\tau = (s_0, a_0, o_1, s_1, a_1, o_2, \dots, s_H)$$
+
+where $s_t$ is the assembled context state, $a_t$ is the admitted action proposal or tool call, and $o_{t+1}$ is the environment observation returned to the agent.
+
+### 2. Trajectory duration and the single-turn inference foundation {#sec-notation-duration-iron-law}
+
+The wall-clock **duration** of a trajectory over a horizon of $H$ turns, indexed $t = 0, \dots, H-1$, decomposes into model inference, tool execution, external wait, and runtime orchestration:
+
+$$\TrajectoryDuration = \sum_{t=0}^{H-1} \left( \ModelTime^{(t)} + \ToolTime^{(t)} + \ExternalWait^{(t)} + \RuntimeTime^{(t)} \right)$$
+
+Every model call $\ModelTime^{(t)}$ is an inference pass executed on an underlying accelerator. Its single-call latency is governed by the foundation **iron law of ML Systems**:
+
+$$\Time = \underbrace{\frac{\DataVolume}{\Bandwidth}}_{\text{Memory Time}} + \underbrace{\frac{\Operations}{\PeakRate \cdot \EfficiencyHw}}_{\text{Compute Time}} + \underbrace{\Latency}_{\text{Latency Overhead}}$$
+
+In autoregressive agent execution, $\DataVolume$ is dominated by model parameter weights $\WeightMemory$ during prefill and KV-cache state $\KvcacheMemory$ during decode:
+
+::: {tbl-colwidths="[8,12,8,72]"}
+
+| **Symbol**          | **Definition**     | **Unit** | **Notes**                                                                                                                                                                                                        |
+|:--------------------|:-------------------|:---------|:-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| **$\Time$**         | **Execution Time** | seconds  | Total serialized execution time in the iron-law performance decomposition.                                                                                                                                       |
+| **$\Bandwidth$**    | **Bandwidth**      | bytes/s  | **Avoids collision with $\BatchSize$ (Batch Size)**. Systems literature often uses $B$ for bandwidth, while ML literature often uses $B$ for batch size. The notation preserves the ML convention.               |
+| **$\DataVolume$**   | **Data Volume**    | bytes    | **Avoids collision with $\DatasetSize$ (Dataset Size)**. In scaling laws, $D$ means training tokens. Here we need bytes moved through memory. The subscript disambiguates.                                       |
+| **$\EfficiencyHw$** | **Efficiency**     | —        | Hardware utilization $(0 \le \EfficiencyHw \le 1)$. Avoids collision with learning rate $(\LearningRate)$.                                                                                                       |
+| **$\Latency$**      | **Latency**        | seconds  | **Avoids collision with $\Loss$ (Loss)**. Fixed overhead time (kernel launch, network RTT). The subscript distinguishes from the loss function.                                                                  |
+| **$\Operations$**   | **Operations**     | FLOPs    | Total floating-point operations. Clean in equations (vs. "$\text{Ops}$").                                                                                                                                        |
+| **$\PeakRate$**     | **Peak Rate**      | FLOP/s   | **Avoids collision with $\Parameters$ (Parameters)**. Roofline presentations often use $P$ for performance, while ML literature commonly uses $P$ for parameter count. The notation preserves the ML convention. |
+
+:::
+
+#### Why these choices matter in agentic systems {#sec-notation-conventions-choices-matter-0c16}
+
+Without precise notation, statements about agent workloads become ambiguous:
+
+> *"Reducing $D$ improves agent responsiveness."*
+
+In agent systems, this could mean reducing the training dataset size $D$, or reducing the memory data volume $\DataVolume$ transferred per token during decode via KV-cache quantization. With our notation, we state precisely:
+
+> *"Reducing $\DataVolume$ via INT4 KV-cache compression cuts memory bus traffic during the decode phase of $\ModelTime^{(t)}$ while training token count $\DatasetSize$ remains unaffected."*
+
+#### Subscripted variants {#sec-notation-conventions-subscripted-variants}
+
+Upright subscripts hold closely related systems quantities apart:
+
+- $\Bandwidth_{\text{memory}}$, $\Bandwidth_{\text{network}}$: memory bus bandwidth vs. remote tool API network bandwidth.
+- $\DataVolume$, $\PeakRate$, $\Latency$, $\EfficiencyHw$: inference engine terms held clear of agent task notation.
+- $\EnergyPerByteMoved$, $\EnergyPerOperationCompute$, $\TotalEnergy$: energy components of agent execution.
+
+### 3. Trajectory goodput and effective task cost {#sec-notation-goodput-cost}
+
+Agentic systems are measured per accepted task completion rather than raw requests. **Trajectory goodput** counts distinct task completions accepted under a declared contract per unit of elapsed observation time $T_{\text{obs}}>0$:
+
+$$\mathcal{G} = \frac{\AcceptedTasks}{T_{\text{obs}}}$$
+
+The **cost per accepted task** divides the included monetary costs across all $N$ initiated task attempts and branches by the $\AcceptedTasks>0$ successfully accepted tasks:
+
+$$\CostPerAcceptedTaskEff = \frac{\sum_{i=1}^{N} C_{\text{task}, i}}{\AcceptedTasks}$$
+
+### 4. The compounding reliability law {#sec-notation-compounding-law}
+
+A trajectory executing $H$ sequential turns without intermediate verification, where each turn is independently correct with probability $1 - \epsilon$, compounds its errors and succeeds with probability:
+
+$$\Pr(\text{success}) = (1 - \epsilon)^{H}$$
+
+Verification, self-correction, and reinforcement learning with verifiable rewards (RLVR) reshape this curve by detecting and repairing faults before the horizon terminates.
+
+### 5. The agentic energy and inference cost corollary {#sec-notation-conventions-energy-corollary-a1da .unlisted}
+
+With effective per-byte data-movement costs and per-operation compute costs, total workload energy across all turns of an agent trajectory is approximated as:
+
+$$\TotalEnergy \approx \sum_{t=0}^{H-1} \left( \DataVolume^{(t)} \times \EnergyPerByteMoved + \Operations^{(t)} \times \EnergyPerOperationCompute \right)$$
+
+::: {tbl-colwidths="[10,25,15,50]"}
+
+| **Symbol**                       | **Definition**            | **Unit**    | **Notes**                                                                                  |
+|:---------------------------------|:--------------------------|:------------|:-------------------------------------------------------------------------------------------|
+| **$\EnergyPerByteMoved$**        | **Energy per Byte Moved** | joules/byte | Effective movement cost; total energy also depends on bytes moved and operations executed. |
+| **$\EnergyPerOperationCompute$** | **Energy per Operation**  | joules/FLOP | Energy cost of a single arithmetic operation.                                              |
+| **$\TotalEnergy$**               | **Total Energy**          | joules      | Total energy consumed by an ML workload, decomposed into data-movement and compute terms.  |
+
+:::
+
+## Trajectories, State, and the Agent Execution Loop {#sec-notation-agent-loop}
+
+The loop symbols describe one turn of a trajectory: the context assembled by the runtime, the proposal generated by the model, the decision made by the runtime harness, and the resulting observation.
+
+### Trajectories and the agent loop {#sec-notation-trajectories}
+
+| **Symbol**            | **Definition**        | **Unit**          | **Notes**                                                                                                                                       |
+|:----------------------|:----------------------|:------------------|:------------------------------------------------------------------------------------------------------------------------------------------------|
+| **$\Context$**        | **Context**           | Tokens            | What the runtime assembles and sends on turn $t$: instructions, goal, tool definitions, and the history of actions, observations, and evidence. |
+| **$\StateAtTurn$**    | **State at turn $t$** | Record            | The context state the model saw on turn $t$. In Part V, the state a policy conditions on.                                                       |
+| **$\ActionProposal$** | **Action proposal**   | Text or tool call | What the model proposed on turn $t$. Nothing happens until the runtime admits it.                                                               |
+| **$\Observation$**    | **Observation**       | Typed result      | What an action returned, such as an exit code, captured output, a response body, or a status.                                                   |
+| **$\Policy$**         | **Policy**            | Distribution      | The model viewed as a distribution over proposals given a context, with parameters $\theta$.                                                    |
+
+### The task contract {#sec-notation-contract}
+
+A task contract fixes what a trajectory is for, where it runs, what it may do and see, and what ends it.
+
+| **Symbol**                   | **Definition**             | **Unit**      | **Notes**                                                                                                                           |
+|:-----------------------------|:---------------------------|:--------------|:------------------------------------------------------------------------------------------------------------------------------------|
+| **$\TaskContract$**          | **Task contract**          | Tuple         | $\mathcal{C} = \langle G, \Environment, \PermittedActions, \AvailableObservations, \CompletionCriteria \rangle$.                    |
+| **$\Environment$**           | **Environment**            | Specification | Reproducible place the work happens: base commit, image, configuration, network rules.                                              |
+| **$\PermittedActions$**      | **Permitted actions**      | Set           | Tools the task may call and the limits on each. Least privilege stated per task.                                                    |
+| **$\AvailableObservations$** | **Available observations** | Specification | What the agent may see, and how much, including truncation and redaction rules.                                                     |
+| **$\CompletionCriteria$**    | **Completion criteria**    | Set of checks | Checks that decide when the task is done, at a stated closure evidence level. The model's claim of completion is never one of them. |
+
+### The H·S·A exposures {#sec-notation-hsa}
+
+H·S·A names the three exposures an agentic task adds beyond a single model call: Horizon ($H$), State ($S$), and Authority ($A$).
+
+| **Symbol**     | **Definition** | **Unit** | **Notes**                                                                                                                                                                      |
+|:---------------|:---------------|:---------|:-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| **$\Horizon$** | **Horizon**    | Turns    | Number of turns a trajectory runs: $H = 1$ (single call), $H \approx 10$ (short loop), $H \ge 100$ (minutes to hours). Wall-clock duration given $H$ is $\TrajectoryDuration$. |
+
+### Grants and information flow {#sec-notation-information-flow}
+
+A capability grant bounds what an operation may reach. An information-flow policy attaches two labels to every record, propagates them through each transformation, and checks them against each operation before dispatch.
+
+| **Symbol**                 | **Definition**           | **Unit**          | **Notes**                                                                                                                                                                                                                                                                                                                       |
+|:---------------------------|:-------------------------|:------------------|:--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| **$\CapabilityGrant$**     | **Capability Grant**     | Tuple             | $\CapabilityGrant = (\mathcal{R}_\Gamma, \mathcal{O}_\Gamma, \phi_\Gamma, \ExposureDuration)$: rights, objects, the condition predicate on an access, and expiry time. Derived grants carry a subscript, as in $\CapabilityGrant_{\text{child}} \sqsubseteq \CapabilityGrant_{\text{parent}}$. Not $C$, which is always a cost. |
+| **$\IntegrityProvenance$** | **Integrity provenance** | Set of sources    | Sources whose content may have influenced record $x$. A derived record takes the union of its inputs' provenance.                                                                                                                                                                                                               |
+| **$\Confidentiality$**     | **Confidentiality**      | Set of recipients | Recipients permitted to receive record $x$. A derived record takes the intersection of its inputs' labels. In the evaluation chapter, $\kappa$ is Cohen's kappa, a local agreement statistic.                                                                                                                                   |
+| **$\AcceptedInfluences$**  | **Accepted influences**  | Set of sources    | Sources the task policy accepts as influences on operation $o$; the evidence check is $\iota(x) \subseteq \AcceptedInfluences$. Upright, to stay distinct from the environment $\mathcal{E}$.                                                                                                                                   |
+
+## Model Calls, Context Windows, and Tokenomics {#sec-notation-tokens-context-sec}
+
+Agent workflows spend compute and memory budgets across iterative model calls, context accumulations, and generation streams.
+
+### Model calls and budgets {#sec-notation-tokens-context}
+
+A model call is bounded by its window and by limits the runtime sets on each request. A trajectory is bounded by a budget under runtime-owned accounting; model visibility does not confer authority to change the meter.
+
+| **Symbol**                   | **Definition**                | **Unit**      | **Notes**                                                                                                                                                                                                                                                                                        |
+|:-----------------------------|:------------------------------|:--------------|:-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| **$\SequenceLength$**        | **Sequence length**           | Tokens        | The shared symbol for sequence length, used here for the prompt a call reads. The State exposure is always written with a level, $S_0$ to $S_3$.                                                                                                                                                 |
+| **$\BasePromptLength$**      | **Base prompt length**        | Tokens        | First prompt of a trajectory before any turn appends to it, as in the resend sum. Subscripted because $S_0$ is a State level.                                                                                                                                                                    |
+| **$\PerturnAppend$**         | **Per-turn append**           | Tokens        | Tokens one turn adds to the next prompt: the action, its observation, and any evidence kept in context.                                                                                                                                                                                          |
+| **$\PromptTokensSent$**      | **Prompt tokens sent**        | Tokens        | Cumulative prompt tokens a trajectory sends across its calls. With a fixed append and no compaction, the resend sum is $\PromptTokensSent = H\,\BasePromptLength + \PerturnAppend\,H(H-1)/2$.                                                                                                    |
+| **$\Vocabulary$**            | **Vocabulary**                | Set of tokens | The token set a call samples from; $\lvert\mathcal{V}\rvert$ is the vocabulary size.                                                                                                                                                                                                             |
+| **$\ContextWindow$**         | **Context window**            | Tokens        | Hard per-call limit on prompt and output together: $S + \OutputLimit \le \ContextWindow$.                                                                                                                                                                                                        |
+| **$\OutputLimit$**           | **Output limit**              | Tokens        | Maximum tokens the runtime lets a call generate.                                                                                                                                                                                                                                                 |
+| **$\PertokenDecodeTime$**    | **Per-token decode time**     | Seconds       | Time to generate one output token on a single stream. A call's whole decode interval is $\CodecDecodeTime$.                                                                                                                                                                                      |
+| **$\CallLatency$**           | **Call latency**              | Seconds       | Elapsed time from request preparation to normalized response, the sum of nonoverlapping intervals $\CallLatency = T_{\text{prep}} + T_{\text{queue}} + T_{\text{prefill}} + \CodecDecodeTime + T_{\text{post}}$. $T_{\text{queue}}$ is the wait before service that the queueing models compute. |
+| **$\Deadline$**              | **Deadline**                  | Seconds       | Wall-clock ceiling enforced by the runtime, on one call or on a whole trajectory. The text names the scope. Inside the budget $\mathbf{B}$ the trajectory deadline is written $T_{\max}$; everywhere else a deadline is $\Deadline$.                                                             |
+| **$\CostCeiling$**           | **Cost ceiling**              | Dollars       | Cost allowance checked against actual consumption, outstanding liability, and newly proposed work while preserving finalization resources.                                                                                                                                                       |
+| **$\KvcacheBytesPerToken$**  | **KV bytes per token**        | Bytes/token   | $\KvcacheBytesPerToken = 2 \cdot N_L \cdot \NumberOfKeyvalueHeadsKv \cdot \AttentionHeadDimension \cdot \ElementStorageSize$, in the shared symbols for layers, KV heads, head dimension, and element size.                                                                                      |
+| **$\KvcacheMemory$**         | **KV-Cache Memory**           | bytes         | Logical full-attention state ($\KvcacheMemory = S \cdot \KvcacheBytesPerToken$) at the specified geometry and precision; the core's quantity. Allocation overhead and shared physical ownership require separate accounting.                                                                     |
+| **$\KvBlockSizeBlk$**        | **KV block size**             | Tokens        | Token positions per fixed block in paged KV storage. Not $p$, which is a probability, or $B$, which is batch size.                                                                                                                                                                               |
+| **$\MemoryHeldDuringAWait$** | **Memory held during a wait** | Byte-seconds  | Constant uniquely resident bytes multiplied by wait duration; $\KvcacheMemory \cdot \ExternalWait$ applies when that payload is fully resident and unshared. Pool accounting counts shared blocks once.                                                                                          |
+
+### Time and cost of a trajectory {#sec-notation-tokenomics}
+
+Agentic systems are measured per accepted task, not per request. The time terms decompose one turn, the cost terms price attempts and the accepted results they buy, and the capacity terms size the pools that serve them.
+
+| **Symbol**                                                                          | **Definition**                              | **Unit**              | **Notes**                                                                                                                                                                                                                                                                                                                                                                    |
+|:------------------------------------------------------------------------------------|:--------------------------------------------|:----------------------|:-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| **$\ModelTime$**                                                                    | **Model time**                              | Seconds               | Time spent in model calls during a turn.                                                                                                                                                                                                                                                                                                                                     |
+| **$\ToolTime$**                                                                     | **Tool time**                               | Seconds               | Time a tool takes to execute, such as a build or a test run.                                                                                                                                                                                                                                                                                                                 |
+| **$\ExternalWait$**                                                                 | **External wait**                           | Seconds               | Time spent waiting on a remote service or a person's approval.                                                                                                                                                                                                                                                                                                               |
+| **$\RuntimeTime$**                                                                  | **Runtime time**                            | Seconds               | The runtime's own work: assembling context, validating proposals, running checks.                                                                                                                                                                                                                                                                                            |
+| **$\TrajectoryDuration$**                                                           | **Trajectory Duration**                     | Seconds               | Wall-clock trajectory duration: $\TrajectoryDuration = \sum_{t=0}^{H-1} (\ModelTime^{(t)} + \ToolTime^{(t)} + \ExternalWait^{(t)} + \RuntimeTime^{(t)})$.                                                                                                                                                                                                                    |
+| **$\TrajectoryGoodput$**                                                            | **Trajectory Goodput**                      | tasks/s               | Distinct task completions accepted under a declared contract per unit of elapsed observation time: $\TrajectoryGoodput = \AcceptedTasks/T_{\text{obs}}$.                                                                                                                                                                                                                     |
+| **$\TrajectoryBudget$**                                                             | **Trajectory Budget**                       | Vector                | Trajectory allowance vector $\TrajectoryBudget = \langle H_{\max}, N_{\max}, T_{\max}, \CostCeiling \rangle$.                                                                                                                                                                                                                                                                |
+| **$\TrajectorySetsAll$**                                                            | **Trajectory Cohort Set**                   | Set                   | Set of all initiated task trajectories $\TrajectorySetsAll$ in an operational cohort.                                                                                                                                                                                                                                                                                        |
+| **$\ConcurrentTrajectories$, $\ConcurrentTrajectoriesTwo$**                         | **Concurrent trajectories, admission rate** | Count, trajectories/s | Little's law for trajectories, $\ConcurrentTrajectories = \ConcurrentTrajectoriesTwo\,\mathbb{E}[\TrajectoryDuration]$, with $\ConcurrentTrajectoriesTwo$ the shared arrival rate $\ArrivalRate$ counted in trajectories. Other held resources follow the same pattern, as in $N_{\text{active}} = \ArrivalRate\,\FallbackHold$.                                             |
+| **$\TaskCost$**                                                                     | **Task cost**                               | Dollars               | Included monetary cost of all attempts and branches for one distinct initiated task.                                                                                                                                                                                                                                                                                         |
+| **$\AttemptCost$**                                                                  | **Attempt cost**                            | Dollars               | Full cost of one attempt: input and output tokens, tool fees, sandbox time, verification, and human review.                                                                                                                                                                                                                                                                  |
+| **$\PertokenPricesIn$, $\PertokenPricesOut$, $\PertokenPricesCache$**               | **Per-token prices**                        | Dollars/token         | Prices of an uncached input token, an output token, and a cached input token. Lowercase $c$ is a unit price that an uppercase $C$ totals; $p$ stays a probability.                                                                                                                                                                                                           |
+| **$\ExpectedCheckingTime$**                                                         | **Expected checking time**                  | Seconds               | Expected verifier slot time per attempted record under a short-circuit check cascade. A time, distinct from the attempt cost $\AttemptCost$ in dollars.                                                                                                                                                                                                                      |
+| **$\AcceptedTasks$**                                                                | **Accepted tasks**                          | Count                 | Distinct tasks satisfying the declared acceptance criteria by the observation cutoff; pending and unknown verdicts remain separately reported.                                                                                                                                                                                                                               |
+| **$\alpha$**                                                                        | **Acceptance fraction**                     | Fraction              | $\alpha = \AcceptedTasks/N$ over a fully classified cohort of $N$ distinct tasks, so $\CostPerAcceptedTaskEff = C_{\text{succ}} + \frac{1-\alpha}{\alpha} C_{\text{fail}}$, where $C_{\text{succ}}$ and $C_{\text{fail}}$ are the mean included costs of an accepted and an unaccepted task.                                                                                 |
+| **$\AcceptanceProbability$**                                                        | **Acceptance probability**                  | Probability           | Per-attempt probability of acceptance; with independent retries, $\CostPerAcceptedTaskEff = \mathbb{E}[\AttemptCost]/\AcceptanceProbability$.                                                                                                                                                                                                                                |
+| **$\CostPerAcceptedTaskEff$**                                                       | **Cost per accepted task**                  | Dollars/task          | Total included monetary cost divided by $\AcceptedTasks>0$, including failed attempts. No finite ratio exists when none are accepted.                                                                                                                                                                                                                                        |
+| **$\WorkerCountWorkers$**                                                           | **Worker count**                            | Count                 | Equally capable agents, model workers, or verifier slots in one pool. Never bare $M$ or $P$, which the shared tables assign to memory and parameter count.                                                                                                                                                                                                                   |
+| **$\ParallelFraction$**                                                             | **Parallel fraction**                       | Fraction              | Share of the work that divides among workers, in $\text{Speedup}(\WorkerCountWorkers) = 1/\big((1-\ParallelFraction) + \ParallelFraction/\WorkerCountWorkers + h(\WorkerCountWorkers)\big)$, where $h$ is the added coordination overhead as a fraction of serial time.                                                                                                      |
+| **$\ContentionAndCoherencyCoefficients$, $\ContentionAndCoherencyCoefficientsTwo$** | **Contention and coherency coefficients**   | Fraction              | The universal scalability law's serialized share and pairwise reconciliation cost, $\text{Speedup}(\WorkerCountWorkers) = \WorkerCountWorkers/\big(1 + \ContentionAndCoherencyCoefficients(\WorkerCountWorkers-1) + \ContentionAndCoherencyCoefficientsTwo\WorkerCountWorkers(\WorkerCountWorkers-1)\big)$. Subscripted, because bare $\kappa$ is the confidentiality label. |
+
+## Recovery, Verification, and Multi-Agent Orchestration {#sec-notation-recovery-sec}
+
+Reliable compound systems combine state checkpoints, retry limits, and distributed worker topologies to guarantee execution progress.
+
+### Recovery, evaluation, and learning {#sec-notation-control-sagas}
+
+These symbols recur across the memory, tool-use, runtime, evaluation, and learning chapters.
+
+| **Symbol**                                                                                                                                 | **Definition**                                       | **Unit**               | **Notes**                                                                                                                                                                                                                                                                                                                                |
+|:-------------------------------------------------------------------------------------------------------------------------------------------|:-----------------------------------------------------|:-----------------------|:-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| **$\ValidityIntervalOfAMemoryEntryBirth$, $\ValidityIntervalOfAMemoryEntryDeath$, $\ValidityIntervalOfAMemoryEntryQ$, $\QueryGeneration$** | **Validity interval of a memory entry**              | Generation index       | Source generations between which a derived entry $c$ stays supported; a query that requires generation $\QueryGeneration$ or $\ValidityIntervalOfAMemoryEntryQ$ may use $c$ only if $\ValidityIntervalOfAMemoryEntryBirth \le \QueryGeneration < \ValidityIntervalOfAMemoryEntryDeath$. Subscripted indices, distinct from the goal $g$. |
+| **$\StalesupportRate$**                                                                                                                    | **Stale-support rate**                               | Fraction               | Decisions that treat superseded support as current, divided by decisions that require current evidence. Only a source version check lowers it.                                                                                                                                                                                           |
+| **$\RequestAndReplylossProbabilities$, $\RequestAndReplylossProbabilitiesTwo$**                                                            | **Request- and reply-loss probabilities**            | Probability            | Independent probabilities that a call's request, or its reply, is lost in transit.                                                                                                                                                                                                                                                       |
+| **$\DuplicateeffectProbability$**                                                                                                          | **Duplicate-effect probability**                     | Probability            | Chance that one blind retry of a non-idempotent call without deduplication applies its effect twice, $\DuplicateeffectProbability = (1-\RequestAndReplylossProbabilities)\,\RequestAndReplylossProbabilitiesTwo\,(1-\RequestAndReplylossProbabilities)$. Named probabilities use lowercase $p$, as $\AcceptanceProbability$ does.        |
+| **$\RepairCap$**                                                                                                                           | **Repair cap**                                       | Count                  | Configured bound on admitted forward-repair attempts in a declared scope; exhaustion withholds further repair and selects permitted recovery or handoff, not proof that repair is impossible.                                                                                                                                            |
+| **$\OptimalCheckpointIntervalCkpt$**                                                                                                       | **Checkpoint interval**                              | Seconds                | Useful-work interval between checkpoints that minimizes expected overhead, $\OptimalCheckpointIntervalCkpt \approx \sqrt{2\,\CheckpointWriteTime\,\MeanTimeBetweenFailures}$ under Young's approximation. Any chosen interval is $\CheckpointIntervalCkpt$. Not $\tau$, which is a trajectory.                                           |
+| **$\CheckpointWriteTime$**                                                                                                                 | **Checkpoint write time**                            | Seconds                | Pause to persist one checkpoint, during which useful work stops.                                                                                                                                                                                                                                                                         |
+| **$\MeanTimeBetweenFailures$, $\MeanTimeBetweenFailuresThree$**                                                                            | **Mean time between failures, failure rate**         | Seconds, failures/time | Mean useful time between failures that lose work, and its reciprocal $\MeanTimeBetweenFailuresThree = 1/\MeanTimeBetweenFailures$. A failure rate counted per turn or per step states that unit. An upright acronym, not the memory root $M$.                                                                                            |
+| **$\ExpectedIrreversibleLossA$**                                                                                                           | **Expected Irreversible Loss**                       | Consequence units      | $L_A = \sum_a \Pr(\text{bad}\ a)\cdot \text{consequence}(a)\cdot(1-\rho_a)$, where $\rho_a$ is the recoverable fraction of action $a$'s consequence. A check before a pivot raises $\rho_a$; one after it does not.                                                                                                                      |
+| **$\VerifierFalseacceptance$, $\VerifierFalseacceptanceFr$**                                                                               | **Verifier false-acceptance, false-rejection rates** | Probability            | $\VerifierFalseacceptance = \Pr(\text{PASS}\mid\neg\text{Valid})$ and $\VerifierFalseacceptanceFr = \Pr(\neg\text{PASS}\mid\text{Valid})$. Subscripted to stay distinct from the per-turn error rate $\epsilon$ of horizon compounding.                                                                                                  |
+| **$\TasksPerComparisonArm$**                                                                                                               | **Tasks per comparison arm**                         | Tasks                  | Sample size per arm for a two-proportion release comparison, $\TasksPerComparisonArm \approx 2(z_{1-\alpha/2}+z_{1-\beta})^2\,\bar p(1-\bar p)/\Delta^2$; here $\alpha$ and $\beta$ are the local test error rates.                                                                                                                      |
+| **$\LossMaskT$**                                                                                                                           | **Loss Mask**                                        | Binary $\{0,1\}$       | Selects eligible policy-response targets under the declared objective, with $t$ a token position. Supplied prompts, observations, initial context seeds, and unselected policy responses have $m_t=0$.                                                                                                                                   |
+| **$\MaskedFinetuningLossSft$**                                                                                                             | **Masked fine-tuning loss**                          | Cross-entropy          | Mean selected-token loss for one example: $-\frac{1}{N_{\text{active}}}\sum_t m_t\log\Policy(x_t\mid x_{<t})$, with $N_{\text{active}}=\sum_t m_t>0$. Batch aggregation is specified separately.                                                                                                                                         |
+
+### Learning chapters (local) {#sec-notation-learning-local}
+
+The imitation and reinforcement-learning chapters, and the derivations in the mathematical appendix that support them, keep the standard notation of their literatures.
+
+| **Symbol**               | **Definition**         | **Unit**     | **Notes**                                                                                                                    |
+|:-------------------------|:-----------------------|:-------------|:-----------------------------------------------------------------------------------------------------------------------------|
+| **$\ActionChunk$**       | **Action Chunk**       | Vector       | Action chunk $\mathbf{A}_t$, $\mathbf{A}_{t:t+H}$, or projection iterate.                                                    |
+| **$\EnvironmentStateK$** | **Environment State**  | State        | Underlying physical or simulator state $s_k$ at step $k$.                                                                    |
+| **$\StateDistribution$** | **State distribution** | Distribution | Average distribution of states a policy visits over the horizon; $\StateDistribution^t$ is the distribution before step $t$. |
+| **$\TrajectoryReward$**  | **Trajectory Reward**  | Scalar       | Scalar evaluation metric or return $R(\tau)$ assigned to a completed trajectory.                                             |
+
+## Deep Learning Foundations in Agentic Systems {#sec-notation-conventions-deep-learning-notation-b40d .unlisted}
+
+Foundation model components in compound agent systems adhere to standard deep learning conventions [@goodfellow2016deep]:
+
+::: {tbl-colwidths="[8,20,72]"}
+
+| **Symbol**                                            | **Definition**                | **Unit** | **Notes**                                                                                      |
+|:------------------------------------------------------|:------------------------------|:---------|:-----------------------------------------------------------------------------------------------|
+| **$\AttentionHeadDimension$**                         | **Attention Head Dimension**  | Integer  | Per-head hidden dimension in attention layers.                                                 |
+| **$\HiddenDimension$**                                | **Hidden Dimension**          | Integer  | Hidden feature dimension $d$ of a neural layer or representation.                              |
+| **$\HiddenDimensionFour$**                            | **Hidden / Time Dimension**   | Integer  | Alternate dimension or time index $p$.                                                         |
+| **$\LayerIndex$**                                     | **Layer Index**               | Integer  | Index $\ell$ for a neural network layer.                                                       |
+| **$\ModelParameters$**                                | **Model Parameters**          | Vector   | Trainable model parameter vector or weights $\theta$.                                          |
+| **$\WeightMemory$**                                   | **Weight Memory**             | bytes    | Memory occupied by model weights ($P \times \text{bytes-per-parameter}$); the core's quantity. |
+| **$\LossFunction$**                                   | **Loss Function**             | Scalar   | The objective function minimized during training.                                              |
+| **$\NumberOfAttentionHeads, \NumberOfKeyValueHeads$** | **Number of Attention Heads** | Integer  | Number of attention heads $H$ and key-value heads $H_{\text{KV}}$ (in GQA/MQA).                |
+| **$\NumberOfLayers$**                                 | **Number of Layers**          | Integer  | Total number of layers in a network.                                                           |
+
+:::
+
+Latin matrices and vectors are set in bold ($\mathbf{W}$, $\mathbf{x}$); scalars, dimensions, indices, and individual matrix entries stay italic ($N$, $d$, $i$, $W_{ij}$). The generic parameter symbol $\theta$ is the conventional exception and stays italic. Matrix operands in general matrix multiply (GEMM) are bold ($\mathbf{C} = \alpha \mathbf{A}\mathbf{B} + \beta \mathbf{C}$), distinct from the scalar batch size $B$. GEMM dimensions are $M$, $N$, and $K$. Asymptotic complexity is written $\mathcal{O}(\cdot)$, distinct from total operations $O$.
+
+## Serving Infrastructure and Performance Metrics {#sec-notation-conventions-performance-serving-memory .unlisted}
+
+Reusable performance and serving quantities follow the same collision-avoidance rule as the iron law:
+
+```{=latex}
+\begingroup
+\renewcommand{\arraystretch}{1.3}
+```
+::: {tbl-colwidths="[10,23,13,54]"}
+
+| **Symbol**                   | **Definition**              | **Unit**      | **Notes**                                                                                                                                                                                                               |
+|:-----------------------------|:----------------------------|:--------------|:------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| **$\ArithmeticIntensity$**   | **Arithmetic Intensity**    | FLOP/byte     | Workload FLOPs per byte moved. The Roofline Model uses $I$ as the independent variable.                                                                                                                                 |
+| **$\ArrivalRate$**           | **Arrival Rate**            | requests/s    | Request arrival rate. The subscript keeps bare $\lambda$ free for fitted sensitivities.                                                                                                                                 |
+| **$\AttainableComputeRate$** | **Attainable Compute Rate** | FLOP/s        | Roofline bound: $\AttainableComputeRate \leq \min(\PeakRate, I \times \Bandwidth)$. Uses $R$, not $T$, because this quantity is a rate.                                                                                 |
+| **$\CompressionRatio$**      | **Compression Ratio**       | Dimensionless | Uncompressed size divided by compressed size. A compressed payload has $1/\CompressionRatio$ of the uncompressed size; the subscript avoids bare $C$ collisions.                                                        |
+| **$\ElementStorageSize$**    | **Element Storage Size**    | bytes/element | Bytes per stored tensor element.                                                                                                                                                                                        |
+| **$\RequestConcurrency$**    | **Request Concurrency**     | requests      | Average in-flight requests in a stable serving system ($\RequestConcurrency = \ArrivalRate \cdot \RequestTimeInSystem$ via Little's Law). Avoids overloading $N$, which counts devices, elements, or samples elsewhere. |
+| **$\RequestTimeInSystem$**   | **Request Time in System**  | seconds       | End-to-end queueing/serving latency for Little's Law. Distinct from $\Latency$, the fixed-latency term in the iron law.                                                                                                 |
+| **$\RooflineRidgePoint$**    | **Roofline Ridge Point**    | FLOP/byte     | $\RooflineRidgePoint = \PeakRate/\Bandwidth$. Prefer this explicit form over starred shorthand so the meaning remains clear in prose.                                                                                   |
+| **$\ServingUtilization$**    | **Serving Utilization**     | Dimensionless | Queue/server utilization. The subscript keeps bare $\rho$ free for other ratio models.                                                                                                                                  |
+
+:::
+
+```{=latex}
+\endgroup
+```
+
+## Distributed Execution, Control, and Safety Constants {#sec-notation-vol3-distributed-control .unlisted}
+
+Multi-agent coordination, distributed scaling, and physical actuators use standardized parameters:
+
+::: {tbl-colwidths="[10,23,13,54]"}
+
+| **Symbol**                                | **Definition**                       | **Unit**      | **Notes**                                                                          |
+|:------------------------------------------|:-------------------------------------|:--------------|:-----------------------------------------------------------------------------------|
+| **$\BarrierRelativeDegree$**              | **Barrier Relative Degree**          | Integer       | Relative degree $r$ of safety barrier constraints.                                 |
+| **$\CheckpointIntervalCkpt$**             | **Checkpoint Interval**              | seconds       | Useful compute interval $T_{\text{ckpt}}$ between durable state checkpoints.       |
+| **$\CodecDecodeTime$**                    | **Codec Decode Time**                | seconds       | Decompression overhead $T_{\text{decode}}$ for tool inputs and network states.     |
+| **$\CohensKappa$**                        | **Cohen's Kappa**                    | Dimensionless | Inter-agent agreement or decision coherency coefficient $\kappa$.                  |
+| **$\CollectivePayloadSize$**              | **Collective Payload Size**          | bytes         | Communication payload size $M$ for distributed agent synchronization.              |
+| **$\CommunicationcomputationRatio$**      | **Communication-Computation Ratio**  | Dimensionless | Ratio $\rho$ of communication time to compute time.                                |
+| **$\CoulombFrictionCoefficient$**         | **Coulomb Friction Coefficient**     | Dimensionless | Surface friction coefficient $\mu$ in embodied physical interaction.               |
+| **$\ExposureDuration$**                   | **Exposure Duration**                | seconds       | Time window $t_{\text{exp}}$ during which an agent is exposed to hazardous states. |
+| **$\FallbackHold$**                       | **Fallback Hold**                    | seconds       | Minimum holding interval $T_{\text{hold}}$ before releasing fallback safe states.  |
+| **$\FittedSensitivity$**                  | **Fitted Sensitivity**               | Scalar        | Sensitivity coefficient $\lambda$ in performance degradation models.               |
+| **$\LinkBandwidth$**                      | **Link Bandwidth**                   | bytes/s       | Inter-node link bandwidth $\beta$.                                                 |
+| **$\LongmessageGapPerByte$**              | **Long-Message Gap per Byte**        | seconds/byte  | Inverse bandwidth parameter $G$ in LogGP communication modeling.                   |
+| **$\MechanicalPlantState$**               | **Mechanical Plant State**           | Vector        | Physical plant state vector $\mathbf{x}$ in robotic embodiments.                   |
+| **$\MessageInjectionGap$**                | **Message Injection Gap**            | seconds       | Message injection gap $g$ in LogGP models.                                         |
+| **$\MicrobatchCount$**                    | **Microbatch Count**                 | Integer       | Microbatch count $m$ in pipeline-parallel inference and training.                  |
+| **$\MotorTorqueConstant$**                | **Motor Torque Constant**            | N*m/A         | Torque constant $K_t$ relating actuator current to mechanical torque.              |
+| **$\NumberOfDevices, \AcceleratorCount$** | **Number of Devices / Accelerators** | Integer       | Device or accelerator count $N$ across the serving fleet.                          |
+| **$\OptimalInertiamatchingRatio$**        | **Optimal Inertia-Matching Ratio**   | Dimensionless | Ideal gear ratio $N^*$ matching motor and load inertia.                            |
+| **$\PermessageLatency$**                  | **Per-Message Latency**              | seconds       | Startup latency $\alpha$ in point-to-point network messaging.                      |
+| **$\ResponseThreshold$**                  | **Response Threshold**               | Scalar        | Classification or safety trip threshold $\tau$.                                    |
+| **$\ScaledResource$**                     | **Scaled Resource**                  | varies        | Scaled resource variable $X$ (compute, data, or parameters).                       |
+| **$\SmallConstant$**                      | **Small Constant**                   | Scalar        | Numerical stabilization constant $\epsilon > 0$.                                   |
+| **$\SpeedAtDetection$**                   | **Speed at Detection**               | m/s           | Physical velocity $v$ at the moment an anomaly is detected.                        |
+| **$\Top$**                                | **Top-$K$ Selection**                | Integer       | Number of top candidates or keys $K$ retrieved from memory or tools.               |
+| **$\VirtualPipelineStagesPerDevice$**     | **Virtual Pipeline Stages**          | Integer       | Interleaved chunks $V$ assigned per physical pipeline worker.                      |
+
+:::
+
+## Units, Precision, and Disambiguation {#sec-notation-units-disambiguation}
+
+Standardized measurement units, numerical representation formats, and collision-avoidance conventions ensure clarity across agentic systems analysis.
+
+### Units and precision {#sec-notation-conventions-units-precision-fdaf .unlisted}
+
+*   Physical units: This book uses SI (metric) units throughout, including meters, kilograms, seconds, watts, and °C, consistent with standard engineering and scientific practice. Where source data was originally reported in imperial units, the book converts to SI and notes the original values parenthetically. A space always separates the number from the unit (for example, 100 ms, 2 TB/s).
+*   Data and memory: This book uses **decimal SI prefixes only**: KB = $10^3$ bytes, MB = $10^6$, GB = $10^9$, TB = $10^{12}$. Binary-prefixed units do not appear in prose; model sizes, activation footprints, throughputs, and transfer volumes are reported in decimal units (for example, 2 TB/s, 102 MB). Hardware memory capacities are the one exception: they keep the vendor's nameplate figure and label, so an accelerator sold as 80 GB holds $80 \times 2^{30}$ bytes.
+*   Compute: The notation distinguishes operation counts from rates. Total work uses FLOPs (for example, GFLOPs, TFLOPs), while throughput uses FLOP/s with decimal prefixes (for example, GFLOP/s, TFLOP/s).
+    *   1 TFLOP = $10^{12}$ FLOPs
+    *   1 TFLOP/s = $10^{12}$ FLOPs per second
+    *   Arithmetic intensity conventionally uses FLOP/byte as a unit ratio (floating-point operations per byte moved). This is a ratio unit, not a total-work symbol or throughput symbol.
+*   Power: Power carries a subscript ($P_{\text{avg}}$, $P_{\text{device}}$, $P_{\text{cluster}}$); bare $P$ remains parameter count.
+*   Latency percentiles: Written p50, p95, and p99 in upright type, inside math as well as in prose.
+*   Currency: Dollar amounts use the dollar sign (`$`); unless otherwise noted, dollar-denominated costs are U.S. dollars (USD).
+*   Precision:
+    *   **FP64**: Double precision (8 bytes)
+    *   **FP32**: Single precision (4 bytes)
+    *   **TF32**: TensorFloat-32 (19-bit Tensor Core compute mode; inputs and storage remain FP32)
+    *   **FP16**: Half precision (2 bytes, standard range)
+    *   **BF16**: Brain float (2 bytes, wide dynamic range)
+    *   **FP8**: Quarter precision (1 byte, E4M3 or E5M2 format)
+    *   **FP4**: 4-bit floating-point format
+    *   **INT8**: 8-bit integer (1 byte)
+    *   **INT4**: 4-bit integer; lower integer precisions follow the same uppercase `INTn` pattern (for example, INT3, INT2)
+
+### Additional units in agentic systems {#sec-notation-agentic-units}
+
+* **Tokens** count what a call reads and writes, and serving throughput is reported in tokens per second.
+* **Turns** count the steps of a trajectory, and the horizon $H$ is measured in turns.
+* **Dollars per accepted task** normalize spend by the results that passed acceptance, not by attempts or requests.
+* **Trajectory goodput** ($\mathcal{G}$) is reported as accepted tasks per unit of elapsed time; goodput per dollar uses total included cost as its denominator.
+* **Byte-seconds** measure memory held over time, such as attention state kept resident during a tool wait.
+
+### Quick reference: Resolving collisions {#sec-notation-conventions-quick-reference-resolving-collisions-a9cf .unlisted}
+
+Common collision points in ML Systems literature include:
+
+::: {tbl-colwidths="[15,20,25,40]"}
+
+| **Symbol**          | **Definition**    | **Unit**    | **Notes**                                              |
+|:--------------------|:------------------|:------------|:-------------------------------------------------------|
+| **$\BatchSize$**    | **Batch Size**    | Bandwidth   | **Batch Size**. Use $\Bandwidth$ for bandwidth.        |
+| **$\DatasetSize$**  | **Dataset Size**  | Data Volume | **Dataset Size**. Use $\DataVolume$ for bytes moved.   |
+| **$\LearningRate$** | **Learning Rate** | Efficiency  | **Learning Rate**. Use $\EfficiencyHw$ for efficiency. |
+| **$\Loss$**         | **Loss**          | Latency     | **Loss** $(\mathcal{L})$. Use $\Latency$ for latency.  |
+| **$\Parameters$**   | **Parameters**    | Peak FLOP/s | **Parameters**. Use $\PeakRate$ for peak rate.         |
+
+:::
+
+### Resolving agentic collisions {#sec-notation-agentic-collisions}
+
+Agentic systems borrow notation from machine learning, systems, and control, so several letters arrive with more than one meaning. The conventions below keep one meaning per symbol:
+
+| **Symbol**                 | **Other common meanings**                           | **Convention in this book**                                                                                                                                                                                                                                                                    |
+|:---------------------------|:----------------------------------------------------|:-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| **$\tau$**                 | Temperature; a threshold; an interval               | Bare $\tau$ is a trajectory. A subscripted $\tau$ is a scoped quantity named where it is used, such as the sampling temperature $\tau_{\text{temp}}$. A time window is $T_{\text{win}}$, and the checkpoint interval is $\OptimalCheckpointIntervalCkpt$.                                      |
+| **$\Advantage$**           | Advantage; action sets                              | Authority is written only with a level, $A_0$ to $A_3$. Advantage is $\hat{A}$; action sets are $\mathcal{A}_{\text{prop}}$ and $\PermittedActions$.                                                                                                                                           |
+| **$\AFourthTaxonomyAxis$** | A fourth taxonomy axis; a grant or commit           | There is no $C$ axis; closure evidence levels are named in words. Costs carry subscripts ($\TaskCost$, $\CostPerAcceptedTaskEff$, $\CostCeiling$), and the task contract is $\mathcal{C}$. A capability grant is $\Gamma$, and a commit is named by its content hash, as in $h_{\text{base}}$. |
+| **$\lambda$**              | Arrival rate; failure rate                          | Arrival rate is the shared $\ArrivalRate$, or $\ConcurrentTrajectoriesTwo$ when counted in trajectories, and failure rate is $\MeanTimeBetweenFailuresThree$. Bare $\lambda$ is the learning chapters' trace decay or a local function defined where it is used.                               |
+| **$\rho$**                 | Utilization; a recoverable fraction                 | Server utilization is the shared $\ServingUtilization$, and the recoverable fraction of an action is $\rho_a$. Bare $\rho$ is a local ratio, such as a correlation, defined where it is used.                                                                                                  |
+| **$\ACommitHash$**         | A commit hash                                       | $h_k$ is the interaction history in the learning chapters. Commit content hashes carry text subscripts, as in $h_{\text{base}}$ and $h_{\text{head}}$.                                                                                                                                         |
+| **$\pi$**                  | Peak arithmetic rate                                | The policy is $\Policy$; a local derivation that writes a fixed policy as bare $\pi$ says so where it does. Peak arithmetic rate is $\PeakRate$ from the shared table.                                                                                                                         |
+| **$\alpha$, $\beta$**      | Test error rates; bandwidth; regularization weights | $\alpha$ is the acceptance fraction. Bandwidth is $\Bandwidth$ from the shared table. Sequential-test error rates and the preference and divergence weights written $\beta$ are local and defined where used.                                                                                  |
+| **$\kappa$**               | Cohen's kappa; a coherency coefficient              | $\kappa(x)$ is a confidentiality label. Cohen's kappa is local to the evaluation chapter's agreement analysis, and the scalability law's coherency coefficient is $\ContentionAndCoherencyCoefficientsTwo$.                                                                                    |
 
 ```{=latex}
 \part{key:mainmatter}

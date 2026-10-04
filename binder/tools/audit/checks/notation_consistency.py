@@ -32,12 +32,10 @@ RULE_TEXT = (
 # ── Definition parsing (from the Notations chapter tables) ────────────────────
 
 _NOTATION_PATHS = (
-    Path("books/shared/_includes/_notation_core_head.qmd"),
-    Path("books/shared/_includes/_notation_core_tail.qmd"),
-    Path("books/vol1/frontmatter/_notation_degradation.qmd"),
-    Path("books/vol2/frontmatter/_notation_scaling.qmd"),
-    Path("books/vol3/frontmatter/_notation_agentic.qmd"),
-    Path("books/vol4/frontmatter/_notation_physical.qmd"),
+    Path("books/vol1/frontmatter/notation.qmd"),
+    Path("books/vol2/frontmatter/notation.qmd"),
+    Path("books/vol3/frontmatter/notation.qmd"),
+    Path("books/vol4/frontmatter/notation.qmd"),
 )
 
 
