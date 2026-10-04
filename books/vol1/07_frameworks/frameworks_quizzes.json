@@ -40,7 +40,7 @@
           {
             "question_type": "SHORT",
             "question": "Explain how viewing an ML framework as a compiler for the silicon contract—rather than merely a numerical library like NumPy—changes an engineer's expectations regarding framework selection and optimization under the systems iron law.",
-            "answer": "A numerical library executes individual operations immediately in isolation, where switching libraries primarily changes syntax without altering underlying execution. An ML framework acts as a compiler that translates an abstract computational graph into a physical execution plan, performing operator fusion, memory planning, and hardware-specific lowering. Consequently, framework selection sets an upper bound on achievable silicon efficiency and directly determines how effectively the system attacks the data movement ($D_{\\text{vol}}$) and dispatch latency ($L_{\\text{lat}}$) terms of the iron law.",
+            "answer": "An ML framework does more than provide convenient tensor syntax: it can capture or defer execution, organize computational graphs, and expose whole regions of work to compiler optimizations such as fusion, memory planning, and hardware-specific lowering. Numerical libraries also rely on optimized kernels, but framework choice additionally determines how much larger-scale structure is visible for reducing avoidable data movement and launch overhead. For example, two frameworks may both call fast GEMM kernels yet differ substantially in whether they can optimize a chain of surrounding operations together. The practical consequence is that framework selection affects achievable efficiency under the iron law, not just coding style.",
             "learning_objective": "Explain how the compiler analogy changes an engineer's expectations of what framework choice determines"
           },
           {
@@ -148,33 +148,33 @@
           },
           {
             "question_type": "MCQ",
-            "question": "A developer attempts to trace a dynamic PyTorch model containing data-dependent control flow (`if tensor.sum() > 0: ...`) using standard graph tracing (`torch.jit.trace`). What failure mode occurs, and how does modern bytecode graph capture (`torch.compile` / TorchDynamo) resolve it?",
+            "question": "A developer traces a PyTorch model containing data-dependent control flow such as `if tensor.sum() > 0: ...` using `torch.jit.trace`, then later runs inputs that should take the other branch. What is the most accurate description of the tracing risk and the modern graph-capture behavior described in the section?",
             "choices": [
-              "Standard tracing crashes immediately on any tensor operation, whereas TorchDynamo rewires the Python interpreter into C++",
-              "Standard tracing converts all dynamic control flow into static loops, whereas TorchDynamo disables all GPU acceleration",
-              "Standard tracing records only the branch taken by the example input and silently bakes it into a static graph, whereas TorchDynamo inspects Python bytecode to capture straight-line subgraphs into FX graphs and falls back to the Python interpreter on graph breaks",
-              "Standard tracing successfully compiles dynamic branches using AST inspection, whereas TorchDynamo rejects all conditional statements"
+              "Tracing always crashes immediately on tensor-dependent branches, whereas modern graph capture always compiles the entire program without fallback",
+              "Tracing converts the Python conditional into a fully general static graph branch, whereas modern graph capture removes the need for any control-flow assumptions",
+              "Tracing records the branch taken by the example input and may emit a `TracerWarning`, while modern graph capture can compile supported regions and, when eager fallback is enabled, return to eager execution at unsupported boundaries",
+              "Tracing silently succeeds for all future inputs, whereas modern graph capture fails only when the GPU lacks enough memory"
             ],
-            "answer": "The correct answer is C. Tracing executes the program with dummy inputs and records the executed trace, silently dropping untaken conditional branches; TorchDynamo intercepts Python frame evaluation bytecode, extracts valid computational subgraphs into FX graphs, and gracefully falls back to the Python interpreter (a graph break) when encountering unsupported dynamic constructs. Claiming tracing crashes on all tensor operations is factually incorrect. Asserting that tracing converts conditionals to static loops misrepresents trace capture. Suggesting tracing handles dynamic branches via AST confuses tracing with source-to-source compilers like TorchScript script mode.",
-            "learning_objective": "Compare graph tracing with bytecode frame interception for handling dynamic control flow"
+            "answer": "The correct answer is C. Tracing records the execution path actually observed for the example input, so a tensor-dependent Python branch can be baked in for that path and PyTorch commonly emits a `TracerWarning` about the resulting lack of generality. Modern graph capture is more flexible because it can compile supported regions and, with eager fallback enabled, return to eager execution at graph breaks rather than requiring the whole program to stay captured. The claim that tracing always crashes is too strong, and the idea that tracing creates a fully general branch-preserving graph misstates what trace-based capture records.",
+            "learning_objective": "Compare trace-based capture with modern graph capture for data-dependent control flow"
           },
           {
             "question_type": "SHORT",
-            "question": "State the dispatch overhead law and explain why a workload composed of many small tensor operations on an NVIDIA A100 GPU can be severely underutilized in eager mode even if the GPU has massive compute throughput.",
-            "answer": "The dispatch overhead law states that a workload is overhead-bound when the overhead ratio $(N_{\\text{ops}} \\cdot t_{\\text{dispatch}}) / (T_{\\text{compute}} + T_{\\text{memory}}) > 1$. Because eager execution incurs a CPU-to-GPU launch tax of ~$2\\text{--}5\\ \\mu\\text{s}$ per operation, a small kernel executing in less than $2\\ \\mu\\text{s}$ forces the GPU to sit idle between launches, bottlenecking end-to-end throughput on CPU dispatch latency rather than GPU arithmetic capacity.",
+            "question": "State the dispatch overhead law and explain why a workload composed of many small tensor operations on a fast GPU can be severely underutilized in eager mode even when the hardware has high peak throughput.",
+            "answer": "The dispatch overhead law states that overhead dominates when the software dispatch time becomes large relative to hardware execution time, modeled in the chapter as $\\frac{N_{\\text{ops}} \\cdot t_{\\text{dispatch}}}{T_{\\text{compute}} + T_{\\text{memory}}} > 1$ under a no-overlap approximation. In the chapter's small-operation scenario, each eager op pays host dispatch and launch work while the device kernels themselves are very short, so end-to-end time is driven more by repeated host overhead than by arithmetic or memory throughput. For example, a small MLP can spend most of its step time in dispatch even on an A100-class GPU. The practical implication is that fusion or graph capture helps not by changing the math, but by reducing how often the host must launch tiny pieces of work.",
             "learning_objective": "Explain how the dispatch overhead law causes GPU underutilization on small eager-mode operations"
           },
           {
             "question_type": "TF",
-            "question": "True or False: In `torch.compile`, encountering a \"graph break\" halts program execution and throws a fatal runtime exception because dynamic Python constructs cannot be represented in the computational graph.",
-            "answer": "False. A graph break does not crash the program; instead, TorchDynamo captures the preceding operations as a compiled subgraph, safely falls back to the standard Python interpreter to execute the unsupported dynamic code, and then resumes graph capture for subsequent operations.",
+            "question": "True or False: When eager fallback is enabled in `torch.compile`, encountering a graph break necessarily halts execution with a runtime error because the unsupported Python code cannot be represented in the captured graph.",
+            "answer": "False. With eager fallback enabled, a graph break ends the current captured region, executes the unsupported portion in eager mode, and can resume capture later. A full-graph requirement is the configuration that can turn such a break into an error.",
             "learning_objective": "Evaluate the operational behavior and performance impact of graph breaks in graph-capture JIT compilers"
           },
           {
             "question_type": "ORDER",
-            "question": "Order the stages of the `torch.compile` compilation and execution pipeline in PyTorch 2.0, from initial Python function call to hardware execution:\n1. AOTAutograd traces both the forward and backward computation graphs ahead of execution\n2. TorchDynamo intercepts Python bytecode during frame evaluation and extracts computational subgraphs\n3. TorchInductor generates optimized vendor-specific kernels (e.g., Triton for GPUs or C++/OpenMP for CPUs)\n4. The high-level intermediate representation is structured as a PyTorch FX graph\n5. The compiled fused kernels execute on the target hardware accelerator",
-            "answer": "The correct sequence is 2 -> 4 -> 1 -> 3 -> 5:\n- (2) TorchDynamo intercepts Python bytecode: Hooks frame evaluation to extract tensor operations.\n- (4) PyTorch FX graph generation: Produces a high-level Python-level intermediate representation.\n- (1) AOTAutograd tracing: Captures both forward and backward computational graphs.\n- (3) TorchInductor lowering: Compiles FX graphs into fused hardware-specific Triton/C++ kernels.\n- (5) Hardware execution: Dispatches the optimized kernels on the accelerator.",
-            "learning_objective": "Order the stages of the modern PyTorch graph-capture compilation pipeline"
+            "question": "Order the stages of a generic graph-capture compilation pipeline from the first Python call to repeated execution of optimized code: (1) an intermediate representation is built for the captured region, (2) optimized executable code is cached for reuse under the same guards, (3) the frontend captures a region of tensor computation from the eager program, (4) the compiled region executes on the target hardware, (5) optimization and lowering transform the captured region toward hardware-specific execution.",
+            "answer": "The correct order is: (3) the frontend captures a region of tensor computation from the eager program, (1) an intermediate representation is built for the captured region, (5) optimization and lowering transform the captured region toward hardware-specific execution, (2) optimized executable code is cached for reuse under the same guards, (4) the compiled region executes on the target hardware. Capture has to happen before any IR exists; optimization and lowering require that representation; caching happens only after code has been produced; and execution uses the resulting cached artifact when the same assumptions still hold. Swapping capture with optimization would leave nothing to optimize, and swapping caching with execution would remove the compiled object that later calls are supposed to reuse.",
+            "learning_objective": "Order the stages of a graph-capture compilation pipeline from eager program capture to cached hardware execution"
           },
           {
             "question_type": "FILL",
@@ -206,15 +206,15 @@
         "questions": [
           {
             "question_type": "MCQ",
-            "question": "For a neural network with $N = 10^7$ parameters and a single scalar loss output $M = 1$, why do deep learning frameworks uniformly employ reverse-mode automatic differentiation (backpropagation) instead of forward-mode differentiation?",
+            "question": "For a neural network with $N = 10^7$ parameters and a single scalar loss output $M = 1$, why is reverse-mode automatic differentiation the standard training choice in deep learning frameworks?",
             "choices": [
-              "Reverse-mode computes all $10^7$ parameter gradients in a single backward pass of complexity $\\mathcal{O}(M) = \\mathcal{O}(1)$, whereas forward-mode would require $10^7$ separate passes of complexity $\\mathcal{O}(N)$",
-              "Forward-mode differentiation cannot compute exact gradients and relies on finite-difference approximations",
-              "Reverse-mode differentiation requires zero memory allocation for intermediate forward activations",
-              "Forward-mode is restricted exclusively to non-linear activation functions and cannot differentiate matrix multiplications"
+              "Reverse mode gets all parameter gradients from one reverse traversal whose work is proportional to the recorded graph, whereas forward mode would need one seeded direction per parameter to recover the full gradient",
+              "Forward-mode differentiation cannot compute exact gradients and therefore is unusable for neural networks",
+              "Reverse-mode differentiation requires no saved forward information, so it is always the lowest-memory choice",
+              "Forward mode can differentiate only scalar element-wise functions, not matrix multiplications or network layers"
             ],
-            "answer": "The correct answer is A. Reverse-mode automatic differentiation (vector-Jacobian products) computes gradients of a scalar loss ($M=1$) with respect to all $N$ input parameters in a single backward traversal with compute cost proportional to the forward pass, whereas forward-mode (Jacobian-vector products) scales with $N$, requiring $10^7$ forward passes. Forward-mode computes mathematically exact derivatives, not finite differences. Reverse-mode actually requires storing intermediate forward activations in memory, which is its primary drawback. Forward-mode applies to all differentiable operations including matrix multiplications.",
-            "learning_objective": "Calculate and compare the computational complexity scaling of forward-mode and reverse-mode automatic differentiation"
+            "answer": "The correct answer is A. Training has a many-parameters-to-one-loss structure, so reverse mode is efficient because one reverse traversal can accumulate gradients for all parameters with work proportional to the forward graph up to a small constant factor. Forward mode computes exact derivatives too, but recovering the full gradient for $10^7$ parameters would require one seeded direction per parameter. The \"no saved forward information\" claim is backwards: reverse mode's main systems cost is retaining or regenerating the forward information backward rules need. Matrix multiplies and other network operations are differentiable in forward mode as well, so the restriction claim is false.",
+            "learning_objective": "Compare the scaling of forward-mode and reverse-mode automatic differentiation for many-parameter scalar-loss training"
           },
           {
             "question_type": "MCQ",
@@ -237,7 +237,7 @@
           {
             "question_type": "TF",
             "question": "True or False: Because reverse-mode automatic differentiation computes exact gradients in a single backward pass, its peak memory consumption during training is identical to that of inference.",
-            "answer": "False. Inference only requires storing the current layer's activations during execution, whereas reverse-mode differentiation requires caching all intermediate activation tensors across the entire forward pass (memory scaling as $\\mathcal{O}(L)$ with network depth) so they can be referenced during the backward pass.",
+            "answer": "False. Training usually keeps additional forward information needed by backward rules, and what must be saved depends on the operation and implementation. Inference avoids optimizer state and gradient storage, but it still has live activations, workspaces, and other runtime tensors rather than only the current layer in all cases.",
             "learning_objective": "Evaluate the memory footprint differences between forward-only inference and reverse-mode training passes"
           },
           {
@@ -248,8 +248,8 @@
           },
           {
             "question_type": "FILL",
-            "question": "To resolve GPU memory exhaustion caused by caching activations during long forward passes, the memory optimization technique that discards intermediate activations and recomputes them on-the-fly from saved boundary tensors during the backward pass is called activation ____ (or rematerialization).",
-            "answer": "The correct answer is checkpointing (or activation checkpointing). Activation checkpointing trades an additional forward pass of compute (~33% overhead) to reduce peak activation memory from $\\mathcal{O}(L)$ to $\\mathcal{O}(\\sqrt{L})$.",
+            "question": "To reduce GPU memory pressure from saved activations during long forward passes, frameworks can save only selected boundary tensors and recompute dropped intermediates during the backward pass. This memory-saving technique is called activation ____ (or rematerialization).",
+            "answer": "checkpointing. Activation checkpointing reduces peak saved-activation memory by storing only selected boundaries and recomputing omitted intermediates later, trading additional backward-time work for lower memory capacity pressure.",
             "learning_objective": "Identify activation checkpointing as a compute-memory trade-off mechanism"
           }
         ]
@@ -275,32 +275,32 @@
         "questions": [
           {
             "question_type": "MCQ",
-            "question": "In framework tensor implementations (such as PyTorch `Tensor` or NumPy `ndarray`), what distinguishes a tensor *view* (e.g. created via `.transpose()` or `.narrow()`) from a tensor *copy*?",
+            "question": "In framework tensor implementations such as PyTorch `Tensor` or NumPy `ndarray`, what distinguishes a tensor *view* from a tensor *copy*?",
             "choices": [
-              "A view converts the underlying data format from floating-point to integer representation",
-              "A view modifies only metadata (shape, strides, storage offset) while sharing the same underlying data storage buffer in $\\mathcal{O}(1)$ time without copying memory",
-              "A view creates a duplicate memory buffer on the host CPU while leaving the GPU buffer unchanged",
-              "A view enforces that the tensor elements are stored strictly in C-contiguous memory layout"
+              "A view converts the underlying data from floating-point to integer representation",
+              "A view changes only tensor metadata while sharing the same storage, though reshape can do this only when the existing strides permit the requested layout",
+              "A view duplicates the tensor into host CPU memory while leaving device memory unchanged",
+              "A view guarantees the tensor is stored in contiguous C-order memory"
             ],
-            "answer": "The correct answer is B. A tensor view shares the underlying storage buffer of the original tensor and merely updates metadata (such as strides, shape, and offset), making operations like slicing, transposing, and reshaping $\\mathcal{O}(1)$ operations that allocate no new array memory. Views do not change numerical data types. Views do not clone data to host CPU memory. Slicing or transposing a tensor frequently produces a non-contiguous view rather than enforcing C-contiguity.",
-            "learning_objective": "Distinguish tensor views from tensor copies in terms of metadata modification and memory allocation"
+            "answer": "The correct answer is B. A view reinterprets existing storage through metadata such as shape, strides, and offset rather than allocating a new data buffer. The chapter emphasizes that transpose commonly creates a strided view, while reshape may return either a view or a copy depending on layout and stride compatibility. The datatype does not change just because something is a view, and a view is often noncontiguous rather than guaranteed to be C-contiguous. The host-copy answer also confuses storage sharing with device transfer, which is a separate operation.",
+            "learning_objective": "Distinguish tensor views from tensor copies in terms of metadata, storage sharing, and layout constraints"
           },
           {
             "question_type": "MCQ",
-            "question": "A GPU training loop shows high GPU idle time because the CPU waits for data loading before launching training kernels. How does enabling `pin_memory=True` on the DataLoader combined with `tensor.to(device, non_blocking=True)` alleviate this bottleneck?",
+            "question": "A training loop shows GPU idle time because batches arrive late from the input pipeline. How can `pin_memory=True` together with `tensor.to(device, non_blocking=True)` help, and what does it *not* guarantee by itself?",
             "choices": [
-              "It automatically quantizes all training data to 8-bit precision on the host CPU",
-              "It bypasses the GPU memory hierarchy entirely by executing matrix multiplications directly in CPU L3 cache",
-              "It allocates page-locked host RAM, allowing the GPU Direct Memory Access (DMA) engine to transfer data over PCIe asynchronously in parallel with GPU kernel compute",
-              "It forces every CUDA kernel to execute synchronously on the default stream"
+              "It automatically quantizes all host tensors to 8-bit precision so the GPU receives less data",
+              "It bypasses the data loader by executing preprocessing directly inside GPU kernels",
+              "It places batches in page-locked host memory so eligible host-to-device copies can use DMA and potentially overlap with device work, but actual overlap still depends on having independent batches, streams, and correct dependency ordering",
+              "It forces every CUDA kernel to run on the default stream so transfer and compute become easier to coordinate"
             ],
-            "answer": "The correct answer is C. Pinned (page-locked) host memory prevents the OS from paging data to disk, allowing the hardware DMA controller to copy data over PCIe to GPU VRAM without CPU intervention, enabling overlap between host-to-device transfers and GPU kernel execution when `non_blocking=True` is used. Pinned memory does not perform precision quantization. It does not execute matrix operations in CPU cache. It enables asynchronous overlapping rather than forcing synchronous serial execution.",
-            "learning_objective": "Analyze how pinned host memory and non-blocking asynchronous transfers overlap data movement with GPU compute"
+            "answer": "The correct answer is C. Pinned host memory enables DMA-friendly transfers from page-locked RAM, and `non_blocking=True` can let those copies proceed asynchronously with respect to the host when the backend supports it. But the chapter is explicit that real overlap also requires enough independent work and correct stream synchronization; pinned memory is not a substitute for fixing a slow CPU loading pipeline with workers and prefetching. The quantization answer invents a mechanism unrelated to `pin_memory`, and the default-stream answer would reduce rather than create overlap opportunities.",
+            "learning_objective": "Analyze how pinned memory and non-blocking copies can help data movement, and distinguish transfer overlap from CPU data-loading bottlenecks"
           },
           {
             "question_type": "SHORT",
-            "question": "Why do deep learning frameworks implement dedicated memory managers (such as PyTorch's CUDA caching allocator) rather than calling the underlying driver's `cudaMalloc` and `cudaFree` on every tensor creation and destruction?",
-            "answer": "Standard driver allocations like `cudaMalloc` and `cudaFree` are expensive system calls that synchronize the GPU device and incur substantial latency overhead (tens to hundreds of microseconds). A caching allocator maintains a pool of pre-allocated GPU memory blocks categorized by size, allowing sub-microsecond allocation and deallocation without device synchronization or driver overhead, while minimizing memory fragmentation across dynamic training iterations.",
+            "question": "Why do deep learning frameworks implement dedicated memory managers such as PyTorch's CUDA caching allocator instead of calling the driver's `cudaMalloc` and `cudaFree` on every tensor creation and destruction?",
+            "answer": "Driver-level allocations can be slow and may force synchronizations, so doing them for every short-lived tensor would inject substantial overhead into each training step. A caching allocator reuses previously reserved blocks, amortizing allocation cost across iterations and reducing repeated trips through the driver. For example, a training loop that repeatedly creates similarly sized activations can draw from the pool instead of re-allocating device memory every time. The practical consequence is lower allocation overhead and better reuse, though fragmentation can still occur and is not eliminated automatically.",
             "learning_objective": "Explain the architectural rationale for framework caching memory allocators over direct driver allocation calls"
           },
           {
@@ -344,21 +344,21 @@
         "questions": [
           {
             "question_type": "MCQ",
-            "question": "In framework module abstractions like PyTorch's `nn.Module`, what systems mechanism enables `optimizer = torch.optim.Adam(model.parameters())` to find and optimize all model weights without the developer manually listing every weight tensor?",
+            "question": "In framework module abstractions like PyTorch's `nn.Module`, what systems mechanism enables `optimizer = torch.optim.Adam(model.parameters())` to find all registered model weights without the developer manually listing every tensor?",
             "choices": [
-              "Python automatically compiles all local variables in memory into an optimization graph",
+              "Python automatically compiles all local variables into an optimization graph",
               "The GPU driver scans VRAM at runtime to detect all floating-point matrices",
               "The autograd engine injects global hooks into Python's garbage collector",
-              "Overridden attribute assignment (`__setattr__`) detects instances of `nn.Parameter` and automatically registers them into an internal hierarchical dictionary (`_parameters`)"
+              "Overridden attribute assignment registers `nn.Parameter` objects in the module tree, and `parameters()` recursively walks that registered structure"
             ],
-            "answer": "The correct answer is D. `nn.Module` overrides Python's `__setattr__` method so that whenever an attribute of type `nn.Parameter` is assigned, it is automatically added to the module's `_parameters` dictionary; calling `model.parameters()` recursively walks this submodule tree to yield all trainable parameters. Python's runtime does not automatically discover arbitrary variables for optimization. The GPU driver has no semantic awareness of model weight structures in host frameworks. Autograd hooks do not inspect garbage collector internals for parameter registration.",
-            "learning_objective": "Explain the parameter registration mechanism in module abstractions like nn.Module"
+            "answer": "The correct answer is D. `nn.Module` intercepts attribute assignment so that assigned `nn.Parameter` objects and child modules are registered into the module's internal structure. Calling `parameters()` then recursively traverses that tree to yield registered parameters. A key subtlety from the section is that registration and trainability are separate: frozen registered parameters can still appear in the accessor, while buffers are tracked separately and excluded from ordinary parameter discovery. The GPU driver and Python runtime do not understand model semantics at that level, and garbage-collector hooks are unrelated to module registration.",
+            "learning_objective": "Explain the parameter registration and recursive discovery mechanism in module abstractions like nn.Module"
           },
           {
             "question_type": "SHORT",
-            "question": "Explain why setting `model.eval()` is necessary for numerically correct inference in models containing BatchNorm or Dropout, and clarify why `model.eval()` is not a substitute for `torch.no_grad()`.",
-            "answer": "Setting `model.eval()` toggles mode-dependent layer behaviors: it disables stochastic Dropout (setting it to identity) and switches BatchNorm from computing batch statistics to using accumulated running mean and variance buffers. However, `model.eval()` does not disable autograd graph construction or activation caching; wrapping inference in `torch.no_grad()` (or `torch.inference_mode()`) is required to deactivate the autograd tape and prevent unnecessary memory allocation.",
-            "learning_objective": "Distinguish the systems role of module evaluation mode from autograd gradient disabling contexts"
+            "question": "Explain why setting `model.eval()` is necessary for numerically correct inference in models containing BatchNorm or Dropout, and clarify why `model.eval()` is not a substitute for disabling gradient recording.",
+            "answer": "`model.eval()` is needed because some layers change behavior between training and inference: Dropout should stop randomly zeroing activations, and BatchNorm should use stored running statistics rather than current batch statistics. That makes inference numerically consistent with the model's intended deployment behavior. But evaluation mode does not itself turn off autograd recording, so a separate gradient-disabling context is still useful when gradients are enabled and you want to avoid unnecessary graph recording and saved state. The practical implication is that correct inference behavior and lower autograd overhead are related but separate controls.",
+            "learning_objective": "Distinguish the systems role of module evaluation mode from gradient-recording controls"
           },
           {
             "question_type": "FILL",
@@ -368,15 +368,15 @@
           },
           {
             "question_type": "MCQ",
-            "question": "Why are modern production pipelines increasingly replacing standard Python `pickle` serialization (the legacy `.pt`/`.pth` format) with formats like Hugging Face's `safetensors` for model checkpoint storage and distribution?",
+            "question": "What does `load_state_dict()` fundamentally do in the module serialization pattern described in the section?",
             "choices": [
-              "safetensors prevents arbitrary code execution vulnerabilities inherent in pickle deserialization and enables zero-copy memory mapping (mmap) for instant model loading",
-              "safetensors automatically quantizes all FP32 weights to 4-bit integers during serialization",
-              "pickle files cannot store floating-point tensor data larger than 2 GB",
-              "safetensors embeds the entire Python interpreter inside the model binary"
+              "It loads parameter and buffer values into an already constructed matching module rather than reconstructing the architecture from scratch",
+              "It automatically quantizes all stored tensors before loading them into the model",
+              "It discovers the model architecture from weights alone and rebuilds any missing layers",
+              "It guarantees cross-framework portability as long as the tensor shapes match"
             ],
-            "answer": "The correct answer is A. Python's `pickle` format executes arbitrary code during unpickling, posing severe security risks when loading third-party model weights; `safetensors` restricts storage strictly to pure tensor data and metadata, eliminating code execution vulnerabilities while supporting zero-copy memory mapping (`mmap`) for high-speed loading. The `safetensors` format preserves original data precision without automatic quantization. Legacy `pickle` is capable of storing large files, though unsafe. `safetensors` contains no Python interpreter code.",
-            "learning_objective": "Evaluate the security and performance advantages of safe tensor serialization formats over general-purpose object pickling"
+            "answer": "The correct answer is A. The section explains that `state_dict()` stores a flat mapping of parameter and buffer values keyed by their location in the module hierarchy, and `load_state_dict()` copies matching values into an already constructed module. That means serialization preserves state, not an architecture inference procedure. The \"weights alone rebuild the model\" idea confuses state loading with model definition, and cross-framework exchange needs compatible graph and operator representations in addition to compatible tensor shapes. Automatic quantization is also unrelated to ordinary `state_dict` loading.",
+            "learning_objective": "Explain how state_dict loading restores module state without reconstructing architecture or guaranteeing cross-framework portability"
           }
         ]
       }
@@ -401,26 +401,26 @@
         "questions": [
           {
             "question_type": "MCQ",
-            "question": "An enterprise engineering team requires a unified workflow where models are trained in Python but must be deployed across cloud microservices (C++ runtime), mobile apps (Android/iOS), and web browsers without maintaining a Python runtime in production. Which framework ecosystem architecture was explicitly designed around this decoupled deployment model via the `SavedModel` abstraction?",
+            "question": "Which framework ecosystem in the section is organized around `SavedModel` as a central boundary between Python-side development and multiple deployment paths such as server serving, mobile conversion, and browser execution?",
             "choices": [
-              "PyTorch 1.0 eager execution",
-              "TensorFlow ecosystem (TensorFlow Serving, TFLite, and TF.js)",
+              "PyTorch eager execution as originally presented",
+              "TensorFlow ecosystem with SavedModel feeding Serving, Lite conversion, and TensorFlow.js paths",
               "Pure NumPy with custom Python socket servers",
               "Scikit-learn with standard pickle deserialization"
             ],
-            "answer": "The correct answer is B. TensorFlow was architected around the `SavedModel` boundary, which packages graph definitions, weights, and signature definitions into a language-neutral format directly executable by TensorFlow Serving (C++ server), TensorFlow Lite (mobile/edge), and TensorFlow.js (browsers) without Python dependencies. PyTorch 1.0 was strictly eager and historically lacked standalone non-Python serving tooling. NumPy and Scikit-learn require Python runtime environments and do not support native mobile/browser graph export.",
-            "learning_objective": "Classify major framework platforms by their deployment architectures and serialization boundaries"
+            "answer": "The correct answer is B. The section presents TensorFlow's architecture as centered on the SavedModel boundary: training-time Python workflows can serialize graph structure, weights, and signatures into an artifact that supports direct serving or target-specific conversion paths such as TensorFlow Lite and TensorFlow.js. That design emphasis is broader than just one runtime and is exactly what distinguishes TensorFlow in the chapter's platform comparison. The NumPy and scikit-learn answers do not provide the same graph-centered deployment architecture, and the PyTorch option misses that the chapter describes PyTorch as eager-first with a more fragmented deployment path rather than SavedModel-centered deployment.",
+            "learning_objective": "Classify TensorFlow by its SavedModel-centered training-to-deployment architecture"
           },
           {
             "question_type": "MCQ",
-            "question": "What core programming model commitment distinguishes JAX from both PyTorch and TensorFlow, enabling seamless functional composition of `jax.jit`, `jax.grad`, and `jax.vmap`?",
+            "question": "What core programming-model commitment distinguishes JAX from both PyTorch and TensorFlow in the chapter's comparison, enabling transformations like `jax.grad`, `jax.vmap`, and `jax.jit` to compose when their contracts align?",
             "choices": [
               "Dynamic class inheritance with mutable object references for all layer parameters",
               "Global state mutation across all forward and backward passes",
-              "Pure functions with no hidden side effects acting on immutable array data structures",
-              "Graph capture via AST string parsing of Python script files"
+              "Pure functions over immutable array-like data, with transformations applied to functions rather than hidden mutable objects",
+              "Graph capture via AST string parsing of Python source files"
             ],
-            "answer": "The correct answer is C. JAX is built on functional programming principles where models and operations are pure functions that take inputs (and explicit parameter dictionaries) and return outputs without mutating internal state or relying on global side effects; this purity allows transformations (`grad`, `vmap`, `jit`) to compose arbitrarily. Class inheritance and mutable parameter objects represent PyTorch's object-oriented `nn.Module` model. Global state mutation violates JAX's transformation contract. JAX captures graphs via tracing during execution, not AST string parsing.",
+            "answer": "The correct answer is C. JAX is presented as a functional transformation system: users write pure functions, arrays are treated immutably, and transformations such as `grad`, `vmap`, and `jit` act on those functions when their input-output contracts are compatible. The section is careful that composition is powerful but not arbitrary, since order still matters semantically. The mutable-object and global-state answers describe the opposite design direction, and the AST-parsing answer invents a mechanism not used in the chapter's explanation of JAX tracing and compilation.",
             "learning_objective": "Explain the pure functional transformation model that distinguishes JAX architecturally"
           },
           {
@@ -463,20 +463,20 @@
         "questions": [
           {
             "question_type": "MCQ",
-            "question": "When deploying deep learning models to microcontroller hardware (TinyML) with less than 256 KB of SRAM, which set of framework runtime assumptions is strictly required?",
+            "question": "In the microcontroller deployment scenario described for TensorFlow Lite Micro, which runtime assumption best matches the chapter's TinyML discussion?",
             "choices": [
-              "Dynamic memory allocation via system malloc, full Python runtime, and 64-bit floating point precision",
-              "Dynamic graph construction with autograd tape tracking enabled",
-              "Cloud-based gRPC client with streaming RPC serialization",
-              "Static memory allocation in a fixed pre-allocated arena, ahead-of-time compiled C/C++ kernels, 8-bit integer quantization, and zero dynamic memory allocation"
+              "Full Python runtime with dynamic graph construction and autograd tracking",
+              "General-purpose heap allocation on every inference because the model is too small to plan memory ahead of time",
+              "Cloud RPC execution with the device acting only as a thin client",
+              "A compact native runtime using a fixed tensor arena and only the operators needed by the model, with integer quantization commonly used when appropriate but not required for every MCU deployment"
             ],
-            "answer": "The correct answer is D. Microcontrollers operate in bare-metal environments without operating systems or virtual memory managers; runtimes like TensorFlow Lite Micro require a fixed pre-allocated memory arena, static kernel dispatch, integer quantization (INT8), and strictly zero dynamic heap allocation (`malloc`). Dynamic allocation and full Python runtimes require megabytes to gigabytes of memory unavailable on microcontrollers. Dynamic autograd graphs are unnecessary and impossible in memory-constrained inference runtimes. Cloud streaming RPCs require continuous network connectivity and OS networking stacks.",
-            "learning_objective": "Classify framework runtime constraints across the cloud-to-microcontroller deployment spectrum"
+            "answer": "The correct answer is D. The chapter's TinyML example emphasizes a small native C/C++ runtime, a fixed application-supplied tensor arena, and model-specific operator selection for microcontroller deployment. INT8 is common because it often helps models fit tight memory and power budgets, but the chapter does not present it as a universal requirement for every MCU case. A full Python runtime with autograd is far too heavy for this setting, per-inference general-purpose heap allocation works against the fixed-memory planning TinyML relies on, and the thin-client cloud answer describes remote execution rather than on-device inference.",
+            "learning_objective": "Classify the runtime assumptions of TinyML-style microcontroller deployment"
           },
           {
             "question_type": "SHORT",
-            "question": "Explain how the three core framework problems (Execution, Differentiation, Abstraction) are dramatically reweighted when transitioning from cloud model training to edge/embedded inference.",
-            "answer": "On inference-only edge devices, the differentiation problem disappears entirely because backward passes and gradient tracking are not executed. The execution problem shifts from maximizing cluster throughput to fitting within rigid hardware constraints (strict latency deadlines, limited memory footprints, and zero dynamic allocation). Meanwhile, the abstraction problem intensifies because edge runtimes must target highly fragmented hardware backends (microcontrollers, mobile NPUs, DSPs, and edge TPUs) with specialized instruction sets and integer formats.",
+            "question": "Explain how the three core framework problems (Execution, Differentiation, Abstraction) are reweighted when moving from cloud model training to edge or embedded inference.",
+            "answer": "The weighting changes because pure inference removes most of the differentiation burden: no backward pass or optimizer state is needed, so the framework no longer spends resources on gradient computation machinery. Execution then shifts toward meeting strict latency, footprint, and predictability constraints on a much smaller device, while abstraction becomes harder because the runtime must target fragmented hardware such as mobile accelerators, DSPs, or MCUs with very different capabilities. For example, a cloud training stack can tolerate richer runtime machinery, while an embedded runtime may need static allocation and a narrow operator set. The practical consequence is that deployment constraints, not training convenience alone, should drive the final runtime choice.",
             "learning_objective": "Explain how edge deployment reweights execution, differentiation, and abstraction relative to cloud training"
           },
           {
@@ -520,14 +520,14 @@
           },
           {
             "question_type": "MCQ",
-            "question": "When evaluating framework viability for a production system expected to operate for 5+ years, which factor represents the greatest long-term architectural risk?",
+            "question": "When evaluating framework viability for a production system expected to operate for 5+ years, which factor is the strongest warning sign of long-term maintenance risk?",
             "choices": [
               "Using Python instead of Fortran for high-level model definitions",
-              "Adopting a niche or abandoned framework with dwindling maintainer support, which risks broken compiler toolchains, lack of support for new accelerator chips, and forced legacy stack maintenance",
-              "Selecting an open-source framework backed by major hardware vendors",
+              "Adopting a niche or fading framework whose maintenance signals, compatibility path, and future hardware support are weak",
+              "Selecting an open-source framework that continues to receive broad ecosystem and vendor support",
               "Training on GPU clusters rather than single CPU workstations"
             ],
-            "answer": "The correct answer is B. Framework selection represents a multi-year infrastructure commitment; choosing an unmaintained or niche framework exposes the organization to severe bit rot, lack of vendor compiler support for future accelerator hardware, security vulnerabilities, and eventual forced migration. Python is the universal standard frontend for ML systems. Vendor-backed open-source frameworks provide stability and active maintenance. GPU cluster training is standard industry practice rather than an architectural risk.",
+            "answer": "The correct answer is B. The section frames framework choice as a multi-year infrastructure commitment, so the biggest architectural risk is weak long-term support: if maintainers disappear, compiler paths stagnate, compatibility erodes, and future hardware or deployment tooling may never be supported well enough for production needs. A framework does not become risky merely because it is less mainstream in some abstract sense; the real concern is whether its maintenance and support signals indicate decay. By contrast, active ecosystem support usually lowers migration and tooling risk, and the Python-versus-Fortran or GPU-versus-CPU answers do not address the chapter's actual long-horizon framework viability criteria.",
             "learning_objective": "Evaluate long-term maintenance and ecosystem health risks in framework selection"
           },
           {
@@ -578,21 +578,21 @@
           },
           {
             "question_type": "MCQ",
-            "question": "In the chapter's training step roofline analysis on an NVIDIA A100 GPU, the raw compute and memory transfer time for a 2-layer MLP batch takes ~4 $\\mu\\text{s}$, but total eager-mode execution takes ~30--50 $\\mu\\text{s}$. What systems bottleneck explains this discrepancy?",
+            "question": "In the chapter's two-layer MLP training-step analysis, suppose a hypothetical profiler showed many short kernels separated by host-side dispatch gaps. Why could the total eager-mode step time greatly exceed the idealized compute and memory lower bounds even on a very fast GPU?",
             "choices": [
-              "Network congestion across distributed InfiniBand interconnects",
-              "Thermal throttling of the GPU streaming multiprocessors",
-              "Memory leakage inside the PyTorch dynamic class hierarchy",
-              "CPU dispatch overhead, where launching ~12 separate small kernels across Python and CUDA runtimes incurs ~2--5 $\\mu\\text{s}$ of launch latency per operation"
+              "Because network communication across multiple machines dominates every training step in the example",
+              "Because thermal throttling is the main bottleneck for small matrix operations in the scenario",
+              "Because the dynamic class hierarchy in the framework leaks memory between layers",
+              "Because repeated host-side dispatch and kernel-launch overhead for many small operations can dominate when the device kernels themselves are short"
             ],
-            "answer": "The correct answer is D. On small models, the physical execution time of each kernel is tiny (~0.2--1 $\\mu\\text{s}$), making total step time dominated by CPU-to-GPU dispatch overhead (~2--5 $\\mu\\text{s}$ per operation across ~12 operations = 24--60 $\\mu\\text{s}$), causing severe GPU underutilization that graph compilation resolves by fusing operations into fewer kernel launches. The analysis is for a single-GPU step, so network interconnect is not involved. Thermal throttling does not account for per-op dispatch latency gaps. The discrepancy is caused by kernel launch overhead, not memory leaks.",
-            "learning_objective": "Analyze why small model training steps on high-end accelerators are overhead-bound rather than compute-bound"
+            "answer": "The correct answer is D. In that hypothetical profile, many short kernels separated by host dispatch gaps would support an overhead-bound diagnosis: even if compute and memory lower bounds are small, eager execution can still spend substantial time issuing many separate operations. The chapter's peak-rate lower bounds and dispatch-cost assumptions motivate this explanation, but by themselves they do not constitute an observed profile. The network answer does not fit a single-device step, and the thermal-throttling and memory-leak explanations are not the chapter's modeled source of overhead.",
+            "learning_objective": "Analyze why small model training steps on fast accelerators can be overhead-bound rather than limited by raw compute or memory bandwidth"
           },
           {
             "question_type": "SHORT",
-            "question": "Contrast the arithmetic intensity of a matrix multiplication (`MatMul`) with an element-wise activation function (`ReLU`) in a neural network layer, and explain why their performance bottlenecks differ fundamentally on modern GPUs.",
-            "answer": "MatMul has high arithmetic intensity ($AI \\approx 15\\text{ FLOPs/Byte}$ for typical hidden dimensions), performing $\\mathcal{O}(N^3)$ operations on $\\mathcal{O}(N^2)$ data, making it compute-bound and capable of saturating GPU tensor cores. In contrast, ReLU performs only 1 FLOP per element while reading and writing 8 bytes in FP32 ($AI = 0.125\\text{ FLOPs/Byte}$), making it severely memory-bandwidth-bound and bottlenecked entirely by HBM data movement.",
-            "learning_objective": "Compare the arithmetic intensity and hardware execution bottlenecks of matrix multiplication versus element-wise activation"
+            "question": "Contrast the arithmetic intensity of a matrix multiplication (`MatMul`) with an element-wise activation such as `ReLU`, and explain how their performance bottlenecks can differ on modern GPUs depending on shape and execution conditions.",
+            "answer": "A matrix multiplication typically reuses its operands many times, so it performs much more arithmetic per byte moved than an element-wise activation does. By contrast, ReLU does very little computation for each value it reads and writes; in the chapter's simplified example it is about $0.125$ FLOP/byte, which makes bandwidth and launch overhead loom large. A MatMul can therefore move toward a compute-bound regime when its shapes are favorable, while ReLU often stays memory- or overhead-sensitive because there is so little work per byte. The practical implication is that compilers often target ReLU-like chains with fusion, whereas large matrix multiplies are more often optimized through kernel quality, layout, and precision choices.",
+            "learning_objective": "Compare the arithmetic intensity and likely bottlenecks of matrix multiplication versus element-wise activation under the roofline model"
           },
           {
             "question_type": "ORDER",
@@ -602,9 +602,9 @@
           },
           {
             "question_type": "SHORT",
-            "question": "During the backward pass of a training step, why is memory traffic often significantly higher than in the forward pass, even though the number of mathematical operations is roughly comparable?",
-            "answer": "The backward pass requires loading saved forward activations from HBM, loading upstream gradient adjoints, computing parameter gradients, and writing gradient tensors to `.grad` memory buffers. For operations like MatMul and activations, evaluating Vector-Jacobian Products requires reading multiple cached inputs and writing multiple output gradient tensors, resulting in roughly $2\\times$ the memory traffic of the forward pass.",
-            "learning_objective": "Analyze why the backward pass incurs higher memory traffic than the forward pass"
+            "question": "During the backward pass of a training step, why is memory traffic often higher than in the forward pass even when the amount of arithmetic work is of the same order?",
+            "answer": "Backward computation often has to revisit saved forward values, combine them with upstream gradients, and write out new gradients, so more tensors are read and written during the pass. For example, a layer may need the saved forward input plus the incoming gradient to produce both weight gradients and propagated gradients. The chapter's training-step table models backward as about twice the forward arithmetic work and roughly three times the memory traffic; those are modeling assumptions for this analysis, not universal constants.",
+            "learning_objective": "Analyze why the backward pass often incurs higher memory traffic than the forward pass"
           }
         ]
       }
@@ -642,7 +642,7 @@
           {
             "question_type": "SHORT",
             "question": "Explain why choosing a framework based on community popularity or GitHub stars rather than binding deployment constraints is a severe engineering pitfall for edge and embedded ML projects.",
-            "answer": "Popular frameworks are typically optimized for cloud GPU training and server environments where gigabytes of RAM and dynamic memory allocation are available. Deploying to edge devices or microcontrollers requires specific runtime characteristics—such as static memory arenas, microsecond latency budgets, INT8 quantization delegates, and bare-metal C++ runtimes (e.g., TFLite Micro or ExecuTorch). Selecting a framework without validating these binding constraints leads to models that cannot physically fit or execute on target silicon, forcing costly late-stage re-engineering.",
+            "answer": "Popularity says little about whether a runtime matches the deployment contract. Edge phones, embedded Linux devices, and microcontrollers impose very different limits on memory allocation, operator support, packaging, and hardware acceleration, so a framework that is convenient for cloud training may still be a poor fit for the target runtime. For example, a mobile runtime such as ExecuTorch is solving a different deployment problem from TensorFlow Lite Micro, which is built for far tighter memory budgets and fixed-allocation execution. The practical consequence is that teams who optimize for ecosystem buzz instead of target constraints can reach the end of development with a model that cannot run acceptably on the actual device.",
             "learning_objective": "Explain why popularity is an insufficient criterion for framework selection in constrained deployment environments"
           },
           {
@@ -673,27 +673,27 @@
         "questions": [
           {
             "question_type": "MCQ",
-            "question": "How do the three fundamental framework problems (Execution, Differentiation, Abstraction) map directly to the terms of the systems iron law ($T_{\\text{epoch}} = \\frac{\\text{Work}}{\\text{Throughput}} \\times \\frac{1}{\\eta_{\\text{hw}}} + \\text{Overhead}$)?",
+            "question": "How do the three framework problems (Execution, Differentiation, Abstraction) connect to the iron-law-style performance terms emphasized in the chapter?",
             "choices": [
-              "Execution controls dataset size, differentiation controls network latency, and abstraction controls cloud server pricing",
-              "All three problems affect only the floating-point precision of the weights",
-              "Execution affects differentiation, while abstraction has no measurable impact on systems performance",
-              "Execution strategy governs dispatch latency and kernel launch overhead ($L_{\\text{lat}}$), differentiation governs intermediate activation memory volume and traffic ($D_{\\text{vol}}$), and hardware abstraction governs silicon utilization efficiency ($\\eta_{\\text{hw}}$)"
+              "Execution controls dataset size, differentiation controls network latency, and abstraction controls cloud pricing",
+              "All three problems affect only the floating-point precision of weights",
+              "Execution affects differentiation, while abstraction has no measurable systems consequence",
+              "Execution strongly shapes launch and dispatch overhead, differentiation changes work and the forward information or memory traffic needed for backward, and abstraction influences how effectively computation is lowered onto hardware"
             ],
-            "answer": "The correct answer is D. The chapter establishes that framework mechanisms directly control the physical terms of the iron law: execution models dictate dispatch latency and launch tax ($L_{\\text{lat}}$), autograd mechanisms dictate activation caching and memory traffic ($D_{\\text{vol}}$), and hardware abstraction compilers dictate kernel mapping and hardware utilization ($\\eta_{\\text{hw}}$). Mapping execution to dataset size or differentiation to network latency misrepresents the framework's internal scope. Asserting they only affect precision ignores execution planning and memory management. Claiming abstraction has no performance impact contradicts the core role of hardware-specific kernel lowering.",
-            "learning_objective": "Synthesize how execution, differentiation, and abstraction map to the governing terms of the systems iron law"
+            "answer": "The correct answer is D. The chapter ties framework design back to physical performance terms by showing that execution strategy changes how much avoidable launch and dispatch overhead the system pays, differentiation changes both the extra work of backward computation and the live forward information or traffic required to support it, and abstraction affects how well kernels, layouts, and placements map to hardware. The key idea is diagnostic rather than exclusive: these associations are useful for reasoning, but mechanisms such as fusion can affect both traffic and launch count. The other answers either collapse the framework into unrelated business quantities or deny the chapter's central claim that abstraction choices materially shape runtime efficiency.",
+            "learning_objective": "Synthesize how execution, differentiation, and abstraction connect to the main iron-law performance terms"
           },
           {
             "question_type": "SHORT",
-            "question": "Summarize why the memory wall—rather than raw floating-point arithmetic capacity—has become the primary driver of modern ML framework compiler innovations (such as kernel fusion and activation checkpointing).",
-            "answer": "Over recent decades, accelerator compute capacity has expanded at a much faster rate than memory bandwidth, creating a massive arithmetic-to-bandwidth gap where memory transfers are hundreds of times slower and more energy-intensive than floating-point math. Consequently, framework innovations focus on reducing memory traffic ($D_{\\text{vol}}$): kernel fusion keeps intermediate activations in fast on-chip SRAM/registers to avoid round trips to global HBM, while activation checkpointing trades cheap compute to reduce peak memory footprint.",
-            "learning_objective": "Explain why the memory wall drives framework compiler optimizations like kernel fusion and rematerialization"
+            "question": "Summarize why the memory wall—rather than raw floating-point arithmetic capacity—has become a major driver of framework compiler innovations such as kernel fusion and activation checkpointing.",
+            "answer": "Framework compilers focus on the memory wall because many workloads are limited more by data movement than by available arithmetic throughput. Kernel fusion helps by reducing intermediate reads and writes, keeping compatible values on chip instead of sending them repeatedly through slower memory. Activation checkpointing addresses a different pressure point: saved-state capacity during training, trading extra recomputation for a smaller live-memory footprint, with its effect on traffic depending on the recomputation path.",
+            "learning_objective": "Explain why the memory wall drives framework compiler optimizations like kernel fusion and activation checkpointing"
           },
           {
             "question_type": "TF",
             "question": "True or False: An ML framework can eliminate the physical constraints imposed by the iron law of performance if an engineer writes clean, high-level declarative Python code.",
-            "answer": "False. A framework is a compiler for the silicon contract that shifts costs between the terms of the iron law (dispatch overhead, memory volume, hardware utilization) rather than eliminating them; no abstraction layer can bypass the physical limits of hardware bandwidth, latency, or compute capacity.",
-            "learning_objective": "Evaluate the systems reality that framework abstractions shift rather than eliminate iron law constraints"
+            "answer": "False. A framework can reduce avoidable work, traffic, or launch overhead through better compilation and runtime choices, but it cannot bypass the underlying limits of hardware bandwidth, latency, memory capacity, or compute throughput.",
+            "learning_objective": "Evaluate the systems reality that framework abstractions reduce avoidable costs but do not eliminate physical limits"
           }
         ]
       }

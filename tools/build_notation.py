@@ -7,6 +7,14 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT / "mlsysim"))
 from mlsysim.notation import Notation
 
+# Volume I chapters retain legacy layer-width commands while their printed
+# notation chapter is pinned. Render them through the canonical registry names.
+# These aliases expand to registry macros, so their symbols cannot drift.
+COMPATIBILITY_ALIASES = {
+    r"\LayerInputAndOutputWidths": r"\LayerInputWidth",
+    r"\LayerInputAndOutputWidthsTwo": r"\LayerOutputWidth",
+}
+
 tex_lines = [
     "% AUTO-GENERATED NOTATION MACROS FROM MLSYSIM",
     "% Do not edit manually. Edit mlsysim/notation/data/symbols.yaml instead.",
@@ -15,6 +23,9 @@ tex_lines = [
 
 for s in Notation.list():
     tex_lines.append(f"\\newcommand{{{s.macro}}}{{{s.latex}}}")
+
+for alias, canonical in COMPATIBILITY_ALIASES.items():
+    tex_lines.append(f"\\newcommand{{{alias}}}{{{canonical}}}")
 
 macros_tex_path = PROJECT_ROOT / "books/shared/_includes/_macros.tex"
 macros_tex_path.write_text("\n".join(tex_lines) + "\n", encoding="utf-8")
@@ -26,6 +37,8 @@ html_lines = [
 ]
 for s in Notation.list():
     html_lines.append(f"\\newcommand{{{s.macro}}}{{{s.latex}}}")
+for alias, canonical in COMPATIBILITY_ALIASES.items():
+    html_lines.append(f"\\newcommand{{{alias}}}{{{canonical}}}")
 html_lines.extend(["$$", "</div>", ""])
 
 macros_html_path = PROJECT_ROOT / "books/shared/_includes/_macros.html"
