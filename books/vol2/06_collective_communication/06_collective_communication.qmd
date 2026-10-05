@@ -1427,7 +1427,7 @@ The six primitives in @tbl-collective-primitives form a decision ladder: use the
 | **Reduce**\index{Reduce}               | Aggregate data from all workers (sum, min, max) to a single root.                                                       | Aggregate validation metrics such as loss and accuracy to a logging process.                        | $\mathcal{O}(\log N)$ latency (tree); $\mathcal{O}(M)$ bandwidth.                                                                                                                               |
 | **AllReduce**\index{AllReduce}         | Aggregate from all workers, then distribute the result to all ($y_i = \sum_{j=0}^{N-1} x_j$ for all $i$).               | Data parallelism: synchronize gradients so every GPU computes the same update.                      | Ring is bandwidth-optimal at $2\frac{N-1}{N}\frac{M}{\beta}$ but $\mathcal{O}(N)$ latency; the simple full-message Tree model gives $\mathcal{O}(\log N)$ latency with more byte-transfer work. |
 | **AllGather**\index{AllGather}         | Each worker's data goes to all; the result concatenates every input ($x_i \rightarrow [x_0, \dots, x_{N-1}]$).          | Sharded data parallelism (FSDP/ZeRO): collect sharded parameters before a forward or backward pass. | Ring $\frac{N-1}{N}\frac{M}{\beta}$; resident data grows from an $M/N$ shard to the full $M$.                                                                                                   |
-| **ReduceScatter**\index{ReduceScatter} | Reduce across workers, but scatter so each keeps a distinct chunk (worker $i$ receives the $i$-th block of $\sum x_j$). | Sharded data parallelism: reduce gradients while keeping them sharded to save memory.               | Ring $\frac{N-1}{N}\frac{M}{\beta}$; the inverse of AllGather.                                                                                                                                  |
+| **ReduceScatter**\index{ReduceScatter} | Reduce across workers, but scatter so each keeps a distinct chunk (worker $i$ receives the $i$-th block of $\sum x_j$). | Sharded data parallelism: reduce gradients while keeping them sharded to save memory.               | Ring $\frac{N-1}{N}\frac{M}{\beta}$; the same ring byte-transfer term as AllGather, with reduction.                                                                                             |
 | **AllToAll**\index{AllToAll}           | The most general pattern: worker $i$ sends a distinct chunk to each worker $j$, a distributed matrix transpose.         | MoE routing tokens to experts; DLRM exchanging embedding lookups across workers.                    | Per-worker payload $\frac{N-1}{N}M$; the limiter can arise from startup, injection/reception, bisection, oversubscription, routing, granularity, or skew.                                       |
 
 : **The Six Collective Primitives**: What each primitive computes, its primary use, and its communication cost, ordered from the narrowest pattern (Broadcast) to the most general (AllToAll). {#tbl-collective-primitives tbl-colwidths="[14,30,27,29]"}
@@ -3725,13 +3725,13 @@ Gloo\index{Gloo} prioritizes portability over the GPU-specific memory paths and 
 
 The selection matrix in @tbl-library-selection summarizes those axes. The point is not to memorize library names; it is to choose the backend whose memory path, topology model, portability constraints, and debugging visibility match the job.
 
-| **Scenario**                      |         **Recommended Library**         | **Rationale**                                |
-|:----------------------------------|:---------------------------------------:|:---------------------------------------------|
-| **Multi-GPU training (NVIDIA)**   |                   NCCL                  | GPUDirect, kernel fusion, NVLink-aware       |
-| **CPU-only distributed training** |               Gloo or MPI               | Mature CPU optimizations                     |
-| **Development/debugging**         |                   Gloo                  | Cross-platform, no CUDA dependency           |
-| **Mixed vendor GPUs**             | Vendor library per group; Gloo fallback | NCCL, RCCL, and oneCCL are vendor-specific   |
-| **HPC integration**               |                MPI + NCCL               | MPI for job launch, NCCL for GPU collectives |
+| **Scenario**                      |              **Recommended Library**              | **Rationale**                                |
+|:----------------------------------|:-------------------------------------------------:|:---------------------------------------------|
+| **Multi-GPU training (NVIDIA)**   |                        NCCL                       | GPUDirect, kernel fusion, NVLink-aware       |
+| **CPU-only distributed training** |                    Gloo or MPI                    | Mature CPU optimizations                     |
+| **Development/debugging**         |                        Gloo                       | Cross-platform, no CUDA dependency           |
+| **Mixed vendor GPUs**             | Vendor-specific groups; validate cross-group path | NCCL, RCCL, and oneCCL are vendor-specific   |
+| **HPC integration**               |                     MPI + NCCL                    | MPI for job launch, NCCL for GPU collectives |
 
 : **Communication Library Selection**: Choose based on hardware and workload requirements. Many NVIDIA GPU training deployments use NCCL; Gloo serves as a portable fallback. {#tbl-library-selection}
 
