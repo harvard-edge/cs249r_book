@@ -222,7 +222,7 @@ pics/dataP/.style = {
 \begin{scope}[local bounding box=STREAMING,scale=\scalefac, every node/.append style={transform shape},
 x=10mm,y=10mm]
 \node[mycylinder,fill=\filllcolor!50] (A) {};
-\node[mycylinder, above=of A,fill=\filllcolor!50] (\BatchSize) {};
+\node[mycylinder, above=of A,fill=\filllcolor!50] (B) {};
 \node[mycylinder, above=of B,fill=\filllcolor!10] (C) {};
 \fill[\filllcolor!50!black]($(C.west)!0.12!(C.east)$)circle(3pt);
 \fill[\filllcolor!50!black]($(B.west)!0.12!(B.east)$)circle(3pt);
@@ -1449,6 +1449,7 @@ From a systems engineering perspective, this translation reveals *why* neural ne
 The transition from individual neurons to integrated systems requires navigating the central trade-off\index{Neural network!capacity vs. cost trade-off} between representational capacity and computational cost. Digital hardware performs arithmetic quickly, but the volume of operations and data movement in deep networks creates bottlenecks that a single-neuron view does not expose.
 
 Replicating intelligent behavior in silicon confronts three interrelated system-level constraints. As models grow, moving parameters and activations can become more limiting than arithmetic throughput. Concurrency clashes with dependency: many operations inside a layer can run in parallel, but layer $\LayerIndex+1$ still depends on layer $\LayerIndex$, placing a lower bound on end-to-end latency. Precision also trades against memory, throughput, and energy: wider representations consume more storage and data movement, while narrower formats require evidence that task quality remains acceptable.
+
 Addressing these constraints requires two complementary strategies. An architectural inductive bias is a built-in structural assumption about the data: convolutional networks assume nearby pixels matter together in images, while recurrent networks assume order matters in sequences. Encoding those assumptions restricts the function class toward structures expected to be useful [@mitchell1980need]. Computational scaling supplies additional capacity and optimization effort. Modern AI engineering combines both approaches, using architectural structure to make effective use of available scale.
 
 ## Neural Network Fundamentals {#sec-neural-computation-neural-network-fundamentals-07e4}
@@ -1606,7 +1607,7 @@ $$ z_j = \sum_i (x_i \cdot w_{ij}) + b_j $$ {#eq-weighted-sum-bias}
 
 With this weighted sum in hand, a suitable output activation and loss can support regression or classification. A binary linear-threshold classifier selects one of two classes around a threshold; multiclass networks instead produce several scores and commonly normalize them into probabilities with softmax, an output function developed with the other activation functions below.
 
-Under the direct scalar, no-reuse accounting established earlier, one neuron with $\LayerInputAndOutputWidths$ inputs performs $\LayerInputAndOutputWidths$ multiply-accumulate operations and moves its inputs, weights, bias, and output. What the formalization adds is the layer view. A dense layer of $\LayerInputAndOutputWidthsTwo$ neurons repeats the weighted sum $\LayerInputAndOutputWidthsTwo$ times, so its arithmetic cost is $\LayerInputAndOutputWidths \times \LayerInputAndOutputWidthsTwo$ MACs—exactly the matrix multiplication $\mathbf{x}\mathbf{W}$ that hardware must execute, and the form in which the rest of this chapter counts work.
+Under the direct scalar, no-reuse accounting established earlier, one neuron with $\LayerInputWidth$ inputs performs $\LayerInputWidth$ multiply-accumulate operations and moves its inputs, weights, bias, and output. What the formalization adds is the layer view. A dense layer of $\LayerOutputWidth$ neurons repeats the weighted sum $\LayerOutputWidth$ times, so its arithmetic cost is $\LayerInputWidth \times \LayerOutputWidth$ MACs—exactly the matrix multiplication $\mathbf{x}\mathbf{W}$ that hardware must execute, and the form in which the rest of this chapter counts work.
 
 #### Nonlinear activation functions {#sec-neural-computation-nonlinear-activation-functions-38bc}
 
@@ -2013,12 +2014,12 @@ The learnable parameters[^fn-parameter-memory-cost] of neural networks, weights 
 
 #### Weight matrices {#sec-neural-computation-weight-matrices-9f9a}
 
-Weights\index{Weights!matrix organization}\index{Weight matrix!layer connections} determine how strongly inputs influence neuron outputs. In dense layers, these weights organize into matrices that map efficiently to linear-algebra kernels. In a layer with $\LayerInputAndOutputWidths$ input features and $\LayerInputAndOutputWidthsTwo$ neurons, the weights form a matrix $\mathbf{W} \in \mathbb{R}^{\LayerInputAndOutputWidths \times \LayerInputAndOutputWidthsTwo}$, where each column represents the weights for a single neuron. A matrix-vector product processes one input, while a matrix-matrix product processes a batch of inputs and can expose more parallel work and data reuse.
+Weights\index{Weights!matrix organization}\index{Weight matrix!layer connections} determine how strongly inputs influence neuron outputs. In dense layers, these weights organize into matrices that map efficiently to linear-algebra kernels. In a layer with $\LayerInputWidth$ input features and $\LayerOutputWidth$ neurons, the weights form a matrix $\mathbf{W} \in \mathbb{R}^{\LayerInputWidth \times \LayerOutputWidth}$, where each column represents the weights for a single neuron. A matrix-vector product processes one input, while a matrix-matrix product processes a batch of inputs and can expose more parallel work and data reuse.
 
-For a single neuron $j$, preactivation is the scalar dot product $z_j = \sum_{i=1}^{\LayerInputAndOutputWidths} (x_i \cdot w_{ij}) + b_j$. For a layer of $\LayerInputAndOutputWidthsTwo$ neurons, evaluating units independently wastes opportunities for SIMD vectorization and cache reuse. Formulating the layer as a matrix multiplication computes all $\LayerInputAndOutputWidthsTwo$ preactivations in a single dense linear-algebra call (@eq-layer-linear):
+For a single neuron $j$, preactivation is the scalar dot product $z_j = \sum_{i=1}^{\LayerInputWidth} (x_i \cdot w_{ij}) + b_j$. For a layer of $\LayerOutputWidth$ neurons, evaluating units independently wastes opportunities for SIMD vectorization and cache reuse. Formulating the layer as a matrix multiplication computes all $\LayerOutputWidth$ preactivations in a single dense linear-algebra call (@eq-layer-linear):
 $$ \mathbf{z} = \mathbf{x}\mathbf{W} + \mathbf{b} $$ {#eq-layer-linear}
 
-This equation computes every neuron's preactivation for one input: the vector $\mathbf{x}$ multiplied by the weight matrix $\mathbf{W}$ produces all $\LayerInputAndOutputWidthsTwo$ values, and the bias vector $\mathbf{b}$ shifts each one. For a batch, the input becomes a matrix and the same layer becomes a matrix-matrix product. These kernels account for much of the work in dense feed-forward networks, but whether they dominate runtime—and whether they are compute bound or memory bound—depends on their dimensions, batch size, precision, implementation, and target hardware.
+This equation computes every neuron's preactivation for one input: the vector $\mathbf{x}$ multiplied by the weight matrix $\mathbf{W}$ produces all $\LayerOutputWidth$ values, and the bias vector $\mathbf{b}$ shifts each one. For a batch, the input becomes a matrix and the same layer becomes a matrix-matrix product. These kernels account for much of the work in dense feed-forward networks, but whether they dominate runtime—and whether they are compute bound or memory bound—depends on their dimensions, batch size, precision, implementation, and target hardware.
 
 This matrix organization is more than mathematical convenience; it reflects how modern neural networks are implemented for efficiency. Each weight $w_{ij}$ represents the strength of the connection between input feature $i$ and neuron $j$ in the layer.
 
@@ -2114,10 +2115,10 @@ The canonical case studied here connects each neuron in a layer to every neuron 
 
 Each neuron in a layer also has an associated bias term[^fn-bias-parameter-cost]\index{Bias!activation threshold}. While weights determine the relative importance of inputs, biases allow neurons to shift their activation functions. This shifting is important for learning, as it gives the network flexibility to fit more complex patterns.
 
-For a layer with $\LayerInputAndOutputWidthsTwo$ neurons, the bias terms form a vector $\mathbf{b} \in \mathbb{R}^{\LayerInputAndOutputWidthsTwo}$. During layer execution, this bias vector is added to the weighted sum of inputs (the same form as @eq-layer-linear), shifting each neuron's activation threshold independently:
+For a layer with $\LayerOutputWidth$ neurons, the bias terms form a vector $\mathbf{b} \in \mathbb{R}^{\LayerOutputWidth}$. During layer execution, this bias vector is added to the weighted sum of inputs (the same form as @eq-layer-linear), shifting each neuron's activation threshold independently:
 $$ \mathbf{z} = \mathbf{x}\mathbf{W} + \mathbf{b} $$
 
-[^fn-bias-parameter-cost]: **Bias terms**\index{Bias!parameter overhead}: Biases add one parameter per neuron, compared with $\LayerInputAndOutputWidths$ weights for a neuron with $\LayerInputAndOutputWidths$ inputs, so they account for $1/(\LayerInputAndOutputWidths+1)$ of that layer's parameters. Their model-wide share and effect on accuracy depend on layer widths, architecture, and normalization. Some modern architectures omit biases in layers followed by batch normalization because the normalization transform includes a learned shift.
+[^fn-bias-parameter-cost]: **Bias terms**\index{Bias!parameter overhead}: Biases add one parameter per neuron, compared with $\LayerInputWidth$ weights for a neuron with $\LayerInputWidth$ inputs, so they account for $1/(\LayerInputWidth+1)$ of that layer's parameters. Their model-wide share and effect on accuracy depend on layer widths, architecture, and normalization. Some modern architectures omit biases in layers followed by batch normalization because the normalization transform includes a learned shift.
 
 The organization of weights and biases across a feed-forward network follows a systematic pattern. For each parameterized affine layer $\LayerIndex$, three components define its computation; the weights and biases are learned, while the activation function is usually chosen by the designer:
 
@@ -2579,7 +2580,7 @@ Parameter count grows with network width and depth. In the MNIST network, an inp
 
 Parameter count tells the engineer what a model must store; it says nothing about whether the model will *learn*. That depends on how those parameters are first set. Parameter initialization\index{Initialization!Xavier/Glorot}\index{Initialization!He initialization} is critical to network behavior. Setting all parameters to zero would cause neurons in a layer to behave identically, preventing diverse feature learning. Instead, weights are typically initialized randomly, often using specific strategies like Xavier/Glorot initialization[^fn-glorot-init-variance] [@glorot2010xavier] or He initialization [@he2015], while biases often start at small constant values or zeros. The scale of these initial values matters: values that are too large or too small lead to poor learning dynamics.
 
-[^fn-glorot-init-variance]: **Xavier/Glorot initialization**\index{Initialization!glorot, variance scaling}: For a layer with $\LayerInputAndOutputWidths$ inputs and $\LayerInputAndOutputWidthsTwo$ outputs, a common Glorot choice uses weight variance $2/(\LayerInputAndOutputWidths+\LayerInputAndOutputWidthsTwo)$ to balance forward activations and backward gradients [@glorot2010xavier]. The fix costs zero additional FLOPs; it is purely a matter of setting the random distribution at startup.
+[^fn-glorot-init-variance]: **Xavier/Glorot initialization**\index{Initialization!glorot, variance scaling}: For a layer with $\LayerInputWidth$ inputs and $\LayerOutputWidth$ outputs, a common Glorot choice uses weight variance $2/(\LayerInputWidth+\LayerOutputWidth)$ to balance forward activations and backward gradients [@glorot2010xavier]. The fix costs zero additional FLOPs; it is purely a matter of setting the random distribution at startup.
 
 The distribution of parameters affects information flow through layers. In digit recognition, if weights are too small, important input details might not propagate to later layers. If too large, the network might amplify noise. Biases help adjust the activation threshold of each neuron, enabling the network to learn optimal decision boundaries.
 
@@ -2705,7 +2706,7 @@ Line2/.style={line width=0.85pt,black!60,text=black}
         \foreach \i in {1,2,3,4} {
             \draw[Line,-latex] (3C\i) --(4C1);
         }
-\node[Box,right=1.95of 4C1](B1){Prediction\\ $(\PredictedOutput)$};
+\node[Box,right=1.95of 4C1](B1){Prediction\\ $({\hat{\mathbf{y}}})$};
 \node[Box,right=of B1,fill=VioletL2,draw=VioletLine2](B2){True Value\\ $(\mathbf{y})$};
 \node[myelipse,below=1.5 of $(B1)!0.5!(B2)$,fill=BlueL,draw=BlueLine,
             ](B3){Loss\\ Function $\mathcal{L}$};
@@ -2722,11 +2723,11 @@ Line2/.style={line width=0.85pt,black!60,text=black}
 \draw[mylineD,-latex,shorten >=2pt](B6)--(L34.10);
 \draw[mylineD,-latex,shorten >=2pt](B6)--(L33.180);
 %%
-\path[](1C1.west)--++(90:1.35)coordinate(A)-|coordinate(\BatchSize)(4C1.east);
+\path[](1C1.west)--++(90:1.35)coordinate(A)-|coordinate(B)(4C1.east);
 \path[](1C3.west)--++(270:2.9)coordinate(C)-|coordinate(D)(4C1.east);
 
 \draw[RedLine, -{Triangle[width = 12pt, length = 5pt]}, line width = 5pt]
-(A)--node[above,text=black]{Forward Propagation}(\BatchSize);
+(A)--node[above,text=black]{Forward Propagation}(B);
 \draw[OrangeLine, -{Triangle[width = 12pt, length = 5pt]}, line width = 5pt]
 (D)--node[below,text=black]{Backpropagation}(C);
 \end{tikzpicture}}
@@ -3791,7 +3792,7 @@ Memory estimation:
 
 Compute estimation:
 
-- FC layer FLOPs: $2 \times \LayerInputAndOutputWidths \times \LayerInputAndOutputWidthsTwo \times \BatchSize$ (multiply-add = 2 ops)
+- FC layer FLOPs: $2 \times \LayerInputWidth \times \LayerOutputWidth \times \BatchSize$ (multiply-add = 2 ops)
 - MACs to FLOPs: Multiply by 2
 - Compute utilization proxy: $\text{achieved FLOP/s} / \PeakRate$
 
@@ -4879,7 +4880,7 @@ pics/dataP/.style = {
         \pgfkeys{/channel/.cd, #1}
 \begin{scope}[local bounding box=STREAMING,scale=\scalefac, every node/.append style={transform shape}]
 \node[mycylinder,fill=\filllcolor!50] (A) {};
-\node[mycylinder, above=of A,fill=\filllcolor!50] (\BatchSize) {};
+\node[mycylinder, above=of A,fill=\filllcolor!50] (B) {};
 \node[mycylinder, above=of B,fill=\filllcolor!10] (C) {};
 \fill[\filllcolor!50!black]($(C.west)!0.12!(C.east)$)circle(3pt);
 \fill[\filllcolor!50!black]($(B.west)!0.12!(B.east)$)circle(3pt);
