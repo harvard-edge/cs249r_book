@@ -746,6 +746,7 @@ The dynamic autograd tape expresses data-dependent behavior directly in the host
 ##### Systems implications: Overhead {.unnumbered}
 
 This flexibility imposes latency costs that map directly to the iron law. Each training step constructs an autograd tape dynamically, adding host-side Python dispatch latency and tape allocation to $\Latency$. Because every operation traverses the framework dispatcher before a device kernel launches, host overhead quickly dominates when individual kernels execute in single-digit microseconds. Eager execution also lacks a whole-graph view, preventing the framework from fusing element-wise chains\index{Kernel fusion!static graph optimization} into single GPU launches or pre-allocating a static memory arena for intermediate activations ($\DataVolume$). The autograd tape must retain every tensor requested by registered backward rules, holding memory until backpropagation consumes it. Together, these costs impose a throughput ceiling on fine-grained workloads where dispatch latency overshadows device arithmetic.
+
 ```{python}
 #| echo: false
 #| label: dispatch-tax-calc
@@ -2206,6 +2207,7 @@ Frameworks provide three graph-level controls to manage this trade-off. Gradient
 ::: {.column-margin .margin-pointer}
 ↪ The decision of when these single-machine levers stop being enough and training must scale beyond one machine is developed in @sec-model-training-scale-physical-ceiling-e06c.
 :::
+
 ##### Extensibility and control {.unnumbered}
 
 Production training systems require fine-grained control over gradient propagation beyond standard backward sweeps. In practice, workloads demand three core capabilities: selective gradient computation\index{Selective gradient computation} for freezing layers during transfer learning via `requires_grad=False` or `.detach()`; gradient inspection and modification\index{Gradient inspection} for clipping, debugging, or logging intermediate adjoints via runtime hooks; and custom differentiation rules\index{Custom differentiation rule} for non-standard operations such as specialized CUDA kernels or novel activation functions.
@@ -2950,6 +2952,7 @@ While the high-level API focuses on math, the framework backend plays the role t
 :::
 
 On the data-movement side, the framework coordinates with this runtime to implement **DMA**\index{DMA!PCIe data movement interface} over the PCIe\index{PCIe!host-device interconnect} bus. The bandwidth gap between the host (CPU) and device (GPU) is the primary "Data Loading Bottleneck": @sec-appdx-machine-foundations-bandwidth-vs-latency-5320 models this transfer, separating the two constraints, $T = \Latency + \DataVolume/\Bandwidth$, that determine whether a given data-loading strategy is limited by per-transfer latency or by sustained bandwidth. Frameworks mitigate this through pinned memory\index{Pinned memory!definition} (page-locked host memory), which enables DMA transfers without pageable-memory staging. This "HW/OS" interface is what makes high-throughput training loops possible on a single machine.
+
 Every tensor resides on a specific device, and cross-device operations incur transfer costs that can dominate execution time. PCIe 4.0 delivers `{python} DeviceBandwidthHierarchy.pcie4_gb_per_s_str` between CPU and GPU, while HBM2e provides `{python} DeviceBandwidthHierarchy.a100_bw_tb_per_s_str` within the GPU. This `{python} DeviceBandwidthHierarchy.pcie_to_hbm_gap_mult_str` bandwidth gap means a single misplaced tensor transfer can erase the entire speedup from GPU acceleration.
 
 ::: {.column-margin}
@@ -2965,6 +2968,7 @@ Three systems principles govern effective device and memory management: understa
 The cost of moving data between devices varies by orders of magnitude depending on the interconnect.[^fn-nvlink-bandwidth-hierarchy] @Tbl-device-transfer-overhead shows transfer times for a $1000{\times}1000$ float32 tensor (4 MB)—roughly the size of a typical activation tensor in a moderately sized model. The numbers reveal why careless device placement can erase any speedup from GPU acceleration.
 
 [^fn-nvlink-bandwidth-hierarchy]: **NVLink**\index{NVLink!bandwidth hierarchy}: NVIDIA's high-bandwidth GPU-to-GPU interconnect, providing `{python} DeviceBandwidthHierarchy.nvlink_a100_gb_per_s_str` bidirectional bandwidth (NVLink 3.0 on A100) compared to `{python} DeviceBandwidthHierarchy.pcie4_bidir_gb_per_s_str` for PCIe 4.0 x16. This ~10$\times$ bandwidth advantage determines whether tensor parallelism, splitting one large tensor computation across multiple GPUs, is practical for a given model size: GPUs connected only by PCIe can make the $\DataVolume/\Bandwidth$ communication term dominate total training time, erasing the benefit of additional compute.
+
 | **Interconnect** |                                                                             **Bandwidth**                                                                             |                   **Transfer Time**                   | **Path**       |
 |:-----------------|:---------------------------------------------------------------------------------------------------------------------------------------------------------------------:|:-----------------------------------------------------:|:---------------|
 | **PCIe 3.0 x16** |                                                         `{python} DeviceBandwidthHierarchy.pcie3_gb_per_s_str`                                                        |  `{python} DeviceBandwidthHierarchy.pcie3_4mb_ms_str` | Host to device |

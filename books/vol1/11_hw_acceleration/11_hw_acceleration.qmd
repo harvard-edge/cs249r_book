@@ -1117,9 +1117,9 @@ output = activation(
 
 :::
 
-While graph representations group these steps into coarse tensor operators, execution on physical hardware requires scheduling individual scalar operations. Lowering the matrix multiplication to loop nests (@lst-loop_level_dense) makes the execution structure explicit: three nested iterations traverse the batch, output feature, and reduction dimensions, establishing $\mathcal{O}(B \times \LayerInputAndOutputWidths \times \LayerInputAndOutputWidthsTwo)$ arithmetic complexity.
+While graph representations group these steps into coarse tensor operators, execution on physical hardware requires scheduling individual scalar operations. Lowering the matrix multiplication to loop nests (@lst-loop_level_dense) makes the execution structure explicit: three nested iterations traverse the batch, output feature, and reduction dimensions, establishing $\mathcal{O}(B \times \LayerInputWidth \times \LayerOutputWidth)$ arithmetic complexity.
 
-::: {#lst-loop_level_dense lst-cap="**Processor-Level Execution**: Nested loops reveal the $\mathcal{O}(B \times \LayerInputAndOutputWidths \times \LayerInputAndOutputWidthsTwo)$ multiply-accumulate operations that accelerators must execute, with `{python} WeightMatrixCalc.wm_batch_macs_m_str` for $B$=`{python} WeightMatrixCalc.wm_batch_str`, $\LayerInputAndOutputWidths$=`{python} WeightMatrixCalc.wm_in_str`, $\LayerInputAndOutputWidthsTwo$=`{python} WeightMatrixCalc.wm_out_str` configurations."}
+::: {#lst-loop_level_dense lst-cap="**Processor-Level Execution**: Nested loops reveal the $\mathcal{O}(B \times \LayerInputWidth \times \LayerOutputWidth)$ multiply-accumulate operations that accelerators must execute, with `{python} WeightMatrixCalc.wm_batch_macs_m_str` for $B$=`{python} WeightMatrixCalc.wm_batch_str`, $\LayerInputWidth$=`{python} WeightMatrixCalc.wm_in_str`, $\LayerOutputWidth$=`{python} WeightMatrixCalc.wm_out_str` configurations."}
 
 ```{.python}
 # Total operations: batch_size × output_size × input_size MACs
@@ -3725,6 +3725,7 @@ The roofline visualization shows performance (TFLOP/s) on the vertical axis and 
 ::: {.column-margin .margin-pointer}
 ↪ The optimizations that pay off in each regime, and the ones that waste effort, are operationalized in @sec-appdx-dam-taxonomy-bottleneck-diagnostic-3fc9.
 :::
+
 ### Hardware ridge points {#sec-hardware-acceleration-hardware-ridge-points-b5b6}
 
 The ridge point\index{Ridge Point!hardware comparison}, the hardware balance $\RooflineRidgePoint$ established in @sec-hardware-acceleration-hardware-balance, is the arithmetic-intensity threshold at which the lower modeled ceiling changes from bandwidth to compute. @Tbl-ridge-points quantifies this boundary across three generations of NVIDIA accelerators:
@@ -4252,10 +4253,10 @@ class BatchAiCalc:
 
 ::: {#nbk-hw-acceleration-batch-size-arithmetic-intensity .callout-notebook title="Batch size and arithmetic intensity"}
 
-Increasing batch size\index{Batch Size!arithmetic intensity impact} improves arithmetic intensity for matrix operations by amortizing weight loading. @Eq-batch-ai formalizes this relationship for an idealized FP16/BF16 dense layer $(\BatchSize{\times}\LayerInputAndOutputWidths){\times}(\LayerInputAndOutputWidths{\times}\LayerInputAndOutputWidthsTwo)$, counting one read each of the input and weights and one write of the output, where $\BatchSize$ is batch size and $\LayerInputAndOutputWidths$ and $\LayerInputAndOutputWidthsTwo$ are the layer's input and output widths:
-$$\ArithmeticIntensity = \frac{2\BatchSize\LayerInputAndOutputWidths\LayerInputAndOutputWidthsTwo}{2\BatchSize\LayerInputAndOutputWidths + 2\LayerInputAndOutputWidths\LayerInputAndOutputWidthsTwo + 2\BatchSize\LayerInputAndOutputWidthsTwo} \approx \frac{2\BatchSize\LayerInputAndOutputWidths\LayerInputAndOutputWidthsTwo}{2\LayerInputAndOutputWidths\LayerInputAndOutputWidthsTwo} = B \quad (\text{when } 2\LayerInputAndOutputWidths\LayerInputAndOutputWidthsTwo \gg 2\BatchSize(\LayerInputAndOutputWidths+\LayerInputAndOutputWidthsTwo))$$ {#eq-batch-ai}
+Increasing batch size\index{Batch Size!arithmetic intensity impact} improves arithmetic intensity for matrix operations by amortizing weight loading. @Eq-batch-ai formalizes this relationship for an idealized FP16/BF16 dense layer $(\BatchSize{\times}\LayerInputWidth){\times}(\LayerInputWidth{\times}\LayerOutputWidth)$, counting one read each of the input and weights and one write of the output, where $\BatchSize$ is batch size and $\LayerInputWidth$ and $\LayerOutputWidth$ are the layer's input and output widths:
+$$\ArithmeticIntensity = \frac{2\BatchSize\LayerInputWidth\LayerOutputWidth}{2\BatchSize\LayerInputWidth + 2\LayerInputWidth\LayerOutputWidth + 2\BatchSize\LayerOutputWidth} \approx \frac{2\BatchSize\LayerInputWidth\LayerOutputWidth}{2\LayerInputWidth\LayerOutputWidth} = B \quad (\text{when } 2\LayerInputWidth\LayerOutputWidth \gg 2\BatchSize(\LayerInputWidth+\LayerOutputWidth))$$ {#eq-batch-ai}
 
-Example: Dense layer with $\LayerInputAndOutputWidths = \LayerInputAndOutputWidthsTwo$ = `{python} BatchAiCalc.matrix_dim_str` (FP16)
+Example: Dense layer with $\LayerInputWidth = \LayerOutputWidth$ = `{python} BatchAiCalc.matrix_dim_str` (FP16)
 
 - Batch = `{python} BatchAiCalc.batch_small_str`: $\ArithmeticIntensity$ ≈ `{python} BatchAiCalc.batch1_ai_flops_per_byte_str` (memory bound)
 - Batch = `{python} BatchAiCalc.batch_medium_str`: $\ArithmeticIntensity$ ≈ `{python} BatchAiCalc.batch32_ai_flops_per_byte_str` (memory bound)
@@ -4453,7 +4454,7 @@ Evaluating these trade-offs requires navigating an unconstrained search space go
 
 #### Ordering computation and execution {#sec-hardware-acceleration-ordering-computation-execution-59e5}
 
-Machine learning workloads are typically expressed as nested loops that iterate over tensor dimensions. For instance, a matrix multiplication kernel loops over batch size ($B$), input features ($\LayerInputAndOutputWidths$), and output features ($\LayerInputAndOutputWidthsTwo$). The loop execution order\index{Loop Ordering!computational efficiency} dictates which tensor elements remain resident in registers or SRAM between iterations, directly determining data locality and reuse.
+Machine learning workloads are typically expressed as nested loops that iterate over tensor dimensions. For instance, a matrix multiplication kernel loops over batch size ($B$), input features ($\LayerInputWidth$), and output features ($\LayerOutputWidth$). The loop execution order\index{Loop Ordering!computational efficiency} dictates which tensor elements remain resident in registers or SRAM between iterations, directly determining data locality and reuse.
 
 Ignoring dependences and equivalent orderings, the number of ways to arrange $n_{\text{loops}}$ loops has the toy upper bound:
 $$
@@ -5892,7 +5893,7 @@ class FpSmallBatchCalc:
 
 **Pitfall**: *Deploying small-batch inference workloads on high-compute accelerators.*
 
-Small-batch dense inference can use only a small fraction of arithmetic peak because single-sample execution lacks cross-sample parameter reuse. For a dense linear projection with widths $\LayerInputAndOutputWidths=\LayerInputAndOutputWidthsTwo=2048$, a single request ($\BatchSize=1$) is modeled as streaming the entire weight tensor from device memory to execute a matrix-vector product, yielding an arithmetic intensity of only `{python} FpSmallBatchCalc.fp_ai_b1_flops_per_byte_str`. At batch size $\BatchSize=256$, weight reuse amortizes memory transfers across tokens, elevating arithmetic intensity to `{python} FpSmallBatchCalc.fp_ai_b256_flops_per_byte_str`. At $\BatchSize=1$, memory bandwidth bounds performance at `{python} FpSmallBatchCalc.fp_a100_roof_b1_tflop_per_s_str` on an A100 and `{python} FpSmallBatchCalc.fp_t4_roof_b1_tflop_per_s_str` on a T4. Although the T4 provides a lower peak of `{python} FpSmallBatchCalc.fp_t4_flops_tflop_per_s_str` with a ridge point of `{python} FpSmallBatchCalc.fp_t4_ridge_str`, the two batch-1 ceilings differ by `{python} FpSmallBatchCalc.fp_roof_ratio_b1_mult_str`, which is exactly their memory-bandwidth ratio; the A100's `{python} FpSmallBatchCalc.fp_peak_ratio_mult_str` advantage in peak compute contributes nothing. The A100 costs `{python} FpSmallBatchCalc.fp_cost_ratio_mult_str` as much as the T4, so their modeled batch-1 throughput ceilings per dollar are nearly the same. Actual procurement requires measured latency, throughput, memory fit, and the intended request mix. System architects must align accelerator selection with operational batch sizes and latency objectives.
+Small-batch dense inference can use only a small fraction of arithmetic peak because single-sample execution lacks cross-sample parameter reuse. For a dense linear projection with widths $\LayerInputWidth=\LayerOutputWidth=2048$, a single request ($\BatchSize=1$) is modeled as streaming the entire weight tensor from device memory to execute a matrix-vector product, yielding an arithmetic intensity of only `{python} FpSmallBatchCalc.fp_ai_b1_flops_per_byte_str`. At batch size $\BatchSize=256$, weight reuse amortizes memory transfers across tokens, elevating arithmetic intensity to `{python} FpSmallBatchCalc.fp_ai_b256_flops_per_byte_str`. At $\BatchSize=1$, memory bandwidth bounds performance at `{python} FpSmallBatchCalc.fp_a100_roof_b1_tflop_per_s_str` on an A100 and `{python} FpSmallBatchCalc.fp_t4_roof_b1_tflop_per_s_str` on a T4. Although the T4 provides a lower peak of `{python} FpSmallBatchCalc.fp_t4_flops_tflop_per_s_str` with a ridge point of `{python} FpSmallBatchCalc.fp_t4_ridge_str`, the two batch-1 ceilings differ by `{python} FpSmallBatchCalc.fp_roof_ratio_b1_mult_str`, which is exactly their memory-bandwidth ratio; the A100's `{python} FpSmallBatchCalc.fp_peak_ratio_mult_str` advantage in peak compute contributes nothing. The A100 costs `{python} FpSmallBatchCalc.fp_cost_ratio_mult_str` as much as the T4, so their modeled batch-1 throughput ceilings per dollar are nearly the same. Actual procurement requires measured latency, throughput, memory fit, and the intended request mix. System architects must align accelerator selection with operational batch sizes and latency objectives.
 
 :::
 
