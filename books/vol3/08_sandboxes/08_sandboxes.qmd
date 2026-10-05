@@ -717,6 +717,46 @@ A **reset contract**\index{Reset contract!definition} defines the precise condit
 
 To eliminate cross-tenant leakage, the supervisor immediately fences an expiring lease before cleanup begins. It halts incoming tool invocations under that lease and revokes its communication channels, credentials, and network authority. Next, the supervisor quiesces and terminates all owned execution, including child processes, background workers, and pending host-side tasks bound to the environment. A wall-clock timeout, error condition, or explicit cancellation signal initiates this sequence, but teardown requires positive confirmation from the enforcement layer rather than assumptions based on elapsed time. If the virtualization layer cannot conclusively verify that all execution has ceased or that shared hardware resources have been cleanly severed, the supervisor isolates and destroys the instance rather than returning it to the pool.
 
+On a POSIX host, that boundary for a local command is typically a **process group**\index{POSIX process group!definition}, which establishes the set of processes reached by a single signal. A tool that executes `bash -c "make && pytest"` spawns a shell, which in turn spawns `make`, compiler subprocesses, the test runner, and multiple worker threads or forks. Signaling only the top-level shell process terminates the shell, but leaves orphaned descendants reparented to the system init process (`PID 1`). These orphaned processes continue consuming CPU cycles, holding file system locks, and keeping socket descriptors open. To prevent orphan leaks, the execution adapter configures each job as the leader of its own process group at spawn time—calling `setpgid(0, 0)` in the child before invoking `exec`—and directs all signals to the entire group. It sends `SIGTERM` first, granting processes a bounded grace period to flush buffers and release external resources, followed by an uncatchable `SIGKILL`. @Lst-vol3-process-group-teardown implements this escalation pattern and reports the verified outcome. If an untrusted process deliberately creates a new session or process group to escape group signaling, the runtime must rely on kernel-level isolation boundaries.
+
+
+::: {#lst-vol3-process-group-teardown lst-cap="**Process-group teardown with escalation**: The job leads its own group, so one signal reaches every descendant still in it. Liveness is probed with signal 0 after reaping exited children, and a group that survives `SIGKILL` is reported as unconfirmed rather than assumed stopped."}
+```python
+import os, signal, subprocess, time
+
+def spawn_job(argv):
+    proc = subprocess.Popen(argv, process_group=0)  # setpgid(0, 0)
+    return proc.pid                  # the leader's PID is the group ID
+
+def group_alive(pgid):
+    try:                             # reap exited children of ours,
+        while os.waitpid(-pgid, os.WNOHANG)[0] > 0:  # or zombies
+            pass                                     # still count
+    except ChildProcessError:        # no children of ours remain
+        pass
+    try:
+        os.killpg(pgid, 0)           # signal 0 probes, delivers nothing
+        return True
+    except ProcessLookupError:
+        return False
+
+def terminate_group(pgid, grace_s=3.0):
+    for sig, wait_s in ((signal.SIGTERM, grace_s), (signal.SIGKILL, 1.0)):
+        try:
+            os.killpg(pgid, sig)
+        except ProcessLookupError:   # group already gone
+            return "exited" if sig == signal.SIGTERM else "terminated"
+        deadline = time.monotonic() + wait_s
+        while time.monotonic() < deadline:
+            if not group_alive(pgid):
+                return "terminated" if sig == signal.SIGTERM else "killed"
+            time.sleep(0.05)
+    return "unconfirmed"             # report it; do not claim a stop
+```
+:::
+
+Two subtle POSIX semantics govern the correctness of this routine. First, when invoking non-blocking `os.waitpid(-pgid, os.WNOHANG)`, a return value of zero indicates that child processes still exist in the group and none has changed state yet; it does not indicate that the process group has cleared. The runtime continues reaping until no direct child processes remain, at which point the system call raises `ChildProcessError`. Second, sending signal 0 via `os.killpg(pgid, 0)` delivers no actual signal to the target group; the kernel simply performs error checking, confirming whether any process matching that group ID still exists and is accessible. Probing with signal 0 directly determines whether any group member remains alive after signal delivery.
+
 Once all writers inside the sandbox are confirmed quiescent, the supervisor extracts and persists only those outputs explicitly permitted by the task's export policy. In a code repair scenario, these artifacts typically include the unified `git diff` of candidate edits and bounded test execution logs linked to the target repository commit. If an implementation attempts to export artifacts while the guest is still executing, it must enforce an explicit consistency boundary so that concurrent, in-flight writes cannot silently alter or corrupt the data being exported.
 
 With permitted artifacts preserved, the supervisor discards private mutable state or restores the environment from a trusted baseline, verifying readiness before assigning the sandbox to a new tenant. @Fig-vol3-sandbox-pool-lifecycle maps this sequence through the pool's operational lifecycle: instances restore from trusted baseline snapshots into a warm standby pool, transition to leased execution during an active task, and undergo automated verification to either recycle clean instances or destroy drifted environments. To prevent a generic "reset complete" signal from obscuring unhandled state, @tbl-vol3-reset-architectures categorizes the required disposition across four distinct operational domains.
