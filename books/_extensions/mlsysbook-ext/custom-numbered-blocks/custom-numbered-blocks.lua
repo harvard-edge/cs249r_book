@@ -255,7 +255,8 @@ end
 local function Meta_findChapterNumber(meta)
   local processedfile = pandoc.path.split_extension(PANDOC_STATE.output_file)
   fbx.isbook = meta.book ~= nil
-  fbx.ishtmlbook = meta.book ~= nil and not quarto.doc.is_format("pdf")
+  -- EPUB is rendered as one document like PDF, so it uses single-document numbering.
+  fbx.ishtmlbook = meta.book ~= nil and not quarto.doc.is_format("pdf") and not quarto.doc.is_format("epub")
   fbx.processedfile = processedfile
 
   fbx.output_file = PANDOC_STATE.output_file
@@ -267,6 +268,8 @@ local function Meta_findChapterNumber(meta)
     local chinfo = chapterinfo(meta.book, processedfile)
     if fbx.ishtmlbook then
       fbx.xreffile= "._htmlbook_xref.json"
+    elseif quarto.doc.is_format("epub") then
+      fbx.xreffile= "._epubbook_xref.json"
     else
       fbx.xreffile= "._pdfbook_xref.json"
       -- fbx.xreffile= "._"..chinfo.lastchapter.."_xref.json"
@@ -354,6 +357,9 @@ local function seed_global_counters(book, processedfile)
   for _, g in ipairs(fbx.global_scoped_groups) do
     fbx.counter[g.cntname] = 0
   end
+  -- ePub renders the whole book as one document, so Pandoc_prefix_count already
+  -- walks every callout in order; seeding here would count each one twice.
+  if quarto.doc.is_format("epub") then return end
 
   for _, v in ipairs(book.render) do
     if str(v.type) == "chapter" then
@@ -474,11 +480,6 @@ local function Meta_initClassDefaults (meta)
 end
 
 local initMeta = function(m)
-  -- Skip this extension entirely for ePub builds
-  -- ePub will use Quarto's native callout rendering with custom CSS
-  if quarto.doc.is_format("epub") then
-    return(m)
-  end
 
   -- Configuration is now only under filter-metadata
   local config = nil
@@ -1119,9 +1120,19 @@ local function Pandoc_makeListof(doc)
   return(doc)
 end
 
--- Skip all processing for ePub format - return empty filter list
+-- ePub keeps Quarto's native callout rendering and the shared EPUB CSS, so the
+-- title and rendering passes are skipped. It still needs numbering and xref
+-- resolution: without them every \ref{pri-...} renders as an empty "( )".
+-- (2026-10-04: 461 empty callout refs across the four EPUBs.)
 if quarto.doc.is_format("epub") then
-  return {}
+  return {
+      {Meta = initMeta}
+    , {Meta = Meta_readxref, Div=fboxDiv_mark_for_processing,
+       Pandoc = Pandoc_prefix_count}
+    , {Div = Divs_getid, Pandoc = Pandoc_preparexref}
+    , {Pandoc = Pandoc_resolvexref}
+    , {Div = Div_cleanupAttribs}
+  }
 end
 
 return{
