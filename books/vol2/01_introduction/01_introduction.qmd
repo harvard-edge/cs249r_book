@@ -1427,64 +1427,6 @@ When sizing GPT-3, the authors used scaling-law extrapolations to choose model s
 
 The practical decision is how to divide a fixed budget among model size, data, and training duration. Empirical curves estimate the quality attainable with that allocation; measurements of the chosen workload and fleet establish its execution cost. A plan needs both estimates before it can connect a target capability to a completion deadline or operating budget.
 
-### Sustainability and cost implications {#sec-vol2-intro-sustainability-cost-implications-0473}
-
-Scaling laws reveal performance pathways while exposing rapidly escalating resource demands. As models expand, training and deployment costs grow disproportionately, creating tension between performance gains and system efficiency. Training the largest models demands distributed infrastructures comprising hundreds or thousands of accelerators, consuming tens of thousands of GPU-days and millions of kilowatt-hours of electricity.
-
-```{python}
-#| echo: false
-#| label: grid-siting-contrast
-# ┌─────────────────────────────────────────────────────────────────────────────
-# │ GRID SITING CONTRAST (LEGO)
-# ├─────────────────────────────────────────────────────────────────────────────
-# │ Context: @sec-vol2-intro-sustainability-cost-implications-0473 and
-# │          footnote fn-carbon-grid-intensity.
-# │
-# │ Goal: Show how grid choice alone scales training emissions.
-# │ Show: Quebec ~20 g/kWh vs Poland ~820 g/kWh (~41x); GPT-3's reported
-# │       552 t CO2 training footprint.
-# │ How: Infrastructure.Grids carbon intensities; ratio at fixed energy;
-# │      Models.Language.GPT3.training_co2e (Patterson et al. 2021).
-# │
-# └─────────────────────────────────────────────────────────────────────────────
-from mlsysim import Infrastructure, Models
-from mlsysim.fmt import check, fmt_carbon_intensity, fmt_emissions, fmt_multiple
-
-class GridSitingContrast:
-    """Carbon-intensity contrast between a hydro grid and a coal grid."""
-
-    # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    intensity_quebec = Infrastructure.Grids.Quebec.carbon_intensity_g_kwh * (gram / kWh)
-    intensity_poland = Infrastructure.Grids.Poland.carbon_intensity_g_kwh * (gram / kWh)
-    gpt3_co2e = Models.Language.GPT3.training_co2e
-
-    # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    # Same energy on both grids, so the emissions ratio is the intensity ratio.
-    siting_ratio = (intensity_poland / intensity_quebec).to("").magnitude
-
-    # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
-    check(35 < siting_ratio < 45, f"Prose says roughly 40x; got {siting_ratio:.1f}")
-    check(100 <= gpt3_co2e.to(metric_ton).magnitude <= 1000, "Footnote places GPT-3 inside the 10^2 to 10^3 t range")
-
-    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
-    quebec_g_per_kwh_str = fmt_carbon_intensity(intensity_quebec, unit=gram / kWh, precision=0)
-    poland_g_per_kwh_str = fmt_carbon_intensity(intensity_poland, unit=gram / kWh, precision=0)
-    siting_ratio_mult_str = fmt_multiple(siting_ratio, precision=0)
-    gpt3_co2e_tonnes_str = fmt_emissions(gpt3_co2e, unit=metric_ton, precision=0)
-```
-
-The sharpest of these costs is environmental, and it turns on a decision the fleet operator actually makes: where to site the cluster. The same training run can differ by roughly `{python} GridSitingContrast.siting_ratio_mult_str` in CO~2~ emissions depending on grid location\index{Carbon emissions!grid intensity}, with grid carbon intensity ranging from about `{python} GridSitingContrast.quebec_g_per_kwh_str` of CO~2~ for Quebec hydropower to about `{python} GridSitingContrast.poland_g_per_kwh_str` for Poland coal.[^fn-carbon-grid-intensity] That single placement choice, together with job scheduling that shifts workloads to low-carbon hours, makes data-center siting a first-order infrastructure decision rather than an afterthought. Financial cost moves in parallel: training a large foundation model runs into the millions of dollars, which limits who can do large-scale research at all.
-
-::: {.column-margin .margin-pointer}
-↪ How site selection and grid carbon intensity set the emissions of the same training run is developed in @sec-sustainable-ai-scale-environmental-impact-ac9a.
-:::
-
-[^fn-carbon-grid-intensity]: **Carbon intensity of training**\index{Training!carbon intensity}: GPT-3 training emitted an estimated `{python} GridSitingContrast.gpt3_co2e_tonnes_str` of CO~2~, and published estimates place large-language-model training in the $10^2$ to $10^3$ ton range, though figures vary widely with hardware, utilization, and electricity mix [@patterson2021carbon].
-
-Scaling laws do not guarantee unbounded improvement. Each incremental performance gain must be weighed against its resource cost. As systems approach practical scaling limits, the emphasis shifts from scaling alone to efficient scaling: balancing performance, cost, energy consumption, and environmental impact.[^fn-scaling-saturation-qualifier]
-
-[^fn-scaling-saturation-qualifier]: **Scaling law saturation**\index{Scaling Laws!saturation}: Power-law relationships\index{Power-law relationship!scaling empirical basis} with a baseline loss term approach that floor rather than predict unbounded loss reduction. Downstream utility may also improve little even while the fitted loss decreases, which this book calls **semantic saturation**\index{Semantic saturation!definition}. That distinction motivates testing data efficiency\index{Data efficiency!scaling saturation mitigation} or model compression against task utility and resource cost; neither technique guarantees that a genuine information limit can be overcome.
-
 ### Scaling law breakdown conditions {#sec-vol2-intro-scaling-law-breakdown-conditions-1f8c}
 
 A resource plan must also identify where its empirical fit ceases to apply, because scaling laws are fitted within the regimes in which they were measured and need not hold beyond them. Unbalanced allocation is one source of inefficiency. @hoffmann2022chinchilla show that many large language models were undertrained because model size grew faster than training-token budgets, and that compute-optimal training requires scaling parameters and tokens together. Other diagnoses require different evidence. Training measurements can reveal an unsuitable optimization schedule; held-out evaluation can distinguish improved generalization from memorization; and execution traces can reveal whether bandwidth or I/O prevents the fleet from completing the planned work. A lower benchmark loss also does not establish robustness to adversarial or out-of-distribution inputs. @Tbl-scaling-breakdown organizes these possible failure modes, mapping each breakdown type\index{Scaling!breakdown type} to a candidate cause and a representative scenario. The table guides investigation rather than inferring a cause from a plateau alone.
@@ -1753,6 +1695,66 @@ That control plane first has to defend the fleet. ML systems face unique securit
 The same control plane must make the fleet auditable. Systems operating at scale attract regulatory attention. Regimes such as the **EU AI Act**\index{EU AI Act!definition} and local privacy laws make **auditability**\index{Auditability!definition} an architectural requirement for many deployments. Auditing whether a model trained on 10,000 GPUs ingested prohibited data requires end-to-end data lineage tracking, supported by controls that capture ingestion and subsequent transformations. A lineage record cannot establish the absence of inputs that were never recorded. Generating a human-interpretable explanation for a recommendation served within a tail-latency budget of tens of milliseconds demands techniques designed into the serving architecture. Meeting these requirements calls for technical capabilities (audit trails, bias testing, and consent management) built into the infrastructure from day one.
 
 Beyond legal compliance, the machine learning fleet carries ethical obligations. Recommendation algorithms shape public discourse; hiring algorithms affect livelihoods. Harmful outcomes can accumulate without a crash log. Responsible AI\index{Responsible AI!at scale} turns fairness, transparency, and accountability requirements into operational invariants\index{Invariant!responsible AI} with defined evidence, owners, and responses. A violation may require withholding a release, routing affected decisions to review, or suspending an unsafe operation; the response must contain the relevant harm. Together, these physical, logical, and societal constraints define the operating envelope of the fleet. Turning them into actionable systems decisions requires a diagnostic taxonomy that can isolate whether execution time is lost to local arithmetic, wire transit, or orchestration overhead.
+
+
+### Sustainability and cost implications {#sec-vol2-intro-sustainability-cost-implications-0473}
+
+Scaling laws reveal performance pathways while exposing rapidly escalating resource demands. As models expand, training and deployment costs grow disproportionately, creating tension between performance gains and system efficiency. Training the largest models demands distributed infrastructures comprising hundreds or thousands of accelerators, consuming tens of thousands of GPU-days and millions of kilowatt-hours of electricity.
+
+```{python}
+#| echo: false
+#| label: grid-siting-contrast
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ GRID SITING CONTRAST (LEGO)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @sec-vol2-intro-sustainability-cost-implications-0473 and
+# │          footnote fn-carbon-grid-intensity.
+# │
+# │ Goal: Show how grid choice alone scales training emissions.
+# │ Show: Quebec ~20 g/kWh vs Poland ~820 g/kWh (~41x); GPT-3's reported
+# │       552 t CO2 training footprint.
+# │ How: Infrastructure.Grids carbon intensities; ratio at fixed energy;
+# │      Models.Language.GPT3.training_co2e (Patterson et al. 2021).
+# │
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import Infrastructure, Models
+from mlsysim.fmt import check, fmt_carbon_intensity, fmt_emissions, fmt_multiple
+
+class GridSitingContrast:
+    """Carbon-intensity contrast between a hydro grid and a coal grid."""
+
+    # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
+    intensity_quebec = Infrastructure.Grids.Quebec.carbon_intensity_g_kwh * (gram / kWh)
+    intensity_poland = Infrastructure.Grids.Poland.carbon_intensity_g_kwh * (gram / kWh)
+    gpt3_co2e = Models.Language.GPT3.training_co2e
+
+    # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
+    # Same energy on both grids, so the emissions ratio is the intensity ratio.
+    siting_ratio = (intensity_poland / intensity_quebec).to("").magnitude
+
+    # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
+    check(35 < siting_ratio < 45, f"Prose says roughly 40x; got {siting_ratio:.1f}")
+    check(100 <= gpt3_co2e.to(metric_ton).magnitude <= 1000, "Footnote places GPT-3 inside the 10^2 to 10^3 t range")
+
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
+    quebec_g_per_kwh_str = fmt_carbon_intensity(intensity_quebec, unit=gram / kWh, precision=0)
+    poland_g_per_kwh_str = fmt_carbon_intensity(intensity_poland, unit=gram / kWh, precision=0)
+    siting_ratio_mult_str = fmt_multiple(siting_ratio, precision=0)
+    gpt3_co2e_tonnes_str = fmt_emissions(gpt3_co2e, unit=metric_ton, precision=0)
+```
+
+The sharpest of these costs is environmental, and it turns on a decision the fleet operator actually makes: where to site the cluster. The same training run can differ by roughly `{python} GridSitingContrast.siting_ratio_mult_str` in CO~2~ emissions depending on grid location\index{Carbon emissions!grid intensity}, with grid carbon intensity ranging from about `{python} GridSitingContrast.quebec_g_per_kwh_str` of CO~2~ for Quebec hydropower to about `{python} GridSitingContrast.poland_g_per_kwh_str` for Poland coal.[^fn-carbon-grid-intensity] That single placement choice, together with job scheduling that shifts workloads to low-carbon hours, makes data-center siting a first-order infrastructure decision rather than an afterthought. Financial cost moves in parallel: training a large foundation model runs into the millions of dollars, which limits who can do large-scale research at all.
+
+::: {.column-margin .margin-pointer}
+↪ How site selection and grid carbon intensity set the emissions of the same training run is developed in @sec-sustainable-ai-scale-environmental-impact-ac9a.
+:::
+
+[^fn-carbon-grid-intensity]: **Carbon intensity of training**\index{Training!carbon intensity}: GPT-3 training emitted an estimated `{python} GridSitingContrast.gpt3_co2e_tonnes_str` of CO~2~, and published estimates place large-language-model training in the $10^2$ to $10^3$ ton range, though figures vary widely with hardware, utilization, and electricity mix [@patterson2021carbon].
+
+Scaling laws do not guarantee unbounded improvement. Each incremental performance gain must be weighed against its resource cost. As systems approach practical scaling limits, the emphasis shifts from scaling alone to efficient scaling: balancing performance, cost, energy consumption, and environmental impact.[^fn-scaling-saturation-qualifier]
+
+[^fn-scaling-saturation-qualifier]: **Scaling law saturation**\index{Scaling Laws!saturation}: Power-law relationships\index{Power-law relationship!scaling empirical basis} with a baseline loss term approach that floor rather than predict unbounded loss reduction. Downstream utility may also improve little even while the fitted loss decreases, which this book calls **semantic saturation**\index{Semantic saturation!definition}. That distinction motivates testing data efficiency\index{Data efficiency!scaling saturation mitigation} or model compression against task utility and resource cost; neither technique guarantees that a genuine information limit can be overcome.
+
 
 ## The C$^3$ Taxonomy and Foundations of Scale {#sec-vol2-introduction-c-cube}
 
