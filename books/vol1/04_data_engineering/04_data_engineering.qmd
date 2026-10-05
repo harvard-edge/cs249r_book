@@ -2167,412 +2167,7 @@ Storage hierarchies and I/O bandwidth govern data pipeline throughput alongside 
 
 Choosing between ingestion patterns requires matching workload characteristics to infrastructure capabilities. Streaming workloads require explicit guarantees on message durability, partition ordering, and fault recovery. Batch workloads depend on dataset volume relative to available memory, transformation complexity, and cluster partitioning. A single machine may process terabytes when its memory, access pattern, and deadline permit. Distributed engines become necessary when the required throughput or working set exceeds the available single-node envelope.
 
-### Quality through validation and monitoring {#sec-data-engineering-quality-validation-monitoring-498f}
-
-Consider a self-driving-car pipeline in which 15 percent of LiDAR point-cloud labels are misaligned by 10–20 cm—enough to place pedestrian bounding boxes on empty sidewalk. Because every record remains structurally valid, schema checks\index{Schema validation!ML pipelines} would miss the defect; statistical monitoring\index{Data validation!monitoring} of label-to-sensor alignment could expose it.
-
-Quality forms the foundation of reliable ML systems. Pipelines enforce quality through continuous validation at every boundary. Data defects represent a leading cause of production ML failures\index{Pipeline!failure modes}: upstream schema drift breaks parsing jobs, distribution shifts degrade model accuracy, and silent data corruption poisons feature representations [@sculley2015hidden]. These failures rarely trigger immediate runtime exceptions; instead, they quietly degrade downstream predictions. Preventing cascading failures requires proactive statistical monitoring before corrupted batches reach model training.
-
-::: {#ws-data-engineering-microsoft-tay-2016 .callout-war-story title="Microsoft Tay (2016)"}
-
-**Context**: In March 2016, Microsoft launched Tay, a Twitter chatbot designed to engage with users online and adapt its responses from public interactions [@microsoft2016tay].
-
-**Mechanism**: Adversarial users coordinated toxic prompts and exploited a public interaction surface, including behavior that repeated user-supplied text.
-
-**Impact**: Tay began tweeting abusive, racist, and misogynistic statements within 16 hours of deployment.
-
-**Fix**: Microsoft suspended the chatbot 16 hours after launch, apologized publicly, and stated that a relaunch would require stronger safeguards against misuse.
-
-**Systems lesson**: Public ingestion paths require adversarial-input controls. Otherwise, a feature that accepts user-generated content also becomes a security surface, and harmful inputs can propagate through the system within hours.
-
-:::
-
-Production teams implement monitoring at scale through severity-based alerting systems where different failure types trigger different response protocols. The most critical alerts indicate complete system failure: the pipeline has stopped processing entirely, showing zero throughput for more than five minutes, or a primary data source has become unavailable. These situations demand immediate attention because they halt all downstream model training or serving. More subtle degradation patterns require different detection strategies. When throughput drops to 80 percent of baseline levels, error rates climb above 5 percent, or quality metrics drift more than two standard deviations from training data characteristics, the system signals degradation requiring urgent but not immediate attention. These gradual failures often prove more dangerous than complete outages because they persist undetected for hours or days, silently corrupting model inputs and degrading prediction quality.
-
-A recommendation system processing user interaction events at 50,000 records per second makes these severity tiers concrete. Its monitoring system tracks several interdependent signals. Instantaneous throughput alerts fire if processing drops below 40,000 records per second for more than 10 minutes, accounting for normal traffic variation while catching genuine capacity or processing problems. Each feature in the data stream has its own quality profile: if a feature like `user_age` shows null values in more than 5 percent of records when the training data contained less than 1 percent nulls, something has likely broken in the upstream data source. Duplicate detection runs on sampled data, watching for the same event appearing multiple times—a pattern that might indicate retry logic gone wrong or a database query accidentally returning the same records repeatedly.
-
-These monitoring dimensions become particularly important when considering end-to-end latency. The system must track both whether data arrives and how long it takes to flow through the entire pipeline from the moment an event occurs to when the resulting features become available for model inference. When 95th percentile latency exceeds 30 seconds in a system with a 10-second service level agreement, the monitoring system needs to pinpoint which pipeline stage introduced the delay: ingestion, transformation, validation, or storage.
-
-Schema and latency alerts expose structural and timing failures; detecting a continuous-feature distribution shift requires a statistical comparison with the training baseline.
-
-Tracking statistical properties\index{Data quality!statistical monitoring} captures whether serving data continues to reflect the training distribution. Rather than merely checking that individual values fall within predefined ranges, production systems maintain rolling statistics across operational windows. For continuous numerical features like `transaction_amount` or `session_duration`, the monitoring harness computes rolling empirical distribution functions, using nonparametric evaluations like the Kolmogorov-Smirnov test[^fn-ks-test-drift] to detect when serving inputs diverge from the training baseline. Notebook \ref{nbk-data-engineering-detecting-drift-with-k-s-test} works one example.
-
-[^fn-ks-test-drift]: **Kolmogorov-Smirnov (K-S) test**\index{Kolmogorov-Smirnov test!drift detection}: A nonparametric test that measures the maximum distance between two empirical cumulative distribution functions without assuming a parametric distribution family [@berger2014kolmogorov]. In ML pipelines, the K-S test is commonly used as a univariate continuous-feature drift detector, with thresholds such as $p < 0.05$ serving as investigation triggers rather than universal failure rules. Discrete and categorical variables require tests and calibrations appropriate to their distributions.
-
-```{python}
-#| echo: false
-
-# ┌─────────────────────────────────────────────────────────────────────────────
-# │ K-S TEST CALCULATION
-# ├─────────────────────────────────────────────────────────────────────────────
-# │ Context: Callout "Detecting Drift with K-S Test"
-# │
-# │ Goal: Provide a concrete numeric threshold for detecting distribution drift.
-# │ Show: That a two-sample difference of about 0.061 marks the threshold
-# │       when training and serving samples both contain 1000 observations.
-# │ How: Calculate the K-S critical value at alpha = 0.05.
-# │
-# └─────────────────────────────────────────────────────────────────────────────
-import math
-from mlsysim import Ops
-from mlsysim.fmt import fmt, fmt_math, check
-
-# ┌── LEGO ───────────────────────────────────────────────
-class KSTest:
-    """
-    Namespace for K-S Test Critical Value calculation.
-    Scenario: Detecting drift with 1000 training and 1000 serving samples at alpha=0.05.
-    """
-
-    # ┌── 1. LOAD (Constants) ───────────────────────────────────────────────
-    n_train = 1000
-    n_serving = 1000
-    coeff = Ops.Monitoring.KsTestCoefficient  # 1.36 for alpha=0.05
-
-    # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
-    d_crit = coeff * math.sqrt((n_train + n_serving) / (n_train * n_serving))
-
-    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
-    check(d_crit > 0, "Critical value must be positive.")
-    check(d_crit <= 0.1, f"Critical value ({d_crit:.3f}) is too loose for n=1000 per sample. Check formula.")
-
-    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
-    ks_dcrit_str = fmt(d_crit, precision=3, commas=False)
-    sample_sizes_math = fmt_math(f"n_0 = n_t = {n_train}")
-```
-
-::: {#nbk-data-engineering-detecting-drift-with-k-s-test .callout-notebook title="Detecting drift with K-S test"}
-
-**Scenario**: Monitoring `session_duration` distribution stability between the training baseline $(\TrainingDistributionZero)$ and current serving distribution $(\CurrentDistribution)$.
-
-**Analysis**: Apply the Kolmogorov-Smirnov test to compare the empirical cumulative distribution functions:
-
-1.  **Compute CDFs**: Calculate cumulative distribution functions for both datasets.
-2.  **Calculate statistic** $(\mathcal{D}_{\text{KS}})$: Find the maximum absolute difference between the CDFs. Let $F_{\TrainingDistributionZero}(x)$ and $F_{\CurrentDistribution}(x)$ denote the empirical cumulative distribution functions of the training baseline $(\TrainingDistributionZero)$ and current serving $(\CurrentDistribution)$ datasets, evaluated at value $x$.
-    $$\mathcal{D}_{\text{KS}} = \max_x |F_{\TrainingDistributionZero}(x) - F_{\CurrentDistribution}(x)|$$
-
-3.  **Determine significance**: For two independent samples, compare $\mathcal{D}_{\text{KS}}$ to the critical value $c_{\text{crit}}$ based on training-baseline sample size $n_0$ and serving sample size $n_t$. The coefficient 1.36 is the large-sample approximation for significance level $\SignificanceLevel = 0.05$.
-    $$c_{\text{crit}} \approx 1.36\sqrt{\frac{n_0 + n_t}{n_0 n_t}}$$
-**Result**: With sample sizes `{python} KSTest.sample_sizes_math`, the critical value is approximately `{python} KSTest.ks_dcrit_str`:
-$$c_{\text{crit}} \approx 1.36\sqrt{(1000 + 1000)/(1000 \cdot 1000)}.$$
-If we observe a maximum difference of $\mathcal{D}_{\text{KS}} = 0.08$, it exceeds the critical value, so we reject the null hypothesis and flag significant drift.
-
-**Systems insight**: Statistical drift tests convert a vague distribution-shift concern into an operational trigger. The test should start an investigation or retraining workflow, not silently become another dashboard number.
-
-:::
-
-The K-S test detects drift in continuous features; @sec-data-engineering-detecting-responding-data-drift-509a details distribution shift taxonomies (covariate, label, concept, and label-quality drift) along with the population stability index and KL divergence metrics.
-
-Categorical features require different statistical approaches. Instead of comparing means and variances, monitoring systems track category frequency distributions. When new categories appear that never existed in training data, or when existing categories shift substantially in relative frequency, the system flags potential data quality issues or genuine distribution shifts; for example, the proportion of "mobile" vs. "desktop" traffic might change by more than 20 percent. This statistical vigilance catches subtle problems that simple schema validation misses entirely: age values may remain in the valid range of 18–95, while the distribution shifts from primarily 25–45 year olds to primarily 65+ year olds, indicating the data source has changed in ways that will affect model performance.
-
-Validation at the pipeline level encompasses multiple strategies working together. Schema validation executes synchronously as data enters the pipeline, rejecting malformed records immediately before they can propagate downstream. Modern tools like TensorFlow Data Validation (TFDV)\index{TensorFlow Data Validation} [@breck2019data] automatically infer schemas from training data, capturing expected data types, value ranges, and presence requirements.
-
-This synchronous validation remains simple and fast, checking properties that can be evaluated on individual records in microseconds. More sophisticated validation that requires comparing serving data against training data distributions or aggregating statistics across many records must run asynchronously to avoid blocking the ingestion pipeline. Statistical validation\index{Statistical validation!sampling strategies} systems typically sample 1–10 percent of serving traffic, enough to detect meaningful shifts while avoiding the computational cost of analyzing every record. These samples accumulate in rolling windows, commonly one hour, 24 hours, and seven days, with different windows revealing different patterns. Hourly windows detect sudden shifts like a data source failing over to a backup with different characteristics, while weekly windows reveal gradual drift in user populations or behavior.
-
-The most insidious validation challenge arises from training-serving skew\index{Training-serving skew!causes}: the failure mode where features are computed differently in training and serving. This typically happens when training pipelines process data in batch using one set of libraries or logic, while serving systems compute features in real time using different implementations. Even seemingly minor discrepancies (a materialized view[^fn-materialized-view-skew] refreshed weekly versus a complete join recomputed daily) can materially reduce production accuracy and can be difficult to diagnose because the system produces no obvious errors. @Sec-data-engineering-ensuring-trainingserving-consistency-c683 formalizes this consistency imperative and quantifies its impact with a concrete evaluation. Detecting training-serving skew requires infrastructure that can recompute training features on serving data for comparison, sampling raw serving data and processing it through both pipelines to measure discrepancies.
-
-::: {.column-margin .margin-pointer}
-↪ Deployment gates that compare training and serving feature distributions and block a release when they diverge are operationalized in @sec-ml-operations-skew-detection-cicd-e361.
-:::
-
-[^fn-materialized-view-skew]: **Materialized view**\index{Materialized view!training-serving skew}: A database optimization that precomputes and caches query results as a physical table. For ML systems, the risk is structural: when a materialized view refreshes on a different schedule in training and serving environments, the feature values the model trained on can diverge from what it receives at inference, degrading accuracy without producing an execution error.
-
-### Data quality as code {#sec-data-engineering-data-quality-code-1cca}
-
-Just as unit tests protect traditional software, data expectation tests\index{Data quality!expectation tests} protect ML pipelines. In **data quality as code**\index{Data quality!as code}, engineers use declarative libraries like Great Expectations\index{Great Expectations!data validation} or Pandera\index{Pandera!schema validation} to express data contracts as executable test suites that run across pipeline stages.
-
-Integrating expectations into continuous integration and deployment (CI/CD) pipelines ensures assertions execute automatically on ingested batches, halting downstream training when data contracts are violated. A pipeline structured as data ingestion followed by data validation followed by training blocks deployment when validation detects anomalies such as age values of 150, triggering alerts for investigation.
-
-Executable expectations catch properties a suite can encode; the remaining question is what valid-looking data can still get wrong.
-
-::: {#psp-data-engineering-mechanical-vs-semantic-quality .callout-perspective title="Mechanical vs. semantic quality"}
-
-In traditional software, many checks are *mechanical*. A null dereference is a runtime error in languages with null references, while integer-overflow behavior depends on the language and type.
-
-In ML systems, data quality has a second, softer dimension: *semantic* quality\index{Data quality!mechanical vs. semantic}.
-
-*   **Mechanical check**: Validates schema and type constraints, such as verifying that `age` is a non-null integer.
-*   **Semantic check**: Validates distribution drift and statistical invariants, such as testing whether the mean or variance of `age` shifts unexpectedly.
-
-A dataset can be mechanically perfect (no nulls, correct types) but semantically broken (for example, all users are suddenly 25 years old due to a default value change). Robust ML systems must validate both the container\index{Data quality!container} (mechanical) and the content\index{Data quality!content} (semantic).
-
-:::
-
-Once validation becomes code, expectation suites become versioned artifacts alongside training code. When training code changes, expectation updates keep data contracts evolving with it. This coupling reduces the risk of silent divergence where code assumes data properties that the upstream pipeline no longer provides; @lst-data-expectations demonstrates this pattern by defining explicit constraints on column ranges, nullability, uniqueness, and categorical sets.
-
-::: {#lst-data-expectations lst-cap="**Data Quality Assertions**: A Great Expectations suite checks age range, identifier presence and uniqueness, and allowed country codes, then raises an error when validation fails."}
-
-```{.python}
-import great_expectations as gx
-
-# Create a data context
-context = gx.get_context()
-
-# Define an expectation suite as executable quality contract
-suite = gx.ExpectationSuite(name="user_data_quality")
-suite = context.suites.add(suite)
-
-# Range validation: prevents physiologically impossible values
-suite.add_expectation(
-    gx.expectations.ExpectColumnValuesToBeBetween(
-        column="age", min_value=0, max_value=120
-    )
-)
-
-# Null detection: ensures primary key integrity for joins
-suite.add_expectation(
-    gx.expectations.ExpectColumnValuesToNotBeNull(column="user_id")
-)
-
-# Uniqueness: prevents duplicate training examples
-suite.add_expectation(
-    gx.expectations.ExpectColumnValuesToBeUnique(column="user_id")
-)
-
-# Categorical validation: detects unexpected values from upstream changes
-suite.add_expectation(
-    gx.expectations.ExpectColumnDistinctValuesToBeInSet(
-        column="country_code",
-        value_set=["US", "CA", "UK", "DE", "FR"],
-    )
-)
-
-# Link the suite to a preconfigured Batch Definition and run validation
-# (the Batch Definition connects GX to the training_users data asset)
-validation_definition = gx.ValidationDefinition(
-    name="training_users_validation",
-    data=batch_definition,
-    suite=suite,
-)
-validation_definition = context.validation_definitions.add(
-    validation_definition
-)
-results = validation_definition.run()
-if not results.success:
-    raise ValueError(f"Data quality check failed: {results}")
-```
-
-:::
-
-These checks catch many schema-level production data issues before they reach training, including missing values, invalid ranges, type errors, and contract violations. The remaining issues require runtime monitoring and outcome checks, because semantic quality problems often emerge only in the full production data stream.
-
-### Data drift detection and response {#sec-data-engineering-detecting-responding-data-drift-509a}
-
-ML models rest on the assumption that production data resembles training data. When this assumption breaks through statistical shifts rather than an explicit contract violation, model performance can change silently without obvious errors or system failures. The validation and monitoring techniques in @sec-data-engineering-quality-validation-monitoring-498f can reveal both sudden and gradual problems; data drift detection\index{Data drift!detection}\index{Distribution shift!monitoring} focuses specifically on changes in distributions that may alter model behavior over time. Detecting, investigating, and responding to these changes requires sustained monitoring effort, making drift a core data engineering responsibility rather than an optional advanced topic.
-
-::: {.column-margin .margin-pointer}
-↪ How drift signals and outcome evidence trigger retraining only when its expected benefit exceeds its cost is operationalized in @sec-ml-operations-retraining-decision-framework-e33d.
-:::
-
-@Sec-appdx-data-foundations-measuring-drift-divergence-a6dd formalizes the divergence metrics used to make the divergence term $\StatisticalDivergence$ of the degradation equation (@eq-degradation) actionable. The **population stability index (PSI)**\index{Population stability index!definition} quantifies changes in categorical or binned&nbsp;feature distributions, while **Kullback-Leibler (KL) divergence**\index{Kullback-Leibler divergence!definition} measures an information-theoretic divergence between probability distributions. The two metrics encode different distributional assumptions and scales, and neither by itself supplies a universal cutoff. Teams calibrate metric-specific thresholds against a deployment baseline and monitor them over time. Crossing a threshold signals that the live distribution has moved far enough to warrant investigation and outcome checks; input divergence alone does not establish whether accuracy improved or degraded, or by how much. Mathematically, PSI discretizes a continuous feature into reference bins (typically deciles of baseline $\TrainingDistributionZero$) and computes $\text{PSI} = \sum_b \left( \CurrentDistribution(b) - \TrainingDistributionZero(b) \right) \ln\left(\frac{\CurrentDistribution(b)}{\TrainingDistributionZero(b)}\right)$. Each bin's two factors share a sign, so every shifting bin adds to the index. Practitioners commonly treat $\text{PSI} < 0.1$ as stable, $0.1 \le \text{PSI} \le 0.25$ as moderate shift, and $\text{PSI} > 0.25$ as a prompt for investigation; these bands are conventions to calibrate against the deployment baseline, not physical limits.
-
-Targeted detection and mitigation require decomposing drift into its constituent distribution components, as shown in the margin locator.
-
-::: {.column-margin}
-![](images/svg/vol1_data_engineering_margin_002.svg){width="100%" fig-alt="A vertical three-node locator pairs each distribution component with its drift type: p(x) covariate, p(y) label, and p(y|x) concept."}
-
-*Each drift type traces to the distribution component that shifted.*
-:::
-
-The first case, **covariate shift**\index{Covariate shift!definition}, changes the input distribution while preserving the relationship between features and labels: $\Distribution$ changes but $\ConditionalDistribution$ stays the same. A medical imaging system trained on one camera model might later receive production images from a different manufacturer. The disease-image relationship remains unchanged, but pixel values shift because sensor characteristics, color calibration, or image processing pipelines differ. Detection therefore focuses on input feature distributions, using metrics such as PSI or KL divergence.
-
-The second case, **label shift**\index{Label shift!definition}\index{Distribution shift!label shift}, changes the output distribution while preserving the relationship between labels and features: $p(y)$ changes but $p(x \mid y)$ stays the same. Disease prevalence might change seasonally while symptoms remain consistent predictors of each disease. A recommendation system might see the same pattern when new product categories launch, changing the relative frequency of user preferences without altering what makes products appealing within each category. Detection can often begin without ground truth labels by tracking shifts in the model's prediction distribution.
-
-The hardest case is **concept drift**\index{Concept drift!definition}: the relationship between features and labels changes, so $\ConditionalDistribution$ evolves over time [@gama2014]. Medical treatment protocols change, user preferences shift as social trends evolve, and fraud patterns adapt as attackers respond to detection systems. Unlike covariate or label shift, concept drift requires ground truth labels for detection because the system must observe whether the feature-to-label relationship itself has changed.
-
-```{python}
-#| echo: false
-#| label: cohens-kappa-chance-calc
-# ┌─────────────────────────────────────────────────────────────────────────────
-# │ COHEN'S KAPPA CHANCE AGREEMENT
-# ├─────────────────────────────────────────────────────────────────────────────
-# │ Context: Cohen's kappa footnote in the label-quality drift section
-# │
-# │ Goal: Compute chance agreement for a 90/10 binary label distribution.
-# │ Show: Majority-class agreement alone is 81%, but total chance agreement is 82%.
-# │ How: Square and sum the class marginals to get chance agreement.
-# │
-# └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import fmt, check
-
-class CohensKappaChance:
-    """Chance agreement for Cohen's kappa under a 90/10 binary marginal."""
-
-    # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    majority_probability = 0.90
-    minority_probability = 0.10
-
-    # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    chance_agreement = majority_probability**2 + minority_probability**2
-
-    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
-    check(abs(chance_agreement - 0.82) < 1e-12, f"Expected 82% chance agreement, got {chance_agreement:.2f}.")
-
-    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
-    chance_agreement_pct_str = fmt_percent(chance_agreement, precision=0, commas=False, style='prose')
-```
-
-#### Label quality drift {#sec-data-engineering-label-quality-drift-1ce7}
-
-Label quality drift\index{Label quality drift!detection}[^fn-label-drift-invisible] represents a meta-level shift distinct from the three preceding distribution shifts: the reliability of ground truth labels degrades over time even when the underlying data distributions remain stable. This drift type proves particularly insidious because standard feature distribution monitoring fails to detect it. Crowdsourced labels may degrade as annotator pools change, training materials become outdated, or labeling guidelines evolve without corresponding model updates. Automated labeling systems accumulate errors as the models powering them drift from their original operating conditions. A recommendation system using click feedback as implicit labels may see label quality degrade as user behavior becomes more exploratory, as bot traffic patterns change, or as interface modifications alter how users interact with content.
-
-Detection requires monitoring annotation consistency rather than feature distributions. Inter-annotator agreement metrics like Cohen's kappa[^fn-cohens-kappa-labeling] $(\CohensKappa)$ provide quantitative assessment. Let $p_o$ represent observed agreement between annotators and $p_e$ represent agreement expected by chance. @Eq-cohens-kappa defines the statistic:
-$$
-\CohensKappa = \frac{p_o - p_e}{1 - p_e}
-$$ {#eq-cohens-kappa}
-
-[^fn-cohens-kappa-labeling]: **Cohen's kappa**\index{Cohen's kappa!label quality}: Introduced by @cohen1960 to measure inter-rater agreement while correcting for agreement expected from the raters' class marginals, which raw percentage agreement ignores. If two independent annotators each label 90 percent of images as "not spam" in a binary task, their expected agreement is `{python} CohensKappaChance.chance_agreement_pct_str`, making raw agreement potentially misleading. The statistic is denoted $\CohensKappa$; interpretive bands such as the Landis-Koch categories are descriptive heuristics rather than universal data-quality thresholds [@landis1977measurement].
-
-Monitoring $\CohensKappa$ over time windows reveals degradation trends. A medical imaging annotation project might establish a baseline $\CohensKappa = 0.85$ (almost perfect agreement) during initial data collection, then observe decline to $\CohensKappa = 0.72$ (substantial agreement) after six months as new annotators join without receiving equivalent domain training.
-
-For systems with calibrated model probabilities, predictive entropy\index{Predictive entropy} provides an additional uncertainty signal. Let $p_i$ represent the model's probability assigned to label category $i$, and let $\log$ denote the natural logarithm, so entropy is measured in nats. @Eq-label-entropy defines this measure:
-$$
-H_{\text{pred}} = -\sum_i p_i \log p_i
-$$ {#eq-label-entropy}
-
-Rising predictive entropy indicates greater uncertainty in the model's predictive distribution, but it does not identify the cause. Harder inputs, distribution shift, calibration changes, or inconsistent supervision can produce the same signal.
-
-Mitigation strategies depend on root cause analysis. Annotator retraining addresses systematic errors from unclear guidelines at low cost with high effectiveness. Multi-annotator voting with majority or consensus rules provides high accuracy for high-stakes domains but significantly increases annotation costs. Model-assisted labeling reduces annotator fatigue but risks introducing bias if the assisting model has its own systematic errors. Expert review sampling, where domain specialists audit a random sample of annotations, enables root cause analysis when quality decline is detected but provides medium coverage of the overall annotation stream.
-
-[^fn-label-drift-invisible]: **Label quality drift**\index{Label quality drift!silent corruption}: Degradation in annotation reliability over time, distinct from distribution shifts in the data itself. This drift type is invisible to standard feature monitoring because the features remain stable while the labels degrade—annotator fatigue, pool turnover, or guideline evolution silently corrupt the ground truth the model learns from. Detection requires monitoring inter-annotator agreement $(\CohensKappa)$ over rolling time windows and comparing automated labels against periodic expert audits.
-
-Operationalizing the PSI and KL divergence metrics\index{Population stability index!drift detection}\index{Kullback-Leibler divergence!distribution comparison} requires connecting them to automated alerts and review workflows. Data engineering is responsible for defining domain-specific drift thresholds from baseline behavior and outcome evidence, selecting monitoring windows that can expose both sudden and gradual changes, and instrumenting pipelines to compute these metrics continuously.
-
-Statistical drift detection identifies distribution changes over time, but monitoring alone does not keep a system running when upstream pipelines stall, malformed payloads arrive, or schema definitions change without notice. Maintaining service continuity under failure requires active reliability mechanisms: fault isolation, backpressure, and graceful degradation.
-
-### Reliability through graceful degradation {#sec-data-engineering-reliability-graceful-degradation-f83d}
-
-Reliability\index{Reliability!error handling} ensures systems continue operating when problems occur. Pipelines face constant challenges: data sources become temporarily unavailable, network partitions separate components, upstream schema changes break parsing logic, or unexpected load spikes exhaust resources. **Graceful degradation**\index{Graceful degradation!data pipelines} means handling these failures through systematic failure analysis, intelligent error handling, and automated recovery strategies that maintain service continuity even under adverse conditions.
-
-Systematic failure mode analysis for ML data pipelines reveals predictable patterns that require specific engineering countermeasures. Data corruption failures occur when upstream systems introduce subtle format changes, encoding issues, or field value modifications that pass basic validation but corrupt model inputs. A date field switching from "YYYY-MM-DD" to "MM/DD/YYYY" format might not trigger schema validation but will break any date-based feature computation. Schema evolution\index{Schema evolution!failures}[^fn-schema-evolution-skew] failures happen when source systems add fields, rename columns, or change data types without coordination, breaking downstream processing assumptions that expected specific field names or types. Resource exhaustion manifests as gradually degrading performance when data volume growth outpaces capacity planning, eventually causing pipeline failures during peak load periods.
-
-[^fn-schema-evolution-skew]: **Schema evolution**\index{Schema evolution!silent failure}: This failure mode arises from a lack of contract testing between upstream data producers and downstream ML consumers. While "loud" failures like a renamed column break explicit assumptions and cause immediate pipeline crashes, "silent" failures are more dangerous. A field changing type from integer to string can pass validation but corrupt feature logic without immediate detection.
-
-Effective error handling strategies ensure problems are contained and recovered from systematically. Intelligent retry logic\index{Retry logic!exponential backoff} for transient errors (network interruptions or temporary service outages) requires exponential backoff strategies to avoid overwhelming recovering services. A simple linear retry that attempts reconnection every second would flood a struggling service with connection attempts, potentially preventing its recovery. Exponential backoff, retrying after one second, then two seconds, then four seconds, doubling with each attempt, gives services breathing room to recover while still maintaining persistence. Many ML systems employ **dead-letter queues (DLQs)**\index{Reliability!dead letter queues}: separate storage for data that fails processing after multiple retry attempts. This allows for later analysis and potential reprocessing of problematic data without blocking the main pipeline [@kleppmann2017designing]. A pipeline processing financial transactions that encounters malformed data can route it to a dead-letter queue rather than losing critical records or halting all processing.
-
-In ML systems, dead-letter queues serve dual purposes beyond failure analysis. Production teams implement systematic review of DLQ contents to identify: (1) schema violations indicating upstream changes, (2) edge case patterns the model should handle, and (3) data quality issues requiring source system fixes. For example, a fraud detection system's DLQ revealed transactions from a new payment type the model had never seen, prompting targeted data collection and retraining rather than simply logging the failures. This transforms DLQs from passive error storage into active sources for identifying model blind spots and driving improvement.
-
-Moving beyond ad-hoc error handling, cascade failure prevention requires circuit breaker\index{Reliability!circuit breakers}[^fn-circuit-breaker-ml] patterns and bulkhead isolation to prevent single component failures from propagating throughout the system. When a feature computation service fails, the circuit breaker pattern stops calling that service after detecting repeated failures, preventing the caller from waiting on timeouts that would cascade into its own failure.
-
-[^fn-circuit-breaker-ml]: **Circuit breaker**\index{Circuit breaker!cascade prevention}: Named for its three-state behavior—closed (normal flow), open (faults blocked), half-open (recovery probe)—after the electrical safety device that interrupts current on overload. In ML data pipelines, the circuit breaker prevents a failing feature computation service from cascading timeouts through the entire serving path: once failure count exceeds a threshold, the breaker opens and the pipeline falls back to cached or default features rather than waiting on a dead service.
-
-Automated recovery engineering extends beyond simple retry logic. Exponential backoff, jitter, load shedding, and circuit breakers reduce request pressure on struggling services while allowing transient faults to recover; simply increasing timeouts can retain resources longer and worsen overload. Multi-tier fallback systems provide degraded service when primary data sources fail: serving slightly stale cached features when real-time computation fails, or using approximate features when exact computation times out. A recommendation system unable to compute user preferences from the past 30 days might fall back to preferences from the past 90 days, providing less precise but still useful recommendations rather than failing entirely. Comprehensive alerting and escalation procedures ensure human intervention occurs when automated recovery fails, with sufficient diagnostic information captured during the failure to enable rapid debugging.
-
-Retry logic, dead-letter queues, and circuit breakers serve as runtime error handlers in the dataset compiler: they catch malformed inputs without halting the entire pipeline. These safeguards operate once data enters the system. The choice of ingestion pattern—batch vs. streaming; extract, transform, load (ETL) vs. extract, load, transform (ELT)—determines how quickly new data reaches the model, what buffering infrastructure is required, and where reliability invariants are enforced.
-
-### Data ingestion {#sec-data-engineering-data-ingestion-8efc}
-
-In the compiler framework, data ingestion\index{Data ingestion!pipeline boundary} acts as the *lexer*: it reads raw source streams and tokenizes them into structured records that downstream stages can process. The primary performance barrier at this stage is the **input/output (I/O) bottleneck**\index{I/O bottleneck!data loading}. Accelerators remain idle if ingestion cannot stage tensors quickly enough to keep compute units supplied. The slowest-stage bound of @sec-data-engineering-feeding-problem applies unchanged: in an idealized two-stage model, step time ranges from $\max(\IronlawTermTimesCompute, T_{\text{IO}})$ with full overlap to $\IronlawTermTimesCompute + T_{\text{IO}}$ with no overlap. What changes is the binding resource. The feeding scenario was starved by the disk; ingestion is more commonly starved by CPU-side decompression and decode.
-
-```{python}
-#| echo: false
-#| label: dataloader-stats-calc
-# ┌─────────────────────────────────────────────────────────────────────────────
-# │ DATALOADER CHOKE POINT SETUP
-# ├─────────────────────────────────────────────────────────────────────────────
-# │ Context: Dataloader Choke Point prose and figure
-# │
-# │ Goal: Keep the illustrative worker/throughput constants next to their use.
-# │ Show: That 8 CPU workers at 375 img/s each reach the 3,000 img/s accelerator rate.
-# │ How: Calculate the minimum worker count and reuse constants in the plot.
-# │
-# │ Note: The accelerator rate comes from FeedingProblem (chapter scenario anchor).
-# └─────────────────────────────────────────────────────────────────────────────
-import math
-from mlsysim.fmt import fmt, check, fmt_rate
-
-# ┌── LEGO ───────────────────────────────────────────────
-class DataloaderStats:
-    """
-    Namespace for Dataloader Choke Point statistics.
-    """
-
-    # ┌── 1. LOAD (Constants) ───────────────────────────────────────────────
-    gpu_limit_img_sec = FeedingProblem.sustained_img_per_sec  # chapter scenario rate
-    worker_img_sec = 375  # scenario assumption: JPEG decode + augment per CPU worker
-    cpu_throughput_cap_img_sec = 3500
-    max_workers = 16
-
-    # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
-    resnet_worker_count = math.ceil(gpu_limit_img_sec / worker_img_sec)
-
-    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
-    check(resnet_worker_count == 8, f"Expected 8 workers for the illustrative dataloader saturation point, got {resnet_worker_count}.")
-
-    # ┌── 4. OUTPUT (Formatting) ───────────────────────────────────────────
-    resnet_worker_count_str = fmt(resnet_worker_count, precision=0, commas=False)
-    worker_img_per_s_str = fmt_rate(worker_img_sec, 'img/s', precision=0, commas=True)
-    gpu_limit_img_per_s_str = fmt_rate(gpu_limit_img_sec, 'img/s', precision=0, commas=True)
-```
-
-In computer vision, JPEG decode and augmentation on the host CPUs are the usual binding stage. In the chapter's scenario the accelerator consumes `{python} DataloaderStats.gpu_limit_img_per_s_str`; if each DataLoader worker process decodes and augments `{python} DataloaderStats.worker_img_per_s_str`, `{python} DataloaderStats.resnet_worker_count_str` workers are needed to reach the crossing. Below the crossing the input pipeline binds, and adding accelerators yields no speedup, a counterintuitive result for teams expecting linear scaling from hardware investments. Above it, additional workers raise nothing because the accelerator binds. The worker count is a capacity match, not a hardware constant: actual ResNet-50\index{ResNet-50!data-loading requirements} and A100\index{A100!data-loading requirements} requirements move with image transforms, host CPUs, batch size, and framework configuration. @Fig-dataloader-choke-point plots this capacity crossing, contrasting the rising blue CPU-supply curve against the dashed red GPU-capacity ceiling to isolate the starved regime below eight workers from the compute-saturated plateau beyond it.
-
-::: {#fig-dataloader-choke-point fig-env="figure" fig-pos="htb" fig-cap="**The Dataloader Choke Point**: Training throughput (img/s) vs. DataLoader workers. The blue CPU-supply curve rises with worker count until it reaches the illustrative input-pipeline cap; the red dashed line marks accelerator consumption capacity. The lower curve is the bottleneck: the accelerator starves to the left of the crossing, while extra workers beyond the crossing do not increase accelerator throughput." fig-alt="Line chart of throughput vs. workers. Blue line (CPU) rises linearly, then plateaus at the input-pipeline cap. Red line (GPU) is flat. Where CPU < GPU, system is starved. Where CPU > GPU, system is saturated."}
-
-```{python}
-#| echo: false
-# ┌─────────────────────────────────────────────────────────────────────────────
-# │ FIGURE: DATALOADER CHOKE POINT
-# ├─────────────────────────────────────────────────────────────────────────────
-# │ Context: @fig-dataloader-choke-point in the data ingestion discussion
-# │
-# │ Goal: Visualize the min(CPU supply, GPU demand) bottleneck.
-# │ Show: The starvation vs. saturation regions in training throughput.
-# │ How: Plot throughput curves showing the "choke point" between CPU and GPU capacity.
-# │
-# └─────────────────────────────────────────────────────────────────────────────
-# ┌── 1. CANVAS ────────────────────────────────────────────────────────────────
-# │ Visualize the min(CPU supply, GPU demand) bottleneck.
-import numpy as np
-from binder.tools.figures import style as book_style
-
-fig, ax, COLORS, plt = book_style.setup_plot(figsize=(10, 4.5))
-
-# —Plot: The Dataloader Choke Point ---
-
-# ┌── 2. ARRAYS ────────────────────────────────────────────────────────────────
-workers = np.arange(1, DataloaderStats.max_workers + 1)
-cpu_throughput = np.minimum(DataloaderStats.worker_img_sec * workers, DataloaderStats.cpu_throughput_cap_img_sec)
-gpu_limit = DataloaderStats.gpu_limit_img_sec
-
-# ┌── 3. RENDER ────────────────────────────────────────────────────────────────
-ax.plot(workers, cpu_throughput, 'o-', color=COLORS['BlueLine'], label='DataLoader (CPU)')
-ax.axhline(gpu_limit, linestyle='--', color=COLORS['RedLine'], label='GPU Capacity')
-ax.fill_between(workers, 0, np.minimum(cpu_throughput, gpu_limit), color=COLORS['BlueL'], alpha=0.2)
-
-# ┌── 4. DECORATE ──────────────────────────────────────────────────────────────
-ax.text(
-    4.5,
-    1500,
-    "Starvation",
-    color=COLORS['BlueLine'],
-    fontweight='normal',
-    ha='center',
-    bbox=dict(facecolor='white', alpha=0.8, edgecolor='none', pad=0.2),
-)
-ax.text(
-    10,
-    3100,
-    "Saturated",
-    color=COLORS['RedLine'],
-    fontweight='normal',
-    ha='center',
-    bbox=dict(facecolor='white', alpha=0.8, edgecolor='none', pad=0.2),
-)
-ax.set_xlabel('DataLoader Workers')
-ax.set_ylabel('Throughput (img/s)')
-ax.legend(loc='lower right', fontsize=8, frameon=True, facecolor='white', framealpha=0.95, edgecolor='gray', fancybox=True, borderpad=0.6)
-plt.show()
-plt.close()
-```
-
-:::
-
-Relieving the choke point takes three mechanisms: multi-process worker pools that scale decode across host cores, asynchronous pinned-memory prefetching that overlaps the host-to-accelerator copy with compute, and hardware decode engines that move JPEG decompression off the host CPU entirely. The last of these removes the CPU bound and hands the constraint back to storage, which is the budget @sec-data-engineering-ml-storage-requirements-performance-1b0d prices.
-
-::: {.column-margin .margin-pointer}
-↪ How asynchronous prefetching and overlapping pipeline stages hide host preparation latency behind accelerator compute is developed in @sec-model-training-data-prefetching-pipeline-overlapping-e984.
-:::
+### Data ingestion
 
 #### Batch vs. streaming ingestion patterns {#sec-data-engineering-batch-vs-streaming-ingestion-patterns-e1b2}
 
@@ -3046,6 +2641,413 @@ KWS production systems often perform always-on wake-word detection on-device. Ba
 Error handling in voice interaction systems requires special attention. Dead letter queues store failed recognition attempts for subsequent analysis, revealing edge cases that need coverage in future model iterations. Each incoming audio sample must pass quality validation (signal-to-noise ratio, sample rate, duration bounds, speaker proximity) before entering the processing pipeline. Invalid samples route to analysis queues rather than being discarded, since these failures often indicate acoustic conditions underrepresented in training data. Valid, consented samples (activated requests, opt-in diagnostics, and crowdsourced recordings) are logged for potential inclusion in future training data; always-on audio that never triggers the wake word stays on the device.
 
 This ingestion architecture completes the boundary layer where external data enters the pipeline. Ingested data, however reliably delivered, remains raw: audio arrives at inconsistent sample rates, text carries varying encodings, and numeric features span incompatible scales. Downstream training requires transforming these heterogeneous records into a uniform representation while guaranteeing that identical transformations execute during both training and serving.
+
+### Quality through validation and monitoring {#sec-data-engineering-quality-validation-monitoring-498f}
+
+Consider a self-driving-car pipeline in which 15 percent of LiDAR point-cloud labels are misaligned by 10–20 cm—enough to place pedestrian bounding boxes on empty sidewalk. Because every record remains structurally valid, schema checks\index{Schema validation!ML pipelines} would miss the defect; statistical monitoring\index{Data validation!monitoring} of label-to-sensor alignment could expose it.
+
+Quality forms the foundation of reliable ML systems. Pipelines enforce quality through continuous validation at every boundary. Data defects represent a leading cause of production ML failures\index{Pipeline!failure modes}: upstream schema drift breaks parsing jobs, distribution shifts degrade model accuracy, and silent data corruption poisons feature representations [@sculley2015hidden]. These failures rarely trigger immediate runtime exceptions; instead, they quietly degrade downstream predictions. Preventing cascading failures requires proactive statistical monitoring before corrupted batches reach model training.
+
+::: {#ws-data-engineering-microsoft-tay-2016 .callout-war-story title="Microsoft Tay (2016)"}
+
+**Context**: In March 2016, Microsoft launched Tay, a Twitter chatbot designed to engage with users online and adapt its responses from public interactions [@microsoft2016tay].
+
+**Mechanism**: Adversarial users coordinated toxic prompts and exploited a public interaction surface, including behavior that repeated user-supplied text.
+
+**Impact**: Tay began tweeting abusive, racist, and misogynistic statements within 16 hours of deployment.
+
+**Fix**: Microsoft suspended the chatbot 16 hours after launch, apologized publicly, and stated that a relaunch would require stronger safeguards against misuse.
+
+**Systems lesson**: Public ingestion paths require adversarial-input controls. Otherwise, a feature that accepts user-generated content also becomes a security surface, and harmful inputs can propagate through the system within hours.
+
+:::
+
+Production teams implement monitoring at scale through severity-based alerting systems where different failure types trigger different response protocols. The most critical alerts indicate complete system failure: the pipeline has stopped processing entirely, showing zero throughput for more than five minutes, or a primary data source has become unavailable. These situations demand immediate attention because they halt all downstream model training or serving. More subtle degradation patterns require different detection strategies. When throughput drops to 80 percent of baseline levels, error rates climb above 5 percent, or quality metrics drift more than two standard deviations from training data characteristics, the system signals degradation requiring urgent but not immediate attention. These gradual failures often prove more dangerous than complete outages because they persist undetected for hours or days, silently corrupting model inputs and degrading prediction quality.
+
+A recommendation system processing user interaction events at 50,000 records per second makes these severity tiers concrete. Its monitoring system tracks several interdependent signals. Instantaneous throughput alerts fire if processing drops below 40,000 records per second for more than 10 minutes, accounting for normal traffic variation while catching genuine capacity or processing problems. Each feature in the data stream has its own quality profile: if a feature like `user_age` shows null values in more than 5 percent of records when the training data contained less than 1 percent nulls, something has likely broken in the upstream data source. Duplicate detection runs on sampled data, watching for the same event appearing multiple times—a pattern that might indicate retry logic gone wrong or a database query accidentally returning the same records repeatedly.
+
+These monitoring dimensions become particularly important when considering end-to-end latency. The system must track both whether data arrives and how long it takes to flow through the entire pipeline from the moment an event occurs to when the resulting features become available for model inference. When 95th percentile latency exceeds 30 seconds in a system with a 10-second service level agreement, the monitoring system needs to pinpoint which pipeline stage introduced the delay: ingestion, transformation, validation, or storage.
+
+Schema and latency alerts expose structural and timing failures; detecting a continuous-feature distribution shift requires a statistical comparison with the training baseline.
+
+Tracking statistical properties\index{Data quality!statistical monitoring} captures whether serving data continues to reflect the training distribution. Rather than merely checking that individual values fall within predefined ranges, production systems maintain rolling statistics across operational windows. For continuous numerical features like `transaction_amount` or `session_duration`, the monitoring harness computes rolling empirical distribution functions, using nonparametric evaluations like the Kolmogorov-Smirnov test[^fn-ks-test-drift] to detect when serving inputs diverge from the training baseline. Notebook \ref{nbk-data-engineering-detecting-drift-with-k-s-test} works one example.
+
+[^fn-ks-test-drift]: **Kolmogorov-Smirnov (K-S) test**\index{Kolmogorov-Smirnov test!drift detection}: A nonparametric test that measures the maximum distance between two empirical cumulative distribution functions without assuming a parametric distribution family [@berger2014kolmogorov]. In ML pipelines, the K-S test is commonly used as a univariate continuous-feature drift detector, with thresholds such as $p < 0.05$ serving as investigation triggers rather than universal failure rules. Discrete and categorical variables require tests and calibrations appropriate to their distributions.
+
+```{python}
+#| echo: false
+
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ K-S TEST CALCULATION
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: Callout "Detecting Drift with K-S Test"
+# │
+# │ Goal: Provide a concrete numeric threshold for detecting distribution drift.
+# │ Show: That a two-sample difference of about 0.061 marks the threshold
+# │       when training and serving samples both contain 1000 observations.
+# │ How: Calculate the K-S critical value at alpha = 0.05.
+# │
+# └─────────────────────────────────────────────────────────────────────────────
+import math
+from mlsysim import Ops
+from mlsysim.fmt import fmt, fmt_math, check
+
+# ┌── LEGO ───────────────────────────────────────────────
+class KSTest:
+    """
+    Namespace for K-S Test Critical Value calculation.
+    Scenario: Detecting drift with 1000 training and 1000 serving samples at alpha=0.05.
+    """
+
+    # ┌── 1. LOAD (Constants) ───────────────────────────────────────────────
+    n_train = 1000
+    n_serving = 1000
+    coeff = Ops.Monitoring.KsTestCoefficient  # 1.36 for alpha=0.05
+
+    # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
+    d_crit = coeff * math.sqrt((n_train + n_serving) / (n_train * n_serving))
+
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(d_crit > 0, "Critical value must be positive.")
+    check(d_crit <= 0.1, f"Critical value ({d_crit:.3f}) is too loose for n=1000 per sample. Check formula.")
+
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
+    ks_dcrit_str = fmt(d_crit, precision=3, commas=False)
+    sample_sizes_math = fmt_math(f"n_0 = n_t = {n_train}")
+```
+
+::: {#nbk-data-engineering-detecting-drift-with-k-s-test .callout-notebook title="Detecting drift with K-S test"}
+
+**Scenario**: Monitoring `session_duration` distribution stability between the training baseline $(\TrainingDistributionZero)$ and current serving distribution $(\CurrentDistribution)$.
+
+**Analysis**: Apply the Kolmogorov-Smirnov test to compare the empirical cumulative distribution functions:
+
+1.  **Compute CDFs**: Calculate cumulative distribution functions for both datasets.
+2.  **Calculate statistic** $(\mathcal{D}_{\text{KS}})$: Find the maximum absolute difference between the CDFs. Let $F_{\TrainingDistributionZero}(x)$ and $F_{\CurrentDistribution}(x)$ denote the empirical cumulative distribution functions of the training baseline $(\TrainingDistributionZero)$ and current serving $(\CurrentDistribution)$ datasets, evaluated at value $x$.
+    $$\mathcal{D}_{\text{KS}} = \max_x |F_{\TrainingDistributionZero}(x) - F_{\CurrentDistribution}(x)|$$
+
+3.  **Determine significance**: For two independent samples, compare $\mathcal{D}_{\text{KS}}$ to the critical value $c_{\text{crit}}$ based on training-baseline sample size $n_0$ and serving sample size $n_t$. The coefficient 1.36 is the large-sample approximation for significance level $\SignificanceLevel = 0.05$.
+    $$c_{\text{crit}} \approx 1.36\sqrt{\frac{n_0 + n_t}{n_0 n_t}}$$
+**Result**: With sample sizes `{python} KSTest.sample_sizes_math`, the critical value is approximately `{python} KSTest.ks_dcrit_str`:
+$$c_{\text{crit}} \approx 1.36\sqrt{(1000 + 1000)/(1000 \cdot 1000)}.$$
+If we observe a maximum difference of $\mathcal{D}_{\text{KS}} = 0.08$, it exceeds the critical value, so we reject the null hypothesis and flag significant drift.
+
+**Systems insight**: Statistical drift tests convert a vague distribution-shift concern into an operational trigger. The test should start an investigation or retraining workflow, not silently become another dashboard number.
+
+:::
+
+The K-S test detects drift in continuous features; @sec-data-engineering-detecting-responding-data-drift-509a details distribution shift taxonomies (covariate, label, concept, and label-quality drift) along with the population stability index and KL divergence metrics.
+
+Categorical features require different statistical approaches. Instead of comparing means and variances, monitoring systems track category frequency distributions. When new categories appear that never existed in training data, or when existing categories shift substantially in relative frequency, the system flags potential data quality issues or genuine distribution shifts; for example, the proportion of "mobile" vs. "desktop" traffic might change by more than 20 percent. This statistical vigilance catches subtle problems that simple schema validation misses entirely: age values may remain in the valid range of 18–95, while the distribution shifts from primarily 25–45 year olds to primarily 65+ year olds, indicating the data source has changed in ways that will affect model performance.
+
+Validation at the pipeline level encompasses multiple strategies working together. Schema validation executes synchronously as data enters the pipeline, rejecting malformed records immediately before they can propagate downstream. Modern tools like TensorFlow Data Validation (TFDV)\index{TensorFlow Data Validation} [@breck2019data] automatically infer schemas from training data, capturing expected data types, value ranges, and presence requirements.
+
+This synchronous validation remains simple and fast, checking properties that can be evaluated on individual records in microseconds. More sophisticated validation that requires comparing serving data against training data distributions or aggregating statistics across many records must run asynchronously to avoid blocking the ingestion pipeline. Statistical validation\index{Statistical validation!sampling strategies} systems typically sample 1–10 percent of serving traffic, enough to detect meaningful shifts while avoiding the computational cost of analyzing every record. These samples accumulate in rolling windows, commonly one hour, 24 hours, and seven days, with different windows revealing different patterns. Hourly windows detect sudden shifts like a data source failing over to a backup with different characteristics, while weekly windows reveal gradual drift in user populations or behavior.
+
+The most insidious validation challenge arises from training-serving skew\index{Training-serving skew!causes}: the failure mode where features are computed differently in training and serving. This typically happens when training pipelines process data in batch using one set of libraries or logic, while serving systems compute features in real time using different implementations. Even seemingly minor discrepancies (a materialized view[^fn-materialized-view-skew] refreshed weekly versus a complete join recomputed daily) can materially reduce production accuracy and can be difficult to diagnose because the system produces no obvious errors. @Sec-data-engineering-ensuring-trainingserving-consistency-c683 formalizes this consistency imperative and quantifies its impact with a concrete evaluation. Detecting training-serving skew requires infrastructure that can recompute training features on serving data for comparison, sampling raw serving data and processing it through both pipelines to measure discrepancies.
+
+::: {.column-margin .margin-pointer}
+↪ Deployment gates that compare training and serving feature distributions and block a release when they diverge are operationalized in @sec-ml-operations-skew-detection-cicd-e361.
+:::
+
+[^fn-materialized-view-skew]: **Materialized view**\index{Materialized view!training-serving skew}: A database optimization that precomputes and caches query results as a physical table. For ML systems, the risk is structural: when a materialized view refreshes on a different schedule in training and serving environments, the feature values the model trained on can diverge from what it receives at inference, degrading accuracy without producing an execution error.
+
+### Data quality as code {#sec-data-engineering-data-quality-code-1cca}
+
+Just as unit tests protect traditional software, data expectation tests\index{Data quality!expectation tests} protect ML pipelines. In **data quality as code**\index{Data quality!as code}, engineers use declarative libraries like Great Expectations\index{Great Expectations!data validation} or Pandera\index{Pandera!schema validation} to express data contracts as executable test suites that run across pipeline stages.
+
+Integrating expectations into continuous integration and deployment (CI/CD) pipelines ensures assertions execute automatically on ingested batches, halting downstream training when data contracts are violated. A pipeline structured as data ingestion followed by data validation followed by training blocks deployment when validation detects anomalies such as age values of 150, triggering alerts for investigation.
+
+Executable expectations catch properties a suite can encode; the remaining question is what valid-looking data can still get wrong.
+
+::: {#psp-data-engineering-mechanical-vs-semantic-quality .callout-perspective title="Mechanical vs. semantic quality"}
+
+In traditional software, many checks are *mechanical*. A null dereference is a runtime error in languages with null references, while integer-overflow behavior depends on the language and type.
+
+In ML systems, data quality has a second, softer dimension: *semantic* quality\index{Data quality!mechanical vs. semantic}.
+
+*   **Mechanical check**: Validates schema and type constraints, such as verifying that `age` is a non-null integer.
+*   **Semantic check**: Validates distribution drift and statistical invariants, such as testing whether the mean or variance of `age` shifts unexpectedly.
+
+A dataset can be mechanically perfect (no nulls, correct types) but semantically broken (for example, all users are suddenly 25 years old due to a default value change). Robust ML systems must validate both the container\index{Data quality!container} (mechanical) and the content\index{Data quality!content} (semantic).
+
+:::
+
+Once validation becomes code, expectation suites become versioned artifacts alongside training code. When training code changes, expectation updates keep data contracts evolving with it. This coupling reduces the risk of silent divergence where code assumes data properties that the upstream pipeline no longer provides; @lst-data-expectations demonstrates this pattern by defining explicit constraints on column ranges, nullability, uniqueness, and categorical sets.
+
+::: {#lst-data-expectations lst-cap="**Data Quality Assertions**: A Great Expectations suite checks age range, identifier presence and uniqueness, and allowed country codes, then raises an error when validation fails."}
+
+```{.python}
+import great_expectations as gx
+
+# Create a data context
+context = gx.get_context()
+
+# Define an expectation suite as executable quality contract
+suite = gx.ExpectationSuite(name="user_data_quality")
+suite = context.suites.add(suite)
+
+# Range validation: prevents physiologically impossible values
+suite.add_expectation(
+    gx.expectations.ExpectColumnValuesToBeBetween(
+        column="age", min_value=0, max_value=120
+    )
+)
+
+# Null detection: ensures primary key integrity for joins
+suite.add_expectation(
+    gx.expectations.ExpectColumnValuesToNotBeNull(column="user_id")
+)
+
+# Uniqueness: prevents duplicate training examples
+suite.add_expectation(
+    gx.expectations.ExpectColumnValuesToBeUnique(column="user_id")
+)
+
+# Categorical validation: detects unexpected values from upstream changes
+suite.add_expectation(
+    gx.expectations.ExpectColumnDistinctValuesToBeInSet(
+        column="country_code",
+        value_set=["US", "CA", "UK", "DE", "FR"],
+    )
+)
+
+# Link the suite to a preconfigured Batch Definition and run validation
+# (the Batch Definition connects GX to the training_users data asset)
+validation_definition = gx.ValidationDefinition(
+    name="training_users_validation",
+    data=batch_definition,
+    suite=suite,
+)
+validation_definition = context.validation_definitions.add(
+    validation_definition
+)
+results = validation_definition.run()
+if not results.success:
+    raise ValueError(f"Data quality check failed: {results}")
+```
+
+:::
+
+These checks catch many schema-level production data issues before they reach training, including missing values, invalid ranges, type errors, and contract violations. The remaining issues require runtime monitoring and outcome checks, because semantic quality problems often emerge only in the full production data stream.
+
+### Data drift detection and response {#sec-data-engineering-detecting-responding-data-drift-509a}
+
+ML models rest on the assumption that production data resembles training data. When this assumption breaks through statistical shifts rather than an explicit contract violation, model performance can change silently without obvious errors or system failures. The validation and monitoring techniques in @sec-data-engineering-quality-validation-monitoring-498f can reveal both sudden and gradual problems; data drift detection\index{Data drift!detection}\index{Distribution shift!monitoring} focuses specifically on changes in distributions that may alter model behavior over time. Detecting, investigating, and responding to these changes requires sustained monitoring effort, making drift a core data engineering responsibility rather than an optional advanced topic.
+
+::: {.column-margin .margin-pointer}
+↪ How drift signals and outcome evidence trigger retraining only when its expected benefit exceeds its cost is operationalized in @sec-ml-operations-retraining-decision-framework-e33d.
+:::
+
+@Sec-appdx-data-foundations-measuring-drift-divergence-a6dd formalizes the divergence metrics used to make the divergence term $\StatisticalDivergence$ of the degradation equation (@eq-degradation) actionable. The **population stability index (PSI)**\index{Population stability index!definition} quantifies changes in categorical or binned&nbsp;feature distributions, while **Kullback-Leibler (KL) divergence**\index{Kullback-Leibler divergence!definition} measures an information-theoretic divergence between probability distributions. The two metrics encode different distributional assumptions and scales, and neither by itself supplies a universal cutoff. Teams calibrate metric-specific thresholds against a deployment baseline and monitor them over time. Crossing a threshold signals that the live distribution has moved far enough to warrant investigation and outcome checks; input divergence alone does not establish whether accuracy improved or degraded, or by how much. Mathematically, PSI discretizes a continuous feature into reference bins (typically deciles of baseline $\TrainingDistributionZero$) and computes $\text{PSI} = \sum_b \left( \CurrentDistribution(b) - \TrainingDistributionZero(b) \right) \ln\left(\frac{\CurrentDistribution(b)}{\TrainingDistributionZero(b)}\right)$. Each bin's two factors share a sign, so every shifting bin adds to the index. Practitioners commonly treat $\text{PSI} < 0.1$ as stable, $0.1 \le \text{PSI} \le 0.25$ as moderate shift, and $\text{PSI} > 0.25$ as a prompt for investigation; these bands are conventions to calibrate against the deployment baseline, not physical limits.
+
+Targeted detection and mitigation require decomposing drift into its constituent distribution components, as shown in the margin locator.
+
+::: {.column-margin}
+![](images/svg/vol1_data_engineering_margin_002.svg){width="100%" fig-alt="A vertical three-node locator pairs each distribution component with its drift type: p(x) covariate, p(y) label, and p(y|x) concept."}
+
+*Each drift type traces to the distribution component that shifted.*
+:::
+
+The first case, **covariate shift**\index{Covariate shift!definition}, changes the input distribution while preserving the relationship between features and labels: $\Distribution$ changes but $\ConditionalDistribution$ stays the same. A medical imaging system trained on one camera model might later receive production images from a different manufacturer. The disease-image relationship remains unchanged, but pixel values shift because sensor characteristics, color calibration, or image processing pipelines differ. Detection therefore focuses on input feature distributions, using metrics such as PSI or KL divergence.
+
+The second case, **label shift**\index{Label shift!definition}\index{Distribution shift!label shift}, changes the output distribution while preserving the relationship between labels and features: $p(y)$ changes but $p(x \mid y)$ stays the same. Disease prevalence might change seasonally while symptoms remain consistent predictors of each disease. A recommendation system might see the same pattern when new product categories launch, changing the relative frequency of user preferences without altering what makes products appealing within each category. Detection can often begin without ground truth labels by tracking shifts in the model's prediction distribution.
+
+The hardest case is **concept drift**\index{Concept drift!definition}: the relationship between features and labels changes, so $\ConditionalDistribution$ evolves over time [@gama2014]. Medical treatment protocols change, user preferences shift as social trends evolve, and fraud patterns adapt as attackers respond to detection systems. Unlike covariate or label shift, concept drift requires ground truth labels for detection because the system must observe whether the feature-to-label relationship itself has changed.
+
+```{python}
+#| echo: false
+#| label: cohens-kappa-chance-calc
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ COHEN'S KAPPA CHANCE AGREEMENT
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: Cohen's kappa footnote in the label-quality drift section
+# │
+# │ Goal: Compute chance agreement for a 90/10 binary label distribution.
+# │ Show: Majority-class agreement alone is 81%, but total chance agreement is 82%.
+# │ How: Square and sum the class marginals to get chance agreement.
+# │
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim.fmt import fmt, check
+
+class CohensKappaChance:
+    """Chance agreement for Cohen's kappa under a 90/10 binary marginal."""
+
+    # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
+    majority_probability = 0.90
+    minority_probability = 0.10
+
+    # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
+    chance_agreement = majority_probability**2 + minority_probability**2
+
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(abs(chance_agreement - 0.82) < 1e-12, f"Expected 82% chance agreement, got {chance_agreement:.2f}.")
+
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
+    chance_agreement_pct_str = fmt_percent(chance_agreement, precision=0, commas=False, style='prose')
+```
+
+#### Label quality drift {#sec-data-engineering-label-quality-drift-1ce7}
+
+Label quality drift\index{Label quality drift!detection}[^fn-label-drift-invisible] represents a meta-level shift distinct from the three preceding distribution shifts: the reliability of ground truth labels degrades over time even when the underlying data distributions remain stable. This drift type proves particularly insidious because standard feature distribution monitoring fails to detect it. Crowdsourced labels may degrade as annotator pools change, training materials become outdated, or labeling guidelines evolve without corresponding model updates. Automated labeling systems accumulate errors as the models powering them drift from their original operating conditions. A recommendation system using click feedback as implicit labels may see label quality degrade as user behavior becomes more exploratory, as bot traffic patterns change, or as interface modifications alter how users interact with content.
+
+Detection requires monitoring annotation consistency rather than feature distributions. Inter-annotator agreement metrics like Cohen's kappa[^fn-cohens-kappa-labeling] $(\CohensKappa)$ provide quantitative assessment. Let $p_o$ represent observed agreement between annotators and $p_e$ represent agreement expected by chance. @Eq-cohens-kappa defines the statistic:
+$$
+\CohensKappa = \frac{p_o - p_e}{1 - p_e}
+$$ {#eq-cohens-kappa}
+
+[^fn-cohens-kappa-labeling]: **Cohen's kappa**\index{Cohen's kappa!label quality}: Introduced by @cohen1960 to measure inter-rater agreement while correcting for agreement expected from the raters' class marginals, which raw percentage agreement ignores. If two independent annotators each label 90 percent of images as "not spam" in a binary task, their expected agreement is `{python} CohensKappaChance.chance_agreement_pct_str`, making raw agreement potentially misleading. The statistic is denoted $\CohensKappa$; interpretive bands such as the Landis-Koch categories are descriptive heuristics rather than universal data-quality thresholds [@landis1977measurement].
+
+Monitoring $\CohensKappa$ over time windows reveals degradation trends. A medical imaging annotation project might establish a baseline $\CohensKappa = 0.85$ (almost perfect agreement) during initial data collection, then observe decline to $\CohensKappa = 0.72$ (substantial agreement) after six months as new annotators join without receiving equivalent domain training.
+
+For systems with calibrated model probabilities, predictive entropy\index{Predictive entropy} provides an additional uncertainty signal. Let $p_i$ represent the model's probability assigned to label category $i$, and let $\log$ denote the natural logarithm, so entropy is measured in nats. @Eq-label-entropy defines this measure:
+$$
+H_{\text{pred}} = -\sum_i p_i \log p_i
+$$ {#eq-label-entropy}
+
+Rising predictive entropy indicates greater uncertainty in the model's predictive distribution, but it does not identify the cause. Harder inputs, distribution shift, calibration changes, or inconsistent supervision can produce the same signal.
+
+Mitigation strategies depend on root cause analysis. Annotator retraining addresses systematic errors from unclear guidelines at low cost with high effectiveness. Multi-annotator voting with majority or consensus rules provides high accuracy for high-stakes domains but significantly increases annotation costs. Model-assisted labeling reduces annotator fatigue but risks introducing bias if the assisting model has its own systematic errors. Expert review sampling, where domain specialists audit a random sample of annotations, enables root cause analysis when quality decline is detected but provides medium coverage of the overall annotation stream.
+
+[^fn-label-drift-invisible]: **Label quality drift**\index{Label quality drift!silent corruption}: Degradation in annotation reliability over time, distinct from distribution shifts in the data itself. This drift type is invisible to standard feature monitoring because the features remain stable while the labels degrade—annotator fatigue, pool turnover, or guideline evolution silently corrupt the ground truth the model learns from. Detection requires monitoring inter-annotator agreement $(\CohensKappa)$ over rolling time windows and comparing automated labels against periodic expert audits.
+
+Operationalizing the PSI and KL divergence metrics\index{Population stability index!drift detection}\index{Kullback-Leibler divergence!distribution comparison} requires connecting them to automated alerts and review workflows. Data engineering is responsible for defining domain-specific drift thresholds from baseline behavior and outcome evidence, selecting monitoring windows that can expose both sudden and gradual changes, and instrumenting pipelines to compute these metrics continuously.
+
+Statistical drift detection identifies distribution changes over time, but monitoring alone does not keep a system running when upstream pipelines stall, malformed payloads arrive, or schema definitions change without notice. Maintaining service continuity under failure requires active reliability mechanisms: fault isolation, backpressure, and graceful degradation.
+
+### Reliability through graceful degradation {#sec-data-engineering-reliability-graceful-degradation-f83d}
+
+Reliability\index{Reliability!error handling} ensures systems continue operating when problems occur. Pipelines face constant challenges: data sources become temporarily unavailable, network partitions separate components, upstream schema changes break parsing logic, or unexpected load spikes exhaust resources. **Graceful degradation**\index{Graceful degradation!data pipelines} means handling these failures through systematic failure analysis, intelligent error handling, and automated recovery strategies that maintain service continuity even under adverse conditions.
+
+Systematic failure mode analysis for ML data pipelines reveals predictable patterns that require specific engineering countermeasures. Data corruption failures occur when upstream systems introduce subtle format changes, encoding issues, or field value modifications that pass basic validation but corrupt model inputs. A date field switching from "YYYY-MM-DD" to "MM/DD/YYYY" format might not trigger schema validation but will break any date-based feature computation. Schema evolution\index{Schema evolution!failures}[^fn-schema-evolution-skew] failures happen when source systems add fields, rename columns, or change data types without coordination, breaking downstream processing assumptions that expected specific field names or types. Resource exhaustion manifests as gradually degrading performance when data volume growth outpaces capacity planning, eventually causing pipeline failures during peak load periods.
+
+[^fn-schema-evolution-skew]: **Schema evolution**\index{Schema evolution!silent failure}: This failure mode arises from a lack of contract testing between upstream data producers and downstream ML consumers. While "loud" failures like a renamed column break explicit assumptions and cause immediate pipeline crashes, "silent" failures are more dangerous. A field changing type from integer to string can pass validation but corrupt feature logic without immediate detection.
+
+Effective error handling strategies ensure problems are contained and recovered from systematically. Intelligent retry logic\index{Retry logic!exponential backoff} for transient errors (network interruptions or temporary service outages) requires exponential backoff strategies to avoid overwhelming recovering services. A simple linear retry that attempts reconnection every second would flood a struggling service with connection attempts, potentially preventing its recovery. Exponential backoff, retrying after one second, then two seconds, then four seconds, doubling with each attempt, gives services breathing room to recover while still maintaining persistence. Many ML systems employ **dead-letter queues (DLQs)**\index{Reliability!dead letter queues}: separate storage for data that fails processing after multiple retry attempts. This allows for later analysis and potential reprocessing of problematic data without blocking the main pipeline [@kleppmann2017designing]. A pipeline processing financial transactions that encounters malformed data can route it to a dead-letter queue rather than losing critical records or halting all processing.
+
+In ML systems, dead-letter queues serve dual purposes beyond failure analysis. Production teams implement systematic review of DLQ contents to identify: (1) schema violations indicating upstream changes, (2) edge case patterns the model should handle, and (3) data quality issues requiring source system fixes. For example, a fraud detection system's DLQ revealed transactions from a new payment type the model had never seen, prompting targeted data collection and retraining rather than simply logging the failures. This transforms DLQs from passive error storage into active sources for identifying model blind spots and driving improvement.
+
+Moving beyond ad-hoc error handling, cascade failure prevention requires circuit breaker\index{Reliability!circuit breakers}[^fn-circuit-breaker-ml] patterns and bulkhead isolation to prevent single component failures from propagating throughout the system. When a feature computation service fails, the circuit breaker pattern stops calling that service after detecting repeated failures, preventing the caller from waiting on timeouts that would cascade into its own failure.
+
+[^fn-circuit-breaker-ml]: **Circuit breaker**\index{Circuit breaker!cascade prevention}: Named for its three-state behavior—closed (normal flow), open (faults blocked), half-open (recovery probe)—after the electrical safety device that interrupts current on overload. In ML data pipelines, the circuit breaker prevents a failing feature computation service from cascading timeouts through the entire serving path: once failure count exceeds a threshold, the breaker opens and the pipeline falls back to cached or default features rather than waiting on a dead service.
+
+Automated recovery engineering extends beyond simple retry logic. Exponential backoff, jitter, load shedding, and circuit breakers reduce request pressure on struggling services while allowing transient faults to recover; simply increasing timeouts can retain resources longer and worsen overload. Multi-tier fallback systems provide degraded service when primary data sources fail: serving slightly stale cached features when real-time computation fails, or using approximate features when exact computation times out. A recommendation system unable to compute user preferences from the past 30 days might fall back to preferences from the past 90 days, providing less precise but still useful recommendations rather than failing entirely. Comprehensive alerting and escalation procedures ensure human intervention occurs when automated recovery fails, with sufficient diagnostic information captured during the failure to enable rapid debugging.
+
+Retry logic, dead-letter queues, and circuit breakers serve as runtime error handlers in the dataset compiler: they catch malformed inputs without halting the entire pipeline. These safeguards operate once data enters the system. The choice of ingestion pattern—batch vs. streaming; extract, transform, load (ETL) vs. extract, load, transform (ELT)—determines how quickly new data reaches the model, what buffering infrastructure is required, and where reliability invariants are enforced.
+
+## Training Data Loading
+
+In the compiler framework, data ingestion\index{Data ingestion!pipeline boundary} acts as the *lexer*: it reads raw source streams and tokenizes them into structured records that downstream stages can process. The primary performance barrier at this stage is the **input/output (I/O) bottleneck**\index{I/O bottleneck!data loading}. Accelerators remain idle if ingestion cannot stage tensors quickly enough to keep compute units supplied. The slowest-stage bound of @sec-data-engineering-feeding-problem applies unchanged: in an idealized two-stage model, step time ranges from $\max(\IronlawTermTimesCompute, T_{\text{IO}})$ with full overlap to $\IronlawTermTimesCompute + T_{\text{IO}}$ with no overlap. What changes is the binding resource. The feeding scenario was starved by the disk; ingestion is more commonly starved by CPU-side decompression and decode.
+
+```{python}
+#| echo: false
+#| label: dataloader-stats-calc
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ DATALOADER CHOKE POINT SETUP
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: Dataloader Choke Point prose and figure
+# │
+# │ Goal: Keep the illustrative worker/throughput constants next to their use.
+# │ Show: That 8 CPU workers at 375 img/s each reach the 3,000 img/s accelerator rate.
+# │ How: Calculate the minimum worker count and reuse constants in the plot.
+# │
+# │ Note: The accelerator rate comes from FeedingProblem (chapter scenario anchor).
+# └─────────────────────────────────────────────────────────────────────────────
+import math
+from mlsysim.fmt import fmt, check, fmt_rate
+
+# ┌── LEGO ───────────────────────────────────────────────
+class DataloaderStats:
+    """
+    Namespace for Dataloader Choke Point statistics.
+    """
+
+    # ┌── 1. LOAD (Constants) ───────────────────────────────────────────────
+    gpu_limit_img_sec = FeedingProblem.sustained_img_per_sec  # chapter scenario rate
+    worker_img_sec = 375  # scenario assumption: JPEG decode + augment per CPU worker
+    cpu_throughput_cap_img_sec = 3500
+    max_workers = 16
+
+    # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
+    resnet_worker_count = math.ceil(gpu_limit_img_sec / worker_img_sec)
+
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(resnet_worker_count == 8, f"Expected 8 workers for the illustrative dataloader saturation point, got {resnet_worker_count}.")
+
+    # ┌── 4. OUTPUT (Formatting) ───────────────────────────────────────────
+    resnet_worker_count_str = fmt(resnet_worker_count, precision=0, commas=False)
+    worker_img_per_s_str = fmt_rate(worker_img_sec, 'img/s', precision=0, commas=True)
+    gpu_limit_img_per_s_str = fmt_rate(gpu_limit_img_sec, 'img/s', precision=0, commas=True)
+```
+
+In computer vision, JPEG decode and augmentation on the host CPUs are the usual binding stage. In the chapter's scenario the accelerator consumes `{python} DataloaderStats.gpu_limit_img_per_s_str`; if each DataLoader worker process decodes and augments `{python} DataloaderStats.worker_img_per_s_str`, `{python} DataloaderStats.resnet_worker_count_str` workers are needed to reach the crossing. Below the crossing the input pipeline binds, and adding accelerators yields no speedup, a counterintuitive result for teams expecting linear scaling from hardware investments. Above it, additional workers raise nothing because the accelerator binds. The worker count is a capacity match, not a hardware constant: actual ResNet-50\index{ResNet-50!data-loading requirements} and A100\index{A100!data-loading requirements} requirements move with image transforms, host CPUs, batch size, and framework configuration. @Fig-dataloader-choke-point plots this capacity crossing, contrasting the rising blue CPU-supply curve against the dashed red GPU-capacity ceiling to isolate the starved regime below eight workers from the compute-saturated plateau beyond it.
+
+::: {#fig-dataloader-choke-point fig-env="figure" fig-pos="htb" fig-cap="**The Dataloader Choke Point**: Training throughput (img/s) vs. DataLoader workers. The blue CPU-supply curve rises with worker count until it reaches the illustrative input-pipeline cap; the red dashed line marks accelerator consumption capacity. The lower curve is the bottleneck: the accelerator starves to the left of the crossing, while extra workers beyond the crossing do not increase accelerator throughput." fig-alt="Line chart of throughput vs. workers. Blue line (CPU) rises linearly, then plateaus at the input-pipeline cap. Red line (GPU) is flat. Where CPU < GPU, system is starved. Where CPU > GPU, system is saturated."}
+
+```{python}
+#| echo: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ FIGURE: DATALOADER CHOKE POINT
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @fig-dataloader-choke-point in the data ingestion discussion
+# │
+# │ Goal: Visualize the min(CPU supply, GPU demand) bottleneck.
+# │ Show: The starvation vs. saturation regions in training throughput.
+# │ How: Plot throughput curves showing the "choke point" between CPU and GPU capacity.
+# │
+# └─────────────────────────────────────────────────────────────────────────────
+# ┌── 1. CANVAS ────────────────────────────────────────────────────────────────
+# │ Visualize the min(CPU supply, GPU demand) bottleneck.
+import numpy as np
+from binder.tools.figures import style as book_style
+
+fig, ax, COLORS, plt = book_style.setup_plot(figsize=(10, 4.5))
+
+# —Plot: The Dataloader Choke Point ---
+
+# ┌── 2. ARRAYS ────────────────────────────────────────────────────────────────
+workers = np.arange(1, DataloaderStats.max_workers + 1)
+cpu_throughput = np.minimum(DataloaderStats.worker_img_sec * workers, DataloaderStats.cpu_throughput_cap_img_sec)
+gpu_limit = DataloaderStats.gpu_limit_img_sec
+
+# ┌── 3. RENDER ────────────────────────────────────────────────────────────────
+ax.plot(workers, cpu_throughput, 'o-', color=COLORS['BlueLine'], label='DataLoader (CPU)')
+ax.axhline(gpu_limit, linestyle='--', color=COLORS['RedLine'], label='GPU Capacity')
+ax.fill_between(workers, 0, np.minimum(cpu_throughput, gpu_limit), color=COLORS['BlueL'], alpha=0.2)
+
+# ┌── 4. DECORATE ──────────────────────────────────────────────────────────────
+ax.text(
+    4.5,
+    1500,
+    "Starvation",
+    color=COLORS['BlueLine'],
+    fontweight='normal',
+    ha='center',
+    bbox=dict(facecolor='white', alpha=0.8, edgecolor='none', pad=0.2),
+)
+ax.text(
+    10,
+    3100,
+    "Saturated",
+    color=COLORS['RedLine'],
+    fontweight='normal',
+    ha='center',
+    bbox=dict(facecolor='white', alpha=0.8, edgecolor='none', pad=0.2),
+)
+ax.set_xlabel('DataLoader Workers')
+ax.set_ylabel('Throughput (img/s)')
+ax.legend(loc='lower right', fontsize=8, frameon=True, facecolor='white', framealpha=0.95, edgecolor='gray', fancybox=True, borderpad=0.6)
+plt.show()
+plt.close()
+```
+
+:::
+
+Relieving the choke point takes three mechanisms: multi-process worker pools that scale decode across host cores, asynchronous pinned-memory prefetching that overlaps the host-to-accelerator copy with compute, and hardware decode engines that move JPEG decompression off the host CPU entirely. The last of these removes the CPU bound and hands the constraint back to storage, which is the budget @sec-data-engineering-ml-storage-requirements-performance-1b0d prices.
+
+::: {.column-margin .margin-pointer}
+↪ How asynchronous prefetching and overlapping pipeline stages hide host preparation latency behind accelerator compute is developed in @sec-model-training-data-prefetching-pipeline-overlapping-e984.
+:::
 
 ## Systematic Data Processing {#sec-data-engineering-systematic-data-processing-aebc}
 

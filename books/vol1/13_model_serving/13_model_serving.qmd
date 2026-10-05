@@ -66,6 +66,1142 @@ The D·A·M taxonomy clarifies how this inversion reshapes each layer of the sys
 
 Meeting that latency deadline governs how engineering teams partition the end-to-end serving stack. A request's latency budget encompasses three sequential stages: host-side ingress and preprocessing (network termination, payload deserialization, and tokenization or feature transformation), accelerator kernel execution, and downstream postprocessing. Any millisecond consumed by unoptimized feature retrieval or queueing delays directly subtracts from the execution time allocated to the neural network itself. Consequently, the central engineering task in model serving is deciding which operations must remain on the synchronous request path, which tasks can be offloaded to asynchronous background pipelines, and how much headroom the system must reserve before tail-latency guarantees collapse under load.
 
+## Serving System Architecture {#sec-model-serving-serving-system-architecture-4879}
+
+While host isolation reduces service-time variability, production serving confronts an impedance mismatch at the system boundary. User requests arrive stochastically—bursting milliseconds apart, followed by seconds of silence—whereas accelerator compute engines demand steady streams of uniform, dense batches to saturate memory bandwidth and functional units. Bridging this gap requires a specialized serving architecture that decouples network ingress from execution scheduling, absorbing arrival bursts and packing irregular inputs into dense batches without violating latency SLOs.
+
+### Internal architecture and request flow {#sec-model-serving-anatomy-inference-server-f12e}
+
+An inference server\index{Inference server!architecture}[^fn-inference-server-serving] (such as NVIDIA Triton or TensorFlow Serving) functions as a specialized runtime scheduler that manages concurrency, device memory, and data movement between host CPUs and accelerator devices. Rather than invoking model execution synchronously upon request arrival, the server pipelines incoming requests through dedicated subsystems that isolate client network handling from accelerator compute. Every request traverses a multi-stage runtime pipeline designed to maximize hardware throughput while bounding queuing latency. @Fig-server-anatomy diagrams the six stages of this pipeline, tracing how incoming client queries traverse network ingress and request buffering queues before the dynamic batcher stages them downward to the inference runner and the hardware accelerator.
+
+[^fn-inference-server-serving]: **Inference server**\index{Inference server!serving architecture}: Google's TensorFlow Serving\index{TensorFlow Serving!inference server} [@olston2017tensorflow] helped establish the separation of model logic from serving infrastructure; NVIDIA's Triton\index{Triton!inference server} [@nvidia_triton] extends this pattern across multiple model frameworks and backends. The critical design insight is that a scheduler and dynamic batcher turn irregular single-request traffic into accelerator-friendly execution, improving utilization when latency budgets allow batching. Exact utilization gains depend on model, hardware, arrival rate, and the configured batching window.
+
+::: {#fig-server-anatomy fig-env="figure" fig-pos="htb" fig-cap="**Inference Server Anatomy**: A modern inference server decouples network handling from accelerator execution through a staged pipeline. Each stage isolates a concern, from absorbing bursty traffic to forming efficient batches, so the hardware accelerator stays highly utilized despite irregular arrival patterns." fig-alt="Flowchart showing a six-stage inference server pipeline: client to network ingress to request queue to dynamic batcher, then down to inference runner to accelerator. Arrows connect stages sequentially."}
+
+```{.tikz}
+\begin{tikzpicture}[font=\small\sffamily]
+  \tikzset{
+    Box/.style={draw=none,minimum width=20mm, minimum height=15mm, node distance=18mm},
+    Arr/.style={-{Triangle[width=10pt,length=8pt]}, line width=5pt,cyan!40,shorten >=1pt, shorten <=2pt},
+ Box2/.style={align=flush center, inner xsep=2pt,draw=OrangeLine,
+  font=\fontsize{7pt}{9}\sffamily,
+    line width=0.75pt, rounded corners,fill=OrangeL!30, text width=16mm,
+    minimum width=16mm, minimum height=9mm},
+LineA/.style = {violet!60,{Circle[line width=1.0pt,fill=white,length=5.5pt]}-,line width=1.5pt,shorten <=-3pt}
+}
+%laptop
+\tikzset{
+pics/laptop/.style = {
+        code = {
+        \pgfkeys{/channel/.cd, #1}
+\begin{scope}[shift={($(0,0)+(0,0)$)},scale=\scalefac,every node/.append style={transform shape}]
+\node[rounded corners=2pt,rectangle,minimum width=60,minimum height=37,
+fill=\filllcolor!60,line width=\Linewidth,draw=black](EKV)at(0,0.53){};
+%
+\node[draw=black,rounded corners=2pt,rectangle,minimum width=53,minimum height=30,
+fill=\filllcolor!10,line width=\Linewidth,](EK)at(0,0.53){};
+\coordinate(SM1)at($(EK.south west)+(0.15,0.5)$);
+\coordinate(SM2)at($(EK.south east)+(-1.1,0.5)$);
+\coordinate(OK1)at($(EK.220)+(0,0.7)$);
+\coordinate(OK2)at($(EK.240)+(0,0.7)$);
+\node[fill=black,inner sep=0pt,ellipse,minimum width=2pt,minimum height=3pt](OKO1)at(OK1){};
+\node[fill=black,inner sep=0pt,ellipse,minimum width=2pt,minimum height=3pt](OKO2)at(OK2){};
+\draw[line width=1.4pt](SM1)to [bend right=45](SM2);
+%%
+\coordinate(4BL)at($(EK.south west)+(0.95,0.3)$);
+    \def\n{5}          % broj boksova
+    \def\w{0.12}        % širina boksa (mm)
+    \def\h{0.5}       % visina boksa (mm)
+    \def\gap{0.05}      % razmak između boksova (mm)
+    % niz boksova
+    \foreach \i in {0,...,4} {
+      \pgfmathsetmacro{\x}{\i*(\w+\gap)}
+      % popuna (klipujemo unutar ivica)
+      \begin{scope}
+        \clip[] ($(4BL)+(\x,0)$) rectangle ++(\w,\h);
+        \fill[gray!10]($(4BL)+(\x,0)$) rectangle ++(\w,\h*1);
+        \fill[fill=\filllcirclecolor]($(4BL)+(\x,0)$) rectangle ++(\w,\h*\Level);
+      \end{scope}
+      % kontura preko
+      \draw[line width=0.6pt,draw=black]($(4BL)+(\x,0)$)  rectangle ++(\w,\h);
+    }
+%
+\draw[fill=\filllcolor!60!black!30,line width=\Linewidth](-1.00,-0.1)--(1.0,-0.1)--(1.28,-0.6)--(-1.28,-0.6)--cycle;
+\draw[fill=\filllcolor!60!black!30,line width=\Linewidth](1.28,-0.6)--(-1.28,-0.6)arc[start angle=180, end angle=270, radius=4pt]--(1.14,-0.73)
+arc[start angle=270, end angle=355, radius=4pt]--cycle;
+\draw[fill=\filllcolor!30!black!10,line width=\Linewidth](-0.95,-0.17)--(0.95,-0.17)--(1.03,-0.34)--(-1.03,-0.34)--cycle;
+\draw[fill=\filllcolor!30!black!20,line width=\Linewidth](-0.16,-0.52)--(0.16,-0.52)--(0.14,-0.42)--(-0.14,-0.42)--cycle;
+\end{scope}
+    }
+  }
+}
+
+\tikzset {
+pics/gatewey/.style = {
+        code = {
+        \pgfkeys{/channel/.cd, #1}
+\begin{scope}[local bounding box=GAT,scale=\scalefac, every node/.append style={transform shape}]
+\def\rI{4mm}
+\def\rII{2.8mm}
+\def\rIII{1.6mm}
+\draw[draw=\drawcolor,line width=0.8*\Linewidth](0,0)--(0,0.38)--(1.2,0.38)--(1.2,0)--cycle;
+\draw[draw=\drawcolor,line width=\Linewidth](0.6,0.4)--(0.6,0.9);
+
+ \draw[draw=\drawcolor, line width=\Linewidth] (0.6,0.9)+(60:\rI) arc[start angle=60, end angle=-60, radius=\rI];
+\draw[draw=\drawcolor, line width=\Linewidth] (0.6,0.9)+(50:\rII) arc[start angle=50, end angle=-50, radius=\rII];
+\draw[draw=\drawcolor, line width=\Linewidth] (0.6,0.9)+(30:\rIII) arc[start angle=30, end angle=-30, radius=\rIII];
+%
+ \draw[draw=\drawcolor, line width=\Linewidth] (0.6,0.9)+(120:\rI) arc[start angle=120, end angle=240, radius=\rI];
+\draw[draw=\drawcolor, line width=\Linewidth] (0.6,0.9)+(130:\rII) arc[start angle=130, end angle=230, radius=\rII];
+\draw[draw=\drawcolor, line width=\Linewidth] (0.6,0.9)+(150:\rIII) arc[start angle=150, end angle=210, radius=\rIII];
+\fill[fill=\filllcolor](0.6,0.9)circle (1.5pt);
+
+\foreach\i in{0.15,0.3,0.45,0.6}{
+\fill[fill=\filllcolor](\i,0.19)circle (1.5pt);
+}
+
+\fill[fill=\filllcolor](1,0.19)circle (2pt);
+\end{scope}
+}
+}
+}
+\tikzset {
+pics/cpu/.style = {
+        code = {
+        \pgfkeys{/channel/.cd, #1}
+\begin{scope}[local bounding box = CPU,scale=\scalefac, every node/.append style={transform shape}]
+\node[fill=\filllcolor,minimum width=66, minimum height=66,
+            rounded corners=2,outer sep=2pt] (C1) {};
+\node[fill=\filllcirclecolor,minimum width=54, minimum height=54] (C2) {\bfseries\Large  GPU};
+
+\foreach \x/\y in {0.11/1,0.26/2,0.41/3,0.56/4,0.71/5,0.85/6}{
+\node[fill=\filllcolor,minimum width=4, minimum height=15,
+           inner sep=0pt,anchor=south](GO\y)at($(C1.north west)!\x!(C1.north east)$){};
+}
+\foreach \x/\y in {0.11/1,0.26/2,0.41/3,0.56/4,0.71/5,0.85/6}{
+\node[fill=\filllcolor,minimum width=4, minimum height=15,
+           inner sep=0pt,anchor=north](DO\y)at($(C1.south west)!\x!(C1.south east)$){};
+}
+\foreach \x/\y in {0.11/1,0.26/2,0.41/3,0.56/4,0.71/5,0.85/6}{
+\node[fill=\filllcolor,minimum width=15, minimum height=4,
+           inner sep=0pt,anchor=east](LE\y)at($(C1.north west)!\x!(C1.south west)$){};
+}
+\foreach \x/\y in {0.11/1,0.26/2,0.41/3,0.56/4,0.71/5,0.85/6}{
+\node[fill=\filllcolor,minimum width=15, minimum height=4,
+           inner sep=0pt,anchor=west](DE\y)at($(C1.north east)!\x!(C1.south east)$){};
+}
+\end{scope}
+    }
+  }
+}
+\tikzset{pics/brain/.style = {
+        code = {
+        \pgfkeys{/channel/.cd, #1}
+\begin{scope}[local bounding box=BRAIN,scale=\scalefac, every node/.append style={transform shape}]
+\fill[fill=\filllcolor!50](0.1,-0.5)to[out=0,in=180](0.33,-0.5)
+to[out=0,in=270](0.45,-0.38)to(0.45,-0.18)
+to[out=40,in=240](0.57,-0.13)to[out=110,in=310](0.52,-0.05)
+to[out=130,in=290](0.44,0.15)to[out=90,in=340,distance=8](0.08,0.69)
+to[out=160,in=80](-0.42,-0.15)to(-0.48,-0.7)to(0.07,-0.7)to(0.1,-0.5)
+to(-0.10,-0.42)to[out=310,in=180](0.1,-0.5);
+\draw[draw=\drawcolor,line width=\Linewidth](0.1,-0.5)to[out=0,in=180](0.33,-0.5)
+to[out=0,in=270](0.45,-0.38)to(0.45,-0.18)
+to[out=40,in=240](0.57,-0.13)to[out=110,in=310](0.52,-0.05)
+to[out=130,in=290](0.44,0.15)to[out=90,in=340,distance=8](0.08,0.69)
+to(-0.42,-0.15)to(-0.48,-0.7)
+(0.07,-0.7)to(0.1,-0.5)
+(-0.10,-0.42)to[out=310,in=180](0.1,-0.5);
+\draw[fill=\filllcolor,line width=\Linewidth](-0.3,-0.10)to(0.08,0.60)
+to[out=60,in=50,distance=3](-0.1,0.69)to[out=160,in=80](-0.26,0.59)to[out=170,in=90](-0.46,0.42)
+to[out=170,in=110](-0.54,0.25)to[out=210,in=150](-0.54,0.04)
+to[out=240,in=130](-0.52,-0.1)to[out=300,in=240]cycle;
+\draw[fill=\filllcolor,line width=\Linewidth]
+(-0.04,0.64)to[out=120,in=0](-0.1,0.69)(-0.19,0.52)to[out=120,in=330](-0.26,0.59)
+(-0.4,0.33)to[out=150,in=280](-0.46,0.42)
+%
+(-0.44,-0.03)to[bend left=30](-0.34,-0.04)
+(-0.33,0.08)to[bend left=40](-0.37,0.2) (-0.37,0.12)to[bend left=40](-0.45,0.14)
+(-0.26,0.2)to[bend left=30](-0.24,0.13)
+(-0.16,0.32)to[bend right=30](-0.27,0.3)to[bend right=30](-0.29,0.38)
+(-0.13,0.49)to[bend left=30](-0.04,0.51);
+
+\draw[rounded corners=0.8pt,line width=\Linewidth,\drawcircle,-{Circle[fill=\filllcirclecolor,length=3.5pt]}](-0.23,0.03)--(-0.15,-0.03)--(-0.19,-0.18)--(-0.04,-0.28);
+\draw[rounded corners=0.8pt,line width=\Linewidth,\drawcircle,-{Circle[fill=\filllcirclecolor,length=3.5pt]}](-0.17,0.13)--(-0.04,0.05)--(-0.06,-0.06)--(0.14,-0.11);
+\draw[rounded corners=0.8pt,line width=\Linewidth,\drawcircle,-{Circle[fill=\filllcirclecolor,length=3.5pt]}](-0.12,0.23)--(0.31,0.0);
+\draw[rounded corners=0.8pt,line width=\Linewidth,\drawcircle,-{Circle[fill=\filllcirclecolor,length=3.5pt]}](-0.07,0.32)--(0.06,0.26)--(0.16,0.33)--(0.34,0.2);
+\draw[rounded corners=0.8pt,line width=\Linewidth,\drawcircle,-{Circle[fill=\filllcirclecolor,length=3.5pt]}](-0.01,0.43)--(0.06,0.39)--(0.18,0.51)--(0.31,0.4);
+\end{scope}
+     }
+  }
+}
+%inbox
+\tikzset{%
+ pics/inbox/.style = {
+        code = {
+        \pgfkeys{/channel/.cd, #1}
+\begin{scope}[local bounding box=INBOX,scale=\scalefac, every node/.append style={transform shape}]
+\node[line width=\Linewidth,draw=\drawcolor,fill=\filllcolor!50,
+rectangle,rounded corners=3pt,minimum width=14mm,minimum height=10mm]at(0,0.3){};
+\node[line width=\Linewidth,draw=\drawcolor,fill=\filllcolor,
+rectangle,rounded corners=3pt,minimum width=15mm,minimum height=10mm]at(0,0.1){};
+\node[line width=\Linewidth,draw=\drawcolor,fill=\filllcolor!50,
+rectangle,rounded corners=3pt,minimum width=17mm,minimum height=10mm]
+at(0,-0.1){};
+\draw[line width=\Linewidth,draw=\drawcolor,fill=\filllcirclecolor,rounded corners=2pt](-0.92,0.05)--
+(-0.92,-0.78)--(0.92,-0.78)--(0.92,0.05)--(0.40,0.05)--(0.32,-0.2)--(-0.29,-0.2)--(-0.40,0.05)--cycle;
+
+\node[single arrow, line width=\Linewidth,draw=black,fill=green!80!black!50, rotate=270,
+      minimum width = 15pt, single arrow head extend=6pt,
+      minimum height=10mm]at(0,0.5) {}; % length of arrow
+ \end{scope}
+     }
+  }
+}
+%funnel
+\tikzset{%
+ pics/funnel/.style = {
+        code = {
+        \pgfkeys{/channel/.cd, #1}
+\begin{scope}[local bounding box=FUNNEL,scale=\scalefac, every node/.append style={transform shape}]
+\draw[fill=\filllcolor!50,line width=\Linewidth,draw=\drawcolor](-0.12,-0.81)--(-0.19,-0.25)--(-0.7,0.41)--(0.7,0.41)--(0.19,-0.25)--(0.12,-0.81)--cycle;
+\draw[fill=\filllcolor!50,line width=\Linewidth,draw=\drawcolor](-0.19,-0.25)--(0.08,-0.25);
+\draw[fill=\filllcolor!50,line width=\Linewidth,draw=\drawcolor](0.16,-0.09)--(0.41,0.31);
+%
+\node[line width=\Linewidth,draw=\drawcolor,fill=\filllcolor!50,inner sep=1pt,
+rectangle,rounded corners=2pt,minimum width=16mm,minimum height=5pt]at(0,0.5){};
+%
+\foreach \i in{-0.5,0,0.5}{
+\node[single arrow, line width=0.8*\Linewidth,draw=black,fill=cyan!90!black!30, rotate=270,inner sep=1pt,
+      minimum width =9pt, single arrow head extend=2pt,
+      minimum height=3.5mm]at(\i,0.83) {}; % length of arrow
+   }
+\node[single arrow,line width=0.8*\Linewidth,draw=black,fill=\filllcirclecolor, rotate=270,inner sep=1pt,
+      minimum width =11pt, single arrow head extend=2pt,
+      minimum height=4mm]at(0,-1.05) {}; % length of arrow
+ \end{scope}
+     }
+  }
+}
+\pgfkeys{
+  /channel/.cd,
+   Depth/.store in=\Depth,
+  Height/.store in=\Height,
+  Width/.store in=\Width,
+  Level/.store in=\Level,
+  filllcirclecolor/.store in=\filllcirclecolor,
+  filllcolor/.store in=\filllcolor,
+  drawcolor/.store in=\drawcolor,
+  drawcircle/.store in=\drawcircle,
+  scalefac/.store in=\scalefac,
+  Linewidth/.store in=\Linewidth,
+  picname/.store in=\picname,
+  filllcolor=BrownLine,
+  filllcirclecolor=cyan!40,
+  drawcolor=black,
+  drawcircle=violet,
+  scalefac=1,
+  Level=0.52,
+  Linewidth=0.5pt,
+  Depth=1.3,
+  Height=0.8,
+  Width=1.1,
+  picname=C
+}
+
+\node[Box, fill=white](B1){};
+ \pic[shift={(0,-0.10)}] at  (B1){laptop={scalefac=0.67,picname=1,drawcolor=GreenD,
+filllcolor=GreenD!70!,Linewidth=0.75pt, filllcirclecolor=red!80}};
+
+\node[Box, fill=white,right=of B1,minimum width=16mm](B2){};
+\pic[shift={(-0.68,-0.57)}] at  (B2){gatewey={scalefac=1.1,picname=1,drawcolor=green!50!black,
+filllcolor=red!,Linewidth=1.5pt, filllcirclecolor=red!80}};
+
+\node[Box, fill=white,right=of B2,minimum width=14mm](B3){};
+\pic[shift={(0,0.07)}] at  (B3){brain={scalefac=1.0,picname=1,filllcolor=orange!30!, Linewidth=1pt}};
+
+\node[Box, fill=white,right=of B3,minimum width=16mm](B4){};
+\pic[shift={(0,-0.06)}] at  (B4){inbox={scalefac=0.7,picname=1,Linewidth=1.0pt,
+ filllcolor=BrownL,drawcolor=black,filllcirclecolor=orange!70!yellow!80}};
+
+\node[Box, fill=white,below=1 of B4,minimum width=17mm,minimum height=22mm](B5){};
+ \pic[shift={(0,0.17)}] at  (B5){funnel={scalefac=0.9,picname=1,Linewidth=1.0pt,
+ filllcolor=BrownL,drawcolor=black,filllcirclecolor=green!70!yellow!80}};
+
+\node[Box, fill=white,below=0.8 of B5,minimum width=17mm](B6){};
+\pic[shift={(0,0)}] at  (B6){cpu={scalefac=0.4,picname=1,drawcolor=GreenD,
+filllcolor=BlueD!70!,Linewidth=0.75pt, filllcirclecolor=brown!20}};
+
+\draw[Arr](B1)--(B2);
+\draw[Arr](B2)--(B3);
+\draw[Arr](B3)--(B4);
+\draw[Arr,shorten <=5pt](B4)--(B5);
+\draw[Arr](B5)--(B6);
+
+\draw[violet,line width=1.5pt](B1.south west)--coordinate(S1)(B1.south east);
+\draw[violet,line width=1.5pt](B2.south west)--coordinate(S2)(B2.south east);
+\draw[violet,line width=1.5pt](B3.south west)--coordinate(S3)(B3.south east);
+\draw[violet,line width=1.5pt](B4.south west)--coordinate(S4)(B4.south east);
+\draw[violet,line width=1.5pt](B5.south west)--coordinate[pos=0.25](S5)(B5.north west);
+\draw[violet,line width=1.5pt](B6.south west)--coordinate(S6)(B6.north west);
+
+\node[Box2,anchor=north,below= 0.6of S1](CR){Client\\(Request)};
+\draw[LineA](S1)--(CR);
+
+\node[Box2,text width=25mm,right=0.75 of CR](NI){Network Ingress\\(HTTP/gRPC)};
+\draw[LineA](S2)--(NI);
+
+ \draw[LineA](S3)--++(210:1.15);
+ \node[Box2,right=0.55 of NI](RQT){Request\\Queue};
+
+\node[Box2,right=0.4 of RQT](DBT){Dynamic\\Batcher};
+\draw[LineA](S4)--(DBT);
+
+\node[Box2,left=of S5,text width=26mm](IRT){Inference Runner\\(TensorRT/ONNX)};
+\draw[LineA](S5)--(IRT);
+
+\draw[LineA](S6)--++(180:1.0)coordinate(AC);
+\node[Box2,text width=26mm,left=of S6]{Accelerator\\(GPU/TPU)};
+  % Labels
+\node[above=0pt of B3, font=\scriptsize\sffamily, text=gray] {Request Buffering};
+\node[above=0pt of B4, font=\scriptsize\sffamily, text=gray] {Throughput Opt.};
+\node[right=12pt of B5.center, align=left,font=\scriptsize\sffamily, text=gray] {Execution\\ Opt.};
+\end{tikzpicture}
+```
+
+:::
+
+This architecture serves three core functions:
+
+First, concurrency management. Serving engines employ asynchronous event loops (such as `epoll` or `kqueue`) and worker thread pools to handle thousands of concurrent client TCP connections without blocking execution threads. Isolating client network I/O lets other ready requests advance while one client has a slow or stalled transfer.
+
+Second, request transformation\index{Request transformation!tensor formats}. The server decodes serialized network payloads into contiguous, aligned memory buffers matching the tensor layout required by the underlying execution engine. For example, 4D vision tensors may use NCHW[^fn-nchw-nhwc-serving]\index{Tensor memory layout!NCHW} or NHWC\index{Tensor memory layout!NHWC} format. On modern accelerators, matrix multiplication units (such as Tensor Cores) load 8- or 16-element channel vectors using coalesced memory transactions that favor channels-last (NHWC) layout. If the execution kernel requires a different physical layout, the server must materialize that layout. `torch.permute` alone creates a view with reordered strides; a contiguous copy or explicit transpose kernel moves the data when required. Such materialization performs little arithmetic ($I \approx 0$ FLOP/byte), so memory traffic or launch overhead can dominate its cost. A device-local conversion consumes device memory bandwidth; PCIe traffic enters only when data also crosses the host-device boundary.
+
+[^fn-nchw-nhwc-serving]: **NCHW and NHWC (tensor memory layouts)**\index{Tensor layout!NCHW vs. NHWC}: These acronyms encode the dimension order of 4D image tensors: N (batch), C (channels), H (height), and W (width). In a contiguous NCHW tensor, each channel plane is contiguous; in NHWC, channels for one spatial position are adjacent. Optimized kernels may favor either layout, and a semantic mismatch can scramble values even when the element count is correct. Serving code should therefore make both dimension meaning and any physical-layout conversion explicit.
+
+Third, model lifecycle management. The runtime establishes the CUDA context before allocating device memory (VRAM) and loading device-resident weights. It also pins host memory buffers for DMA and executes representative warmup passes to trigger deferred compilation and allocation before admitting live client traffic. While enterprise model registries, canary releases, and rollback policies belong to @sec-ml-operations, the serving engine governs local state: validating that active model instances are warmed, resident in accelerator memory, and ready for dispatch.
+
+The execution **scheduler**\index{Scheduler!inference server} coordinates the transition between request buffering and accelerator execution by implementing dynamic batching (@sec-model-serving-throughput-optimization-18d1). For weight-dominated inference at batch size $\BatchSize=1$, streaming parameters from HBM can limit execution before the arithmetic units reach peak throughput. Grouping $\BatchSize$ requests into a concurrent batch amortizes the byte transfers of reading model weights across all $\BatchSize$ inputs, increasing the arithmetic intensity ($I = \Operations/\DataVolume$).
+
+To balance individual request latency against batch compute efficiency, the scheduler tunes queue residency using a **batching window**\index{Batching!window, latency-throughput trade-off} (or timeout threshold). Setting the batching window to zero removes deliberate batch formation delay, but requests can still wait for an available worker. An immediately dispatched small batch may also expose too little work to use the accelerator efficiently. Conversely, setting a bounded window (such as 2 to 5 ms) allows the scheduler to buffer arriving requests until either the queue reaches a target batch size or the timeout expires. The window bounds deliberate formation delay; waiting for a busy worker is a separate resource-queue delay. Batching trades that formation time for greater weight reuse and potentially higher service capacity, while total latency includes both waits and execution.
+
+### Interface protocols and serialization {#sec-model-serving-interface-protocols-serialization-5510}
+
+As accelerator kernels undergo aggressive compilation (via TensorRT, TorchDynamo, or custom kernels), device execution time often drops below a single millisecond, and the host-side cost of ingesting, transporting, and deserializing payloads becomes the dominant term in end-to-end latency (the serving tax itemized in @sec-model-serving-serving-tax-bill-dc6c).
+
+#### The serialization bottleneck {#sec-model-serving-serialization-bottleneck-aaa0}
+
+Machine learning payloads differ fundamentally from conventional web API payloads: they consist of multi-dimensional arrays of floating-point numbers (such as image tensors, dense embedding vectors, or token sequence logits). While text-based JSON is ubiquitous in web services, serializing dense numerical arrays into text incurs severe CPU and memory penalties. Serialization overhead\index{Serialization!overhead} manifests because JSON parsers must scan every byte sequentially, validate syntax, allocate heap nodes, and invoke string-to-float conversion routines (such as `strtod`). Each 32-bit float expands from 4 raw bytes into 7 to 15 ASCII characters including punctuation. Furthermore, raw binary data (such as compressed JPEG or raw image bytes) requires Base64 encoding to travel within JSON strings, imposing a 33 percent size inflation before parsing begins.
+
+Binary serialization formats, such as Protocol Buffers[^fn-protobuf-serialization-overhead] and FlatBuffers,[^fn-flatbuffers-zerocopy-deserialization] bypass this text translation tax. Float arrays transmit directly as packed IEEE 754 byte streams with zero ASCII conversion and zero Base64 framing. Furthermore, FlatBuffers organizes serialized records with internal relative offsets, enabling zero-copy deserialization\index{FlatBuffers!zero-copy serialization}: the serving application reads tensor dimensions, data types, and byte offsets directly out of the network receive buffer without allocating an intermediate object graph on the heap.
+
+[^fn-protobuf-serialization-overhead]: **Protocol Buffers (Protobuf)**\index{Protocol Buffers!serialization}: Protobuf uses a predefined schema (from a `.proto` file) to encode structured data into a compact binary format [@protobufDocs]. Because the schema carries field names and types, the wire payload need not repeat them as JSON does. Its wire format is still not identical to a C++ object's in-memory layout, so it requires a parsing step and does not provide the same direct zero-copy access pattern that FlatBuffers targets.
+
+[^fn-flatbuffers-zerocopy-deserialization]: **FlatBuffers**\index{FlatBuffers!etymology}: The "flat" in the name describes the design: the binary buffer can serve as the serialized representation and the data structure being read, avoiding a separate parsing or unpacking phase for supported access patterns [@flatbuffersDocs]. For ML inference, this can enable zero-copy access\index{FlatBuffers!zero-copy serialization} to tensor metadata---the serving system reads tensor shapes and offsets directly from the buffer rather than allocating a second object representation.
+
+#### REST vs. gRPC {#sec-model-serving-rest-vs-grpc-c7b7}
+
+Transport protocol selection governs connection life cycles and socket multiplexing. Conventional REST APIs typically deploy HTTP/1.1 with JSON payloads. HTTP/1.1 clients commonly use multiple persistent TCP connections for concurrency. Establishing each connection incurs handshake and, for HTTPS, TLS costs, but keep-alive reuse amortizes setup across requests. HTTP/1.1 also suffers from request-level head-of-line blocking, because responses on a single connection must return in request order. While REST APIs can adopt HTTP/2 or binary encodings, the combination of HTTP/1.1 and JSON creates significant socket overhead and CPU parsing contention when serving high-throughput tensor workloads.
+
+In contrast, gRPC (gRPC Remote Procedure Call)[^fn-grpc-inference-protocol] pairs HTTP/2 transport with Protocol Buffers serialization. HTTP/2 establishes a single long-lived TCP connection and multiplexes hundreds of concurrent request and response streams simultaneously using binary framing. This architecture multiplexes concurrent streams over a persistent connection and removes HTTP-level response-order blocking (a lost TCP packet can still stall every stream on the connection, which HTTP/3 addresses by moving to QUIC), while Protobuf enforces strongly typed contracts and serializes binary tensor payloads efficiently. Consequently, gRPC is the standard protocol for internal microservice communication in model serving clusters, where low latency, compact wire payloads, and bidirectional token streaming are primary design criteria.
+
+[^fn-grpc-inference-protocol]: **gRPC (gRPC remote procedure call)**\index{gRPC!inference protocol}: The gRPC framework pairs HTTP/2 transport with an interface definition language and message format, most commonly Protocol Buffers [@grpcDocs]. The relevant serving advantage is the combination of typed contracts, persistent multiplexed connections, streaming support, and compact binary messages. The size and latency benefit over REST/JSON depends on payload shape, client/server implementation, and whether serialization is a meaningful share of the end-to-end latency budget.
+
+A concrete payload comparison quantifies how the serialization format alters wire footprint and host CPU parsing overhead.
+
+```{python}
+#| echo: false
+#| label: serialization-comparison-calc
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ JSON VS PROTOBUF SERIALIZATION
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: Callout "JSON vs Protobuf Serialization"
+# │
+# │ Goal: Quantify the serialization tax in high-throughput inference.
+# │ Show: The 10× efficiency gain of Protobuf over JSON for vector data.
+# │ How: Calculate parsing overhead and wire size for a 1000-float payload.
+# │
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim.fmt import fmt_int, MarkdownStr, check, fmt, fmt_time, fmt_memory, fmt_percent, fmt_multiple, fmt_multiple
+from mlsysim.core.units import byte, KB, microsecond, second
+
+# ┌── LEGO ───────────────────────────────────────────────
+class SerializationEfficiency:
+    """
+    Namespace for Serialization Efficiency calculation.
+    Scenario: Comparing JSON vs Protobuf for a 1000-float payload.
+    """
+
+    # ┌── 1. LOAD (Constants) ───────────────────────────────────────────────
+    floats_count = 1000
+    json_parse_us = 50.0
+    proto_parse_us = 5.0
+    json_bytes_per_float = 9  # scenario: ~9 ASCII chars/float incl. separators
+    protobuf_bytes_per_float = int(BYTES_FP32.to(byte).magnitude)  # FP32 binary
+    requests_per_sec = 10_000  # scenario throughput
+
+    # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
+    efficiency_gain = json_parse_us / proto_parse_us
+    json_size = floats_count * json_bytes_per_float * byte
+    protobuf_size = floats_count * protobuf_bytes_per_float * byte
+    # Napkin chain: per-request saving -> CPU-seconds per second -> core fraction
+    parse_saving_us = json_parse_us - proto_parse_us
+    cpu_saving_per_s = requests_per_sec * parse_saving_us * microsecond  # CPU time saved per wall-clock second
+    core_fraction = (cpu_saving_per_s / second).to("").magnitude
+
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(efficiency_gain >= 5, f"Protobuf gain ({efficiency_gain:.1f}x) is too small to justify switching.")
+    check(json_size > protobuf_size, "JSON wire size must exceed Protobuf.")
+    check(0 < core_fraction < 1, "Per-second parse savings should stay below one full CPU core.")
+
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
+    serial_floats_str = fmt(floats_count, precision=0)
+    json_size_str = fmt_memory(json_size, unit=KB, precision=0, commas=False)
+    json_parse_us_str = fmt_time(round(json_parse_us), 'microsecond', precision=0, commas=False)
+    protobuf_size_str = fmt_memory(protobuf_size, unit=KB, precision=0, commas=False)
+    protobuf_parse_us_str = fmt_time(round(proto_parse_us), 'microsecond', precision=0, commas=False)
+    requests_per_sec_str = fmt(requests_per_sec, precision=0)
+    efficiency_gain_mult_str = fmt_multiple(round(efficiency_gain), precision=0, commas=False)
+    parse_saving_us_str = fmt_time(round(parse_saving_us), 'microsecond', precision=0, commas=False)
+    cpu_saving_s_str = fmt_time(cpu_saving_per_s, 'second', precision=2, commas=False)
+    core_fraction_pct_str = fmt_percent(core_fraction, precision=0, commas=False, style='prose')
+```
+
+::: {#nbk-model-serving-json-vs-protobuf-serialization .callout-notebook title="JSON vs. Protobuf serialization"}
+
+Consider a request payload containing `{python} SerializationEfficiency.serial_floats_str` floating point numbers (for example, an embedding vector).
+
+*   **JSON**\index{JSON!serialization overhead}: Uses ~`{python} SerializationEfficiency.json_size_str` on the wire. Requires ~`{python} SerializationEfficiency.json_parse_us_str` to parse.
+*   **Protobuf**: Uses ~`{python} SerializationEfficiency.protobuf_size_str` on the wire. Requires ~`{python} SerializationEfficiency.protobuf_parse_us_str` to parse.
+
+**Math**: Switching one request to the binary payload saves `{python} SerializationEfficiency.json_parse_us_str` − `{python} SerializationEfficiency.protobuf_parse_us_str` = `{python} SerializationEfficiency.parse_saving_us_str` of parse time. For this illustrative system processing `{python} SerializationEfficiency.requests_per_sec_str` requests per second, the savings compound to `{python} SerializationEfficiency.requests_per_sec_str` $\times$ `{python} SerializationEfficiency.parse_saving_us_str` = `{python} SerializationEfficiency.cpu_saving_s_str` of CPU time reclaimed every wall-clock second, which is `{python} SerializationEfficiency.core_fraction_pct_str` of one core freed from serialization overhead alone.
+
+**Systems insight**: This `{python} SerializationEfficiency.efficiency_gain_mult_str` scenario gain makes gRPC/Protobuf, FlatBuffers, or another binary protocol a strong candidate for high-throughput internal microservices when serialization is a visible part of the latency budget.
+
+:::
+
+Architectural selection is governed by system constraints. REST over HTTP/1.1 remains practical for public-facing edge gateways where broad client compatibility and human-readable debugging take precedence over raw wire efficiency. Within cluster boundaries, gRPC over HTTP/2 with binary serialization can reduce overhead when high query volume or tensor serialization consumes a significant share of the host CPU budget; its streaming support also suits incremental token responses.
+
+Protocol selection and process architecture establish the structural skeleton of an inference server. Evaluating actual operational performance, however, requires tracing how latency accumulates as individual requests traverse each stage of this runtime pipeline.
+
+## Request Lifecycle {#sec-model-serving-request-lifecycle-d9c6}
+
+A single HTTP request carrying a $224{\times}224$ JPEG image arrives at an inference server. Between the moment the first byte enters the network stack and the moment the classification payload departs, the request traverses a sequence of pipeline stages, grouped below into preprocessing, inference, and postprocessing, with data transfer between them. Each stage consumes a slice of the end-to-end latency budget, making granular phase decomposition essential for targeted performance tuning.
+
+### The latency budget {#sec-model-serving-latency-budget-ef40}
+
+For dynamic inference systems, the serving inversion established in @sec-model-serving-serving-paradigm-9634 creates a latency budget\index{Latency budget!optimization objectives} that shapes system design [@gujarati2020]. A serving system with second-scale per-request latency may miss many interactive SLOs, even if it achieves excellent throughput.
+
+```{python}
+#| echo: false
+#| label: tail-latency-ratio-calc
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ TAIL LATENCY RATIO
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: Latency Budget introduction paragraph
+# │
+# │ Goal: Demonstrate why mean latency is a misleading metric for user experience.
+# │ Show: That the p99 latency threshold can be 40× the mean.
+# │ How: Calculate the ratio between mean latency and the p99 threshold.
+# │
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim.fmt import fmt, fmt_multiple, check
+
+class TailLatencyRatioCalc:
+    """Demonstrates why mean latency misleads by showing the p99-to-mean ratio."""
+
+    # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
+    mean_latency_ms_value = 50 * ms  # scenario assumption: mean latency
+    p99_latency_ms_value = 2000 * ms  # scenario assumption: p99 latency
+
+    # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
+    tail_ratio_value = p99_latency_ms_value / mean_latency_ms_value
+
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(tail_ratio_value == 40, f"Expected p99/mean ratio 40x, got {tail_ratio_value}")
+
+    # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
+    tail_ratio_mult_str = fmt_multiple(tail_ratio_value, precision=0, commas=False)
+```
+
+Relevant metrics expand from aggregate throughput and mean latency to the latency distribution. Mean and p50\index{Latency!p50, median response time} describe the center, while p95\index{Latency!p95, percentile target} and p99\index{Latency!percentiles (p50, p95, p99)} expose the slow tail. If mean latency is 50 ms but p99 is two seconds, the p99 threshold is `{python} TailLatencyRatioCalc.tail_ratio_mult_str` the mean, so about 1 percent of requests are at or beyond two seconds. Whether that tail matters depends on the service and its users, which is why percentile targets should come from the SLO rather than convention.[^fn-tail-latency-serving]
+
+[^fn-tail-latency-serving]: **Tail latency**\index{Tail latency!revenue impact}: Unlike averages, percentile latencies reveal the performance impact of system outliers common in ML serving, such as model cache misses or garbage collection pauses. These rare, high-latency requests can disproportionately harm user satisfaction and business outcomes. Because the magnitude is workload-specific, services validate percentile targets (p95, p99) against their own users and SLOs.
+
+Managing these percentile constraints requires decomposing the total allowed response time into a **latency budget**\index{Latency budget!request lifecycle breakdown} that allocates time across each processing phase, the serial accounting that the latency budget principle (\ref{pri-latency-budget}) states formally.
+
+::: {#dfn-model-serving-latency-budget .callout-definition title="Latency budget"}
+
+***Latency budget***\index{Latency budget!definition} is the time allocated to request stages under an end-to-end deadline; the SLO also specifies the required completion quantile.
+
+1.  **Significance**: It acts as a zero-sum constraint system where any milliseconds consumed by serialization or network overhead directly reduce the latency budget ($\EndToEndRequestLatency$) available for model inference.
+2.  **Distinction**: A latency **SLO**\index{SLO!vs. SLI vs. SLA} couples a deadline (for example, $<50\text{ ms}$) with a completion quantile ($\text{p99}$ or $\text{p99.9}$). A service-level indicator (**SLI**\index{SLI!definition}) is the measured quantity used to evaluate that objective. Missing an internal SLO consumes reliability margin; crossing an external **SLA**\index{SLA!contractual penalty} threshold may trigger the remedies defined by the contract. Tail latency spikes can stem from queueing, batch formation, cache state, interference, or data movement.
+3.  **Common pitfall**: A frequent misconception is that the "model" has the entire budget. In the illustrative breakdown in @tbl-model-serving-resnet50-latency-budget, the remainder is consumed by host preprocessing and data movement (JPEG decode, resize, normalization, and PCIe transfer), while upstream network and serialization taxes (@tbl-serving-tax) consume further margin.
+
+:::
+
+Every serving request decomposes into three phases that each consume part of the latency budget. Preprocessing\index{Preprocessing!latency impact} transforms raw input such as image bytes or text strings into model-ready tensors. Inference\index{Inference!pipeline phase} executes the model computation. Postprocessing\index{Postprocessing!response formatting} transforms model outputs into user-facing responses.
+
+::: {.column-margin}
+![](images/svg/model_serving_latency_budget_bar.svg){width="100%" fig-alt="Horizontal stacked bar of the request latency budget: a gray preprocessing segment on the left, an orange inference segment of about the same width in the middle, and a thin gray trailing segment on the right. Inference is one slice among equals rather than the whole budget."}
+
+*Inference is one slice of the latency budget; preprocessing rivals it.*
+:::
+
+Faster hardware does not automatically mean faster serving\index{Amdahl's law!preprocessing bottleneck}, because preprocessing and postprocessing can dominate total latency once inference runs on an optimized accelerator. Finding out which stage dominates requires measuring each one.
+
+### Latency distribution analysis {#sec-model-serving-latency-distribution-analysis-b0f8}
+
+Understanding where latency accumulates requires instrumenting each stage along the serving pipeline independently. In image classification, end-to-end request time conflates host-side image decoding, PCIe bus transfers, accelerator compute, and host-side output parsing. Measuring each phase in isolation exposes where the latency budget is actually spent.
+
+```{python}
+#| echo: false
+#| label: latency-table-calc
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ LATENCY BUDGET BREAKDOWN TABLE
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: Callout "ResNet-50: Latency Budget Breakdown" table
+# │
+# │ Goal: Decompose the request lifecycle into processing phases.
+# │ Show: That noninference tasks (JPEG decode, resize) consume 50% of the latency budget.
+# │ How: Sum millisecond-scale components for a standard vision inference request.
+# │
+# └─────────────────────────────────────────────────────────────────────────────
+
+from mlsysim.fmt import fmt_int, MarkdownStr, fmt, fmt_percent, fmt_time, check
+
+class LatencyTableCalc:
+    """Decomposes the ResNet-50 request lifecycle into processing phases with percentages."""
+
+    # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
+    l_jpeg_value = 3.0 * ms  # scenario assumption: JPEG decode latency
+    l_resize_value = 1.0 * ms  # scenario assumption: resize to 224×224 latency
+    l_norm_value = 0.5 * ms  # scenario assumption: normalize latency
+    l_transfer_value = 0.5 * ms  # scenario assumption: CPU→GPU transfer latency
+    l_inf_value = 5.0 * ms  # scenario assumption: ResNet-50 forward pass latency
+    l_post_value = 0.1 * ms  # scenario assumption: softmax + top-5 latency
+
+    # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
+    l_total_value = l_jpeg_value + l_resize_value + l_norm_value + l_transfer_value + l_inf_value + l_post_value
+    p_jpeg_value = l_jpeg_value / l_total_value * 100
+    p_resize_value = l_resize_value / l_total_value * 100
+    p_norm_value = l_norm_value / l_total_value * 100
+    p_transfer_value = l_transfer_value / l_total_value * 100
+    p_inf_value = l_inf_value / l_total_value * 100
+    p_post_value = l_post_value / l_total_value * 100
+
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(round(l_total_value.to(ms).magnitude, 1) == 10.1, f"Expected 10.1 ms total latency, got {l_total_value}")
+    check(round(p_jpeg_value) == 30, f"Expected ~30% JPEG decode share, got {p_jpeg_value:.1f}%")
+    check(round(p_inf_value) == 50, f"Expected ~50% inference share, got {p_inf_value:.1f}%")
+
+    # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
+    l_jpeg_ms_str = fmt_time(l_jpeg_value, 'millisecond', precision=0, commas=False)
+    l_resize_ms_str = fmt_time(l_resize_value, 'millisecond', precision=0, commas=False)
+    l_norm_ms_str = fmt_time(l_norm_value, 'millisecond', precision=1, commas=False)
+    l_transfer_ms_str = fmt_time(l_transfer_value, 'millisecond', precision=1, commas=False)
+    l_inf_ms_str = fmt_time(l_inf_value, 'millisecond', precision=0, commas=False)
+    l_post_ms_str = fmt_time(l_post_value, 'millisecond', precision=1, commas=False)
+    l_total_ms_str = fmt_time(l_total_value, 'millisecond', precision=1, commas=False)
+
+    p_jpeg_str = fmt_percent(round(p_jpeg_value) / 100, precision=0, commas=False, style='symbol')
+    p_resize_str = fmt_percent(round(p_resize_value) / 100, precision=0, commas=False, style='symbol')
+    p_norm_str = fmt_percent(round(p_norm_value) / 100, precision=0, commas=False, style='symbol')
+    p_transfer_str = fmt_percent(round(p_transfer_value) / 100, precision=0, commas=False, style='symbol')
+    p_inf_str = fmt_percent(round(p_inf_value) / 100, precision=0, commas=False, style='symbol')
+    p_post_str = fmt_percent(round(p_post_value) / 100, precision=0, commas=False, style='symbol')
+```
+
+```{python}
+#| echo: false
+#| label: latency-budget-calc
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ PREPROCESSING SHARE OF LATENCY
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: Latency distribution narrative (key insight paragraph)
+# │
+# │ Goal: Demonstrate the shifting bottleneck from inference to preprocessing.
+# │ Show: That optimized inference (TensorRT) makes preprocessing 63% of total latency.
+# │ How: Compare phase durations before and after model acceleration.
+# │
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim.fmt import fmt, fmt_percent, fmt_time, check
+from mlsysim.physics import calc_amdahls_speedup
+
+class LatencyBudgetCalc:
+    """Demonstrates the shifting bottleneck from inference to preprocessing after TensorRT optimization."""
+
+    # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
+    jpeg_decode_ms_value = 3.0 * ms  # scenario assumption: JPEG decode latency
+    resize_ms_value = 1.0 * ms  # scenario assumption: resize latency
+    normalize_ms_value = 0.5 * ms  # scenario assumption: normalize latency
+    cpu_gpu_ms_value = 0.5 * ms  # scenario assumption: CPU→GPU transfer latency
+    resnet_inference_ms_value = 5.0 * ms  # scenario assumption: PyTorch inference latency
+    postprocess_ms_value = 0.1 * ms  # scenario assumption: postprocessing latency
+    tensorrt_inference_ms_value = 2.0 * ms  # scenario assumption: TensorRT inference latency
+
+    # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
+    preprocess_ms_value = jpeg_decode_ms_value + resize_ms_value + normalize_ms_value
+    total_latency_ms_value = preprocess_ms_value + cpu_gpu_ms_value + resnet_inference_ms_value + postprocess_ms_value
+    preprocess_pct_value = preprocess_ms_value / total_latency_ms_value * 100
+    tensorrt_total_ms_value = preprocess_ms_value + cpu_gpu_ms_value + tensorrt_inference_ms_value + postprocess_ms_value
+    tensorrt_preprocess_pct_value = preprocess_ms_value / tensorrt_total_ms_value * 100
+
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(round(preprocess_pct_value, 1) == 44.6, f"Expected 44.6% preprocessing share, got {preprocess_pct_value:.1f}%")
+    check(round(tensorrt_preprocess_pct_value, 1) == 63.4, f"Expected 63.4% TensorRT preprocessing share, got {tensorrt_preprocess_pct_value:.1f}%")
+
+    # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
+    preprocess_ms_str = fmt_time(preprocess_ms_value, 'millisecond', precision=1, commas=False)
+    cpu_gpu_ms_str = fmt_time(cpu_gpu_ms_value, 'millisecond', precision=1, commas=False)
+    resnet_inference_ms_str = fmt_time(resnet_inference_ms_value, 'millisecond', precision=0, commas=False)
+    tensorrt_inference_ms_str = fmt_time(tensorrt_inference_ms_value, 'millisecond', precision=0, commas=False)
+    model_10x_ms_str = fmt_time(resnet_inference_ms_value / 10, 'millisecond', precision=1, commas=False)
+    total_latency_ms_str = fmt_time(total_latency_ms_value, 'millisecond', precision=1, commas=False)
+    preprocess_pct_str = fmt_percent(preprocess_pct_value / 100, precision=1, commas=False, style='prose')
+    tensorrt_preprocess_pct_str = fmt_percent(tensorrt_preprocess_pct_value / 100, precision=1, commas=False, style='prose')
+```
+
+::: {#exmp-model-serving-resnet-50-latency-budget-breakdown .callout-example title="ResNet-50: Latency budget breakdown"}
+
+@Tbl-model-serving-resnet50-latency-budget details the per-phase latency breakdown for an illustrative ResNet-50 serving request.
+
+```{=latex}
+\begingroup
+\renewcommand{\arraystretch}{1.22}
+```
+
+| **Phase**          | **Operation**              |                    **Time**                    |               **Percentage**               |
+|:-------------------|:---------------------------|:----------------------------------------------:|:------------------------------------------:|
+| **Preprocessing**  | JPEG decode                |   `{python} LatencyTableCalc.l_jpeg_ms_str`    |   `{python} LatencyTableCalc.p_jpeg_str`   |
+| **Preprocessing**  | Resize to $224{\times}224$ |  `{python} LatencyTableCalc.l_resize_ms_str`   |  `{python} LatencyTableCalc.p_resize_str`  |
+| **Preprocessing**  | Normalize (mean/std)       |   `{python} LatencyTableCalc.l_norm_ms_str`    |   `{python} LatencyTableCalc.p_norm_str`   |
+| **Data Transfer**  | CPU→GPU copy               | `{python} LatencyTableCalc.l_transfer_ms_str`  | `{python} LatencyTableCalc.p_transfer_str` |
+| **Inference**      | ResNet-50 forward pass     |    `{python} LatencyTableCalc.l_inf_ms_str`    |   `{python} LatencyTableCalc.p_inf_str`    |
+| **Postprocessing** | Softmax + top-5            |   `{python} LatencyTableCalc.l_post_ms_str`    |  ~`{python} LatencyTableCalc.p_post_str`   |
+| **Total**          |                            | **`{python} LatencyTableCalc.l_total_ms_str`** |                  **100%**                  |
+
+: **ResNet-50 latency budget**: Illustrative per-phase breakdown of a single serving request, showing that preprocessing and data transfer together rival the cost of the ResNet-50 forward pass itself. The percentages expose where engineering effort pays off in this scenario. Per-phase percentages are rounded to the nearest whole number and may not sum to exactly 100. {#tbl-model-serving-resnet50-latency-budget tbl-colwidths="[28,28,22,22]"}
+
+```{=latex}
+\vspace{-2ex}
+\endgroup
+```
+
+**Systems insight**: In this illustrative ResNet-50\index{ResNet-50!latency budget} serving budget, preprocessing consumes `{python} LatencyBudgetCalc.preprocess_pct_str` of latency despite model inference being the computationally intensive phase. If TensorRT reduces inference to the assumed `{python} LatencyBudgetCalc.tensorrt_inference_ms_str`, preprocessing would dominate at `{python} LatencyBudgetCalc.tensorrt_preprocess_pct_str`.
+
+:::
+
+In the ResNet-50 scenario, dense convolutional arithmetic dominates the model stage's work. That does not make the stage compute bound at every batch size. At batch size one, the late layers, whose large weight tensors are reused over only a few spatial positions, lean toward memory bound, and some layers expose too little parallel work to fill the device or amortize per-kernel launch costs, so the stage runs far below peak arithmetic throughput; batching amortizes those costs and fills the machine (@sec-model-serving-batching-helps-f1dc). Changing the model architecture can move the dominant cost out of dense arithmetic entirely, and recommendation systems exhibit this shift.
+
+```{python}
+#| echo: false
+from mlsysim.fmt import fmt_int
+
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ DLRM SERVING LATENCY (IO-BOUND EXAMPLE)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: Lighthouse example "DLRM Serving"
+# │
+# │ Goal: Contrast compute-bound and I/O-bound serving bottlenecks.
+# │ Show: That embedding lookups consume 67% of recommendation latency.
+# │ How: Model DLRM latency across parsing, embedding, and MLP phases.
+# │
+# └─────────────────────────────────────────────────────────────────────────────
+
+from mlsysim.fmt import MarkdownStr, fmt, fmt_percent, fmt_time, check
+
+class DlrmLatencyCalc:
+    """Models DLRM serving latency to contrast I/O-bound vs. compute-bound bottlenecks."""
+
+    # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
+    dlrm_input_ms_value = 0.5 * ms  # scenario assumption: request parsing latency
+    dlrm_embed_ms_value = 6.0 * ms  # scenario assumption: embedding lookup latency
+    dlrm_mlp_ms_value = 1.5 * ms  # scenario assumption: MLP forward latency
+    dlrm_post_ms_value = 1.0 * ms  # scenario assumption: ranking and filtering latency
+
+    # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
+    dlrm_total_ms_value = dlrm_input_ms_value + dlrm_embed_ms_value + dlrm_mlp_ms_value + dlrm_post_ms_value
+    dlrm_mlp_pct_value = dlrm_mlp_ms_value / dlrm_total_ms_value * 100
+
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(dlrm_total_ms_value == 9.0 * ms, f"Expected 9.0 ms total DLRM latency, got {dlrm_total_ms_value}")
+    check(round(dlrm_mlp_pct_value) == 17, f"Expected ~17% MLP share, got {dlrm_mlp_pct_value:.1f}%")
+
+    # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
+    dlrm_input_ms_str = fmt_time(dlrm_input_ms_value, 'millisecond', precision=1, commas=False)
+    dlrm_embed_ms_str = fmt_time(dlrm_embed_ms_value, 'millisecond', precision=0, commas=False)
+    dlrm_mlp_ms_str = fmt_time(dlrm_mlp_ms_value, 'millisecond', precision=1, commas=False)
+    dlrm_post_ms_str = fmt_time(dlrm_post_ms_value, 'millisecond', precision=0, commas=False)
+    dlrm_total_ms_str = fmt_time(dlrm_total_ms_value, 'millisecond', precision=0, commas=False)
+    dlrm_mlp_pct_str = fmt_percent(round(dlrm_mlp_pct_value) / 100, precision=0, commas=False, style='prose')
+```
+
+::: {#lhs-model-serving-lighthouse-example-dlrm-serving .callout-lighthouse title="Lighthouse example: DLRM serving"}
+
+```{=latex}
+\begin{minipage}{1\linewidth}
+\setlength{\parskip}{2pt plus 1pt}%
+\renewcommand{\arraystretch}{1.22}
+```
+
+**Scenario**: Serving DLRM\index{DLRM!I/O-bound serving} with a 10 ms p99 latency budget.
+
+**Analysis**: While ResNet-50's model stage is dominated by convolutional neural network compute, DLRM's dominant model-stage cost is embedding-table memory access. End-to-end serving bottlenecks still require measuring the full path: preprocessing, inference, postprocessing, and data movement. @Tbl-model-serving-dlrm-latency-budget breaks the recommendation request down by phase.
+
+| **Phase**            | **Operation**            |                     **Time**                     |  **Bottleneck**  |
+|:---------------------|:-------------------------|:------------------------------------------------:|:----------------:|
+| **Input Parsing**    | Request parsing          |   `{python} DlrmLatencyCalc.dlrm_input_ms_str`   |       CPU        |
+| **Embedding Lookup** | Fetch 100+ dense vectors |   `{python} DlrmLatencyCalc.dlrm_embed_ms_str`   | memory bandwidth |
+| **Inference**        | MLP forward pass         |    `{python} DlrmLatencyCalc.dlrm_mlp_ms_str`    |     Compute      |
+| **Postprocessing**   | Ranking & Filtering      |   `{python} DlrmLatencyCalc.dlrm_post_ms_str`    |       CPU        |
+| **Total**            |                          | **`{python} DlrmLatencyCalc.dlrm_total_ms_str`** |                  |
+
+: **DLRM serving latency**: Illustrative per-phase breakdown of a recommendation request under a 10 ms p99 budget, contrasting DLRM's memory-bandwidth-bound embedding lookups against ResNet-50's convolution-dominated forward pass. Adding compute to the inference stage does not help once embedding-table bandwidth is the binding constraint. {#tbl-model-serving-dlrm-latency-budget tbl-colwidths="[28,28,22,22]"}
+
+```{=latex}
+\end{minipage}
+\vspace{-3ex}
+```
+**Systems insight**: In DLRM, the "Inference" multilayer perceptron stage is only ~`{python} DlrmLatencyCalc.dlrm_mlp_pct_str` of the latency. The majority of time is spent in embedding lookups, retrieving 128-dimensional embedding vectors from terabyte-scale tables. This is a memory-bandwidth and capacity-bound workload where adding more compute does not help unless the embedding tables can be served faster.
+
+:::
+
+Together, @tbl-model-serving-resnet50-latency-budget and @tbl-model-serving-dlrm-latency-budget expose the same general failure mode: straightforward optimization efforts target where ML expertise applies (model quantization, pruning) while the binding constraint sits elsewhere (image decoding on CPU for ResNet-50, embedding-table memory bandwidth for DLRM). The pattern generalizes: for an isolated serial request with other stage times held fixed, model-only optimization is bounded by the time spent outside the model. Amdahl's law (principle \ref{pri-amdahl}) quantifies that fixed-stage ceiling. Under load, a faster model can also reduce queueing, as the later capacity analysis develops. Adopting the quantitative approach to serving exposes these hidden bottlenecks before engineering effort is misallocated.
+
+```{python}
+#| echo: false
+#| label: amdahl-serving-calc
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ AMDAHL'S LAW IN SERVING
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: Callout "The Quantitative Approach to Serving"
+# │
+# │ Goal: Demonstrate why model-only optimization yields diminishing returns.
+# │ Show: That a 10× model speedup produces only 1.8× end-to-end improvement.
+# │ How: Apply Amdahl's Law using the noninference latency share.
+# │
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim.fmt import fmt, fmt_percent, fmt_time, check
+
+class AmdahlServingCalc:
+    """Applies Amdahl's Law to show that 10× model speedup yields only ~1.8× end-to-end improvement."""
+
+    # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
+    # Re-derived from latency-budget-calc constants
+    preprocess_ms_value = (3.0 + 1.0 + 0.5) * ms  # scenario assumption: JPEG decode + resize + normalize
+    cpu_gpu_ms_value = 0.5 * ms  # scenario assumption: CPU→GPU transfer latency
+    resnet_inference_ms_value = 5.0 * ms  # scenario assumption: PyTorch inference latency
+    postprocess_ms_value = 0.1 * ms  # scenario assumption: postprocessing latency
+
+    # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
+    total_latency_ms_value = preprocess_ms_value + cpu_gpu_ms_value + resnet_inference_ms_value + postprocess_ms_value
+    non_model_ms_value = preprocess_ms_value + cpu_gpu_ms_value
+    non_model_pct_value = non_model_ms_value / total_latency_ms_value * 100
+    model_speedup = 10
+    model_fraction = resnet_inference_ms_value / total_latency_ms_value
+    model_10x_ms_value = resnet_inference_ms_value / model_speedup
+    amdahl_speedup_value = calc_amdahls_speedup(model_fraction, model_speedup)
+    optimized_total_ms_value = total_latency_ms_value / amdahl_speedup_value
+
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(round(amdahl_speedup_value, 1) == 1.8, f"Expected ~1.8x Amdahl speedup, got {amdahl_speedup_value:.2f}")
+    check(round(optimized_total_ms_value.to(ms).magnitude, 1) == 5.6, f"Expected ~5.6 ms optimized latency, got {optimized_total_ms_value}")
+
+    # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
+    non_model_pct_str = fmt_percent(non_model_pct_value / 100, precision=1, commas=False, style='prose')
+    optimized_total_ms_str = fmt_time(optimized_total_ms_value, 'millisecond', precision=1, commas=False)
+    amdahl_speedup_mult_str = fmt_multiple(amdahl_speedup_value, precision=1, commas=False)
+```
+
+::: {#psp-model-serving-quantitative-approach-serving .callout-perspective title="The quantitative approach to serving"}
+
+**Analysis**: Amdahl's law (principle \ref{pri-amdahl}) governs this ceiling (@sec-appdx-machine-foundations-strong-scaling-amdahls-law-c6c2 provides the formal derivation). Preprocessing (`{python} LatencyBudgetCalc.preprocess_ms_str`) and data transfer (`{python} LatencyBudgetCalc.cpu_gpu_ms_str`) consume `{python} AmdahlServingCalc.non_model_pct_str` of total latency. Optimizing the model 10$\times$ faster (`{python} LatencyBudgetCalc.resnet_inference_ms_str` → `{python} LatencyBudgetCalc.model_10x_ms_str`) yields only a `{python} AmdahlServingCalc.amdahl_speedup_mult_str` end-to-end speedup (reducing latency from `{python} LatencyBudgetCalc.total_latency_ms_str` to `{python} AmdahlServingCalc.optimized_total_ms_str`). Focusing exclusively on model optimizations like quantization or pruning yields diminishing returns when non-model stages dominate execution time.
+
+**Mechanism**: Domain-specific accelerators (such as TPUs and Tensor Cores) replace complex control logic with dense multiply-accumulate arrays, which shrinks the model term. The host-side stages stay on general-purpose CPUs and I/O buses, so the faster the accelerator, the larger their share of end-to-end latency.
+
+**Systems insight**: Profile before optimizing. If preprocessing dominates, GPU-accelerated pipelines (NVIDIA DALI) may outperform model quantization\index{Model quantization|see{Quantization}}.
+
+:::
+
+Moving preprocessing closer to the accelerator\index{Preprocessing!GPU, accelerated pipelines} can reduce avoidable CPU-to-GPU transfers, but the end-to-end gain is pipeline-specific. Effective optimization targets the largest time consumers first.
+
+#### The serving tax bill {#sec-model-serving-serving-tax-bill-dc6c}
+
+Beyond model forward-pass execution, every request pays an infrastructure "tax" to the host system and network stack. When an inference query arrives, it traverses the network interface, moves across kernel and user space, deserializes from wire protocols into memory buffers, queues for batch assembly, and copies across the PCIe interconnect to accelerator device memory. These host-side operations run on general-purpose CPUs and I/O buses, which is why their share grows as the model term shrinks.
+
+```{python}
+#| echo: false
+#| label: serving-tax-microseconds-calc
+
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ SERVING TAX MICROSECOND OVERHEADS
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: Killer microseconds discussion following tbl-serving-tax.
+# │
+# │ Goal: Quantify the share of a 5 ms inference budget consumed by the
+# │       named microsecond-scale overheads.
+# │ Show: Serialization + dispatch + data copy range as a percentage of budget.
+# │ How: Sum lower/upper bounds and divide by the 5 ms budget.
+# │
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim.fmt import fmt, check, fmt_percent
+
+# ┌── LEGO ───────────────────────────────────────────────
+class ServingTaxMicrosecondsCalc:
+    """Microsecond-scale serving tax as a share of a 5 ms latency budget."""
+
+    # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
+    inference_budget_us = 5_000
+    serialization_min_us = 50
+    serialization_max_us = 500
+    dispatch_min_us = 10
+    dispatch_max_us = 50
+    data_copy_min_us = 100
+    data_copy_max_us = 500
+
+    # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
+    micro_tax_min_us = serialization_min_us + dispatch_min_us + data_copy_min_us
+    micro_tax_max_us = serialization_max_us + dispatch_max_us + data_copy_max_us
+    micro_tax_min_pct = micro_tax_min_us / inference_budget_us * 100
+    micro_tax_max_pct = micro_tax_max_us / inference_budget_us * 100
+
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(micro_tax_min_us == 160, "Minimum named microsecond tax should be 160 us.")
+    check(micro_tax_max_us == 1050, "Maximum named microsecond tax should be 1050 us.")
+
+    # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
+    micro_tax_min_pct_str = fmt_percent(micro_tax_min_pct / 100, precision=1, commas=False, style='prose')
+    micro_tax_max_pct_str = fmt_percent(micro_tax_max_pct / 100, precision=0, commas=False, style='prose')
+```
+
+#### The killer microseconds problem {#sec-model-serving-killer-microseconds-problem-bc00}
+
+Barroso, Patterson, and colleagues identified a critical gap in how computer systems handle latency across time scales\index{Killer microseconds!latency gap} [@barroso2017]. Nanosecond-scale stalls (such as cache misses) are hidden by hardware instruction-level parallelism, while millisecond-scale delays (such as disk I/O or network RPCs) are hidden by operating system thread context switching. Operations in the microsecond range (1–100 $\mu\text{s}$) fall into an awkward gap: they are too long to spin-wait on a CPU core without wasting compute cycles and power, yet too short for the operating system to context-switch to another thread without paying scheduling overheads that exceed the wait time itself.
+
+Serving infrastructure operates directly in this killer microseconds regime. Using the representative ranges in @tbl-serving-tax, serialization at 50–500 $\mu\text{s}$, dispatch at 10–50 $\mu\text{s}$, and data copy at 100–500 $\mu\text{s}$ are each individually small, but for a 5 ms inference service, these named microsecond-scale overheads collectively consume about `{python} ServingTaxMicrosecondsCalc.micro_tax_min_pct_str` to `{python} ServingTaxMicrosecondsCalc.micro_tax_max_pct_str` of the latency budget before network and queuing delays are counted. No single overhead justifies optimization in isolation, yet together they determine whether the system meets its SLO.
+
+```{=latex}
+\begingroup
+\renewcommand{\arraystretch}{1.18}
+```
+
+| **Tax Component** |    **Typical Cost**   | **Scaling Behavior**   | **Tax Evasion Strategy**        |
+|:------------------|:---------------------:|:-----------------------|:--------------------------------|
+| **Network I/O**   |         1–5 ms        | Linear with payload    | Compression, Region Colocation  |
+| **Serialization** |  50–500 $\mu\text{s}$ | Linear with payload    | gRPC/Protobuf (vs. JSON)        |
+| **Queuing**       |       0.1–10 ms       | Diverges near capacity | Dynamic Batching, Autoscaling   |
+| **Dispatch**      |  10–50 $\mu\text{s}$  | Constant per batch     | Kernel Fusion (reduce launches) |
+| **Data Copy**     | 100–500 $\mu\text{s}$ | Linear with tensor     | Zero-Copy/Shared Memory         |
+
+: **The Serving Tax Bill**: A representative breakdown of noninference latency sources. While individual components like serialization can be below 1 ms, they compound. Under the upper ends of the displayed ranges, this tax can rival a 5 ms model invocation. The engineering goal is to measure the actual request path and reduce the binding costs through choices such as binary payloads, persistent connections, and fewer copies. {#tbl-serving-tax}
+
+```{=latex}
+\endgroup
+```
+
+The latency budget framework provides a systematic approach to this compound problem. Measurement comes first. Without per-phase instrumentation, engineers cannot distinguish a preprocessing bottleneck from a serialization bottleneck, and optimization effort is misallocated to the most visible component (the model) rather than the most expensive one. Once measurement reveals the true distribution of time, engineering effort must flow proportionally. A phase consuming 50 percent of latency deserves more attention than one consuming 5 percent, regardless of which appears easier to optimize. Architectural changes such as GPU-accelerated preprocessing or aggressive batching can shift work between phases entirely, sometimes eliminating a bottleneck rather than merely reducing it.
+
+### Resolution and input size trade-offs {#sec-model-serving-resolution-input-size-tradeoffs-155d}
+
+Input resolution affects both preprocessing and inference latency, but the relationship depends on which side of the roofline the model stage sits. A compute-bound\index{Compute-bound!resolution scaling} stage slows as computation grows; a memory-bound\index{Memory-bound!activation tensors} stage slows as transferred bytes grow. Capacity fit alone does not remove bandwidth cost.
+
+::: {.column-margin .margin-pointer}
+↩ The roofline boundary and arithmetic intensity ridge points that separate compute-bound from memory-bound stages are established in @sec-hardware-acceleration-roofline-model-42ff.
+:::
+
+For convolution-dominated, compute-bound models, @eq-resolution-throughput gives a first-order approximation in which throughput scales inversely with resolution squared, comparing two input resolutions $r_1$ and $r_2$ (image side lengths in pixels):
+$$\frac{\text{Throughput}(r_2)}{\text{Throughput}(r_1)} = \left(\frac{r_1}{r_2}\right)^2$$ {#eq-resolution-throughput}
+
+```{python}
+#| echo: false
+#| label: resolution-scaling-calc
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ RESOLUTION SCALING SLOWDOWN
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: Resolution and input size tradeoffs narrative
+# │
+# │ Goal: Quantify the relationship between input resolution and latency.
+# │ Show: The quadratic relationship between resolution and computation time.
+# │ How: Calculate theoretical slowdown for doubled resolution.
+# │
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import Datasets
+from mlsysim.fmt import fmt, fmt_multiple, check
+
+class ResolutionScalingCalc:
+    """Quantifies the quadratic relationship between input resolution and inference slowdown."""
+
+    # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
+    IMAGE_DIM_RESNET = Datasets.ImageNet.image_width
+    r1_value = IMAGE_DIM_RESNET  # original resolution
+    r2_value = 2 * IMAGE_DIM_RESNET  # doubled resolution
+    measured_slowdown_factor_value = 3.6  # actual measured slowdown factor
+
+    # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
+    theoretical_slowdown_value = (r2_value / r1_value) ** 2
+
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(theoretical_slowdown_value == 4.0, f"Expected 4.0 theoretical slowdown, got {theoretical_slowdown_value}")
+
+    # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
+    r1_str = fmt(r1_value, precision=0, commas=False)
+    r2_str = fmt(r2_value, precision=0, commas=False)
+    theoretical_slowdown_mult_str = fmt_multiple(round(theoretical_slowdown_value), precision=0, commas=False)
+    measured_slowdown_mult_str = fmt_multiple(measured_slowdown_factor_value, precision=1, commas=False)
+```
+
+Doubling resolution from `{python} ResolutionScalingCalc.r1_str` to `{python} ResolutionScalingCalc.r2_str` gives a `{python} ResolutionScalingCalc.theoretical_slowdown_mult_str` compute-scaling estimate; the illustrative `{python} ResolutionScalingCalc.measured_slowdown_mult_str` scenario includes fixed overhead. Higher resolution can raise convolution arithmetic intensity because weights are reused across more spatial positions, but whether the full model becomes compute-bound depends on the bytes moved by its kernels.
+
+```{python}
+#| echo: false
+#| label: resolution-bottleneck-calc
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ RESOLUTION AND COMPUTE BOTTLENECK TABLE
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @tbl-resolution-bottleneck (Resolution and Compute Bottleneck)
+# │
+# │ Goal: Quantify how input resolution shifts ResNet-50 arithmetic intensity.
+# │ Show: FLOPs and activations grow quadratically while weight traffic is
+# │       fixed, so intensity RISES with resolution (deeper into compute-bound).
+# │ How: Scale registry FLOPs and a 224×224 activation footprint by (R/224)²;
+# │      divide by total traffic (fixed weights + activation reads/writes).
+# │
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import Hardware
+from mlsysim.core.units import TFLOP, second, GB
+from mlsysim.fmt import fmt_arithmetic_intensity, fmt_memory, fmt_flop_rate, fmt_bandwidth
+
+class ResolutionBottleneckCalc:
+    """Shows that higher resolution raises arithmetic intensity: quadratic FLOPs amortize the fixed weight traffic."""
+
+    # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
+    resnet = Models.Vision.ResNet50
+    base_dim = Datasets.ImageNet.image_width
+    base_flops = resnet.inference_flops
+    weight_bytes = resnet.size_in_bytes(BYTES_FP32)
+    act_224 = 12.5 * MB  # scenario assumption: 224×224 activation footprint
+    act_rw_factor = 2  # scenario assumption: each activation written once, read once
+    # V100 ridge point = FP32 peak / HBM2 bandwidth, derived from the registry (PCIe variant).
+    v100_pcie = Hardware.Cloud.V100_PCIe
+    v100_sxm2 = Hardware.Cloud.V100
+    ridge_point_value = (v100_pcie.compute.precision_flops["fp32"] / v100_pcie.memory.bandwidth).to(flop / byte)
+
+    # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
+    # FLOPs and activation footprint both scale with (R/224)²; weight traffic
+    # does not. 2026-06-07: replaces hand-typed intensities that DECREASED
+    # with resolution — they implied constant FLOPs, inverting the physics.
+    scale_384 = (384 / base_dim) ** 2
+    scale_512 = (512 / base_dim) ** 2
+    scale_640 = (640 / base_dim) ** 2
+    act_384 = act_224 * scale_384
+    act_512 = act_224 * scale_512
+    act_640 = act_224 * scale_640
+    ai_224_value = (base_flops / (weight_bytes + act_rw_factor * act_224)).to(flop / byte)
+    ai_384_value = (base_flops * scale_384 / (weight_bytes + act_rw_factor * act_384)).to(flop / byte)
+    ai_512_value = (base_flops * scale_512 / (weight_bytes + act_rw_factor * act_512)).to(flop / byte)
+    ai_640_value = (base_flops * scale_640 / (weight_bytes + act_rw_factor * act_640)).to(flop / byte)
+
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(ai_640_value > ai_224_value, "Intensity must rise with resolution: weights amortize over more spatial positions")
+    check((ai_224_value / ridge_point_value).to("").magnitude > 1, "ResNet-50 at 224x224 is compute-bound on V100")
+
+    # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
+    act_224_mb_str = fmt_memory(act_224, unit=MB, precision=1, commas=False)
+    act_384_mb_str = fmt_memory(act_384, unit=MB, precision=1, commas=False)
+    act_512_mb_str = fmt_memory(act_512, unit=MB, precision=1, commas=False)
+    act_640_mb_str = fmt_memory(act_640, unit=MB, precision=1, commas=False)
+
+    ai_224_flops_per_byte_str = fmt_arithmetic_intensity(ai_224_value, commas=False)
+    ai_384_flops_per_byte_str = fmt_arithmetic_intensity(ai_384_value, commas=False)
+    ai_512_flops_per_byte_str = fmt_arithmetic_intensity(ai_512_value, commas=False)
+    ai_640_flops_per_byte_str = fmt_arithmetic_intensity(ai_640_value, commas=False)
+
+    ridge_point_flops_per_byte_str = fmt_arithmetic_intensity(ridge_point_value, precision=1, commas=False)
+
+    v100_pcie_fp32_str = fmt_flop_rate(v100_pcie.compute.precision_flops["fp32"], unit=TFLOP / second, precision=0, commas=False)
+    v100_sxm2_fp32_str = fmt_flop_rate(v100_sxm2.compute.precision_flops["fp32"], unit=TFLOP / second, precision=1, commas=False)
+    v100_bw_str = fmt_bandwidth(v100_pcie.memory.bandwidth, unit=GB / second, precision=0, commas=False)
+```
+
+@Tbl-resolution-bottleneck quantifies how increasing resolution amortizes fixed weight traffic in this simplified model while leaving the executed-kernel bottleneck unresolved.
+
+```{=latex}
+\begingroup
+\renewcommand{\arraystretch}{1.18}
+```
+
+| **Resolution**       |            **Assumed Activation Term**             |                  **Modeled Arith. Intensity**                 |
+|:---------------------|:--------------------------------------------------:|:-------------------------------------------------------------:|
+| **$224{\times}224$** | `{python} ResolutionBottleneckCalc.act_224_mb_str` | `{python} ResolutionBottleneckCalc.ai_224_flops_per_byte_str` |
+| **$384{\times}384$** | `{python} ResolutionBottleneckCalc.act_384_mb_str` | `{python} ResolutionBottleneckCalc.ai_384_flops_per_byte_str` |
+| **$512{\times}512$** | `{python} ResolutionBottleneckCalc.act_512_mb_str` | `{python} ResolutionBottleneckCalc.ai_512_flops_per_byte_str` |
+| **$640{\times}640$** | `{python} ResolutionBottleneckCalc.act_640_mb_str` | `{python} ResolutionBottleneckCalc.ai_640_flops_per_byte_str` |
+
+: **Resolution and Modeled Arithmetic Intensity**: This estimate divides FLOPs by weight bytes plus one assumed read/write of a scaled activation term. It omits aggregate intermediate-tensor, cache, and workspace traffic, so crossing the V100 ridge point does not establish the executed-kernel bottleneck. {#tbl-resolution-bottleneck tbl-colwidths="[30,35,35]"}
+
+```{=latex}
+\endgroup
+```
+
+#### Resolution strategies in production {#sec-model-serving-deploymentspecific-resolution-decisions-1d76}
+
+Different deployment contexts impose distinct resolution requirements shaped by their dominant constraints. A mobile application may accept lower resolution ($224{\times}224$) when latency and battery life outweigh marginal accuracy gains. Some medical-imaging workloads use $512{\times}512$ or higher when diagnostic detail warrants the additional compute. A perception pipeline may use lower resolution over a wide field and high-resolution crops for fine-grained recognition. A public API can instead normalize arbitrary uploads to a fixed contract or select among validated resolution profiles. Adaptive resolution is useful only when the selection policy and every chosen profile preserve the task's quality requirements.
+
+```{python}
+#| echo: false
+#| label: adaptive-resolution-calc
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ ADAPTIVE RESOLUTION
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: Adaptive Resolution paragraph (content-based selection)
+# │
+# │ Goal: Demonstrate the throughput gain from content-aware resolution.
+# │ Show: A 1.4× throughput improvement while maintaining high accuracy.
+# │ How: List benchmark results for adaptive vs. static high resolution.
+# │
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim.fmt import fmt, fmt_count, fmt_percent
+
+class AdaptiveResolutionCalc:
+    """Demonstrates 1.4× throughput gain from content-aware resolution selection."""
+
+    # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
+    adaptive_throughput_improvement_factor_value = 1.4  # throughput gain factor
+    adaptive_accuracy_retention_pct_value = 99.2  # accuracy retention (%)
+
+    # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
+    adaptive_throughput_improvement_mult_str = fmt_multiple(adaptive_throughput_improvement_factor_value, precision=1, commas=False)
+    adaptive_accuracy_retention_str = fmt_percent(adaptive_accuracy_retention_pct_value / 100, precision=1, commas=False, style='prose')
+```
+
+#### Adaptive resolution {#sec-model-serving-adaptive-resolution-cb4e}
+
+Adaptive resolution\index{Adaptive resolution!content-based selection} lets production systems select resolution dynamically based on content. One approach runs a lightweight classifier at $128{\times}128$ to categorize content type, then selects task-appropriate resolution with documents at $512{\times}512$, landscapes at $224{\times}224$, and faces at $384{\times}384$. In this illustrative scenario, the policy provides `{python} AdaptiveResolutionCalc.adaptive_throughput_improvement_mult_str` throughput improvement with `{python} AdaptiveResolutionCalc.adaptive_accuracy_retention_str` accuracy retention vs. fixed high resolution. This pattern trades preprocessing cost from running the lightweight classifier for inference savings on the main model.
+
+The latency analysis so far has focused on sequential processing: one request completing before the next begins. The preprocessing, inference, and postprocessing stages use different hardware resources. This separation creates an opportunity to process multiple requests simultaneously.
+
+### Hardware utilization and request pipelining {#sec-model-serving-utilization-request-pipelining-c61c}
+
+Optimizing each request stage in isolation misses a critical opportunity: the stages use different hardware resources. The latency budget analysis in @sec-model-serving-latency-budget-ef40 reveals that model inference is only one component of the request lifecycle. From a hardware perspective, a useful efficiency objective is to increase the **duty cycle**\index{Duty cycle!accelerator utilization} of the accelerator, the percentage of time the GPU executes useful computation, while preserving the request-latency objective.
+
+In a serialized serving system, the accelerator sits idle during network I/O and CPU-based preprocessing. Serving systems use **request pipelining**\index{Request pipelining!GPU utilization} to overlap these stages, ensuring the GPU is fed a continuous stream of tensors.
+
+::: {.column-margin .margin-pointer}
+↩ Asynchronous host-accelerator transfer and double buffering mechanisms are established in @sec-hardware-acceleration-transfer-optimization-85a8.
+:::
+
+#### Overlapping I/O and compute {#sec-model-serving-overlapping-io-compute-966c}
+
+@Fig-serving-pipeline-timing sequences execution across CPU preprocessing and GPU inference to demonstrate how request pipelining recovers lost compute capacity. In serial execution (A), each request must complete its entire lifecycle (Network $\rightarrow$ CPU Preprocessing $\rightarrow$ GPU Inference $\rightarrow$ Postprocessing) before the next request begins, leaving the GPU idle for more than 50 percent of wall-clock time. Pipelining concurrent requests (B) overlaps CPU preprocessing of upcoming requests with active GPU inference on earlier inputs, eliminating the idle bubbles and maximizing accelerator duty cycle.
+
+::: {#fig-serving-pipeline-timing fig-env="figure" fig-pos="htb" fig-cap="**Request Pipelining**: Pipelining hides latency by overlapping independent operations across different hardware resources. In pipelined execution (B), the CPU processes the next request's data while the GPU executes the current request's inference. This can increase accelerator duty cycle and throughput without changing the model." fig-alt="Two timing diagrams. A (Serial): alternating CPU preprocessing, GPU inference, and idle blocks in sequence. B (Pipelined): two parallel rows where CPU preprocessing overlaps with GPU inference, eliminating idle time."}
+
+```{.tikz}
+\begin{tikzpicture}[font=\footnotesize\sffamily, scale=0.8]
+  \definecolor{CPUColor}{RGB}{173,216,230}
+  \definecolor{GPUColor}{RGB}{144,238,144}
+  \definecolor{WaitColor}{RGB}{240,240,240}
+  \tikzset{
+ Pre/.style={align=flush center, draw=black,
+    font=\footnotesize\sffamily, node distance=-1pt,
+    line width=0.75pt, fill=cyan!20, text width=15mm,
+    minimum width=16mm, minimum height=6mm},
+ Gpu/.style={Pre,fill=GPUColor!60},
+ Idle/.style={Pre,fill=WaitColor}
+}
+\node[Pre](R1){Pre};
+\node[Gpu,right=of R1](R2){GPU};
+\node[Idle,right=of R2](R3){Idle};
+\node[Pre,right=of R3](R4){Pre};
+\node[Gpu,right=of R4](R5){GPU};
+%
+\node[Pre,below=0.79 of R1](R11){Pre1};
+\node[Pre,right=of R11](R12){Pre 2};
+\node[Pre,right=of R12](R13){Pre 3};
+\node[Pre,right=of R13](R14){Pre 4};
+%
+\node[Gpu,below=of R12](R21){GPU 1};
+\node[Gpu,right=of R21](R22){GPU 2};
+\node[Gpu,right=of R22](R23){GPU 3};
+\node[Gpu,right=of R23](R24){GPU 4};
+%
+\node[draw=none,fit=(R1)(R5)](T1){};
+\node[above=-5pt of T1]{\textbf{A. Serial Execution} (Low Utilization)};
+\node[draw=none,fit=(R11)(R24)](T2){};
+\node[above=-5pt of T2]{\textbf{B. Pipelined Execution} (High Utilization)};
+\end{tikzpicture}
+```
+
+:::
+
+Pipelining relies on non-blocking hardware queues and asynchronous execution streams. Instead of blocking until a GPU kernel completes, the host CPU thread enqueues memory transfers and kernel launches into an accelerator stream and immediately begins preprocessing the next incoming request. The accelerator's DMA engine and compute cores execute those queued operations independently, overlapping host preprocessing with device execution.
+
+#### The systems metric: Hardware duty cycle {#sec-model-serving-systems-metric-hardware-duty-cycle-7530}
+
+System efficiency\index{System efficiency!hardware duty cycle} here measures accelerator duty cycle rather than the fraction of peak arithmetic throughput or bandwidth achieved. In @eq-system-efficiency, compute time is the union of useful kernel-active intervals on each resource, summed across resources; overlapping kernels on one GPU are not counted twice.
+$$\text{System Efficiency} = \frac{\sum \IronlawTermTimesCompute}{\text{Wall Clock Time} \times \text{Resource Count}}$$ {#eq-system-efficiency}
+
+If a ResNet-50 request takes 10 ms total (5 ms GPU, 5 ms CPU), a serial system achieves only 50 percent efficiency. With at least two requests in flight in a sustained stream, duty cycle can approach 100 percent after pipeline fill if the CPU keeps up with the GPU. A finite pair still pays pipeline fill and drain time, and stochastic service must retain enough capacity headroom to meet its tail-latency objective. If the CPU is too slow to feed the GPU, the system becomes CPU-bound, and further model optimization provides zero throughput gain; this is the Amdahl ceiling of @sec-model-serving-latency-distribution-analysis-b0f8 seen from the throughput side. Hardware upgrades tighten it, because accelerator compute throughput has grown far faster than CPU single-thread performance across successive generations. A system that was compute-bound on an older accelerator may become CPU-bound after a hardware upgrade—not because preprocessing got slower, but because the model got dramatically faster while the CPU did not.
+
+### Postprocessing {#sec-model-serving-postprocessing-3b24}
+
+The request lifecycle concludes with postprocessing\index{Postprocessing!logits to predictions}, transforming raw accelerator output tensors into structured application responses. This stage straddles the physical boundary between the accelerator and the host CPU. Because client applications cannot consume device memory buffers directly, output tensors must cross the interconnect (typically a PCIe bus) to reach host memory. How the serving engine partitions computation across this boundary dictates whether postprocessing completes in microseconds or stalls the entire serving pipeline.
+
+#### From logits to predictions {#sec-model-serving-logits-predictions-09df}
+
+Classification models emit unnormalized logits\index{Logits!classification output} across the label space. Converting these numerical scores into actionable predictions requires reduction, filtering, and calibration. The simplest reduction is argmax selection\index{Argmax!prediction selection}, which extracts the index of the highest logit. Thresholding\index{Thresholding!confidence cutoff} discards predictions below an empirical certainty cutoff, returning predictions only when the model meets a target precision. When applications require ranked alternatives, top-$k$ extraction selects the $k$ largest scores alongside their class indices. Probability calibration scales raw scores (for example, through temperature scaling) so that output confidence scores reflect empirical accuracy.
+
+Executing reduction operations on the accelerator can reduce host-device transfer volume when the saved transfer cost outweighs the device execution and launch overhead. Performing softmax, argmax, or top-$k$ selection in device memory prunes the payload before it crosses the PCIe bus. In ResNet-50 classification, for example, running top-$k$ on the GPU reduces the transfer payload from 1,000 float32 logits (4,000 bytes) to five values and five integer indices. For ResNet-50 image classification, @lst-resnet-postprocessing traces this execution path from GPU tensor operations to host CPU label lookup and response formatting.
+
+::: {#lst-resnet-postprocessing lst-cap="**ResNet-50 Postprocessing**: Normalizes raw logits into probabilities, extracts top-$k$ predictions, and formats the API response."}
+
+```{.python}
+# Normalize raw logits into probabilities
+# Input: logits tensor of shape (1, 1000), one score per ImageNet
+# class
+probs = torch.softmax(logits, dim=-1)  # Normalize to sum=1 on GPU
+
+# Extract top-5 predictions for multi-class response
+# topk returns (values, indices) sorted by probability
+top5_probs, top5_indices = probs.topk(5)  # GPU operation
+top5_probs = top5_probs.squeeze(0).tolist()
+top5_indices = top5_indices.squeeze(0).tolist()
+
+# Map class indices to human-readable labels
+# imagenet_labels: list of 1000 class names from synset mapping
+labels = [imagenet_labels[i] for i in top5_indices]  # CPU lookup
+
+# Format response with predictions and metadata for API contract
+response = {
+    "predictions": [
+        {"label": label, "confidence": float(prob)}
+        for label, prob in zip(labels, top5_probs)
+    ],
+    "model_version": "resnet50-v2.1",  # Client-side version tracking
+    "inference_time_ms": 5.2,  # Observability for latency monitoring
+}
+```
+
+:::
+
+In @lst-resnet-postprocessing, total postprocessing time is approximately 0.1 ms, negligible compared with preprocessing and inference. The GPU handles the normalization and top-5 reduction, so the subsequent `.tolist()` call transfers only tens of bytes across PCIe. However, `.tolist()` forces a synchronous device-to-host copy, blocking the host thread until the GPU stream finishes. In high-throughput pipelined servers, such synchronization barriers must be scheduled carefully to avoid stalling the CPU thread while it feeds subsequent requests. Fitting a calibration mapping is an offline task; applying a simple fitted mapping online is usually inexpensive, but it is valuable only when downstream decisions require confidence scores whose empirical meaning has been validated.
+
+#### Output formatting {#sec-model-serving-output-formatting-753f}
+
+Production systems package predictions to satisfy application-level API contracts. These contracts govern JSON serialization schemas, floating-point formatting, error codes, and fallback defaults when thresholding rejects all candidates. In Python-based runtimes, repetitive JSON serialization and string allocation can consume unexpected host CPU cycles under heavy concurrency, turning a microsecond-scale formatting step into a CPU bottleneck. High-throughput servers address this by delegating serialization to native C++ runtimes or binary protocols like Protocol Buffers. Response metadata, including model version and inference execution time, completes the payload to enable downstream observability.
+
+::: {#chk-model-serving-resnet-50-latency-analysis .callout-checkpoint title="Tail latency and budget"}
+
+Serving optimizes tail latency under load. Use this checkpoint to separate queueing and batching effects before choosing an optimization.
+
+- [ ] **Queue behavior**: use the mean and p99 curves in @fig-tail-latency-explosion to explain nonlinear latency growth near saturation. Why is the marked 70 percent knee an illustrative planning choice?
+- [ ] **Tail vs. mean**: can you explain why mean latency cannot demonstrate compliance with a p99 SLO?
+- [ ] **Latency budget**: given a 50 ms request deadline and a combined upper bound of 18 ms for all other stages, including network transit, preprocessing, transfer, and postprocessing, how much remains for inference and queueing? Why would a measured 18 ms mean for those stages be insufficient to certify a p99 SLO?
+
+:::
+
+Tracing an isolated request reveals the intrinsic execution time of each pipeline phase. In production, however, multiple requests arrive concurrently and contend for shared accelerators, CPU cores, and memory buses, introducing queuing delays that dwarf raw computation time.
+
 ## Serving Load, Latency, and Architecture {#sec-model-serving-load-latency-architecture-a4d8}
 
 Online serving systems process variable, unbatched request streams while operating under strict latency deadlines. When arrival bursts exhaust a system's reserved headroom, performance degrades nonlinearly.
@@ -1070,1142 +2206,6 @@ Even with pinned CPU cores, memory access latency remains vulnerable to the virt
 Beyond scheduled processes, asynchronous hardware interrupts introduce another source of sub-millisecond preemption. When a network interface card (NIC) receives packet bursts, it triggers hardware interrupt requests (IRQs) that force the handling CPU core to immediately suspend user-space execution and process kernel interrupt handlers. If the OS routes these interrupts to cores running the inference engine's submission loop, the CPU pauses command dispatch to the accelerator. Because GPUs process short inference layers in microseconds, even brief CPU submission stalls drain the accelerator's hardware command ring buffer, causing pipeline bubbles where compute units sit idle waiting for the next kernel descriptor. Interrupt shielding\index{Interrupt shielding!latency isolation} restricts IRQ affinities to dedicated housekeeping cores, reducing preemption of the GPU dispatch thread by those device interrupts.
 
 Isolating physical cores, locking host memory, and shielding interrupt lines reduce specific sources of operating system noise. The resulting service-time distribution still needs measurement under the intended load. Even a predictable single-node execution path leaves a scheduling challenge: processing requests sequentially can underuse accelerator resources when each request exposes little parallel work. To achieve high throughput within latency deadlines, the internal software architecture of the serving engine must coordinate irregular, asynchronous request streams into structured, hardware-saturating batches.
-
-## Serving System Architecture {#sec-model-serving-serving-system-architecture-4879}
-
-While host isolation reduces service-time variability, production serving confronts an impedance mismatch at the system boundary. User requests arrive stochastically—bursting milliseconds apart, followed by seconds of silence—whereas accelerator compute engines demand steady streams of uniform, dense batches to saturate memory bandwidth and functional units. Bridging this gap requires a specialized serving architecture that decouples network ingress from execution scheduling, absorbing arrival bursts and packing irregular inputs into dense batches without violating latency SLOs.
-
-### Internal architecture and request flow {#sec-model-serving-anatomy-inference-server-f12e}
-
-An inference server\index{Inference server!architecture}[^fn-inference-server-serving] (such as NVIDIA Triton or TensorFlow Serving) functions as a specialized runtime scheduler that manages concurrency, device memory, and data movement between host CPUs and accelerator devices. Rather than invoking model execution synchronously upon request arrival, the server pipelines incoming requests through dedicated subsystems that isolate client network handling from accelerator compute. Every request traverses a multi-stage runtime pipeline designed to maximize hardware throughput while bounding queuing latency. @Fig-server-anatomy diagrams the six stages of this pipeline, tracing how incoming client queries traverse network ingress and request buffering queues before the dynamic batcher stages them downward to the inference runner and the hardware accelerator.
-
-[^fn-inference-server-serving]: **Inference server**\index{Inference server!serving architecture}: Google's TensorFlow Serving\index{TensorFlow Serving!inference server} [@olston2017tensorflow] helped establish the separation of model logic from serving infrastructure; NVIDIA's Triton\index{Triton!inference server} [@nvidia_triton] extends this pattern across multiple model frameworks and backends. The critical design insight is that a scheduler and dynamic batcher turn irregular single-request traffic into accelerator-friendly execution, improving utilization when latency budgets allow batching. Exact utilization gains depend on model, hardware, arrival rate, and the configured batching window.
-
-::: {#fig-server-anatomy fig-env="figure" fig-pos="htb" fig-cap="**Inference Server Anatomy**: A modern inference server decouples network handling from accelerator execution through a staged pipeline. Each stage isolates a concern, from absorbing bursty traffic to forming efficient batches, so the hardware accelerator stays highly utilized despite irregular arrival patterns." fig-alt="Flowchart showing a six-stage inference server pipeline: client to network ingress to request queue to dynamic batcher, then down to inference runner to accelerator. Arrows connect stages sequentially."}
-
-```{.tikz}
-\begin{tikzpicture}[font=\small\sffamily]
-  \tikzset{
-    Box/.style={draw=none,minimum width=20mm, minimum height=15mm, node distance=18mm},
-    Arr/.style={-{Triangle[width=10pt,length=8pt]}, line width=5pt,cyan!40,shorten >=1pt, shorten <=2pt},
- Box2/.style={align=flush center, inner xsep=2pt,draw=OrangeLine,
-  font=\fontsize{7pt}{9}\sffamily,
-    line width=0.75pt, rounded corners,fill=OrangeL!30, text width=16mm,
-    minimum width=16mm, minimum height=9mm},
-LineA/.style = {violet!60,{Circle[line width=1.0pt,fill=white,length=5.5pt]}-,line width=1.5pt,shorten <=-3pt}
-}
-%laptop
-\tikzset{
-pics/laptop/.style = {
-        code = {
-        \pgfkeys{/channel/.cd, #1}
-\begin{scope}[shift={($(0,0)+(0,0)$)},scale=\scalefac,every node/.append style={transform shape}]
-\node[rounded corners=2pt,rectangle,minimum width=60,minimum height=37,
-fill=\filllcolor!60,line width=\Linewidth,draw=black](EKV)at(0,0.53){};
-%
-\node[draw=black,rounded corners=2pt,rectangle,minimum width=53,minimum height=30,
-fill=\filllcolor!10,line width=\Linewidth,](EK)at(0,0.53){};
-\coordinate(SM1)at($(EK.south west)+(0.15,0.5)$);
-\coordinate(SM2)at($(EK.south east)+(-1.1,0.5)$);
-\coordinate(OK1)at($(EK.220)+(0,0.7)$);
-\coordinate(OK2)at($(EK.240)+(0,0.7)$);
-\node[fill=black,inner sep=0pt,ellipse,minimum width=2pt,minimum height=3pt](OKO1)at(OK1){};
-\node[fill=black,inner sep=0pt,ellipse,minimum width=2pt,minimum height=3pt](OKO2)at(OK2){};
-\draw[line width=1.4pt](SM1)to [bend right=45](SM2);
-%%
-\coordinate(4BL)at($(EK.south west)+(0.95,0.3)$);
-    \def\n{5}          % broj boksova
-    \def\w{0.12}        % širina boksa (mm)
-    \def\h{0.5}       % visina boksa (mm)
-    \def\gap{0.05}      % razmak između boksova (mm)
-    % niz boksova
-    \foreach \i in {0,...,4} {
-      \pgfmathsetmacro{\x}{\i*(\w+\gap)}
-      % popuna (klipujemo unutar ivica)
-      \begin{scope}
-        \clip[] ($(4BL)+(\x,0)$) rectangle ++(\w,\h);
-        \fill[gray!10]($(4BL)+(\x,0)$) rectangle ++(\w,\h*1);
-        \fill[fill=\filllcirclecolor]($(4BL)+(\x,0)$) rectangle ++(\w,\h*\Level);
-      \end{scope}
-      % kontura preko
-      \draw[line width=0.6pt,draw=black]($(4BL)+(\x,0)$)  rectangle ++(\w,\h);
-    }
-%
-\draw[fill=\filllcolor!60!black!30,line width=\Linewidth](-1.00,-0.1)--(1.0,-0.1)--(1.28,-0.6)--(-1.28,-0.6)--cycle;
-\draw[fill=\filllcolor!60!black!30,line width=\Linewidth](1.28,-0.6)--(-1.28,-0.6)arc[start angle=180, end angle=270, radius=4pt]--(1.14,-0.73)
-arc[start angle=270, end angle=355, radius=4pt]--cycle;
-\draw[fill=\filllcolor!30!black!10,line width=\Linewidth](-0.95,-0.17)--(0.95,-0.17)--(1.03,-0.34)--(-1.03,-0.34)--cycle;
-\draw[fill=\filllcolor!30!black!20,line width=\Linewidth](-0.16,-0.52)--(0.16,-0.52)--(0.14,-0.42)--(-0.14,-0.42)--cycle;
-\end{scope}
-    }
-  }
-}
-
-\tikzset {
-pics/gatewey/.style = {
-        code = {
-        \pgfkeys{/channel/.cd, #1}
-\begin{scope}[local bounding box=GAT,scale=\scalefac, every node/.append style={transform shape}]
-\def\rI{4mm}
-\def\rII{2.8mm}
-\def\rIII{1.6mm}
-\draw[draw=\drawcolor,line width=0.8*\Linewidth](0,0)--(0,0.38)--(1.2,0.38)--(1.2,0)--cycle;
-\draw[draw=\drawcolor,line width=\Linewidth](0.6,0.4)--(0.6,0.9);
-
- \draw[draw=\drawcolor, line width=\Linewidth] (0.6,0.9)+(60:\rI) arc[start angle=60, end angle=-60, radius=\rI];
-\draw[draw=\drawcolor, line width=\Linewidth] (0.6,0.9)+(50:\rII) arc[start angle=50, end angle=-50, radius=\rII];
-\draw[draw=\drawcolor, line width=\Linewidth] (0.6,0.9)+(30:\rIII) arc[start angle=30, end angle=-30, radius=\rIII];
-%
- \draw[draw=\drawcolor, line width=\Linewidth] (0.6,0.9)+(120:\rI) arc[start angle=120, end angle=240, radius=\rI];
-\draw[draw=\drawcolor, line width=\Linewidth] (0.6,0.9)+(130:\rII) arc[start angle=130, end angle=230, radius=\rII];
-\draw[draw=\drawcolor, line width=\Linewidth] (0.6,0.9)+(150:\rIII) arc[start angle=150, end angle=210, radius=\rIII];
-\fill[fill=\filllcolor](0.6,0.9)circle (1.5pt);
-
-\foreach\i in{0.15,0.3,0.45,0.6}{
-\fill[fill=\filllcolor](\i,0.19)circle (1.5pt);
-}
-
-\fill[fill=\filllcolor](1,0.19)circle (2pt);
-\end{scope}
-}
-}
-}
-\tikzset {
-pics/cpu/.style = {
-        code = {
-        \pgfkeys{/channel/.cd, #1}
-\begin{scope}[local bounding box = CPU,scale=\scalefac, every node/.append style={transform shape}]
-\node[fill=\filllcolor,minimum width=66, minimum height=66,
-            rounded corners=2,outer sep=2pt] (C1) {};
-\node[fill=\filllcirclecolor,minimum width=54, minimum height=54] (C2) {\bfseries\Large  GPU};
-
-\foreach \x/\y in {0.11/1,0.26/2,0.41/3,0.56/4,0.71/5,0.85/6}{
-\node[fill=\filllcolor,minimum width=4, minimum height=15,
-           inner sep=0pt,anchor=south](GO\y)at($(C1.north west)!\x!(C1.north east)$){};
-}
-\foreach \x/\y in {0.11/1,0.26/2,0.41/3,0.56/4,0.71/5,0.85/6}{
-\node[fill=\filllcolor,minimum width=4, minimum height=15,
-           inner sep=0pt,anchor=north](DO\y)at($(C1.south west)!\x!(C1.south east)$){};
-}
-\foreach \x/\y in {0.11/1,0.26/2,0.41/3,0.56/4,0.71/5,0.85/6}{
-\node[fill=\filllcolor,minimum width=15, minimum height=4,
-           inner sep=0pt,anchor=east](LE\y)at($(C1.north west)!\x!(C1.south west)$){};
-}
-\foreach \x/\y in {0.11/1,0.26/2,0.41/3,0.56/4,0.71/5,0.85/6}{
-\node[fill=\filllcolor,minimum width=15, minimum height=4,
-           inner sep=0pt,anchor=west](DE\y)at($(C1.north east)!\x!(C1.south east)$){};
-}
-\end{scope}
-    }
-  }
-}
-\tikzset{pics/brain/.style = {
-        code = {
-        \pgfkeys{/channel/.cd, #1}
-\begin{scope}[local bounding box=BRAIN,scale=\scalefac, every node/.append style={transform shape}]
-\fill[fill=\filllcolor!50](0.1,-0.5)to[out=0,in=180](0.33,-0.5)
-to[out=0,in=270](0.45,-0.38)to(0.45,-0.18)
-to[out=40,in=240](0.57,-0.13)to[out=110,in=310](0.52,-0.05)
-to[out=130,in=290](0.44,0.15)to[out=90,in=340,distance=8](0.08,0.69)
-to[out=160,in=80](-0.42,-0.15)to(-0.48,-0.7)to(0.07,-0.7)to(0.1,-0.5)
-to(-0.10,-0.42)to[out=310,in=180](0.1,-0.5);
-\draw[draw=\drawcolor,line width=\Linewidth](0.1,-0.5)to[out=0,in=180](0.33,-0.5)
-to[out=0,in=270](0.45,-0.38)to(0.45,-0.18)
-to[out=40,in=240](0.57,-0.13)to[out=110,in=310](0.52,-0.05)
-to[out=130,in=290](0.44,0.15)to[out=90,in=340,distance=8](0.08,0.69)
-to(-0.42,-0.15)to(-0.48,-0.7)
-(0.07,-0.7)to(0.1,-0.5)
-(-0.10,-0.42)to[out=310,in=180](0.1,-0.5);
-\draw[fill=\filllcolor,line width=\Linewidth](-0.3,-0.10)to(0.08,0.60)
-to[out=60,in=50,distance=3](-0.1,0.69)to[out=160,in=80](-0.26,0.59)to[out=170,in=90](-0.46,0.42)
-to[out=170,in=110](-0.54,0.25)to[out=210,in=150](-0.54,0.04)
-to[out=240,in=130](-0.52,-0.1)to[out=300,in=240]cycle;
-\draw[fill=\filllcolor,line width=\Linewidth]
-(-0.04,0.64)to[out=120,in=0](-0.1,0.69)(-0.19,0.52)to[out=120,in=330](-0.26,0.59)
-(-0.4,0.33)to[out=150,in=280](-0.46,0.42)
-%
-(-0.44,-0.03)to[bend left=30](-0.34,-0.04)
-(-0.33,0.08)to[bend left=40](-0.37,0.2) (-0.37,0.12)to[bend left=40](-0.45,0.14)
-(-0.26,0.2)to[bend left=30](-0.24,0.13)
-(-0.16,0.32)to[bend right=30](-0.27,0.3)to[bend right=30](-0.29,0.38)
-(-0.13,0.49)to[bend left=30](-0.04,0.51);
-
-\draw[rounded corners=0.8pt,line width=\Linewidth,\drawcircle,-{Circle[fill=\filllcirclecolor,length=3.5pt]}](-0.23,0.03)--(-0.15,-0.03)--(-0.19,-0.18)--(-0.04,-0.28);
-\draw[rounded corners=0.8pt,line width=\Linewidth,\drawcircle,-{Circle[fill=\filllcirclecolor,length=3.5pt]}](-0.17,0.13)--(-0.04,0.05)--(-0.06,-0.06)--(0.14,-0.11);
-\draw[rounded corners=0.8pt,line width=\Linewidth,\drawcircle,-{Circle[fill=\filllcirclecolor,length=3.5pt]}](-0.12,0.23)--(0.31,0.0);
-\draw[rounded corners=0.8pt,line width=\Linewidth,\drawcircle,-{Circle[fill=\filllcirclecolor,length=3.5pt]}](-0.07,0.32)--(0.06,0.26)--(0.16,0.33)--(0.34,0.2);
-\draw[rounded corners=0.8pt,line width=\Linewidth,\drawcircle,-{Circle[fill=\filllcirclecolor,length=3.5pt]}](-0.01,0.43)--(0.06,0.39)--(0.18,0.51)--(0.31,0.4);
-\end{scope}
-     }
-  }
-}
-%inbox
-\tikzset{%
- pics/inbox/.style = {
-        code = {
-        \pgfkeys{/channel/.cd, #1}
-\begin{scope}[local bounding box=INBOX,scale=\scalefac, every node/.append style={transform shape}]
-\node[line width=\Linewidth,draw=\drawcolor,fill=\filllcolor!50,
-rectangle,rounded corners=3pt,minimum width=14mm,minimum height=10mm]at(0,0.3){};
-\node[line width=\Linewidth,draw=\drawcolor,fill=\filllcolor,
-rectangle,rounded corners=3pt,minimum width=15mm,minimum height=10mm]at(0,0.1){};
-\node[line width=\Linewidth,draw=\drawcolor,fill=\filllcolor!50,
-rectangle,rounded corners=3pt,minimum width=17mm,minimum height=10mm]
-at(0,-0.1){};
-\draw[line width=\Linewidth,draw=\drawcolor,fill=\filllcirclecolor,rounded corners=2pt](-0.92,0.05)--
-(-0.92,-0.78)--(0.92,-0.78)--(0.92,0.05)--(0.40,0.05)--(0.32,-0.2)--(-0.29,-0.2)--(-0.40,0.05)--cycle;
-
-\node[single arrow, line width=\Linewidth,draw=black,fill=green!80!black!50, rotate=270,
-      minimum width = 15pt, single arrow head extend=6pt,
-      minimum height=10mm]at(0,0.5) {}; % length of arrow
- \end{scope}
-     }
-  }
-}
-%funnel
-\tikzset{%
- pics/funnel/.style = {
-        code = {
-        \pgfkeys{/channel/.cd, #1}
-\begin{scope}[local bounding box=FUNNEL,scale=\scalefac, every node/.append style={transform shape}]
-\draw[fill=\filllcolor!50,line width=\Linewidth,draw=\drawcolor](-0.12,-0.81)--(-0.19,-0.25)--(-0.7,0.41)--(0.7,0.41)--(0.19,-0.25)--(0.12,-0.81)--cycle;
-\draw[fill=\filllcolor!50,line width=\Linewidth,draw=\drawcolor](-0.19,-0.25)--(0.08,-0.25);
-\draw[fill=\filllcolor!50,line width=\Linewidth,draw=\drawcolor](0.16,-0.09)--(0.41,0.31);
-%
-\node[line width=\Linewidth,draw=\drawcolor,fill=\filllcolor!50,inner sep=1pt,
-rectangle,rounded corners=2pt,minimum width=16mm,minimum height=5pt]at(0,0.5){};
-%
-\foreach \i in{-0.5,0,0.5}{
-\node[single arrow, line width=0.8*\Linewidth,draw=black,fill=cyan!90!black!30, rotate=270,inner sep=1pt,
-      minimum width =9pt, single arrow head extend=2pt,
-      minimum height=3.5mm]at(\i,0.83) {}; % length of arrow
-   }
-\node[single arrow,line width=0.8*\Linewidth,draw=black,fill=\filllcirclecolor, rotate=270,inner sep=1pt,
-      minimum width =11pt, single arrow head extend=2pt,
-      minimum height=4mm]at(0,-1.05) {}; % length of arrow
- \end{scope}
-     }
-  }
-}
-\pgfkeys{
-  /channel/.cd,
-   Depth/.store in=\Depth,
-  Height/.store in=\Height,
-  Width/.store in=\Width,
-  Level/.store in=\Level,
-  filllcirclecolor/.store in=\filllcirclecolor,
-  filllcolor/.store in=\filllcolor,
-  drawcolor/.store in=\drawcolor,
-  drawcircle/.store in=\drawcircle,
-  scalefac/.store in=\scalefac,
-  Linewidth/.store in=\Linewidth,
-  picname/.store in=\picname,
-  filllcolor=BrownLine,
-  filllcirclecolor=cyan!40,
-  drawcolor=black,
-  drawcircle=violet,
-  scalefac=1,
-  Level=0.52,
-  Linewidth=0.5pt,
-  Depth=1.3,
-  Height=0.8,
-  Width=1.1,
-  picname=C
-}
-
-\node[Box, fill=white](B1){};
- \pic[shift={(0,-0.10)}] at  (B1){laptop={scalefac=0.67,picname=1,drawcolor=GreenD,
-filllcolor=GreenD!70!,Linewidth=0.75pt, filllcirclecolor=red!80}};
-
-\node[Box, fill=white,right=of B1,minimum width=16mm](B2){};
-\pic[shift={(-0.68,-0.57)}] at  (B2){gatewey={scalefac=1.1,picname=1,drawcolor=green!50!black,
-filllcolor=red!,Linewidth=1.5pt, filllcirclecolor=red!80}};
-
-\node[Box, fill=white,right=of B2,minimum width=14mm](B3){};
-\pic[shift={(0,0.07)}] at  (B3){brain={scalefac=1.0,picname=1,filllcolor=orange!30!, Linewidth=1pt}};
-
-\node[Box, fill=white,right=of B3,minimum width=16mm](B4){};
-\pic[shift={(0,-0.06)}] at  (B4){inbox={scalefac=0.7,picname=1,Linewidth=1.0pt,
- filllcolor=BrownL,drawcolor=black,filllcirclecolor=orange!70!yellow!80}};
-
-\node[Box, fill=white,below=1 of B4,minimum width=17mm,minimum height=22mm](B5){};
- \pic[shift={(0,0.17)}] at  (B5){funnel={scalefac=0.9,picname=1,Linewidth=1.0pt,
- filllcolor=BrownL,drawcolor=black,filllcirclecolor=green!70!yellow!80}};
-
-\node[Box, fill=white,below=0.8 of B5,minimum width=17mm](B6){};
-\pic[shift={(0,0)}] at  (B6){cpu={scalefac=0.4,picname=1,drawcolor=GreenD,
-filllcolor=BlueD!70!,Linewidth=0.75pt, filllcirclecolor=brown!20}};
-
-\draw[Arr](B1)--(B2);
-\draw[Arr](B2)--(B3);
-\draw[Arr](B3)--(B4);
-\draw[Arr,shorten <=5pt](B4)--(B5);
-\draw[Arr](B5)--(B6);
-
-\draw[violet,line width=1.5pt](B1.south west)--coordinate(S1)(B1.south east);
-\draw[violet,line width=1.5pt](B2.south west)--coordinate(S2)(B2.south east);
-\draw[violet,line width=1.5pt](B3.south west)--coordinate(S3)(B3.south east);
-\draw[violet,line width=1.5pt](B4.south west)--coordinate(S4)(B4.south east);
-\draw[violet,line width=1.5pt](B5.south west)--coordinate[pos=0.25](S5)(B5.north west);
-\draw[violet,line width=1.5pt](B6.south west)--coordinate(S6)(B6.north west);
-
-\node[Box2,anchor=north,below= 0.6of S1](CR){Client\\(Request)};
-\draw[LineA](S1)--(CR);
-
-\node[Box2,text width=25mm,right=0.75 of CR](NI){Network Ingress\\(HTTP/gRPC)};
-\draw[LineA](S2)--(NI);
-
- \draw[LineA](S3)--++(210:1.15);
- \node[Box2,right=0.55 of NI](RQT){Request\\Queue};
-
-\node[Box2,right=0.4 of RQT](DBT){Dynamic\\Batcher};
-\draw[LineA](S4)--(DBT);
-
-\node[Box2,left=of S5,text width=26mm](IRT){Inference Runner\\(TensorRT/ONNX)};
-\draw[LineA](S5)--(IRT);
-
-\draw[LineA](S6)--++(180:1.0)coordinate(AC);
-\node[Box2,text width=26mm,left=of S6]{Accelerator\\(GPU/TPU)};
-  % Labels
-\node[above=0pt of B3, font=\scriptsize\sffamily, text=gray] {Request Buffering};
-\node[above=0pt of B4, font=\scriptsize\sffamily, text=gray] {Throughput Opt.};
-\node[right=12pt of B5.center, align=left,font=\scriptsize\sffamily, text=gray] {Execution\\ Opt.};
-\end{tikzpicture}
-```
-
-:::
-
-This architecture serves three core functions:
-
-First, concurrency management. Serving engines employ asynchronous event loops (such as `epoll` or `kqueue`) and worker thread pools to handle thousands of concurrent client TCP connections without blocking execution threads. Isolating client network I/O lets other ready requests advance while one client has a slow or stalled transfer.
-
-Second, request transformation\index{Request transformation!tensor formats}. The server decodes serialized network payloads into contiguous, aligned memory buffers matching the tensor layout required by the underlying execution engine. For example, 4D vision tensors may use NCHW[^fn-nchw-nhwc-serving]\index{Tensor memory layout!NCHW} or NHWC\index{Tensor memory layout!NHWC} format. On modern accelerators, matrix multiplication units (such as Tensor Cores) load 8- or 16-element channel vectors using coalesced memory transactions that favor channels-last (NHWC) layout. If the execution kernel requires a different physical layout, the server must materialize that layout. `torch.permute` alone creates a view with reordered strides; a contiguous copy or explicit transpose kernel moves the data when required. Such materialization performs little arithmetic ($I \approx 0$ FLOP/byte), so memory traffic or launch overhead can dominate its cost. A device-local conversion consumes device memory bandwidth; PCIe traffic enters only when data also crosses the host-device boundary.
-
-[^fn-nchw-nhwc-serving]: **NCHW and NHWC (tensor memory layouts)**\index{Tensor layout!NCHW vs. NHWC}: These acronyms encode the dimension order of 4D image tensors: N (batch), C (channels), H (height), and W (width). In a contiguous NCHW tensor, each channel plane is contiguous; in NHWC, channels for one spatial position are adjacent. Optimized kernels may favor either layout, and a semantic mismatch can scramble values even when the element count is correct. Serving code should therefore make both dimension meaning and any physical-layout conversion explicit.
-
-Third, model lifecycle management. The runtime establishes the CUDA context before allocating device memory (VRAM) and loading device-resident weights. It also pins host memory buffers for DMA and executes representative warmup passes to trigger deferred compilation and allocation before admitting live client traffic. While enterprise model registries, canary releases, and rollback policies belong to @sec-ml-operations, the serving engine governs local state: validating that active model instances are warmed, resident in accelerator memory, and ready for dispatch.
-
-The execution **scheduler**\index{Scheduler!inference server} coordinates the transition between request buffering and accelerator execution by implementing dynamic batching (@sec-model-serving-throughput-optimization-18d1). For weight-dominated inference at batch size $\BatchSize=1$, streaming parameters from HBM can limit execution before the arithmetic units reach peak throughput. Grouping $\BatchSize$ requests into a concurrent batch amortizes the byte transfers of reading model weights across all $\BatchSize$ inputs, increasing the arithmetic intensity ($I = \Operations/\DataVolume$).
-
-To balance individual request latency against batch compute efficiency, the scheduler tunes queue residency using a **batching window**\index{Batching!window, latency-throughput trade-off} (or timeout threshold). Setting the batching window to zero removes deliberate batch formation delay, but requests can still wait for an available worker. An immediately dispatched small batch may also expose too little work to use the accelerator efficiently. Conversely, setting a bounded window (such as 2 to 5 ms) allows the scheduler to buffer arriving requests until either the queue reaches a target batch size or the timeout expires. The window bounds deliberate formation delay; waiting for a busy worker is a separate resource-queue delay. Batching trades that formation time for greater weight reuse and potentially higher service capacity, while total latency includes both waits and execution.
-
-### Interface protocols and serialization {#sec-model-serving-interface-protocols-serialization-5510}
-
-As accelerator kernels undergo aggressive compilation (via TensorRT, TorchDynamo, or custom kernels), device execution time often drops below a single millisecond, and the host-side cost of ingesting, transporting, and deserializing payloads becomes the dominant term in end-to-end latency (the serving tax itemized in @sec-model-serving-serving-tax-bill-dc6c).
-
-#### The serialization bottleneck {#sec-model-serving-serialization-bottleneck-aaa0}
-
-Machine learning payloads differ fundamentally from conventional web API payloads: they consist of multi-dimensional arrays of floating-point numbers (such as image tensors, dense embedding vectors, or token sequence logits). While text-based JSON is ubiquitous in web services, serializing dense numerical arrays into text incurs severe CPU and memory penalties. Serialization overhead\index{Serialization!overhead} manifests because JSON parsers must scan every byte sequentially, validate syntax, allocate heap nodes, and invoke string-to-float conversion routines (such as `strtod`). Each 32-bit float expands from 4 raw bytes into 7 to 15 ASCII characters including punctuation. Furthermore, raw binary data (such as compressed JPEG or raw image bytes) requires Base64 encoding to travel within JSON strings, imposing a 33 percent size inflation before parsing begins.
-
-Binary serialization formats, such as Protocol Buffers[^fn-protobuf-serialization-overhead] and FlatBuffers,[^fn-flatbuffers-zerocopy-deserialization] bypass this text translation tax. Float arrays transmit directly as packed IEEE 754 byte streams with zero ASCII conversion and zero Base64 framing. Furthermore, FlatBuffers organizes serialized records with internal relative offsets, enabling zero-copy deserialization\index{FlatBuffers!zero-copy serialization}: the serving application reads tensor dimensions, data types, and byte offsets directly out of the network receive buffer without allocating an intermediate object graph on the heap.
-
-[^fn-protobuf-serialization-overhead]: **Protocol Buffers (Protobuf)**\index{Protocol Buffers!serialization}: Protobuf uses a predefined schema (from a `.proto` file) to encode structured data into a compact binary format [@protobufDocs]. Because the schema carries field names and types, the wire payload need not repeat them as JSON does. Its wire format is still not identical to a C++ object's in-memory layout, so it requires a parsing step and does not provide the same direct zero-copy access pattern that FlatBuffers targets.
-
-[^fn-flatbuffers-zerocopy-deserialization]: **FlatBuffers**\index{FlatBuffers!etymology}: The "flat" in the name describes the design: the binary buffer can serve as the serialized representation and the data structure being read, avoiding a separate parsing or unpacking phase for supported access patterns [@flatbuffersDocs]. For ML inference, this can enable zero-copy access\index{FlatBuffers!zero-copy serialization} to tensor metadata---the serving system reads tensor shapes and offsets directly from the buffer rather than allocating a second object representation.
-
-#### REST vs. gRPC {#sec-model-serving-rest-vs-grpc-c7b7}
-
-Transport protocol selection governs connection life cycles and socket multiplexing. Conventional REST APIs typically deploy HTTP/1.1 with JSON payloads. HTTP/1.1 clients commonly use multiple persistent TCP connections for concurrency. Establishing each connection incurs handshake and, for HTTPS, TLS costs, but keep-alive reuse amortizes setup across requests. HTTP/1.1 also suffers from request-level head-of-line blocking, because responses on a single connection must return in request order. While REST APIs can adopt HTTP/2 or binary encodings, the combination of HTTP/1.1 and JSON creates significant socket overhead and CPU parsing contention when serving high-throughput tensor workloads.
-
-In contrast, gRPC (gRPC Remote Procedure Call)[^fn-grpc-inference-protocol] pairs HTTP/2 transport with Protocol Buffers serialization. HTTP/2 establishes a single long-lived TCP connection and multiplexes hundreds of concurrent request and response streams simultaneously using binary framing. This architecture multiplexes concurrent streams over a persistent connection and removes HTTP-level response-order blocking (a lost TCP packet can still stall every stream on the connection, which HTTP/3 addresses by moving to QUIC), while Protobuf enforces strongly typed contracts and serializes binary tensor payloads efficiently. Consequently, gRPC is the standard protocol for internal microservice communication in model serving clusters, where low latency, compact wire payloads, and bidirectional token streaming are primary design criteria.
-
-[^fn-grpc-inference-protocol]: **gRPC (gRPC remote procedure call)**\index{gRPC!inference protocol}: The gRPC framework pairs HTTP/2 transport with an interface definition language and message format, most commonly Protocol Buffers [@grpcDocs]. The relevant serving advantage is the combination of typed contracts, persistent multiplexed connections, streaming support, and compact binary messages. The size and latency benefit over REST/JSON depends on payload shape, client/server implementation, and whether serialization is a meaningful share of the end-to-end latency budget.
-
-A concrete payload comparison quantifies how the serialization format alters wire footprint and host CPU parsing overhead.
-
-```{python}
-#| echo: false
-#| label: serialization-comparison-calc
-# ┌─────────────────────────────────────────────────────────────────────────────
-# │ JSON VS PROTOBUF SERIALIZATION
-# ├─────────────────────────────────────────────────────────────────────────────
-# │ Context: Callout "JSON vs Protobuf Serialization"
-# │
-# │ Goal: Quantify the serialization tax in high-throughput inference.
-# │ Show: The 10× efficiency gain of Protobuf over JSON for vector data.
-# │ How: Calculate parsing overhead and wire size for a 1000-float payload.
-# │
-# └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import fmt_int, MarkdownStr, check, fmt, fmt_time, fmt_memory, fmt_percent
-from mlsysim.core.units import byte, KB, microsecond, second
-
-# ┌── LEGO ───────────────────────────────────────────────
-class SerializationEfficiency:
-    """
-    Namespace for Serialization Efficiency calculation.
-    Scenario: Comparing JSON vs Protobuf for a 1000-float payload.
-    """
-
-    # ┌── 1. LOAD (Constants) ───────────────────────────────────────────────
-    floats_count = 1000
-    json_parse_us = 50.0
-    proto_parse_us = 5.0
-    json_bytes_per_float = 9  # scenario: ~9 ASCII chars/float incl. separators
-    protobuf_bytes_per_float = int(BYTES_FP32.to(byte).magnitude)  # FP32 binary
-    requests_per_sec = 10_000  # scenario throughput
-
-    # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
-    efficiency_gain = json_parse_us / proto_parse_us
-    json_size = floats_count * json_bytes_per_float * byte
-    protobuf_size = floats_count * protobuf_bytes_per_float * byte
-    # Napkin chain: per-request saving -> CPU-seconds per second -> core fraction
-    parse_saving_us = json_parse_us - proto_parse_us
-    cpu_saving_per_s = requests_per_sec * parse_saving_us * microsecond  # CPU time saved per wall-clock second
-    core_fraction = (cpu_saving_per_s / second).to("").magnitude
-
-    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
-    check(efficiency_gain >= 5, f"Protobuf gain ({efficiency_gain:.1f}x) is too small to justify switching.")
-    check(json_size > protobuf_size, "JSON wire size must exceed Protobuf.")
-    check(0 < core_fraction < 1, "Per-second parse savings should stay below one full CPU core.")
-
-    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
-    serial_floats_str = fmt(floats_count, precision=0)
-    json_size_str = fmt_memory(json_size, unit=KB, precision=0, commas=False)
-    json_parse_us_str = fmt_time(round(json_parse_us), 'microsecond', precision=0, commas=False)
-    protobuf_size_str = fmt_memory(protobuf_size, unit=KB, precision=0, commas=False)
-    protobuf_parse_us_str = fmt_time(round(proto_parse_us), 'microsecond', precision=0, commas=False)
-    requests_per_sec_str = fmt(requests_per_sec, precision=0)
-    efficiency_gain_mult_str = fmt_multiple(round(efficiency_gain), precision=0, commas=False)
-    parse_saving_us_str = fmt_time(round(parse_saving_us), 'microsecond', precision=0, commas=False)
-    cpu_saving_s_str = fmt_time(cpu_saving_per_s, 'second', precision=2, commas=False)
-    core_fraction_pct_str = fmt_percent(core_fraction, precision=0, commas=False, style='prose')
-```
-
-::: {#nbk-model-serving-json-vs-protobuf-serialization .callout-notebook title="JSON vs. Protobuf serialization"}
-
-Consider a request payload containing `{python} SerializationEfficiency.serial_floats_str` floating point numbers (for example, an embedding vector).
-
-*   **JSON**\index{JSON!serialization overhead}: Uses ~`{python} SerializationEfficiency.json_size_str` on the wire. Requires ~`{python} SerializationEfficiency.json_parse_us_str` to parse.
-*   **Protobuf**: Uses ~`{python} SerializationEfficiency.protobuf_size_str` on the wire. Requires ~`{python} SerializationEfficiency.protobuf_parse_us_str` to parse.
-
-**Math**: Switching one request to the binary payload saves `{python} SerializationEfficiency.json_parse_us_str` − `{python} SerializationEfficiency.protobuf_parse_us_str` = `{python} SerializationEfficiency.parse_saving_us_str` of parse time. For this illustrative system processing `{python} SerializationEfficiency.requests_per_sec_str` requests per second, the savings compound to `{python} SerializationEfficiency.requests_per_sec_str` $\times$ `{python} SerializationEfficiency.parse_saving_us_str` = `{python} SerializationEfficiency.cpu_saving_s_str` of CPU time reclaimed every wall-clock second, which is `{python} SerializationEfficiency.core_fraction_pct_str` of one core freed from serialization overhead alone.
-
-**Systems insight**: This `{python} SerializationEfficiency.efficiency_gain_mult_str` scenario gain makes gRPC/Protobuf, FlatBuffers, or another binary protocol a strong candidate for high-throughput internal microservices when serialization is a visible part of the latency budget.
-
-:::
-
-Architectural selection is governed by system constraints. REST over HTTP/1.1 remains practical for public-facing edge gateways where broad client compatibility and human-readable debugging take precedence over raw wire efficiency. Within cluster boundaries, gRPC over HTTP/2 with binary serialization can reduce overhead when high query volume or tensor serialization consumes a significant share of the host CPU budget; its streaming support also suits incremental token responses.
-
-Protocol selection and process architecture establish the structural skeleton of an inference server. Evaluating actual operational performance, however, requires tracing how latency accumulates as individual requests traverse each stage of this runtime pipeline.
-
-## Request Lifecycle {#sec-model-serving-request-lifecycle-d9c6}
-
-A single HTTP request carrying a $224{\times}224$ JPEG image arrives at an inference server. Between the moment the first byte enters the network stack and the moment the classification payload departs, the request traverses a sequence of pipeline stages, grouped below into preprocessing, inference, and postprocessing, with data transfer between them. Each stage consumes a slice of the end-to-end latency budget, making granular phase decomposition essential for targeted performance tuning.
-
-### The latency budget {#sec-model-serving-latency-budget-ef40}
-
-For dynamic inference systems, the serving inversion established in @sec-model-serving-serving-paradigm-9634 creates a latency budget\index{Latency budget!optimization objectives} that shapes system design [@gujarati2020]. A serving system with second-scale per-request latency may miss many interactive SLOs, even if it achieves excellent throughput.
-
-```{python}
-#| echo: false
-#| label: tail-latency-ratio-calc
-# ┌─────────────────────────────────────────────────────────────────────────────
-# │ TAIL LATENCY RATIO
-# ├─────────────────────────────────────────────────────────────────────────────
-# │ Context: Latency Budget introduction paragraph
-# │
-# │ Goal: Demonstrate why mean latency is a misleading metric for user experience.
-# │ Show: That the p99 latency threshold can be 40× the mean.
-# │ How: Calculate the ratio between mean latency and the p99 threshold.
-# │
-# └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import fmt, fmt_multiple, check
-
-class TailLatencyRatioCalc:
-    """Demonstrates why mean latency misleads by showing the p99-to-mean ratio."""
-
-    # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    mean_latency_ms_value = 50 * ms  # scenario assumption: mean latency
-    p99_latency_ms_value = 2000 * ms  # scenario assumption: p99 latency
-
-    # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    tail_ratio_value = p99_latency_ms_value / mean_latency_ms_value
-
-    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
-    check(tail_ratio_value == 40, f"Expected p99/mean ratio 40x, got {tail_ratio_value}")
-
-    # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
-    tail_ratio_mult_str = fmt_multiple(tail_ratio_value, precision=0, commas=False)
-```
-
-Relevant metrics expand from aggregate throughput and mean latency to the latency distribution. Mean and p50\index{Latency!p50, median response time} describe the center, while p95\index{Latency!p95, percentile target} and p99\index{Latency!percentiles (p50, p95, p99)} expose the slow tail. If mean latency is 50 ms but p99 is two seconds, the p99 threshold is `{python} TailLatencyRatioCalc.tail_ratio_mult_str` the mean, so about 1 percent of requests are at or beyond two seconds. Whether that tail matters depends on the service and its users, which is why percentile targets should come from the SLO rather than convention.[^fn-tail-latency-serving]
-
-[^fn-tail-latency-serving]: **Tail latency**\index{Tail latency!revenue impact}: Unlike averages, percentile latencies reveal the performance impact of system outliers common in ML serving, such as model cache misses or garbage collection pauses. These rare, high-latency requests can disproportionately harm user satisfaction and business outcomes. Because the magnitude is workload-specific, services validate percentile targets (p95, p99) against their own users and SLOs.
-
-Managing these percentile constraints requires decomposing the total allowed response time into a **latency budget**\index{Latency budget!request lifecycle breakdown} that allocates time across each processing phase, the serial accounting that the latency budget principle (\ref{pri-latency-budget}) states formally.
-
-::: {#dfn-model-serving-latency-budget .callout-definition title="Latency budget"}
-
-***Latency budget***\index{Latency budget!definition} is the time allocated to request stages under an end-to-end deadline; the SLO also specifies the required completion quantile.
-
-1.  **Significance**: It acts as a zero-sum constraint system where any milliseconds consumed by serialization or network overhead directly reduce the latency budget ($\EndToEndRequestLatency$) available for model inference.
-2.  **Distinction**: A latency **SLO**\index{SLO!vs. SLI vs. SLA} couples a deadline (for example, $<50\text{ ms}$) with a completion quantile ($\text{p99}$ or $\text{p99.9}$). A service-level indicator (**SLI**\index{SLI!definition}) is the measured quantity used to evaluate that objective. Missing an internal SLO consumes reliability margin; crossing an external **SLA**\index{SLA!contractual penalty} threshold may trigger the remedies defined by the contract. Tail latency spikes can stem from queueing, batch formation, cache state, interference, or data movement.
-3.  **Common pitfall**: A frequent misconception is that the "model" has the entire budget. In the illustrative breakdown in @tbl-model-serving-resnet50-latency-budget, the remainder is consumed by host preprocessing and data movement (JPEG decode, resize, normalization, and PCIe transfer), while upstream network and serialization taxes (@tbl-serving-tax) consume further margin.
-
-:::
-
-Every serving request decomposes into three phases that each consume part of the latency budget. Preprocessing\index{Preprocessing!latency impact} transforms raw input such as image bytes or text strings into model-ready tensors. Inference\index{Inference!pipeline phase} executes the model computation. Postprocessing\index{Postprocessing!response formatting} transforms model outputs into user-facing responses.
-
-::: {.column-margin}
-![](images/svg/model_serving_latency_budget_bar.svg){width="100%" fig-alt="Horizontal stacked bar of the request latency budget: a gray preprocessing segment on the left, an orange inference segment of about the same width in the middle, and a thin gray trailing segment on the right. Inference is one slice among equals rather than the whole budget."}
-
-*Inference is one slice of the latency budget; preprocessing rivals it.*
-:::
-
-Faster hardware does not automatically mean faster serving\index{Amdahl's law!preprocessing bottleneck}, because preprocessing and postprocessing can dominate total latency once inference runs on an optimized accelerator. Finding out which stage dominates requires measuring each one.
-
-### Latency distribution analysis {#sec-model-serving-latency-distribution-analysis-b0f8}
-
-Understanding where latency accumulates requires instrumenting each stage along the serving pipeline independently. In image classification, end-to-end request time conflates host-side image decoding, PCIe bus transfers, accelerator compute, and host-side output parsing. Measuring each phase in isolation exposes where the latency budget is actually spent.
-
-```{python}
-#| echo: false
-#| label: latency-table-calc
-# ┌─────────────────────────────────────────────────────────────────────────────
-# │ LATENCY BUDGET BREAKDOWN TABLE
-# ├─────────────────────────────────────────────────────────────────────────────
-# │ Context: Callout "ResNet-50: Latency Budget Breakdown" table
-# │
-# │ Goal: Decompose the request lifecycle into processing phases.
-# │ Show: That noninference tasks (JPEG decode, resize) consume 50% of the latency budget.
-# │ How: Sum millisecond-scale components for a standard vision inference request.
-# │
-# └─────────────────────────────────────────────────────────────────────────────
-
-from mlsysim.fmt import fmt_int, MarkdownStr, fmt, fmt_percent, fmt_time, check
-
-class LatencyTableCalc:
-    """Decomposes the ResNet-50 request lifecycle into processing phases with percentages."""
-
-    # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    l_jpeg_value = 3.0 * ms  # scenario assumption: JPEG decode latency
-    l_resize_value = 1.0 * ms  # scenario assumption: resize to 224×224 latency
-    l_norm_value = 0.5 * ms  # scenario assumption: normalize latency
-    l_transfer_value = 0.5 * ms  # scenario assumption: CPU→GPU transfer latency
-    l_inf_value = 5.0 * ms  # scenario assumption: ResNet-50 forward pass latency
-    l_post_value = 0.1 * ms  # scenario assumption: softmax + top-5 latency
-
-    # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    l_total_value = l_jpeg_value + l_resize_value + l_norm_value + l_transfer_value + l_inf_value + l_post_value
-    p_jpeg_value = l_jpeg_value / l_total_value * 100
-    p_resize_value = l_resize_value / l_total_value * 100
-    p_norm_value = l_norm_value / l_total_value * 100
-    p_transfer_value = l_transfer_value / l_total_value * 100
-    p_inf_value = l_inf_value / l_total_value * 100
-    p_post_value = l_post_value / l_total_value * 100
-
-    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
-    check(round(l_total_value.to(ms).magnitude, 1) == 10.1, f"Expected 10.1 ms total latency, got {l_total_value}")
-    check(round(p_jpeg_value) == 30, f"Expected ~30% JPEG decode share, got {p_jpeg_value:.1f}%")
-    check(round(p_inf_value) == 50, f"Expected ~50% inference share, got {p_inf_value:.1f}%")
-
-    # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
-    l_jpeg_ms_str = fmt_time(l_jpeg_value, 'millisecond', precision=0, commas=False)
-    l_resize_ms_str = fmt_time(l_resize_value, 'millisecond', precision=0, commas=False)
-    l_norm_ms_str = fmt_time(l_norm_value, 'millisecond', precision=1, commas=False)
-    l_transfer_ms_str = fmt_time(l_transfer_value, 'millisecond', precision=1, commas=False)
-    l_inf_ms_str = fmt_time(l_inf_value, 'millisecond', precision=0, commas=False)
-    l_post_ms_str = fmt_time(l_post_value, 'millisecond', precision=1, commas=False)
-    l_total_ms_str = fmt_time(l_total_value, 'millisecond', precision=1, commas=False)
-
-    p_jpeg_str = fmt_percent(round(p_jpeg_value) / 100, precision=0, commas=False, style='symbol')
-    p_resize_str = fmt_percent(round(p_resize_value) / 100, precision=0, commas=False, style='symbol')
-    p_norm_str = fmt_percent(round(p_norm_value) / 100, precision=0, commas=False, style='symbol')
-    p_transfer_str = fmt_percent(round(p_transfer_value) / 100, precision=0, commas=False, style='symbol')
-    p_inf_str = fmt_percent(round(p_inf_value) / 100, precision=0, commas=False, style='symbol')
-    p_post_str = fmt_percent(round(p_post_value) / 100, precision=0, commas=False, style='symbol')
-```
-
-```{python}
-#| echo: false
-#| label: latency-budget-calc
-# ┌─────────────────────────────────────────────────────────────────────────────
-# │ PREPROCESSING SHARE OF LATENCY
-# ├─────────────────────────────────────────────────────────────────────────────
-# │ Context: Latency distribution narrative (key insight paragraph)
-# │
-# │ Goal: Demonstrate the shifting bottleneck from inference to preprocessing.
-# │ Show: That optimized inference (TensorRT) makes preprocessing 63% of total latency.
-# │ How: Compare phase durations before and after model acceleration.
-# │
-# └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import fmt, fmt_percent, fmt_time, check
-from mlsysim.physics import calc_amdahls_speedup
-
-class LatencyBudgetCalc:
-    """Demonstrates the shifting bottleneck from inference to preprocessing after TensorRT optimization."""
-
-    # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    jpeg_decode_ms_value = 3.0 * ms  # scenario assumption: JPEG decode latency
-    resize_ms_value = 1.0 * ms  # scenario assumption: resize latency
-    normalize_ms_value = 0.5 * ms  # scenario assumption: normalize latency
-    cpu_gpu_ms_value = 0.5 * ms  # scenario assumption: CPU→GPU transfer latency
-    resnet_inference_ms_value = 5.0 * ms  # scenario assumption: PyTorch inference latency
-    postprocess_ms_value = 0.1 * ms  # scenario assumption: postprocessing latency
-    tensorrt_inference_ms_value = 2.0 * ms  # scenario assumption: TensorRT inference latency
-
-    # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    preprocess_ms_value = jpeg_decode_ms_value + resize_ms_value + normalize_ms_value
-    total_latency_ms_value = preprocess_ms_value + cpu_gpu_ms_value + resnet_inference_ms_value + postprocess_ms_value
-    preprocess_pct_value = preprocess_ms_value / total_latency_ms_value * 100
-    tensorrt_total_ms_value = preprocess_ms_value + cpu_gpu_ms_value + tensorrt_inference_ms_value + postprocess_ms_value
-    tensorrt_preprocess_pct_value = preprocess_ms_value / tensorrt_total_ms_value * 100
-
-    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
-    check(round(preprocess_pct_value, 1) == 44.6, f"Expected 44.6% preprocessing share, got {preprocess_pct_value:.1f}%")
-    check(round(tensorrt_preprocess_pct_value, 1) == 63.4, f"Expected 63.4% TensorRT preprocessing share, got {tensorrt_preprocess_pct_value:.1f}%")
-
-    # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
-    preprocess_ms_str = fmt_time(preprocess_ms_value, 'millisecond', precision=1, commas=False)
-    cpu_gpu_ms_str = fmt_time(cpu_gpu_ms_value, 'millisecond', precision=1, commas=False)
-    resnet_inference_ms_str = fmt_time(resnet_inference_ms_value, 'millisecond', precision=0, commas=False)
-    tensorrt_inference_ms_str = fmt_time(tensorrt_inference_ms_value, 'millisecond', precision=0, commas=False)
-    model_10x_ms_str = fmt_time(resnet_inference_ms_value / 10, 'millisecond', precision=1, commas=False)
-    total_latency_ms_str = fmt_time(total_latency_ms_value, 'millisecond', precision=1, commas=False)
-    preprocess_pct_str = fmt_percent(preprocess_pct_value / 100, precision=1, commas=False, style='prose')
-    tensorrt_preprocess_pct_str = fmt_percent(tensorrt_preprocess_pct_value / 100, precision=1, commas=False, style='prose')
-```
-
-::: {#exmp-model-serving-resnet-50-latency-budget-breakdown .callout-example title="ResNet-50: Latency budget breakdown"}
-
-@Tbl-model-serving-resnet50-latency-budget details the per-phase latency breakdown for an illustrative ResNet-50 serving request.
-
-```{=latex}
-\begingroup
-\renewcommand{\arraystretch}{1.22}
-```
-
-| **Phase**          | **Operation**              |                    **Time**                    |               **Percentage**               |
-|:-------------------|:---------------------------|:----------------------------------------------:|:------------------------------------------:|
-| **Preprocessing**  | JPEG decode                |   `{python} LatencyTableCalc.l_jpeg_ms_str`    |   `{python} LatencyTableCalc.p_jpeg_str`   |
-| **Preprocessing**  | Resize to $224{\times}224$ |  `{python} LatencyTableCalc.l_resize_ms_str`   |  `{python} LatencyTableCalc.p_resize_str`  |
-| **Preprocessing**  | Normalize (mean/std)       |   `{python} LatencyTableCalc.l_norm_ms_str`    |   `{python} LatencyTableCalc.p_norm_str`   |
-| **Data Transfer**  | CPU→GPU copy               | `{python} LatencyTableCalc.l_transfer_ms_str`  | `{python} LatencyTableCalc.p_transfer_str` |
-| **Inference**      | ResNet-50 forward pass     |    `{python} LatencyTableCalc.l_inf_ms_str`    |   `{python} LatencyTableCalc.p_inf_str`    |
-| **Postprocessing** | Softmax + top-5            |   `{python} LatencyTableCalc.l_post_ms_str`    |  ~`{python} LatencyTableCalc.p_post_str`   |
-| **Total**          |                            | **`{python} LatencyTableCalc.l_total_ms_str`** |                  **100%**                  |
-
-: **ResNet-50 latency budget**: Illustrative per-phase breakdown of a single serving request, showing that preprocessing and data transfer together rival the cost of the ResNet-50 forward pass itself. The percentages expose where engineering effort pays off in this scenario. Per-phase percentages are rounded to the nearest whole number and may not sum to exactly 100. {#tbl-model-serving-resnet50-latency-budget tbl-colwidths="[28,28,22,22]"}
-
-```{=latex}
-\vspace{-2ex}
-\endgroup
-```
-
-**Systems insight**: In this illustrative ResNet-50\index{ResNet-50!latency budget} serving budget, preprocessing consumes `{python} LatencyBudgetCalc.preprocess_pct_str` of latency despite model inference being the computationally intensive phase. If TensorRT reduces inference to the assumed `{python} LatencyBudgetCalc.tensorrt_inference_ms_str`, preprocessing would dominate at `{python} LatencyBudgetCalc.tensorrt_preprocess_pct_str`.
-
-:::
-
-In the ResNet-50 scenario, dense convolutional arithmetic dominates the model stage's work. That does not make the stage compute bound at every batch size. At batch size one, the late layers, whose large weight tensors are reused over only a few spatial positions, lean toward memory bound, and some layers expose too little parallel work to fill the device or amortize per-kernel launch costs, so the stage runs far below peak arithmetic throughput; batching amortizes those costs and fills the machine (@sec-model-serving-batching-helps-f1dc). Changing the model architecture can move the dominant cost out of dense arithmetic entirely, and recommendation systems exhibit this shift.
-
-```{python}
-#| echo: false
-from mlsysim.fmt import fmt_int
-
-# ┌─────────────────────────────────────────────────────────────────────────────
-# │ DLRM SERVING LATENCY (IO-BOUND EXAMPLE)
-# ├─────────────────────────────────────────────────────────────────────────────
-# │ Context: Lighthouse example "DLRM Serving"
-# │
-# │ Goal: Contrast compute-bound and I/O-bound serving bottlenecks.
-# │ Show: That embedding lookups consume 67% of recommendation latency.
-# │ How: Model DLRM latency across parsing, embedding, and MLP phases.
-# │
-# └─────────────────────────────────────────────────────────────────────────────
-
-from mlsysim.fmt import MarkdownStr, fmt, fmt_percent, fmt_time, check
-
-class DlrmLatencyCalc:
-    """Models DLRM serving latency to contrast I/O-bound vs. compute-bound bottlenecks."""
-
-    # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    dlrm_input_ms_value = 0.5 * ms  # scenario assumption: request parsing latency
-    dlrm_embed_ms_value = 6.0 * ms  # scenario assumption: embedding lookup latency
-    dlrm_mlp_ms_value = 1.5 * ms  # scenario assumption: MLP forward latency
-    dlrm_post_ms_value = 1.0 * ms  # scenario assumption: ranking and filtering latency
-
-    # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    dlrm_total_ms_value = dlrm_input_ms_value + dlrm_embed_ms_value + dlrm_mlp_ms_value + dlrm_post_ms_value
-    dlrm_mlp_pct_value = dlrm_mlp_ms_value / dlrm_total_ms_value * 100
-
-    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
-    check(dlrm_total_ms_value == 9.0 * ms, f"Expected 9.0 ms total DLRM latency, got {dlrm_total_ms_value}")
-    check(round(dlrm_mlp_pct_value) == 17, f"Expected ~17% MLP share, got {dlrm_mlp_pct_value:.1f}%")
-
-    # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
-    dlrm_input_ms_str = fmt_time(dlrm_input_ms_value, 'millisecond', precision=1, commas=False)
-    dlrm_embed_ms_str = fmt_time(dlrm_embed_ms_value, 'millisecond', precision=0, commas=False)
-    dlrm_mlp_ms_str = fmt_time(dlrm_mlp_ms_value, 'millisecond', precision=1, commas=False)
-    dlrm_post_ms_str = fmt_time(dlrm_post_ms_value, 'millisecond', precision=0, commas=False)
-    dlrm_total_ms_str = fmt_time(dlrm_total_ms_value, 'millisecond', precision=0, commas=False)
-    dlrm_mlp_pct_str = fmt_percent(round(dlrm_mlp_pct_value) / 100, precision=0, commas=False, style='prose')
-```
-
-::: {#lhs-model-serving-lighthouse-example-dlrm-serving .callout-lighthouse title="Lighthouse example: DLRM serving"}
-
-```{=latex}
-\begin{minipage}{1\linewidth}
-\setlength{\parskip}{2pt plus 1pt}%
-\renewcommand{\arraystretch}{1.22}
-```
-
-**Scenario**: Serving DLRM\index{DLRM!I/O-bound serving} with a 10 ms p99 latency budget.
-
-**Analysis**: While ResNet-50's model stage is dominated by convolutional neural network compute, DLRM's dominant model-stage cost is embedding-table memory access. End-to-end serving bottlenecks still require measuring the full path: preprocessing, inference, postprocessing, and data movement. @Tbl-model-serving-dlrm-latency-budget breaks the recommendation request down by phase.
-
-| **Phase**            | **Operation**            |                     **Time**                     |  **Bottleneck**  |
-|:---------------------|:-------------------------|:------------------------------------------------:|:----------------:|
-| **Input Parsing**    | Request parsing          |   `{python} DlrmLatencyCalc.dlrm_input_ms_str`   |       CPU        |
-| **Embedding Lookup** | Fetch 100+ dense vectors |   `{python} DlrmLatencyCalc.dlrm_embed_ms_str`   | memory bandwidth |
-| **Inference**        | MLP forward pass         |    `{python} DlrmLatencyCalc.dlrm_mlp_ms_str`    |     Compute      |
-| **Postprocessing**   | Ranking & Filtering      |   `{python} DlrmLatencyCalc.dlrm_post_ms_str`    |       CPU        |
-| **Total**            |                          | **`{python} DlrmLatencyCalc.dlrm_total_ms_str`** |                  |
-
-: **DLRM serving latency**: Illustrative per-phase breakdown of a recommendation request under a 10 ms p99 budget, contrasting DLRM's memory-bandwidth-bound embedding lookups against ResNet-50's convolution-dominated forward pass. Adding compute to the inference stage does not help once embedding-table bandwidth is the binding constraint. {#tbl-model-serving-dlrm-latency-budget tbl-colwidths="[28,28,22,22]"}
-
-```{=latex}
-\end{minipage}
-\vspace{-3ex}
-```
-**Systems insight**: In DLRM, the "Inference" multilayer perceptron stage is only ~`{python} DlrmLatencyCalc.dlrm_mlp_pct_str` of the latency. The majority of time is spent in embedding lookups, retrieving 128-dimensional embedding vectors from terabyte-scale tables. This is a memory-bandwidth and capacity-bound workload where adding more compute does not help unless the embedding tables can be served faster.
-
-:::
-
-Together, @tbl-model-serving-resnet50-latency-budget and @tbl-model-serving-dlrm-latency-budget expose the same general failure mode: straightforward optimization efforts target where ML expertise applies (model quantization, pruning) while the binding constraint sits elsewhere (image decoding on CPU for ResNet-50, embedding-table memory bandwidth for DLRM). The pattern generalizes: for an isolated serial request with other stage times held fixed, model-only optimization is bounded by the time spent outside the model. Amdahl's law (principle \ref{pri-amdahl}) quantifies that fixed-stage ceiling. Under load, a faster model can also reduce queueing, as the later capacity analysis develops. Adopting the quantitative approach to serving exposes these hidden bottlenecks before engineering effort is misallocated.
-
-```{python}
-#| echo: false
-#| label: amdahl-serving-calc
-# ┌─────────────────────────────────────────────────────────────────────────────
-# │ AMDAHL'S LAW IN SERVING
-# ├─────────────────────────────────────────────────────────────────────────────
-# │ Context: Callout "The Quantitative Approach to Serving"
-# │
-# │ Goal: Demonstrate why model-only optimization yields diminishing returns.
-# │ Show: That a 10× model speedup produces only 1.8× end-to-end improvement.
-# │ How: Apply Amdahl's Law using the noninference latency share.
-# │
-# └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import fmt, fmt_percent, fmt_time, check
-
-class AmdahlServingCalc:
-    """Applies Amdahl's Law to show that 10× model speedup yields only ~1.8× end-to-end improvement."""
-
-    # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    # Re-derived from latency-budget-calc constants
-    preprocess_ms_value = (3.0 + 1.0 + 0.5) * ms  # scenario assumption: JPEG decode + resize + normalize
-    cpu_gpu_ms_value = 0.5 * ms  # scenario assumption: CPU→GPU transfer latency
-    resnet_inference_ms_value = 5.0 * ms  # scenario assumption: PyTorch inference latency
-    postprocess_ms_value = 0.1 * ms  # scenario assumption: postprocessing latency
-
-    # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    total_latency_ms_value = preprocess_ms_value + cpu_gpu_ms_value + resnet_inference_ms_value + postprocess_ms_value
-    non_model_ms_value = preprocess_ms_value + cpu_gpu_ms_value
-    non_model_pct_value = non_model_ms_value / total_latency_ms_value * 100
-    model_speedup = 10
-    model_fraction = resnet_inference_ms_value / total_latency_ms_value
-    model_10x_ms_value = resnet_inference_ms_value / model_speedup
-    amdahl_speedup_value = calc_amdahls_speedup(model_fraction, model_speedup)
-    optimized_total_ms_value = total_latency_ms_value / amdahl_speedup_value
-
-    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
-    check(round(amdahl_speedup_value, 1) == 1.8, f"Expected ~1.8x Amdahl speedup, got {amdahl_speedup_value:.2f}")
-    check(round(optimized_total_ms_value.to(ms).magnitude, 1) == 5.6, f"Expected ~5.6 ms optimized latency, got {optimized_total_ms_value}")
-
-    # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
-    non_model_pct_str = fmt_percent(non_model_pct_value / 100, precision=1, commas=False, style='prose')
-    optimized_total_ms_str = fmt_time(optimized_total_ms_value, 'millisecond', precision=1, commas=False)
-    amdahl_speedup_mult_str = fmt_multiple(amdahl_speedup_value, precision=1, commas=False)
-```
-
-::: {#psp-model-serving-quantitative-approach-serving .callout-perspective title="The quantitative approach to serving"}
-
-**Analysis**: Amdahl's law (principle \ref{pri-amdahl}) governs this ceiling (@sec-appdx-machine-foundations-strong-scaling-amdahls-law-c6c2 provides the formal derivation). Preprocessing (`{python} LatencyBudgetCalc.preprocess_ms_str`) and data transfer (`{python} LatencyBudgetCalc.cpu_gpu_ms_str`) consume `{python} AmdahlServingCalc.non_model_pct_str` of total latency. Optimizing the model 10$\times$ faster (`{python} LatencyBudgetCalc.resnet_inference_ms_str` → `{python} LatencyBudgetCalc.model_10x_ms_str`) yields only a `{python} AmdahlServingCalc.amdahl_speedup_mult_str` end-to-end speedup (reducing latency from `{python} LatencyBudgetCalc.total_latency_ms_str` to `{python} AmdahlServingCalc.optimized_total_ms_str`). Focusing exclusively on model optimizations like quantization or pruning yields diminishing returns when non-model stages dominate execution time.
-
-**Mechanism**: Domain-specific accelerators (such as TPUs and Tensor Cores) replace complex control logic with dense multiply-accumulate arrays, which shrinks the model term. The host-side stages stay on general-purpose CPUs and I/O buses, so the faster the accelerator, the larger their share of end-to-end latency.
-
-**Systems insight**: Profile before optimizing. If preprocessing dominates, GPU-accelerated pipelines (NVIDIA DALI) may outperform model quantization\index{Model quantization|see{Quantization}}.
-
-:::
-
-Moving preprocessing closer to the accelerator\index{Preprocessing!GPU, accelerated pipelines} can reduce avoidable CPU-to-GPU transfers, but the end-to-end gain is pipeline-specific. Effective optimization targets the largest time consumers first.
-
-#### The serving tax bill {#sec-model-serving-serving-tax-bill-dc6c}
-
-Beyond model forward-pass execution, every request pays an infrastructure "tax" to the host system and network stack. When an inference query arrives, it traverses the network interface, moves across kernel and user space, deserializes from wire protocols into memory buffers, queues for batch assembly, and copies across the PCIe interconnect to accelerator device memory. These host-side operations run on general-purpose CPUs and I/O buses, which is why their share grows as the model term shrinks.
-
-```{python}
-#| echo: false
-#| label: serving-tax-microseconds-calc
-
-# ┌─────────────────────────────────────────────────────────────────────────────
-# │ SERVING TAX MICROSECOND OVERHEADS
-# ├─────────────────────────────────────────────────────────────────────────────
-# │ Context: Killer microseconds discussion following tbl-serving-tax.
-# │
-# │ Goal: Quantify the share of a 5 ms inference budget consumed by the
-# │       named microsecond-scale overheads.
-# │ Show: Serialization + dispatch + data copy range as a percentage of budget.
-# │ How: Sum lower/upper bounds and divide by the 5 ms budget.
-# │
-# └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import fmt, check, fmt_percent
-
-# ┌── LEGO ───────────────────────────────────────────────
-class ServingTaxMicrosecondsCalc:
-    """Microsecond-scale serving tax as a share of a 5 ms latency budget."""
-
-    # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    inference_budget_us = 5_000
-    serialization_min_us = 50
-    serialization_max_us = 500
-    dispatch_min_us = 10
-    dispatch_max_us = 50
-    data_copy_min_us = 100
-    data_copy_max_us = 500
-
-    # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    micro_tax_min_us = serialization_min_us + dispatch_min_us + data_copy_min_us
-    micro_tax_max_us = serialization_max_us + dispatch_max_us + data_copy_max_us
-    micro_tax_min_pct = micro_tax_min_us / inference_budget_us * 100
-    micro_tax_max_pct = micro_tax_max_us / inference_budget_us * 100
-
-    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
-    check(micro_tax_min_us == 160, "Minimum named microsecond tax should be 160 us.")
-    check(micro_tax_max_us == 1050, "Maximum named microsecond tax should be 1050 us.")
-
-    # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
-    micro_tax_min_pct_str = fmt_percent(micro_tax_min_pct / 100, precision=1, commas=False, style='prose')
-    micro_tax_max_pct_str = fmt_percent(micro_tax_max_pct / 100, precision=0, commas=False, style='prose')
-```
-
-#### The killer microseconds problem {#sec-model-serving-killer-microseconds-problem-bc00}
-
-Barroso, Patterson, and colleagues identified a critical gap in how computer systems handle latency across time scales\index{Killer microseconds!latency gap} [@barroso2017]. Nanosecond-scale stalls (such as cache misses) are hidden by hardware instruction-level parallelism, while millisecond-scale delays (such as disk I/O or network RPCs) are hidden by operating system thread context switching. Operations in the microsecond range (1–100 $\mu\text{s}$) fall into an awkward gap: they are too long to spin-wait on a CPU core without wasting compute cycles and power, yet too short for the operating system to context-switch to another thread without paying scheduling overheads that exceed the wait time itself.
-
-Serving infrastructure operates directly in this killer microseconds regime. Using the representative ranges in @tbl-serving-tax, serialization at 50–500 $\mu\text{s}$, dispatch at 10–50 $\mu\text{s}$, and data copy at 100–500 $\mu\text{s}$ are each individually small, but for a 5 ms inference service, these named microsecond-scale overheads collectively consume about `{python} ServingTaxMicrosecondsCalc.micro_tax_min_pct_str` to `{python} ServingTaxMicrosecondsCalc.micro_tax_max_pct_str` of the latency budget before network and queuing delays are counted. No single overhead justifies optimization in isolation, yet together they determine whether the system meets its SLO.
-
-```{=latex}
-\begingroup
-\renewcommand{\arraystretch}{1.18}
-```
-
-| **Tax Component** |    **Typical Cost**   | **Scaling Behavior**   | **Tax Evasion Strategy**        |
-|:------------------|:---------------------:|:-----------------------|:--------------------------------|
-| **Network I/O**   |         1–5 ms        | Linear with payload    | Compression, Region Colocation  |
-| **Serialization** |  50–500 $\mu\text{s}$ | Linear with payload    | gRPC/Protobuf (vs. JSON)        |
-| **Queuing**       |       0.1–10 ms       | Diverges near capacity | Dynamic Batching, Autoscaling   |
-| **Dispatch**      |  10–50 $\mu\text{s}$  | Constant per batch     | Kernel Fusion (reduce launches) |
-| **Data Copy**     | 100–500 $\mu\text{s}$ | Linear with tensor     | Zero-Copy/Shared Memory         |
-
-: **The Serving Tax Bill**: A representative breakdown of noninference latency sources. While individual components like serialization can be below 1 ms, they compound. Under the upper ends of the displayed ranges, this tax can rival a 5 ms model invocation. The engineering goal is to measure the actual request path and reduce the binding costs through choices such as binary payloads, persistent connections, and fewer copies. {#tbl-serving-tax}
-
-```{=latex}
-\endgroup
-```
-
-The latency budget framework provides a systematic approach to this compound problem. Measurement comes first. Without per-phase instrumentation, engineers cannot distinguish a preprocessing bottleneck from a serialization bottleneck, and optimization effort is misallocated to the most visible component (the model) rather than the most expensive one. Once measurement reveals the true distribution of time, engineering effort must flow proportionally. A phase consuming 50 percent of latency deserves more attention than one consuming 5 percent, regardless of which appears easier to optimize. Architectural changes such as GPU-accelerated preprocessing or aggressive batching can shift work between phases entirely, sometimes eliminating a bottleneck rather than merely reducing it.
-
-### Resolution and input size trade-offs {#sec-model-serving-resolution-input-size-tradeoffs-155d}
-
-Input resolution affects both preprocessing and inference latency, but the relationship depends on which side of the roofline the model stage sits. A compute-bound\index{Compute-bound!resolution scaling} stage slows as computation grows; a memory-bound\index{Memory-bound!activation tensors} stage slows as transferred bytes grow. Capacity fit alone does not remove bandwidth cost.
-
-::: {.column-margin .margin-pointer}
-↩ The roofline boundary and arithmetic intensity ridge points that separate compute-bound from memory-bound stages are established in @sec-hardware-acceleration-roofline-model-42ff.
-:::
-
-For convolution-dominated, compute-bound models, @eq-resolution-throughput gives a first-order approximation in which throughput scales inversely with resolution squared, comparing two input resolutions $r_1$ and $r_2$ (image side lengths in pixels):
-$$\frac{\text{Throughput}(r_2)}{\text{Throughput}(r_1)} = \left(\frac{r_1}{r_2}\right)^2$$ {#eq-resolution-throughput}
-
-```{python}
-#| echo: false
-#| label: resolution-scaling-calc
-# ┌─────────────────────────────────────────────────────────────────────────────
-# │ RESOLUTION SCALING SLOWDOWN
-# ├─────────────────────────────────────────────────────────────────────────────
-# │ Context: Resolution and input size tradeoffs narrative
-# │
-# │ Goal: Quantify the relationship between input resolution and latency.
-# │ Show: The quadratic relationship between resolution and computation time.
-# │ How: Calculate theoretical slowdown for doubled resolution.
-# │
-# └─────────────────────────────────────────────────────────────────────────────
-from mlsysim import Datasets
-from mlsysim.fmt import fmt, fmt_multiple, check
-
-class ResolutionScalingCalc:
-    """Quantifies the quadratic relationship between input resolution and inference slowdown."""
-
-    # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    IMAGE_DIM_RESNET = Datasets.ImageNet.image_width
-    r1_value = IMAGE_DIM_RESNET  # original resolution
-    r2_value = 2 * IMAGE_DIM_RESNET  # doubled resolution
-    measured_slowdown_factor_value = 3.6  # actual measured slowdown factor
-
-    # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    theoretical_slowdown_value = (r2_value / r1_value) ** 2
-
-    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
-    check(theoretical_slowdown_value == 4.0, f"Expected 4.0 theoretical slowdown, got {theoretical_slowdown_value}")
-
-    # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
-    r1_str = fmt(r1_value, precision=0, commas=False)
-    r2_str = fmt(r2_value, precision=0, commas=False)
-    theoretical_slowdown_mult_str = fmt_multiple(round(theoretical_slowdown_value), precision=0, commas=False)
-    measured_slowdown_mult_str = fmt_multiple(measured_slowdown_factor_value, precision=1, commas=False)
-```
-
-Doubling resolution from `{python} ResolutionScalingCalc.r1_str` to `{python} ResolutionScalingCalc.r2_str` gives a `{python} ResolutionScalingCalc.theoretical_slowdown_mult_str` compute-scaling estimate; the illustrative `{python} ResolutionScalingCalc.measured_slowdown_mult_str` scenario includes fixed overhead. Higher resolution can raise convolution arithmetic intensity because weights are reused across more spatial positions, but whether the full model becomes compute-bound depends on the bytes moved by its kernels.
-
-```{python}
-#| echo: false
-#| label: resolution-bottleneck-calc
-# ┌─────────────────────────────────────────────────────────────────────────────
-# │ RESOLUTION AND COMPUTE BOTTLENECK TABLE
-# ├─────────────────────────────────────────────────────────────────────────────
-# │ Context: @tbl-resolution-bottleneck (Resolution and Compute Bottleneck)
-# │
-# │ Goal: Quantify how input resolution shifts ResNet-50 arithmetic intensity.
-# │ Show: FLOPs and activations grow quadratically while weight traffic is
-# │       fixed, so intensity RISES with resolution (deeper into compute-bound).
-# │ How: Scale registry FLOPs and a 224×224 activation footprint by (R/224)²;
-# │      divide by total traffic (fixed weights + activation reads/writes).
-# │
-# └─────────────────────────────────────────────────────────────────────────────
-from mlsysim import Hardware
-from mlsysim.core.units import TFLOP, second, GB
-from mlsysim.fmt import fmt_arithmetic_intensity, fmt_memory, fmt_flop_rate, fmt_bandwidth
-
-class ResolutionBottleneckCalc:
-    """Shows that higher resolution raises arithmetic intensity: quadratic FLOPs amortize the fixed weight traffic."""
-
-    # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    resnet = Models.Vision.ResNet50
-    base_dim = Datasets.ImageNet.image_width
-    base_flops = resnet.inference_flops
-    weight_bytes = resnet.size_in_bytes(BYTES_FP32)
-    act_224 = 12.5 * MB  # scenario assumption: 224×224 activation footprint
-    act_rw_factor = 2  # scenario assumption: each activation written once, read once
-    # V100 ridge point = FP32 peak / HBM2 bandwidth, derived from the registry (PCIe variant).
-    v100_pcie = Hardware.Cloud.V100_PCIe
-    v100_sxm2 = Hardware.Cloud.V100
-    ridge_point_value = (v100_pcie.compute.precision_flops["fp32"] / v100_pcie.memory.bandwidth).to(flop / byte)
-
-    # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    # FLOPs and activation footprint both scale with (R/224)²; weight traffic
-    # does not. 2026-06-07: replaces hand-typed intensities that DECREASED
-    # with resolution — they implied constant FLOPs, inverting the physics.
-    scale_384 = (384 / base_dim) ** 2
-    scale_512 = (512 / base_dim) ** 2
-    scale_640 = (640 / base_dim) ** 2
-    act_384 = act_224 * scale_384
-    act_512 = act_224 * scale_512
-    act_640 = act_224 * scale_640
-    ai_224_value = (base_flops / (weight_bytes + act_rw_factor * act_224)).to(flop / byte)
-    ai_384_value = (base_flops * scale_384 / (weight_bytes + act_rw_factor * act_384)).to(flop / byte)
-    ai_512_value = (base_flops * scale_512 / (weight_bytes + act_rw_factor * act_512)).to(flop / byte)
-    ai_640_value = (base_flops * scale_640 / (weight_bytes + act_rw_factor * act_640)).to(flop / byte)
-
-    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
-    check(ai_640_value > ai_224_value, "Intensity must rise with resolution: weights amortize over more spatial positions")
-    check((ai_224_value / ridge_point_value).to("").magnitude > 1, "ResNet-50 at 224x224 is compute-bound on V100")
-
-    # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
-    act_224_mb_str = fmt_memory(act_224, unit=MB, precision=1, commas=False)
-    act_384_mb_str = fmt_memory(act_384, unit=MB, precision=1, commas=False)
-    act_512_mb_str = fmt_memory(act_512, unit=MB, precision=1, commas=False)
-    act_640_mb_str = fmt_memory(act_640, unit=MB, precision=1, commas=False)
-
-    ai_224_flops_per_byte_str = fmt_arithmetic_intensity(ai_224_value, commas=False)
-    ai_384_flops_per_byte_str = fmt_arithmetic_intensity(ai_384_value, commas=False)
-    ai_512_flops_per_byte_str = fmt_arithmetic_intensity(ai_512_value, commas=False)
-    ai_640_flops_per_byte_str = fmt_arithmetic_intensity(ai_640_value, commas=False)
-
-    ridge_point_flops_per_byte_str = fmt_arithmetic_intensity(ridge_point_value, precision=1, commas=False)
-
-    v100_pcie_fp32_str = fmt_flop_rate(v100_pcie.compute.precision_flops["fp32"], unit=TFLOP / second, precision=0, commas=False)
-    v100_sxm2_fp32_str = fmt_flop_rate(v100_sxm2.compute.precision_flops["fp32"], unit=TFLOP / second, precision=1, commas=False)
-    v100_bw_str = fmt_bandwidth(v100_pcie.memory.bandwidth, unit=GB / second, precision=0, commas=False)
-```
-
-@Tbl-resolution-bottleneck quantifies how increasing resolution amortizes fixed weight traffic in this simplified model while leaving the executed-kernel bottleneck unresolved.
-
-```{=latex}
-\begingroup
-\renewcommand{\arraystretch}{1.18}
-```
-
-| **Resolution**       |            **Assumed Activation Term**             |                  **Modeled Arith. Intensity**                 |
-|:---------------------|:--------------------------------------------------:|:-------------------------------------------------------------:|
-| **$224{\times}224$** | `{python} ResolutionBottleneckCalc.act_224_mb_str` | `{python} ResolutionBottleneckCalc.ai_224_flops_per_byte_str` |
-| **$384{\times}384$** | `{python} ResolutionBottleneckCalc.act_384_mb_str` | `{python} ResolutionBottleneckCalc.ai_384_flops_per_byte_str` |
-| **$512{\times}512$** | `{python} ResolutionBottleneckCalc.act_512_mb_str` | `{python} ResolutionBottleneckCalc.ai_512_flops_per_byte_str` |
-| **$640{\times}640$** | `{python} ResolutionBottleneckCalc.act_640_mb_str` | `{python} ResolutionBottleneckCalc.ai_640_flops_per_byte_str` |
-
-: **Resolution and Modeled Arithmetic Intensity**: This estimate divides FLOPs by weight bytes plus one assumed read/write of a scaled activation term. It omits aggregate intermediate-tensor, cache, and workspace traffic, so crossing the V100 ridge point does not establish the executed-kernel bottleneck. {#tbl-resolution-bottleneck tbl-colwidths="[30,35,35]"}
-
-```{=latex}
-\endgroup
-```
-
-#### Resolution strategies in production {#sec-model-serving-deploymentspecific-resolution-decisions-1d76}
-
-Different deployment contexts impose distinct resolution requirements shaped by their dominant constraints. A mobile application may accept lower resolution ($224{\times}224$) when latency and battery life outweigh marginal accuracy gains. Some medical-imaging workloads use $512{\times}512$ or higher when diagnostic detail warrants the additional compute. A perception pipeline may use lower resolution over a wide field and high-resolution crops for fine-grained recognition. A public API can instead normalize arbitrary uploads to a fixed contract or select among validated resolution profiles. Adaptive resolution is useful only when the selection policy and every chosen profile preserve the task's quality requirements.
-
-```{python}
-#| echo: false
-#| label: adaptive-resolution-calc
-# ┌─────────────────────────────────────────────────────────────────────────────
-# │ ADAPTIVE RESOLUTION
-# ├─────────────────────────────────────────────────────────────────────────────
-# │ Context: Adaptive Resolution paragraph (content-based selection)
-# │
-# │ Goal: Demonstrate the throughput gain from content-aware resolution.
-# │ Show: A 1.4× throughput improvement while maintaining high accuracy.
-# │ How: List benchmark results for adaptive vs. static high resolution.
-# │
-# └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import fmt, fmt_count, fmt_percent
-
-class AdaptiveResolutionCalc:
-    """Demonstrates 1.4× throughput gain from content-aware resolution selection."""
-
-    # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    adaptive_throughput_improvement_factor_value = 1.4  # throughput gain factor
-    adaptive_accuracy_retention_pct_value = 99.2  # accuracy retention (%)
-
-    # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
-    adaptive_throughput_improvement_mult_str = fmt_multiple(adaptive_throughput_improvement_factor_value, precision=1, commas=False)
-    adaptive_accuracy_retention_str = fmt_percent(adaptive_accuracy_retention_pct_value / 100, precision=1, commas=False, style='prose')
-```
-
-#### Adaptive resolution {#sec-model-serving-adaptive-resolution-cb4e}
-
-Adaptive resolution\index{Adaptive resolution!content-based selection} lets production systems select resolution dynamically based on content. One approach runs a lightweight classifier at $128{\times}128$ to categorize content type, then selects task-appropriate resolution with documents at $512{\times}512$, landscapes at $224{\times}224$, and faces at $384{\times}384$. In this illustrative scenario, the policy provides `{python} AdaptiveResolutionCalc.adaptive_throughput_improvement_mult_str` throughput improvement with `{python} AdaptiveResolutionCalc.adaptive_accuracy_retention_str` accuracy retention vs. fixed high resolution. This pattern trades preprocessing cost from running the lightweight classifier for inference savings on the main model.
-
-The latency analysis so far has focused on sequential processing: one request completing before the next begins. The preprocessing, inference, and postprocessing stages use different hardware resources. This separation creates an opportunity to process multiple requests simultaneously.
-
-### Hardware utilization and request pipelining {#sec-model-serving-utilization-request-pipelining-c61c}
-
-Optimizing each request stage in isolation misses a critical opportunity: the stages use different hardware resources. The latency budget analysis in @sec-model-serving-latency-budget-ef40 reveals that model inference is only one component of the request lifecycle. From a hardware perspective, a useful efficiency objective is to increase the **duty cycle**\index{Duty cycle!accelerator utilization} of the accelerator, the percentage of time the GPU executes useful computation, while preserving the request-latency objective.
-
-In a serialized serving system, the accelerator sits idle during network I/O and CPU-based preprocessing. Serving systems use **request pipelining**\index{Request pipelining!GPU utilization} to overlap these stages, ensuring the GPU is fed a continuous stream of tensors.
-
-::: {.column-margin .margin-pointer}
-↩ Asynchronous host-accelerator transfer and double buffering mechanisms are established in @sec-hardware-acceleration-transfer-optimization-85a8.
-:::
-
-#### Overlapping I/O and compute {#sec-model-serving-overlapping-io-compute-966c}
-
-@Fig-serving-pipeline-timing sequences execution across CPU preprocessing and GPU inference to demonstrate how request pipelining recovers lost compute capacity. In serial execution (A), each request must complete its entire lifecycle (Network $\rightarrow$ CPU Preprocessing $\rightarrow$ GPU Inference $\rightarrow$ Postprocessing) before the next request begins, leaving the GPU idle for more than 50 percent of wall-clock time. Pipelining concurrent requests (B) overlaps CPU preprocessing of upcoming requests with active GPU inference on earlier inputs, eliminating the idle bubbles and maximizing accelerator duty cycle.
-
-::: {#fig-serving-pipeline-timing fig-env="figure" fig-pos="htb" fig-cap="**Request Pipelining**: Pipelining hides latency by overlapping independent operations across different hardware resources. In pipelined execution (B), the CPU processes the next request's data while the GPU executes the current request's inference. This can increase accelerator duty cycle and throughput without changing the model." fig-alt="Two timing diagrams. A (Serial): alternating CPU preprocessing, GPU inference, and idle blocks in sequence. B (Pipelined): two parallel rows where CPU preprocessing overlaps with GPU inference, eliminating idle time."}
-
-```{.tikz}
-\begin{tikzpicture}[font=\footnotesize\sffamily, scale=0.8]
-  \definecolor{CPUColor}{RGB}{173,216,230}
-  \definecolor{GPUColor}{RGB}{144,238,144}
-  \definecolor{WaitColor}{RGB}{240,240,240}
-  \tikzset{
- Pre/.style={align=flush center, draw=black,
-    font=\footnotesize\sffamily, node distance=-1pt,
-    line width=0.75pt, fill=cyan!20, text width=15mm,
-    minimum width=16mm, minimum height=6mm},
- Gpu/.style={Pre,fill=GPUColor!60},
- Idle/.style={Pre,fill=WaitColor}
-}
-\node[Pre](R1){Pre};
-\node[Gpu,right=of R1](R2){GPU};
-\node[Idle,right=of R2](R3){Idle};
-\node[Pre,right=of R3](R4){Pre};
-\node[Gpu,right=of R4](R5){GPU};
-%
-\node[Pre,below=0.79 of R1](R11){Pre1};
-\node[Pre,right=of R11](R12){Pre 2};
-\node[Pre,right=of R12](R13){Pre 3};
-\node[Pre,right=of R13](R14){Pre 4};
-%
-\node[Gpu,below=of R12](R21){GPU 1};
-\node[Gpu,right=of R21](R22){GPU 2};
-\node[Gpu,right=of R22](R23){GPU 3};
-\node[Gpu,right=of R23](R24){GPU 4};
-%
-\node[draw=none,fit=(R1)(R5)](T1){};
-\node[above=-5pt of T1]{\textbf{A. Serial Execution} (Low Utilization)};
-\node[draw=none,fit=(R11)(R24)](T2){};
-\node[above=-5pt of T2]{\textbf{B. Pipelined Execution} (High Utilization)};
-\end{tikzpicture}
-```
-
-:::
-
-Pipelining relies on non-blocking hardware queues and asynchronous execution streams. Instead of blocking until a GPU kernel completes, the host CPU thread enqueues memory transfers and kernel launches into an accelerator stream and immediately begins preprocessing the next incoming request. The accelerator's DMA engine and compute cores execute those queued operations independently, overlapping host preprocessing with device execution.
-
-#### The systems metric: Hardware duty cycle {#sec-model-serving-systems-metric-hardware-duty-cycle-7530}
-
-System efficiency\index{System efficiency!hardware duty cycle} here measures accelerator duty cycle rather than the fraction of peak arithmetic throughput or bandwidth achieved. In @eq-system-efficiency, compute time is the union of useful kernel-active intervals on each resource, summed across resources; overlapping kernels on one GPU are not counted twice.
-$$\text{System Efficiency} = \frac{\sum \IronlawTermTimesCompute}{\text{Wall Clock Time} \times \text{Resource Count}}$$ {#eq-system-efficiency}
-
-If a ResNet-50 request takes 10 ms total (5 ms GPU, 5 ms CPU), a serial system achieves only 50 percent efficiency. With at least two requests in flight in a sustained stream, duty cycle can approach 100 percent after pipeline fill if the CPU keeps up with the GPU. A finite pair still pays pipeline fill and drain time, and stochastic service must retain enough capacity headroom to meet its tail-latency objective. If the CPU is too slow to feed the GPU, the system becomes CPU-bound, and further model optimization provides zero throughput gain; this is the Amdahl ceiling of @sec-model-serving-latency-distribution-analysis-b0f8 seen from the throughput side. Hardware upgrades tighten it, because accelerator compute throughput has grown far faster than CPU single-thread performance across successive generations. A system that was compute-bound on an older accelerator may become CPU-bound after a hardware upgrade—not because preprocessing got slower, but because the model got dramatically faster while the CPU did not.
-
-### Postprocessing {#sec-model-serving-postprocessing-3b24}
-
-The request lifecycle concludes with postprocessing\index{Postprocessing!logits to predictions}, transforming raw accelerator output tensors into structured application responses. This stage straddles the physical boundary between the accelerator and the host CPU. Because client applications cannot consume device memory buffers directly, output tensors must cross the interconnect (typically a PCIe bus) to reach host memory. How the serving engine partitions computation across this boundary dictates whether postprocessing completes in microseconds or stalls the entire serving pipeline.
-
-#### From logits to predictions {#sec-model-serving-logits-predictions-09df}
-
-Classification models emit unnormalized logits\index{Logits!classification output} across the label space. Converting these numerical scores into actionable predictions requires reduction, filtering, and calibration. The simplest reduction is argmax selection\index{Argmax!prediction selection}, which extracts the index of the highest logit. Thresholding\index{Thresholding!confidence cutoff} discards predictions below an empirical certainty cutoff, returning predictions only when the model meets a target precision. When applications require ranked alternatives, top-$k$ extraction selects the $k$ largest scores alongside their class indices. Probability calibration scales raw scores (for example, through temperature scaling) so that output confidence scores reflect empirical accuracy.
-
-Executing reduction operations on the accelerator can reduce host-device transfer volume when the saved transfer cost outweighs the device execution and launch overhead. Performing softmax, argmax, or top-$k$ selection in device memory prunes the payload before it crosses the PCIe bus. In ResNet-50 classification, for example, running top-$k$ on the GPU reduces the transfer payload from 1,000 float32 logits (4,000 bytes) to five values and five integer indices. For ResNet-50 image classification, @lst-resnet-postprocessing traces this execution path from GPU tensor operations to host CPU label lookup and response formatting.
-
-::: {#lst-resnet-postprocessing lst-cap="**ResNet-50 Postprocessing**: Normalizes raw logits into probabilities, extracts top-$k$ predictions, and formats the API response."}
-
-```{.python}
-# Normalize raw logits into probabilities
-# Input: logits tensor of shape (1, 1000), one score per ImageNet
-# class
-probs = torch.softmax(logits, dim=-1)  # Normalize to sum=1 on GPU
-
-# Extract top-5 predictions for multi-class response
-# topk returns (values, indices) sorted by probability
-top5_probs, top5_indices = probs.topk(5)  # GPU operation
-top5_probs = top5_probs.squeeze(0).tolist()
-top5_indices = top5_indices.squeeze(0).tolist()
-
-# Map class indices to human-readable labels
-# imagenet_labels: list of 1000 class names from synset mapping
-labels = [imagenet_labels[i] for i in top5_indices]  # CPU lookup
-
-# Format response with predictions and metadata for API contract
-response = {
-    "predictions": [
-        {"label": label, "confidence": float(prob)}
-        for label, prob in zip(labels, top5_probs)
-    ],
-    "model_version": "resnet50-v2.1",  # Client-side version tracking
-    "inference_time_ms": 5.2,  # Observability for latency monitoring
-}
-```
-
-:::
-
-In @lst-resnet-postprocessing, total postprocessing time is approximately 0.1 ms, negligible compared with preprocessing and inference. The GPU handles the normalization and top-5 reduction, so the subsequent `.tolist()` call transfers only tens of bytes across PCIe. However, `.tolist()` forces a synchronous device-to-host copy, blocking the host thread until the GPU stream finishes. In high-throughput pipelined servers, such synchronization barriers must be scheduled carefully to avoid stalling the CPU thread while it feeds subsequent requests. Fitting a calibration mapping is an offline task; applying a simple fitted mapping online is usually inexpensive, but it is valuable only when downstream decisions require confidence scores whose empirical meaning has been validated.
-
-#### Output formatting {#sec-model-serving-output-formatting-753f}
-
-Production systems package predictions to satisfy application-level API contracts. These contracts govern JSON serialization schemas, floating-point formatting, error codes, and fallback defaults when thresholding rejects all candidates. In Python-based runtimes, repetitive JSON serialization and string allocation can consume unexpected host CPU cycles under heavy concurrency, turning a microsecond-scale formatting step into a CPU bottleneck. High-throughput servers address this by delegating serialization to native C++ runtimes or binary protocols like Protocol Buffers. Response metadata, including model version and inference execution time, completes the payload to enable downstream observability.
-
-::: {#chk-model-serving-resnet-50-latency-analysis .callout-checkpoint title="Tail latency and budget"}
-
-Serving optimizes tail latency under load. Use this checkpoint to separate queueing and batching effects before choosing an optimization.
-
-- [ ] **Queue behavior**: use the mean and p99 curves in @fig-tail-latency-explosion to explain nonlinear latency growth near saturation. Why is the marked 70 percent knee an illustrative planning choice?
-- [ ] **Tail vs. mean**: can you explain why mean latency cannot demonstrate compliance with a p99 SLO?
-- [ ] **Latency budget**: given a 50 ms request deadline and a combined upper bound of 18 ms for all other stages, including network transit, preprocessing, transfer, and postprocessing, how much remains for inference and queueing? Why would a measured 18 ms mean for those stages be insufficient to certify a p99 SLO?
-
-:::
-
-Tracing an isolated request reveals the intrinsic execution time of each pipeline phase. In production, however, multiple requests arrive concurrently and contend for shared accelerators, CPU cores, and memory buses, introducing queuing delays that dwarf raw computation time.
 
 ## Queuing Theory {#sec-model-serving-queuing-theory-tail-latency-29a6}
 

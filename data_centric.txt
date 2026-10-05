@@ -1,0 +1,167 @@
+
+## Data-Centric Paradigm Shift {#sec-introduction-datacentric-paradigm-shift-4eca}
+
+That shift changes how software is built. Instead of writing behavior directly, engineers construct a process that learns behavior from data. Andrej Karpathy[^fn-karpathy-software-two] described this change as the move from **Software 1.0**\index{Software 1.0!definition} to **Software 2.0**\index{Software 2.0!definition} [@karpathy2017software]. As @tbl-software-1-vs-2 shows, Software 1.0 encodes operational logic in instructions, while Software 2.0 learns that logic from examples. Its failures can therefore remain silent until evaluation or monitoring reveals that behavior has changed.
+
+An email spam filter makes this learning process concrete. Each training example pairs a message with a label indicating whether it is spam. Training adjusts the model's numerical parameters so that its predictions better match those labels; inference applies the trained model to another message without using that message's label. Evaluation on separate examples tests whether the learned behavior extends beyond the training data.
+
+Software 2.0 does not eliminate code. Engineers still build data pipelines, training loops, evaluation tools, and serving infrastructure. What changes is where application behavior lives. Some of it resides in learned weights shaped by data, so code review alone cannot explain what the system will do. Both kinds of software can fail silently; learning adds the possibility that predictive quality changes even when code and parameters remain fixed.
+
+[^fn-karpathy-software-two]: **Andrej Karpathy**\index{Karpathy, Andrej!Software 2.0}: A founding member of OpenAI and former Director of AI at Tesla who pioneered the application of deep learning to autonomous vehicle fleets. His "Software 2.0" thesis (2017) crystallized the insight that neural network weights are the new "source code," forcing a new engineering reality: instead of debugging explicit logic, engineers must curate and version the data that defines program behavior, since a model with millions of parameters cannot be patched or reasoned about directly.
+
+| **Feature**      | **Software 1.0 (Traditional)** | **Software 2.0 (Machine Learning)**         |
+|:-----------------|:-------------------------------|:--------------------------------------------|
+| **Source Code**  | C++, Python, Java              | Training Data + Labels                      |
+| **Compiler**     | GCC, LLVM                      | Training loop (stochastic gradient descent) |
+| **Logic**        | Explicit (Hand-coded)          | Implicit (Learned)                          |
+| **Failure Mode** | Crashes or silent logic errors | Also statistical quality loss               |
+| **Debugging**    | Trace execution and inputs     | Also inspect data and learned behavior      |
+
+: **The Paradigm Shift from Software 1.0 to Software 2.0**: In Software 2.0, the "programmer" does not write the logic; they curate the dataset that the optimization process uses to write the logic. Debugging therefore moves upstream from code to data. The "compiler" analogy is approximate: unlike a deterministic compiler, the training process is stochastic and may produce different "executables" from the same "source code." {#tbl-software-1-vs-2}
+
+The data-centered workflow changes what engineers must build and maintain. In a study of production systems at Google, Sculley and colleagues found that model code occupied only a small fraction of the engineering surface [@sculley2015hidden]. The surrounding system—data collection, verification, feature extraction, resource management, serving, and monitoring—was larger and more enduring.
+
+::: {.column-margin}
+![](images/svg/vol1_introduction_margin_001.svg){width="100%" fig-alt="A small orange box labeled ML code nested inside a much larger surrounding frame labeled System; the inner box occupies a tiny fraction of the outer area."}
+
+*Production ML work is mostly the surrounding system, not the model code alone.*
+:::
+
+That imbalance creates hidden technical debt. Each surrounding component encodes assumptions about how an example is sampled, what a label means, when a feature is computed, which version reaches serving, and how degradation is detected. None of those assumptions appears in the matrix multiplication that produces a prediction, yet any of them can change the result. Improving the model alone cannot repair a stale proxy, a broken feature pipeline, or a missing feedback signal.
+
+Production data is therefore not a passive input. It is a measurement of the world, collected through a particular product and transformed by a changing pipeline. If that measurement stops representing the intended target, the model can remain numerically healthy while the system becomes wrong. Google Flu Trends provides a revealing example. It had an enormous, timely stream of search data, but the meaning of that data changed beneath the model.
+
+::: {#ws-introduction-google-flu-trends .callout-war-story title="When search logs mistook attention for illness (2014)"}
+
+**Context**: Google Flu Trends\index{Google Flu Trends!proxy drift} (GFT) estimated influenza activity from patterns in aggregated search queries [@ginsberg2009detecting; @lazer2014]. Its attraction came from the speed and scale at which searches arrived relative to clinical reports. If people searched for flu symptoms when they became ill, query volume appeared to offer a timely proxy for infection.
+
+**Failure mode**: The proxy was not stable. News coverage changed what people searched for, and autocomplete changed how they expressed those searches. Query volume began to measure public attention and product behavior as well as illness. During the 2012--2013 season, GFT estimated roughly twice the CDC-reported proportion of doctor visits for influenza-like illness and overestimated for 100 out of 108 weeks.
+
+**Systems lesson**: The remedy was not simply a larger search dataset or a better-tuned model. Researchers combined search signals with CDC sentinel clinical data and recalibrated the relationship over time. Data volume is not ground truth: a behavioral proxy needs a feedback loop to a trusted measurement and continual evidence that the proxy still represents the quantity the system claims to estimate.
+
+:::
+
+Google Flu Trends failed without a conventional software defect. The code did not change, but the effective program did because the distribution of inputs and the relationship between proxy and target had changed. Under the **data-as-code principle**\index{Data-as-code principle!definition}, training data does not merely enter a fixed program; it helps determine the operational logic that the model implements. Engineers still write the optimization procedure, but the examples shape the model weights[^fn-model-weights-inference] through stochastic gradient descent[^fn-sgd-stochastic-sampling] and related methods. Changing the dataset can therefore change system behavior as surely as changing source code.
+
+[^fn-sgd-stochastic-sampling]: **Stochastic gradient descent (SGD)**\index{Stochastic gradient descent!systems trade-off}: The algorithm learns model parameters by processing small, randomly sampled groups of examples ("batches") rather than the entire dataset at once. This trades statistical noise for computational speed. Batch size also affects the machine because a batch that is too small may fail to saturate an accelerator's parallel processors, wasting much of its potential computation.
+
+```{python}
+#| echo: false
+#| label: gpt3-weight-footprint
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ GPT-3 FP16 WEIGHT FOOTPRINT
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: Model Weights footnote in the Software 2.0 section
+# │
+# │ Goal: Avoid hand-computing the storage footprint of a GPT-3-scale model.
+# │ Show: 175 billion parameters at 2 bytes/parameter occupy about 350 GB.
+# │ How: Use mlsysim constants and the shared model_memory formula.
+# │
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim.fmt import fmt, fmt_memory, fmt_params, check
+from mlsysim.core.units import Bparam, GB
+
+# ┌── LEGO ───────────────────────────────────────────────
+class GPT3WeightFootprint:
+    """Storage footprint for GPT-3-scale FP16 weights."""
+
+    # ┌── 1. LOAD (Constants) ───────────────────────────────────────────────
+    params = Models.Language.GPT3.parameters
+    bytes_per_param = BYTES_FP16
+
+    # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
+    params_b = params.to(Bparam).magnitude
+    fp16_weights = memory_from_params(params, bytes_per_param / param)
+
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(params_b == 175, f"GPT-3 parameter count should be 175 billion, got {params_b}.")
+    check(340 <= fp16_weights.to(GB).magnitude <= 360, f"GPT-3 FP16 footprint should be about 350 GB, got {fp16_weights.to(GB).magnitude:.1f}.")
+
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
+    params_b_str = fmt_params(params, scale="B", precision=0, commas=False)
+    fp16_weights_gb_str = fmt_memory(fp16_weights, unit=GB, precision=0, commas=False)
+```
+
+[^fn-model-weights-inference]: **Model weights**\index{Model weights!definition}: The learned numerical parameters of a neural network. A GPT-3-scale (Generative Pre-trained Transformer 3) model stores `{python} GPT3WeightFootprint.params_b_str` such values, consuming `{python} GPT3WeightFootprint.fp16_weights_gb_str` in FP16 precision, a 16-bit floating-point format that uses two bytes per value [@brown2020language]. Parameter count determines the weight footprint and strongly influences serving memory traffic and cost.
+
+From an ML development perspective, this represents a transition from *model-centric* to *data-centric* AI [@ng2021datacentric]\index{Data-centric AI}. In a model-centric approach, teams hold the data fixed and focus on improving model code. In a data-centric approach, they hold the code comparatively fixed and systematically improve the data, making data curation a first-class part of programming model behavior. The shift also changes what testing can establish because no finite dataset can represent every input that a learned system may encounter.
+
+```{python}
+#| echo: false
+#| label: verification-gap-calc
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ VERIFICATION GAP CALCULATION
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: "The verification gap" callout (Data-Centric Paradigm section)
+# │
+# │ Goal: Quantify the impossibility of exhaustive testing in high-dimensional ML.
+# │ Show: The astronomical size of the image input space vs. test set coverage.
+# │ How: Calculate total possible pixel configurations for 224x224 RGB images.
+# │
+# └─────────────────────────────────────────────────────────────────────────────
+import math
+from mlsysim.fmt import fmt_int, fmt, check, fmt_time, fmt_math
+from mlsysim.core.units import count
+
+# ┌── LEGO ───────────────────────────────────────────────
+class VerificationGap:
+    """
+    Calculates the dimensionality of the ImageNet input space to illustrate
+    the 'verification gap' between test sets and real-world input spaces.
+    """
+
+    # ┌── 1. LOAD (Constants) ───────────────────────────────────────────────
+    IMAGE_DIM_RESNET = Datasets.ImageNet.image_width
+    width = IMAGE_DIM_RESNET
+    height = IMAGE_DIM_RESNET
+    channels = IMAGE_CHANNELS_RGB
+    depth = COLOR_DEPTH_8BIT
+    validation_size = Datasets.ImageNet.validation_examples.to(count).magnitude
+
+    # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
+    total_pixels = width * height * channels
+    # Space size is depth^total_pixels. We want log10(depth^total_pixels).
+    digits = total_pixels * math.log10(depth)
+
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(digits > 300_000, f"Verification gap ({digits:.0f} digits) unexpectedly small.")
+
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
+    vg_digits_str = fmt_int(digits, commas=True)
+    imagenet_validation_images_str = fmt(validation_size, precision=0, commas=True)
+    space_size_math = fmt_math(rf"{int(depth)}^{{{format(int(total_pixels), ',').replace(',', '{,}')}}}")
+```
+
+Software 1.0 logic can often be partitioned into execution paths and boundary conditions. A learned system instead operates across a high-dimensional input space that is technically finite but impossible to enumerate in practice. The 2012 ImageNet challenge makes this problem concrete. AlexNet's decisive win[^fn-alexnet-first-mention] helped set the deep learning era in motion, yet the benchmark could evaluate only a vanishing fraction of the inputs the model might encounter. Each input is a $224{\times}224$ RGB image with `{python} VerificationGap.space_size_math` possible pixel configurations, a number with `{python} VerificationGap.vg_digits_str` digits. Real photographs occupy only a tiny region of that space, but even that region is far too large to enumerate. The ImageNet Large Scale Visual Recognition Challenge (ILSVRC) validation set contains only `{python} VerificationGap.imagenet_validation_images_str` images [@krizhevsky2012imagenet; @russakovsky2015]. The ratio of evaluated inputs to possible configurations ($\text{Test Set Coverage} / \text{Total Input Space}$) is effectively zero. Expressed as the volume of unverified states, their disparity creates the **verification gap**\index{Verification gap!definition} (@eq-verification-gap):
+
+[^fn-alexnet-first-mention]: **AlexNet**\index{AlexNet!ImageNet breakthrough}: Alex Krizhevsky, Ilya Sutskever, and Geoffrey Hinton trained this convolutional neural network across two GPUs. At ILSVRC 2012, its 15.3 percent top-5 error, meaning the correct class was absent from its five highest-scoring predictions, substantially beat the second-place system's 26.2 percent [@krizhevsky2012imagenet]. @Sec-introduction-deep-learning-era-infrastructure-bottleneck-2f02 returns to its architecture and systems co-design.
+
+$$ \text{Verification Gap} = \text{Total Input Space} - \text{Test Set Coverage} \approx \text{Total Input Space} $$ {#eq-verification-gap}
+
+The gap does not make testing futile; it changes what testing can establish. Predeployment evaluation provides statistical evidence over sampled inputs, while production monitoring tests whether the operating population and observed outcomes still support that evidence. Statistical reliability replaces any expectation of exhaustive proof, and Part IV states the gap in that statistical form, as a probability bound over a stated deployment population (principle \ref{pri-verification-gap}).
+
+::: {.column-margin}
+![](images/svg/vol1_introduction_margin_002.svg){width="100%" fig-alt="Two blue blocks: a wide block labeled Input space above a thin sliver labeled Test set, schematically showing test coverage as a small fraction of the input space."}
+
+*Test coverage is a vanishing fraction of the input space.*
+:::
+
+The verification gap marks a deeper change in what engineers can claim. Traditional assertions often describe a particular execution in which a given input and state lead the program down a specific path. ML performance claims describe behavior over a population. A fixed model may return the same output for the same input while its measured accuracy changes as the population changes. Data supplies the patterns from which the system learns, but its noise, drift, and omissions also create uncertainty. Robustness therefore cannot mean resisting every change. It requires making change observable and adapting when the evidence no longer supports the system's assumptions, a form of **probabilistic engineering**\index{Probabilistic engineering}.
+
+The engineering consequence reaches beyond testing. Debugging an ML system requires debugging the data, not the Python scripts alone. Version control must track datasets, not git commits alone. Evaluation must examine distributions and outcomes, not code paths alone. Together, these practices make learned behavior reproducible and traceable, but they cannot turn statistical sampling into formal verification.
+
+::: {.column-margin .margin-pointer}
+↪ Versioning training datasets so that a model can be reproduced and traced to its inputs is developed in @sec-data-engineering-data-versioning-ml-reproducibility-16d0.
+:::
+
+::: {#chk-introduction-paradigm-shift .callout-checkpoint title="The paradigm shift"}
+
+Before tracing the history of AI, verify your understanding of the paradigm shift in how we build software:
+
+- [ ] **Software 1.0 vs. 2.0**: can you distinguish Software 1.0 (explicit instructions) from Software 2.0 (behavior learned from data)?
+- [ ] **Debugging shift**: can you identify which dataset evidence to inspect when accuracy falls without a code change?
+- [ ] **Verification gap**: can you explain why finite test coverage can provide statistical evidence but never exhaustive proof, and why production monitoring must continue gathering that evidence?
+
+:::
+
+Learning behavior from data can seem inevitable in hindsight, but it was an engineering pivot forced by hard scaling limits. Earlier AI paradigms attempted to program intelligence directly through hand-crafted symbols and rules. Tracing those failures reveals how the binding constraint migrated across four distinct eras—from logic, to knowledge, to features, and ultimately to physical infrastructure.

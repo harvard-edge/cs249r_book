@@ -3183,47 +3183,6 @@ The loss function's gradients with respect to the network's output logits provid
 
 The choice of loss function also influences other training decisions. Gradient scale interacts with the learning rate, while loss averaging across batches affects gradient noise and thus the useful batch-size regime. Curvature influences optimizer behavior, and convergence decisions require validation metrics and a stopping rule rather than the training-loss trajectory alone.
 
-### Gradient descent and parameter updates {#sec-neural-computation-parameter-update-algorithms-b592}
-
-The loss gives training a single number to reduce, and gradient descent is the rule for reducing it. Consider one weight $w$ and the batch loss plotted against it. At the current value of $w$, the curve has a slope $\partial \mathcal{L}/\partial w$, which is the gradient previewed in @sec-neural-computation-nonlinear-activation-functions-38bc. A positive slope means that increasing $w$ raises the loss, so the weight should move down; a negative slope means it should move up. Taking a small step against the slope, recomputing the slope, and stepping again walks the weight downhill toward lower loss. A network has one such slope per parameter. Collecting them gives the gradient vector $\nabla_{\ModelParameters}\mathcal{L}$, which points in the direction of steepest loss increase, and each update steps the opposite way.
-
-::: {#dfn-nn-computation-gradient-descent .callout-definition title="Gradient descent"}
-
-***Gradient descent***\index{Gradient descent!definition} is the iterative optimization algorithm that updates model parameters in the direction of the negative gradient, $\ModelParameters \leftarrow \ModelParameters - \LearningRate \nabla_\ModelParameters \mathcal{L}$ with learning rate $\LearningRate$, trading computational steps $(\Operations)$ for loss reduction.
-
-1.  **Significance**: Optimizer choice contributes to training memory. In a simplified FP32 ledger, stochastic gradient descent (SGD) needs each weight and gradient (8 bytes per parameter), while Adaptive Moment Estimation (Adam) adds two moment buffers, bringing those four tensors to 16 bytes per parameter. Mixed-precision training may retain selected FP32 master values while storing other tensors more narrowly; @sec-model-training-memory-management-c1ec develops the complete accounting. Optimizer state, saved activations, gradients, temporary workspaces, and communication buffers together determine how many accelerators training requires.
-2.  **Distinction**: Backpropagation computes gradients (the "what to change" signal); an optimizer applies updates (the "change it" action). The backward pass determines which forward values must remain available, while the optimizer adds its own state and update computation.
-3.  **Common pitfall**: A frequent misconception is that gradient descent finds the global minimum. Neural network loss landscapes are nonconvex with many local minima, saddle points, and plateaus. In practice, SGD and its variants converge to regions of low loss that generalize well, but the path depends on the learning rate schedule, batch size, and initialization.
-
-:::
-
-Gradient descent turns each parameter's gradient into a parameter change, using each weight's local loss sensitivity to reduce the loss over successive steps. The fundamental update rule\index{Update rule!gradient descent} is defined in @eq-gradient-descent:
-$$ \theta_{\text{new}} = \theta_{\text{old}} - \LearningRate \nabla_{\ModelParameters}\mathcal{L} $$ {#eq-gradient-descent}
-where $\ModelParameters$ represents the collection of network parameters (weights and biases), $\LearningRate$ is the learning rate\index{Learning rate!update magnitude}\index{Hyperparameter!learning rate}, and $\nabla_{\ModelParameters}\mathcal{L}$ is the gradient of the loss with respect to those parameters, which backpropagation (@sec-neural-computation-gradient-computation-backpropagation-dacf) computes efficiently.
-
-For the digit classifier, the update aims to reduce the chosen loss. If the network frequently confuses "seven"s with "one"s, their loss gradients guide weight changes, while evaluation establishes whether those changes improve classification accuracy. The learning rate $\LearningRate$[^fn-learning-rate-systems] controls adjustment magnitude: too large values cause overshooting optimal parameters, while too small values result in slow convergence.
-
-[^fn-learning-rate-systems]: **Learning rate**\index{Learning rate!etymology}\index{Learning rate!batch size coupling}: This scalar has an outsized impact on training infrastructure because scaling batch size can require retuning the optimization schedule. The linear scaling rule increased learning rate with batch size for a specific large-batch ImageNet training regime [@goyal2017accurate], but the best policy depends on the model, optimizer, data, and scale. Applying a scaling rule outside its validated regime can cause divergence when moving from single-GPU to multi-GPU training.
-
-Plain gradient descent applies @eq-gradient-descent directly to every weight\index{Training!weight optimization}\index{Weight update!optimization}. Practical optimizers refine it: they govern the step size, adjust the step direction, and carry momentum across iterations. No optimizer is universally best across all possible problems [@wolpert1997], so neural-network training depends on choosing update rules and hyperparameters that match the model, data, and hardware constraints.
-
-{{< margin-video "https://youtu.be/IHZwWFHWa-w?si=_MpUFVskdVHYztkz" "Gradient descent – Part 1" "3Blue1Brown" >}}
-
-{{< margin-video "https://youtu.be/Ilg3gGewQ5U?si=YXVP3tm_ZBY9R-Hg" "Gradient descent – Part 2" "3Blue1Brown" >}}
-
-Despite neural network loss landscapes\index{Loss landscape!nonconvex optimization} being highly nonconvex, gradient-based methods often find useful solutions when the model, data, initialization, and optimization regime are well matched. The theoretical reasons, involving concepts like the Lottery Ticket Hypothesis [@frankle2019lottery], implicit bias [@neyshabur2017exploring], and overparameterization benefits [@nakkiran2019deep], remain active research areas. For practical ML systems engineering, the key insight is empirical: learning rates, initialization, regularization, and the training configuration must be validated together.
-
-#### Mini-batch gradient updates {#sec-neural-computation-minibatch-gradient-updates-4a04}
-
-Neural networks typically process multiple examples simultaneously during training, an approach known as mini-batch gradient descent\index{Mini-batch!gradient descent}\index{Batch size!gradient stability}. Rather than updating weights after each individual image, the average gradient over a batch of examples is computed before performing the update.
-
-For a batch of size $\BatchSize$, let $\LossFunction_i$ denote the loss for example $i$; the mean loss gradient becomes @eq-batch-gradient:
-$$ \nabla_{\ModelParameters}\LossFunction_{\text{batch}} = \frac{1}{B}\sum_{i=1}^B \nabla_{\ModelParameters}\LossFunction_i $$ {#eq-batch-gradient}
-
-With a typical batch size of 32, the system performs one forward pass over 32 images, computes 32 per-example losses, averages their gradients, and applies a single weight update. That average smooths noisy per-example gradients, but it also means the accelerator must keep the batch's activations available until the backward pass consumes them. Batch size therefore influences available parallelism and utilization together with model shape, kernel implementation, and hardware.
-
-Batch size also meets a practical systems constraint: a desired effective batch may be larger than what fits in accelerator memory at once. Engineers address this through **gradient accumulation**\index{Gradient accumulation!definition}: the full batch is split into smaller *micro-batches* that each fit in memory, and their gradients are accumulated with the appropriate loss normalization before the optimizer step. From the optimizer's perspective the effective batch size equals the sum across all micro-batches; from the hardware's perspective each micro-batch is an independent forward-backward pass that stays within the memory budget. For per-example-independent computations, accumulating consistently normalized gradients represents the same batch-gradient sum or mean. Exact numerical equivalence is not universal: floating-point reduction order, batch-dependent operations such as batch normalization, stochastic layers, and batch-dependent losses can make micro-batch execution differ from a single full-batch pass.
-
 ### Gradient computation and backpropagation {#sec-neural-computation-gradient-computation-backpropagation-dacf}
 
 Gradient descent assumes the gradient is already in hand, but the loss alone does not tell the system how sensitive it is to each parameter. With `{python} MnistFlopsCalc.total_params_str` in the MNIST network, estimating every derivative through independent perturbations would be computationally prohibitive. This is the credit assignment problem\index{Credit assignment problem!weight responsibility}: connecting the final error to the parameters and intermediate values that can change it. Backpropagation solves it by applying the chain rule to compute all of those local sensitivities in one backward traversal.
@@ -3857,6 +3816,47 @@ The credit assignment problem asks how the loss depends on parameters throughout
 - [ ] **Layer cost**: for a dense layer mapping 4,096 inputs to 4,096 outputs at batch size 32, estimate its forward FLOPs and its FP16 activation bytes to one significant figure, then say which of the two doubling the batch grows.
 
 :::
+
+### Gradient descent and parameter updates {#sec-neural-computation-parameter-update-algorithms-b592}
+
+The loss gives training a single number to reduce, and gradient descent is the rule for reducing it. Consider one weight $w$ and the batch loss plotted against it. At the current value of $w$, the curve has a slope $\partial \mathcal{L}/\partial w$, which is the gradient previewed in @sec-neural-computation-nonlinear-activation-functions-38bc. A positive slope means that increasing $w$ raises the loss, so the weight should move down; a negative slope means it should move up. Taking a small step against the slope, recomputing the slope, and stepping again walks the weight downhill toward lower loss. A network has one such slope per parameter. Collecting them gives the gradient vector $\nabla_{\ModelParameters}\mathcal{L}$, which points in the direction of steepest loss increase, and each update steps the opposite way.
+
+::: {#dfn-nn-computation-gradient-descent .callout-definition title="Gradient descent"}
+
+***Gradient descent***\index{Gradient descent!definition} is the iterative optimization algorithm that updates model parameters in the direction of the negative gradient, $\ModelParameters \leftarrow \ModelParameters - \LearningRate \nabla_\ModelParameters \mathcal{L}$ with learning rate $\LearningRate$, trading computational steps $(\Operations)$ for loss reduction.
+
+1.  **Significance**: Optimizer choice contributes to training memory. In a simplified FP32 ledger, stochastic gradient descent (SGD) needs each weight and gradient (8 bytes per parameter), while Adaptive Moment Estimation (Adam) adds two moment buffers, bringing those four tensors to 16 bytes per parameter. Mixed-precision training may retain selected FP32 master values while storing other tensors more narrowly; @sec-model-training-memory-management-c1ec develops the complete accounting. Optimizer state, saved activations, gradients, temporary workspaces, and communication buffers together determine how many accelerators training requires.
+2.  **Distinction**: Backpropagation computes gradients (the "what to change" signal); an optimizer applies updates (the "change it" action). The backward pass determines which forward values must remain available, while the optimizer adds its own state and update computation.
+3.  **Common pitfall**: A frequent misconception is that gradient descent finds the global minimum. Neural network loss landscapes are nonconvex with many local minima, saddle points, and plateaus. In practice, SGD and its variants converge to regions of low loss that generalize well, but the path depends on the learning rate schedule, batch size, and initialization.
+
+:::
+
+Gradient descent turns each parameter's gradient into a parameter change, using each weight's local loss sensitivity to reduce the loss over successive steps. The fundamental update rule\index{Update rule!gradient descent} is defined in @eq-gradient-descent:
+$$ \theta_{\text{new}} = \theta_{\text{old}} - \LearningRate \nabla_{\ModelParameters}\mathcal{L} $$ {#eq-gradient-descent}
+where $\ModelParameters$ represents the collection of network parameters (weights and biases), $\LearningRate$ is the learning rate\index{Learning rate!update magnitude}\index{Hyperparameter!learning rate}, and $\nabla_{\ModelParameters}\mathcal{L}$ is the gradient of the loss with respect to those parameters, which backpropagation (@sec-neural-computation-gradient-computation-backpropagation-dacf) computes efficiently.
+
+For the digit classifier, the update aims to reduce the chosen loss. If the network frequently confuses "seven"s with "one"s, their loss gradients guide weight changes, while evaluation establishes whether those changes improve classification accuracy. The learning rate $\LearningRate$[^fn-learning-rate-systems] controls adjustment magnitude: too large values cause overshooting optimal parameters, while too small values result in slow convergence.
+
+[^fn-learning-rate-systems]: **Learning rate**\index{Learning rate!etymology}\index{Learning rate!batch size coupling}: This scalar has an outsized impact on training infrastructure because scaling batch size can require retuning the optimization schedule. The linear scaling rule increased learning rate with batch size for a specific large-batch ImageNet training regime [@goyal2017accurate], but the best policy depends on the model, optimizer, data, and scale. Applying a scaling rule outside its validated regime can cause divergence when moving from single-GPU to multi-GPU training.
+
+Plain gradient descent applies @eq-gradient-descent directly to every weight\index{Training!weight optimization}\index{Weight update!optimization}. Practical optimizers refine it: they govern the step size, adjust the step direction, and carry momentum across iterations. No optimizer is universally best across all possible problems [@wolpert1997], so neural-network training depends on choosing update rules and hyperparameters that match the model, data, and hardware constraints.
+
+{{< margin-video "https://youtu.be/IHZwWFHWa-w?si=_MpUFVskdVHYztkz" "Gradient descent – Part 1" "3Blue1Brown" >}}
+
+{{< margin-video "https://youtu.be/Ilg3gGewQ5U?si=YXVP3tm_ZBY9R-Hg" "Gradient descent – Part 2" "3Blue1Brown" >}}
+
+Despite neural network loss landscapes\index{Loss landscape!nonconvex optimization} being highly nonconvex, gradient-based methods often find useful solutions when the model, data, initialization, and optimization regime are well matched. The theoretical reasons, involving concepts like the Lottery Ticket Hypothesis [@frankle2019lottery], implicit bias [@neyshabur2017exploring], and overparameterization benefits [@nakkiran2019deep], remain active research areas. For practical ML systems engineering, the key insight is empirical: learning rates, initialization, regularization, and the training configuration must be validated together.
+
+#### Mini-batch gradient updates {#sec-neural-computation-minibatch-gradient-updates-4a04}
+
+Neural networks typically process multiple examples simultaneously during training, an approach known as mini-batch gradient descent\index{Mini-batch!gradient descent}\index{Batch size!gradient stability}. Rather than updating weights after each individual image, the average gradient over a batch of examples is computed before performing the update.
+
+For a batch of size $\BatchSize$, let $\LossFunction_i$ denote the loss for example $i$; the mean loss gradient becomes @eq-batch-gradient:
+$$ \nabla_{\ModelParameters}\LossFunction_{\text{batch}} = \frac{1}{B}\sum_{i=1}^B \nabla_{\ModelParameters}\LossFunction_i $$ {#eq-batch-gradient}
+
+With a typical batch size of 32, the system performs one forward pass over 32 images, computes 32 per-example losses, averages their gradients, and applies a single weight update. That average smooths noisy per-example gradients, but it also means the accelerator must keep the batch's activations available until the backward pass consumes them. Batch size therefore influences available parallelism and utilization together with model shape, kernel implementation, and hardware.
+
+Batch size also meets a practical systems constraint: a desired effective batch may be larger than what fits in accelerator memory at once. Engineers address this through **gradient accumulation**\index{Gradient accumulation!definition}: the full batch is split into smaller *micro-batches* that each fit in memory, and their gradients are accumulated with the appropriate loss normalization before the optimizer step. From the optimizer's perspective the effective batch size equals the sum across all micro-batches; from the hardware's perspective each micro-batch is an independent forward-backward pass that stays within the memory budget. For per-example-independent computations, accumulating consistently normalized gradients represents the same batch-gradient sum or mean. Exact numerical equivalence is not universal: floating-point reduction order, batch-dependent operations such as batch normalization, stochastic layers, and batch-dependent losses can make micro-batch execution differ from a single full-batch pass.
 
 ### Iterative learning process {#sec-neural-computation-iterative-learning-process-10b9}
 
@@ -5038,6 +5038,8 @@ filllcolor=cyan!10,  Linewidth=1.0pt}};
 
 [^fn-tpu-tensor-hardware]: **TPU (tensor processing unit)**\index{TPU!design trade-off}: Google's custom accelerator, first deployed internally in 2015, was optimized specifically for the matrix multiplications that dominate neural network workloads. The TPU v1 achieved `{python} TpuHardwareFootnoteLocal.tpuv1_tops_str` (vendor-reported INT8 tera-operations/s) for inference at `{python} TpuHardwareFootnoteLocal.tpuv1_tdp_w_str`, a power-efficiency point that general-purpose GPUs of the era could not match. The name "Tensor Processing Unit" reflects the design decision to sacrifice general-purpose flexibility for maximum throughput on the operation neural networks need most.
 
+## Handwritten Digit Recognition {#sec-neural-computation-case-study-usps-digit-recognition-97be}
+
 ### Hardware and software requirements {#sec-neural-computation-hardware-software-requirements-e1e6}
 
 The infrastructure side of that cycle is more than faster chips. A network's mathematical graph does not prescribe an execution plan: frameworks and compilers choose kernels, tensor layouts, fusion boundaries, and schedules for a particular processor. Two implementations of the same function with the same nominal arithmetic count can therefore differ substantially in data traffic, temporary storage, and latency. Hardware supplies arithmetic units, memory, and communication links; software determines how the graph uses them. Because learned behavior lives in parameters stored at ordinary memory addresses, and training adds saved intermediates, gradients, and optimizer state, storage capacity and bandwidth matter alongside arithmetic. That dependence on data movement motivates specialized accelerator hardware.
@@ -5056,8 +5058,6 @@ If any of these concepts remain unclear, review the relevant sections before con
 :::
 
 The convergence of data availability, algorithmic innovation, and computing infrastructure transformed neural networks from theoretical formulations into production workloads. One application, reading handwritten digits, met its operating constraints long before that convergence was complete.
-
-## Handwritten Digit Recognition {#sec-neural-computation-case-study-usps-digit-recognition-97be}
 
 In the late 1980s, LeCun and colleagues demonstrated backpropagation-based recognition of handwritten ZIP-code digits from USPS-supplied images [@lecun1989]. Related convolutional document-recognition work later supported commercially deployed bank-check readers [@lecun1998]. These were distinct systems, but they exposed the same engineering pattern: preprocessing normalized variable handwriting, neural inference produced candidate digits, rejection thresholds sent uncertain predictions to human review, and downstream logic converted accepted predictions into operational decisions. That shared pipeline serves as a systems case study in end-to-end machine learning design, illustrating how preprocessing, model structure, and rejection policy interact under physical throughput constraints.
 
