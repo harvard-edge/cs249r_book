@@ -1129,7 +1129,7 @@ class MemoryBandwidthPitfallRecap:
 
 ***HBM***\index{HBM!definition}\index{High-bandwidth memory|see{HBM}} is the 3D-stacked DRAM architecture used by ML accelerators, in which multiple memory dies are vertically bonded and connected to the processor through thousands of through-silicon vias (TSVs) on a shared silicon interposer, eliminating the centimeter-scale printed circuit board (PCB) traces of conventional DRAM and replacing them with micrometer-scale vertical paths.
 
-1.  **Significance**: HBM3 in the H100 delivers approximately `{python} MemoryBandwidthPitfallRecap.h100_bw_tb_per_s_str` of memory bandwidth (roughly `{python} MemoryBandwidthPitfallRecap.hbm_ddr_ratio_mult_str` DDR5's ~`{python} MemoryBandwidthPitfallRecap.ddr_bw_gb_per_s_str`) at roughly 2--5 pJ/bit vs. DDR5's ~20 pJ/bit. This bandwidth sets the $\Bandwidth$ term of the single-machine iron law (@sec-vol2-introduction-fleet-law), and the H100's FP16 ridge point (@sec-compute-roofline) is approximately `{python} MemoryBandwidthPitfallRecap.ridge_eq_math` FLOP/byte, so any operator with arithmetic intensity below `{python} MemoryBandwidthPitfallRecap.ridge_flop_per_byte_str` (for example, single-request decode, which performs two FLOPs for every two-byte FP16 weight it reads) remains memory-bound even with HBM.
+1.  **Significance**: HBM3 in the H100 delivers approximately `{python} MemoryBandwidthPitfallRecap.h100_bw_tb_per_s_str` of memory bandwidth (roughly `{python} MemoryBandwidthPitfallRecap.hbm_ddr_ratio_mult_str` DDR5's ~`{python} MemoryBandwidthPitfallRecap.ddr_bw_gb_per_s_str`) at roughly 2--5 pJ/bit vs. DDR5's ~20 pJ/bit. This bandwidth sets the $\Bandwidth$ term of the single-machine iron law given in @sec-appdx-dam-taxonomy-iron-law-mapping, and the H100's FP16 ridge point (@sec-compute-roofline) is approximately `{python} MemoryBandwidthPitfallRecap.ridge_eq_math` FLOP/byte, so any operator with arithmetic intensity below `{python} MemoryBandwidthPitfallRecap.ridge_flop_per_byte_str` (for example, single-request decode, which performs two FLOPs for every two-byte FP16 weight it reads) remains memory-bound even with HBM.
 2.  **Distinction**: Unlike DDR memory, which connects through centimeters of PCB trace (introducing capacitance, attenuation, and high driving current), HBM uses 1,024-bit-wide TSV buses with path lengths measured in micrometers, a 1,000$\times$ reduction in signal distance that enables the wider bus without proportionally higher power.
 3.  **Common pitfall**: A frequent misconception is that HBM solves the memory wall. HBM moves the wall rather than eliminates it: Tensor Core throughput $(\PeakRate)$ has scaled faster than HBM bandwidth across generations (from `{python} V100MemoryWallRecap.mem_bw_gb_per_s_str` with `{python} V100MemoryWallRecap.flops_fp16_tflop_per_s_str` FP16 in V100 to `{python} MemoryBandwidthPitfallRecap.h100_bw_tb_per_s_str` with `{python} MemoryBandwidthPitfallRecap.h100_flops_fp16_tflop_per_s_str` FP16 in H100), so the ridge point continues rising and more operations remain memory-bound despite HBM improvements.
 
@@ -1470,10 +1470,6 @@ The interposer area constraint creates a concrete design tension. Making the pro
 #### Memory bandwidth and token latency {#sec-compute-infrastructure-memory-bandwidth-token-latency-1b38}
 
 The distinction between memory *capacity* (how many gigabytes the HBM can store) and memory *bandwidth* (how many terabytes per second it can deliver) is one of the most practically important concepts in ML infrastructure. Capacity determines whether a model's weights *fit*. Bandwidth determines how fast the model can *run*. For autoregressive text generation, where each token requires a full pass through the model's weights, bandwidth is almost always the binding constraint.
-
-::: {.column-margin .margin-pointer}
-↪ The $\alpha$-$\beta$ model, which times a network transfer the same way, as bytes divided by bandwidth plus a fixed per-message startup latency, is developed in @sec-appdx-comm-foundations-alpha-beta.
-:::
 
 ```{python}
 #| echo: false
@@ -3362,6 +3358,10 @@ The logical output tensor for one AllReduce contains `{python} TensorParallelAll
 
 Across `{python} TensorParallelAllReduce.layers_str` forward layers and `{python} TensorParallelAllReduce.layers_str` backward layers, the `{python} TensorParallelAllReduce.sync_events_str` transfers sum to about `{python} TensorParallelAllReduce.cumulative_ms_str` per step before overlap. NVSwitch provides the paths needed for the collective, but this value remains an ideal bandwidth-only lower bound that excludes startup latency, software overhead, and competing traffic.
 
+::: {.column-margin .margin-pointer}
+↪ The $\alpha$-$\beta$ model, which adds the fixed per-message startup latency this bound omits to the bytes-over-bandwidth transfer time, is developed in @sec-appdx-comm-foundations-alpha-beta.
+:::
+
 Against the `{python} TensorParallelAllReduce.compute_step_ms_str` compute-time anchor used in example \ref{exmp-compute-infrastructure-nvlink-bandwidth-surprise}, the unoverlapped NVLink lower bound leaves computation at `{python} TensorParallelAllReduce.nvlink_compute_fraction_pct_str` of combined compute-plus-communication time. Actual tensor-parallel efficiency can be higher when collectives overlap useful computation or lower when latency, contention, load imbalance, and nonparallel work add delay, so it must be measured rather than inferred from peak link bandwidth alone.
 
 ```{python}
@@ -3854,7 +3854,7 @@ If the data loading pipeline\index{Data loading!pipeline} cannot keep pace with 
 For node design, the hardware contract is end-to-end sustained bandwidth at the intended concurrency: storage servers, network paths, host preprocessing, host memory, and accelerator transfer must all keep pace, because a local benchmark that satisfies one node says little about a shared path serving the fleet.
 
 ::: {.column-margin .margin-pointer}
-↪ Sizing input-pipeline bandwidth and prefetch depth from measured p99 delivery latency is developed in @sec-storage-pipeline-equation.
+↪ Sizing the input pipeline end to end, with every stage from storage read to host-to-device transfer held at or above the required bandwidth, is developed in @sec-storage-pipeline-equation.
 :::
 
 ```{python}
@@ -4564,7 +4564,7 @@ The recommendation pod is the clearest case of memory placement, not compute, dr
 The physical design supplies constraints, not an operating policy. Later chapters use its power, capacity, topology, reliability, and sustained-throughput measurements to derive placement, recovery, monitoring, and ownership decisions.
 
 ::: {.column-margin .margin-pointer}
-↪ Fleet utilization and build-versus-buy economics are developed in @sec-ops-scale-fleet-economics.
+↪ The ownership decision, in which sustained fleet utilization sets the build-versus-buy threshold, is developed in @sec-ml-operations-scale-build-vs-buy.
 :::
 
 These physical constraints define warehouse-scale computer design. New technologies do not remove the walls; they move them. The technologies in @sec-compute-emerging matter because they change where the memory, communication, or power constraint binds.

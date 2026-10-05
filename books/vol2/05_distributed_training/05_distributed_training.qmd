@@ -207,7 +207,7 @@ Before optimizing algorithms, the physical constraints of the machine learning f
 $$ \DistributedStepTime = \frac{\IronlawTermTimesCompute}{N} + \CommunicationTime + \SynchronizationTime - \OverlappedTime $$
 
 ::: {.column-margin .margin-pointer}
-↩ The Fleet Law and its compute, bandwidth, and coordination terms are established in @sec-vol2-introduction-fleet-law.
+↩ The Fleet Law and its compute, communication, and coordination terms are established in @sec-vol2-introduction-fleet-law.
 :::
 
 The critical term is the **communication-computation ratio**\index{Communication-computation ratio!definition}, $\rho = \CommunicationTime/(\IronlawTermTimesCompute/N)$. This ratio\index{Communication intensity!fleet scaling} determines whether a cluster behaves as a supercomputer or a collection of idling heaters.
@@ -233,7 +233,7 @@ Two regimes follow from this ratio. A compute-bound cluster, where $\IronlawTerm
 Three concrete signals indicate when distributed training becomes necessary rather than merely beneficial. The first signal is memory exhaustion\index{Memory exhaustion!capacity limit}: model parameters, optimizer states, and activation storage exceed single-device capacity. For full mixed-precision training with Adaptive Moment Estimation (Adam)\index{Mixed-precision training!memory footprint}, the parameter, gradient, and optimizer-state budget of `{python} DenseLLMReferenceFacts.bytes_per_param_str` bytes per parameter alone can exceed an `{python} DenseLLMReferenceFacts.h100_mem_gb_str` accelerator\index{H100}\index{A100} at roughly `{python} DenseLLMReferenceFacts.crossover_params_str` parameters before activations; larger 10--20B models require sharding, offload, or other memory-saving techniques [@rajbhandari2020].
 
 ::: {.column-margin .margin-pointer}
-↪ The accelerator memory capacities behind these budgets are developed in @sec-appdx-fleet-system-assumptions.
+↪ Accelerator HBM capacity, the ceiling these per-parameter budgets are measured against, is developed in @sec-appdx-dam-taxonomy-memory-hierarchy.
 :::
 
 The second signal is unacceptable training duration\index{Training duration!wall-clock limit}. Even when a model fits, single-device training may require weeks or months to converge, making wall-clock time itself a systems constraint. GPT-3's\index{GPT-3} 175B-parameter training run used a cluster of V100 GPUs [@brown2020language], illustrating why the calendar, not just HBM capacity, forces distribution at this scale.
@@ -900,7 +900,7 @@ class Gpt3ActivationBudget:
 
 The defining feature of data parallelism is that the computation phase, both forward and backward, is *embarrassingly parallel*. Each GPU operates as an isolated island, executing an identical copy of the model on its assigned microbatch. Here, microbatch means the per-GPU local slice used for activation accounting; pipeline microbatching uses the same word for a different mechanism, subdividing a global batch to keep pipeline stages occupied. To isolate the activation term, consider an unpartitioned `{python} FrontierTrainingContext.frontier_params_b_str` reference model at microbatch size `{python} Gpt3ActivationBudget.micro_batch_str` and sequence length `{python} Gpt3ActivationBudget.seq_len_str`. This is a hypothetical memory budget, not a feasible one-GPU training configuration: weights and optimizer state must fit as well. Without optimization, storing these activations for backpropagation would consume roughly `{python} Gpt3ActivationBudget.act_unchecked_tb_str` of HBM, an order of magnitude beyond the capacity of even an H100 GPU. Activation checkpointing\index{Activation checkpointing!memory reduction}, which recomputes activations during the backward pass rather than storing them, becomes necessary in this scenario to suppress the footprint to `{python} Gpt3ActivationBudget.act_checkpointed_gb_str`.
 
-The capacity test must include activations rather than stopping at bytes per parameter. @Sec-appdx-dam-taxonomy-training-memory derives the 16-byte-per-parameter training state from which this test starts. At the point of peak residency\index{Memory footprint!peak activation},
+The capacity test must include activations rather than stopping at bytes per parameter. @Sec-appdx-dam-taxonomy-training-memory tabulates the 16-byte-per-parameter training state from which this test starts. At the point of peak residency\index{Memory footprint!peak activation},
 $$
 \TotalMemoryFootprint = \WeightMemoryWeights + \GradientMemoryGradients + \OptimizerstateMemory + \ActivationMemoryActivations,
 $$
@@ -914,7 +914,7 @@ Gradient synchronization is where independent SGD estimates become one update. T
 
 Modern distributed training replaces central aggregation with decentralized collective communication: every worker participates equally in exchanging and summing gradients. In the training loop, this operation surfaces as AllReduce, a collective primitive in which each worker contributes its local gradient tensor and receives the same reduced result, which the training loop normalizes to obtain the global average\index{AllReduce!decentralized gradient synchronization}. In sharded variants (such as ZeRO and FSDP), ReduceScatter\index{ReduceScatter!gradient aggregation} and AllGather\index{AllGather!parameter reconstruction} change which result each worker retains. ReduceScatter combines corresponding tensor elements across the group, then leaves a different shard of the reduced result on each worker. AllGather collects distinct shards and returns their concatenation to every worker without summing them. These contracts let the training loop retain gradient shards and reconstruct parameters on demand while preserving the intended update. Small tensors are dominated by communication latency startup costs, while large tensors are dominated by physical link bandwidth.
 
-At the Distributed Execution row of the fleet stack, the distributed training loop treats AllReduce as an atomic primitive with a known communication volume of approximately $2M$ bytes per worker for an $M$-byte model. @Sec-collective-communication examines how physical network fabrics choreograph those $2M$ bytes across rings, trees, and switches without link contention, and how collective communication libraries such as NCCL schedule intra-node NVLink against inter-node InfiniBand.
+At the Distributed Execution row of the fleet stack, the distributed training loop treats AllReduce as an atomic primitive with a known communication volume of approximately $2M$ bytes per worker for an $M$-byte model. @Sec-collective-communication examines how physical network fabrics choreograph those $2M$ bytes across rings, trees, and switches while limiting link contention, and how collective communication libraries such as NCCL schedule intra-node NVLink against inter-node InfiniBand.
 
 When synchronization performance deviates from theoretical expectations, the fleet stack framework provides a structured approach to isolating the bottleneck.
 

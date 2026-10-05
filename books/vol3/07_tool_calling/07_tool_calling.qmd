@@ -94,15 +94,15 @@ The runtime correlates each result with its corresponding call using an explicit
 
 At the model-side call surface\index{Call surface}, an inference engine emits structured invocation blocks rather than unstructured natural text. Once the model outputs a proposal, the runtime assumes full custody of execution. Between the moment a tool call leaves the model and the moment an observation enters the context of the next turn, the runtime mediates the entire round trip across the four coordinated stages in @fig-vol3-tool-call-loop: argument validation screens inputs against tool schemas, policy authorization verifies security grants, dispatch executes the permitted operation while tracking outcomes, and observation shaping normalizes raw results into bounded prompt payloads.
 
+::: {.column-margin .margin-pointer}
+↩ The six-phase turn lifecycle, whose validation, execution, and observation phases these four stages refine, is established in @sec-vol3-intro-execution-lifecycle.
+:::
+
 Request validation parses proposed arguments against the tool's declared schema, verifying required fields, data types, value ranges, and relational invariants among parameters. Dynamic constraints that depend on volatile environment state cannot be settled at this boundary; the system must evaluate them at the execution boundary rather than inferring them from historical context. Next, operation authorization verifies the active session's security grants against the targeted resource, evaluating concurrency budgets, rate limits, and access policies for read operations as well as state mutations.
 
 Following authorization, dispatch submits the permitted operation to the underlying execution provider while outcome tracking maintains execution identity and status. This tracking distinguishes cleanly among pre-dispatch rejections, active background tasks, successfully reported results, and unconfirmed execution states. A transport timeout simply indicates that the runtime exceeded its waiting deadline, leaving the remote execution state unconfirmed. Finally, observation shaping maps the raw return value back to the originating call identifier, truncating payloads to fit context budgets, sanitizing terminal escape sequences, and tagging the output with accurate status metadata. If log output must be truncated, the payload explicitly discloses the omission; if a system returns an asynchronous job ticket, observation shaping reports it as an acknowledgment rather than a completed effect.
 
 Certain validation checks must execute at the remote endpoint because safety requires atomicity with the state change itself; for example, an edit conditioned on a source version requires the version check to occur in lockstep with the update. Consequently, the host runtime and the remote endpoint each enforce their respective boundaries. The endpoint checks access independently, even for requests that the host runtime already cleared. This division reflects the end-to-end argument applied to system protection: an authorization check that depends on private endpoint state can be finalized only at that endpoint, making preliminary host-level checks useful performance optimizations rather than authoritative substitutes [@saltzer1984endtoend].
-
-::: {.column-margin .margin-pointer}
-↩ The six-phase turn lifecycle that these stages refine is established in @sec-vol3-intro-execution-lifecycle.
-:::
 
 ::: {#fig-vol3-tool-call-loop fig-env="figure" fig-pos="htb" fig-cap="**The tool-call loop**: Validation and authorization can reject a proposed call before dispatch. For a dispatched call, the runtime tracks the available outcome and shapes the return into a bounded observation matched to its call identifier. An unknown effect remains unknown in that observation." fig-alt="Flow diagram showing model tool calls passing through runtime validation, authorization, dispatch and outcome tracking, and observation shaping before the next model call. Rejected calls return structured errors without reaching the environment."}
 ![](images/svg/tool_call_loop.svg)
@@ -221,7 +221,7 @@ Grammar-guided decoding effectively eliminates syntactic errors during generatio
 
 ### Conditional updates {#sec-vol3-tool-calling-conditional-updates}
 
-The `expected_version` parameter binds the read contract of @sec-vol3-persistent-governance directly to the mutation contract enforced here. An earlier read operation confirmed only that `src/pool.py` matched revision `r17` at the specific instant of observation; that read did not lock or reserve the file for future modification. If a concurrent process or another agent alters `src/pool.py` before the edit request arrives, applying a patch derived from `r17` would silently overwrite those intervening modifications, causing a classic lost-update anomaly.
+The `expected_version` parameter binds the retrieval contract of @sec-vol3-persistent-governance directly to the mutation contract enforced here. An earlier read operation confirmed only that `src/pool.py` matched revision `r17` at the specific instant of observation; that read did not lock or reserve the file for future modification. If a concurrent process or another agent alters `src/pool.py` before the edit request arrives, applying a patch derived from `r17` would silently overwrite those intervening modifications, causing a classic lost-update anomaly.
 
 To guarantee serializability, the storage service must verify the expected version and commit the replacement as a single atomic **conditional update**\index{Conditional update!definition}, the storage equivalent of a hardware compare-and-swap (CAS) primitive.[^fn-optimistic-validation-tools] In this example, the workspace source service executes the entire sequence inside a single coordination boundary: it resolves the target file, verifies that its current revision matches `expected_version`, writes the new content, and publishes the resulting revision token. Decomposing this sequence into non-atomic operations—such as reading the revision, verifying it in user space, and then issuing a write—reopens a race window where concurrent writers can intervene. The atomic conditional update closes this time-of-check to time-of-use gap.
 
@@ -458,6 +458,10 @@ The contract must also govern concurrent and interleaved requests. If a duplicat
 
 @Lst-vol3-dispatch-operation-id illustrates the client runtime's implementation of this protocol. The runtime assigns the operation ID once upon admitting the intended mutation, then generates a fresh attempt ID for every network transmission. If repeated retries exhaust the attempt budget, the function returns an explicit unresolved outcome rather than propagating an uncaught exception. This design ensures that transport uncertainty surfaces directly to downstream reconciliation logic rather than disappearing into an unhandled error path. Because this retry loop is safe only when the remote endpoint guarantees deduplication, the runtime invokes this path exclusively for tools whose descriptors formally declare compliance with the operation ID contract.
 
+::: {.column-margin .margin-pointer}
+↪ Recording each admitted operation and its identity durably before dispatch, so that recovery can find every effect that may have begun, is developed in @sec-vol3-persistence-wal.
+:::
+
 ::: {#lst-vol3-dispatch-operation-id lst-cap="**Retrying one intended effect**: The operation ID stays fixed across attempts, and exhausting the attempts yields an unresolved outcome. The loop is safe only against an endpoint that deduplicates by operation ID within its retention window."}
 ```python
 def dispatch_mutation(transport, tool, args, op_id, max_attempts=3):
@@ -484,10 +488,6 @@ Enforcing safety at the effect boundary is equally essential when managing super
 [^fn-epoch-sequencer-tools]: **Epoch Checks at the Resource**: Distributed lock services encountered this exact failure mode when stale lock holders continued mutating storage after their leases lapsed. The Chubby lock service addressed this with a sequencer: an opaque token containing the lock name, mode, and generation number, which clients transmit alongside mutating requests and target servers validate before committing writes [@burrows2006chubby]. The critical architectural insight is location: because a zombie worker cannot detect its own staleness, the mutating resource itself must enforce fencing by rejecting out-of-order epoch numbers. \index{Fencing token!epoch number}
 
 A deduplication contract is incomplete without an explicit retention window. Endpoints must publish how long they retain operation IDs and cached results, as well as how they handle delayed requests that arrive after that retention boundary has elapsed. Once the retention window expires, resubmitting an old operation ID risks being treated as a brand-new request, reintroducing duplicate-execution risks. An idempotency token guarantees exactly-once execution semantics only when paired with active endpoint deduplication, durable coupling between side effects and result records, and an unambiguous retention schedule. The tool runtime must never assume stronger guarantees than the underlying interface explicitly provides.
-
-::: {.column-margin .margin-pointer}
-↪ Recording each operation durably before dispatch, so that recovery can find every effect that may have begun, is developed in @sec-vol3-persistence-wal.
-:::
 
 ### Reconciliation {#sec-vol3-tool-calling-reconciliation}
 
