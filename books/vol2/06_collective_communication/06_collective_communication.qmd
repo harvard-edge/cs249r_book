@@ -144,7 +144,7 @@ At large scale (hundreds of billions of parameters across thousands of GPUs), gr
 Physical constraints govern data movement before algorithms are designed. The speed of light sets a latency floor[^fn-speed-of-light] (roughly 5 $\mu\text{s}$ per kilometer in fiber), the bandwidth-distance product\index{Bandwidth-distance product!optical reach} limits how far a fast link can reach before it needs optics, and kernel-bypass transports such as remote direct memory access (RDMA)\index{RDMA!kernel bypass} and GPUDirect RDMA\index{GPUDirect RDMA!latency reduction} strip the per-message software tax down to a few microseconds. Collective communication adds the energy cost of moving a bit, which the algorithms must respect as firmly as latency and bandwidth.
 
 ::: {.column-margin .margin-pointer}
-↩ Kernel-bypass RDMA and GPUDirect RDMA, which strip the per-message software overhead, are established in @sec-network-fabrics-rdma.
+↩ Kernel-bypass RDMA, which strips the per-message software overhead, and GPUDirect RDMA, which removes the host-memory bounce, are established in @sec-network-fabrics-rdma.
 :::
 
 Moving data consumes energy across storage arrays, interfaces, serializers, transceivers, and switches. @Fig-data-movement-hierarchy partitions data movement across nested physical accounting boundaries\index{Energy consumption!data movement hierarchy}—tracing an on-chip traversal from local SRAM and on-package high-bandwidth memory (HBM)\index{HBM}\index{High-Bandwidth Memory|see{HBM}} out to an intra-node peer GPU and across intermediate switches to a remote node. Each boundary activates distinct physical components: on-package links, intra-node crossbars, serializers, optical transceivers, and switch fabrics. Distance alone does not determine energy per bit, and an endpoint-only estimate cannot be compared directly with a complete fabric-path estimate. Locality remains useful because it can avoid transfers and active interfaces; the energy saving must be evaluated under the same workload, utilization, and accounting boundary.
@@ -619,6 +619,7 @@ The $\alpha$-$\beta$ model\index{Hockney Model!latency and bandwidth} $T(n) = \a
 :::
 
 The two parameters take on collective-specific meanings. Latency ($\alpha$) is the fixed start-up cost to send a message regardless of size, covering software overhead (kernel launch, NCCL initialization), PCIe\index{PCIe}\index{Peripheral Component Interconnect Express|see{PCIe}} traversal, and network switching time. Bandwidth ($\beta$) is the sustained data transfer rate in bytes per second. The critical message size\index{Critical Message Size} $\CrossoverPoint = \alpha \cdot \beta$ marks the crossover point: messages smaller than $\CrossoverPoint$ are latency-bound\index{Latency!bound}; messages larger are bandwidth-bound\index{Bandwidth!bound}. The parameters in @tbl-interconnect-parameters apply directly to collective design.
+
 ```{python}
 #| echo: false
 #| label: collective-message-fusion
@@ -1047,7 +1048,7 @@ class LogPOverlap:
 
   % Region Title Badges above
   \node[anchor=south, font=\footnotesize\bfseries\sffamily\color{GreenLine!90!black}, fill=white, inner sep=2.5pt, rounded corners=2pt]
-    at (5.95, 3.05) {Pipelined Overlap Region ($\LogploggpNetworkLatency$ Hidden)};
+    at (5.95, 3.05) {Pipelined Overlap Region (${L_{\text{LogGP}}}$ Hidden)};
 
   \node[anchor=south, font=\footnotesize\bfseries\sffamily\color{RedLine!90!black}, fill=white, inner sep=2.5pt, rounded corners=2pt]
     at (10.8, 3.05) {Critical Tail Barrier (Exposed)};
@@ -1096,7 +1097,7 @@ class LogPOverlap:
         $\bullet$ \textbf{Exposed Barrier:} $\text{Time}(\text{Layer 1})$ sets sync stall floor \\
         \tikz[baseline=-2pt]\fill[BlueFill!75,draw=BlueLine,line width=0.5pt,rounded corners=1pt] (0,-0.12) rectangle (0.32,0.12);
         \textbf{Optimizer:} Weights updated after global barrier &
-        $\bullet$ \textbf{Step Time:} $\DistributedStepTime = T_{\text{backward}} + T_{\text{tail}} + T_{\text{optimizer}}$
+        $\bullet$ \textbf{Step Time:} ${T_{\text{step}}(N)} = T_{\text{backward}} + T_{\text{tail}} + T_{\text{optimizer}}$
       \end{tabular}
     \end{minipage}
   };
@@ -1123,7 +1124,7 @@ The transfer model prices a message, but a training dependency usually requires 
 Sending a gradient tensor to a peer does not specify which workers must contribute or where the final result belongs. Collective operations supply that group-level contract, using a vocabulary standardized by MPI and inherited by modern ML communication libraries [@mpiforum2015mpi31]. @Fig-collective-primitives-overview diagrams the input-to-output dataflow contracts for four central primitives in this group-communication vocabulary: AllReduce, AllGather, ReduceScatter, and AllToAll. Reading left to right across four ranks (rows 0 through 3), each panel routes per-rank input buffers through an amber transformation operator to produce green output buffers. AllReduce applies global summation ($\Sigma$) to replicate identical sums across all ranks; AllGather concatenates disparate shards onto every rank; ReduceScatter sums vectors across ranks before partitioning the result so each rank retains one reduced shard ($\Sigma_i$); and AllToAll performs a distributed matrix transpose, routing each rank's $j$-th chunk to the $j$-th rank. Two further primitives, Broadcast (rank 0 sends to all) and Reduce (all aggregate to rank 0), serve as foundational building blocks defined in @sec-collective-communication-six-core-primitives-8a66 and compose into these collective patterns.
 
 ::: {.column-margin .margin-pointer}
-↪ The bandwidth and latency cost terms of each collective primitive, under ring, tree, and pairwise-exchange algorithms, are developed in @sec-appdx-comm-foundations-collective-complexity.
+↪ The bandwidth and latency cost terms of AllReduce, AllGather, ReduceScatter, AllToAll, and Broadcast, under ring, tree, and pairwise-exchange algorithms, are developed in @sec-appdx-comm-foundations-collective-complexity.
 :::
 
 ::: {#dfn-collective-communication-collective-operation .callout-definition title="Collective operation"}

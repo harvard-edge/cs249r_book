@@ -302,6 +302,7 @@ That history is the bitter lesson seen from inside the training system. None of 
 ::: {.column-margin .margin-pointer}
 ↩ The bitter lesson, that general methods which absorb more computation outperform encoded human expertise, is established in @sec-introduction-bitter-lesson-79c7.
 :::
+
 ```{python}
 #| echo: false
 #| label: gpt2-lighthouse-hardware-calc
@@ -349,7 +350,7 @@ class GPT2LighthouseSpecs:
 In inference, GPT-2\index{GPT-2!training lighthouse} serves as the Bandwidth Hog lighthouse. Here it recurs as the chapter's stable workload for testing each training cost and optimization.
 
 ::: {.column-margin .margin-pointer}
-↩ GPT-2's archetype as the Bandwidth Hog, a workload bound by data movement rather than arithmetic, is established in @sec-ml-systems-workload-archetypes-fd10.
+↩ GPT-2's inference archetype as the Bandwidth Hog, a workload bound by data movement rather than arithmetic, is established in @sec-ml-systems-workload-archetypes-fd10.
 :::
 
 ::: {#lhs-training-lighthouse-example-training-gpt-2 .callout-lighthouse title="Lighthouse example: Training GPT-2"}
@@ -1646,6 +1647,7 @@ Optimizing individual operations is necessary but insufficient. A perfectly tune
 A training step is not a single operation but a sequence of dependent stages\index{Training pipeline!architecture}\index{Training pipeline!data flow}—data must be loaded before computation can begin, forward passes must complete before backward passes start, and gradients must be computed before parameters can update. The speed of the slowest stage determines the speed of the entire system. Without pipelining, these stages serialize, idling the accelerator while the host prepares data or transfers batches across the bus.
 
 While model execution graphs govern arithmetic on the accelerator, sustained training requires feeding those kernels across physical machine boundaries. Host CPUs ingest raw records from storage and apply preprocessing in host DRAM, while accelerators execute matrix multiplications in HBM. Data must cross the interconnect—typically a PCIe link whose bandwidth is an order of magnitude lower than device memory bandwidth. When upstream data preparation or bus transfer exceeds the duration of the forward and backward passes, the accelerator compute engines starve, reducing the hardware utilization factor $\EfficiencyHw$ in the training-time law.
+
 Managing these physical boundaries divides the training system into three interconnected subsystems, each placing distinct demands on hardware resources. The data pipeline handles ingestion, transformation, and batching on the host\index{Data pipeline!ingestion and preprocessing}; the training loop coordinates forward passes, backward passes, and parameter updates on the accelerator; and the evaluation pipeline periodically assesses model quality on held-out data\index{Evaluation pipeline!validation metrics}. @Fig-training-pipeline diagrams how these three subsystems decouple across the training lifecycle, staging processed batches into the core forward/backward training loop while streaming metrics to an asynchronous evaluation pipeline. The interfaces between them form critical synchronization boundaries where I/O latency, interconnect transfers, or synchronous validation pauses can throttle accelerator utilization.
 
 ::: {#fig-training-pipeline fig-env="figure" fig-pos="htb" fig-cap="**Training System Overview**: The training lifecycle coordinates data preparation, core forward/backward computation, and validation evaluation. The interfaces between these three pipelines represent critical synchronization boundaries where I/O delays or evaluation pauses can throttle accelerator utilization." fig-alt="Block diagram with data pipeline, training loop, and evaluation pipeline boxes. Arrows connect the three stages and show feedback returning to training."}
@@ -2181,6 +2183,7 @@ Storage throughput is bounded by the slower of two hardware constraints, $R_{\te
 Once retrieved from storage, raw bytes require CPU transformation into model-ready tensors. While static feature extraction can run offline, dynamic transformations such as on-the-fly tokenization and image augmentation execute during training. Under ideal independent-worker scaling, preprocessing throughput grows with worker count as expressed in @eq-preprocess-throughput:
 $$R_{\text{preprocessing}} = \frac{\WorkerCountWorkers}{T_{\text{transform}}}$$ {#eq-preprocess-throughput}
 where $\WorkerCountWorkers$ parallel processing threads each perform transformations requiring $T_{\text{transform}}$ seconds. Training architectures employ multiple workers to ensure preprocessing keeps pace with accelerator consumption rates---a single thread performing image augmentation at 30 ms per batch cannot feed an accelerator that computes a forward pass in 10 ms.
+
 Preprocessed data must then transfer to the accelerator before computation can begin. The overall training throughput is therefore constrained by the slowest of three stages, as @eq-training-bottleneck makes explicit. This single minimum is the chapter's pipeline model; every later bound on the input path is an instance of it:
 $$R_{\text{training}} =\min\left(R_{\text{preprocessing}}, \frac{\Bandwidth_{\text{host}}}{\DataVolume^{(\text{batch})}}, \frac{R_{\text{compute}}}{\Operations_{\text{batch}}}\right)$$ {#eq-training-bottleneck}
 where $\Bandwidth_{\text{host}}$ is the host-to-accelerator transfer bandwidth, $\DataVolume^{(\text{batch})}$ is the input bytes per batch, and $\Operations_{\text{batch}}$ is the forward-backward work per batch in FLOPs. Every term is therefore expressed in batches per second before the minimum is taken.
@@ -2566,7 +2569,7 @@ Prepared batches enter the training loop through the forward pass\index{Forward 
 
 #### Compute operations {#sec-model-training-compute-operations-83ee}
 
-The forward pass maps neural network layers to the matrix multiplication kernels analyzed in @sec-model-training-matrix-operations-1f21. For each dense layer with input width $\LayerInputAndOutputWidths$ and output width $\LayerInputAndOutputWidthsTwo$, the accelerator executes $\LayerInputAndOutputWidths \times \LayerInputAndOutputWidthsTwo \times B$ multiply-accumulate operations\index{Matrix multiplication!dense operations}. For example, a layer with dimensions of `{python} TrainingDimensions.layer_dims_math` processing a batch of `{python} TrainingDimensions.layer_batch_str` samples executes about `{python} TrainingDimensions.layer_macs_str`, or about `{python} TrainingDimensions.layer_mflop_str` under the two-FLOPs-per-MAC convention.
+The forward pass maps neural network layers to the matrix multiplication kernels analyzed in @sec-model-training-matrix-operations-1f21. For each dense layer with input width $\LayerInputWidth$ and output width $\LayerOutputWidth$, the accelerator executes $\LayerInputWidth \times \LayerOutputWidth \times B$ multiply-accumulate operations\index{Matrix multiplication!dense operations}. For example, a layer with dimensions of `{python} TrainingDimensions.layer_dims_math` processing a batch of `{python} TrainingDimensions.layer_batch_str` samples executes about `{python} TrainingDimensions.layer_macs_str`, or about `{python} TrainingDimensions.layer_mflop_str` under the two-FLOPs-per-MAC convention.
 
 ::: {#psp-training-wave-quantization-tail-effects .callout-perspective title="Wave quantization and tail effects"}
 
@@ -3830,7 +3833,7 @@ The primary trade-off is memory: prefetch buffers consume host memory, or device
 
 ### Mixed-precision training {#sec-model-training-mixedprecision-training-9218}
 
-While prefetching optimizes data movement, mixed-precision training\index{Mixed-precision training!memory savings} addresses both computational throughput limitations and memory capacity constraints. It uses a lower-precision format where appropriate while retaining higher precision for selected accumulations or updates. @Sec-appdx-machine-foundations-numerical-representations-c889 compares FP32, FP16\index{FP16!dynamic range limitation}, BF16, FP8, and INT8 precision-range trade-offs. A training recipe commonly combines FP32 with either FP16 or BF16; it does not ordinarily use FP16 and BF16 interchangeably in the same path. The resulting speed, memory, and accuracy effects depend on the workload and hardware [@micikevicius2017mixed; @google_bfloat16; @kalamkar2019].
+While prefetching optimizes data movement, mixed-precision training\index{Mixed-precision training!memory savings} addresses both computational throughput limitations and memory capacity constraints. It uses a lower-precision format where appropriate while retaining higher precision for selected accumulations or updates. @Sec-appdx-machine-foundations-floatingpoint-format-comparison-1836 compares FP32, FP16\index{FP16!dynamic range limitation}, BF16, FP8, and INT8 precision-range trade-offs. A training recipe commonly combines FP32 with either FP16 or BF16; it does not ordinarily use FP16 and BF16 interchangeably in the same path. The resulting speed, memory, and accuracy effects depend on the workload and hardware [@micikevicius2017mixed; @google_bfloat16; @kalamkar2019].
 
 ```{python}
 #| echo: false
@@ -4291,7 +4294,7 @@ In addition to accelerating compute-bound matrix operations, reduced precision r
 
 For memory-bound kernels, execution time is determined by bytes transferred across the memory bus rather than arithmetic clock cycles. Converting 32-bit operands to 16-bit FP16 or BF16 halves the byte volume transferred across the HBM bus, doubling the theoretical throughput of memory-bound operations even without engaging Tensor Cores. Realized bandwidth gains depend on cache hit rates, kernel fusion, and format conversion costs.
 
-@Sec-ml-frameworks-mixedprecision-training-support-d31d describes how `autocast` and `GradScaler` implement this split inside the framework. The policy decision that remains for the training recipe is which format to run, and @lst-mixed-precision makes it a single switch: the FP16 path enables gradient scaling, and the BF16 path disables it.
+@Sec-ml-frameworks-mixedprecision-training-support-d31d describes how `autocast` and `GradScaler` implement the split between 16-bit and FP32 operations inside the framework. The policy decision that remains for the training recipe is which format to run, and @lst-mixed-precision makes it a single switch: the FP16 path enables gradient scaling, and the BF16 path disables it.
 
 ```{python}
 #| echo: false
@@ -6790,7 +6793,7 @@ A learning rate that works at batch size `{python} FallaciesPitfallsSetup.fp_bat
 
 **Pitfall**: *Treating mixed precision training as a simple toggle without validation.*
 
-The chapter's illustrative V100 inputs imply a `{python} FallaciesPitfallsSetup.fp_mp_speedup_v100_mult_str` speedup, but they are not a benchmark. FP16 commonly requires loss scaling [@micikevicius2017mixed], while BF16 usually does not [@google_bfloat16; @kalamkar2019] (see @sec-model-training-mixedprecision-training-9218). Either recipe can change numerical behavior, so throughput and convergence must be validated on the target workload.
+The chapter's illustrative V100 inputs imply a `{python} FallaciesPitfallsSetup.fp_mp_speedup_v100_mult_str` speedup, but they are not a benchmark. FP16 commonly requires loss scaling [@micikevicius2017mixed], while BF16 usually does not [@google_bfloat16; @kalamkar2019] (@sec-model-training-mixedprecision-training-9218 compares the two formats). Either recipe can change numerical behavior, so throughput and convergence must be validated on the target workload.
 
 :::
 
@@ -6798,7 +6801,7 @@ The chapter's illustrative V100 inputs imply a `{python} FallaciesPitfallsSetup.
 
 **Fallacy**: *Memory and computation can be optimized independently.*
 
-Memory *and* compute are coupled: in this illustrative profile, accelerator utilization drops from `{python} FallaciesPitfallsSetup.fp_util_batch_256_str` at batch 256 to `{python} FallaciesPitfallsSetup.fp_util_batch_16_range_str` at batch 16. Gradient accumulation (effective batch `{python} FallaciesPitfallsSetup.fp_effective_batch_str`, physical batch `{python} FallaciesPitfallsSetup.fp_physical_batch_str`) trades `{python} FallaciesPitfallsSetup.fp_util_diff_str` efficiency for `{python} FallaciesPitfallsSetup.fp_memory_reduction_mult_str` memory reduction. Tuning these parameters independently can therefore extend training time materially, because the utilization lost at the smaller physical batch applies to every step of the run (see @sec-model-training-gradient-accumulation-checkpointing-0c47).
+Memory *and* compute are coupled: in this illustrative profile, accelerator utilization drops from `{python} FallaciesPitfallsSetup.fp_util_batch_256_str` at batch 256 to `{python} FallaciesPitfallsSetup.fp_util_batch_16_range_str` at batch 16. Gradient accumulation (effective batch `{python} FallaciesPitfallsSetup.fp_effective_batch_str`, physical batch `{python} FallaciesPitfallsSetup.fp_physical_batch_str`) trades `{python} FallaciesPitfallsSetup.fp_util_diff_str` efficiency for `{python} FallaciesPitfallsSetup.fp_memory_reduction_mult_str` memory reduction. Tuning these parameters independently can therefore extend training time materially, because the utilization lost at the smaller physical batch applies to every step of the run (@sec-model-training-gradient-accumulation-checkpointing-0c47 develops this trade-off).
 
 :::
 
@@ -6817,7 +6820,7 @@ Sizing training memory from weights alone omits gradients, optimizer state, mast
 
 **Fallacy**: *The accelerator is always the training bottleneck.*
 
-Data loading often creates idle time, yet teams optimize computation first. In this illustrative profile, prefetching with pipeline overlap reduces wall-clock time by `{python} FallaciesPitfallsSetup.fp_prefetch_reduction_str` (`{python} FallaciesPitfallsSetup.fp_prefetch_time_before_s_str` to `{python} FallaciesPitfallsSetup.fp_prefetch_time_after_s_str`) by overlapping data loading with computation (see @sec-model-training-data-prefetching-pipeline-overlapping-e984). Profile before assuming the GPU is the bottleneck.
+Data loading often creates idle time, yet teams optimize computation first. In this illustrative profile, prefetching with pipeline overlap reduces wall-clock time by `{python} FallaciesPitfallsSetup.fp_prefetch_reduction_str` (`{python} FallaciesPitfallsSetup.fp_prefetch_time_before_s_str` to `{python} FallaciesPitfallsSetup.fp_prefetch_time_after_s_str`) by overlapping data loading with computation (@sec-model-training-data-prefetching-pipeline-overlapping-e984 develops the overlap). Profile before assuming the GPU is the bottleneck.
 
 :::
 

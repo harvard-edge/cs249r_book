@@ -746,6 +746,7 @@ The dynamic autograd tape expresses data-dependent behavior directly in the host
 ##### Systems implications: Overhead {.unnumbered}
 
 This flexibility imposes latency costs that map directly to the iron law. Each training step constructs an autograd tape dynamically, adding host-side Python dispatch latency and tape allocation to $\Latency$. Because every operation traverses the framework dispatcher before a device kernel launches, host overhead quickly dominates when individual kernels execute in single-digit microseconds. Eager execution also lacks a whole-graph view, preventing the framework from fusing element-wise chains\index{Kernel fusion!static graph optimization} into single GPU launches or pre-allocating a static memory arena for intermediate activations ($\DataVolume$). The autograd tape must retain every tensor requested by registered backward rules, holding memory until backpropagation consumes it. Together, these costs impose a throughput ceiling on fine-grained workloads where dispatch latency overshadows device arithmetic.
+
 ```{python}
 #| echo: false
 #| label: dispatch-tax-calc
@@ -2199,13 +2200,14 @@ class ResNetMemory:
 
 Consider an illustrative ResNet-50\index{ResNet-50!training memory footprint} training scenario with `{python} ResNetMemory.resnet_params_m_str` parameters (~`{python} ResNetMemory.resnet_fp32_mb_str` of FP32 weights), batch size 64, and $224{\times}224$ images. With `{python} ResNetMemory.resnet_act_min_gb_str`--`{python} ResNetMemory.resnet_act_max_gb_str` of saved activations, gradients add ~`{python} ResNetMemory.resnet_fp32_mb_str`, and two Adaptive Moment Estimation (Adam) FP32 moment buffers add ~`{python} ResNetMemory.resnet_adam_mb_str`. Summing those four components gives an `{python} ResNetMemory.resnet_training_min_gb_str`--`{python} ResNetMemory.resnet_training_max_gb_str` training scenario, roughly `{python} ResNetMemory.resnet_training_ratio_range_mult_str` the FP32 weight storage alone. This is a capacity-planning sum; actual peak memory depends on which components are live together. Inference requires no optimizer states, gradients, or saved backward buffers, but still has live activations and runtime workspace.
 
-This disparity underscores why accelerator training capacity cannot be deduced from parameter counts alone. Total training memory obeys the four-component formulation ($\TotalMemoryFootprint = \WeightMemory + \GradientMemory + \OptimizerstateMemory + \ActivationMemory$) plus allocator overhead, as derived in @sec-appdx-algorithm-foundations-true-cost-training-memory-e54e.
+This disparity underscores why accelerator training capacity cannot be deduced from parameter counts alone. Total training memory obeys the four-component formulation ($\TotalMemoryFootprint = \WeightMemory + \GradientMemory + \OptimizerstateMemory + \ActivationMemory$) plus allocator overhead, as stated in @sec-appdx-algorithm-foundations-true-cost-training-memory-e54e.
 
 Frameworks provide three graph-level controls to manage this trade-off. Gradient checkpointing\index{Activation checkpointing!recomputation strategy} [@chen2016training] alters what the graph retains: the engine stores selected segment boundaries and regenerates intermediate activations during the backward pass. In iron law terms, checkpointing increases the arithmetic operation count ($O$) to reduce peak activation storage; its effect on transfer volume ($\DataVolume$) depends on the recomputation path. Tensor detachment sets a gradient boundary: calling `.detach()` makes subsequent operations treat that tensor as independent of its prior computation. It does not retroactively free all previously saved state, and cutting a path changes which gradients are computed. Mixed-precision training provides a third lever: representing eligible activations and weights in 16-bit formats halves their bytes relative to FP32, reducing tensor volume ($\DataVolume$) and enabling higher arithmetic throughput on supported Tensor Cores ($\PeakRate$). @Sec-model-training formalizes these graph mechanisms into cluster sizing decisions.
 
 ::: {.column-margin .margin-pointer}
 ↪ The decision of when these single-machine levers stop being enough and training must scale beyond one machine is developed in @sec-model-training-scale-physical-ceiling-e06c.
 :::
+
 ##### Extensibility and control {.unnumbered}
 
 Production training systems require fine-grained control over gradient propagation beyond standard backward sweeps. In practice, workloads demand three core capabilities: selective gradient computation\index{Selective gradient computation} for freezing layers during transfer learning via `requires_grad=False` or `.detach()`; gradient inspection and modification\index{Gradient inspection} for clipping, debugging, or logging intermediate adjoints via runtime hooks; and custom differentiation rules\index{Custom differentiation rule} for non-standard operations such as specialized CUDA kernels or novel activation functions.
@@ -2950,6 +2952,7 @@ While the high-level API focuses on math, the framework backend plays the role t
 :::
 
 On the data-movement side, the framework coordinates with this runtime to implement **DMA**\index{DMA!PCIe data movement interface} over the PCIe\index{PCIe!host-device interconnect} bus. The bandwidth gap between the host (CPU) and device (GPU) is the primary "Data Loading Bottleneck": @sec-appdx-machine-foundations-bandwidth-vs-latency-5320 models this transfer, separating the two constraints, $T = \Latency + \DataVolume/\Bandwidth$, that determine whether a given data-loading strategy is limited by per-transfer latency or by sustained bandwidth. Frameworks mitigate this through pinned memory\index{Pinned memory!definition} (page-locked host memory), which enables DMA transfers without pageable-memory staging. This "HW/OS" interface is what makes high-throughput training loops possible on a single machine.
+
 Every tensor resides on a specific device, and cross-device operations incur transfer costs that can dominate execution time. PCIe 4.0 delivers `{python} DeviceBandwidthHierarchy.pcie4_gb_per_s_str` between CPU and GPU, while HBM2e provides `{python} DeviceBandwidthHierarchy.a100_bw_tb_per_s_str` within the GPU. This `{python} DeviceBandwidthHierarchy.pcie_to_hbm_gap_mult_str` bandwidth gap means a single misplaced tensor transfer can erase the entire speedup from GPU acceleration.
 
 ::: {.column-margin}
@@ -2965,6 +2968,7 @@ Three systems principles govern effective device and memory management: understa
 The cost of moving data between devices varies by orders of magnitude depending on the interconnect.[^fn-nvlink-bandwidth-hierarchy] @Tbl-device-transfer-overhead shows transfer times for a $1000{\times}1000$ float32 tensor (4 MB)—roughly the size of a typical activation tensor in a moderately sized model. The numbers reveal why careless device placement can erase any speedup from GPU acceleration.
 
 [^fn-nvlink-bandwidth-hierarchy]: **NVLink**\index{NVLink!bandwidth hierarchy}: NVIDIA's high-bandwidth GPU-to-GPU interconnect, providing `{python} DeviceBandwidthHierarchy.nvlink_a100_gb_per_s_str` bidirectional bandwidth (NVLink 3.0 on A100) compared to `{python} DeviceBandwidthHierarchy.pcie4_bidir_gb_per_s_str` for PCIe 4.0 x16. This ~10$\times$ bandwidth advantage determines whether tensor parallelism, splitting one large tensor computation across multiple GPUs, is practical for a given model size: GPUs connected only by PCIe can make the $\DataVolume/\Bandwidth$ communication term dominate total training time, erasing the benefit of additional compute.
+
 | **Interconnect** |                                                                             **Bandwidth**                                                                             |                   **Transfer Time**                   | **Path**       |
 |:-----------------|:---------------------------------------------------------------------------------------------------------------------------------------------------------------------:|:-----------------------------------------------------:|:---------------|
 | **PCIe 3.0 x16** |                                                         `{python} DeviceBandwidthHierarchy.pcie3_gb_per_s_str`                                                        |  `{python} DeviceBandwidthHierarchy.pcie3_4mb_ms_str` | Host to device |
@@ -3066,7 +3070,7 @@ for mb in range(num_microbatches):
 This overlap principle extends naturally to model-stage overlap within a single node. Different model stages on separate GPUs can process different microbatches concurrently, with each stage's computation overlapping the next stage's data reception (@lst-pipeline-parallelism-streams). The single-node implementation is enough to expose the synchronization principle that survives at larger scale. Once computation and communication overlap, the remaining challenge is ensuring correctness when operations complete out of order.
 
 ::: {.column-margin .margin-pointer}
-↪ The multi-GPU training strategies built from this stage-overlap pattern, including layer-wise pipeline partitioning, are developed in @sec-model-training-singlenode-multigpu-training-c87f.
+↪ Layer-wise model partitioning across GPUs, whose idle pipeline stages this stage-overlap pattern addresses, is developed in @sec-model-training-model-parallelism-c97e.
 :::
 
 ##### Synchronization and correctness {.unnumbered}
@@ -3544,7 +3548,7 @@ class ResNetGFLOPS:
 
 #### Basic numerical operations {#sec-ml-frameworks-basic-numerical-operations-5516}
 
-With hardware abstraction managing the platform-specific details, frameworks build a layer of mathematical operations on top. GEMM\index{GEMM!matrix multiplication}\index{Tensor!operations, GEMM} dominates ML computation. @Sec-appdx-algorithm-foundations-general-matrix-multiply-gemm-b55d derives how GEMM arithmetic intensity\index{GEMM!arithmetic intensity} scales with matrix dimension, predicting whether a given layer is compute bound or memory bound before any profiler runs. The operation $\mathbf{C} = \alpha \mathbf{A}\mathbf{W} + \beta \mathbf{C}$ accounts for the vast majority of arithmetic in neural networks: a single ResNet-50 forward pass performs approximately `{python} ResNetGFLOPS.resnet_gflop_str`, nearly all of which reduce to GEMM. Frameworks optimize GEMM through cache-aware **tiling**\index{Tiling!definition} (splitting matrices into blocks that fit in L1/L2 cache), loop unrolling for instruction-level parallelism, and shape-specific kernels. Fully connected layers use standard dense GEMM, while convolutional layers use im2col transformations that reshape input patches into matrix columns, converting convolution into GEMM.
+With hardware abstraction managing the platform-specific details, frameworks build a layer of mathematical operations on top. GEMM\index{GEMM!matrix multiplication}\index{Tensor!operations, GEMM} dominates ML computation. The operation $\mathbf{C} = \alpha \mathbf{A}\mathbf{W} + \beta \mathbf{C}$ accounts for the vast majority of arithmetic in neural networks: a single ResNet-50 forward pass performs approximately `{python} ResNetGFLOPS.resnet_gflop_str`, nearly all of which reduce to GEMM. @Sec-appdx-algorithm-foundations-general-matrix-multiply-gemm-b55d derives how GEMM arithmetic intensity\index{GEMM!arithmetic intensity} scales with matrix dimension, predicting whether a given layer is compute bound or memory bound before any profiler runs. Frameworks optimize GEMM through cache-aware **tiling**\index{Tiling!definition} (splitting matrices into blocks that fit in L1/L2 cache), loop unrolling for instruction-level parallelism, and shape-specific kernels. Fully connected layers use standard dense GEMM, while convolutional layers use im2col transformations that reshape input patches into matrix columns, converting convolution into GEMM.
 
 Beyond GEMM, frameworks implement BLAS operations\index{BLAS!vector and matrix operations} (AXPY for vector addition, GEMV for matrix-vector products) and element-wise operations\index{Element-wise operation!memory bandwidth} (activation functions, normalization). Element-wise operations are *individually cheap* but *collectively expensive* due to memory bandwidth. Each operation reads and writes the full tensor, so a sequence of five element-wise operations on a 100&nbsp;MB tensor moves 1&nbsp;GB of data. Fusing those five operations into a single kernel reduces memory traffic to 200&nbsp;MB, a 5$\times$ bandwidth savings that directly translates to faster execution.
 
@@ -4649,7 +4653,7 @@ Engineers assume that if memory is available, larger batches always improve thro
 :::
 
 ::: {.column-margin .margin-pointer}
-↪ How batch size trades accelerator utilization against optimization dynamics is developed in @sec-model-training-batch-size-parameter-updates-4d0b.
+↪ How activation memory grows linearly with batch size and caps the batch that fits in accelerator memory is developed in @sec-model-training-minibatch-processing-4eb0.
 :::
 
 ```{python}

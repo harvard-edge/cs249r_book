@@ -202,6 +202,7 @@ Consider a GPT-4-class training scenario using a hypothetical `{python} Gpt4Trai
 ::: {.column-margin .margin-pointer}
 ↪ The MTBF cascade, which sums component failure rates into node and cluster MTBF for multi-thousand-GPU fleets, is developed in @sec-appdx-reliability-foundations-mtbf-cascade.
 :::
+
 ::: {#nbk-introduction-scale-reliability .callout-notebook title="Scale and reliability"}
 
 **Problem**: A training run for a GPT-4-class model uses `{python} Gpt4TrainingScenario.gpt4_gpus_str`. If each individual GPU has an MTBF of `{python} Gpt4TrainingScenario.gpu_mtbf_hours_str` (the modeling assumption used in this example, not a measured fleet-wide failure rate), how often will the training job be interrupted by hardware failure?
@@ -792,10 +793,6 @@ class FleetInvestmentAnchors:
 
 These scale-induced challenges have driven infrastructure investment by large AI organizations. Meta's Research SuperCluster, announced in 2022, was designed to reach `{python} FleetInvestmentAnchors.rsc_gpus_str` NVIDIA A100 GPUs connected by `{python} InfiniBandScenario.ib_hdr_gbit_per_s_str` InfiniBand[^fn-infiniband-rdma-v2] networking [@meta2022rsc]. Google's TPU v4 pods contain `{python} TpuV4PodScenario.tpuv4_pod_chips_str` with `{python} TpuV4PodScenario.tpuv4_pod_peak_str` of aggregate compute capacity [@zu2024tpuv4]. Microsoft's Azure supercomputer for OpenAI reached more than `{python} FleetInvestmentAnchors.msft_openai_gpus_str` in 2020, and later Azure AI data center announcements describe tens-of-thousands-GPU training fabrics [@microsoft2020openaiSupercomputer; @microsoft2025fairwater]. The scale of the models dictates the scale of the infrastructure.
 
-::: {.column-margin .margin-pointer}
-↪ The $\alpha$-$\beta$ communication model, with the per-interconnect latency and bandwidth parameters that turn a link's specifications into a predicted transfer cost, is developed in @sec-appdx-comm-foundations-alpha-beta.
-:::
-
 [^fn-infiniband-rdma-v2]: **InfiniBand**: A data-center interconnect whose defining feature for ML is remote direct memory access (RDMA)\index{InfiniBand!RDMA}, which bypasses the OS kernel to move data directly between application memory on different machines at microsecond-scale latency. HDR InfiniBand provides about `{python} InfiniBandScenario.ib_hdr_gb_per_s_str` line-rate bandwidth per link and NDR about `{python} InfiniBandScenario.ib_ndr_gb_per_s_str`; that per-link bandwidth, relative to the computation each worker performs between exchanges, decides whether large-model training is compute-bound or communication-bound. RDMA-capable Ethernet (RoCE) now offers comparable line rates.
 
 The scale moment establishes why exponential growth in compute demand forces some ML systems beyond any single machine, making communication a potential bottleneck, component failure routine over long runs, and governance obligations more consequential. The next question is how to organize the engineering response. Established distributed-systems techniques remain essential, but global barriers and large shared model state change their costs and determine which recovery and consistency mechanisms apply. Tracing how the layers of one machine map onto a fleet makes those dependencies explicit.
@@ -963,6 +960,10 @@ class Gpt3CommunicationScenario:
 ```
 
 At large scale, communication can dominate communication-intensive partitions. Distributed data-parallel training synchronizes gradients across workers after each batch. For a model with `{python} Gpt3CommunicationScenario.gpt3_params_b_str` parameters, FP32 gradients occupy about `{python} Gpt3CommunicationScenario.gpt3_gradient_gb_str` before any collective algorithm is applied. Ring AllReduce arranges the AllReduce exchange among neighbors in a logical ring; each worker sends and receives roughly $2(N-1)/N$ times the gradient tensor size, because each gradient byte makes about two trips around the ring, one to reduce and one to broadcast back; @sec-communication-collective-operations-collective-operations-ring-allreduce-ffce derives this factor. Network traffic therefore depends on precision, worker count, collective implementation, and partitioning. On slower interconnects or partitions with little computation per communicated byte, it can consume a large fraction of each iteration rather than a negligible one.
+
+::: {.column-margin .margin-pointer}
+↪ The $\alpha$-$\beta$ communication model, with the per-interconnect latency and bandwidth parameters that turn a link's specifications into a predicted transfer cost, is developed in @sec-appdx-comm-foundations-alpha-beta.
+:::
 
 This exposed transfer cost explains why distributed training systems optimize communication so aggressively. Horovod\index{Horovod!collective communication} uses Ring AllReduce, NCCL integration, and Tensor Fusion to improve collective communication [@sergeev2018horovod]; Megatron-LM\index{Megatron-LM!model parallelism} applies model parallelism [@shoeybi2019megatron]; and ZeRO\index{ZeRO!memory redundancy reduction} reduces memory redundancy [@rajbhandari2020]. For the present argument, the important mapping is role-based: Horovod represents the collective runtime, NCCL the GPU communication backend, Tensor Fusion the gradient-fusion path, Megatron-LM model partitioning, and ZeRO optimizer-state sharding. Their names identify different responses to the same problem: distributing work also distributes state that must move or be kept consistent. The design decision at this stage is which cost prevents progress; selecting a particular mechanism requires the workload and fabric models developed later.
 
@@ -1291,7 +1292,7 @@ plt.close()
 @Fig-scaling-regimes models how compute investments yield capability across three distinct lifecycle phases, each branching into a steeper efficiency trajectory as the preceding phase encounters diminishing returns. The progression begins with pretraining scaling (orange curve), the failure-sensitive foundation run that realizes scaling-law gains in wall-clock time before its return softens along a logarithmic projection; branches into posttraining scaling (blue curve), where fine-tuning and preference optimization replace a single massive job with many smaller, coordination-heavy runs; and culminates in test-time scaling (green callout, "long thinking"), where chain-of-thought search and sampling during inference trade serving latency and throughput for higher reasoning accuracy. Each phase shifts the binding constraint to a different tier of the fleet, so the full treatments belong with their workloads; test-time compute at serving is treated in @sec-inference-logic-wall. For resource-constrained deployments, posttraining and test-time scaling often prove more practical than retraining a model from scratch.
 
 ::: {.column-margin .margin-pointer}
-↪ The multi-model coordination that posttraining alignment runs require is developed in @sec-distributed-training-rlhf.
+↪ The multi-model coordination that posttraining alignment runs require is developed in @sec-distributed-training-rlhf-coordination.
 :::
 
 ::: {#fig-scaling-regimes fig-env="figure" fig-pos="htb" fig-cap="**The three scaling phases**: Intelligence (capability) improves through successive scaling regimes. Pretraining scales with compute and data. Posttraining (reinforcement learning from human feedback, instruction tuning) refines behavior. Test-time scaling (chain-of-thought, search) extracts additional capability at inference." fig-alt="Plot of intelligence vs. compute with ascending curve through three labeled phases: pretraining, posttraining, and test-time scaling. Dashed lines extend beyond each phase."}
@@ -1879,7 +1880,7 @@ $$ \FleetEnergyProductivity = \frac{\UsefulModelFlops}{E_{\text{device}} + E_{\t
 where $\UsefulModelFlops$ is useful work in FLOPs. The three energy terms cover compute devices, attributable cooling, and the network fabric, without counting the same consumption twice. Host, storage, and other facility loads must be added explicitly for a complete operational estimate; embodied impacts lie outside this boundary. Comparisons must use the same boundary and useful-work definition. The resulting Pareto frontier\index{Pareto frontier!time-energy trade-off} balances minimizing $T_{\text{step}}$ with maximizing $\FleetEnergyProductivity$.
 
 ::: {.column-margin .margin-pointer}
-↪ Power usage effectiveness, the facility overhead that scales the cooling term relative to IT energy, is developed across data-center generations and cooling technologies in @sec-appdx-fleet-foundations-energy-hierarchy.
+↪ Power usage effectiveness, the ratio of total facility energy (including cooling and power conversion) to IT energy, is developed across data-center generations and cooling technologies in @sec-appdx-fleet-foundations-energy-hierarchy.
 :::
 
 An illustrative, communication-heavy GPT-3-class synchronization scenario connects the time and energy accounts: exposed Ring AllReduce traffic delays computation and consumes network energy.

@@ -878,7 +878,7 @@ Serving systems differ fundamentally in how they manage accelerator memory, and 
 
 ***KV cache***\index{KV Cache!definition} is a per-request LLM inference memory buffer that stores key and value attention tensors for processed prompt and generated tokens. It avoids recomputing those tensors for the prefix; each new query still performs attention against the cached state.
 
-1.  **Significance**: It reduces per-token attention compute from $\mathcal{O}(n^2)$ to $\mathcal{O}(n)$ in the sequence length, but its footprint grows linearly with both context length and batch size, often consuming more HBM than the model weights themselves and becoming the binding constraint on serving capacity. @Sec-appdx-inference-scale-kv-cache-fundamentals-2ccd derives the fundamental sizing math.
+1.  **Significance**: It reduces per-token attention compute from $\mathcal{O}(n^2)$ to $\mathcal{O}(n)$ in the sequence length, but its footprint grows linearly with both context length and batch size, often consuming more HBM than the model weights themselves and becoming the binding constraint on serving capacity. @Sec-appdx-inference-scale-kv-cache-fundamentals-2ccd explains the fundamental sizing math.
 2.  **Distinction**: Unlike model weights (which are shared across all requests and statically allocated), the KV cache is request-private and dynamically sized; each concurrent user pays a separate, sequence-length-proportional memory tax that the scheduler must budget for.
 3.  **Common pitfall**: A frequent misconception is that reducing model size proportionally reduces serving memory. In practice, the KV cache dominates HBM at long contexts, so a quantized 70B model can still be capacity-bound at batch sizes the weights alone would easily admit.
 
@@ -1903,7 +1903,7 @@ $$\text{Wasted compute} = \frac{(100 - 10) \times 1}{100 \times 8} = 11.25\%$$
 For realistic output length distributions with high variance, wasted compute can exceed 50 percent. @Algo-continuous-batching-decode-scheduler states the continuous-batching scheduler as a decode loop. Completed requests release KV-cache pages, waiting requests enter freed slots, and the next batched kernel runs over the reorganized active set. For Archetype A workloads (GPT-4/Llama-3), refilling slots lets more useful tokens share each weight read. The gain comes from reusing transferred weights, not merely from saturating bandwidth, which a smaller batch may already do.
 
 ::: {.column-margin .margin-pointer}
-↩ The three systems archetypes, including Archetype A (GPT-4/Llama-3), are established in @sec-vol2-introduction-archetypes.
+↩ Archetype A (GPT-4/Llama-3), the autoregressive transformer whose serving must stream billions of weights for every generated token, is established in @sec-introduction-archetype-gpt4llama3-b02f.
 :::
 
 ```pseudocode
@@ -4452,11 +4452,11 @@ This multi-tenant serving pattern shifts the fundamental performance constraint 
 
 #### Multi-LoRA serving and batched adapter execution {#sec-inference-multi-lora-serving}
 
-In multi-tenant environments, thousands of fine-tuned adapters share a single base foundation model. For a linear projection layer with base weights $\mathbf{W}_0 \in \mathbb{R}^{\LayerInputAndOutputWidthsTwo \times \LayerInputAndOutputWidths}$, an adapter $k$ parameterizes the forward transformation using low-rank decomposition matrices $\mathbf{A}_k \in \mathbb{R}^{r_k \times \LayerInputAndOutputWidths}$ and $\mathbf{B}_k \in \mathbb{R}^{\LayerInputAndOutputWidthsTwo \times r_k}$ with rank $r_k \ll \min(\LayerInputAndOutputWidths, \LayerInputAndOutputWidthsTwo)$ (typically $r \in \{8, 16, 64\}$), as formulated in @eq-lora-forward:
+In multi-tenant environments, thousands of fine-tuned adapters share a single base foundation model. For a linear projection layer with base weights $\mathbf{W}_0 \in \mathbb{R}^{\LayerOutputWidth \times \LayerInputWidth}$, an adapter $k$ parameterizes the forward transformation using low-rank decomposition matrices $\mathbf{A}_k \in \mathbb{R}^{r_k \times \LayerInputWidth}$ and $\mathbf{B}_k \in \mathbb{R}^{\LayerOutputWidth \times r_k}$ with rank $r_k \ll \min(\LayerInputWidth, \LayerOutputWidth)$ (typically $r \in \{8, 16, 64\}$), as formulated in @eq-lora-forward:
 
 $$\mathbf{y} = \mathbf{x} \mathbf{W}_0^T + \frac{\alpha_k}{r_k} \mathbf{x} \mathbf{A}_k^T \mathbf{B}_k^T$$ {#eq-lora-forward}
 
-where $\mathbf{x} \in \mathbb{R}^{1 \times \LayerInputAndOutputWidths}$ is a row vector, $\mathbf{y} \in \mathbb{R}^{1 \times \LayerInputAndOutputWidthsTwo}$, and $\alpha_k$ is a fixed scaling factor. Each adapted projection adds $r_k(\LayerInputAndOutputWidths + \LayerInputAndOutputWidthsTwo)$ parameters instead of a full $\LayerInputAndOutputWidths\LayerInputAndOutputWidthsTwo$ weight matrix. The resident adapter budget therefore depends on which layers are adapted, their dimensions and ranks, precision, and the number of simultaneously loaded tenants.
+where $\mathbf{x} \in \mathbb{R}^{1 \times \LayerInputWidth}$ is a row vector, $\mathbf{y} \in \mathbb{R}^{1 \times \LayerOutputWidth}$, and $\alpha_k$ is a fixed scaling factor. Each adapted projection adds $r_k(\LayerInputWidth + \LayerOutputWidth)$ parameters instead of a full $\LayerInputWidth\LayerOutputWidth$ weight matrix. The resident adapter budget therefore depends on which layers are adapted, their dimensions and ranks, precision, and the number of simultaneously loaded tenants.
 
 However, serving requests with heterogeneous adapters in a single continuous batch introduces a critical execution dilemma between batch efficiency and kernel dispatch overhead.
 
@@ -4480,11 +4480,11 @@ Systems such as Punica\index{Punica!multi-tenant LoRA} [@chen2023punica] and S-L
 
 Instead of launching separate kernels for every request, batched or segmented gather-matrix-vector operations\index{BGMV!kernel launch} group heterogeneous adapters within each projection. Down-projection and up-projection can use separate kernels; Punica distinguishes shrink and expand operators [@chen2023punica].
 
-For input activations $\mathbf{X} = [\mathbf{x}_1; \mathbf{x}_2; \dots; \mathbf{x}_B] \in \mathbb{R}^{B \times \LayerInputAndOutputWidths}$, the scheduler constructs an integer mapping vector $\mathbf{m} \in \mathbb{Z}^B$ where $\mathbf{m}[i] = k(i)$ denotes the adapter ID assigned to request $i$. The mathematical dataflow for each token is:
+For input activations $\mathbf{X} = [\mathbf{x}_1; \mathbf{x}_2; \dots; \mathbf{x}_B] \in \mathbb{R}^{B \times \LayerInputWidth}$, the scheduler constructs an integer mapping vector $\mathbf{m} \in \mathbb{Z}^B$ where $\mathbf{m}[i] = k(i)$ denotes the adapter ID assigned to request $i$. The mathematical dataflow for each token is:
 
 1.  **Gather**: Select token activation $\mathbf{x}_i$ and the adapter pointer from $\mathbf{m}[i]$.
-2.  **Down-projection**: Compute the vector-matrix product $\mathbf{v}_i = \mathbf{x}_i \mathbf{A}_{k(i)}^T \in \mathbb{R}^{1 \times r_{k(i)}}$. Because $r \ll \LayerInputAndOutputWidths$, this intermediate is smaller than the input activation; its physical placement depends on the kernel.
-3.  **Up-projection**: Multiply $\mathbf{v}_i$ by $\mathbf{B}_{k(i)}^T \in \mathbb{R}^{r_{k(i)} \times \LayerInputAndOutputWidthsTwo}$, yielding the adapter delta $\Delta \mathbf{y}_i = \frac{\alpha_{k(i)}}{r_{k(i)}} \mathbf{v}_i \mathbf{B}_{k(i)}^T$.
+2.  **Down-projection**: Compute the vector-matrix product $\mathbf{v}_i = \mathbf{x}_i \mathbf{A}_{k(i)}^T \in \mathbb{R}^{1 \times r_{k(i)}}$. Because $r \ll \LayerInputWidth$, this intermediate is smaller than the input activation; its physical placement depends on the kernel.
+3.  **Up-projection**: Multiply $\mathbf{v}_i$ by $\mathbf{B}_{k(i)}^T \in \mathbb{R}^{r_{k(i)} \times \LayerOutputWidth}$, yielding the adapter delta $\Delta \mathbf{y}_i = \frac{\alpha_{k(i)}}{r_{k(i)}} \mathbf{v}_i \mathbf{B}_{k(i)}^T$.
 4.  **Accumulation**: Add $\Delta \mathbf{y}_i$ to the output of the base model projection $\mathbf{y}_i = \mathbf{x}_i \mathbf{W}_0^T + \Delta \mathbf{y}_i$.
 
 By gathering adapter weights within batched kernels, BGMV avoids dispatching a separate kernel for each request's adapter. The gain must be measured against the actual adapter mix; irregular access and small ranks can still limit achieved bandwidth.
@@ -5040,14 +5040,14 @@ The communication pattern for tensor-parallel inference follows a two-phase sync
 
     % GPU 0 Attention
     \node[opbox, minimum height=1.5cm] (att0) at (2.6, 7.95) {
-        \textbf{\textcolor{DarkNavy}{Heads $1 \dots \NumberOfAttentionHeads/2$}}\\[3pt]
+        \textbf{\textcolor{DarkNavy}{Heads $1 \dots {N_{\text{heads}}}/2$}}\\[3pt]
         {\fontsize{7}{8.5}\selectfont\textcolor{SlateGrey}{$\mathbf{Q}, \mathbf{K}, \mathbf{V}$ Projections $\to$ Head Concat}}\\[1pt]
         {\fontsize{7}{8.5}\selectfont\textcolor{SlateGrey}{$\mathbf{W}_O$ Row Partition}}
     };
 
     % GPU 1 Attention
     \node[opbox, minimum height=1.5cm] (att1) at (8.0, 7.95) {
-        \textbf{\textcolor{DarkNavy}{Heads $\NumberOfAttentionHeads/2+1 \dots \NumberOfAttentionHeads$}}\\[3pt]
+        \textbf{\textcolor{DarkNavy}{Heads ${N_{\text{heads}}}/2+1 \dots {N_{\text{heads}}}$}}\\[3pt]
         {\fontsize{7}{8.5}\selectfont\textcolor{SlateGrey}{$\mathbf{Q}, \mathbf{K}, \mathbf{V}$ Projections $\to$ Head Concat}}\\[1pt]
         {\fontsize{7}{8.5}\selectfont\textcolor{SlateGrey}{$\mathbf{W}_O$ Row Partition}}
     };
@@ -5371,10 +5371,10 @@ For inference, pipeline parallelism creates bubbles\index{Pipeline Parallelism!b
     \draw[->, line width=0.85pt, color=ForestGreen, shorten >=2pt, shorten <=2pt] (st3.east) -- (out0.west);
 
     % =========================================================================
-    % PANEL (b): PIPELINED CONCURRENCY (\PipelineparallelDegreePp = 4)
+    % PANEL (b): PIPELINED CONCURRENCY ({N_{\text{PP}}} = 4)
     % =========================================================================
     \node[panelcard, minimum width=21.2cm, minimum height=6.6cm, anchor=north west] (pb) at (0, -4.1) {};
-    \node[panelheader, anchor=north west] (hb) at ([xshift=10pt, yshift=-10pt]pb.north west) {(b) Pipelined Concurrency ($\PipelineparallelDegreePp = 4$)};
+    \node[panelheader, anchor=north west] (hb) at ([xshift=10pt, yshift=-10pt]pb.north west) {(b) Pipelined Concurrency (${N_{\text{PP}}} = 4$)};
     \node[anchor=north east, font=\scriptsize\color{SlateGrey}] at ([shift={(-12pt, -10pt)}]pb.north east) {Multiple requests overlap across pipeline stages; throughput scales $4\times$ in steady state};
 
     % Steady state pill above divider
@@ -5428,7 +5428,7 @@ For inference, pipeline parallelism creates bubbles\index{Pipeline Parallelism!b
     \node[draw=BorderGreen, fill=white, line width=0.75pt, rounded corners=3pt, inner sep=8pt, text width=3.4cm, align=center] (scale_card) at (17.5, -7.85) {
         \small\bfseries\textcolor{DarkNavy}{Throughput Scaling}\\[4pt]
         {\fontsize{7.5}{9}\selectfont
-        Pipeline Depth: $\PipelineparallelDegreePp = 4$\\[2pt]
+        Pipeline Depth: ${N_{\text{PP}}} = 4$\\[2pt]
         \textcolor{ForestGreen}{\textbf{Output: 1 req / step}}}\\[6pt]
         \colorbox{SoftGreen}{\fontsize{7.5}{9}\selectfont\bfseries\textcolor{ForestGreen}{4$\times$ Peak Throughput}}
     };
@@ -6292,7 +6292,7 @@ The practical speedup from sharding depends critically on communication efficien
 
 $$T_{\text{allreduce}} \approx 2(N-1)\alpha + \frac{2(N-1)}{N} \times \frac{M}{\beta}$$ {#eq-allreduce-time}
 
-where $N$ is the number of devices, $M$ is the collective payload size, $\alpha$ is startup latency, and $\beta$ is the interconnect bandwidth. The factor of 2 accounts for the reduce-scatter and all-gather phases. @Sec-appdx-comm-foundations-allreduce derives this ring-AllReduce cost and its bandwidth-optimal $2(N-1)/N$ scaling, showing that the per-rank bandwidth volume approaches a constant multiple of the payload while the ring startup term still grows with device count.
+where $N$ is the number of devices, $M$ is the collective payload size, $\alpha$ is startup latency, and $\beta$ is the interconnect bandwidth. The factor of 2 accounts for the reduce-scatter and all-gather phases. @Sec-communication-collective-operations-collective-operations-ring-allreduce-ffce derives this ring-AllReduce cost from its two-phase schedule and shows its bandwidth-optimal $2(N-1)/N$ scaling, showing that the per-rank bandwidth volume approaches a constant multiple of the payload while the ring startup term still grows with device count.
 
 @Eq-p2p-time expresses the simpler point-to-point communication for pipeline parallelism, where data flows from one device to the next.
 
