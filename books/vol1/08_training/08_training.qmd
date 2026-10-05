@@ -3256,7 +3256,7 @@ Among these three regimes, data-bound stalls are the most frequently misdiagnose
 
 **Scenario**: An engineering team builds a PyTorch data-loading pipeline using standard Python `threading` for CPU-bound image preprocessing that holds the global interpreter lock (GIL).
 
-**Diagnosis**: The GIL serializes these Python-level preprocessing threads, making host preparation time ($T_{\text{prep}} \approx 250 \text{ ms}$) vastly exceed GPU execution time ($T_{\text{step}} \approx 12 \text{ ms}$), reducing the accelerator busy-time fraction to $\EfficiencyHw \approx 4.6\%$ in this serial preparation-and-compute model. Here the fraction measures time spent computing, not arithmetic efficiency relative to peak throughput.
+**Diagnosis**: The GIL serializes these Python-level preprocessing threads, making host preparation time ($T_{\text{prep}} \approx 250 \text{ ms}$) vastly exceed GPU execution time ($T_{\text{step}} \approx 12 \text{ ms}$), reducing the accelerator busy-time fraction to about 4.6 percent in this serial preparation-and-compute model. Here the fraction measures time spent computing, not arithmetic efficiency relative to peak throughput.
 
 **Systems lesson**: Python CPU work that holds the GIL can serialize threads and starve GPUs; native operations may release it. Process workers (`num_workers > 0`) avoid interpreter serialization, while the NVIDIA Data Loading Library (DALI) can move eligible work off the host.
 
@@ -3404,9 +3404,9 @@ The selection phase maps the identified bottleneck to an architectural mechanism
 
 The composition phase evaluates how multiple interventions interact across shared hardware resources. Because system resources are tightly coupled, an optimization that relieves one bottleneck often imposes demands elsewhere. Asynchronous prefetching hides data movement latency behind computation, but maintaining double-buffered batch queues consumes pinned host memory and device HBM. In contrast, synergistic combinations compound performance gains: pairing 16-bit mixed precision with activation checkpointing curtails memory usage sufficiently to allow larger per-device batch sizes, restoring high arithmetic intensity to underutilized tensor cores. Successful composition therefore requires verifying that secondary resource overheads do not trigger a new binding constraint.
 
-@Fig-optimization-flowchart formalizes this diagnostic playbook into a triage flowchart, first screening accelerator utilization below 70 percent to investigate possible input waits before selecting prefetching and overlap, then adjudicating memory headroom (above 90 percent or OOM) to isolate memory-bound mitigations from compute-bound kernel optimizations.
+@Fig-optimization-flowchart formalizes this diagnostic playbook into a triage flowchart, using low accelerator activity and high memory allocation as signals for further investigation. Idle gaps require tracing input preparation, host work, and synchronization; capacity pressure motivates memory-saving techniques. When neither signal explains a missed target, kernel profiling distinguishes bandwidth, arithmetic, and launch limits.
 
-::: {#fig-optimization-flowchart fig-env="figure" fig-pos="htb" fig-cap="**Training Optimization Decision Flowchart**: A heuristic path from profiling signals to candidate optimizations. Begin with accelerator utilization, then distinguish memory pressure from compute saturation before selecting an intervention. The 70 percent utilization and 90 percent memory thresholds are illustrative triage values rather than universal definitions of data-, memory-, or compute-bound execution." fig-alt="Heuristic flowchart starting from a profiled training run and using illustrative accelerator-utilization and memory-pressure thresholds to suggest candidate optimizations before re-profiling."}
+::: {#fig-optimization-flowchart fig-env="figure" fig-pos="htb" fig-cap="**Training Optimization Decision Flowchart**: A heuristic path from profiling signals to candidate optimizations. Begin with accelerator activity and memory pressure, then investigate the limiting dependency or kernel resource before selecting an intervention. The 70 percent utilization and 90 percent memory thresholds are illustrative triage values rather than universal definitions of data-, memory-, or compute-bound execution." fig-alt="Heuristic flowchart starting from a profiled training run and using illustrative accelerator-utilization and memory-pressure thresholds to suggest candidate optimizations before re-profiling."}
 
 ```{.tikz}
 \begin{tikzpicture}[font=\small\sffamily, line width=0.8pt]
@@ -3445,18 +3445,18 @@ The composition phase evaluates how multiple interventions interact across share
 \node[StartStop] (profile) at (0,0) {Profile Training Run};
 \node[Decision,below =0.6 of profile] (util) {Accelerator\\ Util $<70\%$?};
 % Data Branch (Left)
-\node[Bottleneck, left=2.5 of util] (data) {Data-Bound};
-\node[Action,below = 0.7 of data ] (prefetch)  {Apply Prefetching \&\\Pipeline Overlap};
+\node[Bottleneck, left=2.5 of util] (data) {Investigate\\Idle Gaps};
+\node[Action,below = 0.7 of data ] (prefetch)  {Trace Input, Host,\\\& Synchronization};
 
 % Memory Check (Center)
 \node[Decision,below=1.6 of util] (memq)  {OOM Errors or\\Mem $>90\%$?};
 
 % Memory Branch (Left-Center)
-\node[Bottleneck,left =2.50 of memq] (memb)  {Memory-Bound};
+\node[Bottleneck,left =2.50 of memq] (memb)  {Capacity Pressure};
 \node[Action,below =0.7 of memb] (memact)  {Mixed Precision, \\Checkpointing,\\Accumulation};
 % Compute Branch (Right)
-\node[Bottleneck,right= 2.50 of memq] (compb) {Compute-Bound};
-\node[Action,below =0.7 of compb] (compact) {Increase Batch Size,\\Optimize Kernels};
+\node[Bottleneck,right= 2.50 of memq] (compb) {Profile\\Kernel Limits};
+\node[Action,below =0.7 of compb] (compact) {Check Bandwidth,\\Arithmetic, Launches};
 % End Node
 \node[StartStop,below =2.0 of memq] (reprofile) {Re-profile \& Iterate};
 % Main flow connections
@@ -5276,7 +5276,7 @@ Fitting the model into device memory resolves capacity, but does not guarantee e
 - Compute: `{python} GPT2WalkthroughCalc.compute_naive_pct_str` of iteration time
 - Memory transfers: `{python} GPT2WalkthroughCalc.mem_xfer_naive_pct_str` of iteration time
 
-These assumed profile observations shift the diagnostic focus from machine memory capacity (M) to the data pipeline (D) in D·A·M terms. With `{python} GPT2WalkthroughCalc.data_naive_pct_str` of iteration time spent waiting for host-prepared batches, further accelerator memory optimizations will not improve wall-clock training throughput until data starvation is resolved.
+These assumed profile observations shift the diagnostic focus from machine memory capacity (M) to the data pipeline (D) in D·A·M terms. With `{python} GPT2WalkthroughCalc.data_naive_pct_str` of iteration time spent waiting for host-prepared batches, reducing accelerator memory consumption alone does not address the dominant exposed delay. Improving input delivery is the next target in this scenario.
 
 **Step 5**: Apply prefetching and data pipeline optimization.
 
@@ -5302,7 +5302,7 @@ Resolving input starvation requires overlapping host data preparation with accel
 \endgroup
 ```
 
-**Systems insight**: Training optimization follows a strict diagnostic dependency chain: solve memory feasibility before throughput, and eliminate data starvation before kernel tuning. Once capacity and input stalls no longer bind execution, re-profiling determines whether kernel performance is bounded by memory bandwidth or arithmetic throughput before altering batch size or model architecture.
+**Systems insight**: This configuration must first fit in memory before its throughput can be measured. Its assumed profile then identifies exposed input waits as the next constraint to address. After each intervention, re-profiling determines what now limits progress, whether input delivery, memory bandwidth, arithmetic throughput, or another execution cost. The evidence determines the optimization order.
 
 :::
 
@@ -5882,7 +5882,7 @@ Unsharded data parallelism has a hard constraint: every GPU holds a complete mod
 
 #### Model parallelism {#sec-model-training-model-parallelism-c97e}
 
-Model parallelism\index{Model parallelism!memory constraints}\index{Distributed training!scaling efficiency}\index{Model parallelism!layer-wise partitioning} partitions the model itself across GPUs, which becomes necessary when the model exceeds single-GPU memory. AlexNet adopted an early form of this strategy: selected convolutional layers split their kernels and channels across two GPUs, with communication at selected connections. @Fig-model-parallelism traces this inter-device execution pipeline across three partitioned stages: Device 1 through Device 3 sequentially process layers 1–16, 17–32, and 33–48, streaming boundary activations forward during the forward pass and propagating loss gradients in reverse during backpropagation.
+Model parallelism\index{Model parallelism!memory constraints}\index{Distributed training!scaling efficiency}\index{Model parallelism!layer-wise partitioning} partitions the model itself across GPUs, which becomes necessary when the model exceeds single-GPU memory. AlexNet adopted an early form of this strategy: selected convolutional layers split their kernels and channels across two GPUs, with communication at selected connections. @Fig-model-parallelism illustrates a different, layerwise partition of the same broader model-parallel idea: Device 1 through Device 3 sequentially process layers 1–16, 17–32, and 33–48, streaming boundary activations forward during the forward pass and propagating loss gradients in reverse during backpropagation.
 
 ::: {#fig-model-parallelism fig-env="figure" fig-pos="htb" fig-cap="**Model Parallelism**: The model is partitioned across devices, with intermediate activations passing between them. This enables training models larger than single-GPU memory at the cost of sequential dependencies." fig-alt="Diagram showing input flowing through model parts on different devices, with forward pass going right and backward pass returning left."}
 
@@ -6361,7 +6361,7 @@ class NetworkWall:
 3. **Bandwidth-only lower bound**: At `{python} NetworkWall.network_bw_gb_per_s_str` per worker on the 100 Gbps fabric, synchronization latency for the $\DataVolume$ bytes each worker sends is $T_{\text{comm}} = \DataVolume / \Bandwidth_{\text{network}} =$ `{python} NetworkWall.allreduce_gb_str` / `{python} NetworkWall.network_bw_gb_per_s_str` $=$ `{python} NetworkWall.network_time_s_str`.
 4. **Compute comparison**: If the nonoverlapped forward and backward work takes $\IronlawTermTimesCompute \approx$ `{python} NetworkWall.compute_time_s_str`, communication latency $T_{\text{comm}} \approx$ `{python} NetworkWall.network_time_s_str` dominates.
 
-**Systems insight**: The network becomes a wall\index{AllReduce!network wall} when $T_{\text{comm}} > \IronlawTermTimesCompute$, reducing the fraction of this nonoverlapped step spent computing, written locally as $\EfficiencyHw = \frac{\IronlawTermTimesCompute}{\IronlawTermTimesCompute + T_{\text{comm}}}$ to about `{python} NetworkWall.hw_efficiency_pct_str`. This fraction does not measure compute efficiency relative to peak FLOP/s. Ring AllReduce [@sergeev2018horovod] is already the baseline here. Further mitigations include gradient compression (reducing $\DataVolume$), overlap where dependencies permit, and hierarchical topologies that confine high-frequency transfers to fast intra-node links (NVLink at `{python} NetworkWall.nvlink_h100_gb_per_s_str` vs. `{python} NetworkWall.network_bw_gb_per_s_str` inter-node).
+**Systems insight**: The network becomes a wall\index{AllReduce!network wall} when $T_{\text{comm}} > \IronlawTermTimesCompute$, reducing the fraction of this nonoverlapped step spent computing, given by $\frac{\IronlawTermTimesCompute}{\IronlawTermTimesCompute + T_{\text{comm}}}$ to about `{python} NetworkWall.hw_efficiency_pct_str`. This fraction does not measure compute efficiency relative to peak FLOP/s. Ring AllReduce [@sergeev2018horovod] is already the baseline here. Further mitigations include gradient compression (reducing $\DataVolume$), overlap where dependencies permit, and hierarchical topologies that confine high-frequency transfers to fast intra-node links (NVLink at `{python} NetworkWall.nvlink_h100_gb_per_s_str` vs. `{python} NetworkWall.network_bw_gb_per_s_str` inter-node).
 
 :::
 
