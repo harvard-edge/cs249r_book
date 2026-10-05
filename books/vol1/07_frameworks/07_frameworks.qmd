@@ -1553,7 +1553,7 @@ The four recurring archetypes in @tbl-framework-archetype-strategy trace one pri
 
 :::
 
-This principle has concrete implications across three regimes. In research prototyping ($N_{\text{dev}} \gg N_{\text{prod}}$), teams should stay eager. If the architecture changes every few minutes, compilation overhead can dominate. Under the scenario's 30-second compilation assumption, ten compilations per hour consume five minutes.
+Three cases illustrate how reuse changes the compilation decision. In research prototyping ($N_{\text{dev}} \gg N_{\text{prod}}$), teams should stay eager. If the architecture changes every few minutes, compilation overhead can dominate. Under the scenario's 30-second compilation assumption, ten compilations per hour consume five minutes.
 
 For repeated execution ($N_{\text{prod}} \gg N_{\text{dev}}$), compilation can pay off because its one-time cost is amortized across many calls. In the hypothetical ResNet-50 inference scenario in @tbl-training-benchmark, torch.compile provides `{python} CompilationBenchmark.resnet_compile_speedup_pct_str` higher throughput (`{python} CompilationBenchmark.resnet_compile_img_per_s_str` vs. `{python} CompilationBenchmark.resnet_eager_img_per_s_str`). Using the scenario's `{python} CompilationBenchmark.compile_time_ref_s_str` compile cost, this pays off after the breakeven point in @eq-compile-breakeven:
 
@@ -1563,9 +1563,9 @@ $$ {#eq-compile-breakeven}
 
 Evaluating @eq-compile-breakeven with the hypothetical ResNet-50 values gives approximately `{python} CompilationBenchmark.resnet_breakeven_images_str`. The same amortization principle applies to long training runs, using training throughput and compilation costs measured for that workload.
 
-For production inference ($N_{\text{dev}} \approx 0$, $N_{\text{prod}} \rightarrow \infty$), stable workloads provide more opportunity to amortize compilation. Aggressive autotuning can be worthwhile even when setup takes much longer, provided the model converts correctly, meets numerical requirements, and improves measured performance over the deployment lifetime.
+Long-lived production inference ($N_{\text{dev}} \approx 0$, $N_{\text{prod}} \rightarrow \infty$) extends this reuse further, providing more opportunity to amortize compilation. Aggressive autotuning can be worthwhile even when setup takes much longer, provided the model converts correctly, meets numerical requirements, and improves measured performance over the deployment lifetime.
 
-These trade-offs establish three distinct operating regimes across deployment scales. @Fig-compilation-continuum plots total time against production executions on a logarithmic scale ($10^2$ to $10^7$), where the vertical axis intercepts reflect upfront compilation latency and the curve slopes reflect per-execution marginal cost. Dotted vertical lines isolate two crossover thresholds: the steep blue eager trajectory yields to the moderate orange JIT curve at $2 \times 10^6$ runs ("Eager wins" gives way to "JIT wins"), while the flat green AOT curve overtakes JIT beyond $6.7 \times 10^6$ runs ("AOT wins") once its higher upfront compilation penalty is fully amortized.
+The cases form a continuum of increasing reuse. @Fig-compilation-continuum plots total time against production executions on a logarithmic scale ($10^2$ to $10^7$), where the vertical axis intercepts reflect upfront compilation latency and the curve slopes reflect per-execution marginal cost. Dotted vertical lines isolate two crossover thresholds: the steep blue eager trajectory yields to the moderate orange JIT curve at $2 \times 10^6$ runs ("Eager wins" gives way to "JIT wins"), while the flat green AOT curve overtakes JIT beyond $6.7 \times 10^6$ runs ("AOT wins") once its higher upfront compilation penalty is fully amortized.
 
 ::: {#fig-compilation-continuum fig-env="figure" fig-pos="htb" fig-cap="**The Compilation Continuum**: An illustrative cost model shows how one-time compilation cost and per-execution cost create eager, JIT, and AOT crossover regions as production executions increase. The crossover locations depend on the assumed compilation costs and per-execution rates." fig-alt="Line graph with production executions on a logarithmic x-axis and total time in arbitrary units on the y-axis. Blue eager, orange JIT, and green AOT lines rise at decreasing slopes from different initial offsets. Dotted vertical lines mark the eager–JIT and JIT–AOT crossovers; labels identify the region where each strategy has the lowest total time."}
 
@@ -2271,7 +2271,7 @@ These autograd mechanisms connect directly to the silicon contract. The reverse-
 
 #### Mixed-precision training support {#sec-ml-frameworks-mixedprecision-training-support-d31d}
 
-Mixed precision\index{Mixed-precision training!FP16 vs. FP32 trade-offs} exploits hardware specialization to improve two iron law terms simultaneously: Tensor Cores\index{Tensor Core!mixed-precision acceleration} execute 16-bit matrix multiplications at higher throughput than FP32 arithmetic units (increasing $\PeakRate$ and reducing $O/(\PeakRate \cdot \EfficiencyHw)$), while 16-bit activations halve global memory traffic (reducing $\DataVolume$). That dual benefit is why mixed precision is usually the first lever teams pull.
+Mixed precision\index{Mixed-precision training!FP16 vs. FP32 trade-offs} exploits hardware specialization to improve two iron law terms simultaneously: Tensor Cores\index{Tensor Core!mixed-precision acceleration} execute 16-bit matrix multiplications at higher throughput than FP32 arithmetic units (increasing $\PeakRate$ and reducing $O/(\PeakRate \cdot \EfficiencyHw)$), while eligible 16-bit activations halve their stored bytes and can reduce global memory traffic (reducing $\DataVolume$). The realized traffic reduction depends on execution. These two opportunities make mixed precision a common early optimization candidate.
 
 Automatic mixed-precision APIs implement this as a dispatch policy rather than a change to model code. Inside an `autocast` region, the dispatcher consults a per-operator precision list before selecting a kernel. Compute-intensive operations such as convolutions and linear projections run in FP16 or BF16, while numerically sensitive operations such as softmax, reductions, and loss calculations run in FP32. The second framework component, `GradScaler`, compensates for FP16's narrow exponent range (5 bits, with normal values bounded below by $\approx 6.10 \times 10^{-5}$). It multiplies the scalar loss by a loss-scale factor $\LossscaleFactor$ before backward traversal so that small gradients remain representable\index{Loss Scaling!gradient underflow prevention}, divides the parameter gradients by $\LossscaleFactor$ before the optimizer update, and skips any step whose gradients overflow.
 
@@ -4350,7 +4350,7 @@ After backward fills the parameter `.grad` buffers, `optimizer.step()` reads tho
 
 ### Phase 3: Memory traffic analysis (the physics at work) {.unnumbered}
 
-Applying @eq-dispatch-overhead to this step, @tbl-training-step-roofline breaks down the FLOPs, memory traffic, and arithmetic intensity for each operation:
+The ledger in @tbl-training-step-roofline covers selected forward operations and a modeled backward pass, excluding optimizer-update and bias-addition costs. Applying @eq-dispatch-overhead within that scope gives the FLOPs, memory traffic, and arithmetic intensity for each listed operation:
 
 ```{python}
 #| echo: false
@@ -4515,7 +4515,7 @@ class MnistTrainingStepCalc:
     a100_mem_bw_tb_per_s_str = fmt_bandwidth(mem_bw, unit=TB / second, precision=2, commas=False)
 ```
 
-The analytical model yields ~`{python} MnistTrainingStepCalc.mnist_total_mflop_str` of total arithmetic work and ~`{python} MnistTrainingStepCalc.mnist_mem_traffic_mb_str` of memory traffic. Dividing these quantities by peak A100 hardware rates determines the idealized lower bounds:
+The analytical model yields ~`{python} MnistTrainingStepCalc.mnist_total_mflop_str` of arithmetic work and ~`{python} MnistTrainingStepCalc.mnist_mem_traffic_mb_str` of memory traffic for the operations included in the ledger. Dividing these quantities by peak A100 hardware rates determines the idealized lower bounds:
 
 - $\IronlawTermTimesCompute \approx$ `{python} MnistTrainingStepCalc.mnist_total_mflop_str`/`{python} MnistTrainingStepCalc.a100_peak_tflop_per_s_str` FP32 ≈ `{python} MnistTrainingStepCalc.mnist_t_compute_us_str`
 - $\IronlawTermTimesMemory \approx$ `{python} MnistTrainingStepCalc.mnist_mem_traffic_mb_str`/`{python} MnistTrainingStepCalc.a100_mem_bw_tb_per_s_str` ≈ `{python} MnistTrainingStepCalc.mnist_t_memory_us_str`
