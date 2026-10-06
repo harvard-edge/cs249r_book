@@ -131,7 +131,7 @@ class InfraSetup:
     ref_nodes_str = fmt(ref_cluster.count, precision=0, commas=False)
 ```
 
-## Accelerator Spectrum {#sec-compute-accelerator-spectrum}
+## The Accelerator {#sec-compute-accelerator-spectrum}
 
 An accelerator purchase commits the fleet to a workload and software stack for longer than one experiment. A research group changing model operations frequently needs programmability; a service executing a stable computation at sustained volume can justify more specialization. The familiar trade-off between control flexibility and arithmetic efficiency matters here because an architectural mismatch is replicated across the fleet. Comparing programmable and specialized accelerators therefore starts with how much of the workload and compiler stack can remain stable over the deployment's lifetime.
 
@@ -708,7 +708,144 @@ The `{python} InfraSetup.frontier_params_b_str` model anchors this progression. 
 
 :::
 
-## The Memory Wall {#sec-compute-memory-wall}
+## The Node {#sec-compute-node}
+
+The running model needs more memory than one accelerator provides. A node supplies several accelerators in one chassis, but each retains its own memory; dividing the work creates communication that the local fabric must sustain. Tensor parallelism divides an operation across accelerators, pipeline parallelism assigns successive model stages to different groups, and data parallelism assigns different training examples to model replicas whose updates must be combined. These strategies impose different traffic patterns. The node design determines whether that traffic crosses a slow ring\index{Network topology!ring}, a dense mesh\index{Network topology!full mesh}, or a switch-backed crossbar\index{NVSwitch!crossbar topology}. @Fig-node-topology-comparison diagrams these three intra-node wiring options for an eight-GPU chassis, contrasting the link scaling and network diameter of a two-link ring (up to four hops) and a 28-link full mesh against a single-hop NVSwitch crossbar.
+
+::: {#fig-node-topology-comparison fig-env="figure" fig-pos="htb" fig-cap="**Intra-node GPU topology comparison**: Three ways to wire eight GPUs inside one node. Left: a ring gives each GPU only two links, so traffic between distant GPUs passes through up to four hops. Center: a full mesh reaches every peer in one hop but needs $N-1$ links per GPU and $N(N-1)/2$ links in total, which becomes impractical to route beyond about eight GPUs. Right: an NVSwitch fabric gives each GPU one set of links to the switch and puts every pair one switch hop apart, with up to 450 GB/s per direction per H100 SXM GPU (900 GB/s bidirectional); that per-GPU injection bandwidth is not the aggregate bisection bandwidth of the switch fabric." fig-alt="Three panels of eight GPUs labeled G0 to G7. Left, Ring: the GPUs sit on a circle, each linked only to its two neighbors; the footer reads 2 links per GPU, up to 4 hops. Center, Full mesh: the same eight GPUs with a direct link between every pair; the footer reads 7 links per GPU, 28 links in all. Right, NVSwitch: four GPUs above and four below a horizontal NVSwitch fabric bar, each GPU joined to the bar by one link; the footer reads 1 switch hop between any pair."}
+![](images/svg/node-topology-comparison.svg)
+
+:::
+
+```{python}
+#| echo: false
+# ┌── LEGO ───────────────────────────────────────────────
+class InfraFrontierNodeMemRecap:
+    # ┌── 1. LOAD ──────────────────────────────────────────
+    weights_fp16 = Models.Language.GPT3.size_in_bytes(BYTES_FP16)
+    gpu_hbm = Hardware.Cloud.H100.memory.capacity
+
+    # ┌── 2. EXECUTE ───────────────────────────────────────
+    min_gpus = math.ceil((weights_fp16 / gpu_hbm).to_base_units().magnitude)
+
+    # ┌── 3. GUARD ─────────────────────────────────────────
+    check(min_gpus == 5, "Prose says the FP16 weights span at least five accelerators")
+
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
+    frontier_params_b_str = fmt_params(Models.Language.GPT3.parameters, scale="B", precision=0, commas=False)
+```
+
+Aggregating accelerators solves the capacity problem only if the interconnect between them is fast enough that the group behaves as one machine rather than as several machines passing messages. The `{python} InfraFrontierNodeMemRecap.frontier_params_b_str` model's weights span at least five accelerators, and the full training state spans an entire 8-H100 node\index{Node!accelerator aggregation} and more, so some model state must live on different chips. Depending on the partition, execution exchanges partial results, activations, gradients, or parameter shards. Whether those exchanges are cheap or ruinous depends on the local fabric, which is why the node is the first scale level where the accelerator's specifications matter less than the wires between accelerators. The training system can combine tensor parallelism, optimizer sharding, and memory offload as needed to meet its capacity budget, and each strategy places a different demand on the interconnect.
+
+```{python}
+#| echo: false
+from mlsysim.fmt import fmt_bandwidth, fmt_multiple
+
+# ┌── LEGO ───────────────────────────────────────────────
+class H100NvlinkNodeRecap:
+
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
+    nvlink_gb_per_s_str = fmt_bandwidth(Hardware.Cloud.H100.nvlink.bandwidth, unit=GB / second, precision=0, commas=False)
+    nvlink_per_dir_gb_per_s_str = fmt_bandwidth(Hardware.Cloud.H100.nvlink.bandwidth_per_direction, unit=GB / second, precision=0, commas=False)
+    _nvlink_ib_gap = (Hardware.Cloud.H100.nvlink.bandwidth_per_direction / Systems.Fabrics.InfiniBand_NDR.bandwidth).to_base_units().magnitude
+    nvlink_ib_gap_mult_str = fmt_multiple(_nvlink_ib_gap, precision=0, commas=False)
+    ib_bw_gb_per_s_str = fmt_bandwidth(Systems.Fabrics.InfiniBand_NDR.bandwidth, unit=GB / second, precision=0, commas=False)
+    gpus_per_node_str = fmt(Systems.Nodes.DGX_H100.accelerators_per_node, precision=0, commas=False)
+    gpu_hbm_gb_str = fmt_memory_capacity(Hardware.Cloud.H100.memory.capacity, unit=GiB, precision=0, commas=False)
+    node_hbm_gb_str = fmt_memory_capacity(
+        Hardware.Cloud.H100.memory.capacity * Systems.Nodes.DGX_H100.accelerators_per_node, unit=GiB, precision=0, commas=False
+    )
+    host_dram_low_gb_str = InfraFrontierMemoryHbmRecap.host_dram_low_gb_str
+    host_dram_high_tb_str = InfraFrontierMemoryHbmRecap.host_dram_high_tb_str
+```
+
+::: {#dfn-compute-infrastructure-node .callout-definition title="Node"}
+
+***Node***\index{Node!definition} is the ML training cluster's physical server chassis that aggregates multiple accelerators (typically 8) through a high-speed intra-node interconnect (NVLink or ICI), providing a physical packaging and failure boundary. The fast communication domain can coincide with one chassis or extend across several, depending on the fabric.
+
+1.  **Significance**: The NVLink bandwidth within a DGX H100 node reaches `{python} H100NvlinkNodeRecap.nvlink_gb_per_s_str` bidirectional, or `{python} H100NvlinkNodeRecap.nvlink_per_dir_gb_per_s_str` per direction, while inter-node InfiniBand NDR provides `{python} H100NvlinkNodeRecap.ib_bw_gb_per_s_str`, a `{python} H100NvlinkNodeRecap.nvlink_ib_gap_mult_str` per-direction gap that constrains where each parallelism strategy can run. For this DGX H100 topology, frequent tensor-parallel collectives favor the intra-node NVLink domain; pipeline parallelism can span nodes when the network sustains stage-boundary activation traffic. The node is also the primary failure domain: a single node failure in a bulk synchronous parallel training job, where workers advance in lockstep at step barriers, idles the entire cluster until recovery.
+2.  **Distinction**: Unlike a single accelerator (which provides fast HBM bandwidth but limited capacity), a node aggregates 8$\times$ the HBM capacity and 8$\times$ the compute of a single chip, enough to place large FP16 weight shards (`{python} H100NvlinkNodeRecap.gpus_per_node_str` $\times$ `{python} H100NvlinkNodeRecap.gpu_hbm_gb_str` = `{python} H100NvlinkNodeRecap.node_hbm_gb_str` on DGX H100), but not enough to keep the full Adam training state in HBM.
+3.  **Common pitfall**: A frequent misconception is that nodes in a distributed training job operate independently. In bulk synchronous parallel training, all nodes are synchronously coupled at every step barrier: a performance degradation on one node (from thermal throttling, a faulty NIC, or a slow storage read) stalls the entire cluster and drops overall MFU for the duration of that step.
+
+:::
+
+The node exists because of a gap in the memory hierarchy. HBM provides enough bandwidth to feed the accelerator's arithmetic units, but not enough capacity to hold the full 175B-parameter running example. Host DRAM provides capacity (`{python} H100NvlinkNodeRecap.host_dram_low_gb_str` to `{python} H100NvlinkNodeRecap.host_dram_high_tb_str` per server) but not enough bandwidth.
+
+The node bridges this gap by aggregating the HBM of multiple accelerators into distributed capacity connected by a fast interconnect. Each accelerator's HBM remains private to that device: software must shard or replicate tensors explicitly and use collectives or peer transfers when an operation crosses device boundaries. Placing 8 accelerators in one chassis therefore provides 8$\times$ aggregate capacity and 8$\times$ aggregate compute, but it does not create a single shared-memory accelerator; performance depends on how well the partitioning limits traffic over the fabric.
+
+```{python}
+#| echo: false
+from mlsysim.fmt import check, fmt, fmt_memory, fmt_qty_range
+
+# ┌── LEGO ───────────────────────────────────────────────
+# │ Context: hypothetical single-package "super-chip" paragraph below.
+class SuperChipStackCount:
+    """HBM stacks a single package would need to hold the 175B FP16 weights."""
+
+    # ┌── 1. LOAD ──────────────────────────────────────────
+    weights_fp16 = Models.Language.GPT3.size_in_bytes(BYTES_FP16)
+    h100 = Hardware.Cloud.H100
+    b200 = Hardware.Cloud.B200
+
+    # ┌── 2. EXECUTE ───────────────────────────────────────
+    stack_low = (h100.memory.capacity / h100.memory.hbm_stacks).to(GB)
+    stack_high = (b200.memory.capacity / b200.memory.hbm_stacks).to(GB)
+    stacks_low = math.ceil((weights_fp16 / stack_high).to_base_units().magnitude)
+    stacks_high = math.ceil((weights_fp16 / stack_low).to_base_units().magnitude)
+
+    # ┌── 3. GUARD ─────────────────────────────────────────
+    check(stacks_low > b200.memory.hbm_stacks, "The super-chip should need far more stacks than a B200 package")
+
+    # ┌── 4. OUTPUT ────────────────────────────────────────
+    weights_fp16_gb_str = fmt_memory(weights_fp16, unit=GB, precision=0, commas=False)
+    stack_capacity_range_str = fmt_qty_range(round(stack_low.magnitude) * GB, round(stack_high.magnitude) * GB, GB, precision=0, commas=False)
+    stack_count_range_str = fmt_range(stacks_low, stacks_high, precision=0, commas=False)
+    h100_stacks_str = fmt(h100.memory.hbm_stacks, precision=0, commas=False)
+    b200_stacks_str = fmt(b200.memory.hbm_stacks, precision=0, commas=False)
+```
+
+The capacity arithmetic also explains the appeal of multiple packages. Holding a 175B model's `{python} SuperChipStackCount.weights_fp16_gb_str` of FP16 weights on one accelerator, at the example `{python} SuperChipStackCount.stack_capacity_range_str` per HBM stack, would require `{python} SuperChipStackCount.weights_fp16_gb_str` spread across roughly `{python} SuperChipStackCount.stack_count_range_str` stacks. That exceeds the `{python} SuperChipStackCount.h100_stacks_str`-stack H100 and `{python} SuperChipStackCount.b200_stacks_str`-stack B200-class configurations used here. Such a package would need its own area, yield, power, and cooling analysis. Distributing capacity across 8 accelerators instead uses available packages and pays for communication between their private memories.
+
+```{python}
+#| echo: false
+from mlsysim.fmt import fmt_memory, fmt_memory_capacity
+
+# ┌── LEGO ───────────────────────────────────────────────
+class InfraFrontierNodeBudgetRecap:
+    # ┌── 1. LOAD ──────────────────────────────────────────
+    model = Models.Language.GPT3
+    params = model.parameters
+    gpus_per_node = Systems.Nodes.DGX_H100.accelerators_per_node
+
+    # ┌── 2. EXECUTE ───────────────────────────────────────
+    weights = model.size_in_bytes(BYTES_FP16)
+    optimizer = params * BYTES_FP32 * 2
+    gradients = weights
+    total_static = weights + optimizer + gradients
+    gpu_hbm = Hardware.Cloud.H100.memory.capacity
+    node_hbm = gpu_hbm * gpus_per_node
+
+    # ┌── 3. GUARD ─────────────────────────────────────────
+    check(abs(total_static.to(GB).magnitude - 2100) < 1, "Static training state should be about 2.1 TB")
+
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
+    frontier_params_b_str = fmt_params(params, scale="B", precision=0, commas=False)
+    frontier_params_b_value_str = fmt_magnitude(params, unit=Bparam, precision=0, commas=False)
+    weights_gb_str = fmt_memory(weights, unit=GB, precision=0, commas=True)
+    optimizer_gb_str = fmt_memory(optimizer, unit=GB, precision=0, commas=True)
+    gradients_gb_str = fmt_memory(gradients, unit=GB, precision=0, commas=True)
+    total_static_tb_str = fmt_memory(total_static, unit=TB, precision=1, commas=False)
+    gpu_hbm_gb_str = fmt_memory_capacity(gpu_hbm, unit=GiB, precision=0, commas=False)
+    node_hbm_gb_str = fmt_memory_capacity(node_hbm, unit=GiB, precision=0, commas=False)
+```
+
+Understanding how the node partitions memory across its components is essential for selecting parallelism strategies. Consider the memory budget for training our `{python} InfraFrontierNodeBudgetRecap.frontier_params_b_str` model. The model weights in FP16 require `{python} InfraFrontierNodeBudgetRecap.weights_gb_str`. The Adam optimizer maintains two additional copies of every parameter (first and second moments) in FP32 precision, adding `{python} InfraFrontierNodeBudgetRecap.frontier_params_b_value_str` $\times 10^9 \times 2 \times 4$ bytes = `{python} InfraFrontierNodeBudgetRecap.optimizer_gb_str`. Gradients require another `{python} InfraFrontierNodeBudgetRecap.gradients_gb_str`. This subtotal is approximately `{python} InfraFrontierNodeBudgetRecap.total_static_tb_str`, excluding activations and any separate FP32 master-weight copy, far exceeding both a single accelerator's `{python} InfraFrontierNodeBudgetRecap.gpu_hbm_gb_str` HBM and an 8-H100 node's `{python} InfraFrontierNodeBudgetRecap.node_hbm_gb_str` aggregate HBM.
+
+When using ZeRO or FSDP-style optimization (which shards optimizer states, gradients, and optionally parameters across data-parallel workers), the training system avoids replicating this 2.1 TB subtotal on every GPU. Tensor parallelism first reduces each GPU's active weight shard; data-parallel sharding then spreads optimizer state and gradients across many workers; activation checkpointing reduces the activation peak; and offload moves cold optimizer state to host DRAM over PCIe. The node is therefore a high-bandwidth compute and communication unit, not a standalone container for the entire training state.
+
+The node's internal memory hierarchy, consisting of HBM (fast, small), host DRAM (medium speed, larger), and NVMe storage (slow, very large), forms a tiered system that distributed training frameworks exploit aggressively.
+
+### The Memory Wall {#sec-compute-memory-wall}
 
 As arithmetic throughput grows faster than data-access speed, compute units can spend more time waiting for operands. This divergence is known as the memory wall\index{Memory wall!scaling gap} [@wulf1995]. While transistor scaling has increased logic performance by orders of magnitude, the interconnects that feed data to those cores have not kept pace. Neural networks can require large weight and activation streams, making bandwidth rather than compute the governing constraint for some inference and training regimes.
 
@@ -1993,7 +2130,7 @@ A team is serving a 13B-parameter model at batch size 1 on an H100 and observing
 
 Memory capacity and bandwidth screen out infeasible accelerator choices. For the candidates that remain, fleet sizing also needs a sustained compute rate at a precision the workload can use.
 
-## Sustained Compute and Precision {#sec-compute-tensor-cores}
+### Sustained Compute and Precision {#sec-compute-tensor-cores}
 
 A fleet sized from advertised matrix throughput can miss its training deadline when operations cannot use the advertised precision or keep the arithmetic units busy. The relevant hardware contract includes both the eligible matrix operations and their sustained contribution to the complete workload. That contract begins with the specialized arithmetic units: Tensor Cores\index{Tensor Core!matrix units}[^fn-tensor-core-evolution] on NVIDIA GPUs and Matrix Multiply Units\index{Matrix Multiply Unit!TPU} on Google TPUs.
 
@@ -2122,7 +2259,46 @@ Capacity planning must use a measured or conservatively modeled sustained rate, 
 ↪ MFU as a fleet efficiency metric, and how its losses compound across nodes, is developed in @sec-performance-engineering-fleet-efficiency-metric-dff4.
 :::
 
-## Power and Thermal Envelopes {#sec-compute-power-wall}
+## The Rack {#sec-compute-rack}
+
+A standard 42U server rack\index{Rack!power density} in a traditional data center draws about `{python} RackPowerRackRecap.traditional_rack_kw_str` and can be cooled by room-temperature air pushed through perforated floor tiles. The chapter's four-node DGX H100 rack scenario draws `{python} RackPowerRackRecap.rack_power_kw_str` at the modeled IT boundary. At this density, the engineering constraints shift from silicon and signal integrity to power delivery\index{Power delivery!rack-scale} and thermodynamics. The rack is where the power wall and the laws of heat transfer\index{Cooling!rack-scale heat dissipation} become dominant design forces.
+
+::: {.column-margin}
+![](images/svg/vol2_compute_infrastructure_margin_002.svg){width="100%" fig-alt="Two orange horizontal bars on a linear scale: DGX rack 33.5 kW and legacy rack 12 kW."}
+
+*A four-node DGX rack draws nearly three times a traditional rack.*
+:::
+
+```{python}
+#| echo: false
+# ┌── LEGO ───────────────────────────────────────────────
+class InfraFrontierRackPowerRecap:
+
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
+    frontier_params_b_str = fmt_params(Models.Language.GPT3.parameters, scale="B", precision=0, commas=False)
+```
+
+For our `{python} InfraFrontierRackPowerRecap.frontier_params_b_str` model, training across `{python} RackPowerRackRecap.cluster_gpus_str` GPUs requires `{python} RackPowerRackRecap.racks_for_1k_str` racks (`{python} RackPowerRackRecap.nodes_per_rack_str` nodes of `{python} RackPowerRackRecap.gpus_per_node_str` GPUs each per rack). Across the cluster, the modeled rack IT power sums to approximately `{python} RackPowerRackRecap.cluster_power_mw_str`, before facility cooling overhead. Delivering this power reliably and removing the resulting heat without allowing any component to exceed its thermal limit is a multidisciplinary engineering challenge spanning electrical, mechanical, and civil engineering. A failure at any point in the power delivery chain, from the utility substation to the individual GPU voltage regulator, can halt the entire training run, wasting hours of computation and potentially corrupting the training state.
+
+::: {#dfn-compute-infrastructure-rack .callout-definition title="Rack"}
+
+***Rack***\index{Rack!definition} is the physical infrastructure unit, a standardized 42U enclosure, that houses multiple compute nodes, a top-of-rack (ToR) switch (the first network aggregation point connecting all nodes in the rack to the broader cluster fabric), power distribution units, and cooling distribution manifolds, defining the granularity at which power and cooling capacity must be provisioned.
+
+1.  **Significance**: AI rack power density has grown dramatically. The chapter's four-node DGX H100 scenario contains `{python} RackPowerRackRecap.rack_gpus_str` GPUs at `{python} H100TdpRackRecap.tdp_w_str` each and draws `{python} RackPowerRackRecap.rack_power_kw_str` at the modeled IT boundary. This exceeds the roughly `{python} RackPowerRackRecap.traditional_rack_kw_str` typical of general-purpose data center racks and requires purpose-designed electrical distribution and cooling capacity. Whether that cooling is engineered air or liquid depends on the system configuration and facility design.
+2.  **Distinction**: A node packages compute; a rack integrates shared power, cooling, and network distribution. Components and nodes remain individually serviceable, but their maintenance and replacement must respect the capacity and failure boundaries of those shared systems.
+3.  **Common pitfall**: A frequent misconception is that rack placement is a logistical afterthought. Nodes within the same rack share a ToR switch and have single-hop connectivity; nodes in different racks cross at least two switch hops. Placing pipeline stages within a rack can reduce inter-rack traffic when the actual paths and available capacity support the stage-boundary exchanges.
+
+:::
+
+Heat transfer explains why density reshapes the rack. Air has much lower volumetric heat capacity than liquid, so an air-cooled rack needs sufficient airflow, pressure, and temperature rise to carry away its heat. There is no universal 30 kW cutoff: the practical limit depends on server and facility design. The chapter's `{python} RackPowerRackRecap.rack_power_kw_str` scenario can use engineered air cooling in a suitable facility; denser systems can make liquid cooling the practical choice.
+
+Cooling selection is therefore configuration-dependent rather than a consequence of one rack-power threshold. Direct-to-chip liquid cooling raises heat-removal capacity and can reduce fan energy, while engineered air remains viable for systems and facilities designed for its airflow requirements.
+
+::: {.column-margin .margin-pointer}
+↪ Direct-to-chip liquid cooling and facility PUE trade-offs are developed in @sec-sustainable-ai-cooling.
+:::
+
+### Power and Thermal Envelopes {#sec-compute-power-wall}
 
 The memory wall constrains how fast data reaches the compute units; the Roofline Model diagnoses whether compute or memory is the binding constraint; and Tensor Cores maximize the arithmetic value of every byte fetched. Sustaining the resulting compute rate also requires a power-delivery and cooling system sized for the workload. Every FLOP dissipates energy, and the faster a system computes, the more heat it must remove. This is the power wall. @Fig-power-path diagrams the five voltage-conversion stages between the medium-voltage utility grid and the sub-volt GPU die, tracing where compounding conversion losses dissipate energy as heat along the distribution pipeline.
 
@@ -2409,143 +2585,6 @@ The advertised arithmetic-per-watt trajectory provides a partial counterweight t
 Packing accelerators close together shortens communication paths but concentrates heat. A four-node DGX H100 rack already draws `{python} RackPowerTdpRecap.rack_power_kw_str` at the modeled IT boundary (@sec-compute-rack), several times the load of a conventional server rack, and the accelerators of a `{python} PowerPathFigureAnchors.cluster_gpus_str`-GPU cluster alone draw `{python} PowerPathFigureAnchors.gpu_power_mw_str` before hosts, network, and cooling are counted. Rack and pod designs must reconcile that proximity with enough space and infrastructure to deliver power and remove heat across all participating nodes.
 
 Power-envelope implications recur throughout the infrastructure hierarchy. At the node level, configured limits constrain how many accelerators can share a chassis (@sec-compute-node). At the rack level, aggregate sustained load and heat flux help determine whether engineered air or liquid cooling can meet the design point (@sec-compute-rack). At the pod level, coincident demand and transient behavior shape megawatt-scale power delivery (@sec-compute-pod). Every level above the die must therefore manage both sustained heat and electrical variation. Accelerator selection must compare useful workload throughput within that facility envelope, rather than treating power as a cost added after the compute decision.
-
-## The Node {#sec-compute-node}
-
-The running model needs more memory than one accelerator provides. A node supplies several accelerators in one chassis, but each retains its own memory; dividing the work creates communication that the local fabric must sustain. Tensor parallelism divides an operation across accelerators, pipeline parallelism assigns successive model stages to different groups, and data parallelism assigns different training examples to model replicas whose updates must be combined. These strategies impose different traffic patterns. The node design determines whether that traffic crosses a slow ring\index{Network topology!ring}, a dense mesh\index{Network topology!full mesh}, or a switch-backed crossbar\index{NVSwitch!crossbar topology}. @Fig-node-topology-comparison diagrams these three intra-node wiring options for an eight-GPU chassis, contrasting the link scaling and network diameter of a two-link ring (up to four hops) and a 28-link full mesh against a single-hop NVSwitch crossbar.
-
-::: {#fig-node-topology-comparison fig-env="figure" fig-pos="htb" fig-cap="**Intra-node GPU topology comparison**: Three ways to wire eight GPUs inside one node. Left: a ring gives each GPU only two links, so traffic between distant GPUs passes through up to four hops. Center: a full mesh reaches every peer in one hop but needs $N-1$ links per GPU and $N(N-1)/2$ links in total, which becomes impractical to route beyond about eight GPUs. Right: an NVSwitch fabric gives each GPU one set of links to the switch and puts every pair one switch hop apart, with up to 450 GB/s per direction per H100 SXM GPU (900 GB/s bidirectional); that per-GPU injection bandwidth is not the aggregate bisection bandwidth of the switch fabric." fig-alt="Three panels of eight GPUs labeled G0 to G7. Left, Ring: the GPUs sit on a circle, each linked only to its two neighbors; the footer reads 2 links per GPU, up to 4 hops. Center, Full mesh: the same eight GPUs with a direct link between every pair; the footer reads 7 links per GPU, 28 links in all. Right, NVSwitch: four GPUs above and four below a horizontal NVSwitch fabric bar, each GPU joined to the bar by one link; the footer reads 1 switch hop between any pair."}
-![](images/svg/node-topology-comparison.svg)
-
-:::
-
-```{python}
-#| echo: false
-# ┌── LEGO ───────────────────────────────────────────────
-class InfraFrontierNodeMemRecap:
-    # ┌── 1. LOAD ──────────────────────────────────────────
-    weights_fp16 = Models.Language.GPT3.size_in_bytes(BYTES_FP16)
-    gpu_hbm = Hardware.Cloud.H100.memory.capacity
-
-    # ┌── 2. EXECUTE ───────────────────────────────────────
-    min_gpus = math.ceil((weights_fp16 / gpu_hbm).to_base_units().magnitude)
-
-    # ┌── 3. GUARD ─────────────────────────────────────────
-    check(min_gpus == 5, "Prose says the FP16 weights span at least five accelerators")
-
-    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
-    frontier_params_b_str = fmt_params(Models.Language.GPT3.parameters, scale="B", precision=0, commas=False)
-```
-
-Aggregating accelerators solves the capacity problem only if the interconnect between them is fast enough that the group behaves as one machine rather than as several machines passing messages. The `{python} InfraFrontierNodeMemRecap.frontier_params_b_str` model's weights span at least five accelerators, and the full training state spans an entire 8-H100 node\index{Node!accelerator aggregation} and more, so some model state must live on different chips. Depending on the partition, execution exchanges partial results, activations, gradients, or parameter shards. Whether those exchanges are cheap or ruinous depends on the local fabric, which is why the node is the first scale level where the accelerator's specifications matter less than the wires between accelerators. The training system can combine tensor parallelism, optimizer sharding, and memory offload as needed to meet its capacity budget, and each strategy places a different demand on the interconnect.
-
-```{python}
-#| echo: false
-from mlsysim.fmt import fmt_bandwidth, fmt_multiple
-
-# ┌── LEGO ───────────────────────────────────────────────
-class H100NvlinkNodeRecap:
-
-    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
-    nvlink_gb_per_s_str = fmt_bandwidth(Hardware.Cloud.H100.nvlink.bandwidth, unit=GB / second, precision=0, commas=False)
-    nvlink_per_dir_gb_per_s_str = fmt_bandwidth(Hardware.Cloud.H100.nvlink.bandwidth_per_direction, unit=GB / second, precision=0, commas=False)
-    _nvlink_ib_gap = (Hardware.Cloud.H100.nvlink.bandwidth_per_direction / Systems.Fabrics.InfiniBand_NDR.bandwidth).to_base_units().magnitude
-    nvlink_ib_gap_mult_str = fmt_multiple(_nvlink_ib_gap, precision=0, commas=False)
-    ib_bw_gb_per_s_str = fmt_bandwidth(Systems.Fabrics.InfiniBand_NDR.bandwidth, unit=GB / second, precision=0, commas=False)
-    gpus_per_node_str = fmt(Systems.Nodes.DGX_H100.accelerators_per_node, precision=0, commas=False)
-    gpu_hbm_gb_str = fmt_memory_capacity(Hardware.Cloud.H100.memory.capacity, unit=GiB, precision=0, commas=False)
-    node_hbm_gb_str = fmt_memory_capacity(
-        Hardware.Cloud.H100.memory.capacity * Systems.Nodes.DGX_H100.accelerators_per_node, unit=GiB, precision=0, commas=False
-    )
-    host_dram_low_gb_str = InfraFrontierMemoryHbmRecap.host_dram_low_gb_str
-    host_dram_high_tb_str = InfraFrontierMemoryHbmRecap.host_dram_high_tb_str
-```
-
-::: {#dfn-compute-infrastructure-node .callout-definition title="Node"}
-
-***Node***\index{Node!definition} is the ML training cluster's physical server chassis that aggregates multiple accelerators (typically 8) through a high-speed intra-node interconnect (NVLink or ICI), providing a physical packaging and failure boundary. The fast communication domain can coincide with one chassis or extend across several, depending on the fabric.
-
-1.  **Significance**: The NVLink bandwidth within a DGX H100 node reaches `{python} H100NvlinkNodeRecap.nvlink_gb_per_s_str` bidirectional, or `{python} H100NvlinkNodeRecap.nvlink_per_dir_gb_per_s_str` per direction, while inter-node InfiniBand NDR provides `{python} H100NvlinkNodeRecap.ib_bw_gb_per_s_str`, a `{python} H100NvlinkNodeRecap.nvlink_ib_gap_mult_str` per-direction gap that constrains where each parallelism strategy can run. For this DGX H100 topology, frequent tensor-parallel collectives favor the intra-node NVLink domain; pipeline parallelism can span nodes when the network sustains stage-boundary activation traffic. The node is also the primary failure domain: a single node failure in a bulk synchronous parallel training job, where workers advance in lockstep at step barriers, idles the entire cluster until recovery.
-2.  **Distinction**: Unlike a single accelerator (which provides fast HBM bandwidth but limited capacity), a node aggregates 8$\times$ the HBM capacity and 8$\times$ the compute of a single chip, enough to place large FP16 weight shards (`{python} H100NvlinkNodeRecap.gpus_per_node_str` $\times$ `{python} H100NvlinkNodeRecap.gpu_hbm_gb_str` = `{python} H100NvlinkNodeRecap.node_hbm_gb_str` on DGX H100), but not enough to keep the full Adam training state in HBM.
-3.  **Common pitfall**: A frequent misconception is that nodes in a distributed training job operate independently. In bulk synchronous parallel training, all nodes are synchronously coupled at every step barrier: a performance degradation on one node (from thermal throttling, a faulty NIC, or a slow storage read) stalls the entire cluster and drops overall MFU for the duration of that step.
-
-:::
-
-The node exists because of a gap in the memory hierarchy. HBM provides enough bandwidth to feed the accelerator's arithmetic units, but not enough capacity to hold the full 175B-parameter running example. Host DRAM provides capacity (`{python} H100NvlinkNodeRecap.host_dram_low_gb_str` to `{python} H100NvlinkNodeRecap.host_dram_high_tb_str` per server) but not enough bandwidth.
-
-The node bridges this gap by aggregating the HBM of multiple accelerators into distributed capacity connected by a fast interconnect. Each accelerator's HBM remains private to that device: software must shard or replicate tensors explicitly and use collectives or peer transfers when an operation crosses device boundaries. Placing 8 accelerators in one chassis therefore provides 8$\times$ aggregate capacity and 8$\times$ aggregate compute, but it does not create a single shared-memory accelerator; performance depends on how well the partitioning limits traffic over the fabric.
-
-```{python}
-#| echo: false
-from mlsysim.fmt import check, fmt, fmt_memory, fmt_qty_range
-
-# ┌── LEGO ───────────────────────────────────────────────
-# │ Context: hypothetical single-package "super-chip" paragraph below.
-class SuperChipStackCount:
-    """HBM stacks a single package would need to hold the 175B FP16 weights."""
-
-    # ┌── 1. LOAD ──────────────────────────────────────────
-    weights_fp16 = Models.Language.GPT3.size_in_bytes(BYTES_FP16)
-    h100 = Hardware.Cloud.H100
-    b200 = Hardware.Cloud.B200
-
-    # ┌── 2. EXECUTE ───────────────────────────────────────
-    stack_low = (h100.memory.capacity / h100.memory.hbm_stacks).to(GB)
-    stack_high = (b200.memory.capacity / b200.memory.hbm_stacks).to(GB)
-    stacks_low = math.ceil((weights_fp16 / stack_high).to_base_units().magnitude)
-    stacks_high = math.ceil((weights_fp16 / stack_low).to_base_units().magnitude)
-
-    # ┌── 3. GUARD ─────────────────────────────────────────
-    check(stacks_low > b200.memory.hbm_stacks, "The super-chip should need far more stacks than a B200 package")
-
-    # ┌── 4. OUTPUT ────────────────────────────────────────
-    weights_fp16_gb_str = fmt_memory(weights_fp16, unit=GB, precision=0, commas=False)
-    stack_capacity_range_str = fmt_qty_range(round(stack_low.magnitude) * GB, round(stack_high.magnitude) * GB, GB, precision=0, commas=False)
-    stack_count_range_str = fmt_range(stacks_low, stacks_high, precision=0, commas=False)
-    h100_stacks_str = fmt(h100.memory.hbm_stacks, precision=0, commas=False)
-    b200_stacks_str = fmt(b200.memory.hbm_stacks, precision=0, commas=False)
-```
-
-The capacity arithmetic also explains the appeal of multiple packages. Holding a 175B model's `{python} SuperChipStackCount.weights_fp16_gb_str` of FP16 weights on one accelerator, at the example `{python} SuperChipStackCount.stack_capacity_range_str` per HBM stack, would require `{python} SuperChipStackCount.weights_fp16_gb_str` spread across roughly `{python} SuperChipStackCount.stack_count_range_str` stacks. That exceeds the `{python} SuperChipStackCount.h100_stacks_str`-stack H100 and `{python} SuperChipStackCount.b200_stacks_str`-stack B200-class configurations used here. Such a package would need its own area, yield, power, and cooling analysis. Distributing capacity across 8 accelerators instead uses available packages and pays for communication between their private memories.
-
-```{python}
-#| echo: false
-from mlsysim.fmt import fmt_memory, fmt_memory_capacity
-
-# ┌── LEGO ───────────────────────────────────────────────
-class InfraFrontierNodeBudgetRecap:
-    # ┌── 1. LOAD ──────────────────────────────────────────
-    model = Models.Language.GPT3
-    params = model.parameters
-    gpus_per_node = Systems.Nodes.DGX_H100.accelerators_per_node
-
-    # ┌── 2. EXECUTE ───────────────────────────────────────
-    weights = model.size_in_bytes(BYTES_FP16)
-    optimizer = params * BYTES_FP32 * 2
-    gradients = weights
-    total_static = weights + optimizer + gradients
-    gpu_hbm = Hardware.Cloud.H100.memory.capacity
-    node_hbm = gpu_hbm * gpus_per_node
-
-    # ┌── 3. GUARD ─────────────────────────────────────────
-    check(abs(total_static.to(GB).magnitude - 2100) < 1, "Static training state should be about 2.1 TB")
-
-    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
-    frontier_params_b_str = fmt_params(params, scale="B", precision=0, commas=False)
-    frontier_params_b_value_str = fmt_magnitude(params, unit=Bparam, precision=0, commas=False)
-    weights_gb_str = fmt_memory(weights, unit=GB, precision=0, commas=True)
-    optimizer_gb_str = fmt_memory(optimizer, unit=GB, precision=0, commas=True)
-    gradients_gb_str = fmt_memory(gradients, unit=GB, precision=0, commas=True)
-    total_static_tb_str = fmt_memory(total_static, unit=TB, precision=1, commas=False)
-    gpu_hbm_gb_str = fmt_memory_capacity(gpu_hbm, unit=GiB, precision=0, commas=False)
-    node_hbm_gb_str = fmt_memory_capacity(node_hbm, unit=GiB, precision=0, commas=False)
-```
-
-Understanding how the node partitions memory across its components is essential for selecting parallelism strategies. Consider the memory budget for training our `{python} InfraFrontierNodeBudgetRecap.frontier_params_b_str` model. The model weights in FP16 require `{python} InfraFrontierNodeBudgetRecap.weights_gb_str`. The Adam optimizer maintains two additional copies of every parameter (first and second moments) in FP32 precision, adding `{python} InfraFrontierNodeBudgetRecap.frontier_params_b_value_str` $\times 10^9 \times 2 \times 4$ bytes = `{python} InfraFrontierNodeBudgetRecap.optimizer_gb_str`. Gradients require another `{python} InfraFrontierNodeBudgetRecap.gradients_gb_str`. This subtotal is approximately `{python} InfraFrontierNodeBudgetRecap.total_static_tb_str`, excluding activations and any separate FP32 master-weight copy, far exceeding both a single accelerator's `{python} InfraFrontierNodeBudgetRecap.gpu_hbm_gb_str` HBM and an 8-H100 node's `{python} InfraFrontierNodeBudgetRecap.node_hbm_gb_str` aggregate HBM.
-
-When using ZeRO or FSDP-style optimization (which shards optimizer states, gradients, and optionally parameters across data-parallel workers), the training system avoids replicating this 2.1 TB subtotal on every GPU. Tensor parallelism first reduces each GPU's active weight shard; data-parallel sharding then spreads optimizer state and gradients across many workers; activation checkpointing reduces the activation peak; and offload moves cold optimizer state to host DRAM over PCIe. The node is therefore a high-bandwidth compute and communication unit, not a standalone container for the entire training state.
-
-The node's internal memory hierarchy, consisting of HBM (fast, small), host DRAM (medium speed, larger), and NVMe storage (slow, very large), forms a tiered system that distributed training frameworks exploit aggressively.
 
 ### Bandwidth hierarchy {#sec-compute-bandwidth-hierarchy}
 
@@ -3532,45 +3571,6 @@ class H100TdpRackRecap:
     cluster_gpus_str = fmt(cluster_gpus, precision=0, commas=False)
 ```
 
-## The Rack {#sec-compute-rack}
-
-A standard 42U server rack\index{Rack!power density} in a traditional data center draws about `{python} RackPowerRackRecap.traditional_rack_kw_str` and can be cooled by room-temperature air pushed through perforated floor tiles. The chapter's four-node DGX H100 rack scenario draws `{python} RackPowerRackRecap.rack_power_kw_str` at the modeled IT boundary. At this density, the engineering constraints shift from silicon and signal integrity to power delivery\index{Power delivery!rack-scale} and thermodynamics. The rack is where the power wall and the laws of heat transfer\index{Cooling!rack-scale heat dissipation} become dominant design forces.
-
-::: {.column-margin}
-![](images/svg/vol2_compute_infrastructure_margin_002.svg){width="100%" fig-alt="Two orange horizontal bars on a linear scale: DGX rack 33.5 kW and legacy rack 12 kW."}
-
-*A four-node DGX rack draws nearly three times a traditional rack.*
-:::
-
-```{python}
-#| echo: false
-# ┌── LEGO ───────────────────────────────────────────────
-class InfraFrontierRackPowerRecap:
-
-    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
-    frontier_params_b_str = fmt_params(Models.Language.GPT3.parameters, scale="B", precision=0, commas=False)
-```
-
-For our `{python} InfraFrontierRackPowerRecap.frontier_params_b_str` model, training across `{python} RackPowerRackRecap.cluster_gpus_str` GPUs requires `{python} RackPowerRackRecap.racks_for_1k_str` racks (`{python} RackPowerRackRecap.nodes_per_rack_str` nodes of `{python} RackPowerRackRecap.gpus_per_node_str` GPUs each per rack). Across the cluster, the modeled rack IT power sums to approximately `{python} RackPowerRackRecap.cluster_power_mw_str`, before facility cooling overhead. Delivering this power reliably and removing the resulting heat without allowing any component to exceed its thermal limit is a multidisciplinary engineering challenge spanning electrical, mechanical, and civil engineering. A failure at any point in the power delivery chain, from the utility substation to the individual GPU voltage regulator, can halt the entire training run, wasting hours of computation and potentially corrupting the training state.
-
-::: {#dfn-compute-infrastructure-rack .callout-definition title="Rack"}
-
-***Rack***\index{Rack!definition} is the physical infrastructure unit, a standardized 42U enclosure, that houses multiple compute nodes, a top-of-rack (ToR) switch (the first network aggregation point connecting all nodes in the rack to the broader cluster fabric), power distribution units, and cooling distribution manifolds, defining the granularity at which power and cooling capacity must be provisioned.
-
-1.  **Significance**: AI rack power density has grown dramatically. The chapter's four-node DGX H100 scenario contains `{python} RackPowerRackRecap.rack_gpus_str` GPUs at `{python} H100TdpRackRecap.tdp_w_str` each and draws `{python} RackPowerRackRecap.rack_power_kw_str` at the modeled IT boundary. This exceeds the roughly `{python} RackPowerRackRecap.traditional_rack_kw_str` typical of general-purpose data center racks and requires purpose-designed electrical distribution and cooling capacity. Whether that cooling is engineered air or liquid depends on the system configuration and facility design.
-2.  **Distinction**: A node packages compute; a rack integrates shared power, cooling, and network distribution. Components and nodes remain individually serviceable, but their maintenance and replacement must respect the capacity and failure boundaries of those shared systems.
-3.  **Common pitfall**: A frequent misconception is that rack placement is a logistical afterthought. Nodes within the same rack share a ToR switch and have single-hop connectivity; nodes in different racks cross at least two switch hops. Placing pipeline stages within a rack can reduce inter-rack traffic when the actual paths and available capacity support the stage-boundary exchanges.
-
-:::
-
-Heat transfer explains why density reshapes the rack. Air has much lower volumetric heat capacity than liquid, so an air-cooled rack needs sufficient airflow, pressure, and temperature rise to carry away its heat. There is no universal 30 kW cutoff: the practical limit depends on server and facility design. The chapter's `{python} RackPowerRackRecap.rack_power_kw_str` scenario can use engineered air cooling in a suitable facility; denser systems can make liquid cooling the practical choice.
-
-Cooling selection is therefore configuration-dependent rather than a consequence of one rack-power threshold. Direct-to-chip liquid cooling raises heat-removal capacity and can reduce fan energy, while engineered air remains viable for systems and facilities designed for its airflow requirements.
-
-::: {.column-margin .margin-pointer}
-↪ Direct-to-chip liquid cooling and facility PUE trade-offs are developed in @sec-sustainable-ai-cooling.
-:::
-
 ### Rack design considerations {#sec-compute-rack-design}
 
 The physical design of an ML rack differs substantially from a traditional server rack in ways that go beyond power and cooling. In a conventional 42U rack, servers are installed as independent 1U or 2U pizza-box units, each with its own fans, power supplies, and cable connections. ML racks use a fundamentally different form factor. A DGX H100 occupies 8U and contains 8 GPUs, the NVSwitch fabric, multiple power supplies, and (in liquid-cooled configurations) coolant manifolds with quick-connect fittings. Four DGX units in a 42U rack leave only 10U for networking switches, cable management, and PDUs.
@@ -4048,7 +4048,7 @@ At this scale, the warehouse-scale computer (WSC)\index{Warehouse-scale computer
 
 Coupling distinguishes a WSC from a general-purpose cluster. A synchronous training job couples the workers in its own process groups, so a failed worker can stall that job while other tenants continue, unless a shared power, cooling, or network failure reaches them as well. Designing such a machine is building-level computer architecture. Rack placement, the power delivery chain, and the network topology must be co-designed, because a mistake at any layer propagates through the others.
 
-### WSC architecture principles {#sec-compute-wsc-principles}
+## The Fleet {#sec-compute-fleet}
 
 ::: {.column-margin}
 ![](images/svg/vol2_compute_infrastructure_margin_003.svg){width="100%" fig-alt="Three-rung time ladder: one GPU has about 50,000 hours mean time to failure, 1,000 GPUs about 50 hours, and 10,000 GPUs about 5 hours."}
