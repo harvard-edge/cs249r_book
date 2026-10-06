@@ -217,7 +217,7 @@ class NetworkFabricsContextScenario:
     h100_mem_bw_tb_per_s_str = fmt_bandwidth(h100_mem_bw_raw, unit=TB / second, precision=2, commas=False)
 ```
 
-The reference hardware gives the gradient bus analogy a concrete scale. A single H100 has a precision-specific FP16 peak of `{python} NetworkFabricsContextScenario.h100_fp16_tflop_per_s_str` and memory bandwidth of `{python} NetworkFabricsContextScenario.h100_mem_bw_tb_per_s_str`. Its aggregate bidirectional NVLink budget is `{python} NetworkFabricsContextScenario.nvlink_h100_gb_per_s_str` within the node. Comparing per-direction rates gives a ratio of `{python} NetworkFabricsContextScenario.nvlink_to_ib_ratio_mult_str` between `{python} NetworkFabricsContextScenario.nvlink_h100_perdir_gb_per_s_str` of aggregate NVLink bandwidth and `{python} NetworkFabricsContextScenario.ib_ndr_gb_per_s_str` at one NDR InfiniBand port (we compare the aggregate internal bandwidth to a single external port here because a single network interface card (NIC) is often the tightest chokepoint when a tensor must cross the node boundary). The model-wide `{python} NetworkRunningExampleCluster.grad_gb_str` gradient state does not all pass through every `{python} NetworkFabricsContextScenario.ib_ndr_gb_per_s_str` port; partitioning and the collective schedule determine each port's traffic. @Fig-bandwidth-hierarchy compares these resource budgets across four GPU generations (V100 through B200). Converting the budgets into a step-time estimate requires the workload's local payloads and communication dependencies.
+The reference hardware gives the gradient bus analogy a concrete scale. A single H100 has a precision-specific FP16 peak of `{python} NetworkFabricsContextScenario.h100_fp16_tflop_per_s_str` and memory bandwidth of `{python} NetworkFabricsContextScenario.h100_mem_bw_tb_per_s_str`. Its aggregate bidirectional NVLink budget is `{python} NetworkFabricsContextScenario.nvlink_h100_gb_per_s_str` within the node. Comparing per-direction rates gives a ratio of `{python} NetworkFabricsContextScenario.nvlink_to_ib_ratio_mult_str` between `{python} NetworkFabricsContextScenario.nvlink_h100_perdir_gb_per_s_str` of aggregate NVLink bandwidth and `{python} NetworkFabricsContextScenario.ib_ndr_gb_per_s_str` at one NDR InfiniBand port. The comparison sets the aggregate internal budget against a single external port because one network interface card (NIC) is often the tightest chokepoint when a tensor must cross the node boundary. The model-wide `{python} NetworkRunningExampleCluster.grad_gb_str` gradient state does not all pass through every `{python} NetworkFabricsContextScenario.ib_ndr_gb_per_s_str` port; partitioning and the collective schedule determine each port's traffic. @Fig-bandwidth-hierarchy compares these resource budgets across four GPU generations (V100 through B200). Converting the budgets into a step-time estimate requires the workload's local payloads and communication dependencies.
 
 ::: {.column-margin .margin-pointer}
 ↩ The bandwidth hierarchy and its configuration-dependent transfer costs are established in @sec-compute-bandwidth-hierarchy.
@@ -470,7 +470,7 @@ The ML networking inversion\index{ML Networking!data-center workload inversion} 
 
 : **ML networking inverts traditional data-center assumptions**: The comparison contrasts independent-request traffic with synchronized collective phases. Correlated demand and shared completion boundaries change the fabric's capacity and latency requirements. {#tbl-network-assumptions}
 
-The bulk synchronous parallel (BSP)[^fn-bsp-valiant-routing] model makes the dependency in @tbl-network-assumptions explicit. Workers compute locally, exchange the data needed for the next phase, and wait at a barrier until the participating workers finish. In the synchronous training example, all `{python} NetworkRunningExampleCluster.n_gpus_str` must complete the required gradient exchange before the next step can proceed. A 100 ms transfer delay adds 100 ms to that step only if it extends the critical path by the full interval; other computation or communication may hide part of it. At a barrier waiting for the last required result, *Tail latency is not an outlier; it is the bottleneck.*
+The bulk synchronous parallel (BSP)[^fn-bsp-valiant-routing] model makes the dependency in @tbl-network-assumptions explicit. Workers compute locally, exchange the data needed for the next phase, and wait at a barrier until the participating workers finish. In the synchronous training example, all `{python} NetworkRunningExampleCluster.n_gpus_str` must complete the required gradient exchange before the next step can proceed. A 100 ms transfer delay adds 100 ms to that step only if it extends the critical path by the full interval; other computation or communication may hide part of it. At a barrier that waits for the last required result, *tail latency is not an outlier; it is the bottleneck.*
 
 [^fn-bsp-valiant-routing]: [offset=-14mm] **BSP (bulk synchronous parallel)**\index{Bulk Synchronous Parallel!origin}: Proposed by @valiant1990 as a bridging model between parallel hardware and software. Synchronous data-parallel training has the same barrier shape: workers compute local gradients, exchange them, and update from a shared step boundary, making tail latency a binding throughput constraint [@goyal2017accurate; @li2020pytorch].
 
@@ -541,7 +541,7 @@ class IbNdrWireRecap:
     ib_ndr_gbit_per_s_str = fmt_bandwidth(Systems.Fabrics.InfiniBand_NDR.bandwidth, unit=Gbps, precision=0, commas=False)
 ```
 
-At `{python} IbNdrWireRecap.ib_ndr_gbit_per_s_str` and beyond, the physics of signal transmission imposes hard limits on cable length, power consumption, and error rates. Signal attenuation in copper and chromatic dispersion in fiber dictate how far an accelerator can sit from its switches before communication fails. Every higher-level protocol and topology is ultimately constrained by what the physical wire can carry; these limits shape the geometry of the entire cluster. To combat attenuation while meeting throughput demands, link designs must compress more data into the same physical frequency band.
+At `{python} IbNdrWireRecap.ib_ndr_gbit_per_s_str` and beyond, the physics of signal transmission imposes hard limits on cable length, power consumption, and error rates. Signal attenuation in copper and chromatic dispersion in fiber dictate how far an accelerator can sit from its switches before communication fails. Every higher-level protocol and topology is ultimately constrained by what the physical wire can carry; these limits shape the geometry of the entire cluster. To meet throughput demands without raising the signaling rate into worse attenuation, link designs must carry more bits in each transmitted symbol.
 
 ### Signal integrity and PAM4 {#sec-network-fabrics-pam4}
 
@@ -1800,7 +1800,7 @@ class TopologyScenario:
     rail_cost_str = fmt_usd(cost_per_gbps["rail"], precision=0 if float(cost_per_gbps["rail"]).is_integer() else 1, commas=False)
 ```
 
-@Fig-network-topologies charts this bandwidth-versus-cost trade-off on dual vertical axes for a `{python} TopologyScenario.n_gpus_str`-GPU reference cluster. The blue bars track bisection bandwidth from 25.6 TB/s in the non-blocking fat-tree down to 6.4 TB/s in the 3D torus, while the superimposed orange line plots assumed interconnect cost per Gb/s ($1.50/Gb/s for the switchless torus up to $4.00/Gb/s for the tapered Dragonfly). Radix, endpoint count, link speed, routing mechanisms, and equipment pricing all shift these trade-offs; the topology family alone dictates neither raw cross-sectional capacity nor operational capital cost.
+@Fig-network-topologies charts this bandwidth-versus-cost trade-off on dual vertical axes for a `{python} TopologyScenario.n_gpus_str`-GPU reference cluster. The blue bars track bisection bandwidth from `{python} TopologyScenario.fat_tree_tb_str` in the non-blocking fat-tree down to `{python} TopologyScenario.torus_tb_str` in the 3D torus, while the superimposed orange line plots assumed interconnect cost per Gb/s (`{python} TopologyScenario.torus_cost_str`/Gb/s for the switchless torus up to `{python} TopologyScenario.dragonfly_cost_str`/Gb/s for the tapered dragonfly). Radix, endpoint count, link speed, routing mechanisms, and equipment pricing all shift these trade-offs; the topology family alone dictates neither raw cross-sectional capacity nor operational capital cost.
 
 ::: {#fig-network-topologies fig-env="figure" fig-pos="htb" fig-cap="**An illustrative bandwidth-cost scenario for ML network topologies**: $\Bandwidth_{\text{bisect}}$ (TB/s, left axis) and assumed cost per Gb/s (right axis) for four topology configurations on a `{python} TopologyScenario.n_gpus_str`-GPU cluster: fat-tree (`{python} TopologyScenario.fat_tree_tb_str`, `{python} TopologyScenario.fat_tree_cost_str`/Gb/s), dragonfly with tapered global links (`{python} TopologyScenario.dragonfly_tb_str`, `{python} TopologyScenario.dragonfly_cost_str`), rail-optimized with a 2:1 bridging spine (`{python} TopologyScenario.rail_tb_str`, `{python} TopologyScenario.rail_cost_str`), and a 3D torus (`{python} TopologyScenario.torus_tb_str`, `{python} TopologyScenario.torus_cost_str`). The bandwidths follow from the stated structures at one link rate; the costs are scenario inputs that illustrate the comparison method rather than universal properties of each topology family." fig-alt="Illustrative bar chart of four topology configurations with bisection bandwidth in TB/s and assumed cost per Gb/s; fat-tree has the highest bandwidth, and the 3D torus has both the lowest bandwidth and the lowest assumed cost per Gb/s."}
 ```{python}
@@ -1944,7 +1944,7 @@ class NetworkFabricBridgeRecap:
     n_gpus_str = fmt_count(Systems.Clusters.Training_1K.total_accelerators, commas=True, label="GPU")
 ```
 
-Topology provides the structural capacity for the cluster of `{python} NetworkFabricBridgeRecap.n_gpus_str` to communicate, but structure alone does not guarantee performance. When the `{python} NetworkFabricBridgeRecap.n_gpus_str` synchronize contributions to the model’s `{python} NetworkRunningExampleCluster.grad_gb_str` gradient state, that theoretical capacity collides with the reality of **fabric behavior**\index{Fabric behavior!definition}: congestion control and routing dynamics determine whether this traffic flows smoothly or gridlocks under the strict synchronization of the BSP model.
+Topology provides the structural capacity for the cluster of `{python} NetworkFabricBridgeRecap.n_gpus_str` to communicate, but structure alone does not guarantee performance. When the `{python} NetworkFabricBridgeRecap.n_gpus_str` synchronize contributions to the model's `{python} NetworkRunningExampleCluster.grad_gb_str` gradient state, that theoretical capacity collides with the reality of **fabric behavior**\index{Fabric behavior!definition}: congestion control and routing dynamics determine whether this traffic flows smoothly or gridlocks under the strict synchronization of the BSP model.
 
 ## Level 4 Fabric Behavior, Congestion, and Routing {#sec-network-fabrics-behavior}
 
@@ -2002,7 +2002,7 @@ When each buffer in the cycle fills beyond its configured pause threshold, each 
 ![](images/svg/pfc-credit-deadlock.svg)
 :::
 
-Routing changes and flooding can create the dependencies needed for deadlock. During link failure or Border Gateway Protocol (BGP) convergence, inconsistent forwarding tables can create transient loops. If traffic occupies a cycle of mutually blocked queues, backpressure can prevent progress until recovery breaks the dependency. Multicast or broadcast replication can also fill queues whose dependencies intersect, while cross-connects and asymmetric failover paths can introduce cycles absent from the intended hierarchical route. None of these conditions alone proves a deadlock; the occupied buffers and pause states must form the closed waiting cycle described by the model.
+Routing changes and flooding can create the dependencies needed for deadlock. During link failure or Border Gateway Protocol (BGP) convergence, inconsistent forwarding tables can create transient loops. A lossy IP network eventually discards a looping packet when its time-to-live expires; a lossless class has no such release, so looping traffic can fill the buffers along the loop and hold them. If traffic occupies a cycle of mutually blocked queues, backpressure can prevent progress until recovery breaks the dependency. Multicast or broadcast replication can also fill queues whose dependencies intersect, while cross-connects and asymmetric failover paths can introduce cycles absent from the intended hierarchical route. None of these conditions alone proves a deadlock; the occupied buffers and pause states must form the closed waiting cycle described by the model.
 
 Microsoft's production RoCE deployment encountered the flooding trigger directly (war story \ref{ws-network-fabrics-microsoft-pfc-deadlock}).
 
@@ -2097,7 +2097,7 @@ Assume independent transceiver-degradation events with the same per-device proba
 
 #### Watchdog recovery and the lossy alternative {#sec-network-pfc-watchdogs-and-lossy}
 
-Switches can use **PFC watchdog timers**\index{PFC watchdog!definition} to detect prolonged pause states and trigger recovery without a full reboot. The configured threshold $T_{\text{watchdog}}$ must fit the deployment's pause and recovery budgets; a range such as $50\text{--}200\text{ ms}$ is a configuration example, not a universal requirement. Exceeding it indicates stalled progress, not proof of a cyclic deadlock. Depending on the implementation, mitigation can disable pause handling or discard affected traffic so blocked queues can drain. The transport must then recover any lost data, with the completion penalty determined by retransmission behavior, outstanding traffic, and the collective's dependencies.
+Switches can use **PFC watchdog timers**\index{PFC watchdog!definition} to detect prolonged pause states and trigger recovery without a full reboot. The configured threshold $T_{\text{watchdog}}$ must fit the deployment's pause and recovery budgets; a range such as $50\text{--}200\text{ ms}$ is a configuration example, not a universal requirement. Exceeding it indicates stalled progress, not proof of a cyclic deadlock. Depending on the implementation, mitigation can disable pause handling or discard affected traffic so blocked queues can drain. The transport must then recover any lost data, with the completion penalty determined by retransmission behavior, outstanding traffic, and the collective's dependencies. On an RNIC with Go-Back-N-style recovery (@sec-network-fabrics-losslessness), each discarded packet also forces retransmission of the packets sent after it, so breaking a pause converts a stalled queue into a retransmission tail that the waiting collective absorbs.
 
 This systemic brittleness is driving hyperscale operators toward next-generation architectures such as the Ultra Ethernet Consortium (UEC) [@ultraEthernet2025specification], detailed in @sec-network-fabrics-protocol-convergence, and loss-tolerant RDMA designs [@mittal2018irn]. Designs that combine packet spraying\index{Packet spraying!deadlock prevention} with congestion control and selective retransmission can operate without link-layer PFC. Removing PFC removes its pause-based deadlocks and storms, but endpoint recovery must still bound the completion-time penalty of congestion and loss.
 
@@ -2265,6 +2265,7 @@ where $Q_{\text{max}}$ is the finite buffer capacity. The ratio $\ServingUtiliza
 ::: {.column-margin .margin-pointer}
 ⇄ **Contrast:** Request queues, whose arrival and service rates set serving latency rather than switch buffer occupancy, are developed in @sec-appdx-inference-scale-queuing-theory-batched-inference-bbf0.
 :::
+
 In the deliberately worst-case incast above, $\ServingUtilization$ is `{python} IncastBurst.oversubscription_mult_str`, so the `{python} IncastBurst.buffer_mb_str` buffer fills in about `{python} IncastBurst.overflow_us_str`. Once full, that buffer represents `{python} IncastBurst.buffer_hold_us_str` of egress waiting time. By contrast, the bandwidth-delay product\index{Bandwidth-delay product!buffer distinction} for the `{python} IncastBurst.port_gbit_per_s_str` egress and an illustrative `{python} IncastBurst.feedback_rtt_us_str` feedback round trip is only `{python} IncastBurst.bandwidth_delay_product_kb_str`: it measures data in flight on the path, not the buffering needed to absorb an arbitrary fan-in burst. ECN\index{ECN!reaction window} must mark early enough for feedback to arrive before exhaustion; PFC can prevent a drop, but its backpressure can spread congestion. A larger buffer extends the reaction window at the cost of a larger tail-latency bound.
 
 ::: {#fig-congestion-cascade fig-env="figure" fig-pos="htb" fig-cap="**A true incast burst**: This deliberately worst-case fan-in scenario sends `{python} IncastCascadeFigure.n_senders_str` sources at `{python} IncastCascadeFigure.sender_bw_gb_per_s_str` toward one `{python} IncastCascadeFigure.port_gbit_per_s_str` (`{python} IncastCascadeFigure.port_gb_per_s_str`) egress with a `{python} IncastCascadeFigure.buffer_mb_str` buffer. The `{python} IncastCascadeFigure.offered_tb_per_s_str` offered load oversubscribes the destination egress by `{python} IncastCascadeFigure.oversub_mult_str`. Flat aggregation or synchronized reads can create this pattern; bandwidth-optimal ring AllReduce does not, because each rank exchanges point-to-point chunks." fig-alt="Four labeled sender GPUs, GPU 1, 2, 3, and 256, with 252 more implied, each send at 50 GB/s into a shared trunk. A thick arrow labeled 12.8 TB/s offered enters a switch egress port whose 32 MB buffer is drawn as a row of full cells marked drops or PAUSE upstream. A thin 400 Gb/s (50 GB/s) arrow leaves the port to one receiver."}
@@ -2294,6 +2295,8 @@ These mitigations spread the burst in time, space, and priority, but they do not
 :::
 
 ## Level 5 Cluster Design and Case Studies {#sec-network-fabrics-cluster}
+
+The final level of the stack is cluster design\index{Cluster design!gradient bus integration}, where wires, transport, topology, and congestion control combine into a coherent system. The goal of cluster design is to provide an end-to-end gradient bus that makes thousands of distributed GPUs feel like a single machine. At this level, the abstraction layers collapse into concrete engineering decisions: which cables to buy, how to wire the racks, which protocol to deploy, and how to validate that the resulting fabric delivers the bandwidth the training job expects. Two representative large-scale architectures, one built on InfiniBand and one on Ethernet, illuminate the trade-offs that define ML infrastructure [@nvidia2023dgxSuperpodH100; @meta2024genaiInfrastructure; @gangidi2024rdma].
 
 ### The GPU-to-GPU "gradient bus" {#sec-network-fabrics-gradient-bus}
 
@@ -2347,9 +2350,54 @@ In a well-designed cluster, the network fabric acts as a scheduler-aware extensi
 
 Placement determines which communication crosses each boundary. Tensor-parallel groups benefit from fast local paths because they exchange intermediate results frequently. Pipeline\index{Pipeline parallelism!network hierarchy} stages require paths that meet their activation-transfer budget; physical adjacency alone does not establish that property. Data-parallel\index{Data parallelism!network hierarchy} replicas can span the wider fabric when local computation, accumulation, and overlap leave sufficient time for gradient exchange. The production designs that follow show how complete configurations provide those paths.
 
-The final level of the stack is cluster design\index{Cluster design!gradient bus integration}, where wires, transport, topology, and congestion control combine into a coherent system. The goal of cluster design is to provide an end-to-end gradient bus that makes thousands of distributed GPUs feel like a single machine. At this level, the abstraction layers collapse into concrete engineering decisions: which cables to buy, how to wire the racks, which protocol to deploy, and how to validate that the resulting fabric delivers the bandwidth the training job expects. Two representative large-scale architectures, one built on InfiniBand and one on Ethernet, illuminate the trade-offs that define ML infrastructure [@nvidia2023dgxSuperpodH100; @meta2024genaiInfrastructure; @gangidi2024rdma].
+### NVIDIA DGX SuperPOD architecture {#sec-network-fabrics-dgx-superpod}
 
-### Network Virtualization {#sec-network-fabrics-virtualization}
+The NVIDIA DGX SuperPOD architecture connects DGX H100 nodes using an NDR InfiniBand network, serving as a concrete implementation of the gradient bus concept [@nvidia2023dgxSuperpodH100]. Each node acts as a dense compute island, with `{python} IncastBurst.gpus_per_node_word_str` H100 GPUs connected via NVSwitch to provide `{python} NetworkFabricsClusterRecap.nvlink_h100_gb_per_s_str` of internal bandwidth. Externally, each GPU pairs with a ConnectX-7 NIC delivering `{python} NetworkFabricsClusterRecap.ib_ndr_gbit_per_s_str` of injection bandwidth. Across a standard scalable unit of `{python} IncastBurst.su_nodes_str` (`{python} IncastBurst.n_senders_gpus_str`), this yields an aggregate injection bandwidth of `{python} IncastBurst.offered_tb_per_s_str` (`{python} IncastBurst.n_senders_str` $\times$ `{python} IncastBurst.sender_bw_gb_per_s_str`), the rate the scalable unit can offer the fabric when every GPU transmits at once.
+
+This architecture explicitly instantiates the five-level network model. At Level 1, it standardizes on `{python} NetworkFabricsClusterRecap.ib_ndr_gbit_per_s_str` NDR links, with media chosen by reach between each node and its leaf and between leaf and spine. At Level 2, it relies on InfiniBand's native credit-based flow control to guarantee a lossless medium without the fragility of Ethernet PFC. Level 3 implements a rail-optimized fat-tree\index{Rail-optimized topology!DGX SuperPOD implementation}: GPU rails are aligned across a scalable unit so same-rail traffic stays close and cross-rail traffic traverses the spine layer. At Level 4, hardware-based adaptive routing can select among spine paths to improve bisection behavior for cross-rank communication. At Level 5, the design is modular: multiple SuperPOD scalable units connect through additional switching to form larger clusters [@nvidia2023dgxSuperpodH100]. For the 175B-parameter model, the physical infrastructure would consist of `{python} IncastBurst.su_per_ref_cluster_word_str` SuperPOD scalable units wired together, allowing `{python} IncastBurst.ref_cluster_gpus_str` to function as a single synchronous instrument.
+
+### Meta Grand Teton platform {#sec-network-fabrics-grand-teton}
+
+```{python}
+#| echo: false
+#| label: network-fabrics-grand-teton
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ META GRAND TETON CLUSTERS (LEGO)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @sec-network-fabrics-grand-teton opening paragraph.
+# │ Goal: Pin the disclosed cluster size and endpoint rate to the registry.
+# │ How: Systems.Clusters.Meta_GenAI_H100_24K_RoCE / _IB (3,072 Grand Teton
+# │      nodes × 8 H100) on Systems.Fabrics.RoCE_400G / InfiniBand_NDR.
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim.fmt import check, fmt, fmt_bandwidth
+
+class GrandTetonClusters:
+    # ┌── 1. LOAD ──────────────────────────────────────────────────────────
+    roce = Systems.Clusters.Meta_GenAI_H100_24K_RoCE
+    ib = Systems.Clusters.Meta_GenAI_H100_24K_IB
+
+    # ┌── 3. GUARD ─────────────────────────────────────────────────────────
+    check(roce.total_accelerators == ib.total_accelerators, "Both Meta clusters have the same GPU count")
+    check(roce.fabric.bandwidth == ib.fabric.bandwidth, "Both Meta clusters use the same endpoint rate")
+
+    # ┌── 4. OUTPUT ────────────────────────────────────────────────────────
+    n_gpus_value_str = fmt(roce.total_accelerators, precision=0, commas=True)
+    endpoint_gbit_per_s_str = fmt_bandwidth(roce.fabric.bandwidth, unit=Gbps, precision=0, commas=False)
+```
+
+Meta disclosed two Grand Teton-based `{python} GrandTetonClusters.n_gpus_value_str`-H100 clusters: one using RoCE over an Arista/OCP Ethernet fabric and one using NVIDIA Quantum-2 InfiniBand, both with `{python} GrandTetonClusters.endpoint_gbit_per_s_str` endpoints. Meta used both for Llama 3 training and reported ongoing Llama 3 training on the RoCE cluster [@meta2024genaiInfrastructure]. The primary motivation for Ethernet is operational scale and supply chain resilience: by using Ethernet, Meta can source switches from multiple vendors and use the same optical infrastructure and management tooling shared by their front-end serving fleet, avoiding the operational silo of a dedicated InfiniBand island.
+
+Meta's RoCE study shows how Level 4 choices affect the complete fabric. It describes PFC watchdogs for long-duration pause events, iterative routing designs beyond plain ECMP, future-oriented flowlet switching experiments, and a 400G deployment in which DCQCN tuning proved difficult enough that Meta proceeded without DCQCN while relying on PFC plus higher-layer collective controls [@gangidi2024rdma]. The lesson is to validate the combination of endpoint behavior, routing, and flow control under the intended collective traffic. Large-transfer throughput alone does not establish small-message latency or recovery tails, and those results cannot be inferred from the Ethernet or InfiniBand label.
+
+::: {#psp-network-fabrics-infiniband-vs-roce-industry-verdict .callout-perspective title="InfiniBand vs. RoCE: The industry verdict"}
+
+The InfiniBand and RoCE deployments demonstrate different ways to meet a workload's communication contract. Their equipment, routing, recovery mechanisms, and operational requirements must be compared as complete configurations. InfiniBand's native credit-based flow control can simplify lossless configuration and tighten small-message tails, while RoCE inherits Ethernet's multi-vendor switching and shared operational tooling at the cost of tuning buffering, PFC, ECN, and routing policy. For *training runs*, frequent small exchanges can expose startup latency even when a full step lasts seconds. For *inference serving*, the importance of fabric latency depends on model partitioning, request shape, and service-level objectives (SLOs). In both cases, delivered performance and operating cost decide the trade-off.
+
+:::
+
+These case studies close the five-level stack by showing how the physical wire, transport protocol, topology, and congestion controls become one production fabric. The remaining operational problem is not how to build a single fast cluster, but how to share that expensive substrate across teams and workloads without sacrificing the predictable performance that training demands.
+
+## Network Virtualization {#sec-network-fabrics-virtualization}
 
 ```{python}
 #| echo: false
@@ -2397,7 +2445,7 @@ class VirtualizationIdleCost:
 
 Sharing a cluster can recover capacity that a single workload leaves unused. In the scenario of a `{python} VirtualizationIdleCost.cluster_cost_str` system with `{python} VirtualizationIdleCost.idle_pct_str` unused capacity, the idle fraction corresponds to `{python} VirtualizationIdleCost.stranded_str` of the equipment budget. Network virtualization\index{Network virtualization!multi-tenancy} must make sharing compatible with bandwidth allocations, latency targets, and access isolation. These requirements interact because tenants still share physical links and buffers. A proposed policy might reserve `{python} VirtualizationIdleCost.training_share_pct_str` of the cluster's $\Bandwidth_{\text{bisect}}$ for training and allocate the remaining `{python} VirtualizationIdleCost.other_share_pct_str` to inference and preprocessing. Enforcing that policy requires admission control and compatible scheduling along the relevant paths; a virtual NIC or separate traffic class alone does not guarantee the end-to-end share.
 
-#### Hardware NIC virtualization with SR-IOV {#sec-network-fabrics-sriov}
+### Hardware NIC virtualization with SR-IOV {#sec-network-fabrics-sriov}
 
 ```{python}
 #| echo: false
@@ -2412,15 +2460,15 @@ Cloud providers expose NIC resources to virtualized GPU instances through **sing
 
 However, hardware-level isolation still needs explicit bandwidth policy. SR-IOV exposes multiple VFs that share the NIC's physical resources; administrators can add per-VF or per-group QoS policies to cap or guarantee bandwidth, such as assigning `{python} VirtualizationIdleCost.n_vfs_word_str` VFs `{python} VirtualizationIdleCost.vf_rate_gbit_per_s_str` each on a `{python} IbNdrVirtualizationRecap.ib_ndr_gbit_per_s_str` NIC. For the 175B-parameter model training on a multi-tenant cluster, that configured partitioning can prevent a neighboring tenant from stealing bandwidth, but it also enforces a hard ceiling on peak throughput. The training job must be architected to operate within this slice, as no amount of software optimization can burst beyond the configured VF limit.
 
-#### Traffic isolation and quality of service {#sec-network-fabrics-qos}
+### Traffic isolation and quality of service {#sec-network-fabrics-qos}
 
 Consider a worst-case contention scenario on a shared cluster: the 175B model is midway through a gradient AllReduce when a neighboring job initiates a massive checkpoint save. Without strict isolation, a bursty `{python} VirtualizationIdleCost.ckpt_gb_str` write, which occupies a `{python} IbNdrVirtualizationRecap.ib_ndr_gbit_per_s_str` port for `{python} VirtualizationIdleCost.ckpt_s_str` at full line rate, can claim a large share of the shared spine links for that interval and stretch every AllReduce whose traffic crosses them. To prevent this noisy-neighbor effect, high-performance fabrics rely on **quality of service (QoS)**\index{Quality of service!definition} mechanisms that enforce fairness at the packet level.
 
-InfiniBand virtual lanes (VLs)\index{Virtual lane!traffic isolation} separate credit and buffer state within a physical link. Ethernet/RoCE uses **traffic class**\index{Traffic class!definition} mappings and queue policies, whose supported counts and behavior depend on the device. In InfiniBand, exhausted credits for a storage lane need not block a gradient lane that has credits available, but both still share link bandwidth and arbitration. On Ethernet, **enhanced transmission selection**\index{Enhanced transmission selection!definition} allocates service among traffic classes. Devices may also partition buffer and forwarding resources into **network slices**\index{Network slice!definition}. These mechanisms reduce interference when classification, resource allocation, and scheduling agree across the path; shared priorities or buffers can still couple tenants.
+InfiniBand virtual lanes (VLs)\index{Virtual lane!traffic isolation} separate credit and buffer state within a physical link; the architecture allows up to 16 lanes per link, one of them reserved for subnet management [@infiniband2000spec]. Ethernet/RoCE uses **traffic class**\index{Traffic class!definition} mappings and queue policies, whose supported counts and behavior depend on the device. In InfiniBand, exhausted credits for a storage lane need not block a gradient lane that has credits available, but both still share link bandwidth and arbitration. On Ethernet, **enhanced transmission selection**\index{Enhanced transmission selection!definition} allocates service among traffic classes. Devices may also partition buffer and forwarding resources into **network slices**\index{Network slice!definition}. These mechanisms reduce interference when classification, resource allocation, and scheduling agree across the path; shared priorities or buffers can still couple tenants.
 
 Virtualization solves the sharing problem but makes performance diagnosis harder. When a training job slows down on a multi-tenant cluster, the cause could be a physical link degradation, a noisy neighbor exceeding its bandwidth allocation, or a misconfigured QoS policy. Systematic monitoring is essential to distinguish these cases.
 
-### Monitoring and Debugging {#sec-network-fabrics-monitoring}
+## Monitoring and Debugging {#sec-network-fabrics-monitoring}
 
 ```{python}
 #| echo: false
@@ -2484,7 +2532,7 @@ class SilentWaste:
 
 Network performance problems in ML clusters are insidious because they manifest as **silent waste**\index{Silent waste!definition} rather than explicit failures. A degraded transceiver causing a `{python} SilentWaste.bw_loss_pct_str` reduction in effective bandwidth might slow each training iteration by only `{python} SilentWaste.slowdown_pct_range_str`, a drift easily masked by the natural variance of checkpointing or data loading. Over a `{python} SilentWaste.run_days_str`-day training run on `{python} SilentWaste.n_gpus_str`, this invisible drag accumulates to roughly `{python} SilentWaste.waste_gpu_hours_range_str` wasted GPU-hours, burning about `{python} SilentWaste.waste_cost_range_str` at `{python} SilentWaste.gpu_hour_rate_str` without triggering a single alarm. Traditional IT monitoring tools like SNMP or ICMP ping measure connectivity, not the sustained throughput required by RDMA. Effective observability\index{Monitoring!network} requires a three-layer approach: **physical monitoring**\index{Physical monitoring!definition} (FEC errors, signal attenuation), **transport monitoring**\index{Transport monitoring!definition} (PFC pause frames, retransmission rates), and **application monitoring**\index{Application monitoring!definition} (NCCL algorithmic bandwidth) [@jeaugey2017nccl; @gangidi2024rdma]. Only by correlating signals across these layers can operators detect that a "slow training run" is caused by a single degraded cable in one rack.
 
-#### Link-level telemetry {#sec-network-fabrics-link-telemetry}
+### Link-level telemetry {#sec-network-fabrics-link-telemetry}
 
 Hardware counters test whether the deployed path still behaves as assumed. On InfiniBand, the `perfquery` utility reads supported port counters; Ethernet/RoCE devices expose telemetry through their own management interfaces [@linuxManpages2026perfquery]. **PortXmitData**\index{PortXmitData!definition} and **PortRcvData**\index{PortRcvData!definition} count data in units of four octets, so utilization calculations multiply each counter delta by four to recover bytes. **PortXmitDiscards**\index{PortXmitDiscards!definition} records transmit discards that warrant investigation against the port's traffic and recovery policy. The **SymbolErrorCounter**\index{SymbolErrorCounter!definition} and **LinkDownedCounter**\index{LinkDownedCounter!definition} provide evidence of signaling errors and link-down events. Correlating those counters with link rate, lane state, and transport behavior narrows the cause; a counter alone does not identify a defective cable or transceiver.
 
@@ -2531,15 +2579,15 @@ class IbNdrMonitoringRecap:
     ib_ndr_gb_per_s_str = fmt_bandwidth(Systems.Fabrics.InfiniBand_NDR.bandwidth, unit=GB / second, precision=0, commas=False)
 ```
 
-Polling link state alongside traffic counters can reveal **silent degradation**\index{Silent degradation!definition}. A link operating at HDR (`{python} IbHdrReference.ib_hdr_gbit_per_s_str`) rather than the expected NDR rate (`{python} IbNdrMonitoringRecap.ib_ndr_gbit_per_s_str`) can remain connected while offering less bandwidth. Reduced active lane count is another reason to compare negotiated state with the deployment baseline. For `{python} SilentWaste.n_gpus_str` and roughly `{python} SilentWaste.n_links_str` links, the assumed `{python} SilentWaste.p_link_pct_str` point-in-time degradation probability gives `{python} SilentWaste.expected_degraded_str` degraded links in expectation and, under independent events, a `{python} SilentWaste.p_any_pct_str` probability of at least one degradation. A job slows when an affected path limits its required traffic; fleet-wide exposure alone does not determine the job's slowdown.
+Polling link state alongside traffic counters can reveal **silent degradation**\index{Silent degradation!definition}. A link operating at HDR (`{python} IbHdrReference.ib_hdr_gbit_per_s_str`) rather than the expected NDR rate (`{python} IbNdrMonitoringRecap.ib_ndr_gbit_per_s_str`) can remain connected while offering half the expected bandwidth. A link that trains with two of its four lanes active after a connector fault fails the same way: it stays up while its bandwidth is halved. Both cases are visible only when negotiated rate and lane state are compared with the deployment baseline. For `{python} SilentWaste.n_gpus_str` and roughly `{python} SilentWaste.n_links_str` links, the assumed `{python} SilentWaste.p_link_pct_str` point-in-time degradation probability gives `{python} SilentWaste.expected_degraded_str` degraded links in expectation and, under independent events, a `{python} SilentWaste.p_any_pct_str` probability of at least one degradation. A job slows when an affected path limits its required traffic; fleet-wide exposure alone does not determine the job's slowdown.
 
-#### Bandwidth and latency validation {#sec-network-fabrics-bw-testing}
+### Bandwidth and latency validation {#sec-network-fabrics-bw-testing}
 
 Validation must test the bandwidth and latency the job can use, even when counters show no visible fault. The raw NDR rate of `{python} IbNdrMonitoringRecap.ib_ndr_gb_per_s_str` is a reference ceiling; payload throughput also depends on protocol overhead and the complete host-to-host path. Pairwise tests such as `ib_write_bw` can populate an **all-pairs bandwidth matrix**\index{All-pairs bandwidth matrix!definition}, or a sampled subset for a large fleet [@linuxRdma2026perftest]. A low-throughput pair identifies a path to investigate. Comparing the affected pairs with routing and physical telemetry helps distinguish a shared switch or cable problem from endpoint limitations.
 
 For latency-sensitive synchronization, `ib_write_lat` runs a ping-pong test with small RDMA writes and reports half the measured round-trip time as one-way latency. Values such as 2 $\mu$s, 5 $\mu$s, or 100 $\mu$s must be compared with a baseline for the same endpoints, message size, path, and load; they are not universal fault thresholds or evidence of a particular fallback. Application-level tests such as `nccl-tests` then exercise collective communication across the intended worker group. Point-to-point results establish a path baseline, while collective tests reveal costs from concurrent traffic and scheduling that isolated pairs cannot expose.
 
-#### Systematic debugging workflow {#sec-network-fabrics-debug-workflow}
+### Systematic debugging workflow {#sec-network-fabrics-debug-workflow}
 
 When a training job reports lower-than-expected throughput, the diagnostic order should preserve the layer model rather than starting with cables. The following sequence moves from application symptoms toward physical causes:
 
@@ -2590,53 +2638,6 @@ Your `{python} NetworkRunningExampleCluster.params_str` model training job has b
 - [ ] **Collective impact**: estimate the impact on overall AllReduce time when the degraded link lies in the ring AllReduce path, then evaluate whether switching to a tree AllReduce algorithm helps.
 
 :::
-
-### NVIDIA DGX SuperPOD architecture {#sec-network-fabrics-dgx-superpod}
-
-The NVIDIA DGX SuperPOD architecture connects DGX H100 nodes using an NDR InfiniBand network, serving as a concrete implementation of the gradient bus concept [@nvidia2023dgxSuperpodH100]. Each node acts as a dense compute island, with `{python} IncastBurst.gpus_per_node_word_str` H100 GPUs connected via NVSwitch to provide `{python} NetworkFabricsClusterRecap.nvlink_h100_gb_per_s_str` of internal bandwidth. Externally, each GPU pairs with a ConnectX-7 NIC delivering `{python} NetworkFabricsClusterRecap.ib_ndr_gbit_per_s_str` of injection bandwidth. Across a standard scalable unit of `{python} IncastBurst.su_nodes_str` (`{python} IncastBurst.n_senders_gpus_str`), this yields an aggregate injection bandwidth of `{python} IncastBurst.offered_tb_per_s_str` (`{python} IncastBurst.n_senders_str` $\times$ `{python} IncastBurst.sender_bw_gb_per_s_str`), the rate the scalable unit can offer the fabric when every GPU transmits at once.
-
-This architecture explicitly instantiates the five-level network model. At Level 1, it standardizes on `{python} NetworkFabricsClusterRecap.ib_ndr_gbit_per_s_str` NDR links, with media chosen by reach between each node and its leaf and between leaf and spine. At Level 2, it relies on InfiniBand's native credit-based flow control to guarantee a lossless medium without the fragility of Ethernet PFC. Level 3 implements a rail-optimized fat-tree\index{Rail-optimized topology!DGX SuperPOD implementation}: GPU rails are aligned across a scalable unit so same-rail traffic stays close and cross-rail traffic traverses the spine layer. At Level 4, hardware-based adaptive routing can select among spine paths to improve bisection behavior for cross-rank communication. At Level 5, the design is modular: multiple SuperPOD scalable units connect through additional switching to form larger clusters [@nvidia2023dgxSuperpodH100]. For the 175B-parameter model, the physical infrastructure would consist of `{python} IncastBurst.su_per_ref_cluster_word_str` SuperPOD scalable units wired together, allowing `{python} IncastBurst.ref_cluster_gpus_str` to function as a single synchronous instrument.
-
-### Meta Grand Teton platform {#sec-network-fabrics-grand-teton}
-
-```{python}
-#| echo: false
-#| label: network-fabrics-grand-teton
-# ┌─────────────────────────────────────────────────────────────────────────────
-# │ META GRAND TETON CLUSTERS (LEGO)
-# ├─────────────────────────────────────────────────────────────────────────────
-# │ Context: @sec-network-fabrics-grand-teton opening paragraph.
-# │ Goal: Pin the disclosed cluster size and endpoint rate to the registry.
-# │ How: Systems.Clusters.Meta_GenAI_H100_24K_RoCE / _IB (3,072 Grand Teton
-# │      nodes × 8 H100) on Systems.Fabrics.RoCE_400G / InfiniBand_NDR.
-# └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import check, fmt, fmt_bandwidth
-
-class GrandTetonClusters:
-    # ┌── 1. LOAD ──────────────────────────────────────────────────────────
-    roce = Systems.Clusters.Meta_GenAI_H100_24K_RoCE
-    ib = Systems.Clusters.Meta_GenAI_H100_24K_IB
-
-    # ┌── 3. GUARD ─────────────────────────────────────────────────────────
-    check(roce.total_accelerators == ib.total_accelerators, "Both Meta clusters have the same GPU count")
-    check(roce.fabric.bandwidth == ib.fabric.bandwidth, "Both Meta clusters use the same endpoint rate")
-
-    # ┌── 4. OUTPUT ────────────────────────────────────────────────────────
-    n_gpus_value_str = fmt(roce.total_accelerators, precision=0, commas=True)
-    endpoint_gbit_per_s_str = fmt_bandwidth(roce.fabric.bandwidth, unit=Gbps, precision=0, commas=False)
-```
-
-Meta disclosed two Grand Teton-based `{python} GrandTetonClusters.n_gpus_value_str`-H100 clusters: one using RoCE over an Arista/OCP Ethernet fabric and one using NVIDIA Quantum-2 InfiniBand, both with `{python} GrandTetonClusters.endpoint_gbit_per_s_str` endpoints. Meta used both for Llama 3 training and reported ongoing Llama 3 training on the RoCE cluster [@meta2024genaiInfrastructure]. The primary motivation for Ethernet is operational scale and supply chain resilience: by using Ethernet, Meta can source switches from multiple vendors and use the same optical infrastructure and management tooling shared by their front-end serving fleet, avoiding the operational silo of a dedicated InfiniBand island.
-
-Meta's RoCE study shows how Level 4 choices affect the complete fabric. It describes PFC watchdogs for long-duration pause events, iterative routing designs beyond plain ECMP, future-oriented flowlet switching experiments, and a 400G deployment in which DCQCN tuning proved difficult enough that Meta proceeded without DCQCN while relying on PFC plus higher-layer collective controls [@gangidi2024rdma]. The lesson is to validate the combination of endpoint behavior, routing, and flow control under the intended collective traffic. Large-transfer throughput alone does not establish small-message latency or recovery tails, and those results cannot be inferred from the Ethernet or InfiniBand label.
-
-::: {#psp-network-fabrics-infiniband-vs-roce-industry-verdict .callout-perspective title="InfiniBand vs. RoCE: The industry verdict"}
-
-The InfiniBand and RoCE deployments demonstrate different ways to meet a workload's communication contract. Their equipment, routing, recovery mechanisms, and operational requirements must be compared as complete configurations. For *training runs*, frequent small exchanges can expose startup latency even when a full step lasts seconds. For *inference serving*, the importance of fabric latency depends on model partitioning, request shape, and service-level objectives (SLOs). In both cases, delivered performance and operating cost decide the trade-off.
-
-:::
-
-These case studies close the five-level stack by showing how the physical wire, transport protocol, topology, and congestion controls become one production fabric. The remaining operational problem is not how to build a single fast cluster, but how to share that expensive substrate across teams and workloads without sacrificing the predictable performance that training demands.
 
 ## Network Technologies That Move the Ceiling {#sec-network-fabrics-emerging}
 
@@ -2698,7 +2699,7 @@ Higher switch capacity attacks hop count as well as raw bandwidth. XDR InfiniBan
 
 Optical interconnects attack the power-per-bit and reach terms that copper makes worse as data rates increase. Each doubling of the per-lane signaling rate, from the 100 Gb/s-class lanes of current NDR and 800G Ethernet ports to the 200 Gb/s class now arriving, raises the insertion loss per meter of passive copper. The usable reach shrinks, as the link-budget example in @sec-network-fabrics-serdes showed, and the SerDes must spend more energy per bit on equalization to recover the signal. Active electrical cables, which add retimer chips to regenerate the signal mid-cable, extend that reach but add latency and power of their own.
 
-Co-packaged optics (CPO)\index{Co-packaged optics!architecture}\index{Optical interconnect!co-packaged optics}\index{CPO|see{Co-packaged optics}} places optical engines close to the switch or accelerator on a shared package substrate. Shortening the electrical path to the optical engine reduces the signal-conditioning burden before transmission over fiber. The receiving optical engine converts the signal back to electrical form. Fiber still introduces propagation delay and has a loss budget; packaging the optics closer to the processor does not remove those constraints.
+Co-packaged optics (CPO)\index{Co-packaged optics!architecture}\index{Optical interconnect!co-packaged optics}\index{CPO|see{Co-packaged optics}} places optical engines close to the switch or accelerator on a shared package substrate. Moving the optical engine from the switch faceplate to the package shortens the SerDes-to-optics electrical path from centimeters of board trace to millimeters, which reduces the signal-conditioning burden before transmission over fiber. The receiving optical engine converts the signal back to electrical form. Fiber still introduces propagation delay and has a loss budget; packaging the optics closer to the processor does not remove those constraints.
 
 Co-packaged optics\index{Co-packaged optics!link budget effects} therefore changes the electrical portion of the link budget while retaining the reach advantages of optical transmission. Usable reach still depends on the fiber, connectors, optical power, and receiver design. The relevant comparison holds payload capacity and error targets fixed, then measures the power saved by the shorter electrical path against the packaging and maintenance costs of integration.
 
@@ -2781,7 +2782,7 @@ A fixed node configuration can leave compute or memory underused when workloads 
 ↩ CXL memory pooling, which makes node memory capacity less rigid but remains a capacity tier rather than a high-bandwidth memory (HBM) replacement, is established in @sec-compute-cxl.
 :::
 
-A composed node therefore needs a new traffic budget. The $\alpha$-$\beta$ distinction between startup and transfer cost remains useful, but each path requires its own parameters and access model. Remote memory traffic can compete with other transfers, and fine-grained dependent accesses can expose latency that a bulk-bandwidth estimate hides. Disaggregation improves resource flexibility only when these added costs fit the workload's execution budget.
+A composed node therefore needs a new traffic budget. The $\alpha$-$\beta$ distinction between startup and transfer cost remains useful, but each path requires its own parameters and access model. Remote memory traffic can compete with other transfers, and fine-grained dependent accesses can expose latency that a bulk-bandwidth estimate hides. Disaggregation improves resource flexibility only when these added costs fit the workload's execution budget. Composition relocates the synchronization backbone onto new paths rather than eliminating it.
 
 ## Fallacies and Pitfalls {#sec-network-fabrics-fallacies}
 

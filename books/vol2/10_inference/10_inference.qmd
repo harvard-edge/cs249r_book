@@ -866,70 +866,6 @@ The hierarchy guides the rest of the design while allowing a few techniques to c
 
 A recommendation system that processes 100,000 embedding lookups per second across a sharded feature store requires a different serving architecture from a 70-billion-parameter language model generating tokens one at a time. Framework choice alone does not explain the difference. The workloads impose distinct constraints on batching, memory management, scheduling, and deployment topology. This section identifies those architectural dimensions, using specific frameworks as examples rather than as the subject of study.
 
-### Case Study: Multimodal recommendation and freshness {#sec-inference-scale-tiktok-multimodal-recommendation-91e9}
-
-The multimodal recommendation scenario\index{Recommendation system!multimodal serving case} binds on freshness under a tight ranking SLO: video understanding is expensive, new content arrives continuously, and user modeling remains online. It combines video understanding (vision) with user modeling (recommendation) for personalized content ranking, creating a multimodal inference challenge where different model types must coordinate.
-
-The operating scale explains why clear online/offline separation matters: the system handles millions of video rankings per second under a tight p99 latency target below $50\text{ ms}$, ingesting millions of new videos daily across video, audio, text, and user interaction signals.
-
-The serving stack separates content and user paths:
-
-```
-User request → User embedding → Candidate videos → Video understanding → Ranking
-
-                    |                  |                    |
-                    v                  v                    v
-             User Tower          Video Cache          Vision Models
-           (Transformer)        (Pre-computed)        (On-demand)
-```
-
-The scenario separates user understanding (online) from content understanding (offline) through a two-tower architecture with caching.[^fn-two-tower-serving] @Tbl-tiktok-two-tower-updates contrasts the online and offline tower update cadences:
-
-[^fn-two-tower-serving]: **Two-Tower Architecture**\index{Two-Tower Architecture!serving}: Encodes user features and item features through separate neural networks ("towers") into embeddings, then scores via dot product. The serving advantage: item embeddings can be precomputed offline and cached, reducing online candidate generation to the user tower forward pass and vector similarity search. Search latency depends on index size, placement, and the required recall. The trade-off is reduced model expressiveness from late interaction, since the towers cannot attend to each other's features during encoding.
-
-| **Tower**       | **Update Frequency** | **Latency** | **Compute**  |
-|:----------------|:--------------------:|:-----------:|:------------:|
-| **User tower**  |      Real-time       |     5 ms    | GPU (online) |
-| **Video tower** |        Hourly        |     N/A     | GPU (batch)  |
-
-: **Illustrative two-tower update cadence**: User and video towers run on different cadences: user features change second-to-second and must run inference online; video features change much more slowly and are precomputed in hourly batches. This asymmetric scheduling is the design that takes vision inference out of the critical path for almost every request. {#tbl-tiktok-two-tower-updates tbl-colwidths="[28,32,16,24]"}
-
-Video embeddings are precomputed and cached\index{Two-Tower Architecture!offline embedding cache}, eliminating vision inference from the critical path for most requests. A newly uploaded video without a cached embedding needs an explicit policy: process it before admitting it to recommendations, serve a validated fallback, or run vision inference on demand if the request budget permits. The hourly refresh cadence alone does not meet the shorter ingestion targets below; those targets require a separate path for new content.
-
-The online path below separates candidate generation from a later dense reranker. Its user-tower budget is distinct from the reranker budget:
-
-```
-User features → CPU preprocessing (1 ms)
-             → Embedding lookup (2 ms, CPU+DRAM)
-             → User tower (5 ms, GPU)
-             → Dense reranking (10 ms, GPU)
-             → Response formatting (1 ms)
-```
-
-New video content is processed with different priorities, as @tbl-tiktok-video-priorities shows:
-
-| **Priority**   | **SLA** | **Use Case**                 |
-|:---------------|:-------:|:-----------------------------|
-| **Critical**   |  5 min  | Creator with large following |
-| **Standard**   |  30 min | Normal uploads               |
-| **Background** | 2 hours | Bulk/imported content        |
-
-: **Illustrative video ingestion priority tiers**: Three-tier SLA for video ingestion. High-follower-count creators get a five-minute SLA to maximize content freshness for their audience; standard uploads get 30 minutes; bulk imports get two hours of slack so the system can absorb them during quiet periods. {#tbl-tiktok-video-priorities tbl-colwidths="[30,20,50]"}
-
-The priority scheme allocates scarce ingestion capacity to time-sensitive content first. Meeting the stated targets still requires capacity for the corresponding arrival rates; priority changes who waits when demand exceeds capacity, rather than eliminating the wait.
-
-The scenario combines multiple understanding modalities through late fusion, which combines independently computed modality embeddings or scores near the end of ranking rather than running one joint model over all raw modalities:
-
-```
-Video embedding (512d) -+
-Audio embedding (256d) -+- Concat → Fusion MLP → Final embedding (256d)
-Text embedding (256d)  -+
-```
-
-Late fusion separates the modality computations, but their outputs remain inputs to the fusion model. Updating one modality's model can change the meaning or distribution of its embeddings even when their dimensions stay fixed. Each update therefore needs compatibility validation and, when that contract changes, regeneration of cached embeddings or adaptation of the fusion model.
-
-The serving lesson is that freshness requires separating online and offline work. Two-tower architectures make aggressive caching possible because item embeddings can be refreshed asynchronously, while priority-based processing spends the freshest compute where it has the largest user impact.
-
 ### Throughput-latency trade-offs in batching {#sec-inference-scale-framework-categories-172a}
 
 Batch formation sets the throughput-latency operating point. Static batching\index{Static Batching} groups a fixed number of requests and suits predictable, fixed-shape inputs. For autoregressive language models\index{Autoregressive generation!variable sequence length}, iteration-level admission lets new requests replace completed sequences instead of waiting for the longest sequence in a batch; Orca introduced this scheduling approach [@yu2022orca], and vLLM\index{vLLM!paged KV cache} combines it with paged KV-cache management [@kwon2023]. Recommendation systems with sharded embeddings can use feature-parallel batching\index{Feature-Parallel Batching} to group sparse lookups by destination while also batching whole requests for dense computation. The common decision is which unit of work to group: whole requests, decode iterations, or feature lookups. @Sec-inference-scale-batching-strategies-scale-6733 develops the mechanisms and their capacity trade-offs.
@@ -3173,56 +3109,6 @@ The batching strategies to this point focus on scheduling work under a chosen re
 *Reasoning expands latency about 128 times over fast pattern-matching.*
 :::
 
-### Selecting a batching strategy {#sec-inference-scale-quantitative-summary-batching-strategy-selection-d5af}
-
-The selection problem is to match the batching mechanism to model shape, traffic variance, and latency budget. That match depends on where in the request path the latency budget is spent.
-
-::: {#chk-inference-batching-strategy-trade-offs .callout-checkpoint title="Batching strategy trade-offs"}
-
-Verify your understanding of different batching mechanics:
-
-- [ ] **Static vs. continuous**: for a vision service with highly uniform input sizes and predictable traffic, select static batching or continuous batching.
-- [ ] **Waste ratio**: explain when refilling completed slots can eliminate the static-batch padding waste ($1 - \bar{S}/S_{\text{max}}$), and why low arrivals or KV-cache pressure prevent perfect slot reuse.
-- [ ] **Adaptive batching**: explain when shrinking the formation window reduces waiting without sacrificing throughput, and why it cannot resolve overload when arrivals exceed service capacity.
-- [ ] **RecSys bottleneck**: in feature-parallel batching for RecSys, identify whether the primary fleet-stack bottleneck is the GPU's Tensor Cores or the distributed Embedding Store's memory bandwidth.
-- [ ] **Batching limit**: explain why free HBM, not Tensor Core compute, often caps the achievable batch size for long-context LLM serving.
-
-:::
-
-The end-to-end traversal diagrammed in @fig-inference-lifecycle provides the final operational check on batching selection: noncompute stages such as host serialization, queuing, and network routing consume a substantial fraction of the latency budget, so batch formation and execution must be budgeted across the full pipeline rather than against accelerator runtime alone. A decision framework guides strategy selection:
-
-```
-Is it autoregressive text generation?
-|- Yes → Continuous batching with chunked prefill
-`- No → Is it real-time streaming speech/video/robotics?
-        |- Yes → Streaming pipeline with minimal or no batching
-        `- No → Do embedding lookups dominate latency?
-                |- Yes → Feature-parallel batching (RecSys)
-                `- No → Dynamic batching with adaptive parameters
-```
-
-The strategies in @tbl-batching-parameters expose different tuning decisions: batch size for static execution, waiting time for dynamic batching, admission and iteration work for continuous batching, lookup grouping for sharded embeddings, and deadline-compatible grouping for streaming. Continuous batching responds to variable completion times; it does not make output lengths uniform. Each policy must be evaluated against both useful throughput and its latency budget.
-
-| **Strategy**         |   **Key Parameters**  | **Tuning Goal**                  |
-|:---------------------|:---------------------:|:---------------------------------|
-| **Static**           |       Batch size      | Maximize throughput              |
-| **Dynamic**          |   Window, max batch   | Balance latency vs. throughput   |
-| **Continuous**       | Chunk size, max batch | Minimize decode latency variance |
-| **Feature-parallel** |  Accumulation window  | Match embedding shard capacity   |
-| **Streaming**        |     Pipeline depth    | Meet real-time deadline          |
-
-: **Batching strategy parameters**: The parameter each strategy tunes (batch size, formation window, chunk size, accumulation window, or pipeline depth) follows from its goal, from raw throughput for static batching to the real-time deadline for streaming. {#tbl-batching-parameters}
-
-Batching policy and memory admission are coupled. In a full-attention deployment that retains active KV state on the GPU, every admitted sequence consumes cache capacity as its context grows. A schedule with room for more decode work can therefore run out of memory before it reaches its execution limit. Managing that state is the next step in determining useful concurrency.
-
-## Memory and Decode-Time Management {#sec-inference-scale-kv-cache-management-04ed}
-
-As a full-attention LLM generates a 2,000-word essay, each new token attends to representations of earlier tokens. The KV cache\index{KV Cache!memory footprint} retains the keys and values needed for that attention, with a per-request footprint that grows as generation proceeds. Large contiguous reservations can leave HBM reserved but unused or create gaps too small for another reservation. Admission can then fail even though the stored attention state occupies less than the available capacity.
-
-Two classes of techniques meet at this boundary. KV-state capacity techniques, such as PagedAttention\index{PagedAttention!virtual memory mapping} and prefix caching, decide where attention state lives and how much fragmentation the memory manager tolerates. Decode-time latency techniques, such as speculative decoding, change how much target-model work is needed per emitted token. Speculative decoding is not KV-cache compression; it trades extra draft-model state, target-model verification, and scheduler complexity for lower TPOT under the same memory budget.
-
-### Advanced Decode Optimizations and Dynamic Computation
-
 ### The logic wall and test-time compute scaling {#sec-inference-logic-wall}
 
 Test-time scaling turns reasoning into a serving resource. A request may issue more generated tokens, internal chain-of-thought (CoT) tokens, or search steps before producing the answer. Large-model capability work describes emergent behaviors [@wei2022emergent], while later analysis cautions that some apparent emergence can be an artifact of metric choice [@schaeffer2023mirage].
@@ -3278,136 +3164,55 @@ class LogicScaling:
 
 Variable work per request closes the batching story: continuous and adaptive batching handle variation the system observes, while test-time compute is variation the system chooses. **Dynamic compute allocation**\index{Dynamic Compute Allocation!definition} assigns per-request compute budgets based on task difficulty, latency tolerance, and fleet load rather than applying a fixed decode budget to every prompt. With both the batching mechanism and the per-request compute budget now on the table, the remaining task is to decide which combination a given workload should run.
 
-### Speculative decoding as a serving policy {#sec-inference-scale-speculative-decoding-c438}
+### Selecting a batching strategy {#sec-inference-scale-quantitative-summary-batching-strategy-selection-d5af}
 
-Speculative decoding pairs a small draft model\index{Speculative Decoding!draft model} proposing $K$ tokens with a target model verifying them\index{Speculative Decoding!verification step} in one parallel forward pass. With the exact acceptance-and-correction sampling procedure, the emitted sequence preserves the target distribution. Approximate verification rules do not inherit that guarantee. The draft acceptance rate\index{Speculative Decoding!acceptance rate} $\alpha_{\text{acc}}$ determines how much proposed work survives, while drafting and verification costs determine whether it saves time. At fleet scale, the scheduler must also decide when to enable speculation, how its memory cost interacts with admission, and whether it improves the endpoint's SLO-compliant capacity.
+The selection problem is to match the batching mechanism to model shape, traffic variance, and latency budget. That match depends on where in the request path the latency budget is spent.
 
-::: {.column-margin .margin-pointer}
-↩ The draft-and-verify mechanics of speculative decoding are established in @sec-performance-engineering-speculative.
+::: {#chk-inference-batching-strategy-trade-offs .callout-checkpoint title="Batching strategy trade-offs"}
+
+Verify your understanding of different batching mechanics:
+
+- [ ] **Static vs. continuous**: for a vision service with highly uniform input sizes and predictable traffic, select static batching or continuous batching.
+- [ ] **Waste ratio**: explain when refilling completed slots can eliminate the static-batch padding waste ($1 - \bar{S}/S_{\text{max}}$), and why low arrivals or KV-cache pressure prevent perfect slot reuse.
+- [ ] **Adaptive batching**: explain when shrinking the formation window reduces waiting without sacrificing throughput, and why it cannot resolve overload when arrivals exceed service capacity.
+- [ ] **RecSys bottleneck**: in feature-parallel batching for RecSys, identify whether the primary fleet-stack bottleneck is the GPU's Tensor Cores or the distributed Embedding Store's memory bandwidth.
+- [ ] **Batching limit**: explain why free HBM, not Tensor Core compute, often caps the achievable batch size for long-context LLM serving.
+
 :::
 
-::: {.column-margin}
-![](images/svg/inference_decode_roofline.svg){width="100%" fig-alt="A roofline silhouette: a blue memory-bound slope rising to a dashed ridge line, then an orange compute-bound ceiling. A workload dot sits deep on the memory-bound slope, the regime batch-1 decode occupies before parallel verification raises its arithmetic intensity toward the ridge."}
+The end-to-end traversal diagrammed in @fig-inference-lifecycle provides the final operational check on batching selection: noncompute stages such as host serialization, queuing, and network routing consume a substantial fraction of the latency budget, so batch formation and execution must be budgeted across the full pipeline rather than against accelerator runtime alone. A decision framework guides strategy selection:
 
-*Small-batch decode is memory-bound; parallel verification raises arithmetic intensity.*
-:::
-
-The latency benefit depends on accepted progress relative to drafting and verification time. When the draft model proposes $K$ tokens, high acceptance rates allow the target model to verify and emit multiple tokens in a single forward pass. When acceptance drops, rejected tokens are discarded while drafting and verification still cost time; generation can become slower than ordinary decoding. Under a simplified constant, independent acceptance probability at each draft position, the expected number of tokens emitted per round, including the correction token, is $\frac{1 - \alpha_{\text{acc}}^{K+1}}{1 - \alpha_{\text{acc}}}$, which collapses toward 1 as acceptance falls. The following calculation assumes $K = 5$ draft tokens, a draft step 20$\times$ faster than a target decode step, and a verification pass costing the same as one target decode step. Holding those costs fixed isolates sensitivity to acceptance:
-
-```{python}
-#| echo: false
-#| label: speculative-speedup-analysis
-# ┌─────────────────────────────────────────────────────────────────────────────
-# │ SPECULATIVE DECODING SPEEDUP ANALYSIS
-# ├─────────────────────────────────────────────────────────────────────────────
-# │ Context: @sec-inference-scale-speculative-decoding-c438 acceptance-sensitivity bullets
-# │
-# │ Goal: Compute expected latency speedup from speculative decoding at K=5 draft
-# │       tokens with a 20x-faster draft model, across three acceptance rates
-# │       (alpha_acc=0.9 high, 0.7 medium, 0.5 low), to show acceptance sensitivity.
-# │ Show: ~3.7x (alpha_acc=0.9), ~2.4x (alpha_acc=0.7), ~1.6x (alpha_acc=0.5).
-# │ How: E[accepted tokens] = sum alpha_acc^i for i in 0..K; speedup =
-# │       (E[tokens] * t_target) / (t_draft_total + t_target).
-# │
-# └─────────────────────────────────────────────────────────────────────────────
-
-# ┌── LEGO ───────────────────────────────────────────────
-class SpeculativeSpeedup:
-    """Speculative decoding latency speedup across acceptance rates."""
-
-    # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    from mlsysim.solvers import ServingModel
-    from mlsysim import Models, Hardware
-
-    alpha_high = 0.9  # acceptance rate for "easy" text
-    alpha_med = 0.7  # medium-difficulty text
-    alpha_low = 0.5  # "hard" text
-    K = 5  # draft length
-
-    # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    # Use ServingModel to calculate speedup (logic from library)
-    def _speedup(alpha, k):
-        et = sum(alpha**i for i in range(k + 1))
-        # Logic consistent with ServingModel: T = (T_draft*K + T_target) / (E[tokens] * T_target)
-        # Here we use normalized units for simplicity as in original block
-        t_target = 1.0
-        t_draft = 0.05
-        time_per_round = t_draft * k + t_target
-        baseline_time = et * t_target
-        return baseline_time / time_per_round
-
-    sp_high = _speedup(alpha_high, K)
-    sp_med = _speedup(alpha_med, K)
-    sp_low = _speedup(alpha_low, K)
-
-    et_high = (1 - alpha_high ** (K + 1)) / (1 - alpha_high)
-    et_med = (1 - alpha_med ** (K + 1)) / (1 - alpha_med)
-    et_low = (1 - alpha_low ** (K + 1)) / (1 - alpha_low)
-
-    # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
-    from mlsysim.fmt import check, fmt
-
-    check(sp_high > 2.0, f"High acceptance speedup should be >2x, got {sp_high:.1f}x")
-
-    # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
-    sp_high_mult_str = fmt_multiple(sp_high, precision=1, commas=False)
-    sp_med_mult_str = fmt_multiple(sp_med, precision=1, commas=False)
-    sp_low_mult_str = fmt_multiple(sp_low, precision=1, commas=False)
-    et_high_str = fmt_count(et_high, precision=2, commas=False, label="token", allow_fractional=True)
-    et_med_str = fmt_count(et_med, precision=2, commas=False, label="token", allow_fractional=True)
-    et_low_str = fmt_count(et_low, precision=2, commas=False, label="token", allow_fractional=True)
+```
+Is it autoregressive text generation?
+|- Yes → Continuous batching with chunked prefill
+`- No → Is it real-time streaming speech/video/robotics?
+        |- Yes → Streaming pipeline with minimal or no batching
+        `- No → Do embedding lookups dominate latency?
+                |- Yes → Feature-parallel batching (RecSys)
+                `- No → Dynamic batching with adaptive parameters
 ```
 
-Evaluating this model across representative acceptance regimes illustrates how sharply returns depend on draft accuracy: high acceptance ($\alpha_{\text{acc}} = 0.9$) yields an expected `{python} SpeculativeSpeedup.et_high_str` per verification round for a `{python} SpeculativeSpeedup.sp_high_mult_str` speedup, medium acceptance ($\alpha_{\text{acc}} = 0.7$) delivers `{python} SpeculativeSpeedup.et_med_str` per round for a `{python} SpeculativeSpeedup.sp_med_mult_str` speedup, and low acceptance ($\alpha_{\text{acc}} = 0.5$) drops progress to `{python} SpeculativeSpeedup.et_low_str` per round, yielding a modest speedup of `{python} SpeculativeSpeedup.sp_low_mult_str`.
+The strategies in @tbl-batching-parameters expose different tuning decisions: batch size for static execution, waiting time for dynamic batching, admission and iteration work for continuous batching, lookup grouping for sharded embeddings, and deadline-compatible grouping for streaming. Continuous batching responds to variable completion times; it does not make output lengths uniform. Each policy must be evaluated against both useful throughput and its latency budget.
 
-::: {.column-margin}
-![](images/svg/vol2_inference_margin_001.svg){width="100%" fig-alt="Three horizontal bars on a linear scale: 90 percent acceptance gives 3.7 times faster decoding, 70 percent gives 2.4 times, and 50 percent gives 1.6 times."}
+| **Strategy**         |   **Key Parameters**  | **Tuning Goal**                  |
+|:---------------------|:---------------------:|:---------------------------------|
+| **Static**           |       Batch size      | Maximize throughput              |
+| **Dynamic**          |   Window, max batch   | Balance latency vs. throughput   |
+| **Continuous**       | Chunk size, max batch | Minimize decode latency variance |
+| **Feature-parallel** |  Accumulation window  | Match embedding shard capacity   |
+| **Streaming**        |     Pipeline depth    | Meet real-time deadline          |
 
-*Speedup shrinks quickly as draft acceptance falls.*
-:::
+: **Batching strategy parameters**: The parameter each strategy tunes (batch size, formation window, chunk size, accumulation window, or pipeline depth) follows from its goal, from raw throughput for static batching to the real-time deadline for streaming. {#tbl-batching-parameters}
 
-Acceptance depends on the draft-target pair, sampling policy, and request distribution. The preceding calculations are sensitivity cases, not fixed acceptance rates for chat, reasoning, or code generation. A serving fleet must measure acceptance and useful token throughput for its actual traffic before selecting a speculation policy, and that policy must answer three serving concerns: memory, the SLO, and change over time.
+Batching policy and memory admission are coupled. In a full-attention deployment that retains active KV state on the GPU, every admitted sequence consumes cache capacity as its context grows. A schedule with room for more decode work can therefore run out of memory before it reaches its execution limit. Managing that state is the next step in determining useful concurrency.
 
-```{python}
-#| echo: false
-#| label: speculation-draft-weights
-# ┌─────────────────────────────────────────────────────────────────────────────
-# │ SPECULATION TAX: DRAFT-MODEL WEIGHTS (LEGO)
-# ├─────────────────────────────────────────────────────────────────────────────
-# │ Context: "speculation tax" paragraph in
-# │          @sec-inference-scale-speculative-decoding-c438.
-# │
-# │ Goal: Size the resident FP16 weights of a 7B draft model paired with a 70B target.
-# │ Show: ~14 GB of draft weights per replica.
-# │ How: Models.Language.Llama2_7B.size_in_bytes(BYTES_FP16).
-# └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import check, fmt_memory
+## Memory and Decode-Time Management {#sec-inference-scale-kv-cache-management-04ed}
 
-class SpeculationDraftWeights:
-    """Resident FP16 weight cost of a 7B draft model."""
+As a full-attention LLM generates a 2,000-word essay, each new token attends to representations of earlier tokens. The KV cache\index{KV Cache!memory footprint} retains the keys and values needed for that attention, with a per-request footprint that grows as generation proceeds. Large contiguous reservations can leave HBM reserved but unused or create gaps too small for another reservation. Admission can then fail even though the stored attention state occupies less than the available capacity.
 
-    # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    draft = Models.Language.Llama2_7B
-    target = Models.Language.Llama2_70B
+Two classes of techniques meet at this boundary. KV-state capacity techniques, such as PagedAttention\index{PagedAttention!virtual memory mapping} and prefix caching, decide where attention state lives and how much fragmentation the memory manager tolerates. Decode-time latency techniques, such as speculative decoding, change how much target-model work is needed per emitted token. Speculative decoding is not KV-cache compression; it trades extra draft-model state, target-model verification, and scheduler complexity for lower TPOT under the same memory budget.
 
-    # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    draft_fp16 = draft.size_in_bytes(BYTES_FP16)
-    draft_share = (draft_fp16 / target.size_in_bytes(BYTES_FP16)).to("").magnitude
-
-    # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
-    check(0.05 < draft_share < 0.15, "Draft weights should be about a tenth of the target's")
-
-    # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
-    draft_fp16_gb_str = fmt_memory(draft_fp16, unit=GB, precision=0, commas=False)
-```
-
-The first concern is memory. The draft model is not free state. It requires memory for weights, and each in-flight request that uses it reserves additional draft KV state. Pairing a 7B draft model with a 70B target adds roughly `{python} SpeculationDraftWeights.draft_fp16_gb_str` of FP16 weights per replica plus per-request draft cache. When colocated with the target, this *speculation tax*\index{Speculative Decoding!speculation tax} competes directly with the KV-cache admission budget developed in @sec-inference-scale-kv-cache-wall: every gigabyte reserved for the draft is unavailable to target requests. Under a binding memory limit, that reservation lowers maximum concurrency. Placing the draft on separate devices preserves target memory at the cost of additional hardware and communication. The admission controller and the speculation policy therefore require a joint capacity and latency evaluation.
-
-The second concern is which service-level objective the endpoint must meet. At sufficient acceptance, speculation can reduce TPOT; draft execution and cache residency can also reduce admission capacity. Neither latency nor aggregate-throughput benefit follows from the endpoint label alone. The scheduler should compare SLO-compliant goodput with and without speculation under the intended load\index{Speculative Decoding!SLA trade-offs}. TTFT needs separate measurement because draft setup and prefill can add work before the first response token.
-
-The third concern is that acceptance and load change over time. A scheduler can enable speculation when measured TPOT or goodput improves, then disable it when verification cost outweighs accepted-token progress. Disabling draft execution alone does not free resident draft weights; recovering that capacity requires unloading them, and releasing draft KV pages requires ending or migrating the associated speculative state. Alternative draft mechanisms change this budget: self-speculative decoding\index{Self-Speculative Decoding} reuses the target model, Medusa\index{Medusa} [@cai2024medusa] adds prediction heads, and lookahead decoding\index{Lookahead Decoding} avoids a separate draft model. Each requires its own quality, acceptance, and resource evaluation.
-
-## The KV cache wall and memory capacity {#sec-inference-scale-kv-cache-wall}
+### The KV cache wall and memory capacity {#sec-inference-scale-kv-cache-wall}
 
 Increasing batch size in LLM serving can encounter the KV cache wall\index{KV Cache!capacity wall} before execution resources are fully used. The capacity model in @fig-kv-cache-wall combines an idealized 35 GB weight payload for a quantized 70B model with its full-attention KV state on an 80 GB H100. With the illustrated cache dimensions and precision, a batch of 8 reaches the memory boundary at roughly 17K tokens per sequence. Quantization metadata, runtime buffers, and other allocations reduce the capacity available in an actual deployment, so the plotted boundary is an optimistic sizing limit.
 
@@ -4482,6 +4287,135 @@ class PrecisionDividend:
 **Systems insight**: Precision engineering raises the cache-capacity ceiling in this example. Its maximum batch counts omit runtime allocations and headroom, so they are optimistic admission estimates. Additional sequences can amortize weight loading, but the useful batch size also depends on execution cost, quality, and the latency target.
 
 :::
+
+### Speculative decoding as a serving policy {#sec-inference-scale-speculative-decoding-c438}
+
+Speculative decoding pairs a small draft model\index{Speculative Decoding!draft model} proposing $K$ tokens with a target model verifying them\index{Speculative Decoding!verification step} in one parallel forward pass. With the exact acceptance-and-correction sampling procedure, the emitted sequence preserves the target distribution. Approximate verification rules do not inherit that guarantee. The draft acceptance rate\index{Speculative Decoding!acceptance rate} $\alpha_{\text{acc}}$ determines how much proposed work survives, while drafting and verification costs determine whether it saves time. At fleet scale, the scheduler must also decide when to enable speculation, how its memory cost interacts with admission, and whether it improves the endpoint's SLO-compliant capacity.
+
+::: {.column-margin .margin-pointer}
+↩ The draft-and-verify mechanics of speculative decoding are established in @sec-performance-engineering-speculative.
+:::
+
+::: {.column-margin}
+![](images/svg/inference_decode_roofline.svg){width="100%" fig-alt="A roofline silhouette: a blue memory-bound slope rising to a dashed ridge line, then an orange compute-bound ceiling. A workload dot sits deep on the memory-bound slope, the regime batch-1 decode occupies before parallel verification raises its arithmetic intensity toward the ridge."}
+
+*Small-batch decode is memory-bound; parallel verification raises arithmetic intensity.*
+:::
+
+The latency benefit depends on accepted progress relative to drafting and verification time. When the draft model proposes $K$ tokens, high acceptance rates allow the target model to verify and emit multiple tokens in a single forward pass. When acceptance drops, rejected tokens are discarded while drafting and verification still cost time; generation can become slower than ordinary decoding. Under a simplified constant, independent acceptance probability at each draft position, the expected number of tokens emitted per round, including the correction token, is $\frac{1 - \alpha_{\text{acc}}^{K+1}}{1 - \alpha_{\text{acc}}}$, which collapses toward 1 as acceptance falls. The following calculation assumes $K = 5$ draft tokens, a draft step 20$\times$ faster than a target decode step, and a verification pass costing the same as one target decode step. Holding those costs fixed isolates sensitivity to acceptance:
+
+```{python}
+#| echo: false
+#| label: speculative-speedup-analysis
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ SPECULATIVE DECODING SPEEDUP ANALYSIS
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @sec-inference-scale-speculative-decoding-c438 acceptance-sensitivity bullets
+# │
+# │ Goal: Compute expected latency speedup from speculative decoding at K=5 draft
+# │       tokens with a 20x-faster draft model, across three acceptance rates
+# │       (alpha_acc=0.9 high, 0.7 medium, 0.5 low), to show acceptance sensitivity.
+# │ Show: ~3.7x (alpha_acc=0.9), ~2.4x (alpha_acc=0.7), ~1.6x (alpha_acc=0.5).
+# │ How: E[accepted tokens] = sum alpha_acc^i for i in 0..K; speedup =
+# │       (E[tokens] * t_target) / (t_draft_total + t_target).
+# │
+# └─────────────────────────────────────────────────────────────────────────────
+
+# ┌── LEGO ───────────────────────────────────────────────
+class SpeculativeSpeedup:
+    """Speculative decoding latency speedup across acceptance rates."""
+
+    # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
+    from mlsysim.solvers import ServingModel
+    from mlsysim import Models, Hardware
+
+    alpha_high = 0.9  # acceptance rate for "easy" text
+    alpha_med = 0.7  # medium-difficulty text
+    alpha_low = 0.5  # "hard" text
+    K = 5  # draft length
+
+    # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
+    # Use ServingModel to calculate speedup (logic from library)
+    def _speedup(alpha, k):
+        et = sum(alpha**i for i in range(k + 1))
+        # Logic consistent with ServingModel: T = (T_draft*K + T_target) / (E[tokens] * T_target)
+        # Here we use normalized units for simplicity as in original block
+        t_target = 1.0
+        t_draft = 0.05
+        time_per_round = t_draft * k + t_target
+        baseline_time = et * t_target
+        return baseline_time / time_per_round
+
+    sp_high = _speedup(alpha_high, K)
+    sp_med = _speedup(alpha_med, K)
+    sp_low = _speedup(alpha_low, K)
+
+    et_high = (1 - alpha_high ** (K + 1)) / (1 - alpha_high)
+    et_med = (1 - alpha_med ** (K + 1)) / (1 - alpha_med)
+    et_low = (1 - alpha_low ** (K + 1)) / (1 - alpha_low)
+
+    # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
+    from mlsysim.fmt import check, fmt
+
+    check(sp_high > 2.0, f"High acceptance speedup should be >2x, got {sp_high:.1f}x")
+
+    # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
+    sp_high_mult_str = fmt_multiple(sp_high, precision=1, commas=False)
+    sp_med_mult_str = fmt_multiple(sp_med, precision=1, commas=False)
+    sp_low_mult_str = fmt_multiple(sp_low, precision=1, commas=False)
+    et_high_str = fmt_count(et_high, precision=2, commas=False, label="token", allow_fractional=True)
+    et_med_str = fmt_count(et_med, precision=2, commas=False, label="token", allow_fractional=True)
+    et_low_str = fmt_count(et_low, precision=2, commas=False, label="token", allow_fractional=True)
+```
+
+Evaluating this model across representative acceptance regimes illustrates how sharply returns depend on draft accuracy: high acceptance ($\alpha_{\text{acc}} = 0.9$) yields an expected `{python} SpeculativeSpeedup.et_high_str` per verification round for a `{python} SpeculativeSpeedup.sp_high_mult_str` speedup, medium acceptance ($\alpha_{\text{acc}} = 0.7$) delivers `{python} SpeculativeSpeedup.et_med_str` per round for a `{python} SpeculativeSpeedup.sp_med_mult_str` speedup, and low acceptance ($\alpha_{\text{acc}} = 0.5$) drops progress to `{python} SpeculativeSpeedup.et_low_str` per round, yielding a modest speedup of `{python} SpeculativeSpeedup.sp_low_mult_str`.
+
+::: {.column-margin}
+![](images/svg/vol2_inference_margin_001.svg){width="100%" fig-alt="Three horizontal bars on a linear scale: 90 percent acceptance gives 3.7 times faster decoding, 70 percent gives 2.4 times, and 50 percent gives 1.6 times."}
+
+*Speedup shrinks quickly as draft acceptance falls.*
+:::
+
+Acceptance depends on the draft-target pair, sampling policy, and request distribution. The preceding calculations are sensitivity cases, not fixed acceptance rates for chat, reasoning, or code generation. A serving fleet must measure acceptance and useful token throughput for its actual traffic before selecting a speculation policy, and that policy must answer three serving concerns: memory, the SLO, and change over time.
+
+```{python}
+#| echo: false
+#| label: speculation-draft-weights
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ SPECULATION TAX: DRAFT-MODEL WEIGHTS (LEGO)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: "speculation tax" paragraph in
+# │          @sec-inference-scale-speculative-decoding-c438.
+# │
+# │ Goal: Size the resident FP16 weights of a 7B draft model paired with a 70B target.
+# │ Show: ~14 GB of draft weights per replica.
+# │ How: Models.Language.Llama2_7B.size_in_bytes(BYTES_FP16).
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim.fmt import check, fmt_memory
+
+class SpeculationDraftWeights:
+    """Resident FP16 weight cost of a 7B draft model."""
+
+    # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
+    draft = Models.Language.Llama2_7B
+    target = Models.Language.Llama2_70B
+
+    # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
+    draft_fp16 = draft.size_in_bytes(BYTES_FP16)
+    draft_share = (draft_fp16 / target.size_in_bytes(BYTES_FP16)).to("").magnitude
+
+    # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
+    check(0.05 < draft_share < 0.15, "Draft weights should be about a tenth of the target's")
+
+    # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
+    draft_fp16_gb_str = fmt_memory(draft_fp16, unit=GB, precision=0, commas=False)
+```
+
+The first concern is memory. The draft model is not free state. It requires memory for weights, and each in-flight request that uses it reserves additional draft KV state. Pairing a 7B draft model with a 70B target adds roughly `{python} SpeculationDraftWeights.draft_fp16_gb_str` of FP16 weights per replica plus per-request draft cache. When colocated with the target, this *speculation tax*\index{Speculative Decoding!speculation tax} competes directly with the KV-cache admission budget developed in @sec-inference-scale-kv-cache-wall: every gigabyte reserved for the draft is unavailable to target requests. Under a binding memory limit, that reservation lowers maximum concurrency. Placing the draft on separate devices preserves target memory at the cost of additional hardware and communication. The admission controller and the speculation policy therefore require a joint capacity and latency evaluation.
+
+The second concern is which service-level objective the endpoint must meet. At sufficient acceptance, speculation can reduce TPOT; draft execution and cache residency can also reduce admission capacity. Neither latency nor aggregate-throughput benefit follows from the endpoint label alone. The scheduler should compare SLO-compliant goodput with and without speculation under the intended load\index{Speculative Decoding!SLA trade-offs}. TTFT needs separate measurement because draft setup and prefill can add work before the first response token.
+
+The third concern is that acceptance and load change over time. A scheduler can enable speculation when measured TPOT or goodput improves, then disable it when verification cost outweighs accepted-token progress. Disabling draft execution alone does not free resident draft weights; recovering that capacity requires unloading them, and releasing draft KV pages requires ending or migrating the associated speculative state. Alternative draft mechanisms change this budget: self-speculative decoding\index{Self-Speculative Decoding} reuses the target model, Medusa\index{Medusa} [@cai2024medusa] adds prediction heads, and lookahead decoding\index{Lookahead Decoding} avoids a separate draft model. Each requires its own quality, acceptance, and resource evaluation.
 
 ### Memory management best practices {#sec-inference-scale-memory-management-best-practices-67e2}
 
@@ -5890,7 +5824,7 @@ An even expert placement assigns each device $E/N$ experts, where $N$ is the num
 
 :::
 
-The communication pattern differs from tensor parallelism. All-reduce delivers a combined reduction result (*same data to all devices*), which can be efficiently mapped to ring or tree topologies. Expert parallelism instead uses all-to-all\index{All-to-All!expert parallelism} to deliver routed token representations (*different data to different devices* based on routing). This uncoordinated cross-talk stresses network topologies far more than All-reduce, as it generates highly variable traffic patterns that can easily cause link congestion or incast. If some experts receive more work, their hosts can determine completion time while less-loaded hosts wait. Balancing the number of stored experts does not guarantee balanced token traffic.
+The communication pattern differs from tensor parallelism. All-reduce delivers a combined reduction result (*same data to all devices*) and maps onto ring or tree schedules whose per-link traffic is fixed by the message size. Expert parallelism instead uses all-to-all\index{All-to-All!expert parallelism} to deliver routed token representations (*different data to different devices* based on routing), so the bytes each link and receiver carries depend on which experts the router selects; the host of a popular expert can become an incast point for many senders. If some experts receive more work, their hosts can determine completion time while less-loaded hosts wait. Balancing the number of stored experts does not guarantee balanced token traffic.
 
 Training and serving offer different controls over this imbalance. An auxiliary loss\index{Auxiliary Loss} can encourage more balanced expert use during training without guaranteeing balance on future traffic. An expert capacity factor\index{Capacity Factor} limits accepted tokens relative to an even allocation; 1.25$\times$ is an illustrative setting, not a universal requirement. Dropping excess work or rerouting it to another expert changes the model computation and requires quality validation. Expert buffering\index{Expert Buffering} instead retains excess work for later execution, spending latency and queue capacity. These controls trade quality, waiting, and utilization rather than guaranteeing that routing remains balanced.
 
@@ -6511,7 +6445,7 @@ The choice of sharding strategy depends on model architecture and deployment pri
 
 Strategy selection starts from the deployment bottleneck. Tensor parallelism is a candidate when reduced layer execution can repay frequent collectives; pipeline parallelism distributes layers and can sustain throughput when enough concurrent work fills the stages. Expert and embedding sharding distribute sparse state while adding routed communication. These choices can be combined, but each must fit the per-device memory budget and the measured latency contract.
 
-Together, these hardware limits—memory bandwidth bounding generation, compute bounding prompt processing, and interconnect bandwidth constraining parallel execution—define the maximum capability of a single model replica. Once a replica's physical footprint and execution capacity are established, user demand dictates how many such replicas the service must deploy. The challenge then shifts from optimizing a single instance to managing a fleet: deciding where to send each arriving request. Routing must account for work already in progress and reusable state (like KV caches), ensuring that individual replica capacity translates into efficient, reliable service at scale.
+Once a replica's memory footprint and execution capacity are established, demand determines how many replicas the service needs. The next decision is where to send each arriving request. Routing must account for work already in progress and reusable state, so that replica capacity becomes useful fleet capacity.
 
 ## Load Balancing and Request Routing {#sec-inference-scale-load-balancing-request-routing-4997}
 
@@ -7109,7 +7043,7 @@ Consider a critical customer-support chatbot running on the same GPU server as a
 
 ### The multi-tenancy challenge {#sec-inference-scale-multitenancy-challenge-8dca}
 
-Sharing a serving pool can raise utilization and reduce separately provisioned capacity when tenant demand peaks occur at different times. Because accelerators are extremely expensive and often underutilized during off-peak hours, aggregating multiple independent workloads onto the same hardware is economically vital to amortize capital costs. However, this statistical-multiplexing gain weakens when bursts are correlated, and shared resources introduce interference even when aggregate demand fits. Pooling therefore needs both a demand model and enforceable isolation.
+Sharing a serving pool can raise utilization and reduce separately provisioned capacity when tenant demand peaks occur at different times. This statistical-multiplexing gain weakens when bursts are correlated, and shared resources introduce interference even when aggregate demand fits. Pooling therefore needs both a demand model and enforceable isolation.
 
 ::: {.column-margin}
 ![](images/svg/vol2_inference_margin_004.svg){width="100%" fig-alt="A red tenant workload fans gray arrows to five blue peer workloads, showing one source degrading many shared dependents."}
@@ -8071,7 +8005,7 @@ The gateway in @fig-spot-aware-routing separates traffic by its tolerance for ca
 
 Savings under this split depend on provisioned GPU-hours, discounts, retries, and reserve capacity rather than on the traffic share, and spot capacity changes none of the fault-tolerance requirements of the SLO-critical path.
 
-## Global inference infrastructure {#sec-inference-scale-global-inference-infrastructure-df52}
+## Global Inference Infrastructure {#sec-inference-scale-global-inference-infrastructure-df52}
 
 Extending resource isolation and failure boundaries beyond one data center introduces placement decisions at geographic scale. Distance, regional failures, and data-placement requirements can motivate regional replicas, caches, or a centralized service with an explicit network budget. @Fig-serving-deployment-stack illustrates three tiers: edge points of presence for reusable responses, regional gateways for authentication and routing, and GPU clusters for model execution. Its 10 ms, 50 ms, and 2 s budgets are scenario targets, not measured performance or universal deadlines. The application must define whether its execution budget governs first response, individual tokens, or completion of the entire request.
 
@@ -8416,7 +8350,7 @@ Extending resource isolation and failure boundaries beyond one data center intro
 
 :::
 
-#### Drivers for multi-region deployment {#sec-inference-scale-multiregion-matters-d7d3}
+### Drivers for multi-region deployment {#sec-inference-scale-multiregion-matters-d7d3}
 
 Single-region deployment couples every user to the same geographic site and regional failure domain. Network round-trip time (RTT) adds a latency floor for distant users. @Tbl-rtt-by-user-location gives illustrative regional timings; actual paths, access networks, and congestion require measurement:
 
@@ -8431,7 +8365,7 @@ Single-region deployment couples every user to the same geographic site and regi
 
 Network delays compound when a request makes sequential calls across the distant boundary; multiple model calls inside one backend region do not each pay another client-to-region RTT. Regional replication can shorten that path and separate failure domains. Data-placement policies also constrain eligible destinations. The General Data Protection Regulation permits international transfers under specified conditions rather than requiring blanket EU-only processing; applicable law and contractual commitments must be translated into explicit placement rules. Regional replicas, edge caches, and cross-region sharding then trade capacity, communication, and coordination within those rules.
 
-#### Global load balancing with regional replicas {#sec-inference-scale-pattern-1-global-load-balancing-regional-replicas-b7ac}
+### Global load balancing with regional replicas {#sec-inference-scale-pattern-1-global-load-balancing-regional-replicas-b7ac}
 
 In @fig-global-inference-multiregion, a global load balancer\index{Global load balancing!regional replicas} selects among regions that satisfy placement policy, readiness, and capacity requirements. Measured network latency helps choose among those eligible destinations; geographic proximity alone does not determine completion time. A shared registry supplies versioned artifacts to the independent regional replicas.
 
@@ -8680,7 +8614,7 @@ The illustrative RTT comparison shows why nearby replicas can reduce network del
 
 During a rollout, regions may serve different versions. The application must decide whether that is acceptable and whether a request or session needs version pinning. A region-by-region canary deployment\index{Canary deployment!global rollout} limits initial exposure to a small traffic share, such as 1 percent. Its observation window follows the required sample count, traffic diversity, and release criteria, not a fixed number of hours; @sec-ml-operations-scale-canary-deployment-3d8b develops the timing calculation (@eq-canary-duration). Each expansion needs its own error-rate, latency, and quality gate, with compatible prior artifacts retained for rollback.
 
-#### Edge caching with central inference {#sec-inference-scale-pattern-2-edge-caching-central-inference-f08e}
+### Edge caching with central inference {#sec-inference-scale-pattern-2-edge-caching-central-inference-f08e}
 
 Caching responses at the edge\index{Edge caching!central inference} can avoid repeated central inference when a stored response remains valid for the incoming request. Before returning a hit, the edge must enforce authorization and match the relevant model version, conversation or retrieval context, generation policy, and freshness requirements. Identical visible queries do not necessarily permit the same answer, and fresh-sample semantics may prohibit reuse. @Fig-edge-cache-routing shows the hit and miss paths with an illustrative 10 ms hit budget. A miss reaches the central cluster; only responses eligible for reuse should enter the edge store.
 
@@ -8882,7 +8816,7 @@ Semantic caching[^fn-semantic-cache-tradeoff] (caching based on embedding simila
 
 [^fn-semantic-cache-tradeoff]: [offset=-10mm] **Semantic caching**\index{Semantic Caching!trade-off}: A similarity lookup can reuse responses beyond exact string matches, but it adds retrieval work and can return an invalid answer when superficially similar queries require different responses. The similarity threshold therefore trades cache coverage against correctness.
 
-#### Cross-region model sharding {#sec-inference-scale-pattern-3-cross-region-model-sharding-7a2f}
+### Cross-region model sharding {#sec-inference-scale-pattern-3-cross-region-model-sharding-7a2f}
 
 Cross-region model sharding places communication on the request's execution path. Pipeline stages can reside in separate regions, but every dependent stage crossing then pays the inter-region transfer cost. In an illustrative comparison of 75–150 ms network delays with 1–5 ms stage computation, a 10--100$\times$ slowdown is possible; it is not a model-independent ratio. Such placement needs a reason strong enough to justify that cost, such as unavailable colocated capacity, and must be evaluated against the actual stage layout and deadline.
 
@@ -8892,7 +8826,7 @@ Because cross-region sharding is so costly on the steady-state path, most produc
 \newpage
 :::
 
-#### Cross-region failover {#sec-inference-scale-crossregion-failover-0d67}
+### Cross-region failover {#sec-inference-scale-crossregion-failover-0d67}
 
 When a region becomes unavailable, failover must choose a healthy destination permitted to process the request and able to absorb its work. @Lst-active-failover illustrates a simplified timeout fallback. A production policy must also preserve the request's remaining deadline, version requirements, and data-placement constraints when selecting the secondary region.
 
@@ -8919,7 +8853,7 @@ Rerouting is only part of regional failover. The destination needs accessible, a
 ↩ Regional headroom, session rebuilding, and the gradual return of traffic to a recovered region are established in @sec-fault-tolerance-reliability-reliability-replication-strategies-aaa2.
 :::
 
-#### Cost optimization across regions {#sec-inference-scale-cost-optimization-across-regions-c1c2}
+### Cost optimization across regions {#sec-inference-scale-cost-optimization-across-regions-c1c2}
 
 GPU pricing varies by provider, contract, region, and time. @Tbl-gpu-region-pricing uses a hypothetical price snapshot to show how placement can balance cost against latency requirements; it must not be used for procurement:
 
@@ -8953,7 +8887,7 @@ Regional placement completes the serving hierarchy, from one request's batch slo
 
 ## Case Studies {#sec-inference-scale-case-studies-9689}
 
-These four design cases are illustrative composites rather than descriptions of named companies' internal deployments, and their request rates, latency budgets, hardware allocations, and update cadences follow the chapter's scenario convention. Throughout these examples, we rely on standard metrics like TTFT (Time to First Token) and TPOT (Time per Output Token), as well as architectural models like DLRMs (Deep Learning Recommendation Models). Each case binds on a different constraint: embedding scale, variable-length generation, cascade cost, or multimodal freshness. Orca and vLLM supply the previously cited scheduling and memory-management mechanisms; the scenarios combine those ideas with routing, sharding, and admission control.
+These four design cases are illustrative composites rather than descriptions of named companies' internal deployments, and their request rates, latency budgets, hardware allocations, and update cadences follow the chapter's scenario convention. Each case binds on a different constraint: embedding scale, variable-length generation, cascade cost, or multimodal freshness. Orca and vLLM supply the previously cited scheduling and memory-management mechanisms; the scenarios combine those ideas with routing, sharding, and admission control.
 
 ### Embedding-heavy recommendation serving {#sec-inference-scale-meta-recommendation-serving-bede}
 
@@ -9298,6 +9232,70 @@ If deadline will be missed:
 ```
 
 The serving lesson is that ranking cascades reduce cost by spending expensive models only on a shrinking candidate set, at the risk of losing relevant items upstream. Deadline propagation and priority scheduling expose the remaining time budget; meeting it also requires sufficient capacity and a validated fallback when work cannot finish. Custom hardware can improve predictability when the workload matches the accelerator, but the next case adds a freshness constraint that hardware alone cannot solve.
+
+### Multimodal recommendation and freshness {#sec-inference-scale-tiktok-multimodal-recommendation-91e9}
+
+The multimodal recommendation scenario\index{Recommendation system!multimodal serving case} binds on freshness under a tight ranking SLO: video understanding is expensive, new content arrives continuously, and user modeling remains online. It combines video understanding (vision) with user modeling (recommendation) for personalized content ranking, creating a multimodal inference challenge where different model types must coordinate.
+
+The operating scale explains why clear online/offline separation matters: the system handles millions of video rankings per second under a tight p99 latency target below $50\text{ ms}$, ingesting millions of new videos daily across video, audio, text, and user interaction signals.
+
+The serving stack separates content and user paths:
+
+```
+User request → User embedding → Candidate videos → Video understanding → Ranking
+
+                    |                  |                    |
+                    v                  v                    v
+             User Tower          Video Cache          Vision Models
+           (Transformer)        (Pre-computed)        (On-demand)
+```
+
+The scenario separates user understanding (online) from content understanding (offline) through a two-tower architecture with caching.[^fn-two-tower-serving] @Tbl-tiktok-two-tower-updates contrasts the online and offline tower update cadences:
+
+[^fn-two-tower-serving]: **Two-Tower Architecture**\index{Two-Tower Architecture!serving}: Encodes user features and item features through separate neural networks ("towers") into embeddings, then scores via dot product. The serving advantage: item embeddings can be precomputed offline and cached, reducing online candidate generation to the user tower forward pass and vector similarity search. Search latency depends on index size, placement, and the required recall. The trade-off is reduced model expressiveness from late interaction, since the towers cannot attend to each other's features during encoding.
+
+| **Tower**       | **Update Frequency** | **Latency** | **Compute**  |
+|:----------------|:--------------------:|:-----------:|:------------:|
+| **User tower**  |      Real-time       |     5 ms    | GPU (online) |
+| **Video tower** |        Hourly        |     N/A     | GPU (batch)  |
+
+: **Illustrative two-tower update cadence**: User and video towers run on different cadences: user features change second-to-second and must run inference online; video features change much more slowly and are precomputed in hourly batches. This asymmetric scheduling is the design that takes vision inference out of the critical path for almost every request. {#tbl-tiktok-two-tower-updates tbl-colwidths="[28,32,16,24]"}
+
+Video embeddings are precomputed and cached\index{Two-Tower Architecture!offline embedding cache}, eliminating vision inference from the critical path for most requests. A newly uploaded video without a cached embedding needs an explicit policy: process it before admitting it to recommendations, serve a validated fallback, or run vision inference on demand if the request budget permits. The hourly refresh cadence alone does not meet the shorter ingestion targets below; those targets require a separate path for new content.
+
+The online path below separates candidate generation from a later dense reranker. Its user-tower budget is distinct from the reranker budget:
+
+```
+User features → CPU preprocessing (1 ms)
+             → Embedding lookup (2 ms, CPU+DRAM)
+             → User tower (5 ms, GPU)
+             → Dense reranking (10 ms, GPU)
+             → Response formatting (1 ms)
+```
+
+New video content is processed with different priorities, as @tbl-tiktok-video-priorities shows:
+
+| **Priority**   | **SLA** | **Use Case**                 |
+|:---------------|:-------:|:-----------------------------|
+| **Critical**   |  5 min  | Creator with large following |
+| **Standard**   |  30 min | Normal uploads               |
+| **Background** | 2 hours | Bulk/imported content        |
+
+: **Illustrative video ingestion priority tiers**: Three-tier SLA for video ingestion. High-follower-count creators get a five-minute SLA to maximize content freshness for their audience; standard uploads get 30 minutes; bulk imports get two hours of slack so the system can absorb them during quiet periods. {#tbl-tiktok-video-priorities tbl-colwidths="[30,20,50]"}
+
+The priority scheme allocates scarce ingestion capacity to time-sensitive content first. Meeting the stated targets still requires capacity for the corresponding arrival rates; priority changes who waits when demand exceeds capacity, rather than eliminating the wait.
+
+The scenario combines multiple understanding modalities through late fusion, which combines independently computed modality embeddings or scores near the end of ranking rather than running one joint model over all raw modalities:
+
+```
+Video embedding (512d) -+
+Audio embedding (256d) -+- Concat → Fusion MLP → Final embedding (256d)
+Text embedding (256d)  -+
+```
+
+Late fusion separates the modality computations, but their outputs remain inputs to the fusion model. Updating one modality's model can change the meaning or distribution of its embeddings even when their dimensions stay fixed. Each update therefore needs compatibility validation and, when that contract changes, regeneration of cached embeddings or adaptation of the fusion model.
+
+The serving lesson is that freshness requires separating online and offline work. Two-tower architectures make aggressive caching possible because item embeddings can be refreshed asynchronously, while priority-based processing spends the freshest compute where it has the largest user impact.
 
 ### Cross-cutting observations {#sec-inference-scale-crosscutting-observations-742e}
 
