@@ -1,29 +1,3 @@
----
-quiz: data_engineering_quizzes.json
-concepts: data_engineering_concepts.yml
-engine: jupyter
----
-
-# Data Engineering {#sec-data-engineering}
-
-::: {layout-narrow}
-::: {.column-margin}
-
-\chapterminitoc
-
-:::
-
-::: {.content-visible when-format="pdf"}
-\noindent
-![](images/png/cover_data_engineering_blueprint_labeled_print.png){fig-alt="Isometric data refinery where raw mixed data passes through validation, schema alignment, transformation, batching, and an accelerator-ready feed."}
-:::
-
-::: {.content-visible unless-format="pdf"}
-![](images/webp/cover_data_engineering_blueprint_labeled.webp){fig-alt="Isometric data refinery where raw mixed data passes through validation, schema alignment, transformation, batching, and an accelerator-ready feed."}
-:::
-
-:::
-
 ## Purpose {.unnumbered .unlisted}
 
 \begin{marginfigure}
@@ -383,6 +357,130 @@ Data engineering is governed by physical costs. Check your intuition:
 :::
 
 Physical constraints define the operational envelope of ML data systems, but physical awareness alone does not guarantee reliability. A system that accounts for data gravity can still fail if schema validation is neglected, data corruptions go undetected, or ingestion pipelines crash silently under load. Turning these physical realities into robust production infrastructure requires a systematic architectural framework that organizes engineering decisions across ingestion, transformation, and storage.
+
+### Training Data Loading {#sec-data-engineering-training-data-loading}
+
+In the compiler framework, data ingestion\index{Data ingestion!pipeline boundary} acts as the *lexer*: it reads raw source streams and tokenizes them into structured records that downstream stages can process. The primary performance barrier at this stage is the **input/output (I/O) bottleneck**\index{I/O bottleneck!data loading}. Accelerators remain idle if ingestion cannot stage tensors quickly enough to keep compute units supplied. The slowest-stage bound of @sec-data-engineering-feeding-problem applies unchanged: in an idealized two-stage model, step time ranges from $\max(\IronlawTermTimesCompute, T_{\text{IO}})$ with full overlap to $\IronlawTermTimesCompute + T_{\text{IO}}$ with no overlap. What changes is the binding resource. The feeding scenario was starved by the disk; ingestion is more commonly starved by CPU-side decompression and decode.
+
+To mitigate this bottleneck, modern ML data loading pipelines employ several concurrent strategies to hide data preparation latency behind accelerator compute:
+
+1.  **Multi-process worker pools**: Distributing decompression and augmentation across multiple CPU cores prevents a single host thread from throttling the accelerator.
+2.  **Asynchronous prefetching**: Overlapping the host-to-accelerator memory transfer with current-step computation ensures the next batch is staged before the accelerator requests it.
+3.  **Memory pinning**: Staging data in page-locked (pinned) host memory allows direct memory access (DMA) transfers to the accelerator, bypassing expensive CPU paging overhead.
+4.  **Hardware decode engines**: Moving standard JPEG or video decompression off the host CPU and onto specialized on-device media engines (such as NVIDIA's NVJPEG) removes the CPU bound entirely, handing the constraint back to the storage tier.
+
+```{python}
+#| echo: false
+#| label: dataloader-stats-calc
+
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ DATALOADER CHOKE POINT SETUP
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: Dataloader Choke Point prose and figure
+# │
+# │ Goal: Keep the illustrative worker/throughput constants next to their use.
+# │ Show: That 8 CPU workers at 375 img/s each reach the 3,000 img/s accelerator rate.
+# │ How: Calculate the minimum worker count and reuse constants in the plot.
+# │
+# │ Note: The accelerator rate comes from FeedingProblem (chapter scenario anchor).
+# └─────────────────────────────────────────────────────────────────────────────
+import math
+from mlsysim.fmt import fmt, check, fmt_rate
+
+# ┌── LEGO ───────────────────────────────────────────────
+class DataloaderStats:
+    """
+    Namespace for Dataloader Choke Point statistics.
+    """
+
+    # ┌── 1. LOAD (Constants) ───────────────────────────────────────────────
+    gpu_limit_img_sec = FeedingProblem.sustained_img_per_sec  # chapter scenario rate
+    worker_img_sec = 375  # scenario assumption: JPEG decode + augment per CPU worker
+    cpu_throughput_cap_img_sec = 3500
+    max_workers = 16
+
+    # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
+    resnet_worker_count = math.ceil(gpu_limit_img_sec / worker_img_sec)
+
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(resnet_worker_count == 8, f"Expected 8 workers for the illustrative dataloader saturation point, got {resnet_worker_count}.")
+
+    # ┌── 4. OUTPUT (Formatting) ───────────────────────────────────────────
+    resnet_worker_count_str = fmt(resnet_worker_count, precision=0, commas=False)
+    worker_img_per_s_str = fmt_rate(worker_img_sec, 'img/s', precision=0, commas=True)
+    gpu_limit_img_per_s_str = fmt_rate(gpu_limit_img_sec, 'img/s', precision=0, commas=True)
+```
+
+In computer vision, JPEG decode and augmentation on the host CPUs are the usual binding stage. In the chapter's scenario the accelerator consumes `{python} DataloaderStats.gpu_limit_img_per_s_str`; if each DataLoader worker process decodes and augments `{python} DataloaderStats.worker_img_per_s_str`, `{python} DataloaderStats.resnet_worker_count_str` workers are needed to reach the crossing. Below the crossing the input pipeline binds, and adding accelerators yields no speedup, a counterintuitive result for teams expecting linear scaling from hardware investments. Above it, additional workers raise nothing because the accelerator binds. The worker count is a capacity match, not a hardware constant: actual ResNet-50\index{ResNet-50!data-loading requirements} and A100\index{A100!data-loading requirements} requirements move with image transforms, host CPUs, batch size, and framework configuration. @Fig-dataloader-choke-point plots this capacity crossing, contrasting the rising blue CPU-supply curve against the dashed red GPU-capacity ceiling to isolate the starved regime below eight workers from the compute-saturated plateau beyond it.
+
+::: {#fig-dataloader-choke-point fig-env="figure" fig-pos="htb" fig-cap="**The Dataloader Choke Point**: Training throughput (img/s) vs. DataLoader workers. The blue CPU-supply curve rises with worker count until it reaches the illustrative input-pipeline cap; the red dashed line marks accelerator consumption capacity. The lower curve is the bottleneck: the accelerator starves to the left of the crossing, while extra workers beyond the crossing do not increase accelerator throughput." fig-alt="Line chart of throughput vs. workers. Blue line (CPU) rises linearly, then plateaus at the input-pipeline cap. Red line (GPU) is flat. Where CPU < GPU, system is starved. Where CPU > GPU, system is saturated."}
+
+```{python}
+#| echo: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ FIGURE: DATALOADER CHOKE POINT
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @fig-dataloader-choke-point in the data ingestion discussion
+# │
+# │ Goal: Visualize the min(CPU supply, GPU demand) bottleneck.
+# │ Show: The starvation vs. saturation regions in training throughput.
+# │ How: Plot throughput curves showing the "choke point" between CPU and GPU capacity.
+# │
+# └─────────────────────────────────────────────────────────────────────────────
+# ┌── 1. CANVAS ────────────────────────────────────────────────────────────────
+# │ Visualize the min(CPU supply, GPU demand) bottleneck.
+import numpy as np
+from binder.tools.figures import style as book_style
+
+fig, ax, COLORS, plt = book_style.setup_plot(figsize=(10, 4.5))
+
+# —Plot: The Dataloader Choke Point ---
+
+# ┌── 2. ARRAYS ────────────────────────────────────────────────────────────────
+workers = np.arange(1, DataloaderStats.max_workers + 1)
+cpu_throughput = np.minimum(DataloaderStats.worker_img_sec * workers, DataloaderStats.cpu_throughput_cap_img_sec)
+gpu_limit = DataloaderStats.gpu_limit_img_sec
+
+# ┌── 3. RENDER ────────────────────────────────────────────────────────────────
+ax.plot(workers, cpu_throughput, 'o-', color=COLORS['BlueLine'], label='DataLoader (CPU)')
+ax.axhline(gpu_limit, linestyle='--', color=COLORS['RedLine'], label='GPU Capacity')
+ax.fill_between(workers, 0, np.minimum(cpu_throughput, gpu_limit), color=COLORS['BlueL'], alpha=0.2)
+
+# ┌── 4. DECORATE ──────────────────────────────────────────────────────────────
+ax.text(
+    4.5,
+    1500,
+    "Starvation",
+    color=COLORS['BlueLine'],
+    fontweight='normal',
+    ha='center',
+    bbox=dict(facecolor='white', alpha=0.8, edgecolor='none', pad=0.2),
+)
+ax.text(
+    10,
+    3100,
+    "Saturated",
+    color=COLORS['RedLine'],
+    fontweight='normal',
+    ha='center',
+    bbox=dict(facecolor='white', alpha=0.8, edgecolor='none', pad=0.2),
+)
+ax.set_xlabel('DataLoader Workers')
+ax.set_ylabel('Throughput (img/s)')
+ax.legend(loc='lower right', fontsize=8, frameon=True, facecolor='white', framealpha=0.95, edgecolor='gray', fancybox=True, borderpad=0.6)
+plt.show()
+plt.close()
+```
+
+:::
+
+Relieving the choke point takes three mechanisms: multi-process worker pools that scale decode across host cores, asynchronous pinned-memory prefetching that overlaps the host-to-accelerator copy with compute, and hardware decode engines that move JPEG decompression off the host CPU entirely. The last of these removes the CPU bound and hands the constraint back to storage, which is the budget @sec-data-engineering-ml-storage-requirements-performance-1b0d prices.
+
+::: {.column-margin .margin-pointer}
+↪ How asynchronous prefetching and overlapping pipeline stages hide host preparation latency behind accelerator compute is developed in @sec-model-training-data-prefetching-pipeline-overlapping-e984.
+:::
+
+Deploying an end-to-end pipeline across acquisition, ingestion, processing, labeling, and storage does not conclude data engineering. In production, input environments continuously drift: sensor hardware shifts, upstream schemas mutate, and annotator pools turn over. Without active operational maintenance, static pipelines quietly degrade over time.
 
 ## Four Pillars Framework {#sec-data-engineering-four-pillars-framework-4ef1}
 
@@ -2075,6 +2173,403 @@ Governance constraints further shape acquisition: privacy and health-data regula
 
 Ingesting heterogeneous inputs—crowdsourced recordings, synthetic waveforms, and web audio streams—imposes strict architectural demands at the pipeline boundary. Because incoming streams exhibit disparate audio encodings, sampling rates, ingestion latencies, and noise floors, the ingestion tier cannot treat external inputs as uniform data. The storage and validation infrastructure must ingest, normalize, and verify this streaming volume before it can be committed to the training feature store.
 
+## Data Labeling {#sec-data-engineering-data-labeling-6836}
+
+The processing pipelines in @sec-data-engineering-systematic-data-processing-aebc transform raw data into structured features, but supervised learning still requires labels\index{Data labeling!systems engineering} that tell the model which patterns correspond to each target. In the KWS pipeline, the ingestion and processing stages produce millions of clean, standardized audio spectrograms, but training requires ground-truth annotations indicating which segments contain the wake word and which represent ambient background noise. This declaration is the **ground truth**\index{Ground truth!definition},[^fn-ground-truth-proxy] and producing it at scale is often the most human-dependent and error-prone stage of the pipeline.
+
+[^fn-ground-truth-proxy]: **Ground truth**\index{Ground truth!proxy limitation}: From remote sensing, where orbital measurements are verified by sending a team to the physical location—the "ground"—to establish the "truth." The etymology carries a systems warning: ML labels are proxies for reality, not reality itself. When a crowdsourced annotator labels an image as "cat," that label reflects the annotator's judgment, not an objective fact. Every downstream metric—accuracy, precision, recall—is measured against this proxy, meaning label quality errors propagate silently into every evaluation of the model.
+
+Unlike automated transformations that can be parallelized across machines, labeling introduces human judgment into the pipeline, creating non-deterministic latency and stochastic error modes. A crowdsourced annotator might mislabel a whispered "Alexa" as background noise. An expert radiologist might disagree with a colleague about a borderline diagnosis. Such disagreement can reflect genuine ambiguity, unclear instructions, annotator error, or differences in expertise; the labeling system must distinguish and manage these causes rather than treating every disagreement as irreducible. The labeling infrastructure must therefore balance throughput, quality verification, cost, and provenance.
+
+### Label types and system requirements {#sec-data-engineering-label-types-system-requirements-4c33}
+
+System architecture, storage footprint, and loader throughput depend directly on label granularity. In a computer vision system tracking vehicles, pedestrians, and traffic signs from video feeds, each target representation imposes distinct storage, computation, and serialization constraints.
+
+Classification labels\index{Classification label!storage requirements} represent the simplest form, assigning a discrete class index (or a multi-label binary bitmask) to each input. Storage requirements are modest—typically a fixed-width integer (such as a `uint16` or `int32` index) per image—but access patterns diverge between training and evaluation: training pipelines shuffle and sample randomly, whereas validation pipelines stream sequentially across the corpus, driving different indexing and cache-locality strategies.
+
+Bounding boxes\index{Bounding box!definition}\index{Bounding box!annotation}\index{Object detection!bounding boxes} extend beyond classification by localizing objects within each frame. Each bounding box stores four coordinates (such as $x_{\text{min}}, y_{\text{min}}, x_{\text{max}}, y_{\text{max}}$ or center coordinates with width and height) alongside the class identifier. Because scenes contain variable numbers of objects, label storage transitions from fixed-width scalar records to variable-length tensor structures, requiring dynamic padding or ragged-batch handling in the data loader. Moreover, positioning bounding boxes takes 10 to 20$\times$ longer than single-label classification, directly throttling annotation throughput and inflating labeling cost.
+
+```{python}
+#| echo: false
+#| label: segmentation-label-scale-calc
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ SEGMENTATION LABEL SCALE CALCULATION
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: Label types and system requirements
+# │
+# │ Goal: Quantify why pixel-level segmentation is much heavier than boxes.
+# │ Show: A 1920x1080 mask has about 50,000x more scalar entries than ten boxes.
+# │ How: Compare one pixel label per image pixel with four coordinates per box.
+# │
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim.fmt import fmt, check
+
+# ┌── LEGO ───────────────────────────────────────────────
+class SegmentationLabelScale:
+    """Scalar label-entry comparison for masks versus bounding boxes."""
+
+    # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
+    image_width_px = 1920
+    image_height_px = 1080
+    box_count = 10
+    box_coords = 4
+
+    # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
+    pixel_labels = image_width_px * image_height_px
+    box_scalar_entries = box_count * box_coords
+    label_entry_ratio = pixel_labels / box_scalar_entries
+
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(pixel_labels > 2_000_000, f"1080p mask should exceed two million pixels, got {pixel_labels}.")
+    check(label_entry_ratio > 50_000, f"Segmentation-to-box scalar ratio unexpectedly low: {label_entry_ratio:.0f}x.")
+
+    # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
+    pixel_labels_m_str = fmt_count(pixel_labels, scale="M", precision=1, commas=False)
+    box_count_str = fmt(box_count, precision=0, commas=False)
+    box_coords_str = fmt(box_coords, precision=0, commas=False)
+    label_entry_ratio_mult_str = fmt_multiple(round(label_entry_ratio), precision=0, commas=True)
+```
+
+::: {.column-margin}
+![](images/svg/vol1_data_engineering_margin_004.svg){width="100%" fig-alt="Vertical count ladder comparing about 2.1 million segmentation-mask labels against 40 scalar bounding-box entries."}
+
+*Finer annotation granularity multiplies storage and processing scale.*
+:::
+
+Segmentation maps\index{Semantic segmentation!pixel-level labels} assign a class identifier to every pixel, producing dense 2D label matrices ($H \times W$). In autonomous driving and traffic monitoring, this entails tracing irregular boundaries for driveable road surfaces, vehicles, and pedestrians. These dense annotations multiply storage and ingestion bandwidth. A segmentation mask for a $1920{\times}1080$ image requires about `{python} SegmentationLabelScale.pixel_labels_m_str` labels (one per pixel), compared to perhaps `{python} SegmentationLabelScale.box_count_str` bounding boxes or a single classification label. If each box stores `{python} SegmentationLabelScale.box_coords_str` coordinates, that is roughly `{python} SegmentationLabelScale.label_entry_ratio_mult_str` more scalar label entries than `{python} SegmentationLabelScale.box_count_str` boxes before accounting for per-value encoding, and the hours required per image for manual segmentation make this approach suitable only when pixel-level precision is essential.
+
+@Fig-labels arrays five annotation modalities across vision and speech examples, demonstrating how labeling granularity ranges from coarse scene tags and captions to spatial bounding boxes, dense pixel-level masks, and audio transcripts. Classification can label an entire scene, while bounding boxes and segmentation maps localize objects or regions. Production datasets may combine modalities: a single camera frame might carry a scene label, obstacle boxes, and path-region masks, with each label type serving a distinct downstream task.
+
+::: {#fig-labels fig-env="figure" fig-pos="htb" fig-cap="**Data Annotation Modalities**: Four rows show classification, bounding-box, segmentation, and caption labels for one image; the fifth shows a transcript label for an audio input. The appropriate annotation representation depends on the input modality and task." fig-alt="Five-row figure. Four rows apply classification, bounding-box, segmentation, and caption labels to a dog-on-blanket image; the fifth maps a speaker icon to the transcript 'Once upon a time...'."}
+
+![](images/png/cs249r_labels_new.png){width="67%"}
+
+:::
+
+Beyond these geometric labels, production systems must also manage rich metadata essential for quality control and debugging. The Common Voice dataset [@ardila2020common] exemplifies this in speech recognition: tracking speaker demographics for fairness, recording quality metrics for filtering, and language information for multilingual support. If an object detection model fails in rainy conditions, weather metadata captured during collection pinpoints the coverage gap. This metadata requirement demonstrates how label type choice cascades through the entire system design: the infrastructure must optimize storage for the chosen format, implement appropriate retrieval patterns, and track which model versions used which label versions to correlate quality improvements with performance gains.
+
+### Label accuracy and consensus {#sec-data-engineering-achieving-label-accuracy-consensus-7190}
+
+Label quality\index{Label quality!consensus mechanisms} requires bounding label noise despite inherent subjectivity and sensor ambiguity across large datasets. Even with clear guidelines and careful system design, a nonzero fraction of labels will inevitably be corrupted [@northcutt2021pervasive; @thyagarajan2023multilabel]. The challenge is not eliminating labeling errors entirely (an impossible goal) but systematically measuring inter-annotator agreement\index{Inter-annotator agreement} and managing error rates to keep them within bounds that do not degrade model performance.
+
+Labeling failures arise from two distinct sources requiring different engineering responses. Across the benchmark examples compiled in @fig-hard-labels—including an ImageNet black stork mislabeled as a white stork and a CIFAR-10 frog mislabeled as a cat—each panel contrasts the erroneous assigned label against the verified ground truth. Some examples reflect degraded or ambiguous inputs where the correct label is difficult to infer from the data alone; others are visually clear but require domain knowledge, dataset-specific semantics, or expert judgment to label correctly. These different failure modes drive architectural decisions about annotator qualification, task routing, and consensus mechanisms: quality-based errors call for upstream data filtering, while expertise-based errors call for tiered annotator routing.
+
+::: {#fig-hard-labels fig-env="figure" fig-pos="htb" fig-cap="**Pervasive Label Errors**: Confidently mislabeled examples from widely used benchmarks, each showing the given label against the corrected ground truth (MNIST, CIFAR-10, CIFAR-100, Caltech-256, ImageNet, QuickDraw). Fine-grained confusions, such as a crab labeled lobster or a black stork labeled white stork, show that even curated datasets carry systematic errors, motivating careful quality control and expert annotation. Source: [@northcutt2021pervasive]." fig-alt="Six-panel grid of public-dataset label errors: MNIST digit (given 5, corrected 3); CIFAR-10 frog (given cat); CIFAR-100 crab (given lobster); Caltech-256 teapot (given ewer); ImageNet black stork (given white stork); QuickDraw eye (given tiger)."}
+
+![](images/png/label-errors-examples_new.png)
+
+:::
+
+Given these inherent quality challenges, production ML systems implement multiple layers of quality control. Systematic quality checks\index{Label quality!systematic checks} continuously monitor the labeling pipeline through random sampling of labeled data for expert review and statistical methods to flag potential errors. The infrastructure must efficiently process these checks across millions of examples without creating bottlenecks. Sampling strategies typically validate 1-10 percent of labels, balancing detection sensitivity against review costs. Higher-risk applications like medical diagnosis or autonomous vehicles may validate 100 percent of labels through multiple independent reviews, while lower-stakes applications like product recommendations may validate only 1 percent through spot checks.
+
+Beyond random sampling approaches, collecting multiple labels per data point, often referred to as "consensus labeling,"\index{Consensus labeling!quality control} can help identify controversial or ambiguous cases. Commercial labeling platforms such as Labelbox\index{Labelbox} and Scale AI\index{Scale AI} expose consensus and tiered quality-control workflows [@labelbox_consensus; @scaleai_qc], but the statistical core is inter-annotator agreement. The consensus infrastructure typically collects several labels per example, computing metrics like Fleiss' kappa\index{Fleiss' kappa!inter-annotator agreement}, a generalization of the Cohen's kappa statistic introduced in @sec-data-engineering-detecting-responding-data-drift-509a from two raters to any number of annotators [@fleiss1971measuring]. Examples with low agreement, using thresholds such as the Landis-Koch bands as operational heuristics, route to expert review rather than forcing consensus from genuinely ambiguous cases [@landis1977measurement].
+
+The consensus approach reflects an economic trade-off essential for scalable systems. Expert review costs more per example than crowdsourced labeling, but forcing agreement on ambiguous examples through majority voting of nonexperts can produce systematically biased labels. By routing only genuinely ambiguous cases to experts, identified through low inter-annotator agreement or failed gold-standard checks, systems balance cost against quality. This tiered approach enables processing millions of examples economically while maintaining quality standards through targeted expert intervention.
+
+While technical infrastructure provides the foundation for quality control, successful labeling systems must also address human factors. Working effectively with annotators requires standardized annotation rubrics with canonical positive and negative examples, visual edge-case catalogs, automated feedback mechanisms benchmarking annotators against known gold-standard records, and calibration sessions where annotators resolve borderline cases. For complex or domain-specific tasks, the system can implement tiered access levels, routing challenging cases to annotators with demonstrated domain expertise.
+
+Quality monitoring generates substantial telemetry that must be efficiently ingested and tracked. The most informative signals span several dimensions. Inter-annotator agreement rates reveal whether multiple annotators converge on the same example, while label confidence scores capture annotators' reported confidence in their decisions. Time per annotation serves as a dual-sided indicator: annotations completed too quickly suggest carelessness, while those taking too long suggest confusion or unclear guidelines. Error patterns expose systematic biases or misunderstandings in the annotator pool, and annotator performance on gold-standard examples provides ground-truth calibration. Finally, demographic analysis of annotator behavior detects whether certain groups systematically label differently, which could introduce unintended bias into the training data. These metrics must be computed and updated efficiently across millions of examples, often requiring dedicated analytics pipelines that process labeling data in near real-time to catch quality issues before they affect large volumes of data.
+
+### Scaling with AI-assisted labeling {#sec-data-engineering-scaling-aiassisted-labeling-9360}
+
+Throughput limits on manual annotation make pure human labeling a bottleneck for large-scale training, while fully automated labeling lacks the reliability needed for ambiguous or safety-critical examples. AI-assisted labeling\index{AI-assisted labeling!scalability} navigates this trade-off by using model inference to process routine inputs and accelerate human annotation while preserving manual verification for high-uncertainty samples. The decision hierarchy in @fig-weak-supervision structures candidate solutions to this throughput bottleneck, branching from traditional human annotation into semi-supervised learning, transfer learning, and weak supervision via heuristics, distant supervision, and programmatic constraints. Traditional supervision uses direct human labels, with active learning selecting informative samples to reduce labeling volume. Semi-supervised learning\index{Semi-supervised learning!labeling efficiency} exploits structure in unlabeled data alongside a labeled subset. Weak supervision replaces individual manual annotations with programmatic labeling functions. Transfer learning\index{Transfer learning!labeling alternative} reuses representations learned on an upstream task, reducing but not eliminating task-specific labels. Each path alters where supervision cost is paid and which assumptions—unlabeled data geometry, programmatic heuristic accuracy, or representation transferability—the pipeline must validate.
+
+::: {#fig-weak-supervision fig-env="figure" fig-pos="htb" fig-cap="**AI-Augmented Labeling Decision Hierarchy**: A top-level question about obtaining labeled data branches into four paths: traditional supervision, semi-supervised learning, weak supervision, and transfer learning, with active learning as a cost-saving alternative. The branches distinguish where supervision comes from and what additional assumptions or pretrained artifacts the pipeline must validate. Adapted from the Stanford AI Lab weak-supervision overview [@ratner2019weak]." fig-alt="Hierarchical diagram with question about getting labeled data at top. Four branches: traditional supervision, semi supervised, weak supervision, and transfer learning. Active learning branches as cost-saving alternative."}
+
+```{.tikz}
+\begin{tikzpicture}[font=\small\sffamily]
+%
+\tikzset{%
+  Line/.style={line width=1.0pt,black!50,text=black},
+  Box/.style={align=flush center,
+   inner sep=5pt,
+    node distance=0.75,
+    draw=GreenLine,
+    line width=0.75pt,
+    fill=GreenL,
+    text width=55mm,
+    minimum width=53mm, minimum height=9mm
+  },
+   Box1/.style={Box,
+    node distance=0.35,
+    draw=OrangeLine,
+    line width=0.75pt,
+    fill=OrangeL,
+    text width=31mm,
+    minimum width=31mm, minimum height=8.2mm
+  },
+  Box2/.style={Box,
+    node distance=0.5,
+    draw=BlueLine,
+    line width=0.75pt,
+    fill=BlueL,
+    text width=42mm,
+    minimum width=42mm, minimum height=9mm
+  },
+ Text/.style={%
+    inner sep=2pt,
+    draw=none,
+    line width=0.75pt,
+    fill=TextColor,
+    text=black,
+    font=\footnotesize\sffamily,
+    align=flush center,
+    minimum width=7mm, minimum height=5mm
+  },
+}
+%
+\node[Box,text width=65mm,minimum width=62mm, minimum height=10mm,
+           fill=RedL,draw=RedLine](B1){\textbf{How to get more labeled training data?}};
+\node[Box, node distance=0.5,below=of B1,xshift=12mm](B2){\textbf{Traditional Supervision:} Have subject
+              matter experts (SMEs) hand-label more training data};
+\node[Box,below=0.3 of B2](B3){\textbf{Semi-supervised Learning:} Use structural
+            assumptions to automatically use unlabeled data};
+\node[Box,below=0.3 of B3](B4){\textbf{Weak Supervision:}\\ Get lower-quality
+            labels more efficiently and/or at a higher abstraction level};
+\node[Box,below=0.3 of B4](B5){\textbf{Transfer Learning:}\\ Use models
+            already trained on a different task};
+%
+\node[Box2,above right=0.7 and 1.75 of B2,fill=BrownL,draw=BrownLine](2B1){Too expensive!};
+\node[Box2,below =0.15 of 2B1,fill=BrownL,draw=BrownLine](2B2){\textbf{Active Learning:} Estimate
+            which points are most valuable to solicit labels for};
+%
+\node[Box2,above right=1.05 and 1.75 of B4](2B3){Get cheaper, lower-quality labels from nonexperts};
+\node[Box2,below =0.2 of 2B3](2B4){Get higher-level supervision
+            over unlabeled data from SMEs};
+\node[Box2,below =0.2 of 2B4](2B5){Use one or more
+              (noisy/biased) pretrained models to provide supervision};
+%
+\node[Box1,above right=0.25 and 1.45 of 2B3](3B1){Heuristics};
+\node[Box1,below =of 3B1](3B2){Distant Supervision};
+\node[Box1,below =of 3B2](3B3){Constraints};
+\node[Box1,below =of 3B3](3B4){Expected distributions};
+\node[Box1,below =of 3B4](3B5){Invariances};
+%%
+\foreach \x in{2,3,4,5}{
+\draw[-latex,Line](B1.191)|-(B\x);
+}
+
+\foreach \x in{1,2}{
+\draw[-latex,Line](B2.east)--++(0:1.1)|-(2B\x);
+}
+
+\foreach \x in{3,4,5}{
+\draw[-latex,Line](B4.355)--++(0:1.1)|-(2B\x);
+}
+
+\foreach \x in{1,2,3,4,5}{
+\draw[-latex,Line](2B4.east)--++(0:0.8)|-(3B\x);
+}
+\draw[-latex,Line](2B2)--++(270:1.0)--++(180:3.5)|-(B4.05);
+\draw[-latex,Line](B5.355)-|(2B5);
+\end{tikzpicture}
+```
+
+:::
+
+These paths exchange different assumptions rather than simple label counts. Depending on the path, the pipeline relies on task-relevant structure in unlabeled data, a transferable representation, measurable labeling-function accuracy, or an affordable scoring loop. Production systems must record each assumption and validate it against held-out, human-audited data. The diagram functions as a decision map, not an absolute quality ranking.
+
+AI-assisted labeling divides work according to the strengths of each participant. Humans judge ambiguous cases, catch subtle errors, and apply domain knowledge; models can process routine cases at scale, subject to validation. Production systems combine these capabilities through several complementary approaches.
+
+Pre-annotation\index{Pre-annotation!workflow}\index{AI-assisted labeling!preannotation} uses AI models to generate preliminary labels that humans then review and correct—transforming the task from "label from scratch" to "verify and fix." Programmatic labeling frameworks like Snorkel\index{Snorkel!weak supervision} [@ratner2018; @ratner2017] extend this further through weak supervision\index{Weak supervision!programmatic labeling},[^fn-weak-supervision-cost] automatically generating initial labels at scale through rule-based heuristics, knowledge bases, and existing model outputs. In autonomous driving, pretrained object detection models can label vehicles and pedestrians that human annotators verify and refine, handling many clear cases automatically.
+
+[^fn-weak-supervision-cost]: **Weak supervision**\index{Weak supervision!cost trade-off}: A "data programming" paradigm that exchanges some manual annotation labor for the upfront effort of writing and validating programmatic labeling functions. Once written, a function can be applied cheaply at scale, but execution, conflict resolution, quality monitoring, and maintenance still incur cost; the useful comparison is workload-specific rather than literally zero marginal cost.
+
+Large language models (LLMs)\index{LLM!labeling assistance} now assist labeling pipelines by generating descriptions, drafting labeling guidelines from examples, and explaining their reasoning for label assignments. Content moderation systems, for instance, use LLMs for initial content classification with explanations that human reviewers validate. However, LLM integration introduces systems challenges: provider- and model-dependent inference costs and rate limits, as well as the need for systematic output validation because LLMs can produce confident but incorrect labels. Many organizations adopt tiered approaches, using smaller specialized models for routine cases while reserving larger LLMs for complex scenarios requiring nuanced judgment.
+
+Active learning makes the complementary trade-off: it spends model inference to reduce human labeling, so the relevant question is whether that compute fits inside the same budget.
+
+```{python}
+#| echo: false
+#| label: active-learning-budget-calc
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ ACTIVE LEARNING BUDGET CALCULATION
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: "When active learning breaks the budget" callout and active-learning footnote
+# │
+# │ Goal: Normalize active-learning label and inference costs under a fixed budget.
+# │ Show: Full-pool scoring makes the illustrative 10M-image scenario infeasible.
+# │ How: Compute random label cost, active label cost, full-pool inference cost,
+# │      and the candidate-pool size supported by a 10% compute allocation.
+# │
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim.fmt import fmt, fmt_usd, check, fmt_count
+
+# ┌── LEGO ───────────────────────────────────────────────
+class ActiveLearningBudget:
+    """Budget normalization for active learning over a 10M-image candidate pool."""
+
+    # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
+    dataset_images = 10 * MILLION
+    label_budget = 50 * THOUSAND
+    label_cost = 0.50
+    inference_cost_per_image = 0.01
+    random_labels_needed = 1 * MILLION
+    active_labels_low = 100 * THOUSAND
+    active_labels_high = 200 * THOUSAND
+    compute_budget_fraction = 0.10
+    baseline_acc = 85
+    target_acc = 95
+
+    # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
+    random_label_cost = random_labels_needed * label_cost
+    active_label_cost_low = active_labels_low * label_cost
+    active_label_cost_high = active_labels_high * label_cost
+    full_pool_inference_cost = dataset_images * inference_cost_per_image
+    active_total_low = full_pool_inference_cost + active_label_cost_low
+    active_total_high = full_pool_inference_cost + active_label_cost_high
+    compute_budget = label_budget * compute_budget_fraction
+    candidate_pool_images = compute_budget / inference_cost_per_image
+    label_budget_after_compute = label_budget - compute_budget
+    affordable_labels_after_compute = label_budget_after_compute / label_cost
+
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(random_label_cost == 500 * THOUSAND, "Random labeling reference should cost $500K.")
+    check(active_total_low > label_budget, "Full-pool active learning should exceed the $50K budget.")
+    check(candidate_pool_images < dataset_images, "10% compute budget should score only a subset of the pool.")
+
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
+    dataset_images_str = fmt_count(dataset_images, scale='M', commas=False)
+    label_budget_str = fmt_usd(label_budget, precision=0, commas=False, scale="K")
+    label_cost_str = fmt_usd(label_cost, precision=2, commas=False, per="label")
+    inference_cost_str = fmt_usd(inference_cost_per_image, precision=2, commas=False, per="image")
+    random_labels_str = fmt_count(random_labels_needed, scale='M', commas=False)
+    random_label_cost_str = fmt_usd(random_label_cost, precision=0, commas=False, scale="K")
+    active_labels_low_str = fmt_count(active_labels_low, scale='K', commas=False)
+    active_labels_high_str = fmt_count(active_labels_high, scale='K', commas=False)
+    active_label_cost_low_str = fmt_usd(active_label_cost_low, precision=0, commas=False, scale="K")
+    active_label_cost_high_str = fmt_usd(active_label_cost_high, precision=0, commas=False, scale="K")
+    full_pool_inference_cost_str = fmt_usd(full_pool_inference_cost, precision=0, commas=False, scale="K")
+    active_total_low_usd_str = fmt_usd(active_total_low, precision=0, commas=False, scale="K")
+    active_total_high_usd_str = fmt_usd(active_total_high, precision=0, commas=False, scale="K")
+    compute_budget_pct_str = fmt_percent(compute_budget_fraction, precision=0, commas=False, style='prose')
+    compute_budget_str = fmt_usd(compute_budget, precision=0, commas=False, scale="K")
+    candidate_pool_str = fmt_count(candidate_pool_images, scale='K', commas=False)
+    affordable_labels_str = fmt_count(affordable_labels_after_compute, scale='K', commas=False)
+    baseline_acc_str = fmt_percent(baseline_acc / 100, precision=0, commas=False, style='prose')
+    target_acc_str = fmt_percent(target_acc / 100, precision=0, commas=False, style='prose')
+```
+
+[^fn-active-learning-budget]: **Active learning**\index{Active learning!budget multiplier}: Inverts the traditional labeling paradigm: instead of randomly selecting examples to label, the model queries for the examples it needs most, typically those where prediction uncertainty is highest [@settles2009active]. This can reduce the number of labels needed to reach a target accuracy, but the infrastructure trade-off is compute for labels: at `{python} ActiveLearningBudget.inference_cost_str`, scoring a full `{python} ActiveLearningBudget.dataset_images_str` pool costs `{python} ActiveLearningBudget.full_pool_inference_cost_str` before any human labels. Active learning becomes budget leverage only when the candidate pool is pre-filtered, inference is much cheaper, or the compute budget is separate from the labeling budget.
+
+Methods such as active learning\index{Active learning!label prioritization}[^fn-active-learning-budget] complement these approaches by prioritizing candidate examples according to model uncertainty [@settles2009active; @coleman2022]. These systems continuously analyze model uncertainty to identify valuable labeling candidates. Rather than labeling a random sample of unlabeled data, active learning selects examples where the current model is most uncertain or where labels would most improve model performance. The infrastructure must efficiently compute uncertainty metrics (often prediction entropy or disagreement between ensemble models), maintain task queues ordered by informativeness, and adapt prioritization strategies based on incoming labels. In a medical imaging pipeline, for example, active learning routes rare or borderline pathologies to expert radiologists while routine scans receive automated preannotations that clinicians quickly verify. This approach can substantially reduce required annotations in favorable settings, though it requires careful engineering to prevent feedback loops where the model's uncertainty biases which data gets labeled. A budget calculation makes that leverage concrete.
+
+::: {#nbk-data-engineering-active-learning-multiplier .callout-notebook title="When active learning breaks the budget"}
+
+**Problem**: A `{python} ActiveLearningBudget.dataset_images_str` dataset has a `{python} ActiveLearningBudget.label_budget_str` labeling budget. Random sampling achieves `{python} ActiveLearningBudget.baseline_acc_str` accuracy with `{python} ActiveLearningBudget.active_labels_low_str`, while the target is `{python} ActiveLearningBudget.target_acc_str` accuracy.
+
+**Physics**:
+
+1.  **Sample efficiency**: Active learning can achieve target accuracy with fewer samples than random selection in favorable settings.
+2.  **Cost per point**: Random sampling = `{python} ActiveLearningBudget.label_cost_str`. Active learning adds compute cost (~`{python} ActiveLearningBudget.inference_cost_str` for inference) to find hard examples.
+3.  **Multiplier**:
+    *   **Random**: Reaching `{python} ActiveLearningBudget.target_acc_str` may require `{python} ActiveLearningBudget.random_labels_str` labels (`{python} ActiveLearningBudget.random_label_cost_str`). Budget exceeded.
+    *   **Active labels only**: The system may need ~`{python} ActiveLearningBudget.active_labels_low_str`–`{python} ActiveLearningBudget.active_labels_high_str` hard examples (`{python} ActiveLearningBudget.active_label_cost_low_str`–`{python} ActiveLearningBudget.active_label_cost_high_str`), which reaches or exceeds the budget before any scoring compute.
+    *   **Full-pool scoring**: Scoring all `{python} ActiveLearningBudget.dataset_images_str` candidate images adds `{python} ActiveLearningBudget.full_pool_inference_cost_str`, so total active-learning cost becomes `{python} ActiveLearningBudget.active_total_low_usd_str`–`{python} ActiveLearningBudget.active_total_high_usd_str`. Budget exceeded.
+
+```{=latex}
+\vspace*{-2ex}
+```
+**Systems insight**: Algorithm choice is a major lever on label count, but compute must be inside the budget model. Spending `{python} ActiveLearningBudget.compute_budget_pct_str` of this budget on inference (`{python} ActiveLearningBudget.compute_budget_str`) scores only `{python} ActiveLearningBudget.candidate_pool_str` candidate images at the stated inference price and leaves room for about `{python} ActiveLearningBudget.affordable_labels_str` labels. Active learning is viable only if the candidate pool is narrowed before scoring, inference cost drops substantially, or compute is funded separately from labeling (see @fig-data-engineering-active-learning-budget).
+
+:::
+
+::: {#fig-data-engineering-active-learning-budget .column-margin}
+![](images/svg/data_engineering_active_learning_budget.svg){width="100%" fig-alt="Budget-envelope chart with a 50K-dollar limit marker; the labeling budget fits at the limit, while full-pool scoring extends into the red over-budget region at 100K dollars."}
+
+*Full-pool scoring can exceed the label budget before labeling begins.*
+:::
+
+Quality control becomes increasingly important as these AI components interact. The system must monitor both AI and human performance through systematic metrics. Model confidence calibration matters: if the AI reports 95 percent confidence but achieves only 75 percent accuracy at that confidence level, preannotations mislead human reviewers. Human-AI agreement rates reveal whether AI assistance helps or hinders: when humans frequently override AI suggestions, the preannotations may be introducing bias rather than accelerating work. These metrics require careful instrumentation throughout the labeling pipeline, tracking both final labels and the interaction between human annotators and AI at each stage.
+
+These principles manifest at scale across safety-critical domains. Autonomous vehicle labeling infrastructure can process large volumes of sensor frames, using AI preannotation to label common objects while routing unusual scenarios (construction zones, emergency vehicles) to human experts—a distributed architecture where preannotation runs on GPU clusters while human review scales across annotation teams. Medical imaging systems face a parallel label-scarcity problem: large repositories of unlabeled clinical data make expert annotation the bottleneck and motivate data-efficient workflows that learn useful representations from unlabeled structure before expert labels are applied [@krishnan2022]. Across such domains, the common data-engineering pattern is *tiered escalation*: automation handles clear cases, humans handle ambiguous ones, and monitoring ensures the boundary between "clear" and "ambiguous" adapts as both AI capability and deployment conditions evolve.
+
+### Automated labeling in KWS {#sec-data-engineering-case-study-automated-labeling-kws-systems-976d}
+
+```{python}
+#| echo: false
+#| label: kws-automated-labeling-scale-calc
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ KWS AUTOMATED LABELING SCALE CALCULATION
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: Automated labeling in the KWS case study
+# │
+# │ Goal: Quantify why manual annotation is infeasible at MSWC scale.
+# │ Show: Manual labeling would consume tens of person-years even at 10 s/sample.
+# │ How: Convert example count and label time into person-hours and person-years.
+# │
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import *
+
+# ┌── LEGO ───────────────────────────────────────────────
+class KWSAutomatedLabelingScale:
+    """KWS automated-labeling scale recap for the MSWC discussion."""
+
+    # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
+    dataset = Datasets.MSWC
+    total_examples = dataset.training_examples
+    languages = dataset.languages
+    keywords = dataset.keywords
+    label_seconds_per_example = 10
+    sample_duration_ms_low = 500
+    sample_duration_ms_high = 800
+
+    # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
+    total_examples_count = total_examples.to(count).magnitude
+    label_hours = total_examples_count * label_seconds_per_example / SEC_PER_HOUR
+    label_years = label_hours / 2000
+    sample_duration_window_ms = sample_duration_ms_high - sample_duration_ms_low
+
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(label_years > 30, f"Manual KWS labeling effort unexpectedly small: {label_years:.1f} person-years.")
+    check(keywords >= 300_000, f"MSWC keyword coverage unexpectedly narrow: {keywords}.")
+    check(sample_duration_window_ms == 300, f"Expected 300 ms window, got {sample_duration_window_ms}")
+
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
+    dataset_size_million_examples_str = fmt_count(
+        total_examples_count,
+        scale="million",
+        precision=1,
+        scale_style="word",
+        label="example",
+        allow_fractional=True,
+    )
+    dataset_size_million_samples_str = fmt_count(
+        total_examples_count,
+        scale="million",
+        precision=1,
+        scale_style="word",
+        allow_fractional=True,
+        label="sample",
+    )
+    label_hours_str = fmt_time(label_hours, unit=hour, precision=0, commas=True, style="word")
+    label_years_str = fmt_count(label_years, precision=1, commas=False, label="person-year", plural_label="person-years", allow_fractional=True)
+    languages_count_str = fmt_count(languages, label="language", commas=False)
+    keywords_count_str = fmt_count(keywords, label="keyword", commas=True)
+    sample_duration_ms_low_str = fmt_time(sample_duration_ms_low, unit=millisecond, precision=0, commas=False)
+    sample_duration_ms_high_str = fmt_time(sample_duration_ms_high, unit=millisecond, precision=0, commas=False)
+```
+
+Labeling keyword spotting datasets at scale introduces speech-specific systems challenges. Generating millions of labeled wake word samples without proportional human annotation cost requires moving beyond manual and crowdsourced workflows. The Multilingual Spoken Words Corpus (MSWC) [@mazumder2021multilingual] demonstrates how automated labeling\index{Keyword spotting!automated labeling} resolves this throughput bottleneck: the corpus programmatically extracts over `{python} KWSAutomatedLabelingScale.dataset_size_million_examples_str` of one-second speech across `{python} KWSAutomatedLabelingScale.keywords_count_str` in `{python} KWSAutomatedLabelingScale.languages_count_str` from continuous speech corpora.
+
+This scale makes manual annotation impractical: `{python} KWSAutomatedLabelingScale.dataset_size_million_examples_str` at even 10 seconds per label would require approximately `{python} KWSAutomatedLabelingScale.label_hours_str`, roughly `{python} KWSAutomatedLabelingScale.label_years_str` of full-time effort. Broad, documented sourcing across `{python} KWSAutomatedLabelingScale.languages_count_str` can improve coverage, but language count alone does not guarantee representative speakers, accents, devices, or acoustic environments. The pipeline staged in @fig-mswc circumvents this manual annotation bottleneck, using forced alignment\index{Forced alignment!speech labeling}\index{Speech recognition!forced alignment}[^fn-forced-alignment-kws] over paired sentence audio and transcriptions to estimate word boundaries before slicing individual one-second keyword windows for classifier training.
+
+At this scale, quality control becomes a sampling and provenance problem rather than disappearing. The pipeline should report coverage by language, speaker, accent, device, and acoustic environment; retain the source recording, transcript version, aligner version, and boundary confidence for each extracted clip; and route low-confidence alignments and underrepresented slices to human review. Held-out evaluation must then measure the intended wake words across those slices. These controls distinguish a large corpus from a representative one and make extraction errors traceable when a downstream KWS model fails.
+
+[^fn-forced-alignment-kws]: **Forced alignment**\index{Forced alignment!automated labeling}: Given a known transcription, an aligner estimates where its words occur in the audio, often using frame-level acoustic scores and sequence decoding. Timing resolution and accuracy depend on the model, features, language, and recording quality, so boundary estimates still need quality checks. The known transcript makes word-level segmentation far cheaper than labeling every clip manually, though computation, review, and error correction remain.
+
+::: {#fig-mswc fig-env="figure" fig-pos="htb" fig-cap="**Multilingual Data Preparation**: Forced alignment and segmentation transform paired audio-text data into labeled one-second segments, creating a large-scale corpus for training keyword spotting models across `{python} KWSAutomatedLabelingScale.languages_count_str`. This automated process enables scalable development of KWS systems by efficiently generating training examples from readily available speech resources like Common Voice and multilingual captioned content. Source: [@mazumder2021tinyml]." fig-alt="Flowchart illustrating multilingual speech data preparation: raw audio and text transcripts undergo forced alignment and word segmentation to produce labeled one-second audio clips for model training."}
+
+![](images/png/data_engineering_kws2.png)
+
+:::
+
+The extraction system uses these precise timing markers to generate clean keyword samples while handling anticipated engineering challenges: background noise interfering with word boundaries, speakers stretching or compressing words unexpectedly beyond the target `{python} KWSAutomatedLabelingScale.sample_duration_ms_low_str` to `{python} KWSAutomatedLabelingScale.sample_duration_ms_high_str` duration, and longer words exceeding the one-second boundary. MSWC provides automated quality assessment that analyzes audio characteristics to identify potential issues with recording quality, speech clarity, or background noise, which is essential for maintaining consistent standards across `{python} KWSAutomatedLabelingScale.dataset_size_million_samples_str` without the manual review expenses that would make this scale prohibitive.
+
+Voice assistant engineering teams often build on this automated labeling foundation. While automated corpora may not contain the specific wake words a product requires, they provide starting points for KWS prototyping, particularly in underserved languages where commercial datasets do not exist. Production systems typically layer targeted human recording and verification for challenging cases (unusual accents, rare words, or difficult acoustic environments), coordinating between automated processing and human expertise.
+
+At this stage, the compilation pipeline has produced its core artifacts: feature vectors paired with ground-truth labels. Delivering these tensors to execution units exposes the physical storage hierarchy. The fundamental tension is mechanical: batch training demands high-throughput sequential streaming across petabytes of records, while real-time inference requires sub-millisecond point lookups for individual feature vectors. Storage architecture determines whether accelerators compute continuously or idle waiting on I/O.
+
 ## Data Pipeline Architecture {#sec-data-engineering-data-pipeline-architecture-b527}
 ### Data ingestion
 
@@ -2966,90 +3461,33 @@ Transforming audio data for KWS involves converting raw waveforms into formats s
 
 :::
 
-### Data drift detection and response {#sec-data-engineering-detecting-responding-data-drift-509a}
+### Feature stores {#sec-data-engineering-feature-stores-bridging-training-serving-55c8}
 
-ML models rest on the assumption that production data resembles training data. When this assumption breaks through statistical shifts rather than an explicit contract violation, model performance can change silently without obvious errors or system failures. The validation and monitoring techniques in @sec-data-engineering-quality-validation-monitoring-498f can reveal both sudden and gradual problems; data drift detection\index{Data drift!detection}\index{Distribution shift!monitoring} focuses specifically on changes in distributions that may alter model behavior over time. Detecting, investigating, and responding to these changes requires sustained monitoring effort, making drift a core data engineering responsibility rather than an optional advanced topic.
+The fundamental challenge of production feature management is preserving semantic consistency across disparate execution environments: serving historical feature values for training and current feature values for inference. **Point-in-time correctness**\index{Point-in-time correctness} is the primary operational requirement that drives teams to adopt **feature stores**\index{Feature store!training-serving bridge}, mitigating training-serving skew and enabling feature sharing across models.
+
+In production environments, feature computation pipelines often fragment across languages and execution engines. During model development, data scientists compute features like `user_purchase_count_30d` using batch SQL queries in an offline data warehouse. During production serving, an online microservice computes the same metric incrementally from an in-memory cache. Even when intended to be identical, minor discrepancies in timezone arithmetic, missing value imputation, or floating-point rounding cause offline and online features to drift apart. Uber's Michelangelo platform popularized the feature store to resolve this exact form of training-serving skew through centralized, reusable feature definitions [@hermann2017michelangelo].
+
+::: {#dfn-data-engineering-feature-store .callout-definition title="Feature store"}
+
+***Feature store***\index{Feature store!definition} is the architectural layer that centralizes the management of machine learning features, decoupling feature computation from consumption.
+
+1.  **Significance**: It supports point-in-time-correct historical retrieval for training $(x_{t-\Delta})$ and coordinated feature definitions for real-time inference $(x_t)$, reducing training-serving skew when timestamps, backfills, freshness, and synchronization are handled correctly.
+2.  **Distinction**: Unlike a general-purpose database, a feature store is designed for dual storage modes: an *offline store* (columnar/batch) for training and an *online store* (key-value/low-latency) for serving.
+3.  **Common pitfall**: A frequent misconception is that a feature store is only "a place to store data." In reality, it manages feature definitions, values, and retrieval; transformation may run in the feature store, an offline store, or a separate batch or stream-compute engine.
+
+:::
+
+Feature stores (examined from an operational perspective in @sec-ml-operations-feature-stores-c01c) establish a single source of truth for feature definitions across the ML lifecycle. By registering a feature definition as a unified computation graph, the feature store evaluates the identical transformation across both historical batch data and live inference streams. This shared definition reduces one source of training-serving skew, but equivalent execution still requires synchronized fitted state, correct timestamps, and appropriate freshness. Those conditions must be tested across both retrieval paths. Centralization also enables organizational feature reuse: expensive representations, such as multi-dimensional user embeddings derived from months of interaction logs, are computed once and served to multiple downstream modeling teams.
 
 ::: {.column-margin .margin-pointer}
-↪ How drift signals and outcome evidence trigger retraining only when its expected benefit exceeds its cost is operationalized in @sec-ml-operations-retraining-decision-framework-e33d.
+↪ How feature stores are operated in production, including point-in-time retrieval and training-serving skew prevention at scale, is operationalized in @sec-ml-operations-feature-stores-c01c.
 :::
 
-@Sec-appdx-data-foundations-measuring-drift-divergence-a6dd formalizes the divergence metrics used to make the divergence term $\StatisticalDivergence$ of the degradation equation (@eq-degradation) actionable. The **population stability index (PSI)**\index{Population stability index!definition} quantifies changes in categorical or binned&nbsp;feature distributions, while **Kullback-Leibler (KL) divergence**\index{Kullback-Leibler divergence!definition} measures an information-theoretic divergence between probability distributions. The two metrics encode different distributional assumptions and scales, and neither by itself supplies a universal cutoff. Teams calibrate metric-specific thresholds against a deployment baseline and monitor them over time. Crossing a threshold signals that the live distribution has moved far enough to warrant investigation and outcome checks; input divergence alone does not establish whether accuracy improved or degraded, or by how much. Mathematically, PSI discretizes a continuous feature into reference bins (typically deciles of baseline $\TrainingDistributionZero$) and computes $\text{PSI} = \sum_b \left( \CurrentDistribution(b) - \TrainingDistributionZero(b) \right) \ln\left(\frac{\CurrentDistribution(b)}{\TrainingDistributionZero(b)}\right)$. Each bin's two factors share a sign, so every shifting bin adds to the index. Practitioners commonly treat $\text{PSI} < 0.1$ as stable, $0.1 \le \text{PSI} \le 0.25$ as moderate shift, and $\text{PSI} > 0.25$ as a prompt for investigation; these bands are conventions to calibrate against the deployment baseline, not physical limits.
+To reconcile opposing access profiles, feature stores implement dual storage engines\index{Feature store!offline vs. online stores}. The offline store uses columnar formats (such as Parquet) residing on high-capacity object storage, optimized for multi-gigabyte sequential scans during batch training. The online store uses low-latency key-value databases (such as Redis), optimized for sub-10-millisecond point lookups during real-time inference. Synchronizing these two engines requires automated pipelines that push batch-computed feature snapshots to the online store, while streaming ingestion updates both stores continuously as new user events arrive.
 
-Targeted detection and mitigation require decomposing drift into its constituent distribution components, as shown in the margin locator (@fig-vol1-data-engineering-margin-002).
+Time-travel capabilities\index{Time travel!feature stores}\index{Point-in-time correctness!time travel} differentiate a true feature store from a simple cache. Training requires evaluating features as they existed at the exact moment of an event, rather than their current values. In a customer churn model, for example, training on a customer who churned on January 15 must use features computed on January 14, not current post-churn profile state. Feature stores enforce point-in-time correctness using an **as-of join**\index{As-of join!definition}\index{As-of join!point-in-time correctness} (temporal join): for every observation at timestamp $t_{\text{obs}}$, the retrieval engine joins the most recent feature record whose update timestamp satisfies $t_{\text{feat}} \le t_{\text{obs}}$. This temporal inequality filter guarantees that future information cannot leak into the historical training matrix, even when multiple upstream feature tables update at differing frequencies.
 
-::: {#fig-vol1-data-engineering-margin-002 .column-margin}
-![](images/svg/vol1_data_engineering_margin_002.svg){width="100%" fig-alt="A vertical three-node locator pairs each distribution component with its drift type: p(x) covariate, p(y) label, and p(y|x) concept."}
-
-*Each drift type traces to the distribution component that shifted.*
-:::
-
-The first case, **covariate shift**\index{Covariate shift!definition}, changes the input distribution while preserving the relationship between features and labels: $\Distribution$ changes but $\ConditionalDistribution$ stays the same. A medical imaging system trained on one camera model might later receive production images from a different manufacturer. The disease-image relationship remains unchanged, but pixel values shift because sensor characteristics, color calibration, or image processing pipelines differ. Detection therefore focuses on input feature distributions, using metrics such as PSI or KL divergence.
-
-The second case, **label shift**\index{Label shift!definition}\index{Distribution shift!label shift}, changes the output distribution while preserving the relationship between labels and features: $p(y)$ changes but $p(x \mid y)$ stays the same. Disease prevalence might change seasonally while symptoms remain consistent predictors of each disease. A recommendation system might see the same pattern when new product categories launch, changing the relative frequency of user preferences without altering what makes products appealing within each category. Detection can often begin without ground truth labels by tracking shifts in the model's prediction distribution.
-
-The hardest case is **concept drift**\index{Concept drift!definition}: the relationship between features and labels changes, so $\ConditionalDistribution$ evolves over time [@gama2014]. Medical treatment protocols change, user preferences shift as social trends evolve, and fraud patterns adapt as attackers respond to detection systems. Unlike covariate or label shift, concept drift requires ground truth labels for detection because the system must observe whether the feature-to-label relationship itself has changed.
-
-```{python}
-#| echo: false
-#| label: cohens-kappa-chance-calc
-# ┌─────────────────────────────────────────────────────────────────────────────
-# │ COHEN'S KAPPA CHANCE AGREEMENT
-# ├─────────────────────────────────────────────────────────────────────────────
-# │ Context: Cohen's kappa footnote in the label-quality drift section
-# │
-# │ Goal: Compute chance agreement for a 90/10 binary label distribution.
-# │ Show: Majority-class agreement alone is 81%, but total chance agreement is 82%.
-# │ How: Square and sum the class marginals to get chance agreement.
-# │
-# └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import fmt, check
-
-class CohensKappaChance:
-    """Chance agreement for Cohen's kappa under a 90/10 binary marginal."""
-
-    # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    majority_probability = 0.90
-    minority_probability = 0.10
-
-    # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    chance_agreement = majority_probability**2 + minority_probability**2
-
-    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
-    check(abs(chance_agreement - 0.82) < 1e-12, f"Expected 82% chance agreement, got {chance_agreement:.2f}.")
-
-    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
-    chance_agreement_pct_str = fmt_percent(chance_agreement, precision=0, commas=False, style='prose')
-```
-
-#### Label quality drift {#sec-data-engineering-label-quality-drift-1ce7}
-
-Label quality drift\index{Label quality drift!detection}[^fn-label-drift-invisible] represents a meta-level shift distinct from the three preceding distribution shifts: the reliability of ground truth labels degrades over time even when the underlying data distributions remain stable. This drift type proves particularly insidious because standard feature distribution monitoring fails to detect it. Crowdsourced labels may degrade as annotator pools change, training materials become outdated, or labeling guidelines evolve without corresponding model updates. Automated labeling systems accumulate errors as the models powering them drift from their original operating conditions. A recommendation system using click feedback as implicit labels may see label quality degrade as user behavior becomes more exploratory, as bot traffic patterns change, or as interface modifications alter how users interact with content.
-
-Detection requires monitoring annotation consistency rather than feature distributions. Inter-annotator agreement metrics like Cohen's kappa[^fn-cohens-kappa-labeling] $(\CohensKappa)$ provide quantitative assessment. Let $p_o$ represent observed agreement between annotators and $p_e$ represent agreement expected by chance. @Eq-cohens-kappa defines the statistic:
-$$
-\CohensKappa = \frac{p_o - p_e}{1 - p_e}
-$$ {#eq-cohens-kappa}
-
-[^fn-cohens-kappa-labeling]: **Cohen's kappa**\index{Cohen's kappa!label quality}: Introduced by @cohen1960 to measure inter-rater agreement while correcting for agreement expected from the raters' class marginals, which raw percentage agreement ignores. If two independent annotators each label 90 percent of images as "not spam" in a binary task, their expected agreement is `{python} CohensKappaChance.chance_agreement_pct_str`, making raw agreement potentially misleading. The statistic is denoted $\CohensKappa$; interpretive bands such as the Landis-Koch categories are descriptive heuristics rather than universal data-quality thresholds [@landis1977measurement].
-
-Monitoring $\CohensKappa$ over time windows reveals degradation trends. A medical imaging annotation project might establish a baseline $\CohensKappa = 0.85$ (almost perfect agreement) during initial data collection, then observe decline to $\CohensKappa = 0.72$ (substantial agreement) after six months as new annotators join without receiving equivalent domain training.
-
-For systems with calibrated model probabilities, predictive entropy\index{Predictive entropy} provides an additional uncertainty signal. Let $p_i$ represent the model's probability assigned to label category $i$, and let $\log$ denote the natural logarithm, so entropy is measured in nats. @Eq-label-entropy defines this measure:
-$$
-H_{\text{pred}} = -\sum_i p_i \log p_i
-$$ {#eq-label-entropy}
-
-Rising predictive entropy indicates greater uncertainty in the model's predictive distribution, but it does not identify the cause. Harder inputs, distribution shift, calibration changes, or inconsistent supervision can produce the same signal.
-
-Mitigation strategies depend on root cause analysis. Annotator retraining addresses systematic errors from unclear guidelines at low cost with high effectiveness. Multi-annotator voting with majority or consensus rules provides high accuracy for high-stakes domains but significantly increases annotation costs. Model-assisted labeling reduces annotator fatigue but risks introducing bias if the assisting model has its own systematic errors. Expert review sampling, where domain specialists audit a random sample of annotations, enables root cause analysis when quality decline is detected but provides medium coverage of the overall annotation stream.
-
-[^fn-label-drift-invisible]: **Label quality drift**\index{Label quality drift!silent corruption}: Degradation in annotation reliability over time, distinct from distribution shifts in the data itself. This drift type is invisible to standard feature monitoring because the features remain stable while the labels degrade—annotator fatigue, pool turnover, or guideline evolution silently corrupt the ground truth the model learns from. Detection requires monitoring inter-annotator agreement $(\CohensKappa)$ over rolling time windows and comparing automated labels against periodic expert audits.
-
-Operationalizing the PSI and KL divergence metrics\index{Population stability index!drift detection}\index{Kullback-Leibler divergence!distribution comparison} requires connecting them to automated alerts and review workflows. Data engineering is responsible for defining domain-specific drift thresholds from baseline behavior and outcome evidence, selecting monitoring windows that can expose both sudden and gradual changes, and instrumenting pipelines to compute these metrics continuously.
-
-Statistical drift detection identifies distribution changes over time, but monitoring alone does not keep a system running when upstream pipelines stall, malformed payloads arrive, or schema definitions change without notice. Maintaining service continuity under failure requires active reliability mechanisms: fault isolation, backpressure, and graceful degradation.
-
+The performance characteristics of the dual stores directly bound training throughput and serving latency. The offline store must sustain batch read rates of millions of feature vectors per minute across wide schemas. The online store must sustain thousands to millions of point lookups per second while honoring single-digit millisecond latency budgets. When user actions (such as adding an item to a cart) require sub-second feature freshness, streaming feature pipelines\index{Feature store!streaming updates} update the online store continuously. This continuous updating requires careful event deduplication during network retries and timestamp synchronization to ensure late-arriving records do not overwrite newer state.
 ### Idempotent transformations {#sec-data-engineering-building-idempotent-data-transformations-7961}
 
 Reliability adds retry safety to these quality foundations\index{Reliability!idempotency}. While quality focuses on what transformations produce, reliability also governs how safely they can be repeated. **Idempotency**\index{Idempotency!definition}[^fn-idempotency-retry-safety] means that applying an operation repeatedly has the same effect as applying it once. This property proves essential for production ML systems where processing may be retried after failures, data may be reprocessed to fix bugs, or the same data may flow through multiple processing paths. Determinism is a related but distinct requirement: identical inputs and captured state should produce identical outputs.
@@ -3191,403 +3629,6 @@ Recording the exact code version ties processing results directly to the reposit
 The governance pillar in the KWS pipeline tracks audio processing parameters that critically affect model behavior. When audio is normalized to standard volume, the reference volume level is persisted. When an FFT transforms audio into the frequency domain, the window size, hop length, and window function (such as Hamming or Hann) are recorded. When MFCCs are computed, the number of coefficients, frequency range, and mel filterbank parameters are captured. This comprehensive parameter tracking enables several critical capabilities: reproducing training data exactly when debugging model failures, validating that serving uses identical preprocessing to training, and systematically studying how preprocessing choices affect model accuracy. Without this governance infrastructure, teams resort to manual documentation that inevitably becomes outdated or incorrect, leading to subtle training-serving skew that degrades production performance.
 
 Clean, normalized, feature-ready data remains inert without a supervisory signal. That boundary matters operationally because a transformation can be perfectly reproducible yet attach an erroneous target, and deterministic preprocessing cannot compensate for corrupted ground truth. Supervising model training requires assigning target values—declaring which audio segments contain wake words and which capture background noise—introducing subjective human judgment and probabilistic heuristics into what had been a deterministic pipeline.
-
-## Data Labeling {#sec-data-engineering-data-labeling-6836}
-
-The processing pipelines in @sec-data-engineering-systematic-data-processing-aebc transform raw data into structured features, but supervised learning still requires labels\index{Data labeling!systems engineering} that tell the model which patterns correspond to each target. In the KWS pipeline, the ingestion and processing stages produce millions of clean, standardized audio spectrograms, but training requires ground-truth annotations indicating which segments contain the wake word and which represent ambient background noise. This declaration is the **ground truth**\index{Ground truth!definition},[^fn-ground-truth-proxy] and producing it at scale is often the most human-dependent and error-prone stage of the pipeline.
-
-[^fn-ground-truth-proxy]: **Ground truth**\index{Ground truth!proxy limitation}: From remote sensing, where orbital measurements are verified by sending a team to the physical location—the "ground"—to establish the "truth." The etymology carries a systems warning: ML labels are proxies for reality, not reality itself. When a crowdsourced annotator labels an image as "cat," that label reflects the annotator's judgment, not an objective fact. Every downstream metric—accuracy, precision, recall—is measured against this proxy, meaning label quality errors propagate silently into every evaluation of the model.
-
-Unlike automated transformations that can be parallelized across machines, labeling introduces human judgment into the pipeline, creating non-deterministic latency and stochastic error modes. A crowdsourced annotator might mislabel a whispered "Alexa" as background noise. An expert radiologist might disagree with a colleague about a borderline diagnosis. Such disagreement can reflect genuine ambiguity, unclear instructions, annotator error, or differences in expertise; the labeling system must distinguish and manage these causes rather than treating every disagreement as irreducible. The labeling infrastructure must therefore balance throughput, quality verification, cost, and provenance.
-
-### Label types and system requirements {#sec-data-engineering-label-types-system-requirements-4c33}
-
-System architecture, storage footprint, and loader throughput depend directly on label granularity. In a computer vision system tracking vehicles, pedestrians, and traffic signs from video feeds, each target representation imposes distinct storage, computation, and serialization constraints.
-
-Classification labels\index{Classification label!storage requirements} represent the simplest form, assigning a discrete class index (or a multi-label binary bitmask) to each input. Storage requirements are modest—typically a fixed-width integer (such as a `uint16` or `int32` index) per image—but access patterns diverge between training and evaluation: training pipelines shuffle and sample randomly, whereas validation pipelines stream sequentially across the corpus, driving different indexing and cache-locality strategies.
-
-Bounding boxes\index{Bounding box!definition}\index{Bounding box!annotation}\index{Object detection!bounding boxes} extend beyond classification by localizing objects within each frame. Each bounding box stores four coordinates (such as $x_{\text{min}}, y_{\text{min}}, x_{\text{max}}, y_{\text{max}}$ or center coordinates with width and height) alongside the class identifier. Because scenes contain variable numbers of objects, label storage transitions from fixed-width scalar records to variable-length tensor structures, requiring dynamic padding or ragged-batch handling in the data loader. Moreover, positioning bounding boxes takes 10 to 20$\times$ longer than single-label classification, directly throttling annotation throughput and inflating labeling cost.
-
-```{python}
-#| echo: false
-#| label: segmentation-label-scale-calc
-# ┌─────────────────────────────────────────────────────────────────────────────
-# │ SEGMENTATION LABEL SCALE CALCULATION
-# ├─────────────────────────────────────────────────────────────────────────────
-# │ Context: Label types and system requirements
-# │
-# │ Goal: Quantify why pixel-level segmentation is much heavier than boxes.
-# │ Show: A 1920x1080 mask has about 50,000x more scalar entries than ten boxes.
-# │ How: Compare one pixel label per image pixel with four coordinates per box.
-# │
-# └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import fmt, check
-
-# ┌── LEGO ───────────────────────────────────────────────
-class SegmentationLabelScale:
-    """Scalar label-entry comparison for masks versus bounding boxes."""
-
-    # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    image_width_px = 1920
-    image_height_px = 1080
-    box_count = 10
-    box_coords = 4
-
-    # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    pixel_labels = image_width_px * image_height_px
-    box_scalar_entries = box_count * box_coords
-    label_entry_ratio = pixel_labels / box_scalar_entries
-
-    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
-    check(pixel_labels > 2_000_000, f"1080p mask should exceed two million pixels, got {pixel_labels}.")
-    check(label_entry_ratio > 50_000, f"Segmentation-to-box scalar ratio unexpectedly low: {label_entry_ratio:.0f}x.")
-
-    # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
-    pixel_labels_m_str = fmt_count(pixel_labels, scale="M", precision=1, commas=False)
-    box_count_str = fmt(box_count, precision=0, commas=False)
-    box_coords_str = fmt(box_coords, precision=0, commas=False)
-    label_entry_ratio_mult_str = fmt_multiple(round(label_entry_ratio), precision=0, commas=True)
-```
-
-::: {.column-margin}
-![](images/svg/vol1_data_engineering_margin_004.svg){width="100%" fig-alt="Vertical count ladder comparing about 2.1 million segmentation-mask labels against 40 scalar bounding-box entries."}
-
-*Finer annotation granularity multiplies storage and processing scale.*
-:::
-
-Segmentation maps\index{Semantic segmentation!pixel-level labels} assign a class identifier to every pixel, producing dense 2D label matrices ($H \times W$). In autonomous driving and traffic monitoring, this entails tracing irregular boundaries for driveable road surfaces, vehicles, and pedestrians. These dense annotations multiply storage and ingestion bandwidth. A segmentation mask for a $1920{\times}1080$ image requires about `{python} SegmentationLabelScale.pixel_labels_m_str` labels (one per pixel), compared to perhaps `{python} SegmentationLabelScale.box_count_str` bounding boxes or a single classification label. If each box stores `{python} SegmentationLabelScale.box_coords_str` coordinates, that is roughly `{python} SegmentationLabelScale.label_entry_ratio_mult_str` more scalar label entries than `{python} SegmentationLabelScale.box_count_str` boxes before accounting for per-value encoding, and the hours required per image for manual segmentation make this approach suitable only when pixel-level precision is essential.
-
-@Fig-labels arrays five annotation modalities across vision and speech examples, demonstrating how labeling granularity ranges from coarse scene tags and captions to spatial bounding boxes, dense pixel-level masks, and audio transcripts. Classification can label an entire scene, while bounding boxes and segmentation maps localize objects or regions. Production datasets may combine modalities: a single camera frame might carry a scene label, obstacle boxes, and path-region masks, with each label type serving a distinct downstream task.
-
-::: {#fig-labels fig-env="figure" fig-pos="htb" fig-cap="**Data Annotation Modalities**: Four rows show classification, bounding-box, segmentation, and caption labels for one image; the fifth shows a transcript label for an audio input. The appropriate annotation representation depends on the input modality and task." fig-alt="Five-row figure. Four rows apply classification, bounding-box, segmentation, and caption labels to a dog-on-blanket image; the fifth maps a speaker icon to the transcript 'Once upon a time...'."}
-
-![](images/png/cs249r_labels_new.png){width="67%"}
-
-:::
-
-Beyond these geometric labels, production systems must also manage rich metadata essential for quality control and debugging. The Common Voice dataset [@ardila2020common] exemplifies this in speech recognition: tracking speaker demographics for fairness, recording quality metrics for filtering, and language information for multilingual support. If an object detection model fails in rainy conditions, weather metadata captured during collection pinpoints the coverage gap. This metadata requirement demonstrates how label type choice cascades through the entire system design: the infrastructure must optimize storage for the chosen format, implement appropriate retrieval patterns, and track which model versions used which label versions to correlate quality improvements with performance gains.
-
-### Label accuracy and consensus {#sec-data-engineering-achieving-label-accuracy-consensus-7190}
-
-Label quality\index{Label quality!consensus mechanisms} requires bounding label noise despite inherent subjectivity and sensor ambiguity across large datasets. Even with clear guidelines and careful system design, a nonzero fraction of labels will inevitably be corrupted [@northcutt2021pervasive; @thyagarajan2023multilabel]. The challenge is not eliminating labeling errors entirely (an impossible goal) but systematically measuring inter-annotator agreement\index{Inter-annotator agreement} and managing error rates to keep them within bounds that do not degrade model performance.
-
-Labeling failures arise from two distinct sources requiring different engineering responses. Across the benchmark examples compiled in @fig-hard-labels—including an ImageNet black stork mislabeled as a white stork and a CIFAR-10 frog mislabeled as a cat—each panel contrasts the erroneous assigned label against the verified ground truth. Some examples reflect degraded or ambiguous inputs where the correct label is difficult to infer from the data alone; others are visually clear but require domain knowledge, dataset-specific semantics, or expert judgment to label correctly. These different failure modes drive architectural decisions about annotator qualification, task routing, and consensus mechanisms: quality-based errors call for upstream data filtering, while expertise-based errors call for tiered annotator routing.
-
-::: {#fig-hard-labels fig-env="figure" fig-pos="htb" fig-cap="**Pervasive Label Errors**: Confidently mislabeled examples from widely used benchmarks, each showing the given label against the corrected ground truth (MNIST, CIFAR-10, CIFAR-100, Caltech-256, ImageNet, QuickDraw). Fine-grained confusions, such as a crab labeled lobster or a black stork labeled white stork, show that even curated datasets carry systematic errors, motivating careful quality control and expert annotation. Source: [@northcutt2021pervasive]." fig-alt="Six-panel grid of public-dataset label errors: MNIST digit (given 5, corrected 3); CIFAR-10 frog (given cat); CIFAR-100 crab (given lobster); Caltech-256 teapot (given ewer); ImageNet black stork (given white stork); QuickDraw eye (given tiger)."}
-
-![](images/png/label-errors-examples_new.png)
-
-:::
-
-Given these inherent quality challenges, production ML systems implement multiple layers of quality control. Systematic quality checks\index{Label quality!systematic checks} continuously monitor the labeling pipeline through random sampling of labeled data for expert review and statistical methods to flag potential errors. The infrastructure must efficiently process these checks across millions of examples without creating bottlenecks. Sampling strategies typically validate 1-10 percent of labels, balancing detection sensitivity against review costs. Higher-risk applications like medical diagnosis or autonomous vehicles may validate 100 percent of labels through multiple independent reviews, while lower-stakes applications like product recommendations may validate only 1 percent through spot checks.
-
-Beyond random sampling approaches, collecting multiple labels per data point, often referred to as "consensus labeling,"\index{Consensus labeling!quality control} can help identify controversial or ambiguous cases. Commercial labeling platforms such as Labelbox\index{Labelbox} and Scale AI\index{Scale AI} expose consensus and tiered quality-control workflows [@labelbox_consensus; @scaleai_qc], but the statistical core is inter-annotator agreement. The consensus infrastructure typically collects several labels per example, computing metrics like Fleiss' kappa\index{Fleiss' kappa!inter-annotator agreement}, a generalization of the Cohen's kappa statistic introduced in @sec-data-engineering-detecting-responding-data-drift-509a from two raters to any number of annotators [@fleiss1971measuring]. Examples with low agreement, using thresholds such as the Landis-Koch bands as operational heuristics, route to expert review rather than forcing consensus from genuinely ambiguous cases [@landis1977measurement].
-
-The consensus approach reflects an economic trade-off essential for scalable systems. Expert review costs more per example than crowdsourced labeling, but forcing agreement on ambiguous examples through majority voting of nonexperts can produce systematically biased labels. By routing only genuinely ambiguous cases to experts, identified through low inter-annotator agreement or failed gold-standard checks, systems balance cost against quality. This tiered approach enables processing millions of examples economically while maintaining quality standards through targeted expert intervention.
-
-While technical infrastructure provides the foundation for quality control, successful labeling systems must also address human factors. Working effectively with annotators requires standardized annotation rubrics with canonical positive and negative examples, visual edge-case catalogs, automated feedback mechanisms benchmarking annotators against known gold-standard records, and calibration sessions where annotators resolve borderline cases. For complex or domain-specific tasks, the system can implement tiered access levels, routing challenging cases to annotators with demonstrated domain expertise.
-
-Quality monitoring generates substantial telemetry that must be efficiently ingested and tracked. The most informative signals span several dimensions. Inter-annotator agreement rates reveal whether multiple annotators converge on the same example, while label confidence scores capture annotators' reported confidence in their decisions. Time per annotation serves as a dual-sided indicator: annotations completed too quickly suggest carelessness, while those taking too long suggest confusion or unclear guidelines. Error patterns expose systematic biases or misunderstandings in the annotator pool, and annotator performance on gold-standard examples provides ground-truth calibration. Finally, demographic analysis of annotator behavior detects whether certain groups systematically label differently, which could introduce unintended bias into the training data. These metrics must be computed and updated efficiently across millions of examples, often requiring dedicated analytics pipelines that process labeling data in near real-time to catch quality issues before they affect large volumes of data.
-
-### Scaling with AI-assisted labeling {#sec-data-engineering-scaling-aiassisted-labeling-9360}
-
-Throughput limits on manual annotation make pure human labeling a bottleneck for large-scale training, while fully automated labeling lacks the reliability needed for ambiguous or safety-critical examples. AI-assisted labeling\index{AI-assisted labeling!scalability} navigates this trade-off by using model inference to process routine inputs and accelerate human annotation while preserving manual verification for high-uncertainty samples. The decision hierarchy in @fig-weak-supervision structures candidate solutions to this throughput bottleneck, branching from traditional human annotation into semi-supervised learning, transfer learning, and weak supervision via heuristics, distant supervision, and programmatic constraints. Traditional supervision uses direct human labels, with active learning selecting informative samples to reduce labeling volume. Semi-supervised learning\index{Semi-supervised learning!labeling efficiency} exploits structure in unlabeled data alongside a labeled subset. Weak supervision replaces individual manual annotations with programmatic labeling functions. Transfer learning\index{Transfer learning!labeling alternative} reuses representations learned on an upstream task, reducing but not eliminating task-specific labels. Each path alters where supervision cost is paid and which assumptions—unlabeled data geometry, programmatic heuristic accuracy, or representation transferability—the pipeline must validate.
-
-::: {#fig-weak-supervision fig-env="figure" fig-pos="htb" fig-cap="**AI-Augmented Labeling Decision Hierarchy**: A top-level question about obtaining labeled data branches into four paths: traditional supervision, semi-supervised learning, weak supervision, and transfer learning, with active learning as a cost-saving alternative. The branches distinguish where supervision comes from and what additional assumptions or pretrained artifacts the pipeline must validate. Adapted from the Stanford AI Lab weak-supervision overview [@ratner2019weak]." fig-alt="Hierarchical diagram with question about getting labeled data at top. Four branches: traditional supervision, semi supervised, weak supervision, and transfer learning. Active learning branches as cost-saving alternative."}
-
-```{.tikz}
-\begin{tikzpicture}[font=\small\sffamily]
-%
-\tikzset{%
-  Line/.style={line width=1.0pt,black!50,text=black},
-  Box/.style={align=flush center,
-   inner sep=5pt,
-    node distance=0.75,
-    draw=GreenLine,
-    line width=0.75pt,
-    fill=GreenL,
-    text width=55mm,
-    minimum width=53mm, minimum height=9mm
-  },
-   Box1/.style={Box,
-    node distance=0.35,
-    draw=OrangeLine,
-    line width=0.75pt,
-    fill=OrangeL,
-    text width=31mm,
-    minimum width=31mm, minimum height=8.2mm
-  },
-  Box2/.style={Box,
-    node distance=0.5,
-    draw=BlueLine,
-    line width=0.75pt,
-    fill=BlueL,
-    text width=42mm,
-    minimum width=42mm, minimum height=9mm
-  },
- Text/.style={%
-    inner sep=2pt,
-    draw=none,
-    line width=0.75pt,
-    fill=TextColor,
-    text=black,
-    font=\footnotesize\sffamily,
-    align=flush center,
-    minimum width=7mm, minimum height=5mm
-  },
-}
-%
-\node[Box,text width=65mm,minimum width=62mm, minimum height=10mm,
-           fill=RedL,draw=RedLine](B1){\textbf{How to get more labeled training data?}};
-\node[Box, node distance=0.5,below=of B1,xshift=12mm](B2){\textbf{Traditional Supervision:} Have subject
-              matter experts (SMEs) hand-label more training data};
-\node[Box,below=0.3 of B2](B3){\textbf{Semi-supervised Learning:} Use structural
-            assumptions to automatically use unlabeled data};
-\node[Box,below=0.3 of B3](B4){\textbf{Weak Supervision:}\\ Get lower-quality
-            labels more efficiently and/or at a higher abstraction level};
-\node[Box,below=0.3 of B4](B5){\textbf{Transfer Learning:}\\ Use models
-            already trained on a different task};
-%
-\node[Box2,above right=0.7 and 1.75 of B2,fill=BrownL,draw=BrownLine](2B1){Too expensive!};
-\node[Box2,below =0.15 of 2B1,fill=BrownL,draw=BrownLine](2B2){\textbf{Active Learning:} Estimate
-            which points are most valuable to solicit labels for};
-%
-\node[Box2,above right=1.05 and 1.75 of B4](2B3){Get cheaper, lower-quality labels from nonexperts};
-\node[Box2,below =0.2 of 2B3](2B4){Get higher-level supervision
-            over unlabeled data from SMEs};
-\node[Box2,below =0.2 of 2B4](2B5){Use one or more
-              (noisy/biased) pretrained models to provide supervision};
-%
-\node[Box1,above right=0.25 and 1.45 of 2B3](3B1){Heuristics};
-\node[Box1,below =of 3B1](3B2){Distant Supervision};
-\node[Box1,below =of 3B2](3B3){Constraints};
-\node[Box1,below =of 3B3](3B4){Expected distributions};
-\node[Box1,below =of 3B4](3B5){Invariances};
-%%
-\foreach \x in{2,3,4,5}{
-\draw[-latex,Line](B1.191)|-(B\x);
-}
-
-\foreach \x in{1,2}{
-\draw[-latex,Line](B2.east)--++(0:1.1)|-(2B\x);
-}
-
-\foreach \x in{3,4,5}{
-\draw[-latex,Line](B4.355)--++(0:1.1)|-(2B\x);
-}
-
-\foreach \x in{1,2,3,4,5}{
-\draw[-latex,Line](2B4.east)--++(0:0.8)|-(3B\x);
-}
-\draw[-latex,Line](2B2)--++(270:1.0)--++(180:3.5)|-(B4.05);
-\draw[-latex,Line](B5.355)-|(2B5);
-\end{tikzpicture}
-```
-
-:::
-
-These paths exchange different assumptions rather than simple label counts. Depending on the path, the pipeline relies on task-relevant structure in unlabeled data, a transferable representation, measurable labeling-function accuracy, or an affordable scoring loop. Production systems must record each assumption and validate it against held-out, human-audited data. The diagram functions as a decision map, not an absolute quality ranking.
-
-AI-assisted labeling divides work according to the strengths of each participant. Humans judge ambiguous cases, catch subtle errors, and apply domain knowledge; models can process routine cases at scale, subject to validation. Production systems combine these capabilities through several complementary approaches.
-
-Pre-annotation\index{Pre-annotation!workflow}\index{AI-assisted labeling!preannotation} uses AI models to generate preliminary labels that humans then review and correct—transforming the task from "label from scratch" to "verify and fix." Programmatic labeling frameworks like Snorkel\index{Snorkel!weak supervision} [@ratner2018; @ratner2017] extend this further through weak supervision\index{Weak supervision!programmatic labeling},[^fn-weak-supervision-cost] automatically generating initial labels at scale through rule-based heuristics, knowledge bases, and existing model outputs. In autonomous driving, pretrained object detection models can label vehicles and pedestrians that human annotators verify and refine, handling many clear cases automatically.
-
-[^fn-weak-supervision-cost]: **Weak supervision**\index{Weak supervision!cost trade-off}: A "data programming" paradigm that exchanges some manual annotation labor for the upfront effort of writing and validating programmatic labeling functions. Once written, a function can be applied cheaply at scale, but execution, conflict resolution, quality monitoring, and maintenance still incur cost; the useful comparison is workload-specific rather than literally zero marginal cost.
-
-Large language models (LLMs)\index{LLM!labeling assistance} now assist labeling pipelines by generating descriptions, drafting labeling guidelines from examples, and explaining their reasoning for label assignments. Content moderation systems, for instance, use LLMs for initial content classification with explanations that human reviewers validate. However, LLM integration introduces systems challenges: provider- and model-dependent inference costs and rate limits, as well as the need for systematic output validation because LLMs can produce confident but incorrect labels. Many organizations adopt tiered approaches, using smaller specialized models for routine cases while reserving larger LLMs for complex scenarios requiring nuanced judgment.
-
-Active learning makes the complementary trade-off: it spends model inference to reduce human labeling, so the relevant question is whether that compute fits inside the same budget.
-
-```{python}
-#| echo: false
-#| label: active-learning-budget-calc
-# ┌─────────────────────────────────────────────────────────────────────────────
-# │ ACTIVE LEARNING BUDGET CALCULATION
-# ├─────────────────────────────────────────────────────────────────────────────
-# │ Context: "When active learning breaks the budget" callout and active-learning footnote
-# │
-# │ Goal: Normalize active-learning label and inference costs under a fixed budget.
-# │ Show: Full-pool scoring makes the illustrative 10M-image scenario infeasible.
-# │ How: Compute random label cost, active label cost, full-pool inference cost,
-# │      and the candidate-pool size supported by a 10% compute allocation.
-# │
-# └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import fmt, fmt_usd, check, fmt_count
-
-# ┌── LEGO ───────────────────────────────────────────────
-class ActiveLearningBudget:
-    """Budget normalization for active learning over a 10M-image candidate pool."""
-
-    # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    dataset_images = 10 * MILLION
-    label_budget = 50 * THOUSAND
-    label_cost = 0.50
-    inference_cost_per_image = 0.01
-    random_labels_needed = 1 * MILLION
-    active_labels_low = 100 * THOUSAND
-    active_labels_high = 200 * THOUSAND
-    compute_budget_fraction = 0.10
-    baseline_acc = 85
-    target_acc = 95
-
-    # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    random_label_cost = random_labels_needed * label_cost
-    active_label_cost_low = active_labels_low * label_cost
-    active_label_cost_high = active_labels_high * label_cost
-    full_pool_inference_cost = dataset_images * inference_cost_per_image
-    active_total_low = full_pool_inference_cost + active_label_cost_low
-    active_total_high = full_pool_inference_cost + active_label_cost_high
-    compute_budget = label_budget * compute_budget_fraction
-    candidate_pool_images = compute_budget / inference_cost_per_image
-    label_budget_after_compute = label_budget - compute_budget
-    affordable_labels_after_compute = label_budget_after_compute / label_cost
-
-    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
-    check(random_label_cost == 500 * THOUSAND, "Random labeling reference should cost $500K.")
-    check(active_total_low > label_budget, "Full-pool active learning should exceed the $50K budget.")
-    check(candidate_pool_images < dataset_images, "10% compute budget should score only a subset of the pool.")
-
-    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
-    dataset_images_str = fmt_count(dataset_images, scale='M', commas=False)
-    label_budget_str = fmt_usd(label_budget, precision=0, commas=False, scale="K")
-    label_cost_str = fmt_usd(label_cost, precision=2, commas=False, per="label")
-    inference_cost_str = fmt_usd(inference_cost_per_image, precision=2, commas=False, per="image")
-    random_labels_str = fmt_count(random_labels_needed, scale='M', commas=False)
-    random_label_cost_str = fmt_usd(random_label_cost, precision=0, commas=False, scale="K")
-    active_labels_low_str = fmt_count(active_labels_low, scale='K', commas=False)
-    active_labels_high_str = fmt_count(active_labels_high, scale='K', commas=False)
-    active_label_cost_low_str = fmt_usd(active_label_cost_low, precision=0, commas=False, scale="K")
-    active_label_cost_high_str = fmt_usd(active_label_cost_high, precision=0, commas=False, scale="K")
-    full_pool_inference_cost_str = fmt_usd(full_pool_inference_cost, precision=0, commas=False, scale="K")
-    active_total_low_usd_str = fmt_usd(active_total_low, precision=0, commas=False, scale="K")
-    active_total_high_usd_str = fmt_usd(active_total_high, precision=0, commas=False, scale="K")
-    compute_budget_pct_str = fmt_percent(compute_budget_fraction, precision=0, commas=False, style='prose')
-    compute_budget_str = fmt_usd(compute_budget, precision=0, commas=False, scale="K")
-    candidate_pool_str = fmt_count(candidate_pool_images, scale='K', commas=False)
-    affordable_labels_str = fmt_count(affordable_labels_after_compute, scale='K', commas=False)
-    baseline_acc_str = fmt_percent(baseline_acc / 100, precision=0, commas=False, style='prose')
-    target_acc_str = fmt_percent(target_acc / 100, precision=0, commas=False, style='prose')
-```
-
-[^fn-active-learning-budget]: **Active learning**\index{Active learning!budget multiplier}: Inverts the traditional labeling paradigm: instead of randomly selecting examples to label, the model queries for the examples it needs most, typically those where prediction uncertainty is highest [@settles2009active]. This can reduce the number of labels needed to reach a target accuracy, but the infrastructure trade-off is compute for labels: at `{python} ActiveLearningBudget.inference_cost_str`, scoring a full `{python} ActiveLearningBudget.dataset_images_str` pool costs `{python} ActiveLearningBudget.full_pool_inference_cost_str` before any human labels. Active learning becomes budget leverage only when the candidate pool is pre-filtered, inference is much cheaper, or the compute budget is separate from the labeling budget.
-
-Methods such as active learning\index{Active learning!label prioritization}[^fn-active-learning-budget] complement these approaches by prioritizing candidate examples according to model uncertainty [@settles2009active; @coleman2022]. These systems continuously analyze model uncertainty to identify valuable labeling candidates. Rather than labeling a random sample of unlabeled data, active learning selects examples where the current model is most uncertain or where labels would most improve model performance. The infrastructure must efficiently compute uncertainty metrics (often prediction entropy or disagreement between ensemble models), maintain task queues ordered by informativeness, and adapt prioritization strategies based on incoming labels. In a medical imaging pipeline, for example, active learning routes rare or borderline pathologies to expert radiologists while routine scans receive automated preannotations that clinicians quickly verify. This approach can substantially reduce required annotations in favorable settings, though it requires careful engineering to prevent feedback loops where the model's uncertainty biases which data gets labeled. A budget calculation makes that leverage concrete.
-
-::: {#nbk-data-engineering-active-learning-multiplier .callout-notebook title="When active learning breaks the budget"}
-
-**Problem**: A `{python} ActiveLearningBudget.dataset_images_str` dataset has a `{python} ActiveLearningBudget.label_budget_str` labeling budget. Random sampling achieves `{python} ActiveLearningBudget.baseline_acc_str` accuracy with `{python} ActiveLearningBudget.active_labels_low_str`, while the target is `{python} ActiveLearningBudget.target_acc_str` accuracy.
-
-**Physics**:
-
-1.  **Sample efficiency**: Active learning can achieve target accuracy with fewer samples than random selection in favorable settings.
-2.  **Cost per point**: Random sampling = `{python} ActiveLearningBudget.label_cost_str`. Active learning adds compute cost (~`{python} ActiveLearningBudget.inference_cost_str` for inference) to find hard examples.
-3.  **Multiplier**:
-    *   **Random**: Reaching `{python} ActiveLearningBudget.target_acc_str` may require `{python} ActiveLearningBudget.random_labels_str` labels (`{python} ActiveLearningBudget.random_label_cost_str`). Budget exceeded.
-    *   **Active labels only**: The system may need ~`{python} ActiveLearningBudget.active_labels_low_str`–`{python} ActiveLearningBudget.active_labels_high_str` hard examples (`{python} ActiveLearningBudget.active_label_cost_low_str`–`{python} ActiveLearningBudget.active_label_cost_high_str`), which reaches or exceeds the budget before any scoring compute.
-    *   **Full-pool scoring**: Scoring all `{python} ActiveLearningBudget.dataset_images_str` candidate images adds `{python} ActiveLearningBudget.full_pool_inference_cost_str`, so total active-learning cost becomes `{python} ActiveLearningBudget.active_total_low_usd_str`–`{python} ActiveLearningBudget.active_total_high_usd_str`. Budget exceeded.
-
-```{=latex}
-\vspace*{-2ex}
-```
-**Systems insight**: Algorithm choice is a major lever on label count, but compute must be inside the budget model. Spending `{python} ActiveLearningBudget.compute_budget_pct_str` of this budget on inference (`{python} ActiveLearningBudget.compute_budget_str`) scores only `{python} ActiveLearningBudget.candidate_pool_str` candidate images at the stated inference price and leaves room for about `{python} ActiveLearningBudget.affordable_labels_str` labels. Active learning is viable only if the candidate pool is narrowed before scoring, inference cost drops substantially, or compute is funded separately from labeling (see @fig-data-engineering-active-learning-budget).
-
-:::
-
-::: {#fig-data-engineering-active-learning-budget .column-margin}
-![](images/svg/data_engineering_active_learning_budget.svg){width="100%" fig-alt="Budget-envelope chart with a 50K-dollar limit marker; the labeling budget fits at the limit, while full-pool scoring extends into the red over-budget region at 100K dollars."}
-
-*Full-pool scoring can exceed the label budget before labeling begins.*
-:::
-
-Quality control becomes increasingly important as these AI components interact. The system must monitor both AI and human performance through systematic metrics. Model confidence calibration matters: if the AI reports 95 percent confidence but achieves only 75 percent accuracy at that confidence level, preannotations mislead human reviewers. Human-AI agreement rates reveal whether AI assistance helps or hinders: when humans frequently override AI suggestions, the preannotations may be introducing bias rather than accelerating work. These metrics require careful instrumentation throughout the labeling pipeline, tracking both final labels and the interaction between human annotators and AI at each stage.
-
-These principles manifest at scale across safety-critical domains. Autonomous vehicle labeling infrastructure can process large volumes of sensor frames, using AI preannotation to label common objects while routing unusual scenarios (construction zones, emergency vehicles) to human experts—a distributed architecture where preannotation runs on GPU clusters while human review scales across annotation teams. Medical imaging systems face a parallel label-scarcity problem: large repositories of unlabeled clinical data make expert annotation the bottleneck and motivate data-efficient workflows that learn useful representations from unlabeled structure before expert labels are applied [@krishnan2022]. Across such domains, the common data-engineering pattern is *tiered escalation*: automation handles clear cases, humans handle ambiguous ones, and monitoring ensures the boundary between "clear" and "ambiguous" adapts as both AI capability and deployment conditions evolve.
-
-### Automated labeling in KWS {#sec-data-engineering-case-study-automated-labeling-kws-systems-976d}
-
-```{python}
-#| echo: false
-#| label: kws-automated-labeling-scale-calc
-# ┌─────────────────────────────────────────────────────────────────────────────
-# │ KWS AUTOMATED LABELING SCALE CALCULATION
-# ├─────────────────────────────────────────────────────────────────────────────
-# │ Context: Automated labeling in the KWS case study
-# │
-# │ Goal: Quantify why manual annotation is infeasible at MSWC scale.
-# │ Show: Manual labeling would consume tens of person-years even at 10 s/sample.
-# │ How: Convert example count and label time into person-hours and person-years.
-# │
-# └─────────────────────────────────────────────────────────────────────────────
-from mlsysim import *
-
-# ┌── LEGO ───────────────────────────────────────────────
-class KWSAutomatedLabelingScale:
-    """KWS automated-labeling scale recap for the MSWC discussion."""
-
-    # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    dataset = Datasets.MSWC
-    total_examples = dataset.training_examples
-    languages = dataset.languages
-    keywords = dataset.keywords
-    label_seconds_per_example = 10
-    sample_duration_ms_low = 500
-    sample_duration_ms_high = 800
-
-    # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    total_examples_count = total_examples.to(count).magnitude
-    label_hours = total_examples_count * label_seconds_per_example / SEC_PER_HOUR
-    label_years = label_hours / 2000
-    sample_duration_window_ms = sample_duration_ms_high - sample_duration_ms_low
-
-    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
-    check(label_years > 30, f"Manual KWS labeling effort unexpectedly small: {label_years:.1f} person-years.")
-    check(keywords >= 300_000, f"MSWC keyword coverage unexpectedly narrow: {keywords}.")
-    check(sample_duration_window_ms == 300, f"Expected 300 ms window, got {sample_duration_window_ms}")
-
-    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
-    dataset_size_million_examples_str = fmt_count(
-        total_examples_count,
-        scale="million",
-        precision=1,
-        scale_style="word",
-        label="example",
-        allow_fractional=True,
-    )
-    dataset_size_million_samples_str = fmt_count(
-        total_examples_count,
-        scale="million",
-        precision=1,
-        scale_style="word",
-        allow_fractional=True,
-        label="sample",
-    )
-    label_hours_str = fmt_time(label_hours, unit=hour, precision=0, commas=True, style="word")
-    label_years_str = fmt_count(label_years, precision=1, commas=False, label="person-year", plural_label="person-years", allow_fractional=True)
-    languages_count_str = fmt_count(languages, label="language", commas=False)
-    keywords_count_str = fmt_count(keywords, label="keyword", commas=True)
-    sample_duration_ms_low_str = fmt_time(sample_duration_ms_low, unit=millisecond, precision=0, commas=False)
-    sample_duration_ms_high_str = fmt_time(sample_duration_ms_high, unit=millisecond, precision=0, commas=False)
-```
-
-Labeling keyword spotting datasets at scale introduces speech-specific systems challenges. Generating millions of labeled wake word samples without proportional human annotation cost requires moving beyond manual and crowdsourced workflows. The Multilingual Spoken Words Corpus (MSWC) [@mazumder2021multilingual] demonstrates how automated labeling\index{Keyword spotting!automated labeling} resolves this throughput bottleneck: the corpus programmatically extracts over `{python} KWSAutomatedLabelingScale.dataset_size_million_examples_str` of one-second speech across `{python} KWSAutomatedLabelingScale.keywords_count_str` in `{python} KWSAutomatedLabelingScale.languages_count_str` from continuous speech corpora.
-
-This scale makes manual annotation impractical: `{python} KWSAutomatedLabelingScale.dataset_size_million_examples_str` at even 10 seconds per label would require approximately `{python} KWSAutomatedLabelingScale.label_hours_str`, roughly `{python} KWSAutomatedLabelingScale.label_years_str` of full-time effort. Broad, documented sourcing across `{python} KWSAutomatedLabelingScale.languages_count_str` can improve coverage, but language count alone does not guarantee representative speakers, accents, devices, or acoustic environments. The pipeline staged in @fig-mswc circumvents this manual annotation bottleneck, using forced alignment\index{Forced alignment!speech labeling}\index{Speech recognition!forced alignment}[^fn-forced-alignment-kws] over paired sentence audio and transcriptions to estimate word boundaries before slicing individual one-second keyword windows for classifier training.
-
-At this scale, quality control becomes a sampling and provenance problem rather than disappearing. The pipeline should report coverage by language, speaker, accent, device, and acoustic environment; retain the source recording, transcript version, aligner version, and boundary confidence for each extracted clip; and route low-confidence alignments and underrepresented slices to human review. Held-out evaluation must then measure the intended wake words across those slices. These controls distinguish a large corpus from a representative one and make extraction errors traceable when a downstream KWS model fails.
-
-[^fn-forced-alignment-kws]: **Forced alignment**\index{Forced alignment!automated labeling}: Given a known transcription, an aligner estimates where its words occur in the audio, often using frame-level acoustic scores and sequence decoding. Timing resolution and accuracy depend on the model, features, language, and recording quality, so boundary estimates still need quality checks. The known transcript makes word-level segmentation far cheaper than labeling every clip manually, though computation, review, and error correction remain.
-
-::: {#fig-mswc fig-env="figure" fig-pos="htb" fig-cap="**Multilingual Data Preparation**: Forced alignment and segmentation transform paired audio-text data into labeled one-second segments, creating a large-scale corpus for training keyword spotting models across `{python} KWSAutomatedLabelingScale.languages_count_str`. This automated process enables scalable development of KWS systems by efficiently generating training examples from readily available speech resources like Common Voice and multilingual captioned content. Source: [@mazumder2021tinyml]." fig-alt="Flowchart illustrating multilingual speech data preparation: raw audio and text transcripts undergo forced alignment and word segmentation to produce labeled one-second audio clips for model training."}
-
-![](images/png/data_engineering_kws2.png)
-
-:::
-
-The extraction system uses these precise timing markers to generate clean keyword samples while handling anticipated engineering challenges: background noise interfering with word boundaries, speakers stretching or compressing words unexpectedly beyond the target `{python} KWSAutomatedLabelingScale.sample_duration_ms_low_str` to `{python} KWSAutomatedLabelingScale.sample_duration_ms_high_str` duration, and longer words exceeding the one-second boundary. MSWC provides automated quality assessment that analyzes audio characteristics to identify potential issues with recording quality, speech clarity, or background noise, which is essential for maintaining consistent standards across `{python} KWSAutomatedLabelingScale.dataset_size_million_samples_str` without the manual review expenses that would make this scale prohibitive.
-
-Voice assistant engineering teams often build on this automated labeling foundation. While automated corpora may not contain the specific wake words a product requires, they provide starting points for KWS prototyping, particularly in underserved languages where commercial datasets do not exist. Production systems typically layer targeted human recording and verification for challenging cases (unusual accents, rare words, or difficult acoustic environments), coordinating between automated processing and human expertise.
-
-At this stage, the compilation pipeline has produced its core artifacts: feature vectors paired with ground-truth labels. Delivering these tensors to execution units exposes the physical storage hierarchy. The fundamental tension is mechanical: batch training demands high-throughput sequential streaming across petabytes of records, while real-time inference requires sub-millisecond point lookups for individual feature vectors. Storage architecture determines whether accelerators compute continuously or idle waiting on I/O.
 
 ## Storage Architecture {#sec-data-engineering-strategic-storage-architecture-1a6b}
 
@@ -4225,157 +4266,6 @@ Long-term retention balances auditability against storage expenditure and data p
 
 Physical storage architecture dictates where data lives and how fast it moves, but physical layout alone cannot guarantee semantic consistency between training inputs and inference features. Bridging offline batch training and real-time serving requires specialized feature infrastructure.
 
-### Feature stores {#sec-data-engineering-feature-stores-bridging-training-serving-55c8}
-
-The fundamental challenge of production feature management is preserving semantic consistency across disparate execution environments: serving historical feature values for training and current feature values for inference. **Point-in-time correctness**\index{Point-in-time correctness} is the primary operational requirement that drives teams to adopt **feature stores**\index{Feature store!training-serving bridge}, mitigating training-serving skew and enabling feature sharing across models.
-
-In production environments, feature computation pipelines often fragment across languages and execution engines. During model development, data scientists compute features like `user_purchase_count_30d` using batch SQL queries in an offline data warehouse. During production serving, an online microservice computes the same metric incrementally from an in-memory cache. Even when intended to be identical, minor discrepancies in timezone arithmetic, missing value imputation, or floating-point rounding cause offline and online features to drift apart. Uber's Michelangelo platform popularized the feature store to resolve this exact form of training-serving skew through centralized, reusable feature definitions [@hermann2017michelangelo].
-
-::: {#dfn-data-engineering-feature-store .callout-definition title="Feature store"}
-
-***Feature store***\index{Feature store!definition} is the architectural layer that centralizes the management of machine learning features, decoupling feature computation from consumption.
-
-1.  **Significance**: It supports point-in-time-correct historical retrieval for training $(x_{t-\Delta})$ and coordinated feature definitions for real-time inference $(x_t)$, reducing training-serving skew when timestamps, backfills, freshness, and synchronization are handled correctly.
-2.  **Distinction**: Unlike a general-purpose database, a feature store is designed for dual storage modes: an *offline store* (columnar/batch) for training and an *online store* (key-value/low-latency) for serving.
-3.  **Common pitfall**: A frequent misconception is that a feature store is only "a place to store data." In reality, it manages feature definitions, values, and retrieval; transformation may run in the feature store, an offline store, or a separate batch or stream-compute engine.
-
-:::
-
-Feature stores (examined from an operational perspective in @sec-ml-operations-feature-stores-c01c) establish a single source of truth for feature definitions across the ML lifecycle. By registering a feature definition as a unified computation graph, the feature store evaluates the identical transformation across both historical batch data and live inference streams. This shared definition reduces one source of training-serving skew, but equivalent execution still requires synchronized fitted state, correct timestamps, and appropriate freshness. Those conditions must be tested across both retrieval paths. Centralization also enables organizational feature reuse: expensive representations, such as multi-dimensional user embeddings derived from months of interaction logs, are computed once and served to multiple downstream modeling teams.
-
-::: {.column-margin .margin-pointer}
-↪ How feature stores are operated in production, including point-in-time retrieval and training-serving skew prevention at scale, is operationalized in @sec-ml-operations-feature-stores-c01c.
-:::
-
-To reconcile opposing access profiles, feature stores implement dual storage engines\index{Feature store!offline vs. online stores}. The offline store uses columnar formats (such as Parquet) residing on high-capacity object storage, optimized for multi-gigabyte sequential scans during batch training. The online store uses low-latency key-value databases (such as Redis), optimized for sub-10-millisecond point lookups during real-time inference. Synchronizing these two engines requires automated pipelines that push batch-computed feature snapshots to the online store, while streaming ingestion updates both stores continuously as new user events arrive.
-
-Time-travel capabilities\index{Time travel!feature stores}\index{Point-in-time correctness!time travel} differentiate a true feature store from a simple cache. Training requires evaluating features as they existed at the exact moment of an event, rather than their current values. In a customer churn model, for example, training on a customer who churned on January 15 must use features computed on January 14, not current post-churn profile state. Feature stores enforce point-in-time correctness using an **as-of join**\index{As-of join!definition}\index{As-of join!point-in-time correctness} (temporal join): for every observation at timestamp $t_{\text{obs}}$, the retrieval engine joins the most recent feature record whose update timestamp satisfies $t_{\text{feat}} \le t_{\text{obs}}$. This temporal inequality filter guarantees that future information cannot leak into the historical training matrix, even when multiple upstream feature tables update at differing frequencies.
-
-The performance characteristics of the dual stores directly bound training throughput and serving latency. The offline store must sustain batch read rates of millions of feature vectors per minute across wide schemas. The online store must sustain thousands to millions of point lookups per second while honoring single-digit millisecond latency budgets. When user actions (such as adding an item to a cart) require sub-second feature freshness, streaming feature pipelines\index{Feature store!streaming updates} update the online store continuously. This continuous updating requires careful event deduplication during network retries and timestamp synchronization to ensure late-arriving records do not overwrite newer state.
-### Training Data Loading {#sec-data-engineering-training-data-loading}
-
-In the compiler framework, data ingestion\index{Data ingestion!pipeline boundary} acts as the *lexer*: it reads raw source streams and tokenizes them into structured records that downstream stages can process. The primary performance barrier at this stage is the **input/output (I/O) bottleneck**\index{I/O bottleneck!data loading}. Accelerators remain idle if ingestion cannot stage tensors quickly enough to keep compute units supplied. The slowest-stage bound of @sec-data-engineering-feeding-problem applies unchanged: in an idealized two-stage model, step time ranges from $\max(\IronlawTermTimesCompute, T_{\text{IO}})$ with full overlap to $\IronlawTermTimesCompute + T_{\text{IO}}$ with no overlap. What changes is the binding resource. The feeding scenario was starved by the disk; ingestion is more commonly starved by CPU-side decompression and decode.
-
-To mitigate this bottleneck, modern ML data loading pipelines employ several concurrent strategies to hide data preparation latency behind accelerator compute:
-
-1.  **Multi-process worker pools**: Distributing decompression and augmentation across multiple CPU cores prevents a single host thread from throttling the accelerator.
-2.  **Asynchronous prefetching**: Overlapping the host-to-accelerator memory transfer with current-step computation ensures the next batch is staged before the accelerator requests it.
-3.  **Memory pinning**: Staging data in page-locked (pinned) host memory allows direct memory access (DMA) transfers to the accelerator, bypassing expensive CPU paging overhead.
-4.  **Hardware decode engines**: Moving standard JPEG or video decompression off the host CPU and onto specialized on-device media engines (such as NVIDIA's NVJPEG) removes the CPU bound entirely, handing the constraint back to the storage tier.
-
-```{python}
-#| echo: false
-#| label: dataloader-stats-calc
-
-# ┌─────────────────────────────────────────────────────────────────────────────
-# │ DATALOADER CHOKE POINT SETUP
-# ├─────────────────────────────────────────────────────────────────────────────
-# │ Context: Dataloader Choke Point prose and figure
-# │
-# │ Goal: Keep the illustrative worker/throughput constants next to their use.
-# │ Show: That 8 CPU workers at 375 img/s each reach the 3,000 img/s accelerator rate.
-# │ How: Calculate the minimum worker count and reuse constants in the plot.
-# │
-# │ Note: The accelerator rate comes from FeedingProblem (chapter scenario anchor).
-# └─────────────────────────────────────────────────────────────────────────────
-import math
-from mlsysim.fmt import fmt, check, fmt_rate
-
-# ┌── LEGO ───────────────────────────────────────────────
-class DataloaderStats:
-    """
-    Namespace for Dataloader Choke Point statistics.
-    """
-
-    # ┌── 1. LOAD (Constants) ───────────────────────────────────────────────
-    gpu_limit_img_sec = FeedingProblem.sustained_img_per_sec  # chapter scenario rate
-    worker_img_sec = 375  # scenario assumption: JPEG decode + augment per CPU worker
-    cpu_throughput_cap_img_sec = 3500
-    max_workers = 16
-
-    # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
-    resnet_worker_count = math.ceil(gpu_limit_img_sec / worker_img_sec)
-
-    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
-    check(resnet_worker_count == 8, f"Expected 8 workers for the illustrative dataloader saturation point, got {resnet_worker_count}.")
-
-    # ┌── 4. OUTPUT (Formatting) ───────────────────────────────────────────
-    resnet_worker_count_str = fmt(resnet_worker_count, precision=0, commas=False)
-    worker_img_per_s_str = fmt_rate(worker_img_sec, 'img/s', precision=0, commas=True)
-    gpu_limit_img_per_s_str = fmt_rate(gpu_limit_img_sec, 'img/s', precision=0, commas=True)
-```
-
-In computer vision, JPEG decode and augmentation on the host CPUs are the usual binding stage. In the chapter's scenario the accelerator consumes `{python} DataloaderStats.gpu_limit_img_per_s_str`; if each DataLoader worker process decodes and augments `{python} DataloaderStats.worker_img_per_s_str`, `{python} DataloaderStats.resnet_worker_count_str` workers are needed to reach the crossing. Below the crossing the input pipeline binds, and adding accelerators yields no speedup, a counterintuitive result for teams expecting linear scaling from hardware investments. Above it, additional workers raise nothing because the accelerator binds. The worker count is a capacity match, not a hardware constant: actual ResNet-50\index{ResNet-50!data-loading requirements} and A100\index{A100!data-loading requirements} requirements move with image transforms, host CPUs, batch size, and framework configuration. @Fig-dataloader-choke-point plots this capacity crossing, contrasting the rising blue CPU-supply curve against the dashed red GPU-capacity ceiling to isolate the starved regime below eight workers from the compute-saturated plateau beyond it.
-
-::: {#fig-dataloader-choke-point fig-env="figure" fig-pos="htb" fig-cap="**The Dataloader Choke Point**: Training throughput (img/s) vs. DataLoader workers. The blue CPU-supply curve rises with worker count until it reaches the illustrative input-pipeline cap; the red dashed line marks accelerator consumption capacity. The lower curve is the bottleneck: the accelerator starves to the left of the crossing, while extra workers beyond the crossing do not increase accelerator throughput." fig-alt="Line chart of throughput vs. workers. Blue line (CPU) rises linearly, then plateaus at the input-pipeline cap. Red line (GPU) is flat. Where CPU < GPU, system is starved. Where CPU > GPU, system is saturated."}
-
-```{python}
-#| echo: false
-# ┌─────────────────────────────────────────────────────────────────────────────
-# │ FIGURE: DATALOADER CHOKE POINT
-# ├─────────────────────────────────────────────────────────────────────────────
-# │ Context: @fig-dataloader-choke-point in the data ingestion discussion
-# │
-# │ Goal: Visualize the min(CPU supply, GPU demand) bottleneck.
-# │ Show: The starvation vs. saturation regions in training throughput.
-# │ How: Plot throughput curves showing the "choke point" between CPU and GPU capacity.
-# │
-# └─────────────────────────────────────────────────────────────────────────────
-# ┌── 1. CANVAS ────────────────────────────────────────────────────────────────
-# │ Visualize the min(CPU supply, GPU demand) bottleneck.
-import numpy as np
-from binder.tools.figures import style as book_style
-
-fig, ax, COLORS, plt = book_style.setup_plot(figsize=(10, 4.5))
-
-# —Plot: The Dataloader Choke Point ---
-
-# ┌── 2. ARRAYS ────────────────────────────────────────────────────────────────
-workers = np.arange(1, DataloaderStats.max_workers + 1)
-cpu_throughput = np.minimum(DataloaderStats.worker_img_sec * workers, DataloaderStats.cpu_throughput_cap_img_sec)
-gpu_limit = DataloaderStats.gpu_limit_img_sec
-
-# ┌── 3. RENDER ────────────────────────────────────────────────────────────────
-ax.plot(workers, cpu_throughput, 'o-', color=COLORS['BlueLine'], label='DataLoader (CPU)')
-ax.axhline(gpu_limit, linestyle='--', color=COLORS['RedLine'], label='GPU Capacity')
-ax.fill_between(workers, 0, np.minimum(cpu_throughput, gpu_limit), color=COLORS['BlueL'], alpha=0.2)
-
-# ┌── 4. DECORATE ──────────────────────────────────────────────────────────────
-ax.text(
-    4.5,
-    1500,
-    "Starvation",
-    color=COLORS['BlueLine'],
-    fontweight='normal',
-    ha='center',
-    bbox=dict(facecolor='white', alpha=0.8, edgecolor='none', pad=0.2),
-)
-ax.text(
-    10,
-    3100,
-    "Saturated",
-    color=COLORS['RedLine'],
-    fontweight='normal',
-    ha='center',
-    bbox=dict(facecolor='white', alpha=0.8, edgecolor='none', pad=0.2),
-)
-ax.set_xlabel('DataLoader Workers')
-ax.set_ylabel('Throughput (img/s)')
-ax.legend(loc='lower right', fontsize=8, frameon=True, facecolor='white', framealpha=0.95, edgecolor='gray', fancybox=True, borderpad=0.6)
-plt.show()
-plt.close()
-```
-
-:::
-
-Relieving the choke point takes three mechanisms: multi-process worker pools that scale decode across host cores, asynchronous pinned-memory prefetching that overlaps the host-to-accelerator copy with compute, and hardware decode engines that move JPEG decompression off the host CPU entirely. The last of these removes the CPU bound and hands the constraint back to storage, which is the budget @sec-data-engineering-ml-storage-requirements-performance-1b0d prices.
-
-::: {.column-margin .margin-pointer}
-↪ How asynchronous prefetching and overlapping pipeline stages hide host preparation latency behind accelerator compute is developed in @sec-model-training-data-prefetching-pipeline-overlapping-e984.
-:::
-
-Deploying an end-to-end pipeline across acquisition, ingestion, processing, labeling, and storage does not conclude data engineering. In production, input environments continuously drift: sensor hardware shifts, upstream schemas mutate, and annotator pools turn over. Without active operational maintenance, static pipelines quietly degrade over time.
-
 ## Operational Data Health {#sec-data-engineering-data-debt-hidden-liability-3335}
 
 A keyword-spotting (KWS) system deployed to edge devices launches with 98 percent accuracy and verified training-serving consistency. Six months later, production accuracy degrades to 94 percent without any modification to the model weights or architecture. The failure traces to three silent pipeline mutations: new smartphone microphone hardware altered the acoustic frequency response, the labels used to measure live accuracy followed revised guidelines that had not been reconciled with the earlier evaluation standard, and an upstream schema modification in user metadata was deployed without notice. The changed evaluation labels can alter measured accuracy even when predictions for the same inputs remain fixed; their effect must be separated from the changed input paths. Each failure mode represents a manifestation of **data debt**\index{Data debt!hidden liability}: accumulated, unmonitored compromises in data quality, schema integrity, and provenance that compound across system boundaries. Unlike traditional software defects that trigger segmentation faults or unhandled exceptions, data debt leaves the execution graph running normally while the underlying statistical distribution decays. Operating reliable production systems requires formalizing this debt: categorizing its sources, quantifying its accumulation against service-level objectives, and applying structured debugging protocols when production metrics degrade.
@@ -4697,6 +4587,90 @@ A training loader delivers examples more slowly than the accelerator can consume
 - [ ] **Intervention**: What does the drift alert establish, and what additional evidence is needed before choosing pipeline repair or retraining?
 
 :::
+
+### Data drift detection and response {#sec-data-engineering-detecting-responding-data-drift-509a}
+
+ML models rest on the assumption that production data resembles training data. When this assumption breaks through statistical shifts rather than an explicit contract violation, model performance can change silently without obvious errors or system failures. The validation and monitoring techniques in @sec-data-engineering-quality-validation-monitoring-498f can reveal both sudden and gradual problems; data drift detection\index{Data drift!detection}\index{Distribution shift!monitoring} focuses specifically on changes in distributions that may alter model behavior over time. Detecting, investigating, and responding to these changes requires sustained monitoring effort, making drift a core data engineering responsibility rather than an optional advanced topic.
+
+::: {.column-margin .margin-pointer}
+↪ How drift signals and outcome evidence trigger retraining only when its expected benefit exceeds its cost is operationalized in @sec-ml-operations-retraining-decision-framework-e33d.
+:::
+
+@Sec-appdx-data-foundations-measuring-drift-divergence-a6dd formalizes the divergence metrics used to make the divergence term $\StatisticalDivergence$ of the degradation equation (@eq-degradation) actionable. The **population stability index (PSI)**\index{Population stability index!definition} quantifies changes in categorical or binned&nbsp;feature distributions, while **Kullback-Leibler (KL) divergence**\index{Kullback-Leibler divergence!definition} measures an information-theoretic divergence between probability distributions. The two metrics encode different distributional assumptions and scales, and neither by itself supplies a universal cutoff. Teams calibrate metric-specific thresholds against a deployment baseline and monitor them over time. Crossing a threshold signals that the live distribution has moved far enough to warrant investigation and outcome checks; input divergence alone does not establish whether accuracy improved or degraded, or by how much. Mathematically, PSI discretizes a continuous feature into reference bins (typically deciles of baseline $\TrainingDistributionZero$) and computes $\text{PSI} = \sum_b \left( \CurrentDistribution(b) - \TrainingDistributionZero(b) \right) \ln\left(\frac{\CurrentDistribution(b)}{\TrainingDistributionZero(b)}\right)$. Each bin's two factors share a sign, so every shifting bin adds to the index. Practitioners commonly treat $\text{PSI} < 0.1$ as stable, $0.1 \le \text{PSI} \le 0.25$ as moderate shift, and $\text{PSI} > 0.25$ as a prompt for investigation; these bands are conventions to calibrate against the deployment baseline, not physical limits.
+
+Targeted detection and mitigation require decomposing drift into its constituent distribution components, as shown in the margin locator (@fig-vol1-data-engineering-margin-002).
+
+::: {#fig-vol1-data-engineering-margin-002 .column-margin}
+![](images/svg/vol1_data_engineering_margin_002.svg){width="100%" fig-alt="A vertical three-node locator pairs each distribution component with its drift type: p(x) covariate, p(y) label, and p(y|x) concept."}
+
+*Each drift type traces to the distribution component that shifted.*
+:::
+
+The first case, **covariate shift**\index{Covariate shift!definition}, changes the input distribution while preserving the relationship between features and labels: $\Distribution$ changes but $\ConditionalDistribution$ stays the same. A medical imaging system trained on one camera model might later receive production images from a different manufacturer. The disease-image relationship remains unchanged, but pixel values shift because sensor characteristics, color calibration, or image processing pipelines differ. Detection therefore focuses on input feature distributions, using metrics such as PSI or KL divergence.
+
+The second case, **label shift**\index{Label shift!definition}\index{Distribution shift!label shift}, changes the output distribution while preserving the relationship between labels and features: $p(y)$ changes but $p(x \mid y)$ stays the same. Disease prevalence might change seasonally while symptoms remain consistent predictors of each disease. A recommendation system might see the same pattern when new product categories launch, changing the relative frequency of user preferences without altering what makes products appealing within each category. Detection can often begin without ground truth labels by tracking shifts in the model's prediction distribution.
+
+The hardest case is **concept drift**\index{Concept drift!definition}: the relationship between features and labels changes, so $\ConditionalDistribution$ evolves over time [@gama2014]. Medical treatment protocols change, user preferences shift as social trends evolve, and fraud patterns adapt as attackers respond to detection systems. Unlike covariate or label shift, concept drift requires ground truth labels for detection because the system must observe whether the feature-to-label relationship itself has changed.
+
+```{python}
+#| echo: false
+#| label: cohens-kappa-chance-calc
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ COHEN'S KAPPA CHANCE AGREEMENT
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: Cohen's kappa footnote in the label-quality drift section
+# │
+# │ Goal: Compute chance agreement for a 90/10 binary label distribution.
+# │ Show: Majority-class agreement alone is 81%, but total chance agreement is 82%.
+# │ How: Square and sum the class marginals to get chance agreement.
+# │
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim.fmt import fmt, check
+
+class CohensKappaChance:
+    """Chance agreement for Cohen's kappa under a 90/10 binary marginal."""
+
+    # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
+    majority_probability = 0.90
+    minority_probability = 0.10
+
+    # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
+    chance_agreement = majority_probability**2 + minority_probability**2
+
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(abs(chance_agreement - 0.82) < 1e-12, f"Expected 82% chance agreement, got {chance_agreement:.2f}.")
+
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
+    chance_agreement_pct_str = fmt_percent(chance_agreement, precision=0, commas=False, style='prose')
+```
+
+#### Label quality drift {#sec-data-engineering-label-quality-drift-1ce7}
+
+Label quality drift\index{Label quality drift!detection}[^fn-label-drift-invisible] represents a meta-level shift distinct from the three preceding distribution shifts: the reliability of ground truth labels degrades over time even when the underlying data distributions remain stable. This drift type proves particularly insidious because standard feature distribution monitoring fails to detect it. Crowdsourced labels may degrade as annotator pools change, training materials become outdated, or labeling guidelines evolve without corresponding model updates. Automated labeling systems accumulate errors as the models powering them drift from their original operating conditions. A recommendation system using click feedback as implicit labels may see label quality degrade as user behavior becomes more exploratory, as bot traffic patterns change, or as interface modifications alter how users interact with content.
+
+Detection requires monitoring annotation consistency rather than feature distributions. Inter-annotator agreement metrics like Cohen's kappa[^fn-cohens-kappa-labeling] $(\CohensKappa)$ provide quantitative assessment. Let $p_o$ represent observed agreement between annotators and $p_e$ represent agreement expected by chance. @Eq-cohens-kappa defines the statistic:
+$$
+\CohensKappa = \frac{p_o - p_e}{1 - p_e}
+$$ {#eq-cohens-kappa}
+
+[^fn-cohens-kappa-labeling]: **Cohen's kappa**\index{Cohen's kappa!label quality}: Introduced by @cohen1960 to measure inter-rater agreement while correcting for agreement expected from the raters' class marginals, which raw percentage agreement ignores. If two independent annotators each label 90 percent of images as "not spam" in a binary task, their expected agreement is `{python} CohensKappaChance.chance_agreement_pct_str`, making raw agreement potentially misleading. The statistic is denoted $\CohensKappa$; interpretive bands such as the Landis-Koch categories are descriptive heuristics rather than universal data-quality thresholds [@landis1977measurement].
+
+Monitoring $\CohensKappa$ over time windows reveals degradation trends. A medical imaging annotation project might establish a baseline $\CohensKappa = 0.85$ (almost perfect agreement) during initial data collection, then observe decline to $\CohensKappa = 0.72$ (substantial agreement) after six months as new annotators join without receiving equivalent domain training.
+
+For systems with calibrated model probabilities, predictive entropy\index{Predictive entropy} provides an additional uncertainty signal. Let $p_i$ represent the model's probability assigned to label category $i$, and let $\log$ denote the natural logarithm, so entropy is measured in nats. @Eq-label-entropy defines this measure:
+$$
+H_{\text{pred}} = -\sum_i p_i \log p_i
+$$ {#eq-label-entropy}
+
+Rising predictive entropy indicates greater uncertainty in the model's predictive distribution, but it does not identify the cause. Harder inputs, distribution shift, calibration changes, or inconsistent supervision can produce the same signal.
+
+Mitigation strategies depend on root cause analysis. Annotator retraining addresses systematic errors from unclear guidelines at low cost with high effectiveness. Multi-annotator voting with majority or consensus rules provides high accuracy for high-stakes domains but significantly increases annotation costs. Model-assisted labeling reduces annotator fatigue but risks introducing bias if the assisting model has its own systematic errors. Expert review sampling, where domain specialists audit a random sample of annotations, enables root cause analysis when quality decline is detected but provides medium coverage of the overall annotation stream.
+
+[^fn-label-drift-invisible]: **Label quality drift**\index{Label quality drift!silent corruption}: Degradation in annotation reliability over time, distinct from distribution shifts in the data itself. This drift type is invisible to standard feature monitoring because the features remain stable while the labels degrade—annotator fatigue, pool turnover, or guideline evolution silently corrupt the ground truth the model learns from. Detection requires monitoring inter-annotator agreement $(\CohensKappa)$ over rolling time windows and comparing automated labels against periodic expert audits.
+
+Operationalizing the PSI and KL divergence metrics\index{Population stability index!drift detection}\index{Kullback-Leibler divergence!distribution comparison} requires connecting them to automated alerts and review workflows. Data engineering is responsible for defining domain-specific drift thresholds from baseline behavior and outcome evidence, selecting monitoring windows that can expose both sudden and gradual changes, and instrumenting pipelines to compute these metrics continuously.
+
+Statistical drift detection identifies distribution changes over time, but monitoring alone does not keep a system running when upstream pipelines stall, malformed payloads arrive, or schema definitions change without notice. Maintaining service continuity under failure requires active reliability mechanisms: fault isolation, backpressure, and graceful degradation.
 
 ## Fallacies and Pitfalls {#sec-data-engineering-fallacies-pitfalls-886b}
 
