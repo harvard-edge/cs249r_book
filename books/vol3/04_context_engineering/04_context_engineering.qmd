@@ -352,29 +352,7 @@ Consequently, provenance labeling serves semantic interpretation rather than sec
 
 The proportion of untrusted tokens, their accumulation rate, and their vulnerability to staleness vary dramatically across agent architectures. A coding repair agent operates primarily over a local workspace where file contents change predictably. By contrast, an autonomous research agent ingests untrusted third-party web text at high velocity.
 
-::: {#lhs-04-context-by-archetype .callout-lighthouse title="Context by archetype"}
 
-```{=latex}
-\begin{minipage}{1\linewidth}
-```
-Each recurring workload places pressure on a distinct component of the context budget in @eq-vol3-context-budget-partition, requiring a specialized mitigation strategy (@tbl-vol3-context-by-archetype).
-
-| **Lighthouse**        | **What fills the request**                                                                                                                                | **Binding constraint**                                                    | **Mechanism that answers it**                                                             |
-|:----------------------|:----------------------------------------------------------------------------------------------------------------------------------------------------------|:--------------------------------------------------------------------------|:------------------------------------------------------------------------------------------|
-| **Repair agent**      | Source excerpts, test logs, and a progress record from its own workspace, accumulating over a `{python} UsableContextBudget.horizon_str`-turn step budget | Growth of $S_{\text{obs}}$ displacing $S_{\text{state}}$                  | Compaction and progress records (@sec-vol3-context-engineering-compaction)                |
-| **Research agent**    | Retrieved pages and search results written by third parties                                                                                               | Untrusted spans that dominate $S_{\text{obs}}$ and may carry instructions | Provenance-preserving staging here; enforcement in @sec-vol3-security-quarantined-readers |
-| **Remediation agent** | Readings of shared production state that other actors change                                                                                              | Staleness between the read and the action                                 | Invalidation and action-time preconditions (@sec-vol3-context-engineering-context-rot)    |
-| **Support agent**     | Fixed policy instructions and tool declarations, one customer record, a short session                                                                     | $S_{\text{system}}+S_{\text{tools}}$ repeated across many short sessions  | A stable root for prefix reuse (@sec-vol3-context-engineering-staging)                    |
-
-: **Context by archetype**: The four recurring workloads bind on different terms of the same input budget. {#tbl-vol3-context-by-archetype tbl-colwidths="[16,34,25,25]"}
-
-```{=latex}
-\end{minipage}
-```
-
-**Systems insight**: The fundamental context budget equation binds on different constraints across workloads: token accumulation for the repair agent, provenance tracking for the research agent, temporal freshness for the remediation agent, and prefix cache amortization for the customer support agent. Engineering techniques rarely transfer across archetypes without adaptation. Compaction algorithms that keep a software repair agent within its token allocation do not resolve the primary vulnerability of a research agent, whose chief challenge is filtering untrusted external input rather than managing context length.
-
-:::
 
 ### Preserving an exact prefix {#sec-vol3-context-engineering-exact-prefix}
 
@@ -870,19 +848,11 @@ Cryptographic content identifiers verify whether input artifacts remain identica
 
 The most direct signal of state mutation is a verified write executed through a runtime tool. When a file-editing tool successfully writes `r18`, the runtime immediately marks all `r17` source excerpts as historical and registers pending test obligations for the updated code. Tool invocations that fail or raise exceptions alter nothing on disk; the runtime must verify tool exit statuses and inspect return payloads before updating dependency states. Furthermore, state tracking must reside in the runtime's authoritative metadata graph, never in conversational prompt nudges that urge the model to remember what changed.
 
-External processes can also mutate the workspace behind the runtime's back. Inexpensive filesystem metadata—such as file size and modification timestamps—provides lightweight heuristics suggesting a refresh, but authoritative validation requires inspecting content hashes or cryptographic commit identifiers. Kernel-level filesystem watchers (such as Linux's `inotify` subsystem) reduce change-detection latency, yet queue overflows, unmonitored mount boundaries, and dropped events can silently leave a cached view stale [@linuxManpages2026inotify]. Robust runtimes treat watcher events as hints to trigger revalidation rather than as infallible event streams.
-
-To bound uncertainty over dynamic external resources, runtimes often configure a **time-to-live**\index{Time-to-live!definition} (TTL) policy that forces a fresh read after an observation exceeds a specified duration. A TTL operates as an operational heuristic calibrated to the environment's volatility and the cost of acting on stale data, rather than as a formal proof of correctness.[^fn-lease-cache-consistency] An observation younger than the TTL window can become invalid microseconds after retrieval, while an expired observation may reflect perfectly static content. For mission-critical actions, the runtime must bypass TTL caches entirely and perform an eager, synchronous read.
-
-Even when the runtime refreshes context immediately before generating a prompt, an unavoidable race window remains: the external system can mutate between prompt construction and tool execution. Context engineering cannot close this window in the model's token space. Guarding against concurrent mutation requires execution-time preconditions at the tool boundary—such as atomic compare-and-swap operations or optimistic revision checks.[^fn-optimistic-commit-validation] The context assembly layer's responsibility is to record the exact revision identifier on which the model's generated plan rests, allowing the tool execution layer to validate that precondition before committing destructive changes.
+Even when the runtime refreshes context immediately before generating a prompt, an unavoidable race window remains: the external system can mutate between prompt construction and tool execution. Context engineering cannot close this window in the model's token space. Guarding against concurrent mutation requires execution-time preconditions at the tool boundary—such as atomic compare-and-swap operations or optimistic revision checks. The context assembly layer's responsibility is to record the exact revision identifier on which the model's generated plan rests, allowing the tool execution layer to validate that precondition before committing destructive changes.
 
 ::: {.column-margin .margin-pointer}
 ↪ Execution-time preconditions enforced as atomic conditional updates at the tool boundary are operationalized in @sec-vol3-tool-calling-conditional-updates.
 :::
-
-[^fn-lease-cache-consistency]: **Leases**: @gray1989leases converted temporal bounds into formal consistency guarantees through leases. In a distributed cache, a lease grants a client exclusive or shared read rights over a datum for a fixed term, during which the server guarantees it will not permit conflicting writes until every lease expires or is explicitly released. This guarantee hinges on server-coordinated consensus. Because standard filesystems and external web services provide no such cooperative write locks to an agent runtime, a local observation TTL remains a purely speculative heuristic. \index{Lease!cache consistency}
-
-[^fn-optimistic-commit-validation]: **Optimistic Validation**: In optimistic concurrency control, transactions execute reads and computations without acquiring locks, validating prior to commit that no conflicting transaction mutated their read set [@kung1981optimistic]. If the validation check fails, the transaction aborts. Preconditions at the agent tool boundary follow this exact structure: the assembled prompt supplies the version snapshot the model evaluated, and the tool runner verifies that version's integrity before applying side effects to disk. \index{Optimistic concurrency control!action preconditions}
 
 ### Removing, replacing, or appending {#sec-vol3-context-engineering-invalidation-choice}
 

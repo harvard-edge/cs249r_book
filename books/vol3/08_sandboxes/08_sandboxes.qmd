@@ -189,6 +189,149 @@ A well-architected execution boundary enforces granular accounting and resource 
 
 For untrusted agent workloads, systems designers must implement an execution boundary that insulates the supervisor's control state while enforcing task-scoped resource and access limits. @Sec-vol3-sandboxes-microvms evaluates the isolation envelopes available across modern operating systems and virtualized infrastructure. Before comparing these envelopes, however, an architecture must establish which ambient authorities may cross the isolation boundary: spawning a child process that inherits the supervisor's full credentials separates address spaces, yet it still fails to establish a genuinely confined execution environment.
 
+## Capabilities and Credentials {#sec-vol3-sandboxes-least-privilege}
+
+In the README attack, the task needs repository access, not the developer's credentials, and the runtime must carry that distinction into the resources the executing code can reach. A privileged service that uses its own authority to fulfill an insufficiently scoped request can become a *confused deputy*\index{Confused deputy}[^fn-confused-deputy-compiler] [@hardy1988confused]. Identity-based access control can express narrow permissions through an access control list;[^fn-access-matrix-lampson] the failure is letting the request exercise the service's broader authority instead of the authority delegated for this task. That failure comes naturally under **ambient authority**\index{Ambient authority!definition}, the identity-derived reach that ordinary processes run with. Capabilities, introduced by @dennis1966 for multiprogrammed systems, make the delegation explicit instead [@saltzer1975; @miller2006robust].
+
+[^fn-confused-deputy-compiler]: **The Original Confused Deputy**: The example that named the problem was a compiler on a commercial timesharing system that held a license to write files in its own home directory so it could record usage statistics [@hardy1988confused]. A user named the directory's billing file as the compiler's output file, and the compiler, acting with its own license, overwrote the billing records. A tool adapter that writes to a path the model supplies while holding the host's authority reproduces the same structure.
+
+[^fn-access-matrix-lampson]: **Access Matrix**\index{Access matrix}: @lampson1974protection described protection as a matrix of subjects by objects whose entries list the permitted operations. An access control list stores one column with its object; a capability list stores one row with its subject. The choice decides whether a request is checked against who is asking or against what the requester was handed, and only the second can express "this task, this file, this operation" without a new identity per task.
+
+::: {#dfn-capability .callout-definition title="Capability"}
+
+A ***capability***\index{Capability!definition} is an unforgeable reference that both designates a resource and authorizes specific operations on it, so that holding the reference is the permission to use it.
+
+1. **Significance**: It lets the runtime hand executing code exactly the objects and operations of the task grant, bounding the code's blast radius by what it was given rather than by what its identity can reach.
+2. **Distinction**: Under ambient authority a process can reach everything its identity may touch, named globally; under capabilities the default reach is empty, and every access goes through a reference the holder received.
+3. **Common pitfall**: Treating a plain identifier, or a token the model can read and rewrite, as a capability. Without a protected binding the holder can forge or substitute a broader reference.
+
+:::
+
+@Tbl-vol3-ambient-vs-capability contrasts the two ways of deciding what a process may touch.
+
+| Dimension               | Ambient authority (identity and access control lists)         | Capability-based authority                                   |
+|:------------------------|:--------------------------------------------------------------|:-------------------------------------------------------------|
+| **Source of authority** | The identity the process runs as                              | Possession of an unforgeable reference                       |
+| **Naming of resources** | Global names such as paths and network addresses              | Handles or tokens that designate the resource                |
+| **Default reach**       | Everything the identity may touch                             | Nothing without a reference                                  |
+| **Delegation**          | Typically the identity's rights, or a separately managed role | Any subset, down to one object and one operation             |
+| **Confused deputy**     | Common when a request exercises the service's own authority   | Excluded when every access uses a designating reference      |
+| **Revocation**          | A policy change for the identity                              | Expiry, a checked status on the reference, or handle closure |
+
+: **Ambient and capability-based authority**: The two models differ in where authority comes from and how it is passed on, which decides whether a tool process can be steered into using authority the task never received. {#tbl-vol3-ambient-vs-capability tbl-colwidths="[20,40,40]"}
+
+### Scoped grants {#sec-vol3-sandboxes-scoped-grants}
+
+A capability may be a protected handle checked by a runtime or kernel, or a token verified by a service; it need not be a string visible to the model at all. Either way, the implementation prevents the holder from fabricating broader rights or substituting another task's reference.
+
+Use $\CapabilityGrant = (\mathcal{R}_\Gamma, \mathcal{O}_\Gamma, \phi_\Gamma, \ExposureDuration)$ as an abstract description of a grant: rights $\mathcal{R}_\Gamma$, objects $\mathcal{O}_\Gamma$, condition predicate $\phi_\Gamma$, and expiry time $\ExposureDuration$. The tuple describes authority independent of any token encoding. Its conditions can pair different operations with different objects and bind use to a task or recipient, so read and write listed among the rights need not both apply to every listed object.
+
+The tuple becomes operational as a check. A proposed access $a$ names an operation, a target, and its arguments. The enforcement point admits it at time $t$ only if every condition in @eq-vol3-capability-verdict holds:
+
+$$
+\text{admit}(a, \CapabilityGrant, t) \iff \text{authentic}(\CapabilityGrant) \land a.\text{op} \in \mathcal{R}_\Gamma \land a.\text{target} \sqsubseteq \mathcal{O}_\Gamma \land \phi_\Gamma(a) \land t < \ExposureDuration
+$$ {#eq-vol3-capability-verdict}
+
+Here $\text{authentic}(\CapabilityGrant)$ means the reference is protected and bound to this holder, whether by a kernel handle table or by a message authentication code the issuer can verify, and $a.\text{target} \sqsubseteq \mathcal{O}_\Gamma$ means the resolved target lies within the designated objects for that operation. A rejected access changes nothing and returns a structured observation the model can act on. The check is also cheap relative to what it guards. Verifying a handle or a message authentication code is a local computation, orders of magnitude shorter than the model call that produced the proposal, so mediating every access costs nothing a user would notice. The expensive part of capability enforcement is making sure no path bypasses the check.
+
+For the repair, @tbl-vol3-scoped-repair-grant separates the resources an execution grant could cover. Paths are names relative to the task's designated workspace, not arbitrary host paths.
+
+| Resource                                  | Permitted use                                                        | Excluded use                                                  |
+|:------------------------------------------|:---------------------------------------------------------------------|:--------------------------------------------------------------|
+| Candidate source, including `src/pool.py` | Read and edit the permitted source files                             | Modify another task's checkout or the protected baseline      |
+| Task-local scratch and test outputs       | Create, read, and update within storage limits                       | Consume unbounded storage or inherit another tenant's files   |
+| Protected acceptance checks and fixtures  | Read permitted fixtures and invoke the designated checking interface | Replace the checks or alter their reported result             |
+| Private repository service                | Request authorized fetches through the broker                        | Obtain the service credential or push to an unapproved target |
+
+: **A scoped repair grant**: Different resources require different rights; authority over one row does not authorize the excluded use in another. {#tbl-vol3-scoped-repair-grant}
+
+The grant also has a lifetime and enforced limits on execution and output. It permits the repair to make progress while separating writable candidate artifacts from the machinery used to assess them. Tests keep their writable temporary files; protecting the acceptance checks means protecting their implementation and reported results.
+
+The binding between the grant and execution is the essential step. The runtime associates the admitted operation with its actual task, resolves the requested resource within that scope, and checks the required right and current conditions. Resource naming must resist indirection or concurrent changes that could redirect an allowed path to a different object. The version precondition enforced by the conditional update of @sec-vol3-tool-calling-conditional-updates remains a separate check: authority to edit `src/pool.py` says nothing about whether its current version matches the proposal.
+
+The executing code must then be unable to bypass the policy by opening another path, using an inherited handle, or contacting an unrestricted service directly. This can require restricted mounts, process identities, mediated interfaces, or other controls supplied by the envelope. Once the enforcement layer has bound the guest's accessible resources to the grant, the guest need not attach a token to every system call; what matters is the resulting reach.
+
+On Linux, the supervisor can act as a policy compiler. It verifies the grant, then translates the permitted paths and operations into kernel-enforced rules before it starts the worker. Landlock [@linux2024landlock], a Linux security module, lets an unprivileged process irreversibly restrict the filesystem hierarchies and network ports it and its descendants can access; a `seccomp-bpf` filter restricts which system calls the process may make and with which scalar arguments. The supervisor installs both, together with restricted mounts and an unprivileged identity, and then calls `execve` on the tool. The worker runs under limits the kernel enforces on every open and connect, without knowing the grant's format and without being able to remove the rules it inherited. Filtering on system-call numbers cannot inspect the contents of pointer arguments safely,[^fn-interposition-race-window] which is why path restrictions belong to a mechanism that resolves paths inside the kernel rather than to the system-call filter.
+
+[^fn-interposition-race-window]: **Check-Then-Use Races**\index{System-call interposition!races}: Early user-level sandboxes confined untrusted helper programs by intercepting each system call and checking its arguments [@goldberg1996secure]. @garfinkel2003traps catalogued why that design is fragile: a path argument lives in memory the confined process controls, so another thread can change it after the check and before the kernel reads it, and a filter that imperfectly replicates kernel semantics misses indirect routes to the same resource. Checking the resolved object inside the kernel at the moment of use closes that window, which is what an in-kernel access-control module such as Landlock does.
+
+### Attenuation of delegated authority {#sec-vol3-sandboxes-attenuation}
+
+**Attenuation**\index{Attenuation!definition} derives a grant that permits no more than its parent. Writing $\mathcal{\Advantage}(\CapabilityGrant)$ for the accesses allowed by a grant, the relation requires
+
+$$
+\Gamma_{\text{child}}\sqsubseteq \Gamma_{\text{parent}}
+\quad\Longrightarrow\quad
+\mathcal{A}(\Gamma_{\text{child}})\subseteq\mathcal{A}(\Gamma_{\text{parent}}).
+$$
+
+Narrower object scope, fewer rights, stronger conditions, and an earlier expiry can establish that relation. Consider the repair's edit grant, issued at time $T_0$, and two proposed children:
+
+$$
+\begin{aligned}
+\Gamma_{\text{edit}} &= \big(\mathcal{R}_\Gamma=\{\text{read}, \text{write}\},\ \mathcal{O}_\Gamma=\texttt{repo/},\ \ExposureDuration=T_0 + 300\,\text{s}\big) \\
+\Gamma_{\text{test}} &= \big(\mathcal{R}_\Gamma=\{\text{read}, \text{execute}\},\ \mathcal{O}_\Gamma=\texttt{repo/},\ \ExposureDuration=T_0 + 120\,\text{s}\big) && \text{rejected: execute} \notin \mathcal{R}_{\Gamma_{\text{edit}}} \\
+\Gamma_{\text{scan}} &= \big(\mathcal{R}_\Gamma=\{\text{read}\},\ \mathcal{O}_\Gamma=\texttt{repo/src/pool.py},\ \ExposureDuration=T_0 + 120\,\text{s}\big) && \text{valid: } \Gamma_{\text{scan}} \sqsubseteq \Gamma_{\text{edit}}
+\end{aligned}
+$$
+
+The test grant fails even though its lifetime is shorter, because it asks for a right the parent never held. Execution needs an appropriate parent grant or a separately authorized grant from the controller. A runtime that intends to support a test phase therefore includes execute in the grant it issues at the start, or issues a new grant for that phase, and then actively withdraws write authority when testing begins. Withdrawing write authority during testing is what keeps a candidate from modifying the fixtures and checks that grade it, the property sealed evaluation depends on.
+
+::: {.column-margin .margin-pointer}
+↪ Sealed evaluation criteria held outside the agent's reach are developed in @sec-vol3-evaluation-gyms-grader-isolation.
+:::
+
+Attenuation can also happen without contacting the issuer. Chained-caveat tokens such as macaroons [@birgisson2014macaroons] let any holder append a restriction and pass on the narrower token. The issuer mints a root token with a message authentication code $\sigma_0$ computed under a secret key only it holds. A holder adds caveat $c_i$ (a path prefix, a rights subset, a turn limit, an earlier expiry) and replaces the code with a keyed hash (HMAC) of the previous code and the caveat,
+
+$$
+\sigma_i = \text{HMAC}(\sigma_{i-1},\, c_i).
+$$ {#eq-vol3-macaroon-chain}
+
+The verifier recomputes the chain of @eq-vol3-macaroon-chain from its root key and admits a request only if every caveat is satisfied. A holder of the child cannot remove a caveat without the prior code $\sigma_{i-1}$, which the chain does not reveal, so a subagent or tool worker can narrow authority offline but cannot widen the token it received.
+
+This relation constrains derived authority; a trajectory can still move from inspection to an authorized edit or test phase under explicit policy. Deriving a read-only child also leaves a broader parent that the same holder retained fully usable. If a phase transition is meant to remove write authority, the runtime withdraws or disables the earlier grant and deals with access already opened under it. Delegation must also preserve aggregate budgets: several children together receive at most the parent's resource allowance. @Fig-vol3-capability-attenuation contrasts these two authorization mechanisms: panel (A) models a checked derivation tree where revoking or narrowing a child leaves parent grants usable until explicitly withdrawn, whereas panel (B) diagrams Macaroon-style cryptographic attenuation, where append-only caveats progressively restrict capabilities without invalidating the root HMAC signature.
+
+::: {#fig-vol3-capability-attenuation fig-env="figure" fig-pos="htb" fig-cap="**Attenuation and What It Leaves Behind**: Panel A derives two children from the edit grant. The test grant is rejected because it requests execute, which the parent never held, even though its expiry is earlier. The scan grant is valid because every component is narrower. Deriving it does not remove the edit grant, so a worker that retains the parent can still write until the runtime withdraws it. Panel B shows the chained-caveat alternative, in which each holder narrows a token offline by folding a caveat into the next code, and only a verifier holding the issuer's key can check the whole chain." fig-alt="Two panels. Panel A, deriving a grant: a parent grant Gamma_edit with rights read and write over repo/ has two derived children. Gamma_test, requesting read and execute over repo/, is marked rejected because execute is not in the parent's rights. Gamma_scan, with read over repo/src/pool.py, is marked valid. A strip below states that the worker keeps Gamma_edit, so write stays usable until it is withdrawn. Panel B, appending a caveat: an issuer holding key k computes sigma 0, a holder appends caveat c1 for the prefix repo/src/ to compute sigma 1, a holder appends caveat c2 for read rights to compute sigma 2, and a verifier recomputes the chain from k and checks every caveat."}
+![](images/svg/capability-attenuation.svg)
+:::
+
+The operative test is therefore which grants and resource handles the worker can still exercise, rather than merely whether the child grant is narrower. This test applies equally to a helper process inside one trajectory and to a delegated agent, since coordination leaves the meaning of authority unchanged.
+
+### Expiry and revocation {#sec-vol3-sandboxes-expiry-revocation}
+
+An expiry states when a grant stops authorizing new use. Closing an open file descriptor, stopping a running process, and cancelling a request another service already accepted are separate actions, so revocation needs an enforcement mechanism, such as a mediated reference whose current status is checked on each use, together with control over ongoing work where policy requires it.
+
+Suppose the repair's edit phase ends while a worker still holds a writable source handle. Rejecting new edit requests alone leaves that handle as a possible write path. The transition must stop or constrain the worker, revoke the usable reference where supported, or move subsequent work into an appropriately restricted execution context. The runtime must record what it has actually confirmed rather than equating a changed policy record with completed revocation.
+
+External effects have their own boundary. A broker can stop accepting new requests after expiry, but a previously admitted remote operation may still complete. A lease or cancellation request does not settle that effect or justify a retry. Environment teardown and readiness for reuse receive their full treatment in @sec-vol3-sandboxes-pooling-reset; here the requirement is that authority have an enforced lifetime rather than an advisory timestamp.
+
+::: {.column-margin .margin-pointer}
+↩ Why an unsettled remote outcome does not justify a blind retry is established in @sec-vol3-tool-calling-idempotency.
+:::
+
+::: {#chk-08-confused-deputy-defense .callout-checkpoint title="Scope, attenuation, and lifetime"}
+
+A repair worker holds read and write access to the candidate source. It derives a read-only grant for `src/pool.py`, retains the original grant, and opens a writable handle before the edit phase expires.
+
+- [ ] **Derived vs. retained grants**: List every reference through which the worker can still write after deriving the child. Which of them must the runtime withdraw to end write authority?
+- [ ] **Attenuation test**: A proposed child adds test execution and shortens the expiry. Apply the component-wise check of $\Gamma_{\text{child}} \sqsubseteq \Gamma_{\text{parent}}$ and decide whether it is an attenuation of the edit grant.
+- [ ] **Expiry**: When the edit grant expires, the writable handle and one brokered fetch are still open. Decide what the runtime must do with each before it may record revocation as complete.
+- [ ] **Test-phase grant**: Write the tuple $(\mathcal{R}_\Gamma, \mathcal{O}_\Gamma, \phi_\Gamma, \ExposureDuration)$ for a test phase that keeps writable scratch while the acceptance machinery stays outside the worker's writable scope.
+
+:::
+
+### Credential brokering {#sec-vol3-sandboxes-credential-brokering}
+
+Scoped access still leaves a placement decision: whether the executing code must possess the credential used by an external service. Putting a repository token in the guest's environment or filesystem makes it available to code that can read those locations. A **credential broker**\index{Credential broker!definition}\index{Credential brokering|see{Credential broker}} instead holds the selected secret outside the guest and uses it on behalf of an authorized request.
+
+For example, the repair worker requests a fetch from its approved private repository through a host-owned source-service adapter. The broker checks the bound task identity, repository, operation, destination, and current grant, then performs the credentialed request without returning the credential. Permission to fetch does not permit a push or access to another repository. The worker can cause a narrowly authorized use of the credential without possessing the credential itself.
+
+Brokering requires a supported mediation arrangement. An application adapter can make the upstream request directly; a proxy can attach credentials only where it can legitimately inspect and modify the relevant protocol exchange. A signing service likewise needs to authorize what it signs, not merely conceal its key. @Sec-vol3-sandboxes-egress-enforcement develops how the runtime constrains routes that might bypass these interfaces. If a tool genuinely requires a credential inside the guest, a narrowly scoped, short-lived credential shrinks the scope and window of exposure, while the guest still possesses it for that window.
+
+Keeping selected credentials outside the guest removes the most valuable target from the README attack, and from the environment dump in the Gemini CLI incident. The environment and repository content remain sensitive, and a brokered operation can still be misused within its permitted scope. Secret placement, access permission, and whether an allowed request's data may flow to its recipient are three distinct concerns; @sec-vol3-security-taint-tracking develops the last, and this chapter establishes where authority resides and how execution is confined to it.
+
+Capabilities and brokering specify the resources the runtime intends to expose, but they depend on enforcement that running code cannot bypass or modify under the stated threat model. Enforcing those limits in practice requires an execution envelope, evaluated by what it shares with the host and which components uphold its boundary.
+
 ## Choosing an Isolation Envelope {#sec-vol3-sandboxes-microvms}
 
 A lightweight log parser, a multi-turn software repair task compiling code and executing test suites, and an untrusted customer-uploaded binary demand fundamentally different operating interfaces. Selecting an appropriate execution envelope begins with these workload requirements and the host resources that must remain protected, rather than defaulting to a convenient packaging format.
@@ -369,149 +512,6 @@ class EnvelopeAmortization:
 **Systems insight**: The ratio $W/T_{\text{setup}}$ decides the envelope's lifetime. Calls with at least `{python} EnvelopeAmortization.work_for_cap_str` of useful work can afford a fresh envelope each; below that, retain one envelope for the trajectory and pay setup once. The price of reuse is a within-task trust policy, since state from earlier calls reaches later ones. Reuse never crosses tenants: ready capacity for the next task comes from pooling and verified reset (@sec-vol3-sandboxes-pooling). The comparison counts setup and useful work only, excluding model calls, queueing, and teardown.
 
 :::
-
-## Capabilities and Credentials {#sec-vol3-sandboxes-least-privilege}
-
-In the README attack, the task needs repository access, not the developer's credentials, and the runtime must carry that distinction into the resources the executing code can reach. A privileged service that uses its own authority to fulfill an insufficiently scoped request can become a *confused deputy*\index{Confused deputy}[^fn-confused-deputy-compiler] [@hardy1988confused]. Identity-based access control can express narrow permissions through an access control list;[^fn-access-matrix-lampson] the failure is letting the request exercise the service's broader authority instead of the authority delegated for this task. That failure comes naturally under **ambient authority**\index{Ambient authority!definition}, the identity-derived reach that ordinary processes run with. Capabilities, introduced by @dennis1966 for multiprogrammed systems, make the delegation explicit instead [@saltzer1975; @miller2006robust].
-
-[^fn-confused-deputy-compiler]: **The Original Confused Deputy**: The example that named the problem was a compiler on a commercial timesharing system that held a license to write files in its own home directory so it could record usage statistics [@hardy1988confused]. A user named the directory's billing file as the compiler's output file, and the compiler, acting with its own license, overwrote the billing records. A tool adapter that writes to a path the model supplies while holding the host's authority reproduces the same structure.
-
-[^fn-access-matrix-lampson]: **Access Matrix**\index{Access matrix}: @lampson1974protection described protection as a matrix of subjects by objects whose entries list the permitted operations. An access control list stores one column with its object; a capability list stores one row with its subject. The choice decides whether a request is checked against who is asking or against what the requester was handed, and only the second can express "this task, this file, this operation" without a new identity per task.
-
-::: {#dfn-capability .callout-definition title="Capability"}
-
-A ***capability***\index{Capability!definition} is an unforgeable reference that both designates a resource and authorizes specific operations on it, so that holding the reference is the permission to use it.
-
-1. **Significance**: It lets the runtime hand executing code exactly the objects and operations of the task grant, bounding the code's blast radius by what it was given rather than by what its identity can reach.
-2. **Distinction**: Under ambient authority a process can reach everything its identity may touch, named globally; under capabilities the default reach is empty, and every access goes through a reference the holder received.
-3. **Common pitfall**: Treating a plain identifier, or a token the model can read and rewrite, as a capability. Without a protected binding the holder can forge or substitute a broader reference.
-
-:::
-
-@Tbl-vol3-ambient-vs-capability contrasts the two ways of deciding what a process may touch.
-
-| Dimension               | Ambient authority (identity and access control lists)         | Capability-based authority                                   |
-|:------------------------|:--------------------------------------------------------------|:-------------------------------------------------------------|
-| **Source of authority** | The identity the process runs as                              | Possession of an unforgeable reference                       |
-| **Naming of resources** | Global names such as paths and network addresses              | Handles or tokens that designate the resource                |
-| **Default reach**       | Everything the identity may touch                             | Nothing without a reference                                  |
-| **Delegation**          | Typically the identity's rights, or a separately managed role | Any subset, down to one object and one operation             |
-| **Confused deputy**     | Common when a request exercises the service's own authority   | Excluded when every access uses a designating reference      |
-| **Revocation**          | A policy change for the identity                              | Expiry, a checked status on the reference, or handle closure |
-
-: **Ambient and capability-based authority**: The two models differ in where authority comes from and how it is passed on, which decides whether a tool process can be steered into using authority the task never received. {#tbl-vol3-ambient-vs-capability tbl-colwidths="[20,40,40]"}
-
-### Scoped grants {#sec-vol3-sandboxes-scoped-grants}
-
-A capability may be a protected handle checked by a runtime or kernel, or a token verified by a service; it need not be a string visible to the model at all. Either way, the implementation prevents the holder from fabricating broader rights or substituting another task's reference.
-
-Use $\CapabilityGrant = (\mathcal{R}_\Gamma, \mathcal{O}_\Gamma, \phi_\Gamma, \ExposureDuration)$ as an abstract description of a grant: rights $\mathcal{R}_\Gamma$, objects $\mathcal{O}_\Gamma$, condition predicate $\phi_\Gamma$, and expiry time $\ExposureDuration$. The tuple describes authority independent of any token encoding. Its conditions can pair different operations with different objects and bind use to a task or recipient, so read and write listed among the rights need not both apply to every listed object.
-
-The tuple becomes operational as a check. A proposed access $a$ names an operation, a target, and its arguments. The enforcement point admits it at time $t$ only if every condition in @eq-vol3-capability-verdict holds:
-
-$$
-\text{admit}(a, \CapabilityGrant, t) \iff \text{authentic}(\CapabilityGrant) \land a.\text{op} \in \mathcal{R}_\Gamma \land a.\text{target} \sqsubseteq \mathcal{O}_\Gamma \land \phi_\Gamma(a) \land t < \ExposureDuration
-$$ {#eq-vol3-capability-verdict}
-
-Here $\text{authentic}(\CapabilityGrant)$ means the reference is protected and bound to this holder, whether by a kernel handle table or by a message authentication code the issuer can verify, and $a.\text{target} \sqsubseteq \mathcal{O}_\Gamma$ means the resolved target lies within the designated objects for that operation. A rejected access changes nothing and returns a structured observation the model can act on. The check is also cheap relative to what it guards. Verifying a handle or a message authentication code is a local computation, orders of magnitude shorter than the model call that produced the proposal, so mediating every access costs nothing a user would notice. The expensive part of capability enforcement is making sure no path bypasses the check.
-
-For the repair, @tbl-vol3-scoped-repair-grant separates the resources an execution grant could cover. Paths are names relative to the task's designated workspace, not arbitrary host paths.
-
-| Resource                                  | Permitted use                                                        | Excluded use                                                  |
-|:------------------------------------------|:---------------------------------------------------------------------|:--------------------------------------------------------------|
-| Candidate source, including `src/pool.py` | Read and edit the permitted source files                             | Modify another task's checkout or the protected baseline      |
-| Task-local scratch and test outputs       | Create, read, and update within storage limits                       | Consume unbounded storage or inherit another tenant's files   |
-| Protected acceptance checks and fixtures  | Read permitted fixtures and invoke the designated checking interface | Replace the checks or alter their reported result             |
-| Private repository service                | Request authorized fetches through the broker                        | Obtain the service credential or push to an unapproved target |
-
-: **A scoped repair grant**: Different resources require different rights; authority over one row does not authorize the excluded use in another. {#tbl-vol3-scoped-repair-grant}
-
-The grant also has a lifetime and enforced limits on execution and output. It permits the repair to make progress while separating writable candidate artifacts from the machinery used to assess them. Tests keep their writable temporary files; protecting the acceptance checks means protecting their implementation and reported results.
-
-The binding between the grant and execution is the essential step. The runtime associates the admitted operation with its actual task, resolves the requested resource within that scope, and checks the required right and current conditions. Resource naming must resist indirection or concurrent changes that could redirect an allowed path to a different object. The version precondition enforced by the conditional update of @sec-vol3-tool-calling-conditional-updates remains a separate check: authority to edit `src/pool.py` says nothing about whether its current version matches the proposal.
-
-The executing code must then be unable to bypass the policy by opening another path, using an inherited handle, or contacting an unrestricted service directly. This can require restricted mounts, process identities, mediated interfaces, or other controls supplied by the envelope. Once the enforcement layer has bound the guest's accessible resources to the grant, the guest need not attach a token to every system call; what matters is the resulting reach.
-
-On Linux, the supervisor can act as a policy compiler. It verifies the grant, then translates the permitted paths and operations into kernel-enforced rules before it starts the worker. Landlock [@linux2024landlock], a Linux security module, lets an unprivileged process irreversibly restrict the filesystem hierarchies and network ports it and its descendants can access; a `seccomp-bpf` filter restricts which system calls the process may make and with which scalar arguments. The supervisor installs both, together with restricted mounts and an unprivileged identity, and then calls `execve` on the tool. The worker runs under limits the kernel enforces on every open and connect, without knowing the grant's format and without being able to remove the rules it inherited. Filtering on system-call numbers cannot inspect the contents of pointer arguments safely,[^fn-interposition-race-window] which is why path restrictions belong to a mechanism that resolves paths inside the kernel rather than to the system-call filter.
-
-[^fn-interposition-race-window]: **Check-Then-Use Races**\index{System-call interposition!races}: Early user-level sandboxes confined untrusted helper programs by intercepting each system call and checking its arguments [@goldberg1996secure]. @garfinkel2003traps catalogued why that design is fragile: a path argument lives in memory the confined process controls, so another thread can change it after the check and before the kernel reads it, and a filter that imperfectly replicates kernel semantics misses indirect routes to the same resource. Checking the resolved object inside the kernel at the moment of use closes that window, which is what an in-kernel access-control module such as Landlock does.
-
-### Attenuation of delegated authority {#sec-vol3-sandboxes-attenuation}
-
-**Attenuation**\index{Attenuation!definition} derives a grant that permits no more than its parent. Writing $\mathcal{\Advantage}(\CapabilityGrant)$ for the accesses allowed by a grant, the relation requires
-
-$$
-\Gamma_{\text{child}}\sqsubseteq \Gamma_{\text{parent}}
-\quad\Longrightarrow\quad
-\mathcal{A}(\Gamma_{\text{child}})\subseteq\mathcal{A}(\Gamma_{\text{parent}}).
-$$
-
-Narrower object scope, fewer rights, stronger conditions, and an earlier expiry can establish that relation. Consider the repair's edit grant, issued at time $T_0$, and two proposed children:
-
-$$
-\begin{aligned}
-\Gamma_{\text{edit}} &= \big(\mathcal{R}_\Gamma=\{\text{read}, \text{write}\},\ \mathcal{O}_\Gamma=\texttt{repo/},\ \ExposureDuration=T_0 + 300\,\text{s}\big) \\
-\Gamma_{\text{test}} &= \big(\mathcal{R}_\Gamma=\{\text{read}, \text{execute}\},\ \mathcal{O}_\Gamma=\texttt{repo/},\ \ExposureDuration=T_0 + 120\,\text{s}\big) && \text{rejected: execute} \notin \mathcal{R}_{\Gamma_{\text{edit}}} \\
-\Gamma_{\text{scan}} &= \big(\mathcal{R}_\Gamma=\{\text{read}\},\ \mathcal{O}_\Gamma=\texttt{repo/src/pool.py},\ \ExposureDuration=T_0 + 120\,\text{s}\big) && \text{valid: } \Gamma_{\text{scan}} \sqsubseteq \Gamma_{\text{edit}}
-\end{aligned}
-$$
-
-The test grant fails even though its lifetime is shorter, because it asks for a right the parent never held. Execution needs an appropriate parent grant or a separately authorized grant from the controller. A runtime that intends to support a test phase therefore includes execute in the grant it issues at the start, or issues a new grant for that phase, and then actively withdraws write authority when testing begins. Withdrawing write authority during testing is what keeps a candidate from modifying the fixtures and checks that grade it, the property sealed evaluation depends on.
-
-::: {.column-margin .margin-pointer}
-↪ Sealed evaluation criteria held outside the agent's reach are developed in @sec-vol3-evaluation-gyms-grader-isolation.
-:::
-
-Attenuation can also happen without contacting the issuer. Chained-caveat tokens such as macaroons [@birgisson2014macaroons] let any holder append a restriction and pass on the narrower token. The issuer mints a root token with a message authentication code $\sigma_0$ computed under a secret key only it holds. A holder adds caveat $c_i$ (a path prefix, a rights subset, a turn limit, an earlier expiry) and replaces the code with a keyed hash (HMAC) of the previous code and the caveat,
-
-$$
-\sigma_i = \text{HMAC}(\sigma_{i-1},\, c_i).
-$$ {#eq-vol3-macaroon-chain}
-
-The verifier recomputes the chain of @eq-vol3-macaroon-chain from its root key and admits a request only if every caveat is satisfied. A holder of the child cannot remove a caveat without the prior code $\sigma_{i-1}$, which the chain does not reveal, so a subagent or tool worker can narrow authority offline but cannot widen the token it received.
-
-This relation constrains derived authority; a trajectory can still move from inspection to an authorized edit or test phase under explicit policy. Deriving a read-only child also leaves a broader parent that the same holder retained fully usable. If a phase transition is meant to remove write authority, the runtime withdraws or disables the earlier grant and deals with access already opened under it. Delegation must also preserve aggregate budgets: several children together receive at most the parent's resource allowance. @Fig-vol3-capability-attenuation contrasts these two authorization mechanisms: panel (A) models a checked derivation tree where revoking or narrowing a child leaves parent grants usable until explicitly withdrawn, whereas panel (B) diagrams Macaroon-style cryptographic attenuation, where append-only caveats progressively restrict capabilities without invalidating the root HMAC signature.
-
-::: {#fig-vol3-capability-attenuation fig-env="figure" fig-pos="htb" fig-cap="**Attenuation and What It Leaves Behind**: Panel A derives two children from the edit grant. The test grant is rejected because it requests execute, which the parent never held, even though its expiry is earlier. The scan grant is valid because every component is narrower. Deriving it does not remove the edit grant, so a worker that retains the parent can still write until the runtime withdraws it. Panel B shows the chained-caveat alternative, in which each holder narrows a token offline by folding a caveat into the next code, and only a verifier holding the issuer's key can check the whole chain." fig-alt="Two panels. Panel A, deriving a grant: a parent grant Gamma_edit with rights read and write over repo/ has two derived children. Gamma_test, requesting read and execute over repo/, is marked rejected because execute is not in the parent's rights. Gamma_scan, with read over repo/src/pool.py, is marked valid. A strip below states that the worker keeps Gamma_edit, so write stays usable until it is withdrawn. Panel B, appending a caveat: an issuer holding key k computes sigma 0, a holder appends caveat c1 for the prefix repo/src/ to compute sigma 1, a holder appends caveat c2 for read rights to compute sigma 2, and a verifier recomputes the chain from k and checks every caveat."}
-![](images/svg/capability-attenuation.svg)
-:::
-
-The operative test is therefore which grants and resource handles the worker can still exercise, rather than merely whether the child grant is narrower. This test applies equally to a helper process inside one trajectory and to a delegated agent, since coordination leaves the meaning of authority unchanged.
-
-### Expiry and revocation {#sec-vol3-sandboxes-expiry-revocation}
-
-An expiry states when a grant stops authorizing new use. Closing an open file descriptor, stopping a running process, and cancelling a request another service already accepted are separate actions, so revocation needs an enforcement mechanism, such as a mediated reference whose current status is checked on each use, together with control over ongoing work where policy requires it.
-
-Suppose the repair's edit phase ends while a worker still holds a writable source handle. Rejecting new edit requests alone leaves that handle as a possible write path. The transition must stop or constrain the worker, revoke the usable reference where supported, or move subsequent work into an appropriately restricted execution context. The runtime must record what it has actually confirmed rather than equating a changed policy record with completed revocation.
-
-External effects have their own boundary. A broker can stop accepting new requests after expiry, but a previously admitted remote operation may still complete. A lease or cancellation request does not settle that effect or justify a retry. Environment teardown and readiness for reuse receive their full treatment in @sec-vol3-sandboxes-pooling-reset; here the requirement is that authority have an enforced lifetime rather than an advisory timestamp.
-
-::: {.column-margin .margin-pointer}
-↩ Why an unsettled remote outcome does not justify a blind retry is established in @sec-vol3-tool-calling-idempotency.
-:::
-
-::: {#chk-08-confused-deputy-defense .callout-checkpoint title="Scope, attenuation, and lifetime"}
-
-A repair worker holds read and write access to the candidate source. It derives a read-only grant for `src/pool.py`, retains the original grant, and opens a writable handle before the edit phase expires.
-
-- [ ] **Derived vs. retained grants**: List every reference through which the worker can still write after deriving the child. Which of them must the runtime withdraw to end write authority?
-- [ ] **Attenuation test**: A proposed child adds test execution and shortens the expiry. Apply the component-wise check of $\Gamma_{\text{child}} \sqsubseteq \Gamma_{\text{parent}}$ and decide whether it is an attenuation of the edit grant.
-- [ ] **Expiry**: When the edit grant expires, the writable handle and one brokered fetch are still open. Decide what the runtime must do with each before it may record revocation as complete.
-- [ ] **Test-phase grant**: Write the tuple $(\mathcal{R}_\Gamma, \mathcal{O}_\Gamma, \phi_\Gamma, \ExposureDuration)$ for a test phase that keeps writable scratch while the acceptance machinery stays outside the worker's writable scope.
-
-:::
-
-### Credential brokering {#sec-vol3-sandboxes-credential-brokering}
-
-Scoped access still leaves a placement decision: whether the executing code must possess the credential used by an external service. Putting a repository token in the guest's environment or filesystem makes it available to code that can read those locations. A **credential broker**\index{Credential broker!definition}\index{Credential brokering|see{Credential broker}} instead holds the selected secret outside the guest and uses it on behalf of an authorized request.
-
-For example, the repair worker requests a fetch from its approved private repository through a host-owned source-service adapter. The broker checks the bound task identity, repository, operation, destination, and current grant, then performs the credentialed request without returning the credential. Permission to fetch does not permit a push or access to another repository. The worker can cause a narrowly authorized use of the credential without possessing the credential itself.
-
-Brokering requires a supported mediation arrangement. An application adapter can make the upstream request directly; a proxy can attach credentials only where it can legitimately inspect and modify the relevant protocol exchange. A signing service likewise needs to authorize what it signs, not merely conceal its key. @Sec-vol3-sandboxes-egress-enforcement develops how the runtime constrains routes that might bypass these interfaces. If a tool genuinely requires a credential inside the guest, a narrowly scoped, short-lived credential shrinks the scope and window of exposure, while the guest still possesses it for that window.
-
-Keeping selected credentials outside the guest removes the most valuable target from the README attack, and from the environment dump in the Gemini CLI incident. The environment and repository content remain sensitive, and a brokered operation can still be misused within its permitted scope. Secret placement, access permission, and whether an allowed request's data may flow to its recipient are three distinct concerns; @sec-vol3-security-taint-tracking develops the last, and this chapter establishes where authority resides and how execution is confined to it.
-
-Capabilities and brokering specify the resources the runtime intends to expose, but they depend on enforcement that running code cannot bypass or modify under the stated threat model. Enforcing those limits in practice requires an execution envelope, evaluated by what it shares with the host and which components uphold its boundary.
 
 ## The Agent Workspace {#sec-vol3-sandboxes-cow}
 

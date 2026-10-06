@@ -63,7 +63,7 @@ The runtime built so far can already say part of what the team needs. The evalua
 
 This chapter builds the account that joins spending to accepted outcomes. @Sec-vol3-intro-horizon-arithmetic introduced cost per accepted task, the expected cost of an attempt divided by the probability that the attempt is accepted, as one of the book's two quantitative fundamentals. Here that ratio becomes something a team can measure over a real cohort of tasks. Its numerator holds every charge an attempt incurs, its denominator counts only outcomes accepted under one declared contract, and each lever the runtime controls (reuse, retries, acceleration, routing, capacity, and delegation) is worth buying only if it lowers the ratio or buys a deadline the objective values.
 
-The account comes first, in @sec-vol3-agent-economics-accounting, together with the rules that keep failed, canceled, and still-pending work inside it. @Sec-vol3-agent-economics-caching prices what the runtime pays to carry context from call to call and how many attempts it should buy. @Sec-vol3-agent-economics-criticalpath finds where faster execution actually shortens a task, and @sec-vol3-agent-economics-cascades decides which model should attempt the work at all. @Sec-vol3-agent-economics-capacity sizes the services that concurrent trajectories hold and wait on, and @sec-vol3-agent-economics-governance makes spending limits hold across delegated children and late bills. @Sec-vol3-agent-economics-selection then compares whole architectures under one contract, and @sec-vol3-agent-economics-synthesis prices all four lighthouse workloads to show that each is bound by a different term of the same account.
+The account comes first, in @sec-vol3-agent-economics-accounting, together with the rules that keep failed, canceled, and still-pending work inside it. @Sec-vol3-agent-economics-caching prices what the runtime pays to carry context from call to call, while @sec-vol3-agent-economics-reasoning-retry-budgets determines how many attempts it should buy, and @sec-vol3-agent-economics-governance makes spending limits hold across delegated children and late bills. @Sec-vol3-agent-economics-cascades decides which model should attempt the work at all. @Sec-vol3-agent-economics-criticalpath finds where faster execution actually shortens a task, and @sec-vol3-agent-economics-capacity sizes the services that concurrent trajectories hold and wait on. @Sec-vol3-agent-economics-selection then compares whole architectures under one contract, and @sec-vol3-agent-economics-synthesis prices all four lighthouse workloads to show that each is bound by a different term of the same account.
 
 ## Cost per Accepted Task {#sec-vol3-agent-economics-accounting}
 
@@ -483,199 +483,199 @@ Production workloads rarely exhibit a single, uniform success probability $\Hidd
 
 Generating extra candidate solutions also introduces verification risk. As analyzed in @sec-vol3-test-time-compute-selection-costs, repeated sampling raises the chance of a false acceptance, where a flawed candidate satisfies test assertions without truly solving the underlying task. Passing an automated check provides domain-specific verification evidence rather than an absolute guarantee of correctness. Ultimately, prefix caching, context compaction, and retry policies govern what compute resources an agent runtime purchases; determining how those purchased operations dictate end-to-end latency requires analyzing the critical execution path.
 
-## Critical-Path Latency {#sec-vol3-agent-economics-criticalpath}
+## Spending Governance {#sec-vol3-agent-economics-governance}
 
-Accelerating a model call rarely yields a proportional reduction in end-to-end task time. In realistic agent workflows, container provisioning, repository setup, test suite execution, tool I/O, and consensus validation often dominate total elapsed time. Evaluating an acceleration technique therefore requires an end-to-end systems perspective: how much wall-clock time does the proposed change strip from the critical path to a declared endpoint, what compute and memory resources does it consume, and does the accelerated execution preserve the required acceptance evidence? Tracing exposes where time actually goes, while economic accounting determines whether accelerating that specific span is worth the operational cost.
+When a coordinator admits concurrent sub-agents or child tasks, simple balance checks collapse under race conditions. If two children inspect the remaining free balance simultaneously before either records a reservation, both admission checks succeed, yet their combined liability immediately breaches the authorized task budget. Task cancellation introduces a second, equally perilous concurrency bug: returning a stopped child's allocation to the free pool while its remote service call remains billable allows another worker to spend funds that are already committed to third-party infrastructure. To maintain financial safety, the admission invariants established in @sec-vol3-agent-harness-reservation-settlement must remain strictly conserved across concurrent dispatch, node crashes, and late settlement.
 
-### Dependency graphs and elapsed time {#sec-vol3-agent-economics-dependency-graphs}
+### Liability bounds and admission {#sec-vol3-agent-economics-liability-bounds}
 
-Distributed tracing distinguishes enclosing parent spans from the nested operations within them. Summing a parent span's duration with the durations of its children double-counts time. Similarly, simply summing concurrent sibling spans inflates apparent latency, whereas omitting queueing delays, network transit, or uninstrumented runtime pauses undercounts it. When profiling an agent runtime, uninstrumented intervals must remain explicitly accounted for as unexplained gaps rather than arbitrarily attributed to neighboring components.
+Let $E(t)$ denote gross charges settled into a task's ledger at time $t$ and $R(t)$ the funds withheld there for outstanding liabilities, delegated allocations, and protected finalization. A task with authorized budget $\CostCeiling$ maintains the fundamental invariant
 
-::: {.column-margin .margin-pointer}
-↩ Parent-child span nesting and the double-counting it causes in latency attribution are established in @sec-vol3-evaluation-tracing-latency.
-:::
+$$E(t)+R(t)\le \CostCeiling.$$
 
-Crucially, a span's parent in a call tree denotes syntactic containment, which does not necessarily reflect an execution dependency. An agent runtime might spawn background log flushes or asynchronous cache warmers that outlive the caller without blocking the next step. To determine end-to-end latency, we must construct a directed acyclic execution graph based on true dispatch and join conditions: a directed edge indicates that the successor task cannot begin until its predecessor completes. Along any path, we count only disjoint, non-overlapping intervals rather than inclusive parent spans alongside their children. For a directed dependency graph with vertex durations $t(\SpeedAtDetection)$ and source-to-sink paths $\Pi$, the longest path defines the **critical path**\index{Critical path!trajectory}:[^fn-critical-path-method]
+Before admitting any billable operation, the runtime must reserve a strict upper bound $\bar c$ on its maximum possible charge, rather than relying on an expected or average cost. This bound must cover every billing category governed by the provider's rate schedule. For a foundation model API call, the reservation must account for the prompt token length, cached prefix rates, and the strictly enforced maximum completion token limit across all applicable categories (including hidden reasoning tokens). Similarly, invoking an external tool, provisioning a sandbox container, or renting cloud infrastructure requires enforced caps on execution wall-clock time, network data volume, and total per-call service fees.
 
-$$T_{\text{crit}} = \max_{\pi \in \Pi} \sum_{\SpeedAtDetection \in \pi} t(\SpeedAtDetection).$$ {#eq-vol3-critical-path}
+Stopping an operation also incurs teardown charges; required cleanup routines and graceful shutdowns must have reserved funds set aside in advance. Relying on a client-side host timeout or an estimated mean cost provides no protection: if an external service continues executing and billing after the client disconnects, the task's liabilities drift unchecked. Under a strict hard-ceiling policy, the runtime must reject any operation that lacks an enforceable upper bound or substitute a bounded alternative; accepting soft thresholds that permit arbitrary overshoot represents a fundamentally different, weaker operational contract.
 
-[^fn-critical-path-method]: **Critical Path**: The critical-path method was introduced for planning and scheduling large engineering projects, where the longest chain of dependent activities fixes the completion date and every activity off that chain has slack [@kelley1959critical]. Distributed-systems work later recovered the same dependency model from existing component logs of production requests, precisely so that critical-path and slack analysis could say which component's speedup would shorten end-to-end latency [@chow2014mystery]. An agent trace needs the same reconstruction before any acceleration is priced.
+Budget enforcement also depends on complete mediation: every billable interaction must pass through the accounting gateway. If worker nodes hold shared credentials that bypass the reservation gate, or if unmonitored retry loops dispatch billable requests off the books, the ledger's guarantees collapse. Prompt caching and tiered volume discounts present a related operational subtlety: while cache hits reduce final settlement charges, they can reduce the upfront reservation $\bar c$ only if the provider contractually guarantees the discount prior to request dispatch. If a cache miss remains possible, the runtime must withhold the full un-discounted rate.
 
-When the graph contains only mandatory computation, @eq-vol3-critical-path establishes an idealized lower bound on completion time. The critical path matches the actual observed wall-clock interval only when the dependency graph incorporates real-world scheduling artifacts: thread scheduling delays, resource contention waits, queueing latencies, and sandbox initialization. Furthermore, the boundary of the graph depends on the system contract. Emitting an initial streamed token, evaluating a candidate patch against unit tests, and fully committing a validated pull request represent fundamentally different completion endpoints, each with its own dependency sink.
+The ledger tracks gross liabilities rather than net cash flows. Releasing an unspent reservation simply restores permission to spend money that was never actually charged. Subsequent provider credits, reconciliations, or post-hoc refunds are recorded as separate external adjustments that leave gross spending and historical authorizations intact. Crucially, fresh spending capacity enters the system only through an operator's explicit budget grant, never through automatic replenishment from error recoveries or the speculative promise of a newly spawned candidate branch.
 
-Accelerating a non-critical branch leaves end-to-end latency unchanged under a fixed schedule, although it may free cluster capacity or reduce hosting costs. Conversely, accelerating an operation on the critical path often shifts the bottleneck elsewhere: once the original limiting path shrinks below a parallel branch, that alternate branch becomes the new critical path. Systems engineers must therefore recompute critical paths dynamically after each proposed optimization, rather than naively subtracting isolated component savings from total elapsed time.
+### Budget conservation across descendants {#sec-vol3-agent-economics-budget-conservation}
 
-### The payoff of faster inference {#sec-vol3-agent-economics-inference-payoff}
+Each node $k$ maintains the same account structure in a runtime-owned ledger, tracking its allocation $C_{\max,k}$, settled gross charges $E_k$, reservations $R_k$, and free balance $F_k$. The local conservation rule requires
 
-```{python}
-#| label: calc-vol3-agent-economics-critical-path
-#| echo: false
-# WHERE FASTER INFERENCE HELPS (LEGO)
-# Goal: Bound elapsed-time savings in one fixed, serial repair episode.
-# Scope: Hypothetical seconds, not measurements or a fleet workload model.
-from mlsysim import second
-from mlsysim.fmt import fmt_qty, fmt_percent, fmt_multiple, check
+$$C_{\max,k}=E_k+R_k+F_k,\qquad E_k,R_k,F_k\ge0.$$
 
-class CriticalPath:
-    # 1. LOAD: sequential intervals; all required work remains unchanged.
-    model_intervals_s = (1.20, 8.40, 1.85, 11.20, 2.10, 4.50)
-    tests_s = 245.60
-    lifecycle_intervals_s = (14.80, 22.55)
-    runtime_status_intervals_s = (0.12, 0.08)
-    model_speedup = 4.0
+A **budget reservation**\index{Budget reservation!definition}[^fn-escrow-budget-reservation] removes funds from the free balance $F_k$ before an operation can be dispatched. In a hierarchical agent tree, delegating an allocation $b$ to a child node withholds those funds in the parent's reservation pool $R_P$ while the child manages them within its own local ledger ($C_{\max,\AFourthTaxonomyAxis} = F_C = b$). The parent's reservation and the child's entire ledger thus represent the exact same capital backing viewed from two different levels of abstraction. Naively summing reserved balances across all nodes in the hierarchy would double-count the delegated capital. Conversely, inspecting only the parent's settled charges $E_P$ omits active charges still accumulating in open child accounts. Fleet-wide reporting attributes each charge exactly once through its unique operation record, while the tree hierarchy tracks which branch holds the authority to back it.
 
-    # 2. EXECUTE: each interval belongs to exactly one category.
-    model_s = sum(model_intervals_s)
-    lifecycle_s = sum(lifecycle_intervals_s)
-    runtime_status_s = sum(runtime_status_intervals_s)
-    other_s = tests_s + lifecycle_s + runtime_status_s
-    total_s = model_s + other_s
-    model_fraction = model_s / total_s
-    changed_s = other_s + model_s / model_speedup
-    saving_s = total_s - changed_s
-    speedup = total_s / changed_s
-    limiting_speedup = total_s / other_s
-    tests_half_saving_s = tests_s / 2  # alternative: halve the required test interval
+The state transitions summarized in @tbl-vol3-ledger-transitions are strictly atomic with respect to competing admissions and control-plane changes. Because spending represents an irreversible external commitment, ledger update records must durably survive the failure domain specified in @sec-vol3-persistence-wal before any billable request leaves the runtime. If a worker node crashes, a replacement coordinator reconstructs active reservations directly from this write-ahead log rather than resetting balances because the former worker disappeared. Furthermore, delegating financial spending authority differs fundamentally from delegating operational capabilities: granting a child sub-agent read permission on a repository does not subtract that permission from the parent, whereas delegating budget capacity withholds discretionary funds that the parent otherwise could spend.
 
-    # 3. GUARD: disjoint accounting and independent Amdahl calculation.
-    check(all(t >= 0 for t in model_intervals_s + lifecycle_intervals_s + runtime_status_intervals_s), "Nonnegative intervals")
-    check(tests_s >= 0 and other_s > 0 and model_speedup >= 1, "Valid acceleration domain")
-    check(abs(total_s - 312.40) < 1e-9, "Full declared elapsed interval")
-    check(abs(changed_s - total_s * (1 - model_fraction + model_fraction / model_speedup)) < 1e-9, "Independent Amdahl calculation")
-    check(abs(saving_s - 21.9375) < 1e-9, "Independent saved model time")
-    check(1 <= speedup <= limiting_speedup, "Finite acceleration respects limiting bound")
-    check(tests_half_saving_s > 5 * saving_s, "Halving tests must dominate the model speedup here")
+| Ledger event                           | Required condition                                                        | Conserved update                                                                                        |
+|:---------------------------------------|:--------------------------------------------------------------------------|:--------------------------------------------------------------------------------------------------------|
+| Allocate $b$ to a child                | Current authority and eligibility; $b\le F_P$                             | Parent moves $b$ from $F_P$ to $R_P$; child starts with $C_{\max,\AFourthTaxonomyAxis}=F_C=b$           |
+| Admit an operation bounded by $\bar c$ | Current guards pass; $\bar c\le F_k$                                      | Move $\bar c$ from $F_k$ to $R_k$ and record the operation and attempt binding                          |
+| Final settlement with charge $c$       | Authenticated final evidence; $0\le c\le \bar c$; reservation still owned | Remove $\bar c$ from $R_k$, add $c$ to $E_k$, and return $\bar c-c$ to $F_k$                            |
+| Stop a child with unsettled work       | New admission is closed; outstanding records remain owned                 | Keep backing for its calls and descendants; stopping alone releases no liability                        |
+| Close a fully settled child            | No further admission; calls and descendants settled; $R_C=0$              | Parent removes $C_{\max,\AFourthTaxonomyAxis}$ from $R_P$, adds $E_C$ to $E_P$, and adds $F_C$ to $F_P$ |
 
-    # 4. OUTPUT: each export is used below, with units supplied once.
-    model_str = fmt_qty(model_s * second, second, precision=2)
-    tests_str = fmt_qty(tests_s * second, second, precision=2)
-    lifecycle_str = fmt_qty(lifecycle_s * second, second, precision=2)
-    runtime_status_str = fmt_qty(runtime_status_s * second, second, precision=2)
-    total_str = fmt_qty(total_s * second, second, precision=2)
-    fraction_str = fmt_percent(model_fraction, precision=1, style="prose")
-    model_speedup_mult_str = fmt_multiple(model_speedup, precision=0)
-    changed_str = fmt_qty(changed_s * second, second, precision=2)
-    saving_str = fmt_qty(saving_s * second, second, precision=2)
-    speedup_mult_str = fmt_multiple(speedup, precision=2)
-    limiting_speedup_mult_str = fmt_multiple(limiting_speedup, precision=2)
-    tests_half_saving_str = fmt_qty(tests_half_saving_s * second, second, precision=1)
-```
+: **Conserved budget transitions**: Each update preserves the allocated total. Closure requires financial settlement, not merely a stopped local process. {#tbl-vol3-ledger-transitions}
 
-::: {#nbk-18-critical-path-investment .callout-notebook title="How much does faster inference buy?"}
+[^fn-escrow-budget-reservation]: **Escrow**: High-throughput transaction processing systems solved this concurrency bottleneck for hot aggregate quantities like bank balances and warehouse inventory. Rather than locking an entire balance record during a long-running workflow, the escrow transactional method sets aside a portion of the aggregate, allowing concurrent transactions to allocate and commit against the remaining balance independently [@oneil1986escrow]. A budget reservation functions as escrow for spending authority, where the provider's final authenticated invoice serves as the transaction commit.
 
-**Problem**: In a hypothetical three-turn repair episode, how much elapsed time does a `{python} CriticalPath.model_speedup_mult_str` acceleration of every model call save?
+Every budget reservation is tied to a unique compound identifier binding the task, logical operation, transport attempt number, pricing tier, and cost bound $\bar c$. When downstream work finishes, settlement requires cryptographically authenticated usage receipts evaluated against a durable **settlement identity**\index{Settlement identity!definition}—the idempotency key under which the definitive charge posts to the ledger. If network retries cause the provider to deliver identical billing evidence multiple times, the runtime applies the state transition at most once, verifying that repeated deliveries contain identical payloads. A conflicting payload under an existing settlement identity indicates a reconciliation fault, which the runtime must neither blindly overwrite nor silently ignore. When long-running services report intermediate consumption, the runtime can incrementally move settled amounts into $E_k$ while continuing to withhold a bound on remaining liabilities; it releases the reservation entirely only upon definitive finality. Deduplicating a remote side effect at an API endpoint and deduplicating an internal financial ledger record serve two distinct engineering contracts.
 
-**Variables**: All intervals execute sequentially, from runtime initialization through final sandbox snapshot export, without queueing, overlapping execution, or uninstrumented gaps. The durations listed in @tbl-vol3-trace-critical-path represent disjoint, non-overlapping sums rather than nested spans. The proposed acceleration modifies only inference latency, leaving model outputs, tool operations, test evidence, scheduling decisions, and finalization unchanged.
+If an external service reports a charge that exceeds its initial reservation ($c > \bar c$), the system's foundational cost invariant has failed. Silently clamping the reported charge to $\bar c$ or allowing the free balance $F_k$ to drop below zero would conceal a critical safety failure. Instead, the runtime immediately flags the discrepancy, halts further admissions within the affected subtree, and escalates the incident for reconciliation. Until an administrator or reconciliation procedure resolves the dispute, the system's strict financial guarantee is temporarily suspended. Provided cost bounds remain valid, admissions execute atomically, and settlements are strictly deduplicated, every state transition preserves non-negative balances ($E_k, R_k, F_k \ge 0$) and guarantees that no child sub-agent can spend outside its allocated backing.
 
-| Disjoint category                            |                               Elapsed time |
-|:---------------------------------------------|-------------------------------------------:|
-| Model calls across the three turns           |          `{python} CriticalPath.model_str` |
-| Required test execution                      |          `{python} CriticalPath.tests_str` |
-| Sandbox creation and snapshot export         |      `{python} CriticalPath.lifecycle_str` |
-| Runtime initialization and repository status | `{python} CriticalPath.runtime_status_str` |
-| **Whole declared interval**                  |      **`{python} CriticalPath.total_str`** |
+### Cancellation and settlement {#sec-vol3-agent-economics-cancellation-settlement}
 
-: **One serial repair episode**: Categories partition elapsed time under the stated assumptions; the total is not an additional interval. {#tbl-vol3-trace-critical-path}
+The cancellation boundary established in @sec-vol3-multiagent-cancellation-trees immediately prevents a sub-agent from launching new billable operations once control is revoked. However, remote service termination and billing reconciliation operate asynchronously. Even after a local worker halts, outstanding HTTP requests, remote inference batches, or detached cloud instances may continue executing until upstream timeouts trigger or cancellation signals propagate. Consequently, the child's allocation cannot simply be returned to the parent pool at the moment of local termination; it must remain reserved until all remote obligations settle. If maintaining the inactive child's ledger in memory is inefficient, the runtime can execute a durable ledger transfer, handing over all known charges, outstanding reservations, and genuinely unencumbered funds to a centralized settlement coordinator. This transfer must preserve the complete lineage of operation identities and backing reservations across all descendants. At no point during the handover may an ownership gap exist where funds could be double-released or where an in-flight liability is left unbacked.
 
-**Math**: If model execution occupies fraction $f$ of baseline duration $\Time$ and accelerates by factor $x \geq 1$, Amdahl's fixed-work law [@amdahl1967] bounds the new duration: $\Time' = \Time[(1-f)+f/x]$. Here, model work accounts for `{python} CriticalPath.fraction_str` of elapsed time. A `{python} CriticalPath.model_speedup_mult_str` model acceleration reduces the episode to `{python} CriticalPath.changed_str`, saving `{python} CriticalPath.saving_str` for an overall speedup of `{python} CriticalPath.speedup_mult_str`. Even instantaneous inference ($x \to \infty$) yields a whole-episode speedup of only `{python} CriticalPath.limiting_speedup_mult_str` under these assumptions.
+Graceful teardown also requires dedicated resources. Protected finalization routines—such as querying the status of remote jobs, gathering debug telemetry, or shutting down cloud sandboxes—must operate from an isolated, reserved sub-allocation within the original budget. This finalization allowance permits essential status queries after ordinary task admission has closed, without reopening general spending authority. When generating accounting reports across a cutoff boundary, the runtime rigorously distinguishes between settled historical charges and active liabilities held in reserve.
 
-**Systems insight**: The theoretical speedup ceiling $1/(1-f)$ dictates whether paying for faster model inference can ever satisfy an operational deadline. Because this ceiling depends only on baseline profile measurements, engineers can evaluate its viability before investing in model optimization or specialized serving infrastructure. In this repair episode, halving test execution duration while maintaining identical coverage saves `{python} CriticalPath.tests_half_saving_str`—far outpacing the `{python} CriticalPath.saving_str` gained from a `{python} CriticalPath.model_speedup_mult_str` model acceleration—while simultaneously reducing sandbox leasing charges in the effective cost $\CostPerAcceptedTaskEff$. When an engineering latency target exceeds what $1/(1-f)$ can theoretically deliver, engineering effort belongs on test execution and environment lifecycle optimizations. In non-linear, branching trajectories, this principle applies directly to the recomputed critical path of @eq-vol3-critical-path.
-
-:::
-
-### Span types and their levers {#sec-vol3-agent-economics-span-levers}
-
-Once distributed traces identify the critical path, engineers can target specific bottlenecks: optimizing prompt layouts for cache hits, compressing reasoning budgets, running independent tools concurrently, or deploying warm sandbox pools. However, concurrency gains diminish when tools contend for local resources or when a downstream tool requires an earlier output. While speculative environment preparation or early test-suite stopping can yield latency improvements, they do not change the core verification contract. Final task acceptance still demands full test coverage, and any compute resources consumed by aborted or speculative jobs must remain on the trajectory ledger.
-
-### Profitability boundaries for speculative decoding {#sec-vol3-agent-economics-speculative}
-
-The limitations of Amdahl's Law become starkly apparent when evaluating lower-level serving optimizations. Consider speculative decoding as a specific case study: while it accelerates token generation, it frequently fails to yield proportional savings on the overall agent critical path. Autoregressive decoding is memory-bandwidth bound. Speculative decoding is an inference serving optimization whose latency and throughput depend on drafting accuracy and memory bandwidth constraints. From an agent economics standpoint, it is worth deploying only if the resulting end-to-end latency reduction justifies the additional memory footprint and compute overhead in the context of the full trajectory.
-
-::: {.column-margin .margin-pointer}
-↩ The weight-transfer floor that makes single-stream decoding memory-bandwidth bound is established in @sec-vol3-foundation-model-per-call-work-estimate.
-:::
-
-In speculative decoding, a lightweight draft model[^fn-speculative-draft-lineage] proposes $\gamma$ candidate tokens per speculation round, and the larger target model verifies them in a single forward pass, accepting the longest matching prefix and generating one continuation token of its own [@leviathan2023fast; @chen2023accelerating]. Let the computational cost of generating one draft token equal a fraction $\LinkBandwidth$ of a standard target decoding step, and let $\bar \MicrobatchCount$ denote the mean number of draft tokens accepted per round. If evaluating $\gamma$ proposed tokens in parallel costs approximately one target step, each round yields $\bar \MicrobatchCount + 1$ verified tokens in the time equivalent to $\gamma\beta + 1$ target decoding steps. The resulting decoding speedup for an isolated stream is
-
-$$S_{\text{spec}}=\frac{\bar \MicrobatchCount+1}{\gamma\beta+1}.$$ {#eq-vol3-spec-speedup}
-
-[^fn-speculative-draft-lineage]: **Draft-then-Verify Decoding**: The idea predates large language models. Blockwise parallel decoding predicted several future positions at once and backed off to the longest prefix a scoring model validated [@stern2018blockwise]. Speculative decoding moved the proposals into a separate small draft model and added an acceptance rule under which sampled outputs keep the target model's distribution, which is why its savings are purely a cost and latency question rather than a quality trade.
-
-Speculative execution accelerates the generation stream if and only if $\bar \MicrobatchCount > \gamma\beta$—that is, when the average number of accepted draft tokens exceeds the amortized drafting cost. When acceptance falls below this break-even threshold, drafting overhead accumulates faster than verification saves time, actively degrading generation latency. Furthermore, the assumption that parallel verification takes no longer than a single decoding step holds only when single-stream generation is memory-bandwidth bound (principle \ref{pri-vol3-memory-bandwidth-decoding}). As concurrent serving loads increase and large batch sizes shift accelerator utilization toward compute saturation, evaluating $\gamma$ tokens concurrently incurs substantial arithmetic overhead, eroding the latency advantage.
-
-This break-even condition models arithmetic steps within an isolated model call. In a production agent serving architecture, the end-to-end path incurs additional coordination costs: synchronizing draft and target model processes, memory bus transfers, KV-cache management, and wasted compute when early stopping cancels generation mid-trajectory. Under production fleet load, hosting the draft model also reserves high-bandwidth memory (HBM) and matrix units that could otherwise serve concurrent requests, while variable-length verification batches complicate target scheduler batching. Engineering decisions must therefore be validated under representative production traffic, measuring complete-call latency percentiles, aggregate accelerator utilization, queueing delays, and end-to-end task completion rates against the baseline configuration. A high token acceptance rate $\bar \MicrobatchCount / \gamma$ is merely an intermediate serving metric; it does not guarantee economic efficiency at the agent trajectory level.
+The notebook below traces this distinction for a canceled child sub-agent that receives an unexpected, delayed invoice from an external provider.
 
 ```{python}
-#| label: calc-vol3-agent-economics-spec-composition
+#| label: calc-vol3-agent-economics-ledger
 #| echo: false
 # ┌─────────────────────────────────────────────────────────────────────────────
-# │ SPECULATIVE SPEEDUP COMPOSED WITH THE TRAJECTORY (LEGO)
+# │ CONSERVED BUDGET WITH A CANCELED CHILD AND A LATE BILL
 # ├─────────────────────────────────────────────────────────────────────────────
-# │ Context: @eq-vol3-spec-speedup in @sec-vol3-agent-economics-speculative.
-# │ Goal: Show the call-level boundary and its bounded trajectory payoff.
-# │ Show: Speedup above and below break-even; effect on the serial episode.
-# │ How:  S = (m + 1) / (gamma * r + 1), then T' = T[(1 - f) + f / S].
-# │ Note: Reads CriticalPath (model share, episode length) from the earlier
-# │       cell. Draft length, cost ratio, and acceptance are scenario inputs.
+# │ Context: @sec-vol3-agent-economics-governance and its ledger notebook.
+# │ Goal: Keep a stopped child's remote liability backed until final settlement.
+# │ Show: Root balances, child pending liability, late bill, and released funds.
+# │ How: Exact integer accounting in thousandths of a scenario dollar, followed
+# │      by the atomic transfers of @tbl-vol3-ledger-transitions.
+# │ Note: Hypothetical charge records and enforceable bounds, not provider rates.
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim import second
-from mlsysim.fmt import check, fmt, fmt_int, fmt_multiple, fmt_qty
+from mlsysim.fmt import check, fmt_usd
 
-class SpecComposition:
-    # ┌── 1. LOAD (Scenario inputs; episode from CriticalPath) ──────────────
-    gamma = 5  # scenario: draft tokens proposed per round
-    r = 0.08  # scenario: draft token cost as a fraction of a target step
-    m_high, m_low = 3.6, 0.3  # scenario: mean accepted draft tokens per round
-    f = CriticalPath.model_fraction
-    total_s = CriticalPath.total_s
+class BudgetLedger:
+    # ┌── 1. LOAD (Hypothetical records; integer milli-dollars) ─────────────
+    units_per_dollar = 1000
+    b_root = 5000
+    c_plan = 42  # final planning charge already settled at the first row
+    b_trace, b_fuzz = 1200, 2500
+    e_trace, e_fuzz = 380, 850
+    pending_fuzz = 1000  # enforceable maximum remaining remote charge
+    late_charge = 700  # authenticated final bill received after local stop
 
-    # ┌── 2. EXECUTE (Call-level speedup, then fixed-work composition) ─────
-    breakeven = gamma * r
-    s_high = (m_high + 1) / (gamma * r + 1)
-    s_low = (m_low + 1) / (gamma * r + 1)
-    t_high = total_s * ((1 - f) + f / s_high)
-    t_low = total_s * ((1 - f) + f / s_low)
-    traj_high = total_s / t_high
-    traj_bound = 1 / (1 - f)
+    # ┌── 2. EXECUTE (Conserved transitions) ───────────────────────────────
+    f_after_plan = b_root - c_plan
+    r_deleg = b_trace + b_fuzz
+    f_after_deleg = f_after_plan - r_deleg
+    refund_trace = b_trace - e_trace
+    e_after_trace = c_plan + e_trace
+    r_after_trace = r_deleg - b_trace
+    f_after_trace = f_after_deleg + refund_trace
+    fuzz_free_at_stop = b_fuzz - e_fuzz - pending_fuzz
+    fuzz_apparent_free = b_fuzz - e_fuzz  # what a release at local stop would return
+    settlement_records = (("fuzz_final_bill", late_charge), ("fuzz_final_bill", late_charge))  # duplicate delivery
+    applied_settlements = {}
+    fuzz_e_settled = e_fuzz
+    for settlement_id, reported_charge in settlement_records:
+        if settlement_id in applied_settlements:
+            check(applied_settlements[settlement_id] == reported_charge, "Conflicting payload for a settlement identity")
+        else:
+            applied_settlements[settlement_id] = reported_charge
+            fuzz_e_settled += reported_charge
+    fuzz_free_settled = fuzz_free_at_stop + pending_fuzz - late_charge
+    e_final = e_after_trace + fuzz_e_settled
+    r_final = r_after_trace - b_fuzz
+    f_final = f_after_trace + fuzz_free_settled
+    root_states = (
+        (c_plan, 0, f_after_plan),
+        (c_plan, r_deleg, f_after_deleg),
+        (e_after_trace, r_after_trace, f_after_trace),
+        (e_after_trace, r_after_trace, f_after_trace),
+        (e_final, r_final, f_final),
+    )
 
-    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
-    check(m_high > breakeven > m_low >= 0, "One case on each side of the break-even")
-    check(s_high > 1 > s_low, "Break-even separates speedup from slowdown")
-    check(1 < traj_high < traj_bound and t_low > total_s, "Trajectory gain is bounded; slowdown lengthens it")
-    check(abs(traj_bound - CriticalPath.limiting_speedup) < 1e-9, "Same bound as the instant-model case")
+    # ┌── 3. GUARD (Conservation and displayed claims) ──────────────────────
+    for settled, reserved, free in root_states:
+        check(settled + reserved + free == b_root, "Root conservation failed")
+        check(min(settled, reserved, free) >= 0, "Negative ledger balance")
+    check(e_fuzz + pending_fuzz + fuzz_free_at_stop == b_fuzz, "Stopped child must retain the remote reservation")
+    check(0 <= late_charge <= pending_fuzz, "Late bill must fit its enforced bound")
+    check(root_states[2] == root_states[3], "Local stop must not release backing")
+    check(e_final == c_plan + e_trace + e_fuzz + late_charge == 1972, "Every final charge must enter exactly once")
+    check(f_final == 3028 and r_final == 0, "Final free balance drift")
+    check(fuzz_free_at_stop == 650 and fuzz_free_settled == 950, "Late settlement releases only the unused part")
+    check(fuzz_apparent_free - fuzz_free_at_stop == pending_fuzz > late_charge, "Premature release overcommits the bound")
 
-    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
-    gamma_str = fmt_int(gamma)
-    r_str = fmt(r, precision=2)
-    breakeven_str = fmt(breakeven, precision=1)
-    m_high_str, m_low_str = fmt(m_high, precision=1), fmt(m_low, precision=1)
-    s_high_mult_str = fmt_multiple(s_high, precision=2)
-    s_low_mult_str = fmt_multiple(s_low, precision=2)
-    t_high_str = fmt_qty(t_high * second, second, precision=1)
-    t_low_str = fmt_qty(t_low * second, second, precision=1)
-    traj_high_mult_str = fmt_multiple(traj_high, precision=2)
+    # ┌── 4. OUTPUT (Dollar strings) ───────────────────────────────────────
+    b_root_str = fmt_usd(b_root / units_per_dollar, precision=0)
+    c_plan_str = fmt_usd(c_plan / units_per_dollar, precision=3)
+    b_trace_str = fmt_usd(b_trace / units_per_dollar, precision=2)
+    b_fuzz_str = fmt_usd(b_fuzz / units_per_dollar, precision=2)
+    e_trace_str = fmt_usd(e_trace / units_per_dollar, precision=2)
+    e_fuzz_str = fmt_usd(e_fuzz / units_per_dollar, precision=2)
+    pending_fuzz_str = fmt_usd(pending_fuzz / units_per_dollar, precision=0)
+    late_charge_str = fmt_usd(late_charge / units_per_dollar, precision=2)
+    f_after_plan_str = fmt_usd(f_after_plan / units_per_dollar, precision=3)
+    r_deleg_str = fmt_usd(r_deleg / units_per_dollar, precision=2)
+    f_after_deleg_str = fmt_usd(f_after_deleg / units_per_dollar, precision=3)
+    e_after_trace_str = fmt_usd(e_after_trace / units_per_dollar, precision=3)
+    r_after_trace_str = fmt_usd(r_after_trace / units_per_dollar, precision=2)
+    f_after_trace_str = fmt_usd(f_after_trace / units_per_dollar, precision=3)
+    fuzz_free_at_stop_str = fmt_usd(fuzz_free_at_stop / units_per_dollar, precision=2)
+    fuzz_free_settled_str = fmt_usd(fuzz_free_settled / units_per_dollar, precision=2)
+    e_final_str = fmt_usd(e_final / units_per_dollar, precision=3)
+    r_final_str = fmt_usd(r_final / units_per_dollar, precision=0)
+    f_final_str = fmt_usd(f_final / units_per_dollar, precision=3)
+    fuzz_apparent_free_str = fmt_usd(fuzz_apparent_free / units_per_dollar, precision=2)
 ```
 
-To evaluate how speculative decoding impacts the complete agent workflow, we substitute the call-level speedup $S_{\text{spec}}$ for the acceleration factor $x$ in Amdahl's formulation from notebook \ref{nbk-18-critical-path-investment}. Because non-model spans remain unaffected, the maximum trajectory-level speedup remains strictly bounded by $1/(1-f)$.
+::: {#nbk-18-hierarchical-multi-agent-budget-allocation-and .callout-notebook title="A canceled child with a late bill"}
 
-Consider a concrete deployment scenario where the draft model proposes `{python} SpecComposition.gamma_str` tokens per round at a relative cost of `{python} SpecComposition.r_str` per token. The break-even threshold requires accepting at least `{python} SpecComposition.breakeven_str` draft tokens per round. If the draft model aligns well with the agent's prompt distribution and achieves `{python} SpecComposition.m_high_str` accepted tokens per round, @eq-vol3-spec-speedup yields an isolated call speedup of `{python} SpecComposition.s_high_mult_str`. Applying this substantial speedup to every model invocation within the serial episode of @tbl-vol3-trace-critical-path reduces total elapsed time from `{python} CriticalPath.total_str` to `{python} SpecComposition.t_high_str`—a modest `{python} SpecComposition.traj_high_mult_str` speedup for the overall episode. Conversely, if a complex reasoning task drops acceptance to `{python} SpecComposition.m_low_str` tokens per round, the system drops below break-even: call-level performance degrades to `{python} SpecComposition.s_low_mult_str` of baseline speed, expanding total episode duration to `{python} SpecComposition.t_low_str`. @Fig-vol3-critical-path-waterfall plots these interventions as four horizontal stacked bars on an elapsed-time axis: required test suites and sandbox lifecycle operations establish an irreducible non-model floor (marked by the dashed red boundary), demonstrating that even instantaneous model inference shortens the overall episode by less than a tenth.
+**Problem**: A hypothetical repair has a `{python} BudgetLedger.b_root_str` budget. Its planning charge has settled at `{python} BudgetLedger.c_plan_str`, and it allocates `{python} BudgetLedger.b_trace_str` to trace analysis and `{python} BudgetLedger.b_fuzz_str` to fuzzing. The trace child closes with a final charge of `{python} BudgetLedger.e_trace_str`. The fuzzing child has settled `{python} BudgetLedger.e_fuzz_str` and holds `{python} BudgetLedger.pending_fuzz_str` for a remote operation when its local executor confirms termination. No further child work is admitted. The remote operation later terminates with a final additional bill of `{python} BudgetLedger.late_charge_str`. All other charges and required finalization are included in these records, and neither child has descendants. When can the root release the fuzzing allocation?
 
-::: {#fig-vol3-critical-path-waterfall fig-env="figure" fig-pos="htb" fig-cap="**Faster Model Calls, a Barely Shorter Episode**: The serial repair episode of @tbl-vol3-trace-critical-path drawn to scale, each bar partitioned into disjoint category sums rather than a chronological trace. Required tests and sandbox lifecycle form a non-model floor that no model acceleration crosses. A `{python} CriticalPath.model_speedup_mult_str` model speedup and a `{python} SpecComposition.s_high_mult_str` speculative speedup on the calls each shorten the episode by less than a tenth, and even instant model calls stop at the floor. The runtime-status interval is too short to draw at this scale." fig-alt="Four horizontal stacked bars on a shared elapsed-time axis. Each bar has a long required-tests segment, a shorter sandbox creation and export segment, and a model-calls segment at its right end, with its end time and speedup labeled. The model segment is widest in the baseline bar, narrower for model calls four times faster and for speculative decoding, and absent for instant model calls. A dashed red line marks the non-model floor where the model segment begins, and a dashed gray line marks the baseline end."}
-![](images/svg/fig-vol3-critical-path-waterfall.svg)
+**Math**: We keep the entire child allocation reserved at the root until its account closes. @Tbl-vol3-late-bill-ledger follows the root's balances under the same conservation rule throughout.
+
+| Root ledger boundary                    |                               Settled $E$ |                              Reserved $R$ |                                  Free $F$ |
+|:----------------------------------------|------------------------------------------:|------------------------------------------:|------------------------------------------:|
+| Planning settled                        |        `{python} BudgetLedger.c_plan_str` |       `{python} BudgetLedger.r_final_str` |  `{python} BudgetLedger.f_after_plan_str` |
+| Both allocations granted                |        `{python} BudgetLedger.c_plan_str` |       `{python} BudgetLedger.r_deleg_str` | `{python} BudgetLedger.f_after_deleg_str` |
+| Trace child closed                      | `{python} BudgetLedger.e_after_trace_str` | `{python} BudgetLedger.r_after_trace_str` | `{python} BudgetLedger.f_after_trace_str` |
+| Fuzzing locally stopped; bill pending   | `{python} BudgetLedger.e_after_trace_str` | `{python} BudgetLedger.r_after_trace_str` | `{python} BudgetLedger.f_after_trace_str` |
+| Late bill settled; fuzzing child closed |       `{python} BudgetLedger.e_final_str` |       `{python} BudgetLedger.r_final_str` |       `{python} BudgetLedger.f_final_str` |
+
+: **Root Balances Through a Late Bill**: Local stopping retains the pending child's allocation until its charges settle and its account closes. {#tbl-vol3-late-bill-ledger}
+
+At local termination, the fuzzing ledger has `{python} BudgetLedger.fuzz_free_at_stop_str` free, but its remote reservation remains outstanding. Final settlement releases the unused part of that reservation, leaving `{python} BudgetLedger.fuzz_free_settled_str` to return when the child closes. Re-delivery of the same final billing record changes none of these balances.
+
+**Systems insight**: A premature release upon local process termination would have returned `{python} BudgetLedger.fuzz_apparent_free_str` (the allocation minus already-settled charges), even though only `{python} BudgetLedger.fuzz_free_at_stop_str` was truly unencumbered. The subsequent `{python} BudgetLedger.late_charge_str` bill would then have landed on funds already committed to another child task. The governing invariant upon cancellation is strict: release at most the allocation minus settled charges minus the enforceable upper bound on outstanding work, and return the remainder only as each remote operation reaches final settlement. Financial safety is only as reliable as those upper bounds and the completeness of the ledger records.
+
 :::
 
-Accelerating a component on the critical path directly expands deadline headroom, whereas accelerating an off-critical operation primarily frees hardware capacity or lowers hosting costs. An optimization can justify higher operational expense if shaving critical-path latency satisfies a stringent user-facing service-level agreement (SLA); conversely, an optimization that boosts raw token generation rate should be rejected if interconnect contention or server overhead erases those savings at the workflow level. Deploying speculative decoding in an agent system therefore hinges on two distinct boundaries: the serving engine must satisfy the micro-level condition $\bar \MicrobatchCount > \gamma\beta$ under realistic production concurrency, and the overall agent workflow must possess a sufficiently large model fraction $f$ to make the macro-level ceiling $1/(1-f)$ worth pursuing.
+@Fig-vol3-hierarchical-budget-ledger tracks capital conservation across the parent-child hierarchy: the top panel diagrams root allocations across `trace` and `fuzzing` child tasks, while the bottom panel stacks five equal-length bars across sequential accounting boundaries to demonstrate that funds shift strictly among settled, reserved, and free categories without leakage—holding root reservations constant through child cancellation until late bills settle.
 
-::: {#chk-18-whole-trajectory-economics .callout-checkpoint title="Cost and time per accepted task"}
-
-Before routing calls across models, check the account and the clock.
-
-- [ ] **Failed attempts**: A policy accepts `{python} TokenPriceFallacy.b_accepted_str` of `{python} TokenPriceFallacy.tickets_str` tickets. How many rejected attempts does each accepted repair pay for, and which of their charges stay in the numerator if one is canceled before its bill settles?
-- [ ] **Cache layout**: Which term of @eq-vol3-agent-economics-session-bill grows when a timestamp moves from the end of the system prompt to its front, and how does that term's growth with the horizon change?
-- [ ] **Compaction payback**: With `{python} PrefixCacheCost.before_str` calls left in notebook \ref{nbk-vol3-compaction-crossing}, should the runtime compact for price alone? What else could justify compacting anyway?
-- [ ] **Critical-path estimate**: Model calls take `{python} CriticalPath.fraction_str` of the serial episode. Before reading the table again, estimate the largest whole-episode speedup any model acceleration can buy, and decide whether halving the test interval would beat it.
-
+::: {#fig-vol3-hierarchical-budget-ledger fig-env="figure" fig-pos="htb" fig-cap="**Conservation Across a Canceled Child**: Top, the root allocates to two children, and the fuzzing child's ledger at local stop splits its allocation into settled charges, a pending remote reservation, and free balance. Bottom, the root's balances at each boundary of @tbl-vol3-late-bill-ledger always sum to the same budget. Local stopping leaves the root's reservation unchanged; only settlement of the late bill moves the fuzzing allocation into settled and free balances." fig-alt="Top: a root ledger box with arrows to a trace child box and a fuzzing child box. The fuzzing child box contains a stacked bar with settled, pending remote, and free segments and a note about the late bill. Bottom: five equal-length stacked bars, one per root ledger boundary, divided into settled, reserved, and free segments, with the settled amount listed in a column at the right. The fourth bar, labeled fuzzing stopped, bill pending, matches the third."}
+![](images/svg/hierarchical-budget-ledger.svg)
 :::
+
+### Spending alarms and admission limits {#sec-vol3-agent-economics-alarms-admission-limits}
+
+Even when a cumulative task budget is strictly conserved, an overall ceiling cannot prevent damaging expenditure spikes. If an unconstrained agent launches dozens of model calls concurrently, it can burn through its entire allocation in seconds. A retrospective **spending alarm**\index{Spending alarm!definition} monitors the burn rate by dividing the gross charges settled over a trailing window of duration $T_{\text{win}}$ by $T_{\text{win}}$. However, because external billing is often delayed, a retrospective alarm can stay deceptively quiet while expensive requests are in flight, only to spike violently after execution has already halted. While retrospective alarms are useful for triggering administrative alerts or throttling subsequent work, they act after the fact: the capital they measure has already been spent.
+
+To prevent rapid budget exhaustion, the runtime must enforce proactive **admission limits**\index{Admission limit!definition} that evaluate new financial commitments—in the form of reservations—prior to dispatch. For a spending rate limit permitting at most $C_{\text{win}}$ in new liabilities over any trailing window of duration $T_{\text{win}}$, a robust admission policy enforces
+
+$$\sum_{i:\,t-T_{\text{win}}<t_i\le t}\bar c_i\le C_{\text{win}},$$
+
+where $t_i$ is the admission timestamp and $\bar c_i$ is the bounded charge of each billable operation.[^fn-window-token-bucket] Every prospective admission atomically validates both this sliding-window limit and the cumulative ledger balance. This window constraint applies across all child tasks within the coordinator's scope, rather than granting a fresh window allowance to every newly spawned worker. Delegating an allocation down the agent tree is an internal balance partition, not a newly admitted billable dispatch. Furthermore, retaining $\bar c_i$ in the window calculation until its admission timestamp ages out prevents a rapid sequence of fast-completing calls from triggering an unbounded burst. This policy guarantees a strict upper bound on committed work over the interval, regardless of when external providers finish processing requests or transmit final invoices.
+
+[^fn-window-token-bucket]: **Trailing Window vs. Token Bucket**: Standard network and API rate limiters often employ token buckets, which permit an initial burst equal to the bucket capacity followed by a steady refill rate; over a short interval $\Delta t$, maximum consumption can reach capacity plus rate times $\Delta t$. In contrast, the trailing-window sum strictly caps committed liabilities across every continuous window of duration $T_{\text{win}}$ at $C_{\text{win}}$, irrespective of burst shape, at the modest implementation cost of retaining timestamped admission records until they age out of the window.
+
+Rate-limiting policies must also protect capacity and budget for mandatory finalization routines. If an aggressive rate limiter blocks all outgoing traffic during a spending spike, it can starve the very cancellation and status queries required to terminate running tasks and settle outstanding reservations. Dedicating isolated execution lanes or explicit finalization allowances within the accounting policy prevents this deadlock. Importantly, completing a diagnostic probe or clearing an operational alarm must never prematurely release funds held for unrelated active reservations.
+
+When an agent enters an un-converging loop—evidenced by repeated execution failures or unvarying candidate artifacts—the runtime triggers a spending hold under its semantic watchdog policies. This intervention halts ongoing expenditures before runaway iterations exhaust the task budget. The runtime enforces the designated cancellation or escalation workflow while preserving all outstanding liabilities on the ledger. Evaluating whether completed work meets task requirements remains the responsibility of the domain acceptance contract, rather than the spending controller.
+
+::: {.column-margin .margin-pointer}
+↩ Semantic watchdogs, which detect a non-converging loop from its progress evidence and place the trajectory in an admission hold, are established in @sec-vol3-sagas-watchdogs.
+:::
+
+Formal budget reservations transform economic governance from hopeful telemetry into an enforceable systems contract under declared pricing and failure models. Once cost, latency, and residual liabilities are rigorously bounded and audited, the systems architect can make principled trade-offs—determining whether a static deterministic workflow, a single foundation model invocation, or a dynamically delegated agent loop delivers sufficient task value to justify its operational expense.
+
 ## Model Cascades and Routing {#sec-vol3-agent-economics-cascades}
 
 Critical-path analysis reveals where faster execution accelerates an agent workflow, but routing decides which model configuration should attempt the work in the first place. A small, specialized model often completes a constrained code transformation at negligible cost, whereas a frontier model justifies its higher expense when diagnosing complex, ambiguous system failures. A **model cascade**\index{Model cascade!definition}[^fn-cascade-viola-jones] evaluates a task through a sequence of configurations, beginning with an inexpensive tier and escalating only when necessary—an architecture formalized for language model APIs in FrugalGPT [@chen2023frugalgpt]. The economic value of a cascade depends directly on three operational quantities: the fraction of requests resolved by cheaper tiers, the overhead of their failed attempts, and the difficulty distribution of tasks that escalate.
@@ -841,6 +841,123 @@ $$
 For direct routing, this decision rule compares two complete end-to-end policies before execution begins. After an initial cheap attempt fails, however, the router compares the remaining escalation policy against stopping or invoking human fallback, treating already incurred spend as a sunk cost. A cheap-then-frontier policy carries its own reach-weighted cost and compound duration, not merely the cheap model's nominal price. In all cases, the decision rule must operate inside remaining budget, deadline, and operational authority limits; positive expected value never licenses spending past a hard limit or substitutes for explicit authorization.
 
 System load further reshapes this comparison. Waiting for an overloaded model tier consumes wall-clock time and holds open active execution environments, such as containerized sandboxes. When the queue for an inexpensive tier backs up, routing a task directly to an idle frontier model can yield lower total cost and lower wall-clock latency, even at a higher nominal inference price. Production routers must therefore incorporate real-time queue depths and resource contention metrics into their execution-cost and completion-time estimates, linking dispatch decisions directly to underlying queuing and service capacity models.
+
+## Critical-Path Latency {#sec-vol3-agent-economics-criticalpath}
+
+End-to-end execution time is not merely a user-experience metric; it is a primary driver of the environment and sandbox holding cost ($C_{\text{sandbox}}^{(t)}$) established in our fundamental task account. When a task routes to an overloaded model tier or waits for external tools, it holds costly compute resources open.
+
+Accelerating a model call rarely yields a proportional reduction in end-to-end task time. In realistic agent workflows, container provisioning, repository setup, test suite execution, tool I/O, and consensus validation often dominate total elapsed time. Evaluating an acceleration technique therefore requires an end-to-end systems perspective: how much wall-clock time does the proposed change strip from the critical path to a declared endpoint, what compute and memory resources does it consume, and does the accelerated execution preserve the required acceptance evidence? Tracing exposes where time actually goes, while economic accounting determines whether accelerating that specific span is worth the operational cost.
+
+### Dependency graphs and elapsed time {#sec-vol3-agent-economics-dependency-graphs}
+
+Distributed tracing distinguishes enclosing parent spans from the nested operations within them. Summing a parent span's duration with the durations of its children double-counts time. Similarly, simply summing concurrent sibling spans inflates apparent latency, whereas omitting queueing delays, network transit, or uninstrumented runtime pauses undercounts it. When profiling an agent runtime, uninstrumented intervals must remain explicitly accounted for as unexplained gaps rather than arbitrarily attributed to neighboring components.
+
+::: {.column-margin .margin-pointer}
+↩ Parent-child span nesting and the double-counting it causes in latency attribution are established in @sec-vol3-evaluation-tracing-latency.
+:::
+
+Crucially, a span's parent in a call tree denotes syntactic containment, which does not necessarily reflect an execution dependency. An agent runtime might spawn background log flushes or asynchronous cache warmers that outlive the caller without blocking the next step. To determine end-to-end latency, we must construct a directed acyclic execution graph based on true dispatch and join conditions: a directed edge indicates that the successor task cannot begin until its predecessor completes. Along any path, we count only disjoint, non-overlapping intervals rather than inclusive parent spans alongside their children. For a directed dependency graph with vertex durations $t(\SpeedAtDetection)$ and source-to-sink paths $\Pi$, the longest path defines the **critical path**\index{Critical path!trajectory}:[^fn-critical-path-method]
+
+$$T_{\text{crit}} = \max_{\pi \in \Pi} \sum_{\SpeedAtDetection \in \pi} t(\SpeedAtDetection).$$ {#eq-vol3-critical-path}
+
+[^fn-critical-path-method]: **Critical Path**: The critical-path method was introduced for planning and scheduling large engineering projects, where the longest chain of dependent activities fixes the completion date and every activity off that chain has slack [@kelley1959critical]. Distributed-systems work later recovered the same dependency model from existing component logs of production requests, precisely so that critical-path and slack analysis could say which component's speedup would shorten end-to-end latency [@chow2014mystery]. An agent trace needs the same reconstruction before any acceleration is priced.
+
+When the graph contains only mandatory computation, @eq-vol3-critical-path establishes an idealized lower bound on completion time. The critical path matches the actual observed wall-clock interval only when the dependency graph incorporates real-world scheduling artifacts: thread scheduling delays, resource contention waits, queueing latencies, and sandbox initialization. Furthermore, the boundary of the graph depends on the system contract. Emitting an initial streamed token, evaluating a candidate patch against unit tests, and fully committing a validated pull request represent fundamentally different completion endpoints, each with its own dependency sink.
+
+Accelerating a non-critical branch leaves end-to-end latency unchanged under a fixed schedule, although it may free cluster capacity or reduce hosting costs. Conversely, accelerating an operation on the critical path often shifts the bottleneck elsewhere: once the original limiting path shrinks below a parallel branch, that alternate branch becomes the new critical path. Systems engineers must therefore recompute critical paths dynamically after each proposed optimization, rather than naively subtracting isolated component savings from total elapsed time.
+
+### The payoff of faster inference {#sec-vol3-agent-economics-inference-payoff}
+
+```{python}
+#| label: calc-vol3-agent-economics-critical-path
+#| echo: false
+# WHERE FASTER INFERENCE HELPS (LEGO)
+# Goal: Bound elapsed-time savings in one fixed, serial repair episode.
+# Scope: Hypothetical seconds, not measurements or a fleet workload model.
+from mlsysim import second
+from mlsysim.fmt import fmt_qty, fmt_percent, fmt_multiple, check
+
+class CriticalPath:
+    # 1. LOAD: sequential intervals; all required work remains unchanged.
+    model_intervals_s = (1.20, 8.40, 1.85, 11.20, 2.10, 4.50)
+    tests_s = 245.60
+    lifecycle_intervals_s = (14.80, 22.55)
+    runtime_status_intervals_s = (0.12, 0.08)
+    model_speedup = 4.0
+
+    # 2. EXECUTE: each interval belongs to exactly one category.
+    model_s = sum(model_intervals_s)
+    lifecycle_s = sum(lifecycle_intervals_s)
+    runtime_status_s = sum(runtime_status_intervals_s)
+    other_s = tests_s + lifecycle_s + runtime_status_s
+    total_s = model_s + other_s
+    model_fraction = model_s / total_s
+    changed_s = other_s + model_s / model_speedup
+    saving_s = total_s - changed_s
+    speedup = total_s / changed_s
+    limiting_speedup = total_s / other_s
+    tests_half_saving_s = tests_s / 2  # alternative: halve the required test interval
+
+    # 3. GUARD: disjoint accounting and independent Amdahl calculation.
+    check(all(t >= 0 for t in model_intervals_s + lifecycle_intervals_s + runtime_status_intervals_s), "Nonnegative intervals")
+    check(tests_s >= 0 and other_s > 0 and model_speedup >= 1, "Valid acceleration domain")
+    check(abs(total_s - 312.40) < 1e-9, "Full declared elapsed interval")
+    check(abs(changed_s - total_s * (1 - model_fraction + model_fraction / model_speedup)) < 1e-9, "Independent Amdahl calculation")
+    check(abs(saving_s - 21.9375) < 1e-9, "Independent saved model time")
+    check(1 <= speedup <= limiting_speedup, "Finite acceleration respects limiting bound")
+    check(tests_half_saving_s > 5 * saving_s, "Halving tests must dominate the model speedup here")
+
+    # 4. OUTPUT: each export is used below, with units supplied once.
+    model_str = fmt_qty(model_s * second, second, precision=2)
+    tests_str = fmt_qty(tests_s * second, second, precision=2)
+    lifecycle_str = fmt_qty(lifecycle_s * second, second, precision=2)
+    runtime_status_str = fmt_qty(runtime_status_s * second, second, precision=2)
+    total_str = fmt_qty(total_s * second, second, precision=2)
+    fraction_str = fmt_percent(model_fraction, precision=1, style="prose")
+    model_speedup_mult_str = fmt_multiple(model_speedup, precision=0)
+    changed_str = fmt_qty(changed_s * second, second, precision=2)
+    saving_str = fmt_qty(saving_s * second, second, precision=2)
+    speedup_mult_str = fmt_multiple(speedup, precision=2)
+    limiting_speedup_mult_str = fmt_multiple(limiting_speedup, precision=2)
+    tests_half_saving_str = fmt_qty(tests_half_saving_s * second, second, precision=1)
+```
+
+::: {#nbk-18-critical-path-investment .callout-notebook title="How much does faster inference buy?"}
+
+**Problem**: In a hypothetical three-turn repair episode, how much elapsed time does a `{python} CriticalPath.model_speedup_mult_str` acceleration of every model call save?
+
+**Variables**: All intervals execute sequentially, from runtime initialization through final sandbox snapshot export, without queueing, overlapping execution, or uninstrumented gaps. The durations listed in @tbl-vol3-trace-critical-path represent disjoint, non-overlapping sums rather than nested spans. The proposed acceleration modifies only inference latency, leaving model outputs, tool operations, test evidence, scheduling decisions, and finalization unchanged.
+
+| Disjoint category                            |                               Elapsed time |
+|:---------------------------------------------|-------------------------------------------:|
+| Model calls across the three turns           |          `{python} CriticalPath.model_str` |
+| Required test execution                      |          `{python} CriticalPath.tests_str` |
+| Sandbox creation and snapshot export         |      `{python} CriticalPath.lifecycle_str` |
+| Runtime initialization and repository status | `{python} CriticalPath.runtime_status_str` |
+| **Whole declared interval**                  |      **`{python} CriticalPath.total_str`** |
+
+: **One serial repair episode**: Categories partition elapsed time under the stated assumptions; the total is not an additional interval. {#tbl-vol3-trace-critical-path}
+
+**Math**: If model execution occupies fraction $f$ of baseline duration $\Time$ and accelerates by factor $x \geq 1$, Amdahl's fixed-work law [@amdahl1967] bounds the new duration: $\Time' = \Time[(1-f)+f/x]$. Here, model work accounts for `{python} CriticalPath.fraction_str` of elapsed time. A `{python} CriticalPath.model_speedup_mult_str` model acceleration reduces the episode to `{python} CriticalPath.changed_str`, saving `{python} CriticalPath.saving_str` for an overall speedup of `{python} CriticalPath.speedup_mult_str`. Even instantaneous inference ($x \to \infty$) yields a whole-episode speedup of only `{python} CriticalPath.limiting_speedup_mult_str` under these assumptions.
+
+**Systems insight**: The theoretical speedup ceiling $1/(1-f)$ dictates whether paying for faster model inference can ever satisfy an operational deadline. Because this ceiling depends only on baseline profile measurements, engineers can evaluate its viability before investing in model optimization or specialized serving infrastructure. In this repair episode, halving test execution duration while maintaining identical coverage saves `{python} CriticalPath.tests_half_saving_str`—far outpacing the `{python} CriticalPath.saving_str` gained from a `{python} CriticalPath.model_speedup_mult_str` model acceleration—while simultaneously reducing sandbox leasing charges in the effective cost $\CostPerAcceptedTaskEff$. When an engineering latency target exceeds what $1/(1-f)$ can theoretically deliver, engineering effort belongs on test execution and environment lifecycle optimizations. In non-linear, branching trajectories, this principle applies directly to the recomputed critical path of @eq-vol3-critical-path.
+
+:::
+
+### Span types and their levers {#sec-vol3-agent-economics-span-levers}
+
+Once distributed traces identify the critical path, engineers can target specific bottlenecks: optimizing prompt layouts for cache hits, compressing reasoning budgets, running independent tools concurrently, or deploying warm sandbox pools. However, concurrency gains diminish when tools contend for local resources or when a downstream tool requires an earlier output. While speculative environment preparation or early test-suite stopping can yield latency improvements, they do not change the core verification contract. Final task acceptance still demands full test coverage, and any compute resources consumed by aborted or speculative jobs must remain on the trajectory ledger.
+
+::: {#chk-18-whole-trajectory-economics .callout-checkpoint title="Cost and time per accepted task"}
+
+Before routing calls across models, check the account and the clock.
+
+- [ ] **Failed attempts**: A policy accepts `{python} TokenPriceFallacy.b_accepted_str` of `{python} TokenPriceFallacy.tickets_str` tickets. How many rejected attempts does each accepted repair pay for, and which of their charges stay in the numerator if one is canceled before its bill settles?
+- [ ] **Cache layout**: Which term of @eq-vol3-agent-economics-session-bill grows when a timestamp moves from the end of the system prompt to its front, and how does that term's growth with the horizon change?
+- [ ] **Compaction payback**: With `{python} PrefixCacheCost.before_str` calls left in notebook \ref{nbk-vol3-compaction-crossing}, should the runtime compact for price alone? What else could justify compacting anyway?
+- [ ] **Critical-path estimate**: Model calls take `{python} CriticalPath.fraction_str` of the serial episode. Before reading the table again, estimate the largest whole-episode speedup any model acceleration can buy, and decide whether halving the test interval would beat it.
+
+:::
 
 ## Capacity for Trajectories {#sec-vol3-agent-economics-capacity}
 
@@ -1168,199 +1285,6 @@ Before bounding what an individual trajectory may spend, evaluate the platform c
 :::
 
 Capacity planning sizes the collective infrastructure required to sustain admitted workload streams. Enforcing economic discipline on an individual trajectory—and bounding the cumulative expenditures of recursive sub-agent trees—requires a complementary mechanism: a transactional admission and settlement ledger.
-
-## Spending Governance {#sec-vol3-agent-economics-governance}
-
-When a coordinator admits concurrent sub-agents or child tasks, simple balance checks collapse under race conditions. If two children inspect the remaining free balance simultaneously before either records a reservation, both admission checks succeed, yet their combined liability immediately breaches the authorized task budget. Task cancellation introduces a second, equally perilous concurrency bug: returning a stopped child's allocation to the free pool while its remote service call remains billable allows another worker to spend funds that are already committed to third-party infrastructure. To maintain financial safety, the admission invariants established in @sec-vol3-agent-harness-reservation-settlement must remain strictly conserved across concurrent dispatch, node crashes, and late settlement.
-
-### Liability bounds and admission {#sec-vol3-agent-economics-liability-bounds}
-
-Let $E(t)$ denote gross charges settled into a task's ledger at time $t$ and $R(t)$ the funds withheld there for outstanding liabilities, delegated allocations, and protected finalization. A task with authorized budget $\CostCeiling$ maintains the fundamental invariant
-
-$$E(t)+R(t)\le \CostCeiling.$$
-
-Before admitting any billable operation, the runtime must reserve a strict upper bound $\bar c$ on its maximum possible charge, rather than relying on an expected or average cost. This bound must cover every billing category governed by the provider's rate schedule. For a foundation model API call, the reservation must account for the prompt token length, cached prefix rates, and the strictly enforced maximum completion token limit across all applicable categories (including hidden reasoning tokens). Similarly, invoking an external tool, provisioning a sandbox container, or renting cloud infrastructure requires enforced caps on execution wall-clock time, network data volume, and total per-call service fees.
-
-Stopping an operation also incurs teardown charges; required cleanup routines and graceful shutdowns must have reserved funds set aside in advance. Relying on a client-side host timeout or an estimated mean cost provides no protection: if an external service continues executing and billing after the client disconnects, the task's liabilities drift unchecked. Under a strict hard-ceiling policy, the runtime must reject any operation that lacks an enforceable upper bound or substitute a bounded alternative; accepting soft thresholds that permit arbitrary overshoot represents a fundamentally different, weaker operational contract.
-
-Budget enforcement also depends on complete mediation: every billable interaction must pass through the accounting gateway. If worker nodes hold shared credentials that bypass the reservation gate, or if unmonitored retry loops dispatch billable requests off the books, the ledger's guarantees collapse. Prompt caching and tiered volume discounts present a related operational subtlety: while cache hits reduce final settlement charges, they can reduce the upfront reservation $\bar c$ only if the provider contractually guarantees the discount prior to request dispatch. If a cache miss remains possible, the runtime must withhold the full un-discounted rate.
-
-The ledger tracks gross liabilities rather than net cash flows. Releasing an unspent reservation simply restores permission to spend money that was never actually charged. Subsequent provider credits, reconciliations, or post-hoc refunds are recorded as separate external adjustments that leave gross spending and historical authorizations intact. Crucially, fresh spending capacity enters the system only through an operator's explicit budget grant, never through automatic replenishment from error recoveries or the speculative promise of a newly spawned candidate branch.
-
-### Budget conservation across descendants {#sec-vol3-agent-economics-budget-conservation}
-
-Each node $k$ maintains the same account structure in a runtime-owned ledger, tracking its allocation $C_{\max,k}$, settled gross charges $E_k$, reservations $R_k$, and free balance $F_k$. The local conservation rule requires
-
-$$C_{\max,k}=E_k+R_k+F_k,\qquad E_k,R_k,F_k\ge0.$$
-
-A **budget reservation**\index{Budget reservation!definition}[^fn-escrow-budget-reservation] removes funds from the free balance $F_k$ before an operation can be dispatched. In a hierarchical agent tree, delegating an allocation $b$ to a child node withholds those funds in the parent's reservation pool $R_P$ while the child manages them within its own local ledger ($C_{\max,\AFourthTaxonomyAxis} = F_C = b$). The parent's reservation and the child's entire ledger thus represent the exact same capital backing viewed from two different levels of abstraction. Naively summing reserved balances across all nodes in the hierarchy would double-count the delegated capital. Conversely, inspecting only the parent's settled charges $E_P$ omits active charges still accumulating in open child accounts. Fleet-wide reporting attributes each charge exactly once through its unique operation record, while the tree hierarchy tracks which branch holds the authority to back it.
-
-The state transitions summarized in @tbl-vol3-ledger-transitions are strictly atomic with respect to competing admissions and control-plane changes. Because spending represents an irreversible external commitment, ledger update records must durably survive the failure domain specified in @sec-vol3-persistence-wal before any billable request leaves the runtime. If a worker node crashes, a replacement coordinator reconstructs active reservations directly from this write-ahead log rather than resetting balances because the former worker disappeared. Furthermore, delegating financial spending authority differs fundamentally from delegating operational capabilities: granting a child sub-agent read permission on a repository does not subtract that permission from the parent, whereas delegating budget capacity withholds discretionary funds that the parent otherwise could spend.
-
-| Ledger event                           | Required condition                                                        | Conserved update                                                                                        |
-|:---------------------------------------|:--------------------------------------------------------------------------|:--------------------------------------------------------------------------------------------------------|
-| Allocate $b$ to a child                | Current authority and eligibility; $b\le F_P$                             | Parent moves $b$ from $F_P$ to $R_P$; child starts with $C_{\max,\AFourthTaxonomyAxis}=F_C=b$           |
-| Admit an operation bounded by $\bar c$ | Current guards pass; $\bar c\le F_k$                                      | Move $\bar c$ from $F_k$ to $R_k$ and record the operation and attempt binding                          |
-| Final settlement with charge $c$       | Authenticated final evidence; $0\le c\le \bar c$; reservation still owned | Remove $\bar c$ from $R_k$, add $c$ to $E_k$, and return $\bar c-c$ to $F_k$                            |
-| Stop a child with unsettled work       | New admission is closed; outstanding records remain owned                 | Keep backing for its calls and descendants; stopping alone releases no liability                        |
-| Close a fully settled child            | No further admission; calls and descendants settled; $R_C=0$              | Parent removes $C_{\max,\AFourthTaxonomyAxis}$ from $R_P$, adds $E_C$ to $E_P$, and adds $F_C$ to $F_P$ |
-
-: **Conserved budget transitions**: Each update preserves the allocated total. Closure requires financial settlement, not merely a stopped local process. {#tbl-vol3-ledger-transitions}
-
-[^fn-escrow-budget-reservation]: **Escrow**: High-throughput transaction processing systems solved this concurrency bottleneck for hot aggregate quantities like bank balances and warehouse inventory. Rather than locking an entire balance record during a long-running workflow, the escrow transactional method sets aside a portion of the aggregate, allowing concurrent transactions to allocate and commit against the remaining balance independently [@oneil1986escrow]. A budget reservation functions as escrow for spending authority, where the provider's final authenticated invoice serves as the transaction commit.
-
-Every budget reservation is tied to a unique compound identifier binding the task, logical operation, transport attempt number, pricing tier, and cost bound $\bar c$. When downstream work finishes, settlement requires cryptographically authenticated usage receipts evaluated against a durable **settlement identity**\index{Settlement identity!definition}—the idempotency key under which the definitive charge posts to the ledger. If network retries cause the provider to deliver identical billing evidence multiple times, the runtime applies the state transition at most once, verifying that repeated deliveries contain identical payloads. A conflicting payload under an existing settlement identity indicates a reconciliation fault, which the runtime must neither blindly overwrite nor silently ignore. When long-running services report intermediate consumption, the runtime can incrementally move settled amounts into $E_k$ while continuing to withhold a bound on remaining liabilities; it releases the reservation entirely only upon definitive finality. Deduplicating a remote side effect at an API endpoint and deduplicating an internal financial ledger record serve two distinct engineering contracts.
-
-If an external service reports a charge that exceeds its initial reservation ($c > \bar c$), the system's foundational cost invariant has failed. Silently clamping the reported charge to $\bar c$ or allowing the free balance $F_k$ to drop below zero would conceal a critical safety failure. Instead, the runtime immediately flags the discrepancy, halts further admissions within the affected subtree, and escalates the incident for reconciliation. Until an administrator or reconciliation procedure resolves the dispute, the system's strict financial guarantee is temporarily suspended. Provided cost bounds remain valid, admissions execute atomically, and settlements are strictly deduplicated, every state transition preserves non-negative balances ($E_k, R_k, F_k \ge 0$) and guarantees that no child sub-agent can spend outside its allocated backing.
-
-### Cancellation and settlement {#sec-vol3-agent-economics-cancellation-settlement}
-
-The cancellation boundary established in @sec-vol3-multiagent-cancellation-trees immediately prevents a sub-agent from launching new billable operations once control is revoked. However, remote service termination and billing reconciliation operate asynchronously. Even after a local worker halts, outstanding HTTP requests, remote inference batches, or detached cloud instances may continue executing until upstream timeouts trigger or cancellation signals propagate. Consequently, the child's allocation cannot simply be returned to the parent pool at the moment of local termination; it must remain reserved until all remote obligations settle. If maintaining the inactive child's ledger in memory is inefficient, the runtime can execute a durable ledger transfer, handing over all known charges, outstanding reservations, and genuinely unencumbered funds to a centralized settlement coordinator. This transfer must preserve the complete lineage of operation identities and backing reservations across all descendants. At no point during the handover may an ownership gap exist where funds could be double-released or where an in-flight liability is left unbacked.
-
-Graceful teardown also requires dedicated resources. Protected finalization routines—such as querying the status of remote jobs, gathering debug telemetry, or shutting down cloud sandboxes—must operate from an isolated, reserved sub-allocation within the original budget. This finalization allowance permits essential status queries after ordinary task admission has closed, without reopening general spending authority. When generating accounting reports across a cutoff boundary, the runtime rigorously distinguishes between settled historical charges and active liabilities held in reserve.
-
-The notebook below traces this distinction for a canceled child sub-agent that receives an unexpected, delayed invoice from an external provider.
-
-```{python}
-#| label: calc-vol3-agent-economics-ledger
-#| echo: false
-# ┌─────────────────────────────────────────────────────────────────────────────
-# │ CONSERVED BUDGET WITH A CANCELED CHILD AND A LATE BILL
-# ├─────────────────────────────────────────────────────────────────────────────
-# │ Context: @sec-vol3-agent-economics-governance and its ledger notebook.
-# │ Goal: Keep a stopped child's remote liability backed until final settlement.
-# │ Show: Root balances, child pending liability, late bill, and released funds.
-# │ How: Exact integer accounting in thousandths of a scenario dollar, followed
-# │      by the atomic transfers of @tbl-vol3-ledger-transitions.
-# │ Note: Hypothetical charge records and enforceable bounds, not provider rates.
-# └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import check, fmt_usd
-
-class BudgetLedger:
-    # ┌── 1. LOAD (Hypothetical records; integer milli-dollars) ─────────────
-    units_per_dollar = 1000
-    b_root = 5000
-    c_plan = 42  # final planning charge already settled at the first row
-    b_trace, b_fuzz = 1200, 2500
-    e_trace, e_fuzz = 380, 850
-    pending_fuzz = 1000  # enforceable maximum remaining remote charge
-    late_charge = 700  # authenticated final bill received after local stop
-
-    # ┌── 2. EXECUTE (Conserved transitions) ───────────────────────────────
-    f_after_plan = b_root - c_plan
-    r_deleg = b_trace + b_fuzz
-    f_after_deleg = f_after_plan - r_deleg
-    refund_trace = b_trace - e_trace
-    e_after_trace = c_plan + e_trace
-    r_after_trace = r_deleg - b_trace
-    f_after_trace = f_after_deleg + refund_trace
-    fuzz_free_at_stop = b_fuzz - e_fuzz - pending_fuzz
-    fuzz_apparent_free = b_fuzz - e_fuzz  # what a release at local stop would return
-    settlement_records = (("fuzz_final_bill", late_charge), ("fuzz_final_bill", late_charge))  # duplicate delivery
-    applied_settlements = {}
-    fuzz_e_settled = e_fuzz
-    for settlement_id, reported_charge in settlement_records:
-        if settlement_id in applied_settlements:
-            check(applied_settlements[settlement_id] == reported_charge, "Conflicting payload for a settlement identity")
-        else:
-            applied_settlements[settlement_id] = reported_charge
-            fuzz_e_settled += reported_charge
-    fuzz_free_settled = fuzz_free_at_stop + pending_fuzz - late_charge
-    e_final = e_after_trace + fuzz_e_settled
-    r_final = r_after_trace - b_fuzz
-    f_final = f_after_trace + fuzz_free_settled
-    root_states = (
-        (c_plan, 0, f_after_plan),
-        (c_plan, r_deleg, f_after_deleg),
-        (e_after_trace, r_after_trace, f_after_trace),
-        (e_after_trace, r_after_trace, f_after_trace),
-        (e_final, r_final, f_final),
-    )
-
-    # ┌── 3. GUARD (Conservation and displayed claims) ──────────────────────
-    for settled, reserved, free in root_states:
-        check(settled + reserved + free == b_root, "Root conservation failed")
-        check(min(settled, reserved, free) >= 0, "Negative ledger balance")
-    check(e_fuzz + pending_fuzz + fuzz_free_at_stop == b_fuzz, "Stopped child must retain the remote reservation")
-    check(0 <= late_charge <= pending_fuzz, "Late bill must fit its enforced bound")
-    check(root_states[2] == root_states[3], "Local stop must not release backing")
-    check(e_final == c_plan + e_trace + e_fuzz + late_charge == 1972, "Every final charge must enter exactly once")
-    check(f_final == 3028 and r_final == 0, "Final free balance drift")
-    check(fuzz_free_at_stop == 650 and fuzz_free_settled == 950, "Late settlement releases only the unused part")
-    check(fuzz_apparent_free - fuzz_free_at_stop == pending_fuzz > late_charge, "Premature release overcommits the bound")
-
-    # ┌── 4. OUTPUT (Dollar strings) ───────────────────────────────────────
-    b_root_str = fmt_usd(b_root / units_per_dollar, precision=0)
-    c_plan_str = fmt_usd(c_plan / units_per_dollar, precision=3)
-    b_trace_str = fmt_usd(b_trace / units_per_dollar, precision=2)
-    b_fuzz_str = fmt_usd(b_fuzz / units_per_dollar, precision=2)
-    e_trace_str = fmt_usd(e_trace / units_per_dollar, precision=2)
-    e_fuzz_str = fmt_usd(e_fuzz / units_per_dollar, precision=2)
-    pending_fuzz_str = fmt_usd(pending_fuzz / units_per_dollar, precision=0)
-    late_charge_str = fmt_usd(late_charge / units_per_dollar, precision=2)
-    f_after_plan_str = fmt_usd(f_after_plan / units_per_dollar, precision=3)
-    r_deleg_str = fmt_usd(r_deleg / units_per_dollar, precision=2)
-    f_after_deleg_str = fmt_usd(f_after_deleg / units_per_dollar, precision=3)
-    e_after_trace_str = fmt_usd(e_after_trace / units_per_dollar, precision=3)
-    r_after_trace_str = fmt_usd(r_after_trace / units_per_dollar, precision=2)
-    f_after_trace_str = fmt_usd(f_after_trace / units_per_dollar, precision=3)
-    fuzz_free_at_stop_str = fmt_usd(fuzz_free_at_stop / units_per_dollar, precision=2)
-    fuzz_free_settled_str = fmt_usd(fuzz_free_settled / units_per_dollar, precision=2)
-    e_final_str = fmt_usd(e_final / units_per_dollar, precision=3)
-    r_final_str = fmt_usd(r_final / units_per_dollar, precision=0)
-    f_final_str = fmt_usd(f_final / units_per_dollar, precision=3)
-    fuzz_apparent_free_str = fmt_usd(fuzz_apparent_free / units_per_dollar, precision=2)
-```
-
-::: {#nbk-18-hierarchical-multi-agent-budget-allocation-and .callout-notebook title="A canceled child with a late bill"}
-
-**Problem**: A hypothetical repair has a `{python} BudgetLedger.b_root_str` budget. Its planning charge has settled at `{python} BudgetLedger.c_plan_str`, and it allocates `{python} BudgetLedger.b_trace_str` to trace analysis and `{python} BudgetLedger.b_fuzz_str` to fuzzing. The trace child closes with a final charge of `{python} BudgetLedger.e_trace_str`. The fuzzing child has settled `{python} BudgetLedger.e_fuzz_str` and holds `{python} BudgetLedger.pending_fuzz_str` for a remote operation when its local executor confirms termination. No further child work is admitted. The remote operation later terminates with a final additional bill of `{python} BudgetLedger.late_charge_str`. All other charges and required finalization are included in these records, and neither child has descendants. When can the root release the fuzzing allocation?
-
-**Math**: We keep the entire child allocation reserved at the root until its account closes. @Tbl-vol3-late-bill-ledger follows the root's balances under the same conservation rule throughout.
-
-| Root ledger boundary                    |                               Settled $E$ |                              Reserved $R$ |                                  Free $F$ |
-|:----------------------------------------|------------------------------------------:|------------------------------------------:|------------------------------------------:|
-| Planning settled                        |        `{python} BudgetLedger.c_plan_str` |       `{python} BudgetLedger.r_final_str` |  `{python} BudgetLedger.f_after_plan_str` |
-| Both allocations granted                |        `{python} BudgetLedger.c_plan_str` |       `{python} BudgetLedger.r_deleg_str` | `{python} BudgetLedger.f_after_deleg_str` |
-| Trace child closed                      | `{python} BudgetLedger.e_after_trace_str` | `{python} BudgetLedger.r_after_trace_str` | `{python} BudgetLedger.f_after_trace_str` |
-| Fuzzing locally stopped; bill pending   | `{python} BudgetLedger.e_after_trace_str` | `{python} BudgetLedger.r_after_trace_str` | `{python} BudgetLedger.f_after_trace_str` |
-| Late bill settled; fuzzing child closed |       `{python} BudgetLedger.e_final_str` |       `{python} BudgetLedger.r_final_str` |       `{python} BudgetLedger.f_final_str` |
-
-: **Root Balances Through a Late Bill**: Local stopping retains the pending child's allocation until its charges settle and its account closes. {#tbl-vol3-late-bill-ledger}
-
-At local termination, the fuzzing ledger has `{python} BudgetLedger.fuzz_free_at_stop_str` free, but its remote reservation remains outstanding. Final settlement releases the unused part of that reservation, leaving `{python} BudgetLedger.fuzz_free_settled_str` to return when the child closes. Re-delivery of the same final billing record changes none of these balances.
-
-**Systems insight**: A premature release upon local process termination would have returned `{python} BudgetLedger.fuzz_apparent_free_str` (the allocation minus already-settled charges), even though only `{python} BudgetLedger.fuzz_free_at_stop_str` was truly unencumbered. The subsequent `{python} BudgetLedger.late_charge_str` bill would then have landed on funds already committed to another child task. The governing invariant upon cancellation is strict: release at most the allocation minus settled charges minus the enforceable upper bound on outstanding work, and return the remainder only as each remote operation reaches final settlement. Financial safety is only as reliable as those upper bounds and the completeness of the ledger records.
-
-:::
-
-@Fig-vol3-hierarchical-budget-ledger tracks capital conservation across the parent-child hierarchy: the top panel diagrams root allocations across `trace` and `fuzzing` child tasks, while the bottom panel stacks five equal-length bars across sequential accounting boundaries to demonstrate that funds shift strictly among settled, reserved, and free categories without leakage—holding root reservations constant through child cancellation until late bills settle.
-
-::: {#fig-vol3-hierarchical-budget-ledger fig-env="figure" fig-pos="htb" fig-cap="**Conservation Across a Canceled Child**: Top, the root allocates to two children, and the fuzzing child's ledger at local stop splits its allocation into settled charges, a pending remote reservation, and free balance. Bottom, the root's balances at each boundary of @tbl-vol3-late-bill-ledger always sum to the same budget. Local stopping leaves the root's reservation unchanged; only settlement of the late bill moves the fuzzing allocation into settled and free balances." fig-alt="Top: a root ledger box with arrows to a trace child box and a fuzzing child box. The fuzzing child box contains a stacked bar with settled, pending remote, and free segments and a note about the late bill. Bottom: five equal-length stacked bars, one per root ledger boundary, divided into settled, reserved, and free segments, with the settled amount listed in a column at the right. The fourth bar, labeled fuzzing stopped, bill pending, matches the third."}
-![](images/svg/hierarchical-budget-ledger.svg)
-:::
-
-### Spending alarms and admission limits {#sec-vol3-agent-economics-alarms-admission-limits}
-
-Even when a cumulative task budget is strictly conserved, an overall ceiling cannot prevent damaging expenditure spikes. If an unconstrained agent launches dozens of model calls concurrently, it can burn through its entire allocation in seconds. A retrospective **spending alarm**\index{Spending alarm!definition} monitors the burn rate by dividing the gross charges settled over a trailing window of duration $T_{\text{win}}$ by $T_{\text{win}}$. However, because external billing is often delayed, a retrospective alarm can stay deceptively quiet while expensive requests are in flight, only to spike violently after execution has already halted. While retrospective alarms are useful for triggering administrative alerts or throttling subsequent work, they act after the fact: the capital they measure has already been spent.
-
-To prevent rapid budget exhaustion, the runtime must enforce proactive **admission limits**\index{Admission limit!definition} that evaluate new financial commitments—in the form of reservations—prior to dispatch. For a spending rate limit permitting at most $C_{\text{win}}$ in new liabilities over any trailing window of duration $T_{\text{win}}$, a robust admission policy enforces
-
-$$\sum_{i:\,t-T_{\text{win}}<t_i\le t}\bar c_i\le C_{\text{win}},$$
-
-where $t_i$ is the admission timestamp and $\bar c_i$ is the bounded charge of each billable operation.[^fn-window-token-bucket] Every prospective admission atomically validates both this sliding-window limit and the cumulative ledger balance. This window constraint applies across all child tasks within the coordinator's scope, rather than granting a fresh window allowance to every newly spawned worker. Delegating an allocation down the agent tree is an internal balance partition, not a newly admitted billable dispatch. Furthermore, retaining $\bar c_i$ in the window calculation until its admission timestamp ages out prevents a rapid sequence of fast-completing calls from triggering an unbounded burst. This policy guarantees a strict upper bound on committed work over the interval, regardless of when external providers finish processing requests or transmit final invoices.
-
-[^fn-window-token-bucket]: **Trailing Window vs. Token Bucket**: Standard network and API rate limiters often employ token buckets, which permit an initial burst equal to the bucket capacity followed by a steady refill rate; over a short interval $\Delta t$, maximum consumption can reach capacity plus rate times $\Delta t$. In contrast, the trailing-window sum strictly caps committed liabilities across every continuous window of duration $T_{\text{win}}$ at $C_{\text{win}}$, irrespective of burst shape, at the modest implementation cost of retaining timestamped admission records until they age out of the window.
-
-Rate-limiting policies must also protect capacity and budget for mandatory finalization routines. If an aggressive rate limiter blocks all outgoing traffic during a spending spike, it can starve the very cancellation and status queries required to terminate running tasks and settle outstanding reservations. Dedicating isolated execution lanes or explicit finalization allowances within the accounting policy prevents this deadlock. Importantly, completing a diagnostic probe or clearing an operational alarm must never prematurely release funds held for unrelated active reservations.
-
-When an agent enters an un-converging loop—evidenced by repeated execution failures or unvarying candidate artifacts—the runtime triggers a spending hold under its semantic watchdog policies. This intervention halts ongoing expenditures before runaway iterations exhaust the task budget. The runtime enforces the designated cancellation or escalation workflow while preserving all outstanding liabilities on the ledger. Evaluating whether completed work meets task requirements remains the responsibility of the domain acceptance contract, rather than the spending controller.
-
-::: {.column-margin .margin-pointer}
-↩ Semantic watchdogs, which detect a non-converging loop from its progress evidence and place the trajectory in an admission hold, are established in @sec-vol3-sagas-watchdogs.
-:::
-
-Formal budget reservations transform economic governance from hopeful telemetry into an enforceable systems contract under declared pricing and failure models. Once cost, latency, and residual liabilities are rigorously bounded and audited, the systems architect can make principled trade-offs—determining whether a static deterministic workflow, a single foundation model invocation, or a dynamically delegated agent loop delivers sufficient task value to justify its operational expense.
 
 ## Pricing the Choice of Architecture {#sec-vol3-agent-economics-selection}
 
@@ -1818,19 +1742,18 @@ The most effective optimization target depends on which component dominates the 
 
 @Tbl-vol3-agent-economics-key-equations gathers the governing economic relations developed throughout this chapter, along with the operational assumptions—such as cohort settlement, prefix cache dynamics, independent retries, or stationary queueing—under which each holds.
 
-| Equation                                                                                                                                                                                                                             | What it bounds or decides                                                                                                                   | Where derived                                                 |
-|:-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|:--------------------------------------------------------------------------------------------------------------------------------------------|:--------------------------------------------------------------|
-| $\CostPerAcceptedTaskEff=\dfrac{\sum_{i=1}^{\NumberOfDevices}C_{\text{task},i}}{\AcceptedTasks}=C_{\text{succ}}+\dfrac{1-\PermessageLatency}{\PermessageLatency}C_{\text{fail}}$                                                     | Cost per accepted task over a settled cohort; each accepted task carries $(1-\PermessageLatency)/\PermessageLatency$ nonaccepted ones       | @sec-vol3-agent-economics-accounting                          |
-| $C_{\text{session}}=\sum_{t=1}^{\Horizon}\left[\PertokenPricesIn(S^{(t)}-S_{\text{hit}}^{(t)})+\PertokenPricesCache{}S_{\text{hit}}^{(t)}+\PertokenPricesOut{}K^{(t)}\right]$                                                        | Token bill of a trajectory under a declared tariff; prefix reuse lowers the coefficient of the quadratic re-read term without removing it   | @eq-vol3-agent-economics-session-bill                         |
-| $N_{\min}=1+\left\lceil U/s\right\rceil$, with $U=\PertokenPricesOut{}K_{\text{sum}}+\PertokenPricesIn{}S_{\text{comp}}$ and $s=\PertokenPricesCache(\SequenceLength-S_{\text{comp}})$                                               | Payback horizon of compaction; fewer remaining calls than $N_{\min}$ means compaction loses money on price alone                            | @sec-vol3-agent-economics-caching                             |
-| $Q_k=1-(1-\HiddenDimensionFour)^k$ at $c/\HiddenDimensionFour$ per acceptance; $p_{\text{loop}}(H_{\max})=1-\prod_{t=1}^{H_{\max}}(1-q_t)$                                                                                           | Coverage and price of sequential retry with early stopping, and the yield of a bounded loop from its conditional turn rates                 | @sec-vol3-agent-economics-caching, @eq-vol3-loop-success      |
-| $T_{\text{crit}}=\max_{\pi\in\Pi}\sum_{\SpeedAtDetection\in\pi}t(\SpeedAtDetection)$                                                                                                                                                 | Completion time set by the longest dependent path; accelerating a nonlimiting branch leaves it unchanged                                    | @eq-vol3-critical-path                                        |
-| $S_{\text{spec}}=\dfrac{\bar \MicrobatchCount+1}{\gamma\beta+1}$, then $\Time'=\Time\left[(1-f)+f/S_{\text{spec}}\right]$                                                                                                            | Speculation pays on the call only when $\bar \MicrobatchCount>\gamma\beta$; the trajectory gains at most $1/(1-f)$                          | @eq-vol3-spec-speedup, @sec-vol3-agent-economics-criticalpath |
-| $\mathbb{E}[C_{\text{cascade}}]=\sum_j r_j(c_j+g_j)$ and $\AcceptanceProbability=\sum_j r_jq_j$                                                                                                                                      | Reach-weighted price and acceptance of a gated cascade; every reached tier pays for its call and its gate                                   | @sec-vol3-agent-economics-cascades                            |
-| $\ConcurrentTrajectories=\ConcurrentTrajectoriesTwo\mathbb{E}[\TrajectoryDuration]$ and $\ServingUtilization(\PermessageLatency)=\dfrac{\TrajectoryGoodput\,\mathbb{E}[N_{\text{call}}]}{\PermessageLatency \WorkerCountWorkers\mu}$ | Mean occupancy of each held resource, and the offered load a goodput target imposes; lower acceptance raises load as $1/\PermessageLatency$ | @eq-vol3-trajectory-concurrency                               |
-| $\mathbb{E}[T_{\text{queue}}]\approx\dfrac{c_a^2+c_s^2}{2}\dfrac{\ServingUtilization}{1-\ServingUtilization}\mathbb{E}[T_{\text{svc}}]$                                                                                              | Heavy-traffic estimate of mean queue wait at one server; sets the utilization a latency target can afford                                   | @eq-vol3-kingman-gg1                                          |
-| $u^*=\dfrac{C_{\text{fixed}}}{3600\mu_{\text{out}}(c_{\text{API}}-c_{\text{ded}})}$                                                                                                                                                  | Delivered load above which dedicated capacity costs less than a per-token API at a fixed token mix                                          | @eq-vol3-breakeven-utilization                                |
-| $C_{\max,k}=E_k+R_k+F_k$ with $E(t)+R(t)\le \CostCeiling$                                                                                                                                                                            | Conserved spending across descendants; admission reserves a bound $\bar c$, and only settlement releases it                                 | @sec-vol3-agent-economics-governance                          |
+| Equation                                                                                                                                                                                                                             | What it bounds or decides                                                                                                                   | Where derived                                            |
+|:-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|:--------------------------------------------------------------------------------------------------------------------------------------------|:---------------------------------------------------------|
+| $\CostPerAcceptedTaskEff=\dfrac{\sum_{i=1}^{\NumberOfDevices}C_{\text{task},i}}{\AcceptedTasks}=C_{\text{succ}}+\dfrac{1-\PermessageLatency}{\PermessageLatency}C_{\text{fail}}$                                                     | Cost per accepted task over a settled cohort; each accepted task carries $(1-\PermessageLatency)/\PermessageLatency$ nonaccepted ones       | @sec-vol3-agent-economics-accounting                     |
+| $C_{\text{session}}=\sum_{t=1}^{\Horizon}\left[\PertokenPricesIn(S^{(t)}-S_{\text{hit}}^{(t)})+\PertokenPricesCache{}S_{\text{hit}}^{(t)}+\PertokenPricesOut{}K^{(t)}\right]$                                                        | Token bill of a trajectory under a declared tariff; prefix reuse lowers the coefficient of the quadratic re-read term without removing it   | @eq-vol3-agent-economics-session-bill                    |
+| $N_{\min}=1+\left\lceil U/s\right\rceil$, with $U=\PertokenPricesOut{}K_{\text{sum}}+\PertokenPricesIn{}S_{\text{comp}}$ and $s=\PertokenPricesCache(\SequenceLength-S_{\text{comp}})$                                               | Payback horizon of compaction; fewer remaining calls than $N_{\min}$ means compaction loses money on price alone                            | @sec-vol3-agent-economics-caching                        |
+| $Q_k=1-(1-\HiddenDimensionFour)^k$ at $c/\HiddenDimensionFour$ per acceptance; $p_{\text{loop}}(H_{\max})=1-\prod_{t=1}^{H_{\max}}(1-q_t)$                                                                                           | Coverage and price of sequential retry with early stopping, and the yield of a bounded loop from its conditional turn rates                 | @sec-vol3-agent-economics-caching, @eq-vol3-loop-success |
+| $T_{\text{crit}}=\max_{\pi\in\Pi}\sum_{\SpeedAtDetection\in\pi}t(\SpeedAtDetection)$                                                                                                                                                 | Completion time set by the longest dependent path; accelerating a nonlimiting branch leaves it unchanged                                    | @eq-vol3-critical-path                                   |
+| $\mathbb{E}[C_{\text{cascade}}]=\sum_j r_j(c_j+g_j)$ and $\AcceptanceProbability=\sum_j r_jq_j$                                                                                                                                      | Reach-weighted price and acceptance of a gated cascade; every reached tier pays for its call and its gate                                   | @sec-vol3-agent-economics-cascades                       |
+| $\ConcurrentTrajectories=\ConcurrentTrajectoriesTwo\mathbb{E}[\TrajectoryDuration]$ and $\ServingUtilization(\PermessageLatency)=\dfrac{\TrajectoryGoodput\,\mathbb{E}[N_{\text{call}}]}{\PermessageLatency \WorkerCountWorkers\mu}$ | Mean occupancy of each held resource, and the offered load a goodput target imposes; lower acceptance raises load as $1/\PermessageLatency$ | @eq-vol3-trajectory-concurrency                          |
+| $\mathbb{E}[T_{\text{queue}}]\approx\dfrac{c_a^2+c_s^2}{2}\dfrac{\ServingUtilization}{1-\ServingUtilization}\mathbb{E}[T_{\text{svc}}]$                                                                                              | Heavy-traffic estimate of mean queue wait at one server; sets the utilization a latency target can afford                                   | @eq-vol3-kingman-gg1                                     |
+| $u^*=\dfrac{C_{\text{fixed}}}{3600\mu_{\text{out}}(c_{\text{API}}-c_{\text{ded}})}$                                                                                                                                                  | Delivered load above which dedicated capacity costs less than a per-token API at a fixed token mix                                          | @eq-vol3-breakeven-utilization                           |
+| $C_{\max,k}=E_k+R_k+F_k$ with $E(t)+R(t)\le \CostCeiling$                                                                                                                                                                            | Conserved spending across descendants; admission reserves a bound $\bar c$, and only settlement releases it                                 | @sec-vol3-agent-economics-governance                     |
 
 : **Key Equations of Agent Economics**: Each relation holds only under the assumptions stated where it is derived, such as a settled cohort, ideal prefix reuse, conditionally independent attempts, a stationary single-server queue, or enforceable charge bounds. {#tbl-vol3-agent-economics-key-equations tbl-colwidths="[42,40,18]"}
 

@@ -590,7 +590,7 @@ When normal task execution terminates—whether by completing its primary plan, 
 
 When automated finalization fails to establish the required postconditions, the runtime writes a complete handoff record to durable storage. This record captures all verified state changes, indeterminate external operations, active resource leases, unreleased reservations, and the next responsible owner. The runtime then initiates a formal, acknowledged handoff. When an on-call engineer acknowledges the escalation page, that response transfers operational custody of the incident, leaving the underlying external operations to be reconciled manually.
 
-Even within the strict boundaries imposed by commitment regions, iterative repair attempts can consume execution budgets without advancing the task toward completion. Continuous progress monitoring provides the empirical telemetry required to detect these stalled trajectories and trigger timely human intervention.
+So far, this chapter has focused on managing the external environment: recording explicit recovery obligations, unwinding partial side effects through compensation, executing bounded forward repairs, and enforcing safety boundaries around irreversible pivots. These mechanisms guarantee that the system can restore a consistent external state when a single tool dispatch crashes, times out, or fails outright. But agent systems also fail in a distinctly different way. An agent can maintain perfect transaction safety with the external world—successfully committing and unwinding small, safe operations—while its own internal reasoning loops endlessly without making progress toward the task's completion. Protecting the external environment from corruption is necessary, but it does not prevent an agent from burning its entire operational budget on a futile behavioral trajectory.
 
 ## Semantic Watchdog Timers {#sec-vol3-sagas-watchdogs}
 
@@ -783,6 +783,36 @@ A watchdog turns fallible progress evidence into an enforced hold. Test both hal
 :::
 
 A progress monitor operates strictly within the scope of an individual trajectory. In production clusters, however, repeated execution failures often reflect an impaired upstream dependency—such as an overloaded database, a rate-limited package repository, or a failing authentication service—shared across thousands of concurrent agents. Because individual attempt budgets do not limit aggregate cluster load, independent agents retrying in parallel can rapidly trigger a catastrophic retry storm. Mitigating shared degradation requires shifting operational control from individual agent watchdogs to system-level circuit breakers and shared dependency boundaries.
+
+## Dependency Controls {#sec-vol3-sagas-containment}
+
+When an agentic system delegates subtasks to external tools or subagents, failures within those dependencies pose a systemic threat. Without explicit boundaries, a localized timeout in a document retriever or an intermittent failure in a code compiler does not merely overwhelm the external tool—it bloats the model's context window with repetitive error strings and drives massive, compounding inference costs. To insulate shared backend services from retry cascades and protect the runtime from resource exhaustion, the agent harness adapts three traditional dependency controls to LLM-specific behaviors: retry ownership, jittered backoff, and bulkheads.
+
+### Coordinated retry ownership
+
+In a layered architecture, a tool call might pass through the model's client library, an API gateway, a tool dispatcher, and the external service itself. If a network adapter silently retries a timeout three times, and the LLM execution harness also attempts the tool call three times, a single failing operation barrages the downstream service with requests. Worse, if the retry loop is visible to the LLM, every failed attempt appends a redundant error message to the prompt, expanding the context window and multiplying token costs.
+
+To prevent retry multiplication and context bloat, the runtime must enforce **single-owner retries**. The retry allowance for any logical operation must be assigned to exactly one authoritative layer in the stack, while all other layers strictly propagate failures outward. For agentic systems, the trajectory orchestrator is typically the correct owner. By returning a single, consolidated failure observation to the LLM instead of masking failures through lower-level retries, the orchestrator allows the agent to exercise its semantic context—perhaps deciding to write a bespoke script rather than repeatedly hammering a failing API.
+
+### Capped exponential backoff with full jitter
+
+When an authoritative owner does retry an idempotent operation, it must space its attempts to avoid contributing to a thundering herd. A standard exponential backoff doubles the delay between attempts: $b_k = b_0 2^k$. However, if many concurrent agents experience a failure simultaneously—such as a search API rate limit resetting at the top of the minute—pure exponential backoff ensures they will all wake up and request costly LLM inference steps again exactly $b_0$, $2b_0$, and $4b_0$ seconds later, simply moving the bottleneck from the search tool to the model inference cluster.
+
+The runtime breaks this synchronization by applying **full jitter**, selecting the actual delay $d_k$ uniformly at random from zero up to the current backoff limit:
+
+$$d_k \sim \operatorname{Uniform}(0, b_k) \quad \text{where} \quad b_k = \min(b_{\max}, b_0 2^k)$$
+
+While jitter smooths the arrival rate of retries, it does not bound the peak load. It simply decorrelates the retry schedules of independent agents. To strictly bound the load on a failing dependency, the system requires structural isolation.
+
+### Bulkheads and circuit breakers
+
+When a dependency stalls rather than failing immediately, it forces the agent runtime to hold the connection open until a timeout $T_{\text{out}}$ expires. If the runtime processes incoming requests at a rate $\ArrivalRate$, the stalled dependency will trap a growing number of the runtime's worker threads or asynchronous tasks. In steady state, the number of blocked workers is:
+
+$$N_{\text{blocked}} = \min(N_{\text{pool}}, \ArrivalRate T_{\text{out}})$$
+
+In a fleet of autonomous agents, a stalled dependency does not merely block worker threads; it traps the costly inference context of each stalled trajectory in active memory, leading to severe resource exhaustion. The runtime isolates failures using **bulkheads** (named for the watertight compartments in a ship's hull) and **circuit breakers**. A bulkhead restricts the maximum number of concurrent requests to any single dependency, ensuring that a total failure of the document retriever can only exhaust a strict fraction of the worker pool, leaving the remaining capacity available for the code executor.
+
+If the error rate or latency of the dependency crosses a configured threshold, a circuit breaker trips open, instantly failing all subsequent requests without waiting for $T_{\text{out}}$. This immediately relieves the load on the dependency and prevents agents from burning tokens on futile waits. Instead of stalling, the circuit breaker instantly returns a "service unavailable" observation to the model, allowing the agent's semantic compensation logic (or error-handling branches) to activate immediately rather than stalling the entire trajectory.
 
 ## Incident Containment {#sec-vol3-sagas-quarantine}
 

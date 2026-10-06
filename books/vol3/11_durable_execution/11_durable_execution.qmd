@@ -113,12 +113,8 @@ Every event envelope contains a trajectory identifier, a unique event identifier
 | `ContextBuilt`, `ModelReplied`                  | Model-call identity, immutable delivered-input manifest and bytes or available references, assembly and request configuration, reply status and payload, raw signals and available provider provenance | Recover what was supplied and observed without resampling the historical invocation                              |
 | `Authorized`, `BudgetReserved`, `BudgetSettled` | Decision and policy version, invocation or operation identity, reservation bound, actual usage evidence, remaining unresolved liability, protected finalization reserve                                | Rebuild admission and accounting, not merely a remaining-balance scalar                                          |
 | `ToolIntent`, `ToolResult`                      | Logical operation and transport attempt identities, represented operation and arguments, applicable revision and repeat contract, job handle when known, outcome evidence and observation completeness | Preserve possible dispatch and its evidence; a pending, partial, or timeout result does not establish settlement |
-| `ControlChanged`, `PlanChanged`                 | Control request and issuer, guarded state and grant changes, record and control versions, plan revision and dependencies, observation eligibility, resource and outstanding-obligation owners          | Restore the continuation separately from work that remains unresolved                                            |
-| `ApprovalRequested`, `ApprovalResolved`         | Exact held action and relevant versions, authorized reviewer and decision evidence, expiry, withdrawal or refusal status                                                                               | Restore the held decision without treating an old approval as current dispatch permission                        |
-| `Compacted`, `RuntimeInput`                     | Recorded summary and dependencies; clocks, identifiers, policy/configuration inputs, and event-order information captured at the declared replay boundary                                              | Preserve the actual inputs used by context assembly or supervisory decisions                                     |
-| `Checkpoint`                                    | Exact covered log boundary, compatible record and workspace manifests, required artifact references and integrity information                                                                          | Select an available base for reconstructing the record and workspace through a later suffix                      |
 
-: **Trajectory log schema**: Event families preserve the control and evidence contract across a crash. The log records observations and decisions, not automatic proof that an external effect settled or a task succeeded. {#tbl-vol3-durable-log-schema}
+: **Core Trajectory Log Schema**: Core event families preserve the control and evidence contract across a crash. The log records observations and decisions, not automatic proof that an external effect settled or a task succeeded. {#tbl-vol3-durable-log-schema}
 
 Our software repair worksheet illustrates how these identifiers link distributed lifecycle events. Alongside the workspace snapshot `ws_r18`, the identifier `operation_id=test_r18` designates the logical test suite invocation, while `attempt_id=attempt1` tracks the specific network transport attempt. If an asynchronous test executor returns an acknowledgment containing a cluster job identifier such as `job_tests_18`, that handle correlates future asynchronous callbacks with the original operation. However, a recovering worker can discover this link only if that acknowledgment was durably flushed to the log before the crash. A durable `ToolResult` may record an active execution state, a timeout, or a completed test report; the reducer interprets these payloads according to their authenticated provenance. If an asynchronous execution finishes after the supervisor has already timed out the enclosing step, the late-arriving `ToolResult` updates the historical operation ledger rather than corrupting an obsolete execution branch.
 
@@ -224,7 +220,7 @@ Database write-ahead logging forces a modification's log record to stable storag
 
 When surviving evidence proves insufficient to resolve an action, the ledger maintains ownership for reconciliation or explicit operator intervention across timeouts, pauses, and terminal execution paths. Independent branches of execution can proceed under their own guards while dependent operations await resolution. @Sec-vol3-sagas-architecture develops the compensating actions that remediate established effects.
 
-### Group commit {#sec-vol3-durable-execution-group-commit}
+::: {#psp-11-wal-group-commit .callout-perspective title="Performance Optimization: Group commit"}
 
 An agent runtime managing dozens of concurrent trajectories incurs a separate durable storage barrier for every single dispatch. Under a replicated quorum contract, each barrier translates into a network round trip to remote storage nodes. **Group commit**\index{Group commit!definition}[^fn-group-commit-origin] mitigates this overhead by coalescing multiple ready log records into a single shared storage acknowledgment [@dewitt1984]. A batch coordinator aggregates pending intent records, issues one consolidated write to the replicated store, and unblocks individual dispatches only after receiving a successful quorum acknowledgment. Even within a batch, every individual trajectory strictly maintains write-ahead intent ordering before transmission.
 
@@ -287,6 +283,8 @@ class GroupCommit:
 
 Increasing the batch size reduces storage overhead per record but increases the queueing delay experienced by early arrivals. Under light traffic, aggregation delay dominates, making a batch flush timer essential to bound tail latency. Under heavy load, throughput amortization keeps queue depths manageable, though very large payloads can eventually inflate the storage operation itself. With a `{python} GroupCommit.timer_str` ms timer and a `{python} GroupCommit.ack_str` ms quorum acknowledgment, a batch of `{python} GroupCommit.batch_str` intents incurs only `{python} GroupCommit.work_str` ms of amortized storage work per intent; yet the first arrival waits `{python} GroupCommit.first_str` ms, and even the final arrival still waits the full `{python} GroupCommit.ack_str` ms storage round trip. The systems design principle is clear: size the batch timer strictly within the allowable dispatch latency budget, instrument queueing delay separately from storage service time, and never compromise the declared durability domain simply to shave milliseconds off dispatch latency.
 
+:::
+
 ::: {#chk-11-wal-invariants .callout-checkpoint title="Intent, evidence, and the durability domain"}
 
 - [ ] **Failure domain**: The worker acknowledges an intent locally, dispatches the test, then permanently loses its disk before asynchronous replication. Does the remote replica's missing intent license a fresh dispatch, and which acknowledgment in @tbl-vol3-durable-ack-domains would have made that inference sound?
@@ -307,7 +305,14 @@ A **checkpoint**\index{Checkpoint!definition} binds a recoverable record snapsho
 
 ### Consistent recovery boundaries {#sec-vol3-durable-execution-recovery-boundaries}
 
-We define the checkpoint boundary $j_{\text{ckpt}}$ as an authoritative log position rather than a loose model turn, mirroring the fold boundary $j$. A checkpoint manifest serves as the formal contract for this boundary. It explicitly binds $j_{\text{ckpt}}$ to the record snapshot, the workspace snapshot, references to external artifacts, cryptographic hashes for integrity, and the reducer schema versions required to interpret them. The control record snapshot captures cumulative resource consumption, active budget reservations, approval states, and in-flight operations with their assigned worker leases. These obligations persist in the record even while a crashed agent awaits replacement.
+We define the checkpoint boundary $j_{\text{ckpt}}$ as an authoritative log position rather than a loose model turn, mirroring the fold boundary $j$. A checkpoint manifest serves as the formal contract for this boundary.
+
+| Event family | Required contents                                                                                                             | Reconstruction use                                                                          |
+|:-------------|:------------------------------------------------------------------------------------------------------------------------------|:--------------------------------------------------------------------------------------------|
+| `Checkpoint` | Exact covered log boundary, compatible record and workspace manifests, required artifact references and integrity information | Select an available base for reconstructing the record and workspace through a later suffix |
+
+: **Checkpoint Schema**: The checkpoint event formalizes the recovery boundary in the log. {#tbl-vol3-durable-checkpoint-schema}
+ It explicitly binds $j_{\text{ckpt}}$ to the record snapshot, the workspace snapshot, references to external artifacts, cryptographic hashes for integrity, and the reducer schema versions required to interpret them. The control record snapshot captures cumulative resource consumption, active budget reservations, approval states, and in-flight operations with their assigned worker leases. These obligations persist in the record even while a crashed agent awaits replacement.
 
 The capture protocol must guarantee mutual consistency among these distributed components. One design pauses workspace mutations, drains in-flight disk writes, and synchronizes the record and filesystem at a quiescent boundary. An alternative design treats workspace states as content-addressed, immutable trees, mapping each versioned root directly to a log boundary. Reading the database record and the filesystem independently without synchronization does not qualify—it produces torn reads that corrupt recovery.[^fn-consistent-cut-checkpoint] External tasks may remain in flight during capture, provided the checkpoint explicitly records their unresolved status and idempotency tokens.
 
@@ -406,188 +411,7 @@ Periodic compaction can compress an extended delta chain back into a consolidate
 
 Selecting an optimal checkpoint cadence balances the runtime overhead of taking snapshots against the time required to reconstruct the suffix after a crash. When logged events and workspace deltas survive host failure, replaying that suffix incurs only the modest cost of reading, validating, folding, and applying recorded mutations—completely avoiding expensive foundation-model inferences. The agent resumes dispatching new model calls only after state reconstruction and guarded resume succeed.
 
-Classical checkpointing models address a fundamentally harsher failure regime: one where a crash obliterates all in-flight work, forcing the system to recompute from the last checkpoint.[^fn-young-restart-dumps] In agentic execution, this unrecoverable loss occurs when an external tool invocation fails mid-flight, an unlogged model call is interrupted, or local filesystem modifications bypass the write-ahead log. Under Poisson failure assumptions, each crash discards an average of half a checkpoint interval of execution. Balancing that expected loss against the pause overhead of writing snapshots determines the classical checkpoint interval.
-
-[^fn-young-restart-dumps]: **Checkpoint Interval Lineage**: Young posed the problem for long batch jobs that saved restart information periodically so that a random failure need not restart the job from the beginning [@young1974]. The derivation assumes that lost work must be computed again; a trajectory whose turns are logged violates that assumption, which is why the interval lengthens once the log absorbs the lost-work term. \index{Young's approximation!origin}
-
-```{python}
-#| label: calc-vol3-durable-young-interval
-#| echo: false
-# ┌─────────────────────────────────────────────────────────────────────────────
-# │ YOUNG'S CHECKPOINT INTERVAL AND THE FLAT OPTIMUM (LEGO)
-# ├─────────────────────────────────────────────────────────────────────────────
-# │ Context: @eq-vol3-young-interval, @thrm-11-young-checkpoint-interval, and
-# │          the cadence notebook that follows it.
-# │
-# │ Goal: Price the interval for work that must be re-executed after a crash.
-# │ Show: T*_ckpt, overhead at T*_ckpt, and overhead when T*_ckpt is missed.
-# │ How:  w(T_ckpt) = T_save/T_ckpt + T_ckpt/(2 M); T*_ckpt = sqrt(2 T_save M);
-# │       w(x T*_ckpt) / w(T*_ckpt) = (x + 1/x) / 2.
-# │ Note: Scenario pause and failure rate, not measured values.
-# └─────────────────────────────────────────────────────────────────────────────
-import math
-from mlsysim.fmt import fmt_int, fmt_percent, check
-
-class YoungInterval:
-    # ┌── 1. LOAD (scenario inputs, not measurements) ─────────────────────
-    t_save_s = 2.0  # pause per checkpoint, including durable publication
-    mtbf_min = 10  # mean time between work-losing failures, minutes
-    miss_small = 2  # interval off by this factor in either direction
-    miss_big = 10  # interval off by an order of magnitude
-
-    # ┌── 2. EXECUTE ──────────────────────────────────────────────────────
-    mtbf_s = mtbf_min * 60
-    tau_star_s = math.sqrt(2 * t_save_s * mtbf_s)
-
-    def overhead(tau, t_save=t_save_s, mtbf=mtbf_s):
-        return t_save / tau + tau / (2 * mtbf)
-
-    w_star = overhead(tau_star_s)
-    w_small = overhead(tau_star_s * miss_small)
-    w_big = overhead(tau_star_s / miss_big)
-    small_penalty = w_small / w_star - 1
-
-    # ┌── 3. GUARD (prose claims) ─────────────────────────────────────────
-    check(48 < tau_star_s < 50, "tau* is about 49 s")
-    check(abs(w_star - math.sqrt(2 * t_save_s / mtbf_s)) < 1e-12, "Overhead at optimum is sqrt(2 T/M)")
-    check(abs(overhead(tau_star_s / miss_small) - w_small) < 1e-12, "Missing by x or 1/x costs the same")
-    check(abs(small_penalty - 0.25) < 1e-9, "A factor-of-two miss costs 25 percent more")
-    check(abs(w_big / w_star - (miss_big + 1 / miss_big) / 2) < 1e-9, "Order-of-magnitude miss ratio")
-    check(0.40 < w_big < 0.42, "Tenfold miss gives about 41 percent overhead")
-
-    # ┌── 4. OUTPUT ───────────────────────────────────────────────────────
-    t_save_str = fmt_int(t_save_s)
-    mtbf_str = fmt_int(mtbf_min)
-    tau_star_str = fmt_int(tau_star_s)
-    w_star_str = fmt_percent(w_star, precision=1, style="prose")
-    miss_small_str = fmt_int(miss_small)
-    miss_big_str = fmt_int(miss_big)
-    small_penalty_str = fmt_percent(small_penalty, style="prose")
-    w_big_str = f"{fmt_int(w_big * 100)} percent"
-```
-
-::: {#thrm-11-young-checkpoint-interval .callout-theorem title="Optimal checkpoint interval (Young's approximation)"}
-
-*A checkpoint taken too often wastes pauses; one taken too rarely wastes re-execution after each failure.* When failures are rare, Poisson, and independent of progress, each failure loses on average half an interval of useful work, and the pause is small relative to the interval, **Young's approximation**\index{Young's approximation!checkpoint interval} [@young1974] gives the useful-work interval between checkpoints that minimizes expected overhead:
-
-$$\OptimalCheckpointIntervalCkpt \approx \sqrt{2\,\CheckpointWriteTime\,\MeanTimeBetweenFailures}$$ {#eq-vol3-young-interval}
-
-*   **Checkpoint write time** ($\CheckpointWriteTime$): Time execution stops to capture and durably publish one checkpoint.
-*   **Mean time between failures** ($\MeanTimeBetweenFailures$): Expected time between crashes that lose unrecorded work.
-*   **Overhead at the optimum**: The cadence-dependent overhead is $\sqrt{2\,\CheckpointWriteTime/\MeanTimeBetweenFailures}$ of useful time. @Sec-vol3-appendix-math-daly derives the interval, from which this overhead follows, and @daly2006 refines both for failures during saving and recovery.
-*   **Sensitivity**: For a `{python} YoungInterval.t_save_str` s pause and a mean time between failures of `{python} YoungInterval.mtbf_str` minutes, $\OptimalCheckpointIntervalCkpt \approx$ `{python} YoungInterval.tau_star_str` s and the overhead is `{python} YoungInterval.w_star_str`. The minimum is flat: an interval off by a factor of `{python} YoungInterval.miss_small_str` in either direction raises overhead by only `{python} YoungInterval.small_penalty_str`, while a factor-of-`{python} YoungInterval.miss_big_str` miss raises it to `{python} YoungInterval.w_big_str`.
-
-:::
-
-Appending events to a persistent trajectory log fundamentally alters this trade-off by reducing the lost-work penalty without changing the snapshot pause. In distributed systems literature, pairing periodic snapshots with an append-only log of nondeterministic inputs is termed log-based rollback recovery [@elnozahy2002survey].[^fn-determinant-model-reply] When an agent durably records model outputs and workspace diffs turn by turn, recovery costs only the time to replay and validate those entries rather than re-executing inference. Substituting this smaller replay cost into the optimization lengthens the ideal checkpoint interval by the square root of the cost ratio. Only unlogged, in-flight operations—such as an interrupted HTTP call to an LLM provider—still suffer full re-execution penalties governed strictly by @eq-vol3-young-interval.
-
-[^fn-determinant-model-reply]: **Determinants**: Log-based recovery protocols record each nondeterministic event as a determinant, the information needed to reproduce its outcome during recovery, and are classified by when determinants reach stable storage [@elnozahy2002survey]. In an agent trajectory the model reply is the dominant determinant: a sampled reply cannot be regenerated, so logging it is what lets the fold replace re-execution. \index{Rollback recovery!log-based}
-
-::: {.column-margin}
-![](images/svg/vol3_durable_margin_003.svg){width="100%" fig-alt="A U-shaped purple curve of overhead against checkpoint interval on a logarithmic axis, with a dot at its minimum labeled T star, a shaded band around the minimum labeled flat, and the axis ends labeled too often and too rarely."}
-
-*Overhead is flat near the optimum interval and steep far from it.*
-:::
-
-We can quantify the total overhead $T_{\text{overhead}}(k)$ across different checkpoint strides $k$ on an illustrative failure trace. Let $N_k$ denote the number of checkpoints taken at stride $k$, let $\CheckpointWriteTime$ represent the checkpoint write time as defined in @eq-vol3-young-interval, let $T_{\text{restore}}$ denote the baseline restore latency per crash, and let $T_{\text{recon}}$ represent the reconstruction cost per completed turn in the suffix. If crash $i$ leaves $H_{\text{suffix},i}(k)$ completed turns beyond the most recent checkpoint, the total time lost to snapshotting and recovery is:
-
-$$T_{\text{overhead}}(k) = N_k \CheckpointWriteTime + N_{\text{crash}} T_{\text{restore}} + T_{\text{recon}}\sum_i H_{\text{suffix},i}(k).$$
-
-All three terms are expressed in seconds. Aggregating reconstruction costs on a per-turn basis simplifies the model, though in production a single turn's suffix may encompass multiple fine-grained log records.
-
-```{python}
-#| label: calc-vol3-durable-checkpoint-cadence
-#| echo: false
-# CHECKPOINT AND RECORDED-SUFFIX COST (LEGO)
-# Goal: Compare three cadences on a fixed illustrative failure trace and check
-#       them against the logged square-root balance.
-# Scope: Serial capture pauses and reconstruction only; no resampled model calls.
-import math
-from mlsysim.fmt import fmt, fmt_int, fmt_multiple, check
-
-class CheckpointCadence:
-    # 1. LOAD: hypothetical inputs, not measured system performance.
-    turns = 100
-    crashes = (37, 83)  # after these completed turns; independent of cadence
-    strides = (10, 25, 50)
-    checkpoint_s = 0.5  # serial pause including durable publication
-    base_restore_s = 1.0  # per crash, fixed across these three policies
-    suffix_turn_s = 0.1  # read/validate/fold/apply per turn's recorded changes
-    reexec_turn_s = 20.0  # re-execute one turn's model call and tools if unlogged
-
-    # 2. EXECUTE: checkpoint at each multiple, including final handoff at 100.
-    rows = []
-    for stride in strides:
-        count = turns // stride
-        suffixes_list = []
-        for crash in crashes:
-            suffixes_list.append(crash % stride)
-        suffixes = tuple(suffixes_list)
-        suffix_turns = sum(suffixes)
-        capture_s = count * checkpoint_s
-        recovery_s = len(crashes) * base_restore_s + suffix_turns * suffix_turn_s
-        total_s = capture_s + recovery_s
-        rows.append((stride, count, suffixes, capture_s, recovery_s, total_s))
-    best = min(rows, key=lambda row: row[5])
-
-    # Logged square-root balance: per-turn cost c/k + lam * r * k / 2.
-    crash_rate = len(crashes) / turns  # crashes per completed turn
-    k_star_logged = math.sqrt(2 * checkpoint_s / (crash_rate * suffix_turn_s))
-    k_star_reexec = math.sqrt(2 * checkpoint_s / (crash_rate * reexec_turn_s))
-    stride_gain = math.sqrt(reexec_turn_s / suffix_turn_s)
-
-    # Checkpoint after every turn (used by the fallacies section).
-    every_turn_total_s = turns * checkpoint_s + len(crashes) * base_restore_s
-
-    # 3. GUARD: independent arithmetic checks for this finite worksheet.
-    for stride in strides:
-        check(turns % stride == 0, "Final handoff checkpoint included")
-    check([row[2] for row in rows] == [(7, 3), (12, 8), (37, 33)], "Correct checkpoint ages")
-    check([row[1] for row in rows] == [10, 4, 2], "Capture counts")
-    check(all(abs(row[5] - expected) < 1e-9 for row, expected in zip(rows, (8.0, 6.0, 10.0))), "Included seconds")
-    check(best[0] == 25, "Best of three on this trace, not a universal optimum")
-    check(20 < k_star_logged < 25, "Logged balance lands near the winning stride")
-    check(abs(k_star_logged / k_star_reexec - stride_gain) < 1e-9, "Stride gain is sqrt of cost ratio")
-    check(abs(every_turn_total_s - 52.0) < 1e-9, "Every-turn policy costs 52 s")
-    check(every_turn_total_s > 8 * best[5], "Every-turn policy is far worse than the best stride")
-
-    # 4. OUTPUT: all exported strings have inline consumers.
-    turns_str = fmt_int(turns)
-    crashes_str = " and ".join(fmt_int(value) for value in crashes)
-    capture_str = fmt(checkpoint_s, precision=1)
-    base_str = fmt_int(base_restore_s)
-    suffix_str = fmt(suffix_turn_s, precision=1)
-    reexec_str = fmt_int(reexec_turn_s)
-    stride10_str, stride25_str, stride50_str = (fmt_int(s) for s in strides)
-    best_str = fmt_int(best[0])
-    best_total_str = fmt_int(best[5])
-    total10_str, total25_str, total50_str = (fmt_int(row[5]) for row in rows)
-    recovery10_str, recovery25_str, recovery50_str = (fmt_int(row[4]) for row in rows)
-    _trace_strings = []
-    for row in rows:
-        ages = " and ".join(fmt_int(age) for age in row[2])
-        _trace_strings.append(f"{fmt_int(row[1])} checkpoints and reconstructs suffixes of {ages} turns")
-    trace10_str, trace25_str, trace50_str = _trace_strings
-    crash_rate_str = fmt(crash_rate, precision=2)
-    k_logged_str = fmt_int(k_star_logged)
-    k_reexec_str = fmt(k_star_reexec, precision=1)
-    stride_gain_mult_str = fmt_multiple(stride_gain, precision=1)
-    every_turn_str = fmt_int(every_turn_total_s)
-
-CheckpointCadence.trace_strings = CheckpointCadence._trace_strings
-```
-
-::: {#nbk-11-checkpoint-cadence .callout-notebook title="Checkpoint cadence on a fixed crash trace"}
-
-**Problem**: A hypothetical trajectory completes `{python} CheckpointCadence.turns_str` turns, with crashes after turns `{python} CheckpointCadence.crashes_str`. Each published checkpoint pauses execution for `{python} CheckpointCadence.capture_str` s. Each crash costs `{python} CheckpointCadence.base_str` s to restore the checkpoint plus `{python} CheckpointCadence.suffix_str` s per turn of recorded events and workspace changes since it. An initial checkpoint exists, every required suffix survives, and each policy also checkpoints at the final turn; only capture and reconstruction time count. Which stride, `{python} CheckpointCadence.stride10_str`, `{python} CheckpointCadence.stride25_str`, or `{python} CheckpointCadence.stride50_str` turns, spends the least time on this trace?
-
-**Math**: The `{python} CheckpointCadence.stride10_str`-turn policy publishes `{python} CheckpointCadence.trace10_str`. The `{python} CheckpointCadence.stride25_str`-turn policy publishes `{python} CheckpointCadence.trace25_str`. The `{python} CheckpointCadence.stride50_str`-turn policy publishes `{python} CheckpointCadence.trace50_str`. Reconstruction totals are `{python} CheckpointCadence.recovery10_str` s, `{python} CheckpointCadence.recovery25_str` s, and `{python} CheckpointCadence.recovery50_str` s; adding capture pauses gives $T_{\text{overhead}}(k)$ of `{python} CheckpointCadence.total10_str` s, `{python} CheckpointCadence.total25_str` s, and `{python} CheckpointCadence.total50_str` s. The logged form of the balance replaces re-executed work with reconstruction at $T_{\text{recon}}$ per turn. With failure rate $\MeanTimeBetweenFailuresThree =$ `{python} CheckpointCadence.crash_rate_str` crashes per turn, $k^\ast = \sqrt{2\CheckpointWriteTime/(\MeanTimeBetweenFailuresThree T_{\text{recon}})} \approx$ `{python} CheckpointCadence.k_logged_str` turns. If each lost turn instead had to be re-executed at $T_{\text{exec}}$ = `{python} CheckpointCadence.reexec_str` s, the same balance gives $k^\ast \approx$ `{python} CheckpointCadence.k_reexec_str` turns.
-
-**Result**: The `{python} CheckpointCadence.best_str`-turn stride wins on this trace, at `{python} CheckpointCadence.best_total_str` s, next to the balance point of about `{python} CheckpointCadence.k_logged_str` turns.
-
-**Systems insight**: Logging each turn's events and workspace changes lengthens the best stride by $\sqrt{r_{\text{exec}}/\BarrierRelativeDegree}$, about `{python} CheckpointCadence.stride_gain_mult_str` here, because a crash then costs reconstruction instead of repeated model calls. The stride moves with the square root of each knob: quadrupling the capture pause doubles it, and so does quartering the crash rate. Because the optimum is flat (theorem \ref{thrm-11-young-checkpoint-interval}), a stride within a factor of `{python} YoungInterval.miss_small_str` of the balance point costs at most `{python} YoungInterval.small_penalty_str` extra overhead; measure $\CheckpointWriteTime$, $\BarrierRelativeDegree$, and the crash rate from fault-injection traces before tuning more finely.
-
-:::
+Classical checkpointing models balance the overhead of writing frequent snapshots against the time lost recomputing from scratch after a crash. However, appending events to a persistent trajectory log fundamentally alters this trade-off. When an agent durably records model outputs and workspace diffs turn by turn, recovery only costs the time to replay and validate those entries rather than re-executing inference. Because replaying a deterministic event log is orders of magnitude cheaper than invoking new model calls, logging each turn drastically lengthens the optimal checkpoint stride. Systems designers should measure snapshot overhead and log replay times under realistic fault injection, then select a checkpoint cadence that minimizes total elapsed recovery time rather than optimizing for hypothetical inference losses.
 
 Operational transitions—such as waiting for human approval, compacting execution context, or performing a zero-downtime worker handoff—justify taking an opportunistic, out-of-cadence checkpoint if doing so truncates pending recovery chains or enables log pruning. If the record and workspace artifacts are already durable and recoverable, these boundary events require no extra snapshot. Checkpoint cadence remains an efficiency trade-off, whereas intent ordering is an absolute correctness invariant that no cadence optimization can relax.
 
@@ -643,7 +467,15 @@ For `test_r18`, the worker queries the tool endpoint to recover the job and its 
 
 The same rigorous accounting applies to financial and computational budgets. The worker reconstructs `actual_consumption`, `outstanding_reservations`, and the protected `finalization_reserve` by replaying all recorded `BudgetReserved` and `BudgetSettled` transitions. External model providers and compute clusters do not refund resources because an orchestrator crashed mid-flight. A partial usage report settles only the verified fraction of a call, while the unverified remainder stays locked in outstanding reservations. The replacement worker explicitly inherits the duty to retrieve final usage evidence or formally forfeit the reserved allocation.
 
-Control transitions and human approvals remain authoritative across failures. A trajectory recovered in the `PAUSED` state remains suspended, and a trajectory that reached a terminal continuation remains terminal. An approval recorded prior to the crash can continue waiting for dispatch capacity in `AWAITING_APPROVAL`, while an approval that has expired, become stale, or been explicitly revoked remains void across all workers. When authenticated results arrive late—after an operation has timed out or the trajectory has paused—they update the `operation_ledger` to maintain an accurate audit log, rather than retroactively mutating an obsolete conversation turn. The current owner must validate those newly settled facts before admitting them into subsequent model contexts.
+Control transitions and human approvals remain authoritative across failures.
+
+| Event family                            | Required contents                                                                                                                                                                             | Reconstruction use                                                                        |
+|:----------------------------------------|:----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|:------------------------------------------------------------------------------------------|
+| `ControlChanged`, `PlanChanged`         | Control request and issuer, guarded state and grant changes, record and control versions, plan revision and dependencies, observation eligibility, resource and outstanding-obligation owners | Restore the continuation separately from work that remains unresolved                     |
+| `ApprovalRequested`, `ApprovalResolved` | Exact held action and relevant versions, authorized reviewer and decision evidence, expiry, withdrawal or refusal status                                                                      | Restore the held decision without treating an old approval as current dispatch permission |
+
+: **Approval and Control Schema**: These events ensure that human approvals and control transitions remain authoritative across failures. {#tbl-vol3-durable-approval-schema}
+ A trajectory recovered in the `PAUSED` state remains suspended, and a trajectory that reached a terminal continuation remains terminal. An approval recorded prior to the crash can continue waiting for dispatch capacity in `AWAITING_APPROVAL`, while an approval that has expired, become stale, or been explicitly revoked remains void across all workers. When authenticated results arrive late—after an operation has timed out or the trajectory has paused—they update the `operation_ledger` to maintain an accurate audit log, rather than retroactively mutating an obsolete conversation turn. The current owner must validate those newly settled facts before admitting them into subsequent model contexts.
 
 ### Continuation admission {#sec-vol3-durable-execution-continuation-admission}
 
@@ -716,116 +548,6 @@ The final term marks a fundamental divergence between agent recovery and classic
 :::
 
 Resume converts surviving durable records into an authorized continuation while treating unverified outcomes with appropriate caution rather than misinterpreting silence as failure. That same reconstructed state also underpins a second essential capability: auditing and inspecting recorded agent behavior without admitting new model invocations or external side effects. This distinction brings us to trajectory replay.
-
-## Recorded Trajectory Replay {#sec-vol3-persistence-replay}
-
-When an agent execution stalls or fails during an automated repair, resuming the session admits fresh work under current system conditions. Post-mortem debugging, however, demands something fundamentally different: engineers must examine what the runtime recorded at the moment of failure and verify how the harness code responded to the specific inputs available at that time. Rerunning a targeted test like `test_r18` on a new `attempt1` cannot resolve that inquiry. Because external services drift, package versions change, and model sampling introduces variance, a new execution merely supplies fresh observations rather than reproducing the missing historical outcome.
-
-**Replay**\index{Replay!definition} substitutes retained execution records for live, non-deterministic inputs. The guarantees provided by replay depend entirely on which portion of the system computation is repeated. As summarized in @tbl-vol3-replay-comparison, systems engineers use retained trajectories for three distinct purposes: reconstructing a recorded state projection, validating harness logic through regression testing, and branching into counterfactual experiments.
-
-| Mode                      | Inputs and computation                                                                                         | Supported conclusion                                        |
-|:--------------------------|:---------------------------------------------------------------------------------------------------------------|:------------------------------------------------------------|
-| Recorded projection       | Fold retained events with the specified reducer and compatible checkpoint                                      | What selected runtime state the recorded history represents |
-| Harness regression replay | Run harness logic against captured inputs at a declared boundary, with live effects disabled                   | How that harness implementation responds to those inputs    |
-| Counterfactual branch     | Restore compatible starting state, change a declared condition, and obtain valid observations for the new path | What happened in this new experiment                        |
-
-: **Three uses of a recorded trajectory**: Reconstructing history, testing code, and exploring alternative execution paths answer distinct engineering questions. None establishes an unobserved external outcome. {#tbl-vol3-replay-comparison}
-
-The first two modes share a common architectural transformation from live execution, as contrasted in @fig-vol3-replay-mode: whereas live execution (top) loops continuously through active model sampling, authorization gates, and external tool dispatches, replay mode (bottom) severs live model and tool connections entirely, streaming recorded replies and environment observations directly from the trajectory log into the deterministic harness.
-
-::: {#fig-vol3-replay-mode fig-env="figure" fig-pos="htb" fig-cap="**Live Execution vs. Replay**: In live execution (top), each turn samples the model, passes its proposal through the authorization gate, dispatches the tool, and appends every step to the log. In replay (bottom), the model client is stubbed and tool dispatch is disconnected, so recorded replies and results stream into the harness and any request the log does not account for stops the replay. Folding those events reconstructs the recorded projection, and running harness logic against them is regression replay. A counterfactual branch differs from both, because after restoring its starting state it obtains new observations from compatible fixtures or isolated execution." fig-alt="Two panels. Top: live execution with harness record, foundation model, authorization gate, tools and environment, and trajectory log connected in a loop. Bottom: replay mode with the model and tool dispatch boxes crossed out, a recorded-results box, and the trajectory log streaming recorded events into the replaying harness."}
-![](images/svg/fig-vol3-replay-mode.svg)
-:::
-
-### Projection reconstruction {#sec-vol3-durable-execution-projection-reconstruction}
-
-In projection reconstruction, the log functions as a deterministic event stream. Folding the log applies previously recorded decisions directly; today's authorization policy never re-evaluates historical proposals. Starting from a known checkpoint `record_R_ckpt`, the compatible suffix reconstructs the selected record through its captured admission, reservation, intent, and outcome events. If the suffix ends abruptly after a `ToolIntent` record without an accompanying settling event, the resulting projection faithfully retains that unresolved operation, exposing an interrupted execution.
-
-Historical inspection can also retrieve the immutable input manifest captured for a specific `ContextBuilt` event. This manifest reveals the exact token sequence and bounded observations delivered to the model, rather than a prompt newly assembled from current, potentially mutated data sources. Reconstructing the corresponding workspace environment similarly requires mounting the compatible snapshot together with any incremental filesystem deltas logged up to that point.
-
-::: {#dfn-time-travel-replay .callout-definition title="Time-travel replay"}
-
-***Time-travel replay***\index{Time-travel replay!definition} reconstructs a selected recorded state at a historical log boundary from compatible checkpoints, events, and retained artifacts, without repeating the original model calls or external actions.
-
-1. **Significance**: It renders the runtime's historical evidence, decisions, and unresolved obligations fully inspectable at any retained log boundary for the cost of storage reads and a state fold, requiring zero model inference and generating zero external side effects.
-2. **Distinction**: Time-travel replay reconstructs an internal projection of recorded state, rather than restoring the full external world or re-evaluating decisions under updated policy rules.
-3. **Common pitfall**: Promising arbitrary historical inspection across every past turn when retention policies have already pruned required event payloads, filesystem snapshots, or historical reducer definitions.
-
-:::
-
-### Harness regression replay {#sec-vol3-durable-execution-harness-regression-replay}
-
-**Harness regression replay**\index{Harness regression replay!definition} executes the harness code itself against captured external inputs rather than folding precomputed decisions through a reducer. Instead of querying live model endpoints or invoking real tools, the harness consumes recorded model completions, external tool observations, and control events. For deterministic reproduction, the captured boundary must supply all nondeterministic inputs consumed by the harness logic: wall-clock timestamps, randomly generated identifiers, configuration parameters, policy rules, and event arrival schedules. While this capture boundary does not need to simulate the entire operating system, any unrecorded source of entropy weakens reproducibility. This principle directly mirrors deterministic replay in operating-system debuggers, which record asynchronous hardware interrupts and system call outputs to allow developers to step backward through complex race conditions [@king2005debugging].
-
-To serve captured inputs correctly, the replay adapter follows the **matching-request rule**\index{Matching-request rule!definition}, matching every outgoing request against the recorded trace before returning a response. A captured model response is valid only for its specific prompt invocation and delivered token payload. Similarly, a tool observation corresponds to a unique logical operation and attempt, parameterized by exact tool names and serialized arguments. Replay adapters enforce matching using canonicalized representations or explicitly declared normalization schemes, combined with logged arrival sequences or formal concurrency models.[^fn-happened-before-replay] A naive FIFO queue that blindly yields the next recorded event risks routing the test outcome of `test_r18` to an entirely different operation or candidate patch. If an outgoing request deviates from the recorded trace, the replay engine must immediately fail the comparison; under no circumstances should it fall back silently to a live network call.
-
-[^fn-happened-before-replay]: **Happened-Before**: Lamport showed that events in a distributed system are only partially ordered: one event precedes another when a chain of process steps and messages links them, and otherwise the two are concurrent [@lamport1978time]. Parallel tool calls in one turn are concurrent in this sense, so a replay must either record the order the harness actually observed or declare that any order is equivalent. \index{Happened-before relation!replay ordering}
-
-A reliable regression harness must strictly seal all live side-effect pathways. Real tool dispatch, external callback handlers, asynchronous background reconciliation loops, and production database writes must be severed or redirected to in-memory mocks. While the test may mutate isolated, ephemeral test state, all interactions with external infrastructure are replaced by recorded observations. Enforcing these isolation boundaries is strictly the responsibility of the test runtime; the harness must never trust the model or agent code to refrain from issuing live operations.
-
-Consider an edge case where an asynchronous tool returns an authenticated late result after an agent repair job has transitioned into the `PAUSED` state. According to the control-plane state machine, the correct harness behavior is to record the arriving observation in the operation ledger while keeping the agent paused, rather than automatically triggering a new model inference step. If a developer modifies the harness and inadvertently introduces a code path that fires an unauthorized model invocation upon receiving the late event, the regression replay immediately detects the discrepancy and fails the test. Crucially, successful execution against this historical trace proves only that the harness correctly handles that specific scenario; passing a replayed unit test for `test_r18` does not constitute evidence of general task competence or end-to-end patch correctness.
-
-When engineers update harness orchestration logic or tighten safety policies, behavioral changes are often intentional. Regression suites must therefore specify which outputs require strict byte-for-byte equivalence and which represent expected divergence. A diff between replayed execution and the historical baseline can indicate an unintended regression, an intentional algorithmic improvement, or a defect in the input capture itself. While replaying against recorded inputs eliminates expensive model API charges and external tool latencies, it still consumes local compute cycles, disk I/O, and setup overhead—and it validates behavior solely within the narrow envelope of previously observed execution paths.
-
-### Counterfactual branches {#sec-vol3-durable-execution-counterfactual-branches}
-
-A counterfactual investigation asks what trajectory an agent would follow if an engineer alters a prompt template, selects a different foundation model, updates an authorization policy, or modifies an observation filter. The runtime forks execution by allocating a fresh branch identifier linked explicitly to the parent log sequence at a designated checkpoint boundary $j_{\text{ckpt}}$. It documents the intervention in metadata and reconstructs the historical execution environment to match that precise point in time. In the crash repair scenario, branching from checkpoint $j_{\text{ckpt}}$ requires mounting the exact workspace snapshot `ws_r18` alongside matching dependency fixtures. If an engineer restores only the historical source code while executing against current, upgraded third-party packages, the experiment conflates the intentional prompt or code change with uncontrolled environment drift.
-
-By leveraging durable logs, the runtime reconstructs the unchanged prefix deterministically through projection folding, completely avoiding redundant model sampling or tool execution up to the fork point. Beyond that boundary, however, the newly diverged continuation requires genuine observations that correspond to its altered actions. A captured historical response remains valid only as long as the outgoing request and environmental assumptions match the historical trace exactly. The moment the modified agent proposes a different test command, alters tool arguments, or produces an alternative patch candidate, the recorded downstream events become obsolete. At this divergence point, the branch must either halt replay or transition into active execution, gathering fresh observations from an isolated sandbox or compatible test fixture. Because the branch represents an unverified trajectory, production side effects remain strictly disabled, and human approvals granted to the parent execution never carry over automatically to the branch.
-
-A **counterfactual branch**\index{Counterfactual branch!definition} is thus a distinct, newly identified execution thread that inherits a validated historical prefix while exploring an alternative downstream path. Inspecting an individual branch helps engineers diagnose why a specific bug occurred or test how a targeted prompt patch performs on a known failure mode. Establishing broader claims about agent reliability or task success rates, however, requires running statistically grounded benchmarks across distribution-scale test suites. Replay establishes the precise boundary where historical evidence ends and new computation begins; the next section examines how to leverage this retained log evidence to pinpoint the exact step where two executions diverge.
-
-::: {.column-margin .margin-pointer}
-↪ The statistical methods that turn repeated runs over a task distribution into reliability claims are developed in @sec-vol3-evaluation-rigor.
-:::
-
-## Locating a Divergence {#sec-vol3-persistence-non-determinism}
-
-When an automated software-repair workflow undergoes regression replay, execution proceeds uneventfully until reaching the recorded targeted-test result for candidate patch `r18`. The stored test result itself remains identical, but a revised harness assembles a subtly different observation context for the subsequent model call. Waiting until the final repair verdict to compare the runs obscures this earlier discrepancy under layers of compounding tool calls and token generations. Effective debugging requires pinpointing the exact architectural boundary where two executions first cease to agree within the recorded evidence.
-
-A **divergence point**\index{Divergence point!definition} is the first observable mismatch under a declared equivalence relation: between recorded and reconstructed state, between historical and revised harness logic on captured inputs, or between a golden trace and a live execution. Every comparison must explicitly define both its boundary and its equivalence criteria. In practice, two serialized JSON payloads might differ in a harmless trace identifier while representing the same permitted operation. Conversely, two tool invocations cannot be treated as equivalent simply because their shell commands match if they execute against different repository commits or working trees. A coarse turn counter obscures these distinctions when context assembly, model inference, authorization policy checks, and tool dispatch all unfold within a single turn.
-
-### Boundary-by-boundary comparison {#sec-vol3-durable-execution-boundary-comparison}
-
-A disciplined boundary comparison starts at a verified checkpoint or initial state and steps forward through corresponding events in their recorded sequence. Stable invocation and operation identifiers align the traces across runs, preserving any concurrency ordering or partial-order dependencies required by the replay contract. At each boundary, the diagnostic runtime evaluates three elements: the inputs delivered to that stage, the transformation configured for it (such as a prompt template, parser, or security filter), and the resulting output. @Tbl-vol3-nondeterminism-mitigation organizes this diagnostic evidence by the earliest architectural boundary where a mismatch surfaces, preventing engineers from confusing downstream symptoms with root causes.
-
-| First observed difference              | Evidence to compare                                                                                                                          | What the difference establishes                                                                                         |
-|:---------------------------------------|:---------------------------------------------------------------------------------------------------------------------------------------------|:------------------------------------------------------------------------------------------------------------------------|
-| Assembled model input                  | Delivered messages and tool descriptions, source and workspace versions, compaction output, assembly configuration                           | The compared calls did not receive the same recorded input; inspect the earliest changed dependency or assembly step    |
-| Model response                         | Complete request, decoding parameters, requested and available served-model provenance, response status and payload                          | The responses differ under the visible conditions; unrecorded service internals may limit further diagnosis             |
-| Harness decision or admitted operation | Recorded response, parser and policy versions, captured clock and control inputs, current grants and reservations, exact operation arguments | The supervisory decision differs; determine whether this is an intended policy change, a defect, or an uncaptured input |
-| Tool observation                       | Logical operation and attempt identities, actual arguments, target snapshot, service configuration and returned evidence                     | The recorded outcomes or observations differ; determine whether the requests and relevant environments were comparable  |
-
-: **Evidence for Localizing Divergence**: Compare inputs and configuration at the earliest observable mismatch before interpreting downstream differences. A missing record limits the diagnosis rather than proving a particular cause. {#tbl-vol3-nondeterminism-mitigation}
-
-Consider again the candidate patch `r18`. Suppose the original trace recorded that `r18` passed a targeted unit test, but noted that the broader regression suite was omitted. The original harness forwarded both statements to the model. During regression replay with an updated prompt builder, a modified context-compaction rule drops the scope limitation while preserving the word "passed." Because the replay supplies the identical recorded test output and workspace snapshot, the first divergence occurs at the delivered context input—well before the runtime invokes the model. This immediate mismatch isolates the defect to the context assembly change, which stripped critical qualification evidence. Whether this omission subsequently misled the model into making a false completion claim remains a separate causal question for controlled experimentation; the divergence itself is already localized.
-
-Localization granularity depends entirely on what artifacts survive in the persistent store. A surviving cryptographic digest confirms that bytes changed but hides the omitted text, while recording only the agent's final answer conceals every intermediate boundary. An informative diagnostic report identifies both the last boundary that verified successfully and the specific missing record that halted further automated comparison, rather than attributing the failure to whichever component appears last in the execution trace.
-
-### Localization and explanation {#sec-vol3-durable-execution-localization-explanation}
-
-A cryptographic context digest verifies the byte-level integrity of the payload it covers, but it proves nothing about execution state outside that hash. Matching digests guarantee identical prompt text, yet sampling temperatures, decoding penalties, external tool schemas excluded from the hashed payload, model snapshot revisions, and provider configurations may still differ. Even when a visible request matches across every byte and parameter, hosted inference endpoints can exhibit server-side variations. Conversely, unequal digests prove that the input representation changed, but explaining *why* requires inspecting the payload diff alongside its provenance metadata. Engineers must examine both the retained content and its lineage before drawing conclusions from hash comparisons.
-
-Live model invocations can diverge even on identical prompts due to hardware and algorithmic factors. Lowering the temperature to zero or pinning a random seed standardizes the sampling policy, but it cannot eliminate variations from cluster-level accelerator scheduling, non-deterministic floating-point summation in parallel kernels, or silent provider-side model updates. Because an early divergence in a model response alters all subsequent prompts and tool invocations, downstream differences often reflect these cascading input changes rather than fresh errors. Debugging must center on explaining this initial point of departure.
-
-::: {.column-margin .margin-pointer}
-↩ Floating-point reduction order and other sources of serving-path non-determinism are established in @sec-vol3-foundation-model-repetition-replay.
-:::
-
-Regression replay controls this cascading variance by supplying captured outputs at a declared boundary, following the principles developed in @sec-vol3-persistence-replay. However, this isolation holds only if the harness captures every external dependency. If an authorization decision or scheduling check consults an unrecorded host clock, an unversioned environment variable, or a dynamic feature flag, determinism across that boundary collapses. When such leaks occur, developers must either capture the missing environmental inputs into the event log or narrow the replay scope to subcomponents with fully hermetic boundaries. Targeted interface interception in the harness achieves this control without requiring heavy, whole-machine snapshot infrastructure.
-
-Sound diagnostic localization therefore yields a bounded engineering claim rather than an unverified causal leap. It specifies the earliest observed mismatch, catalogs the configurations and input artifacts confirmed to be identical, highlights the explicit differences found, and flags any missing evidence. While counterfactual replays can test whether a specific change explains the failure, observing an altered outcome in one trace does not prove that a fix behaves reliably across diverse workloads. Distribution-scale evaluation establishes the causal and statistical methodology needed to evaluate those system-wide claims; durable execution supplies the auditable evidence required to begin that inquiry.
-
-::: {#chk-11-time-travel-debugging .callout-checkpoint title="Replay and divergence"}
-
-- [ ] **First mismatch**: The recorded `r18` test result is unchanged, but a replayed context omits its coverage limitation. What has been localized, and what has not been proved?
-- [ ] **Equal hashes**: Two calls share identical context digests yet produce different model responses. Which request parameters and provenance fields must be compared before attributing the difference to model non-determinism?
-- [ ] **Capture boundary**: A replay reads the current host clock while evaluating a recorded human approval. Is the resulting mismatch necessarily an agent defect, and what changes would restore a meaningful comparison?
-- [ ] **Changed behavior**: Why can a revised security policy's refusal represent an intended regression-test success, while an alternative model response following that refusal constitutes a brand-new execution branch?
-
-:::
-
-These boundary comparisons fundamentally depend on which events, delivered inputs, and environmental artifacts remain accessible. An agent runtime's retention policy is therefore not merely a storage cost optimization; it dictates which recovery guarantees and diagnostic claims the engineering team can defend in production.
 
 ## Log Retention and State Compaction {#sec-vol3-persistence-compaction}
 
@@ -945,11 +667,128 @@ Once a checkpoint at sequence $j_{\text{ckpt}}$ is durably published, online rec
 
 Compaction preserves current recovery while deliberately shortening the historical replay horizon. Downstream systems cannot substitute a later agent context for an earlier one once the original inputs have expired. Similarly, squashing incremental workspace deltas into a single snapshot preserves the latest workspace tree while shedding intermediate revisions. A compaction policy must therefore explicitly define the surviving replay interval. An uncompacted event history grows monotonically with every turn, regardless of how tightly the agent manages its prompt token budget.
 
-Systems engineers must not confuse log compaction with context compaction. Context compaction operates on prompt token budgets: when conversational history approaches model context limits, the runtime condenses prior turns and commits a `Compacted` event to the log. This event records the exact summary text delivered to subsequent model calls, preserving deterministic replay for future turns. The underlying historical events and payloads that generated the summary remain governed by their own retention policies rather than vanishing when the context window shrinks. Diagnostic telemetry can follow aggressive downsampling or retention rules; in contrast, recovery-critical events and payloads must remain bit-for-bit complete throughout their promised operational lifetime.
+Systems engineers must not confuse log compaction with context compaction. Context compaction operates on prompt token budgets: when conversational history approaches model context limits, the runtime condenses prior turns and commits a `Compacted` event to the log. This event records the exact summary text delivered to subsequent model calls, preserving deterministic replay for future turns.
+
+| Event family                | Required contents                                                                                                                                         | Reconstruction use                                                           |
+|:----------------------------|:----------------------------------------------------------------------------------------------------------------------------------------------------------|:-----------------------------------------------------------------------------|
+| `Compacted`, `RuntimeInput` | Recorded summary and dependencies; clocks, identifiers, policy/configuration inputs, and event-order information captured at the declared replay boundary | Preserve the actual inputs used by context assembly or supervisory decisions |
+
+: **Compaction Schema**: These events preserve the exact summary text delivered to subsequent model calls after context limits are reached. {#tbl-vol3-durable-compaction-schema}
+ The underlying historical events and payloads that generated the summary remain governed by their own retention policies rather than vanishing when the context window shrinks. Diagnostic telemetry can follow aggressive downsampling or retention rules; in contrast, recovery-critical events and payloads must remain bit-for-bit complete throughout their promised operational lifetime.
 
 ::: {.column-margin .margin-pointer}
 ↪ Sampling and retention policies for diagnostic traces are developed in @sec-vol3-evaluation-budgets.
 :::
+
+## Recorded Trajectory Replay {#sec-vol3-persistence-replay}
+
+When an agent execution stalls or fails during an automated repair, resuming the session admits fresh work under current system conditions. Post-mortem debugging, however, demands something fundamentally different: engineers must examine what the runtime recorded at the moment of failure and verify how the harness code responded to the specific inputs available at that time. Rerunning a targeted test like `test_r18` on a new `attempt1` cannot resolve that inquiry. Because external services drift, package versions change, and model sampling introduces variance, a new execution merely supplies fresh observations rather than reproducing the missing historical outcome.
+
+**Replay**\index{Replay!definition} substitutes retained execution records for live, non-deterministic inputs. The guarantees provided by replay depend entirely on which portion of the system computation is repeated. As summarized in @tbl-vol3-replay-comparison, systems engineers use retained trajectories for three distinct purposes: reconstructing a recorded state projection, validating harness logic through regression testing, and branching into counterfactual experiments.
+
+| Mode                      | Inputs and computation                                                                                         | Supported conclusion                                        |
+|:--------------------------|:---------------------------------------------------------------------------------------------------------------|:------------------------------------------------------------|
+| Recorded projection       | Fold retained events with the specified reducer and compatible checkpoint                                      | What selected runtime state the recorded history represents |
+| Harness regression replay | Run harness logic against captured inputs at a declared boundary, with live effects disabled                   | How that harness implementation responds to those inputs    |
+| Counterfactual branch     | Restore compatible starting state, change a declared condition, and obtain valid observations for the new path | What happened in this new experiment                        |
+
+: **Three uses of a recorded trajectory**: Reconstructing history, testing code, and exploring alternative execution paths answer distinct engineering questions. None establishes an unobserved external outcome. {#tbl-vol3-replay-comparison}
+
+The first two modes share a common architectural transformation from live execution, as contrasted in @fig-vol3-replay-mode: whereas live execution (top) loops continuously through active model sampling, authorization gates, and external tool dispatches, replay mode (bottom) severs live model and tool connections entirely, streaming recorded replies and environment observations directly from the trajectory log into the deterministic harness.
+
+::: {#fig-vol3-replay-mode fig-env="figure" fig-pos="htb" fig-cap="**Live Execution vs. Replay**: In live execution (top), each turn samples the model, passes its proposal through the authorization gate, dispatches the tool, and appends every step to the log. In replay (bottom), the model client is stubbed and tool dispatch is disconnected, so recorded replies and results stream into the harness and any request the log does not account for stops the replay. Folding those events reconstructs the recorded projection, and running harness logic against them is regression replay. A counterfactual branch differs from both, because after restoring its starting state it obtains new observations from compatible fixtures or isolated execution." fig-alt="Two panels. Top: live execution with harness record, foundation model, authorization gate, tools and environment, and trajectory log connected in a loop. Bottom: replay mode with the model and tool dispatch boxes crossed out, a recorded-results box, and the trajectory log streaming recorded events into the replaying harness."}
+![](images/svg/fig-vol3-replay-mode.svg)
+:::
+
+### Projection reconstruction {#sec-vol3-durable-execution-projection-reconstruction}
+
+In projection reconstruction, the log functions as a deterministic event stream. Folding the log applies previously recorded decisions directly; today's authorization policy never re-evaluates historical proposals. Starting from a known checkpoint `record_R_ckpt`, the compatible suffix reconstructs the selected record through its captured admission, reservation, intent, and outcome events. If the suffix ends abruptly after a `ToolIntent` record without an accompanying settling event, the resulting projection faithfully retains that unresolved operation, exposing an interrupted execution.
+
+Historical inspection can also retrieve the immutable input manifest captured for a specific `ContextBuilt` event. This manifest reveals the exact token sequence and bounded observations delivered to the model, rather than a prompt newly assembled from current, potentially mutated data sources. Reconstructing the corresponding workspace environment similarly requires mounting the compatible snapshot together with any incremental filesystem deltas logged up to that point.
+
+::: {#dfn-time-travel-replay .callout-definition title="Time-travel replay"}
+
+***Time-travel replay***\index{Time-travel replay!definition} reconstructs a selected recorded state at a historical log boundary from compatible checkpoints, events, and retained artifacts, without repeating the original model calls or external actions.
+
+1. **Significance**: It renders the runtime's historical evidence, decisions, and unresolved obligations fully inspectable at any retained log boundary for the cost of storage reads and a state fold, requiring zero model inference and generating zero external side effects.
+2. **Distinction**: Time-travel replay reconstructs an internal projection of recorded state, rather than restoring the full external world or re-evaluating decisions under updated policy rules.
+3. **Common pitfall**: Promising arbitrary historical inspection across every past turn when retention policies have already pruned required event payloads, filesystem snapshots, or historical reducer definitions.
+
+:::
+
+### Harness regression replay {#sec-vol3-durable-execution-harness-regression-replay}
+
+**Harness regression replay**\index{Harness regression replay!definition} executes the harness code itself against captured external inputs rather than folding precomputed decisions through a reducer. Instead of querying live model endpoints or invoking real tools, the harness consumes recorded model completions, external tool observations, and control events. For deterministic reproduction, the captured boundary must supply all nondeterministic inputs consumed by the harness logic: wall-clock timestamps, randomly generated identifiers, configuration parameters, policy rules, and event arrival schedules. While this capture boundary does not need to simulate the entire operating system, any unrecorded source of entropy weakens reproducibility. This principle directly mirrors deterministic replay in operating-system debuggers, which record asynchronous hardware interrupts and system call outputs to allow developers to step backward through complex race conditions [@king2005debugging].
+
+To serve captured inputs correctly, the replay adapter follows the **matching-request rule**\index{Matching-request rule!definition}, matching every outgoing request against the recorded trace before returning a response. A captured model response is valid only for its specific prompt invocation and delivered token payload. Similarly, a tool observation corresponds to a unique logical operation and attempt, parameterized by exact tool names and serialized arguments. Replay adapters enforce matching using canonicalized representations or explicitly declared normalization schemes, combined with logged arrival sequences or formal concurrency models.[^fn-happened-before-replay] A naive FIFO queue that blindly yields the next recorded event risks routing the test outcome of `test_r18` to an entirely different operation or candidate patch. If an outgoing request deviates from the recorded trace, the replay engine must immediately fail the comparison; under no circumstances should it fall back silently to a live network call.
+
+[^fn-happened-before-replay]: **Happened-Before**: Lamport showed that events in a distributed system are only partially ordered: one event precedes another when a chain of process steps and messages links them, and otherwise the two are concurrent [@lamport1978time]. Parallel tool calls in one turn are concurrent in this sense, so a replay must either record the order the harness actually observed or declare that any order is equivalent. \index{Happened-before relation!replay ordering}
+
+A reliable regression harness must strictly seal all live side-effect pathways. Real tool dispatch, external callback handlers, asynchronous background reconciliation loops, and production database writes must be severed or redirected to in-memory mocks. While the test may mutate isolated, ephemeral test state, all interactions with external infrastructure are replaced by recorded observations. Enforcing these isolation boundaries is strictly the responsibility of the test runtime; the harness must never trust the model or agent code to refrain from issuing live operations.
+
+Consider an edge case where an asynchronous tool returns an authenticated late result after an agent repair job has transitioned into the `PAUSED` state. According to the control-plane state machine, the correct harness behavior is to record the arriving observation in the operation ledger while keeping the agent paused, rather than automatically triggering a new model inference step. If a developer modifies the harness and inadvertently introduces a code path that fires an unauthorized model invocation upon receiving the late event, the regression replay immediately detects the discrepancy and fails the test. Crucially, successful execution against this historical trace proves only that the harness correctly handles that specific scenario; passing a replayed unit test for `test_r18` does not constitute evidence of general task competence or end-to-end patch correctness.
+
+When engineers update harness orchestration logic or tighten safety policies, behavioral changes are often intentional. Regression suites must therefore specify which outputs require strict byte-for-byte equivalence and which represent expected divergence. A diff between replayed execution and the historical baseline can indicate an unintended regression, an intentional algorithmic improvement, or a defect in the input capture itself. While replaying against recorded inputs eliminates expensive model API charges and external tool latencies, it still consumes local compute cycles, disk I/O, and setup overhead—and it validates behavior solely within the narrow envelope of previously observed execution paths.
+
+### Counterfactual branches {#sec-vol3-durable-execution-counterfactual-branches}
+
+A counterfactual investigation asks what trajectory an agent would follow if an engineer alters a prompt template, selects a different foundation model, updates an authorization policy, or modifies an observation filter. The runtime forks execution by allocating a fresh branch identifier linked explicitly to the parent log sequence at a designated checkpoint boundary $j_{\text{ckpt}}$. It documents the intervention in metadata and reconstructs the historical execution environment to match that precise point in time. In the crash repair scenario, branching from checkpoint $j_{\text{ckpt}}$ requires mounting the exact workspace snapshot `ws_r18` alongside matching dependency fixtures. If an engineer restores only the historical source code while executing against current, upgraded third-party packages, the experiment conflates the intentional prompt or code change with uncontrolled environment drift.
+
+By leveraging durable logs, the runtime reconstructs the unchanged prefix deterministically through projection folding, completely avoiding redundant model sampling or tool execution up to the fork point. Beyond that boundary, however, the newly diverged continuation requires genuine observations that correspond to its altered actions. A captured historical response remains valid only as long as the outgoing request and environmental assumptions match the historical trace exactly. The moment the modified agent proposes a different test command, alters tool arguments, or produces an alternative patch candidate, the recorded downstream events become obsolete. At this divergence point, the branch must either halt replay or transition into active execution, gathering fresh observations from an isolated sandbox or compatible test fixture. Because the branch represents an unverified trajectory, production side effects remain strictly disabled, and human approvals granted to the parent execution never carry over automatically to the branch.
+
+A **counterfactual branch**\index{Counterfactual branch!definition} is thus a distinct, newly identified execution thread that inherits a validated historical prefix while exploring an alternative downstream path. Inspecting an individual branch helps engineers diagnose why a specific bug occurred or test how a targeted prompt patch performs on a known failure mode. Establishing broader claims about agent reliability or task success rates, however, requires running statistically grounded benchmarks across distribution-scale test suites. Replay establishes the precise boundary where historical evidence ends and new computation begins; the next section examines how to leverage this retained log evidence to pinpoint the exact step where two executions diverge.
+
+::: {.column-margin .margin-pointer}
+↪ The statistical methods that turn repeated runs over a task distribution into reliability claims are developed in @sec-vol3-evaluation-rigor.
+:::
+
+### Locating a Divergence {#sec-vol3-persistence-non-determinism}
+
+When an automated software-repair workflow undergoes regression replay, execution proceeds uneventfully until reaching the recorded targeted-test result for candidate patch `r18`. The stored test result itself remains identical, but a revised harness assembles a subtly different observation context for the subsequent model call. Waiting until the final repair verdict to compare the runs obscures this earlier discrepancy under layers of compounding tool calls and token generations. Effective debugging requires pinpointing the exact architectural boundary where two executions first cease to agree within the recorded evidence.
+
+A **divergence point**\index{Divergence point!definition} is the first observable mismatch under a declared equivalence relation: between recorded and reconstructed state, between historical and revised harness logic on captured inputs, or between a golden trace and a live execution. Every comparison must explicitly define both its boundary and its equivalence criteria. In practice, two serialized JSON payloads might differ in a harmless trace identifier while representing the same permitted operation. Conversely, two tool invocations cannot be treated as equivalent simply because their shell commands match if they execute against different repository commits or working trees. A coarse turn counter obscures these distinctions when context assembly, model inference, authorization policy checks, and tool dispatch all unfold within a single turn.
+
+#### Boundary-by-boundary comparison {#sec-vol3-durable-execution-boundary-comparison}
+
+A disciplined boundary comparison starts at a verified checkpoint or initial state and steps forward through corresponding events in their recorded sequence. Stable invocation and operation identifiers align the traces across runs, preserving any concurrency ordering or partial-order dependencies required by the replay contract. At each boundary, the diagnostic runtime evaluates three elements: the inputs delivered to that stage, the transformation configured for it (such as a prompt template, parser, or security filter), and the resulting output. @Tbl-vol3-nondeterminism-mitigation organizes this diagnostic evidence by the earliest architectural boundary where a mismatch surfaces, preventing engineers from confusing downstream symptoms with root causes.
+
+| First observed difference              | Evidence to compare                                                                                                                          | What the difference establishes                                                                                         |
+|:---------------------------------------|:---------------------------------------------------------------------------------------------------------------------------------------------|:------------------------------------------------------------------------------------------------------------------------|
+| Assembled model input                  | Delivered messages and tool descriptions, source and workspace versions, compaction output, assembly configuration                           | The compared calls did not receive the same recorded input; inspect the earliest changed dependency or assembly step    |
+| Model response                         | Complete request, decoding parameters, requested and available served-model provenance, response status and payload                          | The responses differ under the visible conditions; unrecorded service internals may limit further diagnosis             |
+| Harness decision or admitted operation | Recorded response, parser and policy versions, captured clock and control inputs, current grants and reservations, exact operation arguments | The supervisory decision differs; determine whether this is an intended policy change, a defect, or an uncaptured input |
+| Tool observation                       | Logical operation and attempt identities, actual arguments, target snapshot, service configuration and returned evidence                     | The recorded outcomes or observations differ; determine whether the requests and relevant environments were comparable  |
+
+: **Evidence for Localizing Divergence**: Compare inputs and configuration at the earliest observable mismatch before interpreting downstream differences. A missing record limits the diagnosis rather than proving a particular cause. {#tbl-vol3-nondeterminism-mitigation}
+
+Consider again the candidate patch `r18`. Suppose the original trace recorded that `r18` passed a targeted unit test, but noted that the broader regression suite was omitted. The original harness forwarded both statements to the model. During regression replay with an updated prompt builder, a modified context-compaction rule drops the scope limitation while preserving the word "passed." Because the replay supplies the identical recorded test output and workspace snapshot, the first divergence occurs at the delivered context input—well before the runtime invokes the model. This immediate mismatch isolates the defect to the context assembly change, which stripped critical qualification evidence. Whether this omission subsequently misled the model into making a false completion claim remains a separate causal question for controlled experimentation; the divergence itself is already localized.
+
+Localization granularity depends entirely on what artifacts survive in the persistent store. A surviving cryptographic digest confirms that bytes changed but hides the omitted text, while recording only the agent's final answer conceals every intermediate boundary. An informative diagnostic report identifies both the last boundary that verified successfully and the specific missing record that halted further automated comparison, rather than attributing the failure to whichever component appears last in the execution trace.
+
+#### Localization and explanation {#sec-vol3-durable-execution-localization-explanation}
+
+A cryptographic context digest verifies the byte-level integrity of the payload it covers, but it proves nothing about execution state outside that hash. Matching digests guarantee identical prompt text, yet sampling temperatures, decoding penalties, external tool schemas excluded from the hashed payload, model snapshot revisions, and provider configurations may still differ. Even when a visible request matches across every byte and parameter, hosted inference endpoints can exhibit server-side variations. Conversely, unequal digests prove that the input representation changed, but explaining *why* requires inspecting the payload diff alongside its provenance metadata. Engineers must examine both the retained content and its lineage before drawing conclusions from hash comparisons.
+
+Live model invocations can diverge even on identical prompts due to hardware and algorithmic factors. Lowering the temperature to zero or pinning a random seed standardizes the sampling policy, but it cannot eliminate variations from cluster-level accelerator scheduling, non-deterministic floating-point summation in parallel kernels, or silent provider-side model updates. Because an early divergence in a model response alters all subsequent prompts and tool invocations, downstream differences often reflect these cascading input changes rather than fresh errors. Debugging must center on explaining this initial point of departure.
+
+::: {.column-margin .margin-pointer}
+↩ Floating-point reduction order and other sources of serving-path non-determinism are established in @sec-vol3-foundation-model-repetition-replay.
+:::
+
+Regression replay controls this cascading variance by supplying captured outputs at a declared boundary, following the principles developed in @sec-vol3-persistence-replay. However, this isolation holds only if the harness captures every external dependency. If an authorization decision or scheduling check consults an unrecorded host clock, an unversioned environment variable, or a dynamic feature flag, determinism across that boundary collapses. When such leaks occur, developers must either capture the missing environmental inputs into the event log or narrow the replay scope to subcomponents with fully hermetic boundaries. Targeted interface interception in the harness achieves this control without requiring heavy, whole-machine snapshot infrastructure.
+
+Sound diagnostic localization therefore yields a bounded engineering claim rather than an unverified causal leap. It specifies the earliest observed mismatch, catalogs the configurations and input artifacts confirmed to be identical, highlights the explicit differences found, and flags any missing evidence. While counterfactual replays can test whether a specific change explains the failure, observing an altered outcome in one trace does not prove that a fix behaves reliably across diverse workloads. Distribution-scale evaluation establishes the causal and statistical methodology needed to evaluate those system-wide claims; durable execution supplies the auditable evidence required to begin that inquiry.
+
+::: {#chk-11-time-travel-debugging .callout-checkpoint title="Replay and divergence"}
+
+- [ ] **First mismatch**: The recorded `r18` test result is unchanged, but a replayed context omits its coverage limitation. What has been localized, and what has not been proved?
+- [ ] **Equal hashes**: Two calls share identical context digests yet produce different model responses. Which request parameters and provenance fields must be compared before attributing the difference to model non-determinism?
+- [ ] **Capture boundary**: A replay reads the current host clock while evaluating a recorded human approval. Is the resulting mismatch necessarily an agent defect, and what changes would restore a meaningful comparison?
+- [ ] **Changed behavior**: Why can a revised security policy's refusal represent an intended regression-test success, while an alternative model response following that refusal constitutes a brand-new execution branch?
+
+:::
+
+These boundary comparisons fundamentally depend on which events, delivered inputs, and environmental artifacts remain accessible. An agent runtime's retention policy is therefore not merely a storage cost optimization; it dictates which recovery guarantees and diagnostic claims the engineering team can defend in production.
 
 ## Fallacies and Pitfalls {#sec-vol3-durable-execution-fallacies}
 

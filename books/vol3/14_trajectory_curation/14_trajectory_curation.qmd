@@ -289,6 +289,27 @@ System privileges and tool access grants must remain explicit and immutably enfo
 ↩ The reset contract, which catalogs every piece of state that teardown must clear before an environment serves a new lease, is established in @sec-vol3-sandboxes-pooling-reset.
 :::
 
+### Fault injection {#sec-vol3-trajectory-curation-fault-injection}
+
+In production, natural execution occasionally exposes an agent to network drops, service timeouts, and tool errors. However, relying solely on spontaneous operational failures leaves massive blind spots in the training distribution. Systematic **fault injection**\index{Fault injection!recovery collection}[^fn-fault-injection-chaos] proactively bridges these coverage gaps. A rigorous collection protocol logs the injection configuration version, the targeted tool invocation or observation stream, the simulated system state, and the expected remediation policy. Crucially, fault injection operates strictly within established security constraints: injecting a network timeout or file lock grants the agent no auxiliary privileges to install unapproved packages, escalate filesystem permissions, or circumvent human approval barriers. Each condition in @tbl-vol3-fault-injection-taxonomy names the causal distinction the fixture must preserve and the response a curator should assess.
+
+[^fn-fault-injection-chaos]: **Fault Injection**: Deliberately introducing failures to evaluate operational resilience is a cornerstone of systems engineering, popularized in distributed infrastructure as chaos engineering—conducting controlled experiments that inject server, network, and disk failures into live clusters to validate steady-state guarantees [@basiri2016]. Curation adopts the methodological rigor rather than the live production venue. Faults are introduced within versioned, hermetic test fixtures where every injected condition is recorded and environment semantics remain deterministic. This ensures that synthesized demonstrations teach genuine fault recovery rather than learning to exploit idiosyncrasies of the simulation harness. \index{Fault injection!chaos engineering}
+
+| Collection condition                               | Required causal distinction                                    | Candidate response to assess                                   |
+|:---------------------------------------------------|:---------------------------------------------------------------|:---------------------------------------------------------------|
+| Malformed proposal rejected locally                | No operation was dispatched                                    | Inspect the schema and correct the represented error           |
+| Partial search result                              | Missing content is distinguished from an empty complete result | Request a valid continuation or report insufficient evidence   |
+| Lost acknowledgment after a state-changing request | The endpoint may have acted despite the missing reply          | Reconcile the identified operation before a dependent retry    |
+| Unavailable capability or exhausted allowance      | The original goal may be unreachable within the grant          | Stop or hand off with accurate scope and owned residual duties |
+
+: **Fault Conditions for Recovery Collection**: Each condition preserves the relation between observations and possible effects. The criterion evaluates an appropriate response, not compulsory autonomous repair. {#tbl-vol3-fault-injection-taxonomy}
+
+Consider the lost-acknowledgment scenario in @tbl-vol3-fault-injection-taxonomy. When a mock harness drops an acknowledgment after committing a mutating remote procedure call, the simulated environment must faithfully retain the side effects of that committed call in its subsequent state. If the mock were to return a connection reset while silently rolling back the server state to a clean slate, it would misrepresent the distributed systems challenge, teaching the agent a naive retry pattern that causes double-execution bugs in production. Replay determinism requires that subsequent model actions receive state observations strictly consistent with prior mutations.
+
+Similarly, an engineering team must differentiate between tasks designed for autonomous remediation and those designed for graceful degradation. A recovery objective requires an authorized, reachable remediation path within the test environment; a safe-stopping objective, by contrast, deliberately closes all remediation paths to teach the agent to halt cleanly and notify an operator. These represent two distinct behavioral objectives with separate evaluation rubrics. Reliability coverage must therefore be tracked separately across unprompted agent mistakes and declared synthetic faults, while documenting any production failure modes that the collection fixture cannot replicate.
+
+#
+
 A well-designed collection fixture unifies the task specification and grading criteria with an explicit learning objective, a capture contract, and a structured distribution of variants. Before launching collection workers across this task matrix, however, systems engineers must partition and quarantine held-out evaluation tasks. Reserving these unpolluted benchmarks is the focus of @sec-vol3-flywheel-evaluation.
 
 ## Split Design {#sec-vol3-flywheel-evaluation}
@@ -385,68 +406,6 @@ While structural group assignments catch known relationships, heuristic deduplic
 To capture meaningful similarity in agent trajectories, feature extraction must combine textual shingles, parsed code syntax, and tool-call invocation sequences. A **shingle**\index{Shingle!definition} is a localized feature extracted from a document or trace, such as an n-gram of command tokens or a sub-tree from an abstract syntax tree (AST). While parsing code into an AST strips away superficial formatting differences, aggressive canonicalization—such as discarding variable identifiers, literal constants, or statement order—can obscure the subtle difference between a working patch and a broken one. Curation pipelines must therefore version their normalization policies and treat high similarity scores as triggers for contextual inspection rather than automatic deletion. To scale set comparisons across hundreds of thousands of trajectories, pipelines use MinHash [@broder1997resemblance],[^fn-minhash-resemblance-curation] which compresses high-dimensional feature sets into compact signatures using the minimum hash values under random permutations. Because standard MinHash treats feature sets as binary indicators and ignores feature frequencies, workloads that require count sensitivity rely on weighted or bag-based estimators.
 
 [^fn-minhash-resemblance-curation]: **MinHash**: Minwise independent permutations were introduced to detect near-duplicate web pages at search-engine scale, where exhaustive all-pairs comparison is computationally prohibitive [@broder1997resemblance]. MinHash maps an arbitrary-sized feature set to a fixed-size signature such that the probability of two signatures matching on any given component equals the Jaccard similarity of their underlying sets. This allows a curation pipeline to index and screen a large trajectory corpus in linear time and memory, deferring expensive all-pairs comparisons to a small subset of candidate matches. \index{MinHash!origin}
-
-To avoid evaluating pairwise distances across all records, pipelines index these signatures using Locality-Sensitive Hashing (LSH). LSH partitions signatures into bands, creating candidate near-duplicates when signatures match identically across a band. By tuning the number of bands and rows, systems engineers shape a probability curve that controls the trade-off between capturing potential duplicates and generating larger collision buckets that demand more downstream verification.
-
-[^fn-lsh-origin-curation]: **Locality-Sensitive Hashing**: A hashing framework where collision probability monotonically increases with item similarity, designed for sublinear approximate nearest-neighbor search in high-dimensional spaces [@indyk1998approximate]. Banding MinHash signatures implements LSH for Jaccard similarity. From a systems perspective, banding decouples screening throughput from corpus size: engineers tune parameters $b$ and $\BarrierRelativeDegree$ so that candidate generation aligns directly with available downstream verification bandwidth. \index{Locality-sensitive hashing!origin}
-
-::: {.column-margin}
-![](images/svg/vol3_trajectory_curation_margin_002.svg){width="100%" fig-alt="S-shaped curve of candidate probability against Jaccard similarity from zero to one for 32 bands of 4 rows. The curve stays near zero below 0.2, rises steeply between 0.3 and 0.6, and reaches nearly one by 0.8. Dots mark 87 percent at 0.5 and nearly 100 percent at 0.8."}
-
-*Banding transforms candidate retrieval into an S-shaped probability curve governed by the number of bands and rows.*
-:::
-
-```{python}
-#| label: lego-14-split-screening-budget
-#| echo: false
-# ┌─────────────────────────────────────────────────────────────────────────────
-# │ MINHASH SCREENING PRECISION AND STORAGE
-# ├─────────────────────────────────────────────────────────────────────────────
-# │ Context: sec-vol3-trajectory-dedup-minhash.
-# │ Goal: Separate ideal estimator uncertainty from practical index storage.
-# │ Show: Maximum standard error, raw signature bytes, and candidate probability.
-# │ How: Independent-permutation model; separate uint32 storage assumption.
-# │ Note: No measured detection quality or semantic-equivalence guarantee.
-# └─────────────────────────────────────────────────────────────────────────────
-from math import sqrt
-from mlsysim import *
-
-class SplitScreeningBudget:
-    # 1. LOAD: illustrative signature and storage design.
-    k = 128
-    n_records = 100_000
-    component_bytes = 4 * byte
-    bands, rows = 32, 4
-    similarities = (0.5, 0.8)
-
-    # 2. EXECUTE: ideal precision, raw storage, and banding candidates.
-    max_standard_error = 0.5 / sqrt(k)
-    signature_bytes = k * component_bytes
-    matrix_bytes = n_records * signature_bytes
-    candidate_probabilities = (
-        1 - (1 - similarities[0] ** rows) ** bands,
-        1 - (1 - similarities[1] ** rows) ** bands,
-    )
-
-    # 3. GUARD: design consistency and numerical scales.
-    check(bands * rows == k, "Complete band partition")
-    check(abs(max_standard_error - 0.0441941738) < 1e-9, "Ideal maximum standard error")
-    check(signature_bytes.to(byte).magnitude == 512, "Raw bytes per signature")
-    check(abs(matrix_bytes.to(MB).magnitude - 51.2) < 1e-9, "Decimal raw matrix size")
-    check(0.873 < candidate_probabilities[0] < 0.874, "Candidate probability at J=0.5")
-    check(candidate_probabilities[1] > 0.9999999, "Candidate probability at J=0.8")
-
-    # 4. OUTPUT: all exports are consumed below.
-    k_str = fmt_int(k)
-    n_str = fmt_int(n_records)
-    width_str = fmt_qty(component_bytes, byte, precision=0)
-    se_str = fmt(max_standard_error, precision=4)
-    signature_str = fmt_qty(signature_bytes, byte, precision=0)
-    matrix_str = fmt_memory(matrix_bytes, unit=MB, precision=1)
-    bands_str, rows_str = fmt_int(bands), fmt_int(rows)
-    lower_j_str, higher_j_str = [fmt(j, precision=1) for j in similarities]
-    candidate_str = fmt_percent(candidate_probabilities[0], precision=1, style="prose")
-```
 
 With `{python} SplitScreeningBudget.k_str` independent ideal components, the worst-case standard error is `{python} SplitScreeningBudget.se_str` on the Jaccard scale. Storing each component in `{python} SplitScreeningBudget.width_str` requires `{python} SplitScreeningBudget.signature_str` per signature and `{python} SplitScreeningBudget.matrix_str` for `{python} SplitScreeningBudget.n_str` records. While this raw matrix excludes the feature inverted index, metadata storage, and candidate staging buffers, it demonstrates that signature storage overhead is trivial even for large corpora.
 
@@ -727,18 +686,6 @@ class VerificationCascadeEconomicsThroughput:
 
 :::
 
-### Learned scores and scoped judgments {#sec-vol3-trajectory-curation-rankers}
-
-Learned scoring models can rank candidate trajectories for manual review or sub-sample from a pool of eligible examples to optimize diversity or stylistic conciseness. For instance, process reward models evaluate individual reasoning steps and intermediate tool calls rather than relying solely on terminal execution outcomes [@uesato2022solving; @lightman2023let]. While a step-level reward signal highlights likely points of failure, pinpointing the root causal error still requires retrospective human or symbolic review. Furthermore, filtering heavily for trajectory brevity alters the underlying data distribution in subtle ways; curation pipelines must not inadvertently purge the very multi-turn recovery sequences that the model needs to learn robust error-correction.
-
-When tasks require evaluating open-ended prose, user interactions, or design elegance, human raters or judge models provide qualitative evaluation scores governed by explicit rubrics and calibration standards. The principle of verification asymmetry (principle \ref{pri-vol3-verification-asymmetry}) defines the operational boundaries of these subjective judges: a learned score ranks candidate solutions and provides scoped evidence for a specific qualitative criterion, provided its input context remains strictly isolated from the agent's internal chain-of-thought gaming. Deterministic verifiers require identical scoping. Every verifier execution must persist metadata identifying the assessor version, rubric hash, extracted evidence, confidence scores, and explicit abstentions. Under no circumstances may an exceptionally high qualitative rating override an unsatisfied deterministic predicate.
-
-::: {.column-margin .margin-pointer}
-↩ Qualitative rubrics and grader calibration standards are established in @sec-vol3-evaluation-grading-calibration.
-:::
-
-Iterated selection against automated scorers concentrates grader blind spots. Pushing a training flywheel against a learned proxy reward initially improves output quality, but excessive optimization eventually leads to proxy collapse: the proxy score continues to rise while true downstream task quality deteriorates [@gao2023scaling]. When subsequent policy generations train on these curated datasets, idiosyncratic biases in the ranker become baked into model behavior. Mitigating this feedback loop requires periodic double-blind audits of both accepted and rejected records, continuous recalibration against held-out ground truth data that is never used for training, and mandatory re-scoring whenever policy architectures or task domains shift. Any data augmentation or trajectory transformation requires fresh verification of its modified payload and token masks—a provenance boundary explored in @sec-vol3-flywheel-provenance.
-
 ::: {#chk-14-admission-cascades-limits .callout-checkpoint title="Defend an admission route"}
 
 A route is defensible when each predicate's verdict and the order of checking can both be justified.
@@ -757,337 +704,6 @@ A route is defensible when each predicate's verdict and the order of checking ca
 :::
 
 By evaluating trajectories through staged, consumer-specific cascades rather than forcing all data through a monolithic cleanliness filter, the curation infrastructure yields precisely verified datasets tailored to distinct imitation, preference, and rollout objectives. Yet verifying clean executions solves only half the data problem: production agents inevitably encounter disruptions, and training policies to recover requires capturing and curating traces that contain mistakes without teaching models to repeat them.
-
-## Recovery Demonstration Curation {#sec-vol3-flywheel-curation}
-
-When an agent operates in real environments, failures are inevitable. Consider an execution trace where an agent issues a malformed tool call, receives a rejection from the environment runtime, and subsequently inspects the schema to produce a successful patch. A naive curation pipeline might discard this trace because it contains a failed step, or scrub the error to make the agent appear prescient. Doing so discards the most valuable training signal in autonomous systems: learning how to recover from an imperfect prefix. The curation cascade can admit the successful repair while preserving the original misstep as necessary context. The core systems questions then become which recovery trajectories to harvest, how to curate them safely, and how much training capacity to allocate to them.
-
-A training corpus composed solely of pristine, error-free trajectories teaches an agent how to act only when prior steps succeeded flawlessly. In production, however, stochastic tool outputs, transient network glitches, and early reasoning missteps inevitably push an agent off the nominal path. Once off that path, a model trained only on clean prefixes faces unfamiliar states, frequently escalating minor detours into catastrophic task failures. This distribution mismatch[^fn-compounding-imitation-error] drives the need for recovery demonstrations. The curation system's practical responsibility is to capture, validate, and package these recovery episodes with their conditioning evidence fully intact.
-
-::: {.column-margin .margin-pointer}
-↪ Exposure bias, the mismatch between training on recorded prefixes and running on prefixes the policy produced itself, and its horizon-dependent cost are developed in @sec-vol3-fine-tuning-exposure-bias.
-:::
-
-[^fn-compounding-imitation-error]: **Compounding Imitation Error**: A policy trained only on states visited by an expert can turn a per-step error rate $\SmallConstant$ into as many as $H^2\epsilon$ mistakes over an $\Horizon$-step task, because an early error exposes the policy to states absent from its training distribution. Interactively querying an expert on learner-visited states—the core mechanism of DAgger—restores an error bound that scales linearly in $\Horizon$ [@ross2011reduction]. Recovery demonstrations serve as the offline curation counterpart: they inject supervised repair targets on the flawed state prefixes that direct-success collection inevitably omits. \index{Imitation learning!compounding error}
-
-::: {#dfn-recovery-demonstration .callout-definition title="Recovery demonstration"}
-
-A ***recovery demonstration***\index{Recovery demonstration!definition} is a curated trajectory record or isolated sequence segment that pairs the context of an operational disruption—such as a model mistake, environment fault, or partial observation—with an action assessed as correct under the task specification and runtime authority boundaries.
-
-1. **Significance**: Recovery demonstrations directly address long-horizon execution stability. Under horizon compounding (@eq-vol3-horizon-compounding), any step-level error that the policy can successfully remediate becomes a temporary detour rather than an irrecoverable task failure. Direct-success harvesting systematically starves the training distribution of these pivotal recovery branches.
-2. **Distinction**: An appropriate recovery action depends on context: it may diagnose an exception, retry with corrected parameters, back off, or hand off control to a human supervisor. It does not demand that the agent heroically overcome impossible environment outages or exceed its security clearance to finish the task.
-3. **Common pitfall**: Treating every token in an eventually successful trajectory as a positive imitation target, thereby inadvertently teaching the model to repeat the initial mistake.
-
-:::
-
-### Record roles and learning uses {#sec-vol3-trajectory-curation-record-roles}
-
-Direct success, recovery, and negative are descriptive behavioral labels rather than blanket permissions for training. A single extended trajectory may begin with straightforward progress, encounter an unexpected environment error, execute a clean recovery, and later stall on an unrelated tool failure. Discarding that entire trajectory wastes genuine engineering signal; conversely, training uncritically on all its tokens teaches the model to replicate its bugs. In an industrial curation pipeline, three distinct verification stages govern data admission:
-
-1. The record-adequacy predicate $\text{chk}_{\text{record}}$ verifies that recorded events, observations, and timestamps faithfully match what actually transpired in the runtime environment.
-2. The usage eligibility predicate $\text{chk}_{\text{use}}$ enforces data-privacy permissions, license constraints, and cross-validation split assignments across every emitted training artifact.
-3. Consumer-specific predicates evaluate whether the process, final outcome, or individual step targets meet the threshold for a particular downstream consumer (such as supervised fine-tuning or preference optimization).
-
-@Tbl-vol3-trajectory-taxonomy maps these behavioral categories to their valid learning applications, emphasizing that taxonomy labels describe behavioral evidence rather than granting unconditional admission.
-
-| Record role                  | Evidence worth preserving                                                                   | Learning-use decision                                                                                                                              |
-|:-----------------------------|:--------------------------------------------------------------------------------------------|:---------------------------------------------------------------------------------------------------------------------------------------------------|
-| Direct-success demonstration | Grounded actions and adequate evidence for the declared result                              | Select useful responses under the demonstration policy; shortest length and absence of error codes are not sufficient criteria                     |
-| Recovery demonstration       | The preceding context, observed disruption, response, and evidence for its assessed outcome | Select the justified response while retaining the mistake or fault as context where needed                                                         |
-| Hard-negative candidate      | A plausible but inadequate response, with evidence identifying the relevant deficiency      | Consider diagnostic use, a separately assessed segment, or a compatible preference comparison; do not automatically imitate the deficient response |
-
-: **Behavioral Roles and Learning Uses**: Record labels describe evidence. Each intended consumer still requires its own admission conditions. {#tbl-vol3-trajectory-taxonomy}
-
-A **hard negative**\index{Hard negative!definition} is an action or plan that appears plausible under surface-level heuristics—such as generating valid syntax or matching expected keyword patterns—yet fails rigorous functional validation. Its difficulty stems from this superficial plausibility. However, pinpointing the precise moment of failure in an agentic trace is subtle. A failed assertion downstream confirms that an error occurred, but it rarely reveals the initial root cause. Similarly, repeated tool calls may suggest an infinite loop, yet an iterative polling loop might be entirely justified under asynchronous conditions. Robust curation systems therefore annotate deficient steps with their empirical failure signals and explicit confidence intervals rather than asserting an unverified divergence point.
-
-Furthermore, engineering teams often assume that any recorded negative can be immediately paired with a success for direct preference optimization or served as a rollout baseline for reinforcement learning with verifiable rewards. This assumption is hazardous. Valid preference learning requires pairwise trajectories conditioned on the exact same context prefix; pairing an unassisted failed attempt with a successful trajectory that benefited from a different prompt, an extra hint, or updated tool outputs produces an ungrounded comparison that corrupts policy optimization.
-
-::: {#psp-14-hard-negative-hazard .callout-perspective title="A recorded mistake is context, not a target"}
-
-A pervasive misconception in trajectory engineering is that an imitation training set must consist exclusively of pristine, error-free transcripts. In reality, a curated training dataset consists of complete conversational contexts coupled with explicit target masks, and these two components serve fundamentally different purposes.
-
-A flawed model response should never receive positive imitation gradients. Nevertheless, that erroneous response must remain in the prompt history if subsequent recovery actions are to make any sense; a correction is meaningful only in the context of the error it resolves. Conversely, an execution trace that ultimately timed out or failed an integration test often contains early sub-tasks solved with exemplary precision. The curation pipeline marks which spans represent valid targets and which represent conditioning context; the loss-masking subsystem then zeros out gradients across context spans during fine-tuning. By masking errors out of the loss calculation while retaining them in the attention context, we teach the model how to react to failures without training it to generate them.
-
-:::
-
-### Conditioning evidence for a correction {#sec-vol3-trajectory-curation-conditioning-evidence}
-
-To see how target selection operates in practice, trace a concrete collection run—designated `collection_run_r19_01`—executing task `pool_repair_01` inside test environment `pool_fixture_v1`. The run yields workspace candidate `ws_r20` (distinct from an earlier evaluation trial `ws_r19`) and captures raw trace `trace_r19_01`. In this run, end-to-end evaluation confirms that the candidate satisfies acceptance specification `repair_accept_v1`, fulfilling all process constraints, resource ceilings, and residual cleanup duties.
-
-The event sequence illustrates the recovery dynamics:
-
-- At event `e2`, the model generates a file edit containing a malformed argument. Because the tool runtime validates inputs locally before dispatch, it rejects the request immediately; the trace faithfully records this refusal without falsely logging an applied write.
-- At event `e3`, the model recognizes the syntax rejection, requests the API schema documentation, and reads the returned specification.
-- At event `e4`, the model issues a corrected, schema-compliant edit. Crucially, the tool enforces an atomic version check alongside the update rather than relying on a stale prior read.
-- Event `e5` captures the automated test and validation summary returned by the execution sandbox.
-- At event `e6`, the model summarizes the validated changes, documents the patch scope, and concludes the session.
-
-Under curation policy `repair_accept_v1`, an initial syntax rejection that is promptly diagnosed and corrected is permissible. A target-selection manifest isolates the actions worth imitating without altering the actual sequence of events:
-
-```json
-{
-  "collection_run_id": "collection_run_r19_01",
-  "source_trace_id": "trace_r19_01",
-  "criteria_version": "repair_accept_v1",
-  "target_selection_version": "recovery_targets_v1",
-  "behavioral_role": "recovery",
-  "context_only_events": ["e2", "e5"],
-  "selected_response_events": ["e3", "e4", "e6"],
-  "assessment_scope": "recorded correction and supported final report"
-}
-```
-
-The underlying source trace continues to preserve the original task prompt, tool definitions, intermediate observations, and evaluation logs. Notice that target selection flags only the reviewed policy generation tokens within events `e3`, `e4`, and `e6`, rather than every token generated across the environment interaction. The rejected proposal (`e2`) and test output (`e5`) remain in the sequence as conditioning context, providing the causal backdrop that makes the agent's schema lookup and repair intelligible. An end-to-end task success does not automatically justify supervising every intermediate action; each selected step must represent a sound decision conditioned on what the agent knew at that exact juncture. @Fig-vol3-trajectory-typology partitions trajectory roles across three execution archetypes: direct success demonstrations where all actions serve as imitation targets (blue), recovery demonstrations where invalid proposals and error observations (`e2`, `e5`) remain conditioning context while repairs (`e3`, `e4`, `e6`) become targets, and hard negatives where plausible actions fail comprehensive validation and are excluded from imitation.
-
-::: {#fig-vol3-trajectory-typology fig-env="figure" fig-pos="htb" fig-cap="**Record Roles and Selected Targets**: Each role is drawn as a sequence of events, with selected targets distinguished from context. In the recovery demonstration, the refused malformed proposal at e2 and the check summary at e5 stay as context while e3, e4, and e6 become targets. A hard-negative candidate looks adequate under a targeted check and fails a required one. Its deficient response is never an imitation target, and where it went wrong is recorded with its basis rather than fixed at an exact step." fig-alt="Three columns of event boxes connected by downward arrows. Direct-success demonstration: task and delivered context, inspect the failing check, edit the pool wakeup, required checks pass, report the supported result. Recovery demonstration: earlier context and observations, e2 malformed edit refused, e3 inspect the schema, e4 corrected permitted edit, e5 check summary, e6 report result and scope. Hard-negative candidate: task and delivered context, plausible edit, targeted check passes, required check fails, with a note that the first causal step is uncertain and its basis is recorded. Each column ends with a learning-use box. A legend marks selected target responses in blue, context or observations in gray, and deficient responses with a red dashed border."}
-![](images/svg/vol3-trajectory-typology.svg)
-:::
-
-When only a localized recovery window contains sound evidence, the curation harness can admit that isolated segment while marking broader task outcomes as unverified. Furthermore, if post-processing sanitizes credentials or strips sensitive data into `trace_r19_01_redacted_v1`, the curation pipeline must revalidate target spans against the modified tokens. Pruning the malformed call, inserting future validation outputs into an early prompt, or truncating intermediate observations fundamentally alters the causal reasoning problem the model is being trained to solve.
-
-### Fault injection {#sec-vol3-trajectory-curation-fault-injection}
-
-In production, natural execution occasionally exposes an agent to network drops, service timeouts, and tool errors. However, relying solely on spontaneous operational failures leaves massive blind spots in the training distribution. Systematic **fault injection**\index{Fault injection!recovery collection}[^fn-fault-injection-chaos] proactively bridges these coverage gaps. A rigorous collection protocol logs the injection configuration version, the targeted tool invocation or observation stream, the simulated system state, and the expected remediation policy. Crucially, fault injection operates strictly within established security constraints: injecting a network timeout or file lock grants the agent no auxiliary privileges to install unapproved packages, escalate filesystem permissions, or circumvent human approval barriers. Each condition in @tbl-vol3-fault-injection-taxonomy names the causal distinction the fixture must preserve and the response a curator should assess.
-
-[^fn-fault-injection-chaos]: **Fault Injection**: Deliberately introducing failures to evaluate operational resilience is a cornerstone of systems engineering, popularized in distributed infrastructure as chaos engineering—conducting controlled experiments that inject server, network, and disk failures into live clusters to validate steady-state guarantees [@basiri2016]. Curation adopts the methodological rigor rather than the live production venue. Faults are introduced within versioned, hermetic test fixtures where every injected condition is recorded and environment semantics remain deterministic. This ensures that synthesized demonstrations teach genuine fault recovery rather than learning to exploit idiosyncrasies of the simulation harness. \index{Fault injection!chaos engineering}
-
-| Collection condition                               | Required causal distinction                                    | Candidate response to assess                                   |
-|:---------------------------------------------------|:---------------------------------------------------------------|:---------------------------------------------------------------|
-| Malformed proposal rejected locally                | No operation was dispatched                                    | Inspect the schema and correct the represented error           |
-| Partial search result                              | Missing content is distinguished from an empty complete result | Request a valid continuation or report insufficient evidence   |
-| Lost acknowledgment after a state-changing request | The endpoint may have acted despite the missing reply          | Reconcile the identified operation before a dependent retry    |
-| Unavailable capability or exhausted allowance      | The original goal may be unreachable within the grant          | Stop or hand off with accurate scope and owned residual duties |
-
-: **Fault Conditions for Recovery Collection**: Each condition preserves the relation between observations and possible effects. The criterion evaluates an appropriate response, not compulsory autonomous repair. {#tbl-vol3-fault-injection-taxonomy}
-
-Consider the lost-acknowledgment scenario in @tbl-vol3-fault-injection-taxonomy. When a mock harness drops an acknowledgment after committing a mutating remote procedure call, the simulated environment must faithfully retain the side effects of that committed call in its subsequent state. If the mock were to return a connection reset while silently rolling back the server state to a clean slate, it would misrepresent the distributed systems challenge, teaching the agent a naive retry pattern that causes double-execution bugs in production. Replay determinism requires that subsequent model actions receive state observations strictly consistent with prior mutations.
-
-Similarly, an engineering team must differentiate between tasks designed for autonomous remediation and those designed for graceful degradation. A recovery objective requires an authorized, reachable remediation path within the test environment; a safe-stopping objective, by contrast, deliberately closes all remediation paths to teach the agent to halt cleanly and notify an operator. These represent two distinct behavioral objectives with separate evaluation rubrics. Reliability coverage must therefore be tracked separately across unprompted agent mistakes and declared synthetic faults, while documenting any production failure modes that the collection fixture cannot replicate.
-
-### Records, stored tokens, and selected targets {#sec-vol3-trajectory-curation-token-accounting}
-
-Because a recovery trajectory contains multiple diagnostic cycles, failed attempts, and environment feedbacks, it is substantially longer than a direct-success path. Consequently, the fraction of recovery trajectories in a dataset does not equal its fraction of stored disk tokens, nor does it equal its fraction of active training tokens. Curation accounting begins with a global repository of retained trajectories, from which downstream pipelines sample subsets tailored to specific training artifacts. A single retained trace may supply conditioning context to an imitation fine-tuning corpus while contributing preference pairs to a reward modeling set; in both cases, it represents a single underlying task execution.
-
-::: {.column-margin}
-![](images/svg/vol3_trajectory_curation_margin_003.svg){width="100%" fig-alt="Three horizontal bars showing the recovery class's share of the hypothetical pool under three denominators: 25 percent of records, 45 percent of stored tokens, and 39 percent of selected target tokens."}
-
-*One recovery class, three shares: records, stored tokens, targets.*
-:::
-
-We formalize these token relationships across trajectory classes. For a trajectory category $j$, let $n_j$ denote the number of retained records, $\bar S^{(j)}$ denote the average stored tokens per record under the active tokenizer, and $\bar w_j$ denote the average selected target tokens per record admitted into a specific imitation fine-tuning artifact. The total stored token volume $V_j$ and total target token volume $W_j$ are:
-
-$$V_j=n_j\bar S^{(j)},\qquad W_j=n_j\bar w_j.$$
-
-The stored token share measures $V_j$ relative to the aggregate token footprint of the entire repository, whereas the target token share measures $W_j$ relative to the active supervision tokens across the training dataset. This distinction carries severe systems implications: processed tokens (context plus targets) dictate transformer attention compute and memory bandwidth during forward-backward passes, whereas target tokens alone dictate the volume of supervised gradient updates. Specifying a dataset mixture in one metric while budgeting GPU infrastructure in another leads to severe scheduling mismatches, particularly when multi-turn serialization or prefix caching enters the pipeline.
-
-```{python}
-#| label: lego-14-sizing-and-token-budget-allocation
-#| echo: false
-# CORPUS DENOMINATORS (LEGO)
-# Goal: Separate retained records, stored context, and selected imitation targets.
-# Scope: Hypothetical disjoint role counts; one emitted sequence per demo record.
-from mlsysim.core.units import token
-from mlsysim.fmt import check, fmt, fmt_int, fmt_percent
-
-class MixedCurationTokenBudgetAllocation:
-    # 1. LOAD: stipulated retained-pool counts and tokenizer-specific means.
-    n_direct, n_recover, n_negative = 32_500, 12_500, 5_000
-    l_direct, l_recover, l_negative = 7200 * token, 18_500 * token, 9800 * token
-    u_direct, u_recover = 1200 * token, 2000 * token
-
-    # 2. EXECUTE: this artifact admits direct/recovery records, not negatives.
-    n_total = n_direct + n_recover + n_negative
-    n_demo = n_direct + n_recover
-    v_direct, v_recover, v_negative = n_direct * l_direct, n_recover * l_recover, n_negative * l_negative
-    v_total = v_direct + v_recover + v_negative
-    v_demo = v_direct + v_recover
-    u_total = n_direct * u_direct + n_recover * u_recover
-    count_share = n_recover / n_total
-    stored_share = (v_recover / v_total).magnitude
-    demo_context_share = (v_recover / v_demo).magnitude
-    target_share = (n_recover * u_recover / u_total).magnitude
-    ctx_per_target_direct = (l_direct / u_direct).to("").magnitude
-    ctx_per_target_recover = (l_recover / u_recover).to("").magnitude
-
-    # 3. GUARD: named denominators, logical-token totals, and target bounds.
-    check(n_total == 50_000 and n_demo == 45_000, "Separate retained and demo counts")
-    check(v_total.to(token).magnitude == 514_250_000, "Retained logical tokens")
-    check(v_demo.to(token).magnitude == 465_250_000, "Demo logical tokens")
-    check(u_total.to(token).magnitude == 64_000_000, "Selected target tokens")
-    check(0 < u_direct <= l_direct and 0 < u_recover <= l_recover, "Targets within records")
-    check(abs(count_share - 0.25) < 1e-12, "Count share")
-    check(abs(stored_share - 0.4496840058) < 1e-9, "Stored share")
-    check(abs(demo_context_share - 0.4970445997) < 1e-9, "Demo context share")
-    check(abs(target_share - 0.390625) < 1e-12, "Target share")
-
-    # 4. OUTPUT: every export is consumed in the worksheet below.
-    n_total_str, n_demo_str = fmt_int(n_total), fmt_int(n_demo)
-    n_direct_str, n_recover_str, n_negative_str = fmt_int(n_direct), fmt_int(n_recover), fmt_int(n_negative)
-    l_direct_str = fmt_int(l_direct.to(token).magnitude)
-    l_recover_str = fmt_int(l_recover.to(token).magnitude)
-    l_negative_str = fmt_int(l_negative.to(token).magnitude)
-    u_direct_str = fmt_int(u_direct.to(token).magnitude)
-    u_recover_str = fmt_int(u_recover.to(token).magnitude)
-    v_total_str = fmt_int(v_total.to(token).magnitude)
-    v_demo_str = fmt_int(v_demo.to(token).magnitude)
-    u_total_str = fmt_int(u_total.to(token).magnitude)
-    count_share_str = fmt_percent(count_share, precision=0, style="prose")
-    stored_share_str = fmt_percent(stored_share, precision=2, style="prose")
-    demo_context_share_str = fmt_percent(demo_context_share, precision=2, style="prose")
-    target_share_str = fmt_percent(target_share, precision=2, style="prose")
-    v_direct_str = fmt_int(v_direct.to(token).magnitude)
-    v_recover_str = fmt_int(v_recover.to(token).magnitude)
-    v_negative_str = fmt_int(v_negative.to(token).magnitude)
-    u_direct_total_str = fmt_int((n_direct * u_direct).to(token).magnitude)
-    u_recover_total_str = fmt_int((n_recover * u_recover).to(token).magnitude)
-    ctx_direct_str = fmt(ctx_per_target_direct, precision=0)
-    ctx_recover_str = fmt(ctx_per_target_recover, precision=2)
-```
-
-::: {#nbk-14-sizing-and-token-budget-allocation .callout-notebook title="One pool, three different token allocations"}
-
-**Problem**: Consider a hypothetical retained corpus containing `{python} MixedCurationTokenBudgetAllocation.n_total_str` records categorized into disjoint roles. The demonstration policy admits direct successes and recovery trajectories; negative trajectories are reserved for diagnostic logging and preference modeling, providing zero imitation targets for this artifact. Using the empirical means listed in @tbl-vol3-curation-token-allocation, determine the fractional share that recovery trajectories occupy across three distinct denominators: total records, stored tokens, and supervised target tokens.
-
-| Retained class |                                                      Records |                                Mean stored tokens per record |                      Mean selected target tokens per record |
-|:---------------|-------------------------------------------------------------:|-------------------------------------------------------------:|------------------------------------------------------------:|
-| Direct         |   `{python} MixedCurationTokenBudgetAllocation.n_direct_str` |   `{python} MixedCurationTokenBudgetAllocation.l_direct_str` |  `{python} MixedCurationTokenBudgetAllocation.u_direct_str` |
-| Recovery       |  `{python} MixedCurationTokenBudgetAllocation.n_recover_str` |  `{python} MixedCurationTokenBudgetAllocation.l_recover_str` | `{python} MixedCurationTokenBudgetAllocation.u_recover_str` |
-| Negative       | `{python} MixedCurationTokenBudgetAllocation.n_negative_str` | `{python} MixedCurationTokenBudgetAllocation.l_negative_str` |                             None in this imitation artifact |
-
-: **Inputs to the Corpus Allocation Worksheet**: Counts and lengths are hypothetical, not an empirically recommended mixture. Selected targets refer to one presentation of each eligible record under a fixed tokenizer and selection policy. {#tbl-vol3-curation-token-allocation}
-
-**Math**: Total stored tokens follow $V_j = n_j\bar S^{(j)}$: direct successes account for `{python} MixedCurationTokenBudgetAllocation.v_direct_str`, recovery traces account for `{python} MixedCurationTokenBudgetAllocation.v_recover_str`, and negatives account for `{python} MixedCurationTokenBudgetAllocation.v_negative_str`, totaling `{python} MixedCurationTokenBudgetAllocation.v_total_str` across the repository and `{python} MixedCurationTokenBudgetAllocation.v_demo_str` across admitted demonstration records. Supervised target tokens follow $W_j = n_j\bar w_j$: direct demonstrations contribute `{python} MixedCurationTokenBudgetAllocation.u_direct_total_str` target tokens and recovery traces contribute `{python} MixedCurationTokenBudgetAllocation.u_recover_total_str` target tokens, totaling `{python} MixedCurationTokenBudgetAllocation.u_total_str` supervisory tokens.
-
-**Result**: Recovery accounts for `{python} MixedCurationTokenBudgetAllocation.count_share_str` of total retained records, `{python} MixedCurationTokenBudgetAllocation.stored_share_str` of all stored tokens in the repository, `{python} MixedCurationTokenBudgetAllocation.demo_context_share_str` of the admitted demonstration tokens, and `{python} MixedCurationTokenBudgetAllocation.target_share_str` of active target supervision tokens.
-
-**Systems insight**: Always formulate training mixtures in terms of target tokens while budgeting GPU compute and memory in terms of processed context tokens. The operational multiplier separating these two metrics is the context-to-target ratio: `{python} MixedCurationTokenBudgetAllocation.ctx_recover_str` stored context tokens per target token for recovery traces, compared to `{python} MixedCurationTokenBudgetAllocation.ctx_direct_str` for direct successes. Increasing the recovery proportion inflates processed context volume far faster than supervised gradient signal. An engineering team that configures a mixture purely by record count will request a `{python} MixedCurationTokenBudgetAllocation.count_share_str` recovery ratio but will end up committing `{python} MixedCurationTokenBudgetAllocation.stored_share_str` of total storage and compute to context processing. Naive multi-turn serialization that repeatedly unrolls conversational prefixes amplifies this computational overhead even further.
-
-:::
-
-### Mixture experiments {#sec-vol3-trajectory-curation-mixture-experiments}
-
-While token accounting quantifies the compute and memory footprint of a corpus, empirical mixture experiments determine its practical operational value. A mixture experiment establishes a fixed evaluation protocol, selects a baseline architecture, and evaluates training cohorts across controlled recovery ratios. For example, an ablation study might compare a direct-success baseline against recovery-augmented corpora while holding task domains, base model checkpoints, target-masking criteria, and total training schedules constant. Curation engineers must track trajectory deduplication and replacement meticulously: expanding the recovery fraction under a constrained training budget inevitably reduces coverage of nominal, direct-path tasks.
-
-Rigorous experimental designs declare their budgeting units explicitly and report performance across both metrics. If an experiment fixes total supervised target tokens, the recovery-heavy training arm processes substantially more prompt context tokens, increasing training wall-clock time and FLOPs. Conversely, if an experiment fixes total processed tokens, the recovery-heavy arm receives fewer supervised target updates. When hardware budgets or training schedules represent hard constraints, engineers must evaluate trade-offs directly against wall-clock training time or financial cost.
-
-Model selection proceeds by screening candidate mixtures on a held-out development suite and validating the top configurations against an isolated evaluation benchmark. To prevent high-level aggregate metrics from masking systematic failure modes, evaluation reports must decompose outcomes across nominal workflows, synthesized fault conditions, and out-of-distribution transfer tasks before synthesizing composite scores. Diagnostic tracking must measure end-to-end task completion alongside hallucinated tool claims, superfluous execution steps, clean termination decisions, and cumulative API token expenditure.
-
-Once an optimal mixture is established, its parameters are locked into a machine-readable **corpus manifest**\index{Corpus manifest!definition}.[^fn-datasheet-manifest-curation] The manifest records the immutable provenance of the published dataset: input trajectory pool identifiers, selection filter versions, sampling weight distributions, token accounting denominators, test coverage matrices, and audit logs. Deploying a model trained on this manifest alters the operational distribution of subsequent production trajectories, feeding fresh failure modes and successful recoveries back into the harvesting pipeline to drive the flywheel of continuous self-improvement.
-
-[^fn-datasheet-manifest-curation]: **Dataset Documentation**: Documenting datasets via structured records that detail their creation, composition, collection boundaries, and intended operational envelope originated by analogy to hardware datasheets in electronic engineering [@gebru2021]. A corpus manifest serves as the machine-verifiable incarnation of this standard for agentic systems: its attributes bind cryptographically to dataset versions, filter code, and empirical validation logs, enabling downstream training pipelines to verify corpus invariants automatically rather than relying on informal documentation. \index{Corpus manifest!datasheet lineage}
-
-## The Self-Improvement Loop {#sec-vol3-trajectory-curation-self-improvement}
-
-Corpus selection directly shapes the distribution of behaviors the next model generation learns. Consider a curation round for an automated connection-pool repair agent that retains only straight-line, nominal executions while discarding messier traces where the agent recovers from misleading test diagnostics. Fine-tuning on that corpus reinforces straightforward repairs but leaves recovery capabilities unimproved. In the subsequent iteration, a higher nominal acceptance rate masks that vulnerability rather than rectifying it. To maintain system reliability across iterations, curators must track three distinct signals each round: what the current policy sampled, what the curation cascade retained, and how the resulting model performs under independent, held-out evaluation.
-
-### Rejection-sampling fine-tuning {#sec-vol3-trajectory-curation-rejection-sampling}
-
-A generate–select–train loop begins with a versioned policy sampling executions across a suite of task fixtures within a defined compute budget. A validation cascade routes the resulting trajectories to their respective destinations: clean demonstrations feed supervised imitation buffers, branched pairs populate preference datasets, and unresolved traces enter diagnostic storage. Training on these curated records produces a candidate policy, which offline evaluation tests to decide whether it should become the generator for the next collection cycle. That promotion decision remains an internal development step rather than a production release. Recording attempted, rejected, and unverified traces alongside retained examples guarantees that an apparent gain in corpus quality reflects genuine policy improvement rather than an artificially relaxed acceptance filter.
-
-Selecting sampled successes for imitation is **rejection-sampling fine-tuning**\index{Rejection-sampling fine-tuning!definition}.[^fn-expert-iteration-curation] The Self-Taught Reasoner (STaR) demonstrates this pattern in bootstrapped reasoning by generating candidate rationales, retaining those that yield correct answers, fine-tuning on them, and using ground-truth answers to provide rationales after failed initial attempts [@zelikman2022star]. An automated verifier confirms that an execution satisfies its declared acceptance criteria, but trajectory review must still assess whether the intermediate tool calls and intermediate states reflect robust problem-solving worth imitating.
-
-[^fn-expert-iteration-curation]: **Expert Iteration**: The generate–select–train loop predates language models. In expert iteration, a search procedure guided by the current network produces stronger decisions than the network alone, the network is trained to imitate them, and the improved network then guides the next round of search [@anthony2017thinking]. Rejection-sampling fine-tuning replaces the search with repeated sampling and the expert's judgment with a check, which is why the check's blind spots become the loop's habits. \index{Expert iteration!generate-select-train loop}
-
-Learning does not require mixed outcomes across every task. An all-success batch supplies prime imitation targets, demonstrating efficient paths through complex tools. Conversely, an all-failure collection yields no end-to-end demonstrations under a success filter, yet it still offers valuable intermediate artifacts: corrective segments that isolate where an execution derailed, justified comparisons for preference modeling, and new failure traces that can be promoted to regression fixtures. By contrast, relative optimization algorithms—such as group-relative objectives—rely on within-group contrast. When all rollouts on a fixture receive identical rewards, relative advantage calculations collapse, yielding zero gradient updates.
-
-::: {.column-margin .margin-pointer}
-↪ Group relative policy optimization, which scores each rollout against the other rollouts sampled for the same task, is developed in @sec-vol3-rlvr-grpo.
-:::
-
-We can quantify the sampling budget required to harvest these different data types. Suppose the collection policy succeeds on a fixture with probability $\HiddenDimensionFour$ per attempt, with each of the $k$ attempts executed independently. A simple success filter extracts a demonstration from the fixture if at least one attempt succeeds, an event that occurs with probability $1-(1-\HiddenDimensionFour)^k$. This expected yield sets the baseline compute cost per successful trajectory in an imitation corpus. Pairwise preference models and group-relative reinforcement learning algorithms require a stricter condition: each group of $k$ rollouts must contain at least one success and at least one failure. Subtracting both the all-failure probability $(1-\HiddenDimensionFour)^k$ and the all-success probability $p^k$ yields the **informative-task fraction**\index{Informative-task fraction!definition}:
-
-$$p_{\text{inform}}(\HiddenDimensionFour,k)=1-(1-\HiddenDimensionFour)^k-p^k.$$ {#eq-vol3-trajectory-curation-informative}
-
-```{python}
-#| label: lego-14-informative-task-fraction
-#| echo: false
-# ┌─────────────────────────────────────────────────────────────────────────────
-# │ SUCCESS YIELD AND INFORMATIVE-TASK FRACTION (LEGO)
-# ├─────────────────────────────────────────────────────────────────────────────
-# │ Context: @eq-vol3-trajectory-curation-informative.
-# │ Goal: Show how per-attempt pass rate sets harvest yield and group contrast.
-# │ Show: 1-(1-p)^k and 1-(1-p)^k-p^k at three pass rates for k attempts.
-# │ How: Independent attempts with a fixed per-attempt pass probability.
-# │ Note: Pass rates are illustrative, not measured fixture difficulties.
-# └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import check, fmt, fmt_int, fmt_percent
-
-class InformativeTaskFraction:
-    # 1. LOAD: attempts per fixture and three illustrative pass rates.
-    k = 8
-    p_low, p_mid, p_high = 0.05, 0.50, 0.95
-
-    # 2. EXECUTE: at least one success, then at least one of each outcome.
-    yield_low = 1 - (1 - p_low) ** k
-    yield_mid = 1 - (1 - p_mid) ** k
-    yield_high = 1 - (1 - p_high) ** k
-    mixed_low = yield_low - p_low**k
-    mixed_mid = yield_mid - p_mid**k
-    mixed_high = yield_high - p_high**k
-    attempts_low = k / yield_low
-
-    # 3. GUARD: symmetry of the mixed fraction and the displayed scales.
-    check(abs(mixed_low - mixed_high) < 1e-12, "Mixed fraction is symmetric in p and 1-p")
-    check(0.33 < mixed_low < 0.34, "Low pass-rate mixed fraction")
-    check(mixed_mid > 0.99, "Mid pass-rate mixed fraction")
-    check(yield_high > 0.999, "High pass-rate yield is near one")
-    check(23 < attempts_low < 24, "Attempts per harvested hard fixture")
-
-    # 4. OUTPUT: every export is consumed in the paragraph below.
-    k_str = fmt_int(k)
-    low_str = fmt_percent(p_low, precision=0, style="prose")
-    mid_str = fmt_percent(p_mid, precision=0, style="prose")
-    high_str = fmt_percent(p_high, precision=0, style="prose")
-    low_yield_str = fmt(yield_low, precision=2)
-    low_mixed_str = fmt(mixed_low, precision=2)
-    mid_mixed_str = fmt(mixed_mid, precision=2)
-    high_mixed_str = fmt(mixed_high, precision=2)
-    attempts_low_str = fmt_int(round(attempts_low))
-```
-
-With `{python} InformativeTaskFraction.k_str` attempts, a fixture the policy solves `{python} InformativeTaskFraction.low_str` of the time yields a success with probability only `{python} InformativeTaskFraction.low_yield_str`, requiring an average of about `{python} InformativeTaskFraction.attempts_low_str` attempts to harvest a single successful trajectory. That same fixture forms a mixed group of successes and failures with probability `{python} InformativeTaskFraction.low_mixed_str`. At `{python} InformativeTaskFraction.mid_str`, where the task is moderately difficult, the mixed fraction reaches `{python} InformativeTaskFraction.mid_mixed_str`, providing abundant pairwise contrast. When the pass rate reaches `{python} InformativeTaskFraction.high_str`, nearly every fixture yields a success, but the mixed fraction drops back to `{python} InformativeTaskFraction.high_mixed_str` because batches rarely include a failing attempt. Crucially, @eq-vol3-trajectory-curation-informative measures contrast rather than general utility. All-success groups remain valid demonstrations for imitation learning, whereas @sec-vol3-rlvr-grpo-zero-variance applies the $p^k$ and $(1-\HiddenDimensionFour)^k$ terms to isolate groups whose uniform rewards offer zero gradient in group-relative optimization.
-
-::: {.column-margin}
-![](images/svg/vol3_trajectory_curation_margin_004.svg){width="100%" fig-alt="Two curves against per-attempt pass rate from zero to one for eight attempts. A blue success-yield curve rises quickly toward one. A purple informative-task curve is a symmetric plateau that falls to zero at both ends, with dots at 0.34 for pass rates of 5 and 95 percent."}
-
-*Easy fixtures always yield successes; only mid-difficulty fixtures yield contrast.*
-:::
-
-Collection difficulty is fundamentally a resource allocation decision. Hard fixtures cost about `{python} InformativeTaskFraction.attempts_low_str` attempts per harvested success, but they force the agent into unfamiliar execution paths and expose missing recovery behaviors. Easy fixtures cost almost nothing per success, acting as low-cost regression anchors that preserve core competencies. For rare or mission-critical task families, low harvest yields represent an acceptable engineering expense necessary to maintain comprehensive coverage. Storing the exact sampling and retention policies directly alongside the corpus ensures that distribution shifts remain auditable across retraining cycles.
-
-### Staleness and coverage narrowing {#sec-vol3-trajectory-curation-coverage-narrowing}
-
-In an evolving agent system, **staleness**\index{Staleness!trajectory corpus} measures architectural incompatibility rather than chronological age. A trajectory generated by an older policy can remain an exemplary demonstration if the underlying tools and environment semantics are unchanged. Conversely, a trace generated minutes ago is stale if recorded against a deprecated tool schema or evaluated by a flawed grader. Trajectory stores prevent silent corruption by recording four explicit provenance fields: the generating policy, the environment fixture, the tool interface schema, and the grading criteria. When verification criteria evolve, the pipeline triggers automated re-evaluation. When tool schemas change, existing trajectories must undergo schema migration and revalidation. Finally, as policy capability advances, the pipeline focuses sampling on the novel edge cases and failure modes the updated agent actually encounters.
-
-Iterative filtering also risks coverage narrowing. Because strategies that successfully cleared earlier filters appear more frequently in fine-tuning data, the policy is conditioned to reproduce those specific paths, sampling them even more heavily in subsequent rounds. Left unchecked, recursive training on self-generated outputs degrades distributional breadth, mirroring the model-collapse phenomena analyzed by @shumailov2024. In production architectures, allowing a model's outputs to dictate its future training distribution introduces the classic hidden feedback loop identified by @sculley2015hidden, quietly compounding technical debt across generations. Automated verifiers prevent outright hallucinations from entering the corpus, but filtering alone cannot break the self-referential loop; engineering teams must track and bound this drift through explicit diversity metrics.
-
-Coverage narrowing manifests in three observable telemetry signals. First, the count of distinct normalized action sequences per fixture declines across iterations. Second, pass@1 continues to climb while pass@$k$ at high $k$ plateaus, indicating that the policy is concentrating probability mass onto known routines rather than discovering alternative solutions. Third, performance on held-out task families stagnates even as acceptance rates on training fixtures rise. Systems teams must interpret action diversity alongside generalization benchmarks: a drop in unique action sequences can simply reflect an agent pruning redundant retries and settling into optimal execution paths, but when shrinking diversity coincides with stagnant held-out scores, the agent is over-specializing.
-
-::: {.column-margin .margin-pointer}
-↩ pass@$k$, the probability that at least one of $k$ sampled candidates passes, is established in @sec-vol3-test-time-compute-pass-at-k.
-:::
-
-Four engineering controls counteract this narrowing tendency. First, capping the number of retained samples per fixture prevents trivially solved environments from overwhelming the corpus. Second, deduplication filters prune identical normalized action sequences while preserving identical actions that occurred under distinct environmental observations. Third, the training corpus retains a permanent anchor of verified external demonstrations—such as curated human interactions—that automated collection cannot displace. Finally, early-stopping policies halt the self-improvement loop when behavioral diversity and held-out performance plateau, even if acceptance rates on training fixtures continue to climb.
-
-External demonstrations and external evaluation suites serve complementary but distinct architectural functions. Permitted human or expert demonstrations anchor the training distribution because they originate outside the current policy's behavioral basin. Protected evaluation tasks, by contrast, must remain strictly quarantined from both training loops and automated curation filters. When engineers repeatedly evaluate candidate policies against a single holdout set to guide promotion decisions, that holdout degrades into development data. Defensible generalization claims require a separate confirmation suite reserved exclusively for final acceptance testing. In addition, periodic manual audits across all curation outcomes—including accepted runs, rejected candidates, and borderline cases—are essential to catch grader shortcuts, reward hacking, and missed edge cases. Any failure against promotion criteria immediately halts the flywheel for human inspection.
-
-### Production feedback signals {#sec-vol3-trajectory-curation-production-feedback}
-
-Production interactions surface operational requirements and edge cases that static offline fixtures miss. However, extracting training signals from live telemetry demands disciplined interpretation: an observed event reflects only the immediate user action, rather than an unvarnished verdict on task correctness. As @tbl-vol3-trajectory-curation-feedback-signals summarizes, each telemetry event must be bounded by its specific operational limitations before being assigned a learning role.
-
-| **Signal**             | **Evidence Provided**                       | **Limitation**                                                             | **Possible Learning Use**                                                           |
-|:-----------------------|:--------------------------------------------|:---------------------------------------------------------------------------|:------------------------------------------------------------------------------------|
-| Accepted without edits | Recorded acceptance of the delivered output | The user may not have checked correctness                                  | Usability label under a declared criterion; candidate for task validation           |
-| Edited or reverted     | A change to, or rejection of, the output    | May reflect correction, style, or changed requirements                     | Proposed target or comparison after checking the applicable task and context        |
-| Mid-task correction    | New user guidance at a particular turn      | Does not establish the cause of the earlier behavior                       | Recovery context, intent clarification, or a candidate fixture                      |
-| Retry or abandonment   | A retry or session-ending event             | Latency, cost, interruptions, and changed plans can produce the same event | Investigation or a label for the observed event, not assumed task failure           |
-| Explicit rating        | The respondent's recorded assessment        | Missing responses and response selection limit population claims           | Label for a defined satisfaction criterion, not automatic proof of task correctness |
-
-: **Production Feedback Signals**: Preserve the observed event and its context before assigning a learning role. A signal may directly label its declared criterion without establishing unrelated properties. {#tbl-vol3-trajectory-curation-feedback-signals}
-
-Misinterpreting these signals distorts the training distribution. For instance, when a user edits an agent's response to introduce a new constraint, the resulting text satisfies an altered prompt rather than the original query. Using that edited response as a supervised target without updating the prompt trains the model on incomplete specifications. Similarly, preference pairs comparing the model's output against a user edit are valid only when the environmental context and task goals remain identical across both versions. Telemetry pipelines must also treat missing feedback as unobserved data rather than tacit endorsement, verify user consent and data governance permissions before ingestion, and convert critical production errors into graded regression fixtures before recycling them into the training loop.
-
-These operational safeguards translate high-level self-improvement goals into a concrete systems collection plan with explicit sampling budgets, automated validation stages, and mandatory human review gates. Because distributed rollout generation scales horizontally while high-assurance verification and human inspection remain strictly throughput-constrained, the curation pipeline must balance sampling volume against bounded downstream validation capacity, preventing unvetted executions from overwhelming the training loop.
 
 ## Collection Pipeline Architecture {#sec-vol3-flywheel-pipeline}
 
@@ -1401,6 +1017,205 @@ When a worker's dispatch lease expires, expiration does not instantly terminate 
 
 Once physical movement from execution to durable disposition is bounded and accounted for, data governance determines artifact admissibility: which upstream source versions justify inclusion, what lossy or privacy-preserving transformations were applied, and which dataset split partitions and license restrictions govern the resulting weights.
 
+## Recovery Demonstration Curation {#sec-vol3-flywheel-curation}
+
+When an agent operates in real environments, failures are inevitable. Consider an execution trace where an agent issues a malformed tool call, receives a rejection from the environment runtime, and subsequently inspects the schema to produce a successful patch. A naive curation pipeline might discard this trace because it contains a failed step, or scrub the error to make the agent appear prescient. Doing so discards the most valuable training signal in autonomous systems: learning how to recover from an imperfect prefix. The curation cascade can admit the successful repair while preserving the original misstep as necessary context. The core systems questions then become which recovery trajectories to harvest, how to curate them safely, and how much training capacity to allocate to them.
+
+A training corpus composed solely of pristine, error-free trajectories teaches an agent how to act only when prior steps succeeded flawlessly. In production, however, stochastic tool outputs, transient network glitches, and early reasoning missteps inevitably push an agent off the nominal path. Once off that path, a model trained only on clean prefixes faces unfamiliar states, frequently escalating minor detours into catastrophic task failures. This distribution mismatch[^fn-compounding-imitation-error] drives the need for recovery demonstrations. The curation system's practical responsibility is to capture, validate, and package these recovery episodes with their conditioning evidence fully intact.
+
+::: {.column-margin .margin-pointer}
+↪ Exposure bias, the mismatch between training on recorded prefixes and running on prefixes the policy produced itself, and its horizon-dependent cost are developed in @sec-vol3-fine-tuning-exposure-bias.
+:::
+
+[^fn-compounding-imitation-error]: **Compounding Imitation Error**: A policy trained only on states visited by an expert can turn a per-step error rate $\SmallConstant$ into as many as $H^2\epsilon$ mistakes over an $\Horizon$-step task, because an early error exposes the policy to states absent from its training distribution. Interactively querying an expert on learner-visited states—the core mechanism of DAgger—restores an error bound that scales linearly in $\Horizon$ [@ross2011reduction]. Recovery demonstrations serve as the offline curation counterpart: they inject supervised repair targets on the flawed state prefixes that direct-success collection inevitably omits. \index{Imitation learning!compounding error}
+
+::: {#dfn-recovery-demonstration .callout-definition title="Recovery demonstration"}
+
+A ***recovery demonstration***\index{Recovery demonstration!definition} is a curated trajectory record or isolated sequence segment that pairs the context of an operational disruption—such as a model mistake, environment fault, or partial observation—with an action assessed as correct under the task specification and runtime authority boundaries.
+
+1. **Significance**: Recovery demonstrations directly address long-horizon execution stability. Under horizon compounding (@eq-vol3-horizon-compounding), any step-level error that the policy can successfully remediate becomes a temporary detour rather than an irrecoverable task failure. Direct-success harvesting systematically starves the training distribution of these pivotal recovery branches.
+2. **Distinction**: An appropriate recovery action depends on context: it may diagnose an exception, retry with corrected parameters, back off, or hand off control to a human supervisor. It does not demand that the agent heroically overcome impossible environment outages or exceed its security clearance to finish the task.
+3. **Common pitfall**: Treating every token in an eventually successful trajectory as a positive imitation target, thereby inadvertently teaching the model to repeat the initial mistake.
+
+:::
+
+### Record roles and learning uses {#sec-vol3-trajectory-curation-record-roles}
+
+Direct success, recovery, and negative are descriptive behavioral labels rather than blanket permissions for training. A single extended trajectory may begin with straightforward progress, encounter an unexpected environment error, execute a clean recovery, and later stall on an unrelated tool failure. Discarding that entire trajectory wastes genuine engineering signal; conversely, training uncritically on all its tokens teaches the model to replicate its bugs. In an industrial curation pipeline, three distinct verification stages govern data admission:
+
+1. The record-adequacy predicate $\text{chk}_{\text{record}}$ verifies that recorded events, observations, and timestamps faithfully match what actually transpired in the runtime environment.
+2. The usage eligibility predicate $\text{chk}_{\text{use}}$ enforces data-privacy permissions, license constraints, and cross-validation split assignments across every emitted training artifact.
+3. Consumer-specific predicates evaluate whether the process, final outcome, or individual step targets meet the threshold for a particular downstream consumer (such as supervised fine-tuning or preference optimization).
+
+@Tbl-vol3-trajectory-taxonomy maps these behavioral categories to their valid learning applications, emphasizing that taxonomy labels describe behavioral evidence rather than granting unconditional admission.
+
+| Record role                  | Evidence worth preserving                                                                   | Learning-use decision                                                                                                                              |
+|:-----------------------------|:--------------------------------------------------------------------------------------------|:---------------------------------------------------------------------------------------------------------------------------------------------------|
+| Direct-success demonstration | Grounded actions and adequate evidence for the declared result                              | Select useful responses under the demonstration policy; shortest length and absence of error codes are not sufficient criteria                     |
+| Recovery demonstration       | The preceding context, observed disruption, response, and evidence for its assessed outcome | Select the justified response while retaining the mistake or fault as context where needed                                                         |
+| Hard-negative candidate      | A plausible but inadequate response, with evidence identifying the relevant deficiency      | Consider diagnostic use, a separately assessed segment, or a compatible preference comparison; do not automatically imitate the deficient response |
+
+: **Behavioral Roles and Learning Uses**: Record labels describe evidence. Each intended consumer still requires its own admission conditions. {#tbl-vol3-trajectory-taxonomy}
+
+A **hard negative**\index{Hard negative!definition} is an action or plan that appears plausible under surface-level heuristics—such as generating valid syntax or matching expected keyword patterns—yet fails rigorous functional validation. Its difficulty stems from this superficial plausibility. However, pinpointing the precise moment of failure in an agentic trace is subtle. A failed assertion downstream confirms that an error occurred, but it rarely reveals the initial root cause. Similarly, repeated tool calls may suggest an infinite loop, yet an iterative polling loop might be entirely justified under asynchronous conditions. Robust curation systems therefore annotate deficient steps with their empirical failure signals and explicit confidence intervals rather than asserting an unverified divergence point.
+
+Furthermore, engineering teams often assume that any recorded negative can be immediately paired with a success for direct preference optimization or served as a rollout baseline for reinforcement learning with verifiable rewards. This assumption is hazardous. Valid preference learning requires pairwise trajectories conditioned on the exact same context prefix; pairing an unassisted failed attempt with a successful trajectory that benefited from a different prompt, an extra hint, or updated tool outputs produces an ungrounded comparison that corrupts policy optimization.
+
+::: {#psp-14-hard-negative-hazard .callout-perspective title="A recorded mistake is context, not a target"}
+
+A pervasive misconception in trajectory engineering is that an imitation training set must consist exclusively of pristine, error-free transcripts. In reality, a curated training dataset consists of complete conversational contexts coupled with explicit target masks, and these two components serve fundamentally different purposes.
+
+A flawed model response should never receive positive imitation gradients. Nevertheless, that erroneous response must remain in the prompt history if subsequent recovery actions are to make any sense; a correction is meaningful only in the context of the error it resolves. Conversely, an execution trace that ultimately timed out or failed an integration test often contains early sub-tasks solved with exemplary precision. The curation pipeline marks which spans represent valid targets and which represent conditioning context; the loss-masking subsystem then zeros out gradients across context spans during fine-tuning. By masking errors out of the loss calculation while retaining them in the attention context, we teach the model how to react to failures without training it to generate them.
+
+:::
+
+### Conditioning evidence for a correction {#sec-vol3-trajectory-curation-conditioning-evidence}
+
+To see how target selection operates in practice, trace a concrete collection run—designated `collection_run_r19_01`—executing task `pool_repair_01` inside test environment `pool_fixture_v1`. The run yields workspace candidate `ws_r20` (distinct from an earlier evaluation trial `ws_r19`) and captures raw trace `trace_r19_01`. In this run, end-to-end evaluation confirms that the candidate satisfies acceptance specification `repair_accept_v1`, fulfilling all process constraints, resource ceilings, and residual cleanup duties.
+
+The event sequence illustrates the recovery dynamics:
+
+- At event `e2`, the model generates a file edit containing a malformed argument. Because the tool runtime validates inputs locally before dispatch, it rejects the request immediately; the trace faithfully records this refusal without falsely logging an applied write.
+- At event `e3`, the model recognizes the syntax rejection, requests the API schema documentation, and reads the returned specification.
+- At event `e4`, the model issues a corrected, schema-compliant edit. Crucially, the tool enforces an atomic version check alongside the update rather than relying on a stale prior read.
+- Event `e5` captures the automated test and validation summary returned by the execution sandbox.
+- At event `e6`, the model summarizes the validated changes, documents the patch scope, and concludes the session.
+
+Under curation policy `repair_accept_v1`, an initial syntax rejection that is promptly diagnosed and corrected is permissible. A target-selection manifest isolates the actions worth imitating without altering the actual sequence of events:
+
+```json
+{
+  "collection_run_id": "collection_run_r19_01",
+  "source_trace_id": "trace_r19_01",
+  "criteria_version": "repair_accept_v1",
+  "target_selection_version": "recovery_targets_v1",
+  "behavioral_role": "recovery",
+  "context_only_events": ["e2", "e5"],
+  "selected_response_events": ["e3", "e4", "e6"],
+  "assessment_scope": "recorded correction and supported final report"
+}
+```
+
+The underlying source trace continues to preserve the original task prompt, tool definitions, intermediate observations, and evaluation logs. Notice that target selection flags only the reviewed policy generation tokens within events `e3`, `e4`, and `e6`, rather than every token generated across the environment interaction. The rejected proposal (`e2`) and test output (`e5`) remain in the sequence as conditioning context, providing the causal backdrop that makes the agent's schema lookup and repair intelligible. An end-to-end task success does not automatically justify supervising every intermediate action; each selected step must represent a sound decision conditioned on what the agent knew at that exact juncture. @Fig-vol3-trajectory-typology partitions trajectory roles across three execution archetypes: direct success demonstrations where all actions serve as imitation targets (blue), recovery demonstrations where invalid proposals and error observations (`e2`, `e5`) remain conditioning context while repairs (`e3`, `e4`, `e6`) become targets, and hard negatives where plausible actions fail comprehensive validation and are excluded from imitation.
+
+::: {#fig-vol3-trajectory-typology fig-env="figure" fig-pos="htb" fig-cap="**Record Roles and Selected Targets**: Each role is drawn as a sequence of events, with selected targets distinguished from context. In the recovery demonstration, the refused malformed proposal at e2 and the check summary at e5 stay as context while e3, e4, and e6 become targets. A hard-negative candidate looks adequate under a targeted check and fails a required one. Its deficient response is never an imitation target, and where it went wrong is recorded with its basis rather than fixed at an exact step." fig-alt="Three columns of event boxes connected by downward arrows. Direct-success demonstration: task and delivered context, inspect the failing check, edit the pool wakeup, required checks pass, report the supported result. Recovery demonstration: earlier context and observations, e2 malformed edit refused, e3 inspect the schema, e4 corrected permitted edit, e5 check summary, e6 report result and scope. Hard-negative candidate: task and delivered context, plausible edit, targeted check passes, required check fails, with a note that the first causal step is uncertain and its basis is recorded. Each column ends with a learning-use box. A legend marks selected target responses in blue, context or observations in gray, and deficient responses with a red dashed border."}
+![](images/svg/vol3-trajectory-typology.svg)
+:::
+
+When only a localized recovery window contains sound evidence, the curation harness can admit that isolated segment while marking broader task outcomes as unverified. Furthermore, if post-processing sanitizes credentials or strips sensitive data into `trace_r19_01_redacted_v1`, the curation pipeline must revalidate target spans against the modified tokens. Pruning the malformed call, inserting future validation outputs into an early prompt, or truncating intermediate observations fundamentally alters the causal reasoning problem the model is being trained to solve.
+
+## Records, stored tokens, and selected targets {#sec-vol3-trajectory-curation-token-accounting}
+
+Because a recovery trajectory contains multiple diagnostic cycles, failed attempts, and environment feedbacks, it is substantially longer than a direct-success path. Consequently, the fraction of recovery trajectories in a dataset does not equal its fraction of stored disk tokens, nor does it equal its fraction of active training tokens. Curation accounting begins with a global repository of retained trajectories, from which downstream pipelines sample subsets tailored to specific training artifacts. A single retained trace may supply conditioning context to an imitation fine-tuning corpus while contributing preference pairs to a reward modeling set; in both cases, it represents a single underlying task execution.
+
+::: {.column-margin}
+![](images/svg/vol3_trajectory_curation_margin_003.svg){width="100%" fig-alt="Three horizontal bars showing the recovery class's share of the hypothetical pool under three denominators: 25 percent of records, 45 percent of stored tokens, and 39 percent of selected target tokens."}
+
+*One recovery class, three shares: records, stored tokens, targets.*
+:::
+
+We formalize these token relationships across trajectory classes. For a trajectory category $j$, let $n_j$ denote the number of retained records, $\bar S^{(j)}$ denote the average stored tokens per record under the active tokenizer, and $\bar w_j$ denote the average selected target tokens per record admitted into a specific imitation fine-tuning artifact. The total stored token volume $V_j$ and total target token volume $W_j$ are:
+
+$$V_j=n_j\bar S^{(j)},\qquad W_j=n_j\bar w_j.$$
+
+The stored token share measures $V_j$ relative to the aggregate token footprint of the entire repository, whereas the target token share measures $W_j$ relative to the active supervision tokens across the training dataset. This distinction carries severe systems implications: processed tokens (context plus targets) dictate transformer attention compute and memory bandwidth during forward-backward passes, whereas target tokens alone dictate the volume of supervised gradient updates. Specifying a dataset mixture in one metric while budgeting GPU infrastructure in another leads to severe scheduling mismatches, particularly when multi-turn serialization or prefix caching enters the pipeline.
+
+```{python}
+#| label: lego-14-sizing-and-token-budget-allocation
+#| echo: false
+# CORPUS DENOMINATORS (LEGO)
+# Goal: Separate retained records, stored context, and selected imitation targets.
+# Scope: Hypothetical disjoint role counts; one emitted sequence per demo record.
+from mlsysim.core.units import token
+from mlsysim.fmt import check, fmt, fmt_int, fmt_percent
+
+class MixedCurationTokenBudgetAllocation:
+    # 1. LOAD: stipulated retained-pool counts and tokenizer-specific means.
+    n_direct, n_recover, n_negative = 32_500, 12_500, 5_000
+    l_direct, l_recover, l_negative = 7200 * token, 18_500 * token, 9800 * token
+    u_direct, u_recover = 1200 * token, 2000 * token
+
+    # 2. EXECUTE: this artifact admits direct/recovery records, not negatives.
+    n_total = n_direct + n_recover + n_negative
+    n_demo = n_direct + n_recover
+    v_direct, v_recover, v_negative = n_direct * l_direct, n_recover * l_recover, n_negative * l_negative
+    v_total = v_direct + v_recover + v_negative
+    v_demo = v_direct + v_recover
+    u_total = n_direct * u_direct + n_recover * u_recover
+    count_share = n_recover / n_total
+    stored_share = (v_recover / v_total).magnitude
+    demo_context_share = (v_recover / v_demo).magnitude
+    target_share = (n_recover * u_recover / u_total).magnitude
+    ctx_per_target_direct = (l_direct / u_direct).to("").magnitude
+    ctx_per_target_recover = (l_recover / u_recover).to("").magnitude
+
+    # 3. GUARD: named denominators, logical-token totals, and target bounds.
+    check(n_total == 50_000 and n_demo == 45_000, "Separate retained and demo counts")
+    check(v_total.to(token).magnitude == 514_250_000, "Retained logical tokens")
+    check(v_demo.to(token).magnitude == 465_250_000, "Demo logical tokens")
+    check(u_total.to(token).magnitude == 64_000_000, "Selected target tokens")
+    check(0 < u_direct <= l_direct and 0 < u_recover <= l_recover, "Targets within records")
+    check(abs(count_share - 0.25) < 1e-12, "Count share")
+    check(abs(stored_share - 0.4496840058) < 1e-9, "Stored share")
+    check(abs(demo_context_share - 0.4970445997) < 1e-9, "Demo context share")
+    check(abs(target_share - 0.390625) < 1e-12, "Target share")
+
+    # 4. OUTPUT: every export is consumed in the worksheet below.
+    n_total_str, n_demo_str = fmt_int(n_total), fmt_int(n_demo)
+    n_direct_str, n_recover_str, n_negative_str = fmt_int(n_direct), fmt_int(n_recover), fmt_int(n_negative)
+    l_direct_str = fmt_int(l_direct.to(token).magnitude)
+    l_recover_str = fmt_int(l_recover.to(token).magnitude)
+    l_negative_str = fmt_int(l_negative.to(token).magnitude)
+    u_direct_str = fmt_int(u_direct.to(token).magnitude)
+    u_recover_str = fmt_int(u_recover.to(token).magnitude)
+    v_total_str = fmt_int(v_total.to(token).magnitude)
+    v_demo_str = fmt_int(v_demo.to(token).magnitude)
+    u_total_str = fmt_int(u_total.to(token).magnitude)
+    count_share_str = fmt_percent(count_share, precision=0, style="prose")
+    stored_share_str = fmt_percent(stored_share, precision=2, style="prose")
+    demo_context_share_str = fmt_percent(demo_context_share, precision=2, style="prose")
+    target_share_str = fmt_percent(target_share, precision=2, style="prose")
+    v_direct_str = fmt_int(v_direct.to(token).magnitude)
+    v_recover_str = fmt_int(v_recover.to(token).magnitude)
+    v_negative_str = fmt_int(v_negative.to(token).magnitude)
+    u_direct_total_str = fmt_int((n_direct * u_direct).to(token).magnitude)
+    u_recover_total_str = fmt_int((n_recover * u_recover).to(token).magnitude)
+    ctx_direct_str = fmt(ctx_per_target_direct, precision=0)
+    ctx_recover_str = fmt(ctx_per_target_recover, precision=2)
+```
+
+::: {#nbk-14-sizing-and-token-budget-allocation .callout-notebook title="One pool, three different token allocations"}
+
+**Problem**: Consider a hypothetical retained corpus containing `{python} MixedCurationTokenBudgetAllocation.n_total_str` records categorized into disjoint roles. The demonstration policy admits direct successes and recovery trajectories; negative trajectories are reserved for diagnostic logging and preference modeling, providing zero imitation targets for this artifact. Using the empirical means listed in @tbl-vol3-curation-token-allocation, determine the fractional share that recovery trajectories occupy across three distinct denominators: total records, stored tokens, and supervised target tokens.
+
+| Retained class |                                                      Records |                                Mean stored tokens per record |                      Mean selected target tokens per record |
+|:---------------|-------------------------------------------------------------:|-------------------------------------------------------------:|------------------------------------------------------------:|
+| Direct         |   `{python} MixedCurationTokenBudgetAllocation.n_direct_str` |   `{python} MixedCurationTokenBudgetAllocation.l_direct_str` |  `{python} MixedCurationTokenBudgetAllocation.u_direct_str` |
+| Recovery       |  `{python} MixedCurationTokenBudgetAllocation.n_recover_str` |  `{python} MixedCurationTokenBudgetAllocation.l_recover_str` | `{python} MixedCurationTokenBudgetAllocation.u_recover_str` |
+| Negative       | `{python} MixedCurationTokenBudgetAllocation.n_negative_str` | `{python} MixedCurationTokenBudgetAllocation.l_negative_str` |                             None in this imitation artifact |
+
+: **Inputs to the Corpus Allocation Worksheet**: Counts and lengths are hypothetical, not an empirically recommended mixture. Selected targets refer to one presentation of each eligible record under a fixed tokenizer and selection policy. {#tbl-vol3-curation-token-allocation}
+
+**Math**: Total stored tokens follow $V_j = n_j\bar S^{(j)}$: direct successes account for `{python} MixedCurationTokenBudgetAllocation.v_direct_str`, recovery traces account for `{python} MixedCurationTokenBudgetAllocation.v_recover_str`, and negatives account for `{python} MixedCurationTokenBudgetAllocation.v_negative_str`, totaling `{python} MixedCurationTokenBudgetAllocation.v_total_str` across the repository and `{python} MixedCurationTokenBudgetAllocation.v_demo_str` across admitted demonstration records. Supervised target tokens follow $W_j = n_j\bar w_j$: direct demonstrations contribute `{python} MixedCurationTokenBudgetAllocation.u_direct_total_str` target tokens and recovery traces contribute `{python} MixedCurationTokenBudgetAllocation.u_recover_total_str` target tokens, totaling `{python} MixedCurationTokenBudgetAllocation.u_total_str` supervisory tokens.
+
+**Result**: Recovery accounts for `{python} MixedCurationTokenBudgetAllocation.count_share_str` of total retained records, `{python} MixedCurationTokenBudgetAllocation.stored_share_str` of all stored tokens in the repository, `{python} MixedCurationTokenBudgetAllocation.demo_context_share_str` of the admitted demonstration tokens, and `{python} MixedCurationTokenBudgetAllocation.target_share_str` of active target supervision tokens.
+
+**Systems insight**: Always formulate training mixtures in terms of target tokens while budgeting GPU compute and memory in terms of processed context tokens. The operational multiplier separating these two metrics is the context-to-target ratio: `{python} MixedCurationTokenBudgetAllocation.ctx_recover_str` stored context tokens per target token for recovery traces, compared to `{python} MixedCurationTokenBudgetAllocation.ctx_direct_str` for direct successes. Increasing the recovery proportion inflates processed context volume far faster than supervised gradient signal. An engineering team that configures a mixture purely by record count will request a `{python} MixedCurationTokenBudgetAllocation.count_share_str` recovery ratio but will end up committing `{python} MixedCurationTokenBudgetAllocation.stored_share_str` of total storage and compute to context processing. Naive multi-turn serialization that repeatedly unrolls conversational prefixes amplifies this computational overhead even further.
+
+:::
+
+### Mixture experiments {#sec-vol3-trajectory-curation-mixture-experiments}
+
+While token accounting quantifies the compute and memory footprint of a corpus, empirical mixture experiments determine its practical operational value. A mixture experiment establishes a fixed evaluation protocol, selects a baseline architecture, and evaluates training cohorts across controlled recovery ratios. For example, an ablation study might compare a direct-success baseline against recovery-augmented corpora while holding task domains, base model checkpoints, target-masking criteria, and total training schedules constant. Curation engineers must track trajectory deduplication and replacement meticulously: expanding the recovery fraction under a constrained training budget inevitably reduces coverage of nominal, direct-path tasks.
+
+Rigorous experimental designs declare their budgeting units explicitly and report performance across both metrics. If an experiment fixes total supervised target tokens, the recovery-heavy training arm processes substantially more prompt context tokens, increasing training wall-clock time and FLOPs. Conversely, if an experiment fixes total processed tokens, the recovery-heavy arm receives fewer supervised target updates. When hardware budgets or training schedules represent hard constraints, engineers must evaluate trade-offs directly against wall-clock training time or financial cost.
+
+Model selection proceeds by screening candidate mixtures on a held-out development suite and validating the top configurations against an isolated evaluation benchmark. To prevent high-level aggregate metrics from masking systematic failure modes, evaluation reports must decompose outcomes across nominal workflows, synthesized fault conditions, and out-of-distribution transfer tasks before synthesizing composite scores. Diagnostic tracking must measure end-to-end task completion alongside hallucinated tool claims, superfluous execution steps, clean termination decisions, and cumulative API token expenditure.
+
+Once an optimal mixture is established, its parameters are locked into a machine-readable **corpus manifest**\index{Corpus manifest!definition}.[^fn-datasheet-manifest-curation] The manifest records the immutable provenance of the published dataset: input trajectory pool identifiers, selection filter versions, sampling weight distributions, token accounting denominators, test coverage matrices, and audit logs. Deploying a model trained on this manifest alters the operational distribution of subsequent production trajectories, feeding fresh failure modes and successful recoveries back into the harvesting pipeline to drive the flywheel of continuous self-improvement.
+
+[^fn-datasheet-manifest-curation]: **Dataset Documentation**: Documenting datasets via structured records that detail their creation, composition, collection boundaries, and intended operational envelope originated by analogy to hardware datasheets in electronic engineering [@gebru2021]. A corpus manifest serves as the machine-verifiable incarnation of this standard for agentic systems: its attributes bind cryptographically to dataset versions, filter code, and empirical validation logs, enabling downstream training pipelines to verify corpus invariants automatically rather than relying on informal documentation. \index{Corpus manifest!datasheet lineage}
+
 ## Trajectory Provenance Tracking {#sec-vol3-flywheel-provenance}
 
 Months after an execution trace enters a training corpus, curators inevitably face difficult systems questions: Which collection run produced this sequence? Which validation criteria were verified, and against which environment fixtures? Does the organization retain legal permission to train on the incorporated source code or API payloads? And when a sanitization pass stripped an API token or IP address, did that transformation invalidate the runtime state that justified the agent's next action?
@@ -1499,9 +1314,9 @@ A well-architected trajectory record possesses a verifiable origin, an explicit 
 
 ## Case Study: Curating the Repair Record {#sec-vol3-flywheel-synthesis}
 
-To see how trajectory curation operates in practice, consider an automated code-repair pipeline processing a recovery run, `collection_run_r19_01`. In this scenario, an agent attempted to fix a software defect starting from baseline workspace `pool_fixture_v1` and eventually produced a patched workspace, `ws_r20`. During execution, the agent generated a malformed edit proposal that the execution harness intercepted and refused before dispatch. Rather than crashing, the agent inspected the tool schema, submitted a corrected edit that passed harness validation, and satisfied the candidate evaluation suite under `repair_accept_v1`. The raw execution trace, `trace_r19_01`, records this entire sequence while preserving immutable provenance: the preceding failed trial's verdict on `ws_r19` and the baseline `test_r18` operations remain unaltered. The curation challenge is deciding which segments of this messy execution record belong in an upstream learning artifact.
+To see how trajectory curation operates in practice end-to-end, we return to the automated code-repair recovery run, `collection_run_r19_01`, introduced in @sec-vol3-flywheel-curation. Recall that in this scenario, the agent started from baseline workspace `pool_fixture_v1` and eventually produced a patched workspace, `ws_r20`. After an initial malformed edit (`e2`) was rejected, the agent successfully recovered by inspecting the schema (`e3`) and submitting a corrected edit (`e4`) that satisfied the evaluation suite under `repair_accept_v1`.
 
-Our proposed training objective is to teach models how to recover from harness refusals: inspecting schemas after an error, generating grounded corrections, and producing concise final reports. The target policy `recovery_targets_v1` selects the schema query `e3`, the corrected edit `e4`, and the final summary `e6` as supervised learning targets—the specific tokens over which gradient updates occur. Meanwhile, the agent's initial malformed proposal at `e2` and the test summary at `e5` remain in the trace as conditioning context. Curation must also retain the initial environment prompt, file context, and intermediate tool responses. Without this surrounding context, isolated action events lose their causal grounding and provide no signal for next-token prediction.
+While we already established how the target policy `recovery_targets_v1` slices this trace into conditioning context versus supervised learning targets, isolating tokens is only one part of the curation challenge. To admit this raw execution record (`trace_r19_01`) into an upstream learning artifact, we must now layer on the remaining pipeline stages: verifying the transformed record, tracking its provenance, and publishing it to a corpus manifest.
 
 ### Admission of the derived view {#sec-vol3-trajectory-curation-derived-view-admission}
 
@@ -1621,6 +1436,119 @@ class CurationArtifactYield:
 :::
 
 A published manifest documents exactly what was emitted, verifies eligibility across all admission gates, isolates supervision targets, and tallies total acquisition cost. Yet operational efficiency and curation hygiene are prerequisites rather than guarantees of model improvement. The ultimate test of a curated corpus lies in offline empirical evaluation: measuring the fine-tuned policy against holdout task distributions under controlled benchmark protocols, where neither a low cost per artifact nor a high emission yield can substitute for genuine downstream task performance.
+
+## The Self-Improvement Loop {#sec-vol3-trajectory-curation-self-improvement}
+
+Corpus selection directly shapes the distribution of behaviors the next model generation learns. Consider a curation round for an automated connection-pool repair agent that retains only straight-line, nominal executions while discarding messier traces where the agent recovers from misleading test diagnostics. Fine-tuning on that corpus reinforces straightforward repairs but leaves recovery capabilities unimproved. In the subsequent iteration, a higher nominal acceptance rate masks that vulnerability rather than rectifying it. To maintain system reliability across iterations, curators must track three distinct signals each round: what the current policy sampled, what the curation cascade retained, and how the resulting model performs under independent, held-out evaluation.
+
+### Rejection-sampling fine-tuning {#sec-vol3-trajectory-curation-rejection-sampling}
+
+A generate–select–train loop begins with a versioned policy sampling executions across a suite of task fixtures within a defined compute budget. A validation cascade routes the resulting trajectories to their respective destinations: clean demonstrations feed supervised imitation buffers, branched pairs populate preference datasets, and unresolved traces enter diagnostic storage. Training on these curated records produces a candidate policy, which offline evaluation tests to decide whether it should become the generator for the next collection cycle. That promotion decision remains an internal development step rather than a production release. Recording attempted, rejected, and unverified traces alongside retained examples guarantees that an apparent gain in corpus quality reflects genuine policy improvement rather than an artificially relaxed acceptance filter.
+
+Selecting sampled successes for imitation is **rejection-sampling fine-tuning**\index{Rejection-sampling fine-tuning!definition}.[^fn-expert-iteration-curation] The Self-Taught Reasoner (STaR) demonstrates this pattern in bootstrapped reasoning by generating candidate rationales, retaining those that yield correct answers, fine-tuning on them, and using ground-truth answers to provide rationales after failed initial attempts [@zelikman2022star]. An automated verifier confirms that an execution satisfies its declared acceptance criteria, but trajectory review must still assess whether the intermediate tool calls and intermediate states reflect robust problem-solving worth imitating.
+
+[^fn-expert-iteration-curation]: **Expert Iteration**: The generate–select–train loop predates language models. In expert iteration, a search procedure guided by the current network produces stronger decisions than the network alone, the network is trained to imitate them, and the improved network then guides the next round of search [@anthony2017thinking]. Rejection-sampling fine-tuning replaces the search with repeated sampling and the expert's judgment with a check, which is why the check's blind spots become the loop's habits. \index{Expert iteration!generate-select-train loop}
+
+Learning does not require mixed outcomes across every task. An all-success batch supplies prime imitation targets, demonstrating efficient paths through complex tools. Conversely, an all-failure collection yields no end-to-end demonstrations under a success filter, yet it still offers valuable intermediate artifacts: corrective segments that isolate where an execution derailed, justified comparisons for preference modeling, and new failure traces that can be promoted to regression fixtures. By contrast, relative optimization algorithms—such as group-relative objectives—rely on within-group contrast. When all rollouts on a fixture receive identical rewards, relative advantage calculations collapse, yielding zero gradient updates.
+
+::: {.column-margin .margin-pointer}
+↪ Group relative policy optimization, which scores each rollout against the other rollouts sampled for the same task, is developed in @sec-vol3-rlvr-grpo.
+:::
+
+We can quantify the sampling budget required to harvest these different data types. Suppose the collection policy succeeds on a fixture with probability $\HiddenDimensionFour$ per attempt, with each of the $k$ attempts executed independently. A simple success filter extracts a demonstration from the fixture if at least one attempt succeeds, an event that occurs with probability $1-(1-\HiddenDimensionFour)^k$. This expected yield sets the baseline compute cost per successful trajectory in an imitation corpus. Pairwise preference models and group-relative reinforcement learning algorithms require a stricter condition: each group of $k$ rollouts must contain at least one success and at least one failure. Subtracting both the all-failure probability $(1-\HiddenDimensionFour)^k$ and the all-success probability $p^k$ yields the **informative-task fraction**\index{Informative-task fraction!definition}:
+
+$$p_{\text{inform}}(\HiddenDimensionFour,k)=1-(1-\HiddenDimensionFour)^k-p^k.$$ {#eq-vol3-trajectory-curation-informative}
+
+```{python}
+#| label: lego-14-informative-task-fraction
+#| echo: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ SUCCESS YIELD AND INFORMATIVE-TASK FRACTION (LEGO)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @eq-vol3-trajectory-curation-informative.
+# │ Goal: Show how per-attempt pass rate sets harvest yield and group contrast.
+# │ Show: 1-(1-p)^k and 1-(1-p)^k-p^k at three pass rates for k attempts.
+# │ How: Independent attempts with a fixed per-attempt pass probability.
+# │ Note: Pass rates are illustrative, not measured fixture difficulties.
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim.fmt import check, fmt, fmt_int, fmt_percent
+
+class InformativeTaskFraction:
+    # 1. LOAD: attempts per fixture and three illustrative pass rates.
+    k = 8
+    p_low, p_mid, p_high = 0.05, 0.50, 0.95
+
+    # 2. EXECUTE: at least one success, then at least one of each outcome.
+    yield_low = 1 - (1 - p_low) ** k
+    yield_mid = 1 - (1 - p_mid) ** k
+    yield_high = 1 - (1 - p_high) ** k
+    mixed_low = yield_low - p_low**k
+    mixed_mid = yield_mid - p_mid**k
+    mixed_high = yield_high - p_high**k
+    attempts_low = k / yield_low
+
+    # 3. GUARD: symmetry of the mixed fraction and the displayed scales.
+    check(abs(mixed_low - mixed_high) < 1e-12, "Mixed fraction is symmetric in p and 1-p")
+    check(0.33 < mixed_low < 0.34, "Low pass-rate mixed fraction")
+    check(mixed_mid > 0.99, "Mid pass-rate mixed fraction")
+    check(yield_high > 0.999, "High pass-rate yield is near one")
+    check(23 < attempts_low < 24, "Attempts per harvested hard fixture")
+
+    # 4. OUTPUT: every export is consumed in the paragraph below.
+    k_str = fmt_int(k)
+    low_str = fmt_percent(p_low, precision=0, style="prose")
+    mid_str = fmt_percent(p_mid, precision=0, style="prose")
+    high_str = fmt_percent(p_high, precision=0, style="prose")
+    low_yield_str = fmt(yield_low, precision=2)
+    low_mixed_str = fmt(mixed_low, precision=2)
+    mid_mixed_str = fmt(mixed_mid, precision=2)
+    high_mixed_str = fmt(mixed_high, precision=2)
+    attempts_low_str = fmt_int(round(attempts_low))
+```
+
+With `{python} InformativeTaskFraction.k_str` attempts, a fixture the policy solves `{python} InformativeTaskFraction.low_str` of the time yields a success with probability only `{python} InformativeTaskFraction.low_yield_str`, requiring an average of about `{python} InformativeTaskFraction.attempts_low_str` attempts to harvest a single successful trajectory. That same fixture forms a mixed group of successes and failures with probability `{python} InformativeTaskFraction.low_mixed_str`. At `{python} InformativeTaskFraction.mid_str`, where the task is moderately difficult, the mixed fraction reaches `{python} InformativeTaskFraction.mid_mixed_str`, providing abundant pairwise contrast. When the pass rate reaches `{python} InformativeTaskFraction.high_str`, nearly every fixture yields a success, but the mixed fraction drops back to `{python} InformativeTaskFraction.high_mixed_str` because batches rarely include a failing attempt. Crucially, @eq-vol3-trajectory-curation-informative measures contrast rather than general utility. All-success groups remain valid demonstrations for imitation learning, whereas @sec-vol3-rlvr-grpo-zero-variance applies the $p^k$ and $(1-\HiddenDimensionFour)^k$ terms to isolate groups whose uniform rewards offer zero gradient in group-relative optimization.
+
+::: {.column-margin}
+![](images/svg/vol3_trajectory_curation_margin_004.svg){width="100%" fig-alt="Two curves against per-attempt pass rate from zero to one for eight attempts. A blue success-yield curve rises quickly toward one. A purple informative-task curve is a symmetric plateau that falls to zero at both ends, with dots at 0.34 for pass rates of 5 and 95 percent."}
+
+*Easy fixtures always yield successes; only mid-difficulty fixtures yield contrast.*
+:::
+
+Collection difficulty is fundamentally a resource allocation decision. Hard fixtures cost about `{python} InformativeTaskFraction.attempts_low_str` attempts per harvested success, but they force the agent into unfamiliar execution paths and expose missing recovery behaviors. Easy fixtures cost almost nothing per success, acting as low-cost regression anchors that preserve core competencies. For rare or mission-critical task families, low harvest yields represent an acceptable engineering expense necessary to maintain comprehensive coverage. Storing the exact sampling and retention policies directly alongside the corpus ensures that distribution shifts remain auditable across retraining cycles.
+
+### Staleness and coverage narrowing {#sec-vol3-trajectory-curation-coverage-narrowing}
+
+In an evolving agent system, **staleness**\index{Staleness!trajectory corpus} measures architectural incompatibility rather than chronological age. A trajectory generated by an older policy can remain an exemplary demonstration if the underlying tools and environment semantics are unchanged. Conversely, a trace generated minutes ago is stale if recorded against a deprecated tool schema or evaluated by a flawed grader. Trajectory stores prevent silent corruption by recording four explicit provenance fields: the generating policy, the environment fixture, the tool interface schema, and the grading criteria. When verification criteria evolve, the pipeline triggers automated re-evaluation. When tool schemas change, existing trajectories must undergo schema migration and revalidation. Finally, as policy capability advances, the pipeline focuses sampling on the novel edge cases and failure modes the updated agent actually encounters.
+
+Iterative filtering also risks coverage narrowing. Because strategies that successfully cleared earlier filters appear more frequently in fine-tuning data, the policy is conditioned to reproduce those specific paths, sampling them even more heavily in subsequent rounds. Left unchecked, recursive training on self-generated outputs degrades distributional breadth, mirroring the model-collapse phenomena analyzed by @shumailov2024. In production architectures, allowing a model's outputs to dictate its future training distribution introduces the classic hidden feedback loop identified by @sculley2015hidden, quietly compounding technical debt across generations. Automated verifiers prevent outright hallucinations from entering the corpus, but filtering alone cannot break the self-referential loop; engineering teams must track and bound this drift through explicit diversity metrics.
+
+Coverage narrowing manifests in three observable telemetry signals. First, the count of distinct normalized action sequences per fixture declines across iterations. Second, pass@1 continues to climb while pass@$k$ at high $k$ plateaus, indicating that the policy is concentrating probability mass onto known routines rather than discovering alternative solutions. Third, performance on held-out task families stagnates even as acceptance rates on training fixtures rise. Systems teams must interpret action diversity alongside generalization benchmarks: a drop in unique action sequences can simply reflect an agent pruning redundant retries and settling into optimal execution paths, but when shrinking diversity coincides with stagnant held-out scores, the agent is over-specializing.
+
+::: {.column-margin .margin-pointer}
+↩ pass@$k$, the probability that at least one of $k$ sampled candidates passes, is established in @sec-vol3-test-time-compute-pass-at-k.
+:::
+
+Four engineering controls counteract this narrowing tendency. First, capping the number of retained samples per fixture prevents trivially solved environments from overwhelming the corpus. Second, deduplication filters prune identical normalized action sequences while preserving identical actions that occurred under distinct environmental observations. Third, the training corpus retains a permanent anchor of verified external demonstrations—such as curated human interactions—that automated collection cannot displace. Finally, early-stopping policies halt the self-improvement loop when behavioral diversity and held-out performance plateau, even if acceptance rates on training fixtures continue to climb.
+
+External demonstrations and external evaluation suites serve complementary but distinct architectural functions. Permitted human or expert demonstrations anchor the training distribution because they originate outside the current policy's behavioral basin. Protected evaluation tasks, by contrast, must remain strictly quarantined from both training loops and automated curation filters. When engineers repeatedly evaluate candidate policies against a single holdout set to guide promotion decisions, that holdout degrades into development data. Defensible generalization claims require a separate confirmation suite reserved exclusively for final acceptance testing. In addition, periodic manual audits across all curation outcomes—including accepted runs, rejected candidates, and borderline cases—are essential to catch grader shortcuts, reward hacking, and missed edge cases. Any failure against promotion criteria immediately halts the flywheel for human inspection.
+
+### Production feedback signals {#sec-vol3-trajectory-curation-production-feedback}
+
+Production interactions surface operational requirements and edge cases that static offline fixtures miss. However, extracting training signals from live telemetry demands disciplined interpretation: an observed event reflects only the immediate user action, rather than an unvarnished verdict on task correctness. As @tbl-vol3-trajectory-curation-feedback-signals summarizes, each telemetry event must be bounded by its specific operational limitations before being assigned a learning role.
+
+| **Signal**             | **Evidence Provided**                       | **Limitation**                                                             | **Possible Learning Use**                                                           |
+|:-----------------------|:--------------------------------------------|:---------------------------------------------------------------------------|:------------------------------------------------------------------------------------|
+| Accepted without edits | Recorded acceptance of the delivered output | The user may not have checked correctness                                  | Usability label under a declared criterion; candidate for task validation           |
+| Edited or reverted     | A change to, or rejection of, the output    | May reflect correction, style, or changed requirements                     | Proposed target or comparison after checking the applicable task and context        |
+| Mid-task correction    | New user guidance at a particular turn      | Does not establish the cause of the earlier behavior                       | Recovery context, intent clarification, or a candidate fixture                      |
+| Retry or abandonment   | A retry or session-ending event             | Latency, cost, interruptions, and changed plans can produce the same event | Investigation or a label for the observed event, not assumed task failure           |
+| Explicit rating        | The respondent's recorded assessment        | Missing responses and response selection limit population claims           | Label for a defined satisfaction criterion, not automatic proof of task correctness |
+
+: **Production Feedback Signals**: Preserve the observed event and its context before assigning a learning role. A signal may directly label its declared criterion without establishing unrelated properties. {#tbl-vol3-trajectory-curation-feedback-signals}
+
+Misinterpreting these signals distorts the training distribution. For instance, when a user edits an agent's response to introduce a new constraint, the resulting text satisfies an altered prompt rather than the original query. Using that edited response as a supervised target without updating the prompt trains the model on incomplete specifications. Similarly, preference pairs comparing the model's output against a user edit are valid only when the environmental context and task goals remain identical across both versions. Telemetry pipelines must also treat missing feedback as unobserved data rather than tacit endorsement, verify user consent and data governance permissions before ingestion, and convert critical production errors into graded regression fixtures before recycling them into the training loop.
+
+These operational safeguards translate high-level self-improvement goals into a concrete systems collection plan with explicit sampling budgets, automated validation stages, and mandatory human review gates. Because distributed rollout generation scales horizontally while high-assurance verification and human inspection remain strictly throughput-constrained, the curation pipeline must balance sampling volume against bounded downstream validation capacity, preventing unvetted executions from overwhelming the training loop.
 
 ## Fallacies and Pitfalls {#sec-vol3-trajectory-curation-fallacies}
 
