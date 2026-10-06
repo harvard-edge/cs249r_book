@@ -2095,6 +2095,98 @@ Applying @eq-dispatch-overhead means comparing the software overhead $T_{\text{s
 
 The dispatch tax analysis demonstrates that small operations become overhead-bound when dispatch latency exceeds device execution time. This systems constraint reaches its logical extreme at the edge of the deployment spectrum, where the memory and latency footprint of the Python runtime exceeds the physical capacity of the target hardware.
 
+### Mixed-precision training support {#sec-ml-frameworks-mixedprecision-training-support-d31d}
+
+Mixed precision accelerates execution and reduces memory footprint by running compute-intensive operations in lower precision (like FP16) while keeping sensitive operations in FP32. Frameworks provide automatic mixed precision APIs and gradient scaling to maintain numerical stability.
+::: {#lst-autocast-usage lst-cap="**Mixed-Precision API**: Modern frameworks provide automatic mixed-precision support through context managers that handle precision selection and numerical stability."}
+
+```{.python}
+import torch
+from torch.amp import autocast, GradScaler
+
+model = MyModel().cuda()
+optimizer = torch.optim.Adam(model.parameters())
+scaler = GradScaler("cuda")
+
+for inputs, targets in dataloader:
+    inputs, targets = inputs.cuda(), targets.cuda()
+    optimizer.zero_grad()
+
+    # Framework automatically selects precision per operation
+    with autocast(device_type="cuda", dtype=torch.float16):
+        outputs = model(inputs)
+        loss = criterion(outputs, targets)
+
+    # GradScaler handles gradient scaling for numerical stability
+    scaler.scale(loss).backward()
+    scaler.step(optimizer)
+    scaler.update()
+```
+
+:::
+
+#### Optimizer state and checkpointing {.unnumbered}
+
+```{python}
+#| echo: false
+#| label: model-7b-optimizer-state
+
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ 7-BILLION-PARAMETER MODEL OPTIMIZER STATE MEMORY
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @sec-ml-frameworks-pytorch-autograd-internals-4fa0 Optimizer State
+# │          and Checkpointing subsection discussing Adam memory overhead
+# │
+# │ Goal: Size a mixed-precision Adam checkpoint for a 7-billion-param model:
+# │       FP16 weights (14 GB) + FP32 master weights (28 GB) + Adam moments
+# │       (56 GB) = ~98 GB, 7x the FP16 weights. Gradients are recomputed
+# │       every step and are not checkpointed.
+# │ Show: "~98 GB (14 GB + 28 GB + 56 GB), 7x"—inline in Optimizer State prose.
+# │ How: params times BYTES_FP16, BYTES_FP32, and BYTES_ADAM_STATE.
+# │
+# │ Note: PERSISTENT—Model7B.model_7b_fp16_gb_str reused at line ~3170
+# │       (System-Level Operations memory manager paragraph), line ~3267
+# │       (nn.Module hierarchical serialization paragraph), line ~4130
+# │       (Fallacies: batch size Fallacy).
+# │
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim.physics import model_memory
+from mlsysim.fmt import check, fmt_memory, fmt_multiple
+from mlsysim import Models, BYTES_ADAM_STATE, BYTES_FP16, BYTES_FP32, GB
+
+# ┌── LEGO ───────────────────────────────────────────────
+class Model7B:
+    """
+    Namespace for 7-billion-parameter model memory.
+    Scenario: Mixed-precision Adam checkpoint volume.
+    """
+
+    # ┌── 1. LOAD (Constants) ───────────────────────────────────────────────
+    params = Models.Language.Llama2_7B.parameters
+
+    # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
+    fp16 = params * BYTES_FP16
+    master = params * BYTES_FP32
+    adam = params * BYTES_ADAM_STATE
+    total = fp16 + master + adam
+    ckpt_multiplier = (total / fp16).to("").magnitude
+
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(ckpt_multiplier == 7, "Mixed-precision Adam checkpoint (no gradients) should be 7x FP16 weights")
+
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
+    model_7b_fp16_gb_str = fmt_memory(fp16, unit=GB, precision=0, commas=False)
+    model_7b_master_gb_str = fmt_memory(master, unit=GB, precision=0, commas=False)
+    model_7b_adam_gb_str = fmt_memory(adam, unit=GB, precision=0, commas=False)
+    model_7b_total_gb_str = fmt_memory(total, unit=GB, precision=0, commas=False)
+    model_7b_ckpt_mult_str = fmt_multiple(ckpt_multiplier, precision=0, commas=False)
+
+# Note: Use Model7B.model_7b_total_gb_str directly.
+```
+
+Resuming training requires restoring model weights and optimizer states (like momentum and variance) in lockstep. Frameworks expose internal state dictionaries via `state_dict()` for serialization to checkpoint files, which is necessary for fault tolerance but significantly increases storage and memory overhead.
+
+
 ## Differentiation Problem {#sec-ml-frameworks-differentiation-problem-8b8a}
 
 Consider what training actually requires: for each of millions of parameters, compute how a tiny change alters the loss. Doing this manually for even a simple three-layer network requires deriving and implementing dozens of partial derivatives; for a modern transformer with billions of parameters, manual differentiation is economically impossible. A framework that executes efficiently but cannot differentiate can run inference but cannot learn.
@@ -2553,97 +2645,6 @@ print(
 :::
 
 These autograd mechanisms connect directly to the silicon contract. The reverse-linked graph defines the sequence of backward kernels the device must execute (the $O$ term). The memory-compute trade-off governs intermediate tensor residency and memory traffic through the memory hierarchy (the $\DataVolume$ term). The extensibility hooks allow engineers to prune unnecessary graph paths and intercept data flow. The interplay between graph retention and memory bandwidth leads directly to mixed-precision training, which reduces memory footprint while increasing hardware execution efficiency.
-
-#### Mixed-precision training support {#sec-ml-frameworks-mixedprecision-training-support-d31d}
-
-Mixed precision accelerates execution and reduces memory footprint by running compute-intensive operations in lower precision (like FP16) while keeping sensitive operations in FP32. Frameworks provide automatic mixed precision APIs and gradient scaling to maintain numerical stability.
-::: {#lst-autocast-usage lst-cap="**Mixed-Precision API**: Modern frameworks provide automatic mixed-precision support through context managers that handle precision selection and numerical stability."}
-
-```{.python}
-import torch
-from torch.amp import autocast, GradScaler
-
-model = MyModel().cuda()
-optimizer = torch.optim.Adam(model.parameters())
-scaler = GradScaler("cuda")
-
-for inputs, targets in dataloader:
-    inputs, targets = inputs.cuda(), targets.cuda()
-    optimizer.zero_grad()
-
-    # Framework automatically selects precision per operation
-    with autocast(device_type="cuda", dtype=torch.float16):
-        outputs = model(inputs)
-        loss = criterion(outputs, targets)
-
-    # GradScaler handles gradient scaling for numerical stability
-    scaler.scale(loss).backward()
-    scaler.step(optimizer)
-    scaler.update()
-```
-
-:::
-
-##### Optimizer state and checkpointing {.unnumbered}
-
-```{python}
-#| echo: false
-#| label: model-7b-optimizer-state
-
-# ┌─────────────────────────────────────────────────────────────────────────────
-# │ 7-BILLION-PARAMETER MODEL OPTIMIZER STATE MEMORY
-# ├─────────────────────────────────────────────────────────────────────────────
-# │ Context: @sec-ml-frameworks-pytorch-autograd-internals-4fa0 Optimizer State
-# │          and Checkpointing subsection discussing Adam memory overhead
-# │
-# │ Goal: Size a mixed-precision Adam checkpoint for a 7-billion-param model:
-# │       FP16 weights (14 GB) + FP32 master weights (28 GB) + Adam moments
-# │       (56 GB) = ~98 GB, 7x the FP16 weights. Gradients are recomputed
-# │       every step and are not checkpointed.
-# │ Show: "~98 GB (14 GB + 28 GB + 56 GB), 7x"—inline in Optimizer State prose.
-# │ How: params times BYTES_FP16, BYTES_FP32, and BYTES_ADAM_STATE.
-# │
-# │ Note: PERSISTENT—Model7B.model_7b_fp16_gb_str reused at line ~3170
-# │       (System-Level Operations memory manager paragraph), line ~3267
-# │       (nn.Module hierarchical serialization paragraph), line ~4130
-# │       (Fallacies: batch size Fallacy).
-# │
-# └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.physics import model_memory
-from mlsysim.fmt import check, fmt_memory, fmt_multiple
-from mlsysim import Models, BYTES_ADAM_STATE, BYTES_FP16, BYTES_FP32, GB
-
-# ┌── LEGO ───────────────────────────────────────────────
-class Model7B:
-    """
-    Namespace for 7-billion-parameter model memory.
-    Scenario: Mixed-precision Adam checkpoint volume.
-    """
-
-    # ┌── 1. LOAD (Constants) ───────────────────────────────────────────────
-    params = Models.Language.Llama2_7B.parameters
-
-    # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
-    fp16 = params * BYTES_FP16
-    master = params * BYTES_FP32
-    adam = params * BYTES_ADAM_STATE
-    total = fp16 + master + adam
-    ckpt_multiplier = (total / fp16).to("").magnitude
-
-    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
-    check(ckpt_multiplier == 7, "Mixed-precision Adam checkpoint (no gradients) should be 7x FP16 weights")
-
-    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
-    model_7b_fp16_gb_str = fmt_memory(fp16, unit=GB, precision=0, commas=False)
-    model_7b_master_gb_str = fmt_memory(master, unit=GB, precision=0, commas=False)
-    model_7b_adam_gb_str = fmt_memory(adam, unit=GB, precision=0, commas=False)
-    model_7b_total_gb_str = fmt_memory(total, unit=GB, precision=0, commas=False)
-    model_7b_ckpt_mult_str = fmt_multiple(ckpt_multiplier, precision=0, commas=False)
-
-# Note: Use Model7B.model_7b_total_gb_str directly.
-```
-
-Resuming training requires restoring model weights and optimizer states (like momentum and variance) in lockstep. Frameworks expose internal state dictionaries via `state_dict()` for serialization to checkpoint files, which is necessary for fault tolerance but significantly increases storage and memory overhead.
 
 #### Memory management in gradient computation {#sec-ml-frameworks-memory-management-gradient-computation-bb77}
 
@@ -3806,7 +3807,7 @@ class ResNetModuleParams:
 
 Tensors, streams, and kernel dispatch operate at the granularity of individual buffers and operations. While these primitives secure high execution efficiency on hardware, scaling model development requires an organizational abstraction: composing thousands of low-level operations into reusable, nestable building blocks called *modules*.
 
-## nn.Module Abstraction {#sec-ml-frameworks-nnmodule-abstraction-2622}
+## Model State Abstractions {#sec-ml-frameworks-nnmodule-abstraction-2622}
 
 Hardware-facing mechanisms—tensors, kernels, streams, and memory managers—ensure individual operations execute efficiently on silicon. Yet a network such as ResNet-50\index{ResNet-50!module hierarchy}, containing `{python} ResNetModuleParams.resnet_params_m_str` parameters across fifty layers, requires extensive coordination: registering weights with optimizers, tracking device placement, toggling training and evaluation modes, and serializing checkpoints. Managing this manually would drown model development in error-prone tensor plumbing. The organizational layer of the framework resolves this through hierarchical composition\index{Module abstraction!hierarchical composition}.
 
