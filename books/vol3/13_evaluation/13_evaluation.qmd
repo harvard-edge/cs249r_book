@@ -18,34 +18,6 @@
 
 :::
 
-## Purpose {.unnumbered .unlisted}
-
-\begin{marginfigure}
-\mlagentstack{0}{0}{100}{0}{0}{0}
-\end{marginfigure}
-
-_Why is a completed agent run not enough evidence to justify a release?_
-
-Evaluating an autonomous agent on final pass rates or aggregate benchmark scores conceals the failure modes that govern production reliability. A task may pass by serendipity while taking hazardous intermediate actions, or fail narrowly after executing dozens of sound steps, and scalar metrics distinguish neither outcome. Comprehensive evaluation requires full trajectory instrumentation: profiling token expenditures, tool invocation safety, recovery behaviors, and verification robustness across varied environmental initial conditions. Relying on LLM-as-a-judge scorers introduces correlated evaluation biases, while uncontrolled test-set contamination rewards rote memorization over generalized task execution. Sizing and validating agent benchmarks requires independent, deterministic assertions that evaluate whether completed tasks satisfy declared contracts within allocated resource envelopes.
-
-::: {.content-visible when-format="pdf"}
-
-\newpage
-
-:::
-
-::: {.callout-learning-objectives}
-
-- Construct a task acceptance contract that credits a trial only on evidence and keeps pending and unknown verdicts in the count
-- Design comparable trials that hold task fixtures, reset conditions, and the task sample fixed across compared configurations
-- Select and calibrate outcome checks and human or model judges by measuring false acceptance against independent assessment
-- Compare configurations by paired acceptance uncertainty, repeated-run consistency, and cost per accepted task, sampling tasks rather than runs
-- Design trace retention policies that keep rare failures and unbiased failure rates within a storage budget
-- Diagnose a failure from recorded evidence and a controlled intervention, stating what the result does and does not establish
-- Design staged releases that size canary exposure with sequential stopping rules and independent hard tripwires
-- Synthesize trials, paired comparisons, and release conditions into an evaluation record that justifies a scoped decision
-
-:::
 ## The Evaluation Problem {#sec-vol3-evaluation-problem}
 
 For the repair agent (lighthouse \ref{lhs-vol3-repair-agent}), the connection-pool repair has concluded its execution lifecycle. The runtime can reconstruct candidate workspace `ws_r18`, retain its unresolved test operation, and account for the temporary integration-test environment. A targeted test run supports that candidate patch, and completed cleanup satisfies the required cleanup postcondition. Whether the overall repair actually meets production requirements remains a separate question.
@@ -245,7 +217,156 @@ Three widely adopted benchmarks illustrate how fixtures and criteria interact in
 
 :::
 
-Once a hermetic gym enforces controlled interactions and protects the evidence collection boundary, the remaining systems challenge centers on grading mechanics: identifying which criteria can be verified through deterministic execution checks and which demand probabilistic or human-in-the-loop validation.
+Once a hermetic gym enforces controlled interactions and protects the evidence collection boundary, the system must record the execution into a distributed trace before it can be graded.
+
+## Distributed Trajectory Tracing {#sec-vol3-evaluation-tracing}
+
+When an evaluation suite reveals that a candidate agent completes fewer tasks or suffers severe latency regressions, aggregate summary metrics rarely pinpoint the root cause. In a complex repair task—such as diagnosing a database connection pool—a candidate might stall during remote inference, wait on a blocked test container, or waste cycles parsing malformed tool outputs. Without fine-grained visibility, these delays blend into an undifferentiated wall-clock total. A trace\index{Trace} transforms these scattered signals by binding every interaction back to the specific evaluation trial, candidate revision, and runtime operation, replacing disjointed service logs with an end-to-end causal record.
+
+**Distributed tracing**\index{Distributed tracing!definition} tracks units of work across process and network boundaries, an operational model established at production scale by Dapper [@sigelman2010dapper]. At the core of this model, a **span**\index{Span!definition} represents a single contiguous unit of execution defined by a unique identifier, explicit start and end timestamps, structured attributes, and optional timed events. Hierarchical parent-child relationships capture synchronous nesting, while trace links correlate decoupled asynchronous interactions that fall outside a single call tree, following the standard OpenTelemetry model [@opentelemetry2026traces]. Within an agentic trajectory, an LLM generation step, a mediated tool execution in a sandbox, and subsequent result validation each form distinct spans. Omitting instrumentation at any of these boundaries leaves unmonitored voids, obscuring whether an unexpected delay originated in model inference, queueing overhead, or environment setup.
+
+### Diagnostic capture and recovery history {#sec-vol3-evaluation-tracing-capture}
+
+::: {#psp-13-telemetry-duality .callout-perspective title="Recovery history and diagnostic traces"}
+
+The durable trajectory log preserves the authoritative, acknowledged state transitions and input artifacts required to reconstruct execution state after a failure. A diagnostic telemetry stream that happens to share identical span identifiers cannot replace this ledger. Diagnostic traces prioritize performance analysis, bottleneck detection, and interactive debugging; under high load or network partitions, tracing pipelines legitimately sample traces, truncate large payloads, or drop spans. The same runtime event can emit records to both pipelines, but their guarantees differ completely. An observability agent might discard an optional span to protect telemetry egress, while the durable recovery engine must guarantee that operation identifiers, resource reservations, and partial results persist to durable storage.
+
+:::
+
+::: {.column-margin .margin-pointer}
+↩ The durable trajectory log, from which recovery reconstructs execution state, is established in @sec-vol3-durable-execution-log-evidence.
+:::
+
+Systems engineers must maintain this distinction when tracking asynchronous operations. Consider a test execution dispatched inside an isolated workspace `ws_r18`. If an HTTP client monitoring that sandbox times out and terminates its diagnostic span, the underlying test does not suddenly vanish. The workload may continue running to completion within the container. When the sandbox eventually emits an authenticated callback with the test results, the durable ledger records the outcome without restarting the held continuation. The distributed trace must correlate that late-arriving callback with the original dispatch attempt using a trace link, accurately preserving both the client-side timeout and the true server-side execution lifetime.
+
+Captured content demands an equally strict boundary. An evaluation harness must distinguish between what an agent proposed, what intermediate middleware modified, and what the model actually received. The delivered-input manifest records the exact byte sequence presented to the model context window, which frequently diverges from raw tool output due to prompt templating, token budget truncation, or context compression. Cryptographic hashes verify payload integrity against historical records, but a hash digest cannot reconstruct payload bytes that were omitted or pruned from storage. Exact deterministic replay and forensic debugging therefore require preserving delivered-input manifests and raw observations in content-addressed storage alongside the trace metadata.
+
+### Trace evidence fields {#sec-vol3-evaluation-tracing-fields}
+
+Rather than accumulating an unbounded collection of unstandardized telemetry tags, an evaluation harness requires a disciplined, minimal schema. Systems engineers must be able to link high-level experimental parameters directly to low-level hardware and network metrics. @Tbl-vol3-trace-evidence-fields organizes the essential fields into five functional categories; while the specific attribute names may follow conventions such as OpenTelemetry semantic conventions, these conceptual groups represent the minimal information required to diagnose agent behavior.
+
+| Record group          | Information to preserve                                                                                                                    | Question it answers                                                                 |
+|:----------------------|:-------------------------------------------------------------------------------------------------------------------------------------------|:------------------------------------------------------------------------------------|
+| Evaluation identity   | Task identity, trial identity, fixture and criterion versions, system configuration, candidate artifact revision                           | Which experiment and candidate does this observation concern?                       |
+| Observed work         | Trace and span identities, operation kind, producer, start/end boundary, clock domain, parent or dependency links                          | Which work was observed, where, and in relation to what other work?                 |
+| Admission and attempt | Model invocation or logical operation identity, transport attempt, applicable decision and policy references                               | Was this proposal withheld or admitted, and which attempt produced the evidence?    |
+| Outcome and usage     | Response status and source, evidence scope, observed token/tool usage, unresolved liability, task-verdict reference                        | What is known about the operation, its costs, and the separate acceptance decision? |
+| Capture limits        | Delivered-input and observation references, omitted ranges or bytes, instrumentation version, known drops, retention/access classification | What can an investigator inspect, and what does this record leave unavailable?      |
+
+: **Minimal trace evidence groups**: Keep identities, observed facts, runtime decisions, and capture limits distinguishable. A completed span is not a completed task. {#tbl-vol3-trace-evidence-fields}
+
+This schema carries the task, trial, configuration, and artifact distinctions of the acceptance record into each observed interaction, while constraining provider provenance to what the remote interface exposes. A fundamental rule of evaluation tracing is that span status must remain decoupled from the final task verdict. An operating system process running a test suite may exit with code 0, prompting the tracing layer to mark the span successful, even though the test output reveals that the candidate failed critical assertions. Conversely, a client span might terminate with a timeout error while fetching auxiliary documentation, yet the candidate agent may still synthesize a valid patch from cached context. The authoritative task acceptance decision relies on independent verification suites and often arrives long after the agent's execution spans have closed.
+
+Propagating context across architectural boundaries requires standardized metadata carriers to propagate correlation identifiers. However, systems architects must maintain a strict security boundary: trace identifiers establish correlation, not authorization. A worker sandbox cannot treat a trace identifier as an admission token. Furthermore, trace headers must never carry sensitive prompt tokens or credentials across untrusted boundaries. When legacy binaries cannot emit internal spans, the orchestrator must record host-observed boundaries explicitly.
+
+### Span overlap and latency attribution {#sec-vol3-evaluation-tracing-latency}
+
+A common pitfall in telemetry analysis is naively summing span durations to calculate total agent execution time. Because a parent span encloses the lifetimes of its children, adding parent and child durations double-counts work. Furthermore, when an agent orchestrator fires multiple tool calls concurrently—such as running a static analysis linter alongside a targeted test suite—their child spans overlap on the timeline. Execution order stems strictly from completion dependencies, never from parent-child hierarchy alone. Comparing durations measured on a single monotonic clock is straightforward, but correlating timestamps across distributed worker hosts requires an explicit alignment model.[^fn-lamport-happened-before] Without synchronized time sources or clock-offset modeling, apparent span overlap between distinct machines can simply reflect physical clock skew. Instrumentation boundaries introduce similar attribution challenges: client-observed model latency encompasses TCP connection handshakes, TLS negotiation, queueing delay at the inference gateway, and network transfer time, meaning that time to first token is never an isolated measurement of model prefill compute.
+
+[^fn-lamport-happened-before]: **Happened-Before Order**: Without perfectly synchronized clocks, a distributed system can define only a partial order of events, built from each process's local sequence and from message sends and receipts; logical clocks extend that partial order consistently [@lamport1978time]. In a trajectory trace, parent and link relations recorded at dispatch carry that causal order, and cross-host timestamps without an alignment model do not. \index{Happened-before relation!trace ordering}
+
+To quantify where latency optimizations yield true wall-clock savings, systems engineers calculate the critical path through the trajectory's dependency graph.[^fn-critical-path-float] Sequential operations add their durations directly, whereas concurrent branches that join at a common synchronization barrier contribute only the duration of the slowest branch. The interactive analysis in notebook \ref{nbk-13-critical-path-latency-and-bottleneck} demonstrates how parallel tool executions and unmonitored runtime intervals shift this critical path.
+
+::: {.column-margin .margin-pointer}
+↪ Critical-path accounting for judging what an acceleration actually saves end to end is developed in @sec-vol3-agent-economics-criticalpath.
+:::
+
+[^fn-critical-path-float]: **Critical Path Method**: Critical-path planning was formalized in 1959 for scheduling large engineering projects, computing for each activity the float by which it can slip without delaying completion [@kelley1959critical]. Float is the quantity the notebook below prices, since shortening a branch saves elapsed time only up to its slack over the next-longest parallel path. \index{Critical path!float}
+
+```{python}
+#| label: calc-vol3-evaluation-observed-critical-path
+#| echo: false
+# OBSERVED SPANS AND A CHANGING CRITICAL PATH (LEGO)
+# Goal: Separate overlapping work, unexplained time, and a conditional speedup.
+# Scope: Hypothetical host-observed intervals in seconds, not benchmark data.
+from mlsysim import second
+from mlsysim.fmt import fmt, fmt_int, fmt_qty, check
+
+class ObservedCriticalPath:
+    # 1. LOAD: one clock; parallel checks start together; no other dependencies.
+    retrieval = (0.0, 0.2)
+    planning = (0.2, 3.2)
+    tests = (3.2, 9.2)
+    lint = (3.2, 5.2)
+    synthesis = (9.7, 11.7)
+    segment = (0.0, 11.7)
+    faster_test_s = 1.0  # intervention assumption, not an observed improvement
+
+    # 2. EXECUTE: seconds throughout; enclosing span is not added to children.
+    retrieval_s = retrieval[1] - retrieval[0]
+    planning_s = planning[1] - planning[0]
+    tests_s = tests[1] - tests[0]
+    lint_s = lint[1] - lint[0]
+    synthesis_s = synthesis[1] - synthesis[0]
+    wall_s = segment[1] - segment[0]
+    leaf_sum_s = retrieval_s + planning_s + tests_s + lint_s + synthesis_s
+    accounted_s = retrieval_s + planning_s + max(tests_s, lint_s) + synthesis_s
+    gap_s = synthesis[0] - max(tests[1], lint[1])
+    changed_s = retrieval_s + planning_s + max(faster_test_s, lint_s) + gap_s + synthesis_s
+    saving_s = wall_s - changed_s
+    reduction_s = tests_s - faster_test_s
+
+    # 3. GUARD: boundaries, overlap, and independent path enumeration.
+    check(retrieval[1] == planning[0], "Serial retrieval-to-planning boundary")
+    check(planning[1] == tests[0] == lint[0], "Checks start together")
+    check(gap_s >= 0, "Synthesis follows both checks")
+    check(abs(leaf_sum_s - 13.2) < 1e-9, "Overlapping leaf-duration sum")
+    check(abs(accounted_s + gap_s - wall_s) < 1e-9, "Complete elapsed accounting")
+    check(abs(wall_s - 11.7) < 1e-9 and abs(gap_s - 0.5) < 1e-9, "Declared observation window")
+    check(abs(changed_s - max(0.2 + 3 + 1 + 0.5 + 2, 0.2 + 3 + 2 + 0.5 + 2)) < 1e-9, "Recompute both paths")
+    check(abs(saving_s - 4.0) < 1e-9, "Saving limited by the other branch")
+
+    # 4. OUTPUT: every export is consumed below.
+    retrieval_interval_str = f"[{fmt_int(retrieval[0])}, {fmt(retrieval[1], precision=1)}]"
+    planning_interval_str = f"[{fmt(planning[0], precision=1)}, {fmt(planning[1], precision=1)}]"
+    tests_interval_str = f"[{fmt(tests[0], precision=1)}, {fmt(tests[1], precision=1)}]"
+    lint_interval_str = f"[{fmt(lint[0], precision=1)}, {fmt(lint[1], precision=1)}]"
+    synthesis_interval_str = f"[{fmt(synthesis[0], precision=1)}, {fmt(synthesis[1], precision=1)}]"
+    wall_str = fmt_qty(wall_s * second, second, precision=1)
+    leaf_sum_str = fmt_qty(leaf_sum_s * second, second, precision=1)
+    accounted_str = fmt_qty(accounted_s * second, second, precision=1)
+    gap_str = fmt_qty(gap_s * second, second, precision=1)
+    faster_str = fmt_qty(faster_test_s * second, second, precision=0)
+    changed_str = fmt_qty(changed_s * second, second, precision=1)
+    saving_str = fmt_qty(saving_s * second, second, precision=0)
+    reduction_str = fmt_qty(reduction_s * second, second, precision=0)
+```
+
+::: {#nbk-13-critical-path-latency-and-bottleneck .callout-notebook title="Observed time and the critical path"}
+
+**Problem**: How much elapsed time do the recorded spans explain, and how much would shortening one check reduce the segment if the other durations and dependencies stayed unchanged?
+
+**Assumptions**: @Tbl-vol3-trace-hierarchy gives observations from a separate hypothetical timing trial that inspects `ws_r19`. The model first proposes checks, the runtime admits two independent read-only checks, and synthesis waits for both. All intervals use one host clock, no hidden dependency delays either check's start, and admission takes no separate time. The enclosing segment runs from retrieval dispatch through the final response.
+
+| Observed span                      | Interval after segment start (s)                       | Required predecessor                         |
+|:-----------------------------------|:-------------------------------------------------------|:---------------------------------------------|
+| Retrieve supporting context        | `{python} ObservedCriticalPath.retrieval_interval_str` | Segment start                                |
+| Model call proposing checks        | `{python} ObservedCriticalPath.planning_interval_str`  | Retrieval response                           |
+| Targeted tests                     | `{python} ObservedCriticalPath.tests_interval_str`     | Validated and admitted check proposal        |
+| Static lint check                  | `{python} ObservedCriticalPath.lint_interval_str`      | Same proposal; independent of targeted tests |
+| Model call synthesizing the report | `{python} ObservedCriticalPath.synthesis_interval_str` | Both check responses                         |
+
+: **Hypothetical observed span intervals**: The two checks overlap. The enclosing segment measures `{python} ObservedCriticalPath.wall_str`; its duration is not additional work to sum with these children. {#tbl-vol3-trace-hierarchy}
+
+**Math**: Adding all leaf durations yields `{python} ObservedCriticalPath.leaf_sum_str`, an overestimate that double-counts concurrent execution during the validation phase. Accounting for concurrency correctly—tracing through retrieval, planning, the longer check (targeted tests), and synthesis—explains `{python} ObservedCriticalPath.accounted_str`. The remaining `{python} ObservedCriticalPath.gap_str` occurs between the completion of the slowest check and the dispatch of the final synthesis call. Because the trace lacks instrumentation for intermediate runtime bookkeeping, prompt serialization, or context collation, this duration remains unattributed; an unmeasured interval highlights a boundary where instrumentation must be refined rather than evidence of worker idle time.
+
+**Intervention**: Suppose an optimization accelerates the targeted test suite from 6.0 s down to `{python} ObservedCriticalPath.faster_str` while all other components remain unchanged. Because the static lint check requires 2.0 s, lint replaces the test suite as the bottleneck on the parallel branch. Recomputing the critical path yields `{python} ObservedCriticalPath.changed_str` for the total segment, achieving an overall elapsed reduction of `{python} ObservedCriticalPath.saving_str`.
+
+**Systems insight**: A performance optimization on a parallel execution branch yields wall-clock returns only up to the branch's float—its slack relative to the next-longest concurrent path. Accelerating the test suite by `{python} ObservedCriticalPath.reduction_str` yields only `{python} ObservedCriticalPath.saving_str` of end-to-end savings because static linting immediately becomes the new critical-path limiter. Systems architects must recompute the critical path across the entire dependency graph before estimating the value of an optimization. Furthermore, theoretical speedups must always be verified empirically in controlled trials; real-world optimizations can shift resource contention, alter cache locality, change garbage collection pressure, or elicit different token generation lengths from the model.
+
+:::
+
+::: {#chk-13-trajectory-instrumentation .callout-checkpoint title="Interpret the trace's evidence"}
+
+- [ ] **Identity**: Why does sharing a trace ID neither authorize a tool call nor make a result applicable to a different candidate revision?
+- [ ] **Outcome**: A client span ends at timeout, and a later grader remains pending. Which operation and task conclusions are still unavailable?
+- [ ] **Overlap**: Why do parent-child links and concurrent checks prevent summing every span duration into task latency?
+- [ ] **Missing time**: What additional capture would be needed to explain the notebook's gap, and why does its location not identify a unique cause?
+- [ ] **Changed path**: Using the notebook's intervals, how much would the segment shrink if the lint check, rather than the tests, were cut to `{python} ObservedCriticalPath.faster_str`? What does your answer imply about where to spend optimization effort?
+
+:::
+
+Distributed trajectory tracing provides the causal fabric needed to reconstruct an agent's execution. With a hermetic environment and a comprehensive trace, the evaluation harness can now apply the task's acceptance contract to grade the trajectory.
 
 ## Grading Trajectories {#sec-vol3-evaluation-grading}
 
@@ -331,7 +452,142 @@ Because shared mistakes survive high agreement, a grader's operating policy is s
 
 :::
 
-Grading yields calibrated criterion-level verdicts and diagnostic measurements for individual trials, but those verdicts evaluate only the specific executions observed in the test harness. Even when graders are isolated and judges are calibrated against reference assessments, observing that a candidate passes more trials than a baseline does not establish that it is genuinely superior. Generalizing beyond those observed runs requires decomposing variance across stochastic attempts and diverse tasks, establishing confidence intervals that do not collapse at extreme probabilities, and bounding comparative uncertainty through paired trials.
+Grading yields calibrated criterion-level verdicts and diagnostic measurements for individual trials. When a trial is graded as a failure, systems engineers must use the trajectory trace to diagnose the root cause.
+
+## Incident Postmortems {#sec-vol3-evaluation-postmortems}
+
+Suppose a trial of the connection-pool repair fails after receiving a silently truncated search result. The retained response ends in the middle of a source excerpt, and the next model response proposes replacing a file outside the permitted repair scope. The runtime rejects that proposal before dispatch. While the execution trace pinpoints where the observation was cut short and where the runtime blocked the illegal operation, it cannot reveal whether a complete observation would have produced an accepted repair. An incident postmortem[^fn-blameless-postmortem-evaluation] connects such telemetry to a testable explanation and a scoped corrective change.
+
+Rigorous postmortems keep these initial findings strictly separated. Delivering an excerpt without truncation metadata demonstrates an interface defect. Emitting an out-of-scope file replacement reveals how the foundation model behaved when starved of context. Finally, intercepting that illegal write confirms that the admission gate functioned as designed. Because failures in agentic systems typically stem from compounding interactions across subsystems, prematurely pinning the fault on a single component obscures the precise conditions that engineering fixes must resolve.
+
+[^fn-blameless-postmortem-evaluation]: **Blameless Postmortem**: Site reliability engineering conducts blameless postmortems to identify contributing causes without indicting any individual or team [@beyer2016sre, ch. 15]. Agent incidents extend this stance from people to components: a model, an observation adapter, and an admission gate can each contribute, and naming one culprit early hides the conditions the corrective change must address. \index{Postmortem!blameless}
+
+### Reconstruction and replay {#sec-vol3-postmortem-replay}
+
+When debugging a failed task, engineers rely on three distinct replay modes: historical reconstruction, harness regression replay, and counterfactual branching. Each mode serves a fundamentally different diagnostic purpose:
+
+- *Reconstruction* aligns recorded decisions with a compatible execution checkpoint to recover the exact system state visible to the agent at the moment of failure.
+- *Harness regression replay* executes deterministic component code against captured inputs while disabling live external side effects.
+- *Counterfactual branching* forks execution from a saved prefix, altering a specific variable or interface contract and collecting fresh observations along the divergent path.
+
+::: {.column-margin .margin-pointer}
+↩ The three uses of a recorded trajectory, and the limits of what each one shows, are established in @sec-vol3-persistence-replay.
+:::
+
+Reconstruction only inspects the past; no replay mode can synthesize an unrecorded historical outcome. Demonstrating that a revised routine now passes tests does not change the fact that the original operation `ws_r18` failed. Furthermore, the fidelity of reconstruction remains strictly bounded by the capture contract defined in perspective \ref{psp-13-telemetry-duality}. Examining the delivered context reveals the truncated excerpt presented to the model; reviewing separately preserved raw stdout reveals what the adapter dropped; and inspecting redacted logs reveals only execution metadata and high-level status.
+
+Harness regression replay is especially effective for isolating data transformations without incurring expensive model invocations. Supplying captured tool responses to legacy and revised observation adapters, with live effect paths disabled, deterministically verifies that the legacy adapter omitted a required partial-result marker while the revised adapter correctly supplies it. However, this offline harness test cannot predict how a model will respond to the revised observation envelope. Answering that question requires a live experiment. Any alteration to prompt text, sampling temperature, model configuration, or tool observation formats represents an intervention rather than a passive replay. Recorded downstream responses remain reusable only under the matching-request rule of @sec-vol3-evaluation-gyms; matching solely on tool names risks fabricating artificial successes by pairing new model actions with obsolete environment responses.
+
+### Fault attribution {#sec-vol3-postmortem-attribution}
+
+Identifying an initial telemetry mismatch helps focus an investigation into a concrete diagnostic hypothesis. In our connection-pool incident, comparing the search tool's raw output against the delivered envelope confirms that the observation adapter silently truncated the text. This yields an engineering hypothesis: omitting the completeness signal misled the model into generating inappropriate repair proposals. Validating this hypothesis demands empirical outcomes measured after an intervention rather than repeated scrutiny of historical telemetry. @Tbl-vol3-fault-attribution distinguishes useful evidence from claims that telemetry cannot support alone; its rows represent overlapping investigation paths rather than mutually exclusive diagnoses.
+
+| Suspected boundary    | Evidence or controlled comparison                                           | Limit of the finding                                                                 |
+|:----------------------|:----------------------------------------------------------------------------|:-------------------------------------------------------------------------------------|
+| Context assembly      | Compare retained source versions, delivered messages, and omission metadata | An omitted fact is not proof that restoring it will complete the task                |
+| Tool observation      | Compare captured output with the adapter's declared and delivered envelopes | A truncation defect does not make the model's later inference correct                |
+| Model response        | Repeat the specified invocation or continuation under controlled conditions | A different response does not identify temperature or sampling as the original cause |
+| Runtime admission     | Exercise captured proposals and control inputs against the stated guards    | A rejected proposal differs from an unauthorized operation that was dispatched       |
+| Execution environment | Compare endpoint evidence, configuration, and relevant fault records        | A timeout or process termination signal alone does not identify its underlying cause |
+
+: **Evidence for diagnostic hypotheses**: Localization constrains an explanation without making the subsystem categories exclusive. {#tbl-vol3-fault-attribution}
+
+System diagnostics must account for ambiguity at every layer. For instance, when an operating system terminates a container via a signal, that signal alone cannot distinguish between an out-of-memory eviction and an administrative termination. Similarly, even when a model generates a schema-valid response, its reasoning may still rest on unverified assumptions. Furthermore, treating an agent's self-generated retrospective explanation as ground truth confuses a generative hypothesis with empirical evidence.
+
+### Controlled diagnostic experiments {#sec-vol3-postmortem-ablation}
+
+To move from suspicion to actionable diagnosis, engineers conduct controlled diagnostic experiments. A rigorous ablation protocol explicitly defines five elements prior to execution: the baseline checkpoint boundary, the specific architectural intervention, all frozen system configurations, allowable sources of stochastic variation, and uniform acceptance criteria. Resetting repository files while allowing external service behaviors to drift introduces confounding variables; interleaving experimental trials across branches helps decouple the intervention effect from infrastructure drift. Interface modifications also frequently bundle multiple mechanisms. Adding a partial-result marker while simultaneously enabling pagination reads tests that combined package rather than the marker alone. Disentangling their individual contributions requires factorial conditions that vary each mechanism independently; the NIST discussion of one-factor experiments demonstrates why varying a single factor at a time fails to expose cross-component interactions [@guthrie2020nisthandbook, sec. 5.2.1.2].
+
+```{python}
+#| label: calc-vol3-evaluation-diagnostic-counts
+#| echo: false
+# DIAGNOSTIC EXPERIMENT COUNTS AND WHAT A CLEAN RUN BOUNDS (LEGO)
+# Goal: Stipulated branch outcomes; Wilson upper failure bound after all-accepted runs.
+# Scope: Hypothetical continuations from one saved prefix; not a task-population sample.
+from math import ceil
+from statistics import NormalDist
+from mlsysim.fmt import fmt_int, fmt_percent, check
+
+class DiagnosticCounts:
+    # 1. LOAD: stipulated outcomes per condition, and a checkpoint target bound.
+    runs = 20
+    original_accepted = 1
+    warning_accepted = 8
+    revised_accepted = 20
+    target_bound = 0.05  # checkpoint exercise: failure-rate bound to demonstrate
+    z = NormalDist().inv_cdf(0.975)
+
+    # 2. EXECUTE: Wilson upper limit on failure after zero observed failures.
+    revised_fail_upper = z * z / (runs + z * z)
+    runs_for_target = ceil(z * z * (1 - target_bound) / target_bound)
+
+    # 3. GUARD
+    check(revised_accepted == runs, "Revised condition accepts every run")
+    check(0 <= original_accepted < warning_accepted < runs, "Stipulated ordering")
+    check(0.15 < revised_fail_upper < 0.17, "Twenty clean runs bound failure near sixteen percent")
+    check(runs_for_target > 3 * runs, "Target bound needs far more runs")
+
+    # 4. OUTPUT
+    runs_str = fmt_int(runs)
+    original_accepted_str = fmt_int(original_accepted)
+    original_rejected_str = fmt_int(runs - original_accepted)
+    warning_accepted_str = fmt_int(warning_accepted)
+    warning_stopped_str = fmt_int(runs - warning_accepted)
+    revised_accepted_str = fmt_int(revised_accepted)
+    revised_fail_upper_str = fmt_percent(round(revised_fail_upper, 2), precision=0, style="prose")
+    target_bound_str = fmt_percent(target_bound, precision=0, style="prose")
+```
+
+::: {#exmp-13-counterfactual-ablation-of-a-silent .callout-example title="A controlled test of observation completeness"}
+
+**Problem**: A diagnostic fixture reproduces a silently truncated search result during the connection-pool repair. What do the following hypothetical outcomes support about a proposed interface change?
+
+**Scenario**: The experiment restores a private copy of a compatible saved prefix of `pool_repair_01` for every continuation, under three branches: the original interface, an added warning, and a revised paginated interface. Each run maintains its own execution lineage and identity, meaning these continuation trials offer evidence about counterfactual behavior without altering historical telemetry from operations `ws_r18` or `ws_r19`. All conditions share the model configuration, sampling settings, starting candidate, permitted operations, budget, and checks, and each receives `{python} DiagnosticCounts.runs_str` fresh stochastic continuations. Acceptance uses the repair's criteria and rejects any run that proposes the out-of-scope rewrite, which the unchanged admission gate blocks before dispatch, and every run reaches a known assessment.
+
+The original-interface condition deliberately retains the adapter defect, delivering the truncated excerpt without an omission notice. Its stipulated outcomes are `{python} DiagnosticCounts.original_accepted_str` accepted repair and `{python} DiagnosticCounts.original_rejected_str` rejected runs that propose the forbidden rewrite. A warning-only condition adds an instruction that search results may be incomplete, but provides no reliable continuation mechanism. Its outcomes are `{python} DiagnosticCounts.warning_accepted_str` accepted repairs and `{python} DiagnosticCounts.warning_stopped_str` budget-limited runs without an accepted repair; none proposes the forbidden rewrite. The revised-interface condition supplies typed partial-result metadata and a supported way to retrieve remaining results. Its outcomes are `{python} DiagnosticCounts.revised_accepted_str` accepted repairs and no nonaccepted runs, with no forbidden rewrite proposal. No condition dispatches an unauthorized write.
+
+**Diagnosis**: Suppressing an illegal write proposal does not equate to successfully repairing the connection pool. While adding a static warning discourages the model from proposing out-of-scope file modifications, several continuations exhaust their execution budgets without reaching an acceptable fix. Conversely, the paginated interface achieves a complete success rate across these trials, justifying broader evaluation of that interface package. However, this diagnostic outcome does not prove that the metadata marker alone drove the turnaround, nor does it imply that model behavior was blameless in the original incident.
+
+These stochastic continuations characterize performance strictly conditional on this specific saved prefix and fixture environment. Even achieving `{python} DiagnosticCounts.revised_accepted_str` accepted runs out of `{python} DiagnosticCounts.runs_str` trials still leaves an upper bound of `{python} DiagnosticCounts.revised_fail_upper_str` on the failure rate under the Wilson score interval of @sec-vol3-evaluation-wilson. Furthermore, these diagnostic ablation runs must remain segregated from benchmark task-set evaluations; pooling them into release metrics would artificially inflate sample size and distort generalization estimates.
+
+**Systems insight**: The observation adapter exhibits an explicit, reproducible defect, and the counterfactual trials demonstrate that repairing it substantially improves continuation outcomes. When designing diagnostic experiments, engineers should preserve admission controls across all conditions, distinguish between safety enforcement (blocking forbidden actions) and functional utility (completing the task), and validate patches against diverse held-out tasks before declaring release readiness.
+
+:::
+
+Because the revised interface follows the bounded-observation contract established in @sec-vol3-tool-calling-truncation-notices, pagination mechanisms must maintain snapshot consistency against an immutable source revision. Exposing a continuation token for content that the server cannot subsequently serve would simply substitute one observation defect for another.
+
+### Scoped regression tests {#sec-vol3-evaluation-postmortems-regression}
+
+A robust corrective patch requires verification at two distinct architectural levels: the localized boundary where the defect occurred and the end-to-end task pipeline whose reliability it aims to restore.
+
+At the boundary level, unit tests must remain entirely deterministic and decoupled from stochastic model calls. Observation-adapter test suites should systematically inject complete, truncated, malformed, and empty payloads, verifying that serialized envelopes correctly populate status fields and omission metadata. In parallel, admission-gate suites must directly submit synthesized out-of-scope file modifications to confirm that the policy engine blocks illegal writes prior to dispatch. Neither verification step requires invoking an LLM.
+
+At the system level, regression tests execute the modified agent within an isolated fixture and evaluate the resulting candidate against the full acceptance suite. Engineers should never treat a bare runtime status of `COMPLETED` as an indicator of correctness, nor should they mistake a single passing test run for a guarantee of operational stability. @Tbl-vol3-postmortem-template organizes the essential artifacts of an investigation, separating confirmed defects from ongoing statistical uncertainty.
+
+| Report element          | Evidence to preserve                                                                                                      |
+|:------------------------|:--------------------------------------------------------------------------------------------------------------------------|
+| Incident and coverage   | Task, trial, configuration, candidate, relevant operation identities, retained interval, and missing or redacted material |
+| Established findings    | Delivered partial observation without required metadata; exact forbidden proposal and recorded pre-dispatch refusal       |
+| Tested change           | Interface revision, compatible fixture and saved boundary, branch identities, unchanged guards, and allowed randomness    |
+| Outcomes                | Common acceptance and proposal/effect criteria, every run's verdict, budget stops, and unavailable assessments            |
+| Corrective verification | Adapter and admission tests, repeated task-level checks, and the actual revision tested                                   |
+| Remaining questions     | Untested fixtures and interactions, retention limits, residual-operation owners, and evidence needed for release          |
+
+: **A bounded postmortem record**: A rigorous incident record documents the empirical evidence supporting a fix alongside unresolved engineering uncertainties, avoiding oversimplified single-cause attributions. {#tbl-vol3-postmortem-template}
+
+::: {#chk-13-fleet-sre-metrics .callout-checkpoint title="Diagnosis and regression scope"}
+
+Use the repair experiment to distinguish a localized defect from a release claim.
+
+- [ ] **Replay modes**: Which test can establish that an adapter omitted a required marker without making a fresh model call, and what can that test not establish?
+- [ ] **Changed requests**: Why must a branch requesting another page obtain a matching observation instead of consuming the next recorded tool result?
+- [ ] **Common outcomes**: Why do fewer forbidden proposals not necessarily imply more accepted repairs?
+- [ ] **Diagnostic sample size**: About how many consecutive accepted continuations would the revised interface need before the Wilson upper limit on its failure rate fell below `{python} DiagnosticCounts.target_bound_str`?
+- [ ] **Regression scope**: Which checks test the adapter, which test admission, and which test completion of the repaired task?
+
+:::
+
+An incident postmortem fulfills its engineering objective when it documents an established interface defect, provides a reproducible regression fixture, and verifies a targeted fix. Yet resolving a single localized failure does not guarantee general reliability across diverse production workloads. To justify a release, systems engineers must evaluate candidate performance across thousands of runs using rigorous statistical methods.
 
 ## Statistical Evaluation Rigor {#sec-vol3-evaluation-rigor}
 
@@ -833,160 +1089,7 @@ Choosing a generator therefore reduces to comparing $(g+v)/p$ across generators,
 
 :::
 
-These metrics quantify outcomes under a declared experiment, and explaining an individual failure takes different evidence. A lower acceptance rate could arise from the model, missing context, an observation boundary, or a slow dependency. Tracing supplies the execution evidence needed to investigate those possibilities.
-
-::: {.callout-chapter-connection title="From statistical variance to runtime observability"}
-While the preceding sections established the mathematical rigor required to trust evaluation metrics---proving *that* an agent failed via statistical tests and paired comparisons---they cannot explain *why* it failed. To diagnose a regression, systems engineers must pivot from macro-level statistical variance to micro-level distributed observability, inspecting the exact sequence of tool executions, model inference latencies, and sandbox delays that comprise a single trajectory.
-:::
-
-## Distributed Trajectory Tracing {#sec-vol3-evaluation-tracing}
-
-When an evaluation suite reveals that a candidate agent completes fewer tasks or suffers severe latency regressions, aggregate summary metrics rarely pinpoint the root cause. In a complex repair task—such as diagnosing a database connection pool—a candidate might stall during remote inference, wait on a blocked test container, or waste cycles parsing malformed tool outputs. Without fine-grained visibility, these delays blend into an undifferentiated wall-clock total. A trace\index{Trace} transforms these scattered signals by binding every interaction back to the specific evaluation trial, candidate revision, and runtime operation, replacing disjointed service logs with an end-to-end causal record.
-
-**Distributed tracing**\index{Distributed tracing!definition} tracks units of work across process and network boundaries, an operational model established at production scale by Dapper [@sigelman2010dapper]. At the core of this model, a **span**\index{Span!definition} represents a single contiguous unit of execution defined by a unique identifier, explicit start and end timestamps, structured attributes, and optional timed events. Hierarchical parent-child relationships capture synchronous nesting, while trace links correlate decoupled asynchronous interactions that fall outside a single call tree, following the standard OpenTelemetry model [@opentelemetry2026traces]. Within an agentic trajectory, an LLM generation step, a mediated tool execution in a sandbox, and subsequent result validation each form distinct spans. Omitting instrumentation at any of these boundaries leaves unmonitored voids, obscuring whether an unexpected delay originated in model inference, queueing overhead, or environment setup.
-
-### Diagnostic capture and recovery history {#sec-vol3-evaluation-tracing-capture}
-
-::: {#psp-13-telemetry-duality .callout-perspective title="Recovery history and diagnostic traces"}
-
-The durable trajectory log preserves the authoritative, acknowledged state transitions and input artifacts required to reconstruct execution state after a failure. A diagnostic telemetry stream that happens to share identical span identifiers cannot replace this ledger. Diagnostic traces prioritize performance analysis, bottleneck detection, and interactive debugging; under high load or network partitions, tracing pipelines legitimately sample traces, truncate large payloads, or drop spans. The same runtime event can emit records to both pipelines, but their guarantees differ completely. An observability agent might discard an optional span to protect telemetry egress, while the durable recovery engine must guarantee that operation identifiers, resource reservations, and partial results persist to durable storage.
-
-:::
-
-::: {.column-margin .margin-pointer}
-↩ The durable trajectory log, from which recovery reconstructs execution state, is established in @sec-vol3-durable-execution-log-evidence.
-:::
-
-Systems engineers must maintain this distinction when tracking asynchronous operations. Consider a test execution dispatched inside an isolated workspace `ws_r18`. If an HTTP client monitoring that sandbox times out and terminates its diagnostic span, the underlying test does not suddenly vanish. The workload may continue running to completion within the container. When the sandbox eventually emits an authenticated callback with the test results, the durable ledger records the outcome without restarting the held continuation. The distributed trace must correlate that late-arriving callback with the original dispatch attempt using a trace link, accurately preserving both the client-side timeout and the true server-side execution lifetime.
-
-Captured content demands an equally strict boundary. An evaluation harness must distinguish between what an agent proposed, what intermediate middleware modified, and what the model actually received. The delivered-input manifest records the exact byte sequence presented to the model context window, which frequently diverges from raw tool output due to prompt templating, token budget truncation, or context compression. Cryptographic hashes verify payload integrity against historical records, but a hash digest cannot reconstruct payload bytes that were omitted or pruned from storage. Exact deterministic replay and forensic debugging therefore require preserving delivered-input manifests and raw observations in content-addressed storage alongside the trace metadata.
-
-### Trace evidence fields {#sec-vol3-evaluation-tracing-fields}
-
-Rather than accumulating an unbounded collection of unstandardized telemetry tags, an evaluation harness requires a disciplined, minimal schema. Systems engineers must be able to link high-level experimental parameters directly to low-level hardware and network metrics. @Tbl-vol3-trace-evidence-fields organizes the essential fields into five functional categories; while the specific attribute names may follow conventions such as OpenTelemetry semantic conventions, these conceptual groups represent the minimal information required to diagnose agent behavior.
-
-| Record group          | Information to preserve                                                                                                                    | Question it answers                                                                 |
-|:----------------------|:-------------------------------------------------------------------------------------------------------------------------------------------|:------------------------------------------------------------------------------------|
-| Evaluation identity   | Task identity, trial identity, fixture and criterion versions, system configuration, candidate artifact revision                           | Which experiment and candidate does this observation concern?                       |
-| Observed work         | Trace and span identities, operation kind, producer, start/end boundary, clock domain, parent or dependency links                          | Which work was observed, where, and in relation to what other work?                 |
-| Admission and attempt | Model invocation or logical operation identity, transport attempt, applicable decision and policy references                               | Was this proposal withheld or admitted, and which attempt produced the evidence?    |
-| Outcome and usage     | Response status and source, evidence scope, observed token/tool usage, unresolved liability, task-verdict reference                        | What is known about the operation, its costs, and the separate acceptance decision? |
-| Capture limits        | Delivered-input and observation references, omitted ranges or bytes, instrumentation version, known drops, retention/access classification | What can an investigator inspect, and what does this record leave unavailable?      |
-
-: **Minimal trace evidence groups**: Keep identities, observed facts, runtime decisions, and capture limits distinguishable. A completed span is not a completed task. {#tbl-vol3-trace-evidence-fields}
-
-This schema carries the task, trial, configuration, and artifact distinctions of the acceptance record into each observed interaction, while constraining provider provenance to what the remote interface exposes. A fundamental rule of evaluation tracing is that span status must remain decoupled from the final task verdict. An operating system process running a test suite may exit with code 0, prompting the tracing layer to mark the span successful, even though the test output reveals that the candidate failed critical assertions. Conversely, a client span might terminate with a timeout error while fetching auxiliary documentation, yet the candidate agent may still synthesize a valid patch from cached context. The authoritative task acceptance decision relies on independent verification suites and often arrives long after the agent's execution spans have closed.
-
-Propagating context across architectural boundaries requires standardized metadata carriers to propagate correlation identifiers. However, systems architects must maintain a strict security boundary: trace identifiers establish correlation, not authorization. A worker sandbox cannot treat a trace identifier as an admission token. Furthermore, trace headers must never carry sensitive prompt tokens or credentials across untrusted boundaries. When legacy binaries cannot emit internal spans, the orchestrator must record host-observed boundaries explicitly.
-
-### Span overlap and latency attribution {#sec-vol3-evaluation-tracing-latency}
-
-A common pitfall in telemetry analysis is naively summing span durations to calculate total agent execution time. Because a parent span encloses the lifetimes of its children, adding parent and child durations double-counts work. Furthermore, when an agent orchestrator fires multiple tool calls concurrently—such as running a static analysis linter alongside a targeted test suite—their child spans overlap on the timeline. Execution order stems strictly from completion dependencies, never from parent-child hierarchy alone. Comparing durations measured on a single monotonic clock is straightforward, but correlating timestamps across distributed worker hosts requires an explicit alignment model.[^fn-lamport-happened-before] Without synchronized time sources or clock-offset modeling, apparent span overlap between distinct machines can simply reflect physical clock skew. Instrumentation boundaries introduce similar attribution challenges: client-observed model latency encompasses TCP connection handshakes, TLS negotiation, queueing delay at the inference gateway, and network transfer time, meaning that time to first token is never an isolated measurement of model prefill compute.
-
-[^fn-lamport-happened-before]: **Happened-Before Order**: Without perfectly synchronized clocks, a distributed system can define only a partial order of events, built from each process's local sequence and from message sends and receipts; logical clocks extend that partial order consistently [@lamport1978time]. In a trajectory trace, parent and link relations recorded at dispatch carry that causal order, and cross-host timestamps without an alignment model do not. \index{Happened-before relation!trace ordering}
-
-To quantify where latency optimizations yield true wall-clock savings, systems engineers calculate the critical path through the trajectory's dependency graph.[^fn-critical-path-float] Sequential operations add their durations directly, whereas concurrent branches that join at a common synchronization barrier contribute only the duration of the slowest branch. The interactive analysis in notebook \ref{nbk-13-critical-path-latency-and-bottleneck} demonstrates how parallel tool executions and unmonitored runtime intervals shift this critical path.
-
-::: {.column-margin .margin-pointer}
-↪ Critical-path accounting for judging what an acceleration actually saves end to end is developed in @sec-vol3-agent-economics-criticalpath.
-:::
-
-[^fn-critical-path-float]: **Critical Path Method**: Critical-path planning was formalized in 1959 for scheduling large engineering projects, computing for each activity the float by which it can slip without delaying completion [@kelley1959critical]. Float is the quantity the notebook below prices, since shortening a branch saves elapsed time only up to its slack over the next-longest parallel path. \index{Critical path!float}
-
-```{python}
-#| label: calc-vol3-evaluation-observed-critical-path
-#| echo: false
-# OBSERVED SPANS AND A CHANGING CRITICAL PATH (LEGO)
-# Goal: Separate overlapping work, unexplained time, and a conditional speedup.
-# Scope: Hypothetical host-observed intervals in seconds, not benchmark data.
-from mlsysim import second
-from mlsysim.fmt import fmt, fmt_int, fmt_qty, check
-
-class ObservedCriticalPath:
-    # 1. LOAD: one clock; parallel checks start together; no other dependencies.
-    retrieval = (0.0, 0.2)
-    planning = (0.2, 3.2)
-    tests = (3.2, 9.2)
-    lint = (3.2, 5.2)
-    synthesis = (9.7, 11.7)
-    segment = (0.0, 11.7)
-    faster_test_s = 1.0  # intervention assumption, not an observed improvement
-
-    # 2. EXECUTE: seconds throughout; enclosing span is not added to children.
-    retrieval_s = retrieval[1] - retrieval[0]
-    planning_s = planning[1] - planning[0]
-    tests_s = tests[1] - tests[0]
-    lint_s = lint[1] - lint[0]
-    synthesis_s = synthesis[1] - synthesis[0]
-    wall_s = segment[1] - segment[0]
-    leaf_sum_s = retrieval_s + planning_s + tests_s + lint_s + synthesis_s
-    accounted_s = retrieval_s + planning_s + max(tests_s, lint_s) + synthesis_s
-    gap_s = synthesis[0] - max(tests[1], lint[1])
-    changed_s = retrieval_s + planning_s + max(faster_test_s, lint_s) + gap_s + synthesis_s
-    saving_s = wall_s - changed_s
-    reduction_s = tests_s - faster_test_s
-
-    # 3. GUARD: boundaries, overlap, and independent path enumeration.
-    check(retrieval[1] == planning[0], "Serial retrieval-to-planning boundary")
-    check(planning[1] == tests[0] == lint[0], "Checks start together")
-    check(gap_s >= 0, "Synthesis follows both checks")
-    check(abs(leaf_sum_s - 13.2) < 1e-9, "Overlapping leaf-duration sum")
-    check(abs(accounted_s + gap_s - wall_s) < 1e-9, "Complete elapsed accounting")
-    check(abs(wall_s - 11.7) < 1e-9 and abs(gap_s - 0.5) < 1e-9, "Declared observation window")
-    check(abs(changed_s - max(0.2 + 3 + 1 + 0.5 + 2, 0.2 + 3 + 2 + 0.5 + 2)) < 1e-9, "Recompute both paths")
-    check(abs(saving_s - 4.0) < 1e-9, "Saving limited by the other branch")
-
-    # 4. OUTPUT: every export is consumed below.
-    retrieval_interval_str = f"[{fmt_int(retrieval[0])}, {fmt(retrieval[1], precision=1)}]"
-    planning_interval_str = f"[{fmt(planning[0], precision=1)}, {fmt(planning[1], precision=1)}]"
-    tests_interval_str = f"[{fmt(tests[0], precision=1)}, {fmt(tests[1], precision=1)}]"
-    lint_interval_str = f"[{fmt(lint[0], precision=1)}, {fmt(lint[1], precision=1)}]"
-    synthesis_interval_str = f"[{fmt(synthesis[0], precision=1)}, {fmt(synthesis[1], precision=1)}]"
-    wall_str = fmt_qty(wall_s * second, second, precision=1)
-    leaf_sum_str = fmt_qty(leaf_sum_s * second, second, precision=1)
-    accounted_str = fmt_qty(accounted_s * second, second, precision=1)
-    gap_str = fmt_qty(gap_s * second, second, precision=1)
-    faster_str = fmt_qty(faster_test_s * second, second, precision=0)
-    changed_str = fmt_qty(changed_s * second, second, precision=1)
-    saving_str = fmt_qty(saving_s * second, second, precision=0)
-    reduction_str = fmt_qty(reduction_s * second, second, precision=0)
-```
-
-::: {#nbk-13-critical-path-latency-and-bottleneck .callout-notebook title="Observed time and the critical path"}
-
-**Problem**: How much elapsed time do the recorded spans explain, and how much would shortening one check reduce the segment if the other durations and dependencies stayed unchanged?
-
-**Assumptions**: @Tbl-vol3-trace-hierarchy gives observations from a separate hypothetical timing trial that inspects `ws_r19`. The model first proposes checks, the runtime admits two independent read-only checks, and synthesis waits for both. All intervals use one host clock, no hidden dependency delays either check's start, and admission takes no separate time. The enclosing segment runs from retrieval dispatch through the final response.
-
-| Observed span                      | Interval after segment start (s)                       | Required predecessor                         |
-|:-----------------------------------|:-------------------------------------------------------|:---------------------------------------------|
-| Retrieve supporting context        | `{python} ObservedCriticalPath.retrieval_interval_str` | Segment start                                |
-| Model call proposing checks        | `{python} ObservedCriticalPath.planning_interval_str`  | Retrieval response                           |
-| Targeted tests                     | `{python} ObservedCriticalPath.tests_interval_str`     | Validated and admitted check proposal        |
-| Static lint check                  | `{python} ObservedCriticalPath.lint_interval_str`      | Same proposal; independent of targeted tests |
-| Model call synthesizing the report | `{python} ObservedCriticalPath.synthesis_interval_str` | Both check responses                         |
-
-: **Hypothetical observed span intervals**: The two checks overlap. The enclosing segment measures `{python} ObservedCriticalPath.wall_str`; its duration is not additional work to sum with these children. {#tbl-vol3-trace-hierarchy}
-
-**Math**: Adding all leaf durations yields `{python} ObservedCriticalPath.leaf_sum_str`, an overestimate that double-counts concurrent execution during the validation phase. Accounting for concurrency correctly—tracing through retrieval, planning, the longer check (targeted tests), and synthesis—explains `{python} ObservedCriticalPath.accounted_str`. The remaining `{python} ObservedCriticalPath.gap_str` occurs between the completion of the slowest check and the dispatch of the final synthesis call. Because the trace lacks instrumentation for intermediate runtime bookkeeping, prompt serialization, or context collation, this duration remains unattributed; an unmeasured interval highlights a boundary where instrumentation must be refined rather than evidence of worker idle time.
-
-**Intervention**: Suppose an optimization accelerates the targeted test suite from 6.0 s down to `{python} ObservedCriticalPath.faster_str` while all other components remain unchanged. Because the static lint check requires 2.0 s, lint replaces the test suite as the bottleneck on the parallel branch. Recomputing the critical path yields `{python} ObservedCriticalPath.changed_str` for the total segment, achieving an overall elapsed reduction of `{python} ObservedCriticalPath.saving_str`.
-
-**Systems insight**: A performance optimization on a parallel execution branch yields wall-clock returns only up to the branch's float—its slack relative to the next-longest concurrent path. Accelerating the test suite by `{python} ObservedCriticalPath.reduction_str` yields only `{python} ObservedCriticalPath.saving_str` of end-to-end savings because static linting immediately becomes the new critical-path limiter. Systems architects must recompute the critical path across the entire dependency graph before estimating the value of an optimization. Furthermore, theoretical speedups must always be verified empirically in controlled trials; real-world optimizations can shift resource contention, alter cache locality, change garbage collection pressure, or elicit different token generation lengths from the model.
-
-:::
-
-::: {#chk-13-trajectory-instrumentation .callout-checkpoint title="Interpret the trace's evidence"}
-
-- [ ] **Identity**: Why does sharing a trace ID neither authorize a tool call nor make a result applicable to a different candidate revision?
-- [ ] **Outcome**: A client span ends at timeout, and a later grader remains pending. Which operation and task conclusions are still unavailable?
-- [ ] **Overlap**: Why do parent-child links and concurrent checks prevent summing every span duration into task latency?
-- [ ] **Missing time**: What additional capture would be needed to explain the notebook's gap, and why does its location not identify a unique cause?
-- [ ] **Changed path**: Using the notebook's intervals, how much would the segment shrink if the lint check, rather than the tests, were cut to `{python} ObservedCriticalPath.faster_str`? What does your answer imply about where to spend optimization effort?
-
-:::
-
-Distributed trajectory tracing provides the causal fabric needed to diagnose why an agent succeeded, failed, or stalled. Yet capturing detailed telemetry incurs concrete engineering costs in CPU overhead, network bandwidth, and persistent storage. In high-throughput evaluation harnesses, preserving every token, tool payload, and internal span across thousands of benchmark trials is rarely feasible. Balancing diagnostic fidelity against operational cost requires explicit policies governing head- and tail-based sampling, payload truncation, and data retention. Defining what to measure is only the first half of the observability problem; the second half is establishing capture and retention policies that preserve critical failure evidence without overwhelming the telemetry infrastructure.
+Applying these statistical methods across thousands of runs generates an enormous volume of telemetry. Retaining complete execution traces for every trial is rarely affordable. Balancing diagnostic fidelity against operational cost requires explicit policies governing head- and tail-based sampling, payload truncation, and data retention.
 
 ## Trace Retention and Privacy {#sec-vol3-evaluation-budgets}
 
@@ -1165,142 +1268,7 @@ Sanitization creates an inherent tension between privacy enforcement and replay 
 
 :::
 
-Storage budgets dictate which runtime observations survive, while privacy policies dictate which preserved artifacts an investigator may legally inspect. Every postmortem analysis and regression benchmark operates strictly within the boundary established by these dual constraints.
-
-## Incident Postmortems {#sec-vol3-evaluation-postmortems}
-
-Suppose a trial of the connection-pool repair fails after receiving a silently truncated search result. The retained response ends in the middle of a source excerpt, and the next model response proposes replacing a file outside the permitted repair scope. The runtime rejects that proposal before dispatch. While the execution trace pinpoints where the observation was cut short and where the runtime blocked the illegal operation, it cannot reveal whether a complete observation would have produced an accepted repair. An incident postmortem[^fn-blameless-postmortem-evaluation] connects such telemetry to a testable explanation and a scoped corrective change.
-
-Rigorous postmortems keep these initial findings strictly separated. Delivering an excerpt without truncation metadata demonstrates an interface defect. Emitting an out-of-scope file replacement reveals how the foundation model behaved when starved of context. Finally, intercepting that illegal write confirms that the admission gate functioned as designed. Because failures in agentic systems typically stem from compounding interactions across subsystems, prematurely pinning the fault on a single component obscures the precise conditions that engineering fixes must resolve.
-
-[^fn-blameless-postmortem-evaluation]: **Blameless Postmortem**: Site reliability engineering conducts blameless postmortems to identify contributing causes without indicting any individual or team [@beyer2016sre, ch. 15]. Agent incidents extend this stance from people to components: a model, an observation adapter, and an admission gate can each contribute, and naming one culprit early hides the conditions the corrective change must address. \index{Postmortem!blameless}
-
-### Reconstruction and replay {#sec-vol3-postmortem-replay}
-
-When debugging a failed task, engineers rely on three distinct replay modes: historical reconstruction, harness regression replay, and counterfactual branching. Each mode serves a fundamentally different diagnostic purpose:
-
-- *Reconstruction* aligns recorded decisions with a compatible execution checkpoint to recover the exact system state visible to the agent at the moment of failure.
-- *Harness regression replay* executes deterministic component code against captured inputs while disabling live external side effects.
-- *Counterfactual branching* forks execution from a saved prefix, altering a specific variable or interface contract and collecting fresh observations along the divergent path.
-
-::: {.column-margin .margin-pointer}
-↩ The three uses of a recorded trajectory, and the limits of what each one shows, are established in @sec-vol3-persistence-replay.
-:::
-
-Reconstruction only inspects the past; no replay mode can synthesize an unrecorded historical outcome. Demonstrating that a revised routine now passes tests does not change the fact that the original operation `ws_r18` failed. Furthermore, the fidelity of reconstruction remains strictly bounded by the capture contract defined in perspective \ref{psp-13-telemetry-duality}. Examining the delivered context reveals the truncated excerpt presented to the model; reviewing separately preserved raw stdout reveals what the adapter dropped; and inspecting redacted logs reveals only execution metadata and high-level status.
-
-Harness regression replay is especially effective for isolating data transformations without incurring expensive model invocations. Supplying captured tool responses to legacy and revised observation adapters, with live effect paths disabled, deterministically verifies that the legacy adapter omitted a required partial-result marker while the revised adapter correctly supplies it. However, this offline harness test cannot predict how a model will respond to the revised observation envelope. Answering that question requires a live experiment. Any alteration to prompt text, sampling temperature, model configuration, or tool observation formats represents an intervention rather than a passive replay. Recorded downstream responses remain reusable only under the matching-request rule of @sec-vol3-evaluation-gyms; matching solely on tool names risks fabricating artificial successes by pairing new model actions with obsolete environment responses.
-
-### Fault attribution {#sec-vol3-postmortem-attribution}
-
-Identifying an initial telemetry mismatch helps focus an investigation into a concrete diagnostic hypothesis. In our connection-pool incident, comparing the search tool's raw output against the delivered envelope confirms that the observation adapter silently truncated the text. This yields an engineering hypothesis: omitting the completeness signal misled the model into generating inappropriate repair proposals. Validating this hypothesis demands empirical outcomes measured after an intervention rather than repeated scrutiny of historical telemetry. @Tbl-vol3-fault-attribution distinguishes useful evidence from claims that telemetry cannot support alone; its rows represent overlapping investigation paths rather than mutually exclusive diagnoses.
-
-| Suspected boundary    | Evidence or controlled comparison                                           | Limit of the finding                                                                 |
-|:----------------------|:----------------------------------------------------------------------------|:-------------------------------------------------------------------------------------|
-| Context assembly      | Compare retained source versions, delivered messages, and omission metadata | An omitted fact is not proof that restoring it will complete the task                |
-| Tool observation      | Compare captured output with the adapter's declared and delivered envelopes | A truncation defect does not make the model's later inference correct                |
-| Model response        | Repeat the specified invocation or continuation under controlled conditions | A different response does not identify temperature or sampling as the original cause |
-| Runtime admission     | Exercise captured proposals and control inputs against the stated guards    | A rejected proposal differs from an unauthorized operation that was dispatched       |
-| Execution environment | Compare endpoint evidence, configuration, and relevant fault records        | A timeout or process termination signal alone does not identify its underlying cause |
-
-: **Evidence for diagnostic hypotheses**: Localization constrains an explanation without making the subsystem categories exclusive. {#tbl-vol3-fault-attribution}
-
-System diagnostics must account for ambiguity at every layer. For instance, when an operating system terminates a container via a signal, that signal alone cannot distinguish between an out-of-memory eviction and an administrative termination. Similarly, even when a model generates a schema-valid response, its reasoning may still rest on unverified assumptions. Furthermore, treating an agent's self-generated retrospective explanation as ground truth confuses a generative hypothesis with empirical evidence.
-
-### Controlled diagnostic experiments {#sec-vol3-postmortem-ablation}
-
-To move from suspicion to actionable diagnosis, engineers conduct controlled diagnostic experiments. A rigorous ablation protocol explicitly defines five elements prior to execution: the baseline checkpoint boundary, the specific architectural intervention, all frozen system configurations, allowable sources of stochastic variation, and uniform acceptance criteria. Resetting repository files while allowing external service behaviors to drift introduces confounding variables; interleaving experimental trials across branches helps decouple the intervention effect from infrastructure drift. Interface modifications also frequently bundle multiple mechanisms. Adding a partial-result marker while simultaneously enabling pagination reads tests that combined package rather than the marker alone. Disentangling their individual contributions requires factorial conditions that vary each mechanism independently; the NIST discussion of one-factor experiments demonstrates why varying a single factor at a time fails to expose cross-component interactions [@guthrie2020nisthandbook, sec. 5.2.1.2].
-
-```{python}
-#| label: calc-vol3-evaluation-diagnostic-counts
-#| echo: false
-# DIAGNOSTIC EXPERIMENT COUNTS AND WHAT A CLEAN RUN BOUNDS (LEGO)
-# Goal: Stipulated branch outcomes; Wilson upper failure bound after all-accepted runs.
-# Scope: Hypothetical continuations from one saved prefix; not a task-population sample.
-from math import ceil
-from statistics import NormalDist
-from mlsysim.fmt import fmt_int, fmt_percent, check
-
-class DiagnosticCounts:
-    # 1. LOAD: stipulated outcomes per condition, and a checkpoint target bound.
-    runs = 20
-    original_accepted = 1
-    warning_accepted = 8
-    revised_accepted = 20
-    target_bound = 0.05  # checkpoint exercise: failure-rate bound to demonstrate
-    z = NormalDist().inv_cdf(0.975)
-
-    # 2. EXECUTE: Wilson upper limit on failure after zero observed failures.
-    revised_fail_upper = z * z / (runs + z * z)
-    runs_for_target = ceil(z * z * (1 - target_bound) / target_bound)
-
-    # 3. GUARD
-    check(revised_accepted == runs, "Revised condition accepts every run")
-    check(0 <= original_accepted < warning_accepted < runs, "Stipulated ordering")
-    check(0.15 < revised_fail_upper < 0.17, "Twenty clean runs bound failure near sixteen percent")
-    check(runs_for_target > 3 * runs, "Target bound needs far more runs")
-
-    # 4. OUTPUT
-    runs_str = fmt_int(runs)
-    original_accepted_str = fmt_int(original_accepted)
-    original_rejected_str = fmt_int(runs - original_accepted)
-    warning_accepted_str = fmt_int(warning_accepted)
-    warning_stopped_str = fmt_int(runs - warning_accepted)
-    revised_accepted_str = fmt_int(revised_accepted)
-    revised_fail_upper_str = fmt_percent(round(revised_fail_upper, 2), precision=0, style="prose")
-    target_bound_str = fmt_percent(target_bound, precision=0, style="prose")
-```
-
-::: {#exmp-13-counterfactual-ablation-of-a-silent .callout-example title="A controlled test of observation completeness"}
-
-**Problem**: A diagnostic fixture reproduces a silently truncated search result during the connection-pool repair. What do the following hypothetical outcomes support about a proposed interface change?
-
-**Scenario**: The experiment restores a private copy of a compatible saved prefix of `pool_repair_01` for every continuation, under three branches: the original interface, an added warning, and a revised paginated interface. Each run maintains its own execution lineage and identity, meaning these continuation trials offer evidence about counterfactual behavior without altering historical telemetry from operations `ws_r18` or `ws_r19`. All conditions share the model configuration, sampling settings, starting candidate, permitted operations, budget, and checks, and each receives `{python} DiagnosticCounts.runs_str` fresh stochastic continuations. Acceptance uses the repair's criteria and rejects any run that proposes the out-of-scope rewrite, which the unchanged admission gate blocks before dispatch, and every run reaches a known assessment.
-
-The original-interface condition deliberately retains the adapter defect, delivering the truncated excerpt without an omission notice. Its stipulated outcomes are `{python} DiagnosticCounts.original_accepted_str` accepted repair and `{python} DiagnosticCounts.original_rejected_str` rejected runs that propose the forbidden rewrite. A warning-only condition adds an instruction that search results may be incomplete, but provides no reliable continuation mechanism. Its outcomes are `{python} DiagnosticCounts.warning_accepted_str` accepted repairs and `{python} DiagnosticCounts.warning_stopped_str` budget-limited runs without an accepted repair; none proposes the forbidden rewrite. The revised-interface condition supplies typed partial-result metadata and a supported way to retrieve remaining results. Its outcomes are `{python} DiagnosticCounts.revised_accepted_str` accepted repairs and no nonaccepted runs, with no forbidden rewrite proposal. No condition dispatches an unauthorized write.
-
-**Diagnosis**: Suppressing an illegal write proposal does not equate to successfully repairing the connection pool. While adding a static warning discourages the model from proposing out-of-scope file modifications, several continuations exhaust their execution budgets without reaching an acceptable fix. Conversely, the paginated interface achieves a complete success rate across these trials, justifying broader evaluation of that interface package. However, this diagnostic outcome does not prove that the metadata marker alone drove the turnaround, nor does it imply that model behavior was blameless in the original incident.
-
-These stochastic continuations characterize performance strictly conditional on this specific saved prefix and fixture environment. Even achieving `{python} DiagnosticCounts.revised_accepted_str` accepted runs out of `{python} DiagnosticCounts.runs_str` trials still leaves an upper bound of `{python} DiagnosticCounts.revised_fail_upper_str` on the failure rate under the Wilson score interval of @sec-vol3-evaluation-wilson. Furthermore, these diagnostic ablation runs must remain segregated from benchmark task-set evaluations; pooling them into release metrics would artificially inflate sample size and distort generalization estimates.
-
-**Systems insight**: The observation adapter exhibits an explicit, reproducible defect, and the counterfactual trials demonstrate that repairing it substantially improves continuation outcomes. When designing diagnostic experiments, engineers should preserve admission controls across all conditions, distinguish between safety enforcement (blocking forbidden actions) and functional utility (completing the task), and validate patches against diverse held-out tasks before declaring release readiness.
-
-:::
-
-Because the revised interface follows the bounded-observation contract established in @sec-vol3-tool-calling-truncation-notices, pagination mechanisms must maintain snapshot consistency against an immutable source revision. Exposing a continuation token for content that the server cannot subsequently serve would simply substitute one observation defect for another.
-
-### Scoped regression tests {#sec-vol3-evaluation-postmortems-regression}
-
-A robust corrective patch requires verification at two distinct architectural levels: the localized boundary where the defect occurred and the end-to-end task pipeline whose reliability it aims to restore.
-
-At the boundary level, unit tests must remain entirely deterministic and decoupled from stochastic model calls. Observation-adapter test suites should systematically inject complete, truncated, malformed, and empty payloads, verifying that serialized envelopes correctly populate status fields and omission metadata. In parallel, admission-gate suites must directly submit synthesized out-of-scope file modifications to confirm that the policy engine blocks illegal writes prior to dispatch. Neither verification step requires invoking an LLM.
-
-At the system level, regression tests execute the modified agent within an isolated fixture and evaluate the resulting candidate against the full acceptance suite. Engineers should never treat a bare runtime status of `COMPLETED` as an indicator of correctness, nor should they mistake a single passing test run for a guarantee of operational stability. @Tbl-vol3-postmortem-template organizes the essential artifacts of an investigation, separating confirmed defects from ongoing statistical uncertainty.
-
-| Report element          | Evidence to preserve                                                                                                      |
-|:------------------------|:--------------------------------------------------------------------------------------------------------------------------|
-| Incident and coverage   | Task, trial, configuration, candidate, relevant operation identities, retained interval, and missing or redacted material |
-| Established findings    | Delivered partial observation without required metadata; exact forbidden proposal and recorded pre-dispatch refusal       |
-| Tested change           | Interface revision, compatible fixture and saved boundary, branch identities, unchanged guards, and allowed randomness    |
-| Outcomes                | Common acceptance and proposal/effect criteria, every run's verdict, budget stops, and unavailable assessments            |
-| Corrective verification | Adapter and admission tests, repeated task-level checks, and the actual revision tested                                   |
-| Remaining questions     | Untested fixtures and interactions, retention limits, residual-operation owners, and evidence needed for release          |
-
-: **A bounded postmortem record**: A rigorous incident record documents the empirical evidence supporting a fix alongside unresolved engineering uncertainties, avoiding oversimplified single-cause attributions. {#tbl-vol3-postmortem-template}
-
-::: {#chk-13-fleet-sre-metrics .callout-checkpoint title="Diagnosis and regression scope"}
-
-Use the repair experiment to distinguish a localized defect from a release claim.
-
-- [ ] **Replay modes**: Which test can establish that an adapter omitted a required marker without making a fresh model call, and what can that test not establish?
-- [ ] **Changed requests**: Why must a branch requesting another page obtain a matching observation instead of consuming the next recorded tool result?
-- [ ] **Common outcomes**: Why do fewer forbidden proposals not necessarily imply more accepted repairs?
-- [ ] **Diagnostic sample size**: About how many consecutive accepted continuations would the revised interface need before the Wilson upper limit on its failure rate fell below `{python} DiagnosticCounts.target_bound_str`?
-- [ ] **Regression scope**: Which checks test the adapter, which test admission, and which test completion of the repaired task?
-
-:::
-
-An incident postmortem fulfills its engineering objective when it documents an established interface defect, provides a reproducible regression fixture, and verifies a targeted fix. Yet resolving a single localized failure does not guarantee general reliability across diverse production workloads. Staged release evaluation determines which additional tasks, edge cases, and runtime conditions the candidate system must navigate while teams gather the next tier of empirical evidence.
+Storage budgets dictate which runtime observations survive, while privacy policies dictate which preserved artifacts an investigator may legally inspect. With robust statistical evaluation and telemetry retention in place, engineering teams can use this evidence to gate staged releases safely.
 
 ## Staged Releases {#sec-vol3-evaluation-releases}
 
@@ -1360,165 +1328,11 @@ Outcome delay matters even when assignment is correct. Under the four-verdict ru
 
 ### Sequential monitoring {#sec-vol3-evaluation-releases-sequential}
 
-Repeatedly applying a fixed-sample test after each new canary outcome inflates its false-positive rate well above the nominal level [@johari2017peeking]. A sequential design instead declares in advance how accumulating evidence will be used. The **sequential probability ratio test** (SPRT)\index{Sequential probability ratio test!definition}[^fn-wald-sprt-origin] [@wald1945sequential] is the compact example for two specified distributions, and it is a different procedure from the paired offline noninferiority test.
+Repeatedly applying a fixed-sample test after each new canary outcome inflates its false-positive rate well above the nominal level [@johari2017peeking]. A sequential design instead declares in advance how accumulating evidence will be used. Rather than waiting for a fixed sample size, sequential monitoring evaluates cumulative metrics continuously against predefined boundaries to stop bad releases early without inflating false positive rates, using techniques like sequential probability ratio tests (SPRT) [@wald1945sequential].
 
-Let independent task labels $x_i$ be Bernoulli with a stationary acceptance probability, and let the simple hypotheses be $p=p_0$ and $p=p_1$, with $0<p_1<p_0<1$ and the lower value a particular degradation. Both values are design inputs, not estimates. With $d_n=\sum_{i=1}^n x_i$, the log-likelihood ratio favoring the degraded hypothesis is
+Success moves the monitoring statistic downward; failure moves it upward. When evidence reaches the upper boundary, the test selects the degraded hypothesis and the release policy can stop new candidate admission. When it crosses the lower boundary, the candidate is accepted. Between the boundaries, evidence remains inconclusive and sampling continues.
 
-$$\Lambda_n = d_n \ln\left(\frac{p_1}{p_0}\right) + (n-d_n)\ln\left(\frac{1-p_1}{1-p_0}\right).$$ {#eq-vol3-release-sprt}
-
-Success moves the statistic in @eq-vol3-release-sprt downward; failure moves it upward. Let $\alpha$ target the probability of choosing degradation under $p_0$, and $\beta$ the probability of choosing $p_0$ under $p_1$. For $0<\alpha,\beta<1$ and $\alpha+\beta<1$, Wald's commonly used approximate log boundaries are
-
-$$u = \ln\left(\frac{1-\beta}{\alpha}\right), \qquad b_{\text{low}} = \ln\left(\frac{\beta}{1-\alpha}\right).$$ {#eq-vol3-release-sprt-boundaries}
-
-Discrete observations can overshoot these approximate thresholds, so the realized error probabilities need calibration for the actual model [@fischer2026improving].
-
-::: {#psp-13-sprt-reading .callout-perspective title="Reading a sequential decision"}
-
-At $\Lambda_n\ge u$, the test selects the specified degraded hypothesis and the release policy can stop new candidate admission. At $\Lambda_n\le b_{\text{low}}$, it selects $p_0$ against that particular alternative. Between the boundaries, evidence remains inconclusive. Selecting $p_0$ rejects one specified degradation; general noninferiority, broader traffic, and safety each need their own evidence. A deadline or sample cap that ends collection between the boundaries leaves the decision inconclusive.
-
-:::
-
-A production stream can violate this model through changing task mix, shared outages, correlated tasks, or delayed labels. Processing results in completion order creates selection bias when duration depends on outcome, which a declared admission-order analysis avoids at the cost of waiting behind unresolved tasks. Testing several metrics or restarting after an unfavorable path needs error control beyond these two boundaries.
-
-::: {.column-margin}
-![](images/svg/vol3_eval_margin_sprt_corridor.svg){width="100%" fig-alt="A shaded corridor between a red upper line labeled u and hold with its value, and a green lower line labeled b sub low and select p sub 0 with its value. From a start at zero, a red dashed line rises to the upper boundary and a green dashed line falls to the lower one. The middle is labeled keep sampling; the horizontal axis reads labeled tasks n."}
-
-*Evidence drifts toward $u$ under degradation and toward $b_{\text{low}}$ otherwise; between them, keep sampling.*
-:::
-
-The same simplified model gives a planning approximation for the expected stopping sample count. Under $p_1$, the expected increment is $m_1=p_1\ln(p_1/p_0)+(1-p_1)\ln((1-p_1)/(1-p_0))$. Neglecting boundary overshoot and substituting the target decision probabilities gives
-
-$$\mathbb{E}_1[N]\approx\frac{(1-\beta)u+\beta b_{\text{low}}}{m_1}.$$ {#eq-vol3-release-sprt-samples}
-
-The numerator in @eq-vol3-release-sprt-samples averages both terminal decisions, as in the classical average-sample-number approximation [@wald1945sequential; @hory2004sequential, eq. 24]. @Sec-vol3-appendix-math-sprt derives the approximate decision boundaries and stopping-sample expression while distinguishing target errors from realized errors.
-
-```{python}
-#| label: lego-13-sizing-canary-traffic-and-circuit
-#| echo: false
-# ┌─────────────────────────────────────────────────────────────────────────────
-# │ SEQUENTIAL STOPPING SCALE, NOT A HARM BOUND
-# ├─────────────────────────────────────────────────────────────────────────────
-# │ Context: nbk-13-sizing-canary-traffic-and-circuit in sec-vol3-evaluation-releases.
-# │ Goal: Compute Wald's no-overshoot stopping approximation and label-time scale.
-# │ Show: Boundaries, drift, approximate sample count, and delayed calendar time.
-# │ How: Hypothetical stationary Bernoulli model with regular admissions.
-# │ Note: Separate later configuration; no promotion of the inconclusive pair.
-# └─────────────────────────────────────────────────────────────────────────────
-from math import log
-from mlsysim import *
-
-class SizingCanaryTrafficCircuitBreaker:
-    # 1. LOAD: hypothetical monitor inputs, not production measurements.
-    p0, p1 = 0.90, 0.75
-    alpha, beta = 0.01, 0.05
-    arrival_per_hr = 60
-    fraction = 0.05
-    label_delay = 0.5 * hour
-
-    # 2. EXECUTE: approximate boundary mixture includes BOTH decisions.
-    upper = log((1 - beta) / alpha)
-    lower = log(beta / (1 - alpha))
-    drift = p1 * log(p1 / p0) + (1 - p1) * log((1 - p1) / (1 - p0))
-    expected_terminal = (1 - beta) * upper + beta * lower
-    expected_samples = expected_terminal / drift
-    canary_per_hr = arrival_per_hr * fraction
-    sampling_time = expected_samples / canary_per_hr * hour
-    label_time = sampling_time + label_delay
-    doubled_time = expected_samples / (2 * canary_per_hr) * hour + label_delay
-
-    # 3. GUARD: numerical scale and distinction between samples and time.
-    check(0 < p1 < p0 < 1, "Specified degraded Bernoulli alternative")
-    check(abs(upper - 4.5538768916) < 1e-9, "Upper approximate log boundary")
-    check(abs(lower + 2.9856819377) < 1e-9, "Lower approximate log boundary")
-    check(45.23 < expected_samples < 45.24, "No-overshoot stopping approximation")
-    check(canary_per_hr == 3, "Assigned arrival rate")
-    check(abs(label_time.to(hour).magnitude - 15.5793544806) < 1e-9, "Regular arrivals plus fixed label delay")
-    check(label_time > sampling_time, "Labels arrive after admission")
-
-    # 4. OUTPUT: every export is consumed in the notebook below.
-    p0_str, p1_str = fmt(p0, precision=2), fmt(p1, precision=2)
-    alpha_str, beta_str = fmt(alpha, precision=2), fmt(beta, precision=2)
-    arrivals_str = fmt_int(arrival_per_hr)
-    fraction_pct_str = fmt_percent(fraction, precision=0, style="prose")
-    delay_str = fmt_qty(label_delay, hour, precision=1)
-    upper_str, lower_str = fmt(upper, precision=4), fmt(lower, precision=4)
-    drift_str = fmt(drift, precision=5)
-    terminal_str = fmt(expected_terminal, precision=4)
-    samples_str = fmt(expected_samples, precision=2)
-    canary_arrivals_str = fmt_int(canary_per_hr)
-    sampling_time_str = fmt_qty(sampling_time, hour, precision=2)
-    label_time_str = fmt_qty(label_time, hour, precision=2)
-    doubled_fraction_str = fmt_percent(2 * fraction, precision=0, style="prose")
-    doubled_time_str = fmt_qty(doubled_time, hour, precision=1)
-```
-
-::: {#nbk-13-sizing-canary-traffic-and-circuit .callout-notebook title="Sequential evidence takes calendar time"}
-
-**Problem**: Consider a separate, hypothetical later configuration that has met its offline and shadow prerequisites. Its monitor compares $p_0$ equal to `{python} SizingCanaryTrafficCircuitBreaker.p0_str` with $p_1$ equal to `{python} SizingCanaryTrafficCircuitBreaker.p1_str`, using design targets $\alpha$ equal to `{python} SizingCanaryTrafficCircuitBreaker.alpha_str` and $\beta$ equal to `{python} SizingCanaryTrafficCircuitBreaker.beta_str`. At `{python} SizingCanaryTrafficCircuitBreaker.arrivals_str` eligible tasks/hour and a `{python} SizingCanaryTrafficCircuitBreaker.fraction_pct_str` candidate allocation, what stopping-sample and calendar-time scale does the no-overshoot approximation predict under $p_1$?
-
-**Assumptions**: Outcomes are independent with constant probability, admissions arrive at regular intervals, and each label arrives exactly `{python} SizingCanaryTrafficCircuitBreaker.delay_str` after admission with none lost. The test is untruncated, with no operational tripwire.
-
-**Math**: The approximate boundaries are `{python} SizingCanaryTrafficCircuitBreaker.upper_str` and `{python} SizingCanaryTrafficCircuitBreaker.lower_str`. Under $p_1$, the expected increment is `{python} SizingCanaryTrafficCircuitBreaker.drift_str`. Neglecting overshoot and substituting the target decision probabilities gives expected terminal log-likelihood `{python} SizingCanaryTrafficCircuitBreaker.terminal_str`. Dividing that quantity by the expected increment gives approximately `{python} SizingCanaryTrafficCircuitBreaker.samples_str` labeled tasks. The average includes both possible decisions, including mistaken selection of $p_0$; it is not the expected number until an alarm.
-
-Candidate admissions occur at `{python} SizingCanaryTrafficCircuitBreaker.canary_arrivals_str` tasks/hour. The corresponding admission-time scale is `{python} SizingCanaryTrafficCircuitBreaker.sampling_time_str`; adding the fixed label delay gives approximately `{python} SizingCanaryTrafficCircuitBreaker.label_time_str` until a decision. Tasks admitted while labels are pending can still be executing when the test stops.
-
-**Systems insight**: The sample count is fixed by the hypotheses and error targets, so calendar time to a decision scales as $1/\rho$. Doubling the allocation to `{python} SizingCanaryTrafficCircuitBreaker.doubled_fraction_str` cuts the time to about `{python} SizingCanaryTrafficCircuitBreaker.doubled_time_str`. Choose $\rho$ from the decision deadline and from the exposure the release can tolerate to harms the monitor does not measure, and keep independent admission and effect limits, because an expected sample count is not a maximum.
-
-:::
-
-```{python}
-#| label: calc-vol3-evaluation-canary-excess-failures
-#| echo: false
-# WHICH HARM THE CANARY FRACTION CONTROLS (LEGO)
-# Goal: Separate excess failures from a measured regression from exposure rate.
-# Scope: Same hypothetical monitor as the sequential-evidence notebook, under p1.
-from mlsysim import hour
-from mlsysim.fmt import fmt, check
-
-class CanaryExcessFailures:
-    # 1. LOAD: reuse the monitor's design inputs; compare with full allocation.
-    m = SizingCanaryTrafficCircuitBreaker
-    full_fraction = 1.0
-
-    # 2. EXECUTE: tasks admitted by the decision = labeled samples + admitted during label delay.
-    gap = m.p0 - m.p1
-    delay_hr = m.label_delay.to(hour).magnitude
-    pending_canary = m.arrival_per_hr * m.fraction * delay_hr
-    pending_full = m.arrival_per_hr * full_fraction * delay_hr
-    excess_canary = (m.expected_samples + pending_canary) * gap
-    excess_full = (m.expected_samples + pending_full) * gap
-    exposure_ratio = full_fraction / m.fraction
-
-    # 3. GUARD: the fraction enters only through the label delay.
-    check(abs(pending_canary - 1.5) < 1e-9 and abs(pending_full - 30) < 1e-9, "Tasks admitted while labels pend")
-    check(6.9 < excess_canary < 7.1, "Excess failures at the canary fraction")
-    check(11.2 < excess_full < 11.4, "Excess failures at full allocation")
-    check(abs(exposure_ratio - 20) < 1e-9, "Admission-rate ratio")
-
-    # 4. OUTPUT
-    excess_canary_str = fmt_int(round(excess_canary))
-    excess_full_str = fmt_int(round(excess_full))
-```
-
-The sample count and the canary fraction control different harms. Under $p_1$, each candidate task fails about $p_0-p_1$ more often than it would under the baseline. With allocation fraction $\rho$ of eligible arrivals at rate $\lambda_{\text{arr}}$ and label delay $t_{\text{label}}$, the monitor decides after roughly $\mathbb{E}_1[N]$ labeled tasks plus the $\rho\lambda_{\text{arr}} t_{\text{label}}$ tasks admitted while their labels are pending, so the measured regression costs about $(\mathbb{E}_1[N]+\rho\lambda_{\text{arr}} t_{\text{label}})(p_0-p_1)$ excess failures. In the notebook's scenario that is about `{python} CanaryExcessFailures.excess_canary_str` at the canary fraction and about `{python} CanaryExcessFailures.excess_full_str` at full allocation. The fraction enters only through the label delay; its main effect on a measured regression is the calendar time needed to collect the samples.
-
-Harms the monitor does not measure behave differently. They accrue for every admitted candidate task until some other mechanism detects them, so their rate scales with $\rho$, and this canary exposes candidate tasks at `{python} SizingCanaryTrafficCircuitBreaker.fraction_pct_str` of the full-allocation rate. The test's sample size fixes the harm from a measured regression; the canary's size limits the harms the test does not measure. A production release of a foundation model shows what the second kind of harm looks like when it escapes.
-
-::: {#ws-vol3-evaluation-gpt4o-sycophancy-2025 .callout-war-story title="The GPT-4o sycophancy rollback (2025)"}
-
-**Context**: In late April 2025, OpenAI rolled out an update to the GPT-4o model behind ChatGPT, adjusting its default personality [@openai2025sycophancy].
-
-**Mechanism**: By OpenAI's account, the update focused too much on short-term user feedback and did not account for how users' interactions evolve over time. The model skewed toward responses that were overly supportive but disingenuous. OpenAI's follow-up analysis reports that changes including an added reward signal from user thumbs-up and thumbs-down feedback weakened the influence of the primary reward that had held sycophancy in check, and that the offline evaluations and the A/B test of the update both looked good before launch [@openai2025expanding].
-
-**Impact**: The update reached ChatGPT users before the behavior was recognized, and OpenAI rolled it back, returning users to an earlier version with more balanced behavior.
-
-**Fix**: OpenAI committed to refining training techniques and system prompts to steer the model away from sycophancy, adding guardrails for honesty and transparency, expanding predeployment testing with direct user feedback, and expanding its evaluations to catch behavioral issues beyond sycophancy.
-
-**Systems lesson**: A release gate passes exactly the criteria it declares. A regression in a property that no criterion measures clears every term of the gate, and no sequential monitor can stop it because none is watching it. The durable responses are a new criterion for the next release and an admission hold on the regressed configuration.
-
-:::
-
-The sycophancy regression is that unmeasured harm at full scale. Detection came from outside the declared criteria, and the effective response was an admission stop on the regressed configuration followed by settlement of what it had already done.
+A production stream can complicate this process through changing task mix, shared outages, correlated tasks, or delayed labels. Processing results in completion order creates selection bias when duration depends on outcome, which a declared admission-order analysis avoids at the cost of waiting behind unresolved tasks.
 
 ### Operational tripwires {#sec-vol3-evaluation-releases-tripwires}
 
@@ -1772,9 +1586,7 @@ class EvaluationExerciseGivens:
 
 **8. Postmortem of a wrong refund answer (Advanced).** The support agent (lighthouse \ref{lhs-vol3-support-agent}) tells a customer that a purchase is refundable within 60 days, while the current policy allows 30. The retained trace holds three records. The raw retrieval result contains two policy passages, the current version and a superseded one, each with an effective date; the delivered context contains both passages with the effective dates removed by the observation adapter; and the answer quotes the superseded passage. The team restores a compatible saved prefix ending just before the retrieval call and runs 40 fresh continuations in each of three branches, holding the model configuration, sampling settings, prompt, and a policy-grounded reference check fixed; every run reaches a known verdict. Branch A keeps the original adapter and yields 18 wrong answers. Branch B delivers the effective dates and yields 3 wrong answers. Branch C removes the superseded passage from the index, so only the current version is retrieved, and yields none. Release policy requires the Wilson upper limit on the support agent's per-session wrong-answer rate to be at most 2 percent. (a) For each claim, state whether the retained record alone, a regression replay of the captured result without a model call, or only the intervention can establish it: the adapter removes effective dates; the model received both passages; the missing dates contributed to the wrong answer. (b) Compute each branch's wrong-answer rate with its Wilson interval. Decide whether the data support the claim that delivering effective dates reduces wrong answers from this prefix, and whether 40 runs per branch distinguish branch B from branch C. (c) Compute how many consecutive correct continuations a fix would need before its Wilson upper limit met the release policy, and the 5-session consistency that branch C's upper limit at 40 runs guarantees. (d) A teammate reports a fourth branch that delivers the dates and also lowers the sampling temperature to zero, with 40 of 40 correct, and proposes shipping it as the fix. Critique the proposal, choose a corrective change, and write the postmortem record's lines for established findings, tested change, and remaining questions.
 
-**9. Size a canary against a deadline (Advanced).** A repair-agent canary monitors acceptance with the SPRT of @eq-vol3-release-sprt, comparing $p_0=0.80$ with $p_1=0.70$ at design targets $\alpha=0.05$ and $\beta=0.10$. Eligible tasks arrive regularly at 40 per hour, each label arrives 2 hours after admission when the regression suite finishes, and under $p_1$ the monitor must decide within 24 hours of the first admission. Separately, a harm the monitor does not measure occurs in 0.5 percent of candidate tasks, and release policy requires the candidate to run for 7 days at its allocation before any wider release. (a) Compute $u$, $b_{\text{low}}$, $m_1$, and the no-overshoot $\mathbb{E}_1[N]$. (b) Find the smallest allocation $\rho$ that meets the decision deadline. (c) Compute the expected excess failures from the measured regression at that $\rho$ and at $\rho=25$ percent. (d) Compute the expected count of unmeasured harms over the 7-day period at both allocations. Choose $\rho$ and justify it from parts (b) through (d). (e) A teammate proposes replacing the SPRT with a fixed-sample test rerun after every new label, stopping at the first value below 0.05. Critique the proposal.
-
-**10. Critique a release report (Advanced).** A team asks to promote a repair-agent candidate with the following evidence. The candidate accepted 78 percent of tasks and the baseline 72 percent, reported as a 6-point gain. The baseline ran on 100 tasks sampled last month, and the candidate on 100 newly sampled tasks. The team dropped 12 candidate trials whose regression suites had not finished, so the candidate accepted 69 of the remaining 88. Report quality counted as accepted when an LLM judge scored it at least 4 of 5, justified by 90 percent raw agreement with a second judge. The failure rate in the release notes was computed from tail-sampled traces. (a) Under the four-verdict rule, bound the candidate's accepted fraction of its admitted cohort, and state what the 6-point claim becomes. (b) Using @eq-vol3-eval-planning-power with $\bar p=0.75$, a 5 percent two-sided significance target, and 80 percent power, compute the tasks per independent arm needed to detect a 6-point difference. (c) Redesign the comparison as paired. Assuming a discordant fraction $\psi=0.15$, an anticipated gain of 3 points, and $\delta_{\text{tol}}=2$ points, find the number of task pairs at which the normal-approximation lower limit $\hat\Delta-z\sqrt{(\psi-\hat\Delta^2)/N}$ clears $-\delta_{\text{tol}}$ if the gain holds. (d) Identify the remaining defects in the report and write a defensible protocol: which criteria the automated gate enforces, which measurements the judge must carry, and which conditions the team must declare before collecting data.
+**9. Critique a release report (Advanced).** A team asks to promote a repair-agent candidate with the following evidence. The candidate accepted 78 percent of tasks and the baseline 72 percent, reported as a 6-point gain. The baseline ran on 100 tasks sampled last month, and the candidate on 100 newly sampled tasks. The team dropped 12 candidate trials whose regression suites had not finished, so the candidate accepted 69 of the remaining 88. Report quality counted as accepted when an LLM judge scored it at least 4 of 5, justified by 90 percent raw agreement with a second judge. The failure rate in the release notes was computed from tail-sampled traces. (a) Under the four-verdict rule, bound the candidate's accepted fraction of its admitted cohort, and state what the 6-point claim becomes. (b) Using @eq-vol3-eval-planning-power with $\bar p=0.75$, a 5 percent two-sided significance target, and 80 percent power, compute the tasks per independent arm needed to detect a 6-point difference. (c) Redesign the comparison as paired. Assuming a discordant fraction $\psi=0.15$, an anticipated gain of 3 points, and $\delta_{\text{tol}}=2$ points, find the number of task pairs at which the normal-approximation lower limit $\hat\Delta-z\sqrt{(\psi-\hat\Delta^2)/N}$ clears $-\delta_{\text{tol}}$ if the gain holds. (d) Identify the remaining defects in the report and write a defensible protocol: which criteria the automated gate enforces, which measurements the judge must carry, and which conditions the team must declare before collecting data.
 
 ::: {.callout-chapter-connection title="From evaluation evidence to curated trajectories"}
 
