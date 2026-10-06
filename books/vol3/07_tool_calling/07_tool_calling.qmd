@@ -243,89 +243,6 @@ When an operation fails, the runtime must return a structured, bounded diagnosti
 
 Every tool descriptor exposed to an agent consumes context window capacity. Deciding which descriptors to stage dynamically, and balancing expressive specialized tools against minimal generic primitives, forms the toolkit-design challenge addressed in @sec-vol3-tool-calling-toolkit-design. Before an agent can select or execute tools, however, the runtime requires a standardized transport protocol to discover, bind, and communicate with external service interfaces.
 
-## Interoperable Tool Discovery {#sec-vol3-tool-calling-mcp}
-
-In practice, a tool implementation such as `conditional_replace_file` can live in several environments: an in-process adapter compiled into the application, a standalone background daemon, or a remote microservice managed by another team. Before the model can propose a valid call, the host runtime must determine which operations that endpoint exposes and how to encode their arguments. This discovery phase supplies that interface metadata. Under the grant rule, however, learning that an operation exists confers no authority to execute it: discovery defines interface syntax, whereas authorization governs execution rights.
-
-### The Model Context Protocol {#sec-vol3-tool-calling-mcp-protocol}
-
-When building a self-contained agent with a small, static set of tools, registering local functions directly in-process is simple and fast. But when multiple host applications must connect to independently maintained tool services, custom point-to-point integration quickly becomes impractical. The underlying challenge is combinatorial. Without a shared interface, $N_{\text{host}}$ host runtimes integrating $N_{\text{tool}}$ tool services require up to $N_{\text{host}} \times N_{\text{tool}}$ bespoke adapters. Standardizing on a common protocol reduces this burden to $N_{\text{host}} + N_{\text{tool}}$ implementations, allowing each side to build to the specification once.
-
-::: {.column-margin}
-![](images/svg/tool_calling_margin_adapter_count.svg){width="100%" fig-alt="Two small graphs. Left: three host boxes each wired to four tool-service boxes, twelve crossing adapter lines, labeled N host times N tool. Right: the same hosts and services each wired once to a central protocol box, labeled N host plus N tool."}
-
-*A shared protocol turns pairwise adapters into one implementation per side.*
-:::
-
-Decoupling tools across a protocol boundary also introduces critical fault isolation. When a tool runs in a separate process, a memory leak, segmentation fault, or unhandled blocking call crashes only the tool server rather than tearing down the primary agent orchestration loop. Even so, protocol standardization does not eliminate engineering responsibilities: integrators must still define tool semantics, audit version compatibility, and enforce security policies. Local in-process plugins and out-of-process tool servers represent deliberate deployment trade-offs rather than mutually exclusive or evolutionary stages.
-
-The **Model Context Protocol (MCP)**\index{MCP!definition}\index{Model Context Protocol|see{MCP}} exemplifies this architecture. MCP structures integrations across three distinct entities: a host application (such as an interactive environment or agent runtime), clients that manage connections, and servers that expose capabilities. Servers can run as local child processes or as remote network services. This architectural division clarifies integration responsibilities rather than prescribing a specific execution sandbox [@mcp2025specification].
-
-Each deployment model matches different operational demands. A local child process keeps filesystem operations adjacent to the working copy and simplifies process lifecycle management. Conversely, a remote service can centralize credential storage, connection pooling, and backend access without replicating sensitive configurations across every host machine. Yet both options introduce distinct failure modes and resource boundaries: an unconfined local process still reaches whatever local filesystem it is granted, while a severed network link can leave an in-flight operation executing invisibly on a remote server. Architects must choose deployments based on where resource governance and policy enforcement belong, evaluating transport latency relative to tool execution duration rather than presuming any transport topology is universally superior.
-
-### Tool listing and invocation {#sec-vol3-tool-calling-listing-invocation}
-
-MCP defines two primary wire operations for tool interaction: `tools/list` to discover available tool definitions and `tools/call` for execution.[^fn-jsonrpc-correlation-ids] Each definition advertises a unique name, a natural-language description, and a JSON Schema governing accepted arguments; an invocation names the target tool and supplies a matching argument dictionary. These messages establish the mechanics of interface exchange rather than a task's execution rights. The MCP tools specification [@mcp2025specification] defines these message formats and explicitly mandates server-side input validation and access controls.
-
-[^fn-jsonrpc-correlation-ids]: **JSON-RPC Request Identifiers**: MCP frames these messages as JSON-RPC 2.0 requests, each carrying an `id` that its response echoes [@mcp2025specification]. That identifier does the work of this chapter's call identifier, matching a reply to its request on one connection. It says nothing about whether a second `tools/call` with the same arguments is the same intended effect, which is why retry safety needs the separate operation identity developed in @sec-vol3-tool-calling-idempotency. \index{JSON-RPC!request identifier}
-
-To trace where policy boundaries sit during execution, consider a repository server advertising two illustrative operations: `read_source` and `apply_patch`. A concrete integration sequence proceeds through several verification checkpoints:
-
-1. The host's client queries `tools/list` and binds each accepted schema explicitly to that server instance and its locally governed tool policy. Explicit binding ensures that an identically named tool advertised by another server cannot silently shadow or replace the expected implementation.
-2. The host determines which accepted definitions to expose in the model context for the connection-pool repair task.
-3. When the model proposes an operation, the host runtime validates the arguments against the schema and verifies task-level authorization before transmitting the request.
-4. Upon receiving `tools/call`, the endpoint independently verifies the request against the underlying operating system permissions and data access controls it manages.
-
-For the connection-pool repair, discovering that `apply_patch` exists leaves the permitted edit paths and the expected-version preconditions unchanged. The guarantee of atomic, conditional updates derives entirely from the server implementation, never from an encouraging function name. If an endpoint fails to provide conditional-update guarantees, the runtime must reject it as incompatible with the task's safety contract.
-
-### Discovery and authority {#sec-vol3-tool-calling-discovery-authority}
-
-Tool descriptions provided during discovery are untrusted external inputs. A description might accurately summarize an operation, omit critical failure modes, or embed prompt instructions that attempt to steer model behavior. Even an authenticated server can supply a misleading description, because verifying a server's identity does not imply endorsing every claim it emits. A host runtime must never promote claims such as “approved for all workspaces” into an authorization grant.
-
-Filtering which tools appear in the model prompt narrows the attack surface, but catalog filtering alone cannot replace per-call enforcement. Task grants evolve dynamically, and call arguments select specific resources at runtime. Authorizing an agent to inspect `src/pool.py` does not permit it to read unrelated credentials or transmit private source code to an external service. Furthermore, defense-in-depth requires the server or backing service to enforce its own perimeter rather than assuming every client performs flawless checks. Host authorization and endpoint authorization protect different assets and operational domains; neither supersedes the other. On the return path, protocol framing cleanly differentiates a tool result payload from a system message, but framing does not disarm adversarial text within the payload.
-
-::: {.column-margin .margin-pointer}
-↪ Prompt injection delivered through tool responses and other observations is developed in @sec-vol3-security-injection-entry-points.
-:::
-
-A documented security vulnerability demonstrates the systemic danger when ambient credential reach serves as the sole barrier between discovery and side effects.
-
-::: {#ws-07-github-mcp-2025 .callout-war-story title="GitHub MCP private-repository leak (2025)"}
-
-**Context**: In May 2025, Invariant Labs demonstrated an attack on an agent connected to GitHub through its MCP integration [@milanta2025github]. The user owned both a public and a private repository and directed the agent, running in a desktop client, to inspect open issues in the public repository. The agent's GitHub access token held permissions that spanned both repositories.
-
-**Mechanism**: An attacker filed an issue in the public repository containing prompt instructions designed to redirect the model. After reading the issue as an ordinary tool result, the agent executed the server's schema-valid tools to inspect the user's private repositories and then opened a pull request in the public repository containing the exfiltrated contents. Every tool call remained within the personal access token's broad credential scope, and no runtime check verified whether the target repository matched the task's intended scope. Although the client prompted users to confirm tool calls by default, developers frequently enable an "Always Allow" setting to avoid operational friction.
-
-**Impact**: The public pull request disclosed sensitive information, including the private repository name, relocation plans, and salary details. Invariant Labs characterized the breakdown as an architectural failure in agent runtime mediation rather than a software defect in GitHub's server implementation.
-
-**Fix**: The researchers recommended enforcing context-aware access control at runtime—such as restricting an agent session strictly to the target repository identified by the user—alongside continuous monitoring of agent-server traffic. They also observed that model alignment training alone failed to stop the attack.
-
-**Systems lesson**: Discovery, schema validity, and credential authentication all succeeded. The failure was an absence of complete mediation (definition \ref{dfn-complete-mediation}) against the task's explicit grants, which should have blocked the initial private-repository read—a read-only $A_0$ action—well before any write operation occurred.
-
-:::
-
-This exploit succeeded because three distinct conditions coincided:
-
-1. The agent ingested untrusted external text that mounted an indirect prompt injection [@greshake2023not].
-2. The agent held ambient authority broader than its active task required.
-3. The runtime provided tools capable of public mutations.
-
-Eliminating any single condition breaks the attack chain. The second condition represents a classic systems security failure: the *confused deputy* problem [@hardy1988confused]. A confused deputy is an authorized program tricked into misusing its authority on behalf of an unprivileged party because the system fails to tie the authority exercised to the party directing the action. In this incident, the agent exercised the user's repository credentials on behalf of the remote attacker who authored the issue text. While prompt injection and unauthorized exfiltration channels require dedicated security defenses, the tool runtime boundary directly governs the second condition. The runtime neutralizes confused deputy attacks by evaluating every tool call against the task's explicit grants rather than delegating authority to ambient credentials.
-
-::: {#chk-07-complete-mediation .callout-checkpoint title="Discovery is not permission"}
-
-A repository server advertises a schema-valid `apply_patch` tool whose description says “use any path needed to complete the repair.” The current task permits edits only to its designated working copy. Later, a read result includes a request to upload repository contents to an external endpoint.
-
-- [ ] **Discovery vs. permission**: Which information does discovery supply, and which claimed permissions must the host refuse to derive from the description?
-- [ ] **Per-call checks**: Why must an allowed tool still be checked against the proposed arguments and current grants at dispatch? What must the endpoint enforce independently?
-- [ ] **Read authority**: Why does the read operation require authorization even though it does not edit a file?
-- [ ] **Returned text**: What do bounded serialization and provenance labels establish about the returned text, and what do they leave open about its influence on the model?
-- [ ] **Placing the check**: In war story \ref{ws-07-github-mcp-2025}, at which call would a per-call check against the task's grants have refused, and which of the three enabling conditions would that remove?
-
-:::
-
-Discovery establishes how to address an operation, and authorization determines whether a given task may attempt it. Yet neither mechanism resolves whether an in-flight mutation actually took effect when a network connection drops or a response times out. Because permission to initiate an action does not confer permission to blindly repeat it when the outcome is uncertain, robust execution requires explicit operation identity and idempotency guarantees.
-
 ## Retrying Uncertain Actions {#sec-vol3-tool-calling-idempotency}
 
 Consider the staging-container restart introduced earlier. When `POST /containers/srv-stage-04/restart` times out, the client cannot distinguish between several fundamentally different physical realities: the request may have been dropped in transit, delayed in a network queue, or accepted by the daemon. The restart process might still be running, might have partially reconfigured the service before halting, or might have completed successfully while only the acknowledgment was lost. A client-side timeout[^fn-rpc-call-semantics] records only that the caller stopped waiting for a response; it conveys no information about endpoint execution state [@cristian1991understanding].
@@ -779,6 +696,89 @@ Even when process termination is confirmed, stopping an execution does not roll 
 :::
 
 An asynchronous tool interface thus preserves the invariant guarantees of tool execution across extended time horizons: it acknowledges queued work without stalling the client, enforces strict resource boundaries, emits bounded observations, and distinguishes requested operations from confirmed system states. Managing complex toolkits over time ultimately requires structuring tool sets so that long-running operations and their corresponding inspection handles form a coherent, self-consistent operational surface.
+
+## Interoperable Tool Discovery {#sec-vol3-tool-calling-mcp}
+
+In practice, a tool implementation such as `conditional_replace_file` can live in several environments: an in-process adapter compiled into the application, a standalone background daemon, or a remote microservice managed by another team. Before the model can propose a valid call, the host runtime must determine which operations that endpoint exposes and how to encode their arguments. This discovery phase supplies that interface metadata. Under the grant rule, however, learning that an operation exists confers no authority to execute it: discovery defines interface syntax, whereas authorization governs execution rights.
+
+### The Model Context Protocol {#sec-vol3-tool-calling-mcp-protocol}
+
+When building a self-contained agent with a small, static set of tools, registering local functions directly in-process is simple and fast. But when multiple host applications must connect to independently maintained tool services, custom point-to-point integration quickly becomes impractical. The underlying challenge is combinatorial. Without a shared interface, $N_{\text{host}}$ host runtimes integrating $N_{\text{tool}}$ tool services require up to $N_{\text{host}} \times N_{\text{tool}}$ bespoke adapters. Standardizing on a common protocol reduces this burden to $N_{\text{host}} + N_{\text{tool}}$ implementations, allowing each side to build to the specification once.
+
+::: {.column-margin}
+![](images/svg/tool_calling_margin_adapter_count.svg){width="100%" fig-alt="Two small graphs. Left: three host boxes each wired to four tool-service boxes, twelve crossing adapter lines, labeled N host times N tool. Right: the same hosts and services each wired once to a central protocol box, labeled N host plus N tool."}
+
+*A shared protocol turns pairwise adapters into one implementation per side.*
+:::
+
+Decoupling tools across a protocol boundary also introduces critical fault isolation. When a tool runs in a separate process, a memory leak, segmentation fault, or unhandled blocking call crashes only the tool server rather than tearing down the primary agent orchestration loop. Even so, protocol standardization does not eliminate engineering responsibilities: integrators must still define tool semantics, audit version compatibility, and enforce security policies. Local in-process plugins and out-of-process tool servers represent deliberate deployment trade-offs rather than mutually exclusive or evolutionary stages.
+
+The **Model Context Protocol (MCP)**\index{MCP!definition}\index{Model Context Protocol|see{MCP}} exemplifies this architecture. MCP structures integrations across three distinct entities: a host application (such as an interactive environment or agent runtime), clients that manage connections, and servers that expose capabilities. Servers can run as local child processes or as remote network services. This architectural division clarifies integration responsibilities rather than prescribing a specific execution sandbox [@mcp2025specification].
+
+Each deployment model matches different operational demands. A local child process keeps filesystem operations adjacent to the working copy and simplifies process lifecycle management. Conversely, a remote service can centralize credential storage, connection pooling, and backend access without replicating sensitive configurations across every host machine. Yet both options introduce distinct failure modes and resource boundaries: an unconfined local process still reaches whatever local filesystem it is granted, while a severed network link can leave an in-flight operation executing invisibly on a remote server. Architects must choose deployments based on where resource governance and policy enforcement belong, evaluating transport latency relative to tool execution duration rather than presuming any transport topology is universally superior.
+
+### Tool listing and invocation {#sec-vol3-tool-calling-listing-invocation}
+
+MCP defines two primary wire operations for tool interaction: `tools/list` to discover available tool definitions and `tools/call` for execution.[^fn-jsonrpc-correlation-ids] Each definition advertises a unique name, a natural-language description, and a JSON Schema governing accepted arguments; an invocation names the target tool and supplies a matching argument dictionary. These messages establish the mechanics of interface exchange rather than a task's execution rights. The MCP tools specification [@mcp2025specification] defines these message formats and explicitly mandates server-side input validation and access controls.
+
+[^fn-jsonrpc-correlation-ids]: **JSON-RPC Request Identifiers**: MCP frames these messages as JSON-RPC 2.0 requests, each carrying an `id` that its response echoes [@mcp2025specification]. That identifier does the work of this chapter's call identifier, matching a reply to its request on one connection. It says nothing about whether a second `tools/call` with the same arguments is the same intended effect, which is why retry safety needs the separate operation identity developed in @sec-vol3-tool-calling-idempotency. \index{JSON-RPC!request identifier}
+
+To trace where policy boundaries sit during execution, consider a repository server advertising two illustrative operations: `read_source` and `apply_patch`. A concrete integration sequence proceeds through several verification checkpoints:
+
+1. The host's client queries `tools/list` and binds each accepted schema explicitly to that server instance and its locally governed tool policy. Explicit binding ensures that an identically named tool advertised by another server cannot silently shadow or replace the expected implementation.
+2. The host determines which accepted definitions to expose in the model context for the connection-pool repair task.
+3. When the model proposes an operation, the host runtime validates the arguments against the schema and verifies task-level authorization before transmitting the request.
+4. Upon receiving `tools/call`, the endpoint independently verifies the request against the underlying operating system permissions and data access controls it manages.
+
+For the connection-pool repair, discovering that `apply_patch` exists leaves the permitted edit paths and the expected-version preconditions unchanged. The guarantee of atomic, conditional updates derives entirely from the server implementation, never from an encouraging function name. If an endpoint fails to provide conditional-update guarantees, the runtime must reject it as incompatible with the task's safety contract.
+
+### Discovery and authority {#sec-vol3-tool-calling-discovery-authority}
+
+Tool descriptions provided during discovery are untrusted external inputs. A description might accurately summarize an operation, omit critical failure modes, or embed prompt instructions that attempt to steer model behavior. Even an authenticated server can supply a misleading description, because verifying a server's identity does not imply endorsing every claim it emits. A host runtime must never promote claims such as “approved for all workspaces” into an authorization grant.
+
+Filtering which tools appear in the model prompt narrows the attack surface, but catalog filtering alone cannot replace per-call enforcement. Task grants evolve dynamically, and call arguments select specific resources at runtime. Authorizing an agent to inspect `src/pool.py` does not permit it to read unrelated credentials or transmit private source code to an external service. Furthermore, defense-in-depth requires the server or backing service to enforce its own perimeter rather than assuming every client performs flawless checks. Host authorization and endpoint authorization protect different assets and operational domains; neither supersedes the other. On the return path, protocol framing cleanly differentiates a tool result payload from a system message, but framing does not disarm adversarial text within the payload.
+
+::: {.column-margin .margin-pointer}
+↪ Prompt injection delivered through tool responses and other observations is developed in @sec-vol3-security-injection-entry-points.
+:::
+
+A documented security vulnerability demonstrates the systemic danger when ambient credential reach serves as the sole barrier between discovery and side effects.
+
+::: {#ws-07-github-mcp-2025 .callout-war-story title="GitHub MCP private-repository leak (2025)"}
+
+**Context**: In May 2025, Invariant Labs demonstrated an attack on an agent connected to GitHub through its MCP integration [@milanta2025github]. The user owned both a public and a private repository and directed the agent, running in a desktop client, to inspect open issues in the public repository. The agent's GitHub access token held permissions that spanned both repositories.
+
+**Mechanism**: An attacker filed an issue in the public repository containing prompt instructions designed to redirect the model. After reading the issue as an ordinary tool result, the agent executed the server's schema-valid tools to inspect the user's private repositories and then opened a pull request in the public repository containing the exfiltrated contents. Every tool call remained within the personal access token's broad credential scope, and no runtime check verified whether the target repository matched the task's intended scope. Although the client prompted users to confirm tool calls by default, developers frequently enable an "Always Allow" setting to avoid operational friction.
+
+**Impact**: The public pull request disclosed sensitive information, including the private repository name, relocation plans, and salary details. Invariant Labs characterized the breakdown as an architectural failure in agent runtime mediation rather than a software defect in GitHub's server implementation.
+
+**Fix**: The researchers recommended enforcing context-aware access control at runtime—such as restricting an agent session strictly to the target repository identified by the user—alongside continuous monitoring of agent-server traffic. They also observed that model alignment training alone failed to stop the attack.
+
+**Systems lesson**: Discovery, schema validity, and credential authentication all succeeded. The failure was an absence of complete mediation (definition \ref{dfn-complete-mediation}) against the task's explicit grants, which should have blocked the initial private-repository read—a read-only $A_0$ action—well before any write operation occurred.
+
+:::
+
+This exploit succeeded because three distinct conditions coincided:
+
+1. The agent ingested untrusted external text that mounted an indirect prompt injection [@greshake2023not].
+2. The agent held ambient authority broader than its active task required.
+3. The runtime provided tools capable of public mutations.
+
+Eliminating any single condition breaks the attack chain. The second condition represents a classic systems security failure: the *confused deputy* problem [@hardy1988confused]. A confused deputy is an authorized program tricked into misusing its authority on behalf of an unprivileged party because the system fails to tie the authority exercised to the party directing the action. In this incident, the agent exercised the user's repository credentials on behalf of the remote attacker who authored the issue text. While prompt injection and unauthorized exfiltration channels require dedicated security defenses, the tool runtime boundary directly governs the second condition. The runtime neutralizes confused deputy attacks by evaluating every tool call against the task's explicit grants rather than delegating authority to ambient credentials.
+
+::: {#chk-07-complete-mediation .callout-checkpoint title="Discovery is not permission"}
+
+A repository server advertises a schema-valid `apply_patch` tool whose description says “use any path needed to complete the repair.” The current task permits edits only to its designated working copy. Later, a read result includes a request to upload repository contents to an external endpoint.
+
+- [ ] **Discovery vs. permission**: Which information does discovery supply, and which claimed permissions must the host refuse to derive from the description?
+- [ ] **Per-call checks**: Why must an allowed tool still be checked against the proposed arguments and current grants at dispatch? What must the endpoint enforce independently?
+- [ ] **Read authority**: Why does the read operation require authorization even though it does not edit a file?
+- [ ] **Returned text**: What do bounded serialization and provenance labels establish about the returned text, and what do they leave open about its influence on the model?
+- [ ] **Placing the check**: In war story \ref{ws-07-github-mcp-2025}, at which call would a per-call check against the task's grants have refused, and which of the three enabling conditions would that remove?
+
+:::
+
+Discovery establishes how to address an operation, and authorization determines whether a given task may attempt it. Yet neither mechanism resolves whether an in-flight mutation actually took effect when a network connection drops or a response times out. Because permission to initiate an action does not confer permission to blindly repeat it when the outcome is uncertain, robust execution requires explicit operation identity and idempotency guarantees.
 
 ## Designing the Active Toolkit {#sec-vol3-tool-calling-toolkit-design}
 

@@ -157,6 +157,151 @@ The operational responsibilities summarized in @tbl-vol3-foundation-model-respon
 
 The request and response records define the operational boundary governing model invocations. Messages supply context, tool definitions define candidate proposals, and the runtime mediates all transitions to external state. Before an inference engine can admit a request, however, the entire payload must fit within the model's context window and generation limits. Enforcing those constraints requires measuring the request in tokens rather than relying on coarse approximations such as character counts, messages, or source files.
 
+## The Invocation Contract {#sec-vol3-foundation-model-contract}
+
+Suppose a model begins generating a cleanup command targeting the path `/tmp/scratch/cache_dir`, but reaches its token limit immediately after emitting `/tmp/scratch`. Both strings form syntactically valid shell commands, yet they specify vastly different deletion boundaries. An execution engine inspecting only raw text cannot determine whether the shorter path represents an intended command or a dangerously truncated prefix. To prevent catastrophic side effects, the host runtime requires an explicit execution outcome alongside the payload.
+
+By pairing request specifications with normalized response envelopes at the invocation boundary, the runtime treats each remote generation as a unified contract.
+
+::: {#dfn-vol3-model-invocation-contract .callout-definition title="Model invocation contract"}
+
+***Model invocation contract***\index{Model invocation contract!definition} is the pair of records that bounds one model call: a request fixing the input, model configuration, sampling settings, and enforced output and time limits, and a normalized envelope reporting the call's status, payload, and resource use.
+
+1.  **Significance**: The contract establishes each model call as a distinct, countable unit within an agent trajectory. Its usage record prices the call's share of $\AttemptCost$, and its status flag isolates completed generations from partial or failed calls. Consequently, the cost per accepted task (@eq-vol3-cost-per-accepted-task) can be computed from recorded telemetry rather than heuristically reconstructed from conversation transcripts.
+2.  **Distinction**: The invocation contract describes the model call rather than the overarching task. A generated tool request can fully conform to decoding limits without ever being dispatched, and a fully generated response can fail downstream validation. Dispatch authorization, tool execution, and task-level acceptance remain separate runtime decisions backed by their own evidence.
+3.  **Common pitfall**: Recording only the payload text. Without explicit status flags and usage accounting, a truncated fragment is indistinguishable from an intentional short response, and unrecorded token consumption silently distorts operational cost accounting as zero-cost execution.
+
+:::
+
+### Formal request specification {#sec-vol3-foundation-model-request-specification}
+
+At the generation interface, the bounded request is represented by the tuple
+
+$$\mathcal{R} = \langle \MechanicalPlantState, \text{ModelID}, \OutputLimit, \Deadline, \mathcal{\SequenceLength}_{\text{stop}}, \mathbf{\Theta}_{\text{sample}} \rangle$$
+
+The prompt tokens $\MechanicalPlantState = (x_1, x_2, \dots, x_S)$ encode the serialized messages, role markers, advertised tool schemas, and formatting delimiters visible to the model. The runtime constructs this sequence from structured `messages` and `tools` configuration fields prior to serialization.
+
+`ModelID` identifies the target model weights and serving deployment requested through `model_config`. Systems engineers must distinguish mutable provider aliases (such as `model-latest`) from immutable, pinned model revisions (such as content-addressed snapshots). The sampling parameters $\mathbf{\Theta}_{\text{sample}}$, including temperature and top-$\HiddenDimensionFour$, configure the stochastic selection rule applied during autoregressive decode. Together with the serialized input and returned output, the resolved configuration uniquely explains a call; exact regeneration also depends on backend serving implementation details, as war story \ref{ws-02-anthropic-serving-bugs-2025} demonstrated.
+
+The resource limits specify an output allowance $\OutputLimit$ and a local waiting deadline $\Deadline$. Systems cannot rely on the model itself to halt generation gracefully; following the invariant closure principle (\ref{pri-invariant-closure}), the host runtime and the remote serving system must enforce these boundaries mechanically. The runtime verifies that the combined prompt and generation budget fits within the service engine's context window. In addition, the adapter records whether the provider charges non-visible reasoning tokens against $\OutputLimit$, since measuring visible text length alone would understate actual resource consumption.
+
+The stop sequences $\mathcal{\SequenceLength}_{\text{stop}}$ define token patterns that trigger an immediate halt at the serving interface. When an inference engine encounters a matching sequence, it stops decoding according to provider matching semantics. However, an engine matches byte sequences blindly: encountering a stop sequence inside an argument or quoted string can terminate generation before closing brackets or quotation marks are emitted. The host runtime must therefore record the provider's raw stop reason and validate candidate syntax independently.
+
+Resource enforcement operates across two distinct physical boundaries: the client host and the remote serving cluster. On the host side, the runtime enforces a receive buffer limit on incoming bytes and a local deadline $\Deadline$ on waiting time. An expired local deadline halts host waiting and marks the invocation as failed, but it provides no guarantee that the remote server has halted execution or freed GPU allocations.[^fn-rpc-unknown-outcome] Server-side token ceilings and cancellation protocols complement these client-side controls. Every operational limit must clearly specify which component enforces it and which physical resource it governs.
+
+[^fn-rpc-unknown-outcome]: **Remote Call Semantics**: Remote procedure call designers met this ambiguity first. In the design @birrell1984rpc describe, a call that returns normally executed exactly once, but a call that ends in a failure report may have executed once or not at all, because the caller cannot tell a lost request from a lost reply. A model call inherits the same gap: a timed-out generation may still have run to completion and been billed, which is why `TRANSPORT_FAILURE` records an unknown remote outcome rather than a call that never happened. \index{Remote procedure call!unknown outcome}
+
+### The normalized status envelope {#sec-vol3-foundation-model-status-envelope}
+
+The runtime represents the observed outcome using the **normalized status envelope**\index{Normalized status envelope!definition}
+
+$$\mathcal{\NumberOfDevices} = \langle \text{status}, \mathbf{y}, \mathbf{\MicrobatchCount} \rangle$$
+
+Here, $\mathbf{y}$ denotes the returned payload, which may be complete, partial, or absent. The metadata record $\mathbf{\MicrobatchCount}$ captures operational telemetry: the response `kind`, the raw provider `stop_reason`, reported token `usage`, unique request identifiers, latency measurements, and serving parameters. In concrete implementations, these attributes appear as fields on a response object; grouping them formally into a tuple decouples the raw text payload from the evidence documenting how it arrived. Unreported usage represents unmeasured cost rather than zero cost.
+
+Because proprietary model APIs express termination conditions using divergent finish reasons, error codes, and transport exceptions, the adapter maps provider-specific signals onto the seven normalized statuses defined in @tbl-vol3-invocation-status. This taxonomy provides this book's normalized interface. A status flag records the outcome verified locally by the host runtime; when concurrent events race—such as a local cancellation overlapping with an incoming completion frame—the adapter applies deterministic resolution rules while preserving the raw provider signals in $\mathbf{\MicrobatchCount}$.
+
+| Status flag         | Terminal condition                                                               | Payload integrity                                                              | Admissible host action                                               |
+|:--------------------|:---------------------------------------------------------------------------------|:-------------------------------------------------------------------------------|:---------------------------------------------------------------------|
+| `COMPLETED`         | Confirmed normal generation termination within the call's limits                 | Fully generated according to the protocol; syntax and meaning remain unchecked | Admit to candidate validation, not directly to dispatch              |
+| `TRUNCATED`         | Generation reaches a token or context ceiling before confirmed normal completion | Incomplete candidate that may nevertheless parse                               | Withhold from action; record the limit and diagnose                  |
+| `REFUSED`           | The model or service explicitly declines the request or response                 | Refusal notice, partial content, or no payload                                 | Handle under the task's refusal policy; do not treat as an action    |
+| `TRANSPORT_FAILURE` | Delivery fails or the local deadline expires without accepted completion         | Missing or partial content; remote outcome may be unknown                      | Record uncertainty and apply bounded failure handling                |
+| `REJECTED`          | A runtime monitor rejects the response during reception                          | Content observed before rejection                                              | Withhold from action; record the rejection and request cancellation  |
+| `CANCELED`          | The runtime cancels the call before accepting its completion                     | Partial, missing, or otherwise unusable as a completed candidate               | Stop local candidate processing; track remote termination separately |
+| `FAULTED`           | The service reports an execution failure                                         | Missing, partial, or diagnostic content                                        | Record the reported fault and route to failure handling              |
+: **Normalized invocation status envelope**: Status controls admission to the candidate path. Completion is a generation outcome, while authorization, tool execution, and task acceptance remain separate decisions. {#tbl-vol3-invocation-status tbl-colwidths="[21,27,25,27]"}
+
+For an artifact such as a `read_file` request, `kind="tool_request"` instructs the runtime which candidate representation to validate, while `status="COMPLETED"` confirms that generation finished under the interface contract. Neither field confirms that the host dispatched the tool or that the filesystem operation succeeded; completion tracks protocol generation, whereas execution and task acceptance remain separate host decisions.
+
+Applying the invariant closure principle (\ref{pri-invariant-closure}) to the status field establishes a mandatory gate: the **quarantining rule**\index{Quarantining rule!definition}. Under this rule, any payload whose invocation envelope reports a status other than `COMPLETED` cannot pass into the candidate execution pipeline. The runtime must verify the status flag before admitting content to downstream parsing or action dispatch. While the system may inspect malformed or interrupted output inside an isolated diagnostic sandbox, that inspection cannot authorize tool dispatch or silently reclassify the fragment as a finished proposal. Search branches terminated by token limits must obey this same constraint. Under the quarantining rule, a truncated payload is treated as a diagnosable failure rather than a partial action.
+
+The cleanup command introduced earlier demonstrates why structural parsing alone cannot replace this status check. Suppose the complete intended command is
+
+```bash
+rm -rf /tmp/scratch/cache_dir
+```
+
+If an exhausted token quota truncates generation midway through the path, the resulting prefix is
+
+```bash
+rm -rf /tmp/scratch
+```
+
+The truncated string parses as valid shell syntax, but it broadens the deletion scope to the entire parent directory. If the envelope marks this output as `TRUNCATED`, the quarantining rule holds the command in quarantine, preventing accidental execution. Conversely, receiving `status="COMPLETED"` does not grant execution authority; it merely establishes that the model finished generating its proposal. Neither command represents an approved cleanup policy on its own; the comparison underscores that syntactic validity cannot substitute for verified completion evidence.
+
+@Lst-vol3-completed-candidate-gate implements this admission check. The gate admits only completed generations to downstream processing, leaving syntax validation, permission checks, and task-level verification to subsequent stages.
+
+::: {#lst-vol3-completed-candidate-gate lst-cap="**Completed-candidate admission**: The status check admits only completed generations to the candidate path. Returning the payload grants no execution authority."}
+```python
+def completed_candidate(envelope):
+    if envelope["status"] != "COMPLETED":
+        raise ValueError("Response is not a completed candidate")
+    # Syntax, permission, and task evidence remain unchecked.
+    return envelope["payload"]
+```
+:::
+
+Incomplete payloads are redirected to a dedicated diagnostic log governed by its own memory and access bounds. This log retains the partial byte stream alongside the observed `stop_reason` to assist failure analysis. Attempting to "repair" a truncated fragment by appending guessed arguments or synthetic delimiters produces an entirely new candidate devoid of generation provenance; such synthetic patches can never inherit the `COMPLETED` status of the original call.
+
+### Streaming and cancellation {#sec-vol3-foundation-model-streaming-cancellation}
+
+**Streaming**\index{Streaming!definition} delivers incremental response fragments across an active network connection before generation finishes. A delivery chunk can contain part of a decoded sub-word, several tokens, or an application-layer framing event. The host runtime must adhere to the provider's framing protocol rather than assuming a one-to-one correspondence between chunks and tokens. Incremental inspection allows the runtime to discover early structural violations; if a prefix violates format constraints, the monitor halts waiting immediately rather than buffering unusable tokens. Because generation is ongoing, the monitor evaluates whether the prefix can transition to a valid completion, rather than testing whether the prefix is already complete.
+
+Rejection and cancellation represent distinct operational events. When an incremental monitor detects a structural violation, the host runtime sets the call status to `REJECTED` and issues a cancellation signal to the remote endpoint. If an operator or client-side timeout interrupts an otherwise compliant response, the runtime marks the status as `CANCELED`. In both scenarios, withholding the partial payload from tool dispatch is an invariant the host enforces locally. However, halting remote decode loops and reclaiming GPU memory require the serving engine to process and honor the cancellation request. Simply closing a TCP socket provides no guarantee that remote execution has ceased.
+
+```{python}
+#| label: lego-stream-cancel
+#| echo: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ GENERATION WORK SPARED BY EARLY CANCELLATION (LEGO)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @sec-vol3-foundation-model-contract, streaming and cancellation;
+# │          @fig-vol3-streaming-cancellation.
+# │ Goal: Bound the decode work a honored cancel request can avoid.
+# │ Show: 4,000 skipped decode steps; their time at the reference output floor.
+# │ How: (K_max - t_cut) steps times the weight-transfer floor per output token,
+# │      the same floor that CallPrice uses in @sec-vol3-foundation-model-cost.
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import *
+from mlsysim.core.units import BYTES_INT8
+from mlsysim.fmt import check, fmt_count, fmt_time
+
+class StreamCancel:
+    # ┌── 1. LOAD (Constants & Parameters) ─────────────────────────────────
+    model = Models.Language.Llama3_70B
+    accel = Hardware.Cloud.H100
+    weight_bytes = BYTES_INT8
+    k_cap = 4_096  # scenario: output allowance of the canceled call (as drawn in the figure)
+    k_cut = 96  # scenario: decode step at which the stream monitor rejects (as drawn)
+
+    # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────
+    t_dec = ((model.parameters / ureg.param * weight_bytes) / accel.memory.bandwidth).to(second)
+    cancel_steps = k_cap - k_cut
+    cancel_s = cancel_steps * t_dec
+
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(cancel_steps == 4_000, "The figure labels 4,000 decode steps not run")
+    check(cancel_s > 10 * second, "Early cancellation should spare tens of seconds of decode")
+
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
+    k_cap_str = fmt_count(k_cap)
+    k_cut_str = fmt_count(k_cut)
+    cancel_steps_str = fmt_count(cancel_steps)
+    t_dec_ms_str = fmt_time(t_dec, unit=ms, precision=3)
+    cancel_s_str = fmt_time(cancel_s, unit=second, precision=1)
+```
+
+@Fig-vol3-streaming-cancellation traces this two-lane cancellation sequence for an invocation configured with an output allowance of `{python} StreamCancel.k_cap_str` tokens: as the decode engine streams tokens to the client runtime, the runtime's stream validator detects a schema violation at step $t_{\text{cut}} =$ `{python} StreamCancel.k_cut_str`, immediately recording a rejection, discarding the partial proposal, and dispatching a cancellation signal to halt server-side decoding.
+
+::: {#fig-vol3-streaming-cancellation fig-env="figure" fig-pos="htb" fig-cap="**Reject, Then Cancel**: The runtime's stream validator advances a parser state as each prefix arrives and holds the output rather than acting on it. At step `{python} StreamCancel.k_cut_str` the proposal introduces a key outside the schema, so the runtime records a rejection, discards the partial proposal, and sends a cancel request. The runtime outcomes on the left hold regardless of the service; the service outcomes on the right hold only if the service receives and honors the cancel request." fig-alt="Sequence diagram with an agent runtime lane on the left, a token stream lane in the middle, and a model service lane on the right. Decode steps 1 and 2 deliver an opening brace and a query key, each accepted by a parser transition and held. Steps 3 to 95 continue. Decode step 96 delivers a force key, and the runtime marks the stream rejected with status REJECTED, discards the partial proposal, and sends a cancel request; the service lane shows decoding stopping at step 96 of up to 4,096. Summary boxes list runtime outcomes, partial proposal never dispatched, rejection recorded, error returned next turn, and service outcomes, labeled as holding only if the cancel is honored: up to 4,000 decode steps not run, request leaves the batch, KV cache memory released."}
+![](images/svg/streaming_token_cancellation.svg)
+:::
+
+The compute savings shown represent an upper bound that requires provider cooperation. If the serving engine processes the cancellation promptly, it skips up to $\OutputLimit - t_{\text{cut}} =$ `{python} StreamCancel.cancel_steps_str` autoregressive decode steps. At the baseline memory-bandwidth decode floor of `{python} StreamCancel.t_dec_ms_str` per generated token modeled in @sec-vol3-foundation-model-cost, avoiding these steps recovers up to `{python} StreamCancel.cancel_s_str` of GPU compute time, frees slots in the continuous batching scheduler, and releases the call's KV-cache allocations. If the remote service fails to honor the cancellation, the host runtime still quarantines the rejected payload locally, but the remote cluster consumes its entire token allowance.
+
+Nonstreaming invocations enforce the exact same candidate admission barrier at batch completion. Streaming shifts the observation boundary earlier in the call lifecycle, enabling rapid rejection and resource recovery without relaxing the rule that incomplete prefixes must never trigger external side effects. While constrained decoding and formal grammars can eliminate syntax errors during generation, the host runtime must always maintain the distinction between an acceptable partial prefix and a validated, completed candidate.
+
 ## Discrete Token Representation {#sec-vol3-foundation-model-tokenization}
 
 When an automated repair agent appends a connection-pool source file and a compiler diagnostic to its message history, the payload expands rapidly. Naive metrics like file counts or raw character counts cannot determine whether the next request will fit within the model's capacity. Under the hood, role delimiters, tool schemas, system prompts, file paths, and source code all serialize into a single sequence of discrete units before entering the neural network. The true operational budget is the token count of that fully assembled sequence, measured strictly against the model's specific tokenizer and wire format.
@@ -343,151 +488,6 @@ class ServingPostmortem:
 Production failures of this nature define the baseline instrumentation required for agentic infrastructure. Comprehensive diagnostic logs must capture the exact prompt payload, model and tokenizer revision hashes, decoding hyperparameters, configured token limits, and any backend routing or seed metadata. Alongside input parameters, the system must record the raw response payload, the explicit finish reason, and token usage metrics. When diagnosing downstream agent failures, developers should distinguish between replaying a recorded trajectory and re-querying the model. Replaying a recorded trace isolates downstream execution logic from model nondeterminism, whereas issuing a repeated API call tests the resilience of the agent across sampling variations. Rigorous evaluation frameworks must measure and report this repeated-call variance rather than assuming consistent single-call execution.
 
 Ultimately, an agent runtime ingests candidate tokens produced under a specific decoding configuration and terminated by a specific boundary condition. Even an uncorrupted, high-probability `read_file` proposal might reference an absent path or violate sandbox directory restrictions. The autoregressive generation process determines how a candidate sequence is synthesized; downstream systems must establish the verification harnesses and guardrails required to evaluate whether that sequence can safely execute.
-
-## The Invocation Contract {#sec-vol3-foundation-model-contract}
-
-Suppose a model begins generating a cleanup command targeting the path `/tmp/scratch/cache_dir`, but reaches its token limit immediately after emitting `/tmp/scratch`. Both strings form syntactically valid shell commands, yet they specify vastly different deletion boundaries. An execution engine inspecting only raw text cannot determine whether the shorter path represents an intended command or a dangerously truncated prefix. To prevent catastrophic side effects, the host runtime requires an explicit execution outcome alongside the payload.
-
-By pairing request specifications with normalized response envelopes at the invocation boundary, the runtime treats each remote generation as a unified contract.
-
-::: {#dfn-vol3-model-invocation-contract .callout-definition title="Model invocation contract"}
-
-***Model invocation contract***\index{Model invocation contract!definition} is the pair of records that bounds one model call: a request fixing the input, model configuration, sampling settings, and enforced output and time limits, and a normalized envelope reporting the call's status, payload, and resource use.
-
-1.  **Significance**: The contract establishes each model call as a distinct, countable unit within an agent trajectory. Its usage record prices the call's share of $\AttemptCost$, and its status flag isolates completed generations from partial or failed calls. Consequently, the cost per accepted task (@eq-vol3-cost-per-accepted-task) can be computed from recorded telemetry rather than heuristically reconstructed from conversation transcripts.
-2.  **Distinction**: The invocation contract describes the model call rather than the overarching task. A generated tool request can fully conform to decoding limits without ever being dispatched, and a fully generated response can fail downstream validation. Dispatch authorization, tool execution, and task-level acceptance remain separate runtime decisions backed by their own evidence.
-3.  **Common pitfall**: Recording only the payload text. Without explicit status flags and usage accounting, a truncated fragment is indistinguishable from an intentional short response, and unrecorded token consumption silently distorts operational cost accounting as zero-cost execution.
-
-:::
-
-### Formal request specification {#sec-vol3-foundation-model-request-specification}
-
-At the generation interface, the bounded request is represented by the tuple
-
-$$\mathcal{R} = \langle \MechanicalPlantState, \text{ModelID}, \OutputLimit, \Deadline, \mathcal{\SequenceLength}_{\text{stop}}, \mathbf{\Theta}_{\text{sample}} \rangle$$
-
-The prompt tokens $\MechanicalPlantState = (x_1, x_2, \dots, x_S)$ encode the serialized messages, role markers, advertised tool schemas, and formatting delimiters visible to the model. The runtime constructs this sequence from structured `messages` and `tools` configuration fields prior to serialization.
-
-`ModelID` identifies the target model weights and serving deployment requested through `model_config`. Systems engineers must distinguish mutable provider aliases (such as `model-latest`) from immutable, pinned model revisions (such as content-addressed snapshots). The sampling parameters $\mathbf{\Theta}_{\text{sample}}$, including temperature and top-$\HiddenDimensionFour$, configure the stochastic selection rule applied during autoregressive decode. Together with the serialized input and returned output, the resolved configuration uniquely explains a call; exact regeneration also depends on backend serving implementation details, as war story \ref{ws-02-anthropic-serving-bugs-2025} demonstrated.
-
-The resource limits specify an output allowance $\OutputLimit$ and a local waiting deadline $\Deadline$. Systems cannot rely on the model itself to halt generation gracefully; following the invariant closure principle (\ref{pri-invariant-closure}), the host runtime and the remote serving system must enforce these boundaries mechanically. The runtime verifies that the combined prompt and generation budget fits within the service engine's context window. In addition, the adapter records whether the provider charges non-visible reasoning tokens against $\OutputLimit$, since measuring visible text length alone would understate actual resource consumption.
-
-The stop sequences $\mathcal{\SequenceLength}_{\text{stop}}$ define token patterns that trigger an immediate halt at the serving interface. When an inference engine encounters a matching sequence, it stops decoding according to provider matching semantics. However, an engine matches byte sequences blindly: encountering a stop sequence inside an argument or quoted string can terminate generation before closing brackets or quotation marks are emitted. The host runtime must therefore record the provider's raw stop reason and validate candidate syntax independently.
-
-Resource enforcement operates across two distinct physical boundaries: the client host and the remote serving cluster. On the host side, the runtime enforces a receive buffer limit on incoming bytes and a local deadline $\Deadline$ on waiting time. An expired local deadline halts host waiting and marks the invocation as failed, but it provides no guarantee that the remote server has halted execution or freed GPU allocations.[^fn-rpc-unknown-outcome] Server-side token ceilings and cancellation protocols complement these client-side controls. Every operational limit must clearly specify which component enforces it and which physical resource it governs.
-
-[^fn-rpc-unknown-outcome]: **Remote Call Semantics**: Remote procedure call designers met this ambiguity first. In the design @birrell1984rpc describe, a call that returns normally executed exactly once, but a call that ends in a failure report may have executed once or not at all, because the caller cannot tell a lost request from a lost reply. A model call inherits the same gap: a timed-out generation may still have run to completion and been billed, which is why `TRANSPORT_FAILURE` records an unknown remote outcome rather than a call that never happened. \index{Remote procedure call!unknown outcome}
-
-### The normalized status envelope {#sec-vol3-foundation-model-status-envelope}
-
-The runtime represents the observed outcome using the **normalized status envelope**\index{Normalized status envelope!definition}
-
-$$\mathcal{\NumberOfDevices} = \langle \text{status}, \mathbf{y}, \mathbf{\MicrobatchCount} \rangle$$
-
-Here, $\mathbf{y}$ denotes the returned payload, which may be complete, partial, or absent. The metadata record $\mathbf{\MicrobatchCount}$ captures operational telemetry: the response `kind`, the raw provider `stop_reason`, reported token `usage`, unique request identifiers, latency measurements, and serving parameters. In concrete implementations, these attributes appear as fields on a response object; grouping them formally into a tuple decouples the raw text payload from the evidence documenting how it arrived. Unreported usage represents unmeasured cost rather than zero cost.
-
-Because proprietary model APIs express termination conditions using divergent finish reasons, error codes, and transport exceptions, the adapter maps provider-specific signals onto the seven normalized statuses defined in @tbl-vol3-invocation-status. This taxonomy provides this book's normalized interface. A status flag records the outcome verified locally by the host runtime; when concurrent events race—such as a local cancellation overlapping with an incoming completion frame—the adapter applies deterministic resolution rules while preserving the raw provider signals in $\mathbf{\MicrobatchCount}$.
-
-| Status flag         | Terminal condition                                                               | Payload integrity                                                              | Admissible host action                                               |
-|:--------------------|:---------------------------------------------------------------------------------|:-------------------------------------------------------------------------------|:---------------------------------------------------------------------|
-| `COMPLETED`         | Confirmed normal generation termination within the call's limits                 | Fully generated according to the protocol; syntax and meaning remain unchecked | Admit to candidate validation, not directly to dispatch              |
-| `TRUNCATED`         | Generation reaches a token or context ceiling before confirmed normal completion | Incomplete candidate that may nevertheless parse                               | Withhold from action; record the limit and diagnose                  |
-| `REFUSED`           | The model or service explicitly declines the request or response                 | Refusal notice, partial content, or no payload                                 | Handle under the task's refusal policy; do not treat as an action    |
-| `TRANSPORT_FAILURE` | Delivery fails or the local deadline expires without accepted completion         | Missing or partial content; remote outcome may be unknown                      | Record uncertainty and apply bounded failure handling                |
-| `REJECTED`          | A runtime monitor rejects the response during reception                          | Content observed before rejection                                              | Withhold from action; record the rejection and request cancellation  |
-| `CANCELED`          | The runtime cancels the call before accepting its completion                     | Partial, missing, or otherwise unusable as a completed candidate               | Stop local candidate processing; track remote termination separately |
-| `FAULTED`           | The service reports an execution failure                                         | Missing, partial, or diagnostic content                                        | Record the reported fault and route to failure handling              |
-: **Normalized invocation status envelope**: Status controls admission to the candidate path. Completion is a generation outcome, while authorization, tool execution, and task acceptance remain separate decisions. {#tbl-vol3-invocation-status tbl-colwidths="[21,27,25,27]"}
-
-For an artifact such as a `read_file` request, `kind="tool_request"` instructs the runtime which candidate representation to validate, while `status="COMPLETED"` confirms that generation finished under the interface contract. Neither field confirms that the host dispatched the tool or that the filesystem operation succeeded; completion tracks protocol generation, whereas execution and task acceptance remain separate host decisions.
-
-Applying the invariant closure principle (\ref{pri-invariant-closure}) to the status field establishes a mandatory gate: the **quarantining rule**\index{Quarantining rule!definition}. Under this rule, any payload whose invocation envelope reports a status other than `COMPLETED` cannot pass into the candidate execution pipeline. The runtime must verify the status flag before admitting content to downstream parsing or action dispatch. While the system may inspect malformed or interrupted output inside an isolated diagnostic sandbox, that inspection cannot authorize tool dispatch or silently reclassify the fragment as a finished proposal. Search branches terminated by token limits must obey this same constraint. Under the quarantining rule, a truncated payload is treated as a diagnosable failure rather than a partial action.
-
-The cleanup command introduced earlier demonstrates why structural parsing alone cannot replace this status check. Suppose the complete intended command is
-
-```bash
-rm -rf /tmp/scratch/cache_dir
-```
-
-If an exhausted token quota truncates generation midway through the path, the resulting prefix is
-
-```bash
-rm -rf /tmp/scratch
-```
-
-The truncated string parses as valid shell syntax, but it broadens the deletion scope to the entire parent directory. If the envelope marks this output as `TRUNCATED`, the quarantining rule holds the command in quarantine, preventing accidental execution. Conversely, receiving `status="COMPLETED"` does not grant execution authority; it merely establishes that the model finished generating its proposal. Neither command represents an approved cleanup policy on its own; the comparison underscores that syntactic validity cannot substitute for verified completion evidence.
-
-@Lst-vol3-completed-candidate-gate implements this admission check. The gate admits only completed generations to downstream processing, leaving syntax validation, permission checks, and task-level verification to subsequent stages.
-
-::: {#lst-vol3-completed-candidate-gate lst-cap="**Completed-candidate admission**: The status check admits only completed generations to the candidate path. Returning the payload grants no execution authority."}
-```python
-def completed_candidate(envelope):
-    if envelope["status"] != "COMPLETED":
-        raise ValueError("Response is not a completed candidate")
-    # Syntax, permission, and task evidence remain unchecked.
-    return envelope["payload"]
-```
-:::
-
-Incomplete payloads are redirected to a dedicated diagnostic log governed by its own memory and access bounds. This log retains the partial byte stream alongside the observed `stop_reason` to assist failure analysis. Attempting to "repair" a truncated fragment by appending guessed arguments or synthetic delimiters produces an entirely new candidate devoid of generation provenance; such synthetic patches can never inherit the `COMPLETED` status of the original call.
-
-### Streaming and cancellation {#sec-vol3-foundation-model-streaming-cancellation}
-
-**Streaming**\index{Streaming!definition} delivers incremental response fragments across an active network connection before generation finishes. A delivery chunk can contain part of a decoded sub-word, several tokens, or an application-layer framing event. The host runtime must adhere to the provider's framing protocol rather than assuming a one-to-one correspondence between chunks and tokens. Incremental inspection allows the runtime to discover early structural violations; if a prefix violates format constraints, the monitor halts waiting immediately rather than buffering unusable tokens. Because generation is ongoing, the monitor evaluates whether the prefix can transition to a valid completion, rather than testing whether the prefix is already complete.
-
-Rejection and cancellation represent distinct operational events. When an incremental monitor detects a structural violation, the host runtime sets the call status to `REJECTED` and issues a cancellation signal to the remote endpoint. If an operator or client-side timeout interrupts an otherwise compliant response, the runtime marks the status as `CANCELED`. In both scenarios, withholding the partial payload from tool dispatch is an invariant the host enforces locally. However, halting remote decode loops and reclaiming GPU memory require the serving engine to process and honor the cancellation request. Simply closing a TCP socket provides no guarantee that remote execution has ceased.
-
-```{python}
-#| label: lego-stream-cancel
-#| echo: false
-# ┌─────────────────────────────────────────────────────────────────────────────
-# │ GENERATION WORK SPARED BY EARLY CANCELLATION (LEGO)
-# ├─────────────────────────────────────────────────────────────────────────────
-# │ Context: @sec-vol3-foundation-model-contract, streaming and cancellation;
-# │          @fig-vol3-streaming-cancellation.
-# │ Goal: Bound the decode work a honored cancel request can avoid.
-# │ Show: 4,000 skipped decode steps; their time at the reference output floor.
-# │ How: (K_max - t_cut) steps times the weight-transfer floor per output token,
-# │      the same floor that CallPrice uses in @sec-vol3-foundation-model-cost.
-# └─────────────────────────────────────────────────────────────────────────────
-from mlsysim import *
-from mlsysim.core.units import BYTES_INT8
-from mlsysim.fmt import check, fmt_count, fmt_time
-
-class StreamCancel:
-    # ┌── 1. LOAD (Constants & Parameters) ─────────────────────────────────
-    model = Models.Language.Llama3_70B
-    accel = Hardware.Cloud.H100
-    weight_bytes = BYTES_INT8
-    k_cap = 4_096  # scenario: output allowance of the canceled call (as drawn in the figure)
-    k_cut = 96  # scenario: decode step at which the stream monitor rejects (as drawn)
-
-    # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────
-    t_dec = ((model.parameters / ureg.param * weight_bytes) / accel.memory.bandwidth).to(second)
-    cancel_steps = k_cap - k_cut
-    cancel_s = cancel_steps * t_dec
-
-    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
-    check(cancel_steps == 4_000, "The figure labels 4,000 decode steps not run")
-    check(cancel_s > 10 * second, "Early cancellation should spare tens of seconds of decode")
-
-    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
-    k_cap_str = fmt_count(k_cap)
-    k_cut_str = fmt_count(k_cut)
-    cancel_steps_str = fmt_count(cancel_steps)
-    t_dec_ms_str = fmt_time(t_dec, unit=ms, precision=3)
-    cancel_s_str = fmt_time(cancel_s, unit=second, precision=1)
-```
-
-@Fig-vol3-streaming-cancellation traces this two-lane cancellation sequence for an invocation configured with an output allowance of `{python} StreamCancel.k_cap_str` tokens: as the decode engine streams tokens to the client runtime, the runtime's stream validator detects a schema violation at step $t_{\text{cut}} =$ `{python} StreamCancel.k_cut_str`, immediately recording a rejection, discarding the partial proposal, and dispatching a cancellation signal to halt server-side decoding.
-
-::: {#fig-vol3-streaming-cancellation fig-env="figure" fig-pos="htb" fig-cap="**Reject, Then Cancel**: The runtime's stream validator advances a parser state as each prefix arrives and holds the output rather than acting on it. At step `{python} StreamCancel.k_cut_str` the proposal introduces a key outside the schema, so the runtime records a rejection, discards the partial proposal, and sends a cancel request. The runtime outcomes on the left hold regardless of the service; the service outcomes on the right hold only if the service receives and honors the cancel request." fig-alt="Sequence diagram with an agent runtime lane on the left, a token stream lane in the middle, and a model service lane on the right. Decode steps 1 and 2 deliver an opening brace and a query key, each accepted by a parser transition and held. Steps 3 to 95 continue. Decode step 96 delivers a force key, and the runtime marks the stream rejected with status REJECTED, discards the partial proposal, and sends a cancel request; the service lane shows decoding stopping at step 96 of up to 4,096. Summary boxes list runtime outcomes, partial proposal never dispatched, rejection recorded, error returned next turn, and service outcomes, labeled as holding only if the cancel is honored: up to 4,000 decode steps not run, request leaves the batch, KV cache memory released."}
-![](images/svg/streaming_token_cancellation.svg)
-:::
-
-The compute savings shown represent an upper bound that requires provider cooperation. If the serving engine processes the cancellation promptly, it skips up to $\OutputLimit - t_{\text{cut}} =$ `{python} StreamCancel.cancel_steps_str` autoregressive decode steps. At the baseline memory-bandwidth decode floor of `{python} StreamCancel.t_dec_ms_str` per generated token modeled in @sec-vol3-foundation-model-cost, avoiding these steps recovers up to `{python} StreamCancel.cancel_s_str` of GPU compute time, frees slots in the continuous batching scheduler, and releases the call's KV-cache allocations. If the remote service fails to honor the cancellation, the host runtime still quarantines the rejected payload locally, but the remote cluster consumes its entire token allowance.
-
-Nonstreaming invocations enforce the exact same candidate admission barrier at batch completion. Streaming shifts the observation boundary earlier in the call lifecycle, enabling rapid rejection and resource recovery without relaxing the rule that incomplete prefixes must never trigger external side effects. While constrained decoding and formal grammars can eliminate syntax errors during generation, the host runtime must always maintain the distinction between an acceptable partial prefix and a validated, completed candidate.
 
 ## Candidate Sequence Verification {#sec-vol3-foundation-model-continuations}
 
