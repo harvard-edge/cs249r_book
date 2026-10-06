@@ -2076,97 +2076,6 @@ Governance constraints further shape acquisition: privacy and health-data regula
 Ingesting heterogeneous inputs—crowdsourced recordings, synthetic waveforms, and web audio streams—imposes strict architectural demands at the pipeline boundary. Because incoming streams exhibit disparate audio encodings, sampling rates, ingestion latencies, and noise floors, the ingestion tier cannot treat external inputs as uniform data. The storage and validation infrastructure must ingest, normalize, and verify this streaming volume before it can be committed to the training feature store.
 
 ## Pipeline Architecture & Processing {#sec-data-engineering-data-pipeline-architecture-b527}
-
-In the compilation framework, **data pipeline architecture**\index{Data pipeline!architecture} functions as the *compiler frontend*: it parses heterogeneous raw inputs into a uniform intermediate representation that downstream stages can process reliably. Audio files from crowdsourcing platforms, synthetic waveforms from generation systems, and edge captures from deployed devices all enter the training pipeline in different formats, and the pipeline must normalize, validate, and route them into a consistent schema. Production KWS inference consumes continuous audio under a separate low-latency constraint; the pipeline traced here follows the recorded examples used to build and update the model. @Fig-pipeline-flow diagrams this multi-tier architecture, showing how raw inputs traverse ingestion and central storage before entering iterative transformation loops and feeding downstream model training, all bounded by an overarching data-governance perimeter.
-
-::: {#fig-pipeline-flow fig-env="figure" fig-pos="htb" fig-cap="**End-to-End Data Pipeline**: Heterogeneous raw sources (batch and streaming) normalize into unified storage before feeding downstream training and feature processing. The architecture decouples ingestion throughput from iterative transformation and labeling loops, all bounded by an overarching data-governance layer." fig-alt="Layered flow diagram with sources at top, then ingestion, storage, and processing layers in the middle, ML training at the bottom, and a data-governance band spanning the full pipeline."}
-
-```{.tikz}
-\resizebox{.8\textwidth}{!}{%
-\begin{tikzpicture}[font=\small\sffamily]
-%
-\tikzset{%
- Line/.style={line width=1.0pt,black!50,text=black},
- Box/.style={align=flush center,
-    inner xsep=2pt,
-    node distance=0.8,
-    draw=GreenLine,
-    line width=0.75pt,
-    fill=GreenL,
-    text width=32mm,
-    minimum width=32mm, minimum height=9mm
-  },
-}
-%
-\begin{scope}[local bounding box = scope1]
-\node[Box](B1){Raw Data Sources};
-\node[Box,right=of B1](B2){External APIs};
-\node[Box,right=of B2](B3){Streaming Sources};
-\end{scope}
-%
-\begin{scope}[shift={($(scope1.south)+(-2.84,-1.8)$)},anchor=center]
-\node[Box, fill=BlueL,draw=BlueLine](2B1){Batch Ingestion};
-\node[Box, fill=BlueL,draw=BlueLine,  node distance=2.8,right=of 2B1](2B2){Stream Processing};
-\end{scope}
-%
-\node[Box,  node distance=0.9,below=of $(2B1)!0.5!(2B2)$](3B1){Storage Layer};
-%
-\node[Box, fill=OrangeL,draw=OrangeLine,below left=0.8 and 0.2 of 3B1](4B1){Training Data};
-\node[Box, fill=RedL,draw=RedLine,node distance=1.3,below right=0.8  and 0.2of 3B1](4B2){Data Validation \& Quality Checks};
-\node[Box, fill=OrangeL,draw=OrangeLine, node distance=0.6,below =of 4B1](5B1){Model Training};
-\node[Box,fill=RedL,draw=RedLine,node distance=0.4,below =of 4B2](5B2){Transformation};
-\node[Box, fill=RedL,draw=RedLine, node distance=0.4,below =of 5B2](6B1){Feature Creation/Engineering};
-\node[Box, fill=RedL,draw=RedLine, node distance=0.4,below =of 6B1](7B1){Data Labeling};
-%
-\scoped[on background layer]
-\node[draw=BackLine,inner xsep=5mm,inner ysep=4mm,yshift=2mm,
-           fill=BackColor,minimum width=114mm,fit=(B1)(B2)(B3),line width=0.75pt](BB1){};
-\node[below=8pt of  BB1.north east,anchor=east]{Sources};
-\scoped[on background layer]
-\node[draw=BackLine,inner xsep=5mm,inner ysep=4mm,yshift=2mm,
-           fill=BackColor,minimum width=113mm,fit=(2B1)(2B2),line width=0.75pt](BB2){};
-\node[below=8pt of  BB2.north east,anchor=east]{Data Ingestion};
-\scoped[on background layer]
-\node[draw=BackLine,inner xsep=9mm,inner ysep=5mm,yshift=-2mm,
-           fill=BackColor,fit=(4B1)(5B1),line width=0.75pt](BB3){};
-\node[above=7pt of  BB3.south east,anchor=east]{ML Training};
-%
-\scoped[on background layer]
-\node[draw=BackLine,inner xsep=9mm,inner ysep=5mm,yshift=-2mm,
-           fill=BackColor,fit=(4B2)(7B1),line width=0.75pt](BB4){};
-\node[above=7pt of  BB4.south east,anchor=east]{Processing Layer};
-%
-\scoped[on background layer]
-\node[draw=OrangeLine,inner xsep=3mm,inner ysep=4mm,yshift=2.5mm,
-           fill=none,fit=(BB1)(BB4),line width=0.75pt](BB4){};
-\node[below=1pt of  BB4.north,anchor=north]{Data Governance};
-%
-\draw[Line,-latex](B1)--++(270:0.95)-|(2B1);
-\draw[Line,-latex](B2)--++(270:0.95)-|(2B1);
-\draw[Line,-latex](B3)--++(270:0.95)-|(2B2);
-%
-\draw[Line,-latex](2B1)|-(3B1);
-\draw[Line,-latex](2B2)|-(3B1);
-%
-\draw[Line,-latex](3B1)--++(270:0.7)-|(4B1);
-\draw[Line,-latex](3B1)--++(270:0.7)-|(4B2);
-%
-\draw[Line,-latex](4B1)--(5B1);
-\draw[Line,-latex](4B2)--(5B2);
-\draw[Line,-latex](5B2)--(6B1);
-\draw[Line,-latex](6B1)--(7B1);
-\draw[Line,-latex](7B1.east)--++(0:0.6)|-(3B1);
-\end{tikzpicture}}
-```
-
-:::
-
-The functional tiers diagrammed in @fig-pipeline-flow decouple raw ingestion from the iterative validation, transformation, and feature-engineering loops that feed model training. Selecting the right engine requires evaluating how pipeline trade-offs interact across stages: quality checks at ingestion dictate downstream storage filtering, while latency budgets during serving constrain preprocessing complexity.
-
-Storage hierarchies and I/O bandwidth govern data pipeline throughput alongside CPU-side decoding and transformation. The physical trade-offs span several orders of magnitude: high-latency object storage suits durable archival, whereas low-latency in-memory stores serve real-time feature lookups. Similarly, bandwidth varies from spinning disks at 100–200 MB/s to main memory at 50–200 GB/s. @Sec-data-engineering-strategic-storage-architecture-1a6b analyzes these storage trade-offs in detail.
-
-Choosing between ingestion patterns requires matching workload characteristics to infrastructure capabilities. Streaming workloads require explicit guarantees on message durability, partition ordering, and fault recovery. Batch workloads depend on dataset volume relative to available memory, transformation complexity, and cluster partitioning. A single machine may process terabytes when its memory, access pattern, and deadline permit. Distributed engines become necessary when the required throughput or working set exceeds the available single-node envelope.
-
 ### Data ingestion
 
 #### Batch vs. streaming ingestion patterns {#sec-data-engineering-batch-vs-streaming-ingestion-patterns-e1b2}
@@ -2642,6 +2551,97 @@ Error handling in voice interaction systems requires special attention. Dead let
 
 This ingestion architecture completes the boundary layer where external data enters the pipeline. Ingested data, however reliably delivered, remains raw: audio arrives at inconsistent sample rates, text carries varying encodings, and numeric features span incompatible scales. Downstream training requires transforming these heterogeneous records into a uniform representation while guaranteeing that identical transformations execute during both training and serving.
 
+
+In the compilation framework, **data pipeline architecture**\index{Data pipeline!architecture} functions as the *compiler frontend*: it parses heterogeneous raw inputs into a uniform intermediate representation that downstream stages can process reliably. Audio files from crowdsourcing platforms, synthetic waveforms from generation systems, and edge captures from deployed devices all enter the training pipeline in different formats, and the pipeline must normalize, validate, and route them into a consistent schema. Production KWS inference consumes continuous audio under a separate low-latency constraint; the pipeline traced here follows the recorded examples used to build and update the model. @Fig-pipeline-flow diagrams this multi-tier architecture, showing how raw inputs traverse ingestion and central storage before entering iterative transformation loops and feeding downstream model training, all bounded by an overarching data-governance perimeter.
+
+::: {#fig-pipeline-flow fig-env="figure" fig-pos="htb" fig-cap="**End-to-End Data Pipeline**: Heterogeneous raw sources (batch and streaming) normalize into unified storage before feeding downstream training and feature processing. The architecture decouples ingestion throughput from iterative transformation and labeling loops, all bounded by an overarching data-governance layer." fig-alt="Layered flow diagram with sources at top, then ingestion, storage, and processing layers in the middle, ML training at the bottom, and a data-governance band spanning the full pipeline."}
+
+```{.tikz}
+\resizebox{.8\textwidth}{!}{%
+\begin{tikzpicture}[font=\small\sffamily]
+%
+\tikzset{%
+ Line/.style={line width=1.0pt,black!50,text=black},
+ Box/.style={align=flush center,
+    inner xsep=2pt,
+    node distance=0.8,
+    draw=GreenLine,
+    line width=0.75pt,
+    fill=GreenL,
+    text width=32mm,
+    minimum width=32mm, minimum height=9mm
+  },
+}
+%
+\begin{scope}[local bounding box = scope1]
+\node[Box](B1){Raw Data Sources};
+\node[Box,right=of B1](B2){External APIs};
+\node[Box,right=of B2](B3){Streaming Sources};
+\end{scope}
+%
+\begin{scope}[shift={($(scope1.south)+(-2.84,-1.8)$)},anchor=center]
+\node[Box, fill=BlueL,draw=BlueLine](2B1){Batch Ingestion};
+\node[Box, fill=BlueL,draw=BlueLine,  node distance=2.8,right=of 2B1](2B2){Stream Processing};
+\end{scope}
+%
+\node[Box,  node distance=0.9,below=of $(2B1)!0.5!(2B2)$](3B1){Storage Layer};
+%
+\node[Box, fill=OrangeL,draw=OrangeLine,below left=0.8 and 0.2 of 3B1](4B1){Training Data};
+\node[Box, fill=RedL,draw=RedLine,node distance=1.3,below right=0.8  and 0.2of 3B1](4B2){Data Validation \& Quality Checks};
+\node[Box, fill=OrangeL,draw=OrangeLine, node distance=0.6,below =of 4B1](5B1){Model Training};
+\node[Box,fill=RedL,draw=RedLine,node distance=0.4,below =of 4B2](5B2){Transformation};
+\node[Box, fill=RedL,draw=RedLine, node distance=0.4,below =of 5B2](6B1){Feature Creation/Engineering};
+\node[Box, fill=RedL,draw=RedLine, node distance=0.4,below =of 6B1](7B1){Data Labeling};
+%
+\scoped[on background layer]
+\node[draw=BackLine,inner xsep=5mm,inner ysep=4mm,yshift=2mm,
+           fill=BackColor,minimum width=114mm,fit=(B1)(B2)(B3),line width=0.75pt](BB1){};
+\node[below=8pt of  BB1.north east,anchor=east]{Sources};
+\scoped[on background layer]
+\node[draw=BackLine,inner xsep=5mm,inner ysep=4mm,yshift=2mm,
+           fill=BackColor,minimum width=113mm,fit=(2B1)(2B2),line width=0.75pt](BB2){};
+\node[below=8pt of  BB2.north east,anchor=east]{Data Ingestion};
+\scoped[on background layer]
+\node[draw=BackLine,inner xsep=9mm,inner ysep=5mm,yshift=-2mm,
+           fill=BackColor,fit=(4B1)(5B1),line width=0.75pt](BB3){};
+\node[above=7pt of  BB3.south east,anchor=east]{ML Training};
+%
+\scoped[on background layer]
+\node[draw=BackLine,inner xsep=9mm,inner ysep=5mm,yshift=-2mm,
+           fill=BackColor,fit=(4B2)(7B1),line width=0.75pt](BB4){};
+\node[above=7pt of  BB4.south east,anchor=east]{Processing Layer};
+%
+\scoped[on background layer]
+\node[draw=OrangeLine,inner xsep=3mm,inner ysep=4mm,yshift=2.5mm,
+           fill=none,fit=(BB1)(BB4),line width=0.75pt](BB4){};
+\node[below=1pt of  BB4.north,anchor=north]{Data Governance};
+%
+\draw[Line,-latex](B1)--++(270:0.95)-|(2B1);
+\draw[Line,-latex](B2)--++(270:0.95)-|(2B1);
+\draw[Line,-latex](B3)--++(270:0.95)-|(2B2);
+%
+\draw[Line,-latex](2B1)|-(3B1);
+\draw[Line,-latex](2B2)|-(3B1);
+%
+\draw[Line,-latex](3B1)--++(270:0.7)-|(4B1);
+\draw[Line,-latex](3B1)--++(270:0.7)-|(4B2);
+%
+\draw[Line,-latex](4B1)--(5B1);
+\draw[Line,-latex](4B2)--(5B2);
+\draw[Line,-latex](5B2)--(6B1);
+\draw[Line,-latex](6B1)--(7B1);
+\draw[Line,-latex](7B1.east)--++(0:0.6)|-(3B1);
+\end{tikzpicture}}
+```
+
+:::
+
+The functional tiers diagrammed in @fig-pipeline-flow decouple raw ingestion from the iterative validation, transformation, and feature-engineering loops that feed model training. Selecting the right engine requires evaluating how pipeline trade-offs interact across stages: quality checks at ingestion dictate downstream storage filtering, while latency budgets during serving constrain preprocessing complexity.
+
+Storage hierarchies and I/O bandwidth govern data pipeline throughput alongside CPU-side decoding and transformation. The physical trade-offs span several orders of magnitude: high-latency object storage suits durable archival, whereas low-latency in-memory stores serve real-time feature lookups. Similarly, bandwidth varies from spinning disks at 100–200 MB/s to main memory at 50–200 GB/s. @Sec-data-engineering-strategic-storage-architecture-1a6b analyzes these storage trade-offs in detail.
+
+Choosing between ingestion patterns requires matching workload characteristics to infrastructure capabilities. Streaming workloads require explicit guarantees on message durability, partition ordering, and fault recovery. Batch workloads depend on dataset volume relative to available memory, transformation complexity, and cluster partitioning. A single machine may process terabytes when its memory, access pattern, and deadline permit. Distributed engines become necessary when the required throughput or working set exceeds the available single-node envelope.
+
 ### Quality through validation and monitoring {#sec-data-engineering-quality-validation-monitoring-498f}
 
 Consider a self-driving-car pipeline in which 15 percent of LiDAR point-cloud labels are misaligned by 10–20 cm—enough to place pedestrian bounding boxes on empty sidewalk. Because every record remains structurally valid, schema checks\index{Schema validation!ML pipelines} would miss the defect; statistical monitoring\index{Data validation!monitoring} of label-to-sensor alignment could expose it.
@@ -2831,90 +2831,6 @@ if not results.success:
 
 These checks catch many schema-level production data issues before they reach training, including missing values, invalid ranges, type errors, and contract violations. The remaining issues require runtime monitoring and outcome checks, because semantic quality problems often emerge only in the full production data stream.
 
-### Data drift detection and response {#sec-data-engineering-detecting-responding-data-drift-509a}
-
-ML models rest on the assumption that production data resembles training data. When this assumption breaks through statistical shifts rather than an explicit contract violation, model performance can change silently without obvious errors or system failures. The validation and monitoring techniques in @sec-data-engineering-quality-validation-monitoring-498f can reveal both sudden and gradual problems; data drift detection\index{Data drift!detection}\index{Distribution shift!monitoring} focuses specifically on changes in distributions that may alter model behavior over time. Detecting, investigating, and responding to these changes requires sustained monitoring effort, making drift a core data engineering responsibility rather than an optional advanced topic.
-
-::: {.column-margin .margin-pointer}
-↪ How drift signals and outcome evidence trigger retraining only when its expected benefit exceeds its cost is operationalized in @sec-ml-operations-retraining-decision-framework-e33d.
-:::
-
-@Sec-appdx-data-foundations-measuring-drift-divergence-a6dd formalizes the divergence metrics used to make the divergence term $\StatisticalDivergence$ of the degradation equation (@eq-degradation) actionable. The **population stability index (PSI)**\index{Population stability index!definition} quantifies changes in categorical or binned&nbsp;feature distributions, while **Kullback-Leibler (KL) divergence**\index{Kullback-Leibler divergence!definition} measures an information-theoretic divergence between probability distributions. The two metrics encode different distributional assumptions and scales, and neither by itself supplies a universal cutoff. Teams calibrate metric-specific thresholds against a deployment baseline and monitor them over time. Crossing a threshold signals that the live distribution has moved far enough to warrant investigation and outcome checks; input divergence alone does not establish whether accuracy improved or degraded, or by how much. Mathematically, PSI discretizes a continuous feature into reference bins (typically deciles of baseline $\TrainingDistributionZero$) and computes $\text{PSI} = \sum_b \left( \CurrentDistribution(b) - \TrainingDistributionZero(b) \right) \ln\left(\frac{\CurrentDistribution(b)}{\TrainingDistributionZero(b)}\right)$. Each bin's two factors share a sign, so every shifting bin adds to the index. Practitioners commonly treat $\text{PSI} < 0.1$ as stable, $0.1 \le \text{PSI} \le 0.25$ as moderate shift, and $\text{PSI} > 0.25$ as a prompt for investigation; these bands are conventions to calibrate against the deployment baseline, not physical limits.
-
-Targeted detection and mitigation require decomposing drift into its constituent distribution components, as shown in the margin locator (@fig-vol1-data-engineering-margin-002).
-
-::: {#fig-vol1-data-engineering-margin-002 .column-margin}
-![](images/svg/vol1_data_engineering_margin_002.svg){width="100%" fig-alt="A vertical three-node locator pairs each distribution component with its drift type: p(x) covariate, p(y) label, and p(y|x) concept."}
-
-*Each drift type traces to the distribution component that shifted.*
-:::
-
-The first case, **covariate shift**\index{Covariate shift!definition}, changes the input distribution while preserving the relationship between features and labels: $\Distribution$ changes but $\ConditionalDistribution$ stays the same. A medical imaging system trained on one camera model might later receive production images from a different manufacturer. The disease-image relationship remains unchanged, but pixel values shift because sensor characteristics, color calibration, or image processing pipelines differ. Detection therefore focuses on input feature distributions, using metrics such as PSI or KL divergence.
-
-The second case, **label shift**\index{Label shift!definition}\index{Distribution shift!label shift}, changes the output distribution while preserving the relationship between labels and features: $p(y)$ changes but $p(x \mid y)$ stays the same. Disease prevalence might change seasonally while symptoms remain consistent predictors of each disease. A recommendation system might see the same pattern when new product categories launch, changing the relative frequency of user preferences without altering what makes products appealing within each category. Detection can often begin without ground truth labels by tracking shifts in the model's prediction distribution.
-
-The hardest case is **concept drift**\index{Concept drift!definition}: the relationship between features and labels changes, so $\ConditionalDistribution$ evolves over time [@gama2014]. Medical treatment protocols change, user preferences shift as social trends evolve, and fraud patterns adapt as attackers respond to detection systems. Unlike covariate or label shift, concept drift requires ground truth labels for detection because the system must observe whether the feature-to-label relationship itself has changed.
-
-```{python}
-#| echo: false
-#| label: cohens-kappa-chance-calc
-# ┌─────────────────────────────────────────────────────────────────────────────
-# │ COHEN'S KAPPA CHANCE AGREEMENT
-# ├─────────────────────────────────────────────────────────────────────────────
-# │ Context: Cohen's kappa footnote in the label-quality drift section
-# │
-# │ Goal: Compute chance agreement for a 90/10 binary label distribution.
-# │ Show: Majority-class agreement alone is 81%, but total chance agreement is 82%.
-# │ How: Square and sum the class marginals to get chance agreement.
-# │
-# └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import fmt, check
-
-class CohensKappaChance:
-    """Chance agreement for Cohen's kappa under a 90/10 binary marginal."""
-
-    # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    majority_probability = 0.90
-    minority_probability = 0.10
-
-    # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    chance_agreement = majority_probability**2 + minority_probability**2
-
-    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
-    check(abs(chance_agreement - 0.82) < 1e-12, f"Expected 82% chance agreement, got {chance_agreement:.2f}.")
-
-    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
-    chance_agreement_pct_str = fmt_percent(chance_agreement, precision=0, commas=False, style='prose')
-```
-
-#### Label quality drift {#sec-data-engineering-label-quality-drift-1ce7}
-
-Label quality drift\index{Label quality drift!detection}[^fn-label-drift-invisible] represents a meta-level shift distinct from the three preceding distribution shifts: the reliability of ground truth labels degrades over time even when the underlying data distributions remain stable. This drift type proves particularly insidious because standard feature distribution monitoring fails to detect it. Crowdsourced labels may degrade as annotator pools change, training materials become outdated, or labeling guidelines evolve without corresponding model updates. Automated labeling systems accumulate errors as the models powering them drift from their original operating conditions. A recommendation system using click feedback as implicit labels may see label quality degrade as user behavior becomes more exploratory, as bot traffic patterns change, or as interface modifications alter how users interact with content.
-
-Detection requires monitoring annotation consistency rather than feature distributions. Inter-annotator agreement metrics like Cohen's kappa[^fn-cohens-kappa-labeling] $(\CohensKappa)$ provide quantitative assessment. Let $p_o$ represent observed agreement between annotators and $p_e$ represent agreement expected by chance. @Eq-cohens-kappa defines the statistic:
-$$
-\CohensKappa = \frac{p_o - p_e}{1 - p_e}
-$$ {#eq-cohens-kappa}
-
-[^fn-cohens-kappa-labeling]: **Cohen's kappa**\index{Cohen's kappa!label quality}: Introduced by @cohen1960 to measure inter-rater agreement while correcting for agreement expected from the raters' class marginals, which raw percentage agreement ignores. If two independent annotators each label 90 percent of images as "not spam" in a binary task, their expected agreement is `{python} CohensKappaChance.chance_agreement_pct_str`, making raw agreement potentially misleading. The statistic is denoted $\CohensKappa$; interpretive bands such as the Landis-Koch categories are descriptive heuristics rather than universal data-quality thresholds [@landis1977measurement].
-
-Monitoring $\CohensKappa$ over time windows reveals degradation trends. A medical imaging annotation project might establish a baseline $\CohensKappa = 0.85$ (almost perfect agreement) during initial data collection, then observe decline to $\CohensKappa = 0.72$ (substantial agreement) after six months as new annotators join without receiving equivalent domain training.
-
-For systems with calibrated model probabilities, predictive entropy\index{Predictive entropy} provides an additional uncertainty signal. Let $p_i$ represent the model's probability assigned to label category $i$, and let $\log$ denote the natural logarithm, so entropy is measured in nats. @Eq-label-entropy defines this measure:
-$$
-H_{\text{pred}} = -\sum_i p_i \log p_i
-$$ {#eq-label-entropy}
-
-Rising predictive entropy indicates greater uncertainty in the model's predictive distribution, but it does not identify the cause. Harder inputs, distribution shift, calibration changes, or inconsistent supervision can produce the same signal.
-
-Mitigation strategies depend on root cause analysis. Annotator retraining addresses systematic errors from unclear guidelines at low cost with high effectiveness. Multi-annotator voting with majority or consensus rules provides high accuracy for high-stakes domains but significantly increases annotation costs. Model-assisted labeling reduces annotator fatigue but risks introducing bias if the assisting model has its own systematic errors. Expert review sampling, where domain specialists audit a random sample of annotations, enables root cause analysis when quality decline is detected but provides medium coverage of the overall annotation stream.
-
-[^fn-label-drift-invisible]: **Label quality drift**\index{Label quality drift!silent corruption}: Degradation in annotation reliability over time, distinct from distribution shifts in the data itself. This drift type is invisible to standard feature monitoring because the features remain stable while the labels degrade—annotator fatigue, pool turnover, or guideline evolution silently corrupt the ground truth the model learns from. Detection requires monitoring inter-annotator agreement $(\CohensKappa)$ over rolling time windows and comparing automated labels against periodic expert audits.
-
-Operationalizing the PSI and KL divergence metrics\index{Population stability index!drift detection}\index{Kullback-Leibler divergence!distribution comparison} requires connecting them to automated alerts and review workflows. Data engineering is responsible for defining domain-specific drift thresholds from baseline behavior and outcome evidence, selecting monitoring windows that can expose both sudden and gradual changes, and instrumenting pipelines to compute these metrics continuously.
-
-Statistical drift detection identifies distribution changes over time, but monitoring alone does not keep a system running when upstream pipelines stall, malformed payloads arrive, or schema definitions change without notice. Maintaining service continuity under failure requires active reliability mechanisms: fault isolation, backpressure, and graceful degradation.
-
 ### Reliability through graceful degradation {#sec-data-engineering-reliability-graceful-degradation-f83d}
 
 Reliability\index{Reliability!error handling} ensures systems continue operating when problems occur. Pipelines face constant challenges: data sources become temporarily unavailable, network partitions separate components, upstream schema changes break parsing logic, or unexpected load spikes exhaust resources. **Graceful degradation**\index{Graceful degradation!data pipelines} means handling these failures through systematic failure analysis, intelligent error handling, and automated recovery strategies that maintain service continuity even under adverse conditions.
@@ -3048,6 +2964,90 @@ Transforming audio data for KWS involves converting raw waveforms into formats s
 ![](images/png/kws_spectrogram.png){width=92%}
 
 :::
+
+### Data drift detection and response {#sec-data-engineering-detecting-responding-data-drift-509a}
+
+ML models rest on the assumption that production data resembles training data. When this assumption breaks through statistical shifts rather than an explicit contract violation, model performance can change silently without obvious errors or system failures. The validation and monitoring techniques in @sec-data-engineering-quality-validation-monitoring-498f can reveal both sudden and gradual problems; data drift detection\index{Data drift!detection}\index{Distribution shift!monitoring} focuses specifically on changes in distributions that may alter model behavior over time. Detecting, investigating, and responding to these changes requires sustained monitoring effort, making drift a core data engineering responsibility rather than an optional advanced topic.
+
+::: {.column-margin .margin-pointer}
+↪ How drift signals and outcome evidence trigger retraining only when its expected benefit exceeds its cost is operationalized in @sec-ml-operations-retraining-decision-framework-e33d.
+:::
+
+@Sec-appdx-data-foundations-measuring-drift-divergence-a6dd formalizes the divergence metrics used to make the divergence term $\StatisticalDivergence$ of the degradation equation (@eq-degradation) actionable. The **population stability index (PSI)**\index{Population stability index!definition} quantifies changes in categorical or binned&nbsp;feature distributions, while **Kullback-Leibler (KL) divergence**\index{Kullback-Leibler divergence!definition} measures an information-theoretic divergence between probability distributions. The two metrics encode different distributional assumptions and scales, and neither by itself supplies a universal cutoff. Teams calibrate metric-specific thresholds against a deployment baseline and monitor them over time. Crossing a threshold signals that the live distribution has moved far enough to warrant investigation and outcome checks; input divergence alone does not establish whether accuracy improved or degraded, or by how much. Mathematically, PSI discretizes a continuous feature into reference bins (typically deciles of baseline $\TrainingDistributionZero$) and computes $\text{PSI} = \sum_b \left( \CurrentDistribution(b) - \TrainingDistributionZero(b) \right) \ln\left(\frac{\CurrentDistribution(b)}{\TrainingDistributionZero(b)}\right)$. Each bin's two factors share a sign, so every shifting bin adds to the index. Practitioners commonly treat $\text{PSI} < 0.1$ as stable, $0.1 \le \text{PSI} \le 0.25$ as moderate shift, and $\text{PSI} > 0.25$ as a prompt for investigation; these bands are conventions to calibrate against the deployment baseline, not physical limits.
+
+Targeted detection and mitigation require decomposing drift into its constituent distribution components, as shown in the margin locator (@fig-vol1-data-engineering-margin-002).
+
+::: {#fig-vol1-data-engineering-margin-002 .column-margin}
+![](images/svg/vol1_data_engineering_margin_002.svg){width="100%" fig-alt="A vertical three-node locator pairs each distribution component with its drift type: p(x) covariate, p(y) label, and p(y|x) concept."}
+
+*Each drift type traces to the distribution component that shifted.*
+:::
+
+The first case, **covariate shift**\index{Covariate shift!definition}, changes the input distribution while preserving the relationship between features and labels: $\Distribution$ changes but $\ConditionalDistribution$ stays the same. A medical imaging system trained on one camera model might later receive production images from a different manufacturer. The disease-image relationship remains unchanged, but pixel values shift because sensor characteristics, color calibration, or image processing pipelines differ. Detection therefore focuses on input feature distributions, using metrics such as PSI or KL divergence.
+
+The second case, **label shift**\index{Label shift!definition}\index{Distribution shift!label shift}, changes the output distribution while preserving the relationship between labels and features: $p(y)$ changes but $p(x \mid y)$ stays the same. Disease prevalence might change seasonally while symptoms remain consistent predictors of each disease. A recommendation system might see the same pattern when new product categories launch, changing the relative frequency of user preferences without altering what makes products appealing within each category. Detection can often begin without ground truth labels by tracking shifts in the model's prediction distribution.
+
+The hardest case is **concept drift**\index{Concept drift!definition}: the relationship between features and labels changes, so $\ConditionalDistribution$ evolves over time [@gama2014]. Medical treatment protocols change, user preferences shift as social trends evolve, and fraud patterns adapt as attackers respond to detection systems. Unlike covariate or label shift, concept drift requires ground truth labels for detection because the system must observe whether the feature-to-label relationship itself has changed.
+
+```{python}
+#| echo: false
+#| label: cohens-kappa-chance-calc
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ COHEN'S KAPPA CHANCE AGREEMENT
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: Cohen's kappa footnote in the label-quality drift section
+# │
+# │ Goal: Compute chance agreement for a 90/10 binary label distribution.
+# │ Show: Majority-class agreement alone is 81%, but total chance agreement is 82%.
+# │ How: Square and sum the class marginals to get chance agreement.
+# │
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim.fmt import fmt, check
+
+class CohensKappaChance:
+    """Chance agreement for Cohen's kappa under a 90/10 binary marginal."""
+
+    # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
+    majority_probability = 0.90
+    minority_probability = 0.10
+
+    # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
+    chance_agreement = majority_probability**2 + minority_probability**2
+
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(abs(chance_agreement - 0.82) < 1e-12, f"Expected 82% chance agreement, got {chance_agreement:.2f}.")
+
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
+    chance_agreement_pct_str = fmt_percent(chance_agreement, precision=0, commas=False, style='prose')
+```
+
+#### Label quality drift {#sec-data-engineering-label-quality-drift-1ce7}
+
+Label quality drift\index{Label quality drift!detection}[^fn-label-drift-invisible] represents a meta-level shift distinct from the three preceding distribution shifts: the reliability of ground truth labels degrades over time even when the underlying data distributions remain stable. This drift type proves particularly insidious because standard feature distribution monitoring fails to detect it. Crowdsourced labels may degrade as annotator pools change, training materials become outdated, or labeling guidelines evolve without corresponding model updates. Automated labeling systems accumulate errors as the models powering them drift from their original operating conditions. A recommendation system using click feedback as implicit labels may see label quality degrade as user behavior becomes more exploratory, as bot traffic patterns change, or as interface modifications alter how users interact with content.
+
+Detection requires monitoring annotation consistency rather than feature distributions. Inter-annotator agreement metrics like Cohen's kappa[^fn-cohens-kappa-labeling] $(\CohensKappa)$ provide quantitative assessment. Let $p_o$ represent observed agreement between annotators and $p_e$ represent agreement expected by chance. @Eq-cohens-kappa defines the statistic:
+$$
+\CohensKappa = \frac{p_o - p_e}{1 - p_e}
+$$ {#eq-cohens-kappa}
+
+[^fn-cohens-kappa-labeling]: **Cohen's kappa**\index{Cohen's kappa!label quality}: Introduced by @cohen1960 to measure inter-rater agreement while correcting for agreement expected from the raters' class marginals, which raw percentage agreement ignores. If two independent annotators each label 90 percent of images as "not spam" in a binary task, their expected agreement is `{python} CohensKappaChance.chance_agreement_pct_str`, making raw agreement potentially misleading. The statistic is denoted $\CohensKappa$; interpretive bands such as the Landis-Koch categories are descriptive heuristics rather than universal data-quality thresholds [@landis1977measurement].
+
+Monitoring $\CohensKappa$ over time windows reveals degradation trends. A medical imaging annotation project might establish a baseline $\CohensKappa = 0.85$ (almost perfect agreement) during initial data collection, then observe decline to $\CohensKappa = 0.72$ (substantial agreement) after six months as new annotators join without receiving equivalent domain training.
+
+For systems with calibrated model probabilities, predictive entropy\index{Predictive entropy} provides an additional uncertainty signal. Let $p_i$ represent the model's probability assigned to label category $i$, and let $\log$ denote the natural logarithm, so entropy is measured in nats. @Eq-label-entropy defines this measure:
+$$
+H_{\text{pred}} = -\sum_i p_i \log p_i
+$$ {#eq-label-entropy}
+
+Rising predictive entropy indicates greater uncertainty in the model's predictive distribution, but it does not identify the cause. Harder inputs, distribution shift, calibration changes, or inconsistent supervision can produce the same signal.
+
+Mitigation strategies depend on root cause analysis. Annotator retraining addresses systematic errors from unclear guidelines at low cost with high effectiveness. Multi-annotator voting with majority or consensus rules provides high accuracy for high-stakes domains but significantly increases annotation costs. Model-assisted labeling reduces annotator fatigue but risks introducing bias if the assisting model has its own systematic errors. Expert review sampling, where domain specialists audit a random sample of annotations, enables root cause analysis when quality decline is detected but provides medium coverage of the overall annotation stream.
+
+[^fn-label-drift-invisible]: **Label quality drift**\index{Label quality drift!silent corruption}: Degradation in annotation reliability over time, distinct from distribution shifts in the data itself. This drift type is invisible to standard feature monitoring because the features remain stable while the labels degrade—annotator fatigue, pool turnover, or guideline evolution silently corrupt the ground truth the model learns from. Detection requires monitoring inter-annotator agreement $(\CohensKappa)$ over rolling time windows and comparing automated labels against periodic expert audits.
+
+Operationalizing the PSI and KL divergence metrics\index{Population stability index!drift detection}\index{Kullback-Leibler divergence!distribution comparison} requires connecting them to automated alerts and review workflows. Data engineering is responsible for defining domain-specific drift thresholds from baseline behavior and outcome evidence, selecting monitoring windows that can expose both sudden and gradual changes, and instrumenting pipelines to compute these metrics continuously.
+
+Statistical drift detection identifies distribution changes over time, but monitoring alone does not keep a system running when upstream pipelines stall, malformed payloads arrive, or schema definitions change without notice. Maintaining service continuity under failure requires active reliability mechanisms: fault isolation, backpressure, and graceful degradation.
 
 ### Idempotent transformations {#sec-data-engineering-building-idempotent-data-transformations-7961}
 
