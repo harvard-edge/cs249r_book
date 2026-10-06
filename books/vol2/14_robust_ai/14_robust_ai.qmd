@@ -408,30 +408,6 @@ System-level faults encompass failures originating from the hardware, code, fram
 ↩ The mechanics of hardware and software faults, and their detection and recovery, are established in @sec-fault-tolerance-reliability.
 :::
 
-#### Diagnosing masquerading failure modes {#sec-robust-ai-diagnosing-the-masquerade-9f21}
-
-Consider an operator who sees the same surface symptom from all three pillars, falling model accuracy while latency and uptime hold steady. A preprocessing bug\index{Software Fault!masquerade as covariate shift} that silently rescales a feature looks exactly like covariate shift to a drift monitor, because the feature statistics have genuinely moved. A numerical overflow\index{Numerical Instability!masquerade as adversarial attack} that corrupts a layer's activations produces confident misclassifications that look exactly like an adversarial example, because the decision flipped without a visible input cause. The difficulty lies in the disguise, because the cheap pillar-specific detectors fire on the symptom rather than the cause.
-
-Three complementary signals guide this investigation: the timing boundary of the change, reproducibility under fixed inputs, and cross-layer correlation with infrastructure telemetry.
-
-The boundary and timing of a change often provide the first diagnostic clue. While environmental shift can evolve gradually or appear abruptly with real-world events, a shift synchronized with a deployment, dependency bump, or schema migration raises the pipeline-fault hypothesis. This suspicion strengthens when multiple features shift simultaneously in directions that the underlying physical process cannot explain. Timing alone narrows the search space without proving causation.
-
-Reproducibility under fixed inputs\index{Fault Diagnosis!fixed-input replay} helps locate the failure boundary. Replaying golden inputs through version-pinned preprocessing pipelines and model artifacts can expose the stage where outputs begin to differ. A software defect may reproduce consistently, but race conditions can be intermittent and a persistent hardware defect can fail repeatedly. Stochastic execution also requires controlling random state or comparing repeated runs. Because shifted or adversarial inputs can reproduce the same error under fixed execution conditions, replay alone cannot settle the diagnosis; operators must compare raw and preprocessed tensors, artifact versions, and population-level statistics alongside the replay output.
-
-Finally, cross-layer correlation\index{Fault Diagnosis!cross-layer correlation} links model behavior to surrounding infrastructure telemetry. Query-rate spikes or unusual input patterns can support an attack hypothesis, while deployment releases, error-correcting code (ECC) memory counters, SDC checkers, or memory-pressure alarms can support a system-fault hypothesis. Neither pattern is necessary or sufficient. An attack can remain within normal traffic patterns, and silent corruption can escape the available counters. Correlation guides the next diagnostic test rather than establishing the cause.
-
-::: {#exmp-robust-ai-masquerade-replay .callout-example title="A drift alert that was a pipeline fault"}
-
-**Scenario**: A credit-risk service raises drift alerts on three income-related features on the morning after a routine dependency update, and the approval rate for applicants in the affected income bands shifts sharply. Latency, error rates, and uptime are unchanged, and every request that the on-call engineer retries returns a score without error.
-
-**Diagnosis**: The three signals point the same way. The alerts begin at the release boundary, and the three features moved together in a direction that no change in applicant behavior explains. Replaying a stored set of golden requests through the previous and current pipeline versions produces identical raw inputs but preprocessed tensors that differ by a constant factor on exactly those features, because the updated library changed a default normalization. Deployment telemetry correlates with the change; query-rate and hardware counters do not. The failure is a software fault disguised as covariate shift. Retraining on the corrupted features would have taught the model the bug, and the successful retries proved only that the service answered, not that its answers passed acceptance.
-
-**Systems lesson**: A replay harness that pins artifact versions and compares tensors at each pipeline stage turns an ambiguous drift alert into an attributable fault. Recovery is complete only when the replayed outputs satisfy the model's acceptance tests again, which is a behavioral check that a successful retry or a green health dashboard cannot supply.
-
-:::
-
-The diagnostic discipline is therefore to read the system-level evidence before accepting the drift or attack hypothesis the surface symptom suggests, because each pillar suggests a different intervention and more than one cause can be active at once.
-
 ### Common robustness principles {#sec-robust-ai-common-robustness-principles-cb22}
 
 Across all three categories, the shared engineering problem is deciding which signal triggers which response. Robust systems need a detection threshold, a degradation path, and an adaptation mechanism, each with an explicit cost budget.
@@ -1152,7 +1128,7 @@ The systems obligation is to preserve the conditions behind the guarantee. A dis
 
 Set size or interval width supplies an operational load signal. Larger outputs convey less specific predictions and can trigger abstention, a stronger model, or human review, so their tail distribution determines fallback capacity just as the risk-coverage curve determines rejected traffic. The target coverage is therefore not free: increasing it usually widens sets, raises review demand, or reduces the fraction of requests on which the system can act automatically.
 
-### Robustness in generative AI {#sec-robust-ai-robustness-generative-ai-941b}
+## Robustness in Generative AI {#sec-robust-ai-robustness-generative-ai-941b}
 
 Large language models, the Archetype A (GPT-4/Llama-3) workload, shift the failure surface from incorrect classification to semantic reliability, where a fluent answer can be factually baseless while the system still appears healthy. The earlier robustness question was whether a label changed under perturbation; the generative version is whether an open-ended output preserves factuality, policy constraints, and task intent under prompt variation. Evaluations in specialized domains such as legal or medical advice show that hallucination rates\index{Hallucination!generative AI} vary strongly with model, retrieval context, prompt design, and sampling temperature. Token entropy\index{Hallucination!token entropy limitations} and log-probability can expose instability in a generation, but neither is a factuality score. A model can assign high probability to a false statement learned from its data, or low probability to a correct but rare statement. Production routing must therefore calibrate these signals against task-specific errors and combine them with evidence checks, retrieval support, or external verification.
 
@@ -1759,6 +1735,30 @@ Contrastive learning methods such as SimCLR [@chen2020simclr] make this idea con
 That transfer benefit is the main systems reason to use SSL in a robustness pipeline. Larger unlabeled corpora expose the model to domains, transformations, and rare cases that would be too expensive to label exhaustively. The same uncurated scale widens the poisoning surface, so SSL pretraining data still needs the ingress and sanitization controls described earlier. In production, SSL usually acts as a foundation rather than a complete defense: pretrain on broad unlabeled data, fine-tune on the supervised task, then apply the adversarial, drift, and poisoning defenses established earlier in this chapter to the task-specific model. Multi-task training can preserve some of this benefit by keeping a self-supervised objective active while the supervised task pulls the representation toward the deployment metric.
 
 The limitation is that SSL is not a robustness guarantee. A contrastive or masked-pretraining objective can still learn brittle shortcuts, and an attacker who understands the pretext task can target those shortcuts directly. The theory explaining when SSL improves robustness remains incomplete, and the compute cost can be substantial because pretraining moves work earlier in the lifecycle. The systems decision is therefore whether broader representation learning lowers the expected cost of drift, relabeling, and robust fine-tuning enough to justify the added pretraining budget.
+
+## System-Level Faults and Masquerading {#sec-robust-ai-diagnosing-the-masquerade-9f21}
+
+Consider an operator who sees the same surface symptom from all three pillars, falling model accuracy while latency and uptime hold steady. A preprocessing bug\index{Software Fault!masquerade as covariate shift} that silently rescales a feature looks exactly like covariate shift to a drift monitor, because the feature statistics have genuinely moved. A numerical overflow\index{Numerical Instability!masquerade as adversarial attack} that corrupts a layer's activations produces confident misclassifications that look exactly like an adversarial example, because the decision flipped without a visible input cause. The difficulty lies in the disguise, because the cheap pillar-specific detectors fire on the symptom rather than the cause.
+
+Three complementary signals guide this investigation: the timing boundary of the change, reproducibility under fixed inputs, and cross-layer correlation with infrastructure telemetry.
+
+The boundary and timing of a change often provide the first diagnostic clue. While environmental shift can evolve gradually or appear abruptly with real-world events, a shift synchronized with a deployment, dependency bump, or schema migration raises the pipeline-fault hypothesis. This suspicion strengthens when multiple features shift simultaneously in directions that the underlying physical process cannot explain. Timing alone narrows the search space without proving causation.
+
+Reproducibility under fixed inputs\index{Fault Diagnosis!fixed-input replay} helps locate the failure boundary. Replaying golden inputs through version-pinned preprocessing pipelines and model artifacts can expose the stage where outputs begin to differ. A software defect may reproduce consistently, but race conditions can be intermittent and a persistent hardware defect can fail repeatedly. Stochastic execution also requires controlling random state or comparing repeated runs. Because shifted or adversarial inputs can reproduce the same error under fixed execution conditions, replay alone cannot settle the diagnosis; operators must compare raw and preprocessed tensors, artifact versions, and population-level statistics alongside the replay output.
+
+Finally, cross-layer correlation\index{Fault Diagnosis!cross-layer correlation} links model behavior to surrounding infrastructure telemetry. Query-rate spikes or unusual input patterns can support an attack hypothesis, while deployment releases, error-correcting code (ECC) memory counters, SDC checkers, or memory-pressure alarms can support a system-fault hypothesis. Neither pattern is necessary or sufficient. An attack can remain within normal traffic patterns, and silent corruption can escape the available counters. Correlation guides the next diagnostic test rather than establishing the cause.
+
+::: {#exmp-robust-ai-masquerade-replay .callout-example title="A drift alert that was a pipeline fault"}
+
+**Scenario**: A credit-risk service raises drift alerts on three income-related features on the morning after a routine dependency update, and the approval rate for applicants in the affected income bands shifts sharply. Latency, error rates, and uptime are unchanged, and every request that the on-call engineer retries returns a score without error.
+
+**Diagnosis**: The three signals point the same way. The alerts begin at the release boundary, and the three features moved together in a direction that no change in applicant behavior explains. Replaying a stored set of golden requests through the previous and current pipeline versions produces identical raw inputs but preprocessed tensors that differ by a constant factor on exactly those features, because the updated library changed a default normalization. Deployment telemetry correlates with the change; query-rate and hardware counters do not. The failure is a software fault disguised as covariate shift. Retraining on the corrupted features would have taught the model the bug, and the successful retries proved only that the service answered, not that its answers passed acceptance.
+
+**Systems lesson**: A replay harness that pins artifact versions and compares tensors at each pipeline stage turns an ambiguous drift alert into an attributable fault. Recovery is complete only when the replayed outputs satisfy the model's acceptance tests again, which is a behavioral check that a successful retry or a green health dashboard cannot supply.
+
+:::
+
+The diagnostic discipline is therefore to read the system-level evidence before accepting the drift or attack hypothesis the surface symptom suggests, because each pillar suggests a different intervention and more than one cause can be active at once.
 
 ## Fallacies and Pitfalls {#sec-robust-ai-fallacies-pitfalls-087e}
 

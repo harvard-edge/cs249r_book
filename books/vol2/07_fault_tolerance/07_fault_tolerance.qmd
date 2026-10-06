@@ -272,248 +272,6 @@ plt.close()
 
 :::
 
-### The Young-Daly checkpoint interval {#sec-fault-tolerance-young-daly}
-
-Every training recovery path in this chapter ultimately falls back on a saved copy of training state, so the first question is what that copy must contain.
-
-::: {#dfn-fault-tolerance-checkpointing .callout-definition title="Checkpointing"}
-
-***Checkpointing***\index{Checkpointing!definition} is the periodic serialization of the complete training state (parameters, optimizer state, data loader position, and random state) to persistent storage at a recorded training step.
-
-1.  **Significance**: It minimizes lost work after a system failure by trading checkpoint I/O against rework. Writing too often wastes accelerator time on storage traffic; writing too rarely risks replaying many completed steps after a failure. The Young-Daly interval\index{Young-Daly formula!square-root trade-off} developed in this section chooses the cadence that balances write cost against expected lost work.
-2.  **Distinction**: A resumable checkpoint captures a consistent execution state, including optimizer state, random-number generator state, data position, and learning rate schedules. It can use full or incremental storage; bitwise replay additionally requires compatible deterministic execution.
-3.  **Common pitfall**: A frequent misconception is that checkpointing is "just writing to disk." For large models it is a storage-system stress test, because the simultaneous write from thousands of GPUs can trigger a checkpoint storm that saturates the entire network fabric $(\Bandwidth)$.
-
-:::
-
-A checkpoint is useful only if it resumes the recorded step consistently. In distributed training, every shard must belong to the same recoverable state; a collection of files from different steps does not preserve progress. For the interval model, assume that writing a checkpoint completes durably before it becomes available for recovery and that a failure discards the work performed since the last completed checkpoint.
-
-When failures are expected during a job, the key engineering decision is how often to write that state, because every save costs I/O time and every unsaved step is work a failure can erase. The Young-Daly formula\index{Young-Daly formula!optimal interval}\index{Daly formula|see{Young-Daly formula}}[^fn-young-daly-formula] (principle \ref{pri-young-daly}, applied in @sec-fault-tolerance-reliability-reliability-checkpoint-interval-failure-analysis-c28d) gives a first-order estimate of that balance through a square-root rule:
-
-$$ \OptimalCheckpointIntervalCkpt = \sqrt{2 \cdot \CheckpointWriteTime \cdot \MeanTimeBetweenFailures_{\text{system}}} $$
-
-```{python}
-#| echo: false
-#| label: young-daly-checkpoint-state
-# ┌─────────────────────────────────────────────────────────────────────────────
-# │ RESUMABLE CHECKPOINT STATE (LEGO)
-# ├─────────────────────────────────────────────────────────────────────────────
-# │ Context: @sec-fault-tolerance-young-daly, the T_write paragraph below.
-# │
-# │ Goal: Size a resumable mixed-precision Adam checkpoint for a 70B model and
-# │       for the 175B running example from one bytes-per-parameter anchor.
-# │ Show: 14 bytes per parameter; ~1 TB (70B) and >2 TB (175B).
-# │ How:  params x ReferenceStats.MixedPrecisionAdam.CheckpointBytesPerParameter.
-# └─────────────────────────────────────────────────────────────────────────────
-from mlsysim import Models, ReferenceStats
-from mlsysim.fmt import check, fmt
-
-class YoungDalyCheckpointState:
-    # ┌── 1. LOAD (Constants) ──────────────────────
-    ckpt_bpp = ReferenceStats.MixedPrecisionAdam.CheckpointBytesPerParameter
-    params_70b = Models.Language.Llama3_70B.parameters
-    params_175b = Models.Language.GPT3.parameters
-
-    # ┌── 2. EXECUTE (The Compute) ─────────────────
-    ckpt_70b_tb = (params_70b * ckpt_bpp).to(TB).magnitude
-    ckpt_175b_tb = (params_175b * ckpt_bpp).to(TB).magnitude
-
-    # ┌── 3. GUARD (Invariants) ────────────────────
-    check(0.9 < ckpt_70b_tb < 1.0, "70B checkpoint must 'approach a terabyte'")
-    check(ckpt_175b_tb > 2.0, "175B checkpoint must 'exceed two terabytes'")
-
-    # ┌── 4. OUTPUT (Formatting) ───────────────────
-    ckpt_bpp_str = fmt(ckpt_bpp.magnitude, precision=0)
-```
-
-$\CheckpointWriteTime$ in distributed ML training is not the time to flush a small process state; it includes transferring model weights and optimizer state to durable storage. The reference format here stores BF16 weights, separate FP32 master weights, and two FP32 moment tensors per parameter for Adaptive Moment Estimation (Adam). A single resumable checkpoint for a 70B-parameter model therefore approaches a terabyte at `{python} YoungDalyCheckpointState.ckpt_bpp_str` bytes per parameter; for the later 175B-parameter running example, it exceeds two terabytes. Reducing $\CheckpointWriteTime$ requires a smaller payload or higher sustained write bandwidth, and $\CheckpointWriteTime$ itself is the central constraint that determines how tightly the checkpoint interval can be set before I/O overhead displaces productive training compute.
-
-To see the balance, consider an interval between saves. Doubling that interval approximately halves the checkpoint writes per unit of training, but a failure then loses twice as much work on average. Under the constant-rate, rare-failure approximation, failure occurs approximately uniformly within an interval, so the average lost work is half the interval. When write time is small relative to the interval, the wasted fraction from saving and replaying work is approximately the sum below. Detection, allocation, and restoration time require a separate recovery budget.
-
-$$ W(\CheckpointIntervalCkpt) \approx \frac{\CheckpointWriteTime}{\CheckpointIntervalCkpt} + \frac{\CheckpointIntervalCkpt}{2 \cdot \MeanTimeBetweenFailures_{\text{system}}} $$
-
-Setting the first derivative to zero ($\frac{dW}{d\CheckpointIntervalCkpt} = -\frac{\CheckpointWriteTime}{\CheckpointIntervalCkpt^2} + \frac{1}{2 \cdot \MeanTimeBetweenFailures_{\text{system}}} = 0$) directly yields the square-root minimum $\OptimalCheckpointIntervalCkpt = \sqrt{2 \cdot \CheckpointWriteTime \cdot \MeanTimeBetweenFailures_{\text{system}}}$. In @fig-checkpoint-tradeoff, this balance forms a U-shaped convex curve for the chapter's 10,000-GPU cluster running a 175B-parameter model: write overhead (dashed blue) falls hyperbolically while expected rework (dashed red) climbs linearly, reaching a minimum near $\OptimalCheckpointIntervalCkpt \approx 14$ minutes. The modeled saving-and-rework loss there is 5.9 percent, before adding recovery downtime. Its scaling consequence is the one to carry forward. As clusters grow, system MTBF drops, so the optimal interval shrinks, demanding higher-bandwidth storage to keep $\CheckpointWriteTime$ small before the "checkpoint tax" consumes the cluster's compute capacity. Because the relationship is a square root, halving MTBF tightens the interval by only $\sqrt{2}\approx 1.4\times$, so doubling cluster size does not demand doubling checkpoint I/O bandwidth when checkpoint size and the other assumptions stay fixed. The chapter applies the formula to its own cluster once the system MTBF is in hand.
-
-::: {.column-margin .margin-pointer}
-↩ The per-tier storage bandwidths that bound how quickly a checkpoint can be written are established in @sec-storage-hierarchy.
-:::
-
-[^fn-young-daly-formula]: **Young-Daly formula**\index{Young-Daly formula!history}: @young1974 derived the first-order optimal checkpoint interval, and @daly2006 independently refined it with tighter second-order bounds.
-
-```{python}
-#| echo: false
-#| label: checkpoint-tradeoff-inputs
-# ┌─────────────────────────────────────────────────────────────────────────────
-# │ CHECKPOINT TRADE-OFF INPUTS (LEGO)
-# ├─────────────────────────────────────────────────────────────────────────────
-# │ Context: @fig-checkpoint-tradeoff and its caption.
-# │
-# │ Goal: Feed the U-curve the same two inputs the Young-Daly notebook uses
-# │       later, so the plotted optimum and the worked interval agree.
-# │ Show: T_write ~24.5 s (175B, 14 B/param, registry write bandwidth);
-# │       full-system MTBF ~3.87 h (GPU + PCIe + shared NIC, 10,000 GPUs);
-# │       tau_opt ~13.8 min.
-# │ How:  Same series-rate composition as the worked MTBF cascade (redundant
-# │       PSUs add no term); tau_opt = sqrt(2 * T_write * MTBF_system).
-# └─────────────────────────────────────────────────────────────────────────────
-import math
-from mlsysim import Models, Systems
-from mlsysim.physics import calc_checkpoint_size
-from mlsysim.fmt import check, fmt_time
-
-class CheckpointTradeoffInputs:
-    # ┌── 1. LOAD (Constants) ──────────────────────
-    ckpt_bytes = calc_checkpoint_size(Models.Language.GPT3.parameters)  # 14 B/param
-    write_bw = float(Systems.Reliability.Recovery.checkpoint_write_bw_gbs) * (GB / second)
-    n_gpus = Systems.Clusters.Training_10K.total_accelerators
-    gpus_per_node = Systems.Nodes.DGX_H100.accelerators_per_node
-    gpu_mttf_h = float(Systems.Reliability.Gpu.mttf_hours)
-    pcie_mttf_h = float(Systems.Reliability.PcieSwitch.mttf_hours)
-    nic_mttf_h = float(Systems.Reliability.Nic.mttf_hours)
-
-    # ┌── 2. EXECUTE (The Compute) ─────────────────
-    t_write_h = (ckpt_bytes / write_bw).to(hour).magnitude
-    rate_per_gpu = 1 / gpu_mttf_h + 1 / pcie_mttf_h + (1 / gpus_per_node) / nic_mttf_h
-    mtbf_h = 1 / (n_gpus * rate_per_gpu)
-    tau_opt_h = math.sqrt(2 * t_write_h * mtbf_h)
-
-    # ┌── 3. GUARD (Invariants) ────────────────────
-    check(22 < t_write_h * 3600 < 27, "175B checkpoint write should be ~24.5 s")
-    check(3.5 < mtbf_h < 4.2, "full-system MTBF should match the worked cascade (~3.87 h)")
-    check(12 < tau_opt_h * 60 < 15, "tau_opt should match the Young-Daly notebook (~13.8 min)")
-
-    # ┌── 4. OUTPUT (Formatting) ───────────────────
-    t_write_s_str = fmt_time(t_write_h * 3600, "second", precision=1, commas=False)
-    mtbf_h_str = fmt_time(mtbf_h, "hour", precision=1, commas=False)
-    tau_opt_min_str = fmt_time(round(tau_opt_h * 60), "minute", precision=0, commas=False)
-    n_gpus_str = fmt(n_gpus, precision=0)
-```
-
-::: {#fig-checkpoint-tradeoff fig-env="figure" fig-pos="htb" fig-cap="**The checkpoint trade-off**: Checkpoint save overhead (dashed blue) falls as the interval lengthens, while expected rework after a failure (dashed red) rises; their sum (solid) is minimized at the Young-Daly interval. The curves use this chapter's 175B running example on its `{python} CheckpointTradeoffInputs.n_gpus_str`-GPU cluster, with a `{python} CheckpointTradeoffInputs.t_write_s_str` checkpoint write and a `{python} CheckpointTradeoffInputs.mtbf_h_str` full-system MTBF, which put the optimum near `{python} CheckpointTradeoffInputs.tau_opt_min_str`. The minimum is shallow, so an interval somewhat off the optimum costs little, while a far shorter or far longer one costs a great deal." fig-alt="Three curves against checkpoint interval in minutes: checkpoint overhead decreasing, rework cost increasing linearly, and total wasted time with a shallow minimum marked near 14 minutes."}
-
-```{python}
-#| echo: false
-# ┌─────────────────────────────────────────────────────────────────────────────
-# │ CHECKPOINT TRADE-OFF (FIGURE)
-# ├─────────────────────────────────────────────────────────────────────────────
-# │ Context: @fig-checkpoint-tradeoff.
-# │
-# │ Goal: Plot save overhead, expected rework, and their sum vs. interval for
-# │       the chapter's 175B / 10,000-GPU example; mark tau_opt.
-# │ Show: Three curves; optimum annotation near 14 min.
-# │ How:  Inputs from CheckpointTradeoffInputs (no literals); book_style.
-# └─────────────────────────────────────────────────────────────────────────────
-import numpy as np
-from binder.tools.figures import style as book_style
-
-fig, ax, COLORS, plt = book_style.setup_plot(figsize=(8, 4.5))
-
-t_write = CheckpointTradeoffInputs.t_write_h
-mtbf = CheckpointTradeoffInputs.mtbf_h
-tau_opt = CheckpointTradeoffInputs.tau_opt_h
-
-tau = np.linspace(tau_opt / 6, tau_opt * 4, 300)
-over_ckpt = t_write / tau
-over_rework = tau / (2 * mtbf)
-total_waste = over_ckpt + over_rework
-waste_opt = t_write / tau_opt + tau_opt / (2 * mtbf)
-
-ax.plot(tau * 60, over_ckpt * 100, label='Checkpoint overhead ($T_{\\mathrm{write}}/T_{\\mathrm{ckpt}}$)', color=COLORS['BlueLine'], linestyle='--')
-ax.plot(
-    tau * 60,
-    over_rework * 100,
-    label='Expected rework ($T_{\\mathrm{ckpt}}/(2\\,\\mathrm{MTBF}_{\\mathrm{system}})$)',
-    color=COLORS['RedLine'],
-    linestyle='--',
-)
-ax.plot(tau * 60, total_waste * 100, label='Total wasted time', color=COLORS['primary'], linewidth=2.5)
-
-ax.scatter([tau_opt * 60], [waste_opt * 100], color=COLORS['primary'], s=40, zorder=5)
-ax.annotate(
-    f'$T^*_{{\\mathrm{{ckpt}}}} \\approx {tau_opt * 60:.0f}$ min, {waste_opt * 100:.1f}% wasted',
-    xy=(tau_opt * 60, waste_opt * 100),
-    xytext=(tau_opt * 60 + 12, waste_opt * 100 + 7),
-    ha='left',
-    arrowprops=dict(arrowstyle='->', color=COLORS['primary'], shrinkB=4, lw=0.75),
-    bbox=dict(boxstyle='round,pad=0.25', facecolor='white', edgecolor='#CBD5E1', lw=0.6, alpha=0.95),
-)
-
-ax.set_xlabel('Checkpoint interval $T_{\\mathrm{ckpt}}$ (minutes)')
-ax.set_ylabel('Share of wall time wasted (%)')
-ax.set_xlim(0, tau_opt * 4 * 60)
-ax.set_yticks([0, 5, 10, 15, 20])
-ax.set_ylim(0, 20)
-
-ax.legend(loc='upper right', frameon=True, facecolor='white', edgecolor='#CBD5E1', framealpha=0.95)
-
-plt.tight_layout()
-plt.show()
-plt.close()
-```
-
-:::
-
-A quick availability calculation shows the same scaling pressure from another angle.
-
-```{python}
-#| echo: false
-#| label: lego-nines-reliability
-from mlsysim.fmt import check, fmt, fmt_int, fmt_percent, fmt_time
-
-class NinesReliability:
-    # ┌── 1. LOAD ──────────────────────────────────────────
-    n_gpus = Systems.Clusters.Training_10K.total_accelerators
-    availability_pct = 99.99
-    single_gpu_success = availability_pct / 100
-
-    # ┌── 2. EXECUTE ───────────────────────────────────────
-    downtime_min_year = (1 - single_gpu_success) * HOURS_PER_YEAR * MINUTES_PER_HOUR
-    cluster_prob = single_gpu_success**n_gpus
-    fleet_mtbf = FleetReliabilityRates.hours_between * hour
-    fast_mttr = 5 * minute
-    slow_mttr = 30 * minute
-    fast_availability = (fleet_mtbf / (fleet_mtbf + fast_mttr)).to("").magnitude
-    slow_availability = (fleet_mtbf / (fleet_mtbf + slow_mttr)).to("").magnitude
-
-    # ┌── 3. GUARD ─────────────────────────────────────────
-    check(0 < cluster_prob < 1, "Probability must be in (0,1)")
-    check(cluster_prob < 0.5, "Cluster survival must be low at scale")
-    check(0 < slow_availability < fast_availability < 1, "Faster repair must improve availability")
-
-    # ┌── 4. OUTPUT ────────────────────────────────────────
-    n_gpus_str = fmt(n_gpus, precision=0)
-    availability_str = fmt_percent(availability_pct / 100, precision=2, commas=False, style='prose')
-    downtime_min_str = fmt_time(downtime_min_year, 'minute', precision=1, commas=False, style='word')
-    survival_str = fmt(single_gpu_success, precision=4, commas=False)
-    cluster_prob_str = fmt(cluster_prob, precision=2, commas=False)
-    cluster_pct_str = fmt_percent(round(cluster_prob * 100) / 100, precision=0, commas=False, style='prose')
-    fleet_mtbf_str = fmt_time(fleet_mtbf, hour, precision=0, commas=False, style="word")
-    fast_mttr_str = fmt_time(fast_mttr, minute, precision=0, commas=False, style="word")
-    slow_mttr_str = fmt_time(slow_mttr, minute, precision=0, commas=False, style="word")
-    fast_availability_str = fmt_percent(fast_availability, precision=2, commas=False, style="prose")
-    slow_availability_str = fmt_percent(slow_availability, precision=2, commas=False, style="prose")
-```
-
-::: {#nbk-fault-tolerance-9s-reliability .callout-notebook title="The 9s of reliability"}
-
-**Problem**: A cluster of `{python} NinesReliability.n_gpus_str` GPUs runs with each GPU at `{python} NinesReliability.availability_str` availability (only `{python} NinesReliability.downtime_min_str` of downtime per year). Assuming independent up/down states, what is the probability that the entire cluster is up at the same instant?
-
-**Math**:
-
-1.  Single GPU availability probability $(R_{\text{GPU}})$: A GPU with `{python} NinesReliability.availability_str` availability has an all-up probability $R_{\text{GPU}} =$ `{python} NinesReliability.survival_str` at a randomly chosen instant.
-2.  Cluster availability probability $(R_{\text{cluster}})$: $R_{\text{cluster}} = (R_{\text{GPU}})^{N}$.
-3.  **Result**: $(R_{\text{GPU}})^{N} \approx$ `{python} NinesReliability.cluster_prob_str`.
-
-**Systems insight**: Even with `{python} NinesReliability.availability_str` reliable hardware, a `{python} NinesReliability.n_gpus_str`-GPU cluster has only a `{python} NinesReliability.cluster_pct_str` chance that every GPU is simultaneously available. Hardware reliability alone is insufficient; software must handle failures automatically.
-
-:::
-
-::: {#psp-fault-tolerance-scale-transforms-failure .callout-perspective title="Scale transforms failure"}
-
-A cluster of `{python} NinesReliability.n_gpus_str` GPUs turns a per-GPU MTBF of `{python} FleetReliabilityRates.gpu_mttf_prose_str` into a system MTBF of `{python} NinesReliability.fleet_mtbf_str`. For a repairable system, steady-state availability\index{Availability!MTBF and MTTR} is $A = \MeanTimeBetweenFailures/(\MeanTimeBetweenFailures+\MeanTimeToRepair)$, where mean time to recovery (MTTR)\index{MTTR!availability impact}\index{MTTR!recovery interval}\index{Mean time to recovery|see{MTTR}} is the recovery interval. Cutting MTTR from `{python} NinesReliability.slow_mttr_str` to `{python} NinesReliability.fast_mttr_str` raises availability from `{python} NinesReliability.slow_availability_str` to `{python} NinesReliability.fast_availability_str`. This stationary two-state model assumes unconstrained repair capacity and complete outage; correlated incidents, repair contention, and degraded operation require direct measurement [@birolini2017]. Systems must engineer recovery, not merely improve components.
-
-:::
-
 ### Quantitative reliability analysis {#sec-fault-tolerance-reliability-quantitative-analysis}
 
 The GPU-only calculation in the opening reliability example supplies the scale intuition; a real training system then composes GPUs, HBM, links, power supplies, storage paths, and redundancy into one failure budget. With MTBF and the FIT rate already defined ($\text{FIT} = 10^9/\MeanTimeBetweenFailures$, so a `{python} FleetReliabilityRates.gpu_mttf_attr_str` GPU contributes `{python} FleetReliabilityRates.gpu_fit_str` FIT), the new question is how component rates compose. The composition rule depends on the redundancy structure and the independence assumptions. For series systems\index{Reliability!series system}\index{Series system!reliability calculation} (for example, a node where all `{python} FleetReliabilityRates.node_gpus_str` GPUs must work), failure of any component fails the whole. With independent constant-rate failures, reliabilities multiply and rates add:
@@ -1716,6 +1474,248 @@ class FaultToleranceCheckpointRecap:
 ```
 
 [^fn-adam-state-memory]: **Adam optimizer state**\index{Adam optimizer!state}\index{Adam optimizer!checkpoint memory}: Adaptive Moment Estimation (Adam) maintains per-parameter first-moment ($m$) and second-moment ($v$) estimates, tripling memory requirements compared to vanilla stochastic gradient descent (SGD) (3$\times$: parameters + two state vectors). For a `{python} FaultToleranceCheckpointRecap.gpt3_params_b_str` parameter model, optimizer state alone reaches `{python} FaultToleranceCheckpointRecap.gpt3_adam_tb_str`, which typically dominates checkpoint size and recovery time, making optimizer state the primary bottleneck in checkpoint I/O design.
+
+### The Young-Daly checkpoint interval {#sec-fault-tolerance-young-daly}
+
+Every training recovery path in this chapter ultimately falls back on a saved copy of training state, so the first question is what that copy must contain.
+
+::: {#dfn-fault-tolerance-checkpointing .callout-definition title="Checkpointing"}
+
+***Checkpointing***\index{Checkpointing!definition} is the periodic serialization of the complete training state (parameters, optimizer state, data loader position, and random state) to persistent storage at a recorded training step.
+
+1.  **Significance**: It minimizes lost work after a system failure by trading checkpoint I/O against rework. Writing too often wastes accelerator time on storage traffic; writing too rarely risks replaying many completed steps after a failure. The Young-Daly interval\index{Young-Daly formula!square-root trade-off} developed in this section chooses the cadence that balances write cost against expected lost work.
+2.  **Distinction**: A resumable checkpoint captures a consistent execution state, including optimizer state, random-number generator state, data position, and learning rate schedules. It can use full or incremental storage; bitwise replay additionally requires compatible deterministic execution.
+3.  **Common pitfall**: A frequent misconception is that checkpointing is "just writing to disk." For large models it is a storage-system stress test, because the simultaneous write from thousands of GPUs can trigger a checkpoint storm that saturates the entire network fabric $(\Bandwidth)$.
+
+:::
+
+A checkpoint is useful only if it resumes the recorded step consistently. In distributed training, every shard must belong to the same recoverable state; a collection of files from different steps does not preserve progress. For the interval model, assume that writing a checkpoint completes durably before it becomes available for recovery and that a failure discards the work performed since the last completed checkpoint.
+
+When failures are expected during a job, the key engineering decision is how often to write that state, because every save costs I/O time and every unsaved step is work a failure can erase. The Young-Daly formula\index{Young-Daly formula!optimal interval}\index{Daly formula|see{Young-Daly formula}}[^fn-young-daly-formula] (principle \ref{pri-young-daly}, applied in @sec-fault-tolerance-reliability-reliability-checkpoint-interval-failure-analysis-c28d) gives a first-order estimate of that balance through a square-root rule:
+
+$$ \OptimalCheckpointIntervalCkpt = \sqrt{2 \cdot \CheckpointWriteTime \cdot \MeanTimeBetweenFailures_{\text{system}}} $$
+
+```{python}
+#| echo: false
+#| label: young-daly-checkpoint-state
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ RESUMABLE CHECKPOINT STATE (LEGO)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @sec-fault-tolerance-young-daly, the T_write paragraph below.
+# │
+# │ Goal: Size a resumable mixed-precision Adam checkpoint for a 70B model and
+# │       for the 175B running example from one bytes-per-parameter anchor.
+# │ Show: 14 bytes per parameter; ~1 TB (70B) and >2 TB (175B).
+# │ How:  params x ReferenceStats.MixedPrecisionAdam.CheckpointBytesPerParameter.
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import Models, ReferenceStats
+from mlsysim.fmt import check, fmt
+
+class YoungDalyCheckpointState:
+    # ┌── 1. LOAD (Constants) ──────────────────────
+    ckpt_bpp = ReferenceStats.MixedPrecisionAdam.CheckpointBytesPerParameter
+    params_70b = Models.Language.Llama3_70B.parameters
+    params_175b = Models.Language.GPT3.parameters
+
+    # ┌── 2. EXECUTE (The Compute) ─────────────────
+    ckpt_70b_tb = (params_70b * ckpt_bpp).to(TB).magnitude
+    ckpt_175b_tb = (params_175b * ckpt_bpp).to(TB).magnitude
+
+    # ┌── 3. GUARD (Invariants) ────────────────────
+    check(0.9 < ckpt_70b_tb < 1.0, "70B checkpoint must 'approach a terabyte'")
+    check(ckpt_175b_tb > 2.0, "175B checkpoint must 'exceed two terabytes'")
+
+    # ┌── 4. OUTPUT (Formatting) ───────────────────
+    ckpt_bpp_str = fmt(ckpt_bpp.magnitude, precision=0)
+```
+
+$\CheckpointWriteTime$ in distributed ML training is not the time to flush a small process state; it includes transferring model weights and optimizer state to durable storage. The reference format here stores BF16 weights, separate FP32 master weights, and two FP32 moment tensors per parameter for Adaptive Moment Estimation (Adam). A single resumable checkpoint for a 70B-parameter model therefore approaches a terabyte at `{python} YoungDalyCheckpointState.ckpt_bpp_str` bytes per parameter; for the later 175B-parameter running example, it exceeds two terabytes. Reducing $\CheckpointWriteTime$ requires a smaller payload or higher sustained write bandwidth, and $\CheckpointWriteTime$ itself is the central constraint that determines how tightly the checkpoint interval can be set before I/O overhead displaces productive training compute.
+
+To see the balance, consider an interval between saves. Doubling that interval approximately halves the checkpoint writes per unit of training, but a failure then loses twice as much work on average. Under the constant-rate, rare-failure approximation, failure occurs approximately uniformly within an interval, so the average lost work is half the interval. When write time is small relative to the interval, the wasted fraction from saving and replaying work is approximately the sum below. Detection, allocation, and restoration time require a separate recovery budget.
+
+$$ W(\CheckpointIntervalCkpt) \approx \frac{\CheckpointWriteTime}{\CheckpointIntervalCkpt} + \frac{\CheckpointIntervalCkpt}{2 \cdot \MeanTimeBetweenFailures_{\text{system}}} $$
+
+Setting the first derivative to zero ($\frac{dW}{d\CheckpointIntervalCkpt} = -\frac{\CheckpointWriteTime}{\CheckpointIntervalCkpt^2} + \frac{1}{2 \cdot \MeanTimeBetweenFailures_{\text{system}}} = 0$) directly yields the square-root minimum $\OptimalCheckpointIntervalCkpt = \sqrt{2 \cdot \CheckpointWriteTime \cdot \MeanTimeBetweenFailures_{\text{system}}}$. In @fig-checkpoint-tradeoff, this balance forms a U-shaped convex curve for the chapter's 10,000-GPU cluster running a 175B-parameter model: write overhead (dashed blue) falls hyperbolically while expected rework (dashed red) climbs linearly, reaching a minimum near $\OptimalCheckpointIntervalCkpt \approx 14$ minutes. The modeled saving-and-rework loss there is 5.9 percent, before adding recovery downtime. Its scaling consequence is the one to carry forward. As clusters grow, system MTBF drops, so the optimal interval shrinks, demanding higher-bandwidth storage to keep $\CheckpointWriteTime$ small before the "checkpoint tax" consumes the cluster's compute capacity. Because the relationship is a square root, halving MTBF tightens the interval by only $\sqrt{2}\approx 1.4\times$, so doubling cluster size does not demand doubling checkpoint I/O bandwidth when checkpoint size and the other assumptions stay fixed. The chapter applies the formula to its own cluster once the system MTBF is in hand.
+
+::: {.column-margin .margin-pointer}
+↩ The per-tier storage bandwidths that bound how quickly a checkpoint can be written are established in @sec-storage-hierarchy.
+:::
+
+[^fn-young-daly-formula]: **Young-Daly formula**\index{Young-Daly formula!history}: @young1974 derived the first-order optimal checkpoint interval, and @daly2006 independently refined it with tighter second-order bounds.
+
+```{python}
+#| echo: false
+#| label: checkpoint-tradeoff-inputs
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ CHECKPOINT TRADE-OFF INPUTS (LEGO)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @fig-checkpoint-tradeoff and its caption.
+# │
+# │ Goal: Feed the U-curve the same two inputs the Young-Daly notebook uses
+# │       later, so the plotted optimum and the worked interval agree.
+# │ Show: T_write ~24.5 s (175B, 14 B/param, registry write bandwidth);
+# │       full-system MTBF ~3.87 h (GPU + PCIe + shared NIC, 10,000 GPUs);
+# │       tau_opt ~13.8 min.
+# │ How:  Same series-rate composition as the worked MTBF cascade (redundant
+# │       PSUs add no term); tau_opt = sqrt(2 * T_write * MTBF_system).
+# └─────────────────────────────────────────────────────────────────────────────
+import math
+from mlsysim import Models, Systems
+from mlsysim.physics import calc_checkpoint_size
+from mlsysim.fmt import check, fmt_time
+
+class CheckpointTradeoffInputs:
+    # ┌── 1. LOAD (Constants) ──────────────────────
+    ckpt_bytes = calc_checkpoint_size(Models.Language.GPT3.parameters)  # 14 B/param
+    write_bw = float(Systems.Reliability.Recovery.checkpoint_write_bw_gbs) * (GB / second)
+    n_gpus = Systems.Clusters.Training_10K.total_accelerators
+    gpus_per_node = Systems.Nodes.DGX_H100.accelerators_per_node
+    gpu_mttf_h = float(Systems.Reliability.Gpu.mttf_hours)
+    pcie_mttf_h = float(Systems.Reliability.PcieSwitch.mttf_hours)
+    nic_mttf_h = float(Systems.Reliability.Nic.mttf_hours)
+
+    # ┌── 2. EXECUTE (The Compute) ─────────────────
+    t_write_h = (ckpt_bytes / write_bw).to(hour).magnitude
+    rate_per_gpu = 1 / gpu_mttf_h + 1 / pcie_mttf_h + (1 / gpus_per_node) / nic_mttf_h
+    mtbf_h = 1 / (n_gpus * rate_per_gpu)
+    tau_opt_h = math.sqrt(2 * t_write_h * mtbf_h)
+
+    # ┌── 3. GUARD (Invariants) ────────────────────
+    check(22 < t_write_h * 3600 < 27, "175B checkpoint write should be ~24.5 s")
+    check(3.5 < mtbf_h < 4.2, "full-system MTBF should match the worked cascade (~3.87 h)")
+    check(12 < tau_opt_h * 60 < 15, "tau_opt should match the Young-Daly notebook (~13.8 min)")
+
+    # ┌── 4. OUTPUT (Formatting) ───────────────────
+    t_write_s_str = fmt_time(t_write_h * 3600, "second", precision=1, commas=False)
+    mtbf_h_str = fmt_time(mtbf_h, "hour", precision=1, commas=False)
+    tau_opt_min_str = fmt_time(round(tau_opt_h * 60), "minute", precision=0, commas=False)
+    n_gpus_str = fmt(n_gpus, precision=0)
+```
+
+::: {#fig-checkpoint-tradeoff fig-env="figure" fig-pos="htb" fig-cap="**The checkpoint trade-off**: Checkpoint save overhead (dashed blue) falls as the interval lengthens, while expected rework after a failure (dashed red) rises; their sum (solid) is minimized at the Young-Daly interval. The curves use this chapter's 175B running example on its `{python} CheckpointTradeoffInputs.n_gpus_str`-GPU cluster, with a `{python} CheckpointTradeoffInputs.t_write_s_str` checkpoint write and a `{python} CheckpointTradeoffInputs.mtbf_h_str` full-system MTBF, which put the optimum near `{python} CheckpointTradeoffInputs.tau_opt_min_str`. The minimum is shallow, so an interval somewhat off the optimum costs little, while a far shorter or far longer one costs a great deal." fig-alt="Three curves against checkpoint interval in minutes: checkpoint overhead decreasing, rework cost increasing linearly, and total wasted time with a shallow minimum marked near 14 minutes."}
+
+```{python}
+#| echo: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ CHECKPOINT TRADE-OFF (FIGURE)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @fig-checkpoint-tradeoff.
+# │
+# │ Goal: Plot save overhead, expected rework, and their sum vs. interval for
+# │       the chapter's 175B / 10,000-GPU example; mark tau_opt.
+# │ Show: Three curves; optimum annotation near 14 min.
+# │ How:  Inputs from CheckpointTradeoffInputs (no literals); book_style.
+# └─────────────────────────────────────────────────────────────────────────────
+import numpy as np
+from binder.tools.figures import style as book_style
+
+fig, ax, COLORS, plt = book_style.setup_plot(figsize=(8, 4.5))
+
+t_write = CheckpointTradeoffInputs.t_write_h
+mtbf = CheckpointTradeoffInputs.mtbf_h
+tau_opt = CheckpointTradeoffInputs.tau_opt_h
+
+tau = np.linspace(tau_opt / 6, tau_opt * 4, 300)
+over_ckpt = t_write / tau
+over_rework = tau / (2 * mtbf)
+total_waste = over_ckpt + over_rework
+waste_opt = t_write / tau_opt + tau_opt / (2 * mtbf)
+
+ax.plot(tau * 60, over_ckpt * 100, label='Checkpoint overhead ($T_{\\mathrm{write}}/T_{\\mathrm{ckpt}}$)', color=COLORS['BlueLine'], linestyle='--')
+ax.plot(
+    tau * 60,
+    over_rework * 100,
+    label='Expected rework ($T_{\\mathrm{ckpt}}/(2\\,\\mathrm{MTBF}_{\\mathrm{system}})$)',
+    color=COLORS['RedLine'],
+    linestyle='--',
+)
+ax.plot(tau * 60, total_waste * 100, label='Total wasted time', color=COLORS['primary'], linewidth=2.5)
+
+ax.scatter([tau_opt * 60], [waste_opt * 100], color=COLORS['primary'], s=40, zorder=5)
+ax.annotate(
+    f'$T^*_{{\\mathrm{{ckpt}}}} \\approx {tau_opt * 60:.0f}$ min, {waste_opt * 100:.1f}% wasted',
+    xy=(tau_opt * 60, waste_opt * 100),
+    xytext=(tau_opt * 60 + 12, waste_opt * 100 + 7),
+    ha='left',
+    arrowprops=dict(arrowstyle='->', color=COLORS['primary'], shrinkB=4, lw=0.75),
+    bbox=dict(boxstyle='round,pad=0.25', facecolor='white', edgecolor='#CBD5E1', lw=0.6, alpha=0.95),
+)
+
+ax.set_xlabel('Checkpoint interval $T_{\\mathrm{ckpt}}$ (minutes)')
+ax.set_ylabel('Share of wall time wasted (%)')
+ax.set_xlim(0, tau_opt * 4 * 60)
+ax.set_yticks([0, 5, 10, 15, 20])
+ax.set_ylim(0, 20)
+
+ax.legend(loc='upper right', frameon=True, facecolor='white', edgecolor='#CBD5E1', framealpha=0.95)
+
+plt.tight_layout()
+plt.show()
+plt.close()
+```
+
+:::
+
+A quick availability calculation shows the same scaling pressure from another angle.
+
+```{python}
+#| echo: false
+#| label: lego-nines-reliability
+from mlsysim.fmt import check, fmt, fmt_int, fmt_percent, fmt_time
+
+class NinesReliability:
+    # ┌── 1. LOAD ──────────────────────────────────────────
+    n_gpus = Systems.Clusters.Training_10K.total_accelerators
+    availability_pct = 99.99
+    single_gpu_success = availability_pct / 100
+
+    # ┌── 2. EXECUTE ───────────────────────────────────────
+    downtime_min_year = (1 - single_gpu_success) * HOURS_PER_YEAR * MINUTES_PER_HOUR
+    cluster_prob = single_gpu_success**n_gpus
+    fleet_mtbf = FleetReliabilityRates.hours_between * hour
+    fast_mttr = 5 * minute
+    slow_mttr = 30 * minute
+    fast_availability = (fleet_mtbf / (fleet_mtbf + fast_mttr)).to("").magnitude
+    slow_availability = (fleet_mtbf / (fleet_mtbf + slow_mttr)).to("").magnitude
+
+    # ┌── 3. GUARD ─────────────────────────────────────────
+    check(0 < cluster_prob < 1, "Probability must be in (0,1)")
+    check(cluster_prob < 0.5, "Cluster survival must be low at scale")
+    check(0 < slow_availability < fast_availability < 1, "Faster repair must improve availability")
+
+    # ┌── 4. OUTPUT ────────────────────────────────────────
+    n_gpus_str = fmt(n_gpus, precision=0)
+    availability_str = fmt_percent(availability_pct / 100, precision=2, commas=False, style='prose')
+    downtime_min_str = fmt_time(downtime_min_year, 'minute', precision=1, commas=False, style='word')
+    survival_str = fmt(single_gpu_success, precision=4, commas=False)
+    cluster_prob_str = fmt(cluster_prob, precision=2, commas=False)
+    cluster_pct_str = fmt_percent(round(cluster_prob * 100) / 100, precision=0, commas=False, style='prose')
+    fleet_mtbf_str = fmt_time(fleet_mtbf, hour, precision=0, commas=False, style="word")
+    fast_mttr_str = fmt_time(fast_mttr, minute, precision=0, commas=False, style="word")
+    slow_mttr_str = fmt_time(slow_mttr, minute, precision=0, commas=False, style="word")
+    fast_availability_str = fmt_percent(fast_availability, precision=2, commas=False, style="prose")
+    slow_availability_str = fmt_percent(slow_availability, precision=2, commas=False, style="prose")
+```
+
+::: {#nbk-fault-tolerance-9s-reliability .callout-notebook title="The 9s of reliability"}
+
+**Problem**: A cluster of `{python} NinesReliability.n_gpus_str` GPUs runs with each GPU at `{python} NinesReliability.availability_str` availability (only `{python} NinesReliability.downtime_min_str` of downtime per year). Assuming independent up/down states, what is the probability that the entire cluster is up at the same instant?
+
+**Math**:
+
+1.  Single GPU availability probability $(R_{\text{GPU}})$: A GPU with `{python} NinesReliability.availability_str` availability has an all-up probability $R_{\text{GPU}} =$ `{python} NinesReliability.survival_str` at a randomly chosen instant.
+2.  Cluster availability probability $(R_{\text{cluster}})$: $R_{\text{cluster}} = (R_{\text{GPU}})^{N}$.
+3.  **Result**: $(R_{\text{GPU}})^{N} \approx$ `{python} NinesReliability.cluster_prob_str`.
+
+**Systems insight**: Even with `{python} NinesReliability.availability_str` reliable hardware, a `{python} NinesReliability.n_gpus_str`-GPU cluster has only a `{python} NinesReliability.cluster_pct_str` chance that every GPU is simultaneously available. Hardware reliability alone is insufficient; software must handle failures automatically.
+
+:::
+
+::: {#psp-fault-tolerance-scale-transforms-failure .callout-perspective title="Scale transforms failure"}
+
+A cluster of `{python} NinesReliability.n_gpus_str` GPUs turns a per-GPU MTBF of `{python} FleetReliabilityRates.gpu_mttf_prose_str` into a system MTBF of `{python} NinesReliability.fleet_mtbf_str`. For a repairable system, steady-state availability\index{Availability!MTBF and MTTR} is $A = \MeanTimeBetweenFailures/(\MeanTimeBetweenFailures+\MeanTimeToRepair)$, where mean time to recovery (MTTR)\index{MTTR!availability impact}\index{MTTR!recovery interval}\index{Mean time to recovery|see{MTTR}} is the recovery interval. Cutting MTTR from `{python} NinesReliability.slow_mttr_str` to `{python} NinesReliability.fast_mttr_str` raises availability from `{python} NinesReliability.slow_availability_str` to `{python} NinesReliability.fast_availability_str`. This stationary two-state model assumes unconstrained repair capacity and complete outage; correlated incidents, repair contention, and degraded operation require direct measurement [@birolini2017]. Systems must engineer recovery, not merely improve components.
+
+:::
 
 ### Checkpoint interval from failure analysis {#sec-fault-tolerance-reliability-reliability-checkpoint-interval-failure-analysis-c28d}
 

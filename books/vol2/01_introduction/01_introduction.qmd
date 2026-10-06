@@ -797,13 +797,142 @@ These scale-induced challenges have driven infrastructure investment by large AI
 
 The scale moment establishes the historical reality of exponential growth in compute demand. But before we explore the physical mechanics of these massive fleets, we must ask what fundamentally drives this demand. The answer lies not in algorithmic complexity, but in empirical scaling properties that dictate exactly how much compute is required to achieve state-of-the-art performance.
 
-## AI Scaling Laws {#sec-vol2-intro-ai-scaling-laws-a043}
+## The C$^3$ Taxonomy and Foundations of Scale {#sec-vol2-introduction-c-cube}
 
-The seven orders of magnitude of training compute traced at the scale moment, from AlexNet to GPT-4-class estimates near `{python} TrainingComputeLandmarks.gpt4_class_flops_oom_math` FLOPs, establish the scale of resource investment. They do not by themselves establish the quality gained from that investment. Measured learning curves supply the separate evidence needed to allocate a training budget, while device throughput, execution efficiency, and the completion deadline determine how much fleet capacity that budget requires.
+An idle accelerator does not identify its own bottleneck. It may be waiting for local operands, a gradient transfer, or a failed peer. The C$^3$ lens introduced at the scale moment separates these explanations and gives the preceding examples a common diagnostic language. On a single machine, diagnosing performance follows the **Data · Algorithm · Machine (D·A·M) taxonomy**\index{D·A·M taxonomy!definition}. In that framework, Data\index{D·A·M taxonomy!data} governs what information the model learns from; the Algorithm\index{D·A·M taxonomy!algorithm}\index{Algorithm!D·A·M taxonomy} defines the mathematical operations to execute; and the Machine\index{D·A·M taxonomy!machine} supplies the silicon and memory hierarchy executing those operations.
 
-Rich Sutton's "bitter lesson" articulated the underlying principle: performance in machine learning is primarily driven by applying general methods at massive scale rather than encoding human knowledge into algorithms [@sutton2019bitter]. Scaling laws\index{Scaling laws!power-law formulation} formalize this observation quantitatively: model loss improves sublinearly as a power-law function of compute, dataset size, and parameters, $\mathcal{L}(X) \propto X^{-\ScalingExponentScale}$ [@kaplan2020scaling; @hoffmann2022chinchilla]. Each equal-sized loss improvement therefore requires disproportionately more resources, a systems consequence this book later names as the universal scaling law\index{Universal scaling law!resource requirements}. Each scaling dimension (parameters, data, and compute) interacts with infrastructure constraints differently, making multi-dimensional efficiency optimization essential at production scale.
+::: {.column-margin .margin-pointer}
+↪ The D·A·M taxonomy as a complete single-node framework, with its diagnostic summary, roofline bound, and scorecard, is developed in @sec-appdx-dam-taxonomy.
+:::
 
-### Empirical evidence for scaling laws {#sec-vol2-intro-empirical-evidence-scaling-laws-0105}
+When workloads stretch across thousands of interconnected nodes, the execution bottleneck shifts. Datacenter hardware is procured and cabled around three physical pillars: Compute, Network, and Storage. At runtime, however, distributed execution spends wall-clock time in three distinct operational dimensions: Compute ($C_1$), Communication ($C_2$), and Coordination ($C_3$). Together, they form the C$^3$ taxonomy\index{C³ taxonomy!operational dimensions}.
+
+Storage is not absent from this runtime model; rather, storage serves as the persistent physical substrate spanning all three dimensions. It acts as an extension of the node memory hierarchy in Compute ($C_1$), a high-throughput streaming pipeline across Communication ($C_2$), and the durable checkpointing engine required for fault-tolerant Coordination ($C_3$).
+
+Each dimension leaves different evidence. Suppose a training job's step time grows by half after its cluster doubles. If time inside each node's kernels grew while their model FLOPs utilization (MFU) fell and memory-bandwidth counters saturated, local execution is responsible; if link utilization and collective timing rose, transfers are; if barrier waiting and recovery records grew, coordination is. The three diagnoses call for different interventions, and optimizing the wrong mechanism leaves the end-to-end bottleneck in place.
+
+As in single-machine systems, the governing limit is the *binding constraint*: the bottleneck whose relaxation yields an end-to-end reduction in training time or serving latency. The C$^3$ taxonomy is therefore an operational diagnostic loop: identify the binding axis, apply the appropriate systems intervention, and remeasure, because relaxing one limit frequently shifts the bottleneck to another.
+
+::: {#dfn-introduction-c3-taxonomy .callout-definition title="The C³ taxonomy"}
+
+***C$^3$ taxonomy***\index{C³ taxonomy!definition} is a diagnostic framework that classifies distributed machine learning execution time and system bottlenecks along three operational dimensions: Compute ($C_1$, the math), Communication ($C_2$, the wire), and Coordination ($C_3$, the logic). The goal is to identify which dimension binds fleet-scale performance.
+
+1.  **Significance**: The diagnostic power is concrete even before inspecting complex distributed traces. If accelerators are computing at low MFU because tensor cores starve for local operands or un-fused kernels, the binding axis is Compute ($C_1$). If accelerators sit idle waiting for AllReduce gradient transfers or activation tensors across the network fabric, the binding axis is Communication ($C_2$). If progress halts due to straggler-induced barrier waiting, node recovery rollbacks, or gang scheduling preemptions, the binding axis is Coordination ($C_3$).
+2.  **Distinction**: Unlike data center procurement categories (Compute, Network, Storage), which classify physical hardware assets, the C$^3$ taxonomy classifies runtime execution cost. Storage does not execute model arithmetic; rather, it serves as the persistent physical substrate across all three dimensions (local NVMe in $C_1$, remote dataset streaming in $C_2$, and durable checkpointing in $C_3$).
+3.  **Common pitfall**: Treating the three dimensions as independent variables. Upgrading to faster accelerators ($C_1$) often converts a compute-bound job into a communication-bound job ($C_2$). Sharding model states to eliminate memory redundancy ($C_1$) increases collective communication volume ($C_2$) and state coordination complexity ($C_3$). The dimensions move together.
+
+:::
+
+The three dimensions specify what to measure before selecting an intervention. Their descriptions below locate familiar local costs alongside the new costs of distribution.
+
+### The three dimensions of the fleet {#sec-vol2-introduction-three-dimensions}
+
+#### Node compute substrate ($C_1$) {#sec-vol2-introduction-dim-compute}
+
+Compute ($C_1$, the math)\index{C³ taxonomy!compute} captures execution within the server node, including arithmetic units, memory, and local Non-Volatile Memory Express (NVMe) storage.
+
+The memory wall\index{Memory wall!in compute axis} binds this axis when operands cannot reach arithmetic units fast enough. Improving **model FLOPs utilization (MFU)**\index{Model FLOPs Utilization!definition} then requires reducing local data movement, for example through operator fusion, rather than merely increasing peak arithmetic throughput.
+
+::: {.column-margin .margin-pointer}
+↪ The memory wall, from high-bandwidth memory (HBM) bandwidth to the roofline model that locates it for one accelerator, is developed in @sec-compute-memory-wall.
+:::
+
+#### Network communication backbone ($C_2$) {#sec-vol2-introduction-dim-comm}
+
+Communication ($C_2$, the wire)\index{C³ taxonomy!communication} captures data movement between worker devices, both within and across nodes. It includes scale-up fabrics inside a server and scale-out networks between servers.
+
+This traffic includes gradients, activations, and dataset shards. Finite bisection bandwidth\index{Bisection bandwidth!in communication axis} can expose a communication tax ($T_{\text{comm}}$) that leaves accelerators waiting for remote data. Reducing bytes transferred or overlapping transfers with useful work can reduce that tax.
+
+#### Orchestration coordination layer ($C_3$) {#sec-vol2-introduction-dim-coord}
+
+Coordination ($C_3$, the logic)\index{C³ taxonomy!coordination} captures the software control plane, synchronization protocols, and state-management mechanisms that bind thousands of separate, failing machines into a coherent distributed computer.
+
+Thread synchronization and kernel launches already impose local coordination costs; distribution adds network and failure boundaries. Schedulers, barriers, and checkpointing must manage reliability collapse\index{Reliability collapse!in coordination axis} ($A_{\text{all}} = (A_{\text{component}})^N$) and **straggler amplification**\index{Straggler amplification!definition}, where a synchronous job waits for its slowest required participant. The objective is **goodput**\index{Goodput!definition}, the rate of useful training progress after wasted and repeated work are accounted for. Overlap where dependencies permit and bounded recovery rollback improve that rate.
+
+### Projection from D·A·M to C$^3$ {#sec-vol2-introduction-projection}
+
+The single-machine D·A·M taxonomy and the fleet-scale C$^3$ taxonomy operate in tandem. D·A·M describes the workload: the *nouns* of the system (the training data, the executed algorithm, the hardware substrate). The C$^3$ taxonomy describes the execution tax: the *verbs* of the fleet (computing the math, communicating the results, coordinating the state). The C$^3$ taxonomy projects\index{C³ taxonomy!projection from D·A·M}\index{D·A·M taxonomy!workload projection} that workload onto a distributed fleet.
+
+Stretching an algorithm across nodes creates communication ($C_2$), such as the activation and gradient exchanges that tensor and pipeline parallelism add between partitions of one model. Stretching data across nodes also moves shards and gradients over the fabric ($C_2$), as when AllReduce synchronizes data-parallel replicas, and it requires coordination ($C_3$) through distributed samplers, gradient-aggregation barriers, and non-blocking checkpointing. Finally, managing hardware faults across a warehouse-scale machine requires orchestration and dynamic node recovery ($C_3$). Fleet-scale ML systems engineering requires solving the cross-products of D·A·M and C$^3$ rather than addressing each dimension in isolation.
+
+### The C$^3$ intersection landscape {#sec-vol2-introduction-c3-landscape}
+
+The dimensions interact at their pairwise intersections\index{C³ taxonomy!pairwise intersections}, where an intervention along one axis alters costs across another. At the intersection of compute and communication ($C_1 \cap C_2$), overlapping transfers with arithmetic can hide network latency, but only while independent computation remains available. Between compute and coordination ($C_1 \cap C_3$), checkpointing preserves progress against failure to maximize fleet goodput, yet it consumes execution resources; its frequency and placement trade present overhead against future recovery loss. Across communication and coordination ($C_2 \cap C_3$), collective synchronization depends jointly on transfer completion and participant readiness, so faster physical links alone cannot eliminate straggler waiting.
+
+At the center ($C_1 \cap C_2 \cap C_3$), all three constraints converge simultaneously. Partitioning a model determines both which device computes each operation and what information must cross the network; recovering a failed partition requires restoring the corresponding shared state. These dependencies explain why parallelism, state sharding, and serving policies must be designed together.
+
+@Fig-c3-taxonomy diagrams this co-design framework as three intersecting operational domains—Compute ($C_1$), Communication ($C_2$), and Coordination ($C_3$)—mapping the Fleet Law step terms contributed by each dimension alongside the pairwise latency-hiding, goodput, and synchronization interfaces that converge at the central discipline of fleet ML systems engineering.
+
+::: {#fig-c3-taxonomy fig-env="figure" fig-pos="htb" fig-cap="**The C$^3$ Intersection Landscape**: Each circle is one operational dimension (Compute, $C_1$, the node substrate; Communication, $C_2$, the network backbone; Coordination, $C_3$, the orchestration layer), labeled with the Fleet Law term it contributes to step time. Each pairwise lens names the interaction between two dimensions: hiding network latency behind computation, maximizing fleet goodput against failure, and synchronizing collectives. At the center, where all three meet, is fleet ML systems engineering." fig-alt="Three overlapping circles labeled Compute C1 (node substrate, T compute over N), Communication C2 (network backbone, T comm of N), and Coordination C3 (orchestration layer, T sync of N). The pairwise overlaps are labeled hiding network latency (C1 and C2), maximizing fleet goodput (C1 and C3), and collective synchronization (C2 and C3). A box at the center, where all three overlap, reads fleet ML systems engineering."}
+![](images/svg/c3-taxonomy.svg){width="90%"}
+:::
+
+The C$^3$ Venn diagram in @fig-c3-taxonomy organizes competing explanations for the same observed delay. A diagnosis may begin with one dimension or with a coupled mechanism, such as checkpoint traffic delaying a collective. The evidence determines which interaction to investigate; the diagram does not prescribe an order in which the dimensions must be optimized.
+
+Surrounding these three operational dimensions are the non-negotiable operating invariants developed across Part IV: the thermodynamic energy and cooling limits that constrain data centers, the adversarial security and differential privacy guarantees required of distributed pipelines, the robustness against silent corruption and distribution shift, and the systemic governance, auditing, and safety invariants essential when operating at societal scale. The C$^3$ figure is an orientation across all sixteen chapters ahead: first diagnose which intersection binds, then intervene.
+
+### The Fleet Law {#sec-vol2-introduction-fleet-law}
+
+The C$^3$ intersection landscape defines *where* distributed execution spends time and where trade-offs bite. The Fleet Law turns that diagnostic map into a first estimate of distributed step time. Its terms are a simplified accounting model, so a prediction must state how work is divided and which costs overlap. On a single machine, execution time is governed by the iron law of performance, $T = \DataVolume/\Bandwidth + O/(\PeakRate \cdot \EfficiencyHw) + \Latency$, decomposing into data movement, computation, and overhead. At fleet scale, that single-machine view no longer suffices. @Eq-fleet-law establishes the **Fleet Law**\index{Fleet law!definition}\index{Iron law of scale|see{Fleet law}}, which decomposes the idealized distributed training step into the terms of the C$^3$ engine:
+
+$$ \DistributedStepTime = \frac{\IronlawTermTimesCompute}{N} + \CommunicationTime + \SynchronizationTime - \OverlappedTime $$ {#eq-fleet-law}
+
+Each term in the Fleet Law maps directly onto a region of the C$^3$ landscape in @fig-c3-taxonomy:
+
+*   $\frac{\IronlawTermTimesCompute}{N}$ is the Compute ($C_1$) term, assuming ideally divisible local arithmetic for a fixed workload distributed across $N$ devices.
+*   $\CommunicationTime$ is the Communication ($C_2$) term, capturing the wire transit time moving gradients, activations, and parameter shards across the network fabric.
+*   $\SynchronizationTime$ is the Coordination ($C_3$) term, capturing time consumed by barrier semantics, straggler waiting, cluster scheduling decisions, and failure recovery.
+*   $\OverlappedTime$ is the Co-Design ($C_1 \cap C_2$, $C_1 \cap C_3$, $C_2 \cap C_3$) term, representing communication or coordination hidden behind useful compute via techniques such as interleaving forward and backward work across pipeline stages, running transfers on separate execution streams, and writing checkpoints asynchronously.
+
+@Fig-fleet-law-step aligns the execution timelines of an identical workload running on $N$ versus $2N$ devices across dual compute and network lanes. While doubling device count cuts the local compute duration ($\IronlawTermTimesCompute/2N$) in half, communication and barrier synchronization persist, and the shortened compute window compresses the gray overlap interval ($\OverlappedTime$)—leaving total step time $T_{\text{step}}(2N)$ well to the right of the dashed ideal half-step bound.
+
+::: {#fig-fleet-law-step fig-env="figure" fig-pos="htb" fig-cap="**Anatomy of a Fleet Law step**: Each row is one training step for the same workload, with local computation on the upper lane and communication and synchronization on the lower lane. Read the step length from the bracket, not from any single bar: overlap (gray band) removes only the transfer time that runs beneath compute, so doubling the devices halves $\IronlawTermTimesCompute/N$ yet leaves $T_{\text{step}}(2N)$ well short of the ideal half-length step (dashed line). Bar lengths are illustrative, not measured." fig-alt="Two timelines. Top, N devices: a long blue compute bar, and on a second lane an amber communication bar that starts under the end of the compute bar, followed by a violet synchronization bar; a bracket spans the whole step. Bottom, 2N devices: a compute bar half as long, a slightly longer communication bar, a longer synchronization bar, and a shorter bracket that ends well to the right of a dashed line marking half the original step."}
+![](images/svg/fleet-law-step.svg)
+:::
+
+Weak scaling, load imbalance, memory-capacity changes, and algorithmic changes require modifying these terms rather than treating $\IronlawTermTimesCompute/N$ as invariant. Measurements must also separate transfer from coordination time: a barrier interval that includes an unfinished transfer cannot be charged in full to both terms. Subtract only overlap supported by the execution timeline. @Eq-fleet-efficiency rewrites this decomposition as the compute-time fraction, defined as the fraction of wall-clock time spent on useful math:
+
+$$ \UsefulComputetimeFraction = \frac{\IronlawTermTimesCompute/N}{\DistributedStepTime} $$ {#eq-fleet-efficiency}
+
+This decomposition is a diagnostic instrument. When $\UsefulComputetimeFraction$ drops below 0.5, more than half the step is spent outside useful local arithmetic. The C$^3$ taxonomy identifies where the time goes: if $\CommunicationTime$ dominates, upgrade interconnects or overlap communication with computation; if $\SynchronizationTime$ dominates, consider asynchronous methods or reduce barrier frequency; if $\IronlawTermTimesCompute/N$ dominates, local arithmetic sets the step time. The **displacement of overhead**\index{Displacement of overhead!definition} is a diagnostic heuristic: reducing one overhead can relocate cost among the three dimensions. Asynchronous training removes some coordination barriers but introduces gradient staleness; pipeline parallelism can reduce some communication exposure but adds bubble time, the intervals in which pipeline stages sit idle waiting for work.
+
+The compute-time fraction describes one configuration. A production team also needs a scalar that says whether extra devices are shortening the training step or merely increasing coordination overhead. The scaling efficiency\index{Scaling efficiency!fleet evaluation} ($\ScalingEfficiency$) of the fleet is the ratio of ideal parallel step time to actual step time:
+$$ \ScalingEfficiency = \frac{\SingledeviceTimeOne}{N \times T_N} $$
+where $\SingledeviceTimeOne$ is the single-device time for the same work and $\NdeviceTime = \DistributedStepTime$ is the step time on $N$ devices.
+
+::: {.column-margin .margin-pointer}
+↪ The component decomposition that maps each term of $\DistributedStepTime$ to measurable activities is developed in @sec-appdx-c3-taxonomy-component-decomposition.
+:::
+
+::: {#psp-introduction-amdahls-distributed-pitfall .callout-perspective title="Amdahl's distributed pitfall"}
+
+The Fleet Law applies Amdahl's reasoning [@amdahl1967] to a strong-scaling experiment: a fixed amount of useful work is divided across more devices while communication and coordination terms are measured for that configuration. A common shortcut reads a measured 20 percent network share as a 5$\times$ speedup ceiling, but Amdahl's bound applies only if that 20 percent of the original workload remains irreducibly serial as compute is accelerated. A network share measured at one device count is not automatically invariant; changing the partition, topology, collective algorithm, or overlap can change both its absolute time and its fraction of the step. The Fleet Law therefore diagnoses the scaling limit of a stated workload and configuration rather than asserting a universal network fraction.
+
+:::
+
+Google's ML Productivity Goodput\index{Goodput!ML productivity metric} provides a complementary view of fleet efficiency [@wongpanich2025fleet]. This Goodput\index{Goodput!productivity decomposition} is a normalized productivity measure composed of three multiplicative factors, rather than the useful-progress rate introduced earlier. **Program goodput**\index{Program Goodput!definition} ($\MlProductivityGoodputFactorsProgram$) measures execution efficiency during productive work; **runtime goodput**\index{Runtime Goodput!definition} ($\MlProductivityGoodputFactorsRuntime$) measures productive progress retained from allocated resources after runtime overhead and lost work; and **scheduling goodput**\index{Scheduling Goodput!definition} ($\MlProductivityGoodputFactorsScheduling$) measures whether a workload has its required resources available together. These factors cut across C$^3$ rather than extending the Fleet Law. Communication overlap can improve program goodput, while checkpointing and recovery affect runtime goodput but belong to Coordination in the Fleet Law. Productivity factors locate losses across the execution lifecycle; C$^3$ identifies the mechanisms responsible for them.
+
+The Fleet Law, the compute-time fraction, and scaling efficiency together describe the time side of fleet efficiency\index{Efficiency!distributed}. They ask how much of each distributed step remains useful compute after communication, synchronization, and overlap are accounted for. Fleet efficiency also has an energy side\index{Energy!fleet consumption metric}\index{Efficiency!energy dimension}, because every exposed transfer and every idle accelerator still draws power.
+
+### The energy-scale invariant {#sec-introduction-energyscale-invariant-a0d6}
+
+While the Fleet Law accounts for time, the **energy-scale invariant**\index{Energy-scale invariant!definition} requires a consistent energy-accounting boundary when comparing fleet designs. What the invariant holds fixed is the accounting boundary, not any particular efficiency value. @Eq-energy-scale-invariant defines **fleet energy productivity**\index{Fleet energy productivity!definition} ($\FleetEnergyProductivity$), measured in FLOP/J, within a simplified operational boundary:
+
+$$ \FleetEnergyProductivity = \frac{\UsefulModelFlops}{E_{\text{device}} + E_{\text{cooling}} + E_{\text{network}}} $$ {#eq-energy-scale-invariant}
+
+where $\UsefulModelFlops$ is useful work in FLOPs. The three energy terms cover compute devices, attributable cooling, and the network fabric, without counting the same consumption twice. Host, storage, and other facility loads must be added explicitly for a complete operational estimate; embodied impacts lie outside this boundary. Comparisons must use the same boundary and useful-work definition. The resulting Pareto frontier\index{Pareto frontier!time-energy trade-off} balances minimizing $T_{\text{step}}$ with maximizing $\FleetEnergyProductivity$.
+
+::: {.column-margin .margin-pointer}
+↪ Power usage effectiveness, the ratio of total facility energy (including cooling and power conversion) to IT energy, is developed across data-center generations and cooling technologies in @sec-appdx-fleet-foundations-energy-hierarchy.
+:::
+
+An illustrative, communication-heavy GPT-3-class synchronization scenario connects the time and energy accounts: exposed Ring AllReduce traffic delays computation and consumes network energy.
+
+::: {.column-margin}
+![](images/svg/vol2_introduction_coordination_tax.svg){width="100%" fig-alt="A single horizontal bar of one training step, 96 percent filled by an amber communication segment, with a thin gray compute sliver of 4 percent at the left."}
+
+*Communication dominates this illustrative step with fixed local compute time and no overlap.*
+:::
 
 ```{python}
 #| echo: false
@@ -1074,7 +1203,7 @@ Performance improvements follow predictable patterns, but the right design actio
 
 ```{python}
 #| echo: false
-import numpy as np
+import NumPy as np
 from binder.tools.figures import style as book_style
 
 fig, ax, COLORS, plt = book_style.setup_plot(figsize=(8, 4.2))
@@ -1127,7 +1256,7 @@ plt.close()
 
 ```{python}
 #| echo: false
-import numpy as np
+import NumPy as np
 from binder.tools.figures import style as book_style
 
 fig, ax, COLORS, plt = book_style.setup_plot(figsize=(8, 4.5))
@@ -1458,11 +1587,11 @@ This exposed transfer cost explains why distributed training systems optimize co
 
 Routine failure, the other consequence of distribution, was already quantified at the scale moment. Under the opening example's assumptions the job meets a hardware failure every few hours, so checkpointing, replacement capacity, and automated recovery must keep each interruption short. The sheer size of this distributed architecture amplifies these challenges, forcing us to confront a new set of strict physical, logical, and societal constraints.
 
-## Constraints of Scale {#sec-vol2-introduction-constraints-scale}
+### Constraints of Scale {#sec-vol2-introduction-constraints-scale}
 
 The three walls describe where performance binds; the constraints behind them are broader. The machine learning fleet operates under three categories of irreducible constraint: physical (the memory, network, and energy walls themselves, plus the reliability gap that opens as fleet size grows), logical (distributed systems face impossibility results like the CAP theorem), and societal (scale amplifies the impact of every technical decision). For an initial C$^3$ diagnosis, the distinctions matter because a slow step may reflect a communication limit or coordination loss, while an otherwise fast design may exceed its energy or governance budget. The formal time decomposition follows after these examples establish what it must account for.
 
-### The reliability gap {#sec-vol2-introduction-reliability-gap}
+#### The reliability gap {#sec-vol2-introduction-reliability-gap}
 
 High individual-component availability does not guarantee high availability for a tightly coupled fleet. This distinction opens the **reliability gap**\index{Reliability gap!definition}: components that are reliable in isolation do not imply that every component required by an unreplicated job will be available simultaneously. For a `{python} Gpt4TrainingScenario.gpt4_gpus_count_str`-GPU job that can make progress only while every GPU is available, @eq-reliability-gap multiplies the component availabilities under an independence assumption to give the probability that all required components are available at the same instant ($A_{\text{all}}$):
 
@@ -1529,7 +1658,7 @@ If each node has an illustrative `{python} ReliabilityGap.node_availability_str`
 
 ```{python}
 #| echo: false
-import numpy as np
+import NumPy as np
 from binder.tools.figures import style as book_style
 
 fig, ax, COLORS, plt = book_style.setup_plot(figsize=(8, 4.5))
@@ -1624,7 +1753,7 @@ The collapse zone isolated in @fig-reliability-gap-collapse makes the architectu
 ↪ The shift from keeping every component running to a fleet that recovers automatically when components fail is developed in @sec-fault-tolerance-reliability.
 :::
 
-### Communication intensity (the CI ratio) {#sec-vol2-introduction-ci-ratio}
+#### Communication intensity (the CI ratio) {#sec-vol2-introduction-ci-ratio}
 
 If arithmetic intensity governs where a single accelerator stalls, **communication intensity (CI)**\index{Communication intensity!definition} governs where a fleet stalls. On a single accelerator, the roofline model\index{Roofline model!compute vs. memory bound} determines whether a kernel is compute-bound or memory-bound. At fleet scale, this analysis elevates to the network.
 
@@ -1656,13 +1785,13 @@ These questions check whether the scale mindset has shifted from local execution
 
 :::
 
-### Distribution complexity and physical boundaries {#sec-vol2-introduction-why-distribution-hard}
+#### Distribution complexity and physical boundaries {#sec-vol2-introduction-why-distribution-hard}
 
 Scale forces distribution: no single machine provides the compute required for the largest models, and no centralized system can collect every data source that global user bases generate. Coordinating computation across physically separated machines connected by finite-bandwidth networks, however, creates constraints that no engineering can eliminate.
 
 The first stressor appears inside data centers, where synchronous training must choose how much consistency to preserve under partitions and failures. The second appears at the edge, where the devices themselves are unreliable, power-limited, and policy-constrained.
 
-#### The CAP theorem reality {#sec-introduction-cap-theorem-reality-f3b0}
+##### The CAP theorem reality {#sec-introduction-cap-theorem-reality-f3b0}
 
 The **CAP theorem**\index{CAP theorem!definition}[^fn-cap-theorem-ml] establishes that an asynchronous distributed system subject to a network partition cannot guarantee both atomic **consistency**\index{Consistency!definition} and **availability**\index{Availability!definition}. **Partition tolerance**\index{Partition tolerance!definition} describes the network condition under which that trade-off applies, not a third interchangeable property that a system can simply discard.
 
@@ -1670,13 +1799,13 @@ The **CAP theorem**\index{CAP theorem!definition}[^fn-cap-theorem-ml] establishe
 
 Under this analogy, synchronous training favors a shared current model state but can halt when a required worker becomes unreachable. Asynchronous training can continue through stragglers or unavailable workers but may use stale model versions. Federated learning similarly accepts temporarily divergent local models so that intermittent edge devices can participate without continuous connectivity.
 
-#### Edge distribution complexity {#sec-introduction-edge-distribution-complexity-71e9}
+##### Edge distribution complexity {#sec-introduction-edge-distribution-complexity-71e9}
 
 The coordination challenges discussed so far assume data-center distribution, where machines run in managed facilities. At the network edge, these challenges intensify along every dimension.
 
 Billions of smartphones and IoT devices operate in uncontrolled environments with unreliable connectivity and limited power. Privacy, consent, or policy constraints may prevent raw data from leaving the device, making federated learning a natural architecture [@mcmahan2017communication]. Intermittent connectivity requires a participation policy, which may select currently available devices for a round or admit delayed updates under stated rules. Keeping raw data local does not by itself protect information exposed through model updates. Device budgets and the threat model determine whether additional compression, privacy mechanisms, or local execution are appropriate.
 
-### Governance and systemic risk at scale {#sec-vol2-introduction-why-governance-matters}
+#### Governance and systemic risk at scale {#sec-vol2-introduction-why-governance-matters}
 
 ::: {.column-margin}
 ![](images/svg/vol2_introduction_margin_003.svg){width="100%" fig-alt="One technical bug fanning out to user or system nodes."}
@@ -1697,7 +1826,7 @@ The same control plane must make the fleet auditable. Systems operating at scale
 Beyond legal compliance, the machine learning fleet carries ethical obligations. Recommendation algorithms shape public discourse; hiring algorithms affect livelihoods. Harmful outcomes can accumulate without a crash log. Responsible AI\index{Responsible AI!at scale} turns fairness, transparency, and accountability requirements into operational invariants\index{Invariant!responsible AI} with defined evidence, owners, and responses. A violation may require withholding a release, routing affected decisions to review, or suspending an unsafe operation; the response must contain the relevant harm. Together, these physical, logical, and societal constraints define the operating envelope of the fleet. Turning them into actionable systems decisions requires a diagnostic taxonomy that can isolate whether execution time is lost to local arithmetic, wire transit, or orchestration overhead.
 
 
-### Sustainability and cost implications {#sec-vol2-intro-sustainability-cost-implications-0473}
+#### Sustainability and cost implications {#sec-vol2-intro-sustainability-cost-implications-0473}
 
 Scaling laws reveal performance pathways while exposing rapidly escalating resource demands. As models expand, training and deployment costs grow disproportionately, creating tension between performance gains and system efficiency. Training the largest models demands distributed infrastructures comprising hundreds or thousands of accelerators, consuming tens of thousands of GPU-days and millions of kilowatt-hours of electricity.
 
@@ -1932,146 +2061,6 @@ Read the three archetypes as constraint probes, not as a catalog of model famili
 
 : **Lighthouse archetypes at scale**: The three canonical workloads in representative diagnostic regimes, with the fleet-scale challenge each raises. These are constraint probes, not invariant bottleneck assignments; workload, partitioning, topology, and overlap determine the binding cost. The MobileNet row describes the local device envelope, not the bottleneck of a complete federated round. {#tbl-vol2-lighthouse-archetypes}
 
-## The C$^3$ Taxonomy and Foundations of Scale {#sec-vol2-introduction-c-cube}
-
-An idle accelerator does not identify its own bottleneck. It may be waiting for local operands, a gradient transfer, or a failed peer. The C$^3$ lens introduced at the scale moment separates these explanations and gives the preceding examples a common diagnostic language. On a single machine, diagnosing performance follows the **Data · Algorithm · Machine (D·A·M) taxonomy**\index{D·A·M taxonomy!definition}. In that framework, Data\index{D·A·M taxonomy!data} governs what information the model learns from; the Algorithm\index{D·A·M taxonomy!algorithm}\index{Algorithm!D·A·M taxonomy} defines the mathematical operations to execute; and the Machine\index{D·A·M taxonomy!machine} supplies the silicon and memory hierarchy executing those operations.
-
-::: {.column-margin .margin-pointer}
-↪ The D·A·M taxonomy as a complete single-node framework, with its diagnostic summary, roofline bound, and scorecard, is developed in @sec-appdx-dam-taxonomy.
-:::
-
-When workloads stretch across thousands of interconnected nodes, the execution bottleneck shifts. Datacenter hardware is procured and cabled around three physical pillars: Compute, Network, and Storage. At runtime, however, distributed execution spends wall-clock time in three distinct operational dimensions: Compute ($C_1$), Communication ($C_2$), and Coordination ($C_3$). Together, they form the C$^3$ taxonomy\index{C³ taxonomy!operational dimensions}.
-
-Storage is not absent from this runtime model; rather, storage serves as the persistent physical substrate spanning all three dimensions. It acts as an extension of the node memory hierarchy in Compute ($C_1$), a high-throughput streaming pipeline across Communication ($C_2$), and the durable checkpointing engine required for fault-tolerant Coordination ($C_3$).
-
-Each dimension leaves different evidence. Suppose a training job's step time grows by half after its cluster doubles. If time inside each node's kernels grew while their model FLOPs utilization (MFU) fell and memory-bandwidth counters saturated, local execution is responsible; if link utilization and collective timing rose, transfers are; if barrier waiting and recovery records grew, coordination is. The three diagnoses call for different interventions, and optimizing the wrong mechanism leaves the end-to-end bottleneck in place.
-
-As in single-machine systems, the governing limit is the *binding constraint*: the bottleneck whose relaxation yields an end-to-end reduction in training time or serving latency. The C$^3$ taxonomy is therefore an operational diagnostic loop: identify the binding axis, apply the appropriate systems intervention, and remeasure, because relaxing one limit frequently shifts the bottleneck to another.
-
-::: {#dfn-introduction-c3-taxonomy .callout-definition title="The C³ taxonomy"}
-
-***C$^3$ taxonomy***\index{C³ taxonomy!definition} is a diagnostic framework that classifies distributed machine learning execution time and system bottlenecks along three operational dimensions: Compute ($C_1$, the math), Communication ($C_2$, the wire), and Coordination ($C_3$, the logic). The goal is to identify which dimension binds fleet-scale performance.
-
-1.  **Significance**: The diagnostic power is concrete even before inspecting complex distributed traces. If accelerators are computing at low MFU because tensor cores starve for local operands or un-fused kernels, the binding axis is Compute ($C_1$). If accelerators sit idle waiting for AllReduce gradient transfers or activation tensors across the network fabric, the binding axis is Communication ($C_2$). If progress halts due to straggler-induced barrier waiting, node recovery rollbacks, or gang scheduling preemptions, the binding axis is Coordination ($C_3$).
-2.  **Distinction**: Unlike data center procurement categories (Compute, Network, Storage), which classify physical hardware assets, the C$^3$ taxonomy classifies runtime execution cost. Storage does not execute model arithmetic; rather, it serves as the persistent physical substrate across all three dimensions (local NVMe in $C_1$, remote dataset streaming in $C_2$, and durable checkpointing in $C_3$).
-3.  **Common pitfall**: Treating the three dimensions as independent variables. Upgrading to faster accelerators ($C_1$) often converts a compute-bound job into a communication-bound job ($C_2$). Sharding model states to eliminate memory redundancy ($C_1$) increases collective communication volume ($C_2$) and state coordination complexity ($C_3$). The dimensions move together.
-
-:::
-
-The three dimensions specify what to measure before selecting an intervention. Their descriptions below locate familiar local costs alongside the new costs of distribution.
-
-### The three dimensions of the fleet {#sec-vol2-introduction-three-dimensions}
-
-#### Node compute substrate ($C_1$) {#sec-vol2-introduction-dim-compute}
-
-Compute ($C_1$, the math)\index{C³ taxonomy!compute} captures execution within the server node, including arithmetic units, memory, and local Non-Volatile Memory Express (NVMe) storage.
-
-The memory wall\index{Memory wall!in compute axis} binds this axis when operands cannot reach arithmetic units fast enough. Improving **model FLOPs utilization (MFU)**\index{Model FLOPs Utilization!definition} then requires reducing local data movement, for example through operator fusion, rather than merely increasing peak arithmetic throughput.
-
-::: {.column-margin .margin-pointer}
-↪ The memory wall, from high-bandwidth memory (HBM) bandwidth to the roofline model that locates it for one accelerator, is developed in @sec-compute-memory-wall.
-:::
-
-#### Network communication backbone ($C_2$) {#sec-vol2-introduction-dim-comm}
-
-Communication ($C_2$, the wire)\index{C³ taxonomy!communication} captures data movement between worker devices, both within and across nodes. It includes scale-up fabrics inside a server and scale-out networks between servers.
-
-This traffic includes gradients, activations, and dataset shards. Finite bisection bandwidth\index{Bisection bandwidth!in communication axis} can expose a communication tax ($T_{\text{comm}}$) that leaves accelerators waiting for remote data. Reducing bytes transferred or overlapping transfers with useful work can reduce that tax.
-
-#### Orchestration coordination layer ($C_3$) {#sec-vol2-introduction-dim-coord}
-
-Coordination ($C_3$, the logic)\index{C³ taxonomy!coordination} captures the software control plane, synchronization protocols, and state-management mechanisms that bind thousands of separate, failing machines into a coherent distributed computer.
-
-Thread synchronization and kernel launches already impose local coordination costs; distribution adds network and failure boundaries. Schedulers, barriers, and checkpointing must manage reliability collapse\index{Reliability collapse!in coordination axis} ($A_{\text{all}} = (A_{\text{component}})^N$) and **straggler amplification**\index{Straggler amplification!definition}, where a synchronous job waits for its slowest required participant. The objective is **goodput**\index{Goodput!definition}, the rate of useful training progress after wasted and repeated work are accounted for. Overlap where dependencies permit and bounded recovery rollback improve that rate.
-
-### Projection from D·A·M to C$^3$ {#sec-vol2-introduction-projection}
-
-The single-machine D·A·M taxonomy and the fleet-scale C$^3$ taxonomy operate in tandem. D·A·M describes the workload: the *nouns* of the system (the training data, the executed algorithm, the hardware substrate). The C$^3$ taxonomy describes the execution tax: the *verbs* of the fleet (computing the math, communicating the results, coordinating the state). The C$^3$ taxonomy projects\index{C³ taxonomy!projection from D·A·M}\index{D·A·M taxonomy!workload projection} that workload onto a distributed fleet.
-
-Stretching an algorithm across nodes creates communication ($C_2$), such as the activation and gradient exchanges that tensor and pipeline parallelism add between partitions of one model. Stretching data across nodes also moves shards and gradients over the fabric ($C_2$), as when AllReduce synchronizes data-parallel replicas, and it requires coordination ($C_3$) through distributed samplers, gradient-aggregation barriers, and non-blocking checkpointing. Finally, managing hardware faults across a warehouse-scale machine requires orchestration and dynamic node recovery ($C_3$). Fleet-scale ML systems engineering requires solving the cross-products of D·A·M and C$^3$ rather than addressing each dimension in isolation.
-
-### The C$^3$ intersection landscape {#sec-vol2-introduction-c3-landscape}
-
-The dimensions interact at their pairwise intersections\index{C³ taxonomy!pairwise intersections}, where an intervention along one axis alters costs across another. At the intersection of compute and communication ($C_1 \cap C_2$), overlapping transfers with arithmetic can hide network latency, but only while independent computation remains available. Between compute and coordination ($C_1 \cap C_3$), checkpointing preserves progress against failure to maximize fleet goodput, yet it consumes execution resources; its frequency and placement trade present overhead against future recovery loss. Across communication and coordination ($C_2 \cap C_3$), collective synchronization depends jointly on transfer completion and participant readiness, so faster physical links alone cannot eliminate straggler waiting.
-
-At the center ($C_1 \cap C_2 \cap C_3$), all three constraints converge simultaneously. Partitioning a model determines both which device computes each operation and what information must cross the network; recovering a failed partition requires restoring the corresponding shared state. These dependencies explain why parallelism, state sharding, and serving policies must be designed together.
-
-@Fig-c3-taxonomy diagrams this co-design framework as three intersecting operational domains—Compute ($C_1$), Communication ($C_2$), and Coordination ($C_3$)—mapping the Fleet Law step terms contributed by each dimension alongside the pairwise latency-hiding, goodput, and synchronization interfaces that converge at the central discipline of fleet ML systems engineering.
-
-::: {#fig-c3-taxonomy fig-env="figure" fig-pos="htb" fig-cap="**The C$^3$ Intersection Landscape**: Each circle is one operational dimension (Compute, $C_1$, the node substrate; Communication, $C_2$, the network backbone; Coordination, $C_3$, the orchestration layer), labeled with the Fleet Law term it contributes to step time. Each pairwise lens names the interaction between two dimensions: hiding network latency behind computation, maximizing fleet goodput against failure, and synchronizing collectives. At the center, where all three meet, is fleet ML systems engineering." fig-alt="Three overlapping circles labeled Compute C1 (node substrate, T compute over N), Communication C2 (network backbone, T comm of N), and Coordination C3 (orchestration layer, T sync of N). The pairwise overlaps are labeled hiding network latency (C1 and C2), maximizing fleet goodput (C1 and C3), and collective synchronization (C2 and C3). A box at the center, where all three overlap, reads fleet ML systems engineering."}
-![](images/svg/c3-taxonomy.svg){width="90%"}
-:::
-
-The C$^3$ Venn diagram in @fig-c3-taxonomy organizes competing explanations for the same observed delay. A diagnosis may begin with one dimension or with a coupled mechanism, such as checkpoint traffic delaying a collective. The evidence determines which interaction to investigate; the diagram does not prescribe an order in which the dimensions must be optimized.
-
-Surrounding these three operational dimensions are the non-negotiable operating invariants developed across Part IV: the thermodynamic energy and cooling limits that constrain data centers, the adversarial security and differential privacy guarantees required of distributed pipelines, the robustness against silent corruption and distribution shift, and the systemic governance, auditing, and safety invariants essential when operating at societal scale. The C$^3$ figure is an orientation across all sixteen chapters ahead: first diagnose which intersection binds, then intervene.
-
-### The Fleet Law {#sec-vol2-introduction-fleet-law}
-
-The C$^3$ intersection landscape defines *where* distributed execution spends time and where trade-offs bite. The Fleet Law turns that diagnostic map into a first estimate of distributed step time. Its terms are a simplified accounting model, so a prediction must state how work is divided and which costs overlap. On a single machine, execution time is governed by the iron law of performance, $T = \DataVolume/\Bandwidth + O/(\PeakRate \cdot \EfficiencyHw) + \Latency$, decomposing into data movement, computation, and overhead. At fleet scale, that single-machine view no longer suffices. @Eq-fleet-law establishes the **Fleet Law**\index{Fleet law!definition}\index{Iron law of scale|see{Fleet law}}, which decomposes the idealized distributed training step into the terms of the C$^3$ engine:
-
-$$ \DistributedStepTime = \frac{\IronlawTermTimesCompute}{N} + \CommunicationTime + \SynchronizationTime - \OverlappedTime $$ {#eq-fleet-law}
-
-Each term in the Fleet Law maps directly onto a region of the C$^3$ landscape in @fig-c3-taxonomy:
-
-*   $\frac{\IronlawTermTimesCompute}{N}$ is the Compute ($C_1$) term, assuming ideally divisible local arithmetic for a fixed workload distributed across $N$ devices.
-*   $\CommunicationTime$ is the Communication ($C_2$) term, capturing the wire transit time moving gradients, activations, and parameter shards across the network fabric.
-*   $\SynchronizationTime$ is the Coordination ($C_3$) term, capturing time consumed by barrier semantics, straggler waiting, cluster scheduling decisions, and failure recovery.
-*   $\OverlappedTime$ is the Co-Design ($C_1 \cap C_2$, $C_1 \cap C_3$, $C_2 \cap C_3$) term, representing communication or coordination hidden behind useful compute via techniques such as interleaving forward and backward work across pipeline stages, running transfers on separate execution streams, and writing checkpoints asynchronously.
-
-@Fig-fleet-law-step aligns the execution timelines of an identical workload running on $N$ versus $2N$ devices across dual compute and network lanes. While doubling device count cuts the local compute duration ($\IronlawTermTimesCompute/2N$) in half, communication and barrier synchronization persist, and the shortened compute window compresses the gray overlap interval ($\OverlappedTime$)—leaving total step time $T_{\text{step}}(2N)$ well to the right of the dashed ideal half-step bound.
-
-::: {#fig-fleet-law-step fig-env="figure" fig-pos="htb" fig-cap="**Anatomy of a Fleet Law step**: Each row is one training step for the same workload, with local computation on the upper lane and communication and synchronization on the lower lane. Read the step length from the bracket, not from any single bar: overlap (gray band) removes only the transfer time that runs beneath compute, so doubling the devices halves $\IronlawTermTimesCompute/N$ yet leaves $T_{\text{step}}(2N)$ well short of the ideal half-length step (dashed line). Bar lengths are illustrative, not measured." fig-alt="Two timelines. Top, N devices: a long blue compute bar, and on a second lane an amber communication bar that starts under the end of the compute bar, followed by a violet synchronization bar; a bracket spans the whole step. Bottom, 2N devices: a compute bar half as long, a slightly longer communication bar, a longer synchronization bar, and a shorter bracket that ends well to the right of a dashed line marking half the original step."}
-![](images/svg/fleet-law-step.svg)
-:::
-
-Weak scaling, load imbalance, memory-capacity changes, and algorithmic changes require modifying these terms rather than treating $\IronlawTermTimesCompute/N$ as invariant. Measurements must also separate transfer from coordination time: a barrier interval that includes an unfinished transfer cannot be charged in full to both terms. Subtract only overlap supported by the execution timeline. @Eq-fleet-efficiency rewrites this decomposition as the compute-time fraction, defined as the fraction of wall-clock time spent on useful math:
-
-$$ \UsefulComputetimeFraction = \frac{\IronlawTermTimesCompute/N}{\DistributedStepTime} $$ {#eq-fleet-efficiency}
-
-This decomposition is a diagnostic instrument. When $\UsefulComputetimeFraction$ drops below 0.5, more than half the step is spent outside useful local arithmetic. The C$^3$ taxonomy identifies where the time goes: if $\CommunicationTime$ dominates, upgrade interconnects or overlap communication with computation; if $\SynchronizationTime$ dominates, consider asynchronous methods or reduce barrier frequency; if $\IronlawTermTimesCompute/N$ dominates, local arithmetic sets the step time. The **displacement of overhead**\index{Displacement of overhead!definition} is a diagnostic heuristic: reducing one overhead can relocate cost among the three dimensions. Asynchronous training removes some coordination barriers but introduces gradient staleness; pipeline parallelism can reduce some communication exposure but adds bubble time, the intervals in which pipeline stages sit idle waiting for work.
-
-The compute-time fraction describes one configuration. A production team also needs a scalar that says whether extra devices are shortening the training step or merely increasing coordination overhead. The scaling efficiency\index{Scaling efficiency!fleet evaluation} ($\ScalingEfficiency$) of the fleet is the ratio of ideal parallel step time to actual step time:
-$$ \ScalingEfficiency = \frac{\SingledeviceTimeOne}{N \times T_N} $$
-where $\SingledeviceTimeOne$ is the single-device time for the same work and $\NdeviceTime = \DistributedStepTime$ is the step time on $N$ devices.
-
-::: {.column-margin .margin-pointer}
-↪ The component decomposition that maps each term of $\DistributedStepTime$ to measurable activities is developed in @sec-appdx-c3-taxonomy-component-decomposition.
-:::
-
-::: {#psp-introduction-amdahls-distributed-pitfall .callout-perspective title="Amdahl's distributed pitfall"}
-
-The Fleet Law applies Amdahl's reasoning [@amdahl1967] to a strong-scaling experiment: a fixed amount of useful work is divided across more devices while communication and coordination terms are measured for that configuration. A common shortcut reads a measured 20 percent network share as a 5$\times$ speedup ceiling, but Amdahl's bound applies only if that 20 percent of the original workload remains irreducibly serial as compute is accelerated. A network share measured at one device count is not automatically invariant; changing the partition, topology, collective algorithm, or overlap can change both its absolute time and its fraction of the step. The Fleet Law therefore diagnoses the scaling limit of a stated workload and configuration rather than asserting a universal network fraction.
-
-:::
-
-Google's ML Productivity Goodput\index{Goodput!ML productivity metric} provides a complementary view of fleet efficiency [@wongpanich2025fleet]. This Goodput\index{Goodput!productivity decomposition} is a normalized productivity measure composed of three multiplicative factors, rather than the useful-progress rate introduced earlier. **Program goodput**\index{Program Goodput!definition} ($\MlProductivityGoodputFactorsProgram$) measures execution efficiency during productive work; **runtime goodput**\index{Runtime Goodput!definition} ($\MlProductivityGoodputFactorsRuntime$) measures productive progress retained from allocated resources after runtime overhead and lost work; and **scheduling goodput**\index{Scheduling Goodput!definition} ($\MlProductivityGoodputFactorsScheduling$) measures whether a workload has its required resources available together. These factors cut across C$^3$ rather than extending the Fleet Law. Communication overlap can improve program goodput, while checkpointing and recovery affect runtime goodput but belong to Coordination in the Fleet Law. Productivity factors locate losses across the execution lifecycle; C$^3$ identifies the mechanisms responsible for them.
-
-The Fleet Law, the compute-time fraction, and scaling efficiency together describe the time side of fleet efficiency\index{Efficiency!distributed}. They ask how much of each distributed step remains useful compute after communication, synchronization, and overlap are accounted for. Fleet efficiency also has an energy side\index{Energy!fleet consumption metric}\index{Efficiency!energy dimension}, because every exposed transfer and every idle accelerator still draws power.
-
-### The energy-scale invariant {#sec-introduction-energyscale-invariant-a0d6}
-
-While the Fleet Law accounts for time, the **energy-scale invariant**\index{Energy-scale invariant!definition} requires a consistent energy-accounting boundary when comparing fleet designs. What the invariant holds fixed is the accounting boundary, not any particular efficiency value. @Eq-energy-scale-invariant defines **fleet energy productivity**\index{Fleet energy productivity!definition} ($\FleetEnergyProductivity$), measured in FLOP/J, within a simplified operational boundary:
-
-$$ \FleetEnergyProductivity = \frac{\UsefulModelFlops}{E_{\text{device}} + E_{\text{cooling}} + E_{\text{network}}} $$ {#eq-energy-scale-invariant}
-
-where $\UsefulModelFlops$ is useful work in FLOPs. The three energy terms cover compute devices, attributable cooling, and the network fabric, without counting the same consumption twice. Host, storage, and other facility loads must be added explicitly for a complete operational estimate; embodied impacts lie outside this boundary. Comparisons must use the same boundary and useful-work definition. The resulting Pareto frontier\index{Pareto frontier!time-energy trade-off} balances minimizing $T_{\text{step}}$ with maximizing $\FleetEnergyProductivity$.
-
-::: {.column-margin .margin-pointer}
-↪ Power usage effectiveness, the ratio of total facility energy (including cooling and power conversion) to IT energy, is developed across data-center generations and cooling technologies in @sec-appdx-fleet-foundations-energy-hierarchy.
-:::
-
-An illustrative, communication-heavy GPT-3-class synchronization scenario connects the time and energy accounts: exposed Ring AllReduce traffic delays computation and consumes network energy.
-
-::: {.column-margin}
-![](images/svg/vol2_introduction_coordination_tax.svg){width="100%" fig-alt="A single horizontal bar of one training step, 96 percent filled by an amber communication segment, with a thin gray compute sliver of 4 percent at the left."}
-
-*Communication dominates this illustrative step with fixed local compute time and no overlap.*
-:::
-
-```{python}
-#| echo: false
-#| label: gpt3-sync-tax
 # ┌─────────────────────────────────────────────────────────────────────────────
 # │ GPT-3 SYNCHRONIZATION AND ENERGY TAX (LEGO)
 # ├─────────────────────────────────────────────────────────────────────────────
@@ -2082,6 +2071,10 @@ An illustrative, communication-heavy GPT-3-class synchronization scenario connec
 # │       for GPT-3 synchronization across IB HDR vs 100 Gb/s Ethernet.
 # │ Show: "~700" GB per-endpoint sync size, "~4%" IB efficiency,
 # │       "~2%" Ethernet efficiency, "~196" J per endpoint synchronization,
+```{python}
+#| echo: false
+#| label: gpt3-sync-tax-reference
+
 # │       and "~196" MJ for 1M endpoint synchronizations.
 # │ How: sync_size = 2 × params × 2 bytes; energy = sync_bits ×
 # │      Systems.NetworkEnergy.InfiniBandEnergyPerBit.

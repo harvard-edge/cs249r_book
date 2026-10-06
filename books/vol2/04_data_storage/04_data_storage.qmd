@@ -1267,66 +1267,6 @@ GPU utilization $(\EfficiencyHw)$ is the fraction of step time spent in computat
 
 A practical concern at this tier is SSD endurance\index{SSD endurance!checkpoint write volume}. NAND flash memory can sustain a limited number of write-erase cycles before the cells degrade. Enterprise NVMe drives are rated for 1 to 3 drive writes per day (DWPD) over a 5-year lifespan. For a `{python} NvmeTierContext.nvme_drive_capacity_tb_str` drive at 1 DWPD, this means the drive can absorb `{python} NvmeTierContext.nvme_drive_capacity_tb_str` of writes per day, or roughly `{python} NvmeTierContext.drive_lifetime_writes_pb_str` total over its lifetime. ML training workloads are predominantly read-heavy (the dataset is written once and read many times), which is favorable for SSD endurance. However, checkpoint writes can be intensive: if each node saves its roughly `{python} NvmeTierContext.ckpt_node_share_gb_str` share of the running example's checkpoint every `{python} NvmeTierContext.checkpoint_interval_str`, that is about `{python} NvmeTierContext.ckpt_node_daily_writes_tb_str` per day of checkpoint writes spread across the node's drives, well within a four-drive node's 1 DWPD budget. The risk emerges when local NVMe is used as a staging buffer for both checkpoint writes and dataset caching: the combined write volume from initial dataset staging plus repeated checkpoint saves must remain within the drive's endurance rating.
 
-### Data formats for training {#sec-storage-data-formats}
-
-Local NVMe can stream `{python} NvmeTierContext.raid0_bw_gb_per_s_str` per node, but packaging determines how much of that bandwidth reaches the loader. The same multi-terabyte dataset stored in different formats can yield I/O throughput that differs by over 100$\times$ on identical hardware, because each format charges a different access cost: per-file metadata, unnecessary feature reads, or sequential shard traversal. A directory containing one JPEG per sample pays a separate file open and metadata lookup for every image. At roughly 10 to 50 microseconds per open in the kernel's file-system layer, a node reading 8,000 images per second spends 80 to 400 ms of CPU time per second on opens alone, before it decodes a single byte. On a shared file system the same operations also queue at a metadata service, the fleet-scale form of this cost that @sec-storage-tier3-pfs develops as the small file problem. A standard ImageNet training pipeline makes the cost of the wrong format visible.
-
-```{python}
-#| echo: false
-# ┌── LEGO ───────────────────────────────────────────────
-# │ Context: ImageNet bottleneck analysis callout.
-# │ Goal: Localize the NVMe random-access latency recap used in the callout.
-from mlsysim import Hardware
-from mlsysim.core.units import microsecond
-from mlsysim.fmt import fmt_time
-
-class ImageNetNvmeLatency:
-    nvme_latency = Hardware.Tech.Storage.NvmeGen4.latency
-
-    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
-    nvme_latency_us_str = fmt_time(nvme_latency, microsecond, precision=0, commas=False)
-```
-
-::: {#nbk-data-storage-imagenet-bottleneck-analysis .callout-notebook title="The ImageNet bottleneck analysis"}
-
-**Problem**: A ResNet-50 training job on ImageNet\index{ImageNet!bottleneck analysis} (`{python} NVMeTierCalcs.imagenet_images_m_str`, ~`{python} NVMeTierCalcs.imagenet_avg_kb_str` average) targets `{python} NVMeTierCalcs.images_per_s_str`. The question is whether to use individual JPEG files on an HDD or NVMe.
-
-**Math**:
-
-1.  **Raw Bandwidth**: `{python} NVMeTierCalcs.images_per_s_str` $\times$ `{python} NVMeTierCalcs.img_size_kb_str` = `{python} NVMeTierCalcs.raw_bw_mb_per_s_str`.
-2.  **HDD reality**: A 7200 RPM hard disk drive (HDD) delivers `{python} NVMeTierCalcs.hdd_iops_str` at random reads\index{HDD!random IOPS bottleneck}. Sustaining `{python} NVMeTierCalcs.images_per_s_str` requires `{python} NVMeTierCalcs.hdd_slowdown_factor_mult_str` more IOPS than the disk provides.
-3.  **Result**: Shuffling individual files on an HDD will starve the GPU, capping utilization at about `{python} NVMeTierCalcs.hdd_util_ceiling_pct_str` before decode, seek, and file-system overheads.
-
-**Systems insight**: The pipeline must either use NVMe (~`{python} ImageNetNvmeLatency.nvme_latency_us_str` random access, three orders of magnitude faster than object storage) or convert the dataset to a sequential format (TFRecord\index{TFRecord!sequential format}/WebDataset) to achieve sequential throughput.
-
-:::
-
-The first format choice is the record layout. Row-oriented formats\index{Row-oriented format!per-sample metadata overhead}, such as CSV or JSON lines, store successive records together and are easy to inspect and debug. They can stream many records from one file, although parsing text and reading unused fields consume CPU cycles and bandwidth.
-
-A second choice solves a different storage problem. Columnar formats\index{Columnar format!feature selection} like Apache Parquet\index{Apache Parquet!columnar storage} and Apache Arrow\index{Apache Arrow!in-memory format} avoid unnecessary reads when tabular features can be selected before transfer. They organize data by column rather than by row, which allows for excellent compression as data within a column is typically of the same type and has lower entropy. Column pruning lets the reader fetch only required features. Predicate pushdown\index{Predicate pushdown!column pruning} applies filters at the storage reader and can skip groups of records using their metadata, further reducing unnecessary I/O. These formats are well-suited for tabular ML tasks and feature engineering but are less natural for unstructured data like images or audio, which are treated as atomic blobs.
-
-A third choice addresses the training access pattern directly. Sequential streaming formats\index{Streaming format!sequential access} reduce per-sample metadata to the cost of opening a shard. TFRecord, Mosaic's StreamingDataset format [@mosaicStreamingMainConcepts], and WebDataset[^fn-webdataset-tar-streaming]\index{WebDataset!tar archive format} group many samples into large, contiguous binary files called shards. WebDataset uses standard `tar` archives, in which each sample keeps its image, label, and metadata entries while the loader streams the archive in order. A data loader opens a single shard and streams its contents sequentially, amortizing the open over thousands of samples. The `tar`-based formats have the added advantage of being valid targets for HTTP byte-range requests, making them ideal for streaming data directly from object storage without downloading the entire file first.
-
-[^fn-webdataset-tar-streaming]: **WebDataset**\index{WebDataset!streaming format}: A data format that repurposes standard POSIX tar archives for ML training. The design insight is that tar's sequential header-then-data layout, invented in 1979 for tape backup, maps perfectly onto the streaming access pattern that ML data loaders need. Because tar archives are valid HTTP byte-range targets, a data loader can stream training samples directly from object storage without staging them on a parallel file system or local NVMe first.
-
-A key trade-off within streaming formats is the presence of an index\index{Data format!index trade-offs}. TFRecord readers often rely on a separate index file that records each sample's byte offset within a shard, while HDF5 embeds its index in the file itself. This enables efficient random access within a shard but introduces a metadata dependency: the index must be read and held in memory. WebDataset is indexless, because each record in the `tar` archive contains its own header specifying its size, allowing for purely sequential streaming without any external metadata. The trade-off is that indexless formats cannot efficiently seek to an arbitrary sample within a shard, a capability that matters for curriculum learning or active learning workloads that require nonsequential data access.
-
-Compression integration\index{Data format!compression integration} also varies across formats, and it trades storage bytes against CPU decoding work. Parquet integrates compression at the column level, exploiting type homogeneity for high ratios. WebDataset and TFRecord typically leave compression to the individual sample: a WebDataset of images stores already-compressed JPEG files, while a text dataset might apply zstd compression per shard, and the host CPU pays for that decompression. Consider two illustrative codecs on the same corpus: a lighter codec compresses 3:1 and produces 1.5 GB/s of decoded output per CPU core, while a denser codec compresses 4:1 and produces 0.5 GB/s per core. These are scenario assumptions, not fixed properties of named codec levels. At the `{python} NvmeTierContext.raid0_bw_gb_per_s_str` local NVMe rate, their potential decoded output rates are `{python} NvmeTierContext.zstd1_eff_bw_gb_per_s_str` and `{python} NvmeTierContext.zstd9_eff_bw_gb_per_s_str`, respectively, provided decoding keeps pace. Sustaining those different output rates requires `{python} NvmeTierContext.light_decode_cores_str` versus `{python} NvmeTierContext.dense_decode_cores_str` cores, so the denser codec needs `{python} NvmeTierContext.decode_core_ratio_mult_str` as many. With fewer cores, decoding limits delivery before storage saturates, so compression is chosen from the measured corpus, decoder, and available CPU budget rather than from the compression ratio alone.
-
-For the running example, the `{python} StorageFuelLineContext.training_tokens_str` token dataset is stored as roughly `{python} NvmeTierContext.tokenized_shard_count_str` shards of `{python} NvmeTierContext.tokenized_shard_gb_str` each in a custom binary format. Each shard contains a small header (token count, vocabulary size, byte order) followed by a contiguous array of 4-byte token IDs. The number of `open()` calls per epoch is therefore the number of shards, not the number of tokens (trillions), an approximately `{python} NvmeTierContext.metadata_reduction_mult_str` reduction in metadata operations that makes streaming from both local NVMe and remote storage feasible at training scale. When staged on POSIX storage such as local NVMe or a parallel file system, the data loader memory-maps the shard and indexes directly into the token array by position, achieving near-peak read bandwidth with zero per-sample metadata overhead. When the same shards are read directly from object storage, the loader uses HTTP ranged GET streaming and an explicit local buffer rather than memory mapping. @Tbl-data-formats compares the format choices by the access cost they impose on the storage path.
-
-| **Format**          |         **Overhead/Sample**          | **Random Access** | **Streaming** | **Compression** |
-|:--------------------|:------------------------------------:|:-----------------:|:-------------:|:---------------:|
-| Individual files    | $\approx 50\ \mu$s (open/stat/close) |        Yes        |      Poor     |     Per-file    |
-| Parquet             |  $\approx 1\ \mu$s (row group seek)  |  Yes (row group)  |      Good     |   Column-level  |
-| TFRecord            |  $\approx 0.1\ \mu$s (index lookup)  |     With index    |   Excellent   |    Per-record   |
-| WebDataset (`tar`)  |           ~0 (sequential)            |         No        |   Excellent   |    Per-sample   |
-| Raw binary (tokens) |                  0                   | Yes (byte offset) |   Excellent   |   None needed   |
-
-: **Data Format Comparison for ML Training**: Per-sample overhead determines whether the storage hardware's bandwidth is realized or wasted on metadata operations. {#tbl-data-formats}
-
-Packaging removes the per-file cost within one node, but no node-local format gives every node the same view of the data. That requirement belongs to the next tier.
-
 ### Tier 3 parallel file systems {#sec-storage-tier3-pfs}
 
 Beyond the single node, the workload requires a shared namespace where all workers can access the same datasets and where durable checkpoints are globally visible. This is the role of the parallel file system\index{Parallel File System!ML infrastructure}.
@@ -1945,6 +1885,111 @@ class PipelineCalcs:
     stall_seq_display_math = fmt_display_math(f"\\text{{Stall \\%}} = \\frac{{{_io_ms:.0f}}}{{{_seq_ms:.0f}}} = " f"{stall_seq_val:.1f}\\%")
     tstep_pipe_display_math = fmt_display_math(f"T_{{\\text{{step}}}} = \\max({_comp_ms:.0f}, {_io_ms:.0f}) = {_pipe_ms:.0f} \\text{{ ms}}")
 ```
+
+```{python}
+#| echo: false
+# ┌── LEGO ───────────────────────────────────────────────
+# │ Context: @sec-storage-complete-path
+from mlsysim import Models
+from mlsysim.fmt import check, fmt, fmt_memory
+
+class CompleteDataPathCheckpoint:
+    gpt3_params = Models.Language.GPT3.parameters
+    training_tokens = ReferenceStats.StorageTrainingCorpus.TrainingTokens
+    compressed_text = ReferenceStats.StorageTrainingCorpus.CompressedSource
+    token_id_bytes = ReferenceStats.StorageTrainingCorpus.TokenIdBytes
+    training_window = ReferenceStats.StorageTrainingCorpus.TrainingWindow
+    checkpoint_interval = ReferenceStats.StorageTrainingCorpus.CheckpointInterval
+    tokenized_text = training_tokens * token_id_bytes
+    ckpt_total = gpt3_params * CHECKPOINT_RESUME_BYTES_PER_PARAM
+    checkpoint_count_val = int((training_window / checkpoint_interval).to("").magnitude)
+    ckpt_fleet_total = ckpt_total * checkpoint_count_val
+    check(checkpoint_count_val == 4320, "30 days at 10-min checkpoint interval should be 4320")
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
+    tokenized_text_tb_str = fmt_memory(tokenized_text, unit=TB, precision=0, commas=False)
+    compressed_text_tb_str = fmt_memory(compressed_text, unit=TB, precision=0, commas=False)
+    ckpt_total_gb_str = fmt_memory(ckpt_total, unit=GB, precision=0, commas=True)
+    checkpoint_count_str = fmt(checkpoint_count_val, precision=0)
+    ckpt_fleet_total_pb_str = fmt_memory(ckpt_fleet_total, unit=PB, precision=1, commas=True)
+```
+
+### The complete data path {#sec-storage-complete-path}
+
+Combining GDS with the multi-tier hierarchy, the complete data path connects the tiers for the running example. At the beginning of the training job, the `{python} CompleteDataPathCheckpoint.tokenized_text_tb_str` serialized shard set, derived from the `{python} CompleteDataPathCheckpoint.compressed_text_tb_str` compressed source corpus, is staged from object storage into the cluster's local NVMe caches, with each node receiving its assigned shard subset during setup. The data loader workers read tokenized shards from NVMe, assemble packed sequences in pinned host DRAM, and transfer those batches to the accelerator. With GDS enabled, token IDs that are already in a GPU-consumable layout can be loaded directly into GPU memory without CPU payload copying; compressed formats still require CPU or GPU decompression before use.
+
+During steady-state training on the host-staged path, CPU data loader workers read from local NVMe and fill a prefetch queue in host DRAM. The GPU receives batches from this queue via PCIe DMA; the supported GDS alternative bypasses that host payload staging. The compute phase (forward pass, backward pass, optimizer step) consumes the batch and updates model state in HBM. Every `{python} StorageFuelLineContext.checkpoint_interval_str`, the training framework captures a consistent checkpoint, writes it to local NVMe through the chosen path, and copies it to the parallel file system in the background. The checkpoint protocol must still establish when all required shards are safe to publish for recovery.
+
+At the end of the training job, the final model checkpoint is promoted from the parallel file system to object storage for long-term retention. The local NVMe copies are deleted during job cleanup. If the model is deployed for inference, it is loaded from object storage into the serving cluster's HBM, completing the lifecycle of data movement through the hierarchy.
+
+The total number of data copies in this lifecycle is instructive. Each training sample traverses: object storage $\to$ NVMe (staging), NVMe $\to$ host DRAM (read), host DRAM $\to$ GPU HBM (transfer). Each checkpoint traverses: GPU HBM $\to$ NVMe (local save), NVMe $\to$ parallel file system (async copy), parallel file system $\to$ object storage (long-term retention). Every copy consumes bandwidth and contributes latency. The engineering goal is to minimize copies on the critical path (the training loop) and tolerate additional copies on noncritical paths (staging and archival). @Fig-storage-complete-data-path maps these dual lifecycles across the tiers, visually distinguishing synchronous critical-path copies (solid arrows) from asynchronous background transfers (dashed arrows). For training inputs moving rightward, the active loop waits only on local promotion into HBM (or the optional GDS bypass); for checkpoints flowing leftward, the exposed pause is confined to the local NVMe save while parallel-file-system replication and archival retention proceed off the critical path.
+
+::: {#fig-storage-complete-data-path fig-env="figure" fig-pos="htb" fig-cap="**The complete data path**: Columns are storage tiers, ordered from the durable object store (left) to accelerator memory (right). Training data moves right and bypasses the parallel file system in this running example; checkpoints return left through it. Solid arrows mark copies the training loop waits on; dashed arrows mark copies that run once per job or in the background." fig-alt="Two rows of tier boxes. Top row, training data: object storage, a dashed arrow to local NVMe, solid arrows to host DRAM and GPU HBM, and an optional bypass arrow from NVMe over host DRAM to GPU HBM. Bottom row, checkpoints: a solid arrow from GPU HBM to local NVMe, then dashed arrows to the parallel file system and to object storage. A key distinguishes solid critical-path arrows from dashed off-path arrows."}
+![](images/svg/complete-data-path.svg)
+:::
+
+Every copy that leaves the node also needs a network, and the choice of network decides whom a storage burst can disturb. Many training nodes carry a small number of storage-facing network adapters on a separate front-end network, in addition to one compute-fabric adapter per accelerator. Routing staging reads and checkpoint copies over that front-end network isolates them from gradient collectives, but it caps each node's storage bandwidth at a few front-end ports. Routing storage over the compute fabric offers far more bandwidth, and remote GDS reads use exactly that RDMA path, but then a checkpoint burst shares switch buffers and spine links with the job's collectives and must be separated by traffic classes. For the running example, each node's fair share of a `{python} StoragePyramidContext.pfs_bw_tb_per_s_str` file system shared by `{python} StoragePyramidContext.pfs_nodes_str` nodes is roughly `{python} StoragePyramidContext.pfs_per_node_bw_gb_per_s_str`, and copying its roughly `{python} NvmeTierContext.ckpt_node_share_gb_str` checkpoint shard within the `{python} StorageFuelLineContext.checkpoint_interval_attr_str` interval needs far less, so a front-end network can carry it; image workloads that stream hundreds of GB/s across the cluster push designs toward the compute fabric.
+
+The volume of data moved during a `{python} StorageFuelLineContext.training_window_attr_str` training run reveals a counterintuitive reality. A single staging copy of the `{python} CompleteDataPathCheckpoint.tokenized_text_tb_str` serialized dataset from object storage to local NVMe accounts for a modest transfer. The checkpointing process, however, generates a vastly larger data stream. With a roughly `{python} CompleteDataPathCheckpoint.ckpt_total_gb_str` checkpoint created every `{python} StorageFuelLineContext.checkpoint_interval_str` across `{python} StorageFuelLineContext.run_nodes_str` nodes for `{python} StorageFuelLineContext.training_window_days_str`, the system produces approximately `{python} CompleteDataPathCheckpoint.checkpoint_count_str` checkpoints, totaling roughly `{python} CompleteDataPathCheckpoint.ckpt_fleet_total_pb_str` of state that must traverse the storage hierarchy. Checkpoint data movement dwarfs training data movement for large models: while the `{python} CompleteDataPathCheckpoint.tokenized_text_tb_str` training dataset might be read a handful of times (once per epoch), the `{python} CompleteDataPathCheckpoint.ckpt_fleet_total_pb_str` of checkpoint data is generated anew, making checkpoint I/O the dominant storage workload. This insight explains why checkpoint staging strategy (write locally, replicate asynchronously) can have a larger impact on overall storage design than training data pipeline optimization for large-model runs. The physical data path dictates where bytes move.
+
+### Data formats for training {#sec-storage-data-formats}
+
+Local NVMe can stream `{python} NvmeTierContext.raid0_bw_gb_per_s_str` per node, but packaging determines how much of that bandwidth reaches the loader. The same multi-terabyte dataset stored in different formats can yield I/O throughput that differs by over 100$\times$ on identical hardware, because each format charges a different access cost: per-file metadata, unnecessary feature reads, or sequential shard traversal. A directory containing one JPEG per sample pays a separate file open and metadata lookup for every image. At roughly 10 to 50 microseconds per open in the kernel's file-system layer, a node reading 8,000 images per second spends 80 to 400 ms of CPU time per second on opens alone, before it decodes a single byte. On a shared file system the same operations also queue at a metadata service, the fleet-scale form of this cost that @sec-storage-tier3-pfs develops as the small file problem. A standard ImageNet training pipeline makes the cost of the wrong format visible.
+
+```{python}
+#| echo: false
+# ┌── LEGO ───────────────────────────────────────────────
+# │ Context: ImageNet bottleneck analysis callout.
+# │ Goal: Localize the NVMe random-access latency recap used in the callout.
+from mlsysim import Hardware
+from mlsysim.core.units import microsecond
+from mlsysim.fmt import fmt_time
+
+class ImageNetNvmeLatency:
+    nvme_latency = Hardware.Tech.Storage.NvmeGen4.latency
+
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
+    nvme_latency_us_str = fmt_time(nvme_latency, microsecond, precision=0, commas=False)
+```
+
+::: {#nbk-data-storage-imagenet-bottleneck-analysis .callout-notebook title="The ImageNet bottleneck analysis"}
+
+**Problem**: A ResNet-50 training job on ImageNet\index{ImageNet!bottleneck analysis} (`{python} NVMeTierCalcs.imagenet_images_m_str`, ~`{python} NVMeTierCalcs.imagenet_avg_kb_str` average) targets `{python} NVMeTierCalcs.images_per_s_str`. The question is whether to use individual JPEG files on an HDD or NVMe.
+
+**Math**:
+
+1.  **Raw Bandwidth**: `{python} NVMeTierCalcs.images_per_s_str` $\times$ `{python} NVMeTierCalcs.img_size_kb_str` = `{python} NVMeTierCalcs.raw_bw_mb_per_s_str`.
+2.  **HDD reality**: A 7200 RPM hard disk drive (HDD) delivers `{python} NVMeTierCalcs.hdd_iops_str` at random reads\index{HDD!random IOPS bottleneck}. Sustaining `{python} NVMeTierCalcs.images_per_s_str` requires `{python} NVMeTierCalcs.hdd_slowdown_factor_mult_str` more IOPS than the disk provides.
+3.  **Result**: Shuffling individual files on an HDD will starve the GPU, capping utilization at about `{python} NVMeTierCalcs.hdd_util_ceiling_pct_str` before decode, seek, and file-system overheads.
+
+**Systems insight**: The pipeline must either use NVMe (~`{python} ImageNetNvmeLatency.nvme_latency_us_str` random access, three orders of magnitude faster than object storage) or convert the dataset to a sequential format (TFRecord\index{TFRecord!sequential format}/WebDataset) to achieve sequential throughput.
+
+:::
+
+The first format choice is the record layout. Row-oriented formats\index{Row-oriented format!per-sample metadata overhead}, such as CSV or JSON lines, store successive records together and are easy to inspect and debug. They can stream many records from one file, although parsing text and reading unused fields consume CPU cycles and bandwidth.
+
+A second choice solves a different storage problem. Columnar formats\index{Columnar format!feature selection} like Apache Parquet\index{Apache Parquet!columnar storage} and Apache Arrow\index{Apache Arrow!in-memory format} avoid unnecessary reads when tabular features can be selected before transfer. They organize data by column rather than by row, which allows for excellent compression as data within a column is typically of the same type and has lower entropy. Column pruning lets the reader fetch only required features. Predicate pushdown\index{Predicate pushdown!column pruning} applies filters at the storage reader and can skip groups of records using their metadata, further reducing unnecessary I/O. These formats are well-suited for tabular ML tasks and feature engineering but are less natural for unstructured data like images or audio, which are treated as atomic blobs.
+
+A third choice addresses the training access pattern directly. Sequential streaming formats\index{Streaming format!sequential access} reduce per-sample metadata to the cost of opening a shard. TFRecord, Mosaic's StreamingDataset format [@mosaicStreamingMainConcepts], and WebDataset[^fn-webdataset-tar-streaming]\index{WebDataset!tar archive format} group many samples into large, contiguous binary files called shards. WebDataset uses standard `tar` archives, in which each sample keeps its image, label, and metadata entries while the loader streams the archive in order. A data loader opens a single shard and streams its contents sequentially, amortizing the open over thousands of samples. The `tar`-based formats have the added advantage of being valid targets for HTTP byte-range requests, making them ideal for streaming data directly from object storage without downloading the entire file first.
+
+[^fn-webdataset-tar-streaming]: **WebDataset**\index{WebDataset!streaming format}: A data format that repurposes standard POSIX tar archives for ML training. The design insight is that tar's sequential header-then-data layout, invented in 1979 for tape backup, maps perfectly onto the streaming access pattern that ML data loaders need. Because tar archives are valid HTTP byte-range targets, a data loader can stream training samples directly from object storage without staging them on a parallel file system or local NVMe first.
+
+A key trade-off within streaming formats is the presence of an index\index{Data format!index trade-offs}. TFRecord readers often rely on a separate index file that records each sample's byte offset within a shard, while HDF5 embeds its index in the file itself. This enables efficient random access within a shard but introduces a metadata dependency: the index must be read and held in memory. WebDataset is indexless, because each record in the `tar` archive contains its own header specifying its size, allowing for purely sequential streaming without any external metadata. The trade-off is that indexless formats cannot efficiently seek to an arbitrary sample within a shard, a capability that matters for curriculum learning or active learning workloads that require nonsequential data access.
+
+Compression integration\index{Data format!compression integration} also varies across formats, and it trades storage bytes against CPU decoding work. Parquet integrates compression at the column level, exploiting type homogeneity for high ratios. WebDataset and TFRecord typically leave compression to the individual sample: a WebDataset of images stores already-compressed JPEG files, while a text dataset might apply zstd compression per shard, and the host CPU pays for that decompression. Consider two illustrative codecs on the same corpus: a lighter codec compresses 3:1 and produces 1.5 GB/s of decoded output per CPU core, while a denser codec compresses 4:1 and produces 0.5 GB/s per core. These are scenario assumptions, not fixed properties of named codec levels. At the `{python} NvmeTierContext.raid0_bw_gb_per_s_str` local NVMe rate, their potential decoded output rates are `{python} NvmeTierContext.zstd1_eff_bw_gb_per_s_str` and `{python} NvmeTierContext.zstd9_eff_bw_gb_per_s_str`, respectively, provided decoding keeps pace. Sustaining those different output rates requires `{python} NvmeTierContext.light_decode_cores_str` versus `{python} NvmeTierContext.dense_decode_cores_str` cores, so the denser codec needs `{python} NvmeTierContext.decode_core_ratio_mult_str` as many. With fewer cores, decoding limits delivery before storage saturates, so compression is chosen from the measured corpus, decoder, and available CPU budget rather than from the compression ratio alone.
+
+For the running example, the `{python} StorageFuelLineContext.training_tokens_str` token dataset is stored as roughly `{python} NvmeTierContext.tokenized_shard_count_str` shards of `{python} NvmeTierContext.tokenized_shard_gb_str` each in a custom binary format. Each shard contains a small header (token count, vocabulary size, byte order) followed by a contiguous array of 4-byte token IDs. The number of `open()` calls per epoch is therefore the number of shards, not the number of tokens (trillions), an approximately `{python} NvmeTierContext.metadata_reduction_mult_str` reduction in metadata operations that makes streaming from both local NVMe and remote storage feasible at training scale. When staged on POSIX storage such as local NVMe or a parallel file system, the data loader memory-maps the shard and indexes directly into the token array by position, achieving near-peak read bandwidth with zero per-sample metadata overhead. When the same shards are read directly from object storage, the loader uses HTTP ranged GET streaming and an explicit local buffer rather than memory mapping. @Tbl-data-formats compares the format choices by the access cost they impose on the storage path.
+
+| **Format**          |         **Overhead/Sample**          | **Random Access** | **Streaming** | **Compression** |
+|:--------------------|:------------------------------------:|:-----------------:|:-------------:|:---------------:|
+| Individual files    | $\approx 50\ \mu$s (open/stat/close) |        Yes        |      Poor     |     Per-file    |
+| Parquet             |  $\approx 1\ \mu$s (row group seek)  |  Yes (row group)  |      Good     |   Column-level  |
+| TFRecord            |  $\approx 0.1\ \mu$s (index lookup)  |     With index    |   Excellent   |    Per-record   |
+| WebDataset (`tar`)  |           ~0 (sequential)            |         No        |   Excellent   |    Per-sample   |
+| Raw binary (tokens) |                  0                   | Yes (byte offset) |   Excellent   |   None needed   |
+
+: **Data Format Comparison for ML Training**: Per-sample overhead determines whether the storage hardware's bandwidth is realized or wasted on metadata operations. {#tbl-data-formats}
+
+Packaging removes the per-file cost within one node, but no node-local format gives every node the same view of the data. That requirement belongs to the next tier.
 
 ## The Data Pipeline Equation {#sec-storage-pipeline-equation}
 
@@ -2935,51 +2980,31 @@ The architectural evolution from CPU-mediated copies to direct storage access re
 ↩ RDMA and kernel-bypass network paths are established in @sec-network-fabrics-rdma.
 :::
 
+The GDS design principle also extends to checkpoint writes\index{GPUDirect Storage!checkpoint write}. A host-staged path transfers checkpoint bytes from GPU HBM through host DRAM to NVMe. A supported direct path can bypass that host staging for a `{python} CompleteDataPathCheckpoint.ckpt_total_gb_str` checkpoint. Removing the copy reduces $\CheckpointWriteTime$ only when that movement contributes to the exposed pause; snapshot consistency, serialization, storage service, and durable publication remain separate requirements.
+
 ```{python}
 #| echo: false
 # ┌── LEGO ───────────────────────────────────────────────
-# │ Context: @sec-storage-complete-path
-from mlsysim import Models
-from mlsysim.fmt import check, fmt, fmt_memory
+# │ Context: Checkpoint section intro — model scale and checkpoint size
+from mlsysim import Models, ReferenceStats
+from mlsysim.core.units import BYTES_ADAM_STATE, BYTES_FP16, BYTES_FP32, GB
+from mlsysim.fmt import check, fmt_memory, fmt_params
 
-class CompleteDataPathCheckpoint:
+class CheckpointModelIntro:
+    # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
     gpt3_params = Models.Language.GPT3.parameters
-    training_tokens = ReferenceStats.StorageTrainingCorpus.TrainingTokens
-    compressed_text = ReferenceStats.StorageTrainingCorpus.CompressedSource
-    token_id_bytes = ReferenceStats.StorageTrainingCorpus.TokenIdBytes
-    training_window = ReferenceStats.StorageTrainingCorpus.TrainingWindow
-    checkpoint_interval = ReferenceStats.StorageTrainingCorpus.CheckpointInterval
-    tokenized_text = training_tokens * token_id_bytes
+    weights_fp16 = gpt3_params * BYTES_FP16
+    master_weights_fp32 = gpt3_params * BYTES_FP32
+    adam_moments = gpt3_params * BYTES_ADAM_STATE
     ckpt_total = gpt3_params * CHECKPOINT_RESUME_BYTES_PER_PARAM
-    checkpoint_count_val = int((training_window / checkpoint_interval).to("").magnitude)
-    ckpt_fleet_total = ckpt_total * checkpoint_count_val
-    check(checkpoint_count_val == 4320, "30 days at 10-min checkpoint interval should be 4320")
+    check(weights_fp16 + master_weights_fp32 + adam_moments == ckpt_total, "Checkpoint component bytes must sum to total.")
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
-    tokenized_text_tb_str = fmt_memory(tokenized_text, unit=TB, precision=0, commas=False)
-    compressed_text_tb_str = fmt_memory(compressed_text, unit=TB, precision=0, commas=False)
+    gpt3_params_b_str = fmt_params(gpt3_params, scale="B", precision=0, commas=False)
     ckpt_total_gb_str = fmt_memory(ckpt_total, unit=GB, precision=0, commas=True)
-    checkpoint_count_str = fmt(checkpoint_count_val, precision=0)
-    ckpt_fleet_total_pb_str = fmt_memory(ckpt_fleet_total, unit=PB, precision=1, commas=True)
+    weights_fp16_gb_str = fmt_memory(weights_fp16, unit=GB, precision=0, commas=False)
+    master_weights_fp32_gb_str = fmt_memory(master_weights_fp32, unit=GB, precision=0, commas=False)
+    adam_moments_gb_str = fmt_memory(adam_moments, unit=GB, precision=0, commas=True)
 ```
-The GDS design principle also extends to checkpoint writes\index{GPUDirect Storage!checkpoint write}. A host-staged path transfers checkpoint bytes from GPU HBM through host DRAM to NVMe. A supported direct path can bypass that host staging for a `{python} CompleteDataPathCheckpoint.ckpt_total_gb_str` checkpoint. Removing the copy reduces $\CheckpointWriteTime$ only when that movement contributes to the exposed pause; snapshot consistency, serialization, storage service, and durable publication remain separate requirements.
-
-### The complete data path {#sec-storage-complete-path}
-
-Combining GDS with the multi-tier hierarchy, the complete data path connects the tiers for the running example. At the beginning of the training job, the `{python} CompleteDataPathCheckpoint.tokenized_text_tb_str` serialized shard set, derived from the `{python} CompleteDataPathCheckpoint.compressed_text_tb_str` compressed source corpus, is staged from object storage into the cluster's local NVMe caches, with each node receiving its assigned shard subset during setup. The data loader workers read tokenized shards from NVMe, assemble packed sequences in pinned host DRAM, and transfer those batches to the accelerator. With GDS enabled, token IDs that are already in a GPU-consumable layout can be loaded directly into GPU memory without CPU payload copying; compressed formats still require CPU or GPU decompression before use.
-
-During steady-state training on the host-staged path, CPU data loader workers read from local NVMe and fill a prefetch queue in host DRAM. The GPU receives batches from this queue via PCIe DMA; the supported GDS alternative bypasses that host payload staging. The compute phase (forward pass, backward pass, optimizer step) consumes the batch and updates model state in HBM. Every `{python} StorageFuelLineContext.checkpoint_interval_str`, the training framework captures a consistent checkpoint, writes it to local NVMe through the chosen path, and copies it to the parallel file system in the background. The checkpoint protocol must still establish when all required shards are safe to publish for recovery.
-
-At the end of the training job, the final model checkpoint is promoted from the parallel file system to object storage for long-term retention. The local NVMe copies are deleted during job cleanup. If the model is deployed for inference, it is loaded from object storage into the serving cluster's HBM, completing the lifecycle of data movement through the hierarchy.
-
-The total number of data copies in this lifecycle is instructive. Each training sample traverses: object storage $\to$ NVMe (staging), NVMe $\to$ host DRAM (read), host DRAM $\to$ GPU HBM (transfer). Each checkpoint traverses: GPU HBM $\to$ NVMe (local save), NVMe $\to$ parallel file system (async copy), parallel file system $\to$ object storage (long-term retention). Every copy consumes bandwidth and contributes latency. The engineering goal is to minimize copies on the critical path (the training loop) and tolerate additional copies on noncritical paths (staging and archival). @Fig-storage-complete-data-path maps these dual lifecycles across the tiers, visually distinguishing synchronous critical-path copies (solid arrows) from asynchronous background transfers (dashed arrows). For training inputs moving rightward, the active loop waits only on local promotion into HBM (or the optional GDS bypass); for checkpoints flowing leftward, the exposed pause is confined to the local NVMe save while parallel-file-system replication and archival retention proceed off the critical path.
-
-::: {#fig-storage-complete-data-path fig-env="figure" fig-pos="htb" fig-cap="**The complete data path**: Columns are storage tiers, ordered from the durable object store (left) to accelerator memory (right). Training data moves right and bypasses the parallel file system in this running example; checkpoints return left through it. Solid arrows mark copies the training loop waits on; dashed arrows mark copies that run once per job or in the background." fig-alt="Two rows of tier boxes. Top row, training data: object storage, a dashed arrow to local NVMe, solid arrows to host DRAM and GPU HBM, and an optional bypass arrow from NVMe over host DRAM to GPU HBM. Bottom row, checkpoints: a solid arrow from GPU HBM to local NVMe, then dashed arrows to the parallel file system and to object storage. A key distinguishes solid critical-path arrows from dashed off-path arrows."}
-![](images/svg/complete-data-path.svg)
-:::
-
-Every copy that leaves the node also needs a network, and the choice of network decides whom a storage burst can disturb. Many training nodes carry a small number of storage-facing network adapters on a separate front-end network, in addition to one compute-fabric adapter per accelerator. Routing staging reads and checkpoint copies over that front-end network isolates them from gradient collectives, but it caps each node's storage bandwidth at a few front-end ports. Routing storage over the compute fabric offers far more bandwidth, and remote GDS reads use exactly that RDMA path, but then a checkpoint burst shares switch buffers and spine links with the job's collectives and must be separated by traffic classes. For the running example, each node's fair share of a `{python} StoragePyramidContext.pfs_bw_tb_per_s_str` file system shared by `{python} StoragePyramidContext.pfs_nodes_str` nodes is roughly `{python} StoragePyramidContext.pfs_per_node_bw_gb_per_s_str`, and copying its roughly `{python} NvmeTierContext.ckpt_node_share_gb_str` checkpoint shard within the `{python} StorageFuelLineContext.checkpoint_interval_attr_str` interval needs far less, so a front-end network can carry it; image workloads that stream hundreds of GB/s across the cluster push designs toward the compute fabric.
-
-The volume of data moved during a `{python} StorageFuelLineContext.training_window_attr_str` training run reveals a counterintuitive reality. A single staging copy of the `{python} CompleteDataPathCheckpoint.tokenized_text_tb_str` serialized dataset from object storage to local NVMe accounts for a modest transfer. The checkpointing process, however, generates a vastly larger data stream. With a roughly `{python} CompleteDataPathCheckpoint.ckpt_total_gb_str` checkpoint created every `{python} StorageFuelLineContext.checkpoint_interval_str` across `{python} StorageFuelLineContext.run_nodes_str` nodes for `{python} StorageFuelLineContext.training_window_days_str`, the system produces approximately `{python} CompleteDataPathCheckpoint.checkpoint_count_str` checkpoints, totaling roughly `{python} CompleteDataPathCheckpoint.ckpt_fleet_total_pb_str` of state that must traverse the storage hierarchy. Checkpoint data movement dwarfs training data movement for large models: while the `{python} CompleteDataPathCheckpoint.tokenized_text_tb_str` training dataset might be read a handful of times (once per epoch), the `{python} CompleteDataPathCheckpoint.ckpt_fleet_total_pb_str` of checkpoint data is generated anew, making checkpoint I/O the dominant storage workload. This insight explains why checkpoint staging strategy (write locally, replicate asynchronously) can have a larger impact on overall storage design than training data pipeline optimization for large-model runs. The physical data path dictates where bytes move.
 
 ## Checkpoint Storage {#sec-storage-checkpointing}
 
@@ -3849,8 +3874,6 @@ For graph-based ANN, this architectural pattern shifts the primary storage bottl
 :::
 
 Graph-based retrieval therefore spends storage budget on index levels that keep random traversal inside the serving latency service-level objective. A disk-backed graph is economical only if the extra SSD accesses do not erase the quality gain from searching a larger corpus. Flat, IVF, and PQ designs move that budget toward scan bandwidth, partition probes, or decompression and approximation error. The same hierarchy now supports bulk model loading, request-scoped KV state, and retrieval, each with a distinct service-rate contract.
-
-
 
 ## The Synthetic Fuel Line {#sec-storage-synthetic-fuel}
 

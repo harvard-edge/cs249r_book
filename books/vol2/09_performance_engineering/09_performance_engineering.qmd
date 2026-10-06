@@ -1169,7 +1169,7 @@ Because all eight shards stream their weights in parallel and together emit one 
 
 The decode calculation identifies weight streaming as a possible limit, while the prefill analysis exposes a different opportunity in attention intermediates. These are distinct sources of HBM traffic, and neither estimate establishes which dominates the deployed service. Profiling must locate the exposed cost and establish a reproducible baseline before an optimization can be selected.
 
-## System Profiling {#sec-performance-engineering-profiling}
+## Diagnosis & Observability {#sec-performance-engineering-profiling}
 
 An engineer spends two weeks rewriting a PyTorch module into a custom CUDA kernel to make it 5$\times$ faster, only to discover the overall model latency did not budge because the system was entirely I/O bound. Performance engineering without measurement is expensive guesswork. System profiling identifies where execution waits and which intervals an intervention could shorten. The candidate remedies mapped across the branches of @fig-iron-law-flowchart are hypotheses: fusion removes intermediate transfers, graph replay reduces repeated host submission, and precision reduction moves fewer bytes. Their detailed mechanisms follow the measurement method; selecting one first requires evidence that its target cost is exposed.
 
@@ -1426,7 +1426,7 @@ A common trap is optimizing based on microbenchmarks rather than end-to-end trac
 
 Profiling turns optimization from guesswork into a discipline guided by quantitative evidence. A trace from one device, however, cannot show how a fleet behaves.
 
-## Measurement at Scale {#sec-performance-engineering-measurement-scale}
+### Measurement at Scale {#sec-performance-engineering-measurement-scale}
 
 ```{python}
 #| echo: false
@@ -1537,7 +1537,7 @@ The correct mode reproduces the target workload. Reporting intended load, achiev
 
 :::
 
-### The fleet efficiency metric {#sec-performance-engineering-fleet-efficiency-metric-dff4}
+#### The fleet efficiency metric {#sec-performance-engineering-fleet-efficiency-metric-dff4}
 
 Hardware utilization reports how often GPUs are busy, but it does not distinguish model arithmetic from recomputation or time spent waiting within communication operations. Fleet measurement therefore needs a useful-work utilization metric. Counting the "useful" FLOPs\index{MFU!useful FLOP metric} required by the model architecture provides a measure of system efficiency\index{MFU!derivation and measurement} that can support comparisons across software stacks and parallelization strategies when the workload, FLOP-counting convention, and hardware peak definition remain fixed. MFU measures the rate of this reference computation; it does not establish convergence or output quality. Recomputation is excluded from its numerator even when it is necessary to fit the model in memory.
 
@@ -1636,7 +1636,7 @@ For the fleet case, a step performs `{python} FleetEfficiencyCalc.fleet_useful_f
 
 ::::
 
-### Detecting scaling regressions {#sec-performance-engineering-detecting-scaling-regressions-7c11}
+#### Detecting scaling regressions {#sec-performance-engineering-detecting-scaling-regressions-7c11}
 
 Local resource costs can become exposed delays at scale. A small increase in memory demand may cross an allocation threshold, while a longer host pause on one rank can hold up a synchronized step across the fleet. Communication changes can separately increase network contention. These mechanisms require different evidence, so a local memory regression alone does not diagnose a network-buffer problem. @Tbl-performance-engineering-scaling-regression-tests organizes the tests that connect local changes to distributed behavior before a full-fleet rollout.
 
@@ -1660,7 +1660,8 @@ Production capacity must account for costs that the reference measurement does n
 
 The measurement contract makes optimization results comparable across the node and fleet boundaries. A trace dominated by intermediate transfers or repeated host launches motivates fusion and replay; dominant weight traffic motivates precision reduction. The following mechanisms each change one part of that measured budget, and their value must be checked against the same workload, quality criterion, and service objective.
 
-## Operator Fusion and Kernel Engineering {#sec-performance-engineering-fusion}
+## Single-Node Optimization Interventions
+### Operator Fusion and Kernel Engineering {#sec-performance-engineering-fusion}
 
 Consider the simple sequence of operations $\mathbf{Y} = \text{LayerNorm}(\text{GELU}(\mathbf{X}\mathbf{W} + \mathbf{b}))$. Separate kernels write and reread intermediate tensors through global memory, creating traffic that can dominate the element-wise and normalization work. Operator fusion\index{Operator Fusion!intermediate memory reduction}\index{Kernel Fusion!memory bandwidth reduction} combines compatible operations so that intermediate values remain in registers or shared memory. The opportunity is to remove transfers and launches; whether the entire sequence fits profitably into one kernel depends on its reduction dependencies and on-chip resource requirements.
 
@@ -2252,7 +2253,7 @@ FlashAttention reduces the memory wall within a single GPU by tiling across the 
 ↩ Ring Attention's rotation of key/value blocks around a ring of accelerators, and its overlap condition, are established in @sec-distributed-training-context-parallelism-ring-ulysses-8b1f.
 :::
 
-## Precision Engineering {#sec-performance-engineering-precision}
+### Precision Engineering {#sec-performance-engineering-precision}
 
 Fusion reduces the number of trips through HBM; precision engineering\index{Precision Engineering!bandwidth multiplication} reduces the payload of each trip. Moving FP16 weights through HBM consumes twice as many bytes as FP8. For bandwidth-bound kernels, shrinking weights from 2 bytes to 1 byte can roughly halve weight-read traffic and increase effective memory bandwidth. The engineering decision is where numerical noise can be tolerated to reduce bandwidth pressure and where quality demands higher precision. The quantization techniques in this section apply reduced precision to efficient inference at scale.
 
@@ -2701,7 +2702,7 @@ Quantizing weights to INT4 compresses the per-GPU footprint by `{python} KVCache
 
 Precision engineering reduces the payload needed to represent values; operator fusion can eliminate transfers of intermediate values altogether. Their combined memory savings can make a configuration feasible even when either technique alone is insufficient. For example, FlashAttention avoids quadratic attention intermediates, while INT8 KV cache compression reduces the remaining cache payload relative to FP16. Their latency gains need not multiply: conversion costs and a shift to a different bottleneck can limit the combined speedup. Because these patterns recur across stable layer structures, the next question is when a compiler can apply the transformations across the whole model graph.
 
-## Graph Compilation {#sec-performance-engineering-compilation}
+### Graph Compilation {#sec-performance-engineering-compilation}
 
 After precision and fusion expose repeatable optimization patterns, graph compilation asks whether those patterns are stable enough for the compiler to own. Manually writing fused CUDA kernels for every possible combination of layers in a massive neural network is a Sisyphean task for human engineers. A graph compiler analyzes the model's computational graph and generates optimized, hardware-aware machine instructions, transforming high-level PyTorch code into specialized kernels when shape stability and replay volume justify the compilation cost.
 
@@ -3223,7 +3224,7 @@ Graph compilation applies supported rewrites and hardware mappings across captur
 {{< pagebreak >}}
 :::
 
-## Algorithmic Performance Transformations {#sec-performance-engineering-algorithmic-transformations}
+### Algorithmic Performance Transformations {#sec-performance-engineering-algorithmic-transformations}
 
 Fusion, precision engineering, and graph compilation optimize the same dense computation by moving fewer bytes, using narrower formats, or letting compilers reorganize kernels. Algorithmic transformations change the work itself. Speculative decoding attacks the memory-bound decode loop by trying to accept multiple tokens per target-model pass, while MoE attacks dense-model cost by activating only the experts a token needs. Both techniques can improve the iron-law budget, but both can also create new bottlenecks if their extra control logic, communication, or imbalance exceeds the work they remove.
 
@@ -3446,7 +3447,8 @@ A per-token estimate separates arithmetic savings from routing costs. Mixtral 8x
 
 For performance engineering, the local question is whether active-parameter savings exceed the costs of routing and communication over the workload envelope. Report the number of experts, experts selected per token, expert capacity, token distribution, routing imbalance, dispatch and combine bytes, AllToAll time, dropped or rerouted tokens, and the achieved quality and latency target. Sparse activation improves the iron-law budget only when inactive experts stay off the critical path and routing does not create a larger communication or straggler term.
 
-## Communication-Computation Overlap {#sec-performance-engineering-overlap}
+## Distributed Optimization Interventions
+### Communication-Computation Overlap {#sec-performance-engineering-overlap}
 
 In a multi-GPU training step or tensor-parallel inference pass, an accelerator can finish local computation and then wait for an AllReduce collective to transfer gradients or activations. Communication-computation overlap can shorten this exposed wait by running communication alongside independent computation. CUDA streams and gradient-bucket hooks provide scheduling mechanisms, but concurrency helps only when dependencies permit it and resource contention does not consume the saved time. The performance question is how much communication remains on the critical path after those constraints are accounted for.
 
