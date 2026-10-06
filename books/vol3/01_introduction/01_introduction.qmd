@@ -86,7 +86,7 @@ Moving from conversational token generation to autonomous goal execution transfo
 
 ***Agentic system***\index{Agentic system!definition}\index{Agentic machine learning system|see{Agentic system}} is an autonomous software system in which a runtime places a foundation model in a closed control loop with context, state, tools, and an environment—dispatching the model's authorized proposals and returning their environmental observations to subsequent calls until the task is accepted, halted, or escalated.
 
-1.  **Significance**: The unit of systems optimization shifts from the isolated model call to the complete task trajectory. Unchecked errors compound exponentially across sequential turns (@sec-vol3-intro-horizon-arithmetic), and every attempt—whether accepted or aborted—is charged to the task's cost per accepted result.
+1.  **Significance**: The unit of systems optimization shifts from the isolated model call to the complete task trajectory. Unchecked errors compound across sequential turns, and every attempt—whether accepted or aborted—is charged to the task's cost per accepted result.
 2.  **Distinction**: In conversational interfaces, a human executes tools, verifies output, and bridges state between turns. In an agentic system, software executes these operations under delegated authority, meaning the model's output is strictly a proposal that holds zero ambient authority.
 3.  **Systems pitfall**: Treating agency as a capability inherent to the model's weights. A more capable model produces more accurate candidate actions, but permission enforcement, sandbox isolation, durable state persistence, and completion verification belong entirely to the surrounding software runtime.
 
@@ -142,6 +142,16 @@ Viewing the agent as a stochastic computer clarifies where traditional systems g
 ### The trajectory and execution lifecycle {#sec-vol3-intro-trajectory-lifecycle}
 #### The trajectory as the systems management boundary {#sec-vol3-intro-trajectory-systems-boundary}
 
+::: {#dfn-vol3-trajectory .callout-definition title="Trajectory"}
+
+***Trajectory***\index{Trajectory!definition} is the ordered sequence of recorded states, proposed actions, runtime decisions, and observations through which one delegated task proceeds, from its initial context to its ultimate acceptance, termination, or escalation.
+
+1.  **Significance**: The trajectory length defines the operational horizon $\Horizon$, which governs how compounding errors degrade system reliability. Furthermore, its complete span—encompassing rejected actions, retries, and failed branches—establishes the true accounting boundary when computing cost and latency per accepted task.
+2.  **Distinction**: While a conversational transcript merely captures the tokens exchanged between a model and a user, a trajectory preserves the full causal history of execution. It records which action proposals the runtime approved, modified, or rejected, alongside the raw observations returned by external tools, linking every decision to the exact evidence available at that step.
+3.  **Common pitfall**: Preserving only the final deliverable. Storing just the accepted patch or completed document hides the computational cost of discarded attempts, masks transient faults, and discards the intermediate verification evidence that justified accepting the work.
+
+:::
+
 Tracing the repair task across turns exposes how proposals, side effects, and observations interact over time. Execution begins when the runtime provisions an isolated working copy of the repository and supplies the initial task description. The model proposes running the failing test. After validating that this command is authorized, the runtime invokes the test runner and records its output. When the runner reports a deadlock, the runtime supplies the diagnostic output to the next model call. The model then proposes inspecting the connection-pool implementation, and the returned source code reveals the locking logic that requires repair.
 
 Guided by this inspection, the model proposes a patch. Before modifying the working copy, the runtime verifies that the edit targets permitted files. This step underscores a foundational separation of concerns: the model's generated diff is merely a proposal, the modified file is an effect, and the tool's execution report is an observation. When a subsequent compilation attempt reports an unclosed bracket, that observation directly steers the next decision. The model proposes a corrected patch, which the runtime applies before rerunning the build. Once compilation succeeds and visible unit tests pass, the runtime collects regression evidence using an immutable test suite that the editing tools cannot touch. It then records the resulting deliverable alongside these verification records. If the results satisfy the contract's acceptance criteria, the runtime submits the repair; otherwise, it can continue iterating, abort, or escalate to a human engineer.
@@ -185,7 +195,7 @@ Consider what happens when the first test fails and the model decides to search 
 
 Similarly, the loop delegates termination entirely to the model's self-reported completion marker. If the model enters a cyclic failure mode—repeatedly generating superficial variations of an invalid patch—the process spins indefinitely, consuming resources without resolving the defect. Worse, if the host process crashes after applying a file modification but before capturing the test result, in-memory conversation history vanishes while disk modifications persist. A naive restart from the original prompt then executes against an altered, inconsistent repository state. Managing durability, rollbacks, and recovery requires explicit knowledge of whether a workspace is ephemeral and whether actions produce external side effects; an unmediated loop leaves both choices unaddressed.
 
-These challenges reflect classic operating systems responsibilities re-emerging at the granularity of an autonomous task. A short, throwaway exploratory script may tolerate lightweight recovery, whereas an agent modifying shared production infrastructure demands transactional checkpointing and compensating actions. In both settings, the runtime requires designated components to govern permissions, persist state, enforce budgets, and determine completion. Reliable systems ensure invariant closure by placing these responsibilities strictly outside the model's unverified output; the five-part task contract introduced in @sec-vol3-intro-five-part-contract defines explicit owners for each.
+These challenges reflect classic operating systems responsibilities re-emerging at the granularity of an autonomous task. A short, throwaway exploratory script may tolerate lightweight recovery, whereas an agent modifying shared production infrastructure demands transactional checkpointing and compensating actions. In both settings, the runtime requires designated components to govern permissions, persist state, enforce budgets, and determine completion. Reliable systems ensure invariant closure by placing these responsibilities strictly outside the model's unverified output; the task contract defines explicit owners for each.
 
 #### The six-phase turn execution lifecycle {#sec-vol3-intro-execution-lifecycle}
 
@@ -221,16 +231,6 @@ The same principle governs context management. Preserving full diagnostic logs f
 :::
 
 While the architecture of a stochastic computer identifies the structural components of an agentic system, the **H·S·A exposure space** quantifies the runtime machinery that a specific workload demands. It measures how far a delegated assignment departs from an elementary, single-turn model invocation. The fundamental unit of that measurement is the primary runtime artifact of this book: the **trajectory**.
-
-::: {#dfn-vol3-trajectory .callout-definition title="Trajectory"}
-
-***Trajectory***\index{Trajectory!definition} is the ordered sequence of recorded states, proposed actions, runtime decisions, and observations through which one delegated task proceeds, from its initial context to its ultimate acceptance, termination, or escalation.
-
-1.  **Significance**: The trajectory length defines the operational horizon $\Horizon$, which governs how compounding errors degrade system reliability. Furthermore, its complete span—encompassing rejected actions, retries, and failed branches—establishes the true accounting boundary when computing cost and latency per accepted task.
-2.  **Distinction**: While a conversational transcript merely captures the tokens exchanged between a model and a user, a trajectory preserves the full causal history of execution. It records which action proposals the runtime approved, modified, or rejected, alongside the raw observations returned by external tools, linking every decision to the exact evidence available at that step.
-3.  **Common pitfall**: Preserving only the final deliverable. Storing just the accepted patch or completed document hides the computational cost of discarded attempts, masks transient faults, and discards the intermediate verification evidence that justified accepting the work.
-
-:::
 
 We formalize this sequence using the compact notation
 
@@ -395,7 +395,7 @@ The working-copy comparison in example \ref{exmp-01-hsa-incident} separates prev
 
 ::: {#pri-invariant-closure .callout-principle title="Invariant closure"}
 
-**Invariant**: Constraints never rest on the model; bounds close mechanically below it, acceptance on evidence above it. Each enforced bound names the property and assumptions under which it holds, and each acceptance decision names the evidence standard it applies. Without intermediate verification, task reliability decays exponentially with the number of sequential turns (a dynamic we formalize in @sec-vol3-intro-horizon-arithmetic). A bound or a check turns a silent violating step into a rejected attempt instead.
+**Invariant**: Constraints never rest on the model; bounds close mechanically below it, acceptance on evidence above it. Each enforced bound names the property and assumptions under which it holds, and each acceptance decision names the evidence standard it applies. Without intermediate verification, task reliability decays exponentially with the number of sequential turns (a dynamic driven by compounding multi-step errors). A bound or a check turns a silent violating step into a rejected attempt instead.
 
 **Implication**: Unchecked reliability decays exponentially with horizon, an attrition that model scaling alone cannot overcome. The runtime mediates permitted effects and resource use independently of the model's compliance. It accepts completion only when evidence meets the task contract, preserving the distinction between a passing check and a guarantee beyond that check's coverage. The contract itself is adopted by authorized people: the model can draft it but cannot adopt, relax, or certify against it. Greater operational exposure requires stronger justification for both the boundaries and the evidence.
 
@@ -537,7 +537,7 @@ Checking converts a silent failure into an explicit, rejected attempt—and a re
 
 $$\CostPerAcceptedTaskEff = \frac{\mathbb{E}[\AttemptCost]}{\AcceptanceProbability}$$ {#eq-vol3-cost-per-accepted-task}
 
-In production systems, runtimes enforce bounded retry budgets, meaning unrecoverable tasks eventually terminate without acceptance. The cohort ratio introduced in @sec-vol3-intro-fallacies computes this effective cost directly from empirical spend and acceptance tallies. Even in its basic form, @eq-vol3-cost-per-accepted-task highlights an essential systems trade-off between unit model pricing and task-level verification (notebook \ref{nbk-01-cost-per-accepted}).
+In production systems, runtimes enforce bounded retry budgets, meaning unrecoverable tasks eventually terminate without acceptance. The cohort ratio introduced in @sec-vol3-agent-economics computes this effective cost directly from empirical spend and acceptance tallies. Even in its basic form, @eq-vol3-cost-per-accepted-task highlights an essential systems trade-off between unit model pricing and task-level verification (notebook \ref{nbk-01-cost-per-accepted}).
 
 ::: {.column-margin .margin-pointer}
 ↪ Whole-trajectory cost and the cohort cost per accepted task, which charges failed and abandoned attempts to the accepted ones, are developed in @sec-vol3-agent-economics-accounting.
@@ -739,8 +739,8 @@ System reliability and operational efficiency ultimately reduce to concrete econ
 | $(1-\SmallConstant)^{\Horizon} \approx e^{-\SmallConstant \Horizon}$                                                                                          | The product $\SmallConstant \Horizon$ governs reliability; expanding the horizon requires a proportionally lower step error rate | @sec-vol3-intro-horizon-arithmetic |
 | $\CostPerAcceptedTaskEff = \mathbb{E}[\AttemptCost]/\AcceptanceProbability$                                                                                   | Expected cost per accepted task under independent retries; acceptance rate scales effective attempt cost                         | @eq-vol3-cost-per-accepted-task    |
 | $\AFourthTaxonomyAxis'_{\text{attempt}}/\HiddenDimensionFour'_{\text{acc}} < \AttemptCost/\AcceptanceProbability$                                             | Economic condition determining whether an added check, boundary, cache, or prompt optimization justifies its cost                | @sec-vol3-intro-horizon-arithmetic |
-| $1-(1-\AcceptanceProbability)^{k}$                                                                                                                            | Cumulative acceptance probability within a budget of $k$ attempts, assuming independent failures                                 | @sec-vol3-intro-fallacies          |
-| $\CostPerAcceptedTaskEff = \big(\sum_{i \in \TrajectorySetsAll} (C_{\text{inference}}^{(i)} + C_{\text{infra}}^{(i)}) + C_{\text{human}}\big)/\AcceptedTasks$ | Measured cost per accepted task over an operational cohort, accounting for failed and abandoned attempts                         | @sec-vol3-intro-fallacies          |
+| $1-(1-\AcceptanceProbability)^{k}$                                                                                                                            | Cumulative acceptance probability within a budget of $k$ attempts, assuming independent failures                                 | @sec-vol3-agent-economics          |
+| $\CostPerAcceptedTaskEff = \big(\sum_{i \in \TrajectorySetsAll} (C_{\text{inference}}^{(i)} + C_{\text{infra}}^{(i)}) + C_{\text{human}}\big)/\AcceptedTasks$ | Measured cost per accepted task over an operational cohort, accounting for failed and abandoned attempts                         | @sec-vol3-agent-economics          |
 : **Key Equations of the Introduction**: Each relation prices reliability or operational cost over an execution trajectory; the first two govern unchecked horizons, while the remaining equations determine whether a specific mechanism justifies its cost. {#tbl-vol3-01_introduction-key-equations tbl-colwidths="[46,36,18]"}
 
 ::: {.callout-takeaways title="Agency is a property of the system, not the model"}

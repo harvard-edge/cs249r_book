@@ -379,7 +379,7 @@ When an unexpected infrastructure failure leaves a required check unavailable, t
 
 Permissions and hard resource limits must remain strict runtime constraints. A negative reward penalty merely discourages proposing a prohibited action; only the execution harness can enforce the boundary, and a penalty cannot undo an executed side effect. Even a reward function that ranks every unsafe trajectory below every safe one leaves an agent free to explore unsafe actions during policy search. The operational rule is to keep authorization, network isolation, and resource quotas firmly anchored in the container harness, using reward terms strictly to express preferences within that bounded perimeter.
 
-This terminal reward evaluates the rollout trajectory as a complete artifact. Converting that scalar outcome into updates for the individual actions taken along the trajectory introduces the credit-assignment problem.
+This terminal reward evaluates the rollout trajectory as a complete artifact. But before converting that scalar outcome into updates for the individual actions, the system must guarantee the integrity of the reward signal itself.
 
 ## Verifier Isolation {#sec-vol3-rlvr-sandboxing}
 
@@ -429,7 +429,7 @@ $$\Pr(\text{accept candidate})=p^{n_{\text{trial}}}.$$
 
 In this notation, $n_{\text{trial}}$ denotes the total number of trials conducted, including the first. An initial pass followed by $n_{\text{trial}}$ additional confirmation reruns would instead yield an acceptance probability of $p^{n_{\text{trial}}+1}$. When trials exhibit statistical dependence, the all-pass probability becomes the product of conditional probabilities $\prod_{j=1}^{n_{\text{trial}}} \Pr(\text{pass}_j\mid\text{all earlier passes})$, which can diverge sharply from $p^{n_{\text{trial}}}$. Launching fresh container instances with randomized execution seeds promotes independence, whereas a persistent checker bug or shared host-level bottleneck introduces positive correlation across runs.
 
-Group normalization makes false passes especially damaging during training. In group relative policy optimization (GRPO), advantage coefficients are computed relative to the empirical mean and standard deviation of rewards within each sampled rollout group. A lone false pass among a group of failing candidates receives the maximum advantage coefficient derived in @eq-vol3-grpo-lone-pass—the exact same update weight awarded to an authentic solution. When a difficult task suffers from flaky verification, the optimizer allocates its largest gradient updates to sheer non-deterministic luck.
+Relative advantage normalizations make false passes especially damaging during training. When optimization updates are scaled relative to the empirical mean of rewards within a sampled rollout group, a lone false pass among a group of failing candidates receives the maximum possible advantage weight—the exact same update weight awarded to an authentic solution. When a difficult task suffers from flaky verification, the optimizer allocates its largest gradient updates to sheer non-deterministic luck. We formalize this relative weighting dynamic later in this chapter.
 
 ```{python}
 #| label: calc-vol3-rlvr-flaky-reward
@@ -496,18 +496,6 @@ When provisioning verifier clusters across a heterogeneous population of candida
 
 When successive runs disagree, repetition alone is insufficient: divergence indicates an unstable test harness that requires systemic mitigation. Verification harnesses should deliberately vary test execution order and process scheduling, running regular sanity checks against known-valid and known-invalid reference artifacts to detect fixture drift before emitting training rewards. If a specific test case exhibits persistent flakiness, operators must quarantine it from the active reward loop. Because quarantining alters the task's reward function, all test suite revisions must be versioned, preserving the historical trial records and audit trail. Combining verifier isolation with repeated evaluation ensures that policy gradient updates reflect authentic task competence rather than execution artifacts or test-runner exploitation.
 
-::: {#chk-16-grpo-mechanics .callout-checkpoint title="Optimizing agent trajectories"}
-
-The recorded interaction, group statistic, and protected assessment must describe the same training event.
-
-- [ ] **Group coefficients**: How does GRPO form its baseline, and which objective term loses its signal when every observed reward agrees?
-- [ ] **Group-size budget**: A task family passes `{python} RolloutBudget.p_check_str` of attempts in groups of `{python} RolloutBudget.group_str`. Estimate the rollouts spent per group that carries any reward contrast, then decide whether doubling $\LongmessageGapPerByte$ or retargeting task difficulty is the better next step at this pass rate.
-- [ ] **Action records**: Why are sampled token IDs and actual delivered prefixes needed when observations are excluded from action scoring?
-- [ ] **Candidate execution**: A patch passes path checks and enters a fresh grader. Which boundary is still missing if its code shares the grader's interpreter and result store?
-- [ ] **Repeated assessment**: Why do three total independent trials differ from an initial pass plus three reruns, and what false-rejection cost accompanies an all-pass rule?
-- [ ] **Protected evidence**: Why are hidden checks repeatedly used for training rewards not an untouched release evaluation set?
-
-:::
 ## Credit Across Turns {#sec-vol3-rlvr-credit}
 
 Consider an agent attempting to repair an exhausted database connection pool. The agent might issue shell commands that accurately isolate a leaked socket, inspect runtime configuration parameters, and pinpoint the bug, only to introduce a syntax error in its final file edit. If the verification harness evaluates only the end state, the entire trajectory receives a failure mark. That terminal failure characterizes the trajectory as a whole rather than condemning every intermediate action as a mistake.
@@ -1088,7 +1076,7 @@ class RolloutBudget:
 
 :::
 
-While group-relative comparisons establish advantage coefficients and optimization weights, every term in the objective ultimately resolves to conditional token probabilities. These probabilities remain valid only if the training engine faithfully reconstructs the precise token contexts seen by the model during inference. In multi-turn agentic workflows, model generations interleave with tool executions, environment state mutations, and dynamic context compaction. Executing GRPO correctly in production therefore requires an exact, immutable log of the tokens passed to and sampled from each model invocation, rather than an unversioned end-of-episode transcript.
+While group-relative comparisons establish advantage coefficients and optimization weights, raw training curves rarely reveal why an agent might become stuck in a repetitive loop or suffer from entropy collapse. Before discussing the systems infrastructure required to log the exact token contexts and environments needed for multi-turn training, we must first examine the common training pathologies that arise when optimizing agentic policies.
 
 ## Training Pathologies {#sec-vol3-rlvr-pathologies}
 
@@ -1244,6 +1232,19 @@ The operational constraints configured in the rollout harness—including contex
 Decoupling model invocation from episode lifetime is equally critical for cluster efficiency. Agent rollouts are fundamentally I/O-bound: a policy might generate a tool request in 200 ms, followed by a 45 s wait while an external container compiles code and runs a test suite. Holding dedicated GPU worker memory idle during that wait window would devastate compute utilization across the training cluster. High-throughput collection engines decouple inference serving from episode execution, scheduling active invocations from other ready rollouts onto the accelerator while blocked rollouts wait for external tool observations. This interleaving maximizes hardware utilization without mutating the causal observation stream consumed by any individual trajectory. @Sec-vol3-rlvr-infrastructure develops the bounded queues, group completion barriers, and version-tracking protocols required to coordinate this asynchronous schedule at scale.
 
 A comprehensive rollout record provides a tamper-proof account of what the policy observed, what tokens it generated, and how the environment responded. Whether that recorded trajectory can safely guide policy updates, however, depends entirely on maintaining an uncompromised boundary between the artifacts the policy is permitted to modify and the independent harness that evaluates them.
+
+::: {#chk-16-grpo-mechanics .callout-checkpoint title="Optimizing agent trajectories"}
+
+The recorded interaction, group statistic, and protected assessment must describe the same training event.
+
+- [ ] **Group coefficients**: How does GRPO form its baseline, and which objective term loses its signal when every observed reward agrees?
+- [ ] **Group-size budget**: A task family passes `{python} RolloutBudget.p_check_str` of attempts in groups of `{python} RolloutBudget.group_str`. Estimate the rollouts spent per group that carries any reward contrast, then decide whether doubling $\LongmessageGapPerByte$ or retargeting task difficulty is the better next step at this pass rate.
+- [ ] **Action records**: Why are sampled token IDs and actual delivered prefixes needed when observations are excluded from action scoring?
+- [ ] **Candidate execution**: A patch passes path checks and enters a fresh grader. Which boundary is still missing if its code shares the grader's interpreter and result store?
+- [ ] **Repeated assessment**: Why do three total independent trials differ from an initial pass plus three reruns, and what false-rejection cost accompanies an all-pass rule?
+- [ ] **Protected evidence**: Why are hidden checks repeatedly used for training rewards not an untouched release evaluation set?
+
+:::
 
 ## Environments and Rollouts {#sec-vol3-rlvr-infrastructure}
 
