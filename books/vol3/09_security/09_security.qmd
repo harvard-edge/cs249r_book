@@ -777,15 +777,15 @@ Security metrics are meaningless without measuring useful task completion. A pol
 
 Comprehensive evaluation also tallies operational latency and financial cost across the full trial boundary, including reader model calls, policy broker checks, provenance tracing, retry loops, and uncompleted attempts. When an overly restrictive defense rejects valid actions, it forces unnecessary retries or leaves tasks uncompleted, directly driving up the effective cost per accepted task (@eq-vol3-cost-per-accepted-task). Because the effective unit cost scales inversely with the probability of acceptance ($\CostPerAcceptedTaskEff \propto 1/\Pr(\text{acc})$), an aggressive defense that suppresses attacks at the expense of high false blocks imposes a steep monetary and operational penalty on ordinary workloads. Framing security and utility through this shared economic lens allows systems designers to evaluate defense trade-offs objectively.
 
-| **Metric** | **Calculation** | **What it Measures** |
-|:---|:---|:---|
-| **Attack-Success Rate** | (Successful attacks) / (Total attacked trials) | The absolute probability of a security breach under attack. |
-| **Relative Attack Reduction** | 1 $-$ (Defended attack rate) / (Baseline attack rate) | Proportional improvement over the baseline. Can mislead on tiny samples. |
-| **Benign Acceptance Rate** | (Accepted benign tasks) / (Total benign trials) | The probability of completing a legitimate task without an attack present. |
-| **False-Block Rate** | (Tasks failed due to defense policy) / (Total benign trials) | The fraction of valid work erroneously rejected by the security layer. |
-| **Effective Cost ($\CostPerAcceptedTaskEff$)** | (Cost per attempt) / (Benign Acceptance Rate) | The economic penalty of a defense that suppresses valid throughput. |
+| **Metric**                                     | **Calculation**                                              | **What it Measures**                                                       |
+|:-----------------------------------------------|:-------------------------------------------------------------|:---------------------------------------------------------------------------|
+| **Attack-Success Rate**                        | (Successful attacks) / (Total attacked trials)               | The absolute probability of a security breach under attack.                |
+| **Relative Attack Reduction**                  | 1 $-$ (Defended attack rate) / (Baseline attack rate)        | Proportional improvement over the baseline. Can mislead on tiny samples.   |
+| **Benign Acceptance Rate**                     | (Accepted benign tasks) / (Total benign trials)              | The probability of completing a legitimate task without an attack present. |
+| **False-Block Rate**                           | (Tasks failed due to defense policy) / (Total benign trials) | The fraction of valid work erroneously rejected by the security layer.     |
+| **Effective Cost ($\CostPerAcceptedTaskEff$)** | (Cost per attempt) / (Benign Acceptance Rate)                | The economic penalty of a defense that suppresses valid throughput.        |
 
-: **Core Security and Utility Metrics**: A rigorous defense evaluation must report absolute breach rates alongside the corresponding utility penalties and false-block tradeoffs. {#tbl-vol3-security-metrics-summary tbl-colwidths="[25,35,40]"}
+: **Core Security and Utility Metrics**: A rigorous defense evaluation must report absolute breach rates alongside the corresponding utility penalties and false-block trade-offs. {#tbl-vol3-security-metrics-summary tbl-colwidths="[25,35,40]"}
 
 ```{python}
 #| label: calc-vol3-security-policy-comparison
@@ -918,45 +918,7 @@ A proposed defense lowers observed fixture disclosures but blocks more legitimat
 - [ ] **Zero-success bound**: A defense shows no disclosures in `{python} SecurityPolicyComparison.chk_n_str` attacked episodes. Estimate the upper bound on its attack-success rate at the level used above, and decide whether the report supports release for a task that tolerates at most `{python} SecurityPolicyComparison.chk_target_str`.
 
 :::
-## Fallacies and Pitfalls {#sec-vol3-security-fallacies}
 
-Each of these design mistakes conflates evidence established at one operational boundary with authorization or trust at another. They persist because they readily pass superficial tests: a model successfully rejects a known exploit string, or an audit log records fewer observed disclosures. Yet in each case, the runtime system's true enforcement mechanisms—its evidence-verification and data-release boundaries—remain unexamined.
-
-::: {.fallacy-pitfall}
-**Fallacy**: *A guardrail classifier in front of the agent eliminates prompt injection.*
-
-An input screening classifier is itself a learned function over text. Attackers can therefore evade it through paraphrasing, character encodings, or by splitting malicious payloads across multiple external documents and conversational turns [@zou2023]. An adaptive adversary optimizes prompts against the guardrail model just as systematically as against the agent itself. For example, EchoLeak passed a production classifier simply by formatting its malicious instructions as commentary addressed to the human reader (war story \ref{ws-09-echoleak-2025}). Furthermore, multi-document agent workflows compound even negligible false-negative rates. A classifier that misses only `{python} InjectionExposure.miss_str` of individual malicious payloads still leaves `{python} InjectionExposure.res_research_str` of research tasks compromised when the agent consumes `{python} InjectionExposure.r_research_str` documents per task (notebook \ref{nbk-09-injection-exposure}), and targeted attacker adaptation pushes this miss rate higher. Input screening filters low-effort noise and reduces the load on downstream controls, but architectural security depends entirely on rigorous runtime release and evidence checks.
-:::
-
-::: {.fallacy-pitfall}
-**Pitfall**: *Exempting read and search tools from disclosure checks.*
-
-Systems engineers often assume that read and search operations are inherently safe because retrieving data leaves the remote index unmodified. However, every read request transmits query parameters, HTTP headers, or lookup keys across a trust boundary, making read-oriented tools effective channels for data exfiltration. In the hypothetical comparison of @sec-vol3-security-evaluation, an authorization policy that validated only the tool name and destination endpoint disclosed sensitive fixtures in `{python} SecurityPolicyComparison.asr_a_str` of attacked episodes. In contrast, enforcing an explicit release check on the data payload embedded within each query reduced the disclosure rate to `{python} SecurityPolicyComparison.asr_b_str`. Every outbound tool call is a potential communication channel; runtime policies must inspect the data entering each request and verify that its release to the specified destination is authorized.
-:::
-
-::: {.fallacy-pitfall}
-**Fallacy**: *Safety post-training makes the model immune to injection.*
-
-Safety alignment trains models to recognize and refuse overtly malicious requests, such as generating exploit code or hate speech. Indirect prompt injection, however, masks its malicious intent as an ordinary, benign step within an authorized task—such as formatting a database query or running a local diagnostic. An attacker directly exploits the model's core instruction-following capability, deliberately pitting its helpfulness against its safety guardrails. Wei and colleagues identified these competing objectives as a primary cause of safety-training failures [@wei2023jailbroken]. While post-training can reduce attack success under standard benchmark protocols, fine-tuned weights cannot enforce a hard security boundary that the model itself cannot cross. Systems engineers must enforce authority delegation and data release checks within the execution runtime beneath the model.
-:::
-
-::: {.fallacy-pitfall}
-**Pitfall**: *Cleaning retained state by deleting the raw injection.*
-
-Deleting an offending input document or message from disk does not purge its influence from the agent. In multi-turn systems, intermediate inferences quickly propagate into persistent memory—generating summaries, distilling execution lessons, or queuing tool proposals that preserve the attacker's intent long after the raw injection is removed (@sec-vol3-security-multiturn). Remediating corrupted state demands rigorous provenance tracking: developers must withdraw the tainted source, trace its causal dependencies across every derived record, and treat the broader retained memory as suspect whenever those dependencies cannot be cleanly isolated.
-:::
-
-::: {.fallacy-pitfall}
-**Fallacy**: *A valid scalar extracted by a separate reader is trusted evidence.*
-
-Parsing unstructured model output into a typed scalar—such as an extracted boolean like `claimed_tests_passed: true`—verifies syntactic structure rather than operational authenticity. Constraining data to a schema does not elevate an untrusted source into an authoritative one. Under the formal dispatch model of @eq-vol3-flow-dispatch, an assertion whose provenance traces to unverified external text lies outside the set of authorized influences. The runtime must reject such claims during evidence checking, no matter how cleanly structured the parser's output appears. Authoritative evidence must originate directly from a designated execution runner and remain strictly scoped to the automated checks that runner independently conducted.
-:::
-
-::: {.fallacy-pitfall}
-**Pitfall**: *Treating a lower attack-success rate as a complete security result.*
-
-An empirical attack-success rate provides an incomplete measure of security on its own. The observed rate depends heavily on the adversary's search budget, the target threat model, and the specific test harness configuration, all while omitting the operational costs imposed by the defense. In the hypothetical comparison of @sec-vol3-security-evaluation, an apparent `{python} SecurityPolicyComparison.reduction_str` reduction in observed disclosures falls to `{python} SecurityPolicyComparison.upper_reduction_str` once unresolved evaluation runs are counted conservatively as disclosures. Furthermore, achieving that protection came with a `{python} SecurityPolicyComparison.ceff_rise_str` increase in cost per accepted benign repair. Observing zero successful attacks in a finite test suite does not close the question either: recording zero breaches across `{python} SecurityPolicyComparison.zero_n_str` trials still leaves an upper confidence bound as high as `{python} SecurityPolicyComparison.zero_ub_str`. Robust evaluations must report statistical confidence bounds, account explicitly for unresolved outcomes, and measure benign task utility alongside attack mitigation.
-:::
 ## Summary {#sec-vol3-security-summary}
 
 Agent security centers on influence rather than traditional access control: which party's content steered an execution proposal, where data embedded in that proposal may travel, and which sources can legitimately justify the resulting state mutation. A language model cannot answer these questions for itself because it processes control instructions and untrusted data within a single, undifferentiated token stream. The runtime environment must track this provenance instead. It maintains records that trace every value across extraction, summarization, long-term memory, and handle references, enforcing policy checks directly on the concrete operation and recipient at dispatch time. Because exposure compounds with every document ingested and every interaction turn executed, these runtime checks must fire unconditionally on every transaction, rather than selectively when an input appears suspicious.

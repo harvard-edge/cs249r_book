@@ -94,6 +94,168 @@ Moving from conversational token generation to autonomous goal execution transfo
 
 This architectural shift forces a fundamental recalculation of core systems metrics. In classical model serving, infrastructure teams optimize for tokens per second, tail latency percentiles, and accelerator utilization. In agentic systems, the governing metrics become **task completion rate**, **cost per accepted task**, and **reliability across multi-turn horizons**. Infrastructure designed for independent requests assumes that calls incur bounded computational costs, that working state vanishes once a response returns, and that an HTTP 200 status code signals successful completion. Delegated tasks invalidate each of these assumptions: an execution spans dozens of dependent steps, accumulates gigabytes of conversational context and tool telemetry, and triggers side effects that permanently alter external systems.
 
+## The Running Example and Four Lighthouses {#sec-vol3-intro-running-example}
+
+To ground the architectural instruments without introducing disjointed scenarios in every chapter, this book organizes its systems analysis around four recurring workloads. The automated repository repair introduced in @sec-vol3-intro-existence-moment serves as the primary running example. Following this repair task across its execution turns shows how core runtime mechanisms operate on concrete problems. Three additional workloads then map out operational regimes that repository repair alone cannot exercise.
+
+### The trajectory as the systems management boundary {#sec-vol3-intro-trajectory-systems-boundary}
+
+Tracing the repair task across turns exposes how proposals, side effects, and observations interact over time. Execution begins when the runtime provisions an isolated working copy of the repository and supplies the initial task description. The model proposes running the failing test. After validating that this command is authorized, the runtime invokes the test runner and records its output. When the runner reports a deadlock, the runtime supplies the diagnostic output to the next model call. The model then proposes inspecting the connection-pool implementation, and the returned source code reveals the locking logic that requires repair.
+
+Guided by this inspection, the model proposes a patch. Before modifying the working copy, the runtime verifies that the edit targets permitted files. This step underscores a foundational separation of concerns: the model's generated diff is merely a proposal, the modified file is an effect, and the tool's execution report is an observation. When a subsequent compilation attempt reports an unclosed bracket, that observation directly steers the next decision. The model proposes a corrected patch, which the runtime applies before rerunning the build. Once compilation succeeds and visible unit tests pass, the runtime collects regression evidence using an immutable test suite that the editing tools cannot touch. It then records the resulting deliverable alongside these verification records. If the results satisfy the contract's acceptance criteria, the runtime submits the repair; otherwise, it can continue iterating, abort, or escalate to a human engineer.
+
+Dynamic observations dictate subsequent action: a thread deadlock demands different remediation than a syntax error, and a clean build never proves that a race condition has disappeared. Even a comprehensive regression test can miss an interleaving that triggers the defect under concurrency. Consequently, an agent runtime requires both a mechanism to incorporate incoming evidence and a rigorous policy for deciding when that evidence justifies termination.
+
+Closing a feedback loop is not new to computing. Feedback control[^fn-feedback-control-cybernetics] and reinforcement learning already organize action around observations of an environment [@wiener1948cybernetics; @sutton2018reinforcement]. Foundation-model agents use learned representations of language and code to propose actions in software environments; work such as ReAct demonstrates this interleaving of generated reasoning, actions, and observations [@yao2023react]. The engineering problem is how to make that interleaving accountable. Fault isolation, access control, and recovery remain essential precisely because a generated proposal can be wrong or destructive.
+
+[^fn-feedback-control-cybernetics]: **Cybernetics**: Wiener's 1948 book named the study of control through feedback, in which a system measures the result of its own action and uses the difference from its goal to choose the next one [@wiener1948cybernetics]. The loop corrects errors only if the measurement comes from the environment; a runtime that feeds back the model's own account of what it did has closed a loop around a claim rather than around the result. \index{Cybernetics!feedback loop}
+
+The multi-turn trajectory serves as the primary systems management boundary because operational dependencies span individual invocations. The corrected patch depends on compiler diagnostics emitted several turns earlier. Each edit consumes part of the task's cumulative token and financial budget, and every operation must be evaluated against the task's security permissions. A single model request ends the moment its response stream finishes; the delegated task, along with any background tool execution, completes only when the runtime explicitly settles it. The runtime must therefore manage state, resource quotas, and lifetime policies at the granularity of the entire task rather than the individual call.
+
+This boundary explains why infrastructure designed for independent, stateless requests cannot host a multi-turn trajectory without fundamental changes. The assumptions that make stateless web services simple break down across turns in predictable ways, each motivating a specific systems subsystem explored later in this book. @Tbl-vol3-request-vs-trajectory contrasts these stateless assumptions against trajectory requirements and identifies the chapters that address them.
+
+| Concern       | Stateless request assumption                 | Trajectory requirement                                                                | Developed in                                            |
+|:--------------|:---------------------------------------------|:--------------------------------------------------------------------------------------|:--------------------------------------------------------|
+| **Cost**      | Each call has a bounded, independent cost    | Cost accumulates across turns and includes failed attempts                            | @sec-vol3-foundation-model, @sec-vol3-agent-economics   |
+| **Memory**    | State is discarded when the response returns | Context, serving state, and the workspace must survive between turns                  | @sec-vol3-context-engineering, @sec-vol3-kv-cache       |
+| **Authority** | A credential is granted to the whole service | Each action is checked against a grant scoped to the task                             | @sec-vol3-tool-calling, @sec-vol3-sandboxes             |
+| **Recovery**  | A failed request can be retried              | Repeating an effect can duplicate it; recovery may require compensation               | @sec-vol3-durable-execution, @sec-vol3-failure-recovery |
+| **Evidence**  | A success status ends the request            | A success status is one observation; acceptance needs an independent check            | @sec-vol3-evaluation                                    |
+| **Placement** | Any replica can serve any request            | Later turns benefit from reaching the retained serving state and the task's workspace | @sec-vol3-kv-cache                                      |
+: **Request Assumptions That a Trajectory Breaks**: Each row names a simplification that stateless services rely on, the requirement a multi-turn task places in its stead, and where the book develops the response. {#tbl-vol3-request-vs-trajectory tbl-colwidths="[12,28,36,24]"}
+
+A naive implementation might attempt to express this multi-turn interaction as a simple while-loop. As shown in @lst-vol3-naive-agent-loop, directly dispatching extracted commands and treating model-declared completion as a termination signal leaves critical systems responsibilities unaddressed.
+
+::: {#lst-vol3-naive-agent-loop lst-cap="**An Unmediated Agent Loop**: Direct command dispatch and model-declared completion leave authority, task evidence, resource limits, and recovery unspecified."}
+```python
+prompt = task_description
+while True:
+    response = generate(prompt)
+    command = parse_command(response)
+    output = run_with_host_permissions(command)
+    prompt += format_observation(command, output)
+    if "TASK_COMPLETE" in response:
+        break
+```
+:::
+
+Consider what happens when the first test fails and the model decides to search the host filesystem for the target function name. Because the loop lacks an authorization boundary, the search command runs with the full privileges of the host process rather than being sandboxed inside the repository copy. Furthermore, whatever output the search produces is appended directly to the prompt without pagination, truncation, or relevance filtering. If the command dumps thousands of lines of filesystem output, the context window quickly overflows or incurs steep token processing costs on subsequent turns. These defects do not stem from using a loop construct itself, but from omitting authorization checks and active context management.
+
+Similarly, the loop delegates termination entirely to the model's self-reported completion marker. If the model enters a cyclic failure mode—repeatedly generating superficial variations of an invalid patch—the process spins indefinitely, consuming resources without resolving the defect. Worse, if the host process crashes after applying a file modification but before capturing the test result, in-memory conversation history vanishes while disk modifications persist. A naive restart from the original prompt then executes against an altered, inconsistent repository state. Managing durability, rollbacks, and recovery requires explicit knowledge of whether a workspace is ephemeral and whether actions produce external side effects; an unmediated loop leaves both choices unaddressed.
+
+These challenges reflect classic operating systems responsibilities re-emerging at the granularity of an autonomous task. A short, throwaway exploratory script may tolerate lightweight recovery, whereas an agent modifying shared production infrastructure demands transactional checkpointing and compensating actions. In both settings, the runtime requires designated components to govern permissions, persist state, enforce budgets, and determine completion. Reliable systems ensure invariant closure by placing these responsibilities strictly outside the model's unverified output; the five-part task contract introduced in @sec-vol3-intro-five-part-contract defines explicit owners for each.
+
+### The six-phase turn execution lifecycle {#sec-vol3-intro-execution-lifecycle}
+
+Consider the turn in which the repository repair agent proposes altering mutex acquisition logic in the connection pool. Before that proposal can manifest as an accepted repair, it passes through an orderly sequence of evaluations distributed across system components. We decompose each turn into six distinct phases:
+
+1. The runtime assembles the next context from the task contract, current workspace state, and relevant observations. It verifies that remaining token and financial budgets permit another inference call, pruning or summarizing past interactions to keep the context within limits while preserving the lineage of workspace modifications.
+2. The model reads that context and returns an action proposal alongside its invocation metadata. The runtime treats partial generations, network interruptions, or malformed outputs as failed calls rather than executable tool invocations, isolating network and inference errors from application logic.
+3. The runtime validates the proposed operation against the tool's schema and the agent's security policy. For a code patch, this check verifies that the target files reside within the permitted repository subtrees and that the patch format is valid. The runtime rejects unauthorized operations immediately or suspends execution if human approval is required.
+4. The tool executes the authorized operation inside an isolated environment subject to strict timeouts and resource limits. For example, applying a patch mutates files in the sandboxed workspace even before the repair passes verification. The runtime tracks in-flight executions asynchronously rather than conflating command dispatch with task completion.
+5. The runtime ingests the tool's raw execution output and structures it as fresh evidence for subsequent turns. A compiler failure yields diagnostic error logs; passing test cases yield exit codes and regression assertions. The runtime records timed-out or truncated runs explicitly as unresolved outcomes rather than treating silence as success.
+6. The runtime evaluates the updated task state against the acceptance criteria defined in the contract. Depending on the outcome, it can authorize another turn, pause for background jobs, request user clarification, terminate the trajectory as unresolvable, or formally accept the deliverable. This determination rests on verified external evidence and resource constraints rather than model self-reports.
+
+These six phases define boundaries of architectural responsibility rather than a rigid, synchronous scheduler. In production systems, authorized operations may run asynchronously against external services, and model outputs may propose final answers instead of tool calls. While implementations can overlap independent sub-tasks, causality enforces strict ordering constraints: a runtime cannot authorize an action based on observations that arrive after dispatch, nor can it infer the physical outcome of an effect from a proposal alone. @Fig-vol3-ch01-execution-lifecycle traces this U-shaped operational pipeline: the top forward path flows from context assembly (phase 1) through model proposal (phase 2) to runtime validation (phase 3), descending to sandboxed tool execution (phase 4) before the bottom return path ingests structured observations (phase 5) and assesses progress against the task contract (phase 6), routing rejected requests directly back to observation history as structured error signals. Policy rejections feed directly back into observation history as error feedback without dispatching to tools; manual approvals and background operations pause the turn; and progress assessment either triggers a new turn, accepts the deliverable, or terminates the trajectory.
+
+::: {#fig-vol3-ch01-execution-lifecycle fig-env="figure" fig-pos="htb" fig-cap="**The Six-Phase Turn Lifecycle**: Each phase marks a change in which component is responsible, not a mandated scheduler. The runtime assembles context, authorizes requests, records outcomes, and assesses progress; the model only proposes, and only an authorized request reaches a tool. A timed-out tool leaves its outcome unknown, and acceptance requires evidence independent of the model's own report, so exhausted limits end in an unresolved outcome or escalation rather than success." fig-alt="Six phase boxes arranged in a U. Top row, left to right: 1 context assembly, runtime; 2 model invocation, model; 3 validate and authorize, runtime. An authorized arrow descends to the bottom row, which runs right to left: 4 tool execution, tool; 5 observation and evidence, runtime; 6 assess against contract, runtime. A dashed rejected arrow runs from phase 3 to phase 5. Dashed arrows from phases 3 and 6 lead to a non-terminal wait box. An another-turn arrow returns from phase 6 to phase 1, and phase 6 also leads to an accept-deliverable box and a stop-without-acceptance box."}
+![](images/svg/ch01_execution_lifecycle.svg)
+:::
+
+Tracking the repair task through this lifecycle clarifies what each piece of evidence actually proves. Applying a patch confirms only that a file was modified. A successful compilation proves syntactic validity and type correctness, but nothing about runtime stability. Regression suites provide behavioral evidence on specific test inputs, yet acceptance ultimately depends on whether the cumulative results satisfy the contract's defined verification standard. Logging each stage distinctly prevents the system from conflating intermediate execution with verified resolution.
+
+Whether these components run within a single local process or distribute across microservices in a cluster, the critical architectural invariant is the strict decoupling of authority from model generation. Execution permissions stem solely from the runtime's explicit policy grant, acceptance criteria originate strictly from the task contract, and ground-truth execution logs derive only from runtime observations—never from unstructured model text, unverified tool responses, or an agent's self-asserted completion tokens.
+
+In practice, executing a test suite often takes substantially longer than generating the code patch that triggered it. Throughout this delay, the task remains logically active even though model inference is idle. The runtime must preserve sufficient context to process the eventual test results, but keeping serving state pinned in high-bandwidth GPU memory throughout an extended tool wait is economically wasteful. Conversely, evicting key-value caches prematurely forces expensive recomputation when the next turn begins. Decoupling the logical lifetime of a task from the ephemeral lifetime of serving allocations is therefore a central systems challenge. Idling precious accelerator memory during slow external operations is the **tool-wait problem**\index{Tool-wait problem!definition}; @sec-vol3-kvcache-swapping models the trade-offs of retaining, offloading, or evicting this state.
+
+The same principle governs context management. Preserving full diagnostic logs for post-hoc auditing does not require re-injecting every compiler warning into every subsequent prompt. Inference latency, GPU memory footprint, tool duration, and cumulative financial cost represent distinct operational metrics that must be balanced when deciding what to retain, recompute, or summarize. Assigning clear ownership and explicit lifetimes to every data artifact allows the runtime to enforce principled cache and context retention policies.
+
+### Four lighthouse workloads {#sec-vol3-intro-lighthouses}
+
+The four workloads plotted across the H·S·A exposure space of @fig-vol3-hsa-taxonomy define this book's **lighthouses**\index{Lighthouse workload!definition}: the support agent, remediation agent, repository repair agent, and research agent. They represent four distinct architectural archetypes chosen because each is bounded by a fundamentally different systems bottleneck; an optimization that halves latency for one workload may be entirely irrelevant to another. Automated repository repair serves as our primary running example, while the other three appear whenever a chapter explores failure modes or constraints that repository repair does not trigger.
+
+```{python}
+#| label: calc-vol3-intro-lighthouse-roster
+#| echo: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ LIGHTHOUSE ROSTER: REPAIR AGENT REGISTRY ANCHOR (LEGO)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: The four lighthouse callouts after @fig-vol3-hsa-taxonomy.
+# │ Goal: Anchor the repair agent, the running example, to its registry profile,
+# │       and pin the other three callouts' horizon words to their profiles.
+# │ Show: Step budget and context window of the reference repair harness.
+# │ How:  Read Agents.Coding.SWE_Bench_Runner; guard the research, remediation,
+# │       and support horizons (Agents.Research/Remediation/Support) against
+# │       the callouts' "tens of turns" and "a few turns" wording.
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import Agents
+from mlsysim.fmt import check, fmt_int
+
+class LighthouseRoster:
+    # ┌── 1. LOAD (Registry) ───────────────────────────────────────────────
+    repair = Agents.Coding.SWE_Bench_Runner  # reference repository-repair harness
+    research = Agents.Research.OrchestratorWorker
+    remediation = Agents.Remediation.OnCall
+    support = Agents.Support.CustomerOps
+
+    # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────
+    repair_steps = repair.max_trajectory_steps
+    repair_window = repair.context_window.to("token").magnitude
+
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(10 <= repair_steps <= 100, "Repair budget must sit in the tens-of-turns regime")
+    check(repair_window >= 32_000, "Repair window must hold a multi-file working context")
+    check(10 <= research.horizon_turns < 100, "Research callout says tens of turns per question")
+    check(10 <= remediation.horizon_turns < 100, "Remediation callout says a moderate horizon of tens of turns")
+    check(support.horizon_turns < 10, "Support callout says short sessions of a few turns")
+
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
+    repair_steps_str = fmt_int(repair_steps)
+    repair_window_str = fmt_int(repair_window)
+```
+
+::: {#lhs-vol3-repair-agent .callout-lighthouse title="Repair agent (long-horizon worker)"}
+
+**Workload**: A repository coding agent diagnoses and fixes a defect in an isolated working copy, submitting a verified patch for review. The connection-pool race condition in this chapter serves as the concrete running example; its reference harness budgets `{python} LighthouseRoster.repair_steps_str` steps inside a `{python} LighthouseRoster.repair_window_str`-token context window.
+
+**Exposure**: Long horizon (tens to hundreds of turns), a task-local working copy ($S_2$), and filesystem edits confined strictly to that disposable sandbox ($A_1$) until a human-reviewed patch is exported.
+
+**Binding constraint**: Compounding errors across the trajectory and quadratic context expansion. Repeatedly re-reading accumulated trajectory history dominates inference cost, while acceptance depends strictly on immutable test suites that the agent cannot modify.
+
+:::
+
+::: {#lhs-vol3-research-agent .callout-lighthouse title="Research agent (untrusted reader)"}
+
+**Workload**: A deep-research agent answers an open-ended question by querying, retrieving, and synthesizing external web sources, frequently delegating sub-queries to parallel worker agents.
+
+**Exposure**: Horizons from tens of turns for one question to thousands for a standing crawl, an expanding knowledge store of ingested documents ($S_3$), and read-only authority ($A_0$).
+
+**Binding constraint**: Ingested content represents untrusted data that can hijack execution flow or exfiltrate private context via indirect prompt injection [@greshake2023not]; read-only access still constitutes severe security exposure. Aggregate token consumption from retrieved documents and worker fan-out dominates total execution cost.
+
+:::
+
+::: {#lhs-vol3-remediation-agent .callout-lighthouse title="Remediation agent (irreversible actor)"}
+
+**Workload**: An automated site-reliability agent diagnoses a live production incident and applies configuration or infrastructure changes to restore service. @Sec-vol3-conclusion-capstone analyzes one such remediation end to end.
+
+**Exposure**: A moderate horizon (tens of turns), mutable shared production infrastructure ($S_3$), and non-compensable or irreversible operations ($A_3$).
+
+**Binding constraint**: A single erroneous action can incur outages costing orders of magnitude more than all trajectory compute combined. Human-in-the-loop approval latency and the blast radius of incorrect decisions dominate systems design, necessitating strict approval gates, compensating actions, and explicit points of no return before execution begins.
+
+:::
+
+::: {#lhs-vol3-support-agent .callout-lighthouse title="Support agent (interactive responder)"}
+
+**Workload**: A customer-operations agent resolves billing and booking inquiries while the user waits synchronously. @Fig-vol3-hsa-taxonomy illustrates its baseline configuration.
+
+**Exposure**: Short sessions of a few turns each across thousands of concurrent users, session context combined with sensitive enterprise database records ($S_1$ with $S_3$), and authority that escalates from read-only queries ($A_0$) to transactional updates such as issuing refunds or reserving seats ($A_2$ to $A_3$).
+
+**Binding constraint**: Strict tail latency under high concurrency, combined with verifiable adherence to enterprise policy. Serving throughput and the aggregate memory overhead of retaining active session state across thousands of simultaneous connections dominate systems cost.
+
+:::
+
+Comparing these four lighthouses demonstrates why systems mechanisms cannot be evaluated in the abstract. Proactive context summarization is vital for a multi-turn repository repair agent but largely superfluous for a three-turn support session. Conversely, requiring interactive human authorization at every step is essential for an on-call remediation agent operating on live infrastructure, yet introduces pointless friction for a read-only web researcher. Each subsequent chapter links its proposed mechanisms directly to the lighthouse whose binding constraints they resolve.
+
 ## From a Useful Proposal to an Accepted Task {#sec-vol3-intro-existence-moment}
 
 Consider a concrete engineering challenge: diagnosing and repairing an intermittent race condition in a distributed key-value store.[^fn-repair-task-benchmark] A foundation model[^fn-foundation-model-term] can inspect the issue description and propose an edit to the connection-pool locking logic. Emitting that patch text, however, leaves the repository completely untouched. Resolving the defect requires an agent to locate the relevant source files, draft an edit, execute compilers and test runners inside an isolated environment, interpret diagnostic logs when a build fails, and verify that the resulting code satisfies the repository's regression test suite.
@@ -276,7 +438,7 @@ In the repository repair task, the goal $\LongmessageGapPerByte$ includes an exp
 
 | Contract Component         |      Formal Symbol       | Systems Role                                        | Concrete Engineering Artifact                    |
 |:---------------------------|:------------------------:|:----------------------------------------------------|:-------------------------------------------------|
-| **Goal**                   |           $\LongmessageGapPerByte$            | Desired end state and explicit negative scope       | Repair request that preserves unrelated behavior |
+| **Goal**                   | $\LongmessageGapPerByte$ | Desired end state and explicit negative scope       | Repair request that preserves unrelated behavior |
 | **Environment**            |      $\Environment$      | Target state and execution conditions               | Source baseline and designated working copy      |
 | **Permitted Actions**      |   $\PermittedActions$    | Operations and resources within delegated authority | Allowed edit paths and test commands             |
 | **Available Observations** | $\AvailableObservations$ | Information the task may obtain and return          | Source excerpts, bounded test output, and diff   |
@@ -501,168 +663,6 @@ A repair agent can inspect and edit a disposable working copy and return a patch
 
 Treating agent reliability and execution cost as coupled functions of trajectory length and acceptance probability establishes a rigorous baseline for system design. These quantitative trade-offs explain why real-world agent architectures depend less on unconstrained model autonomy than on bounded execution graphs, robust intermediate verifiers, and disciplined resource accounting across realistic workloads.
 
-## The Running Example and Four Lighthouses {#sec-vol3-intro-running-example}
-
-To ground the architectural instruments without introducing disjointed scenarios in every chapter, this book organizes its systems analysis around four recurring workloads. The automated repository repair introduced in @sec-vol3-intro-existence-moment serves as the primary running example. Following this repair task across its execution turns shows how core runtime mechanisms operate on concrete problems. Three additional workloads then map out operational regimes that repository repair alone cannot exercise.
-
-### The trajectory as the systems management boundary {#sec-vol3-intro-trajectory-systems-boundary}
-
-Tracing the repair task across turns exposes how proposals, side effects, and observations interact over time. Execution begins when the runtime provisions an isolated working copy of the repository and supplies the initial task description. The model proposes running the failing test. After validating that this command is authorized, the runtime invokes the test runner and records its output. When the runner reports a deadlock, the runtime supplies the diagnostic output to the next model call. The model then proposes inspecting the connection-pool implementation, and the returned source code reveals the locking logic that requires repair.
-
-Guided by this inspection, the model proposes a patch. Before modifying the working copy, the runtime verifies that the edit targets permitted files. This step underscores a foundational separation of concerns: the model's generated diff is merely a proposal, the modified file is an effect, and the tool's execution report is an observation. When a subsequent compilation attempt reports an unclosed bracket, that observation directly steers the next decision. The model proposes a corrected patch, which the runtime applies before rerunning the build. Once compilation succeeds and visible unit tests pass, the runtime collects regression evidence using an immutable test suite that the editing tools cannot touch. It then records the resulting deliverable alongside these verification records. If the results satisfy the contract's acceptance criteria, the runtime submits the repair; otherwise, it can continue iterating, abort, or escalate to a human engineer.
-
-Dynamic observations dictate subsequent action: a thread deadlock demands different remediation than a syntax error, and a clean build never proves that a race condition has disappeared. Even a comprehensive regression test can miss an interleaving that triggers the defect under concurrency. Consequently, an agent runtime requires both a mechanism to incorporate incoming evidence and a rigorous policy for deciding when that evidence justifies termination.
-
-Closing a feedback loop is not new to computing. Feedback control[^fn-feedback-control-cybernetics] and reinforcement learning already organize action around observations of an environment [@wiener1948cybernetics; @sutton2018reinforcement]. Foundation-model agents use learned representations of language and code to propose actions in software environments; work such as ReAct demonstrates this interleaving of generated reasoning, actions, and observations [@yao2023react]. The engineering problem is how to make that interleaving accountable. Fault isolation, access control, and recovery remain essential precisely because a generated proposal can be wrong or destructive.
-
-[^fn-feedback-control-cybernetics]: **Cybernetics**: Wiener's 1948 book named the study of control through feedback, in which a system measures the result of its own action and uses the difference from its goal to choose the next one [@wiener1948cybernetics]. The loop corrects errors only if the measurement comes from the environment; a runtime that feeds back the model's own account of what it did has closed a loop around a claim rather than around the result. \index{Cybernetics!feedback loop}
-
-The multi-turn trajectory serves as the primary systems management boundary because operational dependencies span individual invocations. The corrected patch depends on compiler diagnostics emitted several turns earlier. Each edit consumes part of the task's cumulative token and financial budget, and every operation must be evaluated against the task's security permissions. A single model request ends the moment its response stream finishes; the delegated task, along with any background tool execution, completes only when the runtime explicitly settles it. The runtime must therefore manage state, resource quotas, and lifetime policies at the granularity of the entire task rather than the individual call.
-
-This boundary explains why infrastructure designed for independent, stateless requests cannot host a multi-turn trajectory without fundamental changes. The assumptions that make stateless web services simple break down across turns in predictable ways, each motivating a specific systems subsystem explored later in this book. @Tbl-vol3-request-vs-trajectory contrasts these stateless assumptions against trajectory requirements and identifies the chapters that address them.
-
-| Concern       | Stateless request assumption                 | Trajectory requirement                                                                | Developed in                                             |
-|:--------------|:---------------------------------------------|:--------------------------------------------------------------------------------------|:---------------------------------------------------------|
-| **Cost**      | Each call has a bounded, independent cost    | Cost accumulates across turns and includes failed attempts                            | @sec-vol3-foundation-model, @sec-vol3-agent-economics    |
-| **Memory**    | State is discarded when the response returns | Context, serving state, and the workspace must survive between turns                  | @sec-vol3-context-engineering, @sec-vol3-kv-cache        |
-| **Authority** | A credential is granted to the whole service | Each action is checked against a grant scoped to the task                             | @sec-vol3-tool-calling, @sec-vol3-sandboxes              |
-| **Recovery**  | A failed request can be retried              | Repeating an effect can duplicate it; recovery may require compensation               | @sec-vol3-durable-execution, @sec-vol3-failure-recovery  |
-| **Evidence**  | A success status ends the request            | A success status is one observation; acceptance needs an independent check            | @sec-vol3-evaluation                                     |
-| **Placement** | Any replica can serve any request            | Later turns benefit from reaching the retained serving state and the task's workspace | @sec-vol3-kv-cache                                       |
-: **Request Assumptions That a Trajectory Breaks**: Each row names a simplification that stateless services rely on, the requirement a multi-turn task places in its stead, and where the book develops the response. {#tbl-vol3-request-vs-trajectory tbl-colwidths="[12,28,36,24]"}
-
-A naive implementation might attempt to express this multi-turn interaction as a simple while-loop. As shown in @lst-vol3-naive-agent-loop, directly dispatching extracted commands and treating model-declared completion as a termination signal leaves critical systems responsibilities unaddressed.
-
-::: {#lst-vol3-naive-agent-loop lst-cap="**An Unmediated Agent Loop**: Direct command dispatch and model-declared completion leave authority, task evidence, resource limits, and recovery unspecified."}
-```python
-prompt = task_description
-while True:
-    response = generate(prompt)
-    command = parse_command(response)
-    output = run_with_host_permissions(command)
-    prompt += format_observation(command, output)
-    if "TASK_COMPLETE" in response:
-        break
-```
-:::
-
-Consider what happens when the first test fails and the model decides to search the host filesystem for the target function name. Because the loop lacks an authorization boundary, the search command runs with the full privileges of the host process rather than being sandboxed inside the repository copy. Furthermore, whatever output the search produces is appended directly to the prompt without pagination, truncation, or relevance filtering. If the command dumps thousands of lines of filesystem output, the context window quickly overflows or incurs steep token processing costs on subsequent turns. These defects do not stem from using a loop construct itself, but from omitting authorization checks and active context management.
-
-Similarly, the loop delegates termination entirely to the model's self-reported completion marker. If the model enters a cyclic failure mode—repeatedly generating superficial variations of an invalid patch—the process spins indefinitely, consuming resources without resolving the defect. Worse, if the host process crashes after applying a file modification but before capturing the test result, in-memory conversation history vanishes while disk modifications persist. A naive restart from the original prompt then executes against an altered, inconsistent repository state. Managing durability, rollbacks, and recovery requires explicit knowledge of whether a workspace is ephemeral and whether actions produce external side effects; an unmediated loop leaves both choices unaddressed.
-
-These challenges reflect classic operating systems responsibilities re-emerging at the granularity of an autonomous task. A short, throwaway exploratory script may tolerate lightweight recovery, whereas an agent modifying shared production infrastructure demands transactional checkpointing and compensating actions. In both settings, the runtime requires designated components to govern permissions, persist state, enforce budgets, and determine completion. Reliable systems ensure invariant closure by placing these responsibilities strictly outside the model's unverified output; the five-part task contract introduced in @sec-vol3-intro-five-part-contract defines explicit owners for each.
-
-### The six-phase turn execution lifecycle {#sec-vol3-intro-execution-lifecycle}
-
-Consider the turn in which the repository repair agent proposes altering mutex acquisition logic in the connection pool. Before that proposal can manifest as an accepted repair, it passes through an orderly sequence of evaluations distributed across system components. We decompose each turn into six distinct phases:
-
-1. The runtime assembles the next context from the task contract, current workspace state, and relevant observations. It verifies that remaining token and financial budgets permit another inference call, pruning or summarizing past interactions to keep the context within limits while preserving the lineage of workspace modifications.
-2. The model reads that context and returns an action proposal alongside its invocation metadata. The runtime treats partial generations, network interruptions, or malformed outputs as failed calls rather than executable tool invocations, isolating network and inference errors from application logic.
-3. The runtime validates the proposed operation against the tool's schema and the agent's security policy. For a code patch, this check verifies that the target files reside within the permitted repository subtrees and that the patch format is valid. The runtime rejects unauthorized operations immediately or suspends execution if human approval is required.
-4. The tool executes the authorized operation inside an isolated environment subject to strict timeouts and resource limits. For example, applying a patch mutates files in the sandboxed workspace even before the repair passes verification. The runtime tracks in-flight executions asynchronously rather than conflating command dispatch with task completion.
-5. The runtime ingests the tool's raw execution output and structures it as fresh evidence for subsequent turns. A compiler failure yields diagnostic error logs; passing test cases yield exit codes and regression assertions. The runtime records timed-out or truncated runs explicitly as unresolved outcomes rather than treating silence as success.
-6. The runtime evaluates the updated task state against the acceptance criteria defined in the contract. Depending on the outcome, it can authorize another turn, pause for background jobs, request user clarification, terminate the trajectory as unresolvable, or formally accept the deliverable. This determination rests on verified external evidence and resource constraints rather than model self-reports.
-
-These six phases define boundaries of architectural responsibility rather than a rigid, synchronous scheduler. In production systems, authorized operations may run asynchronously against external services, and model outputs may propose final answers instead of tool calls. While implementations can overlap independent sub-tasks, causality enforces strict ordering constraints: a runtime cannot authorize an action based on observations that arrive after dispatch, nor can it infer the physical outcome of an effect from a proposal alone. @Fig-vol3-ch01-execution-lifecycle traces this U-shaped operational pipeline: the top forward path flows from context assembly (phase 1) through model proposal (phase 2) to runtime validation (phase 3), descending to sandboxed tool execution (phase 4) before the bottom return path ingests structured observations (phase 5) and assesses progress against the task contract (phase 6), routing rejected requests directly back to observation history as structured error signals. Policy rejections feed directly back into observation history as error feedback without dispatching to tools; manual approvals and background operations pause the turn; and progress assessment either triggers a new turn, accepts the deliverable, or terminates the trajectory.
-
-::: {#fig-vol3-ch01-execution-lifecycle fig-env="figure" fig-pos="htb" fig-cap="**The Six-Phase Turn Lifecycle**: Each phase marks a change in which component is responsible, not a mandated scheduler. The runtime assembles context, authorizes requests, records outcomes, and assesses progress; the model only proposes, and only an authorized request reaches a tool. A timed-out tool leaves its outcome unknown, and acceptance requires evidence independent of the model's own report, so exhausted limits end in an unresolved outcome or escalation rather than success." fig-alt="Six phase boxes arranged in a U. Top row, left to right: 1 context assembly, runtime; 2 model invocation, model; 3 validate and authorize, runtime. An authorized arrow descends to the bottom row, which runs right to left: 4 tool execution, tool; 5 observation and evidence, runtime; 6 assess against contract, runtime. A dashed rejected arrow runs from phase 3 to phase 5. Dashed arrows from phases 3 and 6 lead to a non-terminal wait box. An another-turn arrow returns from phase 6 to phase 1, and phase 6 also leads to an accept-deliverable box and a stop-without-acceptance box."}
-![](images/svg/ch01_execution_lifecycle.svg)
-:::
-
-Tracking the repair task through this lifecycle clarifies what each piece of evidence actually proves. Applying a patch confirms only that a file was modified. A successful compilation proves syntactic validity and type correctness, but nothing about runtime stability. Regression suites provide behavioral evidence on specific test inputs, yet acceptance ultimately depends on whether the cumulative results satisfy the contract's defined verification standard. Logging each stage distinctly prevents the system from conflating intermediate execution with verified resolution.
-
-Whether these components run within a single local process or distribute across microservices in a cluster, the critical architectural invariant is the strict decoupling of authority from model generation. Execution permissions stem solely from the runtime's explicit policy grant, acceptance criteria originate strictly from the task contract, and ground-truth execution logs derive only from runtime observations—never from unstructured model text, unverified tool responses, or an agent's self-asserted completion tokens.
-
-In practice, executing a test suite often takes substantially longer than generating the code patch that triggered it. Throughout this delay, the task remains logically active even though model inference is idle. The runtime must preserve sufficient context to process the eventual test results, but keeping serving state pinned in high-bandwidth GPU memory throughout an extended tool wait is economically wasteful. Conversely, evicting key-value caches prematurely forces expensive recomputation when the next turn begins. Decoupling the logical lifetime of a task from the ephemeral lifetime of serving allocations is therefore a central systems challenge. Idling precious accelerator memory during slow external operations is the **tool-wait problem**\index{Tool-wait problem!definition}; @sec-vol3-kvcache-swapping models the trade-offs of retaining, offloading, or evicting this state.
-
-The same principle governs context management. Preserving full diagnostic logs for post-hoc auditing does not require re-injecting every compiler warning into every subsequent prompt. Inference latency, GPU memory footprint, tool duration, and cumulative financial cost represent distinct operational metrics that must be balanced when deciding what to retain, recompute, or summarize. Assigning clear ownership and explicit lifetimes to every data artifact allows the runtime to enforce principled cache and context retention policies.
-
-### Four lighthouse workloads {#sec-vol3-intro-lighthouses}
-
-The four workloads plotted across the H·S·A exposure space of @fig-vol3-hsa-taxonomy define this book's **lighthouses**\index{Lighthouse workload!definition}: the support agent, remediation agent, repository repair agent, and research agent. They represent four distinct architectural archetypes chosen because each is bounded by a fundamentally different systems bottleneck; an optimization that halves latency for one workload may be entirely irrelevant to another. Automated repository repair serves as our primary running example, while the other three appear whenever a chapter explores failure modes or constraints that repository repair does not trigger.
-
-```{python}
-#| label: calc-vol3-intro-lighthouse-roster
-#| echo: false
-# ┌─────────────────────────────────────────────────────────────────────────────
-# │ LIGHTHOUSE ROSTER: REPAIR AGENT REGISTRY ANCHOR (LEGO)
-# ├─────────────────────────────────────────────────────────────────────────────
-# │ Context: The four lighthouse callouts after @fig-vol3-hsa-taxonomy.
-# │ Goal: Anchor the repair agent, the running example, to its registry profile,
-# │       and pin the other three callouts' horizon words to their profiles.
-# │ Show: Step budget and context window of the reference repair harness.
-# │ How:  Read Agents.Coding.SWE_Bench_Runner; guard the research, remediation,
-# │       and support horizons (Agents.Research/Remediation/Support) against
-# │       the callouts' "tens of turns" and "a few turns" wording.
-# └─────────────────────────────────────────────────────────────────────────────
-from mlsysim import Agents
-from mlsysim.fmt import check, fmt_int
-
-class LighthouseRoster:
-    # ┌── 1. LOAD (Registry) ───────────────────────────────────────────────
-    repair = Agents.Coding.SWE_Bench_Runner  # reference repository-repair harness
-    research = Agents.Research.OrchestratorWorker
-    remediation = Agents.Remediation.OnCall
-    support = Agents.Support.CustomerOps
-
-    # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────
-    repair_steps = repair.max_trajectory_steps
-    repair_window = repair.context_window.to("token").magnitude
-
-    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
-    check(10 <= repair_steps <= 100, "Repair budget must sit in the tens-of-turns regime")
-    check(repair_window >= 32_000, "Repair window must hold a multi-file working context")
-    check(10 <= research.horizon_turns < 100, "Research callout says tens of turns per question")
-    check(10 <= remediation.horizon_turns < 100, "Remediation callout says a moderate horizon of tens of turns")
-    check(support.horizon_turns < 10, "Support callout says short sessions of a few turns")
-
-    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
-    repair_steps_str = fmt_int(repair_steps)
-    repair_window_str = fmt_int(repair_window)
-```
-
-::: {#lhs-vol3-repair-agent .callout-lighthouse title="Repair agent (long-horizon worker)"}
-
-**Workload**: A repository coding agent diagnoses and fixes a defect in an isolated working copy, submitting a verified patch for review. The connection-pool race condition in this chapter serves as the concrete running example; its reference harness budgets `{python} LighthouseRoster.repair_steps_str` steps inside a `{python} LighthouseRoster.repair_window_str`-token context window.
-
-**Exposure**: Long horizon (tens to hundreds of turns), a task-local working copy ($S_2$), and filesystem edits confined strictly to that disposable sandbox ($A_1$) until a human-reviewed patch is exported.
-
-**Binding constraint**: Compounding errors across the trajectory and quadratic context expansion. Repeatedly re-reading accumulated trajectory history dominates inference cost, while acceptance depends strictly on immutable test suites that the agent cannot modify.
-
-:::
-
-::: {#lhs-vol3-research-agent .callout-lighthouse title="Research agent (untrusted reader)"}
-
-**Workload**: A deep-research agent answers an open-ended question by querying, retrieving, and synthesizing external web sources, frequently delegating sub-queries to parallel worker agents.
-
-**Exposure**: Horizons from tens of turns for one question to thousands for a standing crawl, an expanding knowledge store of ingested documents ($S_3$), and read-only authority ($A_0$).
-
-**Binding constraint**: Ingested content represents untrusted data that can hijack execution flow or exfiltrate private context via indirect prompt injection [@greshake2023not]; read-only access still constitutes severe security exposure. Aggregate token consumption from retrieved documents and worker fan-out dominates total execution cost.
-
-:::
-
-::: {#lhs-vol3-remediation-agent .callout-lighthouse title="Remediation agent (irreversible actor)"}
-
-**Workload**: An automated site-reliability agent diagnoses a live production incident and applies configuration or infrastructure changes to restore service. @Sec-vol3-conclusion-capstone analyzes one such remediation end to end.
-
-**Exposure**: A moderate horizon (tens of turns), mutable shared production infrastructure ($S_3$), and non-compensable or irreversible operations ($A_3$).
-
-**Binding constraint**: A single erroneous action can incur outages costing orders of magnitude more than all trajectory compute combined. Human-in-the-loop approval latency and the blast radius of incorrect decisions dominate systems design, necessitating strict approval gates, compensating actions, and explicit points of no return before execution begins.
-
-:::
-
-::: {#lhs-vol3-support-agent .callout-lighthouse title="Support agent (interactive responder)"}
-
-**Workload**: A customer-operations agent resolves billing and booking inquiries while the user waits synchronously. @Fig-vol3-hsa-taxonomy illustrates its baseline configuration.
-
-**Exposure**: Short sessions of a few turns each across thousands of concurrent users, session context combined with sensitive enterprise database records ($S_1$ with $S_3$), and authority that escalates from read-only queries ($A_0$) to transactional updates such as issuing refunds or reserving seats ($A_2$ to $A_3$).
-
-**Binding constraint**: Strict tail latency under high concurrency, combined with verifiable adherence to enterprise policy. Serving throughput and the aggregate memory overhead of retaining active session state across thousands of simultaneous connections dominate systems cost.
-
-:::
-
-Comparing these four lighthouses demonstrates why systems mechanisms cannot be evaluated in the abstract. Proactive context summarization is vital for a multi-turn repository repair agent but largely superfluous for a three-turn support session. Conversely, requiring interactive human authorization at every step is essential for an on-call remediation agent operating on live infrastructure, yet introduces pointless friction for a read-only web researcher. Each subsequent chapter links its proposed mechanisms directly to the lighthouse whose binding constraints they resolve.
-
 ## Book Organization {#sec-vol3-intro-book-organization}
 
 The stochastic computer model introduced in @sec-vol3-intro-stochastic-computer provides the architectural blueprint for this book. Each architectural layer forms a distinct part, arranged in order of strict operational dependency. Every layer builds directly upon the guarantees established beneath it while closing a specific operational exposure. For example, generating a higher-quality proposal does not grant permission to execute it, just as sandboxing a tool invocation does not ensure that an extended multi-step workflow will reach a correct terminal state. We therefore develop each subsystem independently before assembling them into a complete agent runtime.
@@ -726,110 +726,6 @@ Every subsequent chapter contributes concrete answers to three fundamental syste
 ↪ Answers to the three questions, tested with the complete architecture assembled, are developed in @sec-vol3-conclusion-questions.
 :::
 
-## Fallacies and Pitfalls {#sec-vol3-intro-fallacies}
-
-A patch can compile cleanly without resolving the underlying defect, just as an agent can consume its turn budget without producing fresh evidence. Autonomous execution fails when system designers mistake churn inside the loop for genuine task completion.
-
-```{python}
-#| label: calc-vol3-intro-fallacies
-#| echo: false
-# ┌─────────────────────────────────────────────────────────────────────────────
-# │ PRICING THE INTRODUCTION'S FALLACIES AND PITFALLS (LEGO)
-# ├─────────────────────────────────────────────────────────────────────────────
-# │ Context: @sec-vol3-intro-fallacies (context window and retry items).
-# │ Goal: Show that the repair transcript fits the window yet is re-read in
-# │       bulk, and what independent retries are worth.
-# │ Show: Final-call context, window fraction, cumulative input, and success
-# │       after several independent attempts.
-# │ How:  Append-only context s0 + delta*(t-1); cumulative sum over turns;
-# │       1 - (1 - p_acc)^k for k independent attempts.
-# │ Note: Turn budget and window from the registry repair harness; start and
-# │       per-turn tokens are scenario inputs shared with the foundation-model
-# │       chapter's call-price estimate; acceptance from CostPerAccepted.
-# └─────────────────────────────────────────────────────────────────────────────
-from mlsysim import Agents
-from mlsysim.fmt import check, fmt_int, fmt_multiple, fmt_percent
-
-class IntroFallacies:
-    # ┌── 1. LOAD (Registry and scenario inputs) ─────────────────────────────
-    agent = Agents.Coding.SWE_Bench_Runner
-    turns = agent.max_trajectory_steps
-    window = agent.context_window.to("token").magnitude
-    s0 = 8_000  # scenario: initial serialized prompt tokens
-    delta = 1_500  # scenario: tokens appended per turn (output plus observation)
-    p_acc = CostPerAccepted.p_acc  # acceptance per independent attempt
-    k_retry = 5  # attempts allowed by the retry budget
-
-    # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────
-    last_call = s0 + delta * (turns - 1)
-    window_share = last_call / window
-    cumulative = turns * s0 + delta * turns * (turns - 1) // 2
-    reread_ratio = cumulative / last_call
-    p_indep = 1 - (1 - p_acc) ** k_retry
-
-    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
-    check(last_call < window, "The whole repair transcript must fit the window")
-    check(reread_ratio > 10, "Cumulative re-read must dwarf the final context")
-    check(p_indep > 0.9, "Independent retries must make success near-certain")
-
-    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
-    turns_str = fmt_int(turns)
-    s0_str, delta_str = fmt_int(s0), fmt_int(delta)
-    last_call_str = fmt_int(last_call)
-    window_str = fmt_int(window)
-    window_share_str = fmt_percent(round(window_share, 2), style="prose")
-    cumulative_str = fmt_int(cumulative)
-    reread_ratio_mult_str = fmt_multiple(reread_ratio, precision=1)
-    k_retry_str = fmt_int(k_retry)
-    p_indep_str = fmt_percent(round(p_indep, 2), style="prose")
-```
-
-::: {.fallacy-pitfall}
-**Fallacy**: *A larger context window removes the need to manage task state.*
-
-Expanding the raw capacity of a context window increases how many tokens a single invocation can ingest, but it does not resolve which state is authoritative. In an append-only trajectory, stale observations and obsolete file edits accumulate alongside current versions. Consider the software repair harness under a `{python} IntroFallacies.turns_str`-turn budget. Starting from an initial prompt of `{python} IntroFallacies.s0_str` tokens and appending `{python} IntroFallacies.delta_str` tokens per turn, the final model call reads `{python} IntroFallacies.last_call_str` tokens. This uses only `{python} IntroFallacies.window_share_str` of a `{python} IntroFallacies.window_str`-token window, meaning buffer capacity never forces eviction. Yet without active state pruning, superseded revisions of edited files sit directly alongside their latest patches. Furthermore, repeatedly resending historical turns forces the system to ingest `{python} IntroFallacies.cumulative_str` cumulative input tokens—`{python} IntroFallacies.reread_ratio_mult_str` the final context size. Even when an entire execution history fits comfortably inside memory, raw capacity does not guarantee relevance or freshness. The runtime must explicitly assemble the working context and designate authoritative state rather than relying on the foundation model to untangle conflicting historical snapshots.
-:::
-
-::: {.column-margin .margin-pointer}
-↪ The quadratic input-token cost of resending an append-only history is developed in @sec-vol3-foundation-model-trajectory-cost-accumulation.
-:::
-
-::: {.fallacy-pitfall}
-**Pitfall**: *Appending every failure and retrying until the model reports progress.*
-
-Retrying an operation yields returns only when successive attempts are conditionally independent. With a per-attempt acceptance rate of `{python} CostPerAccepted.p_acc_str`, `{python} IntroFallacies.k_retry_str` independent attempts achieve an aggregate success rate of `{python} IntroFallacies.p_indep_str`. However, if an agent continuously appends each failure trace into its prompt, the model tends to fixate on its prior erroneous assumptions. In that case, `{python} IntroFallacies.k_retry_str` correlated attempts succeed no more frequently than the initial attempt, while consuming `{python} IntroFallacies.k_retry_str` times the budget. A robust runtime isolates the full diagnostic history in an execution log while feeding the model only the distilled evidence needed for the immediate decision. The control harness must enforce hard retry limits and admit another turn only when a progress check confirms a tangible state change or a fresh environmental observation. Truncating or rewriting the working context changes what the model reads, but physical side effects already executed in the environment persist until actively rolled back.
-:::
-
-::: {.fallacy-pitfall}
-**Fallacy**: *A coherent model report establishes that the task is complete.*
-
-A model's natural-language assertion that it has resolved an issue is an unverified hypothesis, not a proof of completion. In a software repair task, for example, an agent's claim that it fixed a race condition describes an intended outcome rather than the true state of the repository. A clean compilation proves only that the syntax and type signatures satisfy the compiler. Passing regression tests provides stronger evidence, yet even tests validate only the execution paths they specifically exercise. High-integrity execution frameworks never rely on self-reported task completion. Instead, the runtime must validate the workspace against an explicit evidence standard—executing automated test suites, static analysis, and regression checks—while recording both the verification artifacts and any unresolved limitations.
-:::
-
-::: {.fallacy-pitfall}
-**Pitfall**: *Expressing an authority limit only as an instruction to the model.*
-
-System security cannot rely on behavioral compliance requested through natural-language prompts. Prompting an agent to modify files only within a specific project directory expresses intent, but it offers no hard security guarantees against hallucinations or prompt injection attacks embedded in untrusted source files. If the underlying environment exposes raw execution primitives, an agent can be manipulated into exfiltrating secrets or altering sensitive infrastructure. Furthermore, read-only permissions are not inherently safe: an agent that reads an environment variable containing an API secret and transmits it through an outbound network request violates confidentiality without modifying a single local file. Concrete authorization must be enforced by the execution boundary rather than the prompt. Runtimes must isolate agent processes using operating system primitives—such as containers, isolated network namespaces, ephemeral credentials, and strictly scoped tool interfaces—that physically prevent unauthorized operations regardless of what the model decides to invoke.
-:::
-
-::: {.fallacy-pitfall}
-**Fallacy**: *Environmental variation always requires a model-directed loop.*
-
-Engineers often assume that any dynamic environment demands an autonomous, model-directed agent loop. In practice, traditional software workflows have long handled environmental uncertainty using deterministic control flow: conditional branching, parameterized retries, state machines, and exponential backoffs. Invoking a foundation model to decide the next step after a deterministic unit test failure is wasteful if the required recovery action is a known fallback or a fixed sequence of steps. Model-directed decisions are justified only when the next action requires interpreting open-ended, ambiguous evidence that cannot be captured in deterministic logic—such as synthesizing error diagnostics to formulate an edit across multiple files. System designers must benchmark agentic architectures against deterministic baselines under identical acceptance criteria. An agentic loop justifies its added latency, token cost, and non-determinism only when it delivers a measurable reduction in cost per accepted task.
-:::
-
-::: {.fallacy-pitfall}
-**Pitfall**: *Charging only the successful final trajectory to the accepted result.*
-
-Autonomous task completion frequently requires multiple attempts before a candidate patch satisfies the acceptance harness. Every abandoned branch, failed test run, and discarded attempt consumes compute and wall-clock time, even if its code never merges into the final repository. With a per-attempt acceptance rate of `{python} CostPerAccepted.p_acc_str`, accounting only for the winning trajectory yields an apparent cost of `{python} CostPerAccepted.c_attempt_str` per repair, whereas the true expected cost is `{python} CostPerAccepted.c_eff_str`—a `{python} CostPerAccepted.understate_mult_str` understatement. Complete system accounting must also capture sandbox provisioning, tool execution overhead, and the cost of human triaging. Across an evaluation workload, the total cost per accepted task aggregates all expended resources:
-
-$$\CostPerAcceptedTaskEff = \frac{\sum_{i=1}^{\NumberOfDevices} C_{\text{task}, i}}{\AcceptedTasks}$$
-
-Here, $\NumberOfDevices$ encompasses every distinct initiated task within the cohort. The numerator aggregates the included monetary costs of all these tasks ($C_{\text{task}, i}$), including their attempts and branches—spanning model inference tokens, infrastructure runtime fees, and human intervention costs—while $\AcceptedTasks$ counts only those tasks accepted under the stated evidence standard. If no tasks reach acceptance, the ratio is mathematically undefined, but the total incurred cost remains an essential system metric. Rigorous comparisons between architectures require evaluating identical task cohorts under the same acceptance criteria, with cohort boundaries fixed in advance. This empirical ratio serves as the measured counterpart to the theoretical expected cost in @eq-vol3-cost-per-accepted-task.
-:::
-
-These distinctions place the true engineering boundary around the entire task lifecycle. Effective agentic systems maintain synchronized state representations, enforce operational boundaries through runtime isolation rather than prompt compliance, and gate acceptance on reproducible evidence. Ultimately, an agentic system must be judged not by the conversational fluency or length of its trajectory, but by its cost-effective delivery of verified outcomes.
-
 ## Summary {#sec-vol3-intro-summary}
 
 This chapter establishes four foundational instruments for analyzing and engineering agentic systems. Under the *stochastic computer* abstraction, the foundation model operates as a probabilistic processor: it generates candidate actions and reasoning traces, but cannot independently verify correctness or safely mutate external state. A deterministic runtime must enclose this processor to manage persistent state, enforce system invariants, and close the control loop. To determine where such systems require protection, the *H·S·A framework* characterizes task exposure across execution horizon ($\Horizon$), accumulated state ($S_0$ to $S_3$), and delegated authority ($A_0$ to $A_3$). Structural safety then relies on *invariant closure*, enforcing hard physical and logical boundaries below the model while demanding verifiable, artifact-based acceptance criteria above it.
@@ -838,14 +734,14 @@ System reliability and operational efficiency ultimately reduce to concrete econ
 
 @Tbl-vol3-01_introduction-key-equations summarizes the quantitative relations used throughout this chapter to evaluate reliability and cost across an execution horizon, where $\SmallConstant$ is the per-step error rate, $\Horizon$ is the horizon length in turns, and $k$ is the allocated retry budget.
 
-| Equation                                                                                                                                                      | What it bounds or decides                                                                                           | Where derived                      |
-|:--------------------------------------------------------------------------------------------------------------------------------------------------------------|:--------------------------------------------------------------------------------------------------------------------|:-----------------------------------|
-| $\Pr(\text{success}) = (1-\SmallConstant)^{\Horizon}$                                                                                                                      | Task success probability when all $\Horizon$ steps must succeed without intermediate checks                                | @eq-vol3-horizon-compounding       |
-| $(1-\SmallConstant)^{\Horizon} \approx e^{-\SmallConstant \Horizon}$                                                                                                                    | The product $\SmallConstant \Horizon$ governs reliability; expanding the horizon requires a proportionally lower step error rate | @sec-vol3-intro-horizon-arithmetic |
-| $\CostPerAcceptedTaskEff = \mathbb{E}[\AttemptCost]/\AcceptanceProbability$                                                                                   | Expected cost per accepted task under independent retries; acceptance rate scales effective attempt cost            | @eq-vol3-cost-per-accepted-task    |
-| $\AFourthTaxonomyAxis'_{\text{attempt}}/\HiddenDimensionFour'_{\text{acc}} < \AttemptCost/\AcceptanceProbability$                                                                                   | Economic condition determining whether an added check, boundary, cache, or prompt optimization justifies its cost   | @sec-vol3-intro-horizon-arithmetic |
-| $1-(1-\AcceptanceProbability)^{k}$                                                                                                                            | Cumulative acceptance probability within a budget of $k$ attempts, assuming independent failures                    | @sec-vol3-intro-fallacies          |
-| $\CostPerAcceptedTaskEff = \big(\sum_{i \in \TrajectorySetsAll} (C_{\text{inference}}^{(i)} + C_{\text{infra}}^{(i)}) + C_{\text{human}}\big)/\AcceptedTasks$ | Measured cost per accepted task over an operational cohort, accounting for failed and abandoned attempts            | @sec-vol3-intro-fallacies          |
+| Equation                                                                                                                                                      | What it bounds or decides                                                                                                        | Where derived                      |
+|:--------------------------------------------------------------------------------------------------------------------------------------------------------------|:---------------------------------------------------------------------------------------------------------------------------------|:-----------------------------------|
+| $\Pr(\text{success}) = (1-\SmallConstant)^{\Horizon}$                                                                                                         | Task success probability when all $\Horizon$ steps must succeed without intermediate checks                                      | @eq-vol3-horizon-compounding       |
+| $(1-\SmallConstant)^{\Horizon} \approx e^{-\SmallConstant \Horizon}$                                                                                          | The product $\SmallConstant \Horizon$ governs reliability; expanding the horizon requires a proportionally lower step error rate | @sec-vol3-intro-horizon-arithmetic |
+| $\CostPerAcceptedTaskEff = \mathbb{E}[\AttemptCost]/\AcceptanceProbability$                                                                                   | Expected cost per accepted task under independent retries; acceptance rate scales effective attempt cost                         | @eq-vol3-cost-per-accepted-task    |
+| $\AFourthTaxonomyAxis'_{\text{attempt}}/\HiddenDimensionFour'_{\text{acc}} < \AttemptCost/\AcceptanceProbability$                                             | Economic condition determining whether an added check, boundary, cache, or prompt optimization justifies its cost                | @sec-vol3-intro-horizon-arithmetic |
+| $1-(1-\AcceptanceProbability)^{k}$                                                                                                                            | Cumulative acceptance probability within a budget of $k$ attempts, assuming independent failures                                 | @sec-vol3-intro-fallacies          |
+| $\CostPerAcceptedTaskEff = \big(\sum_{i \in \TrajectorySetsAll} (C_{\text{inference}}^{(i)} + C_{\text{infra}}^{(i)}) + C_{\text{human}}\big)/\AcceptedTasks$ | Measured cost per accepted task over an operational cohort, accounting for failed and abandoned attempts                         | @sec-vol3-intro-fallacies          |
 : **Key Equations of the Introduction**: Each relation prices reliability or operational cost over an execution trajectory; the first two govern unchecked horizons, while the remaining equations determine whether a specific mechanism justifies its cost. {#tbl-vol3-01_introduction-key-equations tbl-colwidths="[46,36,18]"}
 
 ::: {.callout-takeaways title="Agency is a property of the system, not the model"}

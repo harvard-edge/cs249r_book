@@ -237,7 +237,7 @@ A rigorous matched comparison holds the acceptance contract and maximum resource
 
 Decomposing system costs in this manner immediately reveals which architectural optimizations yield the highest return. The dominant term in the trajectory account varies significantly across agent workloads, as detailed across the four lighthouse benchmarks evaluated in @sec-vol3-agent-economics-synthesis. In automated bug repair, for instance, repeated prompt context constitutes the overwhelming majority of inference charges. Implementing prefix caching and context compaction drastically reduces the cost of maintaining conversational history across turns, while tuned reasoning limits and adaptive retry budgets curtail the total count of model invocations.
 
-## Caching and Reasoning Budgets {#sec-vol3-agent-economics-caching}
+## Context Cache Economics {#sec-vol3-agent-economics-caching}
 
 When an agent interacts with a language model across multiple turns, identical prompt prefixes recur across successive invocations. Rather than recomputing attention states on every call, modern inference engines retain and share these activations across requests. While reused key-value (KV) state lowers processing costs significantly, it is not free. System designers must price this reuse accurately to evaluate fundamental operational trade-offs: whether compacting context reduces overall billing, and whether purchasing additional inference attempts lowers the ultimate cost per accepted task under a fixed verification contract. Both context validation principles and cache management mechanics govern when such reuse is physically permissible.
 
@@ -405,7 +405,7 @@ Here $N_{\min}$ represents the **payback horizon**\index{Payback horizon!definit
 
 :::
 
-### Reasoning and retry budgets {#sec-vol3-agent-economics-reasoning-retry-budgets}
+## Execution and Reasoning Budgets {#sec-vol3-agent-economics-reasoning-retry-budgets}
 
 An agent runtime can also allocate budget dynamically by purchasing deeper internal reasoning within a single invocation or by funding multiple independent execution attempts. A configured reasoning token limit acts as an upper ceiling rather than a fixed spend. Financial accounting must track actual billed token consumption and its empirical effect on task acceptance under an identical evaluation contract. Because internal deliberation generates tokens serially, systems engineers must evaluate this extra compute against increased turn latency.
 
@@ -585,31 +585,7 @@ class CriticalPath:
 
 ### Span types and their levers {#sec-vol3-agent-economics-span-levers}
 
-Once distributed traces identify the critical path, engineers can target the specific bottlenecks governing each span. @Tbl-vol3-span-taxonomy maps the primary span types of an agent trace to the physical factors governing their duration and the engineering levers available to compress them.
-
-| Span                 | What sets its duration                         | What shortens it                                                         |
-|:---------------------|:-----------------------------------------------|:-------------------------------------------------------------------------|
-| Model, reading input | Context length, prefix-cache misses, queueing  | Cache-stable layout, smaller context, less queueing                      |
-| Model, generating    | Output and reasoning tokens                    | Shorter outputs, smaller reasoning budget, speculative decoding          |
-| Sandbox and tools    | Build size, test-suite size, cold starts       | Warm pools, snapshots, build caches, test selection, parallel tool calls |
-| Network and services | Round trips, payload size, provider throttling | Response caching, prefetching, rate-limit headroom                       |
-| Runtime              | Parsing, validation, logging, snapshotting     | Streaming parsers, incremental snapshots                                 |
-
-: **Trajectory Span Types**: What bounds each kind of span on an agent's critical path and which techniques shorten it. Each lever is admissible only if the accepted result still meets the same acceptance contract and coverage. {#tbl-vol3-span-taxonomy}
-
-When tool operations are independent, the runtime can dispatch them concurrently provided security policies, authorization boundaries, and resource reservations permit parallel execution. If three tool calls dispatch simultaneously without I/O contention and all three must complete before the agent continues, the synchronization join waits only for the longest operation rather than the sum of all three. However, concurrency gains diminish when tools contend for local resources, when dispatch is staggered, or when a downstream tool requires the output of an earlier call. In the sandbox domain, warm container pools, pre-baked filesystem snapshots, and persistent build caches dramatically reduce environment initialization spans, subject to strict isolation and teardown guarantees before each reuse.
-
-::: {.column-margin .margin-pointer}
-↩ The reset contract that a pooled or snapshot-restored sandbox must satisfy before serving a new lease is established in @sec-vol3-sandboxes-pooling-reset.
-:::
-
-Environment preparation can overlap model generation if the runtime executes speculative setup within a sandboxed, isolated scope that commits no external side effects before the full model response is validated and authorized. Streaming tokens from an LLM does not constitute an authorized execution intent; even a speculative read operation might violate an access boundary or leak uncommitted state. If the model output subsequently alters the required tool call or aborts, the runtime must discard speculative work, release allocated resources, and record any incurred compute charges in the task account.
-
-Early stopping alters the evidentiary value of an execution as well as its duration. In a validation pipeline, a single failing assertion in a mandatory test immediately proves that a candidate solution is unacceptable, allowing the runtime to short-circuit the remaining suite. Conversely, an early pass confirms only a single check; it provides zero evidence regarding the remainder of the test suite. Intelligent test prioritization and streaming failure detection thus accelerate defect rejection during intermediate iterations. However, final task acceptance still demands full test coverage across the declared verification contract. Furthermore, canceling a running check does not instantly free resources; active worker processes must unwind cleanly, and any intermediate compute costs remain on the ledger until the underlying jobs settle.
-
-::: {.column-margin .margin-pointer}
-↩ Cancellation as an asynchronous control action, whose job may finish or keep running after the request and leave cleanup obligations unsettled, is established in @sec-vol3-tool-calling-async-governance.
-:::
+Once distributed traces identify the critical path, engineers can target specific bottlenecks: optimizing prompt layouts for cache hits, compressing reasoning budgets, running independent tools concurrently, or deploying warm sandbox pools. However, concurrency gains diminish when tools contend for local resources or when a downstream tool requires an earlier output. While speculative environment preparation or early test-suite stopping can yield latency improvements, they do not change the core verification contract. Final task acceptance still demands full test coverage, and any compute resources consumed by aborted or speculative jobs must remain on the trajectory ledger.
 
 ### Profitability boundaries for speculative decoding {#sec-vol3-agent-economics-speculative}
 
@@ -823,7 +799,6 @@ $$
 The final tier must pay for its verification gate as well. With deterministic stage durations, a task reaching every tier takes $\sum_j(t_j+v_j)$; with variable durations and queueing, characterizing tail percentiles requires the measured empirical distribution. A policy that stops early or leaves assessments unresolved uses its actual reach probabilities and reports those outcomes separately.
 
 The planning metric of cost per accepted task is $\mathbb{E}[C_{\text{cascade}}]/\AcceptanceProbability$, which amortizes the cost of every reached tier across accepted outcomes rather than crediting only successful paths. Evaluating a direct frontier policy requires measuring its baseline acceptance rate across the full target cohort, since its performance on that general distribution is a fundamentally different quantity from its rate on the filtered escalation subset.
-
 
 ::: {#nbk-18-cost-and-latency-trade-offs-in .callout-notebook title="Price the accepted result at every exit"}
 

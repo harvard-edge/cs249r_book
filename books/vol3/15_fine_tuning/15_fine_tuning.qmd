@@ -198,6 +198,66 @@ This independence incurs a substantial computational penalty. If a trajectory sp
 
 With `serialization_v1` assembled, the pipeline defines the tokenized sequences, their conditioning evidence, and the response spans selected during curation. The remaining challenge is determining which token predictions contribute to the training loss. Unmasked cross-entropy over entire multi-turn sequences would inadvertently penalize the model for failing to predict external tool outputs or user messages. Observation loss masking converts the curated span boundaries into aligned prediction targets while preserving necessary observations as conditioning context.
 
+## Schema Robustness {#sec-vol3-fine-tuning-schemas}
+
+When a training trajectory captures an agent inspecting a tool schema before repairing a failed invocation, fine-tuning teaches the policy to consult tool definitions before emitting an action. However, consulting a schema and correctly adhering to an altered interface contract represent two distinct capabilities. If a training corpus exposes the model to only a single, static tool signature across thousands of examples, the policy inevitably memorizes specific parameter keys and argument types into its weights instead of dynamically reading the contract provided in the prompt context. Evaluating whether a model exhibits genuine schema conditioning requires perturbing the presented interface definition while keeping the underlying task constant.
+
+Consider a read-tool interface update. The active runtime interface requires a string argument named `target_uri`, strictly forbids extraneous keys, and resolves paths relative to an authorized fixture directory. A policy that memorized an earlier interface iteration instead emits the legacy parameter name `file_path`:
+
+```json
+{
+  "proposed_call": {
+    "name": "read_file",
+    "arguments": {"file_path": "src/pool.py"}
+  },
+  "current_argument_schema": {
+    "type": "object",
+    "properties": {"target_uri": {"type": "string"}},
+    "required": ["target_uri"],
+    "additionalProperties": false
+  }
+}
+```
+
+This proposal violates the presented schema because it omits the required `target_uri` property and supplies the disallowed `file_path` key. Because the agent runtime validates invocations before dispatch, the schema validator rejects the call immediately. The compatible payload is `{"target_uri": "src/pool.py"}`. Beyond syntactic validity, whether that path exists and whether the agent holds authorization to access it remain independent downstream runtime checks.
+
+Emitting stale parameter keys is a clear, observable failure mode of interface memorization. Attributing this error pattern to trajectory fine-tuning, however, requires careful empirical comparison. Base foundation models also make schema errors when prompted zero-shot. Isolating the effect of fine-tuning demands evaluating both the base and fine-tuned policies under identical prompts, sampling parameters, and tool schemas; @sec-vol3-fine-tuning-benchmarking formalizes the exact error metrics and comparison procedures required to establish this attribution.
+
+### Schema augmentation {#sec-vol3-fine-tuning-schema-augmentation}
+
+**Schema augmentation**\index{Schema augmentation!definition} synthesizes training trajectories with declared interface mutations to force the policy to bind its tool calls to the prompt context rather than internal weight priors. A valid schema transformation involves substantially more than performing string substitution on the tool call. Renaming a parameter, shuffling arguments, or modifying declarations reshapes the entire decision context. Every surrounding artifact—including schema definitions, generated calls, mock observations, and error messages—must remain mutually consistent. Because these synthetic trajectories modify real interaction records, their data lineage and validity bounds must be audited under the trajectory provenance framework. Conditioning policies directly on delivered interface contracts is well established: for example, incorporating retrieved API documentation into training prompts allows fine-tuned models to adapt smoothly when documentation changes after deployment [@patil2023gorilla].
+
+::: {.column-margin .margin-pointer}
+↩ The rule that a transformed trajectory becomes a new derived version bound to its parent trace is established in @sec-vol3-trajectory-curation-derived-records.
+:::
+
+@Tbl-vol3-schema-perturbation-operators distinguishes useful transformations from their consistency obligations. Each operator breaks a specific shortcut the policy might otherwise exploit, such as relying on a fixed field order or hardcoded identifier names.
+
+| Transformation                        | Intended coverage                                                | Required consistency check                                                                                                           |
+|:--------------------------------------|:-----------------------------------------------------------------|:-------------------------------------------------------------------------------------------------------------------------------------|
+| Reorder declarations or object fields | Dependence on one textual order where order has no semantic role | Preserve represented values and dependencies; do not shuffle dependent tool operations                                               |
+| Rename tool or argument identifiers   | Binding the call to the presented interface                      | Update schema, selected calls, documentation, and relevant embedded references; provide compatible adapter behavior                  |
+| Add unused tool declarations          | Tool selection amid additional choices                           | Keep distractors coherent with available capabilities and authority; account for longer or ambiguous context                         |
+| Remove an optional argument           | Behavior when a previously available option is absent            | Establish the replacement default or behavior, then recheck observations and target adequacy; deletion need not preserve the outcome |
+
+: **Coherent Schema Transformations**: Each augmentation changes a decision context and therefore requires more than surface substitution. {#tbl-vol3-schema-perturbation-operators}
+
+In the read-tool example, implementing a semantic-preserving rename requires an adapter that maps the new identifier `target_uri` to the underlying filesystem operation. Furthermore, any prior tool outputs, system prompts, or conversational turns that reference the historical `file_path` identifier must be updated across the trajectory context. The resulting record must illustrate a coherent interaction under the modified interface without falsely claiming that the altered bytes occurred during the original historical run. If a transformation alters return values, ordering, default configurations, or operational side effects, systems engineers must generate valid execution evidence—either by replaying the trajectory against an instrumented sandbox or synthesizing verified responses—rather than splicing stale historical observations onto modified calls.
+
+These transformations also introduce measurable engineering and computational costs. Renaming identifiers can alter subword tokenization boundaries and token counts. Adding distractor tools expands the prompt context for every step in the trajectory, directly increasing training FLOPs and inflating key-value cache memory footprints during inference. Every synthetic example also expands the corpus that verification pipelines must inspect. Systems teams should therefore version each schema transformation pipeline, track token expansion ratios, and quantify whether the resulting robustness gains justify the additional training and review overhead.
+
+### Transfer evaluation {#sec-vol3-fine-tuning-transfer-evaluation}
+
+Evaluation suites must explicitly distinguish among three distinct operational regimes: novel tasks executed against familiar tool schemas, familiar tasks executed against renamed or restructured interfaces, and novel tasks targeting entirely unfamiliar tool families. Conflating these regimes obscures the specific failure modes of a policy. Evaluation splits must protect task answers and synthetic variants. Reusing familiar tool schemas across train and test partitions does not constitute data contamination when the experimental objective specifically evaluates task-level transfer under a known interface.
+
+::: {.column-margin .margin-pointer}
+↩ The isolation of held-out task answers, and the rule that transformed records inherit their parent's split group, are established in @sec-vol3-trajectory-curation-heldout-protection.
+:::
+
+Evaluation pipelines should decouple three hierarchical criteria: structural schema conformance, contextual tool selection, and overall task completion. A proposed invocation can adhere to the JSON Schema validator perfectly yet select the wrong tool, target an unauthorized resource, or supply arguments that fail to solve the user's objective. Measuring each dimension independently prevents engineers from mistaking syntactic compliance for operational success. When assessing schema augmentation, compare fine-tuned policies against unaugmented baselines under an equivalent token budget, measuring performance on both familiar in-distribution schemas and perturbed transfer interfaces to ensure the model retains core capabilities while gaining interface robustness.
+
+Schema augmentation remains a dataset engineering technique governed by empirical validation, and the runtime proposal boundary must continue to validate every generated call against the active interface contract before execution. Supervised imitation fine-tuning teaches an agent to produce valid tool proposals that match demonstration distributions. When multiple distinct tool proposals satisfy the schema but differ in latency, monetary cost, or operational risk, the training objective must move beyond pure imitation to optimize justified preferences among competing, valid actions.
+
 ## Observation Loss Masking {#sec-vol3-fine-tuning-loss-masking}
 
 A data loader that naively selects every assistant token trains the model on malformed proposals alongside their subsequent corrections, unraveling careful curation decisions. Worse, a loader that computes loss across all tokens asks the policy to predict external environment responses. Serialization structures the input sequence into tokens, but the loss mask determines which of those tokens generate parameter updates.
@@ -720,66 +780,6 @@ Retraining modifies the policy parameters, which shifts the states the policy vi
 
 State coverage encompasses not only environment variables but also the tool contracts presented at each decision step. An agent may recover reliably from familiar runtime exceptions yet fail persistently by emitting deprecated argument names following an interface update. Schema robustness tests this narrower sensitivity to structured tool definitions.
 
-## Schema Robustness {#sec-vol3-fine-tuning-schemas}
-
-When a training trajectory captures an agent inspecting a tool schema before repairing a failed invocation, fine-tuning teaches the policy to consult tool definitions before emitting an action. However, consulting a schema and correctly adhering to an altered interface contract represent two distinct capabilities. If a training corpus exposes the model to only a single, static tool signature across thousands of examples, the policy inevitably memorizes specific parameter keys and argument types into its weights instead of dynamically reading the contract provided in the prompt context. Evaluating whether a model exhibits genuine schema conditioning requires perturbing the presented interface definition while keeping the underlying task constant.
-
-Consider a read-tool interface update. The active runtime interface requires a string argument named `target_uri`, strictly forbids extraneous keys, and resolves paths relative to an authorized fixture directory. A policy that memorized an earlier interface iteration instead emits the legacy parameter name `file_path`:
-
-```json
-{
-  "proposed_call": {
-    "name": "read_file",
-    "arguments": {"file_path": "src/pool.py"}
-  },
-  "current_argument_schema": {
-    "type": "object",
-    "properties": {"target_uri": {"type": "string"}},
-    "required": ["target_uri"],
-    "additionalProperties": false
-  }
-}
-```
-
-This proposal violates the presented schema because it omits the required `target_uri` property and supplies the disallowed `file_path` key. Because the agent runtime validates invocations before dispatch, the schema validator rejects the call immediately. The compatible payload is `{"target_uri": "src/pool.py"}`. Beyond syntactic validity, whether that path exists and whether the agent holds authorization to access it remain independent downstream runtime checks.
-
-Emitting stale parameter keys is a clear, observable failure mode of interface memorization. Attributing this error pattern to trajectory fine-tuning, however, requires careful empirical comparison. Base foundation models also make schema errors when prompted zero-shot. Isolating the effect of fine-tuning demands evaluating both the base and fine-tuned policies under identical prompts, sampling parameters, and tool schemas; @sec-vol3-fine-tuning-benchmarking formalizes the exact error metrics and comparison procedures required to establish this attribution.
-
-### Schema augmentation {#sec-vol3-fine-tuning-schema-augmentation}
-
-**Schema augmentation**\index{Schema augmentation!definition} synthesizes training trajectories with declared interface mutations to force the policy to bind its tool calls to the prompt context rather than internal weight priors. A valid schema transformation involves substantially more than performing string substitution on the tool call. Renaming a parameter, shuffling arguments, or modifying declarations reshapes the entire decision context. Every surrounding artifact—including schema definitions, generated calls, mock observations, and error messages—must remain mutually consistent. Because these synthetic trajectories modify real interaction records, their data lineage and validity bounds must be audited under the trajectory provenance framework. Conditioning policies directly on delivered interface contracts is well established: for example, incorporating retrieved API documentation into training prompts allows fine-tuned models to adapt smoothly when documentation changes after deployment [@patil2023gorilla].
-
-::: {.column-margin .margin-pointer}
-↩ The rule that a transformed trajectory becomes a new derived version bound to its parent trace is established in @sec-vol3-trajectory-curation-derived-records.
-:::
-
-@Tbl-vol3-schema-perturbation-operators distinguishes useful transformations from their consistency obligations. Each operator breaks a specific shortcut the policy might otherwise exploit, such as relying on a fixed field order or hardcoded identifier names.
-
-| Transformation                        | Intended coverage                                                | Required consistency check                                                                                                           |
-|:--------------------------------------|:-----------------------------------------------------------------|:-------------------------------------------------------------------------------------------------------------------------------------|
-| Reorder declarations or object fields | Dependence on one textual order where order has no semantic role | Preserve represented values and dependencies; do not shuffle dependent tool operations                                               |
-| Rename tool or argument identifiers   | Binding the call to the presented interface                      | Update schema, selected calls, documentation, and relevant embedded references; provide compatible adapter behavior                  |
-| Add unused tool declarations          | Tool selection amid additional choices                           | Keep distractors coherent with available capabilities and authority; account for longer or ambiguous context                         |
-| Remove an optional argument           | Behavior when a previously available option is absent            | Establish the replacement default or behavior, then recheck observations and target adequacy; deletion need not preserve the outcome |
-
-: **Coherent Schema Transformations**: Each augmentation changes a decision context and therefore requires more than surface substitution. {#tbl-vol3-schema-perturbation-operators}
-
-In the read-tool example, implementing a semantic-preserving rename requires an adapter that maps the new identifier `target_uri` to the underlying filesystem operation. Furthermore, any prior tool outputs, system prompts, or conversational turns that reference the historical `file_path` identifier must be updated across the trajectory context. The resulting record must illustrate a coherent interaction under the modified interface without falsely claiming that the altered bytes occurred during the original historical run. If a transformation alters return values, ordering, default configurations, or operational side effects, systems engineers must generate valid execution evidence—either by replaying the trajectory against an instrumented sandbox or synthesizing verified responses—rather than splicing stale historical observations onto modified calls.
-
-These transformations also introduce measurable engineering and computational costs. Renaming identifiers can alter subword tokenization boundaries and token counts. Adding distractor tools expands the prompt context for every step in the trajectory, directly increasing training FLOPs and inflating key-value cache memory footprints during inference. Every synthetic example also expands the corpus that verification pipelines must inspect. Systems teams should therefore version each schema transformation pipeline, track token expansion ratios, and quantify whether the resulting robustness gains justify the additional training and review overhead.
-
-### Transfer evaluation {#sec-vol3-fine-tuning-transfer-evaluation}
-
-Evaluation suites must explicitly distinguish among three distinct operational regimes: novel tasks executed against familiar tool schemas, familiar tasks executed against renamed or restructured interfaces, and novel tasks targeting entirely unfamiliar tool families. Conflating these regimes obscures the specific failure modes of a policy. Evaluation splits must protect task answers and synthetic variants. Reusing familiar tool schemas across train and test partitions does not constitute data contamination when the experimental objective specifically evaluates task-level transfer under a known interface.
-
-::: {.column-margin .margin-pointer}
-↩ The isolation of held-out task answers, and the rule that transformed records inherit their parent's split group, are established in @sec-vol3-trajectory-curation-heldout-protection.
-:::
-
-Evaluation pipelines should decouple three hierarchical criteria: structural schema conformance, contextual tool selection, and overall task completion. A proposed invocation can adhere to the JSON Schema validator perfectly yet select the wrong tool, target an unauthorized resource, or supply arguments that fail to solve the user's objective. Measuring each dimension independently prevents engineers from mistaking syntactic compliance for operational success. When assessing schema augmentation, compare fine-tuned policies against unaugmented baselines under an equivalent token budget, measuring performance on both familiar in-distribution schemas and perturbed transfer interfaces to ensure the model retains core capabilities while gaining interface robustness.
-
-Schema augmentation remains a dataset engineering technique governed by empirical validation, and the runtime proposal boundary must continue to validate every generated call against the active interface contract before execution. Supervised imitation fine-tuning teaches an agent to produce valid tool proposals that match demonstration distributions. When multiple distinct tool proposals satisfy the schema but differ in latency, monetary cost, or operational risk, the training objective must move beyond pure imitation to optimize justified preferences among competing, valid actions.
-
 ## Trajectory Preference Optimization {#sec-vol3-fine-tuning-dpo}
 
 Consider two independently collected continuations of the connection-pool repair that start from identical diagnostic context and both successfully resolve the leak. One continuation runs the entire integration test suite after every minor edit, while the other runs targeted unit tests and executes the full suite only upon completion. Supervised imitation of both trajectories teaches the agent wasteful verification habits alongside disciplined ones; conversely, training solely on the efficient path discards the valuable signal that the slower trajectory was functionally correct yet computationally expensive. A preference comparison captures this relative trade-off directly, steering the policy toward the efficient trajectory without penalizing the slower candidate as a failed repair. However, not every pair of recorded interactions constitutes an admissible preference comparison. In the recovery demonstration, for instance, the malformed proposal `e2` and the subsequent correction `e4` cannot be paired as preferences, because the correction conditioned on additional environmental error messages that `e2` never observed. Valid comparisons require compatible alternative decisions evaluated under identical available information.
@@ -954,130 +954,7 @@ Initializing $\ActionChunk$ from a Gaussian distribution and setting $\Trajector
 
 ### Parameter-state inventory {#sec-vol3-fine-tuning-state-inventory}
 
-::: {.column-margin}
-![](images/svg/vol3_sft_margin_adapter.svg){width="100%" fig-alt="Two horizontal bars. The upper bar, labeled full 128 GB, is about eight times longer than the lower bar, labeled adapter 16.1 GB."}
-
-*Training 0.10 percent of the parameters still keeps 12.6 percent of the state.*
-:::
-
-Systems engineers must size training hardware by auditing memory consumption across specific data structures and numerical representations, rather than relying on nominal parameter counts. Notebook \ref{nbk-15-adapter-state-inventory} compares the resident parameter state of a full fine-tuning run against a LoRA run under a standard mixed-precision storage convention. This inventory focuses strictly on persistent model state; dynamic activation tensors and ephemeral kernel workspaces are analyzed separately, as their footprints fluctuate with context length, batch configuration, and operator implementations.
-
-```{python}
-#| label: lego-15-adapter-state-inventory
-#| echo: false
-# ┌─────────────────────────────────────────────────────────────────────────────
-# │ PARAMETER-STATE INVENTORY
-# │ Goal: Separate frozen-base storage from trainable parameter state.
-# │ Scope: Hypothetical architecture; aggregate unsharded resident arrays only.
-# └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.core.units import byte, GB, MB
-from mlsysim.fmt import check, fmt_int, fmt_memory, fmt_multiple, fmt_percent, fmt_qty
-
-class AdapterStateInventory:
-    """One explicit precision convention, excluding activations and workspace."""
-
-    # 1. LOAD — exact illustrative inputs, not a named model or measured run.
-    base_parameters = 8_000_000_000
-    layers = 32
-    matrices_per_layer = 2
-    input_width = 4096
-    output_width = 4096
-    rank = 16
-    weight_bytes = 2 * byte
-    gradient_bytes = 2 * byte
-    master_bytes = 4 * byte
-    moment_bytes = 4 * byte
-
-    # 2. CALCULATE — one resident copy of each listed array.
-    adapter_parameters = layers * matrices_per_layer * rank * (input_width + output_width)
-    state_per_parameter = weight_bytes + gradient_bytes + master_bytes + 2 * moment_bytes
-    base_storage = base_parameters * weight_bytes
-    adapter_weights = adapter_parameters * weight_bytes
-    adapter_gradients = adapter_parameters * gradient_bytes
-    adapter_master = adapter_parameters * master_bytes
-    adapter_moments = adapter_parameters * 2 * moment_bytes
-    adapter_state = adapter_parameters * state_per_parameter
-    lora_state = base_storage + adapter_state
-    full_state = base_parameters * state_per_parameter
-    saved_state = full_state - lora_state
-    # Sensitivities: which term dominates, and what rank costs.
-    parameter_fraction = adapter_parameters / base_parameters
-    lora_fraction_of_full = (lora_state / full_state).to("").magnitude
-    state_reduction = (full_state / lora_state).to("").magnitude
-    base_share = (base_storage / lora_state).to("").magnitude
-    rank_doubling_increment = adapter_state  # adapter state is linear in rank
-    frozen_state_per_parameter = weight_bytes
-
-    # 3. ASSERT — bytes, not an invented device-capacity or throughput claim.
-    check(adapter_parameters == 8_388_608, "adapter_parameters")
-    check(state_per_parameter.to(byte).magnitude == 16, "state_per_parameter")
-    check(adapter_weights.to(byte).magnitude == 16_777_216, "adapter_weights")
-    check(adapter_gradients.to(byte).magnitude == 16_777_216, "adapter_gradients")
-    check(adapter_master.to(byte).magnitude == 33_554_432, "adapter_master")
-    check(adapter_moments.to(byte).magnitude == 67_108_864, "adapter_moments")
-    check(adapter_state.to(byte).magnitude == 134_217_728, "adapter_state")
-    check(abs(lora_state.to(GB).magnitude - 16.134217728) < 1e-9, "lora_state")
-    check(full_state.to(GB).magnitude == 128, "full_state")
-    check(abs(saved_state.to(GB).magnitude - 111.865782272) < 1e-9, "saved_state")
-    check(adapter_weights + adapter_gradients + adapter_master + adapter_moments == adapter_state, "sum")
-    check(base_share > 0.99, "frozen base dominates the adapter-run state")
-    check(parameter_fraction < 0.01 < lora_fraction_of_full, "memory falls far less than parameter count")
-
-    # 4. OUTPUT — consumed inputs and results use the shared formatters.
-    base_count_str = fmt_int(base_parameters)
-    layers_str = fmt_int(layers)
-    matrices_str = fmt_int(matrices_per_layer)
-    input_str = fmt_int(input_width)
-    output_str = fmt_int(output_width)
-    rank_str = fmt_int(rank)
-    weight_bytes_str = fmt_qty(weight_bytes, byte, precision=0)
-    gradient_bytes_str = fmt_qty(gradient_bytes, byte, precision=0)
-    master_bytes_str = fmt_qty(master_bytes, byte, precision=0)
-    moment_bytes_str = fmt_qty(moment_bytes, byte, precision=0)
-    parameter_str = fmt_int(adapter_parameters)
-    per_parameter_str = fmt_qty(state_per_parameter, byte, precision=0)
-    base_str = fmt_memory(base_storage, unit=GB, precision=0)
-    weights_str = fmt_memory(adapter_weights, unit=MB, precision=2)
-    gradients_str = fmt_memory(adapter_gradients, unit=MB, precision=2)
-    master_str = fmt_memory(adapter_master, unit=MB, precision=2)
-    moments_str = fmt_memory(adapter_moments, unit=MB, precision=2)
-    adapter_str = fmt_memory(adapter_state, unit=MB, precision=2)
-    lora_str = fmt_memory(lora_state, unit=GB, precision=2)
-    full_str = fmt_memory(full_state, unit=GB, precision=0)
-    saved_str = fmt_memory(saved_state, unit=GB, precision=2)
-    parameter_fraction_str = fmt_percent(parameter_fraction, precision=2, style="prose")
-    lora_fraction_str = fmt_percent(lora_fraction_of_full, precision=1, style="prose")
-    reduction_mult_str = fmt_multiple(state_reduction, precision=1)
-    base_share_str = fmt_percent(base_share, precision=1, style="prose")
-    rank_increment_str = fmt_memory(rank_doubling_increment, unit=MB, precision=2)
-    frozen_bytes_str = fmt_qty(frozen_state_per_parameter, byte, precision=0)
-```
-
-::: {#nbk-15-adapter-state-inventory .callout-notebook title="What adapter training removes from the inventory"}
-
-**Problem**: A hypothetical model contains `{python} AdapterStateInventory.base_count_str` base parameters. The run attaches rank-`{python} AdapterStateInventory.rank_str` adapters to `{python} AdapterStateInventory.matrices_str` matrices in each of `{python} AdapterStateInventory.layers_str` layers. Each selected matrix maps an input width of `{python} AdapterStateInventory.input_str` to an output width of `{python} AdapterStateInventory.output_str`. No other parameters are trained in the adapter case. What parameter-state memory does this save compared with training every base parameter?
-
-For each trainable parameter, assume a weight using `{python} AdapterStateInventory.weight_bytes_str`, a gradient using `{python} AdapterStateInventory.gradient_bytes_str`, a separate higher-precision master weight that the optimizer updates, using `{python} AdapterStateInventory.master_bytes_str`, and two optimizer moments (running averages of the gradient and its square) each using `{python} AdapterStateInventory.moment_bytes_str`. Frozen parameters retain only their `{python} AdapterStateInventory.frozen_bytes_str` weight copy. This is the mixed-precision accounting of adaptive-moment optimization [@kingma2014adam; @micikevicius2017mixed], totaling `{python} AdapterStateInventory.per_parameter_str` per trainable parameter as modeled by @rajbhandari2020; it is one declared implementation convention, not a requirement of every optimizer or framework. Count one unsharded resident copy of each array; display capacities in decimal MB and GB.
-
-**Math**: Each adapted matrix adds $\BarrierRelativeDegree(\LayerInputWidth+\LayerOutputWidth)$ parameters, so the adapters contain `{python} AdapterStateInventory.layers_str` $\times$ `{python} AdapterStateInventory.matrices_str` $\times$ `{python} AdapterStateInventory.rank_str` $\times$ (`{python} AdapterStateInventory.input_str` $+$ `{python} AdapterStateInventory.output_str`) $=$ `{python} AdapterStateInventory.parameter_str` parameters, `{python} AdapterStateInventory.parameter_fraction_str` of the base. The convention assigns `{python} AdapterStateInventory.per_parameter_str` of state to each trainable parameter and `{python} AdapterStateInventory.frozen_bytes_str` to each frozen one. @Tbl-vol3-sft-memory-breakdown inventories the resulting arrays.
-
-| Resident component            | Adapter-training inventory                     |
-|:------------------------------|:-----------------------------------------------|
-| Frozen base weights           | `{python} AdapterStateInventory.base_str`      |
-| Trainable adapter weights     | `{python} AdapterStateInventory.weights_str`   |
-| Adapter gradients             | `{python} AdapterStateInventory.gradients_str` |
-| Adapter master weights        | `{python} AdapterStateInventory.master_str`    |
-| Two adapter optimizer moments | `{python} AdapterStateInventory.moments_str`   |
-
-: **A declared parameter-state inventory**: The count includes only the listed resident arrays, not the full peak memory of a training step. {#tbl-vol3-sft-memory-breakdown}
-
-**Result**: The adapter arrays total `{python} AdapterStateInventory.adapter_str`. Including the frozen base gives approximately `{python} AdapterStateInventory.lora_str`, compared with `{python} AdapterStateInventory.full_str` for full-parameter training under the same convention, a reduction of approximately `{python} AdapterStateInventory.saved_str`, or `{python} AdapterStateInventory.reduction_mult_str`. The saving comes from dropping gradients, master weights, and optimizer moments for the frozen base.
-
-**Systems insight**: Even though adapter training updates only `{python} AdapterStateInventory.parameter_fraction_str` of the parameters, the system must still allocate `{python} AdapterStateInventory.lora_fraction_str` of the full-parameter memory state. The frozen base weights remain resident throughout execution and constitute `{python} AdapterStateInventory.base_share_str` of what remains. Consequently, total parameter-state savings are fundamentally bounded by the ratio of trainable to frozen bytes per parameter (here, 16 bytes vs. 2 bytes, an 8-fold ceiling). Rank adjustments provide virtually no leverage on this footprint; doubling the rank increases memory by only `{python} AdapterStateInventory.rank_increment_str`. The primary engineering lever for shrinking adapter memory state is therefore the numerical precision of the frozen base itself. Dynamic activations and execution workspaces, required under both training paradigms, must be provisioned on top of this subtotal.
-
-:::
-
-Beyond persistent parameter state, a complete memory plan must budget for forward activations (whether retained in high-bandwidth memory or selectively recomputed), temporary kernel scratchpads, collective communication buffers, allocator fragmentation, and operating headroom. Sharding and offloading distribute these resident arrays across cluster nodes or host memory tiers, trading network or PCIe interconnect bandwidth for device memory headroom. When on-device capacity is severely constrained, quantizing the frozen base weights directly targets the dominant state component, as demonstrated by QLoRA (quantized LoRA) [@dettmers2023qlora], trading runtime dequantization arithmetic and metadata storage for lower memory occupancy. Because dynamic activation footprints and kernel workspaces scale with context length, batch structure, and attention kernels, engineers should profile these dynamic terms directly on the target hardware cluster before finalizing resource sizing.
+Parameter-efficient fine-tuning (PEFT) methods, such as LoRA (Low-Rank Adaptation), significantly reduce the memory required to maintain optimizer states. Instead of updating the full dense weight matrices, PEFT injects small, trainable low-rank adapters into specific layers. This reduces the trainable parameter count by orders of magnitude, allowing systems engineers to train multi-billion parameter agents on commodity accelerators without overflowing memory with mixed-precision Adam optimizer states.
 
 ### Adapter release and compatibility {#sec-vol3-fine-tuning-adapter-release}
 
@@ -1241,15 +1118,15 @@ The quantitative decisions of the chapter rest on the relations collected in @tb
 
 | Equation                                                                                                                                                               | What it bounds or decides                                                                                                                                    | Where derived                              |
 |:-----------------------------------------------------------------------------------------------------------------------------------------------------------------------|:-------------------------------------------------------------------------------------------------------------------------------------------------------------|:-------------------------------------------|
-| $\MaskedFinetuningLossSft=-\frac{1}{N_{\text{active}}}\sum_{t}\LossMaskT\log \Policy(x_t\mid x_{<t})$                          | Which positions receive direct loss and the coefficient $1/N_{\text{active}}$ on each; an unmasked average dilutes it by $\SequenceLength/N_{\text{active}}$ | @eq-vol3-sft-masked-objective              |
-| $\PerturnAppend{}H(\Horizon+1)/2$ stored tokens against $\Horizon\,\PerturnAppend$                                                                                       | Training-token price of one example per invocation, an expansion of $(\Horizon+1)/2$ when serving does not retain earlier text                               | @sec-vol3-fine-tuning-serialization        |
+| $\MaskedFinetuningLossSft=-\frac{1}{N_{\text{active}}}\sum_{t}\LossMaskT\log \Policy(x_t\mid x_{<t})$                                                                  | Which positions receive direct loss and the coefficient $1/N_{\text{active}}$ on each; an unmasked average dilutes it by $\SequenceLength/N_{\text{active}}$ | @eq-vol3-sft-masked-objective              |
+| $\PerturnAppend{}H(\Horizon+1)/2$ stored tokens against $\Horizon\,\PerturnAppend$                                                                                     | Training-token price of one example per invocation, an expansion of $(\Horizon+1)/2$ when serving does not retain earlier text                               | @sec-vol3-fine-tuning-serialization        |
 | $\mathcal{\Loss}_{\text{token}}$ weights $\mathcal{\Loss}_j$ by $N_{\text{active},j}/\sum_k N_{\text{active},k}$; $\mathcal{\Loss}_{\text{example}}$ by $1/\BatchSize$ | How far a long trajectory outweighs a short one, and how segmentation shifts task weighting                                                                  | @eq-vol3-loss-token, @eq-vol3-loss-example |
 | $\text{score}_{i,j}=-\infty$ unless $\operatorname{example}(i)=\operatorname{example}(j)$ and $j\le i$                                                                 | Whether a packed buffer preserves each example's visible context                                                                                             | @eq-vol3-block-diagonal-attention          |
-| $J(\pi)-J(\pi^*)\le\min\{\Horizon,\;H^2\epsilon_E\}$                                                                                                   | Excess task cost of imitation whose error is measured on reference states                                                                                    | @eq-vol3-quadratic-derivation              |
-| $J(\pi)-J(\pi^*)\le\min\{\Horizon,\;uH\epsilon_\pi\}$                                                                                                  | Excess cost when error is measured on learner states and each deviation costs at most $u$; decides when on-policy labeling pays                              | @eq-vol3-linear-regret-bound               |
+| $J(\pi)-J(\pi^*)\le\min\{\Horizon,\;H^2\epsilon_E\}$                                                                                                                   | Excess task cost of imitation whose error is measured on reference states                                                                                    | @eq-vol3-quadratic-derivation              |
+| $J(\pi)-J(\pi^*)\le\min\{\Horizon,\;uH\epsilon_\pi\}$                                                                                                                  | Excess cost when error is measured on learner states and each deviation costs at most $u$; decides when on-policy labeling pays                              | @eq-vol3-linear-regret-bound               |
 | $\mathcal{\Loss}_{\text{DPO}}=-\mathbb E\log\sigma\!\left(\LinkBandwidth[\Delta_\theta(\tau_w;c)-\Delta_\theta(\tau_l;c)]\right)$                                      | The preference objective over reference-relative scores of the selected spans                                                                                | @eq-vol3-dpo-trajectory                    |
 | Pair gradient weight $\sigma(-z)$ with $z=\LinkBandwidth(\Delta_w-\Delta_l)$                                                                                           | How hard one comparison pulls, and how $\LinkBandwidth$ sets the margin at which it saturates                                                                | @eq-vol3-dpo-gradient                      |
-| $\BarrierRelativeDegree(\LayerInputWidth+\LayerOutputWidth)$ trainable parameters per adapted matrix                                             | Adapter size; the run's parameter state is then set by the bytes of the frozen base                                                                          | @sec-vol3-fine-tuning-peft                 |
+| $\BarrierRelativeDegree(\LayerInputWidth+\LayerOutputWidth)$ trainable parameters per adapted matrix                                                                   | Adapter size; the run's parameter state is then set by the bytes of the frozen base                                                                          | @sec-vol3-fine-tuning-peft                 |
 | $\text{SFA}$ and $\text{PRE}$ over $\NumberOfDevices$ proposed calls                                                                                                   | Conformance to the delivered schema, and recall of training-schema keys the current schema lacks                                                             | @sec-vol3-fine-tuning-eval-scorecard       |
 
 : **Key Equations of Trajectory Fine-Tuning**: Each relation fixes a quantity that a training, packaging, or release decision depends on. The right column locates its derivation. {#tbl-vol3-15_fine_tuning-key-equations tbl-colwidths="[40,42,18]"}

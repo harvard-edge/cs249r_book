@@ -210,10 +210,10 @@ $$ {#eq-vol3-allocation-critical-path}
 
 The critical path for breadth assumes the serving infrastructure maintains sufficient memory and execution capacity to decode all $\NumberOfDevices$ streams concurrently at an unchanged step time. When capacity saturates, decoding falls back into serialized waves, shifting the critical path toward the sum across candidate streams. In contrast, the feedback expression grows along two distinct dimensions: sequential check durations $t_{\text{check},t}$ and lengthening prompt prefill times $T_{\text{prefill}}(S^{(t)})$ caused by context accumulation. @Tbl-vol3-allocation-model contrasts the resource footprints modeled by @eq-vol3-allocation-critical-path alongside the work processed, peak memory retained, and external information acquired.
 
-| **Axis** | **Tokens processed**                                                                                                                 | **Critical path**                  | **Peak retained model state**                                                | **New information**                      |
-|:---------|:-------------------------------------------------------------------------------------------------------------------------------------|:-----------------------------------|:-----------------------------------------------------------------------------|:-----------------------------------------|
-| Depth    | $\SequenceLength + K_{\text{ext}}$                                                                                                   | One dependent sequence             | One context of $\SequenceLength + K_{\text{ext}}$ tokens                     | None beyond the request and weights      |
-| Breadth  | $\SequenceLength + \sum_n K_n$ (prompt shared)                                                                                       | Longest candidate, given capacity  | $\NumberOfDevices$ contexts, $\SequenceLength + \sum_n K_n$ tokens if shared | Sampling variation over the same request |
+| **Axis** | **Tokens processed**                                                     | **Critical path**                  | **Peak retained model state**                                                | **New information**                      |
+|:---------|:-------------------------------------------------------------------------|:-----------------------------------|:-----------------------------------------------------------------------------|:-----------------------------------------|
+| Depth    | $\SequenceLength + K_{\text{ext}}$                                       | One dependent sequence             | One context of $\SequenceLength + K_{\text{ext}}$ tokens                     | None beyond the request and weights      |
+| Breadth  | $\SequenceLength + \sum_n K_n$ (prompt shared)                           | Longest candidate, given capacity  | $\NumberOfDevices$ contexts, $\SequenceLength + \sum_n K_n$ tokens if shared | Sampling variation over the same request |
 | Feedback | $\sum_{t}(S^{(t)} + \TorqueAndBackemfConstants)$, with $S^{(t)}$ growing | Sum of turns, including each check | One active context of $S^{(\Horizon)} + K_H$ tokens                          | Observations from executed checks        |
 
 : **Resource model of the three allocation axes**: Symbolic accounting of processed tokens, critical path, retained model state, and information source. Concurrency and prefix sharing are capacity and implementation assumptions, not properties of the axis. {#tbl-vol3-allocation-model tbl-colwidths="[11,23,22,25,19]"}
@@ -366,6 +366,138 @@ In production agent workflows, internal reasoning depth and external search brea
 :::
 
 Allocating compute across depth, breadth, and feedback defines where extra computation is spent, but generation alone does not determine which candidate should survive. Even an allocation that discovers a correct repair fails if downstream selection favors a plausible incorrect alternative. The remaining challenge is candidate evaluation: comparing competing proposals while accounting for the costs, latencies, and blind spots of the verification mechanisms that judge them.
+
+## Bounded Search Structures {#sec-vol3-test-time-compute-bounded-search-structures}
+
+The plan formulation strategies described above dictate the structural forms a candidate plan can take. Translating those plans into actionable progress requires a generation mechanism that can traverse the massive space of potential tokens and actions. At each decision point, an automated repair agent can generate an entirely new patch, extend an existing partial candidate by one step, or execute a diagnostic probe to disambiguate competing failure explanations. Each option draws against the same finite task budget while imposing distinct scheduling constraints and dependencies. A diagnostic check that gates the next code extension sits squarely on the critical path. In contrast, candidate generation requests can execute concurrently across available worker pools, whereas abandoning an unviable branch still incurs the unrecoverable cost of the tokens and runtime work already spent. Designing an effective search policy therefore requires explicit mechanisms to track admitted work, quantify pending resource consumption, and enforce principled stopping criteria.
+
+### Search structures {#sec-vol3-test-time-compute-search-structures}
+
+Flat sampling generates a fixed pool of complete candidates before running selection logic across them. In best-of-$\NumberOfDevices$, the runtime admits at most $\NumberOfDevices$ independent generation requests and applies a selector once all candidates finish. Because the requests share no execution dependencies, available serving capacity translates directly into reduced turnaround time through concurrent batching—provided the serving cluster can absorb the concurrent load without degrading token throughput. However, flat sampling defers all semantic evaluation until generation finishes. A candidate with a catastrophic flaw in its first five tokens still runs to completion, expending GPU memory bandwidth and decode cycles that early validation could have saved.
+
+**Beam search**\index{Beam search!definition}[^fn-beam-search-harpy] exposes that intermediate decision boundary directly. The runtime maintains a frontier of partial candidates bounded by a fixed beam width $W$. At each step, it generates a bounded set of extensions for each active candidate, evaluates the extended prefixes using a scoring function, and retains only the top-$W$ candidates for the next round. If fewer candidates survive pruning than the beam capacity allows, the runtime advances only the viable survivors; the search root itself typically begins below full beam width. Step scores can combine learned model probabilities with deterministic checks available at that execution boundary. The beam width bounds the active frontier that receives subsequent generation work rather than total ephemeral state: during expansion, the system must temporarily hold $W$ times the branching factor in candidate extensions, along with their associated activation caches, scores, and parent references.
+
+Early pruning trades generation compute for evaluation overhead and introduces a strict dependence on intermediate scoring accuracy. If a scoring pass mistakenly discards a prefix that would have yielded an optimal solution, a bounded beam search cannot recover that path unless the search policy explicitly incorporates backtracking. Conversely, terminating an unviable patch early avoids the cost of full candidate synthesis and subsequent integration tests. Early pruning yields net savings whenever intermediate evaluations cost less than the downstream generation they preempt, while maintaining an acceptably low false-rejection rate on viable prefixes.
+
+[^fn-beam-search-harpy]: **Beam Search**: The method first appeared in the HARPY speech recognition system, which advanced only a small set of the best-scoring partial paths at each step instead of the full search space [@lowerre1976]. It accepted a bounded risk of pruning the eventual best path in exchange for bounded time and memory, the same trade a runtime makes when it retains a fixed number of partial candidates. \index{Beam search!origin}
+
+An adaptive tree policy removes the constraint of expanding every retained candidate uniformly. Tree search over intermediate reasoning steps [@yao2023tree] dynamically steers computational effort toward branches with promising score trajectories, high outcome uncertainty, or diagnostic value for unresolved choices. **Monte Carlo tree search**\index{Monte Carlo tree search!definition} [@coulom2006efficient; @kocsis2006bandit] provides a formal framework for tracking visit counts and backpropagating estimated returns across a search graph. A prominent selection policy, the PUCT variant[^fn-puct-prior-bonus] used in AlphaGo [@silver2016mastering], traverses the tree from the root by selecting at each partial state $s$ the action $a$ that maximizes
+
+$$
+Q(s,a) + c_{\text{explore}}\,\HiddenDimensionFour(a \mid s)\,\frac{\sqrt{\sum_{a'} \NumberOfDevices(s,a')}}{1 + \NumberOfDevices(s,a)},
+$$ {#eq-vol3-puct}
+
+where $Q(s,a)$ represents the empirical mean return observed through extension $a$, $\NumberOfDevices(s,a)$ is its visit count, $\HiddenDimensionFour(a \mid s)$ denotes a prior distribution over extensions (such as the base model's proposal probability for that reasoning step), and $c_{\text{explore}}$ is a positive scaling factor balancing exploitation of high-value paths against exploration of plausible but under-sampled branches. When the runtime evaluates a newly reached leaf node and obtains value $\VirtualPipelineStagesPerDevice$, every edge along the trajectory back to the root updates its visit count ($\NumberOfDevices \leftarrow \NumberOfDevices + 1$) and its running mean value ($Q \leftarrow Q + (\VirtualPipelineStagesPerDevice - Q)/\NumberOfDevices$). If $\VirtualPipelineStagesPerDevice$ originates from an imperfect learned value function, the $Q$ term in @eq-vol3-puct inherits the selection drift formalized in @eq-vol3-argmax-noise, biasing visits toward edges whose scores are elevated by estimation noise. While tree search focuses compute where value signals appear strongest, its utility hinges on whether the resulting allocation improvements outweigh the latency and memory overhead of leaf evaluations and graph state management.
+
+[^fn-puct-prior-bonus]: **From UCT to PUCT**: The UCT rule treated each node's choice of extension as a multi-armed bandit, adding an exploration bonus that shrinks as an extension accumulates visits [@kocsis2006bandit]. PUCT weights that bonus by a predictor's prior over the arms [@rosin2011multi], which is what lets a language model's own step probabilities concentrate a small budget on plausible extensions. A miscalibrated prior steers visits away from correct but unlikely steps just as effectively. \index{Monte Carlo tree search!PUCT}
+
+@Fig-vol3-search-topologies diagrams where each search structure prunes during candidate expansion: best-of-$\NumberOfDevices$ generates complete candidates independently and defers selection to the end; beam search generates extensions and prunes low-scoring partial candidates at each step boundary; and tree search selectively expands leaves via upper confidence bounds, updating visit counts along the path. @Tbl-vol3-search-topologies summarizes their pruning points, concurrency characteristics, state footprints, and prefix sharing.
+
+::: {.column-margin .margin-pointer}
+↪ Radix prefix caching, which lets later requests for a branch reuse the KV state of its shared ancestors, is developed in @sec-vol3-kv-cache-radix-lookup.
+:::
+
+::: {#fig-vol3-search-topologies fig-env="figure" fig-pos="htb" fig-cap="**Where Each Search Structure Prunes**: Best-of-$\NumberOfDevices$ generates complete candidates independently and discards all but the selected one only at the end. Beam search generates the beam width times the extensions per candidate at each step, scores them, and keeps the beam width. Tree search expands the leaf its selection rule favors, evaluates it, and updates visit counts and value estimates along the path to the root. The drawings show structure only; the pool size, beam width, and depth are illustrative." fig-alt="Three panels of node diagrams. Best-of-N: a prompt node branches into four chains of three generated nodes each; past a dashed line labeled select, one final node is marked selected and three are marked pruned. Beam: a prompt node branches into two nodes, each of which generates two children; a dashed line labeled score, keep 2 marks two children pruned, the two survivors each generate two more, and a second dashed line labeled keep 2 marks two retained and two pruned. Tree search: an uneven tree in which one path from the prompt is drawn bold and ends at a new leaf labeled evaluated V, with a note that the bold path updates N and Q; other nodes are drawn dashed as not yet expanded. A legend identifies prompt, generated, retained or selected, generated then pruned, and not yet expanded nodes."}
+![](images/svg/search_topologies_comparison.svg)
+:::
+
+| **Structure**              | **Where pruning happens**                | **Concurrency**                               | **Search state**                                         | **Prefix sharing**                       |
+|:---------------------------|:-----------------------------------------|:----------------------------------------------|:---------------------------------------------------------|:-----------------------------------------|
+| Best-of-$\NumberOfDevices$ | After complete candidates, at selection  | All $\NumberOfDevices$ requests independent   | $\NumberOfDevices$ candidates and their check results    | The common prompt only                   |
+| Beam                       | At each step boundary, by step score     | Within a step; stages wait for scoring        | Up to width times extensions before pruning, plus scores | Each retained prefix with its extensions |
+| Tree search                | Adaptively, by value estimate and visits | Irregular; depends on which leaves are chosen | Tree nodes with visit counts and value estimates         | Every node's ancestors along its path    |
+
+: **Search structures compared**: Each structure moves the pruning decision to a different point and holds different state. Concurrency describes the dependency graph; actual overlap depends on service capacity. {#tbl-vol3-search-topologies tbl-colwidths="[13,22,21,23,21]"}
+
+### Pruned tree growth {#sec-vol3-test-time-compute-tree-growth}
+
+```{python}
+#| label: calc-vol3-pruned-tree
+#| echo: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ PRUNED TREE GROWTH (LEGO)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @sec-vol3-test-time-compute-tree-growth.
+# │ Goal: Show how a step check's rejection rate bounds expected tree size.
+# │ Show: Unpruned leaf explosion; effective branching factor; generated nodes.
+# │ How: Independent rejection of each child; generated nodes are b times the
+# │      surviving parents at each depth; equal-sized steps.
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import *
+
+class PrunedTree:
+    # ┌── 1. LOAD (Constants & Parameters) ─────────────────────────────────
+    wide_b = 4  # hypothetical alternatives per step, unpruned illustration
+    wide_depth = 10  # hypothetical steps, unpruned illustration
+    b = 5  # hypothetical children proposed per retained node
+    p_prune = 0.68  # hypothetical probability a step check rejects a child
+    depth = 3  # hypothetical steps in the worked example
+
+    # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────
+    wide_leaves = wide_b**wide_depth
+    b_eff = b * (1 - p_prune)
+    critical_prune = 1 - 1 / b
+    unpruned_generated = 0
+    pruned_generated = 0.0
+    for d in range(1, depth + 1):
+        unpruned_generated += b**d
+        pruned_generated += b * b_eff ** (d - 1)
+    unpruned_leaves = b**depth
+    pruned_leaves = b_eff**depth
+    generated_saving = 1 - pruned_generated / unpruned_generated
+
+    # ┌── 3. GUARD (Invariants) ────────────────────────────────────────────
+    check(wide_leaves > 1_000_000, "Unpruned illustration exceeds a million leaves")
+    check(b_eff > 1, "Worked example remains supercritical")
+    check(p_prune < critical_prune, "Rejection rate is below the subcritical threshold")
+    check(pruned_generated < unpruned_generated, "Pruning reduces generated nodes")
+    check(generated_saving > p_prune, "Node saving exceeds the per-child rejection rate")
+
+    # ┌── 4. OUTPUT (Formatting) ───────────────────────────────────────────
+    wide_b_str = fmt_int(wide_b)
+    wide_depth_str = fmt_int(wide_depth)
+    wide_leaves_str = fmt_int(wide_leaves)
+    b_str = fmt_int(b)
+    p_prune_str = fmt_percent(p_prune, precision=0, style="prose")
+    depth_str = fmt_int(depth)
+    b_eff_str = fmt(b_eff, precision=1)
+    critical_prune_str = fmt_percent(critical_prune, precision=0, style="prose")
+    unpruned_generated_str = fmt_int(unpruned_generated)
+    pruned_generated_str = fmt(pruned_generated, precision=1)
+    unpruned_leaves_str = fmt_int(unpruned_leaves)
+    pruned_leaves_str = fmt(pruned_leaves, precision=1)
+    generated_saving_str = fmt_percent(generated_saving, precision=1, style="prose")
+```
+
+::: {.column-margin}
+![](images/svg/vol3_ttc_margin_pruned_nodes.svg){width="100%" fig-alt="Two horizontal orange bars. Unpruned: 155 generated nodes. Pruned: 25.8 generated nodes."}
+
+*Each rejected child also removes the subtree it would have grown.*
+:::
+
+Pruning is what prevents search trees from suffering catastrophic state explosion. A search graph that unconditionally expands every node into `{python} PrunedTree.wide_b_str` branches across `{python} PrunedTree.wide_depth_str` successive steps yields `{python} PrunedTree.wide_leaves_str` leaves, quickly exhausting memory capacity and compute budgets. Now consider a system where each node proposes $b$ candidate extensions, and an intermediate validation check independently prunes each child with probability $p_{\text{prune}}$. The expected number of surviving branches per expanded node—the **effective branching factor**\index{Effective branching factor!definition}—becomes
+
+$$
+b_{\text{eff}} = b\,(1 - p_{\text{prune}}).
+$$ {#eq-vol3-effective-branching}
+
+Under @eq-vol3-effective-branching, the expected frontier width at depth $\HiddenDimension$ is $b_{\text{eff}}^{\,\HiddenDimension}$. Because each of the surviving nodes at depth $\HiddenDimension-1$ generates and validates $b$ proposed children, the total expected count of generated nodes through depth $\DatasetSize$ is $\sum_{\HiddenDimension=1}^{\DatasetSize} b\,b_{\text{eff}}^{\,\HiddenDimension-1}$. This formulation defines a classic Galton–Watson branching process.[^fn-galton-watson-extinction] When $b_{\text{eff}} < 1$—which requires a pruning rate exceeding the critical threshold $1 - 1/b$—the frontier contracts geometrically with depth, causing the search tree to extinguish spontaneously. When $b_{\text{eff}} > 1$, the frontier expands exponentially, requiring hard caps on depth, token consumption, or elapsed execution time to force termination.
+
+[^fn-galton-watson-extinction]: **Galton–Watson Process**: The model comes from a Victorian question about the extinction of family surnames, analyzed in 1875 [@watson1875probability]. That analysis wrongly concluded that every line dies out; the correct result is the threshold used here, under which extinction is certain when the mean number of surviving offspring is at most one (excluding the degenerate case of exactly one child every time) and avoidable when it exceeds one. For a search tree the surviving offspring are the children that pass the step check, so the rejection rate decides which side of the threshold the search lands on. \index{Galton–Watson process!search trees}
+
+To see this quantitative effect in practice, consider a concrete configuration where each node generates `{python} PrunedTree.b_str` extensions, the step validator rejects `{python} PrunedTree.p_prune_str` of proposals, and the search proceeds to depth `{python} PrunedTree.depth_str`. The resulting effective branching factor is `{python} PrunedTree.b_eff_str`. Because branching factor `{python} PrunedTree.b_str` has a subcritical threshold of `{python} PrunedTree.critical_prune_str`, the search remains supercritical ($b_{\text{eff}} > 1$). An unpruned tree across these three steps generates `{python} PrunedTree.unpruned_generated_str` nodes and terminates with `{python} PrunedTree.unpruned_leaves_str` leaves. In contrast, the pruned search generates an expected `{python} PrunedTree.pruned_generated_str` nodes and retains approximately `{python} PrunedTree.pruned_leaves_str` leaves, eliminating `{python} PrunedTree.generated_saving_str` of total node generations. The aggregate reduction exceeds the raw `{python} PrunedTree.p_prune_str` per-node rejection rate because pruning a single parent eliminates the entire combinatorial subtree beneath it. Assuming uniform step sizes, token generation savings follow the identical proportion, though each discarded node still incurs the upfront cost of its own generation and validation pass.
+
+Two systems caveats govern this branching model. First, intermediate checks that exhibit false rejections irrevocably prune viable solution paths; aggressive pruning is therefore advantageous only when the validator's false-rejection rate remains tightly controlled. Second, when an agent requires only a single valid candidate to advance, sequential proposal generation requires $1/(1 - p_{\text{prune}})$ attempts in expectation. In contrast, proposing $W$ candidates in parallel requires $1/(1 - p_{\text{prune}}^{\,W})$ execution rounds, with each round consuming $W$ times the parallel compute. Batching reduces elapsed wall-clock rounds at the expense of higher aggregate token expenditure—the fundamental trade-off between concurrency and total work.
+
+### Branch isolation {#sec-vol3-test-time-compute-mutable-sandbox-search}
+
+While a partial patch is an ephemeral candidate data structure, evaluating it requires concrete execution against a target environment. If one search branch mutates files in a shared workspace and a sibling branch subsequently runs against that modified working tree, the sibling's test outcomes no longer reflect its own proposed edits. A robust runtime must therefore isolate execution environments so that every observation binds strictly to the candidate patch and workspace snapshot that produced it. Stateful or mutating branches require independent execution containers, copy-on-write filesystem forks, or deterministic rollback procedures that restore a clean baseline before subsequent branches execute.
+
+::: {.column-margin .margin-pointer}
+↪ Copy-on-write task workspaces that keep each run's file modifications private are developed in @sec-vol3-sandboxes-cow-provisioning.
+:::
+
+Workspace isolation incurs substantial systems overhead even when a search branch is ultimately discarded. Concurrent sandboxes consume host memory, storage volumes, container daemon process slots, and network bandwidth, while their logged outputs accumulate in the agent's working context. Even read-only diagnostic commands require sandboxed execution permissions and can inadvertently leak environment variables or credentials into search traces. Crucially, pruning a candidate drops it from the active search frontier, but computational backtracking cannot undo remote side effects such as outbound network requests or database writes. Dedicated sandbox containment mechanisms enforce these operational boundaries, ensuring that search policies budget external actions under the reality that tree traversal cannot reverse real-world side effects.
 
 ## Candidate Selection {#sec-vol3-test-time-compute-candidate-diversity}
 
@@ -948,136 +1080,6 @@ Explicit dependency graphs allow an agent runtime to retain proven artifacts and
 
 ## Search Stopping Criteria {#sec-vol3-test-time-compute-bounded-search}
 
-The plan formulation strategies described above dictate the structural forms a candidate plan can take. Translating those plans into actionable progress requires a generation mechanism that can traverse the massive space of potential tokens and actions. At each decision point, an automated repair agent can generate an entirely new patch, extend an existing partial candidate by one step, or execute a diagnostic probe to disambiguate competing failure explanations. Each option draws against the same finite task budget while imposing distinct scheduling constraints and dependencies. A diagnostic check that gates the next code extension sits squarely on the critical path. In contrast, candidate generation requests can execute concurrently across available worker pools, whereas abandoning an unviable branch still incurs the unrecoverable cost of the tokens and runtime work already spent. Designing an effective search policy therefore requires explicit mechanisms to track admitted work, quantify pending resource consumption, and enforce principled stopping criteria.
-
-### Search structures {#sec-vol3-test-time-compute-search-structures}
-
-Flat sampling generates a fixed pool of complete candidates before running selection logic across them. In best-of-$\NumberOfDevices$, the runtime admits at most $\NumberOfDevices$ independent generation requests and applies a selector once all candidates finish. Because the requests share no execution dependencies, available serving capacity translates directly into reduced turnaround time through concurrent batching—provided the serving cluster can absorb the concurrent load without degrading token throughput. However, flat sampling defers all semantic evaluation until generation finishes. A candidate with a catastrophic flaw in its first five tokens still runs to completion, expending GPU memory bandwidth and decode cycles that early validation could have saved.
-
-**Beam search**\index{Beam search!definition}[^fn-beam-search-harpy] exposes that intermediate decision boundary directly. The runtime maintains a frontier of partial candidates bounded by a fixed beam width $W$. At each step, it generates a bounded set of extensions for each active candidate, evaluates the extended prefixes using a scoring function, and retains only the top-$W$ candidates for the next round. If fewer candidates survive pruning than the beam capacity allows, the runtime advances only the viable survivors; the search root itself typically begins below full beam width. Step scores can combine learned model probabilities with deterministic checks available at that execution boundary. The beam width bounds the active frontier that receives subsequent generation work rather than total ephemeral state: during expansion, the system must temporarily hold $W$ times the branching factor in candidate extensions, along with their associated activation caches, scores, and parent references.
-
-Early pruning trades generation compute for evaluation overhead and introduces a strict dependence on intermediate scoring accuracy. If a scoring pass mistakenly discards a prefix that would have yielded an optimal solution, a bounded beam search cannot recover that path unless the search policy explicitly incorporates backtracking. Conversely, terminating an unviable patch early avoids the cost of full candidate synthesis and subsequent integration tests. Early pruning yields net savings whenever intermediate evaluations cost less than the downstream generation they preempt, while maintaining an acceptably low false-rejection rate on viable prefixes.
-
-[^fn-beam-search-harpy]: **Beam Search**: The method first appeared in the HARPY speech recognition system, which advanced only a small set of the best-scoring partial paths at each step instead of the full search space [@lowerre1976]. It accepted a bounded risk of pruning the eventual best path in exchange for bounded time and memory, the same trade a runtime makes when it retains a fixed number of partial candidates. \index{Beam search!origin}
-
-An adaptive tree policy removes the constraint of expanding every retained candidate uniformly. Tree search over intermediate reasoning steps [@yao2023tree] dynamically steers computational effort toward branches with promising score trajectories, high outcome uncertainty, or diagnostic value for unresolved choices. **Monte Carlo tree search**\index{Monte Carlo tree search!definition} [@coulom2006efficient; @kocsis2006bandit] provides a formal framework for tracking visit counts and backpropagating estimated returns across a search graph. A prominent selection policy, the PUCT variant[^fn-puct-prior-bonus] used in AlphaGo [@silver2016mastering], traverses the tree from the root by selecting at each partial state $s$ the action $a$ that maximizes
-
-$$
-Q(s,a) + c_{\text{explore}}\,\HiddenDimensionFour(a \mid s)\,\frac{\sqrt{\sum_{a'} \NumberOfDevices(s,a')}}{1 + \NumberOfDevices(s,a)},
-$$ {#eq-vol3-puct}
-
-where $Q(s,a)$ represents the empirical mean return observed through extension $a$, $\NumberOfDevices(s,a)$ is its visit count, $\HiddenDimensionFour(a \mid s)$ denotes a prior distribution over extensions (such as the base model's proposal probability for that reasoning step), and $c_{\text{explore}}$ is a positive scaling factor balancing exploitation of high-value paths against exploration of plausible but under-sampled branches. When the runtime evaluates a newly reached leaf node and obtains value $\VirtualPipelineStagesPerDevice$, every edge along the trajectory back to the root updates its visit count ($\NumberOfDevices \leftarrow \NumberOfDevices + 1$) and its running mean value ($Q \leftarrow Q + (\VirtualPipelineStagesPerDevice - Q)/\NumberOfDevices$). If $\VirtualPipelineStagesPerDevice$ originates from an imperfect learned value function, the $Q$ term in @eq-vol3-puct inherits the selection drift formalized in @eq-vol3-argmax-noise, biasing visits toward edges whose scores are elevated by estimation noise. While tree search focuses compute where value signals appear strongest, its utility hinges on whether the resulting allocation improvements outweigh the latency and memory overhead of leaf evaluations and graph state management.
-
-[^fn-puct-prior-bonus]: **From UCT to PUCT**: The UCT rule treated each node's choice of extension as a multi-armed bandit, adding an exploration bonus that shrinks as an extension accumulates visits [@kocsis2006bandit]. PUCT weights that bonus by a predictor's prior over the arms [@rosin2011multi], which is what lets a language model's own step probabilities concentrate a small budget on plausible extensions. A miscalibrated prior steers visits away from correct but unlikely steps just as effectively. \index{Monte Carlo tree search!PUCT}
-
-@Fig-vol3-search-topologies diagrams where each search structure prunes during candidate expansion: best-of-$\NumberOfDevices$ generates complete candidates independently and defers selection to the end; beam search generates extensions and prunes low-scoring partial candidates at each step boundary; and tree search selectively expands leaves via upper confidence bounds, updating visit counts along the path. @Tbl-vol3-search-topologies summarizes their pruning points, concurrency characteristics, state footprints, and prefix sharing.
-
-::: {.column-margin .margin-pointer}
-↪ Radix prefix caching, which lets later requests for a branch reuse the KV state of its shared ancestors, is developed in @sec-vol3-kv-cache-radix-lookup.
-:::
-
-::: {#fig-vol3-search-topologies fig-env="figure" fig-pos="htb" fig-cap="**Where Each Search Structure Prunes**: Best-of-$\NumberOfDevices$ generates complete candidates independently and discards all but the selected one only at the end. Beam search generates the beam width times the extensions per candidate at each step, scores them, and keeps the beam width. Tree search expands the leaf its selection rule favors, evaluates it, and updates visit counts and value estimates along the path to the root. The drawings show structure only; the pool size, beam width, and depth are illustrative." fig-alt="Three panels of node diagrams. Best-of-N: a prompt node branches into four chains of three generated nodes each; past a dashed line labeled select, one final node is marked selected and three are marked pruned. Beam: a prompt node branches into two nodes, each of which generates two children; a dashed line labeled score, keep 2 marks two children pruned, the two survivors each generate two more, and a second dashed line labeled keep 2 marks two retained and two pruned. Tree search: an uneven tree in which one path from the prompt is drawn bold and ends at a new leaf labeled evaluated V, with a note that the bold path updates N and Q; other nodes are drawn dashed as not yet expanded. A legend identifies prompt, generated, retained or selected, generated then pruned, and not yet expanded nodes."}
-![](images/svg/search_topologies_comparison.svg)
-:::
-
-| **Structure**              | **Where pruning happens**                | **Concurrency**                               | **Search state**                                         | **Prefix sharing**                       |
-|:---------------------------|:-----------------------------------------|:----------------------------------------------|:---------------------------------------------------------|:-----------------------------------------|
-| Best-of-$\NumberOfDevices$ | After complete candidates, at selection  | All $\NumberOfDevices$ requests independent   | $\NumberOfDevices$ candidates and their check results    | The common prompt only                   |
-| Beam                       | At each step boundary, by step score     | Within a step; stages wait for scoring        | Up to width times extensions before pruning, plus scores | Each retained prefix with its extensions |
-| Tree search                | Adaptively, by value estimate and visits | Irregular; depends on which leaves are chosen | Tree nodes with visit counts and value estimates         | Every node's ancestors along its path    |
-
-: **Search structures compared**: Each structure moves the pruning decision to a different point and holds different state. Concurrency describes the dependency graph; actual overlap depends on service capacity. {#tbl-vol3-search-topologies tbl-colwidths="[13,22,21,23,21]"}
-
-### Pruned tree growth {#sec-vol3-test-time-compute-tree-growth}
-
-```{python}
-#| label: calc-vol3-pruned-tree
-#| echo: false
-# ┌─────────────────────────────────────────────────────────────────────────────
-# │ PRUNED TREE GROWTH (LEGO)
-# ├─────────────────────────────────────────────────────────────────────────────
-# │ Context: @sec-vol3-test-time-compute-tree-growth.
-# │ Goal: Show how a step check's rejection rate bounds expected tree size.
-# │ Show: Unpruned leaf explosion; effective branching factor; generated nodes.
-# │ How: Independent rejection of each child; generated nodes are b times the
-# │      surviving parents at each depth; equal-sized steps.
-# └─────────────────────────────────────────────────────────────────────────────
-from mlsysim import *
-
-class PrunedTree:
-    # ┌── 1. LOAD (Constants & Parameters) ─────────────────────────────────
-    wide_b = 4  # hypothetical alternatives per step, unpruned illustration
-    wide_depth = 10  # hypothetical steps, unpruned illustration
-    b = 5  # hypothetical children proposed per retained node
-    p_prune = 0.68  # hypothetical probability a step check rejects a child
-    depth = 3  # hypothetical steps in the worked example
-
-    # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────
-    wide_leaves = wide_b**wide_depth
-    b_eff = b * (1 - p_prune)
-    critical_prune = 1 - 1 / b
-    unpruned_generated = 0
-    pruned_generated = 0.0
-    for d in range(1, depth + 1):
-        unpruned_generated += b**d
-        pruned_generated += b * b_eff ** (d - 1)
-    unpruned_leaves = b**depth
-    pruned_leaves = b_eff**depth
-    generated_saving = 1 - pruned_generated / unpruned_generated
-
-    # ┌── 3. GUARD (Invariants) ────────────────────────────────────────────
-    check(wide_leaves > 1_000_000, "Unpruned illustration exceeds a million leaves")
-    check(b_eff > 1, "Worked example remains supercritical")
-    check(p_prune < critical_prune, "Rejection rate is below the subcritical threshold")
-    check(pruned_generated < unpruned_generated, "Pruning reduces generated nodes")
-    check(generated_saving > p_prune, "Node saving exceeds the per-child rejection rate")
-
-    # ┌── 4. OUTPUT (Formatting) ───────────────────────────────────────────
-    wide_b_str = fmt_int(wide_b)
-    wide_depth_str = fmt_int(wide_depth)
-    wide_leaves_str = fmt_int(wide_leaves)
-    b_str = fmt_int(b)
-    p_prune_str = fmt_percent(p_prune, precision=0, style="prose")
-    depth_str = fmt_int(depth)
-    b_eff_str = fmt(b_eff, precision=1)
-    critical_prune_str = fmt_percent(critical_prune, precision=0, style="prose")
-    unpruned_generated_str = fmt_int(unpruned_generated)
-    pruned_generated_str = fmt(pruned_generated, precision=1)
-    unpruned_leaves_str = fmt_int(unpruned_leaves)
-    pruned_leaves_str = fmt(pruned_leaves, precision=1)
-    generated_saving_str = fmt_percent(generated_saving, precision=1, style="prose")
-```
-
-::: {.column-margin}
-![](images/svg/vol3_ttc_margin_pruned_nodes.svg){width="100%" fig-alt="Two horizontal orange bars. Unpruned: 155 generated nodes. Pruned: 25.8 generated nodes."}
-
-*Each rejected child also removes the subtree it would have grown.*
-:::
-
-Pruning is what prevents search trees from suffering catastrophic state explosion. A search graph that unconditionally expands every node into `{python} PrunedTree.wide_b_str` branches across `{python} PrunedTree.wide_depth_str` successive steps yields `{python} PrunedTree.wide_leaves_str` leaves, quickly exhausting memory capacity and compute budgets. Now consider a system where each node proposes $b$ candidate extensions, and an intermediate validation check independently prunes each child with probability $p_{\text{prune}}$. The expected number of surviving branches per expanded node—the **effective branching factor**\index{Effective branching factor!definition}—becomes
-
-$$
-b_{\text{eff}} = b\,(1 - p_{\text{prune}}).
-$$ {#eq-vol3-effective-branching}
-
-Under @eq-vol3-effective-branching, the expected frontier width at depth $\HiddenDimension$ is $b_{\text{eff}}^{\,\HiddenDimension}$. Because each of the surviving nodes at depth $\HiddenDimension-1$ generates and validates $b$ proposed children, the total expected count of generated nodes through depth $\DatasetSize$ is $\sum_{\HiddenDimension=1}^{\DatasetSize} b\,b_{\text{eff}}^{\,\HiddenDimension-1}$. This formulation defines a classic Galton–Watson branching process.[^fn-galton-watson-extinction] When $b_{\text{eff}} < 1$—which requires a pruning rate exceeding the critical threshold $1 - 1/b$—the frontier contracts geometrically with depth, causing the search tree to extinguish spontaneously. When $b_{\text{eff}} > 1$, the frontier expands exponentially, requiring hard caps on depth, token consumption, or elapsed execution time to force termination.
-
-[^fn-galton-watson-extinction]: **Galton–Watson Process**: The model comes from a Victorian question about the extinction of family surnames, analyzed in 1875 [@watson1875probability]. That analysis wrongly concluded that every line dies out; the correct result is the threshold used here, under which extinction is certain when the mean number of surviving offspring is at most one (excluding the degenerate case of exactly one child every time) and avoidable when it exceeds one. For a search tree the surviving offspring are the children that pass the step check, so the rejection rate decides which side of the threshold the search lands on. \index{Galton–Watson process!search trees}
-
-To see this quantitative effect in practice, consider a concrete configuration where each node generates `{python} PrunedTree.b_str` extensions, the step validator rejects `{python} PrunedTree.p_prune_str` of proposals, and the search proceeds to depth `{python} PrunedTree.depth_str`. The resulting effective branching factor is `{python} PrunedTree.b_eff_str`. Because branching factor `{python} PrunedTree.b_str` has a subcritical threshold of `{python} PrunedTree.critical_prune_str`, the search remains supercritical ($b_{\text{eff}} > 1$). An unpruned tree across these three steps generates `{python} PrunedTree.unpruned_generated_str` nodes and terminates with `{python} PrunedTree.unpruned_leaves_str` leaves. In contrast, the pruned search generates an expected `{python} PrunedTree.pruned_generated_str` nodes and retains approximately `{python} PrunedTree.pruned_leaves_str` leaves, eliminating `{python} PrunedTree.generated_saving_str` of total node generations. The aggregate reduction exceeds the raw `{python} PrunedTree.p_prune_str` per-node rejection rate because pruning a single parent eliminates the entire combinatorial subtree beneath it. Assuming uniform step sizes, token generation savings follow the identical proportion, though each discarded node still incurs the upfront cost of its own generation and validation pass.
-
-Two systems caveats govern this branching model. First, intermediate checks that exhibit false rejections irrevocably prune viable solution paths; aggressive pruning is therefore advantageous only when the validator's false-rejection rate remains tightly controlled. Second, when an agent requires only a single valid candidate to advance, sequential proposal generation requires $1/(1 - p_{\text{prune}})$ attempts in expectation. In contrast, proposing $W$ candidates in parallel requires $1/(1 - p_{\text{prune}}^{\,W})$ execution rounds, with each round consuming $W$ times the parallel compute. Batching reduces elapsed wall-clock rounds at the expense of higher aggregate token expenditure—the fundamental trade-off between concurrency and total work.
-
-### Branch isolation {#sec-vol3-test-time-compute-mutable-sandbox-search}
-
-While a partial patch is an ephemeral candidate data structure, evaluating it requires concrete execution against a target environment. If one search branch mutates files in a shared workspace and a sibling branch subsequently runs against that modified working tree, the sibling's test outcomes no longer reflect its own proposed edits. A robust runtime must therefore isolate execution environments so that every observation binds strictly to the candidate patch and workspace snapshot that produced it. Stateful or mutating branches require independent execution containers, copy-on-write filesystem forks, or deterministic rollback procedures that restore a clean baseline before subsequent branches execute.
-
-::: {.column-margin .margin-pointer}
-↪ Copy-on-write task workspaces that keep each run's file modifications private are developed in @sec-vol3-sandboxes-cow-provisioning.
-:::
-
-Workspace isolation incurs substantial systems overhead even when a search branch is ultimately discarded. Concurrent sandboxes consume host memory, storage volumes, container daemon process slots, and network bandwidth, while their logged outputs accumulate in the agent's working context. Even read-only diagnostic commands require sandboxed execution permissions and can inadvertently leak environment variables or credentials into search traces. Crucially, pruning a candidate drops it from the active search frontier, but computational backtracking cannot undo remote side effects such as outbound network requests or database writes. Dedicated sandbox containment mechanisms enforce these operational boundaries, ensuring that search policies budget external actions under the reality that tree traversal cannot reverse real-world side effects.
-
 ### A resource ledger for the whole search {#sec-vol3-test-time-compute-resource-ledger}
 
 Managing search budgets requires maintaining separate ledgers for financial expenditure, physical work, wall-clock time, and live system state. Financial cost aggregates generator inferences, validation calls, and external tool invocations under a unified currency. Physical work dimensions, however, represent fundamentally non-interchangeable resource demands: generator prompt and completion tokens, scoring passes, unit test executions, and sandbox setup routines each stress different infrastructure bottlenecks. Summing hardware FLOPs with end-to-end test runtimes in seconds produces meaningless telemetry.
@@ -1477,18 +1479,18 @@ Test-time compute transforms the cost of a decision into an explicit architectur
 
 @Tbl-vol3-test-time-compute-key-equations summarizes the quantitative relations developed throughout this chapter to price compute allocations, evaluate selectors, bound search spaces, and enforce stopping criteria.
 
-| **Equation**                                                                                                                                                                                                                                                                                                                              | **What it bounds or decides**                                                                                                            | **Where derived**                     |
-|:------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|:-----------------------------------------------------------------------------------------------------------------------------------------|:--------------------------------------|
-| $T^{\text{depth}} \approx T_{\text{prefill}}(\SequenceLength) + K_{\text{ext}}\,\PertokenDecodeTime$, $\; T^{\text{breadth}} \approx T_{\text{prefill}}(\SequenceLength) + \max_{\PointToPointMessageSize} \CodecDecodeTime(K_n)$                                                                                                         | Critical path of extending one candidate vs. sampling $\NumberOfDevices$ concurrently, given capacity for all $\NumberOfDevices$ streams | @eq-vol3-allocation-critical-path     |
+| **Equation**                                                                                                                                                                                                                          | **What it bounds or decides**                                                                                                            | **Where derived**                     |
+|:--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|:-----------------------------------------------------------------------------------------------------------------------------------------|:--------------------------------------|
+| $T^{\text{depth}} \approx T_{\text{prefill}}(\SequenceLength) + K_{\text{ext}}\,\PertokenDecodeTime$, $\; T^{\text{breadth}} \approx T_{\text{prefill}}(\SequenceLength) + \max_{\PointToPointMessageSize} \CodecDecodeTime(K_n)$     | Critical path of extending one candidate vs. sampling $\NumberOfDevices$ concurrently, given capacity for all $\NumberOfDevices$ streams | @eq-vol3-allocation-critical-path     |
 | $T^{\text{feedback}} \approx \sum_{t=1}^{\Horizon}\bigl(T_{\text{prefill}}(S^{(t)}) + \CodecDecodeTime(\TorqueAndBackemfConstants) + t_{\text{check},t}\bigr)$, $\; S^{(t)} = \BasePromptLength + \sum_{j<t}(K_j + \lvert o_j\rvert)$ | Latency and input growth of observation-conditioned revision under an append-only context                                                | @eq-vol3-allocation-critical-path     |
-| $\operatorname{pass@}k = 1-(1-\HiddenDimensionFour)^k$, $\; \widehat{\operatorname{pass@}k} = 1-\binom{\PointToPointMessageSize-c}{k}/\binom{\PointToPointMessageSize}{k}$                                                                                                                                                                | Candidate availability for one task, and the ceiling on any selector that returns an unchanged pool member                               | @sec-vol3-test-time-compute-pass-at-k |
-| $\CostPerAcceptedTaskEff = \mathbb{E}[\AttemptCost]/\AcceptanceProbability$                                                                                                                                                                                                                                                               | Whether added deliberation raises $\AcceptanceProbability$ faster than it raises the attempt cost                                        | @eq-vol3-cost-per-accepted-task       |
-| $\Pi_V = \HiddenDimensionFour(1-\VerifierFalseacceptanceFr) / [\HiddenDimensionFour(1-\VerifierFalseacceptanceFr) + (1-\HiddenDimensionFour)\,\VerifierFalseacceptance]$                                                                                                                                                                  | Share of passing candidates that are valid; unchanged by pool size at fixed rates                                                        | @eq-vol3-verifier-precision           |
-| $\sum_{j=1}^{J}(\SequenceLength + j\,\Delta S_{\text{step}}) = JS + \tfrac{J(J+1)}{2}\,\Delta S_{\text{step}}$                                                                                                                                                                                                                            | Scorer input for step-level checks that rescore each growing prefix without reuse                                                        | @eq-vol3-prm-rescoring                |
-| $\mathbb{E}\bigl[\max_{i \le \NumberOfDevices} \epsilon_i\bigr] \approx \sigma\sqrt{2\ln \NumberOfDevices}$, $\; 1-(1-p_{\text{exp}})^\NumberOfDevices$                                                                                                                                                                                   | Score inflation that argmax selection concentrates in the winner, and the chance a pool holds a check exploit                            | @eq-vol3-argmax-noise                 |
-| $Q(s,a) + c_{\text{explore}}\,\HiddenDimensionFour(a \mid s)\,\sqrt{\textstyle\sum_{a'} \NumberOfDevices(s,a')}\,/\,\bigl(1 + \NumberOfDevices(s,a)\bigr)$                                                                                                                                  | Which extension of a partial candidate receives the next unit of tree search                                                             | @eq-vol3-puct                         |
-| $b_{\text{eff}} = b\,(1 - p_{\text{prune}})$, $\; \sum_{\HiddenDimension=1}^{\DatasetSize} b\,b_{\text{eff}}^{\,\HiddenDimension-1}$                                                                                                                                                                                                      | Whether pruning keeps a search tree finite, and the expected nodes it generates through depth $\DatasetSize$                             | @eq-vol3-effective-branching          |
-| $(\hat p_m - \hat p_{\MicrobatchCount-1})/(C_m - C_{\MicrobatchCount-1}) < \epsilon_{\text{stop}}$                                                                                                                                                                                                                                        | Early stop within the hard ceilings and after satisficing, when the next unit of work is not worth its cost                              | @eq-vol3-marginal-stopping            |
+| $\operatorname{pass@}k = 1-(1-\HiddenDimensionFour)^k$, $\; \widehat{\operatorname{pass@}k} = 1-\binom{\PointToPointMessageSize-c}{k}/\binom{\PointToPointMessageSize}{k}$                                                            | Candidate availability for one task, and the ceiling on any selector that returns an unchanged pool member                               | @sec-vol3-test-time-compute-pass-at-k |
+| $\CostPerAcceptedTaskEff = \mathbb{E}[\AttemptCost]/\AcceptanceProbability$                                                                                                                                                           | Whether added deliberation raises $\AcceptanceProbability$ faster than it raises the attempt cost                                        | @eq-vol3-cost-per-accepted-task       |
+| $\Pi_V = \HiddenDimensionFour(1-\VerifierFalseacceptanceFr) / [\HiddenDimensionFour(1-\VerifierFalseacceptanceFr) + (1-\HiddenDimensionFour)\,\VerifierFalseacceptance]$                                                              | Share of passing candidates that are valid; unchanged by pool size at fixed rates                                                        | @eq-vol3-verifier-precision           |
+| $\sum_{j=1}^{J}(\SequenceLength + j\,\Delta S_{\text{step}}) = JS + \tfrac{J(J+1)}{2}\,\Delta S_{\text{step}}$                                                                                                                        | Scorer input for step-level checks that rescore each growing prefix without reuse                                                        | @eq-vol3-prm-rescoring                |
+| $\mathbb{E}\bigl[\max_{i \le \NumberOfDevices} \epsilon_i\bigr] \approx \sigma\sqrt{2\ln \NumberOfDevices}$, $\; 1-(1-p_{\text{exp}})^\NumberOfDevices$                                                                               | Score inflation that argmax selection concentrates in the winner, and the chance a pool holds a check exploit                            | @eq-vol3-argmax-noise                 |
+| $Q(s,a) + c_{\text{explore}}\,\HiddenDimensionFour(a \mid s)\,\sqrt{\textstyle\sum_{a'} \NumberOfDevices(s,a')}\,/\,\bigl(1 + \NumberOfDevices(s,a)\bigr)$                                                                            | Which extension of a partial candidate receives the next unit of tree search                                                             | @eq-vol3-puct                         |
+| $b_{\text{eff}} = b\,(1 - p_{\text{prune}})$, $\; \sum_{\HiddenDimension=1}^{\DatasetSize} b\,b_{\text{eff}}^{\,\HiddenDimension-1}$                                                                                                  | Whether pruning keeps a search tree finite, and the expected nodes it generates through depth $\DatasetSize$                             | @eq-vol3-effective-branching          |
+| $(\hat p_m - \hat p_{\MicrobatchCount-1})/(C_m - C_{\MicrobatchCount-1}) < \epsilon_{\text{stop}}$                                                                                                                                    | Early stop within the hard ceilings and after satisficing, when the next unit of work is not worth its cost                              | @eq-vol3-marginal-stopping            |
 
 : **Key equations**: Each relation holds under the assumptions stated where it is derived, such as independent candidates for a fixed task, fixed checker error rates, and an unchanged per-token rate across concurrent streams. {#tbl-vol3-test-time-compute-key-equations tbl-colwidths="[46,36,18]"}
 

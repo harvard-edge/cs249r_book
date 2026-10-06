@@ -368,7 +368,6 @@ Here $z$ is the standard normal quantile for the selected two-sided confidence l
 
 For zero acceptances in 50 independent tasks, @eq-wilson-interval gives a lower limit of zero and an upper limit of $z^2/(50+z^2)$, (a boundary @fig-vol3-sample-size-confidence-intervals visualizes below). Read with the outcomes reversed, the same arithmetic prices a clean record: zero observed violations in 50 tasks remains consistent with a violation rate up to that limit.
 
-
 Planning counts for evaluation suites follow from fundamental scaling laws. For a single proportion, the confidence interval half-width scales as $z\sqrt{p(1-p)/N}$, reaching its maximum at $p=0.5$. Because precision improves only as $1/\sqrt{N}$, halving the margin of error requires a fourfold increase in evaluation tasks. Detecting a difference between two configurations is considerably more demanding than estimating a single rate. For two independent arms with average acceptance probability $\bar p$, target difference $\Delta$, two-sided significance $\alpha$, and power $1-\beta$, a standard planning estimate of the tasks needed per arm is
 
 $$N_{\text{arm}}\approx\frac{2\,(z_{1-\alpha/2}+z_{1-\beta})^2\,\bar p(1-\bar p)}{\Delta^2}.$$ {#eq-vol3-eval-planning-power}
@@ -411,7 +410,7 @@ class SampleSizeScale:
     arm_large = calc_two_proportion_sample_size(p_half, delta_large, z_alpha=z_alpha, z_beta=z_beta)
     arm_small = calc_two_proportion_sample_size(p_half, delta_small, z_alpha=z_alpha, z_beta=z_beta)
     arm_large_n, arm_small_n = round(arm_large), round(arm_small)
-    
+
     zero_upper = evaluation_wilson(0, 50, z95)[1]
 
     # 3. GUARD: scaling law and published-formula arithmetic.
@@ -568,7 +567,7 @@ class PairedEfficiency:
     n11, b, c, n00 = 70, 12, 18, 50
     pairs = n11 + b + c + n00
     z95 = SampleSizeScale.z95
-    
+
     # 2. EXECUTE
     p_cand, p_base = (n11 + c) / pairs, (n11 + b) / pairs
     discordant = (b + c) / pairs
@@ -836,6 +835,10 @@ Choosing a generator therefore reduces to comparing $(g+v)/p$ across generators,
 
 These metrics quantify outcomes under a declared experiment, and explaining an individual failure takes different evidence. A lower acceptance rate could arise from the model, missing context, an observation boundary, or a slow dependency. Tracing supplies the execution evidence needed to investigate those possibilities.
 
+::: {.callout-chapter-connection title="From statistical variance to runtime observability"}
+While the preceding sections established the mathematical rigor required to trust evaluation metrics---proving *that* an agent failed via statistical tests and paired comparisons---they cannot explain *why* it failed. To diagnose a regression, systems engineers must pivot from macro-level statistical variance to micro-level distributed observability, inspecting the exact sequence of tool executions, model inference latencies, and sandbox delays that comprise a single trajectory.
+:::
+
 ## Distributed Trajectory Tracing {#sec-vol3-evaluation-tracing}
 
 When an evaluation suite reveals that a candidate agent completes fewer tasks or suffers severe latency regressions, aggregate summary metrics rarely pinpoint the root cause. In a complex repair task—such as diagnosing a database connection pool—a candidate might stall during remote inference, wait on a blocked test container, or waste cycles parsing malformed tool outputs. Without fine-grained visibility, these delays blend into an undifferentiated wall-clock total. A trace\index{Trace} transforms these scattered signals by binding every interaction back to the specific evaluation trial, candidate revision, and runtime operation, replacing disjointed service logs with an end-to-end causal record.
@@ -874,7 +877,7 @@ Rather than accumulating an unbounded collection of unstandardized telemetry tag
 
 This schema carries the task, trial, configuration, and artifact distinctions of the acceptance record into each observed interaction, while constraining provider provenance to what the remote interface exposes. A fundamental rule of evaluation tracing is that span status must remain decoupled from the final task verdict. An operating system process running a test suite may exit with code 0, prompting the tracing layer to mark the span successful, even though the test output reveals that the candidate failed critical assertions. Conversely, a client span might terminate with a timeout error while fetching auxiliary documentation, yet the candidate agent may still synthesize a valid patch from cached context. The authoritative task acceptance decision relies on independent verification suites and often arrives long after the agent's execution spans have closed.
 
-Propagating context across architectural boundaries—such as an API gateway, an asynchronous queue, or an isolated worker sandbox—demands standardized metadata carriers. The W3C Trace Context specification [@w3c2021tracecontext] provides standard HTTP and messaging headers to propagate correlation identifiers across distributed components. However, systems architects must maintain a strict security boundary: trace identifiers establish correlation, not authorization. A worker sandbox receiving a trace identifier cannot treat it as an admission token, nor can an agent bypass security policies by injecting arbitrary parent headers. Admission control, credential validation, and payload sanitization remain the exclusive responsibility of the runtime host. Furthermore, trace headers must never carry sensitive prompt tokens, credentials, or proprietary task data across untrusted network boundaries. When black-box tools or legacy binaries cannot emit internal spans, the orchestrator must record host-observed boundaries, explicitly tagging the span as an external dispatch-to-response measurement rather than an internal execution trace.
+Propagating context across architectural boundaries requires standardized metadata carriers to propagate correlation identifiers. However, systems architects must maintain a strict security boundary: trace identifiers establish correlation, not authorization. A worker sandbox cannot treat a trace identifier as an admission token. Furthermore, trace headers must never carry sensitive prompt tokens or credentials across untrusted boundaries. When legacy binaries cannot emit internal spans, the orchestrator must record host-observed boundaries explicitly.
 
 ### Span overlap and latency attribution {#sec-vol3-evaluation-tracing-latency}
 
@@ -1147,7 +1150,7 @@ class TelemetryIngestionInvertedEconomics:
 
 Defining the permitted trace schema is a foundational systems security decision. Diagnostic investigations rarely require wholesale ingestion of raw model prompts and complete tool responses; structured metadata—such as typed return codes, schema versions, sub-span latencies, policy decisions, and cryptographically hashed artifact pointers—often provides complete debugging context without exposing sensitive user data. Tool invocations present distinct data leakage risks: even when credentials and API tokens are cleanly scrubbed, tool arguments and responses frequently contain private customer records, internal database keys, proprietary source snippets, or personal identifiers. Authorization policies must therefore govern specific data attributes and restrict access based on investigator roles, rather than granting blanket read access to an entire telemetry tier. Crucially, data minimization belongs at the trusted capture boundary inside the execution runtime, before unscrubbed buffers enter network queues, ingestion daemons, or alerting systems. Once sensitive strings escape into intermediate telemetry pipelines, retroactive sanitization is virtually impossible, as private data quickly bleeds into secondary search indexes, worker crash logs, and replicated storage volumes.
 
-Automated redaction mitigates disclosure risks, but systems designers must treat every scrubbing mechanism as inherently fallible. Regular expressions miss non-standard or obfuscated secret patterns; Shannon entropy detectors flag UUIDs and cryptographic nonces while missing predictable credentials; and named-entity recognition models hallucinate, skipping private names or stripping valid operational syntax required to diagnose a tool error. Because heuristic sanitizers cannot guarantee zero disclosure across arbitrary payloads, architectural schema design must prioritize structural field exclusion over text redaction: unnecessary fields should never be captured in the first place. For retained fields that undergo transformation, pipelines must validate sanitization rules against curated benchmark suites containing real-world sensitive patterns. When downstream diagnosis requires correlating multiple actions by the same entity without revealing real-world identities, telemetry systems should replace identifiers with keyed cryptographic pseudonyms. Generating these pseudonyms via a hash-based message authentication code (HMAC) requires a securely managed secret key rather than a public salt [@krawczyk1997hmac, sec. 2]. However, engineers must recognize that persistent pseudonyms preserve relational linkability across traces. Regular key rotation constrains longitudinal correlation across evaluation epochs, though it limits multi-week user behavior tracking. Crucially, pseudonymization does not equate to complete anonymization, nor does it provide architectural justification for indefinite trace retention.
+Automated redaction mitigates disclosure risks, but systems designers must treat every scrubbing mechanism (like regex or entropy detectors) as inherently fallible. Because heuristic sanitizers cannot guarantee zero disclosure across arbitrary payloads, architectural schema design must prioritize structural field exclusion over text redaction: unnecessary fields should never be captured in the first place. When downstream diagnosis requires correlating multiple actions by the same entity, telemetry systems should replace identifiers with cryptographic pseudonyms. However, engineers must recognize that persistent pseudonyms preserve relational linkability across traces. Crucially, pseudonymization does not equate to complete anonymization, nor does it provide architectural justification for indefinite trace retention.
 
 ### Replay fidelity after redaction {#sec-vol3-evaluation-budgets-replay-fidelity}
 
