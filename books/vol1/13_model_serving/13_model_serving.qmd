@@ -1202,6 +1202,453 @@ Serving optimizes tail latency under load. Use this checkpoint to separate queue
 
 Tracing an isolated request reveals the intrinsic execution time of each pipeline phase. In production, however, multiple requests arrive concurrently and contend for shared accelerators, CPU cores, and memory buses, introducing queuing delays that dwarf raw computation time.
 
+## Queuing Theory {#sec-model-serving-queuing-theory-tail-latency-29a6}
+
+When arrival streams fluctuate, queuing theory\index{Queuing theory!serving systems} formalizes how contention for shared physical resources—accelerator execution queues, host-to-device PCIe transfers, and memory buses—degrades latency distributions. Its governing laws explain why seemingly well-provisioned inference services experience sharp, nonlinear latency explosions as utilization approaches capacity.
+
+### Little's Law {#sec-model-serving-littles-law-9352}
+
+Capacity planning begins by determining system concurrency\index{SLO!capacity planning}: given an expected arrival rate and measured mean response time, an engineer must calculate how many concurrent requests reside in the system at any instant. This calculation determines how much memory must be reserved for request buffers and activation states before deciding how many accelerators to provision. Little's Law resolves this concurrency question by relating mean in-system population to throughput, while queuing models predict how response times degrade as utilization nears saturation. Together, they provide the quantitative framework for capacity planning.
+
+::: {.column-margin .margin-pointer}
+↪ The derivation of Little's Law from conservation of requests is developed in @sec-appdx-machine-foundations-littles-law-21a3.
+:::
+
+```{python}
+#| echo: false
+#| label: littles-law-calc
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ LITTLE'S LAW CALCULATION
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: Callout "Little's Law" (Capacity Planning section)
+# │
+# │ Goal: Connect observable request rates to hardware capacity requirements.
+# │ Show: The average in-system population at 1000 QPS and 50 ms mean latency.
+# │ How: Apply Little's Law to throughput and mean time in system.
+# │
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim.fmt import fmt_int, MarkdownStr, check, fmt, fmt_time
+
+# ┌── LEGO ───────────────────────────────────────────────
+class CapacityPlanningAnchor:
+    """
+    Namespace for serving capacity anchor.
+    """
+
+    qps_target = 1000
+    mean_latency_ms = 50
+
+    # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
+    qps_str = fmt_rate(qps_target, "QPS", commas=False)
+    qps_display_str = fmt_rate(qps_target, "QPS", commas=True)
+    mean_latency_ms_str = fmt_time(mean_latency_ms, 'millisecond', precision=0, commas=False)
+
+# ┌── LEGO ───────────────────────────────────────────────
+```
+
+::: {#psp-model-serving-notation-alert-l-vs-latency .callout-perspective title="Notation alert: L vs. latency"}
+
+Classical queueing texts write Little's law with single letters for the in-system count and the time in system; this book writes $\RequestConcurrency$ for the count and $\RequestTimeInSystemLat$ for the time, because the classical count letter would collide with the loss $\mathcal{L}$ and with the iron law's fixed-latency term $\Latency$. In queuing theory, $\RequestTimeInSystemLat$ denotes the *response time* or *time in system per request*; queue-only waiting time is $W_q$. Here, $\RequestConcurrency$ denotes the average in-system request count, $\ArrivalRate$ the arrival rate, $\mu$ the unbatched service rate ($\mu = \mu_{\text{eff}}(1) = 1/T_{\text{svc}}(1)$, where $\BatchServiceTimeSvc$ is the time to serve a batch of size $B$), and $\ServingUtilization=\ArrivalRate/\mu$ the serving utilization. The subscripts distinguish queueing notation from the degradation equation's $\lambda$ sensitivity parameter and keep serving utilization from occupying bare $\rho$. The latency-budget equations that follow (@eq-batching-tax, and @eq-batching-latency in @sec-model-serving-dynamic-batching-latencythroughput-tradeoffs-986d) write a request's end-to-end latency as $\EndToEndRequestLatency$ and name its parts with further $\Latency$ subscripts, such as the batch formation delay $L_{\text{lat,form}}$ and the batching-queue wait $L_{\text{lat,wait}}$, which corresponds to $W_q$. A batch of size $B$ sustains the effective service rate $\EffectiveServiceRate = B/\BatchServiceTimeSvc$.
+
+:::
+
+Formulated by John D. C. Little, **Little's law**\index{Little's law!concurrency calculation}[^fn-littles-law-serving] establishes an exact relationship among three macroscopic metrics in any stable queuing system:
+$$\RequestConcurrency = \ArrivalRate \cdot \RequestTimeInSystemLat$$ {#eq-littles-law}
+where $\RequestConcurrency$ is the average number of requests residing in the system, $\ArrivalRate$ is the arrival rate (requests per second), and $\RequestTimeInSystemLat$ is the average time each request spends from arrival to completion.
+
+Little's law holds regardless of the arrival distribution, service-time distribution, or scheduling discipline—it requires only that the system is stable and that requests are neither created nor destroyed internally. For an inference service targeting `{python} CapacityPlanningAnchor.qps_str` with a mean response time of `{python} CapacityPlanningAnchor.mean_latency_ms_str`, Little's law dictates the average in-flight request population that host memory buffers and worker threads must sustain.
+
+[^fn-littles-law-serving]: **Little's law**\index{Little's law!capacity planning}: John D. C. Little (1961) proved that $\RequestConcurrency = \ArrivalRate \RequestTimeInSystemLat$ holds for stable long-run averages over consistent system boundaries, regardless of arrival distribution, service distribution, or scheduling discipline; this universality anchors ML capacity planning: the formula requires no Poisson-arrival or exponential-service assumption. It does require well-defined long-run averages and consistent definitions of arrival rate, time in system, and population.
+
+::: {#nbk-model-serving-littles-law-capacity-sizing .callout-notebook title="Little's Law capacity sizing"}
+
+**Problem**: How many requests are in the system on average at `{python} CapacityPlanningAnchor.qps_display_str`?
+
+**Math**: Little's Law gives $\RequestConcurrency = \ArrivalRate \RequestTimeInSystemLat$, so average population equals throughput multiplied by mean time in system.
+
+**Given**:
+```{python}
+#| echo: false
+#| label: littles-law-capacity-planning
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ LITTLE'S LAW CALCULATION
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: Callout "Little's Law" (Capacity Planning section)
+# │
+# │ Goal: Connect observable request rates to hardware capacity requirements.
+# │ Show: The average in-system population at 1000 QPS and 50 ms mean latency.
+# │ How: Apply Little's Law to throughput and mean time in system.
+# │
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim.fmt import fmt_int, MarkdownStr, check, fmt, fmt_time
+
+# ┌── LEGO ───────────────────────────────────────────────
+class CapacityPlanning:
+    """
+    Namespace for Little's Law Capacity calculation.
+    Scenario: Determining average in-system population for a 1000 QPS target.
+    """
+
+    # ┌── 1. LOAD (Constants) ───────────────────────────────────────────────
+    lambda_qps = 1000.0
+    mean_latency_s = 0.050  # 50 ms mean time in system
+
+    # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
+    # Step 1: Q_req = lambda_arr * T_lat
+    concurrency = lambda_qps * mean_latency_s
+
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(concurrency == 50, f"Math broken: 1000 * 0.05 should be 50, got {concurrency}")
+
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
+    littles_lambda_qps_str = fmt_rate(lambda_qps, "QPS")
+    littles_w_ms_str = fmt_time(round(mean_latency_s * MS_PER_SEC), 'millisecond', precision=0, commas=False)
+    littles_w_s_str = fmt_time(mean_latency_s, 'second', precision=2, commas=False)
+    littles_l_str = fmt_int(round(concurrency), commas=False)
+```
+
+* **Arrival rate $(\ArrivalRate)$**, equal to throughput in a stable system: `{python} CapacityPlanning.littles_lambda_qps_str`.
+* **Mean time in system $(\RequestTimeInSystemLat)$**: `{python} CapacityPlanning.littles_w_ms_str` (`{python} CapacityPlanning.littles_w_s_str`).
+
+**Math**: $\RequestConcurrency$ = `{python} CapacityPlanning.littles_lambda_qps_str` $\times$ `{python} CapacityPlanning.littles_w_s_str` = `{python} CapacityPlanning.littles_l_str` concurrent requests on average
+
+**Systems insight**: The system holds `{python} CapacityPlanning.littles_l_str` requests on average across batch and queue state. A GPU batch-size limit of 32 does not by itself make 1,000 QPS impossible because queued requests may reside in host memory; service rate, queueing behavior, and the tail distribution determine feasibility.
+
+:::
+
+Because @eq-littles-law binds these three variables, constraining any two dictates the third. If an inference service averages 10 ms per request $(\RequestTimeInSystemLat = 0.01 \text{ s})$ and holds 50 concurrent requests on average $(\RequestConcurrency = 50)$, the sustainable arrival rate must be $\ArrivalRate = \RequestConcurrency / \RequestTimeInSystemLat = 5000$ requests per second. Conversely, if host memory limits concurrency to an average of 10 requests while average time in system remains 10 ms, the system cannot exceed a throughput of 1,000 requests per second without dropping traffic.
+
+```{python}
+#| echo: false
+#| label: batching-tax-calc
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ THE BATCHING TAX CALCULATION
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: "The Batching Tax" section
+# │
+# │ Goal: Quantify the wait-time cost of larger batches using queuing theory.
+# │ Show: That batch-32 adds significant wait time compared to batch-1.
+# │ How: Calculate formation delay given arrival rate and batch size.
+# │
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim.fmt import fmt_int, check, fmt, fmt_time
+
+# ┌── LEGO ───────────────────────────────────────────────
+class BatchingTax:
+    """
+    Namespace for The Batching Tax calculation.
+    Scenario: Comparing wait times for B=1 vs B=32 at 500 QPS.
+    """
+
+    # ┌── 1. LOAD (Constants) ───────────────────────────────────────────────
+    lambda_qps = 500.0
+
+    # Inference times (ms)
+    t_inf_b1 = 2.0
+    t_inf_b32 = 15.0
+
+    # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
+    # Step 1: Batch 1
+    w_form_b1 = ((1 - 1) / (2 * lambda_qps) * second).to(ms).magnitude  # 0 ms
+    lat_b1 = w_form_b1 + t_inf_b1
+
+    # Batch 32
+    # Step 2: Formation Delay ~ (B-1) / (2 * lambda)
+    w_form_b32 = ((32 - 1) / (2 * lambda_qps) * second).to(ms).magnitude  # ~31 ms
+    lat_b32 = w_form_b32 + t_inf_b32
+
+    penalty_ratio = lat_b32 / lat_b1
+
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(lat_b32 > lat_b1 * 10, f"Batch-32 penalty ({lat_b32:.1f} ms) should be significant.")
+
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
+    wait_time_b1_ms_str = fmt_time(round(w_form_b1), 'millisecond', precision=0, commas=False)
+    wait_time_b32_ms_str = fmt_time(round(w_form_b32), 'millisecond', precision=0, commas=False)
+    lat_b1_ms_str = fmt_time(round(lat_b1), 'millisecond', precision=0, commas=False)
+    lat_b32_ms_str = fmt_time(round(lat_b32), 'millisecond', precision=0, commas=False)
+    penalty_ratio_mult_str = fmt_multiple(round(penalty_ratio), precision=0, commas=False)
+```
+
+### The batching tax: The latency-throughput frontier {#sec-model-serving-batching-tax}
+
+While Little's Law relates queue depth to throughput, it does not account for the **batching tax**\index{Batching!tax, latency penalty}: the deliberate delay introduced to maximize hardware utilization.
+
+For weight-dominated inference at batch size $B=1$, low arithmetic intensity can make memory bandwidth the lower roofline ceiling, the regime in which the arithmetic intensity law (principle \ref{pri-arithmetic-intensity}) caps attainable throughput at intensity times bandwidth. Accelerators must transfer gigabytes of model weights from HBM to on-chip SRAM to execute matrix-vector multiplications, achieving only a fraction of their peak FLOPS. Batching $B$ inputs converts these operations into general matrix multiplication (GEMM), reusing weights across inputs and increasing arithmetic intensity. However, gathering $B$ requests requires holding earlier arrivals in an input queue.
+
+When an inference server uses request-triggered fixed-size batching, it introduces two distinct sources of latency. **Batch formation delay**\index{Batching!batch formation delay, definition} $(L_{\text{lat,form}})$ is the time each request waits for the batch to fill; the first request waits longest, and the last waits zero. **Inference inflation**\index{Inference inflation!definition} is the growth in batch service time $\BatchServiceTime$ when the accelerator processes $\BatchSize$ samples instead of 1. The resulting latency-throughput Pareto frontier\index{Pareto Frontier!serving trade-offs} represents the operating envelope where throughput gains require paying a tax in response latency. Under stationary Poisson arrivals, @eq-batching-tax approximates the average formation-plus-service latency for batch size $\BatchSize$ and arrival rate $\ArrivalRate$, assuming a worker is available when the batch forms. Resource-queue waiting and other request stages require separate budget:
+$$ L_{\text{lat,total}} \approx \underbrace{ \frac{\BatchSize-1}{2\lambda_{\text{arr}}} }_{\text{Formation delay}} + \underbrace{ \BatchServiceTime }_{\text{Inference time}} $$ {#eq-batching-tax}
+
+@Eq-batching-tax formalizes the trade-off between accelerator throughput and individual request latency. Increasing $B$ raises arithmetic intensity and amortizes memory bandwidth across inputs, but inflates the per-request queueing delay. Concretely, at 500 QPS, moving from batch-1 to batch-32 increases wait-time from `{python} BatchingTax.wait_time_b1_ms_str` to `{python} BatchingTax.wait_time_b32_ms_str`, contributing to a `{python} BatchingTax.penalty_ratio_mult_str` total latency penalty (`{python} BatchingTax.lat_b1_ms_str` → `{python} BatchingTax.lat_b32_ms_str`). Sizing $B$ is therefore an economic optimization: operators select the largest batch size that maximizes query throughput and hardware efficiency without breaching the latency SLO $(L_{\text{lat,SLO}})$.
+
+### The utilization-latency relationship {#sec-model-serving-utilizationlatency-relationship-a2f0}
+
+Little's Law describes average system inventory under steady-state conditions, but it does not reveal how latency behaves as traffic approaches system capacity. The M/M/1 queuing model quantifies the headroom required to prevent latency collapse [@harchol-balter2013].[^fn-mm1-erlang-serving] For a system with Poisson arrivals\index{Poisson process!queuing model} and exponential service times, @eq-mm1-wait gives the average time in system:
+$$\RequestTimeInSystemLat = \frac{1}{\mu - \ArrivalRate} = \frac{\text{service time}}{1 - \ServingUtilization}$$ {#eq-mm1-wait}
+where $\ArrivalRate$ is the arrival rate, $\mu$ is the service rate (requests per second the server can handle), and $\ServingUtilization = \ArrivalRate/\mu$ is the utilization\index{Utilization!latency relationship} (the fraction of time the server is busy).
+
+[^fn-mm1-erlang-serving]: **M/M/1 queue**\index{M/M/1 queue!wait time formula}\index{M/M/1 queue!Erlang origin}: Queuing theory originated with Agner Krarup Erlang's 1909 analysis of the Copenhagen Telephone Exchange, where call arrivals were modeled as memoryless (Poisson). The M/M/1 model's exponential service-time assumption introduces more variance than many fixed-shape ML inference workloads exhibit. At the same utilization and mean service time, its mean queueing wait is twice the M/D/1 value; the ratio for total response time approaches two only as utilization becomes high. This comparison makes the model useful for planning against a deterministic-service baseline; it does not establish a bound for arbitrary production traffic.
+
+Because the denominator contains $1 - \ServingUtilization$, latency grows nonlinearly as utilization approaches unity.[^fn-queuing-delay-divergence] Small incremental increases in traffic near saturation trigger severe backpressure and queuing delays.
+
+[^fn-queuing-delay-divergence]: **Super-linear latency divergence**\index{Queuing theory!utilization divergence}: The planning knee often appears well before full saturation; in the M/M/1 mean response-time equation, $\RequestTimeInSystemLat = \frac{1/\mu}{1-\ServingUtilization}$, where $\ServingUtilization = \ArrivalRate/\mu$ is utilization. The $(1-\ServingUtilization)^{-1}$ term diverges as $\ServingUtilization \to 1$: at $\ServingUtilization = 0.7$, mean response time is already 3.3$\times$ the base service time; at $\ServingUtilization = 0.9$, it is 10$\times$. The exact operating limit is a policy and workload choice, but trying to stretch a latency-sensitive queue toward saturation creates disproportionate latency growth.
+
+The standard M/M/1 formulation assumes exponentially distributed service times. For compiled neural networks processing fixed-size batches and static tensor dimensions, execution times are nearly constant, making an M/D/1\index{M/D/1 queue!deterministic service} queue a tighter model of mean queuing delay. The analysis here retains the M/M/1 model because it yields closed-form solutions and predicts greater mean queueing delay than M/D/1 under matched arrival rate and mean service time. In production environments, variable input lengths, dynamic batch formation, CPU preprocessing, and key-value cache lookups introduce runtime variance that quickly breaks deterministic assumptions.[^fn-kendall-notation-serving]
+
+[^fn-kendall-notation-serving]: **Kendall notation**\index{Kendall notation!queuing models}: In the A/S/c (arrival/service/servers) notation, "M" signifies a Markovian (memoryless) process and "D" means deterministic. M/M/1 is conservative relative to M/D/1 for mean queueing wait when service times are nearly deterministic, but neither model replaces measurement of a production workload's arrival process, service-time variance, or tail behavior.
+
+@Tbl-utilization-latency quantifies this relationship, demonstrating how average time in system multiplies rapidly as utilization approaches 100 percent.
+
+```{python}
+#| echo: false
+#| label: utilization-latency-calc
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ M/M/1 UTILIZATION-LATENCY RELATIONSHIP
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @tbl-utilization-latency
+# │
+# │ Goal: Show how M/M/1 time-in-system grows as utilization approaches capacity.
+# │ How: Latency multiple = 1/(1-rho); example latency = multiple x 5 ms service.
+# │
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim.fmt import fmt_percent, fmt_time, fmt_multiple, check
+from mlsysim.core.units import ms
+
+class UtilizationLatency:
+    """M/M/1 time-in-system = service/(1-rho); example uses a 5 ms service time."""
+
+    # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
+    rho_pct = [50, 70, 80, 90, 95]  # utilization points
+    service_ms_value = 5.0 * ms  # ResNet-50 service time
+
+    # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
+    latency_multiple_value = [1.0 / (1.0 - r / 100.0) for r in rho_pct]
+    example_ms_value = []
+    for _mult in latency_multiple_value:
+        example_ms_value.append(_mult * service_ms_value)
+
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(latency_multiple_value == sorted(latency_multiple_value), "Latency multiple must grow with utilization.")
+    check(abs(latency_multiple_value[0] - 2.0) < 1e-9, "rho=50% must yield a 2x multiple.")
+
+    # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
+    rho_str = [fmt_percent(r / 100, precision=0, commas=False, style='symbol') for r in rho_pct]
+    rho_prose_str = [fmt_percent(r / 100, precision=0, commas=False, style='prose') for r in rho_pct]
+    latency_multiple_mult_str = [fmt_multiple(m, precision=None, commas=False) for m in latency_multiple_value]
+    example_ms_str = [fmt_time(round(e.to(ms).magnitude) * ms, 'millisecond', precision=0, commas=False) for e in example_ms_value]
+    service_ms_str = fmt_time(service_ms_value, 'millisecond', precision=0, commas=False)
+```
+
+| **Utilization $(\ServingUtilization)$**      |                    **Latency Multiple**                    | **Example (`{python} UtilizationLatency.service_ms_str` service)** |
+|:---------------------------------------------|:----------------------------------------------------------:|:------------------------------------------------------------------:|
+| **`{python} UtilizationLatency.rho_str[0]`** | `{python} UtilizationLatency.latency_multiple_mult_str[0]` |          `{python} UtilizationLatency.example_ms_str[0]`           |
+| **`{python} UtilizationLatency.rho_str[1]`** | `{python} UtilizationLatency.latency_multiple_mult_str[1]` |          `{python} UtilizationLatency.example_ms_str[1]`           |
+| **`{python} UtilizationLatency.rho_str[2]`** | `{python} UtilizationLatency.latency_multiple_mult_str[2]` |          `{python} UtilizationLatency.example_ms_str[2]`           |
+| **`{python} UtilizationLatency.rho_str[3]`** | `{python} UtilizationLatency.latency_multiple_mult_str[3]` |          `{python} UtilizationLatency.example_ms_str[3]`           |
+| **`{python} UtilizationLatency.rho_str[4]`** | `{python} UtilizationLatency.latency_multiple_mult_str[4]` |          `{python} UtilizationLatency.example_ms_str[4]`           |
+
+: **Utilization-Latency Relationship**: Average time in system (wait + service) as a multiple of service time for an M/M/1 queue. At `{python} UtilizationLatency.rho_prose_str[0]` utilization, time in system is `{python} UtilizationLatency.latency_multiple_mult_str[0]` service time; at `{python} UtilizationLatency.rho_prose_str[3]`, it reaches `{python} UtilizationLatency.latency_multiple_mult_str[3]`. This nonlinear growth explains why systems that perform well at moderate load suddenly violate SLOs when traffic increases: moving from 80 percent to 90 percent utilization doubles latency. {#tbl-utilization-latency}
+
+### Multi-server considerations {#sec-model-serving-multiserver-considerations-00fc}
+
+A single serving node forms the fundamental building block of inference infrastructure. Single-node queuing dynamics govern resource saturation and establish the baseline performance characteristics that persist when horizontally replicated across a cluster.
+
+Evaluating an isolated node under M/M/1 assumptions establishes the headroom needed before scaling out, testing whether a single accelerator can absorb peak traffic without violating service-level targets. Production profiling must verify whether real-world bottlenecks stem from raw compute saturation, dynamic batching thresholds, host preprocessing, or memory allocation stalls.
+
+When traffic exceeds single-node capacity, the architecture scales out horizontally: multiple independent serving nodes sit behind a load balancer, each hosting a complete, identical model instance. The M/M/c queuing model\index{M/M/c queue!multi-server} extends single-server analysis to $c$ parallel workers, showing how pooled capacity absorbs arrival bursts when queries are uniformly distributed. Tail latency improvements in practice depend heavily on dispatch algorithms, service-time variance across heterogeneous inputs, and per-replica utilization margins. This horizontal replication remains architecturally distinct from model parallelism (tensor or pipeline sharding): replication duplicates the model across independent nodes to serve distinct queries concurrently without inter-device synchronization, whereas model parallelism shards a single model across multiple accelerators connected by high-bandwidth interconnects (such as NVLink) to execute one query collaboratively.
+
+### Tail latency {#sec-model-serving-tail-latency-5376}
+
+Production SLOs\index{SLO!percentile targets} typically specify percentile targets (p95, p99) rather than averages because tail latency determines user experience for the slowest requests [@dean2013].
+
+In Kendall's notation, an *$M/M/1$ queue* denotes Poisson arrivals ($M$, memoryless), exponentially distributed service times ($M$), and a single server ($1$). In this classical queueing model, total request latency (queue wait plus service) follows an exponential distribution with cumulative distribution function $F(t) = 1 - e^{-t / \RequestTimeInSystemLat}$, where $\RequestTimeInSystemLat = \frac{\text{service time}}{1 - \ServingUtilization}$ is the mean response time from @eq-mm1-wait. To derive the 99th percentile latency (p99), we solve for the time $t_{99}$ where 99 percent of requests have completed ($F(t_{99}) = 0.99$):
+$$1 - e^{-t_{99}/\RequestTimeInSystemLat} = 0.99 \implies e^{-t_{99}/\RequestTimeInSystemLat} = 0.01 \implies -\frac{t_{99}}{\RequestTimeInSystemLat} = \ln(0.01) = -\ln(100) \approx -4.605$$
+Solving for $t_{99}$ and substituting the mean latency $\RequestTimeInSystemLat$ yields the governing expression for tail latency:
+$$T_{\text{lat},\text{p99}} \approx \frac{\text{service time}}{1 - \ServingUtilization} \cdot \ln\left(\frac{1}{1 - 0.99}\right) \approx \frac{4.6 \cdot \text{service time}}{1 - \ServingUtilization}$$ {#eq-p99-latency}
+
+Mean latency masks tail contention: at 70 percent utilization, average latency is only 3.3 times service time, while p99 latency reaches 15.3 times service time $(4.6/0.3 \approx 15.3)$. For deterministic-service models such as M/D/1, tail values require numerical calculation rather than a simple universal multiplier, but the core systems reality remains: evaluating a serving cluster by average latency conceals severe tail degradation.
+
+#### The tail at scale problem {#sec-model-serving-tail-scale-problem-958d}
+
+Dean and Barroso's analysis reveals why tail latency becomes critical as systems scale beyond single machines [@dean2013]. When requests fan out to $m$ parallel backends—such as querying an ensemble of models, searching sharded embedding indices, or parallelizing pipeline stages—the overall user request completes only when the slowest sub-task finishes. If sub-task completion events are independent and each has a 99 percent probability of finishing within latency threshold $L_{\text{lat,SLO}}$, the probability that all $m$ backends finish within $L_{\text{lat,SLO}}$ is $(0.99)^m$. For a fan-out of $m = 10$, only $0.99^{10} \approx 90.4\%$ of requests meet the target; at $m = 100$, that probability drops to $0.99^{100} \approx 36.6\%$, meaning nearly two-thirds of user requests experience a tail delay. This "tail at scale"\index{Tail at scale!fan-out amplification} effect makes controlling single-node tail variance essential for overall system performance.
+
+Before exploring software mitigations like hedging, systems engineers must first provision sufficient accelerator capacity to satisfy tail-latency SLOs under peak load. Applying the M/M/1 tail-response-time model to a ResNet-50 deployment makes the provisioning workflow concrete.
+
+```{python}
+#| echo: false
+#| label: capacity-planning-calc
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ RESNET-50 CAPACITY PLANNING
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: Callout "ResNet-50 Capacity Planning"
+# │
+# │ Goal: Demonstrate the complete capacity planning workflow.
+# │ Show: That 62 V100 GPUs are needed for 5000 QPS under the stated 5 ms service-time model and headroom.
+# │ How: Apply the displayed M/M/1 p99 bound to find safe utilization and required service rate.
+# │
+# └─────────────────────────────────────────────────────────────────────────────
+import math
+from mlsysim.fmt import (
+    fmt_int,
+    fmt,
+    fmt_count,
+    fmt_math,
+    fmt_ratio,
+    check,
+    fmt_percent,
+    fmt_time,
+    fmt_rate,
+)
+
+class CapacityPlanningCalc:
+    """ResNet-50 capacity planning: GPUs needed for 5000 QPS at 50 ms p99 with N+1 redundancy."""
+
+    # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
+    cp_peak_qps_value = 5000 * (count / second)  # scenario assumption: peak traffic
+    cp_service_ms_value = 5 * ms  # scenario assumption: TensorRT FP16 service time
+    cp_p99_target_ms_value = 50 * ms  # scenario assumption: p99 latency SLO
+    cp_single_gpu_rate_value = (1 * count / cp_service_ms_value).to(count / second)
+    cp_headroom_factor_value = 1.3  # 30% headroom for variance
+    cp_fp32_bits_value = FP32_BITS  # FP32 bit width
+    cp_int8_bits_value = INT8_BITS  # INT8 bit width
+    mm1_p99_factor_value = 4.6  # p99 multiplier for M/M/1
+    mm1_rho_example_util_value = 0.7  # example utilization
+
+    # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
+    cp_rho_safe_value = 1 - (mm1_p99_factor_value * cp_service_ms_value) / cp_p99_target_ms_value
+    cp_mu_required_value = cp_peak_qps_value / cp_rho_safe_value
+    cp_gpus_raw_value = (cp_mu_required_value / cp_single_gpu_rate_value).to("").magnitude
+    cp_gpus_ceil_value = math.ceil(cp_gpus_raw_value)
+    cp_final_raw_value = cp_gpus_ceil_value * cp_headroom_factor_value
+    cp_final_ceil_value = math.ceil(cp_final_raw_value)
+    cp_gpus_after_fail_value = cp_final_ceil_value - 1
+    cp_util_after_fail_value = (cp_peak_qps_value / (cp_single_gpu_rate_value * cp_gpus_after_fail_value)).to("").magnitude * 100
+    cp_n_plus_2_min_value = cp_gpus_ceil_value + 2
+    cp_n_plus_2_headroom_value = cp_final_ceil_value + 2
+    cp_precision_ratio_value = cp_fp32_bits_value // cp_int8_bits_value
+    mm1_wait_factor_value = mm1_p99_factor_value / (1 - mm1_rho_example_util_value)
+    cp_headroom_pct_value = (cp_headroom_factor_value - 1) * 100
+
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(
+        abs(cp_gpus_raw_value - 46.3) < 0.05,
+        f"GPU count before rounding should be about 46.3, got {cp_gpus_raw_value:.2f}",
+    )
+    check(cp_gpus_ceil_value == 47, f"9259 / 200 should ceil to 47 GPUs, got {cp_gpus_ceil_value}")
+    check(cp_final_ceil_value == 62, f"47 GPUs plus 30 percent headroom should round to 62, got {cp_final_ceil_value}")
+
+    # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
+    cp_mu_required_req_per_s_str = fmt_rate(cp_mu_required_value, 'req/s', precision=1, commas=False)
+    cp_gpus_raw_str = fmt(cp_gpus_raw_value, precision=1, commas=False)
+    cp_gpus_ceil_str = fmt_count(cp_gpus_ceil_value, precision=0, commas=False)
+    cp_final_raw_str = fmt(cp_final_raw_value, precision=1, commas=False)
+    cp_final_ceil_str = fmt(cp_final_ceil_value, precision=0, commas=False)
+    cp_gpus_after_fail_str = fmt(cp_gpus_after_fail_value, precision=0, commas=False)
+    cp_util_after_fail_pct_math = fmt_math(rf"{cp_util_after_fail_value:.1f}\%")
+    cp_n_plus_2_min_gpus_str = fmt_count(cp_n_plus_2_min_value, precision=0, commas=False, label="GPU")
+    cp_n_plus_2_headroom_gpus_str = fmt_count(cp_n_plus_2_headroom_value, precision=0, commas=False, label="GPU")
+    cp_peak_qps_str = fmt_rate(cp_peak_qps_value, 'QPS', precision=0)
+    cp_single_gpu_rate_req_per_s_str = fmt_rate(cp_single_gpu_rate_value, 'req/s', precision=0)
+    _cp_mu_required_req_per_s_math_fragment = cp_mu_required_req_per_s_str.replace(" req/s", r"\,\mathrm{req}/\mathrm{s}")
+    _cp_peak_qps_math_fragment = cp_peak_qps_str.replace(" QPS", r"\,\mathrm{QPS}")
+    cp_service_ms_str = fmt_time(cp_service_ms_value, 'millisecond', precision=0, commas=False)
+    cp_p99_target_ms_str = fmt_time(cp_p99_target_ms_value, 'millisecond', precision=0, commas=False)
+    _cp_service_ms_math_fragment = cp_service_ms_str.replace(" ms", r"\,\mathrm{ms}")
+    _cp_p99_target_ms_math_fragment = cp_p99_target_ms_str.replace(" ms", r"\,\mathrm{ms}")
+    cp_rho_safe_str = fmt(cp_rho_safe_value, precision=2, commas=False)
+    cp_rho_safe_pct_str = fmt_percent(cp_rho_safe_value, precision=0, commas=False, style='prose')
+    mm1_p99_factor_str = fmt_ratio(mm1_p99_factor_value, precision=1, commas=False)
+    cp_rho_safe_math = fmt_math(
+        f"\\rho_{{\\text{{serv}}}} \\leq "
+        f"1 - ({mm1_p99_factor_str} \\times {_cp_service_ms_math_fragment})/"
+        f"{_cp_p99_target_ms_math_fragment} = {cp_rho_safe_str}"
+    )
+    cp_mu_required_math = fmt_math(
+        f"\\mu_{{\\text{{required}}}} = " f"{_cp_peak_qps_math_fragment} / {cp_rho_safe_str} = " f"{_cp_mu_required_req_per_s_math_fragment}"
+    )
+    cp_headroom_pct_str = fmt_percent(cp_headroom_pct_value / 100, precision=0, commas=False, style='prose')
+    cp_headroom_factor_str = fmt_ratio(cp_headroom_factor_value, precision=1, commas=False)
+
+CapacityPlanningCalc.cp_mu_required_req_per_s_math_fragment = CapacityPlanningCalc._cp_mu_required_req_per_s_math_fragment
+CapacityPlanningCalc.cp_peak_qps_math_fragment = CapacityPlanningCalc._cp_peak_qps_math_fragment
+CapacityPlanningCalc.cp_service_ms_math_fragment = CapacityPlanningCalc._cp_service_ms_math_fragment
+CapacityPlanningCalc.cp_p99_target_ms_math_fragment = CapacityPlanningCalc._cp_p99_target_ms_math_fragment
+```
+
+::: {#nbk-model-serving-resnet-50-capacity-planning .callout-notebook title="ResNet-50 capacity planning"}
+
+Consider designing a ResNet-50 serving system with these requirements:
+
+- **Target p99 latency**: 50 ms
+- **Peak expected traffic**: `{python} CapacityPlanningCalc.cp_peak_qps_str`
+- **Service time** (TensorRT FP16): 5 ms
+
+**Step 1**: Find safe utilization.
+From @eq-p99-latency, $T_{\text{lat},\text{p99}} \approx$ `{python} CapacityPlanningCalc.mm1_p99_factor_str` $\times$ service time / $(1 - \ServingUtilization)$. Setting $T_{\text{lat},\text{p99}} \leq 50$ ms with 5 ms service time gives `{python} CapacityPlanningCalc.cp_rho_safe_math` (`{python} CapacityPlanningCalc.cp_rho_safe_pct_str` maximum utilization). This is an M/M/1 p99 estimate under the stated arrival and service assumptions. The mean-wait comparison with M/D/1 does not establish a conservative bound on production p99; a load test must validate the tail.
+
+**Step 2**: Calculate required service rate.
+`{python} CapacityPlanningCalc.cp_mu_required_math`
+
+**Step 3**: Determine GPU count.
+In this M/M/1 model, the single-GPU rate is `{python} CapacityPlanningCalc.cp_single_gpu_rate_req_per_s_str`.
+
+GPUs needed = `{python} CapacityPlanningCalc.cp_mu_required_req_per_s_str` / `{python} CapacityPlanningCalc.cp_single_gpu_rate_req_per_s_str` = `{python} CapacityPlanningCalc.cp_gpus_raw_str` → `{python} CapacityPlanningCalc.cp_gpus_ceil_str` GPUs
+
+This single-GPU rate is the batch-1 service rate. Each request holds the GPU for the full service time, which keeps the M/M/1 model closed-form. Dynamic batching (@sec-model-serving-throughput-optimization-18d1) amortizes fixed overhead across requests and raises the per-GPU rate several-fold, so a batched deployment may need fewer GPUs after its own latency distribution is validated; @sec-model-serving-capacity-planning-96a3 compares the two regimes.
+
+**Step 4**: Add headroom for variance.
+This scenario adds `{python} CapacityPlanningCalc.cp_headroom_pct_str` headroom for traffic spikes and variance: final count = `{python} CapacityPlanningCalc.cp_gpus_ceil_str` $\times$ `{python} CapacityPlanningCalc.cp_headroom_factor_str` = `{python} CapacityPlanningCalc.cp_final_raw_str`, rounded up to `{python} CapacityPlanningCalc.cp_final_ceil_str`.
+
+**Step 5**: Verify fault tolerance.
+The `{python} CapacityPlanningCalc.cp_headroom_pct_str` headroom addresses traffic variance, but production systems also need fault tolerance. With `{python} CapacityPlanningCalc.cp_final_ceil_str` GPUs, losing one leaves `{python} CapacityPlanningCalc.cp_gpus_after_fail_str` GPUs handling `{python} CapacityPlanningCalc.cp_peak_qps_str`. The postfailure utilization is `{python} CapacityPlanningCalc.cp_peak_qps_str` / (`{python} CapacityPlanningCalc.cp_single_gpu_rate_req_per_s_str` $\times$ `{python} CapacityPlanningCalc.cp_gpus_after_fail_str`) = `{python} CapacityPlanningCalc.cp_util_after_fail_pct_math`.
+
+This remains well below the `{python} CapacityPlanningCalc.cp_rho_safe_pct_str` safe utilization threshold, confirming N+1 redundancy is satisfied. For stricter fault tolerance requirements, N+2 redundancy (tolerating two simultaneous failures) would require `{python} CapacityPlanningCalc.cp_n_plus_2_min_gpus_str` under the same safe-utilization threshold, or about `{python} CapacityPlanningCalc.cp_n_plus_2_headroom_gpus_str` if the `{python} CapacityPlanningCalc.cp_headroom_pct_str` headroom must remain after two simultaneous failures.
+
+**Result**: Under batch-1 service, provision `{python} CapacityPlanningCalc.cp_final_ceil_str` V100 GPUs to serve `{python} CapacityPlanningCalc.cp_peak_qps_str` at 50 ms p99 latency with N+1 fault tolerance.
+
+:::
+
+The queuing analysis explains the capacity planning approach detailed in @sec-model-serving-capacity-planning-96a3 and connects directly to the MLPerf Server scenario. @Sec-benchmarking-server-e69f defines that scenario as Poisson arrivals scored by throughput against a tail-latency target. A Server result is therefore valid only when the run satisfies its percentile-latency constraint; otherwise, the target QPS must be reduced and the run repeated.
+
+### Tail-tolerant techniques {#sec-model-serving-tailtolerant-techniques-066e}
+
+Eliminating all sources of latency variability is often impractical. Production systems instead employ techniques that tolerate variability while still meeting SLOs [@dean2013; @dean2012rapid]. The useful organization is by failure mode: a straggler replica calls for a race, fan-out calls for early detection, overload calls for admission control or graceful degradation, and retry amplification calls for coordinated shedding.
+
+For a straggler replica, the system can race the slow path. Under hedging,\index{Hedging!tail tolerance} when a request has not completed within the expected time, the system sends a duplicate request to another server.[^fn-hedging-tail-tolerance] The client uses whichever response arrives first and cancels the other. For ML serving, this means maintaining multiple model replicas and routing slow requests to alternative replicas. With a stable latency distribution, a threshold set at the historical 95th percentile triggers duplicates for about 5 percent of requests; correlated slowdowns can raise that fraction and make hedging amplify overload instead of reducing the tail.
+
+[^fn-hedging-tail-tolerance]: **Hedging**\index{Hedging!tail tolerance}: The term is borrowed from finance, where an offsetting bet reduces risk; here, the redundant request is a bet against a slow server. This is not free: for ML systems, the losing hedged request may still occupy accelerator time if inference has already launched, because ordinary GPU kernels are not cheaply cancelled mid-execution. Thus, a hedging policy must budget duplicate work as well as the latency benefit.
+
+Ordinary launched inference kernels are not cheaply interrupted mid-execution. When a hedged request completes, the duplicate must be cancelled, but if inference has already begun on the GPU, cancellation approaches include checking a cancellation flag before launching inference, accepting wasted compute for the in-flight kernel, or using request prioritization to deprioritize the duplicate. Because hedging typically applies only to a small tail of requests, the overhead from occasional wasted compute remains manageable when the trigger threshold is tuned conservatively.
+
+Tied requests\index{Tied request!latency reduction} make the same race more aggressive by placing the request in multiple server queues simultaneously, with coordination that cancels the other copies once one server begins processing. This avoids waiting to detect a slow response before hedging and can reduce queuing delay when multiple ready replicas are available. It also creates duplicate queue entries, so the coordination mechanism must cancel losing copies before they consume scarce accelerator time.
+
+Fan-out systems need a different intervention point because one slow backend can stall the entire distributed request. Canary requests\index{Canary request!fan-out protection} first send the request to a small subset of one to two servers.[^fn-canary-traffic-fanout] If these return within expected time, the system sends to the remainder. If the canary is slow, the system can retry elsewhere or use cached results before committing to the full fan-out. The technique turns a potential tail-latency amplification problem into an early warning signal.
+
+[^fn-canary-traffic-fanout]: **Canary**\index{Canary!etymology}: Named for the coal mine practice (early 1900s--1980s) of using birds whose high metabolic rate made them sensitive to toxic gases before concentrations became lethal to humans. In ML serving, canary requests serve the same early-warning function for fan-out queries: by testing 1--2 backends before committing to the full fan-out, the system detects slow or failing replicas before a single straggler stalls the entire distributed inference request---a critical protection when fan-out width means tail latency grows with the maximum of all backend response times. Canary deployments borrow the name for a different mechanism, exposing a new model version to a small slice of traffic.
+
+When the problem is cluster overload rather than an isolated straggler, racing backends only exacerbates queue depth by injecting duplicate work. The system must instead protect the latency of admitted requests through graceful degradation or admission control. **Graceful degradation**\index{Graceful degradation!overload handling} returns lower-fidelity results to preserve throughput: classification pipelines fall back to cached approximations, generative models truncate decoding lengths, and model ensembles evaluate only a subset of members. Dynamically reducing active ensemble members shortens service time ($\BatchServiceTime$), which increases the effective service rate $\EffectiveServiceRate$ and lowers utilization $\ServingUtilization = \ArrivalRate / \EffectiveServiceRate$ toward a workload-appropriate operating point with more headroom, as illustrated by @fig-tail-latency-explosion, trading a controlled accuracy reduction for SLO survival instead of an uncontrolled latency collapse. **Admission control**\index{Admission control!queue depth threshold} enforces an even stricter boundary: when the ingress queue exceeds a designated threshold, the server immediately rejects excess queries with HTTP 503 status codes rather than admitting work doomed to violate its latency deadline.
+
+Setting this rejection threshold requires balancing accelerator occupancy against queuing delay. A practical starting heuristic is to bound queue depth to two or three service quanta per worker (for four workers, an ingress queue limit of 8 to 12 requests). Adaptive admission control dynamically tightens this limit when observed p99 latency approaches the SLO and expands it when headroom permits. While compiled, fixed-shape inference yields relatively narrow service-time distributions, variable input lengths, dynamic batch formation, and shared memory bus contention introduce variance that necessitates continuous empirical calibration rather than rigid static limits.
+
+A cascading failure occurs when all replicas experience simultaneous overload. If upstream load balancers retry rejected requests at other replicas that are also overloaded, retry traffic amplifies the overload. Coordinated load shedding\index{Load shedding!retry coordination} addresses this by sharing load information across replicas, enabling system-wide decisions about which requests to accept. When global load exceeds capacity, replicas collectively reject the same fraction of requests rather than each rejecting independently and triggering retries.
+
+These techniques become essential at scale when fan-out amplification makes individual server tail latency visible to users. Single-machine serving systems can implement hedged and tied requests across GPU streams or model replicas. While this queuing analysis assumes first-in-first-out (FIFO) processing, production serving frameworks often implement priority disciplines—such as shortest-job-first or deadline-aware scheduling—to mitigate tail latency for heterogeneous request distributions [@harchol-balter2013].
+
+::: {#chk-model-serving-queuing-slo-headroom .callout-checkpoint title="Queuing and SLO headroom"}
+
+Latency SLOs are not enforced by *fast inference* alone; they are enforced by *headroom*.
+
+- [ ] **Little's Law**: at a fixed stable throughput, can you use $\RequestConcurrency = \ArrivalRate \RequestTimeInSystem$ to explain why a higher average in-system population implies a higher mean response time, even if per-request compute time is unchanged?
+- [ ] **Utilization cliff**: can you explain why latency grows nonlinearly as utilization $\ServingUtilization$ approaches one, and why production systems target a conservative $\ServingUtilization$ rather than "100 percent busy"?
+- [ ] **Wait vs. compute**: given an end-to-end latency budget, can you separate batch formation, waiting for an available worker, and batch service time $\BatchServiceTime$? Which wait does a batching timeout control?
+- [ ] **Capacity planning**: can you explain why a throughput number is only "real" if requests still meet the percentile latency SLO under load?
+- [ ] **Headroom estimate**: a stable service handles 2,000 requests per second and measures a 10 ms mean response time. Use $\RequestConcurrency = \ArrivalRate \RequestTimeInSystem$ to estimate its average in-flight population. Why does this result alone not establish compliance with a 50 ms p99 SLO?
+
+:::
+
+Queuing theory and tail-tolerance policies govern the steady-state processing of requests. They presuppose, however, that serving instances are already initialized and that incoming data matches offline training assumptions—preconditions that frequently fail during cold starts, auto-scaling surges, and silent feature corruption.
+
+
 ## Serving Load, Latency, and Architecture {#sec-model-serving-load-latency-architecture-a4d8}
 
 Online serving systems process variable, unbatched request streams while operating under strict latency deadlines. When arrival bursts exhaust a system's reserved headroom, performance degrades nonlinearly.
@@ -2207,451 +2654,6 @@ Beyond scheduled processes, asynchronous hardware interrupts introduce another s
 
 Isolating physical cores, locking host memory, and shielding interrupt lines reduce specific sources of operating system noise. The resulting service-time distribution still needs measurement under the intended load. Even a predictable single-node execution path leaves a scheduling challenge: processing requests sequentially can underuse accelerator resources when each request exposes little parallel work. To achieve high throughput within latency deadlines, the internal software architecture of the serving engine must coordinate irregular, asynchronous request streams into structured, hardware-saturating batches.
 
-## Queuing Theory {#sec-model-serving-queuing-theory-tail-latency-29a6}
-
-When arrival streams fluctuate, queuing theory\index{Queuing theory!serving systems} formalizes how contention for shared physical resources—accelerator execution queues, host-to-device PCIe transfers, and memory buses—degrades latency distributions. Its governing laws explain why seemingly well-provisioned inference services experience sharp, nonlinear latency explosions as utilization approaches capacity.
-
-### Little's Law {#sec-model-serving-littles-law-9352}
-
-Capacity planning begins by determining system concurrency\index{SLO!capacity planning}: given an expected arrival rate and measured mean response time, an engineer must calculate how many concurrent requests reside in the system at any instant. This calculation determines how much memory must be reserved for request buffers and activation states before deciding how many accelerators to provision. Little's Law resolves this concurrency question by relating mean in-system population to throughput, while queuing models predict how response times degrade as utilization nears saturation. Together, they provide the quantitative framework for capacity planning.
-
-::: {.column-margin .margin-pointer}
-↪ The derivation of Little's Law from conservation of requests is developed in @sec-appdx-machine-foundations-littles-law-21a3.
-:::
-
-```{python}
-#| echo: false
-#| label: littles-law-calc
-# ┌─────────────────────────────────────────────────────────────────────────────
-# │ LITTLE'S LAW CALCULATION
-# ├─────────────────────────────────────────────────────────────────────────────
-# │ Context: Callout "Little's Law" (Capacity Planning section)
-# │
-# │ Goal: Connect observable request rates to hardware capacity requirements.
-# │ Show: The average in-system population at 1000 QPS and 50 ms mean latency.
-# │ How: Apply Little's Law to throughput and mean time in system.
-# │
-# └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import fmt_int, MarkdownStr, check, fmt, fmt_time
-
-# ┌── LEGO ───────────────────────────────────────────────
-class CapacityPlanningAnchor:
-    """
-    Namespace for serving capacity anchor.
-    """
-
-    qps_target = 1000
-    mean_latency_ms = 50
-
-    # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
-    qps_str = fmt_rate(qps_target, "QPS", commas=False)
-    qps_display_str = fmt_rate(qps_target, "QPS", commas=True)
-    mean_latency_ms_str = fmt_time(mean_latency_ms, 'millisecond', precision=0, commas=False)
-
-# ┌── LEGO ───────────────────────────────────────────────
-```
-
-::: {#psp-model-serving-notation-alert-l-vs-latency .callout-perspective title="Notation alert: L vs. latency"}
-
-Classical queueing texts write Little's law with single letters for the in-system count and the time in system; this book writes $\RequestConcurrency$ for the count and $\RequestTimeInSystemLat$ for the time, because the classical count letter would collide with the loss $\mathcal{L}$ and with the iron law's fixed-latency term $\Latency$. In queuing theory, $\RequestTimeInSystemLat$ denotes the *response time* or *time in system per request*; queue-only waiting time is $W_q$. Here, $\RequestConcurrency$ denotes the average in-system request count, $\ArrivalRate$ the arrival rate, $\mu$ the unbatched service rate ($\mu = \mu_{\text{eff}}(1) = 1/T_{\text{svc}}(1)$, where $\BatchServiceTimeSvc$ is the time to serve a batch of size $B$), and $\ServingUtilization=\ArrivalRate/\mu$ the serving utilization. The subscripts distinguish queueing notation from the degradation equation's $\lambda$ sensitivity parameter and keep serving utilization from occupying bare $\rho$. The latency-budget equations that follow (@eq-batching-tax, and @eq-batching-latency in @sec-model-serving-dynamic-batching-latencythroughput-tradeoffs-986d) write a request's end-to-end latency as $\EndToEndRequestLatency$ and name its parts with further $\Latency$ subscripts, such as the batch formation delay $L_{\text{lat,form}}$ and the batching-queue wait $L_{\text{lat,wait}}$, which corresponds to $W_q$. A batch of size $B$ sustains the effective service rate $\EffectiveServiceRate = B/\BatchServiceTimeSvc$.
-
-:::
-
-Formulated by John D. C. Little, **Little's law**\index{Little's law!concurrency calculation}[^fn-littles-law-serving] establishes an exact relationship among three macroscopic metrics in any stable queuing system:
-$$\RequestConcurrency = \ArrivalRate \cdot \RequestTimeInSystemLat$$ {#eq-littles-law}
-where $\RequestConcurrency$ is the average number of requests residing in the system, $\ArrivalRate$ is the arrival rate (requests per second), and $\RequestTimeInSystemLat$ is the average time each request spends from arrival to completion.
-
-Little's law holds regardless of the arrival distribution, service-time distribution, or scheduling discipline—it requires only that the system is stable and that requests are neither created nor destroyed internally. For an inference service targeting `{python} CapacityPlanningAnchor.qps_str` with a mean response time of `{python} CapacityPlanningAnchor.mean_latency_ms_str`, Little's law dictates the average in-flight request population that host memory buffers and worker threads must sustain.
-
-[^fn-littles-law-serving]: **Little's law**\index{Little's law!capacity planning}: John D. C. Little (1961) proved that $\RequestConcurrency = \ArrivalRate \RequestTimeInSystemLat$ holds for stable long-run averages over consistent system boundaries, regardless of arrival distribution, service distribution, or scheduling discipline; this universality anchors ML capacity planning: the formula requires no Poisson-arrival or exponential-service assumption. It does require well-defined long-run averages and consistent definitions of arrival rate, time in system, and population.
-
-::: {#nbk-model-serving-littles-law-capacity-sizing .callout-notebook title="Little's Law capacity sizing"}
-
-**Problem**: How many requests are in the system on average at `{python} CapacityPlanningAnchor.qps_display_str`?
-
-**Math**: Little's Law gives $\RequestConcurrency = \ArrivalRate \RequestTimeInSystemLat$, so average population equals throughput multiplied by mean time in system.
-
-**Given**:
-```{python}
-#| echo: false
-#| label: littles-law-capacity-planning
-# ┌─────────────────────────────────────────────────────────────────────────────
-# │ LITTLE'S LAW CALCULATION
-# ├─────────────────────────────────────────────────────────────────────────────
-# │ Context: Callout "Little's Law" (Capacity Planning section)
-# │
-# │ Goal: Connect observable request rates to hardware capacity requirements.
-# │ Show: The average in-system population at 1000 QPS and 50 ms mean latency.
-# │ How: Apply Little's Law to throughput and mean time in system.
-# │
-# └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import fmt_int, MarkdownStr, check, fmt, fmt_time
-
-# ┌── LEGO ───────────────────────────────────────────────
-class CapacityPlanning:
-    """
-    Namespace for Little's Law Capacity calculation.
-    Scenario: Determining average in-system population for a 1000 QPS target.
-    """
-
-    # ┌── 1. LOAD (Constants) ───────────────────────────────────────────────
-    lambda_qps = 1000.0
-    mean_latency_s = 0.050  # 50 ms mean time in system
-
-    # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
-    # Step 1: Q_req = lambda_arr * T_lat
-    concurrency = lambda_qps * mean_latency_s
-
-    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
-    check(concurrency == 50, f"Math broken: 1000 * 0.05 should be 50, got {concurrency}")
-
-    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
-    littles_lambda_qps_str = fmt_rate(lambda_qps, "QPS")
-    littles_w_ms_str = fmt_time(round(mean_latency_s * MS_PER_SEC), 'millisecond', precision=0, commas=False)
-    littles_w_s_str = fmt_time(mean_latency_s, 'second', precision=2, commas=False)
-    littles_l_str = fmt_int(round(concurrency), commas=False)
-```
-
-* **Arrival rate $(\ArrivalRate)$**, equal to throughput in a stable system: `{python} CapacityPlanning.littles_lambda_qps_str`.
-* **Mean time in system $(\RequestTimeInSystemLat)$**: `{python} CapacityPlanning.littles_w_ms_str` (`{python} CapacityPlanning.littles_w_s_str`).
-
-**Math**: $\RequestConcurrency$ = `{python} CapacityPlanning.littles_lambda_qps_str` $\times$ `{python} CapacityPlanning.littles_w_s_str` = `{python} CapacityPlanning.littles_l_str` concurrent requests on average
-
-**Systems insight**: The system holds `{python} CapacityPlanning.littles_l_str` requests on average across batch and queue state. A GPU batch-size limit of 32 does not by itself make 1,000 QPS impossible because queued requests may reside in host memory; service rate, queueing behavior, and the tail distribution determine feasibility.
-
-:::
-
-Because @eq-littles-law binds these three variables, constraining any two dictates the third. If an inference service averages 10 ms per request $(\RequestTimeInSystemLat = 0.01 \text{ s})$ and holds 50 concurrent requests on average $(\RequestConcurrency = 50)$, the sustainable arrival rate must be $\ArrivalRate = \RequestConcurrency / \RequestTimeInSystemLat = 5000$ requests per second. Conversely, if host memory limits concurrency to an average of 10 requests while average time in system remains 10 ms, the system cannot exceed a throughput of 1,000 requests per second without dropping traffic.
-
-```{python}
-#| echo: false
-#| label: batching-tax-calc
-# ┌─────────────────────────────────────────────────────────────────────────────
-# │ THE BATCHING TAX CALCULATION
-# ├─────────────────────────────────────────────────────────────────────────────
-# │ Context: "The Batching Tax" section
-# │
-# │ Goal: Quantify the wait-time cost of larger batches using queuing theory.
-# │ Show: That batch-32 adds significant wait time compared to batch-1.
-# │ How: Calculate formation delay given arrival rate and batch size.
-# │
-# └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import fmt_int, check, fmt, fmt_time
-
-# ┌── LEGO ───────────────────────────────────────────────
-class BatchingTax:
-    """
-    Namespace for The Batching Tax calculation.
-    Scenario: Comparing wait times for B=1 vs B=32 at 500 QPS.
-    """
-
-    # ┌── 1. LOAD (Constants) ───────────────────────────────────────────────
-    lambda_qps = 500.0
-
-    # Inference times (ms)
-    t_inf_b1 = 2.0
-    t_inf_b32 = 15.0
-
-    # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
-    # Step 1: Batch 1
-    w_form_b1 = ((1 - 1) / (2 * lambda_qps) * second).to(ms).magnitude  # 0 ms
-    lat_b1 = w_form_b1 + t_inf_b1
-
-    # Batch 32
-    # Step 2: Formation Delay ~ (B-1) / (2 * lambda)
-    w_form_b32 = ((32 - 1) / (2 * lambda_qps) * second).to(ms).magnitude  # ~31 ms
-    lat_b32 = w_form_b32 + t_inf_b32
-
-    penalty_ratio = lat_b32 / lat_b1
-
-    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
-    check(lat_b32 > lat_b1 * 10, f"Batch-32 penalty ({lat_b32:.1f} ms) should be significant.")
-
-    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
-    wait_time_b1_ms_str = fmt_time(round(w_form_b1), 'millisecond', precision=0, commas=False)
-    wait_time_b32_ms_str = fmt_time(round(w_form_b32), 'millisecond', precision=0, commas=False)
-    lat_b1_ms_str = fmt_time(round(lat_b1), 'millisecond', precision=0, commas=False)
-    lat_b32_ms_str = fmt_time(round(lat_b32), 'millisecond', precision=0, commas=False)
-    penalty_ratio_mult_str = fmt_multiple(round(penalty_ratio), precision=0, commas=False)
-```
-
-### The batching tax: The latency-throughput frontier {#sec-model-serving-batching-tax}
-
-While Little's Law relates queue depth to throughput, it does not account for the **batching tax**\index{Batching!tax, latency penalty}: the deliberate delay introduced to maximize hardware utilization.
-
-For weight-dominated inference at batch size $B=1$, low arithmetic intensity can make memory bandwidth the lower roofline ceiling, the regime in which the arithmetic intensity law (principle \ref{pri-arithmetic-intensity}) caps attainable throughput at intensity times bandwidth. Accelerators must transfer gigabytes of model weights from HBM to on-chip SRAM to execute matrix-vector multiplications, achieving only a fraction of their peak FLOPS. Batching $B$ inputs converts these operations into general matrix multiplication (GEMM), reusing weights across inputs and increasing arithmetic intensity. However, gathering $B$ requests requires holding earlier arrivals in an input queue.
-
-When an inference server uses request-triggered fixed-size batching, it introduces two distinct sources of latency. **Batch formation delay**\index{Batching!batch formation delay, definition} $(L_{\text{lat,form}})$ is the time each request waits for the batch to fill; the first request waits longest, and the last waits zero. **Inference inflation**\index{Inference inflation!definition} is the growth in batch service time $\BatchServiceTime$ when the accelerator processes $\BatchSize$ samples instead of 1. The resulting latency-throughput Pareto frontier\index{Pareto Frontier!serving trade-offs} represents the operating envelope where throughput gains require paying a tax in response latency. Under stationary Poisson arrivals, @eq-batching-tax approximates the average formation-plus-service latency for batch size $\BatchSize$ and arrival rate $\ArrivalRate$, assuming a worker is available when the batch forms. Resource-queue waiting and other request stages require separate budget:
-$$ L_{\text{lat,total}} \approx \underbrace{ \frac{\BatchSize-1}{2\lambda_{\text{arr}}} }_{\text{Formation delay}} + \underbrace{ \BatchServiceTime }_{\text{Inference time}} $$ {#eq-batching-tax}
-
-@Eq-batching-tax formalizes the trade-off between accelerator throughput and individual request latency. Increasing $B$ raises arithmetic intensity and amortizes memory bandwidth across inputs, but inflates the per-request queueing delay. Concretely, at 500 QPS, moving from batch-1 to batch-32 increases wait-time from `{python} BatchingTax.wait_time_b1_ms_str` to `{python} BatchingTax.wait_time_b32_ms_str`, contributing to a `{python} BatchingTax.penalty_ratio_mult_str` total latency penalty (`{python} BatchingTax.lat_b1_ms_str` → `{python} BatchingTax.lat_b32_ms_str`). Sizing $B$ is therefore an economic optimization: operators select the largest batch size that maximizes query throughput and hardware efficiency without breaching the latency SLO $(L_{\text{lat,SLO}})$.
-
-### The utilization-latency relationship {#sec-model-serving-utilizationlatency-relationship-a2f0}
-
-Little's Law describes average system inventory under steady-state conditions, but it does not reveal how latency behaves as traffic approaches system capacity. The M/M/1 queuing model quantifies the headroom required to prevent latency collapse [@harchol-balter2013].[^fn-mm1-erlang-serving] For a system with Poisson arrivals\index{Poisson process!queuing model} and exponential service times, @eq-mm1-wait gives the average time in system:
-$$\RequestTimeInSystemLat = \frac{1}{\mu - \ArrivalRate} = \frac{\text{service time}}{1 - \ServingUtilization}$$ {#eq-mm1-wait}
-where $\ArrivalRate$ is the arrival rate, $\mu$ is the service rate (requests per second the server can handle), and $\ServingUtilization = \ArrivalRate/\mu$ is the utilization\index{Utilization!latency relationship} (the fraction of time the server is busy).
-
-[^fn-mm1-erlang-serving]: **M/M/1 queue**\index{M/M/1 queue!wait time formula}\index{M/M/1 queue!Erlang origin}: Queuing theory originated with Agner Krarup Erlang's 1909 analysis of the Copenhagen Telephone Exchange, where call arrivals were modeled as memoryless (Poisson). The M/M/1 model's exponential service-time assumption introduces more variance than many fixed-shape ML inference workloads exhibit. At the same utilization and mean service time, its mean queueing wait is twice the M/D/1 value; the ratio for total response time approaches two only as utilization becomes high. This comparison makes the model useful for planning against a deterministic-service baseline; it does not establish a bound for arbitrary production traffic.
-
-Because the denominator contains $1 - \ServingUtilization$, latency grows nonlinearly as utilization approaches unity.[^fn-queuing-delay-divergence] Small incremental increases in traffic near saturation trigger severe backpressure and queuing delays.
-
-[^fn-queuing-delay-divergence]: **Super-linear latency divergence**\index{Queuing theory!utilization divergence}: The planning knee often appears well before full saturation; in the M/M/1 mean response-time equation, $\RequestTimeInSystemLat = \frac{1/\mu}{1-\ServingUtilization}$, where $\ServingUtilization = \ArrivalRate/\mu$ is utilization. The $(1-\ServingUtilization)^{-1}$ term diverges as $\ServingUtilization \to 1$: at $\ServingUtilization = 0.7$, mean response time is already 3.3$\times$ the base service time; at $\ServingUtilization = 0.9$, it is 10$\times$. The exact operating limit is a policy and workload choice, but trying to stretch a latency-sensitive queue toward saturation creates disproportionate latency growth.
-
-The standard M/M/1 formulation assumes exponentially distributed service times. For compiled neural networks processing fixed-size batches and static tensor dimensions, execution times are nearly constant, making an M/D/1\index{M/D/1 queue!deterministic service} queue a tighter model of mean queuing delay. The analysis here retains the M/M/1 model because it yields closed-form solutions and predicts greater mean queueing delay than M/D/1 under matched arrival rate and mean service time. In production environments, variable input lengths, dynamic batch formation, CPU preprocessing, and key-value cache lookups introduce runtime variance that quickly breaks deterministic assumptions.[^fn-kendall-notation-serving]
-
-[^fn-kendall-notation-serving]: **Kendall notation**\index{Kendall notation!queuing models}: In the A/S/c (arrival/service/servers) notation, "M" signifies a Markovian (memoryless) process and "D" means deterministic. M/M/1 is conservative relative to M/D/1 for mean queueing wait when service times are nearly deterministic, but neither model replaces measurement of a production workload's arrival process, service-time variance, or tail behavior.
-
-@Tbl-utilization-latency quantifies this relationship, demonstrating how average time in system multiplies rapidly as utilization approaches 100 percent.
-
-```{python}
-#| echo: false
-#| label: utilization-latency-calc
-# ┌─────────────────────────────────────────────────────────────────────────────
-# │ M/M/1 UTILIZATION-LATENCY RELATIONSHIP
-# ├─────────────────────────────────────────────────────────────────────────────
-# │ Context: @tbl-utilization-latency
-# │
-# │ Goal: Show how M/M/1 time-in-system grows as utilization approaches capacity.
-# │ How: Latency multiple = 1/(1-rho); example latency = multiple x 5 ms service.
-# │
-# └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import fmt_percent, fmt_time, fmt_multiple, check
-from mlsysim.core.units import ms
-
-class UtilizationLatency:
-    """M/M/1 time-in-system = service/(1-rho); example uses a 5 ms service time."""
-
-    # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    rho_pct = [50, 70, 80, 90, 95]  # utilization points
-    service_ms_value = 5.0 * ms  # ResNet-50 service time
-
-    # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    latency_multiple_value = [1.0 / (1.0 - r / 100.0) for r in rho_pct]
-    example_ms_value = []
-    for _mult in latency_multiple_value:
-        example_ms_value.append(_mult * service_ms_value)
-
-    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
-    check(latency_multiple_value == sorted(latency_multiple_value), "Latency multiple must grow with utilization.")
-    check(abs(latency_multiple_value[0] - 2.0) < 1e-9, "rho=50% must yield a 2x multiple.")
-
-    # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
-    rho_str = [fmt_percent(r / 100, precision=0, commas=False, style='symbol') for r in rho_pct]
-    rho_prose_str = [fmt_percent(r / 100, precision=0, commas=False, style='prose') for r in rho_pct]
-    latency_multiple_mult_str = [fmt_multiple(m, precision=None, commas=False) for m in latency_multiple_value]
-    example_ms_str = [fmt_time(round(e.to(ms).magnitude) * ms, 'millisecond', precision=0, commas=False) for e in example_ms_value]
-    service_ms_str = fmt_time(service_ms_value, 'millisecond', precision=0, commas=False)
-```
-
-| **Utilization $(\ServingUtilization)$**      |                    **Latency Multiple**                    | **Example (`{python} UtilizationLatency.service_ms_str` service)** |
-|:---------------------------------------------|:----------------------------------------------------------:|:------------------------------------------------------------------:|
-| **`{python} UtilizationLatency.rho_str[0]`** | `{python} UtilizationLatency.latency_multiple_mult_str[0]` |          `{python} UtilizationLatency.example_ms_str[0]`           |
-| **`{python} UtilizationLatency.rho_str[1]`** | `{python} UtilizationLatency.latency_multiple_mult_str[1]` |          `{python} UtilizationLatency.example_ms_str[1]`           |
-| **`{python} UtilizationLatency.rho_str[2]`** | `{python} UtilizationLatency.latency_multiple_mult_str[2]` |          `{python} UtilizationLatency.example_ms_str[2]`           |
-| **`{python} UtilizationLatency.rho_str[3]`** | `{python} UtilizationLatency.latency_multiple_mult_str[3]` |          `{python} UtilizationLatency.example_ms_str[3]`           |
-| **`{python} UtilizationLatency.rho_str[4]`** | `{python} UtilizationLatency.latency_multiple_mult_str[4]` |          `{python} UtilizationLatency.example_ms_str[4]`           |
-
-: **Utilization-Latency Relationship**: Average time in system (wait + service) as a multiple of service time for an M/M/1 queue. At `{python} UtilizationLatency.rho_prose_str[0]` utilization, time in system is `{python} UtilizationLatency.latency_multiple_mult_str[0]` service time; at `{python} UtilizationLatency.rho_prose_str[3]`, it reaches `{python} UtilizationLatency.latency_multiple_mult_str[3]`. This nonlinear growth explains why systems that perform well at moderate load suddenly violate SLOs when traffic increases: moving from 80 percent to 90 percent utilization doubles latency. {#tbl-utilization-latency}
-
-### Multi-server considerations {#sec-model-serving-multiserver-considerations-00fc}
-
-A single serving node forms the fundamental building block of inference infrastructure. Single-node queuing dynamics govern resource saturation and establish the baseline performance characteristics that persist when horizontally replicated across a cluster.
-
-Evaluating an isolated node under M/M/1 assumptions establishes the headroom needed before scaling out, testing whether a single accelerator can absorb peak traffic without violating service-level targets. Production profiling must verify whether real-world bottlenecks stem from raw compute saturation, dynamic batching thresholds, host preprocessing, or memory allocation stalls.
-
-When traffic exceeds single-node capacity, the architecture scales out horizontally: multiple independent serving nodes sit behind a load balancer, each hosting a complete, identical model instance. The M/M/c queuing model\index{M/M/c queue!multi-server} extends single-server analysis to $c$ parallel workers, showing how pooled capacity absorbs arrival bursts when queries are uniformly distributed. Tail latency improvements in practice depend heavily on dispatch algorithms, service-time variance across heterogeneous inputs, and per-replica utilization margins. This horizontal replication remains architecturally distinct from model parallelism (tensor or pipeline sharding): replication duplicates the model across independent nodes to serve distinct queries concurrently without inter-device synchronization, whereas model parallelism shards a single model across multiple accelerators connected by high-bandwidth interconnects (such as NVLink) to execute one query collaboratively.
-
-### Tail latency {#sec-model-serving-tail-latency-5376}
-
-Production SLOs\index{SLO!percentile targets} typically specify percentile targets (p95, p99) rather than averages because tail latency determines user experience for the slowest requests [@dean2013].
-
-In Kendall's notation, an *$M/M/1$ queue* denotes Poisson arrivals ($M$, memoryless), exponentially distributed service times ($M$), and a single server ($1$). In this classical queueing model, total request latency (queue wait plus service) follows an exponential distribution with cumulative distribution function $F(t) = 1 - e^{-t / \RequestTimeInSystemLat}$, where $\RequestTimeInSystemLat = \frac{\text{service time}}{1 - \ServingUtilization}$ is the mean response time from @eq-mm1-wait. To derive the 99th percentile latency (p99), we solve for the time $t_{99}$ where 99 percent of requests have completed ($F(t_{99}) = 0.99$):
-$$1 - e^{-t_{99}/\RequestTimeInSystemLat} = 0.99 \implies e^{-t_{99}/\RequestTimeInSystemLat} = 0.01 \implies -\frac{t_{99}}{\RequestTimeInSystemLat} = \ln(0.01) = -\ln(100) \approx -4.605$$
-Solving for $t_{99}$ and substituting the mean latency $\RequestTimeInSystemLat$ yields the governing expression for tail latency:
-$$T_{\text{lat},\text{p99}} \approx \frac{\text{service time}}{1 - \ServingUtilization} \cdot \ln\left(\frac{1}{1 - 0.99}\right) \approx \frac{4.6 \cdot \text{service time}}{1 - \ServingUtilization}$$ {#eq-p99-latency}
-
-Mean latency masks tail contention: at 70 percent utilization, average latency is only 3.3 times service time, while p99 latency reaches 15.3 times service time $(4.6/0.3 \approx 15.3)$. For deterministic-service models such as M/D/1, tail values require numerical calculation rather than a simple universal multiplier, but the core systems reality remains: evaluating a serving cluster by average latency conceals severe tail degradation.
-
-#### The tail at scale problem {#sec-model-serving-tail-scale-problem-958d}
-
-Dean and Barroso's analysis reveals why tail latency becomes critical as systems scale beyond single machines [@dean2013]. When requests fan out to $m$ parallel backends—such as querying an ensemble of models, searching sharded embedding indices, or parallelizing pipeline stages—the overall user request completes only when the slowest sub-task finishes. If sub-task completion events are independent and each has a 99 percent probability of finishing within latency threshold $L_{\text{lat,SLO}}$, the probability that all $m$ backends finish within $L_{\text{lat,SLO}}$ is $(0.99)^m$. For a fan-out of $m = 10$, only $0.99^{10} \approx 90.4\%$ of requests meet the target; at $m = 100$, that probability drops to $0.99^{100} \approx 36.6\%$, meaning nearly two-thirds of user requests experience a tail delay. This "tail at scale"\index{Tail at scale!fan-out amplification} effect makes controlling single-node tail variance essential for overall system performance.
-
-Before exploring software mitigations like hedging, systems engineers must first provision sufficient accelerator capacity to satisfy tail-latency SLOs under peak load. Applying the M/M/1 tail-response-time model to a ResNet-50 deployment makes the provisioning workflow concrete.
-
-```{python}
-#| echo: false
-#| label: capacity-planning-calc
-# ┌─────────────────────────────────────────────────────────────────────────────
-# │ RESNET-50 CAPACITY PLANNING
-# ├─────────────────────────────────────────────────────────────────────────────
-# │ Context: Callout "ResNet-50 Capacity Planning"
-# │
-# │ Goal: Demonstrate the complete capacity planning workflow.
-# │ Show: That 62 V100 GPUs are needed for 5000 QPS under the stated 5 ms service-time model and headroom.
-# │ How: Apply the displayed M/M/1 p99 bound to find safe utilization and required service rate.
-# │
-# └─────────────────────────────────────────────────────────────────────────────
-import math
-from mlsysim.fmt import (
-    fmt_int,
-    fmt,
-    fmt_count,
-    fmt_math,
-    fmt_ratio,
-    check,
-    fmt_percent,
-    fmt_time,
-    fmt_rate,
-)
-
-class CapacityPlanningCalc:
-    """ResNet-50 capacity planning: GPUs needed for 5000 QPS at 50 ms p99 with N+1 redundancy."""
-
-    # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    cp_peak_qps_value = 5000 * (count / second)  # scenario assumption: peak traffic
-    cp_service_ms_value = 5 * ms  # scenario assumption: TensorRT FP16 service time
-    cp_p99_target_ms_value = 50 * ms  # scenario assumption: p99 latency SLO
-    cp_single_gpu_rate_value = (1 * count / cp_service_ms_value).to(count / second)
-    cp_headroom_factor_value = 1.3  # 30% headroom for variance
-    cp_fp32_bits_value = FP32_BITS  # FP32 bit width
-    cp_int8_bits_value = INT8_BITS  # INT8 bit width
-    mm1_p99_factor_value = 4.6  # p99 multiplier for M/M/1
-    mm1_rho_example_util_value = 0.7  # example utilization
-
-    # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    cp_rho_safe_value = 1 - (mm1_p99_factor_value * cp_service_ms_value) / cp_p99_target_ms_value
-    cp_mu_required_value = cp_peak_qps_value / cp_rho_safe_value
-    cp_gpus_raw_value = (cp_mu_required_value / cp_single_gpu_rate_value).to("").magnitude
-    cp_gpus_ceil_value = math.ceil(cp_gpus_raw_value)
-    cp_final_raw_value = cp_gpus_ceil_value * cp_headroom_factor_value
-    cp_final_ceil_value = math.ceil(cp_final_raw_value)
-    cp_gpus_after_fail_value = cp_final_ceil_value - 1
-    cp_util_after_fail_value = (cp_peak_qps_value / (cp_single_gpu_rate_value * cp_gpus_after_fail_value)).to("").magnitude * 100
-    cp_n_plus_2_min_value = cp_gpus_ceil_value + 2
-    cp_n_plus_2_headroom_value = cp_final_ceil_value + 2
-    cp_precision_ratio_value = cp_fp32_bits_value // cp_int8_bits_value
-    mm1_wait_factor_value = mm1_p99_factor_value / (1 - mm1_rho_example_util_value)
-    cp_headroom_pct_value = (cp_headroom_factor_value - 1) * 100
-
-    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
-    check(
-        abs(cp_gpus_raw_value - 46.3) < 0.05,
-        f"GPU count before rounding should be about 46.3, got {cp_gpus_raw_value:.2f}",
-    )
-    check(cp_gpus_ceil_value == 47, f"9259 / 200 should ceil to 47 GPUs, got {cp_gpus_ceil_value}")
-    check(cp_final_ceil_value == 62, f"47 GPUs plus 30 percent headroom should round to 62, got {cp_final_ceil_value}")
-
-    # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
-    cp_mu_required_req_per_s_str = fmt_rate(cp_mu_required_value, 'req/s', precision=1, commas=False)
-    cp_gpus_raw_str = fmt(cp_gpus_raw_value, precision=1, commas=False)
-    cp_gpus_ceil_str = fmt_count(cp_gpus_ceil_value, precision=0, commas=False)
-    cp_final_raw_str = fmt(cp_final_raw_value, precision=1, commas=False)
-    cp_final_ceil_str = fmt(cp_final_ceil_value, precision=0, commas=False)
-    cp_gpus_after_fail_str = fmt(cp_gpus_after_fail_value, precision=0, commas=False)
-    cp_util_after_fail_pct_math = fmt_math(rf"{cp_util_after_fail_value:.1f}\%")
-    cp_n_plus_2_min_gpus_str = fmt_count(cp_n_plus_2_min_value, precision=0, commas=False, label="GPU")
-    cp_n_plus_2_headroom_gpus_str = fmt_count(cp_n_plus_2_headroom_value, precision=0, commas=False, label="GPU")
-    cp_peak_qps_str = fmt_rate(cp_peak_qps_value, 'QPS', precision=0)
-    cp_single_gpu_rate_req_per_s_str = fmt_rate(cp_single_gpu_rate_value, 'req/s', precision=0)
-    _cp_mu_required_req_per_s_math_fragment = cp_mu_required_req_per_s_str.replace(" req/s", r"\,\mathrm{req}/\mathrm{s}")
-    _cp_peak_qps_math_fragment = cp_peak_qps_str.replace(" QPS", r"\,\mathrm{QPS}")
-    cp_service_ms_str = fmt_time(cp_service_ms_value, 'millisecond', precision=0, commas=False)
-    cp_p99_target_ms_str = fmt_time(cp_p99_target_ms_value, 'millisecond', precision=0, commas=False)
-    _cp_service_ms_math_fragment = cp_service_ms_str.replace(" ms", r"\,\mathrm{ms}")
-    _cp_p99_target_ms_math_fragment = cp_p99_target_ms_str.replace(" ms", r"\,\mathrm{ms}")
-    cp_rho_safe_str = fmt(cp_rho_safe_value, precision=2, commas=False)
-    cp_rho_safe_pct_str = fmt_percent(cp_rho_safe_value, precision=0, commas=False, style='prose')
-    mm1_p99_factor_str = fmt_ratio(mm1_p99_factor_value, precision=1, commas=False)
-    cp_rho_safe_math = fmt_math(
-        f"\\rho_{{\\text{{serv}}}} \\leq "
-        f"1 - ({mm1_p99_factor_str} \\times {_cp_service_ms_math_fragment})/"
-        f"{_cp_p99_target_ms_math_fragment} = {cp_rho_safe_str}"
-    )
-    cp_mu_required_math = fmt_math(
-        f"\\mu_{{\\text{{required}}}} = " f"{_cp_peak_qps_math_fragment} / {cp_rho_safe_str} = " f"{_cp_mu_required_req_per_s_math_fragment}"
-    )
-    cp_headroom_pct_str = fmt_percent(cp_headroom_pct_value / 100, precision=0, commas=False, style='prose')
-    cp_headroom_factor_str = fmt_ratio(cp_headroom_factor_value, precision=1, commas=False)
-
-CapacityPlanningCalc.cp_mu_required_req_per_s_math_fragment = CapacityPlanningCalc._cp_mu_required_req_per_s_math_fragment
-CapacityPlanningCalc.cp_peak_qps_math_fragment = CapacityPlanningCalc._cp_peak_qps_math_fragment
-CapacityPlanningCalc.cp_service_ms_math_fragment = CapacityPlanningCalc._cp_service_ms_math_fragment
-CapacityPlanningCalc.cp_p99_target_ms_math_fragment = CapacityPlanningCalc._cp_p99_target_ms_math_fragment
-```
-
-::: {#nbk-model-serving-resnet-50-capacity-planning .callout-notebook title="ResNet-50 capacity planning"}
-
-Consider designing a ResNet-50 serving system with these requirements:
-
-- **Target p99 latency**: 50 ms
-- **Peak expected traffic**: `{python} CapacityPlanningCalc.cp_peak_qps_str`
-- **Service time** (TensorRT FP16): 5 ms
-
-**Step 1**: Find safe utilization.
-From @eq-p99-latency, $T_{\text{lat},\text{p99}} \approx$ `{python} CapacityPlanningCalc.mm1_p99_factor_str` $\times$ service time / $(1 - \ServingUtilization)$. Setting $T_{\text{lat},\text{p99}} \leq 50$ ms with 5 ms service time gives `{python} CapacityPlanningCalc.cp_rho_safe_math` (`{python} CapacityPlanningCalc.cp_rho_safe_pct_str` maximum utilization). This is an M/M/1 p99 estimate under the stated arrival and service assumptions. The mean-wait comparison with M/D/1 does not establish a conservative bound on production p99; a load test must validate the tail.
-
-**Step 2**: Calculate required service rate.
-`{python} CapacityPlanningCalc.cp_mu_required_math`
-
-**Step 3**: Determine GPU count.
-In this M/M/1 model, the single-GPU rate is `{python} CapacityPlanningCalc.cp_single_gpu_rate_req_per_s_str`.
-
-GPUs needed = `{python} CapacityPlanningCalc.cp_mu_required_req_per_s_str` / `{python} CapacityPlanningCalc.cp_single_gpu_rate_req_per_s_str` = `{python} CapacityPlanningCalc.cp_gpus_raw_str` → `{python} CapacityPlanningCalc.cp_gpus_ceil_str` GPUs
-
-This single-GPU rate is the batch-1 service rate. Each request holds the GPU for the full service time, which keeps the M/M/1 model closed-form. Dynamic batching (@sec-model-serving-throughput-optimization-18d1) amortizes fixed overhead across requests and raises the per-GPU rate several-fold, so a batched deployment may need fewer GPUs after its own latency distribution is validated; @sec-model-serving-capacity-planning-96a3 compares the two regimes.
-
-**Step 4**: Add headroom for variance.
-This scenario adds `{python} CapacityPlanningCalc.cp_headroom_pct_str` headroom for traffic spikes and variance: final count = `{python} CapacityPlanningCalc.cp_gpus_ceil_str` $\times$ `{python} CapacityPlanningCalc.cp_headroom_factor_str` = `{python} CapacityPlanningCalc.cp_final_raw_str`, rounded up to `{python} CapacityPlanningCalc.cp_final_ceil_str`.
-
-**Step 5**: Verify fault tolerance.
-The `{python} CapacityPlanningCalc.cp_headroom_pct_str` headroom addresses traffic variance, but production systems also need fault tolerance. With `{python} CapacityPlanningCalc.cp_final_ceil_str` GPUs, losing one leaves `{python} CapacityPlanningCalc.cp_gpus_after_fail_str` GPUs handling `{python} CapacityPlanningCalc.cp_peak_qps_str`. The postfailure utilization is `{python} CapacityPlanningCalc.cp_peak_qps_str` / (`{python} CapacityPlanningCalc.cp_single_gpu_rate_req_per_s_str` $\times$ `{python} CapacityPlanningCalc.cp_gpus_after_fail_str`) = `{python} CapacityPlanningCalc.cp_util_after_fail_pct_math`.
-
-This remains well below the `{python} CapacityPlanningCalc.cp_rho_safe_pct_str` safe utilization threshold, confirming N+1 redundancy is satisfied. For stricter fault tolerance requirements, N+2 redundancy (tolerating two simultaneous failures) would require `{python} CapacityPlanningCalc.cp_n_plus_2_min_gpus_str` under the same safe-utilization threshold, or about `{python} CapacityPlanningCalc.cp_n_plus_2_headroom_gpus_str` if the `{python} CapacityPlanningCalc.cp_headroom_pct_str` headroom must remain after two simultaneous failures.
-
-**Result**: Under batch-1 service, provision `{python} CapacityPlanningCalc.cp_final_ceil_str` V100 GPUs to serve `{python} CapacityPlanningCalc.cp_peak_qps_str` at 50 ms p99 latency with N+1 fault tolerance.
-
-:::
-
-The queuing analysis explains the capacity planning approach detailed in @sec-model-serving-capacity-planning-96a3 and connects directly to the MLPerf Server scenario. @Sec-benchmarking-server-e69f defines that scenario as Poisson arrivals scored by throughput against a tail-latency target. A Server result is therefore valid only when the run satisfies its percentile-latency constraint; otherwise, the target QPS must be reduced and the run repeated.
-
-### Tail-tolerant techniques {#sec-model-serving-tailtolerant-techniques-066e}
-
-Eliminating all sources of latency variability is often impractical. Production systems instead employ techniques that tolerate variability while still meeting SLOs [@dean2013; @dean2012rapid]. The useful organization is by failure mode: a straggler replica calls for a race, fan-out calls for early detection, overload calls for admission control or graceful degradation, and retry amplification calls for coordinated shedding.
-
-For a straggler replica, the system can race the slow path. Under hedging,\index{Hedging!tail tolerance} when a request has not completed within the expected time, the system sends a duplicate request to another server.[^fn-hedging-tail-tolerance] The client uses whichever response arrives first and cancels the other. For ML serving, this means maintaining multiple model replicas and routing slow requests to alternative replicas. With a stable latency distribution, a threshold set at the historical 95th percentile triggers duplicates for about 5 percent of requests; correlated slowdowns can raise that fraction and make hedging amplify overload instead of reducing the tail.
-
-[^fn-hedging-tail-tolerance]: **Hedging**\index{Hedging!tail tolerance}: The term is borrowed from finance, where an offsetting bet reduces risk; here, the redundant request is a bet against a slow server. This is not free: for ML systems, the losing hedged request may still occupy accelerator time if inference has already launched, because ordinary GPU kernels are not cheaply cancelled mid-execution. Thus, a hedging policy must budget duplicate work as well as the latency benefit.
-
-Ordinary launched inference kernels are not cheaply interrupted mid-execution. When a hedged request completes, the duplicate must be cancelled, but if inference has already begun on the GPU, cancellation approaches include checking a cancellation flag before launching inference, accepting wasted compute for the in-flight kernel, or using request prioritization to deprioritize the duplicate. Because hedging typically applies only to a small tail of requests, the overhead from occasional wasted compute remains manageable when the trigger threshold is tuned conservatively.
-
-Tied requests\index{Tied request!latency reduction} make the same race more aggressive by placing the request in multiple server queues simultaneously, with coordination that cancels the other copies once one server begins processing. This avoids waiting to detect a slow response before hedging and can reduce queuing delay when multiple ready replicas are available. It also creates duplicate queue entries, so the coordination mechanism must cancel losing copies before they consume scarce accelerator time.
-
-Fan-out systems need a different intervention point because one slow backend can stall the entire distributed request. Canary requests\index{Canary request!fan-out protection} first send the request to a small subset of one to two servers.[^fn-canary-traffic-fanout] If these return within expected time, the system sends to the remainder. If the canary is slow, the system can retry elsewhere or use cached results before committing to the full fan-out. The technique turns a potential tail-latency amplification problem into an early warning signal.
-
-[^fn-canary-traffic-fanout]: **Canary**\index{Canary!etymology}: Named for the coal mine practice (early 1900s--1980s) of using birds whose high metabolic rate made them sensitive to toxic gases before concentrations became lethal to humans. In ML serving, canary requests serve the same early-warning function for fan-out queries: by testing 1--2 backends before committing to the full fan-out, the system detects slow or failing replicas before a single straggler stalls the entire distributed inference request---a critical protection when fan-out width means tail latency grows with the maximum of all backend response times. Canary deployments borrow the name for a different mechanism, exposing a new model version to a small slice of traffic.
-
-When the problem is cluster overload rather than an isolated straggler, racing backends only exacerbates queue depth by injecting duplicate work. The system must instead protect the latency of admitted requests through graceful degradation or admission control. **Graceful degradation**\index{Graceful degradation!overload handling} returns lower-fidelity results to preserve throughput: classification pipelines fall back to cached approximations, generative models truncate decoding lengths, and model ensembles evaluate only a subset of members. Dynamically reducing active ensemble members shortens service time ($\BatchServiceTime$), which increases the effective service rate $\EffectiveServiceRate$ and lowers utilization $\ServingUtilization = \ArrivalRate / \EffectiveServiceRate$ toward a workload-appropriate operating point with more headroom, as illustrated by @fig-tail-latency-explosion, trading a controlled accuracy reduction for SLO survival instead of an uncontrolled latency collapse. **Admission control**\index{Admission control!queue depth threshold} enforces an even stricter boundary: when the ingress queue exceeds a designated threshold, the server immediately rejects excess queries with HTTP 503 status codes rather than admitting work doomed to violate its latency deadline.
-
-Setting this rejection threshold requires balancing accelerator occupancy against queuing delay. A practical starting heuristic is to bound queue depth to two or three service quanta per worker (for four workers, an ingress queue limit of 8 to 12 requests). Adaptive admission control dynamically tightens this limit when observed p99 latency approaches the SLO and expands it when headroom permits. While compiled, fixed-shape inference yields relatively narrow service-time distributions, variable input lengths, dynamic batch formation, and shared memory bus contention introduce variance that necessitates continuous empirical calibration rather than rigid static limits.
-
-A cascading failure occurs when all replicas experience simultaneous overload. If upstream load balancers retry rejected requests at other replicas that are also overloaded, retry traffic amplifies the overload. Coordinated load shedding\index{Load shedding!retry coordination} addresses this by sharing load information across replicas, enabling system-wide decisions about which requests to accept. When global load exceeds capacity, replicas collectively reject the same fraction of requests rather than each rejecting independently and triggering retries.
-
-These techniques become essential at scale when fan-out amplification makes individual server tail latency visible to users. Single-machine serving systems can implement hedged and tied requests across GPU streams or model replicas. While this queuing analysis assumes first-in-first-out (FIFO) processing, production serving frameworks often implement priority disciplines—such as shortest-job-first or deadline-aware scheduling—to mitigate tail latency for heterogeneous request distributions [@harchol-balter2013].
-
-::: {#chk-model-serving-queuing-slo-headroom .callout-checkpoint title="Queuing and SLO headroom"}
-
-Latency SLOs are not enforced by *fast inference* alone; they are enforced by *headroom*.
-
-- [ ] **Little's Law**: at a fixed stable throughput, can you use $\RequestConcurrency = \ArrivalRate \RequestTimeInSystem$ to explain why a higher average in-system population implies a higher mean response time, even if per-request compute time is unchanged?
-- [ ] **Utilization cliff**: can you explain why latency grows nonlinearly as utilization $\ServingUtilization$ approaches one, and why production systems target a conservative $\ServingUtilization$ rather than "100 percent busy"?
-- [ ] **Wait vs. compute**: given an end-to-end latency budget, can you separate batch formation, waiting for an available worker, and batch service time $\BatchServiceTime$? Which wait does a batching timeout control?
-- [ ] **Capacity planning**: can you explain why a throughput number is only "real" if requests still meet the percentile latency SLO under load?
-- [ ] **Headroom estimate**: a stable service handles 2,000 requests per second and measures a 10 ms mean response time. Use $\RequestConcurrency = \ArrivalRate \RequestTimeInSystem$ to estimate its average in-flight population. Why does this result alone not establish compliance with a 50 ms p99 SLO?
-
-:::
-
-Queuing theory and tail-tolerance policies govern the steady-state processing of requests. They presuppose, however, that serving instances are already initialized and that incoming data matches offline training assumptions—preconditions that frequently fail during cold starts, auto-scaling surges, and silent feature corruption.
 
 ## Model Lifecycle Management {#sec-model-serving-model-lifecycle-management-ff2e}
 
