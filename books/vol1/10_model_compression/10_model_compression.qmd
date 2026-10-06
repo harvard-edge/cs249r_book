@@ -288,23 +288,7 @@ TinyML makes physical fit a deployment requirement. A microcontroller with only 
 ↩ The latency, memory, and power envelopes defining cloud, edge, mobile, and TinyML tiers are established in @sec-ml-systems-deployment-paradigm-framework-0d25.
 :::
 
-AlexNet, the model that won the 2012 ImageNet challenge, encountered a memory wall during training, and its architecture records the resulting two-GPU design choice.
-
-::: {#exmp-model-compression-alexnet-2012 .callout-example title="AlexNet's two-GPU split (2012)"}
-
-**Context**: In 2012, Alex Krizhevsky, Ilya Sutskever, and Geoffrey Hinton aimed to train a 60-million-parameter vision model on ImageNet [@krizhevsky2012imagenet].
-
-**Mechanism**: An NVIDIA GTX 580 provided only 3 GB of GDDR5 memory—insufficient to store the 240 MB model weights alongside FP32 activations ($\ActivationMemoryActivations$) and optimizer states ($\OptimizerstateMemory$) for single-GPU training.
-
-**Impact**: The model could not be trained on a single device at all, so the memory ceiling propagated upward into the network design itself rather than remaining a hardware procurement problem.
-
-**Fix**: They partitioned the model across two 3 GB GTX 580 GPUs and limited cross-GPU connections so that the working set would fit within each device's memory bound ($\TotalMemoryFootprint \le 3\text{ GB}$). The resulting two-tower architecture achieved a winning top-5 error rate of 15.3 percent, a 10.8 percentage point margin.
-
-**Systems lesson**: Memory capacity bounds have constrained deep learning since its inception. The same physical ceiling that forced AlexNet's split during training now appears at deployment, where compression rather than model splitting is the lever.
-
-:::
-
-The same memory constraints that shaped AlexNet's training architecture dictate feasibility when deploying models to commodity mobile hardware.
+The same memory constraints that force training-time distribution dictate feasibility when deploying models to commodity mobile hardware.
 
 ::: {#exmp-model-compression-mobilenet-win .callout-example title="An illustrative MobileNet win"}
 
@@ -1199,7 +1183,7 @@ These categories describe deployed execution rather than mutually exclusive trai
 
 : **Pruning Strategies**: Unstructured pruning removes individual weights but needs sparse storage and matching kernels for deployment gains; structured pruning removes whole components that map more directly to dense hardware, while dynamic pruning adds runtime adaptation and overhead. {#tbl-pruning tbl-colwidths="[20,29,30,21]"}
 
-#### Pruning strategies {#sec-model-compression-pruning-strategies-03f7}
+#### Pruning schedules {#sec-model-compression-pruning-strategies-03f7}
 
 The pruning schedule affects how much recovery training the network receives after capacity is removed. Two primary scheduling strategies govern weight removal: iterative pruning and one-shot pruning.
 
@@ -3068,6 +3052,8 @@ Memory reduction is often the first motivation for quantization, but lower-preci
 
 The hardware energy hierarchy exposes this operational asymmetry. In the reference technology model used here, an FP32 addition costs `{python} EnergyDividend.energy_add_fp32_pj_per_op_str`, while an INT8 addition costs `{python} EnergyDividend.energy_add_int8_pj_per_op_str`, an operation-level ratio of `{python} EnergyDividend.energy_dividend_factor_mult_str`. That ratio is not a device-level battery-life prediction: memory accesses, accumulation precision, control, sensors, and idle power remain. It does explain why many accelerators add specialized low-precision units and why quantization can be necessary when arithmetic or memory energy binds.
 
+These energy savings shift fundamentally when memory capacity, rather than compute throughput, is the binding physical constraint.
+
 ::: {.column-margin}
 ```{=latex}
 \vspace*{-47mm}
@@ -3077,7 +3063,7 @@ The hardware energy hierarchy exposes this operational asymmetry. In the referen
 *Packed weights can save memory traffic; arithmetic gains also require a matching execution path.*
 :::
 
-These energy savings shift fundamentally when memory capacity, rather than compute throughput, is the binding physical constraint. Recommendation models convert the energy argument into a placement problem: quantization must shrink the dominant memory structures enough to reside in the host machine's physical memory.
+ Recommendation models convert the energy argument into a placement problem: quantization must shrink the dominant memory structures enough to reside in the host machine's physical memory.
 
 ::: {#lhs-model-compression-dlrm-embedding-quantization .callout-lighthouse title="DLRM and embedding quantization"}
 
@@ -3664,15 +3650,17 @@ class QuantizationSpeedup:
 
 :::
 
+### Numerical format comparison {#sec-model-compression-numerical-format-comparison-8fa2}
+
+Whether quantization accelerates execution depends directly on whether an operator is memory-bandwidth bound or compute bound.
+
 ::: {.column-margin}
 ![](images/svg/model_compression_quantization_roofline.svg){width="100%" fig-alt="Mini roofline with one workload dot on the memory-bound slope labeled mem 2.9x and one workload dot on the compute-bound ceiling labeled comp 2x."}
 
 *Quantization speedup depends on whether memory bandwidth or compute throughput is binding.*
 :::
 
-### Numerical format comparison {#sec-model-compression-numerical-format-comparison-8fa2}
-
-Whether quantization accelerates execution depends directly on whether an operator is memory-bandwidth bound or compute bound. For memory-bound kernels, shrinking bit width cuts bytes transferred across the memory bus, directly increasing effective throughput. For compute-bound kernels, speedup requires specialized arithmetic units capable of retiring more low-precision operations per clock cycle. Selecting a numerical format therefore requires balancing dynamic range and hardware execution support against memory traffic, rather than minimizing bit width blindly. @Tbl-numerics compares the precision formats commonly deployed across accelerator architectures, mapping raw storage footprints, arithmetic throughput gains, and target hardware relative to standard 32-bit floating point (FP32).
+ For memory-bound kernels, shrinking bit width cuts bytes transferred across the memory bus, directly increasing effective throughput. For compute-bound kernels, speedup requires specialized arithmetic units capable of retiring more low-precision operations per clock cycle. Selecting a numerical format therefore requires balancing dynamic range and hardware execution support against memory traffic, rather than minimizing bit width blindly. @Tbl-numerics compares the precision formats commonly deployed across accelerator architectures, mapping raw storage footprints, arithmetic throughput gains, and target hardware relative to standard 32-bit floating point (FP32).
 
 | **Precision Format**             | **Bit-Width** | **Storage Reduction (vs. FP32)** |             **Compute Speed (vs. FP32)**            |         **Power Effect**         | **Use Cases**                                               |
 |:---------------------------------|:-------------:|:--------------------------------:|:---------------------------------------------------:|:--------------------------------:|:------------------------------------------------------------|
@@ -6901,13 +6889,15 @@ Across all platforms, sparse operations can reduce memory bandwidth requirements
 
 #### Challenges and limitations {#sec-model-compression-challenges-limitations-975f}
 
+The same format-hardware contract explains why sparsity often disappoints in practice.
+
 ::: {.column-margin}
 ![](images/svg/vol1_model_compression_margin_003.svg){width="100%" fig-alt="A speedup curve stays nearly flat before climbing through a shaded range labeled kernel-dependent break-even; no universal sparsity percentage is marked."}
 
 *Unstructured sparsity pays off only after crossing a hardware- and kernel-specific break-even point.*
 :::
 
-The same format-hardware contract explains why sparsity often disappoints in practice. The central challenge is the gap between theoretical and practical speedups. Unstructured pruning removes individual weights based on importance, creating irregular patterns that common dense accelerator paths cannot exploit; skipping those zeros requires a sparse representation and a compatible kernel. Pruning itself adds training or analysis cost because identifying removable weights can require sophisticated importance estimation on large models. Even after sparsity is achieved, storage formats add indices whose overhead can offset saved values and arithmetic. The performance break-even point varies with tensor shape, sparse format, kernel, batch size, and hardware; there is no universal sparsity threshold.
+ The central challenge is the gap between theoretical and practical speedups. Unstructured pruning removes individual weights based on importance, creating irregular patterns that common dense accelerator paths cannot exploit; skipping those zeros requires a sparse representation and a compatible kernel. Pruning itself adds training or analysis cost because identifying removable weights can require sophisticated importance estimation on large models. Even after sparsity is achieved, storage formats add indices whose overhead can offset saved values and arithmetic. The performance break-even point varies with tensor shape, sparse format, kernel, batch size, and hardware; there is no universal sparsity threshold.
 
 The accuracy-efficiency trade-off requires measurement across candidate sparsity levels. A model may tolerate one level with little measured impact and then degrade sharply after a comparatively small additional pruning step. The operating point is the highest useful sparsity whose task quality and deployed performance both satisfy their thresholds.
 

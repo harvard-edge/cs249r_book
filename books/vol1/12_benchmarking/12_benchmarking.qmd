@@ -308,15 +308,7 @@ Standardization transforms these empirical lessons into a shared engineering met
 
 ## Model and Data Evaluation {#sec-benchmarking-model-data-benchmarking-e0ca}
 
-A compressed model running on accelerated hardware can still fail if it was trained on biased data. System benchmarks can confirm that hardware delivers promised training throughput, inference latency, and power efficiency, but hardware validation alone cannot ensure deployment success. The optimization pipeline from Part III also included model compression and data selection, each requiring its own validation. The remaining two dimensions of the framework address this gap: model benchmarks verify that compression preserved accuracy and critical model properties, while data benchmarks verify that training data enables robust generalization.
-
-### Model benchmarking {#sec-benchmarking-model-benchmarking-4847}
-
-Model benchmarks\index{Model benchmarking!multi-dimensional evaluation} validate whether compression preserved the properties that matter for deployment. This evaluation extends beyond top-line accuracy. A pruned model might maintain ImageNet accuracy while losing robustness to adversarial inputs. A quantized model might preserve average-case performance while degrading on rare but critical edge cases. A distilled model might match the teacher's accuracy while losing calibration. Historically, benchmarks focused almost exclusively on accuracy, but compression makes multi-dimensional evaluation essential.
-
-::: {.column-margin .margin-pointer}
-↩ Pruning, quantization, and distillation, the compression techniques these benchmarks validate, are established in @sec-model-compression.
-:::
+System benchmarks confirm that hardware delivers promised training throughput and inference latency, but hardware validation alone cannot ensure deployment success. Model and data evaluation verify that compression preserves accuracy and that training data enables robust generalization. Historical progress on ImageNet established the accuracy trajectory against which model compression techniques are evaluated (@fig-imagenet-challenge).
 
 ```{python}
 #| echo: false
@@ -342,12 +334,6 @@ class ResNetSpec:
     resnet_params_str = fmt_params(params)
     resnet_gflops_str = fmt_flops(flops, unit=GFLOPs, precision=1, commas=False)
 ```
-
-ImageNet\index{ImageNet!ILSVRC challenge progression} directly links algorithmic benchmarking to the hardware adoption trends profiled in @fig-imagenet-gpus: error rates plummeted as GPU-enabled convolutional networks became computationally viable. In @fig-imagenet-challenge, the historical error curve tracks that trajectory from the pre-deep-learning baselines of 2010–2011 (28.2 percent and 25.8 percent) down to 3.57 percent in the 2015 ImageNet Large Scale Visual Recognition Challenge [@russakovsky2015]. AlexNet[^fn-alexnet-benchmark-baseline] marks the steepest single-year inflection, cutting error to 16.4 percent in 2012, after which ZFNet, VGGNet, GoogLeNet, and ResNet[^fn-resnet-benchmark-baseline] drove error down below the human baseline to 3.57 percent [@he2016]. This progression established the reference baselines against which model compression techniques are evaluated: a pruned ResNet must demonstrate how much accuracy it sacrifices for a given efficiency gain.
-
-[^fn-alexnet-benchmark-baseline]: **AlexNet**\index{AlexNet!benchmarking paradigm}: The eight-layer CNN (60M parameters) that cut ImageNet top-5 error from 25.8 percent to 16.4 percent in 2012, trained on two GTX 580 GPUs with 3 GB memory each [@krizhevsky2012imagenet]. AlexNet established a benchmarking paradigm that still informs vision evaluation: accuracy on a fixed dataset as the primary metric, with hardware configuration as a secondary specification. Later ImageNet results inherited this baseline comparison structure.
-
-[^fn-resnet-benchmark-baseline]: **ResNet (residual network)**\index{ResNet!MLPerf reference model}: Introduced by @he2016, skip connections enabled 152+ layer networks and achieved 3.57 percent top-5 ImageNet error (ensemble), surpassing the estimated human error rate reported in the ImageNet challenge context [@russakovsky2015]. ResNet-50 became a common MLPerf Training reference workload because its moderate size (`{python} ResNetSpec.resnet_params_str` parameters) and well-understood compute profile (`{python} ResNetSpec.resnet_gflops_str` per image) make it sensitive to both hardware and software optimizations without requiring multi-node setups [@mattson2020mlperf].
 
 ::: {#fig-imagenet-challenge fig-env="figure" fig-pos="htb" fig-cap="**ImageNet Challenge Progression**: AlexNet marks the largest one-year drop in the series; ZFNet, VGGNet, GoogLeNet, and ResNet extend that decline, defining the accuracy trajectory against which later compression trade-offs are judged. Sources: [@russakovsky2015; @krizhevsky2012imagenet; @he2016]." fig-alt="Line graph of ImageNet top-5 error from 2010 to 2015, with points labeled Baseline in 2010 and 2011, AlexNet in 2012, ZFNet in 2013, VGGNet and GoogLeNet in 2014, and ResNet in 2015; error falls from 28.2 percent to 3.57 percent."}
 
@@ -420,51 +406,14 @@ plt.close()
 
 :::
 
-#### Accuracy metrics and their blind spots {#sec-benchmarking-accuracy-metrics-blind-spots-4dcd}
 
-The most common model metrics (accuracy, precision, recall, F1) each reveal different aspects of model behavior while hiding others, and understanding their blind spots is essential for compression validation. Top-$k$ accuracy measures whether the correct label appears in the model's top-$k$ predictions. Top-1 accuracy is strict; top-5 is lenient. The gap between them reveals ranking behavior: a model with 75 percent top-1 but 95 percent top-5 accuracy often ranks the correct class among its leading candidates without placing it first. These rank statistics do not establish whether its confidence scores are calibrated. For deployment, the acceptable gap depends on whether downstream systems can use ranked predictions or require single answers.
-
-Precision and recall matter when classes are imbalanced or errors have asymmetric costs [@sokolova2009]. A fraud detection model with 99 percent accuracy might have 10 percent recall on actual fraud (catching only one in 10 fraudulent transactions), an unacceptable outcome despite high accuracy. Precision (the fraction of predicted positives that are correct) and recall (the fraction of actual positives identified) expose failures that aggregate accuracy conceals.
-
-Aggregate metrics also conceal subgroup failures. A model achieving 95 percent overall accuracy might achieve 60 percent on a critical demographic subgroup. The Gender Shades project\index{Gender Shades!demographic fairness study} [@buolamwini2018gender] revealed commercial gender-classification systems for facial analysis performing substantially worse on darker-skinned women than on lighter-skinned men, a disparity invisible to aggregate benchmarks. Disaggregated evaluation across deployment-relevant subgroups is essential.
-
-::: {.column-margin .margin-pointer}
-↪ Disaggregated evaluation as a release gate, with the slices, metrics, and thresholds that decide whether a model ships, is operationalized in @sec-responsible-engineering-testing-across-populations-9f20.
-:::
-
-#### Calibration: When confidence scores matter {#sec-benchmarking-calibration-confidence-scores-matter-3669}
-
-For many deployment scenarios, *how confident* the model is matters as much as *what* it predicts. A well-calibrated[^fn-calibration-confidence-score] model's confidence scores correspond to actual correctness probability: among 100 predictions made with 80 percent confidence, about 80 should be correct in expectation.
-
-[^fn-calibration-confidence-score]: **Calibration**\index{Calibration!definition and etymology}: From Arabic *qalib* (a mold for casting metal) via Latin *calibrare*, originally describing the adjustment of measuring instruments against known standards. In ML, calibration ensures predicted probabilities match empirical frequencies; @guo2017calibration formalize this concern for modern neural networks and show that temperature scaling is a simple effective post-hoc correction. The etymology is apt: just as an uncalibrated instrument produces precise but inaccurate measurements, an uncalibrated model produces confident but unreliable predictions, causing downstream systems that threshold on confidence scores to make systematically wrong decisions.
-
-Calibration failures create severe operational hazards in automated pipelines. An overconfident model automates catastrophic errors that it should defer to human review (for example, reporting 95 percent confidence but failing 30 percent of the time). Conversely, an underconfident model floods manual review queues with decisions it could safely automate (reporting 60 percent confidence while being correct 98 percent of the time).
-
-To quantify calibration across a dataset, predictions are partitioned into $N_{\text{bins}}$ confidence bins $\text{bin}_1, \text{bin}_2, \dots, \text{bin}_{N_{\text{bins}}}$ (such as ten intervals of width 0.1 from 0 to 1). For each $\text{bin}_m$, the evaluator computes the empirical accuracy $\text{acc}(\text{bin}_m)$ (the fraction of correct predictions in that bin) and the average predicted confidence $\text{conf}(\text{bin}_m)$. **Expected calibration error (ECE)**\index{Expected calibration error!confidence-accuracy gap} measures the weighted average difference between confidence and accuracy in @eq-expected-calibration-error:
-$$\text{ECE} = \sum_{m=1}^{N_{\text{bins}}} \frac{|\text{bin}_m|}{N} \left| \text{acc}(\text{bin}_m) - \text{conf}(\text{bin}_m) \right|$$ {#eq-expected-calibration-error}
-where $N$ is the total sample count and $|\text{bin}_m|$ is the sample count in bin $m$. A measured $\text{ECE} = 0$ means confidence and accuracy agree within the chosen finite-sample bins. Population calibration implies agreement in expectation; a zero estimate does not prove calibration at every confidence level or on another distribution.
-
-Compression frequently disrupts calibration even when preserving aggregate accuracy, a critical concern when validating quantization techniques from @sec-model-compression-quantization-precision-cd46. When floating-point weights and activations are quantized to 8-bit integers, discrete rounding alters the numerical geometry and relative separation of final-layer logits. Often, headline top-1 accuracy barely moves, but the model becomes severely overconfident—assigning extreme probabilities to inputs where it is genuinely uncertain. Post-hoc techniques such as temperature scaling can improve calibration when fitted on separate calibration data and evaluated on an untouched representative holdout [@guo2017calibration].
-
-#### Compression validation: The efficiency-quality frontier {#sec-benchmarking-compression-validation-efficiencyquality-frontier-e9c4}
-
-Model compression trades model capacity for efficiency. Validation must determine whether compression achieved an acceptable trade-off or damaged capabilities that matter.
-
-Pareto frontier\index{Pareto frontier!accuracy-efficiency trade-off}[^fn-pareto-benchmark-tradeoff] evaluation (principle \ref{pri-pareto-frontier}) determines whether a compressed model represents a good trade-off. Plotting accuracy against the target efficiency metric (latency, model size, energy) reveals the trade-off frontier. Models on the Pareto frontier *cannot* improve one metric without degrading the other; models below the frontier are dominated by better alternatives.
+When evaluating compressed models, a Pareto frontier identifies non-dominated choices that balance efficiency against accuracy. Aggregate metrics often hide calibration and tail-case degradation, as shown for MobileNetV2 in @tbl-benchmarking-mobilenet-int8-validation.
 
 ::: {.column-margin}
 ![](images/svg/vol1_benchmarking_margin_004.svg){width="100%" fig-alt="Tiny Pareto frontier with one dominated point."}
 
 *A dominated model is no better on either axis and worse on at least one.*
 :::
-
-[^fn-pareto-benchmark-tradeoff]: **Pareto frontier**\index{Pareto frontier!compression trade-off}: Named after economist @pareto1896cours, the frontier contains all solutions where improving one objective requires degrading another. In compression benchmarking, the trade-off between adjacent candidates must be interpreted using the named axes and units. A candidate is dominated when another is at least as good on every objective and strictly better on one; frontier membership still does not establish that deployment thresholds are met.
-
-Different compression techniques make different efficiency-quality trade-offs. Quantization reduces precision while often preserving aggregate accuracy [@jacob2018]. Pruning induces sparsity while retaining varying levels of test performance [@han2015deep; @gale2019state]. Distillation transfers knowledge from a larger teacher or ensemble into a smaller model [@hinton2015distilling]. Because these aggregate results do not establish preserved calibration or tail behavior, validation must evaluate those properties directly [@guo2017calibration].
-
-Evaluating calibration during compression requires a standardized protocol. Expected calibration error (ECE) compares predicted confidence with empirical accuracy, but it has no universal thresholds. The metric depends on the binning scheme, bin count, sample size, and prediction distribution. A benchmark protocol must therefore freeze the estimator and evaluate degradation relative to the uncompressed baseline under a fixed task tolerance.
-
-Pareto optimality identifies nondominated choices, but it does not establish that any choice clears the deployment's absolute quality floor. Acceptable degradation depends on deployment context: a 2 percent accuracy drop might be acceptable for a recommendation system where users tolerate imperfect suggestions, but unacceptable for medical diagnosis where every false negative carries severe consequences. Production acceptance gates must define absolute accuracy thresholds before compression, evaluating aggregate accuracy, calibration stability, and deployment-critical slices simultaneously. The MobileNetV2 lighthouse makes this multi-dimensional validation protocol concrete.
 
 ```{python}
 #| echo: false
@@ -529,25 +478,6 @@ class MobileNetINT8Calc:
     mv2_edge_fp32_str = fmt_percent(edge_fp32 / 100, precision=1, commas=False, style='symbol')
     mv2_edge_int8_str = fmt_percent(edge_int8 / 100, precision=1, commas=False, style='symbol')
     mv2_edge_drop_str = fmt_pp(edge_drop, precision=1, commas=False)
-    mv2_edge_drop_tbl_str = fmt_pp(edge_drop, precision=1, commas=False, style="symbol")
-    edge_occlusion_pct_str = fmt_percent(edge_occlusion_pct / 100, precision=0, commas=False, style='prose')
-    edge_lux_str = fmt_illuminance(edge_lux * ureg.lux, precision=0, commas=False)
-    edge_rotation_deg_str = fmt(edge_rotation_deg, precision=0, commas=False)
-    real_world_edge_pct_str = fmt_percent(real_world_edge_pct / 100, precision=0, commas=False, style='prose')
-    confidence_threshold_pct_str = fmt_percent(confidence_threshold_pct / 100, precision=0, commas=False, style='prose')
-```
-
-::: {#lhs-benchmarking-mobilenet-int8-compression .callout-lighthouse title="MobileNetV2 INT8 compression"}
-
-```{=latex}
-\begingroup
-\renewcommand{\arraystretch}{1.4}
-```
-Returning to lighthouse \ref{lhs-benchmarking-mobilenet-deployment-validation}, consider an illustrative validation protocol for INT8 quantization, grounded in MobileNetV2's architecture [@sandler2018] and post-training quantization practice [@jacob2018]. The values in @tbl-benchmarking-mobilenet-int8-validation are assumed. For this example, acceptance permits less than one percentage point of loss on either top-one or top-five accuracy and requires no regression in ECE or critical edge-case accuracy under the same evaluation protocol:
-
-**Precompression baseline**: MobileNetV2 achieves `{python} MobileNetINT8Calc.mv2_acc_fp32_prose_str` top-1 accuracy on ImageNet at `{python} MobileNetINT8Calc.mv2_params_m_str` parameters (`{python} MobileNetINT8Calc.mv2_size_fp32_mb_str` FP32).
-
-In @tbl-benchmarking-mobilenet-int8-validation, aggregate accuracy barely changes after INT8 quantization to `{python} MobileNetINT8Calc.mv2_size_int8_mb_str`, but calibration error and edge-case accuracy reveal substantial degradation. The INT8 model's ECE rises from `{python} MobileNetINT8Calc.mv2_ece_fp32_str` to `{python} MobileNetINT8Calc.mv2_ece_int8_str`, failing this example's no-regression criterion under the fixed ECE protocol.
 
 | **Metric**             |                    **FP32**                    |                    **INT8**                    | **Acceptable?**                                                                                |
 |:-----------------------|:----------------------------------------------:|:----------------------------------------------:|:-----------------------------------------------------------------------------------------------|
@@ -560,23 +490,9 @@ In @tbl-benchmarking-mobilenet-int8-validation, aggregate accuracy barely change
 
 **Edge-case definition**: Images with $>$ `{python} MobileNetINT8Calc.edge_occlusion_pct_str` occlusion, $<$ `{python} MobileNetINT8Calc.edge_lux_str` lighting, or $>$ `{python} MobileNetINT8Calc.edge_rotation_deg_str`° rotation from training distribution (approximately `{python} MobileNetINT8Calc.real_world_edge_pct_str` of real-world inputs).
 
-```{=latex}
-\endgroup
-```
 
-**What this reveals**: Under these assumptions, average-case accuracy looks acceptable (`{python} MobileNetINT8Calc.mv2_acc_drop_str` drop), but calibration degrades and edge-case accuracy drops `{python} MobileNetINT8Calc.mv2_edge_drop_str`. If the deployment uses confidence thresholds (for example, "only act if confidence > `{python} MobileNetINT8Calc.confidence_threshold_pct_str`") or encounters many edge cases (unusual lighting, partial occlusions), INT8 MobileNetV2 could fail despite passing aggregate benchmarks.
 
-**Fix**: Evaluate temperature scaling\index{Temperature scaling!calibration restoration} as a post-hoc calibration candidate [@guo2017calibration]. Fit a positive scalar $T_{\text{cal}}$ on separate calibration data to divide logits before softmax: $\text{softmax}(z_i/T_{\text{cal}})$. Validate on an untouched holdout. This rescaling preserves the top-one ranking, so edge-case classification errors require separate diagnosis of quantization and data coverage, followed by correction and testing on reserved edge-case examples.
-
-:::
-
-The Lottery Ticket Hypothesis\index{Lottery ticket hypothesis!compression trade-off} provides concrete benchmarking data illustrating what Pareto-efficient compression looks like. Through iterative pruning, @frankle2019lottery found sparse subnetworks ("winning tickets") in fully connected and convolutional networks that could match the original network's test accuracy when trained in isolation. These empirical findings demonstrate the nonlinear shape of compression trade-offs: aggressive pruning preserves accuracy up to a critical sparsity threshold, beyond which quality degrades sharply. Compression validation must therefore establish empirical trade-off curves for each specific model and architecture, identifying where the model sits on the Pareto frontier and whether further pruning yields hardware efficiency or merely degrades accuracy.
-
-#### Large language model benchmarks {#sec-benchmarking-large-language-model-benchmarks-4ec7}
-
-The compression evaluation framework applies cleanly when the task has a stable label, such as classification accuracy, detection mAP, or segmentation IoU. Large language models break that pattern. A team can choose a model because it scores well on a public benchmark, then discover in deployment that the model recognizes multiple-choice facts but cannot generate a grounded answer, responds too slowly for an interactive product, or produces confident unsafe text that the benchmark never stressed. LLM benchmarking therefore starts by naming the deployment failure that a score is meant to rule out.
-
-The metric taxonomy in @tbl-llm-benchmark-failure-taxonomy organizes evaluation around those failure modes rather than leaderboard rankings. Its rows use Massive Multitask Language Understanding (MMLU)\index{MMLU!multitask language understanding},[^fn-mmlu-knowledge-benchmark] HELM (Holistic Evaluation of Language Models),[^fn-helm-holistic-evaluation] and perplexity\index{Perplexity!language model prediction measure}[^fn-perplexity-language-metric] as examples of scores that answer distinct deployment questions:
+For large language models, evaluation must span multiple dimensions—such as recognition, safety, and responsiveness—because no single score establishes production readiness (@tbl-llm-benchmark-failure-taxonomy).
 
 | **Deployment failure to rule out**     | **Metric or benchmark family**                                 | **What the score reveals**                                                                                                                       | **What the score cannot prove**                                                                                                                        |
 |:---------------------------------------|:---------------------------------------------------------------|:-------------------------------------------------------------------------------------------------------------------------------------------------|:-------------------------------------------------------------------------------------------------------------------------------------------------------|
@@ -593,7 +509,6 @@ The metric taxonomy in @tbl-llm-benchmark-failure-taxonomy organizes evaluation 
 
 [^fn-perplexity-language-metric]: **Perplexity**\index{Perplexity!etymology}\index{Perplexity!serving interpretation}: From Latin *perplexus* (entangled); in information theory, $2^{H(p)}$ where $H$ is entropy. A perplexity of 10 means the model is "10-way confused" on average. The systems consequence is interpretive rather than direct memory accounting: perplexity measures held-out next-token prediction on a corpus, while serving memory pressure is governed by context length, batch size, model shape, and decoding state; KV-cache management is a separate serving problem [@kwon2023].
 
-The responsiveness row requires a concrete timing anchor because LLM benchmarks frequently report a single aggregate throughput number even though users experience generation in distinct phases. A model can achieve high aggregate throughput in tokens per second while still feeling sluggish if the first token arrives late, or it can minimize first-token latency\index{Latency!first-token, LLM responsiveness} while generating subsequent text too slowly for interactive reading.
 
 ```{python}
 #| echo: false
@@ -632,55 +547,9 @@ class LLMThroughputCalc:
     response_tokens_str = fmt_count(response_tokens, commas=False, label="token")
     slow_tokens_per_s_str = fmt_rate(slow_tokens_per_s, 'tokens/s', precision=0, commas=False)
     fast_tokens_per_s_str = fmt_rate(fast_tokens_per_s, 'tokens/s', precision=0, commas=False)
-```
 
-Token throughput\index{Token throughput!generation rate} translates these generation rates into user-perceived wall-clock time: for a response of `{python} LLMThroughputCalc.response_tokens_str`, a generation rate of `{python} LLMThroughputCalc.slow_tokens_per_s_str` requires `{python} LLMThroughputCalc.slow_s_str`, whereas `{python} LLMThroughputCalc.fast_tokens_per_s_str` finishes in `{python} LLMThroughputCalc.fast_s_str`. Time-to-first-token and inter-token latency\index{Inter-token latency!throughput trade-off} must therefore be reported together: one captures initial responsiveness, and the other captures sustained delivery speed. This latency split reflects contrasting computational regimes: time-to-first-token is governed by prompt prefill, which processes tokens in parallel and is typically compute-bound, whereas inter-token latency is governed by autoregressive decoding, where low-batch execution often streams weights and accesses a growing KV cache with limited reuse. The resulting bandwidth pressure depends on model residency, context length, batch size, and the execution path.
 
-A final failure mode is that a benchmark score may reflect training-data memorization rather than general capability. Benchmark contamination\index{Benchmark contamination!LLM memorization risk} is especially difficult to audit in LLMs because web-scale pretraining corpora may contain benchmark questions, inflating scores through memorization rather than skill [@xu2024benchmarking]. Leakage detection reframes this risk as something benchmark designers can test for rather than merely suspect. Temporal holdouts use content published after the training cutoff, dynamic benchmarks generate fresh instances continuously, and contamination tests check whether the model recalls verbatim benchmark phrasing. These techniques keep the benchmark aligned with the deployment question instead of rewarding pretraining exposure to the evaluation set.
-
-### Data benchmarking {#sec-benchmarking-data-benchmarking-22f9}
-
-Model benchmarks validate whether compression preserved model quality. Model quality, however, depends on the data alongside the architecture and training procedure, and this dependency creates the most insidious failure mode in ML deployment. A perfectly preserved model trained on biased or unrepresentative data can still fail in production. Data benchmarks\index{Data benchmarking!training set validation} validate whether the efficiency strategies from @sec-data-selection (active learning, curriculum design, data augmentation, and synthetic data generation) produced training sets that enable reliable deployment. This is often the last validation to fail and the hardest to diagnose: a model achieving excellent accuracy on held-out test data may collapse on production inputs that the training data never adequately represented.
-
-::: {.column-margin .margin-pointer}
-↩ Active learning, curriculum learning, augmentation, and synthetic data generation, the strategies a data benchmark audits, are established in @sec-data-selection.
-:::
-
-Within the D·A·M taxonomy, optimizing the Algorithm and the Machine cannot compensate for structural deficiencies in the Data: an accelerator cluster operating at peak arithmetic intensity simply computes incorrect representations faster when training distributions are defective. A data benchmark therefore begins with an operational protocol rather than an aggregate score. The protocol defines the deployment slice the model must serve, reserves a leakage-resistant holdout, verifies duplicate and near-duplicate separation across partitions, sets minimum coverage for rare classes and subgroups, audits label quality, and establishes drift thresholds that determine when the benchmark no longer represents production. Only after those gates are explicit do aggregate metrics become interpretable.
-
-#### Coverage metrics {.unnumbered}
-
-The first question data benchmarking must answer is whether the training distribution covers the operational domain the model will encounter in production. Generalization to poorly represented input regimes is uncertain and requires direct evaluation; the mechanisms through which training coverage fails are often subtle.
-
-Class balance\index{Class balance!coverage metric} is the most apparent failure mode. In a fraud detection dataset with 99 percent legitimate transactions and 1 percent fraud, a degenerate model that predicts the majority class unconditionally achieves 99 percent accuracy while failing its operational purpose. Mitigating severe class imbalance\index{Class imbalance!coverage failure mode} requires loss reweighting, targeted oversampling, or decision threshold calibration. More insidious is subgroup imbalance\index{Subgroup imbalance!demographic disparity} within classes: a dataset may exhibit balanced positive and negative classes in the aggregate, yet draw negative examples disproportionately from a specific demographic cohort or geographic region. Aggregate accuracy metrics mask these systematic localized failures. When systems interact with human populations, auditing representation across demographic dimensions (such as age, geography, or dialect) is essential, though missing or noisy demographic metadata frequently complicates detection.
-
-Feature coverage\index{Feature coverage!deployment variation} extends beyond discrete class labels into the continuous space of operational variations. While class balance is verified directly from label statistics, feature coverage requires mapping the physical parameters of the deployment environment. A vision pipeline trained exclusively on daytime captures fails under low-light sensor noise; a voice processing pipeline trained on clean studio signals degrades under acoustic reverberation and ambient noise. These environmental variations—differing sensor hardware, lighting conditions, and rare operational edge cases—fall outside discrete label distributions. Benchmarking feature coverage therefore requires specifying concrete bounds on the input space alongside domain experts before evaluating model performance.
-
-#### Quality metrics {.unnumbered}
-
-Even when a training dataset spans the operational domain, annotation errors corrupt the supervisory signal. Label errors, which average about 3 percent across ten canonical test sets and approach 6 percent on ImageNet's validation set [@northcutt2021pervasive], do not act as benign noise. Supervised optimization treats incorrect labels as ground truth. When an evaluation set contains corrupted labels, a model that learns the true underlying distribution is penalized, while a model that memorizes the annotation artifacts receives an inflated score.
-
-For small corpora, manual audits over stratified random samples provide baseline error estimates. At scale, confident learning\index{Confident learning!mislabeled example detection} identifies label errors algorithmically by estimating the joint distribution of noisy annotations and true latent labels using out-of-sample predicted probabilities. When a model consistently assigns high confidence to a class that conflicts with the assigned label, the discrepancy isolates candidate annotation errors from typical optimization uncertainty. Flagging these candidates enables targeted relabeling or filtering, circumventing the prohibitive cost of exhaustive human review.
-
-Inter-annotator agreement measures consistency across annotators prior to model training. Cohen's kappa\index{Cohen's kappa!inter-annotator agreement} for two raters and Fleiss' kappa for multiple raters quantify agreement above chance expectation [@cohen1960; @fleiss1971measuring]. When agreement metrics fall below established thresholds on tasks with objective ground truth, the failure points to ambiguous labeling taxonomies, rater fatigue, or inconsistent guidelines. While Landis and Koch's qualitative kappa bands provide a historical reference [@landis1977measurement], production pipelines require agreement thresholds calibrated directly to application-specific risk tolerance.
-
-The structural form of label noise determines its downstream impact. Random label noise dilutes gradient signals across classes, increasing sample complexity but rarely teaching coherent false representations. In contrast, systematic errors\index{Systematic error!learned ground truth}—such as consistently mislabeling an underrepresented subclass or coupling a label with an environmental artifact—inject structured bias into model weights. If images of wolves photographed against snow are consistently labeled as dogs, the model learns to associate snow with the target class. In the presence of systematic label error, collecting more training data under the same labeling protocol does not correct the bias; it merely reinforces the spurious association with higher parameter certainty.
-
-#### Distribution alignment {.unnumbered}
-
-Data benchmarking must ultimately evaluate whether a model generalizes from training conditions to deployment environments. Standard evaluation protocols assume that training, validation, and test splits are independent and identically distributed (i.i.d.). In production systems, this assumption fails routinely: temporal drift alters consumer behavior, sensor degradation shifts hardware characteristics, and geographic expansion introduces unmodeled subpopulations. When the i.i.d. assumption breaks down, held-out validation accuracy may become a poor predictor of operational performance. The direction and size of the change depend on the shifted population.
-
-This train-to-production alignment\index{Distribution shift!train-to-production alignment} gap is quantified systematically by the WILDS[^fn-wilds-distribution-shift] benchmark [@koh2021wilds], which evaluates models across distribution shifts spanning hospital systems, camera trap locations, and satellite passes. On Camelyon17-WILDS, the reported ERM baseline achieved 93.2 percent in-distribution average accuracy and 70.3 percent out-of-distribution average accuracy across unseen clinical sites. This performance drop occurs despite holding the architecture, hyperparameters, and training compute constant, demonstrating a distribution-dependent performance gap for that fixed model and training procedure. The comparison does not isolate which capacity, representation, or data changes would close it.
-
-[^fn-wilds-distribution-shift]: **WILDS**\index{WILDS!distribution shift benchmark}: Stanford's 2021 benchmark of ten datasets with real-world distribution shifts: hospital changes (Camelyon17), wildlife camera location shifts (iWildCam), and satellite imagery temporal drift (PovertyMap). For the reported Camelyon17-WILDS ERM baseline, average accuracy fell from 93.2 percent in-distribution to 70.3 percent out-of-distribution, demonstrating that standard held-out evaluation can overestimate performance when the i.i.d. assumption\index{i.i.d. assumption!held-out evaluation limitation} fails.
-
-To detect changes that warrant investigation, serving pipelines can apply statistical shift tests to incoming inference streams. Two-sample hypothesis tests such as the Kolmogorov-Smirnov test\index{Kolmogorov-Smirnov test!covariate shift detection} [@berger2014kolmogorov] for univariate features and maximum mean discrepancy\index{Maximum mean discrepancy!covariate shift detection} [@gretton2012kernel] for multivariate embeddings detect changes in the marginal input distribution $p(x)$. Establishing covariate shift\index{Covariate shift!input distribution change} also requires the conditional target distribution $p(y \mid x)$ to remain stable; input-only tests cannot verify that condition without label evidence. Prediction entropy and confidence distributions provide additional warning signals, but shifted inputs can still produce confident predictions. Validate alert thresholds and fallback policies against labeled deployment samples; these signals alone do not guarantee detection before quality degrades.
-
-::: {.column-margin .margin-pointer}
-↪ Live covariate shift detectors feed the statistical distance monitoring and automated drift alerts developed in @sec-ml-operations-feature-distribution-monitoring-b8a0.
-:::
-
-Distribution alignment challenges highlight a persistent tension in ML development between two paradigms: *fixing the data and iterating on models*, or *fixing the model and iterating on data*. The side-by-side schematics in @fig-model-vs-data isolate this divergence through the placement of the padlock and feedback path. In the model-centric panel\index{Model-centric AI!architectural innovation}, the dataset is locked while the feedback loop iteratively refines model parameters on the CPU; in the data-centric panel, the model architecture is locked while the loop routes back to enhance training data quality, diversity, and labeling. As the bidirectional red arrow emphasizes, the two paradigms are complementary engineering strategies rather than mutually exclusive philosophies.
+Distribution alignment challenges highlight two complementary paradigms: iterating on model architecture versus refining dataset quality (@fig-model-vs-data).
 
 ::: {#fig-model-vs-data fig-env="figure" fig-pos="htb" fig-cap="**Development Paradigms**: Model-centric AI iterates on architecture while holding the dataset fixed, whereas data-centric AI iterates on annotations, diversity, and bias while holding the architecture fixed. The double arrow marks the approaches as complementary." fig-alt="Side-by-side diagrams: model-centric AI shows data cylinders feeding CPU with feedback loop to model, data-centric AI shows feedback loop to data instead. Double arrow indicates complementary approaches."}
 
@@ -839,13 +708,8 @@ filllcolor=black!,Linewidth=0.7pt, filllcirclecolor=black}};
 ```
 :::
 
-Data-centric AI\index{Data-centric AI!dataset enhancement paradigm} reflects an important shift in understanding that challenges the "more data is always better" assumption: dataset composition matters alongside scale. Initiatives like DataPerf\index{DataPerf!data quality benchmark} [@mazumder2024dataperf] and DataComp\index{DataComp!data-centric benchmark}[^fn-datacomp-filtering-benchmark] have emerged to evaluate how dataset construction affects model performance systematically. In DataComp's compute-controlled setting, a baseline that retained the top 30 percent of the candidate pool by CLIP-based filtering outperformed the unfiltered-pool baseline on aggregate downstream evaluation [@beaumont2023]. The result establishes the value of curation for that protocol, not a universal optimal fraction.
 
-[^fn-datacomp-filtering-benchmark]: **DataComp**\index{DataComp!data-centric benchmarking}: Introduced in 2023, DataComp fixes the model family, training code, and compute budget while participants vary dataset construction. Its filtering track isolates the effect of selecting examples from a common candidate pool, making curation strategies comparable without attributing every gain to additional training compute.
-
-#### Dataset saturation and dynamic benchmarks {.unnumbered}
-
-Even when coverage, quality, and distribution alignment protocols are satisfied, static benchmarks encounter the problem of dataset saturation\index{Dataset saturation!performance capability illusion}. As models approach empirical upper bounds on fixed test suites, leaderboard deltas compress, making it difficult to distinguish genuine capability advances from over-optimization to benchmark-specific artifacts. The capability trajectories in @fig-dataset-saturation plot this exhaustion over two decades, showing AI scores rising from normalized baselines (-100) to cross the zero line marking human performance [@perrault2024artificial]. While handwriting and speech recognition required over a decade to reach human parity (the green shaded region), reading comprehension and language understanding surged across the threshold in under two years between 2016 and 2020, rapidly exhausting the discriminating headroom of static suites.
+Even with rigorous protocols, static benchmarks face dataset saturation, where models rapidly exhaust a test suite's discriminating headroom (@fig-dataset-saturation).
 
 ::: {#fig-dataset-saturation fig-env="figure" fig-pos="htb" fig-cap="**Dataset Saturation**: The zero line denotes reported human performance; each curve's crossing marks a capability for which the static benchmark has less remaining discriminating headroom. The crossings do not distinguish genuine capability gains from optimization to the evaluation set. Sources: [@perrault2024artificial; @kiela2021]." fig-alt="Line chart showing five AI capabilities crossing human performance baseline from 1998 to 2020: handwriting, speech, image recognition, reading comprehension, and language understanding."}
 
@@ -944,12 +808,6 @@ the humans who did these tests}
 
 :::
 
-Once a static benchmark saturates, high leaderboard accuracy can mask brittle heuristics. MNIST\index{MNIST!dataset saturation example} digit recognition [@lecun1998] demonstrated early that models can exploit dataset-specific capture artifacts rather than invariant features, a concern that eventually prompted researchers to re-examine whether ImageNet had reached the end of its useful diagnostic lifetime [@beyer2020we]. When the evaluation distribution remains frozen, iterative model selection risks overfitting to idiosyncratic test artifacts rather than improving generalizable task capability.
-
-Dynamic benchmarking frameworks such as Dynabench[^fn-dynabench-dynamic-benchmark] [@kiela2021] address saturation by continuously evolving evaluation data. In this paradigm, human annotators generate adversarial inputs targeting the failure modes of current top-performing models, ensuring that the benchmark continues to exercise representational limits. However, dynamic benchmarks introduce a fundamental systems trade-off: because the evaluation distribution changes across iterations, longitudinal comparisons across model generations become difficult to calibrate. Static and dynamic benchmarks therefore serve complementary roles: static suites ensure longitudinal reproducibility on standardized tasks, while dynamic benchmarks identify newly emergent error boundaries.
-
-[^fn-dynabench-dynamic-benchmark]: **Dynabench**\index{Dynabench!dynamic evaluation}: Facebook AI Research's 2021 platform for dynamic benchmark generation, where humans craft adversarial inputs that fool current best models. Dynabench addresses the saturation problem, where very high accuracy on static benchmarks may reflect test-set familiarity rather than robust capability, but introduces its own trade-off: dynamic benchmarks are harder to compare across time because the evaluation set changes. Static and dynamic benchmarks serve complementary diagnostic roles.
-
 ### Holistic system-model-data evaluation {#sec-benchmarking-holistic-systemmodeldata-evaluation-8fda}
 
 Passing system, model, and data benchmarks independently is not enough. A system benchmark can validate hardware performance, a model benchmark can verify that compression preserved quality, and a data benchmark can assess training set representativeness, yet the deployed system can still fail because the three dimensions interact. Real-world AI performance emerges from that interaction, and optimizing one dimension can expose weaknesses in another.
@@ -982,6 +840,7 @@ Applying this matrix organizes hypotheses when system telemetry diverges from th
 :::
 
 Validation under controlled laboratory conditions differs from validation in production. A laboratory protocol may fix data, simplify arrivals, or isolate execution to answer a controlled question; other protocols deliberately vary those conditions. In production, all three assumptions can break simultaneously: data drifts, traffic spikes unpredictably, and concurrent workloads compete for shared hardware resources. The final dimension of benchmarking asks whether laboratory results hold under operational conditions.
+
 
 ## Benchmark Components {#sec-benchmarking-benchmark-components-97cc}
 

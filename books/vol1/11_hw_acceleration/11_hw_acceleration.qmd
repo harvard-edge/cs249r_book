@@ -393,8 +393,6 @@ Architectural design begins with the physical constraints that forced specializa
 
 ## Hardware Specialization {#sec-hardware-acceleration-evolution-hardware-specialization-fdb7}
 
-When Google deployed its first Tensor Processing Unit (TPUv1) into production data centers alongside NVIDIA K80 GPUs, the comparison exposed a fundamental efficiency divide. General-purpose processors dedicate substantial silicon area and power to instruction fetch, branch prediction, and cache coherence, machinery built for arbitrary code that yields poor arithmetic density on regular, dense linear algebra. When an algorithmic pattern becomes sufficiently dominant and structured, specialized hardware\index{Hardware specialization!evolution} outperforms general-purpose platforms by replacing dynamic control machinery with dedicated arithmetic arrays and software-managed data movement. Google's production inference evaluation quantified this efficiency gap (example \ref{exmp-hw-acceleration-tpuv1-vs-k80-efficiency-shock}).
-
 ::: {#exmp-hw-acceleration-tpuv1-vs-k80-efficiency-shock .callout-example title="The TPUv1 vs. K80 efficiency shock"}
 
 **Scenario**: In 2015, Google deployed its first Tensor Processing Unit (TPUv1) into production data centers, comparing its throughput and energy efficiency against general-purpose NVIDIA K80 GPUs [@jouppi2017].
@@ -405,19 +403,7 @@ When Google deployed its first Tensor Processing Unit (TPUv1) into production da
 
 :::
 
-In D·A·M terms, this efficiency gain stems from tailoring machine resources to algorithmic structure. The TPU[^fn-tpu-google-origin] replaced hardware caches with software-managed buffers and routed data directly between neighboring arithmetic units, raising data reuse and cutting off-chip traffic. The price is rigidity. Irregular memory access, dynamic control flow, or an unsupported numeric precision stalls a fixed-function data path and leaves expensive silicon idle. Every modern ML accelerator, from DianNao-class designs [@chen2014diannao] to GPUs with Tensor Cores and Apple's Neural Engine, strikes its own balance between specialization and flexibility, following a pattern that began decades before deep learning.
-
-[^fn-tpu-google-origin]: **TPU (tensor processing unit)**\index{TPU!origin}: The first TPU made a deliberately narrow bet, centering the design on a single $256{\times}256$ systolic array for 8-bit matrix multiplication and avoiding much of the control machinery required by a general-purpose core [@jouppi2017]. That trade buys high compute density on dense matrix multiplication at the cost of flexibility. Irregular or branch-heavy code remains a poor fit, and compiler tiling, padding, and layer dimensions determine how fully the array is used.
-
 ### Specialized computing {#sec-hardware-acceleration-specialized-computing-22ce}
-
-Hardware specialization emerges when one computational pattern becomes the bottleneck that general-purpose processors cannot scale past. The first clear case was floating point\index{Floating-point unit!precision bottleneck}, which late-1970s microprocessors emulated with multi-instruction software routines. The Intel 8087\index{Intel 8087!floating-point coprocessor}\index{Floating-point unit!history} coprocessor (1980) executed those operations directly in hardware [@palmer1980intel8087], and the Intel 486DX (1989) later moved the floating-point unit onto the CPU die itself [@patterson2017hardware]. That cycle, specialization to relieve an acute bottleneck followed by integration once the capability proves universal, recurs in every later era. So does its limit. Dedicated silicon removes the instruction overhead around a dominant operation, but the overall gain is bounded by how much of the run time that operation occupies.
-
-Graphics supplied the second lesson, throughput over latency. A CPU spends most of its silicon on control logic, branch prediction, and caches that minimize the latency of a single instruction stream, which buys nothing when identical arithmetic must be applied to millions of independent pixels. GPUs\index{GPU!history} reallocated that silicon to dense arrays of arithmetic units, and when unified shader architectures (2006) replaced separate vertex and pixel pipelines with arrays of identical programmable cores, the GPU became a general-purpose parallel processor [@owens2008]. Digital signal processors\index{Digital signal processing!multiply-accumulate units} such as Texas Instruments' TMS32010 (1983) contributed the memory organization. To meet hard real-time deadlines, they replaced caches, whose misses introduce variable latency, with software-managed scratchpads feeding dedicated MAC data paths [@lyons2011understanding]. ML accelerators inherit both lessons.
-
-The payoff arrived in 2012, when AlexNet\index{AlexNet!GPU deep learning era} [@krizhevsky2012imagenet] won the ImageNet competition by more than ten percentage points after training on two consumer-grade NVIDIA GTX 580 cards with 3 GB of memory each. Convolutional neural networks (CNNs) trained with gradient descent had existed for decades, but CPU throughput kept large-scale training impractical. Dense 2D convolutions mapped directly onto thousands of GPU arithmetic lanes, compressing months of CPU computation into five to six days. In D·A·M terms, the machine constraint had dictated which algorithms were feasible, and aligning the algorithm's parallel structure with throughput-oriented hardware lifted it.
-
-@Fig-timeline sequences these architectural milestones across five chronological columns from the 1980s to the 2020s, tracing the recurring evolution from discrete coprocessors (such as the Intel 8087 FPU and TMS32010 DSP) through graphics engines and dedicated media codecs to deep-learning tensor arrays and wafer-scale hardware. Each era's specialized unit targets a different bottleneck, yet the principles modern accelerators depend on (dedicating silicon to the dominant operation, staging operands in local memory, and minimizing off-chip data movement) were all in place before deep learning arrived.
 
 ::: {#fig-timeline fig-env="figure" fig-pos="htb" fig-cap="**Hardware Specialization Timeline**: Computing architectures evolve through recurring cycles of specialization and integration across five eras. Each era introduces domain-specific hardware to resolve an important memory or arithmetic bottleneck—from off-chip FPUs to GPUs, codecs, and TPU/Tensor Core array units. Many of these capabilities later appear alongside CPUs in broader systems, even when the specialized units remain distinct." fig-alt="Five-column timeline from the 1980s through the 2020s. The columns list floating-point and signal processing (Intel 8087, TMS32010 DSP), 3D graphics and multimedia (early GPUs, GeForce 256), real-time media and network processing (H.264 and MP3 codecs, IXP2800), deep-learning tensor operations (Google TPU v1 and NVIDIA Tensor Cores), and application-specific acceleration (AI engines, SmartNICs, and multi-chip and wafer-scale systems)."}
 
@@ -483,10 +469,6 @@ The payoff arrived in 2012, when AlexNet\index{AlexNet!GPU deep learning era} [@
 
 ### Emergence of domain-specific architectures {#sec-hardware-acceleration-emergence-domainspecific-architectures-e56e}
 
-These patterns converged into a broader architectural shift once general-purpose scaling slowed. Moore's law\index{Moore's law!slowdown}[^fn-moores-law-scaling] describes a long-running increase in transistor density [@moore1998], and for decades Dennard scaling\index{Dennard Scaling!end of} [@dennard1974] let operating voltage fall as transistors shrank, so clock frequencies rose at constant power density and existing software simply ran faster. When leakage current halted voltage scaling in the mid-2000s, frequencies stalled against a thermal wall. Adding cores bought time but ran into Amdahl's Law and **dark silicon**\index{Dark Silicon!specialization driver}, the thermal limit under which only a fraction of a chip's transistors can switch at full speed simultaneously [@esmaeilzadeh2011]. A general-purpose core also spends most of its energy on instruction fetch and decode, branch prediction, speculation, and cache coherence rather than arithmetic; executing one instruction can cost hundreds of picojoules of control energy to perform a floating-point operation that itself costs a few. As @hennessy2019 argued in their Turing Lecture, the response is **domain-specific architectures (DSAs)**\index{DSA!definition}\index{DSA!scaling law breakdown}\index{Domain-Specific Architecture|see{DSA}},[^fn-dsa-domain-efficiency] hardware that gives up some programmability to spend its power budget on the operations an important domain actually performs.
-
-A DSA wins by specializing every layer of the machine around the workload's invariants. Its data path\index{Data path!customization} is custom-built; matrix units in AI accelerators are often **systolic arrays**\index{Systolic array!definition}, grid-like networks of processing elements that compute and forward data directly to neighboring units, so a value fetched once from on-chip memory is reused across an entire row or column of multiply-accumulate operations instead of returning to a register file after each use. Its memory hierarchy\index{Memory hierarchy!domain-specific} follows the workload's reuse pattern, with software-managed scratchpads and prefetching\index{Prefetching!accelerator optimization} replacing hardware-managed caches for deterministic tensor streams. Its instruction set encodes coarse tensor operations, so one macro-instruction configures thousands of arithmetic units. The same recipe produced smartphone video codecs, genomics aligners, and cryptographic application-specific integrated circuits (ASICs)\index{ASIC!flexibility trade-off} wherever a kernel stabilized [@sullivan2012; @turakhia2018darwin; @bedford_taylor2017].
-
 ```{python}
 #| echo: false
 #| label: systems-gap-rates-calc
@@ -512,8 +494,6 @@ class SystemsGapRates:
     demand_growth_per_year_factor_mult_str = fmt_multiple(demand_growth_per_year, precision=1, commas=False)
     demand_supply_gap_per_year_mult_str = fmt_multiple(demand_supply_gap_per_year, precision=1, commas=False)
 ```
-
-The pressure to specialize has grown because frontier model demand exponentially outruns single-device hardware scaling. @Fig-systems-gap charts this compute divergence on a logarithmic scale, highlighting the widening shaded systems gap between the exponential model demand curve (spanning from AlexNet through GPT-4) and the dashed single-device GPU performance trajectory. The normalized scenario assumes GPU supply rises about `{python} SystemsGapRates.gpu_growth_per_year_factor_mult_str` per year while model demand rises about `{python} SystemsGapRates.demand_growth_per_year_factor_mult_str` per year, producing a gap that widens by roughly `{python} SystemsGapRates.demand_supply_gap_per_year_mult_str` each year. Published compute trends motivate the qualitative divergence, while the plotted rates are scenario assumptions rather than a forecast [@amodei2018ai; @epochai2024compute].
 
 ::: {#fig-systems-gap fig-env="figure" fig-pos="htb" fig-cap="**The Systems Gap**: Relative compute growth (log scale) comparing model demand to hardware supply, normalized to 2012 = 1.0. The gray dotted line (CPU) and blue dashed line (GPU) reflect hardware progress, which lags the exponential red solid line (Model Demand). The purple region is the 'Systems Gap' that must be bridged through parallelism and co-design." fig-alt="Log-scale line chart from 2012 to 2024. Red line (model demand) rises steeply. Blue line (GPU supply) rises moderately. Gray line (CPU trend) rises slowly. A large purple shaded area between red and blue is labeled 'The Systems Gap.'"}
 
@@ -639,12 +619,6 @@ plt.close()
 
 :::
 
-[^fn-moores-law-scaling]: **Moore's law**\index{Moore's law!ML systems consequence}: Gordon Moore's 1965 observation, revised in 1975, that the number of transistors per chip doubles roughly every two years [@moore1998]. It describes density, not performance; performance tracked density only while Dennard scaling held.
-
-[^fn-dsa-domain-efficiency]: **DSA (domain-specific architecture)**\index{DSA!efficiency trade-off}: A DSA that excels at dense matrix multiplication may perform worse than a CPU on irregular workloads such as graph traversal, so its gain on the target domain must justify the software, compiler, and ecosystem cost of a narrower machine [@hennessy2019; @patterson2017hardware].
-
-Technology lifecycles\index{Technology S-Curve!computing paradigms} often trace an S-curve of slow ferment, rapid take-off, and saturation near physical or economic limits. General-purpose scaling has entered its saturation phase\index{Dennard Scaling!multi-core revolution}, so waiting for process shrinks will not close a gap of this size. Closing it takes machines designed to match the algorithm, and many such machines working in parallel. In D·A·M terms, the accelerator makes the machine constraint explicit, and execution efficiency depends on how well an algorithm's tensor dimensions, memory access patterns, and parallelism map onto the specialized structures of the hardware.
-
 ```{python}
 #| echo: false
 #| label: cpu-ml-inefficiency
@@ -688,8 +662,6 @@ class CpuMlInefficiency:
 
 ### Machine learning hardware specialization {#sec-hardware-acceleration-machine-learning-hardware-specialization-09c5}
 
-Many important neural-network workloads concentrate their work in regular tensor operations, such as dense matrix multiplications and convolutions, with substantial data parallelism, predictable reuse, and tolerance for reduced precision. Other ML operations remain irregular, bandwidth bound, or too small to fill a wide engine, so the device need not accelerate every part of a model. Hardware built to exploit the regular portion forms the class of ML accelerators, and the economic trigger for building one appears when that workload matters at fleet scale rather than only in a benchmark (example \ref{exmp-hw-acceleration-google-tpu-voice-search}).
-
 ::: {#exmp-hw-acceleration-google-tpu-voice-search .callout-example title="The TPU capacity cliff"}
 
 **Scenario**: Google projected in 2013 that user adoption of voice-search speech recognition (3 minutes/day/user) would require doubling global data center capacity to run CPU-based neural network inference [@jouppi2017].
@@ -728,8 +700,6 @@ class MlAcceleratorCallout:
     hbm_vs_host_dram_mult_str = fmt_multiple(hbm_vs_host_dram, precision=1, commas=False)
 ```
 
-A general-purpose CPU is a poor host for this work. In an illustrative scenario where a reference CPU sustains `{python} CpuMlInefficiency.cpu_utilization_min_str`–`{python} CpuMlInefficiency.cpu_utilization_max_str` of its peak on a neural network workload, the upper endpoint delivers approximately `{python} CpuMlInefficiency.cpu_gflop_per_s_str` (billions of floating-point operations per second). CPUs optimize for single-thread performance and irregular memory access, whereas neural networks require massive parallelism and predictable data streams, and a single layer that touches gigabytes of parameters overwhelms cache hierarchies designed for smaller working sets.
-
 ```{python}
 #| echo: false
 #| label: energy-gap-anchor-calc
@@ -766,10 +736,6 @@ class EnergyGapAnchor:
     dram_vs_fp32_mult_str = fmt_multiple(round(dram_vs_fp32), precision=0, commas=False)
 ```
 
-The deeper mismatch is energy\index{Energy!data movement cost} (illustrated by the energy ladder in [energy ladder](#margin-energy-ladder)). Per event, accessing a 32-bit value from DRAM costs about `{python} EnergyGapAnchor.dram_pj_str` in the 45 nm estimates of @horowitz2014, roughly `{python} EnergyGapAnchor.dram_vs_fp32_mult_str` the `{python} EnergyGapAnchor.fp32_mul_pj_str` of one FP32 multiply, the same ratio @tbl-energy-movement-cost reported for the data pipeline. Exact values vary by technology node and design, but a gap of two orders of magnitude, the energy-movement principle (\ref{pri-energy-movement}), makes data movement a primary optimization target [@sze2017]. Purpose-built accelerators such as TPUs sustain high utilization on dense kernels because systolic arrays and similar structures maximize data reuse while minimizing movement.
-
-Training and inference\index{Training vs. Inference!accelerator design} load an accelerator differently. Training computes gradients, typically in mixed precision with lower-precision tensor operations and higher-precision accumulation\index{FP16!training precision}\index{FP32!gradient computation} [@micikevicius2017mixed], and backpropagation\index{Backpropagation!memory requirements} retains or recomputes activations, raising memory demand. Inference requires only the forward path and may use INT8 or INT4 when the model and kernels support it. The service objective, whether tail latency, throughput, cost, or energy, then decides which accelerator fits.
-
 ::: {.column-margin .margin-pointer}
 ↩ The activation memory that backpropagation must retain is established in @sec-model-training-activation-memory-requirements-f44c.
 :::
@@ -790,8 +756,6 @@ Training and inference\index{Training vs. Inference!accelerator design} load an 
 *A DRAM access costs about `{python} EnergyGapAnchor.dram_vs_fp32_mult_str` one FP32 multiply per event; the 0.5 pJ bar is a small, register-adjacent L1 access.*
 :::
 
-Deployment context decides which constraint binds. In data centers it is often time-to-result for training large models. An NVIDIA H100\index{NVIDIA!H100} trades hundreds of watts of power for high throughput [@choquette2023], and Google's TPUv4\index{TPU!data center integration} makes a similar trade through systolic arrays and high-bandwidth memory [@jouppi2023]; whether either lowers total cost depends on utilization, rental price, workload scaling, and the electricity rate.
-
 ::: {#chk-hw-acceleration-accelerator-gate .callout-checkpoint title="The accelerator gate"}
 
 Use the energy hierarchy to decide when specialization pays.
@@ -807,15 +771,7 @@ Use the energy hierarchy to decide when specialization pays.
 
 :::
 
-At the edge, the priority shifts toward energy per inference and hard latency or power limits. A smartphone camera or always-on audio path inside a few-watt budget cannot adopt a data center memory system, so edge architectures reduce movement through local scratchpads, tight integration, and dynamic voltage and frequency scaling. Because the binding constraint differs by setting, no single architecture dominates, yet the memory wall governs both. Data center chips buy capacity and bandwidth with high-bandwidth memory (HBM), while edge chips depend on proximity and reuse.
-
 ### The integration bottleneck {#sec-hardware-acceleration-integration-bottleneck-ai-needs-specialized-hardware-0b41}
-
-From the 8087 onward, hardware has evolved to fit the algorithm's dominant bottleneck [@palmer1980intel8087; @sze2017; @jouppi2017], and for dense matrix multiplications and convolutions, provisioning arithmetic units is the easy part. Feeding them is not. Modern AI architectures must resolve an **integration bottleneck**\index{Integration bottleneck!data movement cost}, the problem of transporting operands and results through the memory hierarchy quickly and efficiently enough to sustain thousands of parallel compute units. Specialized silicon delivers its performance-per-watt advantage only when the workload's demand concentrates into regular operations that align with the hardware's data paths.
-
-Three properties of neural-network kernels make this integration bottleneck tractable. First, large matrix multiplications and convolutions expose abundant data parallelism that dense processing-element arrays can exploit concurrently. Second, static or compiled tensor graphs exhibit predictable dataflow, enabling compilers to tile and stage transfers into local scratchpads[^fn-scratchpad-sram-memory] rather than relying exclusively on hardware-managed caches. Third, many tensor operations tolerate reduced precision\index{Quantization!reduced precision tolerance}, allowing supported 8-bit or 4-bit paths to increase compute density and reduce bytes per value [@dally2021; @dally2023]. Workloads dominated by dynamic control flow, large embedding tables, small tensors, variable shapes, or strict precision requirements violate these assumptions and remain bound by memory latency and irregular access.
-
-[^fn-scratchpad-sram-memory]: **Scratchpad memory**\index{Scratchpad memory!ML advantage}: When a compiler can determine a tensor kernel's access pattern, it can explicitly stage tiles in fast, software-controlled local memory. This avoids some tag, replacement, and coherence machinery, but transfers, synchronization, banking, and capacity must be scheduled correctly. Scratchpads complement rather than universally replace caches because irregular or shared data may still benefit from hardware management. Google's TPU v1, for example, used a 24 MB software-managed Unified Buffer for intermediate activations, while weights and instructions used other paths [@jouppi2017].
 
 ```{python}
 #| echo: false
@@ -856,12 +812,6 @@ class HbmVsGddr:
     gddr6x_bw_str = fmt_bandwidth(gddr6x_bw, unit=GB / second, precision=0, commas=False)
     gap_mult_range_str = fmt_multiple_range(gap_low, gap_high, precision=1, commas=False)
 ```
-
-Once arithmetic capacity is abundant, the central engineering challenge becomes keeping data close enough to use it. Because a DRAM access\index{DRAM!energy cost} costs about `{python} EnergyGapAnchor.dram_vs_fp32_mult_str` the energy of an FP32 multiply, the energy hierarchy dictates why accelerator architectures invest silicon area and power budgets into HBM, on-chip SRAM, and software-managed scratchpads\index{Scratchpad Memory!accelerator design} rather than exclusively adding arithmetic logic units.[^fn-hbm-bandwidth-cost]
-
-[^fn-hbm-bandwidth-cost]: **HBM**\index{HBM!bandwidth-cost trade-off}: The A100 and H100 generations provide `{python} HbmVsGddr.hbm_bw_range_str` of device-memory bandwidth through stacked memory and wide interfaces, compared with `{python} HbmVsGddr.gddr6x_bw_str` for the GDDR6X reference used here [@NVIDIA2020; @choquette2023]. Raising the bandwidth ceiling can move some kernels toward the compute-bound side of the roofline, but only if their access pattern and arithmetic intensity can use it. HBM also increases packaging and system cost, so its value depends on the workload's bandwidth demand.
-
-Hardware acceleration resolves the integration bottleneck through specialized spatial layout and tiered storage hierarchies. The architectural blueprint in @fig-accelerator-anatomy diagrams how external HBM feeds shared on-chip storage (L2 cache), which distributes operands into rows of processing elements\index{Processing element!accelerator building block} equipped with private scratchpads, matrix units, and vector pipelines.
 
 ::: {#fig-accelerator-anatomy fig-env="figure" fig-pos="htb" fig-cap="**Anatomy of a Modern AI Accelerator**: This generic schematic combines common components rather than depicting one product. A host interface connects the accelerator to a CPU, a high-bandwidth device-memory interface feeds shared on-chip storage, and processing elements contain matrix, vector, and special-function units with local memory. Real accelerators differ in which units they provide and whether storage is hardware-managed cache or software-managed scratchpad." fig-alt="Generic schematic of an AI accelerator chip linked by a host interface to a host CPU and by a memory interface to high-bandwidth memory. Inside the chip, rows of processing elements surround shared on-chip storage. An enlarged processing element contains local memory, a matrix unit, a vector unit, and a special function unit. A separate dashed link connects host DRAM to the host CPU."}
 
@@ -1039,14 +989,6 @@ fit=(BB1)(DPE1)(DPE4)(B1),yshift=0mm](BB2){};
 ```
 
 :::
-
-Within the processing element architecture detailed in @fig-accelerator-anatomy, specialized units partition execution across distinct mathematical primitives: dedicated matrix units (Tensor Cores)\index{Tensor Core!matrix multiplication} execute dense matrix multiplication, vector units\index{Vector Unit!element-wise operations} evaluate element-wise arithmetic, and special function units (SFUs)\index{Special Function Unit!activation functions} approximate transcendental operations such as activations and exponentials. Their number, grouping, and names vary by vendor; some designs arrange them into an explicit 2D systolic grid, and others distribute matrix engines among wide parallel cores.
-
-The memory hierarchy amortizes the cost of data transport across tiers. High-bandwidth memory\index{HBM!throughput requirements} provides off-chip capacity and throughput, while shared on-chip storage and per-element caches or scratchpads cut off-chip traffic. Because moving a tensor tile across the package boundary costs orders of magnitude more energy than keeping it on chip, compilers and kernels must coordinate tile capacity, reuse, and prefetching to keep operands staged locally; more HBM bandwidth raises the off-chip ceiling, but without local reuse the execution units still stall. The machine foundations appendix collects reference specifications for modern accelerators, including H100 and TPU v5, and summarizes the latency hierarchy.
-
-The host interface links the accelerator to the host CPU, which coordinates execution graphs, asynchronous I/O, and fallback operations while the accelerator executes dispatched kernels. Direct-memory-access engines can overlap host-device transfers with execution, but an operator unsupported by the accelerator backend may require a CPU round-trip. An operator outside the matrix-unit instruction set may instead use vector or other device kernels. These execution boundaries help set the effective speedup envelope. Kernel execution time matters little if transfers, launches, and synchronization dominate end-to-end latency.
-
-The specialization evident in processing elements, vector pipelines, and tiered scratchpads reflects the computational profile of neural networks: models repeatedly invoke a compact set of linear-algebraic and element-wise primitives. Within the D·A·M framework, an algorithmic change produces a wall-clock speedup only when its computational structure and memory access pattern map onto these primitives; one that cuts theoretical operations without aligning with the hardware's data paths leaves compute units starved.
 
 ## AI Compute Primitives {#sec-hardware-acceleration-ai-compute-primitives-2c99}
 
@@ -1410,6 +1352,792 @@ Specialized function paths balance circuit area against mathematical precision. 
 : **Special Function Units**: Dedicated paths reduce instruction overhead for nonlinear and reduction primitives. Implementations and latency are architecture-dependent; the table describes mechanisms rather than universal cycle counts. {#tbl-sfu tbl-colwidths="[18,23,32,27]"}
 
 Vector operations, matrix operations, and special-function paths establish the foundational arithmetic primitives of ML accelerators, but functional units alone do not dictate sustained throughput. These primitives govern *what* the silicon computes; the execution model and memory hierarchy govern *how* data feeds the datapath. A matrix unit rated for hundreds of teraFLOP/s will idle if memory bandwidth cannot sustain operand delivery, if tile dimensions mismatch register blocking, or if thread synchronization serializes execution. Peak hardware ratings describe performance under idealized operand availability; the architecture's execution model dictates how much of that peak is achievable on real neural network workloads.
+
+## Roofline Model {#sec-hardware-acceleration-roofline-model-42ff}
+
+::: {#margin-roofline-elbow .column-margin}
+![](images/svg/hw_acceleration_roofline_elbow.svg){width="100%" fig-alt="Roofline elbow: a blue memory-bound slope rises left to right to a short orange compute-bound ceiling, with a dashed vertical ridge line at the bend and one workload dot sitting low on the blue slope, far below the ridge in the memory-bound region."}
+
+*Low arithmetic intensity places the modeled throughput ceiling on the bandwidth slope.*
+:::
+
+Peak FLOP/s indicates what execution units can deliver when operands are already on chip, but sustained accelerator throughput is ultimately bounded by the rate at which the memory hierarchy delivers data. The Roofline Model[^fn-roofline-performance-model]\index{Roofline Model!efficiency measurement} [@williams2009] (whose core concept is sketched in [roofline elbow diagram](#margin-roofline-elbow)), the same model that sorted training kernels in @sec-model-training-arithmetic-intensity-training-bottlenecks-4446, formalizes this relationship by plotting attainable performance against arithmetic intensity, distinguishing a compute-bound\index{Compute-Bound!roofline classification} ceiling from a memory-bound\index{Memory-Bound!roofline classification} ceiling before profiling establishes what limits actual execution. Rather than evaluating compute capacity in isolation, the model intersects hardware arithmetic throughput with memory bandwidth, revealing which physical ceiling binds execution before an engineer commits optimization effort.
+
+[^fn-roofline-performance-model]: **Roofline model**\index{Roofline model!optimization diagnostic}: Introduced by @williams2009 at UC Berkeley, building on earlier I/O complexity work from the 1980s. Their specific contribution was making the compute vs. bandwidth trade-off visual and actionable: the characteristic roofline plot immediately reveals whether a kernel is compute bound (hitting the flat ceiling) or memory bound (hitting the sloped bandwidth line) and quantifies the gap to hardware limits. A kernel operating at only 50 percent of its ceiling has 2$\times$ theoretical headroom, but instruction mix, latency, and occupancy may prevent it from closing that gap.
+
+```{python}
+#| echo: false
+#| label: roofline-utilization-gap-calc
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ ROOFLINE UTILIZATION GAP CALCULATION
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: "The Utilization Gap" callout in §Roofline Model
+# │
+# │ Goal: Demonstrate why newer accelerators are harder to saturate each generation.
+# │ Show: Ridge points ~139 FLOP/byte (V100), ~153 (A100), ~296 (H100); rising gap.
+# │ How: ridge_point() = peak_flops/memory_bw via Hardware Digital Twin; both in
+# │      SI-compatible pint units so .to(flop/byte).magnitude extracts dimensionless ratio.
+# │
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim.fmt import fmt_int, fmt, check, fmt_arithmetic_intensity
+from mlsysim import Hardware
+
+# ┌── LEGO ───────────────────────────────────────────────
+class RooflineGap:
+    """
+    Namespace for Roofline Utilization Gap.
+    Scenario: Comparing Ridge Points across generations (V100 -> H100).
+    """
+
+    # ┌── 1. LOAD (Constants) ───────────────────────────────────────────────
+    # Thresholds
+    legacy_ai = 200.0
+    relu_ai = 0.125
+    dense_matmul_dim = 1024
+    dense_matmul_bytes_per_val = 2
+
+    # Hardware Twins
+    h_v100 = Hardware.Cloud.V100
+    h_a100 = Hardware.Cloud.A100
+    h_h100 = Hardware.Cloud.H100
+
+    # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
+    # Step 1: Ridge Points (FLOP/byte) directly from Twins
+    v100_ridge = h_v100.ridge_point().to(flop / byte).magnitude
+    a100_ridge = h_a100.ridge_point().to(flop / byte).magnitude
+    h100_ridge = h_h100.ridge_point().to(flop / byte).magnitude
+
+    # Step 2: FP32 Ridge for A100
+    a100_ridge_fp32 = (h_a100.compute.precision_flops['fp32'] / h_a100.memory.bandwidth).to(flop / byte).magnitude
+
+    # Step 3: Display specs used by the nearby ridge-point prose
+    v100_flops = h_v100.compute.peak_flops
+    v100_bandwidth = h_v100.memory.bandwidth
+    a100_fp16_flops = h_a100.compute.peak_flops
+    a100_bandwidth = h_a100.memory.bandwidth
+    h100_fp16_flops = h_h100.compute.peak_flops
+    h100_bandwidth = h_h100.memory.bandwidth
+
+    # Step 4: Comparisons
+    bw_growth = (h_h100.memory.bandwidth / h_a100.memory.bandwidth).to_base_units().magnitude
+    flops_growth = (h_h100.compute.peak_flops / h_a100.compute.peak_flops).to_base_units().magnitude
+    relu_gap = h100_ridge / relu_ai
+    dense_matmul_flops = 2 * dense_matmul_dim**3
+    dense_matmul_bytes = 3 * dense_matmul_dim**2 * dense_matmul_bytes_per_val
+    dense_matmul_ai = dense_matmul_flops / dense_matmul_bytes
+
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    # Ridge points must climb: H100 > A100 > V100
+    check(h100_ridge > a100_ridge > v100_ridge, f"Ridge points must climb. H100({h100_ridge:.0f}) > A100({a100_ridge:.0f}) > V100({v100_ridge:.0f}).")
+    check(relu_gap >= 1000, f"ReLU gap ({relu_gap:.0f}x) is too small.")
+    check(dense_matmul_ai > h100_ridge, f"Large matmul should clear the H100 ridge, got AI={dense_matmul_ai:.0f}.")
+    check(
+        300 <= a100_fp16_flops.to(TFLOP / second).magnitude <= 320,
+        f"A100 FP16 peak should be near 312 TFLOP/s, got {a100_fp16_flops.to(TFLOP/second).magnitude:.0f}.",
+    )
+
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
+    v100_tflop_per_s_str = fmt_flop_rate(v100_flops, unit=TFLOP / second, precision=0, commas=False)
+    v100_bw_tb_per_s_str = fmt_bandwidth(v100_bandwidth, unit=TB / second, precision=1, commas=False)
+    a100_fp16_tflop_per_s_str = fmt_flop_rate(a100_fp16_flops, unit=TFLOP / second, precision=0, commas=False)
+    a100_bw_tb_per_s_str = fmt_bandwidth(a100_bandwidth, unit=TB / second, precision=2, commas=False)
+    h100_fp16_tflop_per_s_str = fmt_flop_rate(h100_fp16_flops, unit=TFLOP / second, precision=0, commas=False)
+    h100_bw_tb_per_s_str = fmt_bandwidth(h100_bandwidth, unit=TB / second, precision=2, commas=False)
+
+    v100_year_str = fmt(h_v100.release_year, precision=0, commas=False)
+    a100_year_str = fmt(h_a100.release_year, precision=0, commas=False)
+    h100_year_str = fmt(h_h100.release_year, precision=0, commas=False)
+
+    v100_ridge_str = fmt_arithmetic_intensity(h_v100.ridge_point(), unit=flop / byte, commas=False)
+    a100_ridge_str = fmt_arithmetic_intensity(h_a100.ridge_point(), unit=flop / byte, commas=False)
+    h100_ridge_str = fmt_arithmetic_intensity(h_h100.ridge_point(), unit=flop / byte, commas=False)
+    a100_ridge_fp32_str = fmt_arithmetic_intensity(
+        h_a100.compute.precision_flops['fp32'] / h_a100.memory.bandwidth, unit=flop / byte, precision=1, commas=False
+    )
+
+    legacy_ai_str = fmt(legacy_ai, precision=0, commas=False)
+    relu_ai_str = fmt(relu_ai, precision=3, commas=False)
+    dense_matmul_dim_str = fmt(dense_matmul_dim, precision=0, commas=False)
+    dense_matmul_ai_str = fmt(dense_matmul_ai, precision=1, commas=False)
+    bandwidth_ratio_mult_str = fmt_multiple(bw_growth, precision=1, commas=False)
+    flops_ratio_mult_str = fmt_multiple(flops_growth, precision=1, commas=False)
+    full_util_pct_str = fmt_percent(1.0, precision=0, commas=False, style='prose')
+```
+
+Performance is bounded by two ceilings, as @eq-roofline formalizes; it writes the bound of the arithmetic intensity law (principle \ref{pri-arithmetic-intensity}) as an idealized equality that ignores launch and synchronization overheads. Here, attainable performance $\AttainableComputeRate$ and peak compute $\PeakRate$ are in FLOP/s (often reported as TFLOP/s), peak bandwidth $\Bandwidth$ is in bytes/s (often TB/s), and arithmetic intensity $I$ is in FLOP/byte:
+$$\AttainableComputeRate = \min(\PeakRate, \Bandwidth \times I)$$ {#eq-roofline}
+
+::: {#dfn-hw-acceleration-arithmetic-intensity .callout-definition title="Arithmetic intensity"}
+
+***Arithmetic intensity***\index{Arithmetic intensity!definition} is the ratio of operations to bytes transferred across the memory interface being modeled ($\text{FLOP}/\text{byte}$). Together with that level's bandwidth and the relevant compute peak, it determines which idealized roofline ceiling is lower.
+
+1.  **Significance**: The threshold between the two ceilings is the ridge point $\PeakRate / \Bandwidth$. For an A100 (`{python} RooflineGap.a100_fp16_tflop_per_s_str` FP16/BF16, `{python} RooflineGap.a100_bw_tb_per_s_str`), it is roughly `{python} RooflineGap.a100_ridge_str`. Under the stated traffic models, a large well-tiled `{python} RooflineGap.dense_matmul_dim_str` $\times$ `{python} RooflineGap.dense_matmul_dim_str` multiply reaches about `{python} RooflineGap.dense_matmul_ai_str` FLOP/byte, while standalone ReLU is about `{python} RooflineGap.relu_ai_str` FLOP/byte. They therefore meet different ceilings on the same hardware.
+2.  **Distinction**: Unlike total FLOPs (a count of operations), arithmetic intensity is a ratio that characterizes the shape of a workload's hardware demand. Two kernels with identical FLOPs but different memory access patterns can have different arithmetic intensities and face different modeled ceilings on the same hardware.
+3.  **Common pitfall**: A frequent misconception is that arithmetic intensity is a fixed property of an operation. In practice, it depends on implementation details: a naive matrix multiplication that reloads operands from DRAM for each output element has low arithmetic intensity; a blocked (tiled) implementation that reuses data from fast SRAM achieves high arithmetic intensity—the same mathematical operation, orders of magnitude apart in hardware efficiency.
+
+:::
+
+With $O$ as the operation count and $\DataVolume$ as data volume in bytes, @eq-arithmetic-intensity makes the definition operational.
+$$\ArithmeticIntensity = \frac{O}{\DataVolume}$$ {#eq-arithmetic-intensity}
+
+The roofline visualization shows performance (TFLOP/s) on the vertical axis and arithmetic intensity (FLOP/byte) on the horizontal axis. At low arithmetic intensity, the upper bound increases linearly along the memory bandwidth slope ($\Bandwidth \times \ArithmeticIntensity$). Above the ridge point, the upper bound is peak compute ($\PeakRate$). Actual performance can lie below both limits. @Sec-appdx-dam-taxonomy-bottleneck-diagnostic-3fc9 maps each regime to the optimizations that pay off and the ones that waste effort, so that modeled placement suggests candidate investments whose benefits must be tested against measured execution.
+
+::: {.column-margin .margin-pointer}
+↪ The optimizations that pay off in each regime, and the ones that waste effort, are operationalized in @sec-appdx-dam-taxonomy-bottleneck-diagnostic-3fc9.
+:::
+
+### Hardware ridge points {#sec-hardware-acceleration-hardware-ridge-points-b5b6}
+
+The ridge point\index{Ridge Point!hardware comparison}, the hardware balance $\RooflineRidgePoint$ established in @sec-hardware-acceleration-hardware-balance, is the arithmetic-intensity threshold at which the lower modeled ceiling changes from bandwidth to compute. @Tbl-ridge-points quantifies this boundary across three generations of NVIDIA accelerators:
+
+```{=latex}
+\begingroup
+\renewcommand{\arraystretch}{1.5}
+```
+
+| **NVIDIA Accelerator**\index{NVIDIA Accelerator!definition} |    **Peak FP16**\index{Peak FP16!definition}     |                  Bandwidth                  |              Ridge Point              |
+|:------------------------------------------------------------|:------------------------------------------------:|:-------------------------------------------:|:-------------------------------------:|
+| **V100 (`{python} RooflineGap.v100_year_str`)**             |   `{python} RooflineGap.v100_tflop_per_s_str`    | `{python} RooflineGap.v100_bw_tb_per_s_str` | `{python} RooflineGap.v100_ridge_str` |
+| **A100 (`{python} RooflineGap.a100_year_str`)**             | `{python} RooflineGap.a100_fp16_tflop_per_s_str` | `{python} RooflineGap.a100_bw_tb_per_s_str` | `{python} RooflineGap.a100_ridge_str` |
+| **H100 (`{python} RooflineGap.h100_year_str`)**             | `{python} RooflineGap.h100_fp16_tflop_per_s_str` | `{python} RooflineGap.h100_bw_tb_per_s_str` | `{python} RooflineGap.h100_ridge_str` |
+
+: **Hardware Ridge Points**: Vendor-published FP16 peak throughput and memory bandwidth for three NVIDIA generations, and the ridge point each pair implies. The ridge rises from V100 to H100 because compute throughput grows faster than bandwidth; these values are hardware-specific rather than universal generation averages. {#tbl-ridge-points}
+
+```{=latex}
+\endgroup
+```
+
+Because arithmetic throughput has grown far faster than memory bandwidth across generations, the hardware ridge point shifts progressively rightward. A workload must therefore exhibit substantially greater data reuse to saturate newer hardware; an algorithm that was compute-bound on an older architecture can easily become memory-bound on a newer one.
+
+::: {#nbk-hw-acceleration-utilization-gap .callout-notebook title="The utilization gap"}
+
+**Problem**: Why is it harder to get `{python} RooflineGap.full_util_pct_str` utilization on an H100 than a V100?
+
+**Metric**: The ridge point $\RooflineRidgePoint = \PeakRate / \Bandwidth$ (FLOP/byte) from @sec-hardware-acceleration-hardware-balance: how many math operations the hardware must perform for every byte of data loaded to keep the compute units busy.
+
+**Evolution**:
+
+*   **V100 (`{python} RooflineGap.v100_year_str`)**: `{python} RooflineGap.v100_tflop_per_s_str` / `{python} RooflineGap.v100_bw_tb_per_s_str` ≈ `{python} RooflineGap.v100_ridge_str`.
+*   **A100 (`{python} RooflineGap.a100_year_str`)**: `{python} RooflineGap.a100_fp16_tflop_per_s_str` / `{python} RooflineGap.a100_bw_tb_per_s_str` ≈ `{python} RooflineGap.a100_ridge_str`.
+*   **H100 (`{python} RooflineGap.h100_year_str`)**: `{python} RooflineGap.h100_fp16_tflop_per_s_str` / `{python} RooflineGap.h100_bw_tb_per_s_str` ≈ `{python} RooflineGap.h100_ridge_str`.
+
+**Result**: The intensity needed to reach the tensor peak has increased. Under this simple HBM roofline, a kernel with $I$ = `{python} RooflineGap.legacy_ai_str` FLOP/byte lies above the A100 ridge but below the H100 ridge. If its intensity and implementation remain unchanged, its idealized gain is then closer to the `{python} RooflineGap.bandwidth_ratio_mult_str` bandwidth ratio than the `{python} RooflineGap.flops_ratio_mult_str` peak-compute ratio.
+
+**Systems insight**: A standalone ReLU under a one-read, one-write FP32 traffic model performs about 1 operation per 8 bytes, far below the H100 tensor ridge. A well-tiled `{python} RooflineGap.dense_matmul_dim_str` $\times$ `{python} RooflineGap.dense_matmul_dim_str` dense multiply reaches about `{python} RooflineGap.dense_matmul_ai_str` FLOP/byte under its idealized traffic model. Fusion is valuable for low-intensity chains because it can remove intermediate round-trips; it is not automatically the best optimization for every kernel.
+
+:::
+
+Operations such as depthwise convolution\index{Depthwise Convolution!low arithmetic intensity}, embedding lookup\index{Embedding Lookup!memory-bound operation}, LayerNorm\index{LayerNorm!memory-bound operation}, and softmax\index{Softmax!memory-bound operation} serve as low-intensity reference points because their limited data reuse makes memory traffic a candidate bottleneck. @Tbl-roofline-operations maps common neural network operations to modeled roofline regimes; these classifications identify the lower ceiling rather than certify the cause of a measured runtime.
+
+```{=latex}
+\begingroup
+\renewcommand{\arraystretch}{1.5}
+```
+
+| Operation                                           | Arithmetic Intensity   | **Classification**\index{Classification!definition} | **Lighthouse example**\index{Lighthouse example!definition} |
+|:----------------------------------------------------|:-----------------------|:----------------------------------------------------|:------------------------------------------------------------|
+| **Conv2D (Dense)**                                  | 50--200 FLOP/byte      | Straddles ridge; high-reuse cases compute-bound     | ResNet-50                                                   |
+| **Dense MatMul (large batch, well-tiled)**          | ~150--1,000+ FLOP/byte | Compute-bound once above the target's ridge         | GPT-2 (batched projections)                                 |
+| **Depthwise conv**\index{Depthwise conv!definition} | 10--20 FLOP/byte       | Memory-bound                                        | MobileNet                                                   |
+| Attention Softmax                                   | Convention-dependent   | Memory-bound                                        | GPT-2 (Generation)                                          |
+| LayerNorm                                           | 1--2 FLOP/byte         | Memory-bound                                        | GPT-2/Llama                                                 |
+| Embedding lookup                                    | $<1$ FLOP/byte         | Memory-bound                                        | DLRM                                                        |
+
+: **Operations on the Roofline**: Neural network layers span a wide range of arithmetic intensities. Large, well-tiled convolutions and batched GEMMs can be compute-bound, while MobileNet depthwise layers, attention softmax, normalization, and DLRM embeddings are often memory-bound. To see how these intensity values translate into real performance predictions, a transformer layer provides a complete arithmetic-intensity calculation across its major sub-operations. {#tbl-roofline-operations tbl-colwidths="[25,25,25,25]"}
+
+```{python}
+#| echo: false
+#| label: transformer-layer-calc
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ TRANSFORMER LAYER ARITHMETIC INTENSITY
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: "Transformer Layer Analysis" callout in Roofline section
+# │
+# │ Goal: Contrast compute-bound and memory-bound ops in a transformer layer.
+# │ Show: Why softmax dominates memory traffic despite having few FLOPs.
+# │ How: Calculate arithmetic intensity for QKV projection vs. softmax.
+# │
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim.fmt import check, fmt, fmt_flops, fmt_int, fmt_memory, fmt_arithmetic_intensity
+
+class TransformerLayerCalc:
+    """Arithmetic intensity for QKV projection vs. softmax in a transformer layer."""
+
+    # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
+    # Illustrative transformer-layer config for this worked example (BERT-base-like).
+    hidden_dim = 768
+    batch_size = 32
+    seq_len = 512
+    num_heads = 12
+    t_fp_bytes_value = BYTES_FP16.to(byte).magnitude
+
+    # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
+    # QKV Projection
+    qkv_flops_value = 2 * 3 * batch_size * seq_len * hidden_dim * hidden_dim
+    qkv_flops_b_value = (qkv_flops_value * flop).to(GFLOPs).magnitude
+
+    qkv_input_value = batch_size * seq_len * hidden_dim
+    qkv_weights_value = 3 * hidden_dim * hidden_dim
+    qkv_output_value = batch_size * seq_len * hidden_dim * 3
+    qkv_bytes_value = (qkv_input_value + qkv_weights_value + qkv_output_value) * t_fp_bytes_value
+    qkv_memory = qkv_bytes_value * byte
+    qkv_ai_value = qkv_flops_value / qkv_bytes_value
+
+    # Softmax
+    softmax_flops_value = batch_size * num_heads * seq_len * seq_len * 3
+    softmax_flops_m_value = (softmax_flops_value * flop).to(MFLOPs).magnitude
+    softmax_bytes_value = batch_size * num_heads * seq_len * seq_len * 2 * t_fp_bytes_value
+    softmax_memory = softmax_bytes_value * byte
+    softmax_ai_value = softmax_flops_value / softmax_bytes_value
+
+    a100_ridge_value = Hardware.Cloud.A100.ridge_point().to(flop / byte).magnitude
+
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(round(qkv_ai_value, 1) == 556.4, f"QKV intensity mismatch: {qkv_ai_value}")
+    check(round(softmax_ai_value, 2) == 0.75, f"Softmax intensity mismatch: {softmax_ai_value}")
+    check(qkv_ai_value > a100_ridge_value > softmax_ai_value, "QKV must be compute-bound and softmax memory-bound")
+
+    # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
+    t_hidden_str = fmt(hidden_dim, precision=0, commas=False)
+    t_batch_str = fmt(batch_size, precision=0, commas=False)
+    t_seq_str = fmt(seq_len, precision=0, commas=False)
+    t_heads_str = fmt(num_heads, precision=0, commas=False)
+    qkv_gflop_str = fmt_flops(qkv_flops_value * flop, unit=GFLOPs, commas=False)
+    qkv_mb_str = fmt_memory(qkv_memory, unit=MB, precision=1, commas=False)
+    qkv_ai_str = fmt(qkv_ai_value, precision=1, commas=False)
+    softmax_mflop_str = fmt_flops(softmax_flops_value * flop, unit=MFLOPs, commas=False)
+    softmax_mb_str = fmt_memory(softmax_memory, unit=MB, precision=1, commas=False)
+    softmax_ai_str = fmt(softmax_ai_value, precision=2, commas=False)
+    a100_ridge_str = fmt_arithmetic_intensity(Hardware.Cloud.A100.ridge_point(), unit=flop / byte, commas=False)
+```
+
+::: {#nbk-transformer-layers .callout-notebook title="Transformer layer analysis"}
+
+For a transformer with hidden dimension $d$ = `{python} TransformerLayerCalc.t_hidden_str`, batch size $B$ = `{python} TransformerLayerCalc.t_batch_str`, sequence length $S$ = `{python} TransformerLayerCalc.t_seq_str`, and $\NumberOfAttentionHeads$ = `{python} TransformerLayerCalc.t_heads_str` attention heads:
+
+**Attention QKV projection**:
+
+- FLOPs: 2 $\times$ 3 $\times$ `{python} TransformerLayerCalc.t_batch_str` $\times$ `{python} TransformerLayerCalc.t_seq_str` $\times$ `{python} TransformerLayerCalc.t_hidden_str` $\times$ `{python} TransformerLayerCalc.t_hidden_str` = `{python} TransformerLayerCalc.qkv_gflop_str`
+- Bytes: (input + weights + output) = (`{python} TransformerLayerCalc.t_batch_str` $\times$ `{python} TransformerLayerCalc.t_seq_str` $\times$ `{python} TransformerLayerCalc.t_hidden_str` + 3 $\times$ `{python} TransformerLayerCalc.t_hidden_str` $\times$ `{python} TransformerLayerCalc.t_hidden_str` + `{python} TransformerLayerCalc.t_batch_str` $\times$ `{python} TransformerLayerCalc.t_seq_str` $\times$ `{python} TransformerLayerCalc.t_hidden_str` $\times$ 3) $\times$ 2 ≈ `{python} TransformerLayerCalc.qkv_mb_str`
+- $I$ = `{python} TransformerLayerCalc.qkv_gflop_str` / `{python} TransformerLayerCalc.qkv_mb_str` = `{python} TransformerLayerCalc.qkv_ai_str` FLOP/byte, placing the compute ceiling below the bandwidth ceiling on A100 (above `{python} TransformerLayerCalc.a100_ridge_str` threshold)
+
+**Softmax**:
+
+- FLOPs: `{python} TransformerLayerCalc.t_batch_str` $\times$ `{python} TransformerLayerCalc.t_heads_str` $\times$ `{python} TransformerLayerCalc.t_seq_str` $\times$ `{python} TransformerLayerCalc.t_seq_str` $\times$ 3 ≈ `{python} TransformerLayerCalc.softmax_mflop_str` (exp, sum, div)
+- Bytes: `{python} TransformerLayerCalc.t_batch_str` $\times$ `{python} TransformerLayerCalc.t_heads_str` $\times$ `{python} TransformerLayerCalc.t_seq_str` $\times$ `{python} TransformerLayerCalc.t_seq_str` $\times 2 \times 2$ = `{python} TransformerLayerCalc.softmax_mb_str`
+- $I$ = `{python} TransformerLayerCalc.softmax_mflop_str` / `{python} TransformerLayerCalc.softmax_mb_str` = `{python} TransformerLayerCalc.softmax_ai_str` FLOP/byte under this simple operation count, placing the bandwidth ceiling below the compute ceiling. Counting exponentials and division as multiple operations increases the numerical intensity; the chosen convention must be used consistently when comparing it with the hardware ceiling.
+
+**Systems insight**: This analysis explains why FlashAttention\index{FlashAttention!memory optimization}\index{Attention Mechanism!memory-bound softmax} focuses on reducing memory traffic in attention rather than reducing FLOPs.
+
+:::
+
+The roofline classification identifies the lower modeled ceiling and suggests optimizations to test against measured execution. For memory-bound operations, execution time is dominated by data transfers across the off-chip memory bus; ALU pipelines spend idle cycles waiting for operands. Optimization must therefore focus on conserving memory bandwidth: fusing adjacent operators keeps intermediate activations in on-chip registers or shared memory (SRAM), lower-precision numeric formats reduce the physical byte count of memory transfers, and algorithmic refactorings like FlashAttention restructure access patterns to compute within SRAM tiles. For compute-bound operations, off-chip bandwidth is no longer the bottleneck because high data reuse keeps execution units supplied. Performance here depends on saturating arithmetic execution pipelines: structuring matrix tiles to sustain Tensor Core throughput, hiding instruction latencies through software pipelining, and scaling batch sizes to distribute work across all available streaming multiprocessors.
+
+::: {.column-margin .margin-pointer}
+↪ How a benchmark determines where a workload actually sits against its roofline ceiling is developed in @sec-benchmarking-system-benchmarks-393c.
+:::
+
+### Calculating memory bandwidth bounds {#sec-hardware-acceleration-calculating-memory-bandwidth-bounds-7fc0}
+
+The memory-bound region of the Roofline Model is governed by the accelerator's off-chip memory bandwidth. To sustain an operational throughput $R_{\text{ops}}$ (FLOP/s) for a workload with arithmetic intensity $I$ (FLOP/byte), the memory subsystem must transfer data at the rate defined by @eq-required-bandwidth:
+$$\Bandwidth_{\text{req}} = \frac{R_{\text{ops}}}{I} \text{ bytes/s}$$ {#eq-required-bandwidth}
+
+When this required bandwidth exceeds the hardware's peak memory bandwidth $\Bandwidth$, memory transfers cap attainable throughput according to @eq-attainable-throughput:
+$$\AttainableComputeRate = \Bandwidth \times I$$ {#eq-attainable-throughput}
+
+Evaluating an operation against the hardware's ridge point determines whether bandwidth or arithmetic throughput sets the lower modeled ceiling. When data reuse is extensive, arithmetic intensity clears the ridge point, placing the kernel in the compute-bound regime. A 2D convolution demonstrates this behavior.
+
+```{python}
+#| echo: false
+#| label: conv2d-analysis-calc
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ CONV2D LAYER ROOFLINE ANALYSIS
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: "Convolutional Layer Analysis" callout notebook
+# │
+# │ Goal: Demonstrate a compute-bound operation using convolution.
+# │ Show: That weight reuse in Conv2D yields high arithmetic intensity.
+# │ How: Calculate FLOPs and memory traffic for a standard 3x3 convolution.
+# │
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim.fmt import check, fmt, fmt_int, fmt_count, fmt_arithmetic_intensity
+
+class Conv2dAnalysisCalc:
+    """Roofline analysis for a 3×3 Conv2D layer showing compute-bound behavior."""
+
+    # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
+    conv_batch = 32
+    conv_cin = 128
+    conv_h = 56
+    conv_w = 56
+    conv_cout = 256
+    conv_k = 3
+    conv_fp_bytes = BYTES_FP16.to(byte).magnitude
+
+    # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
+    conv_out_elements = conv_batch * conv_cout * conv_h * conv_w
+    conv_out_m = conv_out_elements / MILLION
+    conv_flops_per_out = conv_cin * conv_k * conv_k * 2
+    conv_total_flops = conv_out_elements * conv_flops_per_out * flop
+
+    conv_input_memory = conv_batch * conv_cin * conv_h * conv_w * conv_fp_bytes * byte
+    conv_weights_memory = conv_cout * conv_cin * conv_k * conv_k * conv_fp_bytes * byte
+    conv_output_memory = conv_batch * conv_cout * conv_h * conv_w * conv_fp_bytes * byte
+    conv_total_memory = conv_input_memory + conv_weights_memory + conv_output_memory
+
+    conv_ai = (conv_total_flops / conv_total_memory).to(flop / byte).magnitude
+
+    a100_ridge_value = Hardware.Cloud.A100.ridge_point().to(flop / byte).magnitude
+    a100_fp16_flops = Hardware.Cloud.A100.compute.peak_flops
+
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(round(conv_ai, 1) == 762.2, f"Conv2D arithmetic intensity mismatch: {conv_ai}")
+    check(conv_ai > a100_ridge_value, f"Expected Conv2D intensity {conv_ai} to exceed A100 ridge {a100_ridge_value}")
+
+    # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
+    conv_out_m_str = fmt_count(conv_out_elements, scale="M", precision=1, commas=False)
+    conv_flops_per_out_value_str = fmt(conv_flops_per_out, precision=0)
+    conv_total_gflop_str = fmt_flops(conv_total_flops, unit=GFLOPs, precision=1, commas=False)
+    conv_input_mb_str = fmt_memory(conv_input_memory, unit=MB, precision=1, commas=False)
+    conv_weights_mb_str = fmt_memory(conv_weights_memory, unit=MB, precision=1, commas=False)
+    conv_output_mb_str = fmt_memory(conv_output_memory, unit=MB, precision=1, commas=False)
+    conv_total_mb_str = fmt_memory(conv_total_memory, unit=MB, precision=1, commas=False)
+    conv_ai_str = fmt(conv_ai, precision=1, commas=False)
+    a100_ridge_str = fmt_arithmetic_intensity(Hardware.Cloud.A100.ridge_point(), unit=flop / byte, commas=False)
+    a100_fp16_tflop_per_s_str = fmt_flop_rate(a100_fp16_flops, unit=TFLOP / second, precision=0, commas=False)
+    # Calc-line LHS products pinned to cell constants (inline {python} cannot
+    # evaluate inside $...$): each renders the explicit derivation expression.
+    _fpb = int(conv_fp_bytes)
+    conv_out_dims_math = fmt_math(f"{conv_batch} \\times {conv_cout} \\times {conv_h} \\times {conv_w}")
+    conv_flops_per_out_math = fmt_math(f"{conv_cin} \\times {conv_k} \\times {conv_k} \\times 2")
+    conv_input_dims_math = fmt_math(f"{conv_batch} \\times {conv_cin} \\times {conv_h} \\times {conv_w} \\times {_fpb}")
+    conv_weights_dims_math = fmt_math(f"{conv_cout} \\times {conv_cin} \\times {conv_k} \\times {conv_k} \\times {_fpb}")
+    conv_output_dims_math = fmt_math(f"{conv_batch} \\times {conv_cout} \\times {conv_h} \\times {conv_w} \\times {_fpb}")
+```
+
+::: {#nbk-conv-analysis .callout-notebook title="Convolutional layer analysis"}
+
+Consider a Conv2D\index{Roofline Analysis!conv2d layer} layer with input shape (batch = 32, channels = 128, height = 56, width = 56), output channels = 256, and kernel size $3{\times}3$ on an A100 GPU:
+
+**Computational requirements**:
+
+- Output size: `{python} Conv2dAnalysisCalc.conv_out_dims_math` = `{python} Conv2dAnalysisCalc.conv_out_m_str` elements
+- FLOPs per output: `{python} Conv2dAnalysisCalc.conv_flops_per_out_math` = `{python} Conv2dAnalysisCalc.conv_flops_per_out_value_str` (multiply-add)
+- Total FLOPs: `{python} Conv2dAnalysisCalc.conv_out_m_str` $\times$ `{python} Conv2dAnalysisCalc.conv_flops_per_out_value_str` = `{python} Conv2dAnalysisCalc.conv_total_gflop_str`
+
+```{=latex}
+\vspace*{-0.75ex}
+```
+**Memory traffic analysis**:
+
+- Input: `{python} Conv2dAnalysisCalc.conv_input_dims_math` = `{python} Conv2dAnalysisCalc.conv_input_mb_str` (FP16)
+- Weights: `{python} Conv2dAnalysisCalc.conv_weights_dims_math` ≈ `{python} Conv2dAnalysisCalc.conv_weights_mb_str` (FP16)
+- Output: `{python} Conv2dAnalysisCalc.conv_output_dims_math` = `{python} Conv2dAnalysisCalc.conv_output_mb_str` (FP16)
+- Total: `{python} Conv2dAnalysisCalc.conv_total_mb_str`
+
+```{=latex}
+\vspace*{-0.75ex}
+```
+**Arithmetic intensity**:
+$I$ = `{python} Conv2dAnalysisCalc.conv_total_gflop_str` / `{python} Conv2dAnalysisCalc.conv_total_mb_str` = `{python} Conv2dAnalysisCalc.conv_ai_str` FLOP/byte
+
+**Systems insight**: This is well above A100's ridge point of `{python} Conv2dAnalysisCalc.a100_ridge_str`, so the simple Roofline Model places the operation in the compute-limited region. Peak throughput of ~`{python} Conv2dAnalysisCalc.a100_fp16_tflop_per_s_str` (FP16 with Tensor Cores) is therefore the ceiling, but realized performance still depends on tiling, occupancy, instruction mix, and library efficiency.
+
+:::
+
+The convolutional layer's high arithmetic intensity arises from spatial weight reuse: the same $3{\times}3$ kernel is applied across every spatial location in the feature map, amortizing the cost of loading weights from off-chip memory across millions of multiply-accumulate operations. Keeping active tiles in registers and shared memory reduces repeated off-chip transfers, making high arithmetic throughput possible. The roofline calculation alone does not establish bus idleness or arithmetic saturation.
+
+Not all neural network layers exhibit such extensive data reuse. Fully connected (dense) layers—such as classification heads, feed-forward networks, and linear projections in transformer attention blocks—lack spatial dimensions. When evaluated at small batch sizes, their arithmetic intensity drops substantially, shifting execution into the memory-bound regime:
+
+```{python}
+#| echo: false
+#| label: dense-layer-analysis-calc
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ DENSE LAYER ROOFLINE ANALYSIS
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: "Dense Layer Analysis" callout notebook
+# │
+# │ Goal: Contrast memory-bound GEMM with compute-bound convolution.
+# │ Show: That small GEMMs fail to saturate GPU compute due to memory bandwidth limits.
+# │ How: Apply the Roofline Model to calculate attainable performance for a dense layer.
+# │
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim.fmt import check, fmt, fmt_flops, fmt_int, fmt_arithmetic_intensity
+
+class DenseLayerAnalysisCalc:
+    """Roofline analysis for a small GEMM showing memory-bound behavior."""
+
+    # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
+    dense_batch = 32
+    dense_in = 2048
+    dense_out = 2048
+
+    # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
+    dense_total_mflops = (2 * dense_batch * dense_in * dense_out * flop).to(MFLOPs).magnitude
+
+    dense_input_memory = dense_batch * dense_in * 2 * byte
+    dense_weights_memory = dense_in * dense_out * 2 * byte
+    dense_output_memory = dense_batch * dense_out * 2 * byte
+    dense_total_memory = dense_input_memory + dense_weights_memory + dense_output_memory
+
+    dense_total_flops = dense_total_mflops * MFLOPs
+    dense_ai_qty = (dense_total_flops / dense_total_memory).to(flop / byte)
+    dense_ai = dense_ai_qty.magnitude
+
+    a100_bandwidth = Hardware.Cloud.A100.memory.bandwidth
+    a100_peak = Hardware.Cloud.A100.compute.peak_flops
+    dense_attainable = (a100_bandwidth * dense_ai_qty).to(TFLOP / second)
+    dense_util_pct = (dense_attainable / a100_peak).to_base_units().magnitude * 100
+
+    a100_ridge_value = Hardware.Cloud.A100.ridge_point().to(flop / byte).magnitude
+
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(round(dense_ai, 1) == 31.0, f"Dense arithmetic intensity mismatch: {dense_ai}")
+    check(round(dense_util_pct, 1) == 20.3, f"Dense utilization pct mismatch: {dense_util_pct}")
+    check(dense_ai < a100_ridge_value, f"Expected Dense intensity {dense_ai} below A100 ridge {a100_ridge_value}")
+
+    # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
+    dense_total_mflop_str = fmt_flops(dense_total_flops, unit=MFLOPs, precision=1, commas=False)
+    dense_input_kb_str = fmt_memory(dense_input_memory, unit=KB, precision=1, commas=False)
+    dense_weights_mb_str = fmt_memory(dense_weights_memory, unit=MB, precision=1, commas=False)
+    dense_output_kb_str = fmt_memory(dense_output_memory, unit=KB, precision=1, commas=False)
+    dense_total_mb_str = fmt_memory(dense_total_memory, unit=MB, precision=1, commas=False)
+    dense_ai_flops_per_byte_str = fmt_arithmetic_intensity(dense_ai_qty, unit=flop / byte, commas=False)
+    dense_attainable_tflop_per_s_str = fmt_flop_rate(dense_attainable, unit=TFLOP / second, commas=False)
+    dense_util_pct_str = fmt_percent(dense_util_pct / 100, precision=1, commas=False, style='prose')
+    a100_bw_gb_per_s_str = fmt_bandwidth(a100_bandwidth, unit=GB / second, precision=0, commas=True)
+    a100_ridge_str = fmt_arithmetic_intensity(Hardware.Cloud.A100.ridge_point(), unit=flop / byte, commas=False)
+    # Calc-line LHS products pinned to cell constants (inline {python} cannot
+    # evaluate inside $...$): each renders the explicit derivation expression.
+    dense_matmul_dims_math = fmt_math(f"({dense_batch} \\times {dense_in}) \\times ({dense_in} \\times {dense_out})")
+    dense_total_flops_math = fmt_math(f"2 \\times {dense_batch} \\times {dense_in} \\times {dense_out}")
+    dense_input_dims_math = fmt_math(f"{dense_batch} \\times {dense_in} \\times 2")
+    dense_weights_dims_math = fmt_math(f"{dense_in} \\times {dense_out} \\times 2")
+    dense_output_dims_math = fmt_math(f"{dense_batch} \\times {dense_out} \\times 2")
+```
+
+::: {#nbk-hw-acceleration-dense-layer-analysis .callout-notebook title="Dense layer analysis"}
+
+Consider a fully connected layer\index{Dense Layer!roofline analysis}\index{Roofline Analysis!dense layer}: input (batch = 32, features = 2048) → output (batch = 32, features = 2048) on the same A100:
+
+**Computational requirements**:
+
+- Matrix multiply: `{python} DenseLayerAnalysisCalc.dense_matmul_dims_math`
+- Total FLOPs: `{python} DenseLayerAnalysisCalc.dense_total_flops_math` = `{python} DenseLayerAnalysisCalc.dense_total_mflop_str`
+
+```{=latex}
+\vspace*{-0.75ex}
+```
+**Memory traffic analysis**:
+
+- Input: `{python} DenseLayerAnalysisCalc.dense_input_dims_math` = `{python} DenseLayerAnalysisCalc.dense_input_kb_str` (FP16)
+- Weights: `{python} DenseLayerAnalysisCalc.dense_weights_dims_math` = `{python} DenseLayerAnalysisCalc.dense_weights_mb_str` (FP16)
+- Output: `{python} DenseLayerAnalysisCalc.dense_output_dims_math` = `{python} DenseLayerAnalysisCalc.dense_output_kb_str` (FP16)
+- Total: `{python} DenseLayerAnalysisCalc.dense_total_mb_str`
+
+```{=latex}
+\vspace*{-0.75ex}
+```
+**Arithmetic intensity**:
+$I$ = `{python} DenseLayerAnalysisCalc.dense_total_mflop_str` / `{python} DenseLayerAnalysisCalc.dense_total_mb_str` = `{python} DenseLayerAnalysisCalc.dense_ai_flops_per_byte_str`
+
+This intensity sits below A100's ridge point of `{python} DenseLayerAnalysisCalc.a100_ridge_str`, so bandwidth sets the lower modeled ceiling. Performance upper bound:
+$\AttainableComputeRate$ = `{python} DenseLayerAnalysisCalc.a100_bw_gb_per_s_str` $\times$ `{python} DenseLayerAnalysisCalc.dense_ai_flops_per_byte_str` = `{python} DenseLayerAnalysisCalc.dense_attainable_tflop_per_s_str`
+
+**Systems insight**: The modeled ceiling is only `{python} DenseLayerAnalysisCalc.dense_util_pct_str` of peak compute capability, demonstrating the memory wall constraint for this small-batch traffic model.
+
+:::
+
+The dense layer's lower arithmetic intensity stems from limited parameter reuse. While a convolutional kernel is reused across every spatial location in an activation map, a dense weight matrix is reused only across the batch dimension. At a batch size of 32, each fetched weight contributes to 32 sample products in this operation. Assuming the weights are streamed from HBM as modeled, the bandwidth ceiling caps throughput at `{python} DenseLayerAnalysisCalc.dense_util_pct_str` of peak compute capacity. This fraction is not a measurement of stalled cycles, and weights may remain cached across invocations. The calculation explains why low-batch dense inference is a candidate for bandwidth-focused optimization.
+
+While small-batch matrix multiplications suffer from restricted parameter reuse, elementwise and reduction operators represent an even more acute memory bottleneck. Operations such as layer normalization, activation functions, and residual additions perform only a few arithmetic operations per element loaded from memory, driving arithmetic intensity to its physical floor:
+
+```{python}
+#| echo: false
+#| label: layernorm-analysis-calc
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ LAYERNORM ROOFLINE ANALYSIS
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: "LayerNorm Analysis" callout notebook
+# │
+# │ Goal: Demonstrate a severely memory-bound workload.
+# │ Show: Why LayerNorm achieves <1% of peak compute despite its necessity.
+# │ How: Apply the Roofline Model to calculate arithmetic intensity for LayerNorm.
+# │
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim.fmt import fmt_int, fmt, fmt_flops, fmt_count, check
+
+class LayernormAnalysisCalc:
+    """Roofline analysis for LayerNorm showing severely memory-bound behavior."""
+
+    # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
+    ln_batch = 32
+    ln_seq = 512
+    ln_hidden = 768
+    ln_fp_bytes = int(BYTES_FP16.to(byte).magnitude)
+
+    # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
+    ln_elements = ln_batch * ln_seq * ln_hidden
+    ln_elements_m = ln_elements / MILLION
+    ln_flops_per = 8
+    ln_total_mflops = ln_elements_m * ln_flops_per
+
+    ln_input_memory = ln_elements * ln_fp_bytes * byte
+    ln_params_memory = ln_hidden * 2 * ln_fp_bytes * byte
+    ln_output_memory = ln_elements * ln_fp_bytes * byte
+    ln_total_memory = ln_input_memory + ln_output_memory + ln_params_memory
+
+    ln_total_flops = ln_total_mflops * MFLOPs
+    ln_ai_qty = (ln_total_flops / ln_total_memory).to(flop / byte)
+    ln_ai = ln_ai_qty.magnitude
+
+    a100_bandwidth = Hardware.Cloud.A100.memory.bandwidth
+    a100_ridge_value = Hardware.Cloud.A100.ridge_point().to(flop / byte).magnitude
+    ln_attainable = (a100_bandwidth * ln_ai_qty).to(TFLOP / second)
+    ln_ridge_gap = a100_ridge_value / ln_ai
+
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(1.5 < ln_ai < 2.5, f"LayerNorm AI should be around 2 FLOP/byte, got {ln_ai:.2f}")
+    check(ln_ridge_gap > 50, f"LayerNorm should sit far below the A100 ridge, got {ln_ridge_gap:.1f}x")
+
+    # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
+    ln_elements_m_str = fmt_count(ln_elements, scale="M", precision=1, commas=False)
+    ln_total_mflop_str = fmt_flops(ln_total_flops, unit=MFLOPs, precision=1, commas=False)
+    ln_input_mb_str = fmt_memory(ln_input_memory, unit=MB, precision=1, commas=False)
+    ln_params_kb_str = fmt_memory(ln_params_memory, unit=KB, precision=1, commas=False)
+    ln_output_mb_str = fmt_memory(ln_output_memory, unit=MB, precision=1, commas=False)
+    ln_total_mb_str = fmt_memory(ln_total_memory, unit=MB, precision=1, commas=False)
+    ln_ai_str = fmt(ln_ai, precision=1, commas=False)
+    ln_ridge_gap_mult_str = fmt_multiple(round(ln_ridge_gap), commas=False, precision=0)
+    ln_attainable_tflop_per_s_str = fmt_flop_rate(ln_attainable, unit=TFLOP / second, precision=1, commas=False)
+    a100_bw_gb_per_s_str = fmt_bandwidth(a100_bandwidth, unit=GB / second, precision=0, commas=False)
+    ln_flops_per_element_value_str = fmt(ln_flops_per, precision=0, commas=False)
+    ln_fp_bytes_str = fmt(ln_fp_bytes, precision=0, commas=False)
+    # Calc-line LHS products pinned to cell constants (inline {python} cannot
+    # evaluate inside $...$).
+    ln_elements_dims_math = fmt_math(f"{ln_batch} \\times {ln_seq} \\times {ln_hidden}")
+    ln_params_dims_math = fmt_math(f"{ln_hidden} \\times 2 \\times {ln_fp_bytes}")
+```
+
+::: {#nbk-hw-acceleration-layernorm-analysis .callout-notebook title="LayerNorm analysis"}
+
+LayerNorm with input shape (batch = 32, seq = 512, hidden = 768):
+
+**Computational requirements**:
+
+- Elements: `{python} LayernormAnalysisCalc.ln_elements_dims_math` = `{python} LayernormAnalysisCalc.ln_elements_m_str`
+- Approximate operations per element: mean reduction (1 ADD), variance (2 ADD, 1 MUL), normalization and affine transform (2 ADD, 2 MUL) ≈ `{python} LayernormAnalysisCalc.ln_flops_per_element_value_str`; reciprocal-square-root overhead is amortized across each hidden vector
+- Total FLOPs: `{python} LayernormAnalysisCalc.ln_elements_m_str` $\times$ `{python} LayernormAnalysisCalc.ln_flops_per_element_value_str` = `{python} LayernormAnalysisCalc.ln_total_mflop_str`
+
+```{=latex}
+\vspace*{-0.75ex}
+```
+**Memory traffic**:
+
+- Input: `{python} LayernormAnalysisCalc.ln_elements_m_str` $\times$ `{python} LayernormAnalysisCalc.ln_fp_bytes_str` = `{python} LayernormAnalysisCalc.ln_input_mb_str`
+- Parameters (scale, bias): `{python} LayernormAnalysisCalc.ln_params_dims_math` = `{python} LayernormAnalysisCalc.ln_params_kb_str` (negligible)
+- Output: `{python} LayernormAnalysisCalc.ln_elements_m_str` $\times$ `{python} LayernormAnalysisCalc.ln_fp_bytes_str` = `{python} LayernormAnalysisCalc.ln_output_mb_str`
+- Total: `{python} LayernormAnalysisCalc.ln_total_mb_str`
+
+```{=latex}
+\vspace*{-0.75ex}
+```
+**Arithmetic intensity**:
+$I$ = `{python} LayernormAnalysisCalc.ln_total_mflop_str` / `{python} LayernormAnalysisCalc.ln_total_mb_str` = `{python} LayernormAnalysisCalc.ln_ai_str` FLOP/byte
+
+This arithmetic intensity sits severely below the A100 ridge point (`{python} LayernormAnalysisCalc.ln_ridge_gap_mult_str` below). The HBM performance upper bound is:
+$\AttainableComputeRate$ = `{python} LayernormAnalysisCalc.a100_bw_gb_per_s_str` $\times$ `{python} LayernormAnalysisCalc.ln_ai_str` FLOP/byte = `{python} LayernormAnalysisCalc.ln_attainable_tflop_per_s_str`
+
+**Systems insight**: The simple HBM roofline bounds this standalone LayerNorm at about 1 percent of A100's tensor peak. Actual latency also depends on fusion, reduction strategy, launch overhead, and which memory level supplies the data.
+
+:::
+
+Standalone normalization performs minimal arithmetic relative to the memory traffic it generates, as the LayerNorm\index{Roofline Analysis!layer normalization} analysis demonstrates. The illustrated unfused implementation reads and writes activation buffers, giving approximately 2 FLOP/byte when those transfers cross HBM. Cache residency and fusion can change physical HBM traffic. A ceiling near 1 percent of tensor peak is not evidence that all compute units are idle for 99 percent of execution. In the D·A·M framework, operator fusion is one candidate response to excessive intermediate traffic. Combining adjacent projections, bias additions, normalization, or activations can keep values in registers or SRAM, provided the grouping preserves numerical behavior and fits local resources. Profiling establishes whether the saved traffic outweighs any occupancy or scheduling cost.
+
+### Optimization by intensity regime {#sec-hardware-acceleration-optimization-intensity-regime-cb3a}
+
+The roofline analysis directly informs optimization priorities, summarized in @tbl-optimization-intensity-regime.
+
+| **Intensity regime**\index{Intensity regime!definition} | **Typical operations**\index{Typical operations!definition} | **Optimization priority**\index{Optimization priority!definition} | **Common techniques**\index{Common techniques!definition}                             | **Expected impact**\index{Expected impact!definition}                          |
+|:--------------------------------------------------------|:------------------------------------------------------------|:------------------------------------------------------------------|:--------------------------------------------------------------------------------------|:-------------------------------------------------------------------------------|
+| **High $I$ ($>200$ FLOP/byte)**                         | Large convolutions                                          | Maximize compute utilization.                                     | Tensor Cores, thread-block tuning, and high occupancy.                                | Raises sustained compute utilization when the kernel already clears the ridge. |
+| **Medium $I$ (20--200 FLOP/byte)**                      | Medium-sized dense layers                                   | Balance compute and memory optimization.                          | Larger batches, register tiling, and fusion with adjacent operations.                 | Can move the binding bottleneck between memory and compute.                    |
+| **Low $\ArithmeticIntensity$ ($<20$ FLOP/byte)**        | Small dense layers and element-wise operations              | Reduce memory traffic.                                            | Aggressive operator fusion, reduced precision (FP16 → INT8), and algorithmic changes. | Reduces external-memory traffic when fusion or layout changes are legal.       |
+| **Very low $\ArithmeticIntensity$ ($<2$ FLOP/byte)**    | Normalization layers and activation functions               | Eliminate memory round-trips.                                     | Fuse with adjacent operations and use in-place computation where legal.               | Removes intermediate round-trips when adjacent operations can be fused.        |
+
+: **Optimization by Arithmetic Intensity Regime**: Roofline position determines whether an optimization should chase compute utilization, memory-traffic reduction, or complete elimination of memory round-trips. The lower the arithmetic intensity, the more valuable fusion and data-movement avoidance become. {#tbl-optimization-intensity-regime tbl-colwidths="[13,18,16,25,28]"}
+
+For low-intensity operations, operator fusion\index{Operator fusion!memory-bound optimization} is often the decisive optimization: LayerNorm\index{LayerNorm!kernel fusion target} combined with the Gaussian Error Linear Unit (GELU), for example, can become a single fused kernel. One of the most accessible levers for moving an operation up and right on the roofline is batching.
+
+```{python}
+#| echo: false
+#| label: batch-ai-calc
+from mlsysim.fmt import fmt_int, fmt, check, fmt_arithmetic_intensity
+
+class BatchAiCalc:
+    """Arithmetic intensity for a 2048x2048 dense layer as batch size grows."""
+
+    # LOAD
+    M = 2048
+    N = 2048
+    batch_small = 1
+    batch_medium = 32
+    batch_large = 256
+
+    # EXECUTE
+    def dense_ai(batch, m=M, n=N):
+        flops = 2 * batch * m * n
+        bytes_moved = 2 * batch * m + 2 * m * n + 2 * batch * n
+        return flops / bytes_moved
+
+    batch1_ai = dense_ai(batch_small)
+    batch32_ai = dense_ai(batch_medium)
+    batch256_ai = dense_ai(batch_large)
+
+    # GUARD
+    check(0.9 < batch1_ai < 1.1, f"Batch-1 AI should be near 1, got {batch1_ai:.2f}")
+    check(30 < batch32_ai < 32, f"Batch-32 AI should be near 31, got {batch32_ai:.2f}")
+    check(200 < batch256_ai < 210, f"Batch-256 AI should be near 205, got {batch256_ai:.2f}")
+
+    # OUTPUT
+    batch1_ai_flops_per_byte_str = fmt_arithmetic_intensity(batch1_ai * flop / byte, unit=flop / byte, commas=False)
+    batch32_ai_flops_per_byte_str = fmt_arithmetic_intensity(batch32_ai * flop / byte, unit=flop / byte, commas=False)
+    batch256_ai_flops_per_byte_str = fmt_arithmetic_intensity(batch256_ai * flop / byte, unit=flop / byte, commas=False)
+    batch_small_str = fmt(batch_small, precision=0, commas=False)
+    batch_medium_str = fmt(batch_medium, precision=0, commas=False)
+    batch_large_str = fmt(batch_large, precision=0, commas=False)
+    matrix_dim_str = fmt(M, precision=0, commas=False)
+    check(M == N, "Batch-AI example assumes a square M=N matrix.")
+```
+
+::: {#nbk-hw-acceleration-batch-size-arithmetic-intensity .callout-notebook title="Batch size and arithmetic intensity"}
+
+Increasing batch size\index{Batch Size!arithmetic intensity impact} improves arithmetic intensity for matrix operations by amortizing weight loading. @Eq-batch-ai formalizes this relationship for an idealized FP16/BF16 dense layer $(\BatchSize{\times}\LayerInputWidth){\times}(\LayerInputWidth{\times}\LayerOutputWidth)$, counting one read each of the input and weights and one write of the output, where $\BatchSize$ is batch size and $\LayerInputWidth$ and $\LayerOutputWidth$ are the layer's input and output widths:
+$$\ArithmeticIntensity = \frac{2\BatchSize\LayerInputWidth\LayerOutputWidth}{2\BatchSize\LayerInputWidth + 2\LayerInputWidth\LayerOutputWidth + 2\BatchSize\LayerOutputWidth} \approx \frac{2\BatchSize\LayerInputWidth\LayerOutputWidth}{2\LayerInputWidth\LayerOutputWidth} = B \quad (\text{when } 2\LayerInputWidth\LayerOutputWidth \gg 2\BatchSize(\LayerInputWidth+\LayerOutputWidth))$$ {#eq-batch-ai}
+
+Example: Dense layer with $\LayerInputWidth = \LayerOutputWidth$ = `{python} BatchAiCalc.matrix_dim_str` (FP16)
+
+- Batch = `{python} BatchAiCalc.batch_small_str`: $\ArithmeticIntensity$ ≈ `{python} BatchAiCalc.batch1_ai_flops_per_byte_str` (memory bound)
+- Batch = `{python} BatchAiCalc.batch_medium_str`: $\ArithmeticIntensity$ ≈ `{python} BatchAiCalc.batch32_ai_flops_per_byte_str` (memory bound)
+- Batch = `{python} BatchAiCalc.batch_large_str`: $\ArithmeticIntensity$ ≈ `{python} BatchAiCalc.batch256_ai_flops_per_byte_str` (compute bound on A100)
+
+**Systems insight**: This explains why batching can produce large throughput improvements in production inference systems, as MLPerf Inference\index{MLPerf!inference benchmarking}, the standardized benchmark suite, demonstrates by separating bulk-throughput runs from latency-constrained serving runs [@reddi2020].
+
+:::
+
+::: {.column-margin .margin-pointer}
+↪ The MLPerf Inference execution scenarios that separate throughput runs from latency-constrained runs are developed in @sec-benchmarking-mlperf-execution-scenarios-89f0.
+:::
+
+The batch size analysis reveals why inference serving systems are designed around batching: it changes the arithmetic intensity regime of memory-bound workloads. However, batching introduces latency trade-offs, since requests must wait in a queue until a batch forms. This tension between throughput (favoring large batches) and latency (favoring small batches) is a central challenge in ML serving systems, explored in depth in @sec-model-serving-dynamic-batching-latencythroughput-tradeoffs-986d.
+
+When service latency limits batching, batch-1 or small-batch LLM decode often retains low weight reuse and low arithmetic intensity. The next worked model quantifies that particular regime rather than treating all LLM inference as identical.
+
+```{python}
+#| echo: false
+#| label: gpt2-throughput-calc
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ GPT-2 THROUGHPUT CEILING ANALYSIS
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: "The Throughput Ceiling" callout
+# │
+# │ Goal: Demonstrate the throughput ceiling for single-batch inference.
+# │ Show: Why GPT-2 achieves only 1% utilization on A100 at batch=1.
+# │ How: Calculate attainable TFLOP/s based on GPT-2's arithmetic intensity.
+# │
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim.fmt import (
+    check,
+    fmt,
+    fmt_bandwidth,
+    fmt_flop_rate,
+    fmt_flops,
+    fmt_int,
+    fmt_memory,
+    fmt_percent,
+    fmt_usd,
+    fmt_arithmetic_intensity,
+    fmt_math,
+)
+from mlsysim.physics import model_memory
+
+class Gpt2ThroughputCalc:
+    """Throughput ceiling for GPT-2 XL autoregressive inference at batch=1."""
+
+    # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
+    gpt2_weight = Models.Language.GPT2.size_in_bytes(BYTES_FP16)
+
+    # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
+    gpt2_decode_flops = 2 * Models.Language.GPT2.parameters.to(param) * flop / param
+    gpt2_decode_ai_qty = (gpt2_decode_flops / gpt2_weight).to(flop / byte)
+    gpt2_decode_ai = gpt2_decode_ai_qty.magnitude
+
+    a100_bandwidth = Hardware.Cloud.A100.memory.bandwidth
+    a100_fp16_flops = Hardware.Cloud.A100.compute.peak_flops
+    a100_fp32_flops = Hardware.Cloud.A100.compute.precision_flops["fp32"]
+    a100_ridge_value = Hardware.Cloud.A100.ridge_point().to(flop / byte).magnitude
+    a100_ridge_fp32_value = (Hardware.Cloud.A100.compute.precision_flops['fp32'] / Hardware.Cloud.A100.memory.bandwidth).to(flop / byte).magnitude
+    gpt2_max_flops = (gpt2_decode_ai_qty * a100_bandwidth).to(TFLOP / second)
+    gpt2_utilization = (gpt2_max_flops / a100_fp16_flops).to_base_units().magnitude * 100
+
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(round(gpt2_decode_ai, 1) == 1.0, f"GPT-2 decode intensity mismatch: {gpt2_decode_ai}")
+    check(round(gpt2_utilization, 2) == 0.65, f"GPT-2 utilization mismatch: {gpt2_utilization}")
+
+    # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
+    gpt2_weight_gb_str = fmt_memory(gpt2_weight, unit=GB, precision=0, commas=False)
+    gpt2_decode_gflop_str = fmt_flops(gpt2_decode_flops, unit=GFLOPs, precision=0, commas=False)
+    gpt2_decode_ai_str = fmt(gpt2_decode_ai, precision=0, commas=False)
+    gpt2_max_tflop_per_s_str = fmt_flop_rate(gpt2_max_flops, unit=TFLOP / second, commas=False)
+    gpt2_utilization_pct_str = fmt_percent(gpt2_utilization / 100, precision=1, commas=False, style='prose')
+    # "%"-glyph math form for the Actual/Peak worked-calc line; the prose twin (gpt2_utilization_pct_str) keeps the word.
+    gpt2_utilization_pct_math = fmt_math(rf"{gpt2_utilization:.1f}\%")
+    a100_fp16_tflop_per_s_str = fmt_flop_rate(a100_fp16_flops, unit=TFLOP / second, precision=0, commas=False)
+    a100_bw_tb_per_s_str = fmt_bandwidth(a100_bandwidth, unit=TB / second, precision=2, commas=False)
+    a100_fp32_tflop_per_s_str = fmt_flop_rate(a100_fp32_flops, unit=TFLOP / second, precision=1, commas=False)
+    a100_ridge_str = fmt_arithmetic_intensity(Hardware.Cloud.A100.ridge_point(), unit=flop / byte, commas=False)
+    a100_ridge_fp32_str = fmt_arithmetic_intensity(
+        Hardware.Cloud.A100.compute.precision_flops['fp32'] / Hardware.Cloud.A100.memory.bandwidth, unit=flop / byte, precision=1, commas=False
+    )
+    a100_cost_usd_str = fmt_usd(15_000, precision=0)
+    gpt2_util_ceiling_str = fmt_percent(0.01, precision=0, commas=False, style='prose')
+```
+
+::: {#nbk-hw-acceleration-throughput-ceiling .callout-notebook title="The throughput ceiling"}
+
+**Problem**: A batch-1 GPT-2 calculation makes this bandwidth ceiling concrete: what is the maximum possible utilization of an NVIDIA A100 when running GPT-2 inference (batch size 1)?
+
+**The hardware constraints (the denominators)**
+
+*   **Peak compute**: `{python} Gpt2ThroughputCalc.a100_fp16_tflop_per_s_str` (FP16 Tensor Core).
+*   **Peak bandwidth**: `{python} Gpt2ThroughputCalc.a100_bw_tb_per_s_str` (HBM2e).
+*   **Ridge point $(\PeakRate/\Bandwidth)$**: `{python} Gpt2ThroughputCalc.a100_fp16_tflop_per_s_str` / `{python} Gpt2ThroughputCalc.a100_bw_tb_per_s_str` = `{python} Gpt2ThroughputCalc.a100_ridge_str` (for FP16 Tensor Core).
+
+    **Interpretation**: Saturating this chip at FP16 precision requires `{python} Gpt2ThroughputCalc.a100_ridge_str` operations for every byte loaded. The ridge point varies by precision: FP32 operations (`{python} Gpt2ThroughputCalc.a100_fp32_tflop_per_s_str` peak) have a ridge point of only ~`{python} Gpt2ThroughputCalc.a100_ridge_fp32_str`.
+
+**The workload characteristics (the numerator)**
+
+*   **Model**: GPT-2 XL (1.5 billion parameters).
+*   **Operation**: Autoregressive generation (1 token at a time).
+*   **Data movement**: Must load all weights (`{python} Gpt2ThroughputCalc.gpt2_weight_gb_str` @ FP16) for every token.
+*   **Compute**: Vector-Matrix multiplication. Two FLOPs per parameter, $2\Parameters$ ≈ `{python} Gpt2ThroughputCalc.gpt2_decode_gflop_str`.
+*   **Arithmetic intensity**:
+    `{python} Gpt2ThroughputCalc.gpt2_decode_gflop_str` / `{python} Gpt2ThroughputCalc.gpt2_weight_gb_str` = `{python} Gpt2ThroughputCalc.gpt2_decode_ai_str` FLOP/byte
+
+**The prediction (iron law)**
+
+Since the modeled intensity $\ArithmeticIntensity$ (`{python} Gpt2ThroughputCalc.gpt2_decode_ai_str`) $\ll$ the ridge point $\RooflineRidgePoint$ (`{python} Gpt2ThroughputCalc.a100_ridge_str`), bandwidth sets the lower roofline ceiling.
+
+*   **Maximum throughput**: `{python} Gpt2ThroughputCalc.gpt2_decode_ai_str` FLOP/byte $\times$ `{python} Gpt2ThroughputCalc.a100_bw_tb_per_s_str` = `{python} Gpt2ThroughputCalc.gpt2_max_tflop_per_s_str`.
+*   **Utilization ceiling**:
+    `{python} Gpt2ThroughputCalc.gpt2_max_tflop_per_s_str` (Bound) / `{python} Gpt2ThroughputCalc.a100_fp16_tflop_per_s_str` (Peak) ≈ `{python} Gpt2ThroughputCalc.gpt2_utilization_pct_math`
+
+**Systems insight**:
+Without batching, a `{python} Gpt2ThroughputCalc.a100_cost_usd_str` GPU has a modeled ceiling below `{python} Gpt2ThroughputCalc.gpt2_util_ceiling_str` of its compute peak in this weight-streaming decode scenario. Batching and weight quantization address that gap; key-value caching instead avoids recomputing prior attention states.
+
+:::
+
+Through this derivation, the Roofline Model provides a diagnostic framework for identifying whether operations are compute bound or memory bound. A bandwidth ceiling at `{python} Gpt2ThroughputCalc.gpt2_utilization_pct_str` of peak is only the first diagnostic step; the next challenge is translating this diagnosis into efficient execution plans that exploit accelerator architectures.
 
 ## Compute Units and Execution Models {#sec-hardware-acceleration-compute-units-execution-models-f406}
 
@@ -2342,6 +3070,8 @@ Modern AI processors exhibit a range of design trade-offs based on their intende
 | Mobile NPU                                      |                   CPU/GPU/DSP vectors                   |                Small matrix engines               | Integrated NPU blocks | Mobile inference                                          |
 
 : **AI Processor Configurations**: Modern AI processors prioritize different execution unit characteristics for specific workloads: NVIDIA A100 uses wide SIMD and Tensor Cores for training, Google TPUv4 emphasizes high-throughput BF16 matrix multiplication, Intel Sapphire Rapids focuses on INT8-optimized inference, and mobile NPUs prioritize low-power execution. These variations in SIMD width, Tensor Core size, and processing element count reflect the growing diversity in AI hardware architectures. {#tbl-execution-units tbl-colwidths="[15,23,20,23,19]"}
+
+The differences across these architectures highlight how deployment constraints—power, memory, and thermal budgets—force divergent silicon designs. The A100 dedicates substantial die area to wide SIMD arrays and large SRAM caches because training requires accumulating high-precision gradients across large batches. In contrast, Google's TPUv4 strips away SIMD width and control logic to maximize the area of its 128×128 systolic arrays, prioritizing peak throughput on dense matrix multiplication at the cost of programmability. At the edge, mobile NPUs and Intel's Sapphire Rapids AMX extensions favor INT8 precision and smaller matrix engines, proving that inference workloads are fundamentally constrained by memory bandwidth and energy efficiency rather than raw floating-point throughput.
 
 The pattern across these configurations reveals a consistent engineering principle: each design sacrifices generality to optimize for its target workload's dominant operation and precision. Training chips invest silicon in wide floating-point datapaths; inference chips trade precision for throughput; mobile chips trade throughput for energy efficiency. No single design dominates across all workloads, which is precisely why hardware selection depends on workload analysis rather than headline specifications.
 
@@ -3592,792 +4322,6 @@ Each model architecture listed in @tbl-model-mem-compare exercises the memory su
 Hardware architects address these divergent demands with multi-tier memory hierarchies. On-chip SRAM (caches and scratchpad memories) provides tens of terabytes per second of bandwidth at low latency, capturing high-reuse activations and tiled matrix blocks. HBM provides the capacity and throughput required to stage massive weight tensors and dynamic sequence states. When model scale exceeds the physical memory capacity of an individual accelerator, high-speed interconnects such as NVLink supply peer-to-peer inter-accelerator bandwidth for distributed tensor and pipeline parallelism, avoiding the narrower host PCIe bus.
 
 Because a reference off-chip DRAM access costs far more energy per event than arithmetic (@fig-energy-hierarchy), reducing repeated external accesses can improve hardware efficiency. The workload's access and operation counts determine the total energy saving. Determining whether a given kernel execution is constrained by compute throughput or memory bandwidth requires an analytical boundary. The roofline model establishes this relationship by comparing operational intensity against hardware performance limits, narrowing the candidate bottlenecks that profiling must test.
-
-## Roofline Model {#sec-hardware-acceleration-roofline-model-42ff}
-
-::: {#margin-roofline-elbow .column-margin}
-![](images/svg/hw_acceleration_roofline_elbow.svg){width="100%" fig-alt="Roofline elbow: a blue memory-bound slope rises left to right to a short orange compute-bound ceiling, with a dashed vertical ridge line at the bend and one workload dot sitting low on the blue slope, far below the ridge in the memory-bound region."}
-
-*Low arithmetic intensity places the modeled throughput ceiling on the bandwidth slope.*
-:::
-
-Peak FLOP/s indicates what execution units can deliver when operands are already on chip, but sustained accelerator throughput is ultimately bounded by the rate at which the memory hierarchy delivers data. The Roofline Model[^fn-roofline-performance-model]\index{Roofline Model!efficiency measurement} [@williams2009] (whose core concept is sketched in [roofline elbow diagram](#margin-roofline-elbow)), the same model that sorted training kernels in @sec-model-training-arithmetic-intensity-training-bottlenecks-4446, formalizes this relationship by plotting attainable performance against arithmetic intensity, distinguishing a compute-bound\index{Compute-Bound!roofline classification} ceiling from a memory-bound\index{Memory-Bound!roofline classification} ceiling before profiling establishes what limits actual execution. Rather than evaluating compute capacity in isolation, the model intersects hardware arithmetic throughput with memory bandwidth, revealing which physical ceiling binds execution before an engineer commits optimization effort.
-
-[^fn-roofline-performance-model]: **Roofline model**\index{Roofline model!optimization diagnostic}: Introduced by @williams2009 at UC Berkeley, building on earlier I/O complexity work from the 1980s. Their specific contribution was making the compute vs. bandwidth trade-off visual and actionable: the characteristic roofline plot immediately reveals whether a kernel is compute bound (hitting the flat ceiling) or memory bound (hitting the sloped bandwidth line) and quantifies the gap to hardware limits. A kernel operating at only 50 percent of its ceiling has 2$\times$ theoretical headroom, but instruction mix, latency, and occupancy may prevent it from closing that gap.
-
-```{python}
-#| echo: false
-#| label: roofline-utilization-gap-calc
-# ┌─────────────────────────────────────────────────────────────────────────────
-# │ ROOFLINE UTILIZATION GAP CALCULATION
-# ├─────────────────────────────────────────────────────────────────────────────
-# │ Context: "The Utilization Gap" callout in §Roofline Model
-# │
-# │ Goal: Demonstrate why newer accelerators are harder to saturate each generation.
-# │ Show: Ridge points ~139 FLOP/byte (V100), ~153 (A100), ~296 (H100); rising gap.
-# │ How: ridge_point() = peak_flops/memory_bw via Hardware Digital Twin; both in
-# │      SI-compatible pint units so .to(flop/byte).magnitude extracts dimensionless ratio.
-# │
-# └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import fmt_int, fmt, check, fmt_arithmetic_intensity
-from mlsysim import Hardware
-
-# ┌── LEGO ───────────────────────────────────────────────
-class RooflineGap:
-    """
-    Namespace for Roofline Utilization Gap.
-    Scenario: Comparing Ridge Points across generations (V100 -> H100).
-    """
-
-    # ┌── 1. LOAD (Constants) ───────────────────────────────────────────────
-    # Thresholds
-    legacy_ai = 200.0
-    relu_ai = 0.125
-    dense_matmul_dim = 1024
-    dense_matmul_bytes_per_val = 2
-
-    # Hardware Twins
-    h_v100 = Hardware.Cloud.V100
-    h_a100 = Hardware.Cloud.A100
-    h_h100 = Hardware.Cloud.H100
-
-    # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
-    # Step 1: Ridge Points (FLOP/byte) directly from Twins
-    v100_ridge = h_v100.ridge_point().to(flop / byte).magnitude
-    a100_ridge = h_a100.ridge_point().to(flop / byte).magnitude
-    h100_ridge = h_h100.ridge_point().to(flop / byte).magnitude
-
-    # Step 2: FP32 Ridge for A100
-    a100_ridge_fp32 = (h_a100.compute.precision_flops['fp32'] / h_a100.memory.bandwidth).to(flop / byte).magnitude
-
-    # Step 3: Display specs used by the nearby ridge-point prose
-    v100_flops = h_v100.compute.peak_flops
-    v100_bandwidth = h_v100.memory.bandwidth
-    a100_fp16_flops = h_a100.compute.peak_flops
-    a100_bandwidth = h_a100.memory.bandwidth
-    h100_fp16_flops = h_h100.compute.peak_flops
-    h100_bandwidth = h_h100.memory.bandwidth
-
-    # Step 4: Comparisons
-    bw_growth = (h_h100.memory.bandwidth / h_a100.memory.bandwidth).to_base_units().magnitude
-    flops_growth = (h_h100.compute.peak_flops / h_a100.compute.peak_flops).to_base_units().magnitude
-    relu_gap = h100_ridge / relu_ai
-    dense_matmul_flops = 2 * dense_matmul_dim**3
-    dense_matmul_bytes = 3 * dense_matmul_dim**2 * dense_matmul_bytes_per_val
-    dense_matmul_ai = dense_matmul_flops / dense_matmul_bytes
-
-    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
-    # Ridge points must climb: H100 > A100 > V100
-    check(h100_ridge > a100_ridge > v100_ridge, f"Ridge points must climb. H100({h100_ridge:.0f}) > A100({a100_ridge:.0f}) > V100({v100_ridge:.0f}).")
-    check(relu_gap >= 1000, f"ReLU gap ({relu_gap:.0f}x) is too small.")
-    check(dense_matmul_ai > h100_ridge, f"Large matmul should clear the H100 ridge, got AI={dense_matmul_ai:.0f}.")
-    check(
-        300 <= a100_fp16_flops.to(TFLOP / second).magnitude <= 320,
-        f"A100 FP16 peak should be near 312 TFLOP/s, got {a100_fp16_flops.to(TFLOP/second).magnitude:.0f}.",
-    )
-
-    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
-    v100_tflop_per_s_str = fmt_flop_rate(v100_flops, unit=TFLOP / second, precision=0, commas=False)
-    v100_bw_tb_per_s_str = fmt_bandwidth(v100_bandwidth, unit=TB / second, precision=1, commas=False)
-    a100_fp16_tflop_per_s_str = fmt_flop_rate(a100_fp16_flops, unit=TFLOP / second, precision=0, commas=False)
-    a100_bw_tb_per_s_str = fmt_bandwidth(a100_bandwidth, unit=TB / second, precision=2, commas=False)
-    h100_fp16_tflop_per_s_str = fmt_flop_rate(h100_fp16_flops, unit=TFLOP / second, precision=0, commas=False)
-    h100_bw_tb_per_s_str = fmt_bandwidth(h100_bandwidth, unit=TB / second, precision=2, commas=False)
-
-    v100_year_str = fmt(h_v100.release_year, precision=0, commas=False)
-    a100_year_str = fmt(h_a100.release_year, precision=0, commas=False)
-    h100_year_str = fmt(h_h100.release_year, precision=0, commas=False)
-
-    v100_ridge_str = fmt_arithmetic_intensity(h_v100.ridge_point(), unit=flop / byte, commas=False)
-    a100_ridge_str = fmt_arithmetic_intensity(h_a100.ridge_point(), unit=flop / byte, commas=False)
-    h100_ridge_str = fmt_arithmetic_intensity(h_h100.ridge_point(), unit=flop / byte, commas=False)
-    a100_ridge_fp32_str = fmt_arithmetic_intensity(
-        h_a100.compute.precision_flops['fp32'] / h_a100.memory.bandwidth, unit=flop / byte, precision=1, commas=False
-    )
-
-    legacy_ai_str = fmt(legacy_ai, precision=0, commas=False)
-    relu_ai_str = fmt(relu_ai, precision=3, commas=False)
-    dense_matmul_dim_str = fmt(dense_matmul_dim, precision=0, commas=False)
-    dense_matmul_ai_str = fmt(dense_matmul_ai, precision=1, commas=False)
-    bandwidth_ratio_mult_str = fmt_multiple(bw_growth, precision=1, commas=False)
-    flops_ratio_mult_str = fmt_multiple(flops_growth, precision=1, commas=False)
-    full_util_pct_str = fmt_percent(1.0, precision=0, commas=False, style='prose')
-```
-
-Performance is bounded by two ceilings, as @eq-roofline formalizes; it writes the bound of the arithmetic intensity law (principle \ref{pri-arithmetic-intensity}) as an idealized equality that ignores launch and synchronization overheads. Here, attainable performance $\AttainableComputeRate$ and peak compute $\PeakRate$ are in FLOP/s (often reported as TFLOP/s), peak bandwidth $\Bandwidth$ is in bytes/s (often TB/s), and arithmetic intensity $I$ is in FLOP/byte:
-$$\AttainableComputeRate = \min(\PeakRate, \Bandwidth \times I)$$ {#eq-roofline}
-
-::: {#dfn-hw-acceleration-arithmetic-intensity .callout-definition title="Arithmetic intensity"}
-
-***Arithmetic intensity***\index{Arithmetic intensity!definition} is the ratio of operations to bytes transferred across the memory interface being modeled ($\text{FLOP}/\text{byte}$). Together with that level's bandwidth and the relevant compute peak, it determines which idealized roofline ceiling is lower.
-
-1.  **Significance**: The threshold between the two ceilings is the ridge point $\PeakRate / \Bandwidth$. For an A100 (`{python} RooflineGap.a100_fp16_tflop_per_s_str` FP16/BF16, `{python} RooflineGap.a100_bw_tb_per_s_str`), it is roughly `{python} RooflineGap.a100_ridge_str`. Under the stated traffic models, a large well-tiled `{python} RooflineGap.dense_matmul_dim_str` $\times$ `{python} RooflineGap.dense_matmul_dim_str` multiply reaches about `{python} RooflineGap.dense_matmul_ai_str` FLOP/byte, while standalone ReLU is about `{python} RooflineGap.relu_ai_str` FLOP/byte. They therefore meet different ceilings on the same hardware.
-2.  **Distinction**: Unlike total FLOPs (a count of operations), arithmetic intensity is a ratio that characterizes the shape of a workload's hardware demand. Two kernels with identical FLOPs but different memory access patterns can have different arithmetic intensities and face different modeled ceilings on the same hardware.
-3.  **Common pitfall**: A frequent misconception is that arithmetic intensity is a fixed property of an operation. In practice, it depends on implementation details: a naive matrix multiplication that reloads operands from DRAM for each output element has low arithmetic intensity; a blocked (tiled) implementation that reuses data from fast SRAM achieves high arithmetic intensity—the same mathematical operation, orders of magnitude apart in hardware efficiency.
-
-:::
-
-With $O$ as the operation count and $\DataVolume$ as data volume in bytes, @eq-arithmetic-intensity makes the definition operational.
-$$\ArithmeticIntensity = \frac{O}{\DataVolume}$$ {#eq-arithmetic-intensity}
-
-The roofline visualization shows performance (TFLOP/s) on the vertical axis and arithmetic intensity (FLOP/byte) on the horizontal axis. At low arithmetic intensity, the upper bound increases linearly along the memory bandwidth slope ($\Bandwidth \times \ArithmeticIntensity$). Above the ridge point, the upper bound is peak compute ($\PeakRate$). Actual performance can lie below both limits. @Sec-appdx-dam-taxonomy-bottleneck-diagnostic-3fc9 maps each regime to the optimizations that pay off and the ones that waste effort, so that modeled placement suggests candidate investments whose benefits must be tested against measured execution.
-
-::: {.column-margin .margin-pointer}
-↪ The optimizations that pay off in each regime, and the ones that waste effort, are operationalized in @sec-appdx-dam-taxonomy-bottleneck-diagnostic-3fc9.
-:::
-
-### Hardware ridge points {#sec-hardware-acceleration-hardware-ridge-points-b5b6}
-
-The ridge point\index{Ridge Point!hardware comparison}, the hardware balance $\RooflineRidgePoint$ established in @sec-hardware-acceleration-hardware-balance, is the arithmetic-intensity threshold at which the lower modeled ceiling changes from bandwidth to compute. @Tbl-ridge-points quantifies this boundary across three generations of NVIDIA accelerators:
-
-```{=latex}
-\begingroup
-\renewcommand{\arraystretch}{1.5}
-```
-
-| **NVIDIA Accelerator**\index{NVIDIA Accelerator!definition} |    **Peak FP16**\index{Peak FP16!definition}     |                  Bandwidth                  |              Ridge Point              |
-|:------------------------------------------------------------|:------------------------------------------------:|:-------------------------------------------:|:-------------------------------------:|
-| **V100 (`{python} RooflineGap.v100_year_str`)**             |   `{python} RooflineGap.v100_tflop_per_s_str`    | `{python} RooflineGap.v100_bw_tb_per_s_str` | `{python} RooflineGap.v100_ridge_str` |
-| **A100 (`{python} RooflineGap.a100_year_str`)**             | `{python} RooflineGap.a100_fp16_tflop_per_s_str` | `{python} RooflineGap.a100_bw_tb_per_s_str` | `{python} RooflineGap.a100_ridge_str` |
-| **H100 (`{python} RooflineGap.h100_year_str`)**             | `{python} RooflineGap.h100_fp16_tflop_per_s_str` | `{python} RooflineGap.h100_bw_tb_per_s_str` | `{python} RooflineGap.h100_ridge_str` |
-
-: **Hardware Ridge Points**: Vendor-published FP16 peak throughput and memory bandwidth for three NVIDIA generations, and the ridge point each pair implies. The ridge rises from V100 to H100 because compute throughput grows faster than bandwidth; these values are hardware-specific rather than universal generation averages. {#tbl-ridge-points}
-
-```{=latex}
-\endgroup
-```
-
-Because arithmetic throughput has grown far faster than memory bandwidth across generations, the hardware ridge point shifts progressively rightward. A workload must therefore exhibit substantially greater data reuse to saturate newer hardware; an algorithm that was compute-bound on an older architecture can easily become memory-bound on a newer one.
-
-::: {#nbk-hw-acceleration-utilization-gap .callout-notebook title="The utilization gap"}
-
-**Problem**: Why is it harder to get `{python} RooflineGap.full_util_pct_str` utilization on an H100 than a V100?
-
-**Metric**: The ridge point $\RooflineRidgePoint = \PeakRate / \Bandwidth$ (FLOP/byte) from @sec-hardware-acceleration-hardware-balance: how many math operations the hardware must perform for every byte of data loaded to keep the compute units busy.
-
-**Evolution**:
-
-*   **V100 (`{python} RooflineGap.v100_year_str`)**: `{python} RooflineGap.v100_tflop_per_s_str` / `{python} RooflineGap.v100_bw_tb_per_s_str` ≈ `{python} RooflineGap.v100_ridge_str`.
-*   **A100 (`{python} RooflineGap.a100_year_str`)**: `{python} RooflineGap.a100_fp16_tflop_per_s_str` / `{python} RooflineGap.a100_bw_tb_per_s_str` ≈ `{python} RooflineGap.a100_ridge_str`.
-*   **H100 (`{python} RooflineGap.h100_year_str`)**: `{python} RooflineGap.h100_fp16_tflop_per_s_str` / `{python} RooflineGap.h100_bw_tb_per_s_str` ≈ `{python} RooflineGap.h100_ridge_str`.
-
-**Result**: The intensity needed to reach the tensor peak has increased. Under this simple HBM roofline, a kernel with $I$ = `{python} RooflineGap.legacy_ai_str` FLOP/byte lies above the A100 ridge but below the H100 ridge. If its intensity and implementation remain unchanged, its idealized gain is then closer to the `{python} RooflineGap.bandwidth_ratio_mult_str` bandwidth ratio than the `{python} RooflineGap.flops_ratio_mult_str` peak-compute ratio.
-
-**Systems insight**: A standalone ReLU under a one-read, one-write FP32 traffic model performs about 1 operation per 8 bytes, far below the H100 tensor ridge. A well-tiled `{python} RooflineGap.dense_matmul_dim_str` $\times$ `{python} RooflineGap.dense_matmul_dim_str` dense multiply reaches about `{python} RooflineGap.dense_matmul_ai_str` FLOP/byte under its idealized traffic model. Fusion is valuable for low-intensity chains because it can remove intermediate round-trips; it is not automatically the best optimization for every kernel.
-
-:::
-
-Operations such as depthwise convolution\index{Depthwise Convolution!low arithmetic intensity}, embedding lookup\index{Embedding Lookup!memory-bound operation}, LayerNorm\index{LayerNorm!memory-bound operation}, and softmax\index{Softmax!memory-bound operation} serve as low-intensity reference points because their limited data reuse makes memory traffic a candidate bottleneck. @Tbl-roofline-operations maps common neural network operations to modeled roofline regimes; these classifications identify the lower ceiling rather than certify the cause of a measured runtime.
-
-```{=latex}
-\begingroup
-\renewcommand{\arraystretch}{1.5}
-```
-
-| Operation                                           | Arithmetic Intensity   | **Classification**\index{Classification!definition} | **Lighthouse example**\index{Lighthouse example!definition} |
-|:----------------------------------------------------|:-----------------------|:----------------------------------------------------|:------------------------------------------------------------|
-| **Conv2D (Dense)**                                  | 50--200 FLOP/byte      | Straddles ridge; high-reuse cases compute-bound     | ResNet-50                                                   |
-| **Dense MatMul (large batch, well-tiled)**          | ~150--1,000+ FLOP/byte | Compute-bound once above the target's ridge         | GPT-2 (batched projections)                                 |
-| **Depthwise conv**\index{Depthwise conv!definition} | 10--20 FLOP/byte       | Memory-bound                                        | MobileNet                                                   |
-| Attention Softmax                                   | Convention-dependent   | Memory-bound                                        | GPT-2 (Generation)                                          |
-| LayerNorm                                           | 1--2 FLOP/byte         | Memory-bound                                        | GPT-2/Llama                                                 |
-| Embedding lookup                                    | $<1$ FLOP/byte         | Memory-bound                                        | DLRM                                                        |
-
-: **Operations on the Roofline**: Neural network layers span a wide range of arithmetic intensities. Large, well-tiled convolutions and batched GEMMs can be compute-bound, while MobileNet depthwise layers, attention softmax, normalization, and DLRM embeddings are often memory-bound. To see how these intensity values translate into real performance predictions, a transformer layer provides a complete arithmetic-intensity calculation across its major sub-operations. {#tbl-roofline-operations tbl-colwidths="[25,25,25,25]"}
-
-```{python}
-#| echo: false
-#| label: transformer-layer-calc
-# ┌─────────────────────────────────────────────────────────────────────────────
-# │ TRANSFORMER LAYER ARITHMETIC INTENSITY
-# ├─────────────────────────────────────────────────────────────────────────────
-# │ Context: "Transformer Layer Analysis" callout in Roofline section
-# │
-# │ Goal: Contrast compute-bound and memory-bound ops in a transformer layer.
-# │ Show: Why softmax dominates memory traffic despite having few FLOPs.
-# │ How: Calculate arithmetic intensity for QKV projection vs. softmax.
-# │
-# └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import check, fmt, fmt_flops, fmt_int, fmt_memory, fmt_arithmetic_intensity
-
-class TransformerLayerCalc:
-    """Arithmetic intensity for QKV projection vs. softmax in a transformer layer."""
-
-    # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    # Illustrative transformer-layer config for this worked example (BERT-base-like).
-    hidden_dim = 768
-    batch_size = 32
-    seq_len = 512
-    num_heads = 12
-    t_fp_bytes_value = BYTES_FP16.to(byte).magnitude
-
-    # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    # QKV Projection
-    qkv_flops_value = 2 * 3 * batch_size * seq_len * hidden_dim * hidden_dim
-    qkv_flops_b_value = (qkv_flops_value * flop).to(GFLOPs).magnitude
-
-    qkv_input_value = batch_size * seq_len * hidden_dim
-    qkv_weights_value = 3 * hidden_dim * hidden_dim
-    qkv_output_value = batch_size * seq_len * hidden_dim * 3
-    qkv_bytes_value = (qkv_input_value + qkv_weights_value + qkv_output_value) * t_fp_bytes_value
-    qkv_memory = qkv_bytes_value * byte
-    qkv_ai_value = qkv_flops_value / qkv_bytes_value
-
-    # Softmax
-    softmax_flops_value = batch_size * num_heads * seq_len * seq_len * 3
-    softmax_flops_m_value = (softmax_flops_value * flop).to(MFLOPs).magnitude
-    softmax_bytes_value = batch_size * num_heads * seq_len * seq_len * 2 * t_fp_bytes_value
-    softmax_memory = softmax_bytes_value * byte
-    softmax_ai_value = softmax_flops_value / softmax_bytes_value
-
-    a100_ridge_value = Hardware.Cloud.A100.ridge_point().to(flop / byte).magnitude
-
-    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
-    check(round(qkv_ai_value, 1) == 556.4, f"QKV intensity mismatch: {qkv_ai_value}")
-    check(round(softmax_ai_value, 2) == 0.75, f"Softmax intensity mismatch: {softmax_ai_value}")
-    check(qkv_ai_value > a100_ridge_value > softmax_ai_value, "QKV must be compute-bound and softmax memory-bound")
-
-    # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
-    t_hidden_str = fmt(hidden_dim, precision=0, commas=False)
-    t_batch_str = fmt(batch_size, precision=0, commas=False)
-    t_seq_str = fmt(seq_len, precision=0, commas=False)
-    t_heads_str = fmt(num_heads, precision=0, commas=False)
-    qkv_gflop_str = fmt_flops(qkv_flops_value * flop, unit=GFLOPs, commas=False)
-    qkv_mb_str = fmt_memory(qkv_memory, unit=MB, precision=1, commas=False)
-    qkv_ai_str = fmt(qkv_ai_value, precision=1, commas=False)
-    softmax_mflop_str = fmt_flops(softmax_flops_value * flop, unit=MFLOPs, commas=False)
-    softmax_mb_str = fmt_memory(softmax_memory, unit=MB, precision=1, commas=False)
-    softmax_ai_str = fmt(softmax_ai_value, precision=2, commas=False)
-    a100_ridge_str = fmt_arithmetic_intensity(Hardware.Cloud.A100.ridge_point(), unit=flop / byte, commas=False)
-```
-
-::: {#nbk-transformer-layers .callout-notebook title="Transformer layer analysis"}
-
-For a transformer with hidden dimension $d$ = `{python} TransformerLayerCalc.t_hidden_str`, batch size $B$ = `{python} TransformerLayerCalc.t_batch_str`, sequence length $S$ = `{python} TransformerLayerCalc.t_seq_str`, and $\NumberOfAttentionHeads$ = `{python} TransformerLayerCalc.t_heads_str` attention heads:
-
-**Attention QKV projection**:
-
-- FLOPs: 2 $\times$ 3 $\times$ `{python} TransformerLayerCalc.t_batch_str` $\times$ `{python} TransformerLayerCalc.t_seq_str` $\times$ `{python} TransformerLayerCalc.t_hidden_str` $\times$ `{python} TransformerLayerCalc.t_hidden_str` = `{python} TransformerLayerCalc.qkv_gflop_str`
-- Bytes: (input + weights + output) = (`{python} TransformerLayerCalc.t_batch_str` $\times$ `{python} TransformerLayerCalc.t_seq_str` $\times$ `{python} TransformerLayerCalc.t_hidden_str` + 3 $\times$ `{python} TransformerLayerCalc.t_hidden_str` $\times$ `{python} TransformerLayerCalc.t_hidden_str` + `{python} TransformerLayerCalc.t_batch_str` $\times$ `{python} TransformerLayerCalc.t_seq_str` $\times$ `{python} TransformerLayerCalc.t_hidden_str` $\times$ 3) $\times$ 2 ≈ `{python} TransformerLayerCalc.qkv_mb_str`
-- $I$ = `{python} TransformerLayerCalc.qkv_gflop_str` / `{python} TransformerLayerCalc.qkv_mb_str` = `{python} TransformerLayerCalc.qkv_ai_str` FLOP/byte, placing the compute ceiling below the bandwidth ceiling on A100 (above `{python} TransformerLayerCalc.a100_ridge_str` threshold)
-
-**Softmax**:
-
-- FLOPs: `{python} TransformerLayerCalc.t_batch_str` $\times$ `{python} TransformerLayerCalc.t_heads_str` $\times$ `{python} TransformerLayerCalc.t_seq_str` $\times$ `{python} TransformerLayerCalc.t_seq_str` $\times$ 3 ≈ `{python} TransformerLayerCalc.softmax_mflop_str` (exp, sum, div)
-- Bytes: `{python} TransformerLayerCalc.t_batch_str` $\times$ `{python} TransformerLayerCalc.t_heads_str` $\times$ `{python} TransformerLayerCalc.t_seq_str` $\times$ `{python} TransformerLayerCalc.t_seq_str` $\times 2 \times 2$ = `{python} TransformerLayerCalc.softmax_mb_str`
-- $I$ = `{python} TransformerLayerCalc.softmax_mflop_str` / `{python} TransformerLayerCalc.softmax_mb_str` = `{python} TransformerLayerCalc.softmax_ai_str` FLOP/byte under this simple operation count, placing the bandwidth ceiling below the compute ceiling. Counting exponentials and division as multiple operations increases the numerical intensity; the chosen convention must be used consistently when comparing it with the hardware ceiling.
-
-**Systems insight**: This analysis explains why FlashAttention\index{FlashAttention!memory optimization}\index{Attention Mechanism!memory-bound softmax} focuses on reducing memory traffic in attention rather than reducing FLOPs.
-
-:::
-
-The roofline classification identifies the lower modeled ceiling and suggests optimizations to test against measured execution. For memory-bound operations, execution time is dominated by data transfers across the off-chip memory bus; ALU pipelines spend idle cycles waiting for operands. Optimization must therefore focus on conserving memory bandwidth: fusing adjacent operators keeps intermediate activations in on-chip registers or shared memory (SRAM), lower-precision numeric formats reduce the physical byte count of memory transfers, and algorithmic refactorings like FlashAttention restructure access patterns to compute within SRAM tiles. For compute-bound operations, off-chip bandwidth is no longer the bottleneck because high data reuse keeps execution units supplied. Performance here depends on saturating arithmetic execution pipelines: structuring matrix tiles to sustain Tensor Core throughput, hiding instruction latencies through software pipelining, and scaling batch sizes to distribute work across all available streaming multiprocessors.
-
-::: {.column-margin .margin-pointer}
-↪ How a benchmark determines where a workload actually sits against its roofline ceiling is developed in @sec-benchmarking-system-benchmarks-393c.
-:::
-
-### Calculating memory bandwidth bounds {#sec-hardware-acceleration-calculating-memory-bandwidth-bounds-7fc0}
-
-The memory-bound region of the Roofline Model is governed by the accelerator's off-chip memory bandwidth. To sustain an operational throughput $R_{\text{ops}}$ (FLOP/s) for a workload with arithmetic intensity $I$ (FLOP/byte), the memory subsystem must transfer data at the rate defined by @eq-required-bandwidth:
-$$\Bandwidth_{\text{req}} = \frac{R_{\text{ops}}}{I} \text{ bytes/s}$$ {#eq-required-bandwidth}
-
-When this required bandwidth exceeds the hardware's peak memory bandwidth $\Bandwidth$, memory transfers cap attainable throughput according to @eq-attainable-throughput:
-$$\AttainableComputeRate = \Bandwidth \times I$$ {#eq-attainable-throughput}
-
-Evaluating an operation against the hardware's ridge point determines whether bandwidth or arithmetic throughput sets the lower modeled ceiling. When data reuse is extensive, arithmetic intensity clears the ridge point, placing the kernel in the compute-bound regime. A 2D convolution demonstrates this behavior.
-
-```{python}
-#| echo: false
-#| label: conv2d-analysis-calc
-# ┌─────────────────────────────────────────────────────────────────────────────
-# │ CONV2D LAYER ROOFLINE ANALYSIS
-# ├─────────────────────────────────────────────────────────────────────────────
-# │ Context: "Convolutional Layer Analysis" callout notebook
-# │
-# │ Goal: Demonstrate a compute-bound operation using convolution.
-# │ Show: That weight reuse in Conv2D yields high arithmetic intensity.
-# │ How: Calculate FLOPs and memory traffic for a standard 3x3 convolution.
-# │
-# └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import check, fmt, fmt_int, fmt_count, fmt_arithmetic_intensity
-
-class Conv2dAnalysisCalc:
-    """Roofline analysis for a 3×3 Conv2D layer showing compute-bound behavior."""
-
-    # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    conv_batch = 32
-    conv_cin = 128
-    conv_h = 56
-    conv_w = 56
-    conv_cout = 256
-    conv_k = 3
-    conv_fp_bytes = BYTES_FP16.to(byte).magnitude
-
-    # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    conv_out_elements = conv_batch * conv_cout * conv_h * conv_w
-    conv_out_m = conv_out_elements / MILLION
-    conv_flops_per_out = conv_cin * conv_k * conv_k * 2
-    conv_total_flops = conv_out_elements * conv_flops_per_out * flop
-
-    conv_input_memory = conv_batch * conv_cin * conv_h * conv_w * conv_fp_bytes * byte
-    conv_weights_memory = conv_cout * conv_cin * conv_k * conv_k * conv_fp_bytes * byte
-    conv_output_memory = conv_batch * conv_cout * conv_h * conv_w * conv_fp_bytes * byte
-    conv_total_memory = conv_input_memory + conv_weights_memory + conv_output_memory
-
-    conv_ai = (conv_total_flops / conv_total_memory).to(flop / byte).magnitude
-
-    a100_ridge_value = Hardware.Cloud.A100.ridge_point().to(flop / byte).magnitude
-    a100_fp16_flops = Hardware.Cloud.A100.compute.peak_flops
-
-    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
-    check(round(conv_ai, 1) == 762.2, f"Conv2D arithmetic intensity mismatch: {conv_ai}")
-    check(conv_ai > a100_ridge_value, f"Expected Conv2D intensity {conv_ai} to exceed A100 ridge {a100_ridge_value}")
-
-    # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
-    conv_out_m_str = fmt_count(conv_out_elements, scale="M", precision=1, commas=False)
-    conv_flops_per_out_value_str = fmt(conv_flops_per_out, precision=0)
-    conv_total_gflop_str = fmt_flops(conv_total_flops, unit=GFLOPs, precision=1, commas=False)
-    conv_input_mb_str = fmt_memory(conv_input_memory, unit=MB, precision=1, commas=False)
-    conv_weights_mb_str = fmt_memory(conv_weights_memory, unit=MB, precision=1, commas=False)
-    conv_output_mb_str = fmt_memory(conv_output_memory, unit=MB, precision=1, commas=False)
-    conv_total_mb_str = fmt_memory(conv_total_memory, unit=MB, precision=1, commas=False)
-    conv_ai_str = fmt(conv_ai, precision=1, commas=False)
-    a100_ridge_str = fmt_arithmetic_intensity(Hardware.Cloud.A100.ridge_point(), unit=flop / byte, commas=False)
-    a100_fp16_tflop_per_s_str = fmt_flop_rate(a100_fp16_flops, unit=TFLOP / second, precision=0, commas=False)
-    # Calc-line LHS products pinned to cell constants (inline {python} cannot
-    # evaluate inside $...$): each renders the explicit derivation expression.
-    _fpb = int(conv_fp_bytes)
-    conv_out_dims_math = fmt_math(f"{conv_batch} \\times {conv_cout} \\times {conv_h} \\times {conv_w}")
-    conv_flops_per_out_math = fmt_math(f"{conv_cin} \\times {conv_k} \\times {conv_k} \\times 2")
-    conv_input_dims_math = fmt_math(f"{conv_batch} \\times {conv_cin} \\times {conv_h} \\times {conv_w} \\times {_fpb}")
-    conv_weights_dims_math = fmt_math(f"{conv_cout} \\times {conv_cin} \\times {conv_k} \\times {conv_k} \\times {_fpb}")
-    conv_output_dims_math = fmt_math(f"{conv_batch} \\times {conv_cout} \\times {conv_h} \\times {conv_w} \\times {_fpb}")
-```
-
-::: {#nbk-conv-analysis .callout-notebook title="Convolutional layer analysis"}
-
-Consider a Conv2D\index{Roofline Analysis!conv2d layer} layer with input shape (batch = 32, channels = 128, height = 56, width = 56), output channels = 256, and kernel size $3{\times}3$ on an A100 GPU:
-
-**Computational requirements**:
-
-- Output size: `{python} Conv2dAnalysisCalc.conv_out_dims_math` = `{python} Conv2dAnalysisCalc.conv_out_m_str` elements
-- FLOPs per output: `{python} Conv2dAnalysisCalc.conv_flops_per_out_math` = `{python} Conv2dAnalysisCalc.conv_flops_per_out_value_str` (multiply-add)
-- Total FLOPs: `{python} Conv2dAnalysisCalc.conv_out_m_str` $\times$ `{python} Conv2dAnalysisCalc.conv_flops_per_out_value_str` = `{python} Conv2dAnalysisCalc.conv_total_gflop_str`
-
-```{=latex}
-\vspace*{-0.75ex}
-```
-**Memory traffic analysis**:
-
-- Input: `{python} Conv2dAnalysisCalc.conv_input_dims_math` = `{python} Conv2dAnalysisCalc.conv_input_mb_str` (FP16)
-- Weights: `{python} Conv2dAnalysisCalc.conv_weights_dims_math` ≈ `{python} Conv2dAnalysisCalc.conv_weights_mb_str` (FP16)
-- Output: `{python} Conv2dAnalysisCalc.conv_output_dims_math` = `{python} Conv2dAnalysisCalc.conv_output_mb_str` (FP16)
-- Total: `{python} Conv2dAnalysisCalc.conv_total_mb_str`
-
-```{=latex}
-\vspace*{-0.75ex}
-```
-**Arithmetic intensity**:
-$I$ = `{python} Conv2dAnalysisCalc.conv_total_gflop_str` / `{python} Conv2dAnalysisCalc.conv_total_mb_str` = `{python} Conv2dAnalysisCalc.conv_ai_str` FLOP/byte
-
-**Systems insight**: This is well above A100's ridge point of `{python} Conv2dAnalysisCalc.a100_ridge_str`, so the simple Roofline Model places the operation in the compute-limited region. Peak throughput of ~`{python} Conv2dAnalysisCalc.a100_fp16_tflop_per_s_str` (FP16 with Tensor Cores) is therefore the ceiling, but realized performance still depends on tiling, occupancy, instruction mix, and library efficiency.
-
-:::
-
-The convolutional layer's high arithmetic intensity arises from spatial weight reuse: the same $3{\times}3$ kernel is applied across every spatial location in the feature map, amortizing the cost of loading weights from off-chip memory across millions of multiply-accumulate operations. Keeping active tiles in registers and shared memory reduces repeated off-chip transfers, making high arithmetic throughput possible. The roofline calculation alone does not establish bus idleness or arithmetic saturation.
-
-Not all neural network layers exhibit such extensive data reuse. Fully connected (dense) layers—such as classification heads, feed-forward networks, and linear projections in transformer attention blocks—lack spatial dimensions. When evaluated at small batch sizes, their arithmetic intensity drops substantially, shifting execution into the memory-bound regime:
-
-```{python}
-#| echo: false
-#| label: dense-layer-analysis-calc
-# ┌─────────────────────────────────────────────────────────────────────────────
-# │ DENSE LAYER ROOFLINE ANALYSIS
-# ├─────────────────────────────────────────────────────────────────────────────
-# │ Context: "Dense Layer Analysis" callout notebook
-# │
-# │ Goal: Contrast memory-bound GEMM with compute-bound convolution.
-# │ Show: That small GEMMs fail to saturate GPU compute due to memory bandwidth limits.
-# │ How: Apply the Roofline Model to calculate attainable performance for a dense layer.
-# │
-# └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import check, fmt, fmt_flops, fmt_int, fmt_arithmetic_intensity
-
-class DenseLayerAnalysisCalc:
-    """Roofline analysis for a small GEMM showing memory-bound behavior."""
-
-    # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    dense_batch = 32
-    dense_in = 2048
-    dense_out = 2048
-
-    # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    dense_total_mflops = (2 * dense_batch * dense_in * dense_out * flop).to(MFLOPs).magnitude
-
-    dense_input_memory = dense_batch * dense_in * 2 * byte
-    dense_weights_memory = dense_in * dense_out * 2 * byte
-    dense_output_memory = dense_batch * dense_out * 2 * byte
-    dense_total_memory = dense_input_memory + dense_weights_memory + dense_output_memory
-
-    dense_total_flops = dense_total_mflops * MFLOPs
-    dense_ai_qty = (dense_total_flops / dense_total_memory).to(flop / byte)
-    dense_ai = dense_ai_qty.magnitude
-
-    a100_bandwidth = Hardware.Cloud.A100.memory.bandwidth
-    a100_peak = Hardware.Cloud.A100.compute.peak_flops
-    dense_attainable = (a100_bandwidth * dense_ai_qty).to(TFLOP / second)
-    dense_util_pct = (dense_attainable / a100_peak).to_base_units().magnitude * 100
-
-    a100_ridge_value = Hardware.Cloud.A100.ridge_point().to(flop / byte).magnitude
-
-    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
-    check(round(dense_ai, 1) == 31.0, f"Dense arithmetic intensity mismatch: {dense_ai}")
-    check(round(dense_util_pct, 1) == 20.3, f"Dense utilization pct mismatch: {dense_util_pct}")
-    check(dense_ai < a100_ridge_value, f"Expected Dense intensity {dense_ai} below A100 ridge {a100_ridge_value}")
-
-    # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
-    dense_total_mflop_str = fmt_flops(dense_total_flops, unit=MFLOPs, precision=1, commas=False)
-    dense_input_kb_str = fmt_memory(dense_input_memory, unit=KB, precision=1, commas=False)
-    dense_weights_mb_str = fmt_memory(dense_weights_memory, unit=MB, precision=1, commas=False)
-    dense_output_kb_str = fmt_memory(dense_output_memory, unit=KB, precision=1, commas=False)
-    dense_total_mb_str = fmt_memory(dense_total_memory, unit=MB, precision=1, commas=False)
-    dense_ai_flops_per_byte_str = fmt_arithmetic_intensity(dense_ai_qty, unit=flop / byte, commas=False)
-    dense_attainable_tflop_per_s_str = fmt_flop_rate(dense_attainable, unit=TFLOP / second, commas=False)
-    dense_util_pct_str = fmt_percent(dense_util_pct / 100, precision=1, commas=False, style='prose')
-    a100_bw_gb_per_s_str = fmt_bandwidth(a100_bandwidth, unit=GB / second, precision=0, commas=True)
-    a100_ridge_str = fmt_arithmetic_intensity(Hardware.Cloud.A100.ridge_point(), unit=flop / byte, commas=False)
-    # Calc-line LHS products pinned to cell constants (inline {python} cannot
-    # evaluate inside $...$): each renders the explicit derivation expression.
-    dense_matmul_dims_math = fmt_math(f"({dense_batch} \\times {dense_in}) \\times ({dense_in} \\times {dense_out})")
-    dense_total_flops_math = fmt_math(f"2 \\times {dense_batch} \\times {dense_in} \\times {dense_out}")
-    dense_input_dims_math = fmt_math(f"{dense_batch} \\times {dense_in} \\times 2")
-    dense_weights_dims_math = fmt_math(f"{dense_in} \\times {dense_out} \\times 2")
-    dense_output_dims_math = fmt_math(f"{dense_batch} \\times {dense_out} \\times 2")
-```
-
-::: {#nbk-hw-acceleration-dense-layer-analysis .callout-notebook title="Dense layer analysis"}
-
-Consider a fully connected layer\index{Dense Layer!roofline analysis}\index{Roofline Analysis!dense layer}: input (batch = 32, features = 2048) → output (batch = 32, features = 2048) on the same A100:
-
-**Computational requirements**:
-
-- Matrix multiply: `{python} DenseLayerAnalysisCalc.dense_matmul_dims_math`
-- Total FLOPs: `{python} DenseLayerAnalysisCalc.dense_total_flops_math` = `{python} DenseLayerAnalysisCalc.dense_total_mflop_str`
-
-```{=latex}
-\vspace*{-0.75ex}
-```
-**Memory traffic analysis**:
-
-- Input: `{python} DenseLayerAnalysisCalc.dense_input_dims_math` = `{python} DenseLayerAnalysisCalc.dense_input_kb_str` (FP16)
-- Weights: `{python} DenseLayerAnalysisCalc.dense_weights_dims_math` = `{python} DenseLayerAnalysisCalc.dense_weights_mb_str` (FP16)
-- Output: `{python} DenseLayerAnalysisCalc.dense_output_dims_math` = `{python} DenseLayerAnalysisCalc.dense_output_kb_str` (FP16)
-- Total: `{python} DenseLayerAnalysisCalc.dense_total_mb_str`
-
-```{=latex}
-\vspace*{-0.75ex}
-```
-**Arithmetic intensity**:
-$I$ = `{python} DenseLayerAnalysisCalc.dense_total_mflop_str` / `{python} DenseLayerAnalysisCalc.dense_total_mb_str` = `{python} DenseLayerAnalysisCalc.dense_ai_flops_per_byte_str`
-
-This intensity sits below A100's ridge point of `{python} DenseLayerAnalysisCalc.a100_ridge_str`, so bandwidth sets the lower modeled ceiling. Performance upper bound:
-$\AttainableComputeRate$ = `{python} DenseLayerAnalysisCalc.a100_bw_gb_per_s_str` $\times$ `{python} DenseLayerAnalysisCalc.dense_ai_flops_per_byte_str` = `{python} DenseLayerAnalysisCalc.dense_attainable_tflop_per_s_str`
-
-**Systems insight**: The modeled ceiling is only `{python} DenseLayerAnalysisCalc.dense_util_pct_str` of peak compute capability, demonstrating the memory wall constraint for this small-batch traffic model.
-
-:::
-
-The dense layer's lower arithmetic intensity stems from limited parameter reuse. While a convolutional kernel is reused across every spatial location in an activation map, a dense weight matrix is reused only across the batch dimension. At a batch size of 32, each fetched weight contributes to 32 sample products in this operation. Assuming the weights are streamed from HBM as modeled, the bandwidth ceiling caps throughput at `{python} DenseLayerAnalysisCalc.dense_util_pct_str` of peak compute capacity. This fraction is not a measurement of stalled cycles, and weights may remain cached across invocations. The calculation explains why low-batch dense inference is a candidate for bandwidth-focused optimization.
-
-While small-batch matrix multiplications suffer from restricted parameter reuse, elementwise and reduction operators represent an even more acute memory bottleneck. Operations such as layer normalization, activation functions, and residual additions perform only a few arithmetic operations per element loaded from memory, driving arithmetic intensity to its physical floor:
-
-```{python}
-#| echo: false
-#| label: layernorm-analysis-calc
-# ┌─────────────────────────────────────────────────────────────────────────────
-# │ LAYERNORM ROOFLINE ANALYSIS
-# ├─────────────────────────────────────────────────────────────────────────────
-# │ Context: "LayerNorm Analysis" callout notebook
-# │
-# │ Goal: Demonstrate a severely memory-bound workload.
-# │ Show: Why LayerNorm achieves <1% of peak compute despite its necessity.
-# │ How: Apply the Roofline Model to calculate arithmetic intensity for LayerNorm.
-# │
-# └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import fmt_int, fmt, fmt_flops, fmt_count, check
-
-class LayernormAnalysisCalc:
-    """Roofline analysis for LayerNorm showing severely memory-bound behavior."""
-
-    # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    ln_batch = 32
-    ln_seq = 512
-    ln_hidden = 768
-    ln_fp_bytes = int(BYTES_FP16.to(byte).magnitude)
-
-    # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    ln_elements = ln_batch * ln_seq * ln_hidden
-    ln_elements_m = ln_elements / MILLION
-    ln_flops_per = 8
-    ln_total_mflops = ln_elements_m * ln_flops_per
-
-    ln_input_memory = ln_elements * ln_fp_bytes * byte
-    ln_params_memory = ln_hidden * 2 * ln_fp_bytes * byte
-    ln_output_memory = ln_elements * ln_fp_bytes * byte
-    ln_total_memory = ln_input_memory + ln_output_memory + ln_params_memory
-
-    ln_total_flops = ln_total_mflops * MFLOPs
-    ln_ai_qty = (ln_total_flops / ln_total_memory).to(flop / byte)
-    ln_ai = ln_ai_qty.magnitude
-
-    a100_bandwidth = Hardware.Cloud.A100.memory.bandwidth
-    a100_ridge_value = Hardware.Cloud.A100.ridge_point().to(flop / byte).magnitude
-    ln_attainable = (a100_bandwidth * ln_ai_qty).to(TFLOP / second)
-    ln_ridge_gap = a100_ridge_value / ln_ai
-
-    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
-    check(1.5 < ln_ai < 2.5, f"LayerNorm AI should be around 2 FLOP/byte, got {ln_ai:.2f}")
-    check(ln_ridge_gap > 50, f"LayerNorm should sit far below the A100 ridge, got {ln_ridge_gap:.1f}x")
-
-    # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
-    ln_elements_m_str = fmt_count(ln_elements, scale="M", precision=1, commas=False)
-    ln_total_mflop_str = fmt_flops(ln_total_flops, unit=MFLOPs, precision=1, commas=False)
-    ln_input_mb_str = fmt_memory(ln_input_memory, unit=MB, precision=1, commas=False)
-    ln_params_kb_str = fmt_memory(ln_params_memory, unit=KB, precision=1, commas=False)
-    ln_output_mb_str = fmt_memory(ln_output_memory, unit=MB, precision=1, commas=False)
-    ln_total_mb_str = fmt_memory(ln_total_memory, unit=MB, precision=1, commas=False)
-    ln_ai_str = fmt(ln_ai, precision=1, commas=False)
-    ln_ridge_gap_mult_str = fmt_multiple(round(ln_ridge_gap), commas=False, precision=0)
-    ln_attainable_tflop_per_s_str = fmt_flop_rate(ln_attainable, unit=TFLOP / second, precision=1, commas=False)
-    a100_bw_gb_per_s_str = fmt_bandwidth(a100_bandwidth, unit=GB / second, precision=0, commas=False)
-    ln_flops_per_element_value_str = fmt(ln_flops_per, precision=0, commas=False)
-    ln_fp_bytes_str = fmt(ln_fp_bytes, precision=0, commas=False)
-    # Calc-line LHS products pinned to cell constants (inline {python} cannot
-    # evaluate inside $...$).
-    ln_elements_dims_math = fmt_math(f"{ln_batch} \\times {ln_seq} \\times {ln_hidden}")
-    ln_params_dims_math = fmt_math(f"{ln_hidden} \\times 2 \\times {ln_fp_bytes}")
-```
-
-::: {#nbk-hw-acceleration-layernorm-analysis .callout-notebook title="LayerNorm analysis"}
-
-LayerNorm with input shape (batch = 32, seq = 512, hidden = 768):
-
-**Computational requirements**:
-
-- Elements: `{python} LayernormAnalysisCalc.ln_elements_dims_math` = `{python} LayernormAnalysisCalc.ln_elements_m_str`
-- Approximate operations per element: mean reduction (1 ADD), variance (2 ADD, 1 MUL), normalization and affine transform (2 ADD, 2 MUL) ≈ `{python} LayernormAnalysisCalc.ln_flops_per_element_value_str`; reciprocal-square-root overhead is amortized across each hidden vector
-- Total FLOPs: `{python} LayernormAnalysisCalc.ln_elements_m_str` $\times$ `{python} LayernormAnalysisCalc.ln_flops_per_element_value_str` = `{python} LayernormAnalysisCalc.ln_total_mflop_str`
-
-```{=latex}
-\vspace*{-0.75ex}
-```
-**Memory traffic**:
-
-- Input: `{python} LayernormAnalysisCalc.ln_elements_m_str` $\times$ `{python} LayernormAnalysisCalc.ln_fp_bytes_str` = `{python} LayernormAnalysisCalc.ln_input_mb_str`
-- Parameters (scale, bias): `{python} LayernormAnalysisCalc.ln_params_dims_math` = `{python} LayernormAnalysisCalc.ln_params_kb_str` (negligible)
-- Output: `{python} LayernormAnalysisCalc.ln_elements_m_str` $\times$ `{python} LayernormAnalysisCalc.ln_fp_bytes_str` = `{python} LayernormAnalysisCalc.ln_output_mb_str`
-- Total: `{python} LayernormAnalysisCalc.ln_total_mb_str`
-
-```{=latex}
-\vspace*{-0.75ex}
-```
-**Arithmetic intensity**:
-$I$ = `{python} LayernormAnalysisCalc.ln_total_mflop_str` / `{python} LayernormAnalysisCalc.ln_total_mb_str` = `{python} LayernormAnalysisCalc.ln_ai_str` FLOP/byte
-
-This arithmetic intensity sits severely below the A100 ridge point (`{python} LayernormAnalysisCalc.ln_ridge_gap_mult_str` below). The HBM performance upper bound is:
-$\AttainableComputeRate$ = `{python} LayernormAnalysisCalc.a100_bw_gb_per_s_str` $\times$ `{python} LayernormAnalysisCalc.ln_ai_str` FLOP/byte = `{python} LayernormAnalysisCalc.ln_attainable_tflop_per_s_str`
-
-**Systems insight**: The simple HBM roofline bounds this standalone LayerNorm at about 1 percent of A100's tensor peak. Actual latency also depends on fusion, reduction strategy, launch overhead, and which memory level supplies the data.
-
-:::
-
-Standalone normalization performs minimal arithmetic relative to the memory traffic it generates, as the LayerNorm\index{Roofline Analysis!layer normalization} analysis demonstrates. The illustrated unfused implementation reads and writes activation buffers, giving approximately 2 FLOP/byte when those transfers cross HBM. Cache residency and fusion can change physical HBM traffic. A ceiling near 1 percent of tensor peak is not evidence that all compute units are idle for 99 percent of execution. In the D·A·M framework, operator fusion is one candidate response to excessive intermediate traffic. Combining adjacent projections, bias additions, normalization, or activations can keep values in registers or SRAM, provided the grouping preserves numerical behavior and fits local resources. Profiling establishes whether the saved traffic outweighs any occupancy or scheduling cost.
-
-### Optimization by intensity regime {#sec-hardware-acceleration-optimization-intensity-regime-cb3a}
-
-The roofline analysis directly informs optimization priorities, summarized in @tbl-optimization-intensity-regime.
-
-| **Intensity regime**\index{Intensity regime!definition} | **Typical operations**\index{Typical operations!definition} | **Optimization priority**\index{Optimization priority!definition} | **Common techniques**\index{Common techniques!definition}                             | **Expected impact**\index{Expected impact!definition}                          |
-|:--------------------------------------------------------|:------------------------------------------------------------|:------------------------------------------------------------------|:--------------------------------------------------------------------------------------|:-------------------------------------------------------------------------------|
-| **High $I$ ($>200$ FLOP/byte)**                         | Large convolutions                                          | Maximize compute utilization.                                     | Tensor Cores, thread-block tuning, and high occupancy.                                | Raises sustained compute utilization when the kernel already clears the ridge. |
-| **Medium $I$ (20--200 FLOP/byte)**                      | Medium-sized dense layers                                   | Balance compute and memory optimization.                          | Larger batches, register tiling, and fusion with adjacent operations.                 | Can move the binding bottleneck between memory and compute.                    |
-| **Low $\ArithmeticIntensity$ ($<20$ FLOP/byte)**        | Small dense layers and element-wise operations              | Reduce memory traffic.                                            | Aggressive operator fusion, reduced precision (FP16 → INT8), and algorithmic changes. | Reduces external-memory traffic when fusion or layout changes are legal.       |
-| **Very low $\ArithmeticIntensity$ ($<2$ FLOP/byte)**    | Normalization layers and activation functions               | Eliminate memory round-trips.                                     | Fuse with adjacent operations and use in-place computation where legal.               | Removes intermediate round-trips when adjacent operations can be fused.        |
-
-: **Optimization by Arithmetic Intensity Regime**: Roofline position determines whether an optimization should chase compute utilization, memory-traffic reduction, or complete elimination of memory round-trips. The lower the arithmetic intensity, the more valuable fusion and data-movement avoidance become. {#tbl-optimization-intensity-regime tbl-colwidths="[13,18,16,25,28]"}
-
-For low-intensity operations, operator fusion\index{Operator fusion!memory-bound optimization} is often the decisive optimization: LayerNorm\index{LayerNorm!kernel fusion target} combined with the Gaussian Error Linear Unit (GELU), for example, can become a single fused kernel. One of the most accessible levers for moving an operation up and right on the roofline is batching.
-
-```{python}
-#| echo: false
-#| label: batch-ai-calc
-from mlsysim.fmt import fmt_int, fmt, check, fmt_arithmetic_intensity
-
-class BatchAiCalc:
-    """Arithmetic intensity for a 2048x2048 dense layer as batch size grows."""
-
-    # LOAD
-    M = 2048
-    N = 2048
-    batch_small = 1
-    batch_medium = 32
-    batch_large = 256
-
-    # EXECUTE
-    def dense_ai(batch, m=M, n=N):
-        flops = 2 * batch * m * n
-        bytes_moved = 2 * batch * m + 2 * m * n + 2 * batch * n
-        return flops / bytes_moved
-
-    batch1_ai = dense_ai(batch_small)
-    batch32_ai = dense_ai(batch_medium)
-    batch256_ai = dense_ai(batch_large)
-
-    # GUARD
-    check(0.9 < batch1_ai < 1.1, f"Batch-1 AI should be near 1, got {batch1_ai:.2f}")
-    check(30 < batch32_ai < 32, f"Batch-32 AI should be near 31, got {batch32_ai:.2f}")
-    check(200 < batch256_ai < 210, f"Batch-256 AI should be near 205, got {batch256_ai:.2f}")
-
-    # OUTPUT
-    batch1_ai_flops_per_byte_str = fmt_arithmetic_intensity(batch1_ai * flop / byte, unit=flop / byte, commas=False)
-    batch32_ai_flops_per_byte_str = fmt_arithmetic_intensity(batch32_ai * flop / byte, unit=flop / byte, commas=False)
-    batch256_ai_flops_per_byte_str = fmt_arithmetic_intensity(batch256_ai * flop / byte, unit=flop / byte, commas=False)
-    batch_small_str = fmt(batch_small, precision=0, commas=False)
-    batch_medium_str = fmt(batch_medium, precision=0, commas=False)
-    batch_large_str = fmt(batch_large, precision=0, commas=False)
-    matrix_dim_str = fmt(M, precision=0, commas=False)
-    check(M == N, "Batch-AI example assumes a square M=N matrix.")
-```
-
-::: {#nbk-hw-acceleration-batch-size-arithmetic-intensity .callout-notebook title="Batch size and arithmetic intensity"}
-
-Increasing batch size\index{Batch Size!arithmetic intensity impact} improves arithmetic intensity for matrix operations by amortizing weight loading. @Eq-batch-ai formalizes this relationship for an idealized FP16/BF16 dense layer $(\BatchSize{\times}\LayerInputWidth){\times}(\LayerInputWidth{\times}\LayerOutputWidth)$, counting one read each of the input and weights and one write of the output, where $\BatchSize$ is batch size and $\LayerInputWidth$ and $\LayerOutputWidth$ are the layer's input and output widths:
-$$\ArithmeticIntensity = \frac{2\BatchSize\LayerInputWidth\LayerOutputWidth}{2\BatchSize\LayerInputWidth + 2\LayerInputWidth\LayerOutputWidth + 2\BatchSize\LayerOutputWidth} \approx \frac{2\BatchSize\LayerInputWidth\LayerOutputWidth}{2\LayerInputWidth\LayerOutputWidth} = B \quad (\text{when } 2\LayerInputWidth\LayerOutputWidth \gg 2\BatchSize(\LayerInputWidth+\LayerOutputWidth))$$ {#eq-batch-ai}
-
-Example: Dense layer with $\LayerInputWidth = \LayerOutputWidth$ = `{python} BatchAiCalc.matrix_dim_str` (FP16)
-
-- Batch = `{python} BatchAiCalc.batch_small_str`: $\ArithmeticIntensity$ ≈ `{python} BatchAiCalc.batch1_ai_flops_per_byte_str` (memory bound)
-- Batch = `{python} BatchAiCalc.batch_medium_str`: $\ArithmeticIntensity$ ≈ `{python} BatchAiCalc.batch32_ai_flops_per_byte_str` (memory bound)
-- Batch = `{python} BatchAiCalc.batch_large_str`: $\ArithmeticIntensity$ ≈ `{python} BatchAiCalc.batch256_ai_flops_per_byte_str` (compute bound on A100)
-
-**Systems insight**: This explains why batching can produce large throughput improvements in production inference systems, as MLPerf Inference\index{MLPerf!inference benchmarking}, the standardized benchmark suite, demonstrates by separating bulk-throughput runs from latency-constrained serving runs [@reddi2020].
-
-:::
-
-::: {.column-margin .margin-pointer}
-↪ The MLPerf Inference execution scenarios that separate throughput runs from latency-constrained runs are developed in @sec-benchmarking-mlperf-execution-scenarios-89f0.
-:::
-
-The batch size analysis reveals why inference serving systems are designed around batching: it changes the arithmetic intensity regime of memory-bound workloads. However, batching introduces latency trade-offs, since requests must wait in a queue until a batch forms. This tension between throughput (favoring large batches) and latency (favoring small batches) is a central challenge in ML serving systems, explored in depth in @sec-model-serving-dynamic-batching-latencythroughput-tradeoffs-986d.
-
-When service latency limits batching, batch-1 or small-batch LLM decode often retains low weight reuse and low arithmetic intensity. The next worked model quantifies that particular regime rather than treating all LLM inference as identical.
-
-```{python}
-#| echo: false
-#| label: gpt2-throughput-calc
-# ┌─────────────────────────────────────────────────────────────────────────────
-# │ GPT-2 THROUGHPUT CEILING ANALYSIS
-# ├─────────────────────────────────────────────────────────────────────────────
-# │ Context: "The Throughput Ceiling" callout
-# │
-# │ Goal: Demonstrate the throughput ceiling for single-batch inference.
-# │ Show: Why GPT-2 achieves only 1% utilization on A100 at batch=1.
-# │ How: Calculate attainable TFLOP/s based on GPT-2's arithmetic intensity.
-# │
-# └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import (
-    check,
-    fmt,
-    fmt_bandwidth,
-    fmt_flop_rate,
-    fmt_flops,
-    fmt_int,
-    fmt_memory,
-    fmt_percent,
-    fmt_usd,
-    fmt_arithmetic_intensity,
-    fmt_math,
-)
-from mlsysim.physics import model_memory
-
-class Gpt2ThroughputCalc:
-    """Throughput ceiling for GPT-2 XL autoregressive inference at batch=1."""
-
-    # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    gpt2_weight = Models.Language.GPT2.size_in_bytes(BYTES_FP16)
-
-    # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    gpt2_decode_flops = 2 * Models.Language.GPT2.parameters.to(param) * flop / param
-    gpt2_decode_ai_qty = (gpt2_decode_flops / gpt2_weight).to(flop / byte)
-    gpt2_decode_ai = gpt2_decode_ai_qty.magnitude
-
-    a100_bandwidth = Hardware.Cloud.A100.memory.bandwidth
-    a100_fp16_flops = Hardware.Cloud.A100.compute.peak_flops
-    a100_fp32_flops = Hardware.Cloud.A100.compute.precision_flops["fp32"]
-    a100_ridge_value = Hardware.Cloud.A100.ridge_point().to(flop / byte).magnitude
-    a100_ridge_fp32_value = (Hardware.Cloud.A100.compute.precision_flops['fp32'] / Hardware.Cloud.A100.memory.bandwidth).to(flop / byte).magnitude
-    gpt2_max_flops = (gpt2_decode_ai_qty * a100_bandwidth).to(TFLOP / second)
-    gpt2_utilization = (gpt2_max_flops / a100_fp16_flops).to_base_units().magnitude * 100
-
-    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
-    check(round(gpt2_decode_ai, 1) == 1.0, f"GPT-2 decode intensity mismatch: {gpt2_decode_ai}")
-    check(round(gpt2_utilization, 2) == 0.65, f"GPT-2 utilization mismatch: {gpt2_utilization}")
-
-    # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
-    gpt2_weight_gb_str = fmt_memory(gpt2_weight, unit=GB, precision=0, commas=False)
-    gpt2_decode_gflop_str = fmt_flops(gpt2_decode_flops, unit=GFLOPs, precision=0, commas=False)
-    gpt2_decode_ai_str = fmt(gpt2_decode_ai, precision=0, commas=False)
-    gpt2_max_tflop_per_s_str = fmt_flop_rate(gpt2_max_flops, unit=TFLOP / second, commas=False)
-    gpt2_utilization_pct_str = fmt_percent(gpt2_utilization / 100, precision=1, commas=False, style='prose')
-    # "%"-glyph math form for the Actual/Peak worked-calc line; the prose twin (gpt2_utilization_pct_str) keeps the word.
-    gpt2_utilization_pct_math = fmt_math(rf"{gpt2_utilization:.1f}\%")
-    a100_fp16_tflop_per_s_str = fmt_flop_rate(a100_fp16_flops, unit=TFLOP / second, precision=0, commas=False)
-    a100_bw_tb_per_s_str = fmt_bandwidth(a100_bandwidth, unit=TB / second, precision=2, commas=False)
-    a100_fp32_tflop_per_s_str = fmt_flop_rate(a100_fp32_flops, unit=TFLOP / second, precision=1, commas=False)
-    a100_ridge_str = fmt_arithmetic_intensity(Hardware.Cloud.A100.ridge_point(), unit=flop / byte, commas=False)
-    a100_ridge_fp32_str = fmt_arithmetic_intensity(
-        Hardware.Cloud.A100.compute.precision_flops['fp32'] / Hardware.Cloud.A100.memory.bandwidth, unit=flop / byte, precision=1, commas=False
-    )
-    a100_cost_usd_str = fmt_usd(15_000, precision=0)
-    gpt2_util_ceiling_str = fmt_percent(0.01, precision=0, commas=False, style='prose')
-```
-
-::: {#nbk-hw-acceleration-throughput-ceiling .callout-notebook title="The throughput ceiling"}
-
-**Problem**: A batch-1 GPT-2 calculation makes this bandwidth ceiling concrete: what is the maximum possible utilization of an NVIDIA A100 when running GPT-2 inference (batch size 1)?
-
-**The hardware constraints (the denominators)**
-
-*   **Peak compute**: `{python} Gpt2ThroughputCalc.a100_fp16_tflop_per_s_str` (FP16 Tensor Core).
-*   **Peak bandwidth**: `{python} Gpt2ThroughputCalc.a100_bw_tb_per_s_str` (HBM2e).
-*   **Ridge point $(\PeakRate/\Bandwidth)$**: `{python} Gpt2ThroughputCalc.a100_fp16_tflop_per_s_str` / `{python} Gpt2ThroughputCalc.a100_bw_tb_per_s_str` = `{python} Gpt2ThroughputCalc.a100_ridge_str` (for FP16 Tensor Core).
-
-    **Interpretation**: Saturating this chip at FP16 precision requires `{python} Gpt2ThroughputCalc.a100_ridge_str` operations for every byte loaded. The ridge point varies by precision: FP32 operations (`{python} Gpt2ThroughputCalc.a100_fp32_tflop_per_s_str` peak) have a ridge point of only ~`{python} Gpt2ThroughputCalc.a100_ridge_fp32_str`.
-
-**The workload characteristics (the numerator)**
-
-*   **Model**: GPT-2 XL (1.5 billion parameters).
-*   **Operation**: Autoregressive generation (1 token at a time).
-*   **Data movement**: Must load all weights (`{python} Gpt2ThroughputCalc.gpt2_weight_gb_str` @ FP16) for every token.
-*   **Compute**: Vector-Matrix multiplication. Two FLOPs per parameter, $2\Parameters$ ≈ `{python} Gpt2ThroughputCalc.gpt2_decode_gflop_str`.
-*   **Arithmetic intensity**:
-    `{python} Gpt2ThroughputCalc.gpt2_decode_gflop_str` / `{python} Gpt2ThroughputCalc.gpt2_weight_gb_str` = `{python} Gpt2ThroughputCalc.gpt2_decode_ai_str` FLOP/byte
-
-**The prediction (iron law)**
-
-Since the modeled intensity $\ArithmeticIntensity$ (`{python} Gpt2ThroughputCalc.gpt2_decode_ai_str`) $\ll$ the ridge point $\RooflineRidgePoint$ (`{python} Gpt2ThroughputCalc.a100_ridge_str`), bandwidth sets the lower roofline ceiling.
-
-*   **Maximum throughput**: `{python} Gpt2ThroughputCalc.gpt2_decode_ai_str` FLOP/byte $\times$ `{python} Gpt2ThroughputCalc.a100_bw_tb_per_s_str` = `{python} Gpt2ThroughputCalc.gpt2_max_tflop_per_s_str`.
-*   **Utilization ceiling**:
-    `{python} Gpt2ThroughputCalc.gpt2_max_tflop_per_s_str` (Bound) / `{python} Gpt2ThroughputCalc.a100_fp16_tflop_per_s_str` (Peak) ≈ `{python} Gpt2ThroughputCalc.gpt2_utilization_pct_math`
-
-**Systems insight**:
-Without batching, a `{python} Gpt2ThroughputCalc.a100_cost_usd_str` GPU has a modeled ceiling below `{python} Gpt2ThroughputCalc.gpt2_util_ceiling_str` of its compute peak in this weight-streaming decode scenario. Batching and weight quantization address that gap; key-value caching instead avoids recomputing prior attention states.
-
-:::
-
-Through this derivation, the Roofline Model provides a diagnostic framework for identifying whether operations are compute bound or memory bound. A bandwidth ceiling at `{python} Gpt2ThroughputCalc.gpt2_utilization_pct_str` of peak is only the first diagnostic step; the next challenge is translating this diagnosis into efficient execution plans that exploit accelerator architectures.
 
 ## Hardware Mapping {#sec-hardware-acceleration-hardware-mapping-fundamentals-neural-networks-f9a9}
 

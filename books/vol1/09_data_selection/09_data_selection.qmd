@@ -2553,10 +2553,6 @@ Despite these limitations, semi-supervised learning can reduce label requirement
 
 When filtering and prioritizing existing labeled data fails to provide sufficient signal for the compute budget, systems engineering must expand what counts as a valid training sample. Self-supervised learning (SSL) is included in the data-selection toolkit because it is a systems-level alternative to acquiring and selecting expensive human labels. Instead of paying human annotators to label data or pruning a small labeled dataset, SSL shifts the boundary of usable data, allowing the system to extract supervisory signal from the raw structure of massive unlabeled corpora.
 
-GPT was trained to predict the next token in a sequence. BERT was trained to fill in masked tokens. Neither pretraining objective required task-specific human labels. **Self-supervised learning**\index{Self-supervised learning!definition}[^fn-self-supervised-paradigm] (SSL) generalizes this insight: by designing *pretext tasks* that derive supervision from the data's structure, models can learn reusable representations from unlabeled data at scale. Where active and semi-supervised learning reduce the demand for labels, SSL changes the accounting by making unlabeled structure the pretraining signal. Within the intervention map, SSL extends the available pool; the question shifts from which labeled samples to train on to how unlabeled samples can support pretraining. It responds to one aspect of the data wall in @sec-data-selection-icr-frontier by broadening what counts as a training signal, while leaving corpus quality, licensing, coverage, and labeled evaluation requirements intact.
-
-[^fn-self-supervised-paradigm]: **Self-supervised learning**\index{Self-supervised learning!iron law restructuring}: The pretext task, such as next-token or masked-token prediction, provides a supervisory signal derived from the data itself. This reduces dependence on task-specific human labels but can require substantial pretraining compute. Amortization depends on how broadly the resulting model is reused.
-
 Labels are one form of supervision; a pretext task can also derive a learning signal from the structure of the data, as @tbl-self-supervised-tasks summarizes.
 
 | **Modality**    | **Self-Supervised Task** |                      **Supervision Signal** |
@@ -2568,8 +2564,6 @@ Labels are one form of supervision; a pretext task can also derive a learning si
 | **Multi-modal** | CLIP-style alignment     |                      Match image-text pairs |
 
 : **Self-Supervised Pretext Tasks by Modality**: Each task extracts supervision from data structure rather than human labels, enabling pretraining on large-scale unlabeled corpora. {#tbl-self-supervised-tasks .striped .hover tbl-colwidths="[30,30,40]"}
-
-Pretext tasks\index{Pretext Task!self-supervised learning} generate supervision signals automatically. Masked-token objectives\index{Masked Language Modeling!pretext task} can encourage models to learn grammatical and semantic structure; next-token prediction\index{Next-Token Prediction!pretext task} teaches continuation structure; and contrastive image objectives encourage visual features that are invariant to selected transformations\index{Contrastive Learning!pretext task}. These approaches build on convolutional neural network and transformer families, but the systems accounting matters: self-supervision removes task-specific annotation from the pretraining gate rather than removing data cost. Pretraining can begin on unlabeled corpora without waiting for example-level labels, but collection, filtering, licensing, storage, and processing remain. Separating pretraining from downstream labeling restructures the economics of machine learning when the representation transfers across tasks; task-specific adaptation and evaluation still carry their own data requirements.
 
 ### The economics of amortization {#sec-data-selection-economics-amortization-98bb}
 
@@ -2743,8 +2737,6 @@ When its pretraining cost is reused across tasks, SSL supports the **foundation 
 :::
 
 [^fn-foundation-model-risk]: **Foundation model**\index{Foundation model!homogenization risk}: The name emphasizes that these models serve as a shared base for many downstream tasks, but this creates a single point of failure. Defects in the foundation model's pretraining data (biases, factual errors, memorized private content) can propagate to multiple applications built upon it, depending on transfer and downstream adaptation. From a systems perspective, this homogenization risk means that data selection quality during pretraining has an outsized blast radius: a curation error that would affect one task in the train-from-scratch paradigm can affect many downstream deployments.
-
-Pretext objectives differ in what they stress on the machine. Contrastive methods need large negative pools. SimCLR\index{SimCLR!batch requirements}\index{Contrastive Learning!batch-based methods} [@chen2020simclr] draws them from mini-batches as large as 4,096, which costs activation memory and all-gather traffic (inter-accelerator communication to collect negative representations across devices), whereas Momentum Contrast (MoCo)\index{MoCo!queue-based dictionary} [@he2020] caches them in a momentum-encoder queue. Masked autoencoders drop most image patches before the encoder, which cuts attention memory, and autoregressive pretraining scales with tokens. For data selection, the common point is that pretraining turns raw structure into reusable signal that multiplies the value of scarce labels.
 
 Self-supervised learning addresses the label bottleneck by learning from data structure rather than human annotation, yet it cannot solve data scarcity itself. Rare classes may have too few examples, edge cases may never appear in the wild, and privacy constraints may prevent collecting real samples. Synthetic generation addresses this gap by creating new data on demand rather than selecting or curating existing data.
 
@@ -2943,162 +2935,7 @@ The keyword-spotting scenario shows how augmentation, noise injection, and simul
 
 [^fn-model-collapse-mechanism]: **Model collapse**\index{Model collapse!tail distribution compression}: Formally analyzed by @shumailov2024, this phenomenon can arise when errors and missing tail coverage compound during recursive training. Tail distributions contain rare but important patterns that appear infrequently in training data. When generation $n+1$ trains on output from generation $n$ under these conditions, successive generations can further compress the tails, producing increasingly homogeneous data. The degradation can be rapid in recursive training settings, which is why training on unanchored synthetic outputs risks catastrophic collapse of tail diversity.
 
-### Knowledge distillation: Compressing information {#sec-data-selection-knowledge-distillation-compressing-information-ce68}
-
-While data augmentation (@sec-data-selection-data-augmentation-transformationbased-synthesis-3aa7) and generative synthesis (@sec-data-selection-generative-synthesis-creating-new-samples-a43d) synthesize new input samples, knowledge distillation\index{Knowledge distillation!teacher-generated targets}[^fn-distillation-dark-knowledge] [@hinton2015distilling; @gou2021] synthesizes supervisory targets. Rather than training exclusively on sparse ground-truth labels (such as a one-hot vector $[1, 0, 0]$), a compact student network trains against the continuous probability distribution generated by a larger teacher model (such as $[0.70, 0.20, 0.10]$). The soft target distribution, scaled by a temperature parameter $\DistillationTemperature$, exposes inter-class correlations (the dark knowledge) that reflect similarities learned in the teacher's representation space. @Sec-model-compression-distillation-mathematics-4af6 develops the loss and temperature mechanics; here the concern is distillation as a *data* source and what storing or serving those targets costs.
-
-[^fn-distillation-dark-knowledge]: **Knowledge distillation**\index{Knowledge distillation!information density}: Soft teacher probabilities reveal structural similarities across classes that one-hot encodings omit. The temperature parameter\index{Knowledge distillation!temperature parameter} scales logit smoothing ($\DistillationTemperature > 1$); excessive smoothing erases discriminative signal, while $\DistillationTemperature \to 0$ collapses toward the argmax (one-hot) prediction and $\DistillationTemperature = 1$ recovers the ordinary softmax. Distillation introduces teacher inference costs that must be justified by improved student sample efficiency or accuracy.
-
-Distillation exposes a fundamental systems trade-off between accelerator HBM capacity and secondary storage I/O bandwidth:
-
-- **Online distillation**: The teacher model resides directly in accelerator memory alongside the student model during training. The system computes teacher forward passes concurrently with student execution, eliminating persistent storage overhead for soft targets. However, co-locating an overparameterized teacher consumes accelerator memory and tensor-core throughput, restricting the student's maximum per-accelerator batch size and increasing step latency.
-- **Offline distillation**: The teacher generates predictions across the corpus during an offline precomputation pass, storing dense logit vectors to disk. This frees accelerator memory entirely for student training, but dramatically expands dataset storage volume and input pipeline bandwidth. For a classification vocabulary of $V$ classes, storing uncompressed float32 logits increases the per-sample label footprint from a single integer index ($\lceil \log_2 V \rceil$ bits) to $4V$ bytes—a thousand-fold storage expansion for large vocabularies.
-
-Together, transformation-based augmentation (@sec-data-selection-data-augmentation-transformationbased-synthesis-3aa7), generative synthesis (@sec-data-selection-generative-synthesis-creating-new-samples-a43d), and supervisory distillation provide complementary ways to generate training signals. Where static filtering eliminates redundant input samples and dynamic selection optimizes sample ordering during training, synthetic generation manufactures missing signals when empirical collection hits physical, legal, or economic constraints. Orchestrating these techniques across the data, algorithm, and machine dimensions requires balancing data storage footprint, pipeline preprocessing throughput, and accelerator utilization within a unified systems budget.
-
-## Decision Framework {#sec-data-selection-decision-framework-0261}
-
-When labeling budget, redundancy, rare classes, privacy, and convergence speed conflict, systems engineering requires identifying the primary binding constraint. Each stage can raise the information-compute ratio when its measured quality gain justifies its overhead: pruning removes low-value samples before training, dynamic selection focuses compute on high-value samples during training, and synthesis creates new high-value samples on demand (@tbl-data-selection).
-
-| **Stage**                | **When Applied** | **Techniques**                                        | **Order-of-Magnitude Scenario Range**                |
-|:-------------------------|:-----------------|:------------------------------------------------------|:-----------------------------------------------------|
-| **Static pruning**       | Before training  | Coreset Selection, Deduplication, Quality Filtering   | 30–50% dataset reduction                             |
-| **Dynamic selection**    | During training  | Curriculum Learning, Active Learning, Semi-Supervised | 10–30% faster curricula; 2--100$\times$ fewer labels |
-| **Synthetic generation** | On-demand        | Augmentation, Generative Models, Distillation         | 2--10$\times$ effective data expansion               |
-
-: **Three-Stage Data Selection Pipeline**: The ranges illustrate possible outcomes rather than portable expectations. Actual gains depend on the dataset, model, selection method, and target metric. {#tbl-data-selection .striped .hover tbl-colwidths="[23,21,28,28]"}
-
-Once the dominant constraint is named, @tbl-technique-selection compares which technique changes that constraint and why.
-
-| **Constraint**                  | **Candidate Technique**   | **Why**                                              |
-|:--------------------------------|:--------------------------|:-----------------------------------------------------|
-| **Limited labeling budget**     | Active Learning           | Maximizes label ROI by selecting informative samples |
-| **High redundancy in data**     | Deduplication + Coreset   | Removes waste before training begins                 |
-| **Rare classes or edge cases**  | Synthetic Generation      | Creates samples that do not exist in raw data        |
-| **Slow convergence**            | Curriculum Learning       | Improves gradient quality in early training          |
-| **Privacy requirements**        | Privacy-audited synthesis | Reduce direct use of real records; verify leakage    |
-| **Capable teacher, small data** | Knowledge Distillation    | Teacher's soft targets add supervision per example   |
-
-: **Technique Selection Guide by Primary Constraint**: Candidate data-selection techniques mapped to the dominant resource constraint in the ML pipeline. The table begins the diagnosis; prerequisites and measured ROI determine the final choice. {#tbl-technique-selection .striped .hover}
-
-@Tbl-technique-selection maps individual constraints to techniques, but real projects face multiple constraints simultaneously. The triage flowchart in @fig-technique-decision-tree routes candidate strategies hierarchically from the root bottleneck—labeling expense, compute limits, or data scarcity—through operational checks on oracle availability, dataset redundancy, and simulator support to isolate actionable techniques.
-
-::: {#fig-technique-decision-tree fig-pos="htb" fig-cap="**Data Selection Decision Tree**: The tree begins with the primary bottleneck—labeling cost, compute cost, or data scarcity—and narrows each branch using available pools, oracles, redundancy, teachers, or simulators. Its leaves identify candidate techniques; projects with multiple binding constraints may require more than one branch." fig-alt="Decision tree rooted at Primary bottleneck, with branches for labeling cost, compute cost, and data scarcity. Labeling cost branches to self-supervised, active, or semi-supervised learning based on pool and oracle availability. Compute cost branches through redundant data to deduplication plus coreset selection or curriculum learning. Data scarcity branches through teacher or simulator availability to knowledge distillation, synthetic generation, or data augmentation."}
-```{.tikz}
-\begin{tikzpicture}[font=\small\sffamily]
-  \tikzset{
-     Decision/.style={draw=BlueD,fill=cyan!10, trapezium,aspect=2,inner sep=-1.2ex,
-     text width=30mm,line width=1pt,
-                        diamond, minimum width=32mm, minimum height=20mm, align= flush center,
-                        node distance=15mm and 25mm},
-    Leaf/.style={
-      rectangle,
-      draw=GreenLine,
-      fill=green!90!black!10,
-      align=center,
-      line width=1pt,minimum width=23mm,
-      minimum height=1cm,
-      font=\footnotesize\sffamily
-    },
-    Arrow/.style={->, >=Latex,line width=1pt, color=black!70}
-  }
-\def\be{8mm}
-% Root
-\node[Decision] (D1) {Primary\\bottleneck?};
-% Left
-\node[Decision, below left= 17mm and 31mm of D1] (D2) {Labeling\\cost};
-\node[Decision, below = \be of D2] (D3) {Oracle\\available?};
-\node[Leaf, left=14mm of D2] (B1){Self-\\Supervised};
-\node[Leaf, below=7mm of D3] (B2){Active\\Learning};
-\node[Leaf, left=14mm of D3] (B3){Semi-\\Supervised};
-%right
-\node[Decision, below right=17mm and 31mm  of D1] (D4) {Data\\scarcity};
-\node[Decision, below = \be of D4] (D5) {Simulator\\available?};
-\node[Leaf, right=14mm of D4] (B6){Knowledge\\Distillation};
-\node[Leaf, right=14mm of D5] (B7){Data\\Augmentation};
-\node[Leaf, below=7mm of D5] (B8){Synthetic\\Generation};
-%center
-\node[Decision, below = 7mm of D1] (D6) {Compute\\cost};
-\node[Decision, below = \be of D6] (D7) {Redundant\\data?};
-\node[Leaf, below=7mm of $(D3.south)!0.6!(D7.south)$] (B4){Dedup +\\Coreset};
-\node[Leaf, below=7mm of $(D7.south)!0.4!(D5.south)$] (B5){Curriculum\\Learning};
-%%arrows
-\draw[Arrow](D1)-|node[above, pos=0.25, font=\scriptsize\sffamily] {Labeling $\$\$\$$}(D2);
-\draw[Arrow](D1)-|node[above, pos=0.25, font=\scriptsize\sffamily] {Not enough data}(D4);
-\draw[Arrow](D1)--node[right, pos=0.25, font=\scriptsize\sffamily] {Compute $\$\$\$$}(D6);
-\draw[Arrow] (D2) -- node[above, pos=0.45, font=\scriptsize\sffamily] {Large pool} (B1);
-\draw[Arrow](D2)--(D3);
-\draw[Arrow](D3)--node[right, pos=0.25, font=\scriptsize\sffamily] {Yes}(B2);
-\draw[Arrow](D3)--node[above, pos=0.25, font=\scriptsize\sffamily] {No}(B3);
-%
-\draw[Arrow](D7.west)-|node[above, pos=0.25, font=\scriptsize\sffamily] {High}(B4.120);
-\draw[Arrow](D7.east)-|node[above, pos=0.25, font=\scriptsize\sffamily] {Low}(B5.65);
-%
-\draw[Arrow](D5)--node[right, pos=0.25, font=\scriptsize\sffamily] {Yes}(B8);
-\draw[Arrow](D5)--node[above, pos=0.25, font=\scriptsize\sffamily] {No}(B7);
-
-\draw[Arrow] (D4) -- node[above, pos=0.45, font=\scriptsize\sffamily] {Teacher} (B6);
-
-\draw[Arrow](D4)--node[right, pos=0.25, font=\scriptsize\sffamily] {Domain}(D5);
-
-\draw[Arrow](D6)--(D7);
-\end{tikzpicture}
-```
-
-:::
-
-### Decision process {.unnumbered}
-
-Each path requires a structured assessment because the same dataset symptom can point to different bottlenecks. Technique selection begins by naming the binding constraint, then checks whether the data, labels, and infrastructure needed by the chosen method exist.
-
-#### Step 1: Assess the bottleneck {.unnumbered}
-
-Identify which resource constraint most severely limits the training pipeline:
-
-- **Labeling cost**: Label-efficiency techniques such as active learning, semi-supervised learning, and self-supervised learning maximize the value extracted from each human annotation.
-- **Compute cost**: Coreset selection and deduplication can reduce processed samples, while a validated curriculum may reduce the steps needed to reach a target metric.
-- **Data scarcity**: Data creation through augmentation, synthesis, and distillation expands the effective training set beyond what raw collection provides.
-
-This diagnostic step keeps technique selection tied to the binding resource constraint rather than to the most familiar algorithm.
-
-#### Step 2: Check prerequisites {.unnumbered}
-
-With the bottleneck identified, verify that the corresponding techniques are feasible given the available infrastructure and data. Each approach carries specific requirements that must be met before implementation can begin (@tbl-technique-prerequisites).
-
-```{=latex}
-\begingroup
-\renewcommand{\arraystretch}{1.3}
-```
-
-| **Technique**                                        | **Prerequisites**                                           |
-|:-----------------------------------------------------|:------------------------------------------------------------|
-| **Active Learning**                                  | Access to oracle, unlabeled pool, retraining infrastructure |
-| **Coreset selection**\index{Coreset!data efficiency} | Proxy model or embedding extractor, full dataset accessible |
-| **Curriculum Learning**                              | Difficulty scoring method, pacing schedule                  |
-| **Semi-Supervised**                                  | Some labeled data, unlabeled data from same distribution    |
-| **Self-Supervised**                                  | Large unlabeled corpus, pretraining compute budget          |
-| **Augmentation**                                     | Domain knowledge of invariances, augmentation library       |
-| **Synthetic Generation**                             | Generative model or simulator, domain gap mitigation        |
-
-: **Technique Prerequisites**: Each technique carries specific infrastructure and data requirements that must be verified before implementation. A technique with excellent theoretical gains but unmet prerequisites will fail in practice, making this checklist the first step in technique selection. {#tbl-technique-prerequisites .striped .hover}
-
-```{=latex}
-\endgroup
-```
-
-#### Step 3: Estimate ROI {.unnumbered}
-
-Before committing engineering resources, estimate each candidate technique's return on investment. @Sec-data-selection-roi-framework-data-selection-techniques-dade defines ROI and @sec-data-selection-amortization-across-training-runs-f6b8 extends it across runs; the essential discipline is to express recurring savings and selection costs per training run and to spread one-time engineering cost across the planned number of experiments $N_{\text{runs}}$.
-
-A technique with high theoretical compute gains but complex engineering requirements may deliver lower net ROI than a simpler approach. Exact deduplication is often an inexpensive first candidate because hashing is computationally lightweight and easy to implement, although downstream benefit still depends on corpus redundancy and intentional sample weighting. Active learning requires oracle access, retraining infrastructure, and selection algorithm development, so its ROI depends heavily on how many labeling cycles amortize that upfront engineering investment.
-
-#### Step 4: Combine techniques {.unnumbered}
-
-Data selection techniques are not mutually exclusive, but combining them does not guarantee additive gains. A representative workflow deduplicates the raw corpus, applies a coverage-aware coreset filter, orders retained batches through an empirical curriculum, and applies runtime augmentations during batch collation. Pretrained representations alter the baseline trajectory further. Every additional stage must justify its compute overhead, because cascading filters frequently discard overlapping subsets while their scoring latencies accumulate.
-
-*Stages can compound efficiency gains when their effects do not overlap and their overhead remains small; combined savings must be measured rather than assumed.*
-
-Algorithmic filtering translates into system speedup only when selection overhead remains strictly bounded. A coreset pass that consumes ten hours of probe inference to trim a two-hour training run produces a net loss on wall-clock time and cloud spend. Similarly, an adaptive curriculum that scans the full corpus for per-epoch difficulty scoring can stall accelerators on host CPU bottlenecks. Realizing data-efficiency gains in production demands engineering empathy for the physical stack: amortizing scoring passes, streaming nonsequential batches without defeating prefetch engines, and synchronizing distributed selection states without serialization stalls.
+Together, transformation-based augmentation (@sec-data-selection-data-augmentation-transformationbased-synthesis-3aa7) and generative synthesis (@sec-data-selection-generative-synthesis-creating-new-samples-a43d) provide complementary ways to generate training signals. Where static filtering eliminates redundant input samples and dynamic selection optimizes sample ordering during training, synthetic generation manufactures missing signals when empirical collection hits physical, legal, or economic constraints. Orchestrating these techniques across the data, algorithm, and machine dimensions requires balancing data storage footprint, pipeline preprocessing throughput, and accelerator utilization within a unified systems budget.
 
 ## Selection Engineering {#sec-data-selection-selection-engineering-a4eb}
 
@@ -3725,6 +3562,8 @@ The balance between investment and savings varies across selection strategies. @
 ```{=latex}
 \endgroup
 ```
+The profiles in @tbl-roi-profiles demonstrate that data savings never come for free. Deduplication requires an upfront investment in hashing or embedding infrastructure, but reliably pays off across many epochs by eliminating redundant storage and compute. Coreset selection demands training a proxy model to score the dataset; it only breaks even if the compute saved by dropping samples exceeds the cost of that proxy training. Active learning shifts the cost from human labelers to machine inference, generating high ROI when human time is expensive, though it introduces human-in-the-loop latency that can stall automated pipelines. Finally, data augmentation requires zero new data acquisition but shifts the burden to the CPU or GPU, trading compute cycles for effective dataset expansion. In all cases, a technique earns its place only when its specific benefit clearly outweighs its structural investment.
+
 
 ### Break-even analysis {#sec-data-selection-breakeven-analysis-9a38}
 
@@ -4479,6 +4318,149 @@ drawcolor=black,filllcolor=cyan!10!, Linewidth=0.75pt,filllcirclecolor=red}};
 
 Tracing artifacts through the pipeline in @fig-optimization-stack reveals why data selection occupies an asymmetric position at the head of the optimization stack: pruning raw inputs reduces upstream training FLOPs, but does not automatically shrink parameter footprint, improve quantization headroom, or relax serving latency constraints in the downstream compression and hardware stages. Each downstream tier inherits both the computational savings and any representational deficits created upstream; an aggressive filter that discards rare but critical edge cases can force downstream engineers to train longer or abandon aggressive quantization to preserve task accuracy.
 
+
+## Decision Framework {#sec-data-selection-decision-framework-0261}
+
+When labeling budget, redundancy, rare classes, privacy, and convergence speed conflict, systems engineering requires identifying the primary binding constraint. Each stage can raise the information-compute ratio when its measured quality gain justifies its overhead: pruning removes low-value samples before training, dynamic selection focuses compute on high-value samples during training, and synthesis creates new high-value samples on demand (@tbl-data-selection).
+
+| **Stage**                | **When Applied** | **Techniques**                                        | **Order-of-Magnitude Scenario Range**                |
+|:-------------------------|:-----------------|:------------------------------------------------------|:-----------------------------------------------------|
+| **Static pruning**       | Before training  | Coreset Selection, Deduplication, Quality Filtering   | 30–50% dataset reduction                             |
+| **Dynamic selection**    | During training  | Curriculum Learning, Active Learning, Semi-Supervised | 10–30% faster curricula; 2--100$\times$ fewer labels |
+| **Synthetic generation** | On-demand        | Augmentation, Generative Models         | 2--10$\times$ effective data expansion               |
+
+: **Three-Stage Data Selection Pipeline**: The ranges illustrate possible outcomes rather than portable expectations. Actual gains depend on the dataset, model, selection method, and target metric. {#tbl-data-selection .striped .hover tbl-colwidths="[23,21,28,28]"}
+
+Once the dominant constraint is named, @tbl-technique-selection compares which technique changes that constraint and why.
+
+| **Constraint**                  | **Candidate Technique**   | **Why**                                              |
+|:--------------------------------|:--------------------------|:-----------------------------------------------------|
+| **Limited labeling budget**     | Active Learning           | Maximizes label ROI by selecting informative samples |
+| **High redundancy in data**     | Deduplication + Coreset   | Removes waste before training begins                 |
+| **Rare classes or edge cases**  | Synthetic Generation      | Creates samples that do not exist in raw data        |
+| **Slow convergence**            | Curriculum Learning       | Improves gradient quality in early training          |
+| **Privacy requirements**        | Privacy-audited synthesis | Reduce direct use of real records; verify leakage    |
+
+: **Technique Selection Guide by Primary Constraint**: Candidate data-selection techniques mapped to the dominant resource constraint in the ML pipeline. The table begins the diagnosis; prerequisites and measured ROI determine the final choice. {#tbl-technique-selection .striped .hover}
+
+@Tbl-technique-selection maps individual constraints to techniques, but real projects face multiple constraints simultaneously. The triage flowchart in @fig-technique-decision-tree routes candidate strategies hierarchically from the root bottleneck—labeling expense, compute limits, or data scarcity—through operational checks on oracle availability, dataset redundancy, and simulator support to isolate actionable techniques.
+
+::: {#fig-technique-decision-tree fig-pos="htb" fig-cap="**Data Selection Decision Tree**: The tree begins with the primary bottleneck—labeling cost, compute cost, or data scarcity—and narrows each branch using available pools, oracles, redundancy, teachers, or simulators. Its leaves identify candidate techniques; projects with multiple binding constraints may require more than one branch." fig-alt="Decision tree rooted at Primary bottleneck, with branches for labeling cost, compute cost, and data scarcity. Labeling cost branches to self-supervised, active, or semi-supervised learning based on pool and oracle availability. Compute cost branches through redundant data to deduplication plus coreset selection or curriculum learning. Data scarcity branches through teacher or simulator availability to knowledge distillation, synthetic generation, or data augmentation."}
+```{.tikz}
+\begin{tikzpicture}[font=\small\sffamily]
+  \tikzset{
+     Decision/.style={draw=BlueD,fill=cyan!10, trapezium,aspect=2,inner sep=-1.2ex,
+     text width=30mm,line width=1pt,
+                        diamond, minimum width=32mm, minimum height=20mm, align= flush center,
+                        node distance=15mm and 25mm},
+    Leaf/.style={
+      rectangle,
+      draw=GreenLine,
+      fill=green!90!black!10,
+      align=center,
+      line width=1pt,minimum width=23mm,
+      minimum height=1cm,
+      font=\footnotesize\sffamily
+    },
+    Arrow/.style={->, >=Latex,line width=1pt, color=black!70}
+  }
+\def\be{8mm}
+% Root
+\node[Decision] (D1) {Primary\\bottleneck?};
+% Left
+\node[Decision, below left= 17mm and 31mm of D1] (D2) {Labeling\\cost};
+\node[Decision, below = \be of D2] (D3) {Oracle\\available?};
+\node[Leaf, left=14mm of D2] (B1){Self-\\Supervised};
+\node[Leaf, below=7mm of D3] (B2){Active\\Learning};
+\node[Leaf, left=14mm of D3] (B3){Semi-\\Supervised};
+%right
+\node[Decision, below right=17mm and 31mm  of D1] (D4) {Data\\scarcity};
+\node[Decision, below = \be of D4] (D5) {Simulator\\available?};
+\node[Leaf, right=14mm of D4] (B6){Knowledge\\Distillation};
+\node[Leaf, right=14mm of D5] (B7){Data\\Augmentation};
+\node[Leaf, below=7mm of D5] (B8){Synthetic\\Generation};
+%center
+\node[Decision, below = 7mm of D1] (D6) {Compute\\cost};
+\node[Decision, below = \be of D6] (D7) {Redundant\\data?};
+\node[Leaf, below=7mm of $(D3.south)!0.6!(D7.south)$] (B4){Dedup +\\Coreset};
+\node[Leaf, below=7mm of $(D7.south)!0.4!(D5.south)$] (B5){Curriculum\\Learning};
+%%arrows
+\draw[Arrow](D1)-|node[above, pos=0.25, font=\scriptsize\sffamily] {Labeling $\$\$\$$}(D2);
+\draw[Arrow](D1)-|node[above, pos=0.25, font=\scriptsize\sffamily] {Not enough data}(D4);
+\draw[Arrow](D1)--node[right, pos=0.25, font=\scriptsize\sffamily] {Compute $\$\$\$$}(D6);
+\draw[Arrow] (D2) -- node[above, pos=0.45, font=\scriptsize\sffamily] {Large pool} (B1);
+\draw[Arrow](D2)--(D3);
+\draw[Arrow](D3)--node[right, pos=0.25, font=\scriptsize\sffamily] {Yes}(B2);
+\draw[Arrow](D3)--node[above, pos=0.25, font=\scriptsize\sffamily] {No}(B3);
+%
+\draw[Arrow](D7.west)-|node[above, pos=0.25, font=\scriptsize\sffamily] {High}(B4.120);
+\draw[Arrow](D7.east)-|node[above, pos=0.25, font=\scriptsize\sffamily] {Low}(B5.65);
+%
+\draw[Arrow](D5)--node[right, pos=0.25, font=\scriptsize\sffamily] {Yes}(B8);
+\draw[Arrow](D5)--node[above, pos=0.25, font=\scriptsize\sffamily] {No}(B7);
+
+\draw[Arrow] (D4) -- node[above, pos=0.45, font=\scriptsize\sffamily] {Teacher} (B6);
+
+\draw[Arrow](D4)--node[right, pos=0.25, font=\scriptsize\sffamily] {Domain}(D5);
+
+\draw[Arrow](D6)--(D7);
+\end{tikzpicture}
+```
+
+:::
+
+### Decision process {.unnumbered}
+
+Each path requires a structured assessment because the same dataset symptom can point to different bottlenecks. Technique selection begins by naming the binding constraint, then checks whether the data, labels, and infrastructure needed by the chosen method exist.
+
+#### Step 1: Assess the bottleneck {.unnumbered}
+
+Identify which resource constraint most severely limits the training pipeline:
+
+- **Labeling cost**: Label-efficiency techniques such as active learning, semi-supervised learning, and self-supervised learning maximize the value extracted from each human annotation.
+- **Compute cost**: Coreset selection and deduplication can reduce processed samples, while a validated curriculum may reduce the steps needed to reach a target metric.
+- **Data scarcity**: Data creation through augmentation, synthesis, and distillation expands the effective training set beyond what raw collection provides.
+
+This diagnostic step keeps technique selection tied to the binding resource constraint rather than to the most familiar algorithm.
+
+#### Step 2: Check prerequisites {.unnumbered}
+
+With the bottleneck identified, verify that the corresponding techniques are feasible given the available infrastructure and data. Each approach carries specific requirements that must be met before implementation can begin (@tbl-technique-prerequisites).
+
+```{=latex}
+\begingroup
+\renewcommand{\arraystretch}{1.3}
+```
+
+| **Technique**                                        | **Prerequisites**                                           |
+|:-----------------------------------------------------|:------------------------------------------------------------|
+| **Active Learning**                                  | Access to oracle, unlabeled pool, retraining infrastructure |
+| **Coreset selection**\index{Coreset!data efficiency} | Proxy model or embedding extractor, full dataset accessible |
+| **Curriculum Learning**                              | Difficulty scoring method, pacing schedule                  |
+| **Semi-Supervised**                                  | Some labeled data, unlabeled data from same distribution    |
+| **Self-Supervised**                                  | Large unlabeled corpus, pretraining compute budget          |
+| **Augmentation**                                     | Domain knowledge of invariances, augmentation library       |
+| **Synthetic Generation**                             | Generative model or simulator, domain gap mitigation        |
+
+: **Technique Prerequisites**: Each technique carries specific infrastructure and data requirements that must be verified before implementation. A technique with excellent theoretical gains but unmet prerequisites will fail in practice, making this checklist the first step in technique selection. {#tbl-technique-prerequisites .striped .hover}
+
+```{=latex}
+\endgroup
+```
+
+#### Step 3: Estimate ROI {.unnumbered}
+
+Before committing engineering resources, estimate each candidate technique's return on investment. @Sec-data-selection-roi-framework-data-selection-techniques-dade defines ROI and @sec-data-selection-amortization-across-training-runs-f6b8 extends it across runs; the essential discipline is to express recurring savings and selection costs per training run and to spread one-time engineering cost across the planned number of experiments $N_{\text{runs}}$.
+
+A technique with high theoretical compute gains but complex engineering requirements may deliver lower net ROI than a simpler approach. Exact deduplication is often an inexpensive first candidate because hashing is computationally lightweight and easy to implement, although downstream benefit still depends on corpus redundancy and intentional sample weighting. Active learning requires oracle access, retraining infrastructure, and selection algorithm development, so its ROI depends heavily on how many labeling cycles amortize that upfront engineering investment.
+
+#### Step 4: Combine techniques {.unnumbered}
+
+Data selection techniques are not mutually exclusive, but combining them does not guarantee additive gains. A representative workflow deduplicates the raw corpus, applies a coverage-aware coreset filter, orders retained batches through an empirical curriculum, and applies runtime augmentations during batch collation. Pretrained representations alter the baseline trajectory further. Every additional stage must justify its compute overhead, because cascading filters frequently discard overlapping subsets while their scoring latencies accumulate.
+
+*Stages can compound efficiency gains when their effects do not overlap and their overhead remains small; combined savings must be measured rather than assumed.*
+
+Algorithmic filtering translates into system speedup only when selection overhead remains strictly bounded. A coreset pass that consumes ten hours of probe inference to trim a two-hour training run produces a net loss on wall-clock time and cloud spend. Similarly, an adaptive curriculum that scans the full corpus for per-epoch difficulty scoring can stall accelerators on host CPU bottlenecks. Realizing data-efficiency gains in production demands engineering empathy for the physical stack: amortizing scoring passes, streaming nonsequential batches without defeating prefetch engines, and synchronizing distributed selection states without serialization stalls.
 
 ## Fallacies and Pitfalls {#sec-data-selection-fallacies-pitfalls-f4d0}
 
