@@ -180,11 +180,15 @@ class MobileNetJourneyMath:
 
 : **The Lighthouse Journey (MobileNetV2)**: Tracing one model through seven phases of the systems stack shows how decisions in one domain (for example, architecture) propagate constraints and opportunities into downstream domains (for example, hardware acceleration and monitoring). {#tbl-lighthouse-journey-mobilenet tbl-colwidths="[17,22,61]"}
 
-Decisions in one row constrain options in the next: depthwise separable convolutions reduce the workload, while INT8 quantization reduces per-value storage when supported. Depthwise factorization is not a prerequisite for INT8; the deployed operator set, quantization scheme, and runtime jointly determine whether mobile NPU acceleration is feasible. This constraint propagation is universal across machine learning workloads. Formalizing these trade-offs requires quantitative principles of several kinds: bounds, decompositions, fitted models, policies, and heuristics.
+Decisions in one row constrain options in the next: depthwise separable convolutions reduce the computational workload, while INT8 quantization reduces per-value storage. But depthwise factorization is not a prerequisite for INT8. Instead, the deployed operator set, quantization scheme, and runtime jointly dictate whether mobile NPU acceleration is feasible.
+
+This constraint propagation is universal. When an engineer alters an embedding table layout, doubles a batch size, or quantizes an attention layer, the performance outcome is not random. It is governed by physical limits, empirical trade-offs, and operational feedback.
 
 ## Thirteen Quantitative Principles {#sec-thirteen-quantitative-invariants-0dd2}
 
-When an engineer alters an embedding table layout, doubles batch size, or quantizes an attention layer from FP16 to INT8, the performance outcome is not random; it is governed by physical bounds, empirical trade-offs, and operational feedback. Reasoning quantitatively about this behavior across the entire stack requires rigorous analytical instruments. These **thirteen quantitative principles**\index{Thirteen quantitative principles!framework} deliberately combine exact mathematical bounds, engineering decompositions, fitted empirical models, policy constraints, and design heuristics. @Tbl-thirteen-principles summarizes all thirteen principles across four systems phases. They are not all the same kind of statement. Some are hard bounds (the roofline, Amdahl's Law), some are decompositions (the iron law), some are fitted models (drift, bias feedback), some are policies (the latency budget), and some are heuristics (data gravity, the silicon contract). Each principle box on the part pages names its kind, and each principle is reliable only within its stated assumptions.
+Reasoning quantitatively about system behavior across the entire stack requires rigorous analytical instruments. The **thirteen quantitative principles**\index{Thirteen quantitative principles!framework} summarized in @Tbl-thirteen-principles provide that foundation.
+
+They deliberately combine different types of statements. Some are hard bounds (the roofline, Amdahl's Law); some are decompositions (the iron law). Others are fitted models (drift, bias feedback), operational policies (the latency budget), or design heuristics (data gravity, the silicon contract). Because each principle box across the preceding chapters specifies its kind and assumptions, they can be reliably combined to diagnose cross-layer bottlenecks.
 
 ```{python}
 #| echo: false
@@ -262,39 +266,25 @@ The thirteen principles are not independent axioms. One habit ties them together
 
 [^fn-conservation-complexity-heuristic]: **Conservation-of-complexity heuristic**\index{Conservation of complexity!heuristic limits}: Tesler's Law\index{Tesler's law!conservation of complexity}, a design aphorism, says that an application's irreducible complexity must be handled somewhere in the interaction among user, application, and platform [@tesler1984complexity]; extending it to all ML-system complexity is an analogy, not a physical law. Quantization may add validation burden, and abstraction may move implementation detail behind an interface, but good design can also remove accidental complexity outright. Large language model application pipelines illustrate a possible shift: simplifying the user-facing interface with shorter or vaguer prompts may move work into system prompts, retrieval, or output verification. Use the heuristic to search for displaced costs, not to assume that an equal compensating cost must exist.
 
-### Foundations: Where complexity originates (principles 1–2) {.unnumbered}
-
-The data-as-code principle\index{Data-as-code principle!logical program} (\ref{pri-data-as-code}) and the data-gravity principle\index{Data gravity principle!physical anchor} (principle \ref{pri-data-gravity}) establish data as a primary logical program and physical anchor. Runtime behavior reflects data, algorithm, and implementation in concert, while compute-to-data placement balances transfer volume, reuse frequency, network bandwidth, and compute mobility. Model behavior and architecture directly inherit constraints from this data substrate.
+The principles form a diagnostic chain. It begins with data. The data-as-code and data-gravity heuristics\index{Data-as-code principle!logical program}\index{Data gravity principle!physical anchor} (principles 1–2) establish data as the system's logical program and physical anchor. For example, DLRM's embedding tables outgrow a single accelerator's memory, making capacity the primary design constraint and forcing compute to move where the data physically resides.
 
 ::: {.column-margin .margin-pointer}
 ↩ The transfer time and egress cost that make a large dataset the gravitational center of an architecture are established in @sec-data-engineering-data-gravity-adcb.
 :::
 
-The lighthouse models illustrate both principles. ResNet-50 and GPT-2 acquire their capabilities from architecture coupled to massive training corpora. DLRM's embedding tables, which outgrow a single accelerator's memory, make memory capacity a primary design constraint, requiring the execution system to be engineered around where the data physically resides. Compute-to-data placement recurs across deployment environments precisely because moving large, low-reuse datasets saturates interconnects.
-
-### Development: How complexity becomes computation (principles 3–4) {.unnumbered}
-
-The iron law (principle \ref{pri-iron-law}) and the silicon contract (principle \ref{pri-silicon-contract}) govern execution efficiency. The iron law's three-term decomposition (@sec-introduction-iron-law-ml-systems-c32a) isolates data movement, computation, and overhead; the silicon contract reveals which term limits performance on a given architecture-hardware pair. Representative execution regimes include sufficiently large batched ResNet-50 kernels approaching a compute ceiling, low-batch Llama decode limited by weight traffic, DLRM constrained by embedding capacity, and MobileNetV2 mapped to mobile NPU limits. Actual shapes, kernels, and runtime conditions determine which regime applies. As mapped in @sec-appdx-dam-taxonomy-bottleneck-diagnostic-3fc9, diagnosing whether an execution path is compute-bound, bandwidth-bound, or capacity-bound determines which optimizations yield speedup and which waste engineering effort. Training latency drops most when engineers target the binding term directly rather than distributing effort uniformly (@sec-model-training).
+Once execution begins, the iron law\index{Iron law of ML systems!synthesis} and the silicon contract\index{Silicon contract!constraint propagation} (principles 3–4) dictate efficiency. Diagnosing whether a path is compute-bound, bandwidth-bound, or capacity-bound determines which optimizations yield speedups and which waste effort.
 
 ::: {.column-margin .margin-pointer}
 ↪ The bottleneck diagnostic that pairs each binding iron-law term with the optimizations that work and those that are wasted is operationalized in @sec-appdx-dam-taxonomy-bottleneck-diagnostic-3fc9.
 :::
 
-### Optimization: How constraints shape trade-offs (principles 5–8) {.unnumbered}
-
-The four optimization principles form a tightly coupled diagnostic chain. The Pareto frontier\index{Pareto frontier!multi-objective optimization} (principle \ref{pri-pareto-frontier}) identifies nondominated trade-offs after objective directions are normalized: quantization trades precision for memory traffic, pruning trades capacity for speed, and distillation trades training compute for inference efficiency. The arithmetic intensity law\index{Arithmetic intensity!bottleneck diagnosis} (principle \ref{pri-arithmetic-intensity}) diagnoses whether compute or bandwidth sets the ideal ceiling. The energy-movement principle\index{Energy-movement principle!data locality} (principle \ref{pri-energy-movement}) combines per-event costs with event counts: under reference hardware constants, one DRAM access costs about `{python} EnergyMovementMath.dram_vs_range_mult_str` as much as one FP32/FP16 arithmetic operation, but workload-total dominance depends on how many of each occur. Amdahl's Law\index{Amdahl's law!preprocessing bottleneck} (principle \ref{pri-amdahl}) sets the ceiling on any parallelism gain, explaining why data loading and preprocessing can become bottlenecks in highly optimized systems.
+To navigate those ceilings, the four optimization principles (5–8) weigh the competing costs. MobileNetV2 balances all four simultaneously: INT8 quantization trades numerical precision for reduced memory traffic (Pareto frontier\index{Pareto frontier!multi-objective optimization}), which raises arithmetic intensity\index{Arithmetic intensity!bottleneck diagnosis}. Because one DRAM access costs about `{python} EnergyMovementMath.dram_vs_range_mult_str` as much as one FP32/FP16 arithmetic operation (energy-movement principle\index{Energy-movement principle!data locality}), the resulting drop in bytes moved saves energy. However, Amdahl's Law\index{Amdahl's law!preprocessing bottleneck} bounds the ultimate end-to-end speedup if preprocessing remains unaccelerated.
 
 ::: {.column-margin .margin-pointer}
 ↩ The compute-versus-bandwidth boundary and hardware balance ($I_{\text{ridge}}$) are established in @sec-hardware-acceleration-hardware-balance.
 :::
 
-MobileNetV2 (@sec-network-architectures) balances all four principles simultaneously. Depthwise separable convolutions reshape the Pareto frontier [@sandler2018]. INT8 quantization\index{INT8 quantization!bandwidth trade-off} exploits the arithmetic intensity law by raising arithmetic intensity through reduced memory traffic [@jacob2018]. Measured energy savings, where the reduced traffic and supported execution lower total consumption, align with the energy-movement principle, while Amdahl's Law bounds end-to-end speedup when host-side preprocessing remains unaccelerated. Microcontroller workloads such as KWS compress these trade-offs further, operating under sub-megabyte memories that leave little room for avoidable overhead.
-
-### Deployment: How reality defeats assumptions (principles 9–13) {.unnumbered}
-
-The deployment principles address failures that bench testing cannot rule out: a system can work correctly on the bench yet fail silently in production. The verification gap\index{Verification gap!statistical testing} (principle \ref{pri-verification-gap}) states what testing can promise: behavior over a stated deployment population, tolerance, and confidence, not correctness for every future input. The statistical drift diagnostic\index{Statistical drift risk!accuracy erosion} (principle \ref{pri-statistical-drift}) detects that the population has changed, and labeled outcomes fit how much that change costs in accuracy. The training-serving skew diagnostic\index{Training-serving skew!accuracy impact} (principle \ref{pri-training-serving-skew}) flags training and serving paths that compute the same features differently. The latency budget\index{Latency budget!tail latency constraint} (principle \ref{pri-latency-budget}) holds serving to the tail quantile the product selects. The bias feedback model\index{Bias feedback model!disparity amplification} (principle \ref{pri-bias-feedback}) treats disparity as a quantity that compounds across retraining cycles at a fitted rate, which turns fairness into a stability question about the deployment loop.
-
-The five deployment principles govern the operational tooling examined in @sec-ml-operations-production-monitoring-5e1b: monitoring infrastructure, drift detection, feature stores, and disaggregated subgroup metrics exist to surface silent failures and trigger corrective action. A recommendation system that achieves high offline accuracy still requires parity checks when training-serving skew corrupts feature pipelines (principle \ref{pri-training-serving-skew}) and outcome auditing when user behavior shifts seasonally (principle \ref{pri-statistical-drift}). Large language model serving must bound tail latency; continuous batching and speculative decoding (@sec-model-serving) are candidate mechanisms whose effects must be evaluated against the workload and product service-level objectives. Similarly, an automated credit model may satisfy throughput and convergence targets while systematically compounding disparities against underserved groups, requiring disaggregated monitoring to intercept feedback loops (principle \ref{pri-bias-feedback}).
+Finally, deployment principles (9–13) confront the reality that systems can pass bench tests yet fail in production. They govern the tooling required to catch silent regressions: verifying accuracy bounds\index{Verification gap!statistical testing}, monitoring statistical drift\index{Statistical drift risk!accuracy erosion} when populations shift, isolating training-serving skew\index{Training-serving skew!accuracy impact}, enforcing tail-latency budgets\index{Latency budget!tail latency constraint}, and intercepting compounding bias feedback\index{Bias feedback model!disparity amplification} loops before they solidify.
 
 ::: {.column-margin .margin-pointer}
 ↩ The monitoring infrastructure and drift quantification that surface these silent failures are established in @sec-ml-operations-production-monitoring-5e1b.
@@ -323,7 +313,11 @@ A colleague proposes quantizing your model from FP16 to INT8 to reduce serving c
 
 :::
 
-@Fig-invariants-cycle models this closed engineering lifecycle around a central balance-scale hub representing the conservation-of-complexity heuristic. Four cardinal phases corresponding to the book's parts—Foundations (Data), Development (Model), Optimization (Efficiency), and Deployment (Operations)—connect via clockwise transition arcs that group the thirteen principles. Downstream arcs trace how early decisions bound subsequent stages: data-as-code and data-gravity heuristics (principles 1–2) inform model development, which triggers the iron law and silicon contract (principles 3–4) before efficiency trade-offs across the Pareto frontier, arithmetic intensity, energy movement, and Amdahl's Law (principles 5–8) govern optimization. Completing the loop, the closing arc routes runtime telemetry—verification gap, statistical drift, skew diagnostic, latency budget, and bias feedback (principles 9–13)—back from deployment into foundations, directing displaced complexity toward layers equipped to handle it.
+@Fig-invariants-cycle models this engineering lifecycle. The conservation-of-complexity heuristic sits at the center, serving as a reminder that displaced constraints must be handled elsewhere. The four phases corresponding to the book's parts—Foundations, Development, Optimization, and Deployment—form a continuous feedback loop governed by the thirteen principles.
+
+Early choices restrict downstream options. The data-as-code and data-gravity heuristics (principles 1–2) anchor the model's logic and physical placement. Those choices trigger the iron law and silicon contract (principles 3–4), which determine the efficiency ceilings during development. The four optimization principles—the Pareto frontier, arithmetic intensity, energy movement, and Amdahl's Law (principles 5–8)—then negotiate the trade-offs to reach those ceilings.
+
+Finally, deployment exposes the system to reality. The verification gap, statistical drift, skew diagnostic, latency budget, and bias feedback (principles 9–13) provide runtime telemetry. These signals route operational complexity back to the foundations, ensuring that anomalies trigger dataset updates or architectural refinements rather than uncalibrated rollbacks.
 
 The deployment-to-foundations feedback loop is central to production engineering. Principles 9 through 13 expose signals that trigger targeted remediations: canary rollbacks, fallback heuristics, dataset augmentation, model retraining, or kernel retuning. When anomalies emerge, engineers diagnose root causes rather than triggering uncalibrated rollbacks. This cycle governs single-system design: the objective is not to catalog every future architecture, but to make feedback loops observable before operational failures compound.
 
@@ -824,7 +818,7 @@ Batching can amortize weight traffic across requests, and supported quantization
 *Mean latency hides the tail; the selected tail quantile governs the SLO.*
 :::
 
-The two traces use different principles, but they share one discipline: name the binding term, measure it, and budget for it. That discipline is the engineering answer to the bitter lesson. Scale works, but only a system that can afford it and can still be trusted continues to scale. The remaining question is where these constraints bind next, as ML systems spread across heterogeneous deployment targets, confront adversarial conditions, and grow into compositions of many components.
+The two traces use different principles, but they share one discipline: name the binding term, measure it, and budget for it. That discipline is the engineering answer to the bitter lesson. Scale works, but only a system that can afford it and can still be trusted continues to scale. The remaining question is where these constraints bind next, as ML systems spread across heterogeneous deployment targets, confront adversarial conditions, take on societal applications with public consequences, and grow into compositions of many components.
 
 ## Future Directions {#sec-future-directions-01df}
 
@@ -938,22 +932,6 @@ System composition aligns directly with fundamental systems engineering principl
 
 @hennessy2019 declared a "New Golden Age for Computer Architecture," driven by the end of Dennard scaling, the slowdown of Moore's Law, and new opportunities from domain-specific architectures, open instruction sets, and agile chip development. Large-scale AI workloads are one domain where those pressures are visible. Building more capable AI services will not be a matter of writing a better loss function alone; it will be a systems engineering challenge involving energy efficiency, high-bandwidth interconnects, memory hierarchy design, and software stacks that keep heterogeneous hardware useful rather than idle. The thirteen principles provide a quantitative vocabulary for navigating that regime while preserving the distinction between physical bounds and deployment-specific assumptions.
 
-:::
-
-That regime rewards engineers who use bounds to guide benchmarks and measurements to test the assumptions behind those bounds. The same habit governs the last question this book raises, which is what the engineer owes the people a system affects.
-
-## Journey Forward {#sec-journey-forward-6453}
-
-*Intelligence is a systems property.* It emerges from co-designing data pipelines, model architectures, accelerator hardware, runtime software, and operational governance rather than from any isolated algorithmic breakthrough. The governing lesson of systems engineering is not a fixed recipe for a single model family or hardware generation. It is the discipline of exposing hidden dependencies to measurement, quantifying trade-offs against physical hardware limits, and holding production deployments accountable to real-world operational constraints. Two appendices carry that discipline into practice: @sec-appdx-dam-taxonomy supplies the diagnostic framework, and @sec-appdx-system-assumptions supplies the reference values for the reader's own napkin math.
-
-### The engineering responsibility {.unnumbered}
-
-The systems integration perspective demonstrates why ethical considerations cannot be separated from physical and algorithmic design. Hardware requirements govern access: a model demanding an array of high-end data-center accelerators for inference excludes organizations unable to procure specialized capital. Upstream training data encodes historical sampling skews that distort downstream model predictions. Sustained accelerator power draw directly drives facility thermal dissipation and regional grid carbon emissions. System design choices—from arithmetic precision to data curation—distribute operational costs and societal consequences far beyond the engineering team.
-
-Systems engineering extends beyond maximizing raw capability to operating deployments responsibly within societal and physical bounds. Production systems must achieve the arithmetic efficiency needed to run on accessible hardware, maintain fault tolerance against hardware anomalies, operate within strict thermal and power envelopes, and meet justified, application-specific fairness requirements across relevant demographic groups. Realizing applications such as planetary climate monitoring and clinical diagnostic assistants demands rigorous systems discipline, guided by the governance criteria established in @sec-responsible-engineering-responsible-engineering-checklist-a038 as first-class physical and operational constraints.
-
-::: {.column-margin .margin-pointer}
-↩ The lifecycle that turns responsibility into written requirements, release gates, documentation, and operational monitoring is established in @sec-responsible-engineering-responsible-engineering-checklist-a038.
 :::
 
 The principles established here provide a coherent lens for individual ML systems. Larger systems do not invalidate that lens; they expose the same constraints at a different boundary.
@@ -1131,6 +1109,22 @@ These fallacies and pitfalls share a common root: attempting to isolate componen
 
 ::: {.column-margin .margin-pointer}
 ↪ A diagnostic matrix that maps common production symptoms to candidate D·A·M axes and the measurements that confirm them is operationalized in @sec-appdx-dam-taxonomy-production-troubleshooting-02fb.
+:::
+
+This discipline rewards engineers who use bounds to guide benchmarks and measurements to test the assumptions behind those bounds. The same habit governs the last question this book raises, which is what the engineer owes the people a system affects.
+
+## Journey Forward {#sec-journey-forward-6453}
+
+*Intelligence is a systems property.* It emerges from co-designing data pipelines, model architectures, accelerator hardware, runtime software, and operational governance rather than from any isolated algorithmic breakthrough. The governing lesson of systems engineering is not a fixed recipe for a single model family or hardware generation. It is the discipline of exposing hidden dependencies to measurement, quantifying trade-offs against physical hardware limits, and holding production deployments accountable to real-world operational constraints. Two appendices carry that discipline into practice: @sec-appdx-dam-taxonomy supplies the diagnostic framework, and @sec-appdx-system-assumptions supplies the reference values for the reader's own napkin math. Yet, true engineering discipline extends beyond technical math and diagnostics into the realm of societal impact.
+
+### The engineering responsibility {.unnumbered}
+
+The systems integration perspective demonstrates why ethical considerations cannot be separated from physical and algorithmic design. Hardware requirements govern access: a model demanding an array of high-end data-center accelerators for inference excludes organizations unable to procure specialized capital. Upstream training data encodes historical sampling skews that distort downstream model predictions. Sustained accelerator power draw directly drives facility thermal dissipation and regional grid carbon emissions. System design choices—from arithmetic precision to data curation—distribute operational costs and societal consequences far beyond the engineering team.
+
+Systems engineering extends beyond maximizing raw capability to operating deployments responsibly within societal and physical bounds. Production systems must achieve the arithmetic efficiency needed to run on accessible hardware, maintain fault tolerance against hardware anomalies, operate within strict thermal and power envelopes, and meet justified, application-specific fairness requirements across relevant demographic groups. Realizing applications such as planetary climate monitoring and clinical diagnostic assistants demands rigorous systems discipline, guided by the governance criteria established in @sec-responsible-engineering-responsible-engineering-checklist-a038 as first-class physical and operational constraints.
+
+::: {.column-margin .margin-pointer}
+↩ The lifecycle that turns responsibility into written requirements, release gates, documentation, and operational monitoring is established in @sec-responsible-engineering-responsible-engineering-checklist-a038.
 :::
 
 ## Summary {#sec-summary-2ef7}

@@ -1,0 +1,54 @@
+### Algorithmic structure {#sec-network-architectures-algorithmic-structure-732e}
+
+Meta open-sourced DLRM to expose a workload that differs from CNNs and transformers in a critical way. They must look up user and item preferences in massive embedding tables that can reach terabytes in size.
+
+The DLRM\index{DLRM} architecture [@naumov2019deep] standardizes this workflow as a four-stage pipeline partitioned across dense and sparse regimes. Continuous features such as user age or time of day first flow through a bottom MLP, a compute-intensive but memory-light stage dominated by dense matrix multiplications. In parallel, categorical IDs index into dedicated embedding tables\index{Embedding!table}, which is where the memory capacity wall appears:
+
+```{python}
+#| echo: false
+#| label: dlrm-embedding-size
+
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ DLRM EMBEDDING TABLE SIZE
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: DLRM architecture description, sparse features section
+# │
+# │ Goal: Demonstrate the memory capacity challenge of recommendation systems.
+# │ Show: That a single user embedding table can exceed 500 GB.
+# │ How: Calculate table size for 1 billion users with 128-dim vectors.
+# │
+# └─────────────────────────────────────────────────────────────────────────────
+
+from mlsysim import Hardware
+from mlsysim.fmt import fmt_int, fmt, check
+
+# ┌── LEGO ───────────────────────────────────────────────
+class DLRMEmbedding:
+    """
+    Namespace for DLRM Embedding Table calculation.
+    Scenario: 1 billion users x 128 dim x FP32 = Capacity Wall.
+    """
+
+    # ┌── 1. LOAD (Constants) ───────────────────────────────────────────────
+    num_users = 1_000_000_000
+    embed_dim = 128
+    bytes_per_param = BYTES_FP32
+    a100_capacity = Hardware.Cloud.A100.memory.capacity
+
+    # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
+    table_memory = num_users * embed_dim * bytes_per_param
+
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(
+        table_memory >= a100_capacity,
+        f"DLRM table ({table_memory.to(GB).magnitude:.1f} GB) fits on an A100. It must be larger to illustrate the capacity wall.",
+    )
+
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
+    embed_table_gb_str = fmt_memory(table_memory, unit=GB, precision=0, commas=False)
+
+# Note: Use DLRMEmbedding.embed_table_gb_str directly.
+```
+
+For example, an embedding table for one billion users with 128-dimensional vectors requires $10^9 \times 128 \times 4$ bytes $\approx$ `{python} DLRMEmbedding.embed_table_gb_str` of memory. This stage is memory-intensive but compute-light because each lookup is a memory copy with zero arithmetic reuse. The interaction layer\index{DLRM!interaction layer} then combines the dense activations from the bottom MLP with the gathered sparse embedding vectors through pairwise dot products that capture user-item correlations. Finally, a top MLP processes the concatenated interaction representations through feedforward layers to predict a target probability such as click-through rate. This combination of dense and sparse computation makes DLRM the chapter's recommendation lighthouse; @sec-network-architectures-computational-mapping-b346 quantifies the capacity-bound profile that results.
+

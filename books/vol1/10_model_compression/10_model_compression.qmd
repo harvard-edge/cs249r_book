@@ -1,29 +1,3 @@
----
-quiz: model_compression_quizzes.json
-concepts: model_compression_concepts.yml
-engine: jupyter
----
-
-# Model Compression {#sec-model-compression}
-
-::: {layout-narrow}
-::: {.column-margin}
-
-\chapterminitoc
-
-:::
-
-::: {.content-visible when-format="pdf"}
-\noindent
-![](images/png/cover_model_compression_blueprint_labeled_print.png){fig-alt="Isometric compression workshop where a large model passes through pruning, distillation, and quantization stations before fitting into a constrained device envelope."}
-:::
-
-::: {.content-visible unless-format="pdf"}
-![](images/webp/cover_model_compression_blueprint_labeled.webp){fig-alt="Isometric compression workshop where a large model passes through pruning, distillation, and quantization stations before fitting into a constrained device envelope."}
-:::
-
-:::
-
 ## Purpose {.unnumbered .unlisted}
 
 \begin{marginfigure}
@@ -32,7 +6,11 @@ engine: jupyter
 
 _Why do the models that win benchmarks rarely become the models that run in production?_
 
-Training produced a capable model, and data selection made it cheaper to produce; neither guarantees that it can be deployed. Cloud, Edge, Mobile, and TinyML each impose constraints that research benchmarks ignore, including memory budgets measured in megabytes rather than gigabytes, latency targets measured in milliseconds rather than seconds, and power envelopes measured in milliwatts rather than kilowatts. Research optimizes for accuracy on held-out test sets; production optimizes for accuracy per dollar, accuracy per watt, and accuracy per millisecond. Models that win benchmarks are often larger, slower, and more resource-intensive than production constraints permit. Bridging that gap requires a systematic discipline of compression that trades capabilities the deployment does not need for constraints it cannot violate. Many trained models carry more precision, more connections, or more capacity than a deployment context demands, and some of that surplus can be removed while preserving required behavior. Yet a smaller representation is not automatically a faster one. The hardware and software stack must exploit the new precision or structure; otherwise a nominal reduction can merely move the bottleneck while latency remains unchanged. Removing half the weights can leave runtime and energy untouched if the hardware still fetches, stores, and multiplies every zero. Applied well, compression can reduce model size by several times, transforming a research artifact that runs only in a data center into a production asset for a phone, sensor, or microcontroller. The aim is to make the right model possible in its physical environment, which is a different target from making the model as small as possible. In D·A·M terms, compression enacts algorithm-machine co-design on the model itself, rewriting its mathematical structure to fit the physical constraints of the machine.
+Training produced a capable model, and data selection made it cheaper to produce; neither guarantees that it can be deployed. Cloud, Edge, Mobile, and TinyML each impose constraints that research benchmarks ignore, including memory budgets measured in megabytes rather than gigabytes, latency targets measured in milliseconds rather than seconds, and power envelopes measured in milliwatts rather than kilowatts. Research optimizes for accuracy on held-out test sets; production optimizes for accuracy per dollar, accuracy per watt, and accuracy per millisecond. Models that win benchmarks are often larger, slower, and more resource-intensive than production constraints permit.
+
+Bridging that gap requires a systematic discipline of compression that trades capabilities the deployment does not need for constraints it cannot violate. Many trained models carry more precision, more connections, or more capacity than a deployment context demands, and some of that surplus can be removed while preserving required behavior. Yet a smaller representation is not automatically a faster one. The hardware and software stack must exploit the new precision or structure; otherwise a nominal reduction can merely move the bottleneck while latency remains unchanged. Removing half the weights can leave runtime and energy untouched if the hardware still fetches, stores, and multiplies every zero.
+
+Applied well, compression can reduce model size by several times, transforming a research artifact that runs only in a data center into a production asset for a phone, sensor, or microcontroller. The aim is to make the right model possible in its physical environment, which is a different target from making the model as small as possible. In D·A·M terms, compression enacts algorithm-machine co-design on the model itself, rewriting its mathematical structure to fit the physical constraints of the machine.
 
 ::: {.content-visible when-format="pdf"}
 
@@ -2084,7 +2062,7 @@ Pruning modifies an existing parameterization, while distillation transfers beha
 
 ### Structured approximations {#sec-model-compression-structured-approximations-4798}
 
-Structured approximation addresses a distinct deployment constraint compared to pruning or distillation: when a layer's weight tensor exhibits mathematical redundancy, representing that redundancy directly requires less storage capacity and memory bandwidth than fetching the dense tensor from DRAM. Rather than eliminating individual weights or transferring behavior to a separate architecture, structured methods decompose large weight matrices and tensors into compact, lower-dimensional factors. Low-rank matrix factorization and tensor decomposition provide complementary algebraic strategies for implementing this compression.
+Real-world neural network parameters often occupy a much lower-dimensional space than their raw shape suggests. Exposing this underlying mathematical structure provides a powerful way to reduce the memory bandwidth bottleneck in edge deployment. Structured approximation addresses a distinct deployment constraint compared to pruning or distillation: when a layer's weight tensor exhibits mathematical redundancy, representing that redundancy directly requires less storage capacity and memory bandwidth than fetching the dense tensor from DRAM. This shifts the optimization strategy from destroying individual weights (as in unstructured pruning) to gracefully reshaping the entire matrix so that hardware can execute it more efficiently. Rather than abruptly eliminating weights or transferring behavior to a separate architecture, structured methods decompose large weight matrices and tensors into compact, lower-dimensional factors. Low-rank matrix factorization and tensor decomposition provide complementary algebraic strategies for implementing this compression.
 
 ```{python}
 #| echo: false
@@ -2469,9 +2447,92 @@ In production pipelines, practitioners frequently combine these structured appro
 
 Pruning and factorization modify existing model parameterizations, while distillation transfers behavior into an independently trained student model. Neural architecture search takes a fundamentally different path: discovering architectures that are efficient by construction.
 
+### Hardware-aware design {#sec-model-compression-hardwareaware-design-c561}
+
+Hardware-aware design begins before compression. If the target device cannot keep convolution kernels fed, cannot store activations without spilling, or cannot meet the power budget at the chosen input resolution, pruning and quantization only treat symptoms. The architecture itself must expose the kind of work the hardware can execute efficiently. That means choosing layer shapes, scaling rules, and operator patterns with memory bandwidth, parallelism, and energy as first-class constraints rather than post-hoc deployment checks.
+
+#### Efficient design principles {#sec-model-compression-efficient-design-principles-b015}
+
+The first design step is to identify what the trace shows as the limiting resource. A model can miss its target because every layer is too expensive, because one convolution family dominates arithmetic, because activations or parameters do not fit the memory hierarchy, or because the candidate architecture ignores the platform's preferred operators. @Tbl-hardware-efficient-design organizes the common responses by the bottleneck they address rather than by model family.
+
+| **Observed bottleneck**       | **Architectural response**                                                                                                                         | **Example networks** |
+|:------------------------------|:---------------------------------------------------------------------------------------------------------------------------------------------------|:---------------------|
+| **Over-budget model scaling** | Adjust depth, width, and resolution together so the model stays within the latency, memory, and power envelope.                                    | EfficientNet, RegNet |
+| **Redundant computation**     | Replace expensive dense operations with factorized or grouped operations that preserve useful channel mixing at lower arithmetic cost.             | MobileNet, ResNeXt   |
+| **Memory pressure**           | Reduce parameter storage or reuse features, then check peak activation lifetimes; feature reuse can retain a larger working set.                   | DenseNet, SqueezeNet |
+| **Platform mismatch**         | Include measured device latency, operator support, and power behavior in the architecture search or design loop instead of optimizing FLOPs alone. | MobileNetV3, MnasNet |
+
+: **Hardware-Aware Design Principles**: A profiling trace should determine which architectural response is appropriate. MobileNet responds to redundant convolutional computation with depthwise separable convolutions, DenseNet and SqueezeNet respond to memory pressure with feature reuse and parameter reduction, and hardware-aware NAS incorporates measured platform behavior directly into the search objective. {#tbl-hardware-efficient-design tbl-colwidths="[23,56,21]"}
+
+These responses interact. Reducing convolutional FLOPs with depthwise separable convolutions[^fn-depthwise-separable-mobile] helps only if the target runtime has efficient kernels for the resulting operators. Shrinking a model with parameter-reduction layers helps only if activation storage or memory traffic was part of the measured problem. Hardware-aware design therefore does not replace profiling; it moves profiling information earlier, into the architecture itself.
+
+[^fn-depthwise-separable-mobile]: **Depthwise separable convolutions**\index{Depthwise separable convolution!mobile efficiency}: This technique reduces computation by factorizing a standard convolution into separate depthwise (per-channel) and pointwise $(1{\times}1)$ operations. MobileNet architectures use this factorization to trade model capacity and accuracy against lower operation counts for on-device vision [@howard2017mobilenets; @sandler2018].
+
+#### Scaling optimization {#sec-model-compression-scaling-optimization-6ad9}
+
+The first architectural response is global: when every stage of the profile is over budget, the problem is not one bad layer; the model is scaled incorrectly for the deployment envelope. The design task is then to distribute capacity across depth, width, and input resolution rather than choose a single parameter count. Depth increases sequential work and activation storage. Width exposes more parallel work but raises memory use. Resolution improves spatial detail while increasing the number of positions each convolution must process. The right balance depends on the machine: a highly parallel accelerator can often exploit width, while a small edge device may be dominated by memory capacity and energy per access.
+
+Mathematically, the total FLOPs for a convolutional model can be approximated as:
+$$
+O \propto \NumberOfLayers \cdot w_{\text{mult}}^2 \cdot r^2,
+$$
+where $\NumberOfLayers$ is depth (number of layers), $w_{\text{mult}}$ is the width multiplier (channel count relative to a base model), and $r$ is the input resolution. This expression shows why naive scaling fails: increasing width and resolution together multiplies work quickly, and the resulting model may exceed the memory bandwidth or power budget even when the parameter count appears reasonable.
+
+Compound scaling turns this balancing act into a controlled design rule. Instead of adjusting depth, width, and resolution independently, compound scaling grows all three dimensions by fixed ratios $(\alpha, \beta, \gamma)$ relative to a base model:
+$$
+\NumberOfLayers = \alpha^\phi N_{L,0}, \quad w_{\text{mult}} = \beta^\phi w_{\text{mult},0}, \quad r = \gamma^\phi r_0
+$$
+Here, $\phi$ is a scaling coefficient, and $\alpha$, $\beta$, and $\gamma$ (as in the original EfficientNet paper) are scaling factors determined from empirical accuracy and efficiency measurements. The rule matters because it prevents one dimension from consuming the budget before the others can contribute useful accuracy.
+
+EfficientNet (@sec-model-compression-neural-architecture-search-cf12) validated this principle by using search to find a baseline architecture and then scaling it with balanced depth, width, and resolution coefficients [@tan2019efficientnet]. The lesson is not that every deployment should use EfficientNet. The systems lesson is that scaling is a resource-allocation decision: the same accuracy target can imply different depth-width-resolution trade-offs depending on which resource the target platform makes scarce. Later benchmarking material formalizes how to measure those trade-offs; here, the design principle is to scale the dimensions against the binding resource.
+
+The same logic extends beyond convolutional models. Transformer layers, attention heads, sequence length, and embedding width play roles analogous to depth, width, and resolution: each increases capacity, but each stresses compute, memory bandwidth, or activation storage differently. Hardware-aware scaling keeps those dimensions tied to the measured bottleneck instead of treating model size as a single scalar.
+
+#### Computation reduction {#sec-model-compression-computation-reduction-13de}
+
+If the profile shows that a small set of convolutional operators dominates arithmetic, reducing the whole model uniformly is wasteful. The better response is to change the expensive operator. Modern efficient architectures do this by factorizing dense computations into cheaper pieces that preserve the representation needed for accuracy.
+
+Depthwise separable convolutions, popularized by MobileNet, exemplify this approach by decomposing standard convolutions into two stages: depthwise convolution (applying separate filters to each input channel independently) and pointwise convolution ($1{\times}1$ convolution mixing outputs across channels). For batch size one, unit stride, padding that preserves an $h{\times}w$ spatial size, and a square kernel of width $k$, the computational complexity of standard convolution with $\LayerInputWidth$ input channels and $\LayerOutputWidth$ output channels is:
+$$
+\mathcal{O}(h w \LayerInputWidth \LayerOutputWidth k^2)
+$$
+where $k$ is kernel size. Depthwise separable convolutions reduce this to:
+$$
+\mathcal{O}(h w \LayerInputWidth k^2) + \mathcal{O}(h w \LayerInputWidth \LayerOutputWidth)
+$$
+eliminating the $k^2$ factor from channel-mixing operations and often achieving 5--10$\times$ FLOP reduction. The wall-clock benefit depends on kernel support and memory behavior: a mobile runtime with optimized depthwise kernels can convert much of this arithmetic reduction into latency savings, while a poorly supported backend may expose the factorized operations as many small, memory-bound kernels.
+
+Other factorization patterns respond to the same diagnosis. Grouped convolutions, used in ResNeXt, partition feature maps into independent groups before merging them, reducing redundant cross-channel work. Bottleneck layers, used in ResNet, apply $1{\times}1$ convolutions to reduce feature dimensionality before expensive operations. SqueezeNet uses the same $1{\times}1$ idea to reduce parameters. These techniques improve efficiency when they reduce the operation that actually dominates the trace; they provide much less benefit when memory traffic, launch overhead, or unsupported kernels become the new bottleneck.
+
+Arithmetic reduction is only one possible response. When profiling instead identifies memory capacity or data movement as the binding resource on the target device, the architecture must address that memory bottleneck directly.
+
+#### Memory optimization {#sec-model-compression-memory-optimization-8c43}
+
+When the profile points to memory rather than arithmetic, the architecture must reduce the working set or the number of expensive memory accesses. Activations, feature maps, and parameters can exceed cache, SRAM, accelerator memory, or edge-device storage even when the FLOP count is acceptable. Memory-efficient architectures therefore try to preserve useful information while storing or moving less data.
+
+DenseNet illustrates the feature-reuse response [@huang2017]. In a traditional convolutional network, each layer computes a new set of feature maps, increasing the activation footprint as the network deepens. DenseNet connects layers so later computations can reuse earlier feature maps instead of relearning similar representations. In DenseNet with $\NumberOfLayers$ layers and growth rate $g$, each layer generates $g$ new feature maps concatenated with prior layers, causing the total number of feature maps to grow linearly:
+$$
+\mathcal{O}(\NumberOfLayers g)
+$$
+
+DenseNet reduces parameter redundancy through feature reuse, but concatenating retained features can increase activation storage and memory traffic. The resulting working set and runtime must be measured on the target hardware.
+
+Activation checkpointing complements feature reuse by trading computation for memory during training. For $\NumberOfLayers$ comparable layers, each with activation footprint $\ActivationMemoryActivations^{(\ell)}$, evenly spaced checkpointing reduces the saved-activation term from $\mathcal{O}(\NumberOfLayers \ActivationMemoryActivations^{(\ell)})$ to $\mathcal{O}(\sqrt{\NumberOfLayers}\,\ActivationMemoryActivations^{(\ell)})$ while recomputing omitted activations during backpropagation. In the compression context, checkpointing enables training of larger models within fixed memory budgets, which in turn provides more capacity for subsequent pruning or distillation to exploit.
+
+Parameter reduction applies the same reasoning to storage. SqueezeNet uses $1{\times}1$ convolutions to reduce the number of input channels before applying standard convolutions, making the expensive layer operate on a smaller representation [@iandola2016squeezenet]. The number of parameters in a standard convolutional layer is:
+$$
+\mathcal{O}(\LayerInputWidth \LayerOutputWidth k^2)
+$$
+
+By reducing $\LayerInputWidth$ using $1{\times}1$ convolutions, SqueezeNet reduces parameter count, achieving the paper's AlexNet-level accuracy target with far fewer parameters than AlexNet. That trade is attractive when the deployment constraint is flash storage, model download size, or parameter bandwidth; it is less decisive when activation memory or operator overhead dominates.
+
+Feature reuse, activation checkpointing, and parameter reduction are therefore not interchangeable recipes. Each changes a different part of the memory problem. Reused features reduce redundant representations, checkpointing reduces training-time activation storage, and $1{\times}1$ bottlenecks reduce parameter movement. The correct choice follows from which memory term the profile shows as binding.
+
+Beyond minimizing stored tensor volume, substantial execution efficiency emerges from restructuring memory access schedules. Combining adjacent operations into composite execution kernels eliminates off-chip DRAM round-trips for intermediate feature maps.
+
 ### Hardware-aware NAS as a structural deployment tool {#sec-model-compression-hardware-aware-nas}
 
-Pruning, distillation, and factorization assume an existing topology engineered by human intuition. Selecting a competitive configuration can require extensive experimentation, and manual exploration risks leaving efficient architectural candidates undiscovered [@elsken2019]. **Hardware-aware neural architecture search (NAS)**\index{NAS!definition} automates part of this process by exploring a specified space of architectures and optimizing directly for execution metrics on target silicon, rather than theoretical FLOP counts.
+Where pruning removes structural excess from an existing network and distillation transfers it to a manually designed student, neural architecture search poses a different question: what if we could design a fundamentally efficient architecture from scratch? Pruning, distillation, and factorization all assume an existing topology engineered by human intuition. Selecting a competitive configuration can require extensive experimentation, and manual exploration risks leaving efficient architectural candidates undiscovered [@elsken2019]. **Hardware-aware neural architecture search (NAS)**\index{NAS!definition} automates part of this process by exploring a specified space of architectures and optimizing directly for execution metrics on target silicon, rather than theoretical FLOP counts.
 
 ```{=latex}
 \Needspace{25\baselineskip}
@@ -2658,6 +2719,425 @@ Surviving operations must still execute within physical memory bandwidth and reg
 
 Quantization is often an attractive first deployment experiment because it leaves the architecture intact and can be applied post-training. Its leverage is greatest when weight or activation traffic binds and the target provides efficient low-precision kernels; otherwise, it may shrink the artifact without accelerating the request.
 
+### Adaptive computation methods {#sec-model-compression-adaptive-computation-methods-d164}
+
+Static structural optimizations---such as pruning, distillation, and architecture search---optimize a fixed execution graph, ensuring that absent input-dependent control, every input follows an identical scheduled path. On static graphs, the **Algorithm** imposes an invariant computational workload on the **Machine**: a 24-layer transformer executes identical MAC operations and streams its full parameter footprint from HBM or off-chip DRAM for an obvious, easily classified sample as it does for an ambiguous one. **Adaptive inference**\index{Adaptive inference!definition} replaces this open-loop pipeline with an input-dependent control loop: intermediate representations or runtime budgets inform dynamic decisions that terminate execution or route activations through specialized subnetworks. While dynamic paths can reduce average arithmetic operations and memory traffic, they introduce runtime overheads in routing logic, batch management, confidence calibration, and latency variance.
+
+#### Dynamic schemes {#sec-model-compression-dynamic-schemes-e9ff}
+
+Because input data exhibit non-uniform semantic complexity, allocating an invariant computational budget wastes memory bandwidth and execution cycles on simple samples. Dynamic schemes modulate execution paths to lower amortized computation while preserving the deep network for worst-case inputs. This architectural flexibility spans four primary control variables: network depth (early exit), structural routing (conditional layer skipping), expert subnetworks (mixture-of-experts), and continuous computational allocation.
+
+To control execution depth, **early exit**\index{Adaptive computation!early exit} architectures attach auxiliary classification heads to intermediate layers, terminating execution when intermediate representations yield sufficient prediction confidence [@teerapittayanon2016]. BranchyNet implements this mechanism across convolutional backbones using shallow exit branches, whereas multi-exit vision transformers attach linear probes and entropy estimators between transformer blocks [@xin2021]. When an input satisfies an exit criterion—such as softmax prediction entropy dropping below a pre-tuned threshold—the runtime halts evaluation and returns the intermediate prediction. The net operational benefit requires that the arithmetic operations and memory transfers avoided in subsequent layers exceed the computational overhead of evaluating the intermediate classifiers and gating thresholds.
+
+The systems trade-off diverges sharply across hardware deployment targets. On single-sample edge processors (batch size $B=1$, typical of microcontrollers and mobile NPUs), early exit immediately terminates the execution thread [@hu2020triple]. Skipping remaining layers eliminates both the arithmetic operations and the off-chip DRAM transactions required to load subsequent layer weights into on-chip SRAM cache. Conversely, on parallel throughput accelerators (GPUs and TPUs) processing batched workloads ($B > 1$), early exit introduces severe batch fragmentation [@chen2024eellm]. If only a subset of samples in a batch reaches the exit threshold, the remaining samples must still traverse deeper layers. Unless the runtime executes dynamic batch compaction—gathering unresolved activation tensors into a contiguous memory buffer via memory copies and kernel synchronizations—inactive samples remain allocated in memory, or the accelerator must mask inactive SIMD or single instruction, multiple threads (SIMT) lanes. Consequently, tail latency for the batch remains dictated by the deepest traversing sample. @Fig-early-exit-transformers traces this branching topology along the backbone: each transformer block taps intermediate representations into an auxiliary classifier and confidence estimator (LTE) to trigger an early exit, while unresolved tokens traverse horizontal connections to deeper layers.
+
+::: {.column-margin .margin-pointer}
+↪ The latency-throughput trade-offs of batching under production request streams, including service-level objective (SLO) violations, are developed in @sec-model-serving-dynamic-batching-latencythroughput-tradeoffs-986d.
+:::
+
+::: {#fig-early-exit-transformers fig-env="figure" fig-pos="htb" fig-cap="**Early Exit Architecture**: Transformer layers dynamically adjust computation by classifying each layer's output and enabling early termination if sufficient confidence is reached, reducing average latency and power when many inputs can exit before the final layer. Source: [@xin2021]." fig-alt="Flowchart with input feeding transformer layers 1 through N sub L in sequence. Each layer connects to a classifier, confidence estimator, and exit point. Arrows show continue paths for low confidence."}
+
+```{.tikz}
+\begin{tikzpicture}[font=\small\sffamily]
+\tikzset{%
+Line/.style={line width=1.0pt,black!50,text=black},
+Box/.style={inner xsep=2pt,
+    node distance=1.7,
+    draw=GreenLine,
+    line width=0.75pt,
+    fill=GreenL,
+    text width=25mm,align=flush center,
+    minimum width=25mm, minimum height=8mm
+  },
+}
+
+\node[Box, ellipse,text width=14mm,minimum width=12mm,inner ysep=-1pt,
+             minimum height=10mm, fill=RedL,draw=RedLine](B1){Input};
+\node[Box,right=of B1](B2){Transformer 1};
+\node[Box,right=of B2](B3){Transformer 2};
+\node[Box, node distance=2.5,right=of B3](B4){Transformer $N_L$};
+\node[font=\tiny\sffamily](B0)at($(B3)!0.5!(B4)$){$\bullet$ $\bullet$ $\bullet$};
+%
+\def\di{0.45}
+\node[Box,node distance=\di,below=of B2,fill=VioletL2,draw=VioletLine](C1){Classifier 1};
+\node[Box,node distance=\di,below=of C1,fill=BlueL,draw=BlueLine](C2){Confidence/LTE};
+\node[Box,node distance=\di,below=of C2,ellipse,text width=14mm,minimum width=12mm,
+             minimum height=10mm, fill=RedL,draw=RedLine](C3){Exit};
+%
+\node[Box,node distance=\di,below=of B3,fill=VioletL2,draw=VioletLine](2C1){Classifier 2};
+\node[Box,node distance=\di,below=of 2C1,fill=BlueL,draw=BlueLine](2C2){Confidence/LTE};
+\node[Box,node distance=\di,below=of 2C2,ellipse,text width=14mm,minimum width=12mm,
+             minimum height=10mm, fill=RedL,draw=RedLine](2C3){Exit};
+%
+\node[Box,node distance=\di,below=of B4,fill=VioletL2,draw=VioletLine](3C1){Classifier $N_L$};
+\node[Box,node distance=\di,below=of 3C1,fill=BlueL,draw=BlueLine](3C2){Confidence/LTE};
+\node[Box,node distance=\di,below=of 3C2,ellipse,text width=14mm,minimum width=12mm,
+             minimum height=10mm, fill=RedL,draw=RedLine](3C3){Exit};
+%
+\node[font=\tiny\sffamily](2B0)at($(2C1)!0.5!(3C1)$){$\bullet$ $\bullet$ $\bullet$};
+\node[font=\tiny\sffamily](3B0)at($(2C2)!0.5!(3C2)$){$\bullet$ $\bullet$ $\bullet$};
+\draw[Line,-latex](B1)--(B2);
+\draw[Line,-latex](B2)--(B3);
+\draw[Line,-latex](B3)--(B0);
+\draw[Line,-latex](B0)--(B4);
+%
+\draw[Line,-latex](B2)--(C1);
+\draw[Line,-latex](C1)--(C2);
+\draw[Line,-latex](C2)--(C3);
+%
+\draw[Line,-latex](B3)--(2C1);
+\draw[Line,-latex](2C1)--(2C2);
+\draw[Line,-latex](2C2)--(2C3);
+%
+\draw[Line,-latex](B4)--(3C1);
+\draw[Line,-latex](3C1)--(3C2);
+\draw[Line,-latex](3C2)--(3C3);
+%
+\draw[Line,-latex](C2)-|node[left=6pt,pos=0.8,rotate=90]{Continue}($(B2)!0.5!(B3)$);
+\draw[Line,-latex](2C2.east)-|node[right=9pt,pos=0.35,rotate=90]{Continue}($(B3)!0.68!(B0)$);
+\end{tikzpicture}
+```
+
+:::
+
+Beyond truncating execution depth along a single linear pipeline, **conditional computation**\index{Conditional computation!definition} dynamically modulates the topological routing of activations through the network graph [@bengio2015conditional]. Instead of executing every block in a predefined sequence, gating functions evaluate activation tensors to bypass residual layers, alter operator kernels, or select specialized functional blocks. This converts a static directed acyclic graph (DAG) into an input-dependent dynamic graph.
+
+Architectural implementations target distinct structural granularities. SkipNet uses lightweight recurrent or feedforward gating controllers to conditionally bypass residual blocks in convolutional networks, preserving full network depth only for computationally difficult inputs [@wang2018skipnet]. Dynamic Filter Networks generate sample-specific convolutional filter weights dynamically from the input, modifying feature extraction patterns directly rather than skipping static weights [@jia2016dynamic]. Capsule Networks utilize iterative routing-by-agreement to direct low-level feature vectors to compatible high-level capsules [@sabour2017dynamic]. From a hardware systems perspective, conditional routing achieves wall-clock speedups only when the cycles saved by bypassing operators surpass the latency of evaluating the gating network, executing host-device control synchronization, and managing uncoalesced memory accesses.
+
+Scaling dense transformer models couples parameter capacity directly to per-token floating-point operations: increasing model capacity forces every token to compute against every parameter weight matrix, driving up both arithmetic demand and memory bandwidth requirements. The **mixture-of-experts (MoE)**\index{MoE!definition} architecture decouples parameter capacity from per-token compute by replacing dense feedforward network (FFN) layers with a bank of parallel expert subnetworks coordinated by a parameterized router [@shazeer2017outrageously]. Google's Switch Transformer[^fn-switch-transformer-scaling] scales this sparse routing principle by steering each token to a single expert ($k=1$), dramatically reducing communication overhead compared to top-$k$ routing [@fedus2022switch].
+
+[^fn-switch-transformer-scaling]: **Switch Transformer**\index{Switch Transformer!scaling trade-off}: @fedus2022switch scales to roughly 1.6 trillion total parameters while routing each token to one expert; in a compute-matched experiment, Switch-Base with 64 experts reached the T5-Base quality target in about one-seventh the training time; the trillion-parameter comparison reported roughly 4$\times$ speedup over T5-XXL. Routing each token to one expert reduces communication relative to top-$k$ routing, but load imbalance requires auxiliary losses and capacity factors. This trade-off—massive parameter capacity at low per-token compute cost, but with complex systems engineering for load balancing—defines the MoE design space.
+
+This sparse activation creates a fundamental memory-bandwidth and capacity trade-off on accelerator hardware. While a token routed to one of $N_{\text{experts}}$ experts executes arithmetic against only $1/N_{\text{experts}}$ of the total expert parameters, an all-resident deployment keeps all $N_{\text{experts}}$ expert matrices in device memory (HBM or SRAM). Offloading changes this capacity requirement by adding transfers to the execution path. At low operational batch sizes—such as single-stream autoregressive generation—routing divergent tokens to different experts fragments matrix-matrix multiplications (GEMM) into low-arithmetic-intensity matrix-vector operations (GEMV), which can make execution bandwidth-limited. Furthermore, uneven token distribution causes computational hotspots where overloaded experts drop tokens exceeding their capacity factor, while under-allocated experts leave tensor core pipelines idle.
+
+Sparse Mixture-of-Experts architectures replace monolithic feedforward networks (FFNs) with dynamically routed subnetworks. @Fig-switch-transformer diagrams this conditional execution pathway: the left block embeds a Switching FFN layer within the standard transformer stack, while the expanded right panel details the gating router dispatching individual tokens ("More" with $p=0.65$, "Parameters" with $p=0.8$) to distinct expert sub-blocks (FFN 2 and FFN 1) while leaving unselected experts idle.
+
+::: {#fig-switch-transformer fig-env="figure" fig-pos="htb" fig-cap="**Switch Transformer Architecture**: Replacing dense feedforward layers with a Switching FFN layer (left) enables sparse conditional routing. A gating network routes each token to a single expert (right) out of a large pool, decoupling total model capacity (parameters) from per-token compute cost (FLOPs). Source: [@fedus2022switch]." fig-alt="Two-part diagram. Left shows switch transformer block with self-attention, add-normalize, switching FFN layer, and add-normalize. Right shows expanded view with router selecting one of four FFN experts per token based on probability."}
+
+```{.tikz}
+\begin{tikzpicture}[line join=round,font=\small\sffamily]
+\tikzset{%
+Line/.style={line width=1.0pt,black!50,text=black},
+Box/.style={inner xsep=2pt,
+    node distance=0.8,
+    draw=GreenLine,
+    line width=0.75pt,
+    fill=GreenL,
+    text width=75mm,align=flush center,
+    minimum width=75mm, minimum height=8mm
+  },
+Box2/.style={inner xsep=2pt,
+    node distance=0.15,
+    draw=VioletLine,
+    line width=0.75pt,
+    fill=VioletL2,
+    text width=10mm,align=flush center,
+    minimum width=10mm, minimum height=7mm
+  },
+Box3/.style={inner xsep=2pt,
+    node distance=0.8,
+    draw=VioletLine,
+    line width=0.75pt,
+    fill=VioletL2,
+    text width=33mm,align=flush center,
+    minimum width=33mm, minimum height=8mm
+  },
+do path picture/.style={%
+    path picture={%
+      \pgfpointdiff{\pgfpointanchor{path picture bounding box}{south west}}%
+        {\pgfpointanchor{path picture bounding box}{north east}}%
+      \pgfgetlastxy\x\y%
+      \tikzset{x=\x/2,y=\y/2}%
+      #1
+    }
+  },
+  cross/.style={do path picture={
+    \draw [line cap=round] (-1,-1) -- (1,1) (-1,1) -- (1,-1);
+  }},
+plus/.style={do path picture={
+    \draw [line cap=round] (-3/4,0) -- (3/4,0) (0,-3/4) -- (0,3/4);
+  }}
+}
+
+\node[Box,fill=RedL,draw=RedLine](P1){Self-Attention};
+\node[Box,above=0.4 of P1,fill=BrownL,draw=BrownLine](P2){Add + Normalize};
+\node[Box,node distance=6.5,above=of P2,fill=BrownL,draw=BrownLine](P3){Add + Normalize};
+\draw[Line,-latex](P2.172)coordinate(DPR1)--++(90:1)coordinate(PR1);
+\draw[Line,-latex](P2.8)coordinate(DPR2)--++(90:1)coordinate(PR2);
+\draw[Line,-latex](P3.172)coordinate(DAN1)--++(90:0.5)coordinate(AN1);
+\draw[Line,-latex](P3.8)coordinate(DAN2)--++(90:0.5)coordinate(AN2);
+\draw[Line,-latex](P1.172)--(P1.172|-P2.south);
+\draw[Line,-latex](P1.8)--(P1.8|-P2.south);
+%%%Router-1
+\begin{scope}[local bounding box=R1,line width=0.5pt,shift={($(PR1)+(-0.4,0.2)$)}]
+\newcommand{\Depth}{1.3}
+\newcommand{\Height}{0.7}
+\newcommand{\Width}{0.4}
+\coordinate (O2) at (0,0,0);
+\coordinate (A2) at (0,\Width,0);
+\coordinate (B2) at (0,\Width,\Height);
+\coordinate (C2) at (0,0,\Height);
+\coordinate (D2) at (\Depth,0,0);
+\coordinate (E2) at (\Depth,\Width,0);
+\coordinate (F2) at (\Depth,\Width,\Height);
+\coordinate (G2) at (\Depth,0,\Height);
+
+\draw[fill=GreenL] (D2) -- (E2) -- (F2) -- (G2) -- cycle;% Right Face
+\draw[fill=GreenL] (C2) -- (B2) -- (F2) -- (G2) -- (C2);% Front Face
+\draw[fill=GreenL] (A2) -- (B2) -- (F2) -- (E2) -- cycle;% Top Face
+%
+\node[]at($(B2)!0.5!(G2)$){Router};
+
+\begin{scope}[local bounding box=BB1,line width=0.5pt,inner sep=3.6pt]
+\def\dx{0.25}
+\def\dy{0.5}
+\def\dz{0.2}
+% bottom-left corner coordinate (bar origin)
+\def\x{0}
+\def\y{0.21}
+\def\z{0}
+
+% boje
+%\filldraw[fill=blue!30, draw=black] (\x,\y,\z) -- (\x,\y,\z+\dz) -- (\x,\y+\dy,\z+\dz) -- (\x,\y+\dy,\z) -- cycle; % leva strana
+\filldraw[fill=red!10, draw=black] (\x,\y+\dy,\z) -- (\x,\y+\dy,\z+\dz) -- (\x+\dx,\y+\dy,\z+\dz) -- (\x+\dx,\y+\dy,\z) -- cycle; % gornja strana
+%\filldraw[fill=blue!20, draw=black] (\x,\y,\z) -- (\x,\y,\z+\dz) -- (\x+\dx,\y,\z+\dz) -- (\x+\dx,\y,\z) -- cycle; % donja strana
+%\filldraw[fill=blue!40, draw=black] (\x,\y,\z) -- (\x+\dx,\y,\z) -- (\x+\dx,\y+\dy,\z) -- (\x,\y+\dy,\z) -- cycle; % zadnja strana
+\filldraw[fill=red!50, draw=black] (\x+\dx,\y,\z) -- (\x+\dx,\y,\z+\dz) -- (\x+\dx,\y+\dy,\z+\dz) -- (\x+\dx,\y+\dy,\z) -- cycle; % desna strana
+\filldraw[fill=red!60, draw=black] (\x,\y,\z+\dz) -- (\x+\dx,\y,\z+\dz) -- (\x+\dx,\y+\dy,\z+\dz) -- (\x,\y+\dy,\z+\dz) -- cycle; % prednja strana
+\end{scope}
+
+\begin{scope}[local bounding box=BB1,shift={(0.25,0)}]
+\def\dx{0.25}
+\def\dy{1.0}
+\def\dz{0.2}
+%
+\def\x{0}
+\def\y{0.21}
+\def\z{0}
+\filldraw[fill=red!10, draw=black] (\x,\y+\dy,\z)coordinate(NB1) -- (\x,\y+\dy,\z+\dz) -- (\x+\dx,\y+\dy,\z+\dz) -- (\x+\dx,\y+\dy,\z) -- cycle; % gornja strana
+\filldraw[fill=red!50, draw=black] (\x+\dx,\y,\z) -- (\x+\dx,\y,\z+\dz) -- (\x+\dx,\y+\dy,\z+\dz) -- (\x+\dx,\y+\dy,\z) -- cycle; % desna strana
+\filldraw[fill=red!60, draw=black] (\x,\y,\z+\dz) -- (\x+\dx,\y,\z+\dz) -- (\x+\dx,\y+\dy,\z+\dz) -- (\x,\y+\dy,\z+\dz) -- cycle; % prednja strana
+\end{scope}
+\begin{scope}[local bounding box=BB1,shift={(0.5,0)}]
+\def\dx{0.25}
+\def\dy{0.2}
+\def\dz{0.2}
+%
+\def\x{0}
+\def\y{0.21}
+\def\z{0}
+%
+\filldraw[fill=red!10, draw=black] (\x,\y+\dy,\z) -- (\x,\y+\dy,\z+\dz) -- (\x+\dx,\y+\dy,\z+\dz) -- (\x+\dx,\y+\dy,\z) -- cycle; % gornja strana
+\filldraw[fill=red!50, draw=black] (\x+\dx,\y,\z) -- (\x+\dx,\y,\z+\dz) -- (\x+\dx,\y+\dy,\z+\dz) -- (\x+\dx,\y+\dy,\z) -- cycle; % desna strana
+\filldraw[fill=red!60, draw=black] (\x,\y,\z+\dz) -- (\x+\dx,\y,\z+\dz) -- (\x+\dx,\y+\dy,\z+\dz) -- (\x,\y+\dy,\z+\dz) -- cycle; % prednja strana
+\end{scope}
+\begin{scope}[local bounding box=BB1,shift={(0.75,0)}]
+\def\dx{0.25}
+\def\dy{0.6}
+\def\dz{0.2}
+%
+\def\x{0}
+\def\y{0.21}
+\def\z{0}
+%
+\filldraw[fill=red!10, draw=black] (\x,\y+\dy,\z) -- (\x,\y+\dy,\z+\dz) -- (\x+\dx,\y+\dy,\z+\dz) -- (\x+\dx,\y+\dy,\z) -- cycle; % gornja strana
+\filldraw[fill=red!50, draw=black] (\x+\dx,\y,\z) -- (\x+\dx,\y,\z+\dz) -- (\x+\dx,\y+\dy,\z+\dz) -- (\x+\dx,\y+\dy,\z) -- cycle; % desna strana
+\filldraw[fill=red!60, draw=black] (\x,\y,\z+\dz) -- (\x+\dx,\y,\z+\dz) -- (\x+\dx,\y+\dy,\z+\dz) -- (\x,\y+\dy,\z+\dz) -- cycle; % prednja strana
+\end{scope}
+\end{scope}
+%%%%%%%%%%%%%%%%%%
+%%%Router-2
+\begin{scope}[local bounding box=R1,line width=0.5pt,shift={($(PR2)+(-0.4,0.2)$)}]
+\newcommand{\Depth}{1.3}
+\newcommand{\Height}{0.7}
+\newcommand{\Width}{0.4}
+\coordinate (O2) at (0,0,0);
+\coordinate (A2) at (0,\Width,0);
+\coordinate (B2) at (0,\Width,\Height);
+\coordinate (C2) at (0,0,\Height);
+\coordinate (D2) at (\Depth,0,0);
+\coordinate (E2) at (\Depth,\Width,0);
+\coordinate (F2) at (\Depth,\Width,\Height);
+\coordinate (G2) at (\Depth,0,\Height);
+
+\draw[fill=GreenL] (D2) -- (E2) -- (F2) -- (G2) -- cycle;% Right Face
+\draw[fill=GreenL] (C2) -- (B2) -- (F2) -- (G2) -- (C2);% Front Face
+\draw[fill=GreenL] (A2) -- (B2) -- (F2) -- (E2) -- cycle;% Top Face
+%
+\node[]at($(B2)!0.5!(G2)$){Router};
+
+\begin{scope}[local bounding box=BB1,line width=0.5pt,inner sep=3.6pt]
+\def\dx{0.25}
+\def\dy{1.1}
+\def\dz{0.2}
+%
+\def\x{0}
+\def\y{0.21}
+\def\z{0}
+
+%
+\filldraw[fill=red!10, draw=black] (\x,\y+\dy,\z) coordinate(NB2)-- (\x,\y+\dy,\z+\dz) -- (\x+\dx,\y+\dy,\z+\dz) -- (\x+\dx,\y+\dy,\z) -- cycle; % gornja strana
+\filldraw[fill=red!50, draw=black] (\x+\dx,\y,\z) -- (\x+\dx,\y,\z+\dz) -- (\x+\dx,\y+\dy,\z+\dz) -- (\x+\dx,\y+\dy,\z) -- cycle; % desna strana
+\filldraw[fill=red!60, draw=black] (\x,\y,\z+\dz) -- (\x+\dx,\y,\z+\dz) -- (\x+\dx,\y+\dy,\z+\dz) -- (\x,\y+\dy,\z+\dz) -- cycle; % prednja strana
+\end{scope}
+
+\begin{scope}[local bounding box=BB1,shift={(0.25,0)}]
+\def\dx{0.25}
+\def\dy{0.6}
+\def\dz{0.2}
+%
+\def\x{0}
+\def\y{0.21}
+\def\z{0}
+\filldraw[fill=red!10, draw=black] (\x,\y+\dy,\z) -- (\x,\y+\dy,\z+\dz) -- (\x+\dx,\y+\dy,\z+\dz) -- (\x+\dx,\y+\dy,\z) -- cycle; % gornja strana
+\filldraw[fill=red!50, draw=black] (\x+\dx,\y,\z) -- (\x+\dx,\y,\z+\dz) -- (\x+\dx,\y+\dy,\z+\dz) -- (\x+\dx,\y+\dy,\z) -- cycle; % desna strana
+\filldraw[fill=red!60, draw=black] (\x,\y,\z+\dz) -- (\x+\dx,\y,\z+\dz) -- (\x+\dx,\y+\dy,\z+\dz) -- (\x,\y+\dy,\z+\dz) -- cycle; % prednja strana
+\end{scope}
+\begin{scope}[local bounding box=BB1,shift={(0.5,0)}]
+\def\dx{0.25}
+\def\dy{0.3}
+\def\dz{0.2}
+%
+\def\x{0}
+\def\y{0.21}
+\def\z{0}
+%
+\filldraw[fill=red!10, draw=black] (\x,\y+\dy,\z) -- (\x,\y+\dy,\z+\dz) -- (\x+\dx,\y+\dy,\z+\dz) -- (\x+\dx,\y+\dy,\z) -- cycle; % gornja strana
+\filldraw[fill=red!50, draw=black] (\x+\dx,\y,\z) -- (\x+\dx,\y,\z+\dz) -- (\x+\dx,\y+\dy,\z+\dz) -- (\x+\dx,\y+\dy,\z) -- cycle; % desna strana
+\filldraw[fill=red!60, draw=black] (\x,\y,\z+\dz) -- (\x+\dx,\y,\z+\dz) -- (\x+\dx,\y+\dy,\z+\dz) -- (\x,\y+\dy,\z+\dz) -- cycle; % prednja strana
+\end{scope}
+\begin{scope}[local bounding box=BB1,shift={(0.75,0)}]
+\def\dx{0.25}
+\def\dy{0.15}
+\def\dz{0.2}
+%
+\def\x{0}
+\def\y{0.21}
+\def\z{0}
+%
+\filldraw[fill=red!10, draw=black] (\x,\y+\dy,\z) -- (\x,\y+\dy,\z+\dz) -- (\x+\dx,\y+\dy,\z+\dz) -- (\x+\dx,\y+\dy,\z) -- cycle; % gornja strana
+\filldraw[fill=red!50, draw=black] (\x+\dx,\y,\z) -- (\x+\dx,\y,\z+\dz) -- (\x+\dx,\y+\dy,\z+\dz) -- (\x+\dx,\y+\dy,\z) -- cycle; % desna strana
+\filldraw[fill=red!60, draw=black] (\x,\y,\z+\dz) -- (\x+\dx,\y,\z+\dz) -- (\x+\dx,\y+\dy,\z+\dz) -- (\x,\y+\dy,\z+\dz) -- cycle; % prednja strana
+\end{scope}
+\end{scope}
+%%%%%%%%%%%%%%%%%
+%FFN left
+\begin{scope}[local bounding box=SFFN1,line width=0.5pt,shift={($(NB1)+(-1.85,1.55)$)}]
+\node[Box2](FFN1){FFN1};
+\node[Box2,right=of FFN1,line width=1.5pt](FFN2){FFN2};
+\node[Box2,right=of FFN2](FFN3){FFN3};
+\node[Box2,right=of FFN3](FFN4){FFN4};
+\end{scope}
+%FFN right
+\begin{scope}[local bounding box=SFFN2,line width=0.5pt,shift={($(SFFN1)+(3.9,0)$)}]
+\node[Box2,line width=1.5pt](2FFN1){FFN1};
+\node[Box2,right=of 2FFN1](2FFN2){FFN2};
+\node[Box2,right=of 2FFN2](2FFN3){FFN3};
+\node[Box2,right=of 2FFN3](2FFN4){FFN4};
+\end{scope}
+\node[draw,circle,line width=0.75pt, above=1.2 of $(FFN2)!0.5!(FFN3)$,cross,minimum width=6mm](CI1){};
+\node[draw,circle,line width=0.75pt, above=1.2 of $(2FFN2)!0.5!(2FFN3)$,cross,minimum width=6mm](CI2){};
+%
+\draw[Line,-latex](NB1)--++(90:0.5)-|(FFN2);
+\draw[Line,-latex](NB2)--++(90:0.5)-|(2FFN1);
+\draw[Line,-latex,dashed,rounded corners=8pt](NB1)--
+node[below,pos=0.5]{$p = 0.65$}++(180:2.7)|-(CI1.west);
+\draw[Line,-latex,dashed,rounded corners=8pt](NB2)--
+node[below,pos=0.5]{$p = 0.8$}++(0:3.2)|-(CI2.east);
+\draw[Line,-latex](CI1)--(CI1|-P3.south);
+\draw[Line,-latex](CI2)--(CI2|-P3.south);
+\draw[Line,-latex](FFN2)--++(90:0.7)-|(CI1);
+\draw[Line,-latex](2FFN1)--++(90:0.7)-|(CI2);
+%%%
+%fitting
+\scoped[on background layer]
+\node[draw=BackLine,inner xsep=7mm,inner ysep=3mm,
+yshift=0mm,fill=BackColor!70,fit=(FFN1)(2FFN4)(CI2)(R1),line width=0.75pt](GBB2){};
+%%below Router to Add +Normalize
+\draw[Line,-latex]($(DPR1)!0.25!(PR1)$)--++(180:3.8)|-(P3);
+\draw[Line,-latex]($(DPR2)!0.25!(PR2)$)--++(0:3.8)|-(P3);
+%%%Above Add + Normalize
+\begin{scope}[local bounding box=Y1,line width=0.5pt,shift={($(AN1)+(-1.2,0)$)}]
+\def\side{0.4}
+\foreach \i/\col in {0/white,1/green!40,2/white,3/green!40,4/white,5/green!40}{
+    \draw[fill=\col,thick] (\i*\side,0) rectangle ++(\side,\side);
+}
+\end{scope}
+\node[left=2pt of Y1]{$y_1$};
+\begin{scope}[local bounding box=Y2,line width=0.5pt,shift={($(AN2)+(-1.2,0)$)}]
+\def\side{0.4}
+\foreach \i/\col in {0/white,1/green!40,2/white,3/green!40,4/white,5/green!40}{
+    \draw[fill=\col,thick] (\i*\side,0) rectangle ++(\side,\side);
+}
+\end{scope}
+\node[left=2pt of Y2]{$y_2$};
+%%below Self-Attention
+\draw[Line,latex-](P1.188)coordinate(GSA1)--++(270:0.7)coordinate(SA1);
+\node[draw,circle,line width=0.75pt, below=0 of SA1,cross,minimum width=6mm](CI3){};
+\draw[Line,latex-](P1.352)coordinate(GSA2)--++(270:0.7)coordinate(SA2);
+\node[draw,circle,line width=0.75pt, below=0 of SA2,cross,minimum width=6mm](CI4){};
+\draw[Line,latex-](CI3.south)coordinate(GDCI3)--++(270:0.7)coordinate(DCI3);
+\draw[Line,latex-](CI4.south)coordinate(GDCI4)--++(270:0.7)coordinate(DCI4);%
+%
+\node[left=2pt of CI3,align=center]{Positional\\ embedding};
+\node[left=2pt of CI4,align=center]{Positional\\ embedding};
+%
+\begin{scope}[local bounding box=X1,line width=0.5pt,shift={($(DCI3)+(-1.2,-0.14)$)}]
+\def\side{0.4}
+\foreach \i/\col in {0/white,1/green!40,2/white,3/green!40,4/white,5/green!40}{
+    \draw[fill=\col,thick] (\i*\side,0) rectangle ++(\side,\side);
+}
+\end{scope}
+\node[left=2pt of X1]{$x_1$};
+\node[below=2pt of X1]{More};
+\begin{scope}[local bounding box=X2,line width=0.5pt,shift={($(DCI4)+(-1.2,-0.14)$)}]
+\def\side{0.4}
+\foreach \i/\col in {0/white,1/green!40,2/white,3/green!40,4/white,5/green!40}{
+    \draw[fill=\col,thick] (\i*\side,0) rectangle ++(\side,\side);
+}
+\end{scope}
+\node[left=2pt of X2]{$x_2$};
+\node[below=2pt of X2]{Parameters};
+%
+\draw[Line,-latex]($(GSA1)!0.5!(SA1)$)--++(180:3.8)|-(P2);
+\draw[Line,-latex]($(GSA2)!0.5!(SA2)$)--++(0:3.8)|-(P2);
+%%%%%%%%%%%%
+%left diagram
+\begin{scope}[local bounding box=LD,line width=0.5pt,shift={(-13,1.8)}]
+\node[Box3,fill=RedL,draw=RedLine](2P1){Self-Attention};
+\node[Box3,above=of 2P1,fill=BrownL,draw=BrownLine](2P2){Add + Normalize};
+\node[Box3,above=of 2P2,fill=BackColor,draw=BackLine](2P3){Switching FFN Layer};
+\node[Box3,above=of 2P3,fill=BrownL,draw=BrownLine](2P4){Add + Normalize};
+%
+\draw[Line,-latex](2P1)--(2P2);
+\draw[Line,-latex](2P2)--(2P3);
+\draw[Line,-latex](2P3)--(2P4);
+\draw[Line,-latex](2P4)--++(90:1)node[above]{$y$};
+\draw[Line,latex-](2P1)--++(270:1)node[below]{$x$};
+\draw[blue,dashed,thick]($(2P1.south east)+(0.2,-0.2)$)--++(310:5);
+\draw[blue,dashed,thick]($(2P4.north east)+(0.2,-0.2)$)--++(40:5);
+\end{scope}
+\end{tikzpicture}
+```
+
+:::
+
+Because the router lies on the critical execution path, the accelerator runtime must dynamically dispatch and gather activations across expert blocks without triggering host-device synchronization stalls. On data-parallel accelerators such as GPUs and TPUs, executing sparse expert layers efficiently requires token permutation: tokens assigned to the same expert are gathered into contiguous memory tiles to sustain high Tensor Core utilization during subsequent matrix multiplications [@lepikhin2021gshard]. If the routing distribution is highly skewed, token buffers for popular experts overflow their fixed capacity allocations, forcing the system to either truncate tokens (causing representation degradation) or trigger ragged kernel launches that leave parallel vector lanes idle.
+
+::: {.column-margin .margin-pointer}
+↪ How runtimes execute tensors whose shapes vary, by matching precompiled shape profiles, padding, splitting the batch, or falling back to a general kernel, is developed in @sec-hardware-acceleration-dynamic-kernel-execution-33fc.
+:::
+
+While early exit and MoE routing make discrete branch selections, adaptive inference can also operate continuously by progressively modulating depth or iteration counts based on real-time task difficulty [@yang2020]. Dynamic routing architectures such as BlockDrop dynamically adjust the number of active layers according to runtime policy networks [@wu2018blockdrop], while dynamic layer scaling allocates computation incrementally until output uncertainty drops below a calibrated threshold. Consider an embedded vision system processing sensor streams: high-contrast frames with clear road geometry resolve through a minimal prefix of feature-extraction layers, whereas degraded frames containing occluded obstacles trigger deeper recurrent processing blocks. The physical systems gain materializes only if the control evaluation remains computationally lightweight and the runtime schedules frames with matched execution depths concurrently to maintain high hardware utilization.
+
+#### Implementation challenges {#sec-model-compression-implementation-challenges-1184}
+
+Realizing the efficiency gains of adaptive computation requires overcoming critical challenges across model training, runtime orchestration, and hardware alignment. During training, discrete routing decisions (such as non-differentiable $\mathrm{argmax}$ selections) break standard backpropagation. Practitioners must employ continuous relaxations such as the Gumbel-Softmax estimator, reinforcement learning policy gradients, or auxiliary load-balancing losses to prevent routing collapse where the router over-allocates inputs to a single expert or exit [@shazeer2017outrageously].
+
+At runtime, control-flow branching fundamentally conflicts with the bulk-synchronous parallel execution model of modern accelerators. When parallel threads within a GPU warp encounter divergent execution branches, the hardware may serialize branch execution and mask inactive threads, reducing the value of theoretical FLOP savings. Gating also introduces control dependencies that can limit fusion, require token-permutation buffers, or trigger host-device synchronization, depending on the runtime. If these dispatch overheads exceed the compute time saved by skipping layers, the dynamic model exhibits higher end-to-end latency than a dense baseline. @Sec-hardware-acceleration-dynamic-kernel-execution-33fc examines hardware-aware runtime strategies, including ragged batching and dynamic kernel launch queues, designed to manage these execution patterns.
+
+Beyond systems efficiency, dynamic control introduces severe quality and security failure modes. Because gating policies route inputs based on statistical heuristics, poorly calibrated gates systematically underallocate computation to rare distribution tails, degrading prediction accuracy precisely on safety-critical edge cases. Furthermore, input-dependent computation exposes an attack surface: adversarial perturbations can intentionally manipulate routing gates to trigger denial-of-quality attacks (forcing inputs into truncated early exits that fail) or denial-of-service attacks (forcing all inputs into maximally deep or imbalanced paths to saturate accelerator queues). Consequently, evaluating adaptive models cannot rely on average FLOP counts alone. Rigorous system profiling must report path distribution histograms, tail latency (p99), accuracy stratified by input difficulty, and throughput stability under dynamic batching. Where dynamic computation decides whether to perform certain operations, sparsity exploitation addresses a complementary question: how to accelerate computation when many operands are zero.
+
 ## Quantization and Precision {#sec-model-compression-quantization-precision-cd46}
 
 ```{python}
@@ -2697,6 +3177,8 @@ class QuantizationMemoryAnchor:
     llm_7b_mem_gb_str = fmt_memory(llm_7b_mem_fp16, unit=GB, precision=0, commas=False)
     smartphone_ram_gb_str = fmt_memory_capacity(smartphone_ram, unit=GiB, precision=0, commas=False)
 ```
+
+While structural optimization and pruning physically remove parameters to streamline the model graph, these techniques leave the fundamental mathematical representation untouched: the remaining weights still demand floating-point precision. However, modern accelerators and edge devices can perform integer arithmetic much faster, with a fraction of the energy. This brings us to the next layer of the optimization stack: reducing the numerical precision of the data itself.
 
 The physical gap governing compression is dictated by memory constraints: a `{python} QuantizationMemoryAnchor.llm_7b_str`-billion parameter language model in FP16 requires `{python} QuantizationMemoryAnchor.llm_7b_mem_gb_str` solely for weights, while the smartphone target offers only `{python} QuantizationMemoryAnchor.smartphone_ram_gb_str` of shared RAM. Structured pruning can remove layers or heads, but unstructured zeros do not shrink a densely stored deployment artifact without specialized format overhead [@han2016deep]. A complementary lever reduces the bit width representing each parameter: determining how far precision can drop before accuracy collapses establishes the practical envelope of quantization.
 
@@ -3045,8 +3527,6 @@ class EnergyDividend:
     dram_read_bits_value_str = fmt(dram_read_bits, precision=0, commas=False)
     dram_read_vs_int8_mac_mult_str = fmt_multiple(dram_read_vs_int8_mac, precision=1, commas=True)
 ```
-
-### The energy dividend: INT8 vs. FP32 {#sec-model-compression-energy-dividend}
 
 Memory reduction is often the first motivation for quantization, but lower-precision arithmetic can also provide an **energy dividend**\index{Energy dividend!quantization efficiency}. Moving from FP32 to INT8 reduces raw value payload by exactly 4$\times$; the operation-level energy ratio can be larger, while end-to-end energy remains workload- and device-dependent.
 
@@ -4401,14 +4881,21 @@ Affine quantization establishes a linear mapping $x \approx s(x_q - z)$, where $
 \vspace*{-2ex}
 ```
 **Scenario**:
-Suppose the activations range from `{python} QuantizationMathCalc.alpha_math` to `{python} QuantizationMathCalc.beta_math`, and the target precision is UINT8 $(b=8)$.
+Suppose we want to quantize a $2 \times 2$ activation matrix with values ranging from `{python} QuantizationMathCalc.alpha_math` to `{python} QuantizationMathCalc.beta_math`, and the target precision is UINT8 $(b=8)$:
+$$
+\mathbf{X} = \begin{pmatrix} -1.0 & 2.0 \\ 0.0 & 3.0 \end{pmatrix}
+$$
 
-* **Range**: `{python} QuantizationMathCalc.range_math`.
 * **Steps**: `{python} QuantizationMathCalc.steps_math` = `{python} QuantizationMathCalc.steps_str`.
 * **Scale**: `{python} QuantizationMathCalc.scale_math`.
 * **Zero-point**: `{python} QuantizationMathCalc.zero_point_math`.
 
-**Systems insight**: The real value $0.0$ is represented by the integer `{python} QuantizationMathCalc.zero_point_str`, which ensures that zero-padding (common in CNNs) is represented exactly, preventing "quantization drift" where padding introduces nonzero noise.
+Applying the mapping $x_q = \text{clamp}\left(\text{round}\left(\frac{x}{s} + z\right), 0, 255\right)$ element-wise, we pack the floating-point distribution into integer bins:
+$$
+\mathbf{X}_q = \begin{pmatrix} 0 & 191 \\ 64 & 255 \end{pmatrix}
+$$
+
+**Systems insight**: The real value $0.0$ is represented exactly by the integer `{python} QuantizationMathCalc.zero_point_str`. This is critical because it ensures that zero-padding (common in CNNs) is represented exactly, preventing "quantization drift" where padding introduces nonzero noise.
 
 :::
 
@@ -4875,6 +5362,8 @@ Integrating quantization effects during training lets the model adapt its weight
 
 ##### Fake quantization nodes and implementation {#sec-model-compression-fake-quantization-nodes-implementation-e822}
 
+Why rely on fake quantization? If precision drops from FP32 to INT8 only after training, the model can suffer an abrupt "quantization shock" where subtle activation patterns are irrevocably destroyed. Fake quantization forces the network to experience this precision loss *during* training, treating hardware constraints as just another source of noise. This allows the weights to naturally migrate to values that are robust to integer representation.
+
 QAT implementation relies on fake quantization operations that simulate quantization during forward propagation while maintaining full precision for gradient computation. These operations insert quantize-dequantize pairs into the computational graph, creating a training-time simulation of inference-time behavior.
 
 A fake quantization node must preserve the same errors the inference runtime will see, so its three operations model the deployment path during training:
@@ -4933,9 +5422,13 @@ $$
 0 & \text{otherwise}
 \end{cases}
 $$
-Within the clipping range $[\alpha, \beta]$, the estimator treats quantization as an identity mapping, passing the upstream gradient $\frac{\partial \mathcal{L}}{\partial x_{\text{fake}}}$ unchanged to master weight $x$. Beyond clipping boundaries, the derivative evaluates to zero, blocking gradients from saturated outliers that would otherwise destabilize optimizer updates.
+This estimator manages the gradient flow and operator graph through several distinct mechanisms:
 
-In practice, frameworks like PyTorch and TensorFlow implement fake quantization as custom autograd operators whose forward pass performs the quantize-dequantize round trip while the backward pass applies an STE. Scale handling depends on the method: observers may track distributions and later freeze, or scales may be learned. Batch normalization also requires deployment-consistent handling: workflows fold batch normalization into preceding convolution weights ($\mathbf{W}_{\text{fused}} = \frac{\gamma}{\sigma} \mathbf{W}$) where $\sigma$ is the square root of the sum of running variance and the numerical stabilizer. Folding also adjusts the convolution bias using the running mean and the batch-normalization shift. Freezing running statistics before export allows fake-quantization scales to match the static fused parameters executed during inference.
+* **Identity mapping within bounds**: Within the clipping range $[\alpha, \beta]$, the STE treats quantization as an identity function, passing the upstream gradient $\frac{\partial \mathcal{L}}{\partial x_{\text{fake}}}$ unchanged to the master weight $x$.
+* **Gradient clipping for outliers**: Beyond the clipping boundaries, the derivative evaluates to zero. This blocks gradients from saturated outliers that would otherwise destabilize optimizer updates.
+* **Custom autograd operators**: In practice, frameworks like PyTorch and TensorFlow implement fake quantization as custom operators where the forward pass performs the quantize-dequantize round trip and the backward pass applies the STE.
+* **Scale and range handling**: Depending on the specific QAT method, observers may track distributions and freeze scales later, or the scales themselves may be learned directly during backpropagation.
+* **Batch normalization folding**: To match deployment conditions, QAT workflows fold batch normalization into preceding convolution weights ($\mathbf{W}_{\text{fused}} = \frac{\gamma}{\sigma} \mathbf{W}$) where $\sigma$ is the square root of the sum of running variance and the numerical stabilizer. Folding also adjusts the convolution bias using the running mean and the batch-normalization shift. Freezing running statistics before export allows fake-quantization scales to match the static fused parameters executed during inference.
 
 ##### QAT trade-offs {#sec-model-compression-qat-tradeoffs-e8ef}
 
@@ -5025,732 +5518,7 @@ The gap arises from several architectural and runtime mismatches. Sparse matrice
 
 Hardware implementation starts from the execution trace. Profiling reveals where theoretical speedups vanish in practice: sparse tensors continue to move through dense kernels, reduced-precision operators trigger un-fused type conversions that flood the memory bus, and small layers spend more time launching kernels and moving intermediates than doing arithmetic. The model has become smaller on paper, but the execution trace still asks the machine to perform an inefficient sequence of memory accesses and operations.
 
-Where representation optimization determines *what* computations to perform and precision optimization determines *how precisely* to compute them, hardware implementation determines *how* those computations fit the machine. Measured bottlenecks determine which architectural response is useful. Hardware-aware design changes the model before training so its layers match the deployment envelope. Sparsity exploitation makes removed weights visible to kernels that can skip them. Dynamic computation lets easy inputs leave early instead of paying for the worst case. Operator fusion reduces memory traffic when adjacent operations would otherwise write and reread the same tensors.
-
-### Hardware-aware design {#sec-model-compression-hardwareaware-design-c561}
-
-Hardware-aware design begins before compression. If the target device cannot keep convolution kernels fed, cannot store activations without spilling, or cannot meet the power budget at the chosen input resolution, pruning and quantization only treat symptoms. The architecture itself must expose the kind of work the hardware can execute efficiently. That means choosing layer shapes, scaling rules, and operator patterns with memory bandwidth, parallelism, and energy as first-class constraints rather than post-hoc deployment checks.
-
-#### Efficient design principles {#sec-model-compression-efficient-design-principles-b015}
-
-The first design step is to identify what the trace shows as the limiting resource. A model can miss its target because every layer is too expensive, because one convolution family dominates arithmetic, because activations or parameters do not fit the memory hierarchy, or because the candidate architecture ignores the platform's preferred operators. @Tbl-hardware-efficient-design organizes the common responses by the bottleneck they address rather than by model family.
-
-| **Observed bottleneck**       | **Architectural response**                                                                                                                         | **Example networks** |
-|:------------------------------|:---------------------------------------------------------------------------------------------------------------------------------------------------|:---------------------|
-| **Over-budget model scaling** | Adjust depth, width, and resolution together so the model stays within the latency, memory, and power envelope.                                    | EfficientNet, RegNet |
-| **Redundant computation**     | Replace expensive dense operations with factorized or grouped operations that preserve useful channel mixing at lower arithmetic cost.             | MobileNet, ResNeXt   |
-| **Memory pressure**           | Reduce parameter storage or reuse features, then check peak activation lifetimes; feature reuse can retain a larger working set.                   | DenseNet, SqueezeNet |
-| **Platform mismatch**         | Include measured device latency, operator support, and power behavior in the architecture search or design loop instead of optimizing FLOPs alone. | MobileNetV3, MnasNet |
-
-: **Hardware-Aware Design Principles**: A profiling trace should determine which architectural response is appropriate. MobileNet responds to redundant convolutional computation with depthwise separable convolutions, DenseNet and SqueezeNet respond to memory pressure with feature reuse and parameter reduction, and hardware-aware NAS incorporates measured platform behavior directly into the search objective. {#tbl-hardware-efficient-design tbl-colwidths="[23,56,21]"}
-
-These responses interact. Reducing convolutional FLOPs with depthwise separable convolutions[^fn-depthwise-separable-mobile] helps only if the target runtime has efficient kernels for the resulting operators. Shrinking a model with parameter-reduction layers helps only if activation storage or memory traffic was part of the measured problem. Hardware-aware design therefore does not replace profiling; it moves profiling information earlier, into the architecture itself.
-
-[^fn-depthwise-separable-mobile]: **Depthwise separable convolutions**\index{Depthwise separable convolution!mobile efficiency}: This technique reduces computation by factorizing a standard convolution into separate depthwise (per-channel) and pointwise $(1{\times}1)$ operations. MobileNet architectures use this factorization to trade model capacity and accuracy against lower operation counts for on-device vision [@howard2017mobilenets; @sandler2018].
-
-#### Scaling optimization {#sec-model-compression-scaling-optimization-6ad9}
-
-The first architectural response is global: when every stage of the profile is over budget, the problem is not one bad layer; the model is scaled incorrectly for the deployment envelope. The design task is then to distribute capacity across depth, width, and input resolution rather than choose a single parameter count. Depth increases sequential work and activation storage. Width exposes more parallel work but raises memory use. Resolution improves spatial detail while increasing the number of positions each convolution must process. The right balance depends on the machine: a highly parallel accelerator can often exploit width, while a small edge device may be dominated by memory capacity and energy per access.
-
-Mathematically, the total FLOPs for a convolutional model can be approximated as:
-$$
-O \propto \NumberOfLayers \cdot w_{\text{mult}}^2 \cdot r^2,
-$$
-where $\NumberOfLayers$ is depth (number of layers), $w_{\text{mult}}$ is the width multiplier (channel count relative to a base model), and $r$ is the input resolution. This expression shows why naive scaling fails: increasing width and resolution together multiplies work quickly, and the resulting model may exceed the memory bandwidth or power budget even when the parameter count appears reasonable.
-
-Compound scaling turns this balancing act into a controlled design rule. Instead of adjusting depth, width, and resolution independently, compound scaling grows all three dimensions by fixed ratios $(\alpha, \beta, \gamma)$ relative to a base model:
-$$
-\NumberOfLayers = \alpha^\phi N_{L,0}, \quad w_{\text{mult}} = \beta^\phi w_{\text{mult},0}, \quad r = \gamma^\phi r_0
-$$
-Here, $\phi$ is a scaling coefficient, and $\alpha$, $\beta$, and $\gamma$ (as in the original EfficientNet paper) are scaling factors determined from empirical accuracy and efficiency measurements. The rule matters because it prevents one dimension from consuming the budget before the others can contribute useful accuracy.
-
-EfficientNet (@sec-model-compression-neural-architecture-search-cf12) validated this principle by using search to find a baseline architecture and then scaling it with balanced depth, width, and resolution coefficients [@tan2019efficientnet]. The lesson is not that every deployment should use EfficientNet. The systems lesson is that scaling is a resource-allocation decision: the same accuracy target can imply different depth-width-resolution trade-offs depending on which resource the target platform makes scarce. Later benchmarking material formalizes how to measure those trade-offs; here, the design principle is to scale the dimensions against the binding resource.
-
-The same logic extends beyond convolutional models. Transformer layers, attention heads, sequence length, and embedding width play roles analogous to depth, width, and resolution: each increases capacity, but each stresses compute, memory bandwidth, or activation storage differently. Hardware-aware scaling keeps those dimensions tied to the measured bottleneck instead of treating model size as a single scalar.
-
-#### Computation reduction {#sec-model-compression-computation-reduction-13de}
-
-If the profile shows that a small set of convolutional operators dominates arithmetic, reducing the whole model uniformly is wasteful. The better response is to change the expensive operator. Modern efficient architectures do this by factorizing dense computations into cheaper pieces that preserve the representation needed for accuracy.
-
-Depthwise separable convolutions, popularized by MobileNet, exemplify this approach by decomposing standard convolutions into two stages: depthwise convolution (applying separate filters to each input channel independently) and pointwise convolution ($1{\times}1$ convolution mixing outputs across channels). For batch size one, unit stride, padding that preserves an $h{\times}w$ spatial size, and a square kernel of width $k$, the computational complexity of standard convolution with $\LayerInputWidth$ input channels and $\LayerOutputWidth$ output channels is:
-$$
-\mathcal{O}(h w \LayerInputWidth \LayerOutputWidth k^2)
-$$
-where $k$ is kernel size. Depthwise separable convolutions reduce this to:
-$$
-\mathcal{O}(h w \LayerInputWidth k^2) + \mathcal{O}(h w \LayerInputWidth \LayerOutputWidth)
-$$
-eliminating the $k^2$ factor from channel-mixing operations and often achieving 5--10$\times$ FLOP reduction. The wall-clock benefit depends on kernel support and memory behavior: a mobile runtime with optimized depthwise kernels can convert much of this arithmetic reduction into latency savings, while a poorly supported backend may expose the factorized operations as many small, memory-bound kernels.
-
-Other factorization patterns respond to the same diagnosis. Grouped convolutions, used in ResNeXt, partition feature maps into independent groups before merging them, reducing redundant cross-channel work. Bottleneck layers, used in ResNet, apply $1{\times}1$ convolutions to reduce feature dimensionality before expensive operations. SqueezeNet uses the same $1{\times}1$ idea to reduce parameters. These techniques improve efficiency when they reduce the operation that actually dominates the trace; they provide much less benefit when memory traffic, launch overhead, or unsupported kernels become the new bottleneck.
-
-Arithmetic reduction is only one possible response. When profiling instead identifies memory capacity or data movement as the binding resource on the target device, the architecture must address that memory bottleneck directly.
-
-#### Memory optimization {#sec-model-compression-memory-optimization-8c43}
-
-When the profile points to memory rather than arithmetic, the architecture must reduce the working set or the number of expensive memory accesses. Activations, feature maps, and parameters can exceed cache, SRAM, accelerator memory, or edge-device storage even when the FLOP count is acceptable. Memory-efficient architectures therefore try to preserve useful information while storing or moving less data.
-
-DenseNet illustrates the feature-reuse response [@huang2017]. In a traditional convolutional network, each layer computes a new set of feature maps, increasing the activation footprint as the network deepens. DenseNet connects layers so later computations can reuse earlier feature maps instead of relearning similar representations. In DenseNet with $\NumberOfLayers$ layers and growth rate $g$, each layer generates $g$ new feature maps concatenated with prior layers, causing the total number of feature maps to grow linearly:
-$$
-\mathcal{O}(\NumberOfLayers g)
-$$
-
-DenseNet reduces parameter redundancy through feature reuse, but concatenating retained features can increase activation storage and memory traffic. The resulting working set and runtime must be measured on the target hardware.
-
-Activation checkpointing complements feature reuse by trading computation for memory during training. For $\NumberOfLayers$ comparable layers, each with activation footprint $\ActivationMemoryActivations^{(\ell)}$, evenly spaced checkpointing reduces the saved-activation term from $\mathcal{O}(\NumberOfLayers \ActivationMemoryActivations^{(\ell)})$ to $\mathcal{O}(\sqrt{\NumberOfLayers}\,\ActivationMemoryActivations^{(\ell)})$ while recomputing omitted activations during backpropagation. In the compression context, checkpointing enables training of larger models within fixed memory budgets, which in turn provides more capacity for subsequent pruning or distillation to exploit.
-
-Parameter reduction applies the same reasoning to storage. SqueezeNet uses $1{\times}1$ convolutions to reduce the number of input channels before applying standard convolutions, making the expensive layer operate on a smaller representation [@iandola2016squeezenet]. The number of parameters in a standard convolutional layer is:
-$$
-\mathcal{O}(\LayerInputWidth \LayerOutputWidth k^2)
-$$
-
-By reducing $\LayerInputWidth$ using $1{\times}1$ convolutions, SqueezeNet reduces parameter count, achieving the paper's AlexNet-level accuracy target with far fewer parameters than AlexNet. That trade is attractive when the deployment constraint is flash storage, model download size, or parameter bandwidth; it is less decisive when activation memory or operator overhead dominates.
-
-Feature reuse, activation checkpointing, and parameter reduction are therefore not interchangeable recipes. Each changes a different part of the memory problem. Reused features reduce redundant representations, checkpointing reduces training-time activation storage, and $1{\times}1$ bottlenecks reduce parameter movement. The correct choice follows from which memory term the profile shows as binding.
-
-Beyond minimizing stored tensor volume, substantial execution efficiency emerges from restructuring memory access schedules. Combining adjacent operations into composite execution kernels eliminates off-chip DRAM round-trips for intermediate feature maps.
-
-#### Operator fusion {#sec-model-compression-operator-fusion-ac1d}
-
-Kernel fusion appeared in @sec-ml-frameworks-execution-strategy-matters-memory-wall-1ce8 as the framework's main defense against the memory wall; here it becomes a deployment lever applied to the compressed graph. Consider a typical neural network layer: convolution followed by batch normalization followed by rectified linear unit (ReLU). Without fusion, each operation writes its output to GPU global memory, then the next operation reads that output back. Three memory round-trips occur for what could be computed entirely in fast on-chip registers. By fusing these operations into a single kernel, compilers and inference engines eliminate the redundant memory transactions, improving both throughput and latency on memory-bound workloads [@chen2018tvm; @nvidia2024tensorrt].
-
-::: {#dfn-model-compression-operator-fusion .callout-definition title="Operator fusion"}
-
-***Operator fusion***\index{Operator fusion!definition} is a compiler and runtime optimization that combines adjacent tensor operations into a single fused kernel so intermediate values remain in registers or on-chip memory instead of being written to and reread from accelerator global memory.
-
-1.  **Significance**: In an ideal chain of $n_{\text{ops}}$ element-wise operations over the same tensor of $M_{\text{tensor}}$ bytes, separate kernels can move about $2\,n_{\text{ops}} M_{\text{tensor}}$, while a fused kernel can approach $2M_{\text{tensor}}$ by keeping intermediates on chip. Real traffic also includes weights, caches, alignment, and spills, so profiling must confirm the reduction.
-2.  **Distinction**: Operator fusion rewrites execution to keep intermediates on chip. Some patterns also fold parameters, as with batch normalization, while preserving the intended function within numerical tolerances. The performance benefit depends on the traffic and launch overhead removed.
-3.  **Common pitfall**: A frequent misconception is that more fusion is always better. Fusion is constrained by data dependencies, tensor shapes, register pressure, and cache capacity; over-fusing can reduce occupancy or force spills back to memory, erasing the benefit.
-
-:::
-
-Modern neural networks consist of sequences of operations such as convolution, batch normalization, activation functions, and element-wise operations. When executed independently, each operation requires four steps:
-
-1. Loading input tensors from global memory
-2. Performing computation
-3. Writing output tensors back to global memory
-4. Launching the next kernel
-
-The read-compute-write cycle creates memory bandwidth bottlenecks for operations with low arithmetic intensity (FLOP/byte). For an ideal sequence of $n_{\text{ops}}$ operations over the same intermediate tensor of $M_{\text{tensor}}$ bytes, the unfused traffic is:
-$$
-D_{\text{vol,unfused}} = 2\,n_{\text{ops}} M_{\text{tensor}}
-$$
-where each operation reads and writes the intermediate once. If the sequence is legal to fuse and intermediates stay on chip, the traffic can approach:
-$$
-D_{\text{vol,fused}} = 2M_{\text{tensor}}
-$$
-by reading the intermediate input once and writing its final output once. Weights, auxiliary inputs, cache effects, and register spills are outside this simple bound. Several inference patterns nevertheless approximate it closely enough for fusion to matter.
-
-##### Convolution-BatchNorm-ReLU fusion {.unnumbered}
-
-The common Conv-BN-ReLU pattern in @lst-conv-bn-relu-fusion can replace three launches and intermediate round-trips with one fused path when the compiler can legally fold batch normalization and combine the activation.
-
-::: {#lst-conv-bn-relu-fusion lst-cap="**Conv-BN-ReLU Fusion**: Combining three operations into a single kernel reduces the idealized intermediate-tensor stream from 6 transfers to 2; weights, auxiliary inputs, and spills are outside this count."}
-
-```{.python}
-# Pseudocode: runtime APIs and fusion legality are
-# implementation-dependent.
-# === UNFUSED: 3 kernel launches, 6 memory transfers ===
-conv_out = conv2d(input, weight)
-bn_out = batch_norm(conv_out, ...)
-relu_out = relu(bn_out)
-
-
-# === FUSED: 1 kernel launch, 2 memory transfers ===
-def conv_bn_relu_fused(input, weight, gamma, beta, mean, var):
-    # Read input and weight once
-    conv = conv2d(input, weight)
-
-    # Apply batch norm in registers (no memory write)
-    bn = gamma * (conv - mean) / sqrt(var + eps) + beta
-
-    # Apply ReLU in registers (no memory write)
-    output = relu(bn)
-
-    # Write final result once
-    return output
-```
-
-:::
-
-```{python}
-#| echo: false
-#| label: conv-fusion-calc
-# ┌─────────────────────────────────────────────────────────────────────────────
-# │ CONV-BN-RELU FUSION TRANSFER REDUCTION
-# ├─────────────────────────────────────────────────────────────────────────────
-# │ Context: Operator fusion prose, after @lst-conv-bn-relu-fusion
-# │
-# │ Goal: Demonstrate the memory traffic reduction from Conv-BN-ReLU fusion.
-# │ Show: A 3× reduction in data movement (6 transfers to 2).
-# │ How: Calculate memory read/write counts for fused vs. unfused execution.
-# │
-# └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import fmt, check, fmt_math
-
-class ConvFusionCalc:
-    """Demonstrate 3x memory traffic reduction from Conv-BN-ReLU fusion (6 transfers → 2)."""
-
-    unfused_transfers = 6
-    fused_transfers = 2
-    conv_channels = 256
-    conv_spatial = 28
-    bytes_per_element = 4
-
-    transfer_reduction = unfused_transfers / fused_transfers
-    eliminated_traffic_mb = 4 * conv_channels * conv_spatial * conv_spatial * bytes_per_element / MILLION
-
-    check(transfer_reduction == 3, "Conv-BN-ReLU fusion must yield exactly 3x transfer reduction.")
-
-    transfer_reduction_mult_str = fmt_multiple(round(transfer_reduction), precision=0, commas=False)
-    conv_bn_relu_mem_math = fmt_math(
-        f"4 \\times 256 \\times 28 \\times 28 \\times 4 \\text{{ bytes}} \\approx \\text{{{eliminated_traffic_mb:.1f} MB}}"
-    )
-```
-
-::: {.column-margin}
-![](images/svg/vol1_model_compression_margin_002.svg){width="100%" fig-alt="Two horizontal blue bars labeled Unfused: 6 and Fused: 2; the fused bar is one-third as long."}
-
-*The idealized intermediate stream falls from six transfers to two.*
-:::
-
-The intended function is preserved, although batch-normalization folding changes the arithmetic sequence. In the idealized intermediate stream, traffic drops from 6 transfers to 2 transfers (`{python} ConvFusionCalc.transfer_reduction_mult_str` reduction). For a ResNet-50 layer with 256 channels and spatial size $28{\times}28$, this eliminates `{python} ConvFusionCalc.conv_bn_relu_mem_math` of intermediate memory traffic per layer.
-
-The same principle extends beyond CNNs. GEMM bias-activation fusion eliminates intermediate writes in transformer linear layers by computing element-wise operations in registers immediately after each matrix multiplication output element. Attention tiling, as in FlashAttention,[^fn-flashattention-kernel-fusion] reduces HBM traffic by processing attention in SRAM-sized tiles and avoiding materialization of the full $S{\times}S$ attention matrix.
-
-[^fn-flashattention-kernel-fusion]: **FlashAttention**\index{FlashAttention!SRAM tiling}: Demonstrates fusion's power for memory-bound attention by tiling computation to SRAM, avoiding materialization of the full attention matrix, and reporting multi-fold speedups on long sequences [@dao2022]. This exemplifies how operator fusion transforms memory-bound bottlenecks: the arithmetic is mathematically equivalent, but the memory access pattern changes, making longer-context attention feasible on hardware that could not otherwise afford the full intermediate matrix.
-
-::: {.column-margin .margin-pointer}
-↩ IO-aware attention tiling and its HBM-traffic accounting are established in @sec-model-training-flash-attention-ioaware-attention-optimization-3da0.
-:::
-
-```{python}
-#| echo: false
-#| label: fusion-calc
-# ┌── LEGO ───────────────────────────────────────────────
-# │ Goal: Conv-BN-ReLU bandwidth and kernel-launch savings for fusion prose.
-from mlsysim.fmt import fmt, fmt_int, fmt_qty_int, check, fmt_time, fmt_memory
-from mlsysim.core.units import microsecond
-
-class FusionCalc:
-    conv_channels = 256
-    conv_spatial = 28
-    bytes_per_element = 4
-    weights_mb = 2.4
-    bn_params_mb = 0.002
-    kernels_unfused = 150
-    kernels_fused = 50
-    latency_per_kernel_us = 10
-    v100_bw = Hardware.Cloud.V100.memory.bandwidth
-
-    feat_map_mb = conv_channels * conv_spatial * conv_spatial * bytes_per_element / MILLION
-    feat_map = feat_map_mb * MB
-    weights = weights_mb * MB
-    bn_params = bn_params_mb * MB
-    unfused_conv_mb = feat_map_mb * 2 + weights_mb
-    unfused_conv = unfused_conv_mb * MB
-    unfused_conv_display = round(unfused_conv_mb) * MB
-    unfused_bn_mb = feat_map_mb * 2 + bn_params_mb
-    unfused_bn = unfused_bn_mb * MB
-    unfused_relu_mb = feat_map_mb * 2
-    unfused_relu = unfused_relu_mb * MB
-    total_unfused_mb = unfused_conv_mb + unfused_bn_mb + unfused_relu_mb
-    total_unfused = total_unfused_mb * MB
-    total_fused_mb = feat_map_mb * 2 + weights_mb
-    total_fused = total_fused_mb * MB
-    total_fused_display = round(total_fused_mb) * MB
-    bandwidth_reduction_pct = (1 - total_fused_mb / total_unfused_mb) * 100
-    saved_latency_ms = (kernels_unfused - kernels_fused) * latency_per_kernel_us / THOUSAND
-    unfused_time = total_unfused / v100_bw
-    fused_time = total_fused / v100_bw
-    fusion_speedup = (unfused_time / fused_time).to("").magnitude
-
-    check(bandwidth_reduction_pct > 40, "Fusion should reduce bandwidth by more than 40%.")
-    check(fusion_speedup > 1, "Fused execution must be faster than unfused.")
-
-    # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
-    feat_map_kb_str = fmt_memory(feat_map, unit=KB, precision=1, commas=False)
-    weights_mb_str = fmt_memory(weights, unit=MB, precision=1, commas=False)
-    bn_params_kb_str = fmt_memory(bn_params, unit=KB, precision=0, commas=False)
-    unfused_conv_mb_str = fmt_qty_int(unfused_conv_display, MB, commas=False)
-    unfused_bn_mb_str = fmt_memory(unfused_bn, unit=MB, precision=1, commas=False)
-    unfused_relu_mb_str = fmt_memory(unfused_relu, unit=MB, precision=1, commas=False)
-    total_unfused_mb_str = fmt_memory(total_unfused, unit=MB, precision=1, commas=False)
-    total_fused_mb_str = fmt_qty_int(total_fused_display, MB, commas=False)
-    bandwidth_reduction_pct_str = fmt_percent(bandwidth_reduction_pct / 100, precision=1, commas=False, style='prose')
-    kernels_unfused_str = fmt(kernels_unfused, precision=0, commas=False)
-    kernels_fused_str = fmt(kernels_fused, precision=0, commas=False)
-    unfused_time_us_str = fmt_time(round(unfused_time.to(microsecond).magnitude), "microsecond", precision=0, commas=False, style="word")
-    fused_time_us_str = fmt_time(fused_time, "microsecond", precision=1, commas=False, style="word")
-    fusion_speedup_mult_str = fmt_multiple(fusion_speedup, precision=2, commas=False)
-```
-
-Memory bandwidth analysis quantifies these fusion benefits concretely. Consider a Conv-BN-ReLU sequence operating on a $28{\times}28{\times}256$ feature map (`{python} FusionCalc.feat_map_kb_str`). Without fusion, each operation performs its own memory round-trip: Conv reads input (`{python} FusionCalc.feat_map_kb_str`) plus weights (`{python} FusionCalc.weights_mb_str`) and writes output (`{python} FusionCalc.feat_map_kb_str`), totaling `{python} FusionCalc.unfused_conv_mb_str`. BN then reads that output, adds its parameters (`{python} FusionCalc.bn_params_kb_str`), and writes again, for `{python} FusionCalc.unfused_bn_mb_str`. ReLU repeats the pattern for another `{python} FusionCalc.unfused_relu_mb_str`. The total unfused memory traffic is `{python} FusionCalc.total_unfused_mb_str`. With fusion, the entire sequence reads input and weights once and writes the final output once, requiring only `{python} FusionCalc.total_fused_mb_str`—a `{python} FusionCalc.bandwidth_reduction_pct_str` bandwidth reduction.
-
-```{python}
-#| echo: false
-#| label: compression-v100-specs
-# ┌── LEGO ───────────────────────────────────────────────
-# │ Goal: V100 bandwidth and compute specs for fusion timing prose.
-from mlsysim.fmt import fmt_bandwidth
-
-class V100Specs:
-    v100_bw = Hardware.Cloud.V100.memory.bandwidth
-
-    # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
-    v100_bw_gb_per_s_str = fmt_bandwidth(v100_bw, unit=GB / second, precision=0, commas=False)
-```
-
-At the modeled `{python} V100Specs.v100_bw_gb_per_s_str` HBM bandwidth, these traffic volumes imply ideal lower bounds of `{python} FusionCalc.unfused_time_us_str` before fusion and `{python} FusionCalc.fused_time_us_str` after fusion, a `{python} FusionCalc.fusion_speedup_mult_str` ratio for the traffic component alone. These are not full layer latencies because convolution compute, cache effects, and launch overhead must also be included.
-
-As @tbl-fusion-speedup shows, fusion benefits vary by workload. Memory-bound operations benefit most, while compute-bound operations see minimal improvement.
-
-```{=latex}
-\begingroup
-\renewcommand{\arraystretch}{1.3}
-```
-
-| **Workload**                | **Relative Fusion Benefit** | **Why**                                                       |
-|:----------------------------|:---------------------------:|:--------------------------------------------------------------|
-| **Element-wise operations** |             High            | Highly memory bound, low arithmetic intensity                 |
-| **Conv-BN-Act patterns**    |           Moderate          | Mixed memory/compute characteristics                          |
-| **GEMM-based operations**   |             Low             | Compute bound; fusion reduces the memory-bound tail           |
-| **Attention mechanisms**    |             High            | Long sequences amplify avoided attention-intermediate traffic |
-
-: **Illustrative Operator Fusion Benefit by Workload**: Memory-bound workloads tend to benefit more than compute-bound workloads; realized gains depend on the graph, runtime, sequence shape, and hardware. {#tbl-fusion-speedup tbl-colwidths="[34,18,48]"}
-
-```{=latex}
-\endgroup
-```
-
-Fusion also reduces kernel launch overhead. Each CUDA kernel launch incurs microsecond-scale latency. In a graph with 50 fusible Conv-BN-ReLU triplets, unfused execution launches `{python} FusionCalc.kernels_unfused_str` kernels, while fused execution launches `{python} FusionCalc.kernels_fused_str` kernels, saving repeated launch overhead in addition to memory traffic.
-
-Fusion implementation spans the software stack, from framework-level pattern matching through compiler optimization such as Accelerated Linear Algebra (XLA), TVM, and TensorRT to runtime fusion that adapts to input shapes and hardware characteristics. The process becomes tractable when a framework can export or trace the relevant computation as a graph whose nodes are tensor operations and whose edges record data dependencies. A compiler can then match legal patterns such as Conv→BN→ReLU and rewrite them as fused operations while checking shapes, aliases, and numerical constraints. Dynamic control flow, in-place mutation, or unsupported operations can prevent that graph rewrite, so the exported plan must be inspected rather than assumed.
-
-::: {.column-margin .margin-pointer}
-↪ The register pressure and accelerator-specific constraints that bound how far kernels can be fused on GPUs and TPUs are developed in @sec-hardware-acceleration-performance-benefits-constraints-1b74.
-:::
-
-While operator fusion minimizes data movement between static pipeline stages, adaptive computation challenges the assumption that every input requires the full depth or width of the computational graph. By modulating active subnetworks based on input difficulty or runtime budgets, systems trade deterministic execution schedules for lower amortized latency and energy.
-
-### Adaptive computation methods {#sec-model-compression-adaptive-computation-methods-d164}
-
-Hardware-aware architecture design and operator fusion optimize a fixed execution graph, ensuring that absent input-dependent control, every input follows an identical scheduled path. On static graphs, the **Algorithm** imposes an invariant computational workload on the **Machine**: a 24-layer transformer executes identical MAC operations and streams its full parameter footprint from HBM or off-chip DRAM for an obvious, easily classified sample as it does for an ambiguous one. **Adaptive inference**\index{Adaptive inference!definition} replaces this open-loop pipeline with an input-dependent control loop: intermediate representations or runtime budgets inform dynamic decisions that terminate execution or route activations through specialized subnetworks. While dynamic paths can reduce average arithmetic operations and memory traffic, they introduce runtime overheads in routing logic, batch management, confidence calibration, and latency variance.
-
-#### Dynamic schemes {#sec-model-compression-dynamic-schemes-e9ff}
-
-Because input data exhibit non-uniform semantic complexity, allocating an invariant computational budget wastes memory bandwidth and execution cycles on simple samples. Dynamic schemes modulate execution paths to lower amortized computation while preserving the deep network for worst-case inputs. This architectural flexibility spans four primary control variables: network depth (early exit), structural routing (conditional layer skipping), expert subnetworks (mixture-of-experts), and continuous computational allocation.
-
-To control execution depth, **early exit**\index{Adaptive computation!early exit} architectures attach auxiliary classification heads to intermediate layers, terminating execution when intermediate representations yield sufficient prediction confidence [@teerapittayanon2016]. BranchyNet implements this mechanism across convolutional backbones using shallow exit branches, whereas multi-exit vision transformers attach linear probes and entropy estimators between transformer blocks [@xin2021]. When an input satisfies an exit criterion—such as softmax prediction entropy dropping below a pre-tuned threshold—the runtime halts evaluation and returns the intermediate prediction. The net operational benefit requires that the arithmetic operations and memory transfers avoided in subsequent layers exceed the computational overhead of evaluating the intermediate classifiers and gating thresholds.
-
-The systems trade-off diverges sharply across hardware deployment targets. On single-sample edge processors (batch size $B=1$, typical of microcontrollers and mobile NPUs), early exit immediately terminates the execution thread [@hu2020triple]. Skipping remaining layers eliminates both the arithmetic operations and the off-chip DRAM transactions required to load subsequent layer weights into on-chip SRAM cache. Conversely, on parallel throughput accelerators (GPUs and TPUs) processing batched workloads ($B > 1$), early exit introduces severe batch fragmentation [@chen2024eellm]. If only a subset of samples in a batch reaches the exit threshold, the remaining samples must still traverse deeper layers. Unless the runtime executes dynamic batch compaction—gathering unresolved activation tensors into a contiguous memory buffer via memory copies and kernel synchronizations—inactive samples remain allocated in memory, or the accelerator must mask inactive SIMD or single instruction, multiple threads (SIMT) lanes. Consequently, tail latency for the batch remains dictated by the deepest traversing sample. @Fig-early-exit-transformers traces this branching topology along the backbone: each transformer block taps intermediate representations into an auxiliary classifier and confidence estimator (LTE) to trigger an early exit, while unresolved tokens traverse horizontal connections to deeper layers.
-
-::: {.column-margin .margin-pointer}
-↪ The latency-throughput trade-offs of batching under production request streams, including service-level objective (SLO) violations, are developed in @sec-model-serving-dynamic-batching-latencythroughput-tradeoffs-986d.
-:::
-
-::: {#fig-early-exit-transformers fig-env="figure" fig-pos="htb" fig-cap="**Early Exit Architecture**: Transformer layers dynamically adjust computation by classifying each layer's output and enabling early termination if sufficient confidence is reached, reducing average latency and power when many inputs can exit before the final layer. Source: [@xin2021]." fig-alt="Flowchart with input feeding transformer layers 1 through N sub L in sequence. Each layer connects to a classifier, confidence estimator, and exit point. Arrows show continue paths for low confidence."}
-
-```{.tikz}
-\begin{tikzpicture}[font=\small\sffamily]
-\tikzset{%
-Line/.style={line width=1.0pt,black!50,text=black},
-Box/.style={inner xsep=2pt,
-    node distance=1.7,
-    draw=GreenLine,
-    line width=0.75pt,
-    fill=GreenL,
-    text width=25mm,align=flush center,
-    minimum width=25mm, minimum height=8mm
-  },
-}
-
-\node[Box, ellipse,text width=14mm,minimum width=12mm,inner ysep=-1pt,
-             minimum height=10mm, fill=RedL,draw=RedLine](B1){Input};
-\node[Box,right=of B1](B2){Transformer 1};
-\node[Box,right=of B2](B3){Transformer 2};
-\node[Box, node distance=2.5,right=of B3](B4){Transformer $N_L$};
-\node[font=\tiny\sffamily](B0)at($(B3)!0.5!(B4)$){$\bullet$ $\bullet$ $\bullet$};
-%
-\def\di{0.45}
-\node[Box,node distance=\di,below=of B2,fill=VioletL2,draw=VioletLine](C1){Classifier 1};
-\node[Box,node distance=\di,below=of C1,fill=BlueL,draw=BlueLine](C2){Confidence/LTE};
-\node[Box,node distance=\di,below=of C2,ellipse,text width=14mm,minimum width=12mm,
-             minimum height=10mm, fill=RedL,draw=RedLine](C3){Exit};
-%
-\node[Box,node distance=\di,below=of B3,fill=VioletL2,draw=VioletLine](2C1){Classifier 2};
-\node[Box,node distance=\di,below=of 2C1,fill=BlueL,draw=BlueLine](2C2){Confidence/LTE};
-\node[Box,node distance=\di,below=of 2C2,ellipse,text width=14mm,minimum width=12mm,
-             minimum height=10mm, fill=RedL,draw=RedLine](2C3){Exit};
-%
-\node[Box,node distance=\di,below=of B4,fill=VioletL2,draw=VioletLine](3C1){Classifier $N_L$};
-\node[Box,node distance=\di,below=of 3C1,fill=BlueL,draw=BlueLine](3C2){Confidence/LTE};
-\node[Box,node distance=\di,below=of 3C2,ellipse,text width=14mm,minimum width=12mm,
-             minimum height=10mm, fill=RedL,draw=RedLine](3C3){Exit};
-%
-\node[font=\tiny\sffamily](2B0)at($(2C1)!0.5!(3C1)$){$\bullet$ $\bullet$ $\bullet$};
-\node[font=\tiny\sffamily](3B0)at($(2C2)!0.5!(3C2)$){$\bullet$ $\bullet$ $\bullet$};
-\draw[Line,-latex](B1)--(B2);
-\draw[Line,-latex](B2)--(B3);
-\draw[Line,-latex](B3)--(B0);
-\draw[Line,-latex](B0)--(B4);
-%
-\draw[Line,-latex](B2)--(C1);
-\draw[Line,-latex](C1)--(C2);
-\draw[Line,-latex](C2)--(C3);
-%
-\draw[Line,-latex](B3)--(2C1);
-\draw[Line,-latex](2C1)--(2C2);
-\draw[Line,-latex](2C2)--(2C3);
-%
-\draw[Line,-latex](B4)--(3C1);
-\draw[Line,-latex](3C1)--(3C2);
-\draw[Line,-latex](3C2)--(3C3);
-%
-\draw[Line,-latex](C2)-|node[left=6pt,pos=0.8,rotate=90]{Continue}($(B2)!0.5!(B3)$);
-\draw[Line,-latex](2C2.east)-|node[right=9pt,pos=0.35,rotate=90]{Continue}($(B3)!0.68!(B0)$);
-\end{tikzpicture}
-```
-
-:::
-
-Beyond truncating execution depth along a single linear pipeline, **conditional computation**\index{Conditional computation!definition} dynamically modulates the topological routing of activations through the network graph [@bengio2015conditional]. Instead of executing every block in a predefined sequence, gating functions evaluate activation tensors to bypass residual layers, alter operator kernels, or select specialized functional blocks. This converts a static directed acyclic graph (DAG) into an input-dependent dynamic graph.
-
-Architectural implementations target distinct structural granularities. SkipNet uses lightweight recurrent or feedforward gating controllers to conditionally bypass residual blocks in convolutional networks, preserving full network depth only for computationally difficult inputs [@wang2018skipnet]. Dynamic Filter Networks generate sample-specific convolutional filter weights dynamically from the input, modifying feature extraction patterns directly rather than skipping static weights [@jia2016dynamic]. Capsule Networks utilize iterative routing-by-agreement to direct low-level feature vectors to compatible high-level capsules [@sabour2017dynamic]. From a hardware systems perspective, conditional routing achieves wall-clock speedups only when the cycles saved by bypassing operators surpass the latency of evaluating the gating network, executing host-device control synchronization, and managing uncoalesced memory accesses.
-
-Scaling dense transformer models couples parameter capacity directly to per-token floating-point operations: increasing model capacity forces every token to compute against every parameter weight matrix, driving up both arithmetic demand and memory bandwidth requirements. The **mixture-of-experts (MoE)**\index{MoE!definition} architecture decouples parameter capacity from per-token compute by replacing dense feedforward network (FFN) layers with a bank of parallel expert subnetworks coordinated by a parameterized router [@shazeer2017outrageously]. Google's Switch Transformer[^fn-switch-transformer-scaling] scales this sparse routing principle by steering each token to a single expert ($k=1$), dramatically reducing communication overhead compared to top-$k$ routing [@fedus2022switch].
-
-[^fn-switch-transformer-scaling]: **Switch Transformer**\index{Switch Transformer!scaling trade-off}: @fedus2022switch scales to roughly 1.6 trillion total parameters while routing each token to one expert; in a compute-matched experiment, Switch-Base with 64 experts reached the T5-Base quality target in about one-seventh the training time; the trillion-parameter comparison reported roughly 4$\times$ speedup over T5-XXL. Routing each token to one expert reduces communication relative to top-$k$ routing, but load imbalance requires auxiliary losses and capacity factors. This trade-off—massive parameter capacity at low per-token compute cost, but with complex systems engineering for load balancing—defines the MoE design space.
-
-This sparse activation creates a fundamental memory-bandwidth and capacity trade-off on accelerator hardware. While a token routed to one of $N_{\text{experts}}$ experts executes arithmetic against only $1/N_{\text{experts}}$ of the total expert parameters, an all-resident deployment keeps all $N_{\text{experts}}$ expert matrices in device memory (HBM or SRAM). Offloading changes this capacity requirement by adding transfers to the execution path. At low operational batch sizes—such as single-stream autoregressive generation—routing divergent tokens to different experts fragments matrix-matrix multiplications (GEMM) into low-arithmetic-intensity matrix-vector operations (GEMV), which can make execution bandwidth-limited. Furthermore, uneven token distribution causes computational hotspots where overloaded experts drop tokens exceeding their capacity factor, while under-allocated experts leave tensor core pipelines idle.
-
-Sparse Mixture-of-Experts architectures replace monolithic feedforward networks (FFNs) with dynamically routed subnetworks. @Fig-switch-transformer diagrams this conditional execution pathway: the left block embeds a Switching FFN layer within the standard transformer stack, while the expanded right panel details the gating router dispatching individual tokens ("More" with $p=0.65$, "Parameters" with $p=0.8$) to distinct expert sub-blocks (FFN 2 and FFN 1) while leaving unselected experts idle.
-
-::: {#fig-switch-transformer fig-env="figure" fig-pos="htb" fig-cap="**Switch Transformer Architecture**: Replacing dense feedforward layers with a Switching FFN layer (left) enables sparse conditional routing. A gating network routes each token to a single expert (right) out of a large pool, decoupling total model capacity (parameters) from per-token compute cost (FLOPs). Source: [@fedus2022switch]." fig-alt="Two-part diagram. Left shows switch transformer block with self-attention, add-normalize, switching FFN layer, and add-normalize. Right shows expanded view with router selecting one of four FFN experts per token based on probability."}
-
-```{.tikz}
-\begin{tikzpicture}[line join=round,font=\small\sffamily]
-\tikzset{%
-Line/.style={line width=1.0pt,black!50,text=black},
-Box/.style={inner xsep=2pt,
-    node distance=0.8,
-    draw=GreenLine,
-    line width=0.75pt,
-    fill=GreenL,
-    text width=75mm,align=flush center,
-    minimum width=75mm, minimum height=8mm
-  },
-Box2/.style={inner xsep=2pt,
-    node distance=0.15,
-    draw=VioletLine,
-    line width=0.75pt,
-    fill=VioletL2,
-    text width=10mm,align=flush center,
-    minimum width=10mm, minimum height=7mm
-  },
-Box3/.style={inner xsep=2pt,
-    node distance=0.8,
-    draw=VioletLine,
-    line width=0.75pt,
-    fill=VioletL2,
-    text width=33mm,align=flush center,
-    minimum width=33mm, minimum height=8mm
-  },
-do path picture/.style={%
-    path picture={%
-      \pgfpointdiff{\pgfpointanchor{path picture bounding box}{south west}}%
-        {\pgfpointanchor{path picture bounding box}{north east}}%
-      \pgfgetlastxy\x\y%
-      \tikzset{x=\x/2,y=\y/2}%
-      #1
-    }
-  },
-  cross/.style={do path picture={
-    \draw [line cap=round] (-1,-1) -- (1,1) (-1,1) -- (1,-1);
-  }},
-plus/.style={do path picture={
-    \draw [line cap=round] (-3/4,0) -- (3/4,0) (0,-3/4) -- (0,3/4);
-  }}
-}
-
-\node[Box,fill=RedL,draw=RedLine](P1){Self-Attention};
-\node[Box,above=0.4 of P1,fill=BrownL,draw=BrownLine](P2){Add + Normalize};
-\node[Box,node distance=6.5,above=of P2,fill=BrownL,draw=BrownLine](P3){Add + Normalize};
-\draw[Line,-latex](P2.172)coordinate(DPR1)--++(90:1)coordinate(PR1);
-\draw[Line,-latex](P2.8)coordinate(DPR2)--++(90:1)coordinate(PR2);
-\draw[Line,-latex](P3.172)coordinate(DAN1)--++(90:0.5)coordinate(AN1);
-\draw[Line,-latex](P3.8)coordinate(DAN2)--++(90:0.5)coordinate(AN2);
-\draw[Line,-latex](P1.172)--(P1.172|-P2.south);
-\draw[Line,-latex](P1.8)--(P1.8|-P2.south);
-%%%Router-1
-\begin{scope}[local bounding box=R1,line width=0.5pt,shift={($(PR1)+(-0.4,0.2)$)}]
-\newcommand{\Depth}{1.3}
-\newcommand{\Height}{0.7}
-\newcommand{\Width}{0.4}
-\coordinate (O2) at (0,0,0);
-\coordinate (A2) at (0,\Width,0);
-\coordinate (B2) at (0,\Width,\Height);
-\coordinate (C2) at (0,0,\Height);
-\coordinate (D2) at (\Depth,0,0);
-\coordinate (E2) at (\Depth,\Width,0);
-\coordinate (F2) at (\Depth,\Width,\Height);
-\coordinate (G2) at (\Depth,0,\Height);
-
-\draw[fill=GreenL] (D2) -- (E2) -- (F2) -- (G2) -- cycle;% Right Face
-\draw[fill=GreenL] (C2) -- (B2) -- (F2) -- (G2) -- (C2);% Front Face
-\draw[fill=GreenL] (A2) -- (B2) -- (F2) -- (E2) -- cycle;% Top Face
-%
-\node[]at($(B2)!0.5!(G2)$){Router};
-
-\begin{scope}[local bounding box=BB1,line width=0.5pt,inner sep=3.6pt]
-\def\dx{0.25}
-\def\dy{0.5}
-\def\dz{0.2}
-% bottom-left corner coordinate (bar origin)
-\def\x{0}
-\def\y{0.21}
-\def\z{0}
-
-% boje
-%\filldraw[fill=blue!30, draw=black] (\x,\y,\z) -- (\x,\y,\z+\dz) -- (\x,\y+\dy,\z+\dz) -- (\x,\y+\dy,\z) -- cycle; % leva strana
-\filldraw[fill=red!10, draw=black] (\x,\y+\dy,\z) -- (\x,\y+\dy,\z+\dz) -- (\x+\dx,\y+\dy,\z+\dz) -- (\x+\dx,\y+\dy,\z) -- cycle; % gornja strana
-%\filldraw[fill=blue!20, draw=black] (\x,\y,\z) -- (\x,\y,\z+\dz) -- (\x+\dx,\y,\z+\dz) -- (\x+\dx,\y,\z) -- cycle; % donja strana
-%\filldraw[fill=blue!40, draw=black] (\x,\y,\z) -- (\x+\dx,\y,\z) -- (\x+\dx,\y+\dy,\z) -- (\x,\y+\dy,\z) -- cycle; % zadnja strana
-\filldraw[fill=red!50, draw=black] (\x+\dx,\y,\z) -- (\x+\dx,\y,\z+\dz) -- (\x+\dx,\y+\dy,\z+\dz) -- (\x+\dx,\y+\dy,\z) -- cycle; % desna strana
-\filldraw[fill=red!60, draw=black] (\x,\y,\z+\dz) -- (\x+\dx,\y,\z+\dz) -- (\x+\dx,\y+\dy,\z+\dz) -- (\x,\y+\dy,\z+\dz) -- cycle; % prednja strana
-\end{scope}
-
-\begin{scope}[local bounding box=BB1,shift={(0.25,0)}]
-\def\dx{0.25}
-\def\dy{1.0}
-\def\dz{0.2}
-%
-\def\x{0}
-\def\y{0.21}
-\def\z{0}
-\filldraw[fill=red!10, draw=black] (\x,\y+\dy,\z)coordinate(NB1) -- (\x,\y+\dy,\z+\dz) -- (\x+\dx,\y+\dy,\z+\dz) -- (\x+\dx,\y+\dy,\z) -- cycle; % gornja strana
-\filldraw[fill=red!50, draw=black] (\x+\dx,\y,\z) -- (\x+\dx,\y,\z+\dz) -- (\x+\dx,\y+\dy,\z+\dz) -- (\x+\dx,\y+\dy,\z) -- cycle; % desna strana
-\filldraw[fill=red!60, draw=black] (\x,\y,\z+\dz) -- (\x+\dx,\y,\z+\dz) -- (\x+\dx,\y+\dy,\z+\dz) -- (\x,\y+\dy,\z+\dz) -- cycle; % prednja strana
-\end{scope}
-\begin{scope}[local bounding box=BB1,shift={(0.5,0)}]
-\def\dx{0.25}
-\def\dy{0.2}
-\def\dz{0.2}
-%
-\def\x{0}
-\def\y{0.21}
-\def\z{0}
-%
-\filldraw[fill=red!10, draw=black] (\x,\y+\dy,\z) -- (\x,\y+\dy,\z+\dz) -- (\x+\dx,\y+\dy,\z+\dz) -- (\x+\dx,\y+\dy,\z) -- cycle; % gornja strana
-\filldraw[fill=red!50, draw=black] (\x+\dx,\y,\z) -- (\x+\dx,\y,\z+\dz) -- (\x+\dx,\y+\dy,\z+\dz) -- (\x+\dx,\y+\dy,\z) -- cycle; % desna strana
-\filldraw[fill=red!60, draw=black] (\x,\y,\z+\dz) -- (\x+\dx,\y,\z+\dz) -- (\x+\dx,\y+\dy,\z+\dz) -- (\x,\y+\dy,\z+\dz) -- cycle; % prednja strana
-\end{scope}
-\begin{scope}[local bounding box=BB1,shift={(0.75,0)}]
-\def\dx{0.25}
-\def\dy{0.6}
-\def\dz{0.2}
-%
-\def\x{0}
-\def\y{0.21}
-\def\z{0}
-%
-\filldraw[fill=red!10, draw=black] (\x,\y+\dy,\z) -- (\x,\y+\dy,\z+\dz) -- (\x+\dx,\y+\dy,\z+\dz) -- (\x+\dx,\y+\dy,\z) -- cycle; % gornja strana
-\filldraw[fill=red!50, draw=black] (\x+\dx,\y,\z) -- (\x+\dx,\y,\z+\dz) -- (\x+\dx,\y+\dy,\z+\dz) -- (\x+\dx,\y+\dy,\z) -- cycle; % desna strana
-\filldraw[fill=red!60, draw=black] (\x,\y,\z+\dz) -- (\x+\dx,\y,\z+\dz) -- (\x+\dx,\y+\dy,\z+\dz) -- (\x,\y+\dy,\z+\dz) -- cycle; % prednja strana
-\end{scope}
-\end{scope}
-%%%%%%%%%%%%%%%%%%
-%%%Router-2
-\begin{scope}[local bounding box=R1,line width=0.5pt,shift={($(PR2)+(-0.4,0.2)$)}]
-\newcommand{\Depth}{1.3}
-\newcommand{\Height}{0.7}
-\newcommand{\Width}{0.4}
-\coordinate (O2) at (0,0,0);
-\coordinate (A2) at (0,\Width,0);
-\coordinate (B2) at (0,\Width,\Height);
-\coordinate (C2) at (0,0,\Height);
-\coordinate (D2) at (\Depth,0,0);
-\coordinate (E2) at (\Depth,\Width,0);
-\coordinate (F2) at (\Depth,\Width,\Height);
-\coordinate (G2) at (\Depth,0,\Height);
-
-\draw[fill=GreenL] (D2) -- (E2) -- (F2) -- (G2) -- cycle;% Right Face
-\draw[fill=GreenL] (C2) -- (B2) -- (F2) -- (G2) -- (C2);% Front Face
-\draw[fill=GreenL] (A2) -- (B2) -- (F2) -- (E2) -- cycle;% Top Face
-%
-\node[]at($(B2)!0.5!(G2)$){Router};
-
-\begin{scope}[local bounding box=BB1,line width=0.5pt,inner sep=3.6pt]
-\def\dx{0.25}
-\def\dy{1.1}
-\def\dz{0.2}
-%
-\def\x{0}
-\def\y{0.21}
-\def\z{0}
-
-%
-\filldraw[fill=red!10, draw=black] (\x,\y+\dy,\z) coordinate(NB2)-- (\x,\y+\dy,\z+\dz) -- (\x+\dx,\y+\dy,\z+\dz) -- (\x+\dx,\y+\dy,\z) -- cycle; % gornja strana
-\filldraw[fill=red!50, draw=black] (\x+\dx,\y,\z) -- (\x+\dx,\y,\z+\dz) -- (\x+\dx,\y+\dy,\z+\dz) -- (\x+\dx,\y+\dy,\z) -- cycle; % desna strana
-\filldraw[fill=red!60, draw=black] (\x,\y,\z+\dz) -- (\x+\dx,\y,\z+\dz) -- (\x+\dx,\y+\dy,\z+\dz) -- (\x,\y+\dy,\z+\dz) -- cycle; % prednja strana
-\end{scope}
-
-\begin{scope}[local bounding box=BB1,shift={(0.25,0)}]
-\def\dx{0.25}
-\def\dy{0.6}
-\def\dz{0.2}
-%
-\def\x{0}
-\def\y{0.21}
-\def\z{0}
-\filldraw[fill=red!10, draw=black] (\x,\y+\dy,\z) -- (\x,\y+\dy,\z+\dz) -- (\x+\dx,\y+\dy,\z+\dz) -- (\x+\dx,\y+\dy,\z) -- cycle; % gornja strana
-\filldraw[fill=red!50, draw=black] (\x+\dx,\y,\z) -- (\x+\dx,\y,\z+\dz) -- (\x+\dx,\y+\dy,\z+\dz) -- (\x+\dx,\y+\dy,\z) -- cycle; % desna strana
-\filldraw[fill=red!60, draw=black] (\x,\y,\z+\dz) -- (\x+\dx,\y,\z+\dz) -- (\x+\dx,\y+\dy,\z+\dz) -- (\x,\y+\dy,\z+\dz) -- cycle; % prednja strana
-\end{scope}
-\begin{scope}[local bounding box=BB1,shift={(0.5,0)}]
-\def\dx{0.25}
-\def\dy{0.3}
-\def\dz{0.2}
-%
-\def\x{0}
-\def\y{0.21}
-\def\z{0}
-%
-\filldraw[fill=red!10, draw=black] (\x,\y+\dy,\z) -- (\x,\y+\dy,\z+\dz) -- (\x+\dx,\y+\dy,\z+\dz) -- (\x+\dx,\y+\dy,\z) -- cycle; % gornja strana
-\filldraw[fill=red!50, draw=black] (\x+\dx,\y,\z) -- (\x+\dx,\y,\z+\dz) -- (\x+\dx,\y+\dy,\z+\dz) -- (\x+\dx,\y+\dy,\z) -- cycle; % desna strana
-\filldraw[fill=red!60, draw=black] (\x,\y,\z+\dz) -- (\x+\dx,\y,\z+\dz) -- (\x+\dx,\y+\dy,\z+\dz) -- (\x,\y+\dy,\z+\dz) -- cycle; % prednja strana
-\end{scope}
-\begin{scope}[local bounding box=BB1,shift={(0.75,0)}]
-\def\dx{0.25}
-\def\dy{0.15}
-\def\dz{0.2}
-%
-\def\x{0}
-\def\y{0.21}
-\def\z{0}
-%
-\filldraw[fill=red!10, draw=black] (\x,\y+\dy,\z) -- (\x,\y+\dy,\z+\dz) -- (\x+\dx,\y+\dy,\z+\dz) -- (\x+\dx,\y+\dy,\z) -- cycle; % gornja strana
-\filldraw[fill=red!50, draw=black] (\x+\dx,\y,\z) -- (\x+\dx,\y,\z+\dz) -- (\x+\dx,\y+\dy,\z+\dz) -- (\x+\dx,\y+\dy,\z) -- cycle; % desna strana
-\filldraw[fill=red!60, draw=black] (\x,\y,\z+\dz) -- (\x+\dx,\y,\z+\dz) -- (\x+\dx,\y+\dy,\z+\dz) -- (\x,\y+\dy,\z+\dz) -- cycle; % prednja strana
-\end{scope}
-\end{scope}
-%%%%%%%%%%%%%%%%%
-%FFN left
-\begin{scope}[local bounding box=SFFN1,line width=0.5pt,shift={($(NB1)+(-1.85,1.55)$)}]
-\node[Box2](FFN1){FFN1};
-\node[Box2,right=of FFN1,line width=1.5pt](FFN2){FFN2};
-\node[Box2,right=of FFN2](FFN3){FFN3};
-\node[Box2,right=of FFN3](FFN4){FFN4};
-\end{scope}
-%FFN right
-\begin{scope}[local bounding box=SFFN2,line width=0.5pt,shift={($(SFFN1)+(3.9,0)$)}]
-\node[Box2,line width=1.5pt](2FFN1){FFN1};
-\node[Box2,right=of 2FFN1](2FFN2){FFN2};
-\node[Box2,right=of 2FFN2](2FFN3){FFN3};
-\node[Box2,right=of 2FFN3](2FFN4){FFN4};
-\end{scope}
-\node[draw,circle,line width=0.75pt, above=1.2 of $(FFN2)!0.5!(FFN3)$,cross,minimum width=6mm](CI1){};
-\node[draw,circle,line width=0.75pt, above=1.2 of $(2FFN2)!0.5!(2FFN3)$,cross,minimum width=6mm](CI2){};
-%
-\draw[Line,-latex](NB1)--++(90:0.5)-|(FFN2);
-\draw[Line,-latex](NB2)--++(90:0.5)-|(2FFN1);
-\draw[Line,-latex,dashed,rounded corners=8pt](NB1)--
-node[below,pos=0.5]{$p = 0.65$}++(180:2.7)|-(CI1.west);
-\draw[Line,-latex,dashed,rounded corners=8pt](NB2)--
-node[below,pos=0.5]{$p = 0.8$}++(0:3.2)|-(CI2.east);
-\draw[Line,-latex](CI1)--(CI1|-P3.south);
-\draw[Line,-latex](CI2)--(CI2|-P3.south);
-\draw[Line,-latex](FFN2)--++(90:0.7)-|(CI1);
-\draw[Line,-latex](2FFN1)--++(90:0.7)-|(CI2);
-%%%
-%fitting
-\scoped[on background layer]
-\node[draw=BackLine,inner xsep=7mm,inner ysep=3mm,
-yshift=0mm,fill=BackColor!70,fit=(FFN1)(2FFN4)(CI2)(R1),line width=0.75pt](GBB2){};
-%%below Router to Add +Normalize
-\draw[Line,-latex]($(DPR1)!0.25!(PR1)$)--++(180:3.8)|-(P3);
-\draw[Line,-latex]($(DPR2)!0.25!(PR2)$)--++(0:3.8)|-(P3);
-%%%Above Add + Normalize
-\begin{scope}[local bounding box=Y1,line width=0.5pt,shift={($(AN1)+(-1.2,0)$)}]
-\def\side{0.4}
-\foreach \i/\col in {0/white,1/green!40,2/white,3/green!40,4/white,5/green!40}{
-    \draw[fill=\col,thick] (\i*\side,0) rectangle ++(\side,\side);
-}
-\end{scope}
-\node[left=2pt of Y1]{$y_1$};
-\begin{scope}[local bounding box=Y2,line width=0.5pt,shift={($(AN2)+(-1.2,0)$)}]
-\def\side{0.4}
-\foreach \i/\col in {0/white,1/green!40,2/white,3/green!40,4/white,5/green!40}{
-    \draw[fill=\col,thick] (\i*\side,0) rectangle ++(\side,\side);
-}
-\end{scope}
-\node[left=2pt of Y2]{$y_2$};
-%%below Self-Attention
-\draw[Line,latex-](P1.188)coordinate(GSA1)--++(270:0.7)coordinate(SA1);
-\node[draw,circle,line width=0.75pt, below=0 of SA1,cross,minimum width=6mm](CI3){};
-\draw[Line,latex-](P1.352)coordinate(GSA2)--++(270:0.7)coordinate(SA2);
-\node[draw,circle,line width=0.75pt, below=0 of SA2,cross,minimum width=6mm](CI4){};
-\draw[Line,latex-](CI3.south)coordinate(GDCI3)--++(270:0.7)coordinate(DCI3);
-\draw[Line,latex-](CI4.south)coordinate(GDCI4)--++(270:0.7)coordinate(DCI4);%
-%
-\node[left=2pt of CI3,align=center]{Positional\\ embedding};
-\node[left=2pt of CI4,align=center]{Positional\\ embedding};
-%
-\begin{scope}[local bounding box=X1,line width=0.5pt,shift={($(DCI3)+(-1.2,-0.14)$)}]
-\def\side{0.4}
-\foreach \i/\col in {0/white,1/green!40,2/white,3/green!40,4/white,5/green!40}{
-    \draw[fill=\col,thick] (\i*\side,0) rectangle ++(\side,\side);
-}
-\end{scope}
-\node[left=2pt of X1]{$x_1$};
-\node[below=2pt of X1]{More};
-\begin{scope}[local bounding box=X2,line width=0.5pt,shift={($(DCI4)+(-1.2,-0.14)$)}]
-\def\side{0.4}
-\foreach \i/\col in {0/white,1/green!40,2/white,3/green!40,4/white,5/green!40}{
-    \draw[fill=\col,thick] (\i*\side,0) rectangle ++(\side,\side);
-}
-\end{scope}
-\node[left=2pt of X2]{$x_2$};
-\node[below=2pt of X2]{Parameters};
-%
-\draw[Line,-latex]($(GSA1)!0.5!(SA1)$)--++(180:3.8)|-(P2);
-\draw[Line,-latex]($(GSA2)!0.5!(SA2)$)--++(0:3.8)|-(P2);
-%%%%%%%%%%%%
-%left diagram
-\begin{scope}[local bounding box=LD,line width=0.5pt,shift={(-13,1.8)}]
-\node[Box3,fill=RedL,draw=RedLine](2P1){Self-Attention};
-\node[Box3,above=of 2P1,fill=BrownL,draw=BrownLine](2P2){Add + Normalize};
-\node[Box3,above=of 2P2,fill=BackColor,draw=BackLine](2P3){Switching FFN Layer};
-\node[Box3,above=of 2P3,fill=BrownL,draw=BrownLine](2P4){Add + Normalize};
-%
-\draw[Line,-latex](2P1)--(2P2);
-\draw[Line,-latex](2P2)--(2P3);
-\draw[Line,-latex](2P3)--(2P4);
-\draw[Line,-latex](2P4)--++(90:1)node[above]{$y$};
-\draw[Line,latex-](2P1)--++(270:1)node[below]{$x$};
-\draw[blue,dashed,thick]($(2P1.south east)+(0.2,-0.2)$)--++(310:5);
-\draw[blue,dashed,thick]($(2P4.north east)+(0.2,-0.2)$)--++(40:5);
-\end{scope}
-\end{tikzpicture}
-```
-
-:::
-
-Because the router lies on the critical execution path, the accelerator runtime must dynamically dispatch and gather activations across expert blocks without triggering host-device synchronization stalls. On data-parallel accelerators such as GPUs and TPUs, executing sparse expert layers efficiently requires token permutation: tokens assigned to the same expert are gathered into contiguous memory tiles to sustain high Tensor Core utilization during subsequent matrix multiplications [@lepikhin2021gshard]. If the routing distribution is highly skewed, token buffers for popular experts overflow their fixed capacity allocations, forcing the system to either truncate tokens (causing representation degradation) or trigger ragged kernel launches that leave parallel vector lanes idle.
-
-::: {.column-margin .margin-pointer}
-↪ How runtimes execute tensors whose shapes vary, by matching precompiled shape profiles, padding, splitting the batch, or falling back to a general kernel, is developed in @sec-hardware-acceleration-dynamic-kernel-execution-33fc.
-:::
-
-While early exit and MoE routing make discrete branch selections, adaptive inference can also operate continuously by progressively modulating depth or iteration counts based on real-time task difficulty [@yang2020]. Dynamic routing architectures such as BlockDrop dynamically adjust the number of active layers according to runtime policy networks [@wu2018blockdrop], while dynamic layer scaling allocates computation incrementally until output uncertainty drops below a calibrated threshold. Consider an embedded vision system processing sensor streams: high-contrast frames with clear road geometry resolve through a minimal prefix of feature-extraction layers, whereas degraded frames containing occluded obstacles trigger deeper recurrent processing blocks. The physical systems gain materializes only if the control evaluation remains computationally lightweight and the runtime schedules frames with matched execution depths concurrently to maintain high hardware utilization.
-
-#### Implementation challenges {#sec-model-compression-implementation-challenges-1184}
-
-Realizing the efficiency gains of adaptive computation requires overcoming critical challenges across model training, runtime orchestration, and hardware alignment. During training, discrete routing decisions (such as non-differentiable $\mathrm{argmax}$ selections) break standard backpropagation. Practitioners must employ continuous relaxations such as the Gumbel-Softmax estimator, reinforcement learning policy gradients, or auxiliary load-balancing losses to prevent routing collapse where the router over-allocates inputs to a single expert or exit [@shazeer2017outrageously].
-
-At runtime, control-flow branching fundamentally conflicts with the bulk-synchronous parallel execution model of modern accelerators. When parallel threads within a GPU warp encounter divergent execution branches, the hardware may serialize branch execution and mask inactive threads, reducing the value of theoretical FLOP savings. Gating also introduces control dependencies that can limit fusion, require token-permutation buffers, or trigger host-device synchronization, depending on the runtime. If these dispatch overheads exceed the compute time saved by skipping layers, the dynamic model exhibits higher end-to-end latency than a dense baseline. @Sec-hardware-acceleration-dynamic-kernel-execution-33fc examines hardware-aware runtime strategies, including ragged batching and dynamic kernel launch queues, designed to manage these execution patterns.
-
-Beyond systems efficiency, dynamic control introduces severe quality and security failure modes. Because gating policies route inputs based on statistical heuristics, poorly calibrated gates systematically underallocate computation to rare distribution tails, degrading prediction accuracy precisely on safety-critical edge cases. Furthermore, input-dependent computation exposes an attack surface: adversarial perturbations can intentionally manipulate routing gates to trigger denial-of-quality attacks (forcing inputs into truncated early exits that fail) or denial-of-service attacks (forcing all inputs into maximally deep or imbalanced paths to saturate accelerator queues). Consequently, evaluating adaptive models cannot rely on average FLOP counts alone. Rigorous system profiling must report path distribution histograms, tail latency (p99), accuracy stratified by input difficulty, and throughput stability under dynamic batching. Where dynamic computation decides whether to perform certain operations, sparsity exploitation addresses a complementary question: how to accelerate computation when many operands are zero.
+Where representation optimization determines *what* computations to perform and precision optimization determines *how precisely* to compute them, hardware implementation determines *how* those computations fit the machine. Measured bottlenecks determine which architectural response is useful. Hardware-aware design changes the model before training so its layers match the deployment envelope. Sparsity exploitation makes removed weights visible to kernels that can skip them. Operator fusion reduces memory traffic when adjacent operations would otherwise write and reread the same tensors.
 
 ### Sparsity exploitation {#sec-model-compression-sparsity-exploitation-48a6}
 
@@ -6432,7 +6200,11 @@ yshift=0mm,fill=none,fit=(cell-1-1A5)(cell-1-9A5),line width=3.5pt](BB3){};
 
 :::
 
-Similarly, N:M sparsity retains at most $n$ nonzeros in each group of $m$ consecutive elements; hardware-oriented pruning often enforces exactly $n$ retained values so every group has the same representation [@zhou2021learningnmfinegrainedstructured]. The deterministic format lets a supported kernel predict the value and metadata layout while retaining more capacity than removing whole channels or blocks. That regularity creates an executable compromise between arbitrary masks and dense computation, but only for targets with the matching path. As the 2:4 example in @sec-model-compression-structured-pruning-9692 showed, each stored value then needs only a 2-bit index ($00_2$ through $11_2$) to record its position within its block of four. This compact metadata imposes only a 16-bit overhead per 16-element row segment—far below the multi-byte pointer arrays required by general CSR or COO formats—allowing Tensor Cores to stream compressed operands without memory bandwidth bloat. @Fig-2-4-gemm contrasts the execution mechanics between standard dense GEMM and 2:4 sparse processing: on the right, 2-bit coordinate indices steer hardware multiplexers to pull matching activation elements into the dot-product engine alongside the two retained weights per 4-element block, halving arithmetic cycles relative to the 8-element dense baseline on the left. In parallel, STEP examines learning more general N:M masks for inference [@lu2023steplearningnmstructured].
+Similarly, N:M sparsity retains at most $n$ nonzeros in each group of $m$ consecutive elements; hardware-oriented pruning often enforces exactly $n$ retained values so every group has the same representation [@zhou2021learningnmfinegrainedstructured]. The deterministic format lets a supported kernel predict the value and metadata layout while retaining more capacity than removing whole channels or blocks. That regularity creates an executable compromise between arbitrary masks and dense computation, but only for targets with the matching path.
+
+As the 2:4 example in @sec-model-compression-structured-pruning-9692 showed, each stored value then needs only a 2-bit index ($00_2$ through $11_2$) to record its position within its block of four. This compact metadata imposes only a 16-bit overhead per 16-element row segment—far below the multi-byte pointer arrays required by general CSR or COO formats—allowing Tensor Cores to stream compressed operands without memory bandwidth bloat.
+
+@Fig-2-4-gemm contrasts the execution mechanics between standard dense GEMM and 2:4 sparse processing: on the right, 2-bit coordinate indices steer hardware multiplexers to pull matching activation elements into the dot-product engine alongside the two retained weights per 4-element block, halving arithmetic cycles relative to the 8-element dense baseline on the left. In parallel, STEP examines learning more general N:M masks for inference [@lu2023steplearningnmstructured].
 
 At accelerator level, the same pattern-specific rule holds: hardware support is a contract between the sparse format and the execution path.
 
@@ -6925,6 +6697,437 @@ Optimization techniques interact through shared representations and physical res
 
 Because optimization techniques interact so heavily through shared execution mechanics, selecting an appropriate compression strategy cannot rely on single-technique benchmarks. Practical deployment requires a systematic selection workflow that maps target hardware bottlenecks directly to compatible compression pipelines.
 
+### Operator fusion {#sec-model-compression-operator-fusion-ac1d}
+
+Kernel fusion appeared in @sec-ml-frameworks-execution-strategy-matters-memory-wall-1ce8 as the framework's main defense against the memory wall; here it becomes a deployment lever applied to the compressed graph. Consider a typical neural network layer: convolution followed by batch normalization followed by rectified linear unit (ReLU). Without fusion, each operation writes its output to GPU global memory, then the next operation reads that output back. Three memory round-trips occur for what could be computed entirely in fast on-chip registers. By fusing these operations into a single kernel, compilers and inference engines eliminate the redundant memory transactions, improving both throughput and latency on memory-bound workloads [@chen2018tvm; @nvidia2024tensorrt].
+
+::: {#dfn-model-compression-operator-fusion .callout-definition title="Operator fusion"}
+
+***Operator fusion***\index{Operator fusion!definition} is a compiler and runtime optimization that combines adjacent tensor operations into a single fused kernel so intermediate values remain in registers or on-chip memory instead of being written to and reread from accelerator global memory.
+
+1.  **Significance**: In an ideal chain of $n_{\text{ops}}$ element-wise operations over the same tensor of $M_{\text{tensor}}$ bytes, separate kernels can move about $2\,n_{\text{ops}} M_{\text{tensor}}$, while a fused kernel can approach $2M_{\text{tensor}}$ by keeping intermediates on chip. Real traffic also includes weights, caches, alignment, and spills, so profiling must confirm the reduction.
+2.  **Distinction**: Operator fusion rewrites execution to keep intermediates on chip. Some patterns also fold parameters, as with batch normalization, while preserving the intended function within numerical tolerances. The performance benefit depends on the traffic and launch overhead removed.
+3.  **Common pitfall**: A frequent misconception is that more fusion is always better. Fusion is constrained by data dependencies, tensor shapes, register pressure, and cache capacity; over-fusing can reduce occupancy or force spills back to memory, erasing the benefit.
+
+:::
+
+Modern neural networks consist of sequences of operations such as convolution, batch normalization, activation functions, and element-wise operations. When executed independently, each operation requires four steps:
+
+1. Loading input tensors from global memory
+2. Performing computation
+3. Writing output tensors back to global memory
+4. Launching the next kernel
+
+The read-compute-write cycle creates memory bandwidth bottlenecks for operations with low arithmetic intensity (FLOP/byte). For an ideal sequence of $n_{\text{ops}}$ operations over the same intermediate tensor of $M_{\text{tensor}}$ bytes, the unfused traffic is:
+$$
+D_{\text{vol,unfused}} = 2\,n_{\text{ops}} M_{\text{tensor}}
+$$
+where each operation reads and writes the intermediate once. If the sequence is legal to fuse and intermediates stay on chip, the traffic can approach:
+$$
+D_{\text{vol,fused}} = 2M_{\text{tensor}}
+$$
+by reading the intermediate input once and writing its final output once. Weights, auxiliary inputs, cache effects, and register spills are outside this simple bound. Several inference patterns nevertheless approximate it closely enough for fusion to matter.
+
+##### Convolution-BatchNorm-ReLU fusion {.unnumbered}
+
+The common Conv-BN-ReLU pattern in @lst-conv-bn-relu-fusion can replace three launches and intermediate round-trips with one fused path when the compiler can legally fold batch normalization and combine the activation.
+
+::: {#lst-conv-bn-relu-fusion lst-cap="**Conv-BN-ReLU Fusion**: Combining three operations into a single kernel reduces the idealized intermediate-tensor stream from 6 transfers to 2; weights, auxiliary inputs, and spills are outside this count."}
+
+```{.python}
+# Pseudocode: runtime APIs and fusion legality are
+# implementation-dependent.
+# === UNFUSED: 3 kernel launches, 6 memory transfers ===
+conv_out = conv2d(input, weight)
+bn_out = batch_norm(conv_out, ...)
+relu_out = relu(bn_out)
+
+
+# === FUSED: 1 kernel launch, 2 memory transfers ===
+def conv_bn_relu_fused(input, weight, gamma, beta, mean, var):
+    # Read input and weight once
+    conv = conv2d(input, weight)
+
+    # Apply batch norm in registers (no memory write)
+    bn = gamma * (conv - mean) / sqrt(var + eps) + beta
+
+    # Apply ReLU in registers (no memory write)
+    output = relu(bn)
+
+    # Write final result once
+    return output
+```
+
+:::
+
+```{python}
+#| echo: false
+#| label: conv-fusion-calc
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ CONV-BN-RELU FUSION TRANSFER REDUCTION
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: Operator fusion prose, after @lst-conv-bn-relu-fusion
+# │
+# │ Goal: Demonstrate the memory traffic reduction from Conv-BN-ReLU fusion.
+# │ Show: A 3× reduction in data movement (6 transfers to 2).
+# │ How: Calculate memory read/write counts for fused vs. unfused execution.
+# │
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim.fmt import fmt, check, fmt_math
+
+class ConvFusionCalc:
+    """Demonstrate 3x memory traffic reduction from Conv-BN-ReLU fusion (6 transfers → 2)."""
+
+    unfused_transfers = 6
+    fused_transfers = 2
+    conv_channels = 256
+    conv_spatial = 28
+    bytes_per_element = 4
+
+    transfer_reduction = unfused_transfers / fused_transfers
+    eliminated_traffic_mb = 4 * conv_channels * conv_spatial * conv_spatial * bytes_per_element / MILLION
+
+    check(transfer_reduction == 3, "Conv-BN-ReLU fusion must yield exactly 3x transfer reduction.")
+
+    transfer_reduction_mult_str = fmt_multiple(round(transfer_reduction), precision=0, commas=False)
+    conv_bn_relu_mem_math = fmt_math(
+        f"4 \\times 256 \\times 28 \\times 28 \\times 4 \\text{{ bytes}} \\approx \\text{{{eliminated_traffic_mb:.1f} MB}}"
+    )
+```
+
+::: {.column-margin}
+![](images/svg/vol1_model_compression_margin_002.svg){width="100%" fig-alt="Two horizontal blue bars labeled Unfused: 6 and Fused: 2; the fused bar is one-third as long."}
+
+*The idealized intermediate stream falls from six transfers to two.*
+:::
+
+The intended function is preserved, although batch-normalization folding changes the arithmetic sequence. In the idealized intermediate stream, traffic drops from 6 transfers to 2 transfers (`{python} ConvFusionCalc.transfer_reduction_mult_str` reduction). For a ResNet-50 layer with 256 channels and spatial size $28{\times}28$, this eliminates `{python} ConvFusionCalc.conv_bn_relu_mem_math` of intermediate memory traffic per layer.
+
+The same principle extends beyond CNNs. GEMM bias-activation fusion eliminates intermediate writes in transformer linear layers by computing element-wise operations in registers immediately after each matrix multiplication output element. Attention tiling, as in FlashAttention,[^fn-flashattention-kernel-fusion] reduces HBM traffic by processing attention in SRAM-sized tiles and avoiding materialization of the full $S{\times}S$ attention matrix.
+
+[^fn-flashattention-kernel-fusion]: **FlashAttention**\index{FlashAttention!SRAM tiling}: Demonstrates fusion's power for memory-bound attention by tiling computation to SRAM, avoiding materialization of the full attention matrix, and reporting multi-fold speedups on long sequences [@dao2022]. This exemplifies how operator fusion transforms memory-bound bottlenecks: the arithmetic is mathematically equivalent, but the memory access pattern changes, making longer-context attention feasible on hardware that could not otherwise afford the full intermediate matrix.
+
+::: {.column-margin .margin-pointer}
+↩ IO-aware attention tiling and its HBM-traffic accounting are established in @sec-model-training-flash-attention-ioaware-attention-optimization-3da0.
+:::
+
+```{python}
+#| echo: false
+#| label: fusion-calc
+# ┌── LEGO ───────────────────────────────────────────────
+# │ Goal: Conv-BN-ReLU bandwidth and kernel-launch savings for fusion prose.
+from mlsysim.fmt import fmt, fmt_int, fmt_qty_int, check, fmt_time, fmt_memory
+from mlsysim.core.units import microsecond
+
+class FusionCalc:
+    conv_channels = 256
+    conv_spatial = 28
+    bytes_per_element = 4
+    weights_mb = 2.4
+    bn_params_mb = 0.002
+    kernels_unfused = 150
+    kernels_fused = 50
+    latency_per_kernel_us = 10
+    v100_bw = Hardware.Cloud.V100.memory.bandwidth
+
+    feat_map_mb = conv_channels * conv_spatial * conv_spatial * bytes_per_element / MILLION
+    feat_map = feat_map_mb * MB
+    weights = weights_mb * MB
+    bn_params = bn_params_mb * MB
+    unfused_conv_mb = feat_map_mb * 2 + weights_mb
+    unfused_conv = unfused_conv_mb * MB
+    unfused_conv_display = round(unfused_conv_mb) * MB
+    unfused_bn_mb = feat_map_mb * 2 + bn_params_mb
+    unfused_bn = unfused_bn_mb * MB
+    unfused_relu_mb = feat_map_mb * 2
+    unfused_relu = unfused_relu_mb * MB
+    total_unfused_mb = unfused_conv_mb + unfused_bn_mb + unfused_relu_mb
+    total_unfused = total_unfused_mb * MB
+    total_fused_mb = feat_map_mb * 2 + weights_mb
+    total_fused = total_fused_mb * MB
+    total_fused_display = round(total_fused_mb) * MB
+    bandwidth_reduction_pct = (1 - total_fused_mb / total_unfused_mb) * 100
+    saved_latency_ms = (kernels_unfused - kernels_fused) * latency_per_kernel_us / THOUSAND
+    unfused_time = total_unfused / v100_bw
+    fused_time = total_fused / v100_bw
+    fusion_speedup = (unfused_time / fused_time).to("").magnitude
+
+    check(bandwidth_reduction_pct > 40, "Fusion should reduce bandwidth by more than 40%.")
+    check(fusion_speedup > 1, "Fused execution must be faster than unfused.")
+
+    # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
+    feat_map_kb_str = fmt_memory(feat_map, unit=KB, precision=1, commas=False)
+    weights_mb_str = fmt_memory(weights, unit=MB, precision=1, commas=False)
+    bn_params_kb_str = fmt_memory(bn_params, unit=KB, precision=0, commas=False)
+    unfused_conv_mb_str = fmt_qty_int(unfused_conv_display, MB, commas=False)
+    unfused_bn_mb_str = fmt_memory(unfused_bn, unit=MB, precision=1, commas=False)
+    unfused_relu_mb_str = fmt_memory(unfused_relu, unit=MB, precision=1, commas=False)
+    total_unfused_mb_str = fmt_memory(total_unfused, unit=MB, precision=1, commas=False)
+    total_fused_mb_str = fmt_qty_int(total_fused_display, MB, commas=False)
+    bandwidth_reduction_pct_str = fmt_percent(bandwidth_reduction_pct / 100, precision=1, commas=False, style='prose')
+    kernels_unfused_str = fmt(kernels_unfused, precision=0, commas=False)
+    kernels_fused_str = fmt(kernels_fused, precision=0, commas=False)
+    unfused_time_us_str = fmt_time(round(unfused_time.to(microsecond).magnitude), "microsecond", precision=0, commas=False, style="word")
+    fused_time_us_str = fmt_time(fused_time, "microsecond", precision=1, commas=False, style="word")
+    fusion_speedup_mult_str = fmt_multiple(fusion_speedup, precision=2, commas=False)
+```
+
+Memory bandwidth analysis quantifies these fusion benefits concretely. Consider a Conv-BN-ReLU sequence operating on a $28{\times}28{\times}256$ feature map (`{python} FusionCalc.feat_map_kb_str`). Without fusion, each operation performs its own memory round-trip: Conv reads input (`{python} FusionCalc.feat_map_kb_str`) plus weights (`{python} FusionCalc.weights_mb_str`) and writes output (`{python} FusionCalc.feat_map_kb_str`), totaling `{python} FusionCalc.unfused_conv_mb_str`. BN then reads that output, adds its parameters (`{python} FusionCalc.bn_params_kb_str`), and writes again, for `{python} FusionCalc.unfused_bn_mb_str`. ReLU repeats the pattern for another `{python} FusionCalc.unfused_relu_mb_str`. The total unfused memory traffic is `{python} FusionCalc.total_unfused_mb_str`. With fusion, the entire sequence reads input and weights once and writes the final output once, requiring only `{python} FusionCalc.total_fused_mb_str`—a `{python} FusionCalc.bandwidth_reduction_pct_str` bandwidth reduction.
+
+```{python}
+#| echo: false
+#| label: compression-v100-specs
+# ┌── LEGO ───────────────────────────────────────────────
+# │ Goal: V100 bandwidth and compute specs for fusion timing prose.
+from mlsysim.fmt import fmt_bandwidth
+
+class V100Specs:
+    v100_bw = Hardware.Cloud.V100.memory.bandwidth
+
+    # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
+    v100_bw_gb_per_s_str = fmt_bandwidth(v100_bw, unit=GB / second, precision=0, commas=False)
+```
+
+At the modeled `{python} V100Specs.v100_bw_gb_per_s_str` HBM bandwidth, these traffic volumes imply ideal lower bounds of `{python} FusionCalc.unfused_time_us_str` before fusion and `{python} FusionCalc.fused_time_us_str` after fusion, a `{python} FusionCalc.fusion_speedup_mult_str` ratio for the traffic component alone. These are not full layer latencies because convolution compute, cache effects, and launch overhead must also be included.
+
+As @tbl-fusion-speedup shows, fusion benefits vary by workload. Memory-bound operations benefit most, while compute-bound operations see minimal improvement.
+
+```{=latex}
+\begingroup
+\renewcommand{\arraystretch}{1.3}
+```
+
+| **Workload**                | **Relative Fusion Benefit** | **Why**                                                       |
+|:----------------------------|:---------------------------:|:--------------------------------------------------------------|
+| **Element-wise operations** |             High            | Highly memory bound, low arithmetic intensity                 |
+| **Conv-BN-Act patterns**    |           Moderate          | Mixed memory/compute characteristics                          |
+| **GEMM-based operations**   |             Low             | Compute bound; fusion reduces the memory-bound tail           |
+| **Attention mechanisms**    |             High            | Long sequences amplify avoided attention-intermediate traffic |
+
+: **Illustrative Operator Fusion Benefit by Workload**: Memory-bound workloads tend to benefit more than compute-bound workloads; realized gains depend on the graph, runtime, sequence shape, and hardware. {#tbl-fusion-speedup tbl-colwidths="[34,18,48]"}
+
+```{=latex}
+\endgroup
+```
+
+Fusion also reduces kernel launch overhead. Each CUDA kernel launch incurs microsecond-scale latency. In a graph with 50 fusible Conv-BN-ReLU triplets, unfused execution launches `{python} FusionCalc.kernels_unfused_str` kernels, while fused execution launches `{python} FusionCalc.kernels_fused_str` kernels, saving repeated launch overhead in addition to memory traffic.
+
+Fusion implementation spans the software stack, from framework-level pattern matching through compiler optimization such as Accelerated Linear Algebra (XLA), TVM, and TensorRT to runtime fusion that adapts to input shapes and hardware characteristics. The process becomes tractable when a framework can export or trace the relevant computation as a graph whose nodes are tensor operations and whose edges record data dependencies. A compiler can then match legal patterns such as Conv→BN→ReLU and rewrite them as fused operations while checking shapes, aliases, and numerical constraints. Dynamic control flow, in-place mutation, or unsupported operations can prevent that graph rewrite, so the exported plan must be inspected rather than assumed.
+
+::: {.column-margin .margin-pointer}
+↪ The register pressure and accelerator-specific constraints that bound how far kernels can be fused on GPUs and TPUs are developed in @sec-hardware-acceleration-performance-benefits-constraints-1b74.
+:::
+
+While operator fusion minimizes data movement between static pipeline stages, adaptive computation challenges the assumption that every input requires the full depth or width of the computational graph. By modulating active subnetworks based on input difficulty or runtime budgets, systems trade deterministic execution schedules for lower amortized latency and energy.
+
+## Efficiency Measurement {#sec-model-compression-efficiency-measurement-2424}
+
+@Sec-model-compression-architectural-efficiency-8dd3 traced the gap between a compression ratio on paper and the speedup a model actually realizes. That gap establishes an empirical measurement obligation. While INT8 reduces raw tensor payload by $4\times$ relative to FP32, latency speedups do not scale proportionately. Realized throughput depends on memory hierarchy constraints, arithmetic intensity, and target kernel implementations that nominal compression ratios cannot predict. Translating theoretical compression into realized speedup requires identifying which physical bottlenecks govern each model component, establishing multidimensional baselines on target hardware, and isolating how arithmetic reductions interact with system-level overhead.
+
+### Profiling and opportunity analysis {#sec-model-compression-profiling-opportunity-analysis-477f}
+
+Profiling decomposes model execution along the physical boundaries of the accelerator: memory capacity (SRAM, DRAM/HBM), memory bus bandwidth, and arithmetic throughput. Memory allocation divides into static footprint (weight tensors and persistent buffers) and dynamic allocation (activation tensors and KV caches during the forward pass). Static footprint dictates whether model parameters fit into fast on-chip memory or device DRAM without spilling across high-latency host-accelerator interconnects such as PCIe. Dynamic allocation dictates peak memory residency, bounding maximum batch size and serving concurrency. At the operator level, profiling measures theoretical operations (FLOPs) alongside wall-clock execution time. Because operators vary across orders of magnitude in arithmetic intensity ($I = \Operations/\DataVolume$), their execution bottlenecks diverge: sufficiently large matrix multiplications with high operand reuse can saturate execution units, whereas standalone low-intensity operators (such as layer normalization and elementwise activations) can spend much of their time streaming tensors, consuming wall-clock time disproportionate to their FLOP count.
+
+A profile of a Vision Transformer (ViT) on an edge accelerator illustrates this operational heterogeneity. Per token and layer, the multilayer perceptron (MLP) block costs about $8d^2$ multiply-accumulates against $4d^2$ for the query, key, value, and output projections. In a ViT-Base-sized model the MLP blocks therefore carry nearly two-thirds of FLOPs and the projections just under one-third, with the attention score and weighting products adding only a few percent at standard image resolution. Layer normalization inverts the picture: it contributes almost no FLOPs yet can claim a visible share of wall-clock latency, because it streams whole activation tensors with little arithmetic per byte. Profiling isolates the governing physical bottleneck for each component, dictating targeted optimizations rather than uniform compression: structured pruning of MLP hidden units relieves the compute-dominant blocks, operator fusion eliminates intermediate global memory round-trips for memory-bound normalization layers, and INT8 quantization shrinks the static footprint that the MLP and projection weights dominate.
+
+```{python}
+#| echo: false
+#| label: amdahl-compression-calc
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ AMDAHL CEILING FOR MODEL COMPRESSION
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: "FLOPs reduction != proportional speedup" warning callout in
+# │          @sec-model-compression-profiling-opportunity-analysis-477f.
+# │
+# │ Goal:    Bound end-to-end speedup when model inference is a minority of
+# │          total latency.
+# │ Show:    A 20 percent model-time fraction caps overall speedup at 1.25x.
+# │ How:     Apply Amdahl's Law with model_fraction as the accelerable share.
+# │
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim.fmt import fmt, check
+
+class AmdahlCompression:
+    # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
+    flops_reduction = 0.50
+    model_fraction = 0.20
+
+    # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
+    non_model_fraction = 1 - model_fraction
+    max_speedup = calc_amdahls_speedup(model_fraction, float("inf"))
+
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(0 < flops_reduction < 1, "FLOPs-reduction comparison should be a fractional optimization target.")
+    check(abs(max_speedup - 1.25) < 1e-12, "Amdahl example should yield 1.25x maximum speedup.")
+
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
+    flops_reduction_pct_str = fmt_percent(flops_reduction, precision=0, commas=False, style='prose')
+    model_fraction_pct_str = fmt_percent(model_fraction, precision=0, commas=False, style='prose')
+    non_model_pct_str = fmt_percent(non_model_fraction, precision=0, commas=False, style='prose')
+    max_speedup_mult_str = fmt_multiple(max_speedup, precision=2, commas=False)
+```
+
+::: {.column-margin}
+![](images/svg/vol1_model_compression_margin_004.svg){width="100%" fig-alt="A horizontal stacked bar has a narrow gray segment labeled Model 20 percent at the left and a wide blue segment labeled Other 80 percent filling the rest; a label above the right end reads max 1.25x."}
+
+*Compression hits an end-to-end ceiling once non-model work dominates the pipeline.*
+:::
+
+Translating layer-level profiling metrics into end-to-end system speedup requires accounting for the complete serving pipeline. In production serving systems, model execution frequently represents only a fraction of total latency, with the remainder consumed by image decoding, tokenization, RPC deserialization, or network transfer. As the margin diagram illustrates, optimizing the model in isolation encounters an Amdahl ceiling whenever non-model stages dominate the latency budget.
+
+::: {#psp-model-compression-flops-speedup .callout-perspective title="FLOPs reduction is not proportional speedup"}
+
+Reducing a model's FLOPs by `{python} AmdahlCompression.flops_reduction_pct_str` does not guarantee `{python} AmdahlCompression.flops_reduction_pct_str` latency reduction. Memory-bound operations see little benefit from arithmetic reduction because data movement, not multiplication, sets their time. Critically, Amdahl's law (principle \ref{pri-amdahl}) applies at the system level: if model inference accounts for only `{python} AmdahlCompression.model_fraction_pct_str` of end-to-end latency (with the remaining `{python} AmdahlCompression.non_model_pct_str` spent on data loading, preprocessing, and postprocessing), then even perfect model optimization yields at most `{python} AmdahlCompression.max_speedup_mult_str` overall speedup. Tokenization and network transfer can occupy the non-model fraction in language-model serving; image decoding, resizing, and normalization can do the same in vision pipelines. Profile the complete path on target hardware before estimating optimization benefits.
+
+:::
+
+Complementing latency and throughput profiles, layer-wise sensitivity analysis quantifies how individual layers tolerate perturbation. In deep networks, parameter distributions across different layers exhibit unequal robustness to precision reduction or weight elimination. Profiling accuracy degradation while systematically perturbing one layer at a time—evaluating quantization noise or weight-removal impact—identifies which components require high-precision representations and which can absorb aggressive 4-bit quantization or structured pruning without compromising task accuracy.
+
+### Measuring optimization effectiveness {#sec-model-compression-measuring-optimization-effectiveness-a3b2}
+
+Evaluating compression requires balancing statistical quality against physical execution costs across the Data, Algorithm, and Machine (D·A·M) axes. A single scalar metric—such as top-1 accuracy or parameter count—fails to capture deployment viability. Quality baselines must capture aggregate accuracy, confidence calibration (verifying that predicted probabilities reflect empirical correctness), and performance across underrepresented input slices. Simultaneously, efficiency baselines must record peak memory residency, latency distributions (including p99 tail latency), memory bus saturation, and per-inference energy.
+
+```{python}
+#| echo: false
+#| label: resnet50-int8-measurement-calc
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ RESNET-50 INT8 QUANTIZATION ILLUSTRATIVE METRICS
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @sec-model-compression-measuring-optimization-effectiveness-a3b2
+# │          baseline-vs-postquantization paragraph.
+# │
+# │ Goal:    Provide before/after values for an illustrative INT8 quantization
+# │          evaluation framework.
+# │ Show:    Accuracy drop, latency speedup, model-size reduction, and energy
+# │          scenario for ResNet-50 FP32 -> INT8 on V100, plus per-class
+# │          degradation, calibration error, and CPU contrast.
+# │ How:     Combine scenario inputs with modeled system values, then derive
+# │          drops and ratios.
+# │
+# └─────────────────────────────────────────────────────────────────────────────
+import warnings
+from mlsysim.fmt import (
+    check,
+    fmt_memory,
+    fmt_multiple,
+    fmt_percent,
+    fmt_pp,
+    fmt_energy,
+    fmt_time,
+)
+
+# ┌── LEGO ───────────────────────────────────────────────
+class ResNet50Int8Metrics:
+    # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
+    from mlsysim import Models, Hardware, Engine
+    from mlsysim.solvers import CompressionModel
+
+    m = Models.Vision.ResNet50
+    h = Hardware.Cloud.V100
+
+    # Scenario inputs, not measurements from a single benchmark run
+    fp32_top1 = 76.1
+    int8_top1 = 75.8
+    per_class_min_drop = 0.1
+    per_class_max_drop = 1.2
+    calibration_error_fp32 = 2.1
+    calibration_error_int8 = 3.4
+    cpu_speedup = 1.2
+
+    # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
+    # The V100 registry has only fp32 in precision_flops; the generic solver
+    # fallback makes this an illustrative model rather than a V100 benchmark.
+    # Suppress the fallback warning for FP32 base metrics.
+    _prev_filters = warnings.filters[:]
+    warnings.filterwarnings("ignore", message="Precision.*not in", category=UserWarning)
+    from mlsysim.solvers import SingleNodeModel
+
+    p_fp32 = SingleNodeModel().solve(m, h, batch_size=1, precision="fp32")
+    warnings.filters[:] = _prev_filters
+
+    # Use CompressionModel to construct an internally consistent INT8 scenario
+    c_int8 = CompressionModel().solve(m, h, method="quantization", target_bitwidth=8)
+
+    fp32_latency = p_fp32.latency
+    int8_latency = fp32_latency / c_int8.inference_speedup
+    fp32_size = p_fp32.memory_footprint
+    int8_size = fp32_size / c_int8.compression_ratio
+    fp32_energy = p_fp32.energy
+    int8_energy = fp32_energy / c_int8.inference_speedup
+
+    top1_drop = fp32_top1 - int8_top1
+    latency_speedup = (fp32_latency / int8_latency).to("").magnitude
+    size_reduction = (fp32_size / int8_size).to("").magnitude
+    energy_improvement = (fp32_energy / int8_energy).to("").magnitude
+
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(0 < top1_drop < 1, "INT8 accuracy drop should be sub-point.")
+    check(latency_speedup > 1.0, "INT8 should provide speedup over FP32.")
+    check(size_reduction > 3, "INT8 size reduction should be close to 4x.")
+    check(cpu_speedup < latency_speedup, "GPU INT8 speedup should exceed CPU speedup.")
+
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
+    fp32_top1_str = fmt_percent(fp32_top1 / 100, precision=1, commas=False, style='symbol')
+    fp32_top1_prose_str = fmt_percent(fp32_top1 / 100, precision=1, commas=False, style='prose')
+    int8_top1_str = fmt_percent(int8_top1 / 100, precision=1, commas=False, style='symbol')
+    int8_top1_prose_str = fmt_percent(int8_top1 / 100, precision=1, commas=False, style='prose')
+    fp32_latency_ms_str = fmt_time(fp32_latency, 'millisecond', precision=2, commas=False)
+    int8_latency_ms_str = fmt_time(int8_latency, 'millisecond', precision=2, commas=False)
+    fp32_size_mb_str = fmt_memory(fp32_size, unit=MB, precision=1, commas=False)
+    int8_size_mb_str = fmt_memory(int8_size, unit=MB, precision=1, commas=False)
+    fp32_energy_j_str = fmt_energy(fp32_energy, unit=joule, precision=2, commas=False)
+    int8_energy_j_str = fmt_energy(int8_energy, unit=joule, precision=2, commas=False)
+    calibration_error_fp32_str = fmt_percent(calibration_error_fp32 / 100, precision=1, commas=False, style='symbol')
+    calibration_error_fp32_prose_str = fmt_percent(calibration_error_fp32 / 100, precision=1, commas=False, style='prose')
+    calibration_error_int8_str = fmt_percent(calibration_error_int8 / 100, precision=1, commas=False, style='symbol')
+    calibration_error_int8_prose_str = fmt_percent(calibration_error_int8 / 100, precision=1, commas=False, style='prose')
+    top1_drop_pp_str = fmt_pp(top1_drop, precision=1, commas=False, style="symbol")
+    top1_drop_pp_prose_str = fmt_pp(top1_drop, precision=1, commas=False, style="prose")
+    size_reduction_mult_str = fmt_multiple(round(size_reduction), precision=0, commas=False)
+    energy_improvement_mult_str = fmt_multiple(round(energy_improvement), precision=0, commas=False)
+```
+
+::: {.column-margin}
+![](images/svg/model_compression_int8_beforeafter.svg){width="100%" fig-alt="Two strokes run from FP32 to INT8, each ending in a dot. The model-size stroke falls steeply and is labeled 4x smaller; the accuracy stroke is nearly horizontal and labeled ~same."}
+
+*An illustrative INT8 profile must validate both size and accuracy.*
+:::
+
+Quantizing ResNet-50 from FP32 to INT8 demonstrates how compression decisions ripple across physical and statistical dimensions. Rather than assessing INT8 conversion through an isolated accuracy metric, @tbl-resnet50-int8-profile presents a modeled deployment profile across compute, memory, energy, and statistical calibration. As illustrated in the margin diagram, validating compression requires confirming that artifact compression does not trigger unacceptable quality degradation.
+
+```{=latex}
+\begingroup
+%\renewcommand{\arraystretch}{1.3}
+```
+
+| **Metric**            | **FP32 baseline**                                         | **INT8 result**                                                                                               | **Deployment reading**                                                |
+|:----------------------|:----------------------------------------------------------|:--------------------------------------------------------------------------------------------------------------|:----------------------------------------------------------------------|
+| **Top-1 accuracy**    | `{python} ResNet50Int8Metrics.fp32_top1_str`              | `{python} ResNet50Int8Metrics.int8_top1_str` (`{python} ResNet50Int8Metrics.top1_drop_pp_str` drop)           | Aggregate accuracy mostly holds, but subgroup checks still matter.    |
+| **Modeled latency**   | `{python} ResNet50Int8Metrics.fp32_latency_ms_str`        | `{python} ResNet50Int8Metrics.int8_latency_ms_str`                                                            | GPU latency improves when the runtime maps INT8 to fast kernels.      |
+| **Model size**        | `{python} ResNet50Int8Metrics.fp32_size_mb_str`           | `{python} ResNet50Int8Metrics.int8_size_mb_str` (`{python} ResNet50Int8Metrics.size_reduction_mult_str`)      | The artifact becomes easier to cache, transmit, and deploy on edge.   |
+| **Energy/inference**  | `{python} ResNet50Int8Metrics.fp32_energy_j_str`          | `{python} ResNet50Int8Metrics.int8_energy_j_str` (`{python} ResNet50Int8Metrics.energy_improvement_mult_str`) | Lower precision reduces both arithmetic and memory-movement energy.   |
+| **Calibration error** | `{python} ResNet50Int8Metrics.calibration_error_fp32_str` | `{python} ResNet50Int8Metrics.calibration_error_int8_str`                                                     | Confidence calibration can drift even when accuracy looks acceptable. |
+
+: **Illustrative ResNet-50 INT8 Deployment Profile**: The values form a modeled scenario, not measurements from one hardware run. A real profile must measure accuracy, latency, artifact size, energy, and calibration on the target system. {#tbl-resnet50-int8-profile tbl-colwidths="[21,19,24,36]"}
+
+```{=latex}
+\endgroup
+```
+
+In this illustrative profile, converting weights and activations to INT8 reduces the model footprint by `{python} ResNet50Int8Metrics.size_reduction_mult_str` (from `{python} ResNet50Int8Metrics.fp32_size_mb_str` to `{python} ResNet50Int8Metrics.int8_size_mb_str`), while the scenario assigns a `{python} ResNet50Int8Metrics.energy_improvement_mult_str` reduction in per-inference energy. That energy gain is not implied by the footprint ratio alone. The latency scenario starts from a modeled V100 FP32 baseline of `{python} ResNet50Int8Metrics.fp32_latency_ms_str` and applies an illustrative speedup factor to obtain `{python} ResNet50Int8Metrics.int8_latency_ms_str`. While aggregate top-1 accuracy drops by only `{python} ResNet50Int8Metrics.top1_drop_pp_prose_str` (from `{python} ResNet50Int8Metrics.fp32_top1_prose_str` to `{python} ResNet50Int8Metrics.int8_top1_prose_str`), calibration error increases from `{python} ResNet50Int8Metrics.calibration_error_fp32_prose_str` to `{python} ResNet50Int8Metrics.calibration_error_int8_prose_str`. Post-quantization probability distributions drift, which can compromise safety-critical confidence thresholds even when top-1 classification accuracy appears preserved. Production deployment decisions require corresponding quality, latency, and energy measurements using a supported execution path on target hardware.
+
+Realizing these gains in production requires evaluating interactions among multiple compression techniques. Applying pruning, quantization, and knowledge distillation sequentially can produce non-additive gains or compound degradation; for example, uncalibrated weight quantization on an aggressively pruned sparse matrix can trigger catastrophic accuracy collapse. Evaluating these compounded trade-offs requires mapping models onto an efficiency-quality Pareto frontier. Executing this systematic profiling and multi-stage transformation pipeline in turn depends on automated software tooling that coordinates compilation, kernel generation, and hardware benchmarking.
+
+::: {#chk-model-compression-deployment-evidence .callout-checkpoint title="From compression claim to deployment evidence"}
+
+A compressed artifact must pass the same application requirements as its baseline.
+
+- [ ] **Footprint and feasibility**: distinguish raw weight size from peak runtime memory, including activations, caches, metadata, and workspace.
+- [ ] **Modeled and measured gains**: identify which claims in the ResNet-50 profile require target-hardware measurements, and explain why fewer FLOPs or bytes alone cannot establish latency.
+- [ ] **Quality and operating limits**: specify the accuracy, confidence calibration, tail-latency, sustained-power, and energy checks needed before accepting a candidate.
+
+:::
+
 ## Technique Selection {#sec-model-compression-technique-selection-ba16}
 
 Selecting compression techniques for production deployment requires identifying the binding physical constraint of the target execution environment. Consider a transformer deployment where model parameters exceed device memory by 3$\times$, inference latency exceeds the service-level objective by 4$\times$, and the thermal envelope restricts dissipation to no more than 2 W sustained. Deciding whether to quantize, prune, distill to a compact architecture, or compose multiple methods depends on which hardware boundary is saturated, the allowable task accuracy loss, and the available training budget.
@@ -6980,7 +7183,7 @@ The transformer scenario above makes INT4 weight-only quantization a candidate, 
 
 Validating that a chosen technique achieves its performance target requires systematic profiling and measurement on target silicon (@sec-model-compression-efficiency-measurement-2424). Real-world deployments rarely rely on an isolated optimization: combining pruning, quantization, and distillation introduces cross-layer interactions that require validating the chosen sequence.
 
-## Optimization Strategies {#sec-model-compression-optimization-strategies-f2f6}
+### Combined Optimization Strategies {#sec-model-compression-optimization-strategies-f2f6}
 
 ```{python}
 #| echo: false
@@ -7253,219 +7456,13 @@ The method comparison in @fig-compression-methods illustrates the separate quest
 
 A compounding footprint reduction on paper does not guarantee proportional execution speedups on hardware. Pruned dimensions can misalign with SIMD vector widths, and quantized tensors require supported hardware kernels to avoid dequantization overhead. Validating that a multi-stage optimization pipeline achieves its latency, memory, and energy targets requires systematic profiling and measurement on target silicon (@sec-model-compression-efficiency-measurement-2424).
 
-## Efficiency Measurement {#sec-model-compression-efficiency-measurement-2424}
-
-@Sec-model-compression-architectural-efficiency-8dd3 traced the gap between a compression ratio on paper and the speedup a model actually realizes. That gap establishes an empirical measurement obligation. While INT8 reduces raw tensor payload by $4\times$ relative to FP32, latency speedups do not scale proportionately. Realized throughput depends on memory hierarchy constraints, arithmetic intensity, and target kernel implementations that nominal compression ratios cannot predict. Translating theoretical compression into realized speedup requires identifying which physical bottlenecks govern each model component, establishing multidimensional baselines on target hardware, and isolating how arithmetic reductions interact with system-level overhead.
-
-### Profiling and opportunity analysis {#sec-model-compression-profiling-opportunity-analysis-477f}
-
-Profiling decomposes model execution along the physical boundaries of the accelerator: memory capacity (SRAM, DRAM/HBM), memory bus bandwidth, and arithmetic throughput. Memory allocation divides into static footprint (weight tensors and persistent buffers) and dynamic allocation (activation tensors and KV caches during the forward pass). Static footprint dictates whether model parameters fit into fast on-chip memory or device DRAM without spilling across high-latency host-accelerator interconnects such as PCIe. Dynamic allocation dictates peak memory residency, bounding maximum batch size and serving concurrency. At the operator level, profiling measures theoretical operations (FLOPs) alongside wall-clock execution time. Because operators vary across orders of magnitude in arithmetic intensity ($I = \Operations/\DataVolume$), their execution bottlenecks diverge: sufficiently large matrix multiplications with high operand reuse can saturate execution units, whereas standalone low-intensity operators (such as layer normalization and elementwise activations) can spend much of their time streaming tensors, consuming wall-clock time disproportionate to their FLOP count.
-
-A profile of a Vision Transformer (ViT) on an edge accelerator illustrates this operational heterogeneity. Per token and layer, the multilayer perceptron (MLP) block costs about $8d^2$ multiply-accumulates against $4d^2$ for the query, key, value, and output projections. In a ViT-Base-sized model the MLP blocks therefore carry nearly two-thirds of FLOPs and the projections just under one-third, with the attention score and weighting products adding only a few percent at standard image resolution. Layer normalization inverts the picture: it contributes almost no FLOPs yet can claim a visible share of wall-clock latency, because it streams whole activation tensors with little arithmetic per byte. Profiling isolates the governing physical bottleneck for each component, dictating targeted optimizations rather than uniform compression: structured pruning of MLP hidden units relieves the compute-dominant blocks, operator fusion eliminates intermediate global memory round-trips for memory-bound normalization layers, and INT8 quantization shrinks the static footprint that the MLP and projection weights dominate.
-
-```{python}
-#| echo: false
-#| label: amdahl-compression-calc
-# ┌─────────────────────────────────────────────────────────────────────────────
-# │ AMDAHL CEILING FOR MODEL COMPRESSION
-# ├─────────────────────────────────────────────────────────────────────────────
-# │ Context: "FLOPs reduction != proportional speedup" warning callout in
-# │          @sec-model-compression-profiling-opportunity-analysis-477f.
-# │
-# │ Goal:    Bound end-to-end speedup when model inference is a minority of
-# │          total latency.
-# │ Show:    A 20 percent model-time fraction caps overall speedup at 1.25x.
-# │ How:     Apply Amdahl's Law with model_fraction as the accelerable share.
-# │
-# └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import fmt, check
-
-class AmdahlCompression:
-    # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    flops_reduction = 0.50
-    model_fraction = 0.20
-
-    # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    non_model_fraction = 1 - model_fraction
-    max_speedup = calc_amdahls_speedup(model_fraction, float("inf"))
-
-    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
-    check(0 < flops_reduction < 1, "FLOPs-reduction comparison should be a fractional optimization target.")
-    check(abs(max_speedup - 1.25) < 1e-12, "Amdahl example should yield 1.25x maximum speedup.")
-
-    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
-    flops_reduction_pct_str = fmt_percent(flops_reduction, precision=0, commas=False, style='prose')
-    model_fraction_pct_str = fmt_percent(model_fraction, precision=0, commas=False, style='prose')
-    non_model_pct_str = fmt_percent(non_model_fraction, precision=0, commas=False, style='prose')
-    max_speedup_mult_str = fmt_multiple(max_speedup, precision=2, commas=False)
-```
-
-::: {.column-margin}
-![](images/svg/vol1_model_compression_margin_004.svg){width="100%" fig-alt="A horizontal stacked bar has a narrow gray segment labeled Model 20 percent at the left and a wide blue segment labeled Other 80 percent filling the rest; a label above the right end reads max 1.25x."}
-
-*Compression hits an end-to-end ceiling once non-model work dominates the pipeline.*
-:::
-
-Translating layer-level profiling metrics into end-to-end system speedup requires accounting for the complete serving pipeline. In production serving systems, model execution frequently represents only a fraction of total latency, with the remainder consumed by image decoding, tokenization, RPC deserialization, or network transfer. As the margin diagram illustrates, optimizing the model in isolation encounters an Amdahl ceiling whenever non-model stages dominate the latency budget.
-
-::: {#psp-model-compression-flops-speedup .callout-perspective title="FLOPs reduction is not proportional speedup"}
-
-Reducing a model's FLOPs by `{python} AmdahlCompression.flops_reduction_pct_str` does not guarantee `{python} AmdahlCompression.flops_reduction_pct_str` latency reduction. Memory-bound operations see little benefit from arithmetic reduction because data movement, not multiplication, sets their time. Critically, Amdahl's law (principle \ref{pri-amdahl}) applies at the system level: if model inference accounts for only `{python} AmdahlCompression.model_fraction_pct_str` of end-to-end latency (with the remaining `{python} AmdahlCompression.non_model_pct_str` spent on data loading, preprocessing, and postprocessing), then even perfect model optimization yields at most `{python} AmdahlCompression.max_speedup_mult_str` overall speedup. Tokenization and network transfer can occupy the non-model fraction in language-model serving; image decoding, resizing, and normalization can do the same in vision pipelines. Profile the complete path on target hardware before estimating optimization benefits.
-
-:::
-
-Complementing latency and throughput profiles, layer-wise sensitivity analysis quantifies how individual layers tolerate perturbation. In deep networks, parameter distributions across different layers exhibit unequal robustness to precision reduction or weight elimination. Profiling accuracy degradation while systematically perturbing one layer at a time—evaluating quantization noise or weight-removal impact—identifies which components require high-precision representations and which can absorb aggressive 4-bit quantization or structured pruning without compromising task accuracy.
-
-### Measuring optimization effectiveness {#sec-model-compression-measuring-optimization-effectiveness-a3b2}
-
-Evaluating compression requires balancing statistical quality against physical execution costs across the Data, Algorithm, and Machine (D·A·M) axes. A single scalar metric—such as top-1 accuracy or parameter count—fails to capture deployment viability. Quality baselines must capture aggregate accuracy, confidence calibration (verifying that predicted probabilities reflect empirical correctness), and performance across underrepresented input slices. Simultaneously, efficiency baselines must record peak memory residency, latency distributions (including p99 tail latency), memory bus saturation, and per-inference energy.
-
-```{python}
-#| echo: false
-#| label: resnet50-int8-measurement-calc
-# ┌─────────────────────────────────────────────────────────────────────────────
-# │ RESNET-50 INT8 QUANTIZATION ILLUSTRATIVE METRICS
-# ├─────────────────────────────────────────────────────────────────────────────
-# │ Context: @sec-model-compression-measuring-optimization-effectiveness-a3b2
-# │          baseline-vs-postquantization paragraph.
-# │
-# │ Goal:    Provide before/after values for an illustrative INT8 quantization
-# │          evaluation framework.
-# │ Show:    Accuracy drop, latency speedup, model-size reduction, and energy
-# │          scenario for ResNet-50 FP32 -> INT8 on V100, plus per-class
-# │          degradation, calibration error, and CPU contrast.
-# │ How:     Combine scenario inputs with modeled system values, then derive
-# │          drops and ratios.
-# │
-# └─────────────────────────────────────────────────────────────────────────────
-import warnings
-from mlsysim.fmt import (
-    check,
-    fmt_memory,
-    fmt_multiple,
-    fmt_percent,
-    fmt_pp,
-    fmt_energy,
-    fmt_time,
-)
-
-# ┌── LEGO ───────────────────────────────────────────────
-class ResNet50Int8Metrics:
-    # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    from mlsysim import Models, Hardware, Engine
-    from mlsysim.solvers import CompressionModel
-
-    m = Models.Vision.ResNet50
-    h = Hardware.Cloud.V100
-
-    # Scenario inputs, not measurements from a single benchmark run
-    fp32_top1 = 76.1
-    int8_top1 = 75.8
-    per_class_min_drop = 0.1
-    per_class_max_drop = 1.2
-    calibration_error_fp32 = 2.1
-    calibration_error_int8 = 3.4
-    cpu_speedup = 1.2
-
-    # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    # The V100 registry has only fp32 in precision_flops; the generic solver
-    # fallback makes this an illustrative model rather than a V100 benchmark.
-    # Suppress the fallback warning for FP32 base metrics.
-    _prev_filters = warnings.filters[:]
-    warnings.filterwarnings("ignore", message="Precision.*not in", category=UserWarning)
-    from mlsysim.solvers import SingleNodeModel
-
-    p_fp32 = SingleNodeModel().solve(m, h, batch_size=1, precision="fp32")
-    warnings.filters[:] = _prev_filters
-
-    # Use CompressionModel to construct an internally consistent INT8 scenario
-    c_int8 = CompressionModel().solve(m, h, method="quantization", target_bitwidth=8)
-
-    fp32_latency = p_fp32.latency
-    int8_latency = fp32_latency / c_int8.inference_speedup
-    fp32_size = p_fp32.memory_footprint
-    int8_size = fp32_size / c_int8.compression_ratio
-    fp32_energy = p_fp32.energy
-    int8_energy = fp32_energy / c_int8.inference_speedup
-
-    top1_drop = fp32_top1 - int8_top1
-    latency_speedup = (fp32_latency / int8_latency).to("").magnitude
-    size_reduction = (fp32_size / int8_size).to("").magnitude
-    energy_improvement = (fp32_energy / int8_energy).to("").magnitude
-
-    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
-    check(0 < top1_drop < 1, "INT8 accuracy drop should be sub-point.")
-    check(latency_speedup > 1.0, "INT8 should provide speedup over FP32.")
-    check(size_reduction > 3, "INT8 size reduction should be close to 4x.")
-    check(cpu_speedup < latency_speedup, "GPU INT8 speedup should exceed CPU speedup.")
-
-    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
-    fp32_top1_str = fmt_percent(fp32_top1 / 100, precision=1, commas=False, style='symbol')
-    fp32_top1_prose_str = fmt_percent(fp32_top1 / 100, precision=1, commas=False, style='prose')
-    int8_top1_str = fmt_percent(int8_top1 / 100, precision=1, commas=False, style='symbol')
-    int8_top1_prose_str = fmt_percent(int8_top1 / 100, precision=1, commas=False, style='prose')
-    fp32_latency_ms_str = fmt_time(fp32_latency, 'millisecond', precision=2, commas=False)
-    int8_latency_ms_str = fmt_time(int8_latency, 'millisecond', precision=2, commas=False)
-    fp32_size_mb_str = fmt_memory(fp32_size, unit=MB, precision=1, commas=False)
-    int8_size_mb_str = fmt_memory(int8_size, unit=MB, precision=1, commas=False)
-    fp32_energy_j_str = fmt_energy(fp32_energy, unit=joule, precision=2, commas=False)
-    int8_energy_j_str = fmt_energy(int8_energy, unit=joule, precision=2, commas=False)
-    calibration_error_fp32_str = fmt_percent(calibration_error_fp32 / 100, precision=1, commas=False, style='symbol')
-    calibration_error_fp32_prose_str = fmt_percent(calibration_error_fp32 / 100, precision=1, commas=False, style='prose')
-    calibration_error_int8_str = fmt_percent(calibration_error_int8 / 100, precision=1, commas=False, style='symbol')
-    calibration_error_int8_prose_str = fmt_percent(calibration_error_int8 / 100, precision=1, commas=False, style='prose')
-    top1_drop_pp_str = fmt_pp(top1_drop, precision=1, commas=False, style="symbol")
-    top1_drop_pp_prose_str = fmt_pp(top1_drop, precision=1, commas=False, style="prose")
-    size_reduction_mult_str = fmt_multiple(round(size_reduction), precision=0, commas=False)
-    energy_improvement_mult_str = fmt_multiple(round(energy_improvement), precision=0, commas=False)
-```
-
-::: {.column-margin}
-![](images/svg/model_compression_int8_beforeafter.svg){width="100%" fig-alt="Two strokes run from FP32 to INT8, each ending in a dot. The model-size stroke falls steeply and is labeled 4x smaller; the accuracy stroke is nearly horizontal and labeled ~same."}
-
-*An illustrative INT8 profile must validate both size and accuracy.*
-:::
-
-Quantizing ResNet-50 from FP32 to INT8 demonstrates how compression decisions ripple across physical and statistical dimensions. Rather than assessing INT8 conversion through an isolated accuracy metric, @tbl-resnet50-int8-profile presents a modeled deployment profile across compute, memory, energy, and statistical calibration. As illustrated in the margin diagram, validating compression requires confirming that artifact compression does not trigger unacceptable quality degradation.
-
-```{=latex}
-\begingroup
-%\renewcommand{\arraystretch}{1.3}
-```
-
-| **Metric**            | **FP32 baseline**                                         | **INT8 result**                                                                                               | **Deployment reading**                                                |
-|:----------------------|:----------------------------------------------------------|:--------------------------------------------------------------------------------------------------------------|:----------------------------------------------------------------------|
-| **Top-1 accuracy**    | `{python} ResNet50Int8Metrics.fp32_top1_str`              | `{python} ResNet50Int8Metrics.int8_top1_str` (`{python} ResNet50Int8Metrics.top1_drop_pp_str` drop)           | Aggregate accuracy mostly holds, but subgroup checks still matter.    |
-| **Modeled latency**   | `{python} ResNet50Int8Metrics.fp32_latency_ms_str`        | `{python} ResNet50Int8Metrics.int8_latency_ms_str`                                                            | GPU latency improves when the runtime maps INT8 to fast kernels.      |
-| **Model size**        | `{python} ResNet50Int8Metrics.fp32_size_mb_str`           | `{python} ResNet50Int8Metrics.int8_size_mb_str` (`{python} ResNet50Int8Metrics.size_reduction_mult_str`)      | The artifact becomes easier to cache, transmit, and deploy on edge.   |
-| **Energy/inference**  | `{python} ResNet50Int8Metrics.fp32_energy_j_str`          | `{python} ResNet50Int8Metrics.int8_energy_j_str` (`{python} ResNet50Int8Metrics.energy_improvement_mult_str`) | Lower precision reduces both arithmetic and memory-movement energy.   |
-| **Calibration error** | `{python} ResNet50Int8Metrics.calibration_error_fp32_str` | `{python} ResNet50Int8Metrics.calibration_error_int8_str`                                                     | Confidence calibration can drift even when accuracy looks acceptable. |
-
-: **Illustrative ResNet-50 INT8 Deployment Profile**: The values form a modeled scenario, not measurements from one hardware run. A real profile must measure accuracy, latency, artifact size, energy, and calibration on the target system. {#tbl-resnet50-int8-profile tbl-colwidths="[21,19,24,36]"}
-
-```{=latex}
-\endgroup
-```
-
-In this illustrative profile, converting weights and activations to INT8 reduces the model footprint by `{python} ResNet50Int8Metrics.size_reduction_mult_str` (from `{python} ResNet50Int8Metrics.fp32_size_mb_str` to `{python} ResNet50Int8Metrics.int8_size_mb_str`), while the scenario assigns a `{python} ResNet50Int8Metrics.energy_improvement_mult_str` reduction in per-inference energy. That energy gain is not implied by the footprint ratio alone. The latency scenario starts from a modeled V100 FP32 baseline of `{python} ResNet50Int8Metrics.fp32_latency_ms_str` and applies an illustrative speedup factor to obtain `{python} ResNet50Int8Metrics.int8_latency_ms_str`. While aggregate top-1 accuracy drops by only `{python} ResNet50Int8Metrics.top1_drop_pp_prose_str` (from `{python} ResNet50Int8Metrics.fp32_top1_prose_str` to `{python} ResNet50Int8Metrics.int8_top1_prose_str`), calibration error increases from `{python} ResNet50Int8Metrics.calibration_error_fp32_prose_str` to `{python} ResNet50Int8Metrics.calibration_error_int8_prose_str`. Post-quantization probability distributions drift, which can compromise safety-critical confidence thresholds even when top-1 classification accuracy appears preserved. Production deployment decisions require corresponding quality, latency, and energy measurements using a supported execution path on target hardware.
-
-Realizing these gains in production requires evaluating interactions among multiple compression techniques. Applying pruning, quantization, and knowledge distillation sequentially can produce non-additive gains or compound degradation; for example, uncalibrated weight quantization on an aggressively pruned sparse matrix can trigger catastrophic accuracy collapse. Evaluating these compounded trade-offs requires mapping models onto an efficiency-quality Pareto frontier. Executing this systematic profiling and multi-stage transformation pipeline in turn depends on automated software tooling that coordinates compilation, kernel generation, and hardware benchmarking.
-
-::: {#chk-model-compression-deployment-evidence .callout-checkpoint title="From compression claim to deployment evidence"}
-
-A compressed artifact must pass the same application requirements as its baseline.
-
-- [ ] **Footprint and feasibility**: distinguish raw weight size from peak runtime memory, including activations, caches, metadata, and workspace.
-- [ ] **Modeled and measured gains**: identify which claims in the ResNet-50 profile require target-hardware measurements, and explain why fewer FLOPs or bytes alone cannot establish latency.
-- [ ] **Quality and operating limits**: specify the accuracy, confidence calibration, tail-latency, sustained-power, and energy checks needed before accepting a candidate.
-
-:::
-
 ## Implementation Tools {#sec-model-compression-implementation-tools-4990}
 
 Quantizing a 175-billion-parameter model by hand requires modifying thousands of operator call sites to insert scale factors and track dynamic activation ranges. Without automated framework tooling, even uniform INT8 post-training quantization requires manually intercepting tensor lifecycles across the computation graph, while pruning requires maintaining sparsity masks alongside weight matrices. At scale, manual graph manipulation cannot guarantee autograd consistency during retraining or enforce the memory-alignment constraints required by accelerator hardware.
 
-Tool choice follows the layer of the software stack that owns the transformation. Framework APIs operate on the high-level computation graph during training and calibration, where the execution engine maintains visibility into weights, activations, and autograd state. At this stage, quantization is typically simulated: fake-quantization nodes clamp and round values within floating-point registers, modeling numerical precision loss while preserving differentiability. Simulating quantization does not itself establish a physical speedup. A compiler or runtime must lower the graph into supported kernels; frameworks may integrate that stage or export to a separate deployment engine. The runtime compiler fuses scale factor arithmetic directly into matrix-multiplication compute tiles and packs sparse weights into hardware-specific metadata layouts (such as 2:4 structured sparsity formats). This lowering eliminates round-trip memory transactions to HBM that would otherwise negate the benefits of reduced precision. Software infrastructure enforces this boundary, capturing the calibration data, pruning schedules, and operator fusions that generated the deployable binary rather than relying on untracked script modifications.
+Tool choice follows the layer of the software stack that owns the transformation. Framework APIs operate on the high-level computation graph during training and calibration, where the execution engine maintains visibility into weights, activations, and autograd state. At this stage, quantization is typically simulated: fake-quantization nodes clamp and round values within floating-point registers, modeling numerical precision loss while preserving differentiability.
+
+Simulating quantization does not itself establish a physical speedup. A compiler or runtime must lower the graph into supported kernels; frameworks may integrate that stage or export to a separate deployment engine. The runtime compiler fuses scale factor arithmetic directly into matrix-multiplication compute tiles and packs sparse weights into hardware-specific metadata layouts (such as 2:4 structured sparsity formats). This lowering eliminates round-trip memory transactions to HBM that would otherwise negate the benefits of reduced precision. Software infrastructure enforces this boundary, capturing the calibration data, pruning schedules, and operator fusions that generated the deployable binary rather than relying on untracked script modifications.
 
 Across this multi-stage pipeline, the operational imperative is reproducibility. Compressing a model alters its numerical representations across both the algorithm and machine layers of the D·A·M taxonomy. Unrecorded calibration inputs or mismatched rounding modes can degrade accuracy silently without raising runtime errors; the baseline requirement is that every deployed artifact must remain deterministically traceable from its source training checkpoint through its compiled hardware execution graph.
 

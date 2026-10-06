@@ -1,0 +1,210 @@
+### System implications {#sec-network-architectures-system-implications-6b63}
+
+The sliding window and im2col transformations described in @sec-network-architectures-computational-mapping-824c reveal *how* CNNs compute; this section reveals *what that computation costs* in memory, compute, and data movement. These costs depend on layer depth, activation liveness, and whether feature maps remain cached in SRAM or spill to HBM.
+
+```{python}
+#| echo: false
+#| label: cnn-system-implications
+
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ CNN SYSTEM IMPLICATIONS
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: Memory Requirements, Computation Needs, and Data Movement
+# │          subsections of §System Implications for CNNs
+# │
+# │ Goal: Derive weight counts, activation counts, and spatial positions
+# │       from architecture parameters so prose values stay consistent.
+# │ Show: 576 weights (3×3×1×64), 3.2M activations (224×224×64), 50,176 positions.
+# │ How:  Direct multiplication of kernel, channel, and spatial dimensions.
+# │
+# └─────────────────────────────────────────────────────────────────────────────
+
+from mlsysim.fmt import fmt_int, fmt, check
+
+# ┌── LEGO ───────────────────────────────────────────────
+class CNNSysImpl:
+    """
+    Namespace for CNN System Implications calculations.
+    Scenario: ImageNet (224×224) with 3×3 filters and 64 output channels.
+    """
+
+    # ┌── 1. LOAD (Constants) ───────────────────────────────────────────────
+    IMAGE_DIM_RESNET = Datasets.ImageNet.image_width
+    img_dim = IMAGE_DIM_RESNET  # 224
+    kernel_size = 3
+    c_out = 64  # output channels
+    c_in_single = 1  # single input channel (for weight illustration)
+
+    # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
+    # Step 1: Weight parameters for single input channel: K × K × C_in × C_out
+    weights_single_ch = kernel_size * kernel_size * c_in_single * c_out  # 576
+
+    # Step 2: Spatial positions in the output feature map
+    spatial_positions = img_dim * img_dim  # 50,176
+
+    # Step 3: Activation values: H × W × C_out
+    activations = img_dim * img_dim * c_out  # 3,211,264
+
+    # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
+    check(weights_single_ch == 576, f"Expected 576 weight params, got {weights_single_ch}")
+    check(spatial_positions == 50_176, f"Expected 50,176 spatial positions, got {spatial_positions}")
+    check(activations == 3_211_264, f"Expected 3,211,264 activations, got {activations}")
+
+    # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
+    weights_single_ch_str = fmt(weights_single_ch, precision=0, commas=True)
+    spatial_positions_str = fmt_count(spatial_positions, precision=0, commas=True)
+    activations_str = fmt_count(activations, scale="M", precision=1)  # "3.2M"
+```
+
+#### Memory requirements {#sec-network-architectures-memory-requirements-a1a1}
+
+Memory consumption in convolutional layers divides into two distinct state components: static filter parameters and transient feature maps (activations). Weight sharing ensures that parameter storage remains compact: for an ImageNet input, a convolutional layer with 64 filters of size $3{\times}3$ applied to a single input channel requires only `{python} CNNSysImpl.weights_single_ch_str` parameters. Even across 64 input channels, storing 36,864 weights requires roughly 147 KB in FP32, fitting comfortably within on-chip L2 or L1 cache. In contrast, intermediate feature maps scale with input resolution and channel depth: a $224{\times}224$ feature map with 64 channels materializes `{python} CNNSysImpl.activations_str` activation values (approximately 12.8 MB in FP32 per sample in the batch). During training, these activations must remain live in memory for backward-pass gradient evaluation, making activation memory—not weight capacity—the binding memory constraint for deep CNNs on accelerators.
+
+Accelerators exploit this footprint disparity through hierarchical caching. CPUs retain compact filter weights in L2/L3 caches while streaming activation tensors. GPUs stage filter weights and input tiles in on-chip scratchpad SRAM (shared memory) and register files, reusing loaded weights across thousands of spatial coordinates and eliminating redundant round-trips to off-chip HBM.
+
+::: {.column-margin .margin-pointer}
+↪ The memory hierarchy of register files, on-chip SRAM, and HBM that these caching patterns exploit is developed in @sec-hardware-acceleration-memory-hierarchy-1839.
+:::
+
+#### Computation needs {#sec-network-architectures-computation-needs-85cd}
+
+Evaluating a convolutional layer requires repeatedly evaluating local dot products across spatial positions. For an ImageNet input with $3{\times}3$ filters and 64 output channels, computing a single spatial position requires `{python} CNNSysImpl.weights_single_ch_str` multiply-accumulate operations per input channel. Repeating this evaluation across all `{python} CNNSysImpl.spatial_positions_str` spatial positions yields millions of operations per layer. Although each spatial stencil touches fewer parameters than a dense layer, spatial repetition multiplies the total floating-point operation count.
+
+This computational regularity provides rich opportunities for hardware parallelization. Because each spatial coordinate is independent, processors parallelize work along multiple axes simultaneously: across the batch dimension, across spatial coordinates $(x, y)$, and across output channels. CPUs execute vectorized SIMD instructions[^fn-simd-vector-instructions] to evaluate multiple spatial outputs per clock cycle, while GPUs dispatch thread warps across thousands of concurrent execution lanes.
+
+[^fn-simd-vector-instructions]: **SIMD (single instruction, multiple data)**\index{SIMD!CNN inference}: CPU instructions that apply the same operation to multiple data elements simultaneously; AVX-512 can process 16 single-precision values per vector instruction; realized speedup over scalar code also depends on instruction throughput, vectorization, and memory access. For CNN inference on edge CPUs without GPU access, SIMD utilization can affect whether a model meets real-time latency targets. Frameworks like TFLite and Open Neural Network Exchange (ONNX) Runtime use vectorized convolution kernels to exploit this parallelism. \index{SIMD!edge deployment}
+
+#### Data movement {#sec-network-architectures-data-movement-36f6}
+
+Data movement in a convolutional layer exhibits an arithmetic intensity profile fundamentally different from that of an MLP. In a fully connected layer at batch size one, each loaded weight is used exactly once, yielding an arithmetic intensity bounded below 1 FLOP/byte. In a 2D convolution, each $3{\times}3$ filter weight is reused across all `{python} CNNSysImpl.spatial_positions_str` positions of the $224{\times}224$ feature map. This massive weight reuse increases operational intensity, shifting computation from the memory-bandwidth-bound regime toward the compute-bound ceiling.
+
+The systems challenge shifts from loading weights to staging activations. Because adjacent spatial receptive fields overlap, a naive memory access pattern would re-fetch each input pixel from memory up to $K^2 = 9$ times. Runtimes avoid this redundant memory traffic by tiling computation into 2D spatial blocks sized to fit inside accelerator SRAM. Once an input tile is loaded into shared memory, all overlapping filter dot products for that tile execute in place, amortizing the DRAM/HBM transfer and maximizing the `{python} CNNSysImpl.spatial_positions_str` reuses of each filter weight.
+
+::: {.column-margin .margin-pointer}
+↪ The hardware ridge point ($I_{\text{ridge}}$), which decides whether spatial filter reuse saturates the arithmetic units or starves on memory bandwidth, is developed in @sec-hardware-acceleration-hardware-balance.
+:::
+
+```{python}
+#| echo: false
+#| label: cnn-lighthouse-profile-recap
+
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ CNN LIGHTHOUSE PROFILE RECAP
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: Local ResNet-50 and MobileNetV2 lighthouse profile callouts
+# │
+# │ Goal: Recompute the CNN lighthouse quantities used in the adjacent tables.
+# │ Scope: chapter-anchor — lighthouse callouts and chapter takeaway share these exports.
+# │ Show: ResNet-50 compute scale and MobileNetV2's smaller parameter/FLOP budget.
+# │ How: Retrieve local model specs from mlsysim and derive ratios.
+# │
+# └─────────────────────────────────────────────────────────────────────────────
+
+from mlsysim import Models
+from mlsysim.fmt import fmt_int, fmt, fmt_flops, fmt_params, check, fmt_percent
+
+# ┌── LEGO ───────────────────────────────────────────────
+class CNNLighthouseProfile:
+    """Local quantitative recap for ResNet-50 and MobileNetV2 profile tables."""
+
+    # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
+    resnet = Models.Vision.ResNet50
+    mobilenet = Models.Vision.MobileNetV2
+
+    # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
+    resnet_params_m = resnet.parameters.to(Mparam).magnitude
+    resnet_gflops = resnet.inference_flops.to(GFLOPs)
+    resnet_fp32 = resnet.size_in_bytes(BYTES_FP32)
+    mobilenet_params_m = mobilenet.parameters.to(Mparam).magnitude
+    mobilenet_flops = mobilenet.inference_flops
+    mobilenet_fp32 = mobilenet.size_in_bytes(BYTES_FP32)
+    mobilenet_size_ratio = resnet.parameters.to(param).magnitude / mobilenet.parameters.to(param).magnitude
+    mobilenet_flops_ratio = (resnet.inference_flops / mobilenet.inference_flops).to("").magnitude
+    resnet_3x3_macs_g = 1.850
+    resnet_total_macs_g = 3.858
+    resnet_3x3_share_pct = resnet_3x3_macs_g / resnet_total_macs_g * 100
+
+    # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
+    check(abs(resnet_gflops - 8.2 * GFLOPs) <= 0.1 * GFLOPs, f"Expected ResNet-50 around 8.2 GFLOPs, got {resnet_gflops.to(GFLOPs).magnitude:.1f}.")
+    check(
+        10 <= mobilenet_flops_ratio <= 20, f"Expected MobileNetV2 to use roughly an order of magnitude fewer FLOPs, got {mobilenet_flops_ratio:.1f}x."
+    )
+    check(45 <= resnet_3x3_share_pct <= 50, f"Expected 3x3 convolutions to be about half of ResNet-50 MACs, got {resnet_3x3_share_pct:.1f}%.")
+
+    # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
+    resnet_params_m_str = fmt_params(resnet.parameters, scale="M", precision=1, commas=False)
+    resnet_gflop_str = fmt_flops(resnet_gflops, unit=GFLOPs, precision=1)
+    resnet_fp32_mb_str = fmt_memory(resnet_fp32, unit=MB, precision=1, commas=True)
+    mobilenet_params_m_str = fmt_params(mobilenet.parameters, scale="M", precision=1, commas=False)
+    mobilenet_mflop_str = fmt_flops(mobilenet_flops, unit=MFLOPs, precision=0)
+    mobilenet_fp32_mb_str = fmt_memory(mobilenet_fp32, unit=MB, commas=True)
+    mobilenet_size_ratio_mult_str = fmt_multiple(mobilenet_size_ratio, precision=1, commas=True)
+    mobilenet_flops_ratio_mult_str = fmt_multiple(mobilenet_flops_ratio, precision=1, commas=True)
+    resnet_3x3_share_pct_str = fmt_percent(round(resnet_3x3_share_pct) / 100, precision=0, commas=False, style='symbol')
+```
+
+These memory, compute, and data-movement patterns converge in one model that serves as the chapter's reference point for compute-bound vision workloads: the ResNet-50 architecture.
+
+::: {#lhs-nn-architectures-resnet-50-vision-lighthouse .callout-lighthouse title="ResNet-50 (vision lighthouse)"}
+
+**Why it matters**: ResNet-50 is a reference point for regular, convolution-heavy vision workloads. Its architecture consists almost entirely of dense convolutional layers, making it highly regular and efficient on GPUs. Under batched execution with good data reuse, ResNet-50 performance is typically limited by floating-point throughput (FLOP/s), making it a useful lighthouse for explaining data parallelism, quantization, and batching strategies. @Tbl-nn-architectures-resnet50-profile summarizes the quantitative properties and their system consequences:
+
+```{=latex}
+\begingroup
+\renewcommand{\arraystretch}{1.2}
+```
+
+| **Property**    | **Value**                                                           | **System Implication**                                                                                                                     |
+|:----------------|:--------------------------------------------------------------------|:-------------------------------------------------------------------------------------------------------------------------------------------|
+| **Parameters**  | `{python} CNNLighthouseProfile.resnet_params_m_str`                 | `{python} CNNLighthouseProfile.resnet_fp32_mb_str` model size at FP32; fits comfortably in GPU memory.                                     |
+| **FLOPs/Image** | `{python} CNNLighthouseProfile.resnet_gflop_str` $(224{\times}224)$ | $3{\times}3$ convolutions are the largest single kernel class at roughly `{python} CNNLighthouseProfile.resnet_3x3_share_pct_str` of MACs. |
+| **Constraint**  | Compute-heavy when batched                                          | Limited by peak FLOP/s when weight and activation reuse are high; small-batch inference can move toward the memory-bound regime.           |
+| **Bottleneck**  | FP Throughput                                                       | Benefits maximally from specialized Matrix Units (Tensor Cores).                                                                           |
+| **Profile**     | High effective arithmetic intensity under reuse                     | Arithmetic intensity depends on batch size, convolution algorithm, and materialized memory traffic.                                        |
+
+: **ResNet-50 Systems Profile**: Quantitative properties of the vision lighthouse and their system consequences. Under batched convolutional reuse, ResNet-50 has high effective arithmetic intensity and is typically compute-bound, so peak FP throughput on Tensor Cores often sets the ceiling before memory bandwidth does. {#tbl-nn-architectures-resnet50-profile tbl-colwidths="[14,22,64]"}
+
+```{=latex}
+\endgroup
+\vspace*{-2ex}
+```
+:::
+
+ResNet-50's compute-bound profile assumes abundant hardware resources, yet most inference runs on devices with power budgets three orders of magnitude smaller than a data center GPU. MobileNetV2\index{MobileNetV2!latency-constrained deployment} demonstrates that architectural innovation can target this regime, achieving competitive accuracy with a fraction of the computational cost.
+
+::: {#lhs-nn-architectures-mobilenet-efficiency-lighthouse .callout-lighthouse title="MobileNetV2 (efficiency lighthouse)"}
+
+**Why it matters**: MobileNetV2 represents latency-constrained edge workloads. Its depthwise separable convolutions trade channel mixing capacity for speed, making it a useful baseline for mobile apps, embedded vision, and neural architecture search (NAS), automated search over model designs. @Tbl-nn-architectures-mobilenet-profile summarizes the efficiency lighthouse's quantitative properties:
+
+```{=latex}
+\begingroup
+\renewcommand{\arraystretch}{1.3}
+```
+
+| **Property**    | **Value**                                              | **System Implication**                                                                                                                               |
+|:----------------|:-------------------------------------------------------|:-----------------------------------------------------------------------------------------------------------------------------------------------------|
+| **Parameters**  | `{python} CNNLighthouseProfile.mobilenet_params_m_str` | `{python} CNNLighthouseProfile.mobilenet_fp32_mb_str` at FP32; `{python} CNNLighthouseProfile.mobilenet_size_ratio_mult_str` smaller than ResNet-50. |
+| **FLOPs/Image** | `{python} CNNLighthouseProfile.mobilenet_mflop_str`    | `{python} CNNLighthouseProfile.mobilenet_flops_ratio_mult_str` fewer than ResNet-50 for similar accuracy.                                            |
+| **Constraint**  | Latency Bound                                          | Single-image inference speed is the priority.                                                                                                        |
+| **Bottleneck**  | Overhead/Memory Access                                 | Operator dispatch and memory access can dominate actual compute.                                                                                     |
+| **Profile**     | Low Arithmetic Intensity                               | Memory access and control logic matter more than peak FLOP/s.                                                                                        |
+
+: **MobileNetV2 Systems Profile**: Quantitative properties of the efficiency lighthouse and their system consequences. Roughly an order of magnitude smaller than ResNet-50 in both parameters and FLOPs, MobileNetV2's operation shapes and arithmetic intensity make single-image latency sensitive to operator-dispatch overhead and memory access on mobile CPUs. {#tbl-nn-architectures-mobilenet-profile tbl-colwidths="[14,25,61]"}
+
+```{=latex}
+\endgroup
+```
+:::
+
+The ResNet-50 and MobileNetV2 profiles expose a critical systems trade-off: a model with `{python} CNNLighthouseProfile.mobilenet_flops_ratio_mult_str` fewer FLOPs does not automatically run `{python} CNNLighthouseProfile.mobilenet_flops_ratio_mult_str` faster. Whether operational reduction translates into wall-clock speedup depends on arithmetic intensity, operator dispatch overhead, and the hardware's roofline balance. On data center GPUs engineered for high arithmetic intensity, MobileNetV2 often achieves only a modest speedup because its fragmented depthwise operations underutilize tensor cores.
+
+Architectural efficiency techniques like depthwise separable convolutions and pruning (removing redundant weights or channels) alter this hardware mapping balance\index{Convolution!hardware optimization}. Perspective \ref{psp-nn-architectures-flops-speed} addresses the central fallacy linking FLOP counts directly to execution latency.
+
+::: {#psp-nn-architectures-flops-speed .callout-perspective title="Misconception: FLOPs equal speed"}
+
+**Fallacy**: "MobileNetV2 has `{python} CNNLighthouseProfile.mobilenet_flops_ratio_mult_str` fewer FLOPs than ResNet-50, so it must run `{python} CNNLighthouseProfile.mobilenet_flops_ratio_mult_str` faster."
+
+**Resolution**: On some high-end GPUs, MobileNetV2 can run slower than ResNet-50 despite using far fewer operations. MobileNetV2's depthwise separable convolutions have low arithmetic intensity: they move more data relative to computation. GPUs optimized for dense matrix operations may use their compute units poorly on these kernels. FLOPs measure *work*; throughput depends on how well that work *maps to hardware*. This hardware-architecture mismatch recurs as a general fallacy in @sec-network-architectures-fallacies-pitfalls-96b4.
+
+:::
+

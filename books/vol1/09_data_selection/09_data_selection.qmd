@@ -32,7 +32,11 @@ engine: jupyter
 
 _How can a carefully selected subset retain most of the value of a much larger dataset?_
 
-Training pays to acquire, label, score, move, and process examples even though their learning value differs. Large datasets contain redundant, noisy, or target-misaligned samples, while scarce regions may lack the cases a model needs, such as the rare conditions under which a deployed system is most likely to fail. Training on every example treats a near-duplicate and a rare failure case as equally worth paying for, and at scale much of the compute budget can go to relearning what the model already knows. Data selection turns that heterogeneity into a systems optimization. It can remove avoidable work before training, direct labels and training steps toward informative cases as learning proceeds, or create missing examples when scarcity is the binding constraint. It can also invest once in reusable representation learning when that cost can be amortized across downstream tasks. The objective is therefore not the smallest dataset but the lowest end-to-end cost of reaching target quality without losing rare cases, underrepresented groups, or deployment-relevant coverage. Every strategy adds its own overhead: examples must be scored, generated, shuffled, stored, or validated, and those costs can erase the savings they promise. That judgment must be made end to end, because gains in labeling or training can be erased by selection latency, storage access, or distributed coordination. A method earns its place only when the learning it preserves or creates exceeds the work required to apply it. This distinction matters across repeated experiments, where useful reductions compound, and across adaptation, where the value of an example changes with the model and target distribution. Data engineering established that data is the source code of ML systems; data selection asks which evidence is useful now and which is still missing. In D·A·M terms, it is data-algorithm co-design: shape the training signal so each unit of machine work buys more useful learning.
+Training pays to acquire, label, score, move, and process examples even though their learning value differs. Large datasets contain redundant, noisy, or target-misaligned samples, while scarce regions may lack the cases a model needs, such as the rare conditions under which a deployed system is most likely to fail. Training on every example treats a near-duplicate and a rare failure case as equally worth paying for, and at scale much of the compute budget can go to relearning what the model already knows.
+
+Data selection turns that heterogeneity into a systems optimization. It can remove avoidable work before training, direct labels and training steps toward informative cases as learning proceeds, or create missing examples when scarcity is the binding constraint. It can also invest once in reusable representation learning when that cost can be amortized across downstream tasks. The objective is therefore not the smallest dataset but the lowest end-to-end cost of reaching target quality without losing rare cases, underrepresented groups, or deployment-relevant coverage.
+
+Every strategy adds its own overhead: examples must be scored, generated, shuffled, stored, or validated, and those costs can erase the savings they promise. That judgment must be made end to end, because gains in labeling or training can be erased by selection latency, storage access, or distributed coordination. A method earns its place only when the learning it preserves or creates exceeds the work required to apply it. This distinction matters across repeated experiments, where useful reductions compound, and across adaptation, where the value of an example changes with the model and target distribution. Data engineering established that data is the source code of ML systems; data selection asks which evidence is useful now and which is still missing. In D·A·M terms, it is data-algorithm co-design: shape the training signal so each unit of machine work buys more useful learning.
 
 ::: {.content-visible when-format="pdf"}
 
@@ -1391,9 +1395,7 @@ Across these workloads, data selection functions as a systems optimization tailo
 
 :::
 
-Disciplined metrics separate genuine compute savings from deferred computational debt: a selection strategy must be evaluated against its stated objective, counting the overhead of scoring, filtering, and staging samples alongside training, labeling, or reuse savings at target quality. When teams optimize selection algorithms against isolated benchmarks rather than end-to-end pipeline constraints, intuitive heuristics frequently backfire—wasting cluster cycles on scoring overhead, destabilizing optimization trajectories, or silently corrupting downstream generalization. Examining these recurrent failure modes reveals how data selection breaks down in production and how systems engineers diagnose them before launching expensive training runs.
-
-::: {#chk-data-selection-acceptance-evidence .callout-checkpoint title="Accepting a data intervention"}
+Disciplined metrics separate genuine compute savings from deferred computational debt: a selection strategy must be evaluated against its stated objective, counting the overhead of scoring, filtering, and staging samples alongside training, labeling, or reuse savings at target quality. When teams optimize selection algorithms against isolated benchmarks rather than end-to-end pipeline constraints, intuitive heuristics frequently backfire—wasting cluster cycles on scoring overhead, destabilizing optimization trajectories, or silently corrupting downstream generalization. ::: {#chk-data-selection-acceptance-evidence .callout-checkpoint title="Accepting a data intervention"}
 
 A smaller training pool is one observation in the acceptance decision. Connect the measurements to the constraint the intervention was meant to relieve.
 
@@ -1481,6 +1483,52 @@ class QualityMultiplier:
 **Systems insight**: Under this harsher model, cleaning data acts as a `{python} QualityMultiplier.ratio_mult_str` compute multiplier. The milder effective-sample-size model above makes different assumptions, so a measured learning curve is needed to estimate the multiplier for a real workload.
 
 :::
+
+### Data deduplication {#sec-data-selection-data-deduplication-6c20}
+
+While coreset selection identifies which samples to keep based on their informativeness, a complementary approach targets duplicate samples that add compute without adding learning signal. Deduplication\index{Deduplication!data selection optimization} can provide immediate efficiency gains, especially for exact and near-duplicates, and requires no model training. This makes it one of the most accessible optimizations in data selection, but near-duplicate thresholds must be validated so the pipeline does not remove useful distributional signal.
+
+The simplest form of deduplication\index{Deduplication!hash-based, exact matching} uses hash-based methods for exact matches. By computing a cryptographic hash (MD5 or SHA-256) for each sample and removing those with identical hashes, practitioners can eliminate byte-for-byte duplicates that inevitably accumulate in large web-scraped corpora. This process is computationally cheap, scaling linearly with dataset size, and can be parallelized trivially.
+
+::: {.column-margin .margin-pointer}
+↩ Deduplication as a deterministic data-cleaning step that keeps training and serving pipelines consistent is established in @sec-data-engineering-ensuring-trainingserving-consistency-c683.
+:::
+
+Near-duplicate detection addresses content that differs at the byte level while retaining substantial token- or character-shingle overlap. For text, MinHash\index{MinHash!near-duplicate detection}[^fn-minhash-jaccard-dedup] with Locality-Sensitive Hashing\index{Locality-sensitive hashing!near-duplicate detection}[^fn-lsh-hashing-dedup] (LSH) approximates Jaccard similarity[^fn-jaccard-similarity-dedup] efficiently. In practice, the pipeline converts each document into a set of overlapping character or word $k$-shingles, compresses these sets into fixed-length MinHash signatures where the probability of hash collision equals Jaccard similarity, and partitions the signatures into $b$ bands of $r$ rows using LSH. Documents matching across all rows in any single band collide in the same bucket, restricting expensive similarity verification to likely candidates and avoiding an impossible $\mathcal{O}(\DatasetSize^2)$ all-pairs comparison across a corpus of $\DatasetSize$ web documents numbering in the billions. It can detect lightly edited content with high overlap, but it does not establish semantic paraphrase equivalence.
+
+[^fn-jaccard-similarity-dedup]: **Jaccard similarity**\index{Jaccard similarity!deduplication}: Defined as $|\mathcal{A} \cap \mathcal{B}| / |\mathcal{A} \cup \mathcal{B}|$ for two sets $\mathcal{A}$ and $\mathcal{B}$, ranging from 0 (disjoint) to 1 (identical). For deduplication, the metric compares sets of shingles across documents of different lengths. The threshold must be calibrated for the shingle definition, corpus, and downstream quality because no universal cutoff separates duplicates from legitimately related documents.
+
+[^fn-lsh-hashing-dedup]: **Locality-sensitive hashing (LSH)**\index{Locality-sensitive hashing!probabilistic bucketing}: Imagine sorting a massive library by reading the first sentence of a few random pages; if two books share the same sentences on those specific pages, they are thrown into the same sorting bin. LSH works exactly like this: it hashes MinHash signatures into buckets so that similar signatures are more likely to collide. Candidate generation avoids an exhaustive all-pairs comparison, while runtime and memory depend on signature width, banding, bucket sizes, and the number of candidates that require verification.
+
+[^fn-minhash-jaccard-dedup]: **MinHash**\index{MinHash!signature compression}: Invented by @broder1997resemblance to detect duplicate web pages for AltaVista, the algorithm creates compact signatures using random hash functions such that similar documents produce similar signatures with high probability. Each signature compresses a document to a fixed-size sketch, enabling pairwise similarity estimation in $\mathcal{O}(s)$ time for sketch size $s$.
+
+For images, perceptual hashing\index{Perceptual hashing!image deduplication} produces signatures robust to minor transformations like resizing and compression, identifying visually similar candidates stored in different formats. Embedding-based similarity\index{Deduplication!embedding-based} can retrieve semantic near-neighbor candidates by computing dense representations (CLIP[^fn-clip-embedding-dedup] [@radford2021learning] for images, sentence transformers for text), though proximity does not itself prove duplication and the approach incurs higher computational overhead.
+
+[^fn-clip-embedding-dedup]: **CLIP (Contrastive Language-Image Pretraining)**\index{Contrastive Language-Image Pretraining!semantic deduplication}\index{CLIP|see{Contrastive Language-Image Pretraining}}: Pretrained on 400 million image-text pairs, CLIP maps semantically related images and text into a shared embedding space [@radford2021learning]. Embeddings can retrieve candidates for review, but semantic proximity is not proof that two samples are duplicates. Generating embeddings also costs substantially more than computing perceptual hashes, with the ratio depending on model and hardware.
+
+Deduplication can reduce repeated-content memorization and avoid spending FLOPs on exact or near duplicates. It can also alter the corpus's intentional empirical weighting, so thresholds and downstream quality must be validated rather than assuming that every duplicate is harmful.
+
+The systems impact of deduplication shifts when input examples index persistent model state rather than streaming through stateless compute layers.
+
+::: {#lhs-data-selection-dlrm-embedding-deduplication .callout-lighthouse title="DLRM and embedding deduplication"}
+
+The DLRM lighthouse model is memory capacity-bound, and at production scale its embedding tables reach terabytes of storage for billions of user/item IDs. Much of this capacity is wasted on *cold embeddings*, IDs that appear rarely in training data.
+
+Data selection for DLRM can include interaction deduplication\index{Interaction deduplication} and embedding pruning\index{Embedding pruning} for cold IDs. Removing repeated interactions reduces training examples but shrinks an embedding table only when IDs disappear or the allocation, hashing, or sharing policy changes.
+
+:::
+
+### Data pruning by quality {#sec-data-selection-data-pruning-quality-3d69}
+
+Deduplication removes redundant samples, but a third category of problematic data remains: samples that actively harm learning. Quality-based pruning\index{Pruning!quality, label error detection} eliminates samples that either contribute no meaningful signal or introduce contradictory information that confuses the optimization process.
+
+Label error detection can be a high-impact form of quality pruning. Tools like Cleanlab\index{Cleanlab!label error detection} identify samples where the assigned label may be incorrect based on model confidence patterns across training. A sample that the model consistently predicts as class A but is labeled class B may be a hard boundary case, a distribution shift, a model blind spot, or an annotation mistake. The score should trigger review rather than automatic deletion; confirmed errors can then be corrected or removed.
+
+Outlier removal\index{Pruning!outlier removal} addresses a different pathology: samples far from any cluster center in feature space. Such points can indicate noise, annotation errors, or corruption, but they can also be the rare edge cases that define deployment risk. The key is distinguishing informative outliers from invalid samples, with conservative thresholds and slice-level review before removal.
+
+Low-information filtering\index{Pruning!low-information filtering} applies domain-specific heuristics to remove samples that lack sufficient signal for learning. For text corpora, this often means removing high-perplexity\index{Perplexity!filtering, low-information text removal} garbled text (perplexity is a language model's measure of how surprising a text is, so high values can flag incoherent strings but also valid specialist or rare-language text) and, in some pipelines, low-perplexity boilerplate or repetitive text. For image datasets, filtering targets blurry, corrupted, or near-uniform samples that provide little visual information.
+
+Beyond heuristics and perplexity, industrial pretraining pipelines rely heavily on *classifier-based filtering*: training a lightweight, high-throughput linear classifier (such as fastText) using curated, high-quality reference text (e.g., Wikipedia, books, and scientific papers) as positive examples and uncurated web dumps as negative examples. This classifier assigns each scraped document a continuous quality score, allowing pipelines to filter out millions of low-quality web pages at gigabyte-per-second ingestion speeds without the heavy computational burden of evaluating a full neural language model.
 
 ### Coreset selection algorithms {#sec-data-selection-coreset-selection-algorithms-2c74}
 
@@ -1691,53 +1739,7 @@ train_full_model(model, coreset)
 
 :::
 
-### Data deduplication {#sec-data-selection-data-deduplication-6c20}
-
-While coreset selection identifies which samples to keep based on their informativeness, a complementary approach targets duplicate samples that add compute without adding learning signal. Deduplication\index{Deduplication!data selection optimization} can provide immediate efficiency gains, especially for exact and near-duplicates, and requires no model training. This makes it one of the most accessible optimizations in data selection, but near-duplicate thresholds must be validated so the pipeline does not remove useful distributional signal.
-
-The simplest form of deduplication\index{Deduplication!hash-based, exact matching} uses hash-based methods for exact matches. By computing a cryptographic hash (MD5 or SHA-256) for each sample and removing those with identical hashes, practitioners can eliminate byte-for-byte duplicates that inevitably accumulate in large web-scraped corpora. This process is computationally cheap, scaling linearly with dataset size, and can be parallelized trivially.
-
-::: {.column-margin .margin-pointer}
-↩ Deduplication as a deterministic data-cleaning step that keeps training and serving pipelines consistent is established in @sec-data-engineering-ensuring-trainingserving-consistency-c683.
-:::
-
-Near-duplicate detection addresses content that differs at the byte level while retaining substantial token- or character-shingle overlap. For text, MinHash\index{MinHash!near-duplicate detection}[^fn-minhash-jaccard-dedup] with Locality-Sensitive Hashing\index{Locality-sensitive hashing!near-duplicate detection}[^fn-lsh-hashing-dedup] (LSH) approximates Jaccard similarity[^fn-jaccard-similarity-dedup] efficiently. In practice, the pipeline converts each document into a set of overlapping character or word $k$-shingles, compresses these sets into fixed-length MinHash signatures where the probability of hash collision equals Jaccard similarity, and partitions the signatures into $b$ bands of $r$ rows using LSH. Documents matching across all rows in any single band collide in the same bucket, restricting expensive similarity verification to likely candidates and avoiding an impossible $\mathcal{O}(\DatasetSize^2)$ all-pairs comparison across a corpus of $\DatasetSize$ web documents numbering in the billions. It can detect lightly edited content with high overlap, but it does not establish semantic paraphrase equivalence.
-
-[^fn-jaccard-similarity-dedup]: **Jaccard similarity**\index{Jaccard similarity!deduplication}: Defined as $|\mathcal{A} \cap \mathcal{B}| / |\mathcal{A} \cup \mathcal{B}|$ for two sets $\mathcal{A}$ and $\mathcal{B}$, ranging from 0 (disjoint) to 1 (identical). For deduplication, the metric compares sets of shingles across documents of different lengths. The threshold must be calibrated for the shingle definition, corpus, and downstream quality because no universal cutoff separates duplicates from legitimately related documents.
-
-[^fn-lsh-hashing-dedup]: **Locality-sensitive hashing (LSH)**\index{Locality-sensitive hashing!probabilistic bucketing}: LSH hashes MinHash signatures into buckets so that similar signatures are more likely to collide. Candidate generation avoids an exhaustive all-pairs comparison, while runtime and memory depend on signature width, banding, bucket sizes, and the number of candidates that require verification.
-
-[^fn-minhash-jaccard-dedup]: **MinHash**\index{MinHash!signature compression}: Invented by @broder1997resemblance to detect duplicate web pages for AltaVista, the algorithm creates compact signatures using random hash functions such that similar documents produce similar signatures with high probability. Each signature compresses a document to a fixed-size sketch, enabling pairwise similarity estimation in $\mathcal{O}(s)$ time for sketch size $s$.
-
-For images, perceptual hashing\index{Perceptual hashing!image deduplication} produces signatures robust to minor transformations like resizing and compression, identifying visually similar candidates stored in different formats. Embedding-based similarity\index{Deduplication!embedding-based} can retrieve semantic near-neighbor candidates by computing dense representations (CLIP[^fn-clip-embedding-dedup] [@radford2021learning] for images, sentence transformers for text), though proximity does not itself prove duplication and the approach incurs higher computational overhead.
-
-[^fn-clip-embedding-dedup]: **CLIP (Contrastive Language-Image Pretraining)**\index{Contrastive Language-Image Pretraining!semantic deduplication}\index{CLIP|see{Contrastive Language-Image Pretraining}}: Pretrained on 400 million image-text pairs, CLIP maps semantically related images and text into a shared embedding space [@radford2021learning]. Embeddings can retrieve candidates for review, but semantic proximity is not proof that two samples are duplicates. Generating embeddings also costs substantially more than computing perceptual hashes, with the ratio depending on model and hardware.
-
-Deduplication can reduce repeated-content memorization and avoid spending FLOPs on exact or near duplicates. It can also alter the corpus's intentional empirical weighting, so thresholds and downstream quality must be validated rather than assuming that every duplicate is harmful.
-
-The systems impact of deduplication shifts when input examples index persistent model state rather than streaming through stateless compute layers.
-
-::: {#lhs-data-selection-dlrm-embedding-deduplication .callout-lighthouse title="DLRM and embedding deduplication"}
-
-The DLRM lighthouse model is memory capacity-bound, and at production scale its embedding tables reach terabytes of storage for billions of user/item IDs. Much of this capacity is wasted on *cold embeddings*, IDs that appear rarely in training data.
-
-Data selection for DLRM can include interaction deduplication\index{Interaction deduplication} and embedding pruning\index{Embedding pruning} for cold IDs. Removing repeated interactions reduces training examples but shrinks an embedding table only when IDs disappear or the allocation, hashing, or sharing policy changes.
-
-:::
-
-### Data pruning by quality {#sec-data-selection-data-pruning-quality-3d69}
-
-Deduplication removes redundant samples, but a third category of problematic data remains: samples that actively harm learning. Quality-based pruning\index{Pruning!quality, label error detection} eliminates samples that either contribute no meaningful signal or introduce contradictory information that confuses the optimization process.
-
-Label error detection can be a high-impact form of quality pruning. Tools like Cleanlab\index{Cleanlab!label error detection} identify samples where the assigned label may be incorrect based on model confidence patterns across training. A sample that the model consistently predicts as class A but is labeled class B may be a hard boundary case, a distribution shift, a model blind spot, or an annotation mistake. The score should trigger review rather than automatic deletion; confirmed errors can then be corrected or removed.
-
-Outlier removal\index{Pruning!outlier removal} addresses a different pathology: samples far from any cluster center in feature space. Such points can indicate noise, annotation errors, or corruption, but they can also be the rare edge cases that define deployment risk. The key is distinguishing informative outliers from invalid samples, with conservative thresholds and slice-level review before removal.
-
-Low-information filtering\index{Pruning!low-information filtering} applies domain-specific heuristics to remove samples that lack sufficient signal for learning. For text corpora, this often means removing high-perplexity\index{Perplexity!filtering, low-information text removal} garbled text (perplexity is a language model's measure of how surprising a text is, so high values can flag incoherent strings but also valid specialist or rare-language text) and, in some pipelines, low-perplexity boilerplate or repetitive text. For image datasets, filtering targets blurry, corrupted, or near-uniform samples that provide little visual information.
-
-Beyond heuristics and perplexity, industrial pretraining pipelines rely heavily on *classifier-based filtering*: training a lightweight, high-throughput linear classifier (such as fastText) using curated, high-quality reference text (e.g., Wikipedia, books, and scientific papers) as positive examples and uncurated web dumps as negative examples. This classifier assigns each scraped document a continuous quality score, allowing pipelines to filter out millions of low-quality web pages at gigabyte-per-second ingestion speeds without the heavy computational burden of evaluating a full neural language model.
-
-Together, these three static pruning techniques (coreset selection, deduplication, and quality filtering) shrink $O$ before training begins, subject to the same fixed-schedule caveat as before. A schedule that adds compensating epochs or steps gives back part of the saving.
+Together, these three static pruning techniques (deduplication, quality filtering, and coreset selection) shrink $O$ before training begins, subject to the same fixed-schedule caveat as before. A schedule that adds compensating epochs or steps gives back part of the saving.
 
 Static pruning answers a question about *what* to keep, but it treats the answer as fixed. Once the pruned dataset is set, every epoch trains on the same subset. A sample's usefulness, however, can change as the model learns: examples that challenge an undertrained model may become easy after sufficient gradient updates. Dynamic selection techniques address this limitation by adapting the training data at each stage based on what the model has already mastered.
 
@@ -2406,17 +2408,19 @@ Consider an illustrative medical-imaging scenario with `{python} ClinicalLabelin
 
 The core insight behind semi-supervised learning is that unlabeled data, while it cannot directly teach the mapping from inputs to outputs, contains structural information about the input distribution $\Distribution$ that can constrain the hypothesis space. Under smoothness and cluster assumptions, a decision boundary that cuts through a dense region assigns different labels to nearby inputs and is less plausible than one in a low-density region. Semi-supervised methods exploit these assumptions, which must be checked against the target task.
 
-Three techniques implement this distribution-regularization insight. Pseudo-labeling\index{Pseudo-labeling!semi-supervised technique}[^fn-pseudo-labeling-ssl] trains on the labeled subset, generates model predictions on the unlabeled pool, and incorporates samples exceeding a confidence threshold as synthetic ground truth for subsequent retraining. The confidence threshold governs a critical systems trade-off: setting it too low admits label noise that degrades learning, while setting it too high discards informative examples and wastes the unlabeled pool. Confident mistakes can survive either threshold, so confidence must be checked against labeled validation evidence rather than treated as proof of correctness.
+When an engineer faces a labeling crisis—such as a sudden domain shift where only a handful of new examples can be annotated before the model must deploy—these assumptions dictate which technique to choose. Three techniques implement this distribution-regularization insight, each suited to a different operational bottleneck.
+
+**Pseudo-labeling**\index{Pseudo-labeling!semi-supervised technique}[^fn-pseudo-labeling-ssl] is the choice when the model is already well-calibrated and compute is cheap. It trains on the labeled subset, generates model predictions on the unlabeled pool, and incorporates samples exceeding a confidence threshold as synthetic ground truth for subsequent retraining. The confidence threshold governs a critical systems trade-off: setting it too low admits label noise that degrades learning, while setting it too high discards informative examples and wastes the unlabeled pool. Confident mistakes can survive either threshold, so confidence must be checked against labeled validation evidence rather than treated as proof of correctness.
 
 [^fn-pseudo-labeling-ssl]: **Pseudo-labeling**\index{Pseudo-labeling!semi-supervised learning}: Uses a trained model's own confident predictions as ground-truth labels for unlabeled data; the technique's effectiveness depends on a virtuous cycle\index{Virtuous cycle!definition}: accurate predictions on easy unlabeled examples expand the training set, improving the model, which enables accurate predictions on harder examples. The failure mode is equally self-reinforcing: incorrect pseudo-labels reinforce errors through *confirmation bias*\index{Pseudo-labeling!confirmation bias}, causing the model to reinforce its own misclassifications.
 
-Consistency regularization\index{Consistency regularization!semi-supervised technique}[^fn-consistency-reg-ssl] enforces that the model produce invariant predictions across perturbed versions of the same input. When transformations such as cropping, rotation, or color shifts preserve the task label, the loss function penalizes prediction divergence between two stochastic views of an unlabeled sample. Hybrid approaches like FixMatch\index{Semi-supervised learning!consistency plus pseudo-labeling}[^fn-fixmatch-semi-supervised] unify both mechanisms: they generate a pseudo-label on a weakly augmented view when prediction confidence exceeds a threshold, then train the model to predict that label on a strongly augmented variant of the same input.
+**Consistency regularization**\index{Consistency regularization!semi-supervised technique}[^fn-consistency-reg-ssl] is the choice when domain knowledge provides strong, label-preserving transformations, allowing the pipeline to squeeze signal out of unlabeled data by enforcing invariance. It enforces that the model produce invariant predictions across perturbed versions of the same input. When transformations such as cropping, rotation, or color shifts preserve the task label, the loss function penalizes prediction divergence between two stochastic views of an unlabeled sample. Hybrid approaches like FixMatch\index{Semi-supervised learning!consistency plus pseudo-labeling}[^fn-fixmatch-semi-supervised] unify both mechanisms: they generate a pseudo-label on a weakly augmented view when prediction confidence exceeds a threshold, then train the model to predict that label on a strongly augmented variant of the same input.
 
 [^fn-consistency-reg-ssl]: **Consistency regularization**\index{Consistency regularization!compute trade-off}: Rooted in a task-dependent smoothness assumption: if two inputs $x_1$ and $x_2$ are related by a label-preserving perturbation, their predictions should agree; the training objective minimizes divergence between a model's predictions on an input and its augmented version. This is conceptually distinct from data augmentation (which creates more training examples) because it explicitly enforces prediction consistency as a loss term, even for unlabeled data where the "correct" label is unknown. The systems consequence is additional computation for generating and comparing predictions under multiple perturbations, a trade-off that can favor compute-rich, label-poor settings.
 
 [^fn-fixmatch-semi-supervised]: **FixMatch**\index{FixMatch!label-compute trade-off}: It generates a pseudo-label using a weakly augmented image and then trains the model to predict that same label for a strongly augmented version of the image. This consistency training is gated by a confidence threshold; a pseudo-label is only used if the model's prediction on the weak augmentation is highly confident (for example, >0.95) [@sohn2020fixmatch]. This embodies a direct systems trade-off between additional training compute and fewer manual labels; the magnitude depends on the baseline and cost model.
 
-Label propagation\index{Label propagation!graph-based semi-supervised} frames semi-supervised learning as graph diffusion: it constructs an affinity graph over sample representations and propagates labels from labeled nodes to unlabeled neighbors. This approach works well when representations form well-separated clusters, though constructing and querying the similarity graph across large datasets introduces substantial memory and nearest-neighbor search overhead.
+**Label propagation**\index{Label propagation!graph-based semi-supervised} is the choice when representations form distinct, well-separated clusters, allowing labels to flow across dense regions without repetitive forward passes. It frames semi-supervised learning as graph diffusion: it constructs an affinity graph over sample representations and propagates labels from labeled nodes to unlabeled neighbors. This approach works well when representations form well-separated clusters, though constructing and querying the similarity graph across large datasets introduces substantial memory and nearest-neighbor search overhead.
 
 ```{python}
 #| echo: false
@@ -2565,169 +2569,6 @@ Labels are one form of supervision; a pretext task can also derive a learning si
 
 : **Self-Supervised Pretext Tasks by Modality**: Each task extracts supervision from data structure rather than human labels, enabling pretraining on large-scale unlabeled corpora. {#tbl-self-supervised-tasks .striped .hover tbl-colwidths="[30,30,40]"}
 
-### The economics of amortization {#sec-data-selection-economics-amortization-98bb}
-
-The centrality of self-supervised learning to foundation-model workflows stems directly from cost amortization\index{Cost amortization!self-supervised pretraining}. A foundation model is a broadly pretrained reusable base model adapted to downstream tasks through fine-tuning. This architecture divides costs into two phases: an expensive upfront pretraining investment executed once on unlabeled data, and lightweight task-specific adaptations reused across many applications (@tbl-cost-amortization).
-
-| **Approach**                   | **Labels per Task** | **Compute per Task**  |     **Data Acquisition** |
-|:-------------------------------|:--------------------|:----------------------|-------------------------:|
-| **Train from scratch**         | 100K–1M labeled     | 100% full training    | Task-specific collection |
-| **Fine-tune foundation model** | 100–1K labeled      | 1–5% of full training | Reuse pretraining corpus |
-
-: **Illustrative Foundation-Model Amortization**: The label and compute ranges are scenario assumptions. They illustrate why reuse can lower marginal task cost when representations transfer, not a universal fine-tuning ratio. {#tbl-cost-amortization .striped .hover}
-
-```{python}
-#| echo: false
-#| label: foundation-cost-calc
-
-# ┌─────────────────────────────────────────────────────────────────────────────
-# │ FOUNDATION MODEL COST AMORTIZATION
-# ├─────────────────────────────────────────────────────────────────────────────
-# │ Context: "Economics of Amortization" section and @tbl-cost-amortization
-# │
-# │ Goal: Demonstrate the economic shift toward foundation models.
-# │ Show: That fine-tuning yields a 100× label reduction and 20× marginal compute drop.
-# │ How: Contrast total costs for 10 tasks trained from scratch vs. fine-tuned.
-# │
-# └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.core.units import USD, count, hour
-from mlsysim.fmt import fmt_percent, fmt, fmt_count, fmt_usd, check
-
-class FoundationCostAmortization:
-    """Foundation model amortization: 10 tasks, 100× label reduction, 20× marginal compute drop."""
-
-    # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    scratch_compute_per_task = 1000 * hour  # scenario assumption: GPU-hours per task
-    task_count = 10  # number of tasks
-    pretrain_compute = 10000 * hour  # scenario assumption: one-time GPU-hours
-    finetune_compute_per_task = 50 * hour  # scenario assumption: GPU-hours per task
-    labels_per_task_scratch = 100_000 * count  # scenario assumption: labels from scratch
-    cost_per_label = 1 * (USD / count)  # scenario assumption: label price
-    labels_per_task_finetune = 1_000 * count  # scenario assumption: labels for fine-tuning
-
-    # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    scratch_compute_total = scratch_compute_per_task * task_count
-    foundation_compute_total = pretrain_compute + (finetune_compute_per_task * task_count)
-
-    label_cost_scratch_total = labels_per_task_scratch * cost_per_label * task_count
-    label_cost_finetune_total = labels_per_task_finetune * cost_per_label * task_count
-
-    label_cost_reduction = label_cost_scratch_total / label_cost_finetune_total
-    marginal_compute_reduction = (scratch_compute_per_task / finetune_compute_per_task).to("").magnitude
-    crossover_tasks_value = (pretrain_compute / (scratch_compute_per_task - finetune_compute_per_task)).to("").magnitude
-
-    # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
-    check(label_cost_reduction > 1.0, "Fine-tuning must require fewer labels than scratch training.")
-    check(marginal_compute_reduction > 1.0, "Fine-tuning marginal compute must be less than scratch training.")
-    check(abs(crossover_tasks_value - 10.53) < 0.1, f"Expected ~10.5 crossover tasks, got {crossover_tasks_value:.2f}")
-
-    # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
-    n_tasks_str = fmt(task_count, precision=0, commas=False)
-    cost_per_label_str = fmt_usd(cost_per_label.to(USD / count).magnitude, precision=0, commas=False)
-    labels_per_task_scratch_str = fmt_count(labels_per_task_scratch, precision=0, commas=True)
-    # Currency prefix + M/K suffixes use fmt() prefix/suffix discipline.
-    label_cost_scratch_total_str = fmt_usd(label_cost_scratch_total, precision=0, commas=False, scale="M")
-    cost_scratch_per_task_str = fmt_count(
-        scratch_compute_per_task.to(hour).magnitude, precision=0, commas=True, label="GPU-hour", plural_label="GPU-hours"
-    )
-    cost_scratch_total_str = fmt_count(scratch_compute_total.to(hour).magnitude, precision=0, commas=True, label="GPU-hour", plural_label="GPU-hours")
-    cost_foundation_total_str = fmt_count(
-        foundation_compute_total.to(hour).magnitude, precision=0, commas=True, label="GPU-hour", plural_label="GPU-hours"
-    )
-    labels_per_task_finetune_str = fmt_count(labels_per_task_finetune, precision=0, commas=True)
-    label_cost_finetune_total_str = fmt_usd(label_cost_finetune_total, precision=0, commas=False, scale="K")
-    cost_finetune_value_str = fmt_count(
-        finetune_compute_per_task.to(hour).magnitude, precision=0, commas=True, label="GPU-hour", plural_label="GPU-hours"
-    )
-    cost_pretrain_value_str = fmt_count(pretrain_compute.to(hour).magnitude, precision=0, commas=True, label="GPU-hour", plural_label="GPU-hours")
-    marginal_compute_reduction_mult_str = fmt_multiple(marginal_compute_reduction, precision=0, commas=False)
-    crossover_tasks_str = fmt(crossover_tasks_value, precision=1, commas=False)
-    label_cost_reduction_factor_mult_str = fmt_multiple(label_cost_reduction, precision=0, commas=True)
-```
-
-To illustrate this economic transformation, consider a company building `{python} FoundationCostAmortization.n_tasks_str` specialized classifiers. Under the scenario assumptions, each task trained from scratch needs `{python} FoundationCostAmortization.labels_per_task_scratch_str` labels at `{python} FoundationCostAmortization.cost_per_label_str` per label, for `{python} FoundationCostAmortization.label_cost_scratch_total_str` across all tasks. The modeled compute burden is `{python} FoundationCostAmortization.cost_scratch_total_str`.
-
-The fine-tuning scenario pays `{python} FoundationCostAmortization.cost_pretrain_value_str` once, then assigns `{python} FoundationCostAmortization.labels_per_task_finetune_str` labels and `{python} FoundationCostAmortization.cost_finetune_value_str` of compute to each task. Across all `{python} FoundationCostAmortization.n_tasks_str` tasks, the modeled fine-tuning labels cost `{python} FoundationCostAmortization.label_cost_finetune_total_str`.
-
-Under these inputs, labeling cost drops by `{python} FoundationCostAmortization.label_cost_reduction_factor_mult_str` and per-task marginal compute by `{python} FoundationCostAmortization.marginal_compute_reduction_mult_str`. These are consequences of the chosen scenario values, while total compute becomes favorable only after enough downstream tasks amortize pretraining.
-
-Fine-tuning becomes economical when representations transfer effectively and downstream task count exceeds the break-even threshold. The side-by-side bar charts in @fig-amortization-comparison contrast the cost structures across ten downstream tasks: training from scratch expends a constant 1,000 GPU-hours per task (totaling 10,000 GPU-hours), whereas the foundation model approach absorbs a 10,000 GPU-hour pretraining bar upfront but collapses subsequent task fine-tuning to just 50 GPU-hours per bar.
-
-::: {#fig-amortization-comparison fig-env="figure" fig-pos="htb" fig-cap="**Cost Amortization in Foundation Models**: Training from scratch (left) requires `{python} FoundationCostAmortization.cost_scratch_per_task_str` per task (`{python} FoundationCostAmortization.cost_scratch_total_str` total for `{python} FoundationCostAmortization.n_tasks_str` tasks). The foundation model approach (right) pays `{python} FoundationCostAmortization.cost_pretrain_value_str` upfront for pretraining but reduces each subsequent task to just `{python} FoundationCostAmortization.cost_finetune_value_str`. At `{python} FoundationCostAmortization.n_tasks_str` tasks the totals are comparable (`{python} FoundationCostAmortization.cost_scratch_total_str` vs. `{python} FoundationCostAmortization.cost_foundation_total_str`), but the per-task marginal cost drops by `{python} FoundationCostAmortization.marginal_compute_reduction_mult_str`, and the crossover favoring the foundation model occurs around `{python} FoundationCostAmortization.crossover_tasks_str` tasks. The plotted `{python} FoundationCostAmortization.n_tasks_str`-task snapshot therefore remains just below that break-even point." fig-alt="Two bar charts side by side. Left (train from scratch) shows equal per-task GPU-hour bars totaling the scratch-training cost. Right (foundation model) shows one tall pretraining bar followed by short fine-tuning bars per task."}
-
-```{python}
-#| echo: false
-
-# ┌─────────────────────────────────────────────────────────────────────────────
-# │ COST AMORTIZATION COMPARISON (FIGURE)
-# ├─────────────────────────────────────────────────────────────────────────────
-# │ Context: @fig-amortization-comparison—foundation model cost structure
-# │
-# │ Goal: Contrast train-from-scratch (10×1,000 hrs) vs foundation model
-# │       (10,000 upfront + 10×50 fine-tune); show crossover at ~11 tasks.
-# │ Show: Side-by-side bar charts; total labels; 20× per-task marginal drop.
-# │ How: matplotlib subplots; stacked/grouped bars; book_style.set_book_style().
-# │
-# └─────────────────────────────────────────────────────────────────────────────
-# ┌── 1. CANVAS ────────────────────────────────────────────────────────────────
-# │ Contrast train-from-scratch (10×1,000 hrs) vs foundation model
-import numpy as np
-import matplotlib.pyplot as plt
-from binder.tools.figures import style as book_style
-
-# ┌── 2. ARRAYS ────────────────────────────────────────────────────────────────
-book_style.set_book_style()
-COLORS = book_style.COLORS
-fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(10, 4.1))
-
-tasks = np.arange(1, 11)
-
-# Left: Train from Scratch
-ax1.bar(tasks, [1] * 10, color=COLORS['RedL'], edgecolor=COLORS['RedLine'], linewidth=0.8, width=0.6)
-ax1.set_title('Train from Scratch', fontweight='bold', fontsize=11)
-ax1.set_xlabel('Task Number')
-ax1.set_ylabel('Cost (1000 GPU-hours)')
-ax1.set_ylim(0, 12)
-ax1.set_xticks(tasks)
-ax1.set_yticks([0, 2, 4, 6, 8, 10])
-ax1.spines['top'].set_visible(False)
-ax1.spines['right'].set_visible(False)
-ax1.grid(False)
-ax1.text(5.5, 11, 'Total: 10,000 GPU-hours', ha='center', fontsize=9, fontweight='bold', color=COLORS['RedLine'])
-
-# Right: Foundation Model
-
-# ┌── 3. RENDER ────────────────────────────────────────────────────────────────
-fm_tasks = np.arange(0, 11)
-fm_labels = ['Pre'] + [str(i) for i in range(1, 11)]
-pre_train = [10] + [0] * 10
-fine_tune = [0] + [0.05] * 10
-
-ax2.bar(fm_tasks, pre_train, color=COLORS['BlueL'], edgecolor=COLORS['BlueLine'], linewidth=0.8, width=0.6, label='Pre-training')
-ax2.bar(fm_tasks, fine_tune, bottom=pre_train, color=COLORS['GreenL'], edgecolor=COLORS['GreenLine'], linewidth=0.8, width=0.6, label='Fine-tuning')
-ax2.set_title('Foundation Model', fontweight='bold', fontsize=11)
-ax2.set_xlabel('Task Number')
-ax2.set_ylim(0, 12)
-ax2.set_xticks(fm_tasks)
-ax2.set_xticklabels(fm_labels)
-ax2.set_yticks([0, 2, 4, 6, 8, 10])
-ax2.spines['top'].set_visible(False)
-ax2.spines['right'].set_visible(False)
-ax2.grid(False)
-ax2.legend(loc='upper right', fontsize=8, frameon=True, facecolor='white', framealpha=0.95, edgecolor='gray', fancybox=True, borderpad=0.6)
-ax2.text(5.5, 11, 'Total: 10,500 GPU-hours', ha='center', fontsize=9, fontweight='bold', color=COLORS['BlueLine'])
-
-plt.tight_layout()
-plt.show()
-plt.close()
-
-# ┌── 4. DECORATE ──────────────────────────────────────────────────────────────
-```
-
-:::
-
-### Foundation model paradigm {#sec-data-selection-foundation-model-paradigm-f0f1}
-
 When its pretraining cost is reused across tasks, SSL supports the **foundation model paradigm**\index{Foundation model!definition}\index{Self-supervised learning!foundation model paradigm}[^fn-foundation-model-risk] [@bommasani2021opportunities]. The core data selection principles—coreset selection, curriculum learning, and active learning—remain essential within this paradigm. Pretraining corpus curation applies deduplication and quality filtering at web scale, while downstream selection dictates which fine-tuning examples maximize task-specific transfer.
 
 ::: {.column-margin}
@@ -2750,7 +2591,15 @@ Real-world data collection encounters physical and legal boundaries: autonomous 
 
 Data augmentation\index{Data augmentation!definition} is the lowest-overhead form of synthetic generation: it expands the effective training distribution by transforming existing samples dynamically during ingestion. Because label-preserving transformations generate novel inputs without expanding durable storage, augmentation multiplies dataset diversity with zero additional data acquisition cost. In an accelerator-based training pipeline, however, augmentation shifts the computational bottleneck between the host CPU and the accelerator. When executed on host CPU worker threads, intensive decoding and spatial transformations can saturate host cores, starving the accelerator across the PCIe bus. Offloading transformations directly to accelerator kernels can relieve CPU preprocessing pressure, while inputs still cross the host-to-device link. It consumes HBM and compute cycles that would otherwise perform gradient updates.
 
-For image data, transformation pipelines encode task-valid invariances required at deployment [@shorten2019]. Geometric operations (rotation, horizontal flipping, random cropping, and scaling) encourage viewpoint invariance when they preserve the target label, while photometric adjustments (brightness, contrast, and color jitter) simulate sensor noise and varying illumination. More aggressive strategies alter input topology directly: Cutout\index{Cutout!image augmentation}[^fn-cutout-data-augmentation] applies random rectangular zero-masks to prevent reliance on localized features; MixUp\index{MixUp!image augmentation} [@zhang2018mixup] constructs virtual samples by taking linear combinations of image pairs and their one-hot labels ($\tilde{x} = \lambda_{\text{mix}} x_i + (1 - \lambda_{\text{mix}}) x_j$, with mixing weight $\lambda_{\text{mix}} \in [0, 1]$); and CutMix\index{CutMix!image augmentation}[^fn-cutmix-data-augmentation] pastes rectangular patches from one image into another while blending labels proportionally to the patch area. Because CutMix and MixUp operate via tensor linear combinations and block memory copies directly in device memory, they provide strong data-space regularization with negligible FLOP overhead.
+For image data, transformation pipelines encode task-valid invariances required at deployment [@shorten2019]:
+
+- **Geometric operations**: Rotation, horizontal flipping, random cropping, and scaling encourage viewpoint invariance when they preserve the target label.
+- **Photometric adjustments**: Brightness, contrast, and color jitter simulate sensor noise and varying illumination.
+- **Topology alterations**: More aggressive strategies alter input topology directly. Cutout\index{Cutout!image augmentation}[^fn-cutout-data-augmentation] applies random rectangular zero-masks to prevent reliance on localized features.
+- **MixUp**\index{MixUp!image augmentation}: [@zhang2018mixup] constructs virtual samples by taking linear combinations of image pairs and their one-hot labels ($\tilde{x} = \lambda_{\text{mix}} x_i + (1 - \lambda_{\text{mix}}) x_j$, with mixing weight $\lambda_{\text{mix}} \in [0, 1]$).
+- **CutMix**\index{CutMix!image augmentation}[^fn-cutmix-data-augmentation]: Pastes rectangular patches from one image into another while blending labels proportionally to the patch area.
+
+Because CutMix and MixUp operate via tensor linear combinations and block memory copies directly in device memory, they provide strong data-space regularization with negligible FLOP overhead.
 
 [^fn-cutout-data-augmentation]: **Cutout**\index{Cutout!augmentation efficiency}: Randomly masks square regions of input images during training, forcing the model to recognize objects from partial information rather than relying on any single discriminative region [@devries2017cutout]. Unlike dropout (which zeroes neurons in feature space), Cutout operates in input space. The original Cutout experiments produced 0.3--2.0 percentage-point gains across CIFAR-10/100 and SVHN with negligible compute overhead, making it a high-ICR augmentation technique when occlusion-style invariance matches the task: more information per sample at near-zero additional cost to the pipeline.
 
@@ -2781,6 +2630,7 @@ Augmentation perturbs existing training points within their local neighborhoods.
 1. Generative Adversarial Networks (GANs)\index{GAN!synthetic data generation} train a generator against a discriminator. Once trained, feed-forward generator inference requires a single forward pass, providing low latency and high sample throughput. However, GAN training is vulnerable to mode collapse, which suppresses the tail variety required for robust edge-case coverage.
 2. Diffusion models\index{Diffusion model!text-to-image synthesis} formulate synthesis as iterative denoising across a parameterized Markov chain or continuous score-based process. Latent diffusion systems such as Stable Diffusion[^fn-stable-diffusion-synthesis] enable precise semantic conditioning from text prompts while operating in a compressed latent space. A sampling recipe with 20 to 50 sequential denoising steps runs the backbone repeatedly for each generated batch. Its arithmetic and memory traffic can make offline generation preferable; whether on-the-fly generation is feasible depends on the sampler, generator, and available resources.
 3. Physical simulation engines (such as CARLA for autonomous driving or Isaac Sim and Unity for robotics) decouple data generation from neural inference entirely, executing rigid-body physics, kinematics, and graphics rendering pipelines. Simulators produce exact ground-truth annotations (including 3D bounding boxes, depth maps, and velocity vectors) from internal state without human labeling cost. The systems bottleneck shifts to host CPU physics computation and GPU graphics rasterization or ray tracing throughput.
+4. Knowledge Distillation\index{Knowledge distillation!synthetic generation} transfers the capabilities of a massive, heavily parameterized teacher model into a smaller, deployment-ready student model. Instead of training the student solely on one-hot ground truth labels, it learns from the teacher's soft probability outputs (the logits). This exposes the student to "dark knowledge"—the subtle, structural relationships between classes (e.g., that a car looks more like a truck than a dog) encoded in the teacher's confident predictions, enriching the learning signal per sample far beyond what sparse labels provide.
 
 [^fn-stable-diffusion-synthesis]: **Stable Diffusion**\index{Stable Diffusion!generation cost}: Performs iterative denoising in a compressed latent space, enabling targeted text-to-image examples [@rombach2022]. Its iterative generation is substantially more compute-intensive than geometric transforms, so it fits cases where novelty matters more than per-sample throughput.
 
@@ -3393,346 +3243,6 @@ These implementation patterns determine whether data selection yields net system
 
 Yet operational feasibility does not guarantee economic viability. A deduplication infrastructure that costs \$50K to engineer but saves only \$10K across an entire training campaign yields a net loss. Deploying selection techniques requires rigorous financial accounting of capital, compute, and human annotation budgets.
 
-## Cost Modeling {#sec-data-selection-cost-modeling-9b02}
-
-Allocating capital between human annotation and accelerator compute is a primary systems decision in large-scale machine learning. A team operating under a fixed engineering budget must determine whether purchasing 100,000 specialist annotations or leasing an additional 64-GPU cluster yields greater downstream accuracy. Systematic cost modeling\index{Cost modeling!data selection economics} establishes the quantitative framework required to navigate these trade-offs, calculating break-even points for active learning pipelines and determining how many training runs are required to amortize custom data curation tooling.
-
-### Quantifying data costs and ROI {#sec-data-selection-quantifying-data-costs-roi-f0b4}
-
-The total cost of training data\index{Total cost of data!formula} spans acquisition, labeling, storage retention, and accelerator compute, extending well beyond object-storage invoices:
-$$
-C_{\text{total}} = C_{\text{acquire}} + C_{\text{label}} + C_{\text{store}} + C_{\text{process}}
-$$
-Labeling ($C_{\text{label}}$) represents the expenditure that data selection targets most directly, whereas storage ($C_{\text{store}}$) and processing ($C_{\text{process}}$) scale mechanically with retained byte volume and the number of accelerator passes. @Tbl-cost-components itemizes these four cost components alongside their operational drivers.
-
-```{=latex}
-\begingroup
-\renewcommand{\arraystretch}{1.25}
-```
-
-| **Component**            |                                 **Formula**                                  |                        **Illustrative Range** |
-|:-------------------------|:----------------------------------------------------------------------------:|----------------------------------------------:|
-| **$C_{\text{acquire}}$** |                         $D \times c_{\text{sample}}$                         | \$0.001–\$10/sample (web scrape vs. licensed) |
-| **$C_{\text{label}}$**   |                 $D_{\text{labeled}} \times c_{\text{label}}$                 |        \$0.01–\$200/sample (crowd vs. expert) |
-| **$C_{\text{store}}$**   |  $D_{\text{vol,store}} \times c_{\text{storage}} \times T_{\text{months}}$   |                        \$0.02–\$0.10/GB/month |
-| **$C_{\text{process}}$** | $D \times N_{\text{epochs}} \times O_{\text{sample}} \times c_{\text{FLOP}}$ |                Proportional to training FLOPs |
-
-: **Total Cost of Training Data**: The four cost components span the full data lifecycle. Here $\DatasetSize$ is the total sample count, $D_{\text{labeled}}$ is the labeled subset, $D_{\text{vol,store}}$ is stored byte volume, $T_{\text{months}}$ is retention time, $N_{\text{epochs}}$ is the number of training passes, and $\Operations_{\text{sample}}$ is per-sample training work. The ranges are scenario anchors rather than universal market prices. {#tbl-cost-components .striped .hover tbl-colwidths="[25,30,45]"}
-
-```{=latex}
-\endgroup
-```
-
-The interplay of these four cost terms becomes concrete when evaluating an ImageNet-scale vision model training run.
-
-```{python}
-#| echo: false
-#| label: cost-breakdown-calc
-
-# ┌─────────────────────────────────────────────────────────────────────────────
-# │ TRAINING COST BREAKDOWN
-# ├─────────────────────────────────────────────────────────────────────────────
-# │ Context: "Cost Breakdown: ImageNet-Scale Training" callout
-# │
-# │ Goal: Demonstrate that data costs often exceed compute costs.
-# │ How: Calculate total costs for raw data, labeling, storage, and training.
-# │
-# └─────────────────────────────────────────────────────────────────────────────
-from mlsysim import Infrastructure
-from mlsysim.core.units import GB, USD, count, hour, ureg
-from mlsysim.fmt import fmt_percent, fmt_usd, check, fmt_count, fmt_time, fmt_memory
-
-class CostBreakdown:
-    """ImageNet-scale cost breakdown: data (~83%) still leads compute (~17%) once the
-    whole training campaign, not a single run, is priced."""
-
-    # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    raw_data_cost = 50000 * USD  # scenario assumption: licensed dataset
-    label_count = 1_200_000 * count  # scenario assumption: images to label
-    cost_per_label = Infrastructure.Pricing.Labeling.CrowdHigh.rate / count
-    storage_rate = Infrastructure.Pricing.Storage.S3StandardLowPerTbMonth.rate
-    gpu_rate = Infrastructure.Pricing.Cloud.GpuTrainingPerHour.rate
-    storage_size = 150 * GB  # scenario assumption: retained training data
-    storage_duration = 12 * ureg.month  # scenario assumption: retention time
-    train_epoch_count = 100
-    train_gpu_count = 8  # scenario assumption: 8-GPU training job
-    train_duration = 24 * hour  # scenario assumption: runtime of ONE run
-    # The dataset is paid for once; the accelerators are not. A published model
-    # is the survivor of a campaign of hyperparameter sweeps, restarts, and
-    # ablations, so pricing a single run understates compute by that factor.
-    # 30 is a deliberately conservative campaign size for this scenario.
-    train_run_count = 30  # scenario assumption: runs in the training campaign
-
-    # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    label_cost = label_count * cost_per_label
-    storage_cost = (storage_size * storage_rate * storage_duration).to(USD)
-    train_gpu_hours_per_run = train_gpu_count * train_duration
-    train_gpu_hours = train_gpu_hours_per_run * train_run_count
-    train_compute_cost = (train_gpu_hours * gpu_rate).to(USD)
-    total_cost = raw_data_cost + label_cost + storage_cost + train_compute_cost
-
-    p_data = (raw_data_cost + label_cost + storage_cost) / total_cost
-    p_compute = train_compute_cost / total_cost
-
-    # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
-    check(p_data > p_compute, "Data costs must dominate compute costs in this scenario.")
-    check(abs((p_data + p_compute).to("").magnitude - 1.0) < 0.001, "Data + compute percentages must sum to 100%.")
-    # Every Amount in the table must be reproducible from the operands printed
-    # beside it, so each derived cost is checked against its published rate.
-    check(
-        abs(storage_cost.to(USD).magnitude - 36.0) < 1e-9,
-        f"Storage should be 150 GB x $0.02/GB/month x 12 months = $36, got {storage_cost.to(USD).magnitude:.2f}.",
-    )
-    check(
-        abs(train_compute_cost.to(USD).magnitude - 23_040.0) < 1e-9,
-        f"Training should be 30 runs x 192 GPU-hours x $4.00/h = $23,040, " f"got {train_compute_cost.to(USD).magnitude:.2f}.",
-    )
-    check(
-        abs(label_cost.to(USD).magnitude - 60_000.0) < 1e-9,
-        f"Labels should be 1.2M x $0.05 = $60,000, got {label_cost.to(USD).magnitude:.2f}.",
-    )
-
-    # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
-    c_raw_usd_str = fmt_usd(raw_data_cost, precision=0)
-    c_label_usd_str = fmt_usd(label_cost, precision=0)
-    c_store_usd_str = fmt_usd(storage_cost, precision=0, commas=False)
-    c_train_usd_str = fmt_usd(train_compute_cost, precision=0)
-    train_run_count_str = fmt_count(train_run_count, label="run")
-    c_total_usd_str = fmt_usd(total_cost, precision=0)
-    p_data_str = fmt_percent(p_data, precision=1, commas=False, style='symbol')
-    p_compute_str = fmt_percent(p_compute, precision=1, commas=False, style='symbol')
-    n_labels_str = fmt_count(label_count, scale='M', precision=1)
-    cb_cost_per_label_str = fmt_usd(cost_per_label.to(USD / count).magnitude, precision=2, commas=False, per="label")
-    storage_size_str = fmt_memory(storage_size, unit=GB, precision=0, commas=False)
-    storage_duration_str = fmt_time(storage_duration, ureg.month, precision=0, commas=False, style="word")
-    cb_storage_rate_str = fmt_usd(storage_rate.to(USD / GB / ureg.month).magnitude, precision=2, commas=False, per="GB/month")
-    cb_gpu_rate_str = fmt_usd(gpu_rate.to(USD / hour).magnitude, precision=0, commas=False, per="GPU-hour")
-    train_epoch_count_str = fmt_count(train_epoch_count, label="epoch", plural_label="epochs")
-    train_gpu_count_str = fmt_count(train_gpu_count, label="A100")
-    train_duration_str = fmt_time(train_duration, hour, precision=0, commas=False)
-    train_gpu_hours_str = fmt_count(
-        train_gpu_hours.to(hour).magnitude,
-        label="GPU-hour",
-        plural_label="GPU-hours",
-    )
-```
-
-::: {#nbk-data-selection-cost-breakdown-imagenet-scale-training .callout-notebook title="Cost breakdown: ImageNet-scale training"}
-
-@Tbl-data-selection-imagenet-cost-breakdown itemizes one illustrative acquisition, labeling, storage, and compute scenario at ImageNet scale. The resulting ratio follows from the stated licensing, annotation, storage, runtime, and compute-cost assumptions; it is not a typical ratio for every supervised workload.
-
-| **Cost Component**                                                                                                                                                                                                       | **Calculation**                                                                                                                                        |                                        **Amount**                                        |
-|:-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|:-------------------------------------------------------------------------------------------------------------------------------------------------------|:----------------------------------------------------------------------------------------:|
-| **Raw data (`{python} CostBreakdown.n_labels_str` images)**                                                                                                                                                              | Licensed dataset, flat fee                                                                                                                             |                          `{python} CostBreakdown.c_raw_usd_str`                          |
-| **Labels (crowd annotation)**                                                                                                                                                                                            | `{python} CostBreakdown.n_labels_str` $\times$ `{python} CostBreakdown.cb_cost_per_label_str`                                                          |                         `{python} CostBreakdown.c_label_usd_str`                         |
-| **Storage (cloud object store)**                                                                                                                                                                                         | `{python} CostBreakdown.storage_size_str` $\times$ `{python} CostBreakdown.cb_storage_rate_str` $\times$ `{python} CostBreakdown.storage_duration_str` |                         `{python} CostBreakdown.c_store_usd_str`                         |
-| **Training campaign (`{python} CostBreakdown.train_run_count_str`, each `{python} CostBreakdown.train_epoch_count_str` in `{python} CostBreakdown.train_duration_str` on `{python} CostBreakdown.train_gpu_count_str`)** | `{python} CostBreakdown.train_gpu_hours_str` $\times$ `{python} CostBreakdown.cb_gpu_rate_str`                                                         |                         `{python} CostBreakdown.c_train_usd_str`                         |
-| **Total**                                                                                                                                                                                                                |                                                                                                                                                        |                       **`{python} CostBreakdown.c_total_usd_str`**                       |
-| **Data vs. Compute ratio**                                                                                                                                                                                               |                                                                                                                                                        | `{python} CostBreakdown.p_data_str` data, `{python} CostBreakdown.p_compute_str` compute |
-
-: **Illustrative ImageNet-Scale Cost Breakdown**: Itemized acquisition, labeling, storage, and compute costs under the stated scenario assumptions. Each amount follows from the rate shown beside it, using the book's published crowd-labeling, object-storage, and cloud-GPU rates. Data costs dominate this particular calculation because licensing and annotation are included while the training run itself is short. {#tbl-data-selection-imagenet-cost-breakdown tbl-colwidths="[30,38,32]"}
-
-**Systems insight**: Acquisition and labeling can dwarf compute cost in supervised vision workloads, as they do under these assumptions. The compute figure prices the whole training campaign, not one run: a published model is the survivor of sweeps, restarts, and ablations, and costing a single run would understate compute roughly thirtyfold. Even so, acquisition and labeling remain the larger share. The run count is an assumption like any other, so a complete ROI calculation must state it and price both categories rather than assuming which one dominates.
-
-:::
-
-### ROI framework for data selection techniques {#sec-data-selection-roi-framework-data-selection-techniques-dade}
-
-Data selection techniques insert algorithmic filtering into the training pipeline to reduce downstream costs. However, evaluating sample importance is not free: scoring consumes accelerator cycles, generates host-device memory traffic, or requires engineering custom pipeline stages. Evaluating whether a selection strategy is economically justified requires balancing these upfront overheads against downstream savings through Return on Investment\index{Return on investment!data selection framework} (ROI):
-$$
-\text{ROI} = \frac{\text{Savings} - \text{Investment}}{\text{Investment}} \times 100\%
-$$
-
-The balance between investment and savings varies across selection strategies. @Tbl-roi-profiles maps the primary cost drivers and benefit mechanisms across four standard techniques; their net return depends on corpus volume, model scale, and existing pipeline infrastructure.
-
-```{=latex}
-\begingroup
-\renewcommand{\arraystretch}{1.35}
-```
-
-| **Technique**         | **Investment (Cost)**                                   | **Savings (Benefit)**                                        |
-|:----------------------|:--------------------------------------------------------|:-------------------------------------------------------------|
-| **Deduplication**     | One-time compute for hashing + infrastructure           | Reduced storage and repeated-sample processing               |
-| **Coreset Selection** | Proxy model training + selection compute                | Fewer retained samples if target quality and coverage hold   |
-| **Active Learning**   | Inference on unlabeled pool + human-in-the-loop latency | Lower labeling demand when query selection transfers         |
-| **Data Augmentation** | CPU/GPU cycles for transforms                           | Effective dataset size increase without new data acquisition |
-
-: **ROI Profiles for Data Selection Techniques**: The table identifies costs and possible savings. No technique guarantees positive ROI. A training-time claim must satisfy the selection inequality; labeling savings or reusable data investments require their corresponding total-cost comparison at target quality. {#tbl-roi-profiles .striped .hover tbl-colwidths="[18,39,43]"}
-
-```{=latex}
-\endgroup
-```
-The profiles in @tbl-roi-profiles demonstrate that data savings never come for free. Deduplication requires an upfront investment in hashing or embedding infrastructure, but reliably pays off across many epochs by eliminating redundant storage and compute. Coreset selection demands training a proxy model to score the dataset; it only breaks even if the compute saved by dropping samples exceeds the cost of that proxy training. Active learning shifts the cost from human labelers to machine inference, generating high ROI when human time is expensive, though it introduces human-in-the-loop latency that can stall automated pipelines. Finally, data augmentation requires zero new data acquisition but shifts the burden to the CPU or GPU, trading compute cycles for effective dataset expansion. In all cases, a technique earns its place only when its specific benefit clearly outweighs its structural investment.
-
-
-### Break-even analysis {#sec-data-selection-breakeven-analysis-9a38}
-
-Selection algorithms expend compute and pipeline latency to reduce downstream labeling or training work. The **break-even point**\index{Break-even point!data selection ROI} marks the operating boundary where the financial savings from omitted samples exactly equal the computational and operational overhead of selecting them. If candidate scoring is computationally intensive or candidate pools are massive, a selection policy can easily consume more resources than it recovers.
-
-```{python}
-#| echo: false
-#| label: breakeven-calc
-
-# ┌─────────────────────────────────────────────────────────────────────────────
-# │ ACTIVE LEARNING BREAK-EVEN ANALYSIS
-# ├─────────────────────────────────────────────────────────────────────────────
-# │ Context: "Break-Even Analysis" section (Example: Active Learning Break-Even)
-# │
-# │ Goal: Calculate the break-even point for active learning investments.
-# │      $50/round inference cost, active learning achieves target accuracy with
-# │      2,000 labels + $500 inference vs random sampling's 5,000 labels. The
-# │      144% ROI shows active learning is economically justified when labeling
-# │      exceeds inference cost.
-# │
-# └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import fmt_count, fmt_percent, fmt, check, fmt_usd, fmt_math
-
-class BreakevenCalc:
-    """Active learning break-even: 2K labels + $500 inference achieves same accuracy as 5K random labels."""
-
-    # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    cost_label = 10  # $/label
-    n_initial = 1000  # initial labeled set
-    n_queries_per_round = 100  # samples per round
-    cost_inference = 50  # $/round (scoring pool)
-    n_random = 5000  # random sampling needs
-    n_active = 2000  # active learning needs
-    n_rounds = 10  # AL query rounds
-
-    # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    cost_random_total = n_random * cost_label
-    cost_active_label = n_active * cost_label
-    cost_active_inference = n_rounds * cost_inference
-    cost_active_total = cost_active_label + cost_active_inference
-
-    roi_pct = (cost_random_total - cost_active_total) / cost_active_total * 100
-
-    # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
-    check(cost_random_total > cost_active_total, "Active learning must be cheaper than random sampling.")
-    check(abs(roi_pct - 143.9) < 1.0, f"Expected ~144% ROI, got {roi_pct:.1f}%")
-
-    # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
-    cost_label_str = fmt_usd(cost_label, precision=0, commas=False, per="sample")
-    n_initial_str = fmt(n_initial, precision=0, commas=True)
-    cost_initial_str = fmt_usd(n_initial * cost_label, precision=0, commas=True)
-    n_queries_str = fmt_count(n_queries_per_round, label="query", commas=False)
-    cost_inference_str = fmt_usd(cost_inference, precision=0, commas=False)
-    be_n_random_str = fmt(n_random, precision=0, commas=True)
-    be_n_active_str = fmt(n_active, precision=0, commas=True)
-    n_rounds_str = fmt(n_rounds, precision=0, commas=False)
-    cost_random_total_str = fmt_usd(cost_random_total, precision=0, commas=True)
-    cost_active_label_str = fmt_usd(cost_active_label, precision=0, commas=True)
-    cost_active_inference_str = fmt_usd(cost_active_inference, precision=0, commas=True)
-    cost_active_total_str = fmt_usd(cost_active_total, precision=0, commas=True)
-    # "%"-glyph math form for the ROI worked-calc line (this value is only consumed inside that calculation).
-    roi_pct_math = fmt_math(rf"{roi_pct:.1f}\%")
-```
-
-Suppose labeling costs `{python} BreakevenCalc.cost_label_str`, active learning starts from `{python} BreakevenCalc.n_initial_str` labeled samples (`{python} BreakevenCalc.cost_initial_str`), issues `{python} BreakevenCalc.n_queries_str` per round at `{python} BreakevenCalc.cost_inference_str` inference cost (the expense of scoring the candidate pool $U$ with the active model), and the random-labeling baseline requires `{python} BreakevenCalc.be_n_random_str` samples for target accuracy. If active learning reaches target accuracy with only `{python} BreakevenCalc.be_n_active_str` labeled samples, the following comparison reports net savings relative to the total active-learning cost. This uses the entire active-learning expenditure as the investment denominator, rather than only the incremental scoring investment in the preceding framework:
-\begin{gather*}
-\text{Random labeling cost} = \text{`{python} BreakevenCalc.be_n_random_str`} \times \text{`{python} BreakevenCalc.cost_label_str`} = \text{`{python} BreakevenCalc.cost_random_total_str`}
-\\
-\text{Active learning cost} = \text{`{python} BreakevenCalc.be_n_active_str`} \times \text{`{python} BreakevenCalc.cost_label_str`} + \text{`{python} BreakevenCalc.n_rounds_str` rounds} \times \text{`{python} BreakevenCalc.cost_inference_str`} = \text{`{python} BreakevenCalc.cost_active_total_str`}
-\\
-\text{ROI} = \frac{\text{`{python} BreakevenCalc.cost_random_total_str`} - \text{`{python} BreakevenCalc.cost_active_total_str`}}{\text{`{python} BreakevenCalc.cost_active_total_str`}}= \text{`{python} BreakevenCalc.roi_pct_math`}
-\end{gather*}
-
-Break-even occurs when avoided labeling costs equal selection overhead. When an unlabeled candidate pool $U$ contains millions of uncurated examples, repeatedly scoring it across multiple rounds scales compute with $|U| \times c_{\text{infer}}$, meaning an algorithmic reduction in labeled samples can be erased if proxy inference costs are not carefully bounded.
-
-### Amortization across training runs {#sec-data-selection-amortization-across-training-runs-f6b8}
-
-Static data selection techniques decouple dataset curation from the model training loop. Computational filters—such as MinHash deduplication, exact $n$-gram indexing, or embedding clustering—require substantial upfront engineering and preprocessing compute. However, production model development is inherently iterative: hyperparameter search, neural architecture search, ablation studies, and seed sweeps repeatedly train on the identical curated corpus. Evaluating these techniques on a single isolated run misrepresents their economics. **Amortized return on investment (ROI)**\index{Return on investment!amortized} accounts for how upfront curation investments spread across an entire training campaign:
-$$
-\text{Amortized ROI} = \frac{N_{\text{runs}} \times \text{Per-Run Savings} - \text{One-Time Investment}}{\text{One-Time Investment}} \times 100\%
-$$
-
-@Tbl-dedup-costs itemizes the upfront capital and compute expenditures against per-run savings for an illustrative MinHash deduplication pipeline.
-
-```{python}
-#| echo: false
-#| label: amortization-calc
-
-# ┌─────────────────────────────────────────────────────────────────────────────
-# │ DEDUPLICATION AMORTIZATION
-# ├─────────────────────────────────────────────────────────────────────────────
-# │ Context: "Amortization: The Time Value of Data Selection" section
-# │
-# │ Goal: Demonstrate how infrastructure ROI depends on model reuse.
-# │ How: Calculate amortized ROI for data deduplication infrastructure over time.
-# │
-# └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import fmt_percent, fmt, check, fmt_usd
-
-class DeduplicationAmortization:
-    """Deduplication pipeline ROI: negative at 1 run, highly profitable at 50 runs."""
-
-    # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    cost_build = 50000  # $ engineering time
-    cost_compute_once = 5000  # $ one-time MinHash compute
-    savings_per_run = 10000  # $ saved per training run
-
-    # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    cost_investment = cost_build + cost_compute_once
-    runs = [1, 5, 10, 50]
-    # Step 1: For-loop (not list comprehension)—class bodies cannot access class attrs in comprehension scopes
-    rois = []
-    for _r in runs:
-        rois.append((_r * savings_per_run - cost_investment) / cost_investment)
-
-    # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
-    check(rois[0] < 0, "Single-run ROI must be negative (investment not yet recovered).")
-    check(rois[3] > 0, "50-run ROI must be positive (highly profitable).")
-
-    # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
-    cost_build_str = fmt_usd(cost_build, precision=0, commas=True)
-    cost_compute_once_str = fmt_usd(cost_compute_once, precision=0, commas=True)
-    savings_per_run_str = fmt_usd(savings_per_run, precision=0, commas=True, per="run")
-    # ROI is a signed rate of change (negative at 1 run, >800% at 50): opt into
-    # fmt_percent's wider domain explicitly so the guard still catches blunders.
-    roi_1_str = fmt_percent(rois[0], precision=1, commas=False, style='symbol', allow_negative=True, max_ratio=9)
-    roi_5_str = fmt_percent(rois[1], precision=1, commas=False, style='symbol', allow_negative=True, max_ratio=9)
-    roi_10_str = fmt_percent(rois[2], precision=1, commas=False, style='symbol', allow_negative=True, max_ratio=9)
-    roi_50_str = fmt_percent(rois[3], precision=1, commas=False, style='symbol', allow_negative=True, max_ratio=9)
-```
-
-```{=latex}
-\begingroup
-\renewcommand{\arraystretch}{1.3}
-```
-
-| **Component**                             |                                                               **Cost** |
-|:------------------------------------------|-----------------------------------------------------------------------:|
-| **Build deduplication pipeline**          | `{python} DeduplicationAmortization.cost_build_str` (engineering time) |
-| **Compute MinHash signatures (one-time)** |             `{python} DeduplicationAmortization.cost_compute_once_str` |
-| **Per-run savings**                       |               `{python} DeduplicationAmortization.savings_per_run_str` |
-
-: **Deduplication Infrastructure Cost Components**: The one-time investment covers engineering effort and initial compute; the per-run savings accrue with every subsequent training run on the deduplicated data. {#tbl-dedup-costs .striped .hover}
-
-```{=latex}
-\endgroup
-```
-
-Because the initial infrastructure and signature-generation costs are fixed, each subsequent training run compounds the net financial return. Three operational factors govern whether curation infrastructure reaches break-even:
-
-- **Repeated training runs**: Hyperparameter search, model iterations, and scheduled retraining reuse the same selection infrastructure many times.
-- **Shared datasets**: A cleaned or deduplicated corpus can support multiple teams or model architectures.
-- **Broadly reusable techniques**: Methods such as deduplication transfer across models, whereas task-specific coresets may not.
-
-@Tbl-amortized-roi tracks how amortized return scales with campaign run count under these cost parameters.
-
-| **Number of Runs** |                                                    **Amortized ROI** |
-|:-------------------|---------------------------------------------------------------------:|
-| **1 run**          |            `{python} DeduplicationAmortization.roi_1_str` (net loss) |
-| **5 runs**         |     `{python} DeduplicationAmortization.roi_5_str` (near break-even) |
-| **10 runs**        |          +`{python} DeduplicationAmortization.roi_10_str` (positive) |
-| **50 runs**        | +`{python} DeduplicationAmortization.roi_50_str` (highly profitable) |
-
-: **Amortized ROI over Multiple Training Runs**: Under this scenario's costs and savings, a deduplication pipeline that loses money on its first use becomes profitable when reused across enough runs. Infrastructure investments should be evaluated over their expected lifetime rather than from one use. {#tbl-amortized-roi .striped .hover}
-
-Deduplication achieves high investment leverage because eliminating redundant sequences reduces host-storage footprint and avoids wasted gradient updates across every downstream architecture. Sample-selection methods conditioned on proxy gradients or uncertainty scores transfer within a model family or between related architectures, but their rankings must be revalidated when the target model, task, or data changes, which narrows their amortization window relative to deduplication. For exploratory or one-off training runs, low-overhead methods like uniform random sampling or basic augmentation may offer better ROI. A static scoring pass can still pay for itself in one run if its measured savings exceed its cost at target quality.
-
-Standard cost models assume a centralized data pipeline where a single host process evaluates importance metrics across a unified dataset. Scaling to high-throughput multi-accelerator training shards datasets across independent storage volumes and distributed worker ranks, erecting communication and synchronization bottlenecks that can dismantle these idealized single-node economics.
-
 ## Distributed Selection {#sec-data-selection-distributed-selection-d03e}
 
 Data sharding dissolves the single-process abstraction. In a centralized pipeline, coreset algorithms sort a single global ranking, curricula enforce a uniform sequence, and active-learning loops evaluate a shared candidate pool. Distributed execution\index{Distributed training!data selection challenges} shards storage across independent nodes, computes scores on out-of-sync model checkpoints, and isolates worker visibility. Scaling data selection across clusters introduces two physical constraints: synthesizing representative global subsets from isolated shard perspectives, and maintaining coherent sample rankings as worker states diverge.
@@ -3907,9 +3417,642 @@ Positive ROI can erode quickly when workers coordinate frequently during trainin
 
 A further constraint arises from cluster network topology\index{Distributed Selection!network topology constraints}. Gradient synchronization may use accelerator collectives over dedicated links, while embedding vectors, score arrays, and coreset indices may follow host or storage paths instead. The actual route depends on system architecture. Selection traffic can therefore expose CPU, network interface card, storage, or collective-network bottlenecks that the training profile alone does not reveal.
 
-Real ML systems combine data selection with model-level efficiency, machine-level throughput, and distributed training simultaneously. These optimizations interact in ways that can amplify or undermine each other, and understanding these interactions is essential for designing efficient end-to-end pipelines.
+## Cost Modeling {#sec-data-selection-cost-modeling-9b02}
 
-## Cross-Layer Interactions {#sec-data-selection-crosslayer-interactions-1f39}
+Allocating capital between human annotation and accelerator compute is a primary systems decision in large-scale machine learning. A team operating under a fixed engineering budget must determine whether purchasing 100,000 specialist annotations or leasing an additional 64-GPU cluster yields greater downstream accuracy. Systematic cost modeling\index{Cost modeling!data selection economics} establishes the quantitative framework required to navigate these trade-offs, calculating break-even points for active learning pipelines and determining how many training runs are required to amortize custom data curation tooling.
+
+### Quantifying data costs and ROI {#sec-data-selection-quantifying-data-costs-roi-f0b4}
+
+The total cost of training data\index{Total cost of data!formula} spans acquisition, labeling, storage retention, and accelerator compute, extending well beyond object-storage invoices:
+$$
+C_{\text{total}} = C_{\text{acquire}} + C_{\text{label}} + C_{\text{store}} + C_{\text{process}}
+$$
+Labeling ($C_{\text{label}}$) represents the expenditure that data selection targets most directly, whereas storage ($C_{\text{store}}$) and processing ($C_{\text{process}}$) scale mechanically with retained byte volume and the number of accelerator passes. @Tbl-cost-components itemizes these four cost components alongside their operational drivers.
+
+```{=latex}
+\begingroup
+\renewcommand{\arraystretch}{1.25}
+```
+
+| **Component**            |                                 **Formula**                                  |                        **Illustrative Range** |
+|:-------------------------|:----------------------------------------------------------------------------:|----------------------------------------------:|
+| **$C_{\text{acquire}}$** |                         $D \times c_{\text{sample}}$                         | \$0.001–\$10/sample (web scrape vs. licensed) |
+| **$C_{\text{label}}$**   |                 $D_{\text{labeled}} \times c_{\text{label}}$                 |        \$0.01–\$200/sample (crowd vs. expert) |
+| **$C_{\text{store}}$**   |  $D_{\text{vol,store}} \times c_{\text{storage}} \times T_{\text{months}}$   |                        \$0.02–\$0.10/GB/month |
+| **$C_{\text{process}}$** | $D \times N_{\text{epochs}} \times O_{\text{sample}} \times c_{\text{FLOP}}$ |                Proportional to training FLOPs |
+
+: **Total Cost of Training Data**: The four cost components span the full data lifecycle. Here $\DatasetSize$ is the total sample count, $D_{\text{labeled}}$ is the labeled subset, $D_{\text{vol,store}}$ is stored byte volume, $T_{\text{months}}$ is retention time, $N_{\text{epochs}}$ is the number of training passes, and $\Operations_{\text{sample}}$ is per-sample training work. The ranges are scenario anchors rather than universal market prices. {#tbl-cost-components .striped .hover tbl-colwidths="[25,30,45]"}
+
+```{=latex}
+\endgroup
+```
+
+The interplay of these four cost terms becomes concrete when evaluating an ImageNet-scale vision model training run.
+
+```{python}
+#| echo: false
+#| label: cost-breakdown-calc
+
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ TRAINING COST BREAKDOWN
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: "Cost Breakdown: ImageNet-Scale Training" callout
+# │
+# │ Goal: Demonstrate that data costs often exceed compute costs.
+# │ How: Calculate total costs for raw data, labeling, storage, and training.
+# │
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import Infrastructure
+from mlsysim.core.units import GB, USD, count, hour, ureg
+from mlsysim.fmt import fmt_percent, fmt_usd, check, fmt_count, fmt_time, fmt_memory
+
+class CostBreakdown:
+    """ImageNet-scale cost breakdown: data (~83%) still leads compute (~17%) once the
+    whole training campaign, not a single run, is priced."""
+
+    # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
+    raw_data_cost = 50000 * USD  # scenario assumption: licensed dataset
+    label_count = 1_200_000 * count  # scenario assumption: images to label
+    cost_per_label = Infrastructure.Pricing.Labeling.CrowdHigh.rate / count
+    storage_rate = Infrastructure.Pricing.Storage.S3StandardLowPerTbMonth.rate
+    gpu_rate = Infrastructure.Pricing.Cloud.GpuTrainingPerHour.rate
+    storage_size = 150 * GB  # scenario assumption: retained training data
+    storage_duration = 12 * ureg.month  # scenario assumption: retention time
+    train_epoch_count = 100
+    train_gpu_count = 8  # scenario assumption: 8-GPU training job
+    train_duration = 24 * hour  # scenario assumption: runtime of ONE run
+    # The dataset is paid for once; the accelerators are not. A published model
+    # is the survivor of a campaign of hyperparameter sweeps, restarts, and
+    # ablations, so pricing a single run understates compute by that factor.
+    # 30 is a deliberately conservative campaign size for this scenario.
+    train_run_count = 30  # scenario assumption: runs in the training campaign
+
+    # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
+    label_cost = label_count * cost_per_label
+    storage_cost = (storage_size * storage_rate * storage_duration).to(USD)
+    train_gpu_hours_per_run = train_gpu_count * train_duration
+    train_gpu_hours = train_gpu_hours_per_run * train_run_count
+    train_compute_cost = (train_gpu_hours * gpu_rate).to(USD)
+    total_cost = raw_data_cost + label_cost + storage_cost + train_compute_cost
+
+    p_data = (raw_data_cost + label_cost + storage_cost) / total_cost
+    p_compute = train_compute_cost / total_cost
+
+    # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
+    check(p_data > p_compute, "Data costs must dominate compute costs in this scenario.")
+    check(abs((p_data + p_compute).to("").magnitude - 1.0) < 0.001, "Data + compute percentages must sum to 100%.")
+    # Every Amount in the table must be reproducible from the operands printed
+    # beside it, so each derived cost is checked against its published rate.
+    check(
+        abs(storage_cost.to(USD).magnitude - 36.0) < 1e-9,
+        f"Storage should be 150 GB x $0.02/GB/month x 12 months = $36, got {storage_cost.to(USD).magnitude:.2f}.",
+    )
+    check(
+        abs(train_compute_cost.to(USD).magnitude - 23_040.0) < 1e-9,
+        f"Training should be 30 runs x 192 GPU-hours x $4.00/h = $23,040, " f"got {train_compute_cost.to(USD).magnitude:.2f}.",
+    )
+    check(
+        abs(label_cost.to(USD).magnitude - 60_000.0) < 1e-9,
+        f"Labels should be 1.2M x $0.05 = $60,000, got {label_cost.to(USD).magnitude:.2f}.",
+    )
+
+    # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
+    c_raw_usd_str = fmt_usd(raw_data_cost, precision=0)
+    c_label_usd_str = fmt_usd(label_cost, precision=0)
+    c_store_usd_str = fmt_usd(storage_cost, precision=0, commas=False)
+    c_train_usd_str = fmt_usd(train_compute_cost, precision=0)
+    train_run_count_str = fmt_count(train_run_count, label="run")
+    c_total_usd_str = fmt_usd(total_cost, precision=0)
+    p_data_str = fmt_percent(p_data, precision=1, commas=False, style='symbol')
+    p_compute_str = fmt_percent(p_compute, precision=1, commas=False, style='symbol')
+    n_labels_str = fmt_count(label_count, scale='M', precision=1)
+    cb_cost_per_label_str = fmt_usd(cost_per_label.to(USD / count).magnitude, precision=2, commas=False, per="label")
+    storage_size_str = fmt_memory(storage_size, unit=GB, precision=0, commas=False)
+    storage_duration_str = fmt_time(storage_duration, ureg.month, precision=0, commas=False, style="word")
+    cb_storage_rate_str = fmt_usd(storage_rate.to(USD / GB / ureg.month).magnitude, precision=2, commas=False, per="GB/month")
+    cb_gpu_rate_str = fmt_usd(gpu_rate.to(USD / hour).magnitude, precision=0, commas=False, per="GPU-hour")
+    train_epoch_count_str = fmt_count(train_epoch_count, label="epoch", plural_label="epochs")
+    train_gpu_count_str = fmt_count(train_gpu_count, label="A100")
+    train_duration_str = fmt_time(train_duration, hour, precision=0, commas=False)
+    train_gpu_hours_str = fmt_count(
+        train_gpu_hours.to(hour).magnitude,
+        label="GPU-hour",
+        plural_label="GPU-hours",
+    )
+```
+
+::: {#nbk-data-selection-cost-breakdown-imagenet-scale-training .callout-notebook title="Cost breakdown: ImageNet-scale training"}
+
+@Tbl-data-selection-imagenet-cost-breakdown itemizes one illustrative acquisition, labeling, storage, and compute scenario at ImageNet scale. The resulting ratio follows from the stated licensing, annotation, storage, runtime, and compute-cost assumptions; it is not a typical ratio for every supervised workload.
+
+| **Cost Component**                                                                                                                                                                                                       | **Calculation**                                                                                                                                        |                                        **Amount**                                        |
+|:-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|:-------------------------------------------------------------------------------------------------------------------------------------------------------|:----------------------------------------------------------------------------------------:|
+| **Raw data (`{python} CostBreakdown.n_labels_str` images)**                                                                                                                                                              | Licensed dataset, flat fee                                                                                                                             |                          `{python} CostBreakdown.c_raw_usd_str`                          |
+| **Labels (crowd annotation)**                                                                                                                                                                                            | `{python} CostBreakdown.n_labels_str` $\times$ `{python} CostBreakdown.cb_cost_per_label_str`                                                          |                         `{python} CostBreakdown.c_label_usd_str`                         |
+| **Storage (cloud object store)**                                                                                                                                                                                         | `{python} CostBreakdown.storage_size_str` $\times$ `{python} CostBreakdown.cb_storage_rate_str` $\times$ `{python} CostBreakdown.storage_duration_str` |                         `{python} CostBreakdown.c_store_usd_str`                         |
+| **Training campaign (`{python} CostBreakdown.train_run_count_str`, each `{python} CostBreakdown.train_epoch_count_str` in `{python} CostBreakdown.train_duration_str` on `{python} CostBreakdown.train_gpu_count_str`)** | `{python} CostBreakdown.train_gpu_hours_str` $\times$ `{python} CostBreakdown.cb_gpu_rate_str`                                                         |                         `{python} CostBreakdown.c_train_usd_str`                         |
+| **Total**                                                                                                                                                                                                                |                                                                                                                                                        |                       **`{python} CostBreakdown.c_total_usd_str`**                       |
+| **Data vs. Compute ratio**                                                                                                                                                                                               |                                                                                                                                                        | `{python} CostBreakdown.p_data_str` data, `{python} CostBreakdown.p_compute_str` compute |
+
+: **Illustrative ImageNet-Scale Cost Breakdown**: Itemized acquisition, labeling, storage, and compute costs under the stated scenario assumptions. Each amount follows from the rate shown beside it, using the book's published crowd-labeling, object-storage, and cloud-GPU rates. Data costs dominate this particular calculation because licensing and annotation are included while the training run itself is short. {#tbl-data-selection-imagenet-cost-breakdown tbl-colwidths="[30,38,32]"}
+
+**Systems insight**: Acquisition and labeling can dwarf compute cost in supervised vision workloads, as they do under these assumptions. The compute figure prices the whole training campaign, not one run: a published model is the survivor of sweeps, restarts, and ablations, and costing a single run would understate compute roughly thirtyfold. Even so, acquisition and labeling remain the larger share. The run count is an assumption like any other, so a complete ROI calculation must state it and price both categories rather than assuming which one dominates.
+
+:::
+
+### ROI framework for data selection techniques {#sec-data-selection-roi-framework-data-selection-techniques-dade}
+
+Data selection techniques insert algorithmic filtering into the training pipeline to reduce downstream costs. However, evaluating sample importance is not free: scoring consumes accelerator cycles, generates host-device memory traffic, or requires engineering custom pipeline stages. Evaluating whether a selection strategy is economically justified requires balancing these upfront overheads against downstream savings through Return on Investment\index{Return on investment!data selection framework} (ROI):
+$$
+\text{ROI} = \frac{\text{Savings} - \text{Investment}}{\text{Investment}} \times 100\%
+$$
+
+The balance between investment and savings varies across selection strategies. @Tbl-roi-profiles maps the primary cost drivers and benefit mechanisms across four standard techniques; their net return depends on corpus volume, model scale, and existing pipeline infrastructure.
+
+```{=latex}
+\begingroup
+\renewcommand{\arraystretch}{1.35}
+```
+
+| **Technique**         | **Investment (Cost)**                                   | **Savings (Benefit)**                                        |
+|:----------------------|:--------------------------------------------------------|:-------------------------------------------------------------|
+| **Deduplication**     | One-time compute for hashing + infrastructure           | Reduced storage and repeated-sample processing               |
+| **Coreset Selection** | Proxy model training + selection compute                | Fewer retained samples if target quality and coverage hold   |
+| **Active Learning**   | Inference on unlabeled pool + human-in-the-loop latency | Lower labeling demand when query selection transfers         |
+| **Data Augmentation** | CPU/GPU cycles for transforms                           | Effective dataset size increase without new data acquisition |
+
+: **ROI Profiles for Data Selection Techniques**: The table identifies costs and possible savings. No technique guarantees positive ROI. A training-time claim must satisfy the selection inequality; labeling savings or reusable data investments require their corresponding total-cost comparison at target quality. {#tbl-roi-profiles .striped .hover tbl-colwidths="[18,39,43]"}
+
+```{=latex}
+\endgroup
+```
+The profiles in @tbl-roi-profiles demonstrate that data savings never come for free. Deduplication requires an upfront investment in hashing or embedding infrastructure, but reliably pays off across many epochs by eliminating redundant storage and compute. Coreset selection demands training a proxy model to score the dataset; it only breaks even if the compute saved by dropping samples exceeds the cost of that proxy training. Active learning shifts the cost from human labelers to machine inference, generating high ROI when human time is expensive, though it introduces human-in-the-loop latency that can stall automated pipelines. Finally, data augmentation requires zero new data acquisition but shifts the burden to the CPU or GPU, trading compute cycles for effective dataset expansion. In all cases, a technique earns its place only when its specific benefit clearly outweighs its structural investment.
+
+### Break-even analysis {#sec-data-selection-breakeven-analysis-9a38}
+
+Selection algorithms expend compute and pipeline latency to reduce downstream labeling or training work. The **break-even point**\index{Break-even point!data selection ROI} marks the operating boundary where the financial savings from omitted samples exactly equal the computational and operational overhead of selecting them. If candidate scoring is computationally intensive or candidate pools are massive, a selection policy can easily consume more resources than it recovers.
+
+```{python}
+#| echo: false
+#| label: breakeven-calc
+
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ ACTIVE LEARNING BREAK-EVEN ANALYSIS
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: "Break-Even Analysis" section (Example: Active Learning Break-Even)
+# │
+# │ Goal: Calculate the break-even point for active learning investments.
+# │      $50/round inference cost, active learning achieves target accuracy with
+# │      2,000 labels + $500 inference vs random sampling's 5,000 labels. The
+# │      144% ROI shows active learning is economically justified when labeling
+# │      exceeds inference cost.
+# │
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim.fmt import fmt_count, fmt_percent, fmt, check, fmt_usd, fmt_math
+
+class BreakevenCalc:
+    """Active learning break-even: 2K labels + $500 inference achieves same accuracy as 5K random labels."""
+
+    # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
+    cost_label = 10  # $/label
+    n_initial = 1000  # initial labeled set
+    n_queries_per_round = 100  # samples per round
+    cost_inference = 50  # $/round (scoring pool)
+    n_random = 5000  # random sampling needs
+    n_active = 2000  # active learning needs
+    n_rounds = 10  # AL query rounds
+
+    # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
+    cost_random_total = n_random * cost_label
+    cost_active_label = n_active * cost_label
+    cost_active_inference = n_rounds * cost_inference
+    cost_active_total = cost_active_label + cost_active_inference
+
+    roi_pct = (cost_random_total - cost_active_total) / cost_active_total * 100
+
+    # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
+    check(cost_random_total > cost_active_total, "Active learning must be cheaper than random sampling.")
+    check(abs(roi_pct - 143.9) < 1.0, f"Expected ~144% ROI, got {roi_pct:.1f}%")
+
+    # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
+    cost_label_str = fmt_usd(cost_label, precision=0, commas=False, per="sample")
+    n_initial_str = fmt(n_initial, precision=0, commas=True)
+    cost_initial_str = fmt_usd(n_initial * cost_label, precision=0, commas=True)
+    n_queries_str = fmt_count(n_queries_per_round, label="query", commas=False)
+    cost_inference_str = fmt_usd(cost_inference, precision=0, commas=False)
+    be_n_random_str = fmt(n_random, precision=0, commas=True)
+    be_n_active_str = fmt(n_active, precision=0, commas=True)
+    n_rounds_str = fmt(n_rounds, precision=0, commas=False)
+    cost_random_total_str = fmt_usd(cost_random_total, precision=0, commas=True)
+    cost_active_label_str = fmt_usd(cost_active_label, precision=0, commas=True)
+    cost_active_inference_str = fmt_usd(cost_active_inference, precision=0, commas=True)
+    cost_active_total_str = fmt_usd(cost_active_total, precision=0, commas=True)
+    # "%"-glyph math form for the ROI worked-calc line (this value is only consumed inside that calculation).
+    roi_pct_math = fmt_math(rf"{roi_pct:.1f}\%")
+```
+
+Suppose labeling costs `{python} BreakevenCalc.cost_label_str`, active learning starts from `{python} BreakevenCalc.n_initial_str` labeled samples (`{python} BreakevenCalc.cost_initial_str`), issues `{python} BreakevenCalc.n_queries_str` per round at `{python} BreakevenCalc.cost_inference_str` inference cost (the expense of scoring the candidate pool $U$ with the active model), and the random-labeling baseline requires `{python} BreakevenCalc.be_n_random_str` samples for target accuracy (`{python} BreakevenCalc.cost_random_total_str`). If active learning reaches target accuracy with only `{python} BreakevenCalc.be_n_active_str` labeled samples, the total active learning cost is `{python} BreakevenCalc.cost_active_total_str` (labels plus `{python} BreakevenCalc.n_rounds_str` rounds of inference). Comparing the two approaches, active learning yields an ROI of `{python} BreakevenCalc.roi_pct_math` by replacing expensive human labels with cheaper machine inference.
+
+Break-even occurs when avoided labeling costs equal selection overhead. When an unlabeled candidate pool $U$ contains millions of uncurated examples, repeatedly scoring it across multiple rounds scales compute with $|U| \times c_{\text{infer}}$, meaning an algorithmic reduction in labeled samples can be erased if proxy inference costs are not carefully bounded.
+
+### Amortization: The Economics of Reusability {#sec-data-selection-amortization-reusability}
+
+#### Amortization across training runs {.unnumbered}
+
+Static data selection techniques decouple dataset curation from the model training loop. Computational filters—such as MinHash deduplication, exact $n$-gram indexing, or embedding clustering—require substantial upfront engineering and preprocessing compute. However, production model development is inherently iterative: hyperparameter search, neural architecture search, ablation studies, and seed sweeps repeatedly train on the identical curated corpus. Evaluating these techniques on a single isolated run misrepresents their economics. **Amortized return on investment (ROI)**\index{Return on investment!amortized} accounts for how upfront curation investments spread across an entire training campaign by dividing the net savings (per-run savings multiplied by the number of runs, minus the one-time investment) by that initial investment.
+
+@Tbl-dedup-costs itemizes the upfront capital and compute expenditures against per-run savings for an illustrative MinHash deduplication pipeline.
+
+```{python}
+#| echo: false
+#| label: amortization-calc
+
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ DEDUPLICATION AMORTIZATION
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: "Amortization: The Time Value of Data Selection" section
+# │
+# │ Goal: Demonstrate how infrastructure ROI depends on model reuse.
+# │ How: Calculate amortized ROI for data deduplication infrastructure over time.
+# │
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim.fmt import fmt_percent, fmt, check, fmt_usd
+
+class DeduplicationAmortization:
+    """Deduplication pipeline ROI: negative at 1 run, highly profitable at 50 runs."""
+
+    # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
+    cost_build = 50000  # $ engineering time
+    cost_compute_once = 5000  # $ one-time MinHash compute
+    savings_per_run = 10000  # $ saved per training run
+
+    # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
+    cost_investment = cost_build + cost_compute_once
+    runs = [1, 5, 10, 50]
+    # Step 1: For-loop (not list comprehension)—class bodies cannot access class attrs in comprehension scopes
+    rois = []
+    for _r in runs:
+        rois.append((_r * savings_per_run - cost_investment) / cost_investment)
+
+    # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
+    check(rois[0] < 0, "Single-run ROI must be negative (investment not yet recovered).")
+    check(rois[3] > 0, "50-run ROI must be positive (highly profitable).")
+
+    # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
+    cost_build_str = fmt_usd(cost_build, precision=0, commas=True)
+    cost_compute_once_str = fmt_usd(cost_compute_once, precision=0, commas=True)
+    savings_per_run_str = fmt_usd(savings_per_run, precision=0, commas=True, per="run")
+    # ROI is a signed rate of change (negative at 1 run, >800% at 50): opt into
+    # fmt_percent's wider domain explicitly so the guard still catches blunders.
+    roi_1_str = fmt_percent(rois[0], precision=1, commas=False, style='symbol', allow_negative=True, max_ratio=9)
+    roi_5_str = fmt_percent(rois[1], precision=1, commas=False, style='symbol', allow_negative=True, max_ratio=9)
+    roi_10_str = fmt_percent(rois[2], precision=1, commas=False, style='symbol', allow_negative=True, max_ratio=9)
+    roi_50_str = fmt_percent(rois[3], precision=1, commas=False, style='symbol', allow_negative=True, max_ratio=9)
+```
+
+```{=latex}
+\begingroup
+\renewcommand{\arraystretch}{1.3}
+```
+
+| **Component**                             |                                                               **Cost** |
+|:------------------------------------------|-----------------------------------------------------------------------:|
+| **Build deduplication pipeline**          | `{python} DeduplicationAmortization.cost_build_str` (engineering time) |
+| **Compute MinHash signatures (one-time)** |             `{python} DeduplicationAmortization.cost_compute_once_str` |
+| **Per-run savings**                       |               `{python} DeduplicationAmortization.savings_per_run_str` |
+
+: **Deduplication Infrastructure Cost Components**: The one-time investment covers engineering effort and initial compute; the per-run savings accrue with every subsequent training run on the deduplicated data. {#tbl-dedup-costs .striped .hover}
+
+```{=latex}
+\endgroup
+```
+
+Because the initial infrastructure and signature-generation costs are fixed, each subsequent training run compounds the net financial return. Three operational factors govern whether curation infrastructure reaches break-even:
+
+- **Repeated training runs**: Hyperparameter search, model iterations, and scheduled retraining reuse the same selection infrastructure many times.
+- **Shared datasets**: A cleaned or deduplicated corpus can support multiple teams or model architectures.
+- **Broadly reusable techniques**: Methods such as deduplication transfer across models, whereas task-specific coresets may not.
+
+@Tbl-amortized-roi tracks how amortized return scales with campaign run count under these cost parameters.
+
+| **Number of Runs** |                                                    **Amortized ROI** |
+|:-------------------|---------------------------------------------------------------------:|
+| **1 run**          |            `{python} DeduplicationAmortization.roi_1_str` (net loss) |
+| **5 runs**         |     `{python} DeduplicationAmortization.roi_5_str` (near break-even) |
+| **10 runs**        |          +`{python} DeduplicationAmortization.roi_10_str` (positive) |
+| **50 runs**        | +`{python} DeduplicationAmortization.roi_50_str` (highly profitable) |
+
+: **Amortized ROI over Multiple Training Runs**: Under this scenario's costs and savings, a deduplication pipeline that loses money on its first use becomes profitable when reused across enough runs. Infrastructure investments should be evaluated over their expected lifetime rather than from one use. {#tbl-amortized-roi .striped .hover}
+
+Deduplication achieves high investment leverage because eliminating redundant sequences reduces host-storage footprint and avoids wasted gradient updates across every downstream architecture. Sample-selection methods conditioned on proxy gradients or uncertainty scores transfer within a model family or between related architectures, but their rankings must be revalidated when the target model, task, or data changes, which narrows their amortization window relative to deduplication. For exploratory or one-off training runs, low-overhead methods like uniform random sampling or basic augmentation may offer better ROI. A static scoring pass can still pay for itself in one run if its measured savings exceed its cost at target quality.
+
+Standard cost models assume a centralized data pipeline where a single host process evaluates importance metrics across a unified dataset. Scaling to high-throughput multi-accelerator training shards datasets across independent storage volumes and distributed worker ranks, erecting communication and synchronization bottlenecks that can dismantle these idealized single-node economics.
+
+#### Amortization across tasks: Foundation models {.unnumbered}
+
+The centrality of self-supervised learning to foundation-model workflows stems directly from cost amortization\index{Cost amortization!self-supervised pretraining}. A foundation model is a broadly pretrained reusable base model adapted to downstream tasks through fine-tuning. This architecture divides costs into two phases: an expensive upfront pretraining investment executed once on unlabeled data, and lightweight task-specific adaptations reused across many applications (@tbl-cost-amortization).
+
+| **Approach**                   | **Labels per Task** | **Compute per Task**  |     **Data Acquisition** |
+|:-------------------------------|:--------------------|:----------------------|-------------------------:|
+| **Train from scratch**         | 100K–1M labeled     | 100% full training    | Task-specific collection |
+| **Fine-tune foundation model** | 100–1K labeled      | 1–5% of full training | Reuse pretraining corpus |
+
+: **Illustrative Foundation-Model Amortization**: The label and compute ranges are scenario assumptions. They illustrate why reuse can lower marginal task cost when representations transfer, not a universal fine-tuning ratio. {#tbl-cost-amortization .striped .hover}
+
+```{python}
+#| echo: false
+#| label: foundation-cost-calc
+
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ FOUNDATION MODEL COST AMORTIZATION
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: "Economics of Amortization" section and @tbl-cost-amortization
+# │
+# │ Goal: Demonstrate the economic shift toward foundation models.
+# │ Show: That fine-tuning yields a 100× label reduction and 20× marginal compute drop.
+# │ How: Contrast total costs for 10 tasks trained from scratch vs. fine-tuned.
+# │
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim.core.units import USD, count, hour
+from mlsysim.fmt import fmt_percent, fmt, fmt_count, fmt_usd, check
+
+class FoundationCostAmortization:
+    """Foundation model amortization: 10 tasks, 100× label reduction, 20× marginal compute drop."""
+
+    # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
+    scratch_compute_per_task = 1000 * hour  # scenario assumption: GPU-hours per task
+    task_count = 10  # number of tasks
+    pretrain_compute = 10000 * hour  # scenario assumption: one-time GPU-hours
+    finetune_compute_per_task = 50 * hour  # scenario assumption: GPU-hours per task
+    labels_per_task_scratch = 100_000 * count  # scenario assumption: labels from scratch
+    cost_per_label = 1 * (USD / count)  # scenario assumption: label price
+    labels_per_task_finetune = 1_000 * count  # scenario assumption: labels for fine-tuning
+
+    # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
+    scratch_compute_total = scratch_compute_per_task * task_count
+    foundation_compute_total = pretrain_compute + (finetune_compute_per_task * task_count)
+
+    label_cost_scratch_total = labels_per_task_scratch * cost_per_label * task_count
+    label_cost_finetune_total = labels_per_task_finetune * cost_per_label * task_count
+
+    label_cost_reduction = label_cost_scratch_total / label_cost_finetune_total
+    marginal_compute_reduction = (scratch_compute_per_task / finetune_compute_per_task).to("").magnitude
+    crossover_tasks_value = (pretrain_compute / (scratch_compute_per_task - finetune_compute_per_task)).to("").magnitude
+
+    # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
+    check(label_cost_reduction > 1.0, "Fine-tuning must require fewer labels than scratch training.")
+    check(marginal_compute_reduction > 1.0, "Fine-tuning marginal compute must be less than scratch training.")
+    check(abs(crossover_tasks_value - 10.53) < 0.1, f"Expected ~10.5 crossover tasks, got {crossover_tasks_value:.2f}")
+
+    # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
+    n_tasks_str = fmt(task_count, precision=0, commas=False)
+    cost_per_label_str = fmt_usd(cost_per_label.to(USD / count).magnitude, precision=0, commas=False)
+    labels_per_task_scratch_str = fmt_count(labels_per_task_scratch, precision=0, commas=True)
+    # Currency prefix + M/K suffixes use fmt() prefix/suffix discipline.
+    label_cost_scratch_total_str = fmt_usd(label_cost_scratch_total, precision=0, commas=False, scale="M")
+    cost_scratch_per_task_str = fmt_count(
+        scratch_compute_per_task.to(hour).magnitude, precision=0, commas=True, label="GPU-hour", plural_label="GPU-hours"
+    )
+    cost_scratch_total_str = fmt_count(scratch_compute_total.to(hour).magnitude, precision=0, commas=True, label="GPU-hour", plural_label="GPU-hours")
+    cost_foundation_total_str = fmt_count(
+        foundation_compute_total.to(hour).magnitude, precision=0, commas=True, label="GPU-hour", plural_label="GPU-hours"
+    )
+    labels_per_task_finetune_str = fmt_count(labels_per_task_finetune, precision=0, commas=True)
+    label_cost_finetune_total_str = fmt_usd(label_cost_finetune_total, precision=0, commas=False, scale="K")
+    cost_finetune_value_str = fmt_count(
+        finetune_compute_per_task.to(hour).magnitude, precision=0, commas=True, label="GPU-hour", plural_label="GPU-hours"
+    )
+    cost_pretrain_value_str = fmt_count(pretrain_compute.to(hour).magnitude, precision=0, commas=True, label="GPU-hour", plural_label="GPU-hours")
+    marginal_compute_reduction_mult_str = fmt_multiple(marginal_compute_reduction, precision=0, commas=False)
+    crossover_tasks_str = fmt(crossover_tasks_value, precision=1, commas=False)
+    label_cost_reduction_factor_mult_str = fmt_multiple(label_cost_reduction, precision=0, commas=True)
+```
+
+To illustrate this economic transformation, consider a company building `{python} FoundationCostAmortization.n_tasks_str` specialized classifiers. Under the scenario assumptions, each task trained from scratch needs `{python} FoundationCostAmortization.labels_per_task_scratch_str` labels at `{python} FoundationCostAmortization.cost_per_label_str` per label, for `{python} FoundationCostAmortization.label_cost_scratch_total_str` across all tasks. The modeled compute burden is `{python} FoundationCostAmortization.cost_scratch_total_str`.
+
+The fine-tuning scenario pays `{python} FoundationCostAmortization.cost_pretrain_value_str` once, then assigns `{python} FoundationCostAmortization.labels_per_task_finetune_str` labels and `{python} FoundationCostAmortization.cost_finetune_value_str` of compute to each task. Across all `{python} FoundationCostAmortization.n_tasks_str` tasks, the modeled fine-tuning labels cost `{python} FoundationCostAmortization.label_cost_finetune_total_str`.
+
+Under these inputs, labeling cost drops by `{python} FoundationCostAmortization.label_cost_reduction_factor_mult_str` and per-task marginal compute by `{python} FoundationCostAmortization.marginal_compute_reduction_mult_str`. These are consequences of the chosen scenario values, while total compute becomes favorable only after enough downstream tasks amortize pretraining.
+
+Fine-tuning becomes economical when representations transfer effectively and downstream task count exceeds the break-even threshold. The side-by-side bar charts in @fig-amortization-comparison contrast the cost structures across ten downstream tasks: training from scratch expends a constant 1,000 GPU-hours per task (totaling 10,000 GPU-hours), whereas the foundation model approach absorbs a 10,000 GPU-hour pretraining bar upfront but collapses subsequent task fine-tuning to just 50 GPU-hours per bar.
+
+::: {#fig-amortization-comparison fig-env="figure" fig-pos="htb" fig-cap="**Cost Amortization in Foundation Models**: Training from scratch (left) requires `{python} FoundationCostAmortization.cost_scratch_per_task_str` per task (`{python} FoundationCostAmortization.cost_scratch_total_str` total for `{python} FoundationCostAmortization.n_tasks_str` tasks). The foundation model approach (right) pays `{python} FoundationCostAmortization.cost_pretrain_value_str` upfront for pretraining but reduces each subsequent task to just `{python} FoundationCostAmortization.cost_finetune_value_str`. At `{python} FoundationCostAmortization.n_tasks_str` tasks the totals are comparable (`{python} FoundationCostAmortization.cost_scratch_total_str` vs. `{python} FoundationCostAmortization.cost_foundation_total_str`), but the per-task marginal cost drops by `{python} FoundationCostAmortization.marginal_compute_reduction_mult_str`, and the crossover favoring the foundation model occurs around `{python} FoundationCostAmortization.crossover_tasks_str` tasks. The plotted `{python} FoundationCostAmortization.n_tasks_str`-task snapshot therefore remains just below that break-even point." fig-alt="Two bar charts side by side. Left (train from scratch) shows equal per-task GPU-hour bars totaling the scratch-training cost. Right (foundation model) shows one tall pretraining bar followed by short fine-tuning bars per task."}
+
+```{python}
+#| echo: false
+
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ COST AMORTIZATION COMPARISON (FIGURE)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @fig-amortization-comparison—foundation model cost structure
+# │
+# │ Goal: Contrast train-from-scratch (10×1,000 hrs) vs foundation model
+# │       (10,000 upfront + 10×50 fine-tune); show crossover at ~11 tasks.
+# │ Show: Side-by-side bar charts; total labels; 20× per-task marginal drop.
+# │ How: matplotlib subplots; stacked/grouped bars; book_style.set_book_style().
+# │
+# └─────────────────────────────────────────────────────────────────────────────
+# ┌── 1. CANVAS ────────────────────────────────────────────────────────────────
+# │ Contrast train-from-scratch (10×1,000 hrs) vs foundation model
+import numpy as np
+import matplotlib.pyplot as plt
+from binder.tools.figures import style as book_style
+
+# ┌── 2. ARRAYS ────────────────────────────────────────────────────────────────
+book_style.set_book_style()
+COLORS = book_style.COLORS
+fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(10, 4.1))
+
+tasks = np.arange(1, 11)
+
+# Left: Train from Scratch
+ax1.bar(tasks, [1] * 10, color=COLORS['RedL'], edgecolor=COLORS['RedLine'], linewidth=0.8, width=0.6)
+ax1.set_title('Train from Scratch', fontweight='bold', fontsize=11)
+ax1.set_xlabel('Task Number')
+ax1.set_ylabel('Cost (1000 GPU-hours)')
+ax1.set_ylim(0, 12)
+ax1.set_xticks(tasks)
+ax1.set_yticks([0, 2, 4, 6, 8, 10])
+ax1.spines['top'].set_visible(False)
+ax1.spines['right'].set_visible(False)
+ax1.grid(False)
+ax1.text(5.5, 11, 'Total: 10,000 GPU-hours', ha='center', fontsize=9, fontweight='bold', color=COLORS['RedLine'])
+
+# Right: Foundation Model
+
+# ┌── 3. RENDER ────────────────────────────────────────────────────────────────
+fm_tasks = np.arange(0, 11)
+fm_labels = ['Pre'] + [str(i) for i in range(1, 11)]
+pre_train = [10] + [0] * 10
+fine_tune = [0] + [0.05] * 10
+
+ax2.bar(fm_tasks, pre_train, color=COLORS['BlueL'], edgecolor=COLORS['BlueLine'], linewidth=0.8, width=0.6, label='Pre-training')
+ax2.bar(fm_tasks, fine_tune, bottom=pre_train, color=COLORS['GreenL'], edgecolor=COLORS['GreenLine'], linewidth=0.8, width=0.6, label='Fine-tuning')
+ax2.set_title('Foundation Model', fontweight='bold', fontsize=11)
+ax2.set_xlabel('Task Number')
+ax2.set_ylim(0, 12)
+ax2.set_xticks(fm_tasks)
+ax2.set_xticklabels(fm_labels)
+ax2.set_yticks([0, 2, 4, 6, 8, 10])
+ax2.spines['top'].set_visible(False)
+ax2.spines['right'].set_visible(False)
+ax2.grid(False)
+ax2.legend(loc='upper right', fontsize=8, frameon=True, facecolor='white', framealpha=0.95, edgecolor='gray', fancybox=True, borderpad=0.6)
+ax2.text(5.5, 11, 'Total: 10,500 GPU-hours', ha='center', fontsize=9, fontweight='bold', color=COLORS['BlueLine'])
+
+plt.tight_layout()
+plt.show()
+plt.close()
+
+# ┌── 4. DECORATE ──────────────────────────────────────────────────────────────
+```
+
+:::
+
+## Decision Framework {#sec-data-selection-decision-framework-0261}
+
+When labeling budget, redundancy, rare classes, privacy, and convergence speed conflict, systems engineering requires identifying the primary binding constraint. Each stage can raise the information-compute ratio when its measured quality gain justifies its overhead: pruning removes low-value samples before training, dynamic selection focuses compute on high-value samples during training, and synthesis creates new high-value samples on demand (@tbl-data-selection).
+
+| **Stage**                | **When Applied** | **Techniques**                                        | **Order-of-Magnitude Scenario Range**                |
+|:-------------------------|:-----------------|:------------------------------------------------------|:-----------------------------------------------------|
+| **Static pruning**       | Before training  | Coreset Selection, Deduplication, Quality Filtering   | 30–50% dataset reduction                             |
+| **Dynamic selection**    | During training  | Curriculum Learning, Active Learning, Semi-Supervised | 10–30% faster curricula; 2--100$\times$ fewer labels |
+| **Synthetic generation** | On-demand        | Augmentation, Generative Models                       | 2--10$\times$ effective data expansion               |
+
+: **Three-Stage Data Selection Pipeline**: The ranges illustrate possible outcomes rather than portable expectations. Actual gains depend on the dataset, model, selection method, and target metric. {#tbl-data-selection .striped .hover tbl-colwidths="[23,21,28,28]"}
+
+Once the dominant constraint is named, @tbl-technique-selection compares which technique changes that constraint and why.
+
+| **Constraint**                 | **Candidate Technique**   | **Why**                                              |
+|:-------------------------------|:--------------------------|:-----------------------------------------------------|
+| **Limited labeling budget**    | Active Learning           | Maximizes label ROI by selecting informative samples |
+| **High redundancy in data**    | Deduplication + Coreset   | Removes waste before training begins                 |
+| **Rare classes or edge cases** | Synthetic Generation      | Creates samples that do not exist in raw data        |
+| **Slow convergence**           | Curriculum Learning       | Improves gradient quality in early training          |
+| **Privacy requirements**       | Privacy-audited synthesis | Reduce direct use of real records; verify leakage    |
+
+: **Technique Selection Guide by Primary Constraint**: Candidate data-selection techniques mapped to the dominant resource constraint in the ML pipeline. The table begins the diagnosis; prerequisites and measured ROI determine the final choice. {#tbl-technique-selection .striped .hover}
+
+@Tbl-technique-selection maps individual constraints to techniques, but real projects face multiple constraints simultaneously. The triage flowchart in @fig-technique-decision-tree routes candidate strategies hierarchically from the root bottleneck—labeling expense, compute limits, or data scarcity—through operational checks on oracle availability, dataset redundancy, and simulator support to isolate actionable techniques.
+
+::: {#fig-technique-decision-tree fig-pos="htb" fig-cap="**Data Selection Decision Tree**: The tree begins with the primary bottleneck—labeling cost, compute cost, or data scarcity—and narrows each branch using available pools, oracles, redundancy, teachers, or simulators. Its leaves identify candidate techniques; projects with multiple binding constraints may require more than one branch." fig-alt="Decision tree rooted at Primary bottleneck, with branches for labeling cost, compute cost, and data scarcity. Labeling cost branches to self-supervised, active, or semi-supervised learning based on pool and oracle availability. Compute cost branches through redundant data to deduplication plus coreset selection or curriculum learning. Data scarcity branches through teacher or simulator availability to knowledge distillation, synthetic generation, or data augmentation."}
+```{.tikz}
+\begin{tikzpicture}[font=\small\sffamily]
+  \tikzset{
+     Decision/.style={draw=BlueD,fill=cyan!10, trapezium,aspect=2,inner sep=-1.2ex,
+     text width=30mm,line width=1pt,
+                        diamond, minimum width=32mm, minimum height=20mm, align= flush center,
+                        node distance=15mm and 25mm},
+    Leaf/.style={
+      rectangle,
+      draw=GreenLine,
+      fill=green!90!black!10,
+      align=center,
+      line width=1pt,minimum width=23mm,
+      minimum height=1cm,
+      font=\footnotesize\sffamily
+    },
+    Arrow/.style={->, >=Latex,line width=1pt, color=black!70}
+  }
+\def\be{8mm}
+% Root
+\node[Decision] (D1) {Primary\\bottleneck?};
+% Left
+\node[Decision, below left= 17mm and 31mm of D1] (D2) {Labeling\\cost};
+\node[Decision, below = \be of D2] (D3) {Oracle\\available?};
+\node[Leaf, left=14mm of D2] (B1){Self-\\Supervised};
+\node[Leaf, below=7mm of D3] (B2){Active\\Learning};
+\node[Leaf, left=14mm of D3] (B3){Semi-\\Supervised};
+%right
+\node[Decision, below right=17mm and 31mm  of D1] (D4) {Data\\scarcity};
+\node[Decision, below = \be of D4] (D5) {Simulator\\available?};
+\node[Leaf, right=14mm of D4] (B6){Knowledge\\Distillation};
+\node[Leaf, right=14mm of D5] (B7){Data\\Augmentation};
+\node[Leaf, below=7mm of D5] (B8){Synthetic\\Generation};
+%center
+\node[Decision, below = 7mm of D1] (D6) {Compute\\cost};
+\node[Decision, below = \be of D6] (D7) {Redundant\\data?};
+\node[Leaf, below=7mm of $(D3.south)!0.6!(D7.south)$] (B4){Dedup +\\Coreset};
+\node[Leaf, below=7mm of $(D7.south)!0.4!(D5.south)$] (B5){Curriculum\\Learning};
+%%arrows
+\draw[Arrow](D1)-|node[above, pos=0.25, font=\scriptsize\sffamily] {Labeling $\$\$\$$}(D2);
+\draw[Arrow](D1)-|node[above, pos=0.25, font=\scriptsize\sffamily] {Not enough data}(D4);
+\draw[Arrow](D1)--node[right, pos=0.25, font=\scriptsize\sffamily] {Compute $\$\$\$$}(D6);
+\draw[Arrow] (D2) -- node[above, pos=0.45, font=\scriptsize\sffamily] {Large pool} (B1);
+\draw[Arrow](D2)--(D3);
+\draw[Arrow](D3)--node[right, pos=0.25, font=\scriptsize\sffamily] {Yes}(B2);
+\draw[Arrow](D3)--node[above, pos=0.25, font=\scriptsize\sffamily] {No}(B3);
+%
+\draw[Arrow](D7.west)-|node[above, pos=0.25, font=\scriptsize\sffamily] {High}(B4.120);
+\draw[Arrow](D7.east)-|node[above, pos=0.25, font=\scriptsize\sffamily] {Low}(B5.65);
+%
+\draw[Arrow](D5)--node[right, pos=0.25, font=\scriptsize\sffamily] {Yes}(B8);
+\draw[Arrow](D5)--node[above, pos=0.25, font=\scriptsize\sffamily] {No}(B7);
+
+\draw[Arrow] (D4) -- node[above, pos=0.45, font=\scriptsize\sffamily] {Teacher} (B6);
+
+\draw[Arrow](D4)--node[right, pos=0.25, font=\scriptsize\sffamily] {Domain}(D5);
+
+\draw[Arrow](D6)--(D7);
+\end{tikzpicture}
+```
+
+:::
+
+Each path requires a structured assessment because the same dataset symptom can point to different bottlenecks. Technique selection begins by naming the binding constraint, then checks whether the data, labels, and infrastructure needed by the chosen method exist.
+
+#### Step 1: Assess the bottleneck {.unnumbered}
+
+Identify which resource constraint most severely limits the training pipeline:
+
+- **Labeling cost**: Label-efficiency techniques such as active learning, semi-supervised learning, and self-supervised learning maximize the value extracted from each human annotation.
+- **Compute cost**: Coreset selection and deduplication can reduce processed samples, while a validated curriculum may reduce the steps needed to reach a target metric.
+- **Data scarcity**: Data creation through augmentation, synthesis, and distillation expands the effective training set beyond what raw collection provides.
+
+This diagnostic step keeps technique selection tied to the binding resource constraint rather than to the most familiar algorithm.
+
+#### Step 2: Check prerequisites {.unnumbered}
+
+With the bottleneck identified, verify that the corresponding techniques are feasible given the available infrastructure and data. Each approach carries specific requirements that must be met before implementation can begin (@tbl-technique-prerequisites).
+
+```{=latex}
+\begingroup
+\renewcommand{\arraystretch}{1.3}
+```
+
+| **Technique**                                        | **Prerequisites**                                           |
+|:-----------------------------------------------------|:------------------------------------------------------------|
+| **Active Learning**                                  | Access to oracle, unlabeled pool, retraining infrastructure |
+| **Coreset selection**\index{Coreset!data efficiency} | Proxy model or embedding extractor, full dataset accessible |
+| **Curriculum Learning**                              | Difficulty scoring method, pacing schedule                  |
+| **Semi-Supervised**                                  | Some labeled data, unlabeled data from same distribution    |
+| **Self-Supervised**                                  | Large unlabeled corpus, pretraining compute budget          |
+| **Augmentation**                                     | Domain knowledge of invariances, augmentation library       |
+| **Synthetic Generation**                             | Generative model or simulator, domain gap mitigation        |
+
+: **Technique Prerequisites**: Each technique carries specific infrastructure and data requirements that must be verified before implementation. A technique with excellent theoretical gains but unmet prerequisites will fail in practice, making this checklist the first step in technique selection. {#tbl-technique-prerequisites .striped .hover}
+
+```{=latex}
+\endgroup
+```
+
+#### Step 3: Estimate ROI {.unnumbered}
+
+Before committing engineering resources, estimate each candidate technique's return on investment. @Sec-data-selection-roi-framework-data-selection-techniques-dade defines ROI and @sec-data-selection-amortization-across-training-runs-f6b8 extends it across runs; the essential discipline is to express recurring savings and selection costs per training run and to spread one-time engineering cost across the planned number of experiments $N_{\text{runs}}$.
+
+A technique with high theoretical compute gains but complex engineering requirements may deliver lower net ROI than a simpler approach. Exact deduplication is often an inexpensive first candidate because hashing is computationally lightweight and easy to implement, although downstream benefit still depends on corpus redundancy and intentional sample weighting. Active learning requires oracle access, retraining infrastructure, and selection algorithm development, so its ROI depends heavily on how many labeling cycles amortize that upfront engineering investment.
+
+#### Step 4: Combine techniques {.unnumbered}
+
+Data selection techniques are not mutually exclusive, but combining them does not guarantee additive gains. A representative workflow deduplicates the raw corpus, applies a coverage-aware coreset filter, orders retained batches through an empirical curriculum, and applies runtime augmentations during batch collation. Pretrained representations alter the baseline trajectory further. Every additional stage must justify its compute overhead, because cascading filters frequently discard overlapping subsets while their scoring latencies accumulate.
+
+*Stages can compound efficiency gains when their effects do not overlap and their overhead remains small; combined savings must be measured rather than assumed.*
+
+Algorithmic filtering translates into system speedup only when selection overhead remains strictly bounded. A coreset pass that consumes ten hours of probe inference to trim a two-hour training run produces a net loss on wall-clock time and cloud spend. Similarly, an adaptive curriculum that scans the full corpus for per-epoch difficulty scoring can stall accelerators on host CPU bottlenecks. Realizing data-efficiency gains in production demands engineering empathy for the physical stack: amortizing scoring passes, streaming nonsequential batches without defeating prefetch engines, and synchronizing distributed selection states without serialization stalls.
+
+## Cross-Layer Interactions
+
+Real ML systems combine data selection with model-level efficiency, machine-level throughput, and distributed training simultaneously. These optimizations interact in ways that can amplify or undermine each other, and understanding these interactions is essential for designing efficient end-to-end pipelines. {#sec-data-selection-crosslayer-interactions-1f39}
 
 In the D·A·M taxonomy (Data · Algorithm · Machine), data selection operates on the data dimension to change the examples processed and the learning signal they provide. Yet execution time under the iron law of ML systems depends on how input pruning alters the algorithm (model representations, loss landscapes, and compressibility) and the machine (memory bandwidth, kernel arithmetic intensity, and inter-accelerator communication). These cross-layer interactions\index{Cross-layer interaction!cross-optimization effects} can amplify efficiency gains across the stack or introduce unexpected bottlenecks that negate upstream savings. System efficiency requires co-designing data curation alongside model compression and hardware scheduling rather than optimizing each component in isolation.
 
@@ -4318,149 +4461,7 @@ drawcolor=black,filllcolor=cyan!10!, Linewidth=0.75pt,filllcirclecolor=red}};
 
 Tracing artifacts through the pipeline in @fig-optimization-stack reveals why data selection occupies an asymmetric position at the head of the optimization stack: pruning raw inputs reduces upstream training FLOPs, but does not automatically shrink parameter footprint, improve quantization headroom, or relax serving latency constraints in the downstream compression and hardware stages. Each downstream tier inherits both the computational savings and any representational deficits created upstream; an aggressive filter that discards rare but critical edge cases can force downstream engineers to train longer or abandon aggressive quantization to preserve task accuracy.
 
-
-## Decision Framework {#sec-data-selection-decision-framework-0261}
-
-When labeling budget, redundancy, rare classes, privacy, and convergence speed conflict, systems engineering requires identifying the primary binding constraint. Each stage can raise the information-compute ratio when its measured quality gain justifies its overhead: pruning removes low-value samples before training, dynamic selection focuses compute on high-value samples during training, and synthesis creates new high-value samples on demand (@tbl-data-selection).
-
-| **Stage**                | **When Applied** | **Techniques**                                        | **Order-of-Magnitude Scenario Range**                |
-|:-------------------------|:-----------------|:------------------------------------------------------|:-----------------------------------------------------|
-| **Static pruning**       | Before training  | Coreset Selection, Deduplication, Quality Filtering   | 30–50% dataset reduction                             |
-| **Dynamic selection**    | During training  | Curriculum Learning, Active Learning, Semi-Supervised | 10–30% faster curricula; 2--100$\times$ fewer labels |
-| **Synthetic generation** | On-demand        | Augmentation, Generative Models         | 2--10$\times$ effective data expansion               |
-
-: **Three-Stage Data Selection Pipeline**: The ranges illustrate possible outcomes rather than portable expectations. Actual gains depend on the dataset, model, selection method, and target metric. {#tbl-data-selection .striped .hover tbl-colwidths="[23,21,28,28]"}
-
-Once the dominant constraint is named, @tbl-technique-selection compares which technique changes that constraint and why.
-
-| **Constraint**                  | **Candidate Technique**   | **Why**                                              |
-|:--------------------------------|:--------------------------|:-----------------------------------------------------|
-| **Limited labeling budget**     | Active Learning           | Maximizes label ROI by selecting informative samples |
-| **High redundancy in data**     | Deduplication + Coreset   | Removes waste before training begins                 |
-| **Rare classes or edge cases**  | Synthetic Generation      | Creates samples that do not exist in raw data        |
-| **Slow convergence**            | Curriculum Learning       | Improves gradient quality in early training          |
-| **Privacy requirements**        | Privacy-audited synthesis | Reduce direct use of real records; verify leakage    |
-
-: **Technique Selection Guide by Primary Constraint**: Candidate data-selection techniques mapped to the dominant resource constraint in the ML pipeline. The table begins the diagnosis; prerequisites and measured ROI determine the final choice. {#tbl-technique-selection .striped .hover}
-
-@Tbl-technique-selection maps individual constraints to techniques, but real projects face multiple constraints simultaneously. The triage flowchart in @fig-technique-decision-tree routes candidate strategies hierarchically from the root bottleneck—labeling expense, compute limits, or data scarcity—through operational checks on oracle availability, dataset redundancy, and simulator support to isolate actionable techniques.
-
-::: {#fig-technique-decision-tree fig-pos="htb" fig-cap="**Data Selection Decision Tree**: The tree begins with the primary bottleneck—labeling cost, compute cost, or data scarcity—and narrows each branch using available pools, oracles, redundancy, teachers, or simulators. Its leaves identify candidate techniques; projects with multiple binding constraints may require more than one branch." fig-alt="Decision tree rooted at Primary bottleneck, with branches for labeling cost, compute cost, and data scarcity. Labeling cost branches to self-supervised, active, or semi-supervised learning based on pool and oracle availability. Compute cost branches through redundant data to deduplication plus coreset selection or curriculum learning. Data scarcity branches through teacher or simulator availability to knowledge distillation, synthetic generation, or data augmentation."}
-```{.tikz}
-\begin{tikzpicture}[font=\small\sffamily]
-  \tikzset{
-     Decision/.style={draw=BlueD,fill=cyan!10, trapezium,aspect=2,inner sep=-1.2ex,
-     text width=30mm,line width=1pt,
-                        diamond, minimum width=32mm, minimum height=20mm, align= flush center,
-                        node distance=15mm and 25mm},
-    Leaf/.style={
-      rectangle,
-      draw=GreenLine,
-      fill=green!90!black!10,
-      align=center,
-      line width=1pt,minimum width=23mm,
-      minimum height=1cm,
-      font=\footnotesize\sffamily
-    },
-    Arrow/.style={->, >=Latex,line width=1pt, color=black!70}
-  }
-\def\be{8mm}
-% Root
-\node[Decision] (D1) {Primary\\bottleneck?};
-% Left
-\node[Decision, below left= 17mm and 31mm of D1] (D2) {Labeling\\cost};
-\node[Decision, below = \be of D2] (D3) {Oracle\\available?};
-\node[Leaf, left=14mm of D2] (B1){Self-\\Supervised};
-\node[Leaf, below=7mm of D3] (B2){Active\\Learning};
-\node[Leaf, left=14mm of D3] (B3){Semi-\\Supervised};
-%right
-\node[Decision, below right=17mm and 31mm  of D1] (D4) {Data\\scarcity};
-\node[Decision, below = \be of D4] (D5) {Simulator\\available?};
-\node[Leaf, right=14mm of D4] (B6){Knowledge\\Distillation};
-\node[Leaf, right=14mm of D5] (B7){Data\\Augmentation};
-\node[Leaf, below=7mm of D5] (B8){Synthetic\\Generation};
-%center
-\node[Decision, below = 7mm of D1] (D6) {Compute\\cost};
-\node[Decision, below = \be of D6] (D7) {Redundant\\data?};
-\node[Leaf, below=7mm of $(D3.south)!0.6!(D7.south)$] (B4){Dedup +\\Coreset};
-\node[Leaf, below=7mm of $(D7.south)!0.4!(D5.south)$] (B5){Curriculum\\Learning};
-%%arrows
-\draw[Arrow](D1)-|node[above, pos=0.25, font=\scriptsize\sffamily] {Labeling $\$\$\$$}(D2);
-\draw[Arrow](D1)-|node[above, pos=0.25, font=\scriptsize\sffamily] {Not enough data}(D4);
-\draw[Arrow](D1)--node[right, pos=0.25, font=\scriptsize\sffamily] {Compute $\$\$\$$}(D6);
-\draw[Arrow] (D2) -- node[above, pos=0.45, font=\scriptsize\sffamily] {Large pool} (B1);
-\draw[Arrow](D2)--(D3);
-\draw[Arrow](D3)--node[right, pos=0.25, font=\scriptsize\sffamily] {Yes}(B2);
-\draw[Arrow](D3)--node[above, pos=0.25, font=\scriptsize\sffamily] {No}(B3);
-%
-\draw[Arrow](D7.west)-|node[above, pos=0.25, font=\scriptsize\sffamily] {High}(B4.120);
-\draw[Arrow](D7.east)-|node[above, pos=0.25, font=\scriptsize\sffamily] {Low}(B5.65);
-%
-\draw[Arrow](D5)--node[right, pos=0.25, font=\scriptsize\sffamily] {Yes}(B8);
-\draw[Arrow](D5)--node[above, pos=0.25, font=\scriptsize\sffamily] {No}(B7);
-
-\draw[Arrow] (D4) -- node[above, pos=0.45, font=\scriptsize\sffamily] {Teacher} (B6);
-
-\draw[Arrow](D4)--node[right, pos=0.25, font=\scriptsize\sffamily] {Domain}(D5);
-
-\draw[Arrow](D6)--(D7);
-\end{tikzpicture}
-```
-
-:::
-
-### Decision process {.unnumbered}
-
-Each path requires a structured assessment because the same dataset symptom can point to different bottlenecks. Technique selection begins by naming the binding constraint, then checks whether the data, labels, and infrastructure needed by the chosen method exist.
-
-#### Step 1: Assess the bottleneck {.unnumbered}
-
-Identify which resource constraint most severely limits the training pipeline:
-
-- **Labeling cost**: Label-efficiency techniques such as active learning, semi-supervised learning, and self-supervised learning maximize the value extracted from each human annotation.
-- **Compute cost**: Coreset selection and deduplication can reduce processed samples, while a validated curriculum may reduce the steps needed to reach a target metric.
-- **Data scarcity**: Data creation through augmentation, synthesis, and distillation expands the effective training set beyond what raw collection provides.
-
-This diagnostic step keeps technique selection tied to the binding resource constraint rather than to the most familiar algorithm.
-
-#### Step 2: Check prerequisites {.unnumbered}
-
-With the bottleneck identified, verify that the corresponding techniques are feasible given the available infrastructure and data. Each approach carries specific requirements that must be met before implementation can begin (@tbl-technique-prerequisites).
-
-```{=latex}
-\begingroup
-\renewcommand{\arraystretch}{1.3}
-```
-
-| **Technique**                                        | **Prerequisites**                                           |
-|:-----------------------------------------------------|:------------------------------------------------------------|
-| **Active Learning**                                  | Access to oracle, unlabeled pool, retraining infrastructure |
-| **Coreset selection**\index{Coreset!data efficiency} | Proxy model or embedding extractor, full dataset accessible |
-| **Curriculum Learning**                              | Difficulty scoring method, pacing schedule                  |
-| **Semi-Supervised**                                  | Some labeled data, unlabeled data from same distribution    |
-| **Self-Supervised**                                  | Large unlabeled corpus, pretraining compute budget          |
-| **Augmentation**                                     | Domain knowledge of invariances, augmentation library       |
-| **Synthetic Generation**                             | Generative model or simulator, domain gap mitigation        |
-
-: **Technique Prerequisites**: Each technique carries specific infrastructure and data requirements that must be verified before implementation. A technique with excellent theoretical gains but unmet prerequisites will fail in practice, making this checklist the first step in technique selection. {#tbl-technique-prerequisites .striped .hover}
-
-```{=latex}
-\endgroup
-```
-
-#### Step 3: Estimate ROI {.unnumbered}
-
-Before committing engineering resources, estimate each candidate technique's return on investment. @Sec-data-selection-roi-framework-data-selection-techniques-dade defines ROI and @sec-data-selection-amortization-across-training-runs-f6b8 extends it across runs; the essential discipline is to express recurring savings and selection costs per training run and to spread one-time engineering cost across the planned number of experiments $N_{\text{runs}}$.
-
-A technique with high theoretical compute gains but complex engineering requirements may deliver lower net ROI than a simpler approach. Exact deduplication is often an inexpensive first candidate because hashing is computationally lightweight and easy to implement, although downstream benefit still depends on corpus redundancy and intentional sample weighting. Active learning requires oracle access, retraining infrastructure, and selection algorithm development, so its ROI depends heavily on how many labeling cycles amortize that upfront engineering investment.
-
-#### Step 4: Combine techniques {.unnumbered}
-
-Data selection techniques are not mutually exclusive, but combining them does not guarantee additive gains. A representative workflow deduplicates the raw corpus, applies a coverage-aware coreset filter, orders retained batches through an empirical curriculum, and applies runtime augmentations during batch collation. Pretrained representations alter the baseline trajectory further. Every additional stage must justify its compute overhead, because cascading filters frequently discard overlapping subsets while their scoring latencies accumulate.
-
-*Stages can compound efficiency gains when their effects do not overlap and their overhead remains small; combined savings must be measured rather than assumed.*
-
-Algorithmic filtering translates into system speedup only when selection overhead remains strictly bounded. A coreset pass that consumes ten hours of probe inference to trim a two-hour training run produces a net loss on wall-clock time and cloud spend. Similarly, an adaptive curriculum that scans the full corpus for per-epoch difficulty scoring can stall accelerators on host CPU bottlenecks. Realizing data-efficiency gains in production demands engineering empathy for the physical stack: amortizing scoring passes, streaming nonsequential batches without defeating prefetch engines, and synchronizing distributed selection states without serialization stalls.
+Examining these recurrent failure modes reveals how data selection breaks down in production and how systems engineers diagnose them before launching expensive training runs.
 
 ## Fallacies and Pitfalls {#sec-data-selection-fallacies-pitfalls-f4d0}
 

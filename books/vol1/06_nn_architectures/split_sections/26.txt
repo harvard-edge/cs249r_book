@@ -1,0 +1,157 @@
+### System implications {#sec-network-architectures-system-implications-05a3}
+
+Attention mechanisms exhibit distinctive system-level patterns that differ from previous architectures through their dynamic connectivity requirements. In iron law terms, attention shifts the bottleneck from the latency-bound sequential path of RNNs toward quadratic score interactions and implementation-dependent data movement. The subsections below separate the part of that cost that is unavoidable from the part that is an implementation choice.
+
+#### Memory requirements {#sec-network-architectures-memory-requirements-72c3}
+
+Attention mechanisms require storage for query-key-value projections and intermediate feature representations. A naive implementation also materializes an $S{\times}S$ attention-weight matrix for every sequence and head, creating a quadratic memory bottleneck alongside the $\SequenceLength{\times}\HiddenDimension$ inputs and outputs. For long sequences, these transient scores can dominate accelerator memory even though the learned projection matrices remain fixed in size. Tiled exact-attention kernels such as FlashAttention stream score blocks through faster memory and avoid retaining the complete matrix in HBM, while still computing $S^2$ dense interactions (@sec-appdx-algorithm-flash-attention derives the online softmax recurrence and its I/O reduction). This distinction separates an unavoidable quadratic compute cost for dense attention from optional quadratic score storage. Without kernel tiling, materializing intermediate score matrices quickly exhausts accelerator high-bandwidth memory at production sequence lengths.
+
+::: {.column-margin}
+![](images/svg/nn_architectures_attention_memory_wall.svg){width="100%" fig-alt="A flat curve that hockey-sticks sharply upward; a dot marks the knee, and the region to the right of the knee is shaded red as a danger zone."}
+
+*Doubling context quadruples score interactions and naive score storage.*
+:::
+
+```{python}
+#| echo: false
+#| label: attention-quadratic-bottleneck
+
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ ATTENTION QUADRATIC BOTTLENECK
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: Callout "The Quadratic Bottleneck" showing naive score-memory scaling
+# │
+# │ Goal: Illustrate the naive score-storage wall for long-context transformers.
+# │ Show: A materialized 100K-token attention matrix consumes 240 GB per layer.
+# │ How: Calculate the size of the S×S attention matrix in FP16.
+# │
+# └─────────────────────────────────────────────────────────────────────────────
+
+from mlsysim.fmt import fmt_int, fmt, check, fmt_sci
+
+# ┌── LEGO ───────────────────────────────────────────────
+class AttentionMemory:
+    """
+    Namespace for Quadratic Attention Memory Calculation.
+    Scenario: Naively materialized score memory at a 100K context window.
+    """
+
+    # ┌── 1. LOAD (Constants) ───────────────────────────────────────────────
+    seq_len = 100_000
+    bytes_per_element = BYTES_FP16.to(byte).magnitude
+    num_layers = 32
+    num_heads = 12
+
+    # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
+    # Step 1: S^2 * heads
+    elements = seq_len * seq_len * num_heads
+
+    # Step 2: Memory
+    single_layer_memory = elements * BYTES_FP16
+    # Step 3: Use decimal GB for standard model size quotes.
+    total_memory = single_layer_memory * num_layers
+
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(total_memory >= 100 * GB, f"Materialized score memory ({total_memory.to(GB).magnitude:.1f} GB) is too small for a 'bottleneck'.")
+
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
+    seq_len_str = fmt(seq_len, precision=0)
+    elements_str = fmt_sci(elements, precision=1)
+    bytes_per_element_value_str = fmt(bytes_per_element, precision=0, commas=False)
+    num_layers_str = fmt(num_layers, precision=0, commas=False)
+    num_heads_str = fmt(num_heads, precision=0, commas=False)
+    single_layer_gb_str = fmt_memory(single_layer_memory, unit=GB, precision=0, commas=False)
+    total_gb_str = fmt_memory(total_memory, unit=GB, precision=0, commas=True)
+```
+
+::: {#nbk-nn-architectures-quadratic-bottleneck .callout-notebook title="The quadratic bottleneck"}
+
+**Problem**: How much memory does a materialized attention matrix\index{Attention mechanism!quadratic bottleneck} require at sequence length $\SequenceLength =$ `{python} AttentionMemory.seq_len_str` (context window)?
+
+**Math**:
+
+1.  **Matrix size**: The attention score matrix $(\mathbf{Q}\mathbf{K}^T)$ has dimensions $S{\times}S$ per head, across $\NumberOfAttentionHeads$ heads (`{python} AttentionMemory.num_heads_str` heads in this example).
+2.  **Elements**: `{python} AttentionMemory.seq_len_str` $\times$ `{python} AttentionMemory.seq_len_str` $\times$ `{python} AttentionMemory.num_heads_str` heads = `{python} AttentionMemory.elements_str` elements.
+3.  **Memory**: At FP16 (`{python} AttentionMemory.bytes_per_element_value_str` bytes/element): `{python} AttentionMemory.elements_str` $\times$ `{python} AttentionMemory.bytes_per_element_value_str` bytes = `{python} AttentionMemory.single_layer_gb_str`.
+4.  **Retained layers**: `{python} AttentionMemory.single_layer_gb_str` per layer $\times$ `{python} AttentionMemory.num_layers_str` retained layers = `{python} AttentionMemory.total_gb_str`.
+
+```{=latex}
+\vspace*{-1ex}
+```
+**Systems insight**: A materialized attention matrix consumes `{python} AttentionMemory.single_layer_gb_str` per layer. Naive training that retains all `{python} AttentionMemory.num_layers_str` layers' scores for backward would require `{python} AttentionMemory.total_gb_str`, far exceeding any single GPU's capacity. This memory wall motivates two broad implementation strategies: avoid materializing the full matrix by tiling the computation, or reduce the number of scores computed in the first place.
+
+:::
+
+#### Computation and data movement {#sec-network-architectures-computation-needs-7a5d}
+
+Attention computation splits into two primary GEMM phases interleaved by a row-wise reduction: generating pairwise query-key scores and computing weighted sums over values. Query-key inner products require $\BatchSize \times \NumberOfAttentionHeads \times \SequenceLength^2 \times \AttentionHeadDimension$ MAC operations, mirrored symmetrically by the value-aggregation stage. The intervening softmax requires row-wise maximum finding, exponentiation, and summation. Unlike static weight convolutions where filter weights are reused across fixed grid positions, attention computes transient, input-dependent affinity matrices that must be refreshed for every token configuration.
+
+::: {#chk-nn-architectures-quadratic-scaling-intuition .callout-checkpoint title="Quadratic scaling intuition"}
+
+Long-context scaling is shaped by the cost of attention. Verify your intuition:
+
+- [ ] **Quadratic growth**: can you explain why doubling sequence length quadruples dense score interactions and a materialized score matrix?
+- [ ] **Tiling boundary**: can you explain why long-context dense attention remains more expensive even when tiling removes full-matrix storage?
+```{=latex}
+\vspace*{-1ex}
+```
+:::
+
+Data movement in attention creates memory access patterns distinct from fixed-stencil operations. Evaluating attention requires projecting and streaming query, key, and value tensors, then routing value vectors according to dynamically evaluated scores. In naive implementations, staging the intermediate $\SequenceLength \times \SequenceLength$ score matrix in global HBM/DRAM turns score materialization into the dominant bandwidth bottleneck. While static convolutions benefit from deterministic cache lines and RNNs reuse weights across time, naive attention generates massive, short-lived activation footprints that challenge standard on-chip cache capacities.
+
+```{python}
+#| echo: false
+#| label: transformer-complexity-anchor
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ TRANSFORMER QUADRATIC SCALING ANCHOR
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: "The Quadratic Wall" perspective callout on BERT context limits.
+# │
+# │ Goal: Anchor naive score-memory growth when context length increases.
+# │ Show: 4×, 16×, and 64× memory ratios for doubled/mid/long context lengths.
+# │ How: Compute (S/S_base)² for representative sequence lengths.
+# │
+# └─────────────────────────────────────────────────────────────────────────────
+
+from mlsysim.fmt import fmt, fmt_multiple, check
+
+# ┌── LEGO ───────────────────────────────────────────────
+class TransformerComplexityAnchor:
+    """
+    Namespace for Transformer quadratic scaling anchor.
+    """
+
+    # ┌── 1. LOAD (Constants) ───────────────────────────────────────────────
+    base_seq_len = 512
+    doubled_seq_len = 1024
+    mid_seq_len = 2048
+    long_seq_len = 4096
+
+    # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
+    scaling_ratio = (doubled_seq_len / base_seq_len) ** 2
+    mid_context_ratio = (mid_seq_len / base_seq_len) ** 2
+    long_context_ratio = (long_seq_len / base_seq_len) ** 2
+
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(scaling_ratio == 4.0, f"Doubling context should cost 4x materialized score memory, got {scaling_ratio}.")
+    check(mid_context_ratio == 16.0, f"2048 vs 512 context should cost 16x materialized score memory, got {mid_context_ratio}.")
+    check(long_context_ratio == 64.0, f"4096 vs 512 context should cost 64x materialized score memory, got {long_context_ratio}.")
+
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
+    base_seq_len_str = fmt(base_seq_len, precision=0, commas=True)
+    long_seq_len_str = fmt(long_seq_len, precision=0, commas=True)
+    long_context_ratio_mult_str = fmt_multiple(long_context_ratio, precision=0, commas=False)
+```
+
+::: {#exmp-nn-architectures-quadratic-wall .callout-example title="The quadratic wall"}
+
+**Scenario**: BERT was pretrained with 512 learned position embeddings, so its deployments enforced a hard 512-token input limit [@devlin2019].
+
+**Diagnosis**: Inputs beyond the pretrained positions are undefined for the model, however much memory is available. The limit itself was chosen partly because attention cost grows quadratically with sequence length. Extending from `{python} TransformerComplexityAnchor.base_seq_len_str` to `{python} TransformerComplexityAnchor.long_seq_len_str` tokens would multiply materialized score memory by `{python} TransformerComplexityAnchor.long_context_ratio_mult_str`.
+
+**Systems lesson**: Super-linear scaling turns algorithmic complexity into a hardware constraint that can become fixed in the model itself. Serving long sequences requires tiled attention, sparse attention, or truncation to bound the HBM activation footprint.
+
+:::
+
+Attention replaces the serialized hidden-state bottleneck of recurrent models with dynamic, constant-depth routing, but shifts the system burden to quadratic arithmetic scaling and high memory bandwidth traffic. When combined with feed-forward layers, residual connections, and normalization, this primitive enables end-to-end parallel sequence processing on modern accelerators. The transformer architecture (@sec-network-architectures-transformers-attentiononly-architecture-1b56) builds directly on this foundation, establishing the dominant architectural paradigm for modern large-scale machine learning systems.
+

@@ -1,0 +1,272 @@
+## Architectural Principles {#sec-network-architectures-architectural-principles-engineering-tradeoffs-362e}
+
+The dense multilayer perceptron (MLP) of @sec-neural-computation paid for a weight between every pixel and every hidden unit, including relationships an image rarely needs. Matrix multiplication, activation functions, and gradient computation form the "verbs" of neural networks, and architectures remove that waste by assembling the same verbs into computational graphs\index{Architecture!computational graph} shaped like the data. Under the silicon contract (principle \ref{pri-silicon-contract}), that shape is also an implicit agreement with hardware, trading computational patterns for efficiency on particular problem classes.
+
+::: {.column-margin}
+![](images/svg/nn_architectures_inductive_bias.svg){width="100%" fig-alt="Vertical list of three architectures with a dark-to-light dot ramp: CNN (darkest, strong spatial prior), Transformer (mid), MLP (lightest, no structural prior), ordered by inductive-bias strength."}
+
+*Inductive bias from strong (convolutional) to weak (fully connected): stronger prior, less data needed.*
+:::
+
+Every neural network architecture decides how computation should be organized to match the inherent structure in the data. Images have spatial locality, language has sequential dependencies, and tabular records often lack a fixed spatial or sequential organization. The architecture encodes assumptions about these patterns directly into the computational graph, and those assumptions influence parameter count, hardware utilization, and deployment feasibility. Architecture selection is therefore a systems engineering problem\index{Architecture!systems engineering} that directly affects the iron law terms: the number of operations $\Operations$ and the volume of data movement $\DataVolume$. The structural assumptions that each architecture encodes are known as **inductive biases**\index{Inductive bias!definition},[^fn-inductive-bias-architecture] and they serve as the unifying concept for this entire chapter.
+
+[^fn-inductive-bias-architecture]: **Inductive bias**\index{Inductive bias!etymology}\index{Inductive bias!systems consequence}: From Latin *inducere*, "to lead into," encoding a structural assumption "leads" the model toward a smaller solution space, which is why this concept unifies the entire chapter: every architecture discussed here—multilayer perceptron (MLP), convolutional neural network (CNN), recurrent neural network (RNN), and transformer—is defined by its choice of bias. A CNN's locality bias cuts parameters by orders of magnitude vs. an equivalent MLP, directly shrinking the iron law's $O$ and $\DataVolume$ terms, while global attention trades quadratic score computation for long-range connectivity.
+
+```{python}
+#| echo: false
+from mlsysim import *
+from mlsysim.core.units import *
+
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ INDUCTIVE BIAS LOCALITY PARAMETER REDUCTION
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: Inductive bias definition quantitative significance.
+# │
+# │ Goal: Keep the CNN-vs.-MLP locality ratio computed at its first use.
+# │ How: Compare an ImageNet-sized dense input connection with a 3x3 RGB filter.
+# │
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim.fmt import fmt_int, fmt, fmt_qty_int, check, fmt_memory, fmt_bandwidth, fmt_flop_rate, fmt_power
+
+class InductiveBiasLocalityCalc:
+    """ImageNet-sized locality-bias parameter reduction for one feature detector."""
+
+    # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
+    img_dim = 224
+    img_channels = 3
+    kernel = 3
+
+    # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
+    dense_input_weights = img_dim * img_dim * img_channels
+    local_filter_weights = kernel * kernel * img_channels
+    spatial_locality_reduction = dense_input_weights / local_filter_weights
+
+    # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
+    check(spatial_locality_reduction > 5_000, f"Expected ImageNet locality reduction above 5,000x, got {spatial_locality_reduction:.1f}x.")
+
+    # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
+    spatial_locality_reduction_mult_str = fmt_multiple(spatial_locality_reduction, precision=1, commas=True)
+```
+
+```{=latex}
+\vspace*{-1ex}
+```
+::: {#dfn-nn-architectures-inductive-bias .callout-definition title="Inductive bias"}
+
+***Inductive bias***\index{Inductive bias!definition} is a structural constraint built into a model architecture that restricts the hypothesis space, enabling generalization from finite data by encoding domain-specific assumptions (such as spatial locality or sequential ordering) directly into the computational graph.
+
+1.  **Significance**: Inductive bias can reduce the dataset size $(\DatasetSize)$ required for generalization. For one output feature detector over $N_{\text{pix}}$ pixel positions with $C_{\text{in}}$ input channels, a dense connection uses $\mathcal{O}(N_{\text{pix}} C_{\text{in}})$ parameters, while a shared $K{\times}K$ CNN filter uses $\mathcal{O}(K^2 C_{\text{in}})$ parameters and is applied at every position, costing $\mathcal{O}(N_{\text{pix}} K^2 C_{\text{in}})$ operations. For a $224{\times}224$ RGB image, a shared $3{\times}3$ filter therefore uses roughly `{python} InductiveBiasLocalityCalc.spatial_locality_reduction_mult_str` fewer parameters than one dense feature detector, reducing parameter storage and often the data required to avoid overfitting.
+2.  **Distinction**: Unlike regularization (which penalizes hypothesis complexity at training time via L1/L2 terms), inductive bias restricts the hypothesis space at architecture design time: a CNN represents nonlocal functions less directly than local patterns, while regularization discourages complexity through the training objective.
+3.  **Common pitfall**: A frequent misconception is that stronger inductive bias is always better. A strong locality bias (CNN) excels on spatial data but represents long-range dependencies in language less directly than global attention, which supports long-range dependencies at $\mathcal{O}(\SequenceLength^2)$ score-computation cost.
+
+:::
+
+::: {.column-margin}
+![](images/svg/nn_architectures_algorithm_axis.svg){width="100%" fig-alt="Vertical three-box D·A·M stack: Data (gray, top), Algorithm (orange, lit, middle), Machine (gray, bottom). The lit Algorithm box marks the architecture axis."}
+
+*Architecture is the algorithm axis of D·A·M: it sets the operation-count budget.*
+:::
+
+A convolutional neural network (CNN) encodes an inductive bias of spatial locality: nearby pixels matter more than distant ones. A transformer lets each element attend to any other, enabling long-range relationships at quadratic score-computation cost. These biases help architectures learn efficiently by restricting the space of functions they represent. Without an appropriate bias, a model may require substantially more data and compute to learn the same structure. The unified framework in @sec-network-architectures-architecture-selection-framework-a442 brings these architectural families together once each bias has appeared in practice.
+
+Machine learning systems face a core engineering trade-off: **representational power vs. computational efficiency**\index{Architecture!representational power vs. efficiency}. Under the iron law of ML systems (principle \ref{pri-iron-law}), architectural choice is the primary determinant of the operation-count term $\Operations$. A transformer's attention mechanism enables global relationships but scales as $\mathcal{O}(\SequenceLength^2)$ operations with sequence length $\SequenceLength$; a CNN exploits spatial locality to reduce operations to linear scaling in the number of spatial positions. Matching the right inductive biases to a workload's data while setting a manageable operation-count budget defines the practice of neural architecture selection.
+
+::: {#exmp-nn-architectures-netflix-prize-ensemble .callout-example title="The ensemble Netflix did not ship (2009)"}
+
+**Context**: Netflix awarded its \$1M Grand Prize in 2009 for a 10 percent improvement in recommendation accuracy [@johnston2012netflixprize].
+
+**Mechanism**: Bringing the winning improvement into production required substantial engineering effort just as Netflix's business was shifting from mailed DVDs to streaming. That shift also produced richer viewing signals and changed what personalization needed to optimize.
+
+**Impact**: The additional accuracy did not justify the production effort, so Netflix did not deploy the Grand Prize code.
+
+**Fix**: Netflix retained two algorithms from the earlier Progress Prize and redirected its recommendation work toward streaming-era personalization.
+
+**Systems lesson**: An offline metric gain is only valuable when its integration cost and objective still match the production system.
+
+:::
+
+Choosing an architectural backbone sets the primary memory layout and compute pattern for downstream hardware. @Tbl-architecture-families contrasts the five major neural network families across their spatial/temporal inductive biases, tensor operations, and memory access characteristics.
+
+| **Architecture** | **Data Type**                 | **Core Innovation**            |
+|:-----------------|:------------------------------|:-------------------------------|
+| **MLPs**         | Tabular/Unstructured          | Dense connectivity             |
+| **CNNs**         | Spatial (images)              | Local filters + weight sharing |
+| **RNNs**         | Sequential (time series)      | Recurrent state                |
+| **Transformers** | Relational (language)         | Dynamic attention              |
+| **DLRM**         | Categorical (recommendations) | Embedding tables               |
+
+: **Neural Architecture Families**: Each family targets a data structure and encodes a core innovation. {#tbl-architecture-families}
+
+Five specific model architectures recur throughout this book as lighthouse models: consistent reference points that ground abstract concepts in concrete systems reality. These examples are concrete implementations of the Workload Archetypes (such as Compute Beast and Bandwidth Hog). The two vision lighthouses sit on or near the empirical Pareto frontier\index{Pareto frontier} plotted in @fig-efficiency-frontier, which bounds ImageNet top-1 accuracy against logarithmic compute cost (GMACs per image); the other three were chosen for the bottlenecks they isolate: memory bandwidth, memory capacity, and an always-on power envelope.
+
+::: {.column-margin .margin-pointer}
+↩ The Workload Archetypes classifying compute- and bandwidth-bound execution regimes are established in @sec-ml-systems-workload-archetypes-fd10.
+:::
+
+::: {#fig-efficiency-frontier fig-env="figure" fig-pos="htb" fig-cap="**The Efficiency Frontier**: ImageNet Top-1 Accuracy vs. Computational Cost (GMACs). The plotted points illustrate representational power versus computational cost across major model families. The dashed 'Pareto frontier' is an illustrative trade-off curve rather than a benchmark rerun; exact accuracy and reported compute values vary by model variant, training recipe, implementation, and operation-counting convention (multiply-accumulates vs. floating-point operations). The legend distinguishes six families: legacy CNNs (gray), dense CNNs (blue), efficient Mobile architectures (green), EfficientNet-class models (violet), modern CNNs (orange), and Transformers (red)." fig-alt="Scatter plot of ImageNet top-1 accuracy against compute cost on a logarithmic horizontal axis. Ten labeled model points use six colors for architecture families, and a gray dashed line connects MobileNetV2, EfficientNet-B0, ConvNeXt-T, and EfficientNet-B7."}
+
+```{python}
+#| echo: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ EFFICIENCY FRONTIER (FIGURE)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @fig-efficiency-frontier—model evolution and Pareto frontier
+# │
+# │ Goal: Plot ImageNet accuracy vs GMACs; show Dense CNN, Mobile, Transformer
+# │       families; dashed Pareto frontier.
+# │ Show: Scatter by family; model labels; log-scale x-axis.
+# │ How: MODELS_DATA; pandas groupby; book_style.setup_plot().
+# │
+# └─────────────────────────────────────────────────────────────────────────────
+# ┌── 1. CANVAS ────────────────────────────────────────────────────────────────
+# │ Plot ImageNet accuracy vs GMACs; show Dense CNN, Mobile, Transformer
+import pandas as pd
+from binder.tools.figures import style as book_style
+
+fig, ax, COLORS, plt = book_style.setup_plot(figsize=(10, 4.5))
+
+# =============================================================================
+# DATA
+# =============================================================================
+
+# ┌── 2. ARRAYS ────────────────────────────────────────────────────────────────
+MODELS_DATA = [
+    {'Model': 'AlexNet', 'Year': 2012, 'GMACs': 0.7, 'Accuracy': 63.3, 'Family': 'Legacy'},
+    {'Model': 'VGG-16', 'Year': 2014, 'GMACs': 15.5, 'Accuracy': 71.5, 'Family': 'Legacy'},
+    {'Model': 'ResNet-50', 'Year': 2015, 'GMACs': 4.1, 'Accuracy': 76.0, 'Family': 'Dense CNN'},
+    {'Model': 'Inception-v3', 'Year': 2015, 'GMACs': 5.7, 'Accuracy': 78.8, 'Family': 'Dense CNN'},
+    {'Model': 'MobileNetV2', 'Year': 2018, 'GMACs': 0.3, 'Accuracy': 72.0, 'Family': 'Mobile'},
+    {'Model': 'EfficientNet-B0', 'Year': 2019, 'GMACs': 0.39, 'Accuracy': 77.1, 'Family': 'Efficient'},
+    {'Model': 'EfficientNet-B7', 'Year': 2019, 'GMACs': 37.0, 'Accuracy': 84.3, 'Family': 'Efficient'},
+    {'Model': 'ViT-B/16', 'Year': 2020, 'GMACs': 17.6, 'Accuracy': 77.9, 'Family': 'Transformer'},
+    {'Model': 'Swin-T', 'Year': 2021, 'GMACs': 4.5, 'Accuracy': 81.3, 'Family': 'Transformer'},
+    {'Model': 'ConvNeXt-T', 'Year': 2022, 'GMACs': 4.5, 'Accuracy': 82.1, 'Family': 'Modern CNN'},
+]
+
+# =============================================================================
+# PLOT: The Efficiency Frontier
+# =============================================================================
+df = pd.DataFrame(MODELS_DATA)
+
+color_map = {
+    'Legacy': COLORS['grid'],
+    'Dense CNN': COLORS['BlueLine'],
+    'Mobile': COLORS['GreenLine'],
+    'Efficient': COLORS['VioletLine'],
+    'Transformer': COLORS['RedLine'],
+    'Modern CNN': COLORS['OrangeLine'],
+}
+
+# Individual label settings
+label_styles = {
+    'AlexNet': {
+        'xytext': (8, 2),
+        'ha': 'left',
+        'va': 'top',
+    },
+    'VGG-16': {
+        'xytext': (8, 2),
+        'ha': 'left',
+        'va': 'top',
+    },
+    'ResNet-50': {
+        'xytext': (0, -12),
+        'ha': 'center',
+        'va': 'center',
+    },
+    'Inception-v3': {
+        'xytext': (0, -12),
+        'ha': 'center',
+        'va': 'center',
+    },
+    'MobileNetV2': {
+        'xytext': (8, 2),
+        'ha': 'left',
+        'va': 'top',
+    },
+    'EfficientNet-B0': {
+        'xytext': (8, -3),
+        'ha': 'left',
+        'va': 'top',
+    },
+    'EfficientNet-B7': {
+        'xytext': (19, -14),
+        'ha': 'right',
+        'va': 'center',
+    },
+    'ViT-B/16': {
+        'xytext': (0, -12),
+        'ha': 'center',
+        'va': 'center',
+    },
+    'Swin-T': {
+        'xytext': (0, -12),
+        'ha': 'center',
+        'va': 'center',
+    },
+    'ConvNeXt-T': {
+        'xytext': (0, 12),
+        'ha': 'center',
+        'va': 'center',
+    },
+}
+
+default_label_style = {
+    'xytext': (5, 5),
+    'ha': 'left',
+    'va': 'bottom',
+    'fontsize': 8,
+    'bbox': dict(facecolor='white', alpha=0.8, edgecolor='none', pad=0.5),
+}
+
+# ┌── 3. RENDER ────────────────────────────────────────────────────────────────
+for family, group in df.groupby('Family'):
+    ax.scatter(
+        group['GMACs'],
+        group['Accuracy'],
+        label=family,
+        c=color_map.get(family, COLORS['primary']),
+        s=120,
+        alpha=0.9,
+        edgecolors='white',
+        linewidth=1.2,
+        zorder=3,
+    )
+
+for _, row in df.iterrows():
+    model = row['Model']
+
+    style = default_label_style.copy()
+    style.update(label_styles.get(model, {}))
+
+    ax.annotate(
+        model,
+        (row['GMACs'], row['Accuracy']),
+        xytext=style['xytext'],
+        textcoords='offset points',
+        ha=style['ha'],
+        va=style['va'],
+        fontsize=style.get('fontsize', 8),
+        bbox=style.get('bbox', None),
+    )
+
+pareto_models = ['MobileNetV2', 'EfficientNet-B0', 'ConvNeXt-T', 'EfficientNet-B7']
+pareto_points = df[df['Model'].isin(pareto_models)].sort_values('GMACs')
+
+ax.plot(pareto_points['GMACs'], pareto_points['Accuracy'], '--', color=COLORS['grid'], linewidth=1.5, zorder=1)
+
+# ┌── 4. DECORATE ──────────────────────────────────────────────────────────────
+ax.set_xscale('log')
+ax.set_xlabel('Compute Cost (GMACs per Image)')
+ax.set_ylabel('ImageNet Top-1 Accuracy (%)')
+ax.legend(
+    loc='lower right', title='Family', fontsize=8, frameon=True, facecolor='white', framealpha=0.95, edgecolor='gray', fancybox=True, borderpad=0.6
+)
+plt.show()
+plt.close()
+```
+
+:::
+
+These models serve as canonical workloads for understanding system constraints. The empirical Pareto frontier in @fig-efficiency-frontier illustrates how each architecture family occupies a distinct computational cost regime. The plotted curve should be read as a historical trajectory of the trade-off between representational power and computational efficiency, not as a controlled benchmark rerun. It isolates the progression from architectures that prioritize raw accuracy to those that minimize operations (GMACs) for constrained environments, and onward to models that trade substantial compute for flexible, long-range modeling. Architectural choices made at design time determine where a system lands on this frontier.
+

@@ -1,0 +1,64 @@
+## MLPs: Dense Pattern Processing {#sec-network-architectures-multilayer-perceptrons-dense-pattern-processing-bc11}
+
+The MNIST digit classifier of @sec-neural-computation is the purest example of dense processing: each of its 784 pixel inputs connects to every hidden unit, and each hidden unit to every unit in the next layer. The same all-to-all pattern suits tabular inputs, such as the sender reputation, link count, and keyword features a spam filter scores, where no feature has a fixed neighbor. **MLPs**\index{MLP!definition}[^fn-perceptron-rosenblatt-etymology] represent the fully connected architecture of that classifier, now examined through the four-part systems lens.
+
+[^fn-perceptron-rosenblatt-etymology]: **Perceptron**\index{Perceptron!etymology}: Formed from "perception" and the device suffix "-tron" (as in *cyclotron* and *klystron*), coined by Frank Rosenblatt\index{Rosenblatt, Frank} [@rosenblatt1957perceptron] for the atomic unit of neural computation: a weighted sum followed by a nonlinear activation, extending the earlier McCulloch-Pitts neuron\index{McCulloch-Pitts neuron}. MLPs are composed entirely of these units arranged in fully-connected layers, so the efficiency of this single operation, a multiply-accumulate, determines system throughput. Modern accelerators execute over $10^{14}$ of these operations per second, making the perceptron the computational primitive\index{Perceptron!computational primitive} that the entire ML hardware ecosystem is optimized around.
+
+MLPs embody an inductive bias: *they impose no specific spatial or temporal connectivity pattern, allowing any input to relate to any output*. This architectural choice provides flexibility across input relationships, making MLPs versatile but potentially costly compared to alternatives that exploit matching structure. Their representational capacity was established theoretically by the universal approximation theorem (UAT)[^fn-uat-exponential-width] [@cybenko1989; @hornik1989], introduced in @sec-neural-computation. This theorem states that a sufficiently large MLP with nonlinear activation functions can approximate any continuous function on a compact domain, given suitable weights and biases. That combination of theoretical universality and dense connectivity is the architectural concept captured by the *multilayer perceptron*.
+
+[^fn-uat-exponential-width]: **Universal approximation theorem (UAT)**\index{Universal approximation theorem}: This theorem establishes representational capacity for continuous functions on a compact domain, given suitable nonlinear activations. The systems-level catch\index{Universal approximation theorem!systems consequence} is that the existence guarantee supplies neither an efficient training procedure nor a practical width for a particular task. Some function classes require width that grows rapidly with input dimension; a $256{\times}256$ image alone does not establish how difficult its target function is to learn.
+
+```{python}
+#| echo: false
+#| label: mlp-definition-costs
+
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ MLP DEFINITION COSTS
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: MLP definition callout quantitative significance
+# │
+# │ Goal: Derive dense-layer and same-channel convolution parameter counts.
+# │ Show: quadratic dense scaling and channel-mixing cost for 3x3 convolution.
+# │ How: Direct parameter and FP16 weight-byte calculation.
+# │
+# └─────────────────────────────────────────────────────────────────────────────
+
+from mlsysim.fmt import fmt_int, fmt, fmt_count, check
+
+# ┌── LEGO ───────────────────────────────────────────────
+class MLPDefinitionCosts:
+    """Quantitative anchor for dense layer scaling in the MLP definition."""
+
+    # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
+    layer_width = 1024
+    conv_kernel = 3
+
+    # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
+    dense_params = layer_width * layer_width
+    dense_fp16_memory = dense_params * BYTES_FP16
+    conv_weights = conv_kernel * conv_kernel * layer_width * layer_width
+    conv_weights_m = conv_weights / MILLION
+
+    # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
+    check(dense_params == 1_048_576, f"1024x1024 dense layer should have 1,048,576 weights, got {dense_params}.")
+    check(abs(conv_weights_m - 9.4) < 0.1, f"3x3 1024-channel convolution should be about 9.4M weights, got {conv_weights_m:.1f}M.")
+
+    # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
+    layer_width_str = fmt(layer_width, precision=0, commas=True)
+    dense_params_str = fmt_count(dense_params, label="parameter")
+    dense_fp16_mb_str = fmt_memory(dense_fp16_memory, unit=MB, precision=1, commas=False)
+    conv_weights_m_str = fmt_count(conv_weights, scale="M", precision=1, commas=False, label="weight")
+```
+
+::: {#dfn-nn-architectures-multilayer-perceptrons .callout-definition title="Multilayer perceptrons"}
+
+***Multilayer perceptrons***\index{MLP!definition} are feed-forward neural network architectures that apply fully connected layers in sequence, where every neuron in one layer connects to every neuron in the next, without imposing a specific spatial or temporal connectivity pattern.
+
+1.  **Significance**: The lack of structural prior gives dense layers quadratic parameter scaling in layer width: a single layer mapping `{python} MLPDefinitionCosts.layer_width_str` inputs to `{python} MLPDefinitionCosts.layer_width_str` outputs requires `{python} MLPDefinitionCosts.dense_params_str` and about `{python} MLPDefinitionCosts.dense_fp16_mb_str` of weight memory in FP16. A $3{\times}3$ convolution mapping `{python} MLPDefinitionCosts.layer_width_str` input channels to `{python} MLPDefinitionCosts.layer_width_str` output channels has about `{python} MLPDefinitionCosts.conv_weights_m_str`; convolution's advantage for images comes from spatial weight sharing across positions, not from reducing the channel-mixing matrix itself. This makes MLPs inefficient for high-dimensional structured inputs like images.
+2.  **Distinction**: Unlike convolutional neural networks, which exploit spatial locality to reduce parameter count, MLPs treat all input elements symmetrically, making them the architecture of choice for tabular data where no spatial or sequential structure is present.
+3.  **Common pitfall**: A frequent misconception is that MLPs are too simple to matter for complex tasks. MLPs provide a useful dense baseline, but CNNs, recurrent networks, and transformers add operators and connectivity patterns that cannot be reduced to weight sharing alone.
+
+:::
+
+In practice, the UAT explains *why* MLPs succeed across diverse tasks while revealing the gap between theoretical capability and practical implementation. The theorem guarantees that some MLP can approximate any function, yet provides no guidance on requisite network size or weight determination. While MLPs can theoretically solve any pattern recognition problem, doing so may demand impractically large networks or prohibitive computation. This theoretical universality drives the selection of MLPs for tabular data, recommendation systems, and problems where input relationships are unknown. At the same time, these practical limitations motivated the development of specialized architectures that exploit data structure for computational efficiency, as @sec-network-architectures-cnns-spatial-pattern-processing-5b8d, @sec-network-architectures-rnns-sequential-pattern-processing-f804, and @sec-network-architectures-transformers-attentiononly-architecture-1b56 demonstrate.
+

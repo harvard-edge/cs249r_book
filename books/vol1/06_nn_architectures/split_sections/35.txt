@@ -1,0 +1,203 @@
+### Computational mapping and system implications {#sec-network-architectures-computational-mapping-b346}
+
+DLRM's computational mapping splits into two regimes that stress different hardware subsystems. The dense MLPs execute standard GEMM operations, identical to the MLP computational mapping discussed in @sec-network-architectures-computational-mapping-cf30 and handled efficiently by Tensor Cores. The sparse embedding lookups, however, are qualitatively different. They are index-based memory gathers with zero arithmetic intensity, making individual lookups memory-bandwidth bound at the operation level. This operational bottleneck is distinct from the capacity constraint: total table size dictates whether parameters fit in device memory, whereas memory bus throughput governs how fast individual rows can be gathered. Because each training sample or request accesses a different set of sparse rows, the rows are scattered across the table, so spatial locality and prefetching help little. Access popularity is heavily skewed, however. A small set of hot rows (popular items, active users) recurs across requests and gives caches temporal locality to exploit, while the long tail of rarely touched rows misses. @Lst-embedding_bag_compute writes this sparse stage as a loop nest parallel to those of the other families.
+
+::: {#lst-embedding_bag_compute lst-cap="**Embedding-Bag Gather**: Four nested loops expose DLRM's sparse stage. Loops 1 and 2 parallelize across samples and features, but Loop 3 takes its addresses from the input IDs, so hardware cannot predict them, and Loop 4 performs one addition per 4-byte FP32 value loaded. Batching raises that intensity only when samples share hot rows."}
+
+```{.python}
+def embedding_bag_compute(sparse_ids, tables):
+    # Loop 1: Process each sample in the batch (parallelizable)
+    for b in range(batch_size):
+        # Loop 2: Each categorical feature has its own table
+        for f in range(num_features):
+            pooled[b, f, :] = 0
+            # Loop 3: Multi-hot feature, one gather per active ID
+            for idx in sparse_ids[b][f]:  # data-dependent address
+                row = tables[f][idx]  # irregular read, little reuse
+                # Loop 4: Pool (sum) the gathered rows
+                for d in range(embed_dim):
+                    pooled[b, f, d] += row[d]
+    return pooled  # feeds the interaction layer
+```
+
+:::
+
+```{python}
+#| echo: false
+#| label: dlrm-lighthouse-profile-recap
+
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ DLRM LIGHTHOUSE PROFILE RECAP
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: Local DLRM recommendation lighthouse profile
+# │
+# │ Goal: Recompute capacity-focused quantities used in the adjacent DLRM prose.
+# │ Show: DLRM is a memory-capacity workload, unlike ResNet/GPT-3 scale examples.
+# │ How: Use local model specs and FP16/FP32 memory estimates.
+# │
+# └─────────────────────────────────────────────────────────────────────────────
+
+from mlsysim import Models
+from mlsysim.fmt import fmt_int, fmt, check, fmt_memory, fmt_params
+
+# ┌── LEGO ───────────────────────────────────────────────
+class DLRMLighthouseProfile:
+    """Local quantitative recap for the DLRM capacity lighthouse."""
+
+    # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
+    dlrm = Models.Recommendation.DLRM
+    resnet = Models.Vision.ResNet50
+    gpt3 = Models.Language.GPT3
+
+    # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
+    dlrm_model_size = dlrm.model_size
+    resnet_fp32 = resnet.size_in_bytes(BYTES_FP32)
+    gpt3_fp16 = gpt3.size_in_bytes(BYTES_FP16)
+    bytes_fp32 = int(BYTES_FP32.to(byte).magnitude)
+
+    # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
+    check(dlrm_model_size > resnet_fp32, "DLRM profile should be larger than ResNet-50 weight memory.")
+    check(gpt3_fp16 > 100 * GB, f"Expected GPT-3 FP16 weights to be larger than 100 GB, got {gpt3_fp16.to(GB).magnitude:.0f}.")
+
+    # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
+    bytes_fp32_value_str = fmt(bytes_fp32, precision=0, commas=False)
+    dlrm_entries_b_str = fmt_params(dlrm.embedding_entries, scale="B", precision=0, commas=False)
+    dlrm_model_size_gb_str = fmt_memory(dlrm_model_size, unit=GB, precision=0, commas=True)
+    resnet_fp32_mb_str = fmt_memory(resnet_fp32, unit=MB, precision=1, commas=True)
+    gpt3_fp16_gb_str = fmt_memory(gpt3_fp16, unit=GB, precision=0, commas=True)
+```
+
+::: {#lhs-nn-architectures-dlrm-recommendation-lighthouse .callout-lighthouse title="DLRM (recommendation lighthouse)"}
+
+**Why it matters**: DLRM exemplifies **memory-capacity-bound**\index{Memory!capacity-bound workload} workloads. Its massive embedding tables often exceed the memory of a single accelerator or server, so the system must decide where those tables live before it can optimize arithmetic throughput. The interaction layer then gathers selected embedding vectors and combines them with dense features, making capacity and irregular data movement the dominant constraints. This contrasts sharply with CNNs (compute bound) and transformers (memory-bandwidth bound), requiring different hardware and deployment choices. @Tbl-nn-architectures-dlrm-profile summarizes the recommendation lighthouse's quantitative properties.
+
+```{=latex}
+\begingroup
+\renewcommand{\arraystretch}{1.4}
+```
+
+| **Property**             | **Value**                                                      | **System Implication**                                                                                       |
+|:-------------------------|:---------------------------------------------------------------|:-------------------------------------------------------------------------------------------------------------|
+| **Embedding Parameters** | `{python} DLRMLighthouseProfile.dlrm_entries_b_str`            | Parameters $\times$ `{python} DLRMLighthouseProfile.bytes_fp32_value_str` bytes; dominates total model size. |
+| **Model Size**           | `{python} DLRMLighthouseProfile.dlrm_model_size_gb_str` (FP32) | May exceed one device's fast memory.                                                                         |
+| **Constraint**           | Memory Capacity                                                | Model size $> \text{Single GPU Memory}$.                                                                     |
+| **Bottleneck**           | Irregular Data Movement                                        | Gather operations dominate sparse feature processing.                                                        |
+| **Profile**              | Mixed (Sparse/Dense)                                           | Combines memory-heavy lookups with compute-heavy MLPs.                                                       |
+
+: **DLRM Systems Profile**: Quantitative properties of the recommendation lighthouse and their system consequences. Billion-entry embedding tables push the model past single-device memory, creating a capacity-bound regime that decides which bandwidth the iron law's data term must pay. {#tbl-nn-architectures-dlrm-profile tbl-colwidths="[18,24,58]"}
+
+```{=latex}
+\endgroup
+\vspace*{-2ex}
+```
+:::
+
+Once embedding tables exceed one device, capacity, not arithmetic, becomes the primary systems constraint. While a ResNet-50 (`{python} DLRMLighthouseProfile.resnet_fp32_mb_str`) fits on a single accelerator and a dense language model like GPT-3 (`{python} DLRMLighthouseProfile.gpt3_fp16_gb_str`) fits within a single multi-GPU node, production recommendation models reach terabytes of embedding parameters. In iron law terms, capacity acts as a feasibility constraint that comes before either execution term. It decides where the tables live, and therefore which bandwidth the data term $\DataVolume/\Bandwidth$ must use: HBM when the tables fit, host DRAM over PCIe or a peer accelerator over NVLink when they do not.
+
+::: {.column-margin}
+![](images/svg/vol1_nn_architectures_margin_003.svg){width="100%" fig-alt="Four embedding partitions connected by all-to-all exchange links, showing that sparse feature lookups may depend on data stored outside the local partition."}
+
+*DLRM embedding lookups can depend on vectors stored outside the local memory partition.*
+:::
+
+The architecture therefore breaks the single-device assumption that holds for smaller dense models. Systems designers resolve this capacity wall through three distinct architectural strategies:
+
+*   **Shrink the tables**: Compression, hashing, or pruning reduces capacity pressure, though these techniques risk information loss on long-tail users and items.
+*   **Move the tables**: Embeddings can reside in host DRAM or external key-value stores, though remote lookups incur high data-movement latencies over PCIe or Ethernet.
+*   **Partition the tables**: Tables can be sharded across multiple accelerators so that no single device stores the full model, though lookups then require cross-device communication.
+
+Architecturally, DLRM turns recommendation into a capacity-management challenge before it becomes a compute-optimization task. Training-time model partitioning and hardware-accelerated interconnects address these distributed layouts, but the baseline sizing challenge begins with a single table.
+
+```{python}
+#| echo: false
+#| label: capacity-wall-calc
+
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ THE CAPACITY WALL CALCULATION
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: DLRM System Implications -- embedding table memory
+# │
+# │ Goal: Illustrate the "Capacity Wall" for large-scale recommendation.
+# │ Show: That one embedding table can consume about 60% of A100 memory.
+# │ How: Compare table size to GPU capacity in GB to motivate capacity planning.
+# │
+# └─────────────────────────────────────────────────────────────────────────────
+
+from mlsysim import Hardware
+from mlsysim.fmt import fmt_int, fmt, check, fmt_memory_capacity
+
+# ┌── LEGO ───────────────────────────────────────────────
+class CapacityWall:
+    """
+    Namespace for Capacity Wall Calculation.
+    Scenario: 100M items x 128 dim embedding.
+    """
+
+    # ┌── 1. LOAD (Constants) ───────────────────────────────────────────────
+    num_items = 100_000_000
+    embed_dim = 128
+    bytes_per_param = BYTES_FP32
+    # nameplate magnitude in decimal GB: the prose shows the reader
+    # `table size / capacity = share`, so both operands must be decimal
+    a100_capacity = Hardware.Cloud.A100.memory.capacity.to(GiB).magnitude * GB
+
+    # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
+    table_memory = num_items * embed_dim * bytes_per_param
+    utilization_pct = (table_memory / a100_capacity).to("").magnitude * 100
+
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(50 <= utilization_pct <= 70, f"Capacity-wall example should consume roughly 60% of an 80 GB A100, got {utilization_pct:.1f}%.")
+
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
+    cw_num_items_str = fmt_count(num_items, scale="M", commas=False)
+    cw_embed_dim_str = fmt(embed_dim, precision=0, commas=False)
+    cw_bytes_per_param_str = fmt_int(bytes_per_param.to(byte).magnitude)
+    cw_table_gb_str = fmt_memory(table_memory, unit=GB, precision=1, commas=False)
+    cw_utilization_pct_str = fmt_percent(round(utilization_pct) / 100, precision=0, commas=False, style='prose')
+    a100_mem_gb_str = fmt_memory_capacity(a100_capacity, unit=GB, precision=0, commas=False)
+
+# Note: Use CapacityWall.cw_num_items_str directly.
+```
+
+::: {.column-margin}
+![](images/svg/nn_architectures_capacity_wall.svg){width="100%" fig-alt="Three stacked memory bars: a single item embedding table at 51 GB fits below an 80 GB A100 capacity bar, but an item-plus-user pair at 102 GB overshoots it, no longer fitting on one device."}
+
+*One embedding table fits an 80 GB A100; a second breaches the capacity wall.*
+:::
+
+::: {#nbk-nn-architectures-capacity-wall .callout-notebook title="The capacity wall"}
+
+**Problem**: Consider a recommendation system for a store with `{python} CapacityWall.cw_num_items_str` items using an embedding size of `{python} CapacityWall.cw_embed_dim_str`. How much memory does the item table alone require?
+
+**Math**:
+
+1.  **Table entries**: `{python} CapacityWall.cw_num_items_str` items.
+2.  **Vector size**: `{python} CapacityWall.cw_embed_dim_str` elements.
+3.  **Precision**: FP32 (`{python} CapacityWall.cw_bytes_per_param_str` bytes per element).
+4.  **Table size**: `{python} CapacityWall.cw_num_items_str` items $\times$ `{python} CapacityWall.cw_embed_dim_str` $\times$ `{python} CapacityWall.cw_bytes_per_param_str` bytes ≈ `{python} CapacityWall.cw_table_gb_str`.
+5.  **Capacity share**: `{python} CapacityWall.cw_table_gb_str` $\div$ `{python} CapacityWall.a100_mem_gb_str` = `{python} CapacityWall.cw_utilization_pct_str` of device capacity.
+6.  **Two-table check**: Two tables at `{python} CapacityWall.cw_utilization_pct_str` each exceed 100 percent of device capacity.
+
+**Systems insight**: A single embedding table for one feature (items) already consumes `{python} CapacityWall.cw_utilization_pct_str` of an `{python} CapacityWall.a100_mem_gb_str` A100 GPU. Adding a user table of the same size means the embedding tables no longer fit on a single `{python} CapacityWall.a100_mem_gb_str` accelerator, motivating table compression, off-device memory, or partitioning across devices. DLRM is capacity bound: the primary systems question is not how many FLOP/s the accelerator can deliver, but where the embedding state can physically reside.
+
+:::
+
+Once the tables no longer fit on one device, sparse lookups cross memory and interconnect boundaries. A request may need rows owned by several accelerators, forcing the device executing the downstream MLP to wait while the system gathers them across PCIe or NVLink. Within a multi-accelerator server, gathering rows distributed across multiple GPUs turns memory routing into an interconnect bandwidth bottleneck. The architectural consequence is that a recommendation model's memory layout directly determines its cross-accelerator data-transfer traffic, creating a coordination tax for both training and serving.
+
+::: {.column-margin .margin-pointer}
+↪ Partitioning a model that exceeds one device's memory across accelerators, and the communication that partition boundaries add, is developed in @sec-model-training-model-parallelism-c97e.
+:::
+
+::: {#chk-nn-architectures-dlrm-sparse-scatter .callout-checkpoint title="DLRM and sparse scatter"}
+
+Recommendation systems stress a different part of the machine than CNNs or transformers.
+
+- [ ] **Capacity-bound**: Can you explain why embedding tables push DLRM into a memory capacity regime where "FLOPs" is not the binding constraint?
+- [ ] **Sparse access**: Can you explain why embedding lookups defeat prefetching, and why popularity skew still lets a cache capture the hot rows?
+- [ ] **Placement logic**: If a single embedding table does not fit in fast device memory, can you describe which state must move, shrink, or be partitioned?
+- [ ] **Data-movement bottleneck**: Can you explain why sparse embedding lookups can dominate even when the dense MLP has modest FLOP cost?
+
+:::
+
+With DLRM, the roster of five families is complete, and each has been analyzed on its own terms: the pattern it targets, the computation it performs, the mapping it induces, and the bottleneck it exposes. A deployment rarely gets to examine one family in isolation. The same accelerator that serves a vision model today may serve a language model or a recommender tomorrow, and the architecture decides which of its resources gives out first.
+

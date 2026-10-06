@@ -1,0 +1,211 @@
+### Algorithmic structure {#sec-network-architectures-algorithmic-structure-60ef}
+
+Generative Pre-trained Transformer 2 demonstrated that scaling up a simple decoder-only transformer architecture on massive datasets could produce coherent text generation. Unlike BERT, an encoder-style transformer that reads context in both directions, GPT-2 generates text sequentially (autoregressively[^fn-autoregressive-decoding-bandwidth]\index{Autoregressive generation}).
+
+```{python}
+#| echo: false
+#| label: autoregressive-inference-cost
+
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ AUTOREGRESSIVE INFERENCE COST
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: GPT-2 biography footnote on per-token bandwidth pressure
+# │
+# │ Goal: Derive FP16 weight traffic and arithmetic intensity for one token.
+# │ Show: Why autoregressive generation is bandwidth-bound.
+# │ How: Use mlsysim GPT-2 model specs and FP16 weight bytes.
+# │
+# └─────────────────────────────────────────────────────────────────────────────
+
+from mlsysim import Models
+from mlsysim.fmt import fmt_int, fmt, fmt_count, fmt_params, check, fmt_arithmetic_intensity
+
+# ┌── LEGO ───────────────────────────────────────────────
+class AutoregressiveInferenceCost:
+    """Bandwidth cost for GPT-2-style single-token autoregressive decoding."""
+
+    # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
+    model = Models.Language.GPT2
+
+    # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
+    params_b = model.parameters.to(Bparam).magnitude
+    fp16_weight = model.size_in_bytes(BYTES_FP16)
+    flops_per_token = model.inference_flops.to(flop).magnitude
+    fp16_weight_bytes = fp16_weight.to(byte).magnitude
+    intensity_fp16 = flops_per_token / fp16_weight_bytes
+
+    # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
+    check(0.8 <= intensity_fp16 <= 1.2, f"Expected about 1 FLOP/byte for FP16 autoregressive GPT-2, got {intensity_fp16:.2f}.")
+
+    # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
+    params_b_str = fmt_params(model.parameters, scale="B", precision=1, commas=False)
+    fp16_weight_gb_str = fmt_memory(fp16_weight, unit=GB, precision=0, commas=False)
+    intensity_fp16_str = fmt_arithmetic_intensity(intensity_fp16 * flop / byte, unit=flop / byte, precision=0, commas=False)
+```
+
+[^fn-autoregressive-decoding-bandwidth]: [offset=-38mm] **Autoregressive generation**\index{Autoregressive generation!bandwidth bottleneck}: A decoding strategy where each output token is conditioned on all previously generated tokens, requiring a full model forward pass per token; for a `{python} AutoregressiveInferenceCost.params_b_str`-parameter model in FP16, the weight-only batch-one model used here reads about `{python} AutoregressiveInferenceCost.fp16_weight_gb_str` of weights per decoding step and yields a work-to-byte ratio of about `{python} AutoregressiveInferenceCost.intensity_fp16_str`. This low arithmetic intensity often makes batch-one and small-batch decoding bandwidth bound; larger batches can amortize weight traffic. During generation, serving systems also retain attention state from earlier tokens; @sec-network-architectures-attention-mechanisms-dynamic-pattern-processing-22df names this state the key-value cache.
+
+The architectural shift in transformers centers on self-attention layers. Unlike encoder-decoder attention where queries originate from the target sequence and keys/values from the source, self-attention\index{Self-attention}\index{Attention mechanism!self-attention} derives queries, keys, and values from the identical input sequence $\mathbf{X}$. Making all three projections self-referential allows the model to resolve intra-sequence dependencies across arbitrary token distances without intermediate recurrent steps. @Eq-self-attention formalizes this transformation:
+$$
+\text{SelfAttention}(\mathbf{X}) = \text{softmax}
+\left(\frac{\mathbf{X}\mathbf{W}_Q(\mathbf{X}\mathbf{W}_K)^T}{\sqrt{\AttentionHeadDimension}}\right)\mathbf{X}\mathbf{W}_V
+$$ {#eq-self-attention}
+
+Here, $\mathbf{X}$ is the input sequence, and $\mathbf{W}_Q$, $\mathbf{W}_K$, and $\mathbf{W}_V$ are learned weight matrices for queries, keys, and values respectively. This formulation highlights how self-attention derives all its components from the same input, creating a dynamic, content-dependent processing pattern. Without positional information or a mask, matrix multiplication and row-wise softmax operate symmetrically across the token dimension, making self-attention permutation-equivariant: shuffling the rows of $\mathbf{X}$ merely shuffles the output rows identically, treating the sequence as an unordered set. Positional encodings—whether added as sinusoidal vectors or applied via rotary position embeddings—inject word order and relative distance. A fixed causal mask also imposes an ordering constraint.
+
+Transformers extend single-head self-attention by executing multiple attention operations in parallel through multi-head attention\index{Multi-head attention}\index{Attention mechanism!multi-head}. Instead of computing a single set of attention weights over $d$ dimensions, the architecture projects queries, keys, and values into $\NumberOfAttentionHeads$ distinct lower-dimensional subspaces of dimension $\AttentionHeadDimension = d / \NumberOfAttentionHeads$. Each head\index{Attention head!specialization} attends to different representation patterns simultaneously. Their outputs are concatenated and projected through an output matrix $\mathbf{W}_O$, as formalized in @eq-multihead-attention:
+$$
+\text{MultiHead}(\mathbf{Q}, \mathbf{K}, \mathbf{V}) = \text{Concat}(\text{head}_1, \ldots, \text{head}_{\NumberOfAttentionHeads})\mathbf{W}_O
+$$ {#eq-multihead-attention}
+where each attention head is computed as follows. In this multi-head notation, $\mathbf{Q}$, $\mathbf{K}$, and $\mathbf{V}$ denote the source representations before the head-specific projections; for self-attention, all three are $\mathbf{X}$. The head matrices apply the projections once:
+$$
+\text{head}_i = \text{Attention}(\mathbf{Q}\mathbf{W}_{Q,i}, \mathbf{K}\mathbf{W}_{K,i}, \mathbf{V}\mathbf{W}_{V,i})
+$$
+
+The $\sqrt{\AttentionHeadDimension}$ scaling introduced with the attention operator follows from a variance argument. Assuming query and key components are independent random variables with zero mean and unit variance, their inner product $\mathbf{q}_i \cdot \mathbf{k}_j = \sum_{m=1}^{\AttentionHeadDimension} q_{im} k_{jm}$ has zero mean and variance $\AttentionHeadDimension$, so dividing by $\sqrt{\AttentionHeadDimension}$ restores unit variance and keeps softmax out of its saturated, near-zero-gradient region at large head dimensions.[^fn-attention-variance-scaling]
+
+[^fn-attention-variance-scaling]: **Attention scaling $(\sqrt{\AttentionHeadDimension})$**\index{Attention mechanism!scaled dot-product}\index{Scaling!attention, numerical stability}: This normalization directly counteracts the linear growth in variance $(\AttentionHeadDimension)$ of the query-key dot product, preventing the softmax function from saturating where gradients would otherwise vanish. The systems consequence is most acute in mixed-precision training: when activations grow large, unscaled dot products can produce logits that overflow the 16-bit float range, destabilizing or halting learning entirely.
+
+Conceptually, attention implements a differentiable content-addressable memory\index{Attention mechanism!content-addressable memory}. Whereas conventional memory architectures retrieve stored values at explicit addresses, self-attention uses the query vector $\mathbf{q}_i$ to score similarity against all candidate keys $\mathbf{K} \in \mathbb{R}^{S \times \AttentionHeadDimension}$. The resulting softmax distribution generates a continuous interpolation over the value vectors $\mathbf{V} \in \mathbb{R}^{S \times \AttentionHeadDimension}$, functioning as a differentiable lookup operation.
+
+In practice, full-rank multi-head attention frequently exhibits structural redundancy, with multiple heads learning correlated attention maps. Furthermore, the exponential in softmax creates acute sensitivity to underflow and overflow in reduced-precision formats. These hardware-relevant behaviors motivate structural pruning, low-rank factorization, sparse attention patterns, and specialized quantization strategies.
+
+Self-attention learns dynamic activation patterns across the input sequence. Unlike CNNs which apply fixed filters or RNNs which use fixed recurrence patterns, attention learns which elements should activate together based on their content. Trained attention heads often specialize in distinct syntactic or semantic patterns [@clark2019], dynamically adapting the effective connectivity graph for each input sequence.
+
+The transformer architecture applies this self-attention mechanism within a broader structure that typically includes feed-forward layers, layer normalization\index{Layer normalization!Transformer}, and residual connections\index{Residual connection!Transformer}. @Fig-transformer diagrams this full encoder-decoder topology: sinusoidal positional encodings combine with token embeddings at the base of both towers, feeding repeated multi-head attention and feed-forward blocks wrapped in residual bypasses and layer normalization before terminating in linear and softmax output heads. Because all positions can be processed in parallel rather than sequentially, the architecture trades recurrent state for large matrix operations that map well to accelerator training.
+
+::: {#fig-transformer fig-env="figure" fig-pos="htb" fig-cap="**Transformer Architecture (Encoder-Decoder)**: Complete architecture. The encoder (left, repeated $\NumberOfLayers$ times) consists of multi-head attention followed by feed-forward layers, each with residual connections (arrows bypassing blocks) and layer normalization. The decoder (right) adds masked attention to prevent attending to future tokens during autoregressive generation. Positional encodings (sine waves) inject sequence order information absent from the permutation-equivariant attention operation. This design enables training parallelism across all positions while the decoder maintains autoregressive causality during inference. Source: [@vaswani2017]." fig-alt="Encoder-decoder architecture. Encoder: multi-head attention, add-norm, feed-forward, add-norm, repeated N_L times. Decoder adds masked attention. Positional encoding sine waves at inputs. Skip connections bypass sublayers. Linear and softmax at top."}
+
+```{.tikz}
+\scalebox{0.8}{%
+\begin{tikzpicture}[font=\small\sffamily]
+\tikzset{%
+  do path picture/.style={%
+    path picture={%
+      \pgfpointdiff{\pgfpointanchor{path picture bounding box}{south west}}%
+        {\pgfpointanchor{path picture bounding box}{north east}}%
+      \pgfgetlastxy\x\y%
+      \tikzset{x=\x/2,y=\y/2}%
+      #1
+    }
+  },
+  sin wave/.style={do path picture={
+    \draw [line cap=round,line width=1.5pt] (-3/4,0)
+      sin (-3/8,1/2) cos (0,0) sin (3/8,-1/2) cos (3/4,0);
+  }},
+  cross/.style={do path picture={
+    \draw [line cap=round,line width=1.75pt] (-1,-1) -- (1,1) (-1,1) -- (1,-1);
+  }},
+  plus/.style={do path picture={
+    \draw [line cap=round,line width=1.5pt] (-3/4,0) -- (3/4,0) (0,-3/4) -- (0,3/4);
+  }}
+}
+
+\tikzset{%
+  Box/.style={align=flush center,
+    inner xsep=2pt,
+    node distance=0.9,
+    draw=RedLine,%GreenLine,
+    line width=0.75pt,
+    fill=magenta!05,
+    minimum width=32mm, minimum height=10mm},
+  Box2/.style={Box, draw=GreenD, fill=GreenL!25},
+  Box3/.style={Box, draw=mybrown, fill=mybrown!06, minimum height=5.5mm, node distance=0.25},
+  Box4/.style={Box, draw=myblue, fill=cyan!05},
+  Box5/.style={Box, draw=myorange, fill=myorange!06, minimum height=6mm},
+  Circ/.style={draw,circle,inner sep=1pt,thick,minimum size=7mm, fill=mygreen!10,
+  font=\huge\sffamily\bfseries},
+  Circ2/.style={draw=black ,circle,minimum size=10mm, fill=mygreen!10,thick},
+  Txt/.style={align=center,font=\sffamily\footnotesize,text=black},
+  Txt2/.style={font=\sffamily\fontsize{9pt}{9}\selectfont,text=black!60,align=left,},
+  ALine/.style={draw=black!40,line width=0.6pt,{{Triangle[width=1.0*4pt,length=7pt]}-},shorten <=0pt,shorten >=0pt},
+  LineA/.style={draw=black!40,line width=0.6pt,{-{Triangle[width=1.0*4pt,length=7pt]}},shorten <=0pt,shorten >=0pt},
+  Line/.style={draw=black!40,line width=0.6pt,shorten <=0pt,shorten >=0pt},
+}
+
+%};%
+\node[Box](LB1){Input\\ Embedding};
+\node[above=0.55 of LB1,Circ, plus](LC1){};
+\node[left=of LC1,Circ2,sin wave](LC2){};
+\node[Box2,above=1.4 of LC1](LB2){Multi-Head\\ Attention};
+\node[Box3,above=of LB2](LB3){Add \& Norm};
+\node[Box4,above=of LB3](LB4){Feed \\ Forward};
+\node[Box3,above=of LB4](LB5){Add \& Norm};
+%
+\node[left=1pt of LC2,Txt]{Positional\\ Encoding};
+%arrows
+\draw[ALine](LB1.south)--++(0,-7mm)node[below=-3pt]{Inputs};
+\draw[LineA](LB1)--(LC1);
+\draw[LineA](LC1)--coordinate[pos=0.4](LSR1)(LB2);
+\draw[LineA](LC1)--++(0,11mm)-|(LB2.330);
+\draw[LineA](LC1)--++(0,11mm)-|(LB2.210);
+%
+\draw[Line](LB2)--(LB3);
+\draw[LineA](LB3)--coordinate[pos=0.4](LSR2)(LB4);
+\draw[Line](LB4)--(LB5);
+%
+\draw[LineA](LSR1)--++(-25mm,0)coordinate(LC01)|-(LB3);
+\draw[LineA](LSR2)--++(-25mm,0)coordinate(LC02)|-(LB5);
+%
+\draw[Line](LC1)--(LC2);
+%%
+\begin{scope}[on background layer]
+\node[draw=BackLine,fill=BackColor!06,inner xsep=3mm,fit=(LC01)(LC02)(LB5)](BB1){};
+\node[left=1pt of BB1.west]{$N_L\times$};
+\end{scope}
+%%%%%%%%%%%%%%
+%right
+%%%%%%%%%%%%%%
+\node[Box,right=3.1 of LB1](RB1){Output\\ Embedding};
+\node[above=0.55 of RB1,Circ, plus](RC1){};
+\node[right=of RC1,Circ2,sin wave](RC2){};
+\node[Box2,above=1.4 of RC1](RB2){Masked Multi-Head\\ Attention};
+\node[Box3,above=of RB2](RB3){Add \& Norm};
+\node[Box2,above=of RB3](RB4){Multi-Head\\ Attention};
+\node[Box3,above=of RB4](RB5){Add \& Norm};
+%
+\node[Box4,above=of RB5](RB6){Feed \\ Forward};
+\node[Box3,above=of RB6](RB7){Add \& Norm};
+%
+\node[Box5,above=0.5 of RB7](RB8){Linear};
+\node[Box5,above=0.5 of RB8](RB9){Softmax};
+%
+\node[right=1pt of RC2,Txt]{Positional\\ Encoding};
+%arrows
+\draw[ALine](RB1.south)--++(0,-7mm)node[below=-3pt]{Outputs (shifted right)};
+\draw[LineA](RB1)--(RC1);
+\draw[LineA](RC1)--coordinate[pos=0.4](RSR1)(RB2);
+\draw[LineA](RC1)--++(0,11mm)-|(RB2.330);
+\draw[LineA](RC1)--++(0,11mm)-|(RB2.210);
+%
+\draw[Line](RB2)--(RB3);
+\draw[LineA](RB3)--coordinate[pos=0.32](RSR2)(RB4);
+\draw[Line](RB4)--(RB5);
+%%
+\draw[LineA](RB5)--coordinate[pos=0.4](RSR3)(RB6);
+%
+\draw[LineA](RSR1)--++(25mm,0)coordinate(RCO1)|-(RB3);
+\draw[LineA](RSR2)--++(25mm,0)coordinate(RCO2)|-(RB5);
+\draw[LineA](RSR3)--++(25mm,0)coordinate(RCO2)|-(RB7);
+
+\draw[Line](RB6)--(RB7);
+\draw[Line](RC1)--(RC2);
+%
+\draw[LineA](RB7)--(RB8);
+\draw[LineA](RB8)--(RB9);
+%
+\begin{scope}[on background layer]
+\node[draw=BackLine,fill=BackColor!06,inner xsep=3mm,fit=(RCO1)(RCO2)(RB7)](BB2){};
+\node[right=1pt of BB2.east]{$N_L\times$};
+\end{scope}
+%%
+\draw[LineA,line width=0.85pt,black](LB5)--++(0,15mm)--++(28.5mm,0)--++(0,-37mm)coordinate(PT1)
+-|(RB4.330);
+\draw[LineA,line width=0.85pt,black](PT1)-|(RB4.210);
+%
+\draw[LineA](RB9.north)--++(0,5mm)node[above=-3pt]{Output Probabilities};
+\end{tikzpicture}}
+```
+
+:::
+

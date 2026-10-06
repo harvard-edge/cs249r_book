@@ -1,0 +1,86 @@
+### Decision framework {#sec-network-architectures-decision-framework-a889}
+
+A wildlife monitoring sensor must classify camera-trap images within a watt-scale solar power budget, while an industrial recommendation service must retrieve terabyte-scale embeddings within a tail-latency budget of tens of milliseconds. Each constraint eliminates architectures that look competitive on unconstrained benchmarks, and a structural mismatch at this stage cannot be rescued later by compiler optimization or kernel tuning. Engineering teams nonetheless often default to architectures by popularity, deploying over-parameterized transformers where a lightweight CNN would suffice or selecting models that violate the inference latency budget. In D·A·M terms, architecture selection chooses the algorithm ($\text{A}$) that bridges the structure of the data ($\text{D}$) to the budgets of the machine ($\text{M}$): memory capacity, memory bandwidth, compute throughput, and thermal envelope.
+
+Selection begins with data-to-architecture mapping\index{Architecture!data-to-architecture mapping}, matching the symmetries of the input to an operator family. The useful strength of an inductive bias\index{Inductive bias!hierarchy} depends on the task (@sec-network-architectures-architectural-principles-engineering-tradeoffs-362e). CNNs impose local connectivity, weight sharing, and translation equivariance, reducing parameter volume and exposing reuse for grid-like data. RNNs impose temporal recurrence, bounding inference state across sequence lengths at the price of serialization. Transformers use content-based attention, gaining flexible interactions while paying for dense quadratic score computation. MLPs impose no specific spatial or temporal connectivity pattern, leaving those relationships to be learned. A matching prior can reduce the samples and computation needed for a target accuracy; a mismatched prior can exclude useful solutions. Model selection must test both predictive fit and the resulting machine costs.
+
+@Fig-dnn-fm-framework formalizes this selection pipeline as a multi-stage triage tree: candidate architectures route first by input data structure (text, sequences, spatial grids, or tabular features) and then pass through sequential screening gates for memory capacity, compute budget, inference latency, accuracy targets, and hardware deployment readiness. High-cardinality recommendation workloads sit outside this dense flowchart and route to the sparse embedding family (@sec-network-architectures-sparse-architectures-recommendation-systems-5d19) before applying the same memory, compute, speed, accuracy, and deployment checks. If any constraint fails, the decision loop routes execution back to scale down model capacity or substitute an alternative architecture family.
+
+::: {#fig-dnn-fm-framework fig-env="figure" fig-pos="htb" fig-cap="**Architecture Selection Decision Framework**: A systematic flowchart for choosing dense neural network architectures based on data characteristics and deployment constraints. The process begins with data type identification (text/sequences/images/tabular) to select initial architecture candidates (Transformers/RNNs/CNNs/MLPs), then iteratively evaluates memory budget, computational cost, inference speed, accuracy targets, and hardware compatibility. High-cardinality recommendation workloads are handled separately by the sparse-embedding family (DLRM) in the Sparse Architectures section, then re-enter the same constraint checks." fig-alt="Flowchart from Define Problem, branching by data type to Transformers, RNNs, CNNs, MLPs. Diamonds check memory, compute, speed, accuracy, deployment. Each No loops back via Scale Down or Increase Capacity; each Yes reaches Selected."}
+
+```{.tikz}
+\scalebox{1}{%
+\begin{tikzpicture}[font=\small\sffamily]
+\tikzset{%
+Line/.style={line width=1.0pt,black!50,text=black},
+LineA/.style={BrownLine!80, line width=1.0pt,{-{Triangle[width=0.7*6pt,length=1.40*6pt]}},text=black},
+  Box/.style={inner xsep=2pt,
+    node distance=7mm,
+    draw=GreenLine, line width=0.75pt,
+    fill=GreenL,
+    text width=35mm,align=flush center,
+    minimum width=35mm, minimum height=10mm
+  },
+    Box1/.style={Box, draw=RedLine, fill=RedL, node distance=30mm},
+    Box2/.style={Box, draw=BlueLine, fill=BlueL!50, node distance=10mm,
+    },
+    RedT/.style={blue!55!black,font=\footnotesize\sffamily},
+ decision/.style = {align=flush center,text width=42mm,minimum width=40mm,diamond, aspect=2.2, node distance=6mm,
+                             inner xsep=-3pt,  inner ysep=-2.95ex,fill=VioletL2, draw=VioletLine},
+}
+\node[Box2](B1){Transformers: Attention mechanisms};
+\node[Box2,right=of B1](B2){RNNs: Temporal dependencies};
+\node[Box2,right=of B2](B3){CNNs: Local feature detection};
+\node[Box2,right=of B3](B4){MLPs: Dense connectivity};
+%start
+\node[decision,node distance=15mm,above=of $(B2.north east)!0.5!(B3.north west)$](D1){What type\\ of data?};
+\node[Box,above=of D1](B0){Start:\\ Define Problem};
+%below
+\node[Box,node distance=10mm,below=of $(B2.south east)!0.5!(B3.south west)$](D2){Check\\ Constraints};
+\node[decision,below=of D2](D3){Memory\\ budget?};
+\node[decision,below=of D3](D4){Computational\\ budget?};
+\node[decision,below=of D4](D5){Inference\\ speed?};
+\node[decision,below=of D5](D6){Accuracy\\ target?};
+\node[decision,below=of D6](D7){Deployment \\ready?};
+%End
+\node[Box,below=of D7](AS){Architecture\\ Selected};
+\node[Box1,right=of D7](SD){Scale down model or change architecture};
+\node[Box1,left=2.5 of D6](IM){Increase model capacity or change architecture};
+%arrows
+\draw[LineA](B0)--(D1);
+\draw[LineA](D1.south)--++(0,-3mm)-|node[right,align=left,pos=0.77]{Text, complex\\ relations}(B1);
+\draw[LineA](D1.south)--++(0,-3mm)-|node[right,align=left,pos=0.75]{Time series,\\ sequences}(B2);
+\draw[LineA](D1.south)--++(0,-3mm)-|node[right,align=left,pos=0.75]{Images, spatial\\ patterns}(B3);
+\draw[LineA](D1.south)--++(0,-3mm)-|node[right,align=left,pos=0.75]{Tabular, features\\ unrelated}(B4);
+\foreach \a in{1,2,3,4}{
+\draw[LineA](B\a.south)--++(0,-4mm)-|(D2);
+}
+\draw[LineA](D2)--(D3);
+\draw[LineA](D3)--node[right]{Yes}node[left,RedT]{Sufficient}(D4);
+\draw[LineA](D4)--node[right]{Yes}node[left,RedT]{Acceptable}(D5);
+\draw[LineA](D5)--node[right]{Yes}node[left,RedT]{Fast enough}(D6);
+\draw[LineA](D6)--node[right]{Yes}node[left,RedT]{Met}(D7);
+\draw[LineA](D7)--node[right]{Yes}node[left,RedT]{Hardware suitable}(AS);
+%
+\draw[LineA](D7)--node[above,pos=0,anchor=south west]{No}node[below,RedT,pos=0,anchor=north west]{Hardware issues}(SD);
+\draw[LineA](D3)-|node[above,pos=0,anchor=south west]{No}node[below,RedT,pos=0,anchor=north west]{Insufficient}(SD);
+\draw[LineA](D4)-|node[above,pos=0,anchor=south west]{No}node[below,RedT,pos=0,anchor=north west]{Too slow}(SD);
+\draw[LineA](D5)-|node[above,pos=0,anchor=south west]{No}node[below,RedT,pos=0,anchor=north west]{Too slow}(SD);
+%
+\draw[LineA](D6)--node[above,pos=0,anchor=south east]{No}node[below,RedT,pos=0,anchor=north east]{Not met}(IM);
+%
+\draw[LineA](SD.east)--++(14mm,0)|-node[above,RedT,pos=0.8,anchor=south east]{Insufficient}(D1);
+\draw[LineA](IM.west)--++(-10mm,0)|-(D1);
+\end{tikzpicture}}
+```
+
+:::
+
+When constraints require scaling down, model compression techniques provide systematic approaches for reducing memory, compute, and latency while preserving accuracy. The framework executes in three ordered phases:
+
+1.  **Data symmetry identification ($\text{D}$)**: Identify structural symmetries and invariances in the input data. Spatial locality routes candidates to CNNs; temporal sequence structure to RNNs; unconstrained cross-token dependency to transformers; tabular features without spatial geometry to MLPs; and high-cardinality categorical IDs to sparse embedding tables.
+2.  **Progressive physical constraint filtering ($\text{A} \times \text{M}$)**: Filter candidate models against hardware budgets: static parameter storage in flash/DRAM, peak dynamic activation footprint in SRAM/HBM, arithmetic intensity against the hardware roofline, and tail latency deadlines. A violation requires scaling down model width or depth, applying quantization and compression, or switching to a lower-overhead architecture family.
+3.  **Empirical capacity and deployment validation**: Verify that candidate capacity meets target accuracy on representative evaluation distributions. If predictive accuracy falls short, scale model capacity and re-evaluate physical hardware constraints. If target accelerator hardware cannot sustain the required arithmetic throughput or memory bandwidth, select an alternative architecture rather than relying on marginal hyperparameter adjustments.
+
+Kernel-level choices refine this decision. Im2col or direct convolution, fused normalization, and IO-aware tiled attention (@sec-model-training-flash-attention-ioaware-attention-optimization-3da0) change realized traffic and utilization, and can shift which iron-law term binds; @sec-ml-frameworks and @sec-hardware-acceleration develop them. Architectural dependencies still matter. Batching independent recurrent sequences or fusing their operations reduces per-step cost, while the ordered state transitions remain. Candidate selection and kernel measurements therefore inform each other.
+
