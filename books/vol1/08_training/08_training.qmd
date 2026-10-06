@@ -139,276 +139,6 @@ class TrainingScenarios:
     )
 ```
 
-## Training Systems Fundamentals {#sec-model-training-training-systems-fundamentals-05d2}
-
-Running a model once and training it from scratch live on opposite sides of the systems cost curve. Frameworks provide the execution substrate: computational graphs schedule operations, automatic differentiation computes gradients, and hardware abstractions target diverse accelerators. Those mechanisms make a single training step possible; training systems make it repeatable at scale. The same forward/backward/update loop may run many thousands or millions of times while retaining activations, feeding accelerators, and staying within practical memory, time, and budget limits.
-
-::: {.column-margin}
-![](images/svg/training_cost_asymmetry.svg){width="100%" fig-alt="Curve that stays nearly flat, bends upward at a marked knee, and rises steeply through a shaded right-hand zone."}
-
-*Training cost stays flat across scale, then explodes past the large-scale knee.*
-:::
-
-This chapter uses an external order-of-magnitude estimate of approximately `{python} TrainingScenarios.gpt2_training_cost_2019_str` for GPT-2-scale training and a public estimate near `{python} TrainingScenarios.gpt4_training_cost_est_str` for a GPT-4-class training run.[^fn-training-cost-scaling] Neither figure was disclosed as an audited training bill. This **training cost asymmetry**\index{Training cost asymmetry!definition}\index{Training!cost asymmetry}\index{Training!inference vs. training} reflects the difference between evaluating a trained model for a defined request and repeatedly executing forward, backward, and update computations across a training corpus.
-
-[^fn-training-cost-scaling]: [offset=8mm] **Training cost scaling**\index{Training cost!scaling trajectory}: The roughly 2,000$\times$ ratio between this chapter's two cost anchors illustrates how parameter counts, training-token budgets, hardware generations, and accelerator fleets can compound; it is not a controlled comparison of disclosed training bills. OpenAI's GPT-2 report documents the model and training setup but does not disclose training cost [@radford2019language]. Exact GPT-4 training details were also not disclosed, so the GPT-4-class figure is explicitly an industry estimate supported by public reporting and independent infrastructure analysis [@knight2023giantmodels; @semianalysisGPT4].
-
-For GPT-2, the chapter uses roughly `{python} TrainingScenarios.gpt2_fwd_flops_str` floating-point operations per token for a forward evaluation, following the parameter-based accounting associated with the architecture in the GPT-2 technical report [@radford2019language]. The total budget of `{python} TrainingScenarios.gpt2_total_flops_str` corresponds to roughly `{python} TrainingScenarios.gpt2_implied_passes_billion_str` billion token positions when forward and backward work is approximated as three times the forward cost. This accounting estimate is not a claim that GPT-2 executed that many complete inference requests. The scale makes training systems engineering a distinct discipline and shows how access to training infrastructure can constrain participation in AI development.
-
-```{=latex}
-\vspace*{-1ex}
-```
-::: {#dfn-training-training-systems .callout-definition title="Training systems"}
-
-***Machine learning training systems***\index{Training systems!definition}\index{Training!systems} are software-hardware systems that execute the iterative optimization loop (forward pass, loss computation, backward pass, and parameter update) to minimize a loss function over a training dataset.
-
-1.  Significance: Training memory cost is `{python} TrainingScenarios.adam_training_memory_mult_str` the inference memory cost per parameter in a standard mixed-precision Adaptive Moment Estimation (Adam) setup: a `{python} TrainingScenarios.adam_example_params_b_str`-parameter model requires `{python} TrainingScenarios.adam_inference_gb_str` (FP16 weights) + `{python} TrainingScenarios.adam_grad_gb_str` (FP16 gradients) + `{python} TrainingScenarios.adam_master_gb_str` (FP32 master weights) + `{python} TrainingScenarios.adam_moments_gb_str` (Adam first and second moments in FP32) = `{python} TrainingScenarios.adam_training_state_gb_str` at least, before accounting for activation storage. This multiplier is a major reason a model that runs inference on one GPU requires multiple GPUs for training.
-2.  Distinction: Unlike inference systems, which execute a single forward pass and discard intermediate activations, standard backpropagation stores the tensors needed by the backward pass, creating a footprint that grows with model depth and batch size.
-3.  Common pitfall: A frequent misconception is that training failures are compute problems. A common failure is an out-of-memory (OOM) error, a memory-management problem: tensors saved for backpropagation accumulate during the forward pass and can exhaust memory before the first gradient is computed.
-
-:::
-
-```{python}
-#| echo: false
-from mlsysim import Models
-
-# ┌── LEGO ───────────────────────────────────────────────
-# │ Goal: GPT-2 weight, Adam, and layer counts for memory-pressure prose.
-from mlsysim.fmt import fmt_count, fmt_memory, fmt_params
-
-class TrainingMemoryPressure:
-    gpt2 = Models.Language.GPT2
-    gpt2_params = gpt2.parameters
-    gpt2_layers = gpt2.layers
-    gpt2_params_fp32 = gpt2.size_in_bytes(BYTES_FP32)
-    gpt2_adam = gpt2.size_in_bytes(BYTES_ADAM_STATE)
-
-    # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
-    gpt2_params_b_str = fmt_params(gpt2_params)
-    gpt2_params_gb_fp32_str = fmt_memory(gpt2_params_fp32, unit=GB, precision=0, commas=False)
-    gpt2_adam_gb_str = fmt_memory(gpt2_adam, unit=GB, precision=0, commas=False)
-```
-
-Three characteristics distinguish training workloads from general-purpose computing:
-
-- **Computational intensity**\index{Training!computational intensity}: The `{python} TrainingScenarios.gpt2_total_flops_str` budget spread over days of wall-clock time demands sustained PFLOP/s-scale throughput from hardware whose realized large-model throughput is often far below theoretical peak [@narayanan2021; @chowdhery2022palm].
-- **Memory pressure**\index{Training!memory pressure}: Storing `{python} TrainingMemoryPressure.gpt2_params_b_str` weights requires `{python} TrainingMemoryPressure.gpt2_params_gb_fp32_str` in FP32; the Adam optimizer adds two state tensors per parameter\index{Optimizer state!memory overhead}, consuming another `{python} TrainingMemoryPressure.gpt2_adam_gb_str`. Activation memory adds a workload-dependent footprint governed by architecture, sequence length, batch size, precision, and checkpointing, and the combined state can exceed a single accelerator's capacity.
-- **Data dependencies**: Each gradient update depends on the result of the previous one, creating sequential bottlenecks that limit how much parallelism the system can exploit.
-
-Each challenge points to a different kind of fix. Computational intensity pushes the system toward higher accelerator utilization and lower-precision arithmetic. Memory pressure calls for techniques such as gradient checkpointing,[^fn-activation-checkpointing-tradeoff] a specific application of *rematerialization* (discarding and recomputing intermediate values to save memory) that trades recomputation for reduced activation storage, and mixed-precision training\index{Mixed-precision training!definition},[^fn-mixed-precision-training] which reduces the memory footprint of weights and activations. Data dependencies motivate pipeline designs that overlap computation with data movement and sustain the data loading throughput the accelerator needs, so it never sits idle waiting for the next batch. The analysis here establishes the execution baseline on single-machine and single-node multi-GPU topologies; scaling across distributed network boundaries introduces multi-node communication fabrics and fault-tolerance protocols treated in advanced distributed systems texts.
-
-::: {.column-margin .margin-pointer}
-↩ The feeding problem, in which data delivery must keep pace with accelerator consumption, is established in @sec-data-engineering-feeding-problem.
-:::
-
-### The staged system pipeline: Identifying "accelerator bubbles" {#sec-model-training-staged-pipeline}
-
-A training system is not a single loop; it is a **staged system pipeline**\index{Training pipeline!staged system workflow}. Reaching high accelerator utilization requires analyzing training as a factory floor where four distinct stages coordinate to keep the ALUs busy:
-
-1.  **Data Loading & Preprocessing** (CPU/Storage): Fetching raw bits from Non-Volatile Memory Express (NVMe), decoding, and augmenting on CPU cores.
-2.  **Host-to-Device Transfer** (PCIe): Moving the processed batch over the PCIe bus into GPU memory via direct memory access (DMA).
-3.  **Forward/Backward Pass** (Accelerator): Propagating activations and gradients through layers on the GPU.
-4.  **Parameter Synchronization** (Interconnect): Exchanging gradients between accelerators over the available fabric. NVLink provides up to `{python} TrainingScenarios.nvlink_h100_gb_per_s_str` in the H100 configuration used later, while other systems may use PCIe or a network interconnect.
-
-Any mismatch in the throughput of these stages creates **accelerator bubbles**\index{Accelerator!bubbles, pipeline idleness}, intervals in which some accelerator resources are idle or underutilized while waiting for another stage. A systems engineer reduces these bubbles through techniques such as asynchronous prefetching and pipeline overlap, aiming to make the next batch available before the current step needs it. @Sec-model-training-identifying-bottlenecks-f57f develops the quantitative tools for measuring and reducing these bubbles.
-
-[^fn-activation-checkpointing-tradeoff]: **Gradient checkpointing (activation checkpointing)**\index{Activation checkpointing!memory-compute trade-off}: Backpropagation retains the forward values required by each backward rule. Checkpointing saves selected values and recomputes others during backward, trading additional work for lower activation memory. The $\sqrt{\NumberOfLayers}$ checkpoint placement and its associated recomputation cost describe the classical schedule analyzed by @chen2016training rather than every checkpointing implementation. @Sec-model-training-optimal-checkpoint-placement-strategy-4a0d works through that schedule for GPT-2's layer count.
-
-[^fn-mixed-precision-training]: **Mixed-precision training**\index{Mixed-precision training!trade-off}: Uses lower precision for selected computation and storage while retaining higher precision where accumulation or numerical range requires it. A common FP16 recipe maintains FP32 master weights\index{FP32 master weights!mixed-precision training} and uses loss scaling to reduce gradient underflow [@micikevicius2017mixed]. BF16 ("Brain Floating Point," from Google Brain [@google_bfloat16]) matches FP32's 8-bit exponent range and therefore usually avoids dynamic loss scaling, though the exact state and accumulation precision depend on the optimizer and implementation.
-
-Training systems budget compute, memory, and data flow under the training-time iron law, using reference workloads such as GPT-2 to price bottlenecks before applying targeted optimizations (mixed precision, tiled attention kernels, gradient accumulation, activation checkpointing, and prefetching) before scaling beyond a single host.
-
-Computational intensity, memory pressure, and data dependencies compound in large-scale execution: a single unmitigated numerical explosion can invalidate thousands of accelerator-hours.
-
-::: {#ws-training-palm-loss-spikes .callout-war-story title="The PaLM loss spikes (2022)"}
-
-**Context**: PaLM's 540-billion-parameter run used 6,144 Tensor Processing Unit (TPU) v4 chips across two 3,072-chip Pods connected through Google's data-center network and suffered severe training-instability spikes absent from smaller runs [@chowdhery2022palm].
-
-**Failure mode**: The training loss spiked roughly 20 times despite gradient clipping. The spikes occurred at highly irregular intervals, sometimes late in training, never appeared in smaller models, and had no identified principled mitigation.
-
-**Impact**: Each recovery discarded recent progress on an expensive 6,144-chip run, so reproducible checkpoints and repeatable data order were prerequisites for replay.
-
-**Response**: Engineers restarted training from an uncorrupted checkpoint roughly 100 steps prior to each spike and skipped approximately 200--500 data batches around the failure window.
-
-**Systems lesson**: Operational fault tolerance directly governs the utilization factor $\EfficiencyHw$ in the training-time law (@eq-training-iron-law). Automated loss-spike detection, checkpoint cadence, and batch skipping are core system mechanisms required to protect cluster compute efficiency.
-
-:::
-
-## Training-Time Law {#sec-model-training-iron-law-training-performance-a53f}
-
-PaLM's loss spikes show how directly lost progress becomes lost time at frontier scale, because every discarded step is paid for again on the full cluster. Pricing that cost, and every other one, requires a decomposition of training time into its physical constituents.
-
-The iron law of ML systems (principle \ref{pri-iron-law}) supplies that decomposition once it is specialized to training.\index{Training!training-time law}\index{Training-time law!utilization gap} The training-time form of the iron law, which this chapter shortens to the training-time law, keeps the compute term as the organizing equation so that every optimization technique maps to one of its factors.
-
-::: {#dfn-training-iron-law-training-performance .callout-definition title="The training-time law"}
-
-***The training-time law***\index{Training-time law!definition} expresses training time through the workload's operation count and its effective achieved throughput:
-$$T_{\text{train}} = \frac{O}{\PeakRate \times \EfficiencyHw}$$ {#eq-training-iron-law}
-
-Here $\EfficiencyHw$ is an effective end-to-end utilization factor, the achieved model-operation rate divided by the relevant hardware peak. Data stalls, communication, synchronization, launch overhead, and inefficient kernels all reduce this factor. Prefetching and overlap can hide part of those costs but do not guarantee their removal.
-
-1.  Significance: In the D·A·M taxonomy, these terms map to distinct optimization levers: $O$ is governed by Data (training token count) and Algorithm (model architecture or compression methods such as pruning and distillation), $\PeakRate$ is governed by the Machine (hardware execution units at the chosen numerical precision), and $\EfficiencyHw$ is the effective systems utilization factor and primary engineering target (@narayanan2021 measured 44 to 52 percent of theoretical peak throughput across GPT models trained on A100 clusters). @Sec-model-compression defines the compression techniques; here they serve only to show where such methods enter the accounting.
-2.  Distinction: The general iron law exposes data movement, computation, and latency separately. This training form folds every source of lost throughput into $\EfficiencyHw$, making it useful for budget accounting but insufficient for diagnosing which underlying term is responsible.
-3.  Common pitfall: A frequent misconception is that $\EfficiencyHw$ is fixed by hardware. System efficiency is a pipeline property: memory bandwidth saturation, kernel launch overhead, and synchronization barriers each reduce $\EfficiencyHw$ independently, and diagnosing which factor dominates requires profiling rather than reading hardware specs.
-
-:::
-
-@Eq-training-iron-law reveals three levers for improvement: reduce total operations through algorithmic innovation, increase peak throughput through hardware selection and precision formats, or improve utilization through pipeline orchestration. Core training optimization techniques target one or more of these levers, as summarized in @tbl-iron-law-mapping.
-
-```{=latex}
-\begingroup
-\renewcommand{\arraystretch}{1.3}
-```
-
-| **Technique**                   | **Term Affected**               | **Mechanism**                                                                  |
-|:--------------------------------|:--------------------------------|:-------------------------------------------------------------------------------|
-| **Mixed Precision (FP16/BF16)** | Peak Throughput ↑               | Uses supported lower-precision hardware paths                                  |
-| **Data Prefetching**            | Utilization ↑                   | Reduces accelerator idle time waiting for data                                 |
-| **Gradient Checkpointing**      | Memory ↓, Operations ↑          | Reduces saved activations by recomputing selected values                       |
-| **Gradient Accumulation**       | Memory ↓, Synchronization ↓     | Builds an effective batch from serialized micro-batches                        |
-| **Operator Fusion**             | Memory Traffic ↓, Overhead ↓    | Avoids intermediate transfers and reduces kernel launches                      |
-| **FlashAttention**              | Memory Traffic ↓, Utilization ↑ | Same asymptotic FLOPs, much lower HBM IO; backward recomputation may add FLOPs |
-
-: **Iron law optimization mapping**: Optimization techniques mapped to iron law terms. Understanding which term a technique affects guides optimization strategy selection. {#tbl-iron-law-mapping tbl-colwidths="[25,27,48]"}
-
-```{=latex}
-\endgroup
-```
-
-The training-time law focuses on execution efficiency---how fast the hardware processes a given workload. It does not capture data-side factors such as data quality, dataset size, or curriculum design, which affect how many total operations $O$ are needed to reach a target accuracy. A cleaner dataset or a better data mix can reduce the number of epochs required, shrinking $O$ without touching hardware at all. Holding the workload fixed, the question is how to execute it as fast as possible.
-
-::: {.column-margin .margin-pointer}
-↪ Data selection, which shrinks total operations ($O$) by keeping the examples that return the most learning per unit of compute, is developed in @sec-data-selection-data-selection-fundamentals-e839.
-:::
-
-Actual training throughput remains below the arithmetic peak whenever kernels, data delivery, or communication leave resources idle. Scaling to multiple accelerators introduces additional communication overhead, a trade-off quantified in @sec-model-training-scaling-training-systems-adfd.
-
-::: {#chk-training-physics-training .callout-checkpoint title="The physics of training"}
-
-Training speed is governed by the utilization of hardware peaks.
-
-**Utilization gap**
-
-- [ ] **Peak vs. real**: why does sustained end-to-end utilization remain below the arithmetic peak?
-- [ ] **Utilization losses**: which pipeline stalls introduced earlier reduce $\EfficiencyHw$, and which can prefetching or overlap hide?
-- [ ] **Order of magnitude**: a frontier run needs on the order of $10^{23}$ FLOPs at a utilization $\EfficiencyHw$ well below 1. Estimate which lever shortens wall-clock time more, doubling $\PeakRate$ or doubling $\EfficiencyHw$, and why, in practice, the two levers differ in cost and reachability even though the training-time law treats them symmetrically.
-
-:::
-
-The training-time law provides a static framework for reasoning about training performance, but the history of deep learning reveals how the binding constraint has shifted over time as hardware and algorithms co-evolved. In 1986, Rumelhart and colleagues popularized backpropagation for multilayer neural networks [@rumelhart1986]. In 2012, AlexNet trained an ImageNet classifier in five to six days on two GPUs [@krizhevsky2012imagenet], demonstrating how well neural-network parallelism mapped to graphics hardware. By 2017, transformers\index{Transformer!training evolution} [@vaswani2017] shifted attention toward large-scale sequence modeling and high-throughput accelerator kernels. GPT-3\index{GPT-3!training compute} in 2020 consumed about $3.14 \times 10^{23}$ FLOPs [@brown2020language], making utilization $(\EfficiencyHw)$ critical. By 2023, training efficiency improved through targeted systems optimizations: FlashAttention reduces memory traffic while improving $\EfficiencyHw$; gradient checkpointing trades additional $O$ for memory capacity; mixed precision increases $\PeakRate$. Each innovation addresses a specific iron-law bottleneck.
-
-That history is the bitter lesson seen from inside the training system. None of these milestones succeeded by encoding more human expertise. Backpropagation supplied a general recipe, and each later step let that recipe absorb more computation, more parameters, and more data. The systems consequence is what makes training engineering matter. If capability tracks the computation a general method can absorb, then every point of $\EfficiencyHw$ lost to stalls, and every gigabyte of memory that forces a smaller model or batch, is capability forgone at a fixed budget. The first obligation of a training system is therefore to convert its compute budget into useful operations as completely as the hardware allows.
-
-::: {.column-margin .margin-pointer}
-↩ The bitter lesson, that general methods which absorb more computation outperform encoded human expertise, is established in @sec-introduction-bitter-lesson-79c7.
-:::
-
-```{python}
-#| echo: false
-#| label: gpt2-lighthouse-hardware-calc
-from mlsysim.fmt import fmt_sci_flops, fmt_memory, fmt_params
-
-# ┌─────────────────────────────────────────────────────────────────────────────
-# │ GPT-2 LIGHTHOUSE + V100 HARDWARE SPECS
-# ├─────────────────────────────────────────────────────────────────────────────
-# │ Context: §Running Example: Training GPT-2, §GPT-2 Attention Layer
-# │          Computation (notebook), §Activation Memory Requirements,
-# │          §Gradient Accumulation walkthrough.
-# │
-# │ Goal: Provide GPT-2 weight/dataset sizes, DLRM scale, and V100 hardware
-# │       specs for the lighthouse table and GPT-2 FLOP notebook.
-# │ Show: GPT-2 lighthouse table specs; V100 throughput in system implication.
-# │ How:  Hard-coded model sizes; V100 specs from Hardware Digital Twin.
-# │
-# └─────────────────────────────────────────────────────────────────────────────
-
-# ── GPT-2 Lighthouse Sizes + DLRM Scale ──────────────────────────────────
-class GPT2LighthouseSpecs:
-    # ┌── 1. LOAD ──────────────────────────────────────────────────────────────
-    gpt2_model = Models.Language.GPT2
-    gpt2_params = gpt2_model.parameters
-    gpt2_total_flops = gpt2_model.training_ops
-    gpt2_weights_fp16 = gpt2_model.size_in_bytes(BYTES_FP16)
-    gpt2_weights_fp32 = gpt2_model.size_in_bytes(BYTES_FP32)
-    gpt2_dataset_size = gpt2_model.training_dataset_size
-    dlrm_model = Models.Recommendation.DLRM
-    dlrm_params_min = dlrm_model.parameter_range_min
-    dlrm_params_max = dlrm_model.parameter_range_max
-
-    # ┌── 4. OUTPUT ────────────────────────────────────────────────────────────
-    gpt2_params_b_str = fmt_params(gpt2_params)
-    gpt2_total_flops_str = fmt_sci_flops(gpt2_total_flops)
-    gpt2_weights_fp16_gb_str = fmt_memory(gpt2_weights_fp16, unit=GB, precision=0, commas=False)
-    gpt2_weights_fp32_gb_str = fmt_memory(gpt2_weights_fp32, unit=GB, precision=0, commas=False)
-    gpt2_dataset_size_gb_str = fmt_memory(gpt2_dataset_size, unit=GB, precision=0, commas=False)
-    dlrm_params_min_b_str = fmt_params(dlrm_params_min, precision=0)
-    dlrm_params_max_t_str = fmt_params(dlrm_params_max, precision=0)
-```
-
-### Running example: Training GPT-2 {#sec-model-training-running-example-training-gpt2-19cd}
-
-In inference, GPT-2\index{GPT-2!training lighthouse} serves as the Bandwidth Hog lighthouse. Here it recurs as the chapter's stable workload for testing each training cost and optimization.
-
-::: {.column-margin .margin-pointer}
-↩ GPT-2's inference archetype as the Bandwidth Hog, a workload bound by data movement rather than arithmetic, is established in @sec-ml-systems-workload-archetypes-fd10.
-:::
-
-::: {#lhs-training-lighthouse-example-training-gpt-2 .callout-lighthouse title="Lighthouse example: Training GPT-2"}
-
-**Context**:
-GPT-2 (1.5 billion parameters) serves as the primary case study because it is large enough to expose meaningful compute, activation, and optimizer-state constraints while remaining easier to analyze than frontier-scale models. Whether it requires distributed training depends on precision, optimizer state, activation memory, hardware capacity, and the target training time. @Tbl-training-gpt2-lighthouse-specs maps each model property to the systems constraint it creates:
-
-```{=latex}
-\begingroup
-\renewcommand{\arraystretch}{1.3}
-```
-
-| **Property**     |                         **Specification**                         | **Systems Implication**                                                                                                                                        |
-|:-----------------|:-----------------------------------------------------------------:|:---------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| **Parameters**   |       `{python} GPT2LighthouseSpecs.gpt2_params_b_str` (XL)       | Requires ~`{python} GPT2LighthouseSpecs.gpt2_weights_fp16_gb_str` (FP16) or ~`{python} GPT2LighthouseSpecs.gpt2_weights_fp32_gb_str` (FP32) for weights alone. |
-| **Architecture** |                        48 Layers, 1600 Dim                        | Deep pipeline creates heavy activation memory pressure.                                                                                                        |
-| **Dataset**      | WebText (`{python} GPT2LighthouseSpecs.gpt2_dataset_size_gb_str`) | Preprocessing, shuffling, and delivery must sustain the selected training configuration.                                                                       |
-| **Compute**      |       ~ `{python} GPT2LighthouseSpecs.gpt2_total_flops_str`       | Training duration depends on achieved throughput and accelerator count.                                                                                        |
-
-: **GPT-2 (1.5 Billion Parameters) Lighthouse Model Specifications**: Parameter count, architecture depth, dataset size, and total training compute mapped to their systems implications. Each row pairs a model property with the engineering constraint it creates—memory footprint for weights, activation pressure from pipeline depth, I/O throughput requirements, and parallelization demand. {#tbl-training-gpt2-lighthouse-specs tbl-colwidths="[20,26,54]"}
-
-```{=latex}
-\endgroup
-```
-
-**Mechanism**:
-In dense transformer models, the arithmetic work per token is directly proportional to parameter count $\Parameters$. In the forward pass, each parameter participates in one multiply-accumulate operation ($1\text{ MAC} = 2\text{ FLOPs}$), consuming $2\Parameters\text{ FLOPs/token}$. Backpropagation computes two matrix products per parameter: one to propagate gradients backward with respect to activations ($2\Parameters\text{ FLOPs}$), and another to calculate weight gradients for the optimizer ($2\Parameters\text{ FLOPs}$). The backward pass therefore requires twice the compute of the forward pass ($4\Parameters\text{ FLOPs/token}$), yielding a total work factor of $2\Parameters + 4\Parameters = 6\Parameters\text{ FLOPs/token}$. Across a dataset of $\DatasetSize$ tokens, total training work is $\Operations \approx 6 \cdot \Parameters \cdot \DatasetSize$, or `{python} GPT2LighthouseSpecs.gpt2_total_flops_str`.
-
-Training GPT-2 couples this operation count with a strict memory footprint $\TotalMemoryFootprint = \WeightMemoryWeights + \GradientMemoryGradients + \OptimizerstateMemory + \ActivationMemoryActivations$. Balancing execution time $T_{\text{train}} = \frac{\Operations}{\PeakRate \times \EfficiencyHw}$ requires orchestrating data ingestion, activation memory, and compute throughput within accelerator high-bandwidth memory (HBM) capacity.
-
-:::
-
-Not all training workloads are compute bound. Recommendation models like DLRM\index{DLRM!embedding bottleneck} are dominated by massive embedding tables\index{Embedding table!capacity bottleneck} (`{python} GPT2LighthouseSpecs.dlrm_params_min_b_str` to `{python} GPT2LighthouseSpecs.dlrm_params_max_t_str` parameters, mostly embeddings) that make them memory bandwidth bound rather than compute bound. For such workloads, the first scaling problem is often capacity: splitting the embedding tables across devices so the model fits at all. In contrast, dense, compute-intensive training—exemplified by the GPT-2 lighthouse model analyzed below—exposes compute-bound and activation-memory limits rather than capacity partitioning.
-
-Within the end-to-end ML lifecycle, training systems ingest prepared data from upstream pipelines and produce model checkpoints for downstream deployment. Data quality directly governs training stability, while training throughput dictates iteration velocity. This systems pressure manifests across three distinct scales. At data scale, large corpora require high-throughput I/O pipelines and distributed storage to avoid accelerator starvation. At model scale, billion-parameter architectures force the system to balance memory capacity against communication, choosing between replicating weights across data-parallel devices\index{Distributed training!data parallelism}[^fn-training-data-parallelism] or partitioning layers across devices with model parallelism\index{Distributed training!model parallelism}.[^fn-training-model-parallelism] At infrastructure scale, coordinating multiple accelerators introduces synchronization overhead that can dominate training time. These physical trade-offs make the stage interface contracts formalized in @sec-ml-workflow-stage-interface-specification-ae3c essential during training: orchestration decisions dictate both iteration velocity and hardware efficiency.
-
-[^fn-training-data-parallelism]: **Data parallelism**\index{Data parallelism!communication overhead}: Replicates the full model on every device, splitting only the data. Each device computes gradients independently, then an AllReduce operation synchronizes them---adding communication volume proportional to model size at every step. This synchronization tax limits scaling efficiency: doubling accelerators rarely halves training time once communication becomes the bottleneck.
-
-[^fn-training-model-parallelism]: **Model parallelism**\index{Model parallelism!pipeline bubbles}: Partitions the model's layers across devices when it exceeds single-device memory. Activations must transfer between devices at every partition boundary, and naive partitioning creates "pipeline bubbles" where downstream devices idle while waiting. Microbatch pipelining, as in GPipe and PipeDream\index{PipeDream!pipeline parallelism}, recovers much of this lost efficiency [@huang2019gpipe; @narayanan2019].
-
-GPT-2's `{python} GPT2LighthouseSpecs.gpt2_dataset_size_gb_str` WebText corpus sits at the lower end of this data scale spectrum. Larger corpora change the data path qualitatively.
-
-::: {#psp-training-10-gb-10-tb-scale-factor .callout-perspective title="The 10 GB to 10 TB scale factor"}
-
-In a memory-resident regime, a corpus may fit in system RAM and avoid repeated storage reads after caching, though preprocessing and transfer costs remain. In a streaming regime, the corpus exceeds local memory and the system must orchestrate storage reads, preprocessing, caching, and delivery throughout training. The appropriate design may include multiple workers, prefetching, local caches, or distributed storage, depending on which stage limits throughput.
-
-Scale therefore changes more than the amount of data; it transforms the system's physics.
-
-:::
-
-These scaling constraints translate into concrete workflow requirements. Training workflows consist of interdependent stages---data preprocessing, forward and backward passes, and parameter updates. System constraints dictate these execution limits: modern accelerators' compute-to-bandwidth ratios (ridge points) far exceed the arithmetic intensity of many kernels, leaving those kernels starved for operands [@patterson2017hardware]. In multi-accelerator configurations, cross-device synchronization introduces latency penalties, where interconnect bandwidth (such as PCIe lanes or NVLink bridges\index{NVLink!training interconnect}) dictates the communication-to-computation ratio.[^fn-transformer-compute-scaling]
-
-The hardware-software boundary is central to training. Mixed-precision training emerged from recognizing that Tensor Core hardware could accelerate reduced-precision arithmetic. Gradient checkpointing arose from memory capacity constraints. Training systems engineering is the work of matching those algorithmic choices to the physical limits of the machine.
-
-[^fn-transformer-compute-scaling]: **Transformer training interconnect sensitivity**\index{Training!transformer, interconnect sensitivity}: Self-attention's $\mathcal{O}(S^2)$ memory and compute scaling increases activation size with sequence length. In pipeline parallelism, activations cross devices at model-partition boundaries, while data parallelism synchronizes gradients whose volume scales with parameter count. The resulting communication cost depends on the parallelism strategy, topology, message size, and degree of overlap, making interconnect choice a first-order training-system decision.
-
-Every training bottleneck ultimately traces back to the execution cost of specific mathematical operations. Sufficiently large matrix multiplications with high operand reuse can be compute-bound and governed by peak arithmetic throughput [@goto2008], whereas standalone low-intensity activation and normalization operations often face a memory-bandwidth ceiling. Meanwhile, optimizer states inflate the resident memory footprint regardless of arithmetic activity. Designing systems to execute these operations efficiently begins with accounting for each cost category separately.
-
 ## Mathematical Foundations {#sec-model-training-mathematical-foundations-d894}
 
 Linear algebra expresses matrix multiplication compactly as $\mathbf{C} = \mathbf{A}\mathbf{B}$. In hardware, executing this operation efficiently requires navigating the accelerator's physical memory hierarchy:
@@ -1290,6 +1020,276 @@ The trajectory vector in @fig-training-roofline illustrates how FlashAttention[^
 Arithmetic-intensity analysis is how the silicon contract (principle \ref{pri-silicon-contract}) is checked in training. The contract names the resource a workload wagers on; the analysis determines which physical resource actually constrains a particular implementation. Dense matrix multiplication reaches the compute-bound regime when tensor shapes provide sufficient data reuse, while standalone normalization and elementwise activation kernels remain memory bandwidth bound. FlashAttention exemplifies how tiling reduces off-chip data movement and raises effective arithmetic intensity, shifting memory-bound attention toward compute saturation.
 
 Optimizing individual operations is necessary but insufficient. A perfectly tuned matrix multiplication achieves nothing if the accelerator sits idle waiting for the next batch of data. Isolated operation costs—dense matrix multiplication FLOPs, memory-bound activations, and optimizer state allocations—compound within the execution loop. Sustained throughput requires orchestrating these discrete operations into a balanced pipeline where upstream data delivery and downstream parameter updates prevent accelerator starvation.
+
+## Training Systems Fundamentals {#sec-model-training-training-systems-fundamentals-05d2}
+
+Running a model once and training it from scratch live on opposite sides of the systems cost curve. Frameworks provide the execution substrate: computational graphs schedule operations, automatic differentiation computes gradients, and hardware abstractions target diverse accelerators. Those mechanisms make a single training step possible; training systems make it repeatable at scale. The same forward/backward/update loop may run many thousands or millions of times while retaining activations, feeding accelerators, and staying within practical memory, time, and budget limits.
+
+::: {.column-margin}
+![](images/svg/training_cost_asymmetry.svg){width="100%" fig-alt="Curve that stays nearly flat, bends upward at a marked knee, and rises steeply through a shaded right-hand zone."}
+
+*Training cost stays flat across scale, then explodes past the large-scale knee.*
+:::
+
+This chapter uses an external order-of-magnitude estimate of approximately `{python} TrainingScenarios.gpt2_training_cost_2019_str` for GPT-2-scale training and a public estimate near `{python} TrainingScenarios.gpt4_training_cost_est_str` for a GPT-4-class training run.[^fn-training-cost-scaling] Neither figure was disclosed as an audited training bill. This **training cost asymmetry**\index{Training cost asymmetry!definition}\index{Training!cost asymmetry}\index{Training!inference vs. training} reflects the difference between evaluating a trained model for a defined request and repeatedly executing forward, backward, and update computations across a training corpus.
+
+[^fn-training-cost-scaling]: [offset=8mm] **Training cost scaling**\index{Training cost!scaling trajectory}: The roughly 2,000$\times$ ratio between this chapter's two cost anchors illustrates how parameter counts, training-token budgets, hardware generations, and accelerator fleets can compound; it is not a controlled comparison of disclosed training bills. OpenAI's GPT-2 report documents the model and training setup but does not disclose training cost [@radford2019language]. Exact GPT-4 training details were also not disclosed, so the GPT-4-class figure is explicitly an industry estimate supported by public reporting and independent infrastructure analysis [@knight2023giantmodels; @semianalysisGPT4].
+
+For GPT-2, the chapter uses roughly `{python} TrainingScenarios.gpt2_fwd_flops_str` floating-point operations per token for a forward evaluation, following the parameter-based accounting associated with the architecture in the GPT-2 technical report [@radford2019language]. The total budget of `{python} TrainingScenarios.gpt2_total_flops_str` corresponds to roughly `{python} TrainingScenarios.gpt2_implied_passes_billion_str` billion token positions when forward and backward work is approximated as three times the forward cost. This accounting estimate is not a claim that GPT-2 executed that many complete inference requests. The scale makes training systems engineering a distinct discipline and shows how access to training infrastructure can constrain participation in AI development.
+
+```{=latex}
+\vspace*{-1ex}
+```
+::: {#dfn-training-training-systems .callout-definition title="Training systems"}
+
+***Machine learning training systems***\index{Training systems!definition}\index{Training!systems} are software-hardware systems that execute the iterative optimization loop (forward pass, loss computation, backward pass, and parameter update) to minimize a loss function over a training dataset.
+
+1.  Significance: Training memory cost is `{python} TrainingScenarios.adam_training_memory_mult_str` the inference memory cost per parameter in a standard mixed-precision Adaptive Moment Estimation (Adam) setup: a `{python} TrainingScenarios.adam_example_params_b_str`-parameter model requires `{python} TrainingScenarios.adam_inference_gb_str` (FP16 weights) + `{python} TrainingScenarios.adam_grad_gb_str` (FP16 gradients) + `{python} TrainingScenarios.adam_master_gb_str` (FP32 master weights) + `{python} TrainingScenarios.adam_moments_gb_str` (Adam first and second moments in FP32) = `{python} TrainingScenarios.adam_training_state_gb_str` at least, before accounting for activation storage. This multiplier is a major reason a model that runs inference on one GPU requires multiple GPUs for training.
+2.  Distinction: Unlike inference systems, which execute a single forward pass and discard intermediate activations, standard backpropagation stores the tensors needed by the backward pass, creating a footprint that grows with model depth and batch size.
+3.  Common pitfall: A frequent misconception is that training failures are compute problems. A common failure is an out-of-memory (OOM) error, a memory-management problem: tensors saved for backpropagation accumulate during the forward pass and can exhaust memory before the first gradient is computed.
+
+:::
+
+```{python}
+#| echo: false
+from mlsysim import Models
+
+# ┌── LEGO ───────────────────────────────────────────────
+# │ Goal: GPT-2 weight, Adam, and layer counts for memory-pressure prose.
+from mlsysim.fmt import fmt_count, fmt_memory, fmt_params
+
+class TrainingMemoryPressure:
+    gpt2 = Models.Language.GPT2
+    gpt2_params = gpt2.parameters
+    gpt2_layers = gpt2.layers
+    gpt2_params_fp32 = gpt2.size_in_bytes(BYTES_FP32)
+    gpt2_adam = gpt2.size_in_bytes(BYTES_ADAM_STATE)
+
+    # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
+    gpt2_params_b_str = fmt_params(gpt2_params)
+    gpt2_params_gb_fp32_str = fmt_memory(gpt2_params_fp32, unit=GB, precision=0, commas=False)
+    gpt2_adam_gb_str = fmt_memory(gpt2_adam, unit=GB, precision=0, commas=False)
+```
+
+Three characteristics distinguish training workloads from general-purpose computing:
+
+- **Computational intensity**\index{Training!computational intensity}: The `{python} TrainingScenarios.gpt2_total_flops_str` budget spread over days of wall-clock time demands sustained PFLOP/s-scale throughput from hardware whose realized large-model throughput is often far below theoretical peak [@narayanan2021; @chowdhery2022palm].
+- **Memory pressure**\index{Training!memory pressure}: Storing `{python} TrainingMemoryPressure.gpt2_params_b_str` weights requires `{python} TrainingMemoryPressure.gpt2_params_gb_fp32_str` in FP32; the Adam optimizer adds two state tensors per parameter\index{Optimizer state!memory overhead}, consuming another `{python} TrainingMemoryPressure.gpt2_adam_gb_str`. Activation memory adds a workload-dependent footprint governed by architecture, sequence length, batch size, precision, and checkpointing, and the combined state can exceed a single accelerator's capacity.
+- **Data dependencies**: Each gradient update depends on the result of the previous one, creating sequential bottlenecks that limit how much parallelism the system can exploit.
+
+Each challenge points to a different kind of fix. Computational intensity pushes the system toward higher accelerator utilization and lower-precision arithmetic. Memory pressure calls for techniques such as gradient checkpointing,[^fn-activation-checkpointing-tradeoff] a specific application of *rematerialization* (discarding and recomputing intermediate values to save memory) that trades recomputation for reduced activation storage, and mixed-precision training\index{Mixed-precision training!definition},[^fn-mixed-precision-training] which reduces the memory footprint of weights and activations. Data dependencies motivate pipeline designs that overlap computation with data movement and sustain the data loading throughput the accelerator needs, so it never sits idle waiting for the next batch. The analysis here establishes the execution baseline on single-machine and single-node multi-GPU topologies; scaling across distributed network boundaries introduces multi-node communication fabrics and fault-tolerance protocols treated in advanced distributed systems texts.
+
+::: {.column-margin .margin-pointer}
+↩ The feeding problem, in which data delivery must keep pace with accelerator consumption, is established in @sec-data-engineering-feeding-problem.
+:::
+
+### The staged system pipeline: Identifying "accelerator bubbles" {#sec-model-training-staged-pipeline}
+
+A training system is not a single loop; it is a **staged system pipeline**\index{Training pipeline!staged system workflow}. Reaching high accelerator utilization requires analyzing training as a factory floor where four distinct stages coordinate to keep the ALUs busy:
+
+1.  **Data Loading & Preprocessing** (CPU/Storage): Fetching raw bits from Non-Volatile Memory Express (NVMe), decoding, and augmenting on CPU cores.
+2.  **Host-to-Device Transfer** (PCIe): Moving the processed batch over the PCIe bus into GPU memory via direct memory access (DMA).
+3.  **Forward/Backward Pass** (Accelerator): Propagating activations and gradients through layers on the GPU.
+4.  **Parameter Synchronization** (Interconnect): Exchanging gradients between accelerators over the available fabric. NVLink provides up to `{python} TrainingScenarios.nvlink_h100_gb_per_s_str` in the H100 configuration used later, while other systems may use PCIe or a network interconnect.
+
+Any mismatch in the throughput of these stages creates **accelerator bubbles**\index{Accelerator!bubbles, pipeline idleness}, intervals in which some accelerator resources are idle or underutilized while waiting for another stage. A systems engineer reduces these bubbles through techniques such as asynchronous prefetching and pipeline overlap, aiming to make the next batch available before the current step needs it. @Sec-model-training-identifying-bottlenecks-f57f develops the quantitative tools for measuring and reducing these bubbles.
+
+[^fn-activation-checkpointing-tradeoff]: **Gradient checkpointing (activation checkpointing)**\index{Activation checkpointing!memory-compute trade-off}: Backpropagation retains the forward values required by each backward rule. Checkpointing saves selected values and recomputes others during backward, trading additional work for lower activation memory. The $\sqrt{\NumberOfLayers}$ checkpoint placement and its associated recomputation cost describe the classical schedule analyzed by @chen2016training rather than every checkpointing implementation. @Sec-model-training-optimal-checkpoint-placement-strategy-4a0d works through that schedule for GPT-2's layer count.
+
+[^fn-mixed-precision-training]: **Mixed-precision training**\index{Mixed-precision training!trade-off}: Uses lower precision for selected computation and storage while retaining higher precision where accumulation or numerical range requires it. A common FP16 recipe maintains FP32 master weights\index{FP32 master weights!mixed-precision training} and uses loss scaling to reduce gradient underflow [@micikevicius2017mixed]. BF16 ("Brain Floating Point," from Google Brain [@google_bfloat16]) matches FP32's 8-bit exponent range and therefore usually avoids dynamic loss scaling, though the exact state and accumulation precision depend on the optimizer and implementation.
+
+Training systems budget compute, memory, and data flow under the training-time iron law, using reference workloads such as GPT-2 to price bottlenecks before applying targeted optimizations (mixed precision, tiled attention kernels, gradient accumulation, activation checkpointing, and prefetching) before scaling beyond a single host.
+
+Computational intensity, memory pressure, and data dependencies compound in large-scale execution: a single unmitigated numerical explosion can invalidate thousands of accelerator-hours.
+
+::: {#ws-training-palm-loss-spikes .callout-war-story title="The PaLM loss spikes (2022)"}
+
+**Context**: PaLM's 540-billion-parameter run used 6,144 Tensor Processing Unit (TPU) v4 chips across two 3,072-chip Pods connected through Google's data-center network and suffered severe training-instability spikes absent from smaller runs [@chowdhery2022palm].
+
+**Failure mode**: The training loss spiked roughly 20 times despite gradient clipping. The spikes occurred at highly irregular intervals, sometimes late in training, never appeared in smaller models, and had no identified principled mitigation.
+
+**Impact**: Each recovery discarded recent progress on an expensive 6,144-chip run, so reproducible checkpoints and repeatable data order were prerequisites for replay.
+
+**Response**: Engineers restarted training from an uncorrupted checkpoint roughly 100 steps prior to each spike and skipped approximately 200--500 data batches around the failure window.
+
+**Systems lesson**: Operational fault tolerance directly governs the utilization factor $\EfficiencyHw$ in the training-time law (@eq-training-iron-law). Automated loss-spike detection, checkpoint cadence, and batch skipping are core system mechanisms required to protect cluster compute efficiency.
+
+:::
+
+## Training-Time Law {#sec-model-training-iron-law-training-performance-a53f}
+
+PaLM's loss spikes show how directly lost progress becomes lost time at frontier scale, because every discarded step is paid for again on the full cluster. Pricing that cost, and every other one, requires a decomposition of training time into its physical constituents.
+
+The iron law of ML systems (principle \ref{pri-iron-law}) supplies that decomposition once it is specialized to training.\index{Training!training-time law}\index{Training-time law!utilization gap} The training-time form of the iron law, which this chapter shortens to the training-time law, keeps the compute term as the organizing equation so that every optimization technique maps to one of its factors.
+
+::: {#dfn-training-iron-law-training-performance .callout-definition title="The training-time law"}
+
+***The training-time law***\index{Training-time law!definition} expresses training time through the workload's operation count and its effective achieved throughput:
+$$T_{\text{train}} = \frac{O}{\PeakRate \times \EfficiencyHw}$$ {#eq-training-iron-law}
+
+Here $\EfficiencyHw$ is an effective end-to-end utilization factor, the achieved model-operation rate divided by the relevant hardware peak. Data stalls, communication, synchronization, launch overhead, and inefficient kernels all reduce this factor. Prefetching and overlap can hide part of those costs but do not guarantee their removal.
+
+1.  Significance: In the D·A·M taxonomy, these terms map to distinct optimization levers: $O$ is governed by Data (training token count) and Algorithm (model architecture or compression methods such as pruning and distillation), $\PeakRate$ is governed by the Machine (hardware execution units at the chosen numerical precision), and $\EfficiencyHw$ is the effective systems utilization factor and primary engineering target (@narayanan2021 measured 44 to 52 percent of theoretical peak throughput across GPT models trained on A100 clusters). @Sec-model-compression defines the compression techniques; here they serve only to show where such methods enter the accounting.
+2.  Distinction: The general iron law exposes data movement, computation, and latency separately. This training form folds every source of lost throughput into $\EfficiencyHw$, making it useful for budget accounting but insufficient for diagnosing which underlying term is responsible.
+3.  Common pitfall: A frequent misconception is that $\EfficiencyHw$ is fixed by hardware. System efficiency is a pipeline property: memory bandwidth saturation, kernel launch overhead, and synchronization barriers each reduce $\EfficiencyHw$ independently, and diagnosing which factor dominates requires profiling rather than reading hardware specs.
+
+:::
+
+@Eq-training-iron-law reveals three levers for improvement: reduce total operations through algorithmic innovation, increase peak throughput through hardware selection and precision formats, or improve utilization through pipeline orchestration. Core training optimization techniques target one or more of these levers, as summarized in @tbl-iron-law-mapping.
+
+```{=latex}
+\begingroup
+\renewcommand{\arraystretch}{1.3}
+```
+
+| **Technique**                   | **Term Affected**               | **Mechanism**                                                                  |
+|:--------------------------------|:--------------------------------|:-------------------------------------------------------------------------------|
+| **Mixed Precision (FP16/BF16)** | Peak Throughput ↑               | Uses supported lower-precision hardware paths                                  |
+| **Data Prefetching**            | Utilization ↑                   | Reduces accelerator idle time waiting for data                                 |
+| **Gradient Checkpointing**      | Memory ↓, Operations ↑          | Reduces saved activations by recomputing selected values                       |
+| **Gradient Accumulation**       | Memory ↓, Synchronization ↓     | Builds an effective batch from serialized micro-batches                        |
+| **Operator Fusion**             | Memory Traffic ↓, Overhead ↓    | Avoids intermediate transfers and reduces kernel launches                      |
+| **FlashAttention**              | Memory Traffic ↓, Utilization ↑ | Same asymptotic FLOPs, much lower HBM IO; backward recomputation may add FLOPs |
+
+: **Iron law optimization mapping**: Optimization techniques mapped to iron law terms. Understanding which term a technique affects guides optimization strategy selection. {#tbl-iron-law-mapping tbl-colwidths="[25,27,48]"}
+
+```{=latex}
+\endgroup
+```
+
+The training-time law focuses on execution efficiency---how fast the hardware processes a given workload. It does not capture data-side factors such as data quality, dataset size, or curriculum design, which affect how many total operations $O$ are needed to reach a target accuracy. A cleaner dataset or a better data mix can reduce the number of epochs required, shrinking $O$ without touching hardware at all. Holding the workload fixed, the question is how to execute it as fast as possible.
+
+::: {.column-margin .margin-pointer}
+↪ Data selection, which shrinks total operations ($O$) by keeping the examples that return the most learning per unit of compute, is developed in @sec-data-selection-data-selection-fundamentals-e839.
+:::
+
+Actual training throughput remains below the arithmetic peak whenever kernels, data delivery, or communication leave resources idle. Scaling to multiple accelerators introduces additional communication overhead, a trade-off quantified in @sec-model-training-scaling-training-systems-adfd.
+
+::: {#chk-training-physics-training .callout-checkpoint title="The physics of training"}
+
+Training speed is governed by the utilization of hardware peaks.
+
+**Utilization gap**
+
+- [ ] **Peak vs. real**: why does sustained end-to-end utilization remain below the arithmetic peak?
+- [ ] **Utilization losses**: which pipeline stalls introduced earlier reduce $\EfficiencyHw$, and which can prefetching or overlap hide?
+- [ ] **Order of magnitude**: a frontier run needs on the order of $10^{23}$ FLOPs at a utilization $\EfficiencyHw$ well below 1. Estimate which lever shortens wall-clock time more, doubling $\PeakRate$ or doubling $\EfficiencyHw$, and why, in practice, the two levers differ in cost and reachability even though the training-time law treats them symmetrically.
+
+:::
+
+The training-time law provides a static framework for reasoning about training performance, but the history of deep learning reveals how the binding constraint has shifted over time as hardware and algorithms co-evolved. In 1986, Rumelhart and colleagues popularized backpropagation for multilayer neural networks [@rumelhart1986]. In 2012, AlexNet trained an ImageNet classifier in five to six days on two GPUs [@krizhevsky2012imagenet], demonstrating how well neural-network parallelism mapped to graphics hardware. By 2017, transformers\index{Transformer!training evolution} [@vaswani2017] shifted attention toward large-scale sequence modeling and high-throughput accelerator kernels. GPT-3\index{GPT-3!training compute} in 2020 consumed about $3.14 \times 10^{23}$ FLOPs [@brown2020language], making utilization $(\EfficiencyHw)$ critical. By 2023, training efficiency improved through targeted systems optimizations: FlashAttention reduces memory traffic while improving $\EfficiencyHw$; gradient checkpointing trades additional $O$ for memory capacity; mixed precision increases $\PeakRate$. Each innovation addresses a specific iron-law bottleneck.
+
+That history is the bitter lesson seen from inside the training system. None of these milestones succeeded by encoding more human expertise. Backpropagation supplied a general recipe, and each later step let that recipe absorb more computation, more parameters, and more data. The systems consequence is what makes training engineering matter. If capability tracks the computation a general method can absorb, then every point of $\EfficiencyHw$ lost to stalls, and every gigabyte of memory that forces a smaller model or batch, is capability forgone at a fixed budget. The first obligation of a training system is therefore to convert its compute budget into useful operations as completely as the hardware allows.
+
+::: {.column-margin .margin-pointer}
+↩ The bitter lesson, that general methods which absorb more computation outperform encoded human expertise, is established in @sec-introduction-bitter-lesson-79c7.
+:::
+
+```{python}
+#| echo: false
+#| label: gpt2-lighthouse-hardware-calc
+from mlsysim.fmt import fmt_sci_flops, fmt_memory, fmt_params
+
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ GPT-2 LIGHTHOUSE + V100 HARDWARE SPECS
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: §Running Example: Training GPT-2, §GPT-2 Attention Layer
+# │          Computation (notebook), §Activation Memory Requirements,
+# │          §Gradient Accumulation walkthrough.
+# │
+# │ Goal: Provide GPT-2 weight/dataset sizes, DLRM scale, and V100 hardware
+# │       specs for the lighthouse table and GPT-2 FLOP notebook.
+# │ Show: GPT-2 lighthouse table specs; V100 throughput in system implication.
+# │ How:  Hard-coded model sizes; V100 specs from Hardware Digital Twin.
+# │
+# └─────────────────────────────────────────────────────────────────────────────
+
+# ── GPT-2 Lighthouse Sizes + DLRM Scale ──────────────────────────────────
+class GPT2LighthouseSpecs:
+    # ┌── 1. LOAD ──────────────────────────────────────────────────────────────
+    gpt2_model = Models.Language.GPT2
+    gpt2_params = gpt2_model.parameters
+    gpt2_total_flops = gpt2_model.training_ops
+    gpt2_weights_fp16 = gpt2_model.size_in_bytes(BYTES_FP16)
+    gpt2_weights_fp32 = gpt2_model.size_in_bytes(BYTES_FP32)
+    gpt2_dataset_size = gpt2_model.training_dataset_size
+    dlrm_model = Models.Recommendation.DLRM
+    dlrm_params_min = dlrm_model.parameter_range_min
+    dlrm_params_max = dlrm_model.parameter_range_max
+
+    # ┌── 4. OUTPUT ────────────────────────────────────────────────────────────
+    gpt2_params_b_str = fmt_params(gpt2_params)
+    gpt2_total_flops_str = fmt_sci_flops(gpt2_total_flops)
+    gpt2_weights_fp16_gb_str = fmt_memory(gpt2_weights_fp16, unit=GB, precision=0, commas=False)
+    gpt2_weights_fp32_gb_str = fmt_memory(gpt2_weights_fp32, unit=GB, precision=0, commas=False)
+    gpt2_dataset_size_gb_str = fmt_memory(gpt2_dataset_size, unit=GB, precision=0, commas=False)
+    dlrm_params_min_b_str = fmt_params(dlrm_params_min, precision=0)
+    dlrm_params_max_t_str = fmt_params(dlrm_params_max, precision=0)
+```
+
+### Running example: Training GPT-2 {#sec-model-training-running-example-training-gpt2-19cd}
+
+In inference, GPT-2\index{GPT-2!training lighthouse} serves as the Bandwidth Hog lighthouse. Here it recurs as the chapter's stable workload for testing each training cost and optimization.
+
+::: {.column-margin .margin-pointer}
+↩ GPT-2's inference archetype as the Bandwidth Hog, a workload bound by data movement rather than arithmetic, is established in @sec-ml-systems-workload-archetypes-fd10.
+:::
+
+::: {#lhs-training-lighthouse-example-training-gpt-2 .callout-lighthouse title="Lighthouse example: Training GPT-2"}
+
+**Context**:
+GPT-2 (1.5 billion parameters) serves as the primary case study because it is large enough to expose meaningful compute, activation, and optimizer-state constraints while remaining easier to analyze than frontier-scale models. Whether it requires distributed training depends on precision, optimizer state, activation memory, hardware capacity, and the target training time. @Tbl-training-gpt2-lighthouse-specs maps each model property to the systems constraint it creates:
+
+```{=latex}
+\begingroup
+\renewcommand{\arraystretch}{1.3}
+```
+
+| **Property**     |                         **Specification**                         | **Systems Implication**                                                                                                                                        |
+|:-----------------|:-----------------------------------------------------------------:|:---------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| **Parameters**   |       `{python} GPT2LighthouseSpecs.gpt2_params_b_str` (XL)       | Requires ~`{python} GPT2LighthouseSpecs.gpt2_weights_fp16_gb_str` (FP16) or ~`{python} GPT2LighthouseSpecs.gpt2_weights_fp32_gb_str` (FP32) for weights alone. |
+| **Architecture** |                        48 Layers, 1600 Dim                        | Deep pipeline creates heavy activation memory pressure.                                                                                                        |
+| **Dataset**      | WebText (`{python} GPT2LighthouseSpecs.gpt2_dataset_size_gb_str`) | Preprocessing, shuffling, and delivery must sustain the selected training configuration.                                                                       |
+| **Compute**      |       ~ `{python} GPT2LighthouseSpecs.gpt2_total_flops_str`       | Training duration depends on achieved throughput and accelerator count.                                                                                        |
+
+: **GPT-2 (1.5 Billion Parameters) Lighthouse Model Specifications**: Parameter count, architecture depth, dataset size, and total training compute mapped to their systems implications. Each row pairs a model property with the engineering constraint it creates—memory footprint for weights, activation pressure from pipeline depth, I/O throughput requirements, and parallelization demand. {#tbl-training-gpt2-lighthouse-specs tbl-colwidths="[20,26,54]"}
+
+```{=latex}
+\endgroup
+```
+
+**Mechanism**:
+In dense transformer models, the arithmetic work per token is directly proportional to parameter count $\Parameters$. In the forward pass, each parameter participates in one multiply-accumulate operation ($1\text{ MAC} = 2\text{ FLOPs}$), consuming $2\Parameters\text{ FLOPs/token}$. Backpropagation computes two matrix products per parameter: one to propagate gradients backward with respect to activations ($2\Parameters\text{ FLOPs}$), and another to calculate weight gradients for the optimizer ($2\Parameters\text{ FLOPs}$). The backward pass therefore requires twice the compute of the forward pass ($4\Parameters\text{ FLOPs/token}$), yielding a total work factor of $2\Parameters + 4\Parameters = 6\Parameters\text{ FLOPs/token}$. Across a dataset of $\DatasetSize$ tokens, total training work is $\Operations \approx 6 \cdot \Parameters \cdot \DatasetSize$, or `{python} GPT2LighthouseSpecs.gpt2_total_flops_str`.
+
+Training GPT-2 couples this operation count with a strict memory footprint $\TotalMemoryFootprint = \WeightMemoryWeights + \GradientMemoryGradients + \OptimizerstateMemory + \ActivationMemoryActivations$. Balancing execution time $T_{\text{train}} = \frac{\Operations}{\PeakRate \times \EfficiencyHw}$ requires orchestrating data ingestion, activation memory, and compute throughput within accelerator high-bandwidth memory (HBM) capacity.
+
+:::
+
+Not all training workloads are compute bound. Recommendation models like DLRM\index{DLRM!embedding bottleneck} are dominated by massive embedding tables\index{Embedding table!capacity bottleneck} (`{python} GPT2LighthouseSpecs.dlrm_params_min_b_str` to `{python} GPT2LighthouseSpecs.dlrm_params_max_t_str` parameters, mostly embeddings) that make them memory bandwidth bound rather than compute bound. For such workloads, the first scaling problem is often capacity: splitting the embedding tables across devices so the model fits at all. In contrast, dense, compute-intensive training—exemplified by the GPT-2 lighthouse model analyzed below—exposes compute-bound and activation-memory limits rather than capacity partitioning.
+
+Within the end-to-end ML lifecycle, training systems ingest prepared data from upstream pipelines and produce model checkpoints for downstream deployment. Data quality directly governs training stability, while training throughput dictates iteration velocity. This systems pressure manifests across three distinct scales. At data scale, large corpora require high-throughput I/O pipelines and distributed storage to avoid accelerator starvation. At model scale, billion-parameter architectures force the system to balance memory capacity against communication, choosing between replicating weights across data-parallel devices\index{Distributed training!data parallelism}[^fn-training-data-parallelism] or partitioning layers across devices with model parallelism\index{Distributed training!model parallelism}.[^fn-training-model-parallelism] At infrastructure scale, coordinating multiple accelerators introduces synchronization overhead that can dominate training time. These physical trade-offs make the stage interface contracts formalized in @sec-ml-workflow-stage-interface-specification-ae3c essential during training: orchestration decisions dictate both iteration velocity and hardware efficiency.
+
+[^fn-training-data-parallelism]: **Data parallelism**\index{Data parallelism!communication overhead}: Replicates the full model on every device, splitting only the data. Each device computes gradients independently, then an AllReduce operation synchronizes them---adding communication volume proportional to model size at every step. This synchronization tax limits scaling efficiency: doubling accelerators rarely halves training time once communication becomes the bottleneck.
+
+[^fn-training-model-parallelism]: **Model parallelism**\index{Model parallelism!pipeline bubbles}: Partitions the model's layers across devices when it exceeds single-device memory. Activations must transfer between devices at every partition boundary, and naive partitioning creates "pipeline bubbles" where downstream devices idle while waiting. Microbatch pipelining, as in GPipe and PipeDream\index{PipeDream!pipeline parallelism}, recovers much of this lost efficiency [@huang2019gpipe; @narayanan2019].
+
+GPT-2's `{python} GPT2LighthouseSpecs.gpt2_dataset_size_gb_str` WebText corpus sits at the lower end of this data scale spectrum. Larger corpora change the data path qualitatively.
+
+::: {#psp-training-10-gb-10-tb-scale-factor .callout-perspective title="The 10 GB to 10 TB scale factor"}
+
+In a memory-resident regime, a corpus may fit in system RAM and avoid repeated storage reads after caching, though preprocessing and transfer costs remain. In a streaming regime, the corpus exceeds local memory and the system must orchestrate storage reads, preprocessing, caching, and delivery throughout training. The appropriate design may include multiple workers, prefetching, local caches, or distributed storage, depending on which stage limits throughput.
+
+Scale therefore changes more than the amount of data; it transforms the system's physics.
+
+:::
+
+These scaling constraints translate into concrete workflow requirements. Training workflows consist of interdependent stages---data preprocessing, forward and backward passes, and parameter updates. System constraints dictate these execution limits: modern accelerators' compute-to-bandwidth ratios (ridge points) far exceed the arithmetic intensity of many kernels, leaving those kernels starved for operands [@patterson2017hardware]. In multi-accelerator configurations, cross-device synchronization introduces latency penalties, where interconnect bandwidth (such as PCIe lanes or NVLink bridges\index{NVLink!training interconnect}) dictates the communication-to-computation ratio.[^fn-transformer-compute-scaling]
+
+The hardware-software boundary is central to training. Mixed-precision training emerged from recognizing that Tensor Core hardware could accelerate reduced-precision arithmetic. Gradient checkpointing arose from memory capacity constraints. Training systems engineering is the work of matching those algorithmic choices to the physical limits of the machine.
+
+[^fn-transformer-compute-scaling]: **Transformer training interconnect sensitivity**\index{Training!transformer, interconnect sensitivity}: Self-attention's $\mathcal{O}(S^2)$ memory and compute scaling increases activation size with sequence length. In pipeline parallelism, activations cross devices at model-partition boundaries, while data parallelism synchronizes gradients whose volume scales with parameter count. The resulting communication cost depends on the parallelism strategy, topology, message size, and degree of overlap, making interconnect choice a first-order training-system decision.
+
+Every training bottleneck ultimately traces back to the execution cost of specific mathematical operations. Sufficiently large matrix multiplications with high operand reuse can be compute-bound and governed by peak arithmetic throughput [@goto2008], whereas standalone low-intensity activation and normalization operations often face a memory-bandwidth ceiling. Meanwhile, optimizer states inflate the resident memory footprint regardless of arithmetic activity. Designing systems to execute these operations efficiently begins with accounting for each cost category separately.
 
 ## Pipeline Architecture {#sec-model-training-pipeline-architecture-81c9}
 

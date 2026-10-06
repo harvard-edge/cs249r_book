@@ -1482,313 +1482,6 @@ The physical energy disparity across storage tiers mapped in @fig-energy-hierarc
 
 When a workload's arithmetic intensity falls below this threshold, data transfer ($\frac{\DataVolume}{\Bandwidth}$) sets the larger of the two modeled time bounds. Accelerators attempt to tolerate memory latency—typically hundreds of clock cycles for off-chip DRAM—by maintaining thousands of concurrent execution threads and switching between active warps while memory requests remain in flight. However, when memory bandwidth saturates or when register pressure limits occupancy, the scheduler runs out of independent instructions to issue. Compute pipelines then stall, leaving high-throughput tensor cores idle while waiting for operands. Simultaneously, driving wide off-chip memory buses across capacitive printed circuit board traces and PHY interfaces consumes a substantial fraction of the chip's TDP, directly constraining the energy budget available for arithmetic logic [@horowitz2014; @sze2017].
 
-### Hardware balance: The paradigm partition {#sec-hardware-acceleration-hardware-balance}
-
-Different devices place the compute-bandwidth boundary at different intensities. The **hardware balance $(\RooflineRidgePoint)$**\index{Hardware balance} is the ratio of peak arithmetic throughput to peak memory bandwidth. In the roofline model, it is the ridge point\index{Ridge Point!hardware balance} where the compute and bandwidth ceilings intersect:
-$$ \RooflineRidgePoint = \frac{\PeakRate}{\Bandwidth} $$
-
-The ratio sets a device-specific boundary. Depending on the chosen precision, a high-end accelerator such as H100 may require roughly $150$--$300$ FLOP/byte to reach its arithmetic ceiling, whereas a microcontroller may have a much lower ridge point. The same kernel can therefore be bandwidth bound on a compute-dense accelerator and compute bound on an edge processor. Hardware balance does not label either device as universally efficient; it identifies how much reuse a workload needs on that device.
-
-Peak computational capability has expanded faster than memory bus performance across accelerator generations, and the size of that mismatch is what sets how much data reuse a kernel needs to stay fed. @Fig-compute-memory-imbalance plots these two growth trajectories on a logarithmic scale normalized to the V100 baseline, isolating how the shaded gap between peak compute and memory bandwidth widens to a $2.0\times$ reuse burden on B200.
-
-```{python}
-#| echo: false
-#| label: compute-bandwidth-divergence-calc
-# +-----------------------------------------------------------------------------
-# | COMPUTE VS BANDWIDTH GROWTH, V100 THROUGH B200
-# +-----------------------------------------------------------------------------
-# | Context: the lead-in prose above and @fig-compute-memory-imbalance.
-# |
-# | Goal: Quantify how much faster peak dense FP16 throughput grew than memory
-# |       bandwidth across five NVIDIA datacenter generations.
-# | Show: Growth multiples for compute, for bandwidth, and for the gap between
-# |       them, which is the ridge-point rise @fig-rising-ridge then plots.
-# | How:  Read peak_flops and memory.bandwidth per generation from the hardware
-# |       registry and normalize both series to the V100 baseline.
-# +-----------------------------------------------------------------------------
-from mlsysim.fmt import fmt_multiple, MarkdownStr
-
-class ComputeBandwidthDivergence:
-    """Registry-sourced compute vs bandwidth growth, V100 through B200."""
-
-    # +-- 1. LOAD (Constants) --------------------------------------------------
-    generations = [
-        Hardware.Cloud.V100,
-        Hardware.Cloud.A100,
-        Hardware.Cloud.H100,
-        Hardware.Cloud.H200,
-        Hardware.Cloud.B200,
-    ]
-
-    # +-- 2. EXECUTE (The Compute) ---------------------------------------------
-    # A comprehension body cannot see class-scope names, so the baselines are
-    # divided out in plain expressions rather than inside a comprehension.
-    years = [g.release_year for g in generations]
-    compute = [g.compute.peak_flops.to(TFLOP / second).magnitude for g in generations]
-    bandwidth = [g.memory.bandwidth.to(GB / second).magnitude for g in generations]
-    compute_growth = compute[-1] / compute[0]
-    bandwidth_growth = bandwidth[-1] / bandwidth[0]
-    gap_growth = compute_growth / bandwidth_growth
-
-    # +-- 3. GUARD (Invariants) ------------------------------------------------
-    check(compute_growth > bandwidth_growth, "Compute must outgrow bandwidth for the divergence to exist.")
-    check(compute[3] == compute[2], "H200 should match H100 peak compute; the narrowing lesson depends on it.")
-    check(bandwidth[3] > bandwidth[2], "H200 should exceed H100 bandwidth; the narrowing lesson depends on it.")
-
-    # +-- 4. OUTPUT (Formatting) -----------------------------------------------
-    span_str = MarkdownStr(f"{years[0]}--{years[-1]}")
-    compute_growth_mult_str = fmt_multiple(compute_growth, precision=0, commas=False)
-    bandwidth_growth_mult_str = fmt_multiple(bandwidth_growth, precision=1, commas=False)
-    gap_growth_mult_str = fmt_multiple(gap_growth, precision=1, commas=False)
-```
-
-::: {#fig-compute-memory-imbalance fig-env="figure" fig-pos="htb" fig-cap="**The Compute-Bandwidth Divergence**: Peak dense FP16 throughput and memory bandwidth across five NVIDIA datacenter generations, each normalized to its V100 baseline on a log scale. Over `{python} ComputeBandwidthDivergence.span_str` compute grows `{python} ComputeBandwidthDivergence.compute_growth_mult_str` while bandwidth grows `{python} ComputeBandwidthDivergence.bandwidth_growth_mult_str`, so the shaded separation between the curves widens by `{python} ComputeBandwidthDivergence.gap_growth_mult_str`. That separation is the data reuse a kernel must supply to keep the arithmetic units busy. The H200 step is the instructive exception: bandwidth rose while peak compute held flat, narrowing the gap for one generation." fig-alt="Line graph on a log scale comparing compute growth against memory bandwidth growth across five GPU generations from 2017 to 2024, each normalized to 1 at the V100. The compute line rises to roughly 18 and the bandwidth line to roughly 9, with the area between them shaded. At the H200 point the bandwidth line rises while the compute line stays flat, so the shaded area narrows before widening again."}
-
-```{python}
-#| echo: false
-# +-----------------------------------------------------------------------------
-# | COMPUTE-BANDWIDTH DIVERGENCE (FIGURE)
-# +-----------------------------------------------------------------------------
-# | Context: @fig-compute-memory-imbalance
-# |
-# | Goal: Plot peak compute growth against memory bandwidth growth per
-# |       accelerator generation and shade the separation between them.
-# | Show: Two curves normalized to the V100 baseline, log y axis, shaded gap,
-# |       generations annotated so the H200 bandwidth step is visible.
-# | How:  Read peak_flops and memory.bandwidth from the hardware registry, the
-# |       same source as the calc cell above; no values are hardcoded here.
-# +-----------------------------------------------------------------------------
-# +-- 1. CANVAS ----------------------------------------------------------------
-from binder.tools.figures import style as book_style
-from matplotlib.ticker import FixedLocator, FixedFormatter, NullLocator
-import numpy as np
-
-fig, ax, COLORS, plt = book_style.setup_plot(figsize=(10, 4.2))
-
-# +-- 2. ARRAYS ----------------------------------------------------------------
-_gens = [
-    ("V100", Hardware.Cloud.V100),
-    ("A100", Hardware.Cloud.A100),
-    ("H100", Hardware.Cloud.H100),
-    ("H200", Hardware.Cloud.H200),
-    ("B200", Hardware.Cloud.B200),
-]
-_labels = [n for n, _ in _gens]
-_years = [g.release_year for _, g in _gens]
-_compute = np.asarray([g.compute.peak_flops.to(TFLOP / second).magnitude for _, g in _gens])
-_bandwidth = np.asarray([g.memory.bandwidth.to(GB / second).magnitude for _, g in _gens])
-compute_index = _compute / _compute[0]
-bandwidth_index = _bandwidth / _bandwidth[0]
-
-# +-- 3. RENDER ----------------------------------------------------------------
-# Semantic palette: compute is orange, memory is blue.
-ax.fill_between(_years, bandwidth_index, compute_index, color=COLORS['grid'], alpha=0.3)
-ax.plot(_years, compute_index, 'o-', color=COLORS['OrangeLine'], linewidth=1.5, markersize=5, label='Peak compute growth')
-ax.plot(_years, bandwidth_index, 's-', color=COLORS['BlueLine'], linewidth=1.5, markersize=5, label='Memory bandwidth growth')
-
-# +-- 4. DECORATE --------------------------------------------------------------
-for _x, _y, _n in zip(_years, compute_index, _labels):
-    ax.annotate(_n, xy=(_x, _y), xytext=(0, 8), textcoords='offset points', ha='center', fontsize=8, color=COLORS['primary'])
-
-# On a log axis the vertical distance between the curves IS their ratio, which
-# is the ridge-point rise @fig-rising-ridge plots. Label sits to the right of
-# the arrow, in clear space, so it never masks the compute stroke.
-_gap = compute_index[-1] / bandwidth_index[-1]
-ax.annotate(
-    '',
-    xy=(_years[-1], compute_index[-1]),
-    xytext=(_years[-1], bandwidth_index[-1]),
-    arrowprops=dict(arrowstyle='<->', color=COLORS['primary'], lw=1.5),
-)
-ax.annotate(
-    f'Reuse\nburden\n{_gap:.1f}$\\times$',
-    xy=(_years[-1], float(np.sqrt(compute_index[-1] * bandwidth_index[-1]))),
-    xytext=(9, 0),
-    textcoords='offset points',
-    ha='left',
-    va='center',
-    linespacing=1.25,
-    fontsize=9,
-    color=COLORS['primary'],
-    fontweight='bold',
-)
-
-ax.set_yscale('log')
-# A 1-18 range gives only 10^0 and 10^1 by default, so label the growth
-# multiples a reader actually wants to read off the axis.
-ax.yaxis.set_major_locator(FixedLocator([1, 2, 5, 10, 20]))
-ax.yaxis.set_major_formatter(FixedFormatter(['1', '2', '5', '10', '20']))
-ax.yaxis.set_minor_locator(NullLocator())
-ax.set_ylim(0.85, 26)
-ax.set_xlim(_years[0] - 0.4, _years[-1] + 1.05)
-ax.set_xlabel('Year')
-ax.set_ylabel('Relative growth (V100 = 1.0)')
-ax.set_xticks(_years)
-ax.legend(loc='upper left', fontsize=8, frameon=True, facecolor='white', framealpha=0.95, edgecolor='gray', fancybox=True, borderpad=0.6)
-plt.show()
-plt.close()
-```
-
-:::
-
-The threshold required for a kernel to become compute bound has shifted across accelerator hardware generations. @Fig-rising-ridge tracks the steep climb in hardware ridge points from V100 (139 FLOP/byte) through H100 (295 FLOP/byte) and B200 (281 FLOP/byte), charting how execution escapes the legacy memory-rich zone and enters a compute-dense regime where high operational reuse is mandatory to saturate peak throughput.
-
-::: {#fig-rising-ridge fig-env="figure" fig-pos="htb" fig-cap="**The Rising Ridge**: Hardware arithmetic intensity (FLOP/byte) over time computed as each chip's dense FP16 tensor peak divided by its memory bandwidth. This is the arithmetic intensity a kernel must reach before compute rather than bandwidth limits it. As compute capability grows faster than memory bandwidth, the ridge point rises from V100 through H100 and remains high on B200. This trend explains why architectures with high data reuse flourish while low-reuse workloads face a growing hardware tax." fig-alt="Line plot showing dense-FP16 arithmetic intensity ridge points: about 140 FLOP/byte for V100, 153 for A100, 295 for H100, and 281 for B200. Shaded regions indicate memory-rich and compute-dense zones."}
-
-```{python}
-#| echo: false
-# ┌─────────────────────────────────────────────────────────────────────────────
-# │ RISING RIDGE (FIGURE)
-# ├─────────────────────────────────────────────────────────────────────────────
-# │ Context: @fig-rising-ridge—ridge point and memory-bound regime
-# │
-# │ Goal: Plot hardware ridge point (FLOP/byte) over time using one precision
-# │       basis; explain why low-reuse ops become memory-bound.
-# │ Show: Line plot; chip annotations; ridge values.
-# │ How: Compute dense FP16 ridge points from local hardware constants.
-# │
-# └─────────────────────────────────────────────────────────────────────────────
-# ┌── 1. CANVAS ────────────────────────────────────────────────────────────────
-# │ Plot hardware ridge point (FLOP/byte) over time; show V100→B200
-from binder.tools.figures import style as book_style
-import numpy as np
-
-fig, ax, COLORS, plt = book_style.setup_plot(figsize=(10, 4.0))
-
-# =============================================================================
-# DATA: Ridge Points (Peak FLOP/s/Memory Bandwidth)
-# =============================================================================
-
-years = [2017, 2020, 2022, 2024]
-chips = ['V100', 'A100', 'H100', 'B200']
-ridges = [
-    Hardware.Cloud.V100.compute.peak_flops.to(TFLOPs / second).magnitude / Hardware.Cloud.V100.memory.bandwidth.to(TB / second).magnitude,
-    Hardware.Cloud.A100.compute.peak_flops.to(TFLOPs / second).magnitude / Hardware.Cloud.A100.memory.bandwidth.to(TB / second).magnitude,
-    Hardware.Cloud.H100.compute.peak_flops.to(TFLOPs / second).magnitude / Hardware.Cloud.H100.memory.bandwidth.to(TB / second).magnitude,
-    Hardware.Cloud.B200.compute.peak_flops.to(TFLOPs / second).magnitude / Hardware.Cloud.B200.memory.bandwidth.to(TB / second).magnitude,
-]
-
-# =============================================================================
-# PLOT: The Rising Ridge
-# =============================================================================
-
-ax.plot(years, ridges, 'o-', color=COLORS['RedLine'], linewidth=2.5, markersize=8, label='Hardware Ridge Point')
-
-# -------------------------------------------------------------------------
-# Default styles
-# -------------------------------------------------------------------------
-default_chip_label_style = {
-    "xytext": (0, 12),
-    "textcoords": "offset points",
-    "ha": "center",
-    "va": "bottom",
-    "fontweight": "bold",
-    "color": COLORS["RedLine"],
-    "fontsize": 9,
-    "bbox": dict(boxstyle="round,pad=0.2", facecolor="white", edgecolor="none", alpha=0.8),
-}
-
-default_value_label_style = {
-    "xytext": (0, -18),
-    "textcoords": "offset points",
-    "ha": "center",
-    "va": "top",
-    "fontsize": 8,
-    "color": COLORS["primary"],
-    "bbox": dict(boxstyle="round,pad=0.2", facecolor="white", edgecolor="none", alpha=0.8),
-}
-
-# -------------------------------------------------------------------------
-# Per-label overrides
-# -------------------------------------------------------------------------
-chip_label_styles = {
-    "V100": {
-        "xytext": (0, 7),
-        "ha": "center",
-    },
-    "A100": {
-        "xytext": (-5, 7),
-        "ha": "center",
-    },
-    "H100": {
-        "xytext": (-10, 7),
-        "ha": "center",
-    },
-    "B200": {
-        "xytext": (0, 7),
-        "ha": "center",
-    },
-}
-
-value_label_styles = {
-    "V100": {
-        "xytext": (0, -8),
-        "ha": "center",
-    },
-    "A100": {
-        "xytext": (0, -8),
-        "ha": "center",
-    },
-    "H100": {
-        "xytext": (0, -8),
-        "ha": "center",
-    },
-    "B200": {
-        "xytext": (4, -8),
-        "ha": "center",
-    },
-}
-
-# -------------------------------------------------------------------------
-# Render labels
-# -------------------------------------------------------------------------
-for year, ridge, chip in zip(years, ridges, chips):
-    chip_style = default_chip_label_style.copy()
-    chip_style.update(chip_label_styles.get(chip, {}))
-
-    value_style = default_value_label_style.copy()
-    value_style.update(value_label_styles.get(chip, {}))
-
-    ax.annotate(chip, (year, ridge), **chip_style)
-    ax.annotate(f"{ridge:.0f}", (year, ridge), **value_style)
-
-ax.axhspan(0, 100, color=COLORS['BlueL'], alpha=0.2)
-
-# ┌── 4. DECORATE ──────────────────────────────────────────────────────────────
-ax.text(
-    2019,
-    50,
-    "Memory-Rich Zone\n(Legacy Ops Safe)",
-    color=COLORS['BlueLine'],
-    ha='center',
-    va='center',
-    fontsize=8,
-    fontweight='bold',
-    bbox=dict(facecolor='white', alpha=0.8, edgecolor='none', pad=0.5),
-)
-ax.axhspan(100, 600, color=COLORS['OrangeL'], alpha=0.1)
-ax.text(
-    2019,
-    350,
-    "Compute-Dense Zone\n(Transformers Required)",
-    color=COLORS['OrangeLine'],
-    ha='center',
-    va='center',
-    fontsize=8,
-    fontweight='bold',
-    bbox=dict(facecolor='white', alpha=0.8, edgecolor='none', pad=0.5),
-)
-
-ax.set_xlabel('Release Year')
-ax.set_ylabel('Arithmetic Intensity (FLOP/byte)')
-ax.set_ylim(0, 650)
-ax.set_xticks(years)
-plt.show()
-plt.close()
-```
-
-:::
-
 The physical cost of memory access escalates sharply across storage tiers (@fig-energy-hierarchy). While an arithmetic unit drives signals over micrometer-scale wires on silicon, consuming from tens of femtojoules (an 8-bit add) to a few picojoules (an FP32 multiply) per operation, fetching an operand from DRAM requires driving macroscopic PCB traces and package interconnects, consuming hundreds of picojoules [@horowitz2014]. In machine learning models where billions of parameters and activations stream across the bus, data movement quickly dominates the total power envelope. This energy differential drives architectural decisions; the TPUv1's performance-per-watt advantage (example \ref{exmp-hw-acceleration-tpuv1-vs-k80-efficiency-shock}) came largely from minimizing off-chip data movement through systolic arrays and large on-chip SRAM [@jouppi2017]. These design choices demonstrate that energy budgets, as much as cycle budgets, dictate what architectures can execute in production.
 
 #### Memory access patterns in ML workloads {#sec-hardware-acceleration-memory-access-patterns-ml-workloads-a960}
@@ -2569,6 +2262,313 @@ The roofline visualization shows performance (TFLOP/s) on the vertical axis and 
 
 ::: {.column-margin .margin-pointer}
 ↪ The optimizations that pay off in each regime, and the ones that waste effort, are operationalized in @sec-appdx-dam-taxonomy-bottleneck-diagnostic-3fc9.
+:::
+
+### Hardware balance: The paradigm partition {#sec-hardware-acceleration-hardware-balance}
+
+Different devices place the compute-bandwidth boundary at different intensities. The **hardware balance $(\RooflineRidgePoint)$**\index{Hardware balance} is the ratio of peak arithmetic throughput to peak memory bandwidth. In the roofline model, it is the ridge point\index{Ridge Point!hardware balance} where the compute and bandwidth ceilings intersect:
+$$ \RooflineRidgePoint = \frac{\PeakRate}{\Bandwidth} $$
+
+The ratio sets a device-specific boundary. Depending on the chosen precision, a high-end accelerator such as H100 may require roughly $150$--$300$ FLOP/byte to reach its arithmetic ceiling, whereas a microcontroller may have a much lower ridge point. The same kernel can therefore be bandwidth bound on a compute-dense accelerator and compute bound on an edge processor. Hardware balance does not label either device as universally efficient; it identifies how much reuse a workload needs on that device.
+
+Peak computational capability has expanded faster than memory bus performance across accelerator generations, and the size of that mismatch is what sets how much data reuse a kernel needs to stay fed. @Fig-compute-memory-imbalance plots these two growth trajectories on a logarithmic scale normalized to the V100 baseline, isolating how the shaded gap between peak compute and memory bandwidth widens to a $2.0\times$ reuse burden on B200.
+
+```{python}
+#| echo: false
+#| label: compute-bandwidth-divergence-calc
+# +-----------------------------------------------------------------------------
+# | COMPUTE VS BANDWIDTH GROWTH, V100 THROUGH B200
+# +-----------------------------------------------------------------------------
+# | Context: the lead-in prose above and @fig-compute-memory-imbalance.
+# |
+# | Goal: Quantify how much faster peak dense FP16 throughput grew than memory
+# |       bandwidth across five NVIDIA datacenter generations.
+# | Show: Growth multiples for compute, for bandwidth, and for the gap between
+# |       them, which is the ridge-point rise @fig-rising-ridge then plots.
+# | How:  Read peak_flops and memory.bandwidth per generation from the hardware
+# |       registry and normalize both series to the V100 baseline.
+# +-----------------------------------------------------------------------------
+from mlsysim.fmt import fmt_multiple, MarkdownStr
+
+class ComputeBandwidthDivergence:
+    """Registry-sourced compute vs bandwidth growth, V100 through B200."""
+
+    # +-- 1. LOAD (Constants) --------------------------------------------------
+    generations = [
+        Hardware.Cloud.V100,
+        Hardware.Cloud.A100,
+        Hardware.Cloud.H100,
+        Hardware.Cloud.H200,
+        Hardware.Cloud.B200,
+    ]
+
+    # +-- 2. EXECUTE (The Compute) ---------------------------------------------
+    # A comprehension body cannot see class-scope names, so the baselines are
+    # divided out in plain expressions rather than inside a comprehension.
+    years = [g.release_year for g in generations]
+    compute = [g.compute.peak_flops.to(TFLOP / second).magnitude for g in generations]
+    bandwidth = [g.memory.bandwidth.to(GB / second).magnitude for g in generations]
+    compute_growth = compute[-1] / compute[0]
+    bandwidth_growth = bandwidth[-1] / bandwidth[0]
+    gap_growth = compute_growth / bandwidth_growth
+
+    # +-- 3. GUARD (Invariants) ------------------------------------------------
+    check(compute_growth > bandwidth_growth, "Compute must outgrow bandwidth for the divergence to exist.")
+    check(compute[3] == compute[2], "H200 should match H100 peak compute; the narrowing lesson depends on it.")
+    check(bandwidth[3] > bandwidth[2], "H200 should exceed H100 bandwidth; the narrowing lesson depends on it.")
+
+    # +-- 4. OUTPUT (Formatting) -----------------------------------------------
+    span_str = MarkdownStr(f"{years[0]}--{years[-1]}")
+    compute_growth_mult_str = fmt_multiple(compute_growth, precision=0, commas=False)
+    bandwidth_growth_mult_str = fmt_multiple(bandwidth_growth, precision=1, commas=False)
+    gap_growth_mult_str = fmt_multiple(gap_growth, precision=1, commas=False)
+```
+
+::: {#fig-compute-memory-imbalance fig-env="figure" fig-pos="htb" fig-cap="**The Compute-Bandwidth Divergence**: Peak dense FP16 throughput and memory bandwidth across five NVIDIA datacenter generations, each normalized to its V100 baseline on a log scale. Over `{python} ComputeBandwidthDivergence.span_str` compute grows `{python} ComputeBandwidthDivergence.compute_growth_mult_str` while bandwidth grows `{python} ComputeBandwidthDivergence.bandwidth_growth_mult_str`, so the shaded separation between the curves widens by `{python} ComputeBandwidthDivergence.gap_growth_mult_str`. That separation is the data reuse a kernel must supply to keep the arithmetic units busy. The H200 step is the instructive exception: bandwidth rose while peak compute held flat, narrowing the gap for one generation." fig-alt="Line graph on a log scale comparing compute growth against memory bandwidth growth across five GPU generations from 2017 to 2024, each normalized to 1 at the V100. The compute line rises to roughly 18 and the bandwidth line to roughly 9, with the area between them shaded. At the H200 point the bandwidth line rises while the compute line stays flat, so the shaded area narrows before widening again."}
+
+```{python}
+#| echo: false
+# +-----------------------------------------------------------------------------
+# | COMPUTE-BANDWIDTH DIVERGENCE (FIGURE)
+# +-----------------------------------------------------------------------------
+# | Context: @fig-compute-memory-imbalance
+# |
+# | Goal: Plot peak compute growth against memory bandwidth growth per
+# |       accelerator generation and shade the separation between them.
+# | Show: Two curves normalized to the V100 baseline, log y axis, shaded gap,
+# |       generations annotated so the H200 bandwidth step is visible.
+# | How:  Read peak_flops and memory.bandwidth from the hardware registry, the
+# |       same source as the calc cell above; no values are hardcoded here.
+# +-----------------------------------------------------------------------------
+# +-- 1. CANVAS ----------------------------------------------------------------
+from binder.tools.figures import style as book_style
+from matplotlib.ticker import FixedLocator, FixedFormatter, NullLocator
+import numpy as np
+
+fig, ax, COLORS, plt = book_style.setup_plot(figsize=(10, 4.2))
+
+# +-- 2. ARRAYS ----------------------------------------------------------------
+_gens = [
+    ("V100", Hardware.Cloud.V100),
+    ("A100", Hardware.Cloud.A100),
+    ("H100", Hardware.Cloud.H100),
+    ("H200", Hardware.Cloud.H200),
+    ("B200", Hardware.Cloud.B200),
+]
+_labels = [n for n, _ in _gens]
+_years = [g.release_year for _, g in _gens]
+_compute = np.asarray([g.compute.peak_flops.to(TFLOP / second).magnitude for _, g in _gens])
+_bandwidth = np.asarray([g.memory.bandwidth.to(GB / second).magnitude for _, g in _gens])
+compute_index = _compute / _compute[0]
+bandwidth_index = _bandwidth / _bandwidth[0]
+
+# +-- 3. RENDER ----------------------------------------------------------------
+# Semantic palette: compute is orange, memory is blue.
+ax.fill_between(_years, bandwidth_index, compute_index, color=COLORS['grid'], alpha=0.3)
+ax.plot(_years, compute_index, 'o-', color=COLORS['OrangeLine'], linewidth=1.5, markersize=5, label='Peak compute growth')
+ax.plot(_years, bandwidth_index, 's-', color=COLORS['BlueLine'], linewidth=1.5, markersize=5, label='Memory bandwidth growth')
+
+# +-- 4. DECORATE --------------------------------------------------------------
+for _x, _y, _n in zip(_years, compute_index, _labels):
+    ax.annotate(_n, xy=(_x, _y), xytext=(0, 8), textcoords='offset points', ha='center', fontsize=8, color=COLORS['primary'])
+
+# On a log axis the vertical distance between the curves IS their ratio, which
+# is the ridge-point rise @fig-rising-ridge plots. Label sits to the right of
+# the arrow, in clear space, so it never masks the compute stroke.
+_gap = compute_index[-1] / bandwidth_index[-1]
+ax.annotate(
+    '',
+    xy=(_years[-1], compute_index[-1]),
+    xytext=(_years[-1], bandwidth_index[-1]),
+    arrowprops=dict(arrowstyle='<->', color=COLORS['primary'], lw=1.5),
+)
+ax.annotate(
+    f'Reuse\nburden\n{_gap:.1f}$\\times$',
+    xy=(_years[-1], float(np.sqrt(compute_index[-1] * bandwidth_index[-1]))),
+    xytext=(9, 0),
+    textcoords='offset points',
+    ha='left',
+    va='center',
+    linespacing=1.25,
+    fontsize=9,
+    color=COLORS['primary'],
+    fontweight='bold',
+)
+
+ax.set_yscale('log')
+# A 1-18 range gives only 10^0 and 10^1 by default, so label the growth
+# multiples a reader actually wants to read off the axis.
+ax.yaxis.set_major_locator(FixedLocator([1, 2, 5, 10, 20]))
+ax.yaxis.set_major_formatter(FixedFormatter(['1', '2', '5', '10', '20']))
+ax.yaxis.set_minor_locator(NullLocator())
+ax.set_ylim(0.85, 26)
+ax.set_xlim(_years[0] - 0.4, _years[-1] + 1.05)
+ax.set_xlabel('Year')
+ax.set_ylabel('Relative growth (V100 = 1.0)')
+ax.set_xticks(_years)
+ax.legend(loc='upper left', fontsize=8, frameon=True, facecolor='white', framealpha=0.95, edgecolor='gray', fancybox=True, borderpad=0.6)
+plt.show()
+plt.close()
+```
+
+:::
+
+The threshold required for a kernel to become compute bound has shifted across accelerator hardware generations. @Fig-rising-ridge tracks the steep climb in hardware ridge points from V100 (139 FLOP/byte) through H100 (295 FLOP/byte) and B200 (281 FLOP/byte), charting how execution escapes the legacy memory-rich zone and enters a compute-dense regime where high operational reuse is mandatory to saturate peak throughput.
+
+::: {#fig-rising-ridge fig-env="figure" fig-pos="htb" fig-cap="**The Rising Ridge**: Hardware arithmetic intensity (FLOP/byte) over time computed as each chip's dense FP16 tensor peak divided by its memory bandwidth. This is the arithmetic intensity a kernel must reach before compute rather than bandwidth limits it. As compute capability grows faster than memory bandwidth, the ridge point rises from V100 through H100 and remains high on B200. This trend explains why architectures with high data reuse flourish while low-reuse workloads face a growing hardware tax." fig-alt="Line plot showing dense-FP16 arithmetic intensity ridge points: about 140 FLOP/byte for V100, 153 for A100, 295 for H100, and 281 for B200. Shaded regions indicate memory-rich and compute-dense zones."}
+
+```{python}
+#| echo: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ RISING RIDGE (FIGURE)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @fig-rising-ridge—ridge point and memory-bound regime
+# │
+# │ Goal: Plot hardware ridge point (FLOP/byte) over time using one precision
+# │       basis; explain why low-reuse ops become memory-bound.
+# │ Show: Line plot; chip annotations; ridge values.
+# │ How: Compute dense FP16 ridge points from local hardware constants.
+# │
+# └─────────────────────────────────────────────────────────────────────────────
+# ┌── 1. CANVAS ────────────────────────────────────────────────────────────────
+# │ Plot hardware ridge point (FLOP/byte) over time; show V100→B200
+from binder.tools.figures import style as book_style
+import numpy as np
+
+fig, ax, COLORS, plt = book_style.setup_plot(figsize=(10, 4.0))
+
+# =============================================================================
+# DATA: Ridge Points (Peak FLOP/s/Memory Bandwidth)
+# =============================================================================
+
+years = [2017, 2020, 2022, 2024]
+chips = ['V100', 'A100', 'H100', 'B200']
+ridges = [
+    Hardware.Cloud.V100.compute.peak_flops.to(TFLOPs / second).magnitude / Hardware.Cloud.V100.memory.bandwidth.to(TB / second).magnitude,
+    Hardware.Cloud.A100.compute.peak_flops.to(TFLOPs / second).magnitude / Hardware.Cloud.A100.memory.bandwidth.to(TB / second).magnitude,
+    Hardware.Cloud.H100.compute.peak_flops.to(TFLOPs / second).magnitude / Hardware.Cloud.H100.memory.bandwidth.to(TB / second).magnitude,
+    Hardware.Cloud.B200.compute.peak_flops.to(TFLOPs / second).magnitude / Hardware.Cloud.B200.memory.bandwidth.to(TB / second).magnitude,
+]
+
+# =============================================================================
+# PLOT: The Rising Ridge
+# =============================================================================
+
+ax.plot(years, ridges, 'o-', color=COLORS['RedLine'], linewidth=2.5, markersize=8, label='Hardware Ridge Point')
+
+# -------------------------------------------------------------------------
+# Default styles
+# -------------------------------------------------------------------------
+default_chip_label_style = {
+    "xytext": (0, 12),
+    "textcoords": "offset points",
+    "ha": "center",
+    "va": "bottom",
+    "fontweight": "bold",
+    "color": COLORS["RedLine"],
+    "fontsize": 9,
+    "bbox": dict(boxstyle="round,pad=0.2", facecolor="white", edgecolor="none", alpha=0.8),
+}
+
+default_value_label_style = {
+    "xytext": (0, -18),
+    "textcoords": "offset points",
+    "ha": "center",
+    "va": "top",
+    "fontsize": 8,
+    "color": COLORS["primary"],
+    "bbox": dict(boxstyle="round,pad=0.2", facecolor="white", edgecolor="none", alpha=0.8),
+}
+
+# -------------------------------------------------------------------------
+# Per-label overrides
+# -------------------------------------------------------------------------
+chip_label_styles = {
+    "V100": {
+        "xytext": (0, 7),
+        "ha": "center",
+    },
+    "A100": {
+        "xytext": (-5, 7),
+        "ha": "center",
+    },
+    "H100": {
+        "xytext": (-10, 7),
+        "ha": "center",
+    },
+    "B200": {
+        "xytext": (0, 7),
+        "ha": "center",
+    },
+}
+
+value_label_styles = {
+    "V100": {
+        "xytext": (0, -8),
+        "ha": "center",
+    },
+    "A100": {
+        "xytext": (0, -8),
+        "ha": "center",
+    },
+    "H100": {
+        "xytext": (0, -8),
+        "ha": "center",
+    },
+    "B200": {
+        "xytext": (4, -8),
+        "ha": "center",
+    },
+}
+
+# -------------------------------------------------------------------------
+# Render labels
+# -------------------------------------------------------------------------
+for year, ridge, chip in zip(years, ridges, chips):
+    chip_style = default_chip_label_style.copy()
+    chip_style.update(chip_label_styles.get(chip, {}))
+
+    value_style = default_value_label_style.copy()
+    value_style.update(value_label_styles.get(chip, {}))
+
+    ax.annotate(chip, (year, ridge), **chip_style)
+    ax.annotate(f"{ridge:.0f}", (year, ridge), **value_style)
+
+ax.axhspan(0, 100, color=COLORS['BlueL'], alpha=0.2)
+
+# ┌── 4. DECORATE ──────────────────────────────────────────────────────────────
+ax.text(
+    2019,
+    50,
+    "Memory-Rich Zone\n(Legacy Ops Safe)",
+    color=COLORS['BlueLine'],
+    ha='center',
+    va='center',
+    fontsize=8,
+    fontweight='bold',
+    bbox=dict(facecolor='white', alpha=0.8, edgecolor='none', pad=0.5),
+)
+ax.axhspan(100, 600, color=COLORS['OrangeL'], alpha=0.1)
+ax.text(
+    2019,
+    350,
+    "Compute-Dense Zone\n(Transformers Required)",
+    color=COLORS['OrangeLine'],
+    ha='center',
+    va='center',
+    fontsize=8,
+    fontweight='bold',
+    bbox=dict(facecolor='white', alpha=0.8, edgecolor='none', pad=0.5),
+)
+
+ax.set_xlabel('Release Year')
+ax.set_ylabel('Arithmetic Intensity (FLOP/byte)')
+ax.set_ylim(0, 650)
+ax.set_xticks(years)
+plt.show()
+plt.close()
+```
+
 :::
 
 ### Hardware ridge points {#sec-hardware-acceleration-hardware-ridge-points-b5b6}
@@ -4105,6 +4105,181 @@ No single accelerator architecture suits every workload. A chip optimized for we
 
 :::
 
+#### Memory-efficient tiling strategies {#sec-hardware-acceleration-memoryefficient-tiling-strategies-9fce}
+
+Layout changes how values are arranged, and fusion can remove intermediate buffers. Tiling addresses another part of the locality problem by bounding the operand blocks actively reused at each memory tier. @Sec-hardware-acceleration-tiling-principle introduced tiling as the bridge between a graph-level matrix and a fixed systolic array, including the fringe tax and the loop nest in @algo-tiled-gemm. The same partitioning recurs at every tier of the memory hierarchy. Tiling\index{Tiling!memory-efficient strategies}[^fn-tiling-cache-reuse] restructures a computation into blocks that fit within fast local memory (caches, shared memory, or registers), so that each block is reused before eviction rather than refetched from DRAM [@lam1991].
+
+[^fn-tiling-cache-reuse]: **Tiling (loop blocking)**\index{Tiling!DRAM traffic reduction}: This restructuring partitions a computation into blocks sized for a fast local tier. A naive loop makes repeated references to the same elements; caches may capture some, while blocking deliberately concentrates reuse before eviction [@lam1991]. This reduction in lower-tier traffic is a primary source of the gap between naive matrix multiplication and optimized GEMM routines.
+
+Matrix multiplication, widely used in AI models, demonstrates inefficient memory access when implemented naively. @Lst-naive_matmul shows how, without tiling, repeated memory accesses for the same data lead to unnecessary bandwidth consumption.
+
+::: {#lst-naive_matmul lst-cap="**Naïve Matrix Multiplication**: Direct implementation makes $\mathcal{O}(N^3)$ array references for $N{\times}N$ matrices. Caches can serve some references, but the loop order does not deliberately block reuse for the memory hierarchy."}
+
+```{.python}
+for i in range(N):
+    for j in range(N):
+        for k in range(N):
+            C[i, j] += A[i, k] * B[k, j]  # Repeatedly fetching
+            # A[i, k] and B[k, j]
+```
+
+:::
+
+The loop repeatedly references elements of $\mathbf{A}$ and $\mathbf{B}$. Some references can hit in cache, but large matrices and an unfavorable traversal order can still cause excessive lower-tier traffic. @Fig-tiling-diagram diagrams the spatial partitioning of matrix multiplication ($\mathbf{C} = \mathbf{A}\mathbf{B}$) across its three principal dimensions ($M$, $K$, and $N$). Each highlighted region represents the working set staged in fast memory at one moment: an $M_{\text{tile}}{\times}K_{\text{tile}}$ block of $\mathbf{A}$ (within the green row band) multiplies a $K_{\text{tile}}{\times}N_{\text{tile}}$ block of $\mathbf{B}$ (within the pink column band) to accumulate one $M_{\text{tile}}{\times}N_{\text{tile}}$ output tile ($\text{Block}_{m,n}$, shaded blue) of $\mathbf{C}$. Processing all inner-product operations for an active tile before evicting it amortizes off-chip DRAM latency across $M_{\text{tile}} \cdot N_{\text{tile}} \cdot K_{\text{tile}}$ arithmetic operations.
+
+::: {#fig-tiling-diagram fig-env="figure" fig-pos="htb" fig-cap="**Matrix Tiling Mechanics**: Partitioning large matrix multiplication ($\mathbf{C}=\mathbf{A}\mathbf{B}$) into $M_{\text{tile}}\times K_{\text{tile}}$ and $K_{\text{tile}}\times N_{\text{tile}}$ blocks aligns memory footprints with fast on-chip SRAM/registers. Maximizing register reuse within each tile amortizes slow off-chip DRAM accesses and keeps compute engines operating at peak throughput." fig-alt="Three matrices A, B, C with highlighted tiles showing how matrix multiplication partitions into smaller blocks. Dimensions labeled M, N, K with corresponding tile sizes Mtile, Ntile, Ktile."}
+
+```{.tikz}
+\scalebox{0.65}{%
+\begin{tikzpicture}[line join=round,font=\sffamily,x=1mm,y=1mm]
+\tikzset{%
+   Line/.style={draw,line width=1.25pt,black,text=black},
+   LineT/.style={draw,line width=0.75pt,black,text=black},
+  }
+%Bmatrix
+\node[Line,rectangle,anchor=south west,
+minimum width=66mm,minimum height=60mm](BM)at(0,0){};
+\scoped[on background layer]
+\node[LineT,rectangle,anchor=south west,fill=RedFill,
+minimum width=18mm,minimum height=60mm](BM1)at(18mm,0){};
+\node[LineT,rectangle,anchor=south west,fill=RedFill,
+minimum width=18mm,minimum height=9mm](BM2)at(18mm,30mm){};
+%
+\draw[thick,decorate,decoration={brace, amplitude=7pt}]([yshift=2mm]BM.north west)--
+([yshift=2mm]BM.north east)node[midway,above=9pt]{N};
+\draw[thick,decorate,decoration={brace, amplitude=7pt,mirror}]([xshift=-2mm]BM.north west)--
+([xshift=-2mm]BM.south west)node[midway,left=9pt]{K};
+\draw[thick,decorate,decoration={brace, amplitude=5pt}]([xshift=2mm]BM2.north east)--
+([xshift=2mm]BM2.south east)node[midway,right=6pt]{$K_{\text{tile}}$};
+\draw[thick,decorate,decoration={brace, amplitude=5pt,mirror}]([yshift=-2mm,xshift=1mm]BM2.south west)--
+([yshift=-2mm,xshift=-1mm]BM2.south east)node[midway,below=6pt]{$N_{\text{tile}}$};
+\node[below left=2 of BM.north east]{B matrix};
+%Cmatrix
+\node[Line,rectangle,anchor=north west,
+minimum width=66mm,minimum height=48mm](CM)at(0,-10){};
+\node[LineT,rectangle,anchor=north west,
+minimum width=18mm,minimum height=48mm](CM1)at(18mm,-10){};
+\node[LineT,rectangle,anchor=south west,
+minimum width=66mm,minimum height=15mm](CM2)at(CM.south west){};
+\node[LineT,rectangle,anchor=south west,fill=BlueL,
+minimum width=18mm,minimum height=14.8mm](CM3)at(CM1.south west){};
+%
+\draw[thick,decorate,decoration={brace, amplitude=5pt}]([yshift=-1mm,xshift=2mm]CM3.north east)--
+([yshift=1mm,xshift=2mm]CM3.south east)node[midway,right=6pt]{$M_{\text{tile}}$};
+\draw[thick,decorate,decoration={brace, amplitude=5pt,mirror}]([yshift=-2mm,xshift=1mm]CM3.south west)--
+([yshift=-2mm,xshift=-1mm]CM3.south east)node[midway,below=6pt]{$N_{\text{tile}}$};
+\node at (CM3.center){$\text{Block}_{m,n}$};
+%Amatrix
+\node[Line,rectangle,anchor=north east,
+minimum width=60mm,minimum height=48mm](AM)at(-10,-10){};
+\node[LineT,rectangle,anchor=south west,fill=GreenL!40,
+minimum width=60mm,minimum height=15mm](AM1)at(AM.south west){};
+\node[LineT,rectangle,anchor=south west,fill=GreenL,
+minimum width=9mm,minimum height=15mm](AM2)at($(AM.south west)+(21mm,0)$){};
+\node[below left=2 of CM.north east]{C matrix};
+\node[Line,rectangle,anchor=north east,
+minimum width=60mm,minimum height=48mm](AM)at(-10,-10){};
+%
+\draw[thick,decorate,decoration={brace, amplitude=7pt}]([yshift=2mm]AM.north west)--
+([yshift=2mm]AM.north east)node[midway,above=9pt]{K};
+\draw[thick,decorate,decoration={brace, amplitude=7pt,mirror}]([xshift=-2mm]AM.north west)--
+([xshift=-2mm]AM.south west)node[midway,left=9pt]{M};
+\draw[thick,decorate,decoration={brace, amplitude=5pt}]([yshift=-1mm,xshift=2mm]AM2.north east)--
+([yshift=1mm,xshift=2mm]AM2.south east)node[midway,right=6pt]{$M_{\text{tile}}$};
+\draw[thick,decorate,decoration={brace, amplitude=5pt,mirror}]([yshift=-2mm,xshift=1mm]AM2.south west)--
+([yshift=-2mm,xshift=-1mm]AM2.south east)node[midway,below=6pt]{$K_{\text{tile}}$};
+\node[below left=2 of AM.north east]{A matrix};
+\end{tikzpicture}}
+```
+
+:::
+
+##### Tiling fundamentals {#sec-hardware-acceleration-tiling-fundamentals-e9e6}
+
+In @lst-naive_matmul, every iteration of the innermost loop fetches $A_{ik}$ and $B_{kj}$, multiplies them, and updates $C_{ij}$. Because the matrices are large, the processor reloads values it used moments earlier, and each reload that misses on chip pays the DRAM penalty in latency and energy [@horowitz2014; @sze2017].
+
+##### Performance benefits of tiling {#sec-hardware-acceleration-performance-benefits-tiling-e7bd}
+
+Tiling processes one submatrix at a time, so that once a block is loaded it is reused many times before the loop moves on. @Lst-tiled_matmul demonstrates cache-friendly loop blocking: the loop bounds partition the matrices into tiles, and the hardware cache hierarchy keeps recently used tile data close to the compute units when access order has locality.
+
+::: {#lst-tiled_matmul lst-cap="**Cache-Blocked Matrix Multiplication**: This high-level loop blocking approach divides matrices into smaller index ranges so hardware caches can reuse data within each tile, improving computational efficiency without explicit scratchpad loads."}
+
+```{.python}
+TILE_SIZE = 32  # Choose a tile size based on hardware constraints
+
+# Cache blocking: partition data via loop bounds.
+# Loads are implicit through the hardware cache hierarchy.
+for i in range(0, N, TILE_SIZE):
+    for j in range(0, N, TILE_SIZE):
+        for k in range(0, N, TILE_SIZE):
+            # Each tile computed independently
+            for ii in range(i, min(i + TILE_SIZE, N)):
+                for jj in range(j, min(j + TILE_SIZE, N)):
+                    for kk in range(k, min(k + TILE_SIZE, N)):
+                        C[ii, jj] += A[ii, kk] * B[kk, jj]
+```
+
+:::
+
+The restructuring produces a chain of effects. A small tile is revisited while it is still likely to be cached, so most operand references hit in L1/L2 or shared memory instead of DRAM. DRAM traffic falls as a result, and the processing units spend less time waiting for operands. When an untiled access pattern repeatedly fetches operands from lower memory tiers, that traffic can impose a bandwidth ceiling below the arithmetic ceiling.
+
+##### Tiling methods {#sec-hardware-acceleration-tiling-methods-6257}
+
+Tiling implementations differ along one axis, which is whether the hardware or the program decides what stays in fast memory. The two ends are implicit (cache) blocking and explicit (scratchpad) staging, and practical kernels often combine them.
+
+Implicit (cache) blocking\index{Tiling!implicit cache blocking} restructures only the loop bounds. The tiled matrix multiplication in @lst-tiled_matmul issues no explicit loads; its tile-shaped access pattern lets hardware caches reuse nearby values before they are evicted. It suits CPUs and GPUs with capable caches and large tensors that exceed fast-memory capacity.
+
+Explicit (scratchpad) staging\index{Tiling!explicit staging} copies each tile into shared memory, a scratchpad, or registers and reorganizes the computation around the staged copy. It is the only option on accelerators whose fast memory is software managed, and it guarantees reuse that a cache might lose to eviction. Convolution is the classic case, because staging a filter once lets it serve many input regions without being refetched. @Lst-loop_blocking loads blocks of $\mathbf{A}$ and $\mathbf{B}$ into temporary fast storage and reuses them across the inner loops.
+
+::: {#lst-loop_blocking lst-cap="**Explicit Tile Staging Pseudocode**: A backend maps the temporary tile objects to fast storage and reuses them across inner-loop operations."}
+
+```{.python}
+# Explicit tile staging: load data into fast
+# temporary storage before the inner loops.
+for i in range(0, N, TILE_SIZE):
+    for j in range(0, N, TILE_SIZE):
+        for k in range(0, N, TILE_SIZE):
+            # Pseudocode: map these tile objects to fast memory
+            A_tile = A[i : i + TILE_SIZE, k : k + TILE_SIZE]
+            B_tile = B[k : k + TILE_SIZE, j : j + TILE_SIZE]
+
+            # Reuse loaded tiles for all inner iterations
+            for ii in range(A_tile.shape[0]):
+                for jj in range(B_tile.shape[1]):
+                    for kk in range(A_tile.shape[1]):
+                        C[i + ii, j + jj] += (
+                            A_tile[ii, kk] * B_tile[kk, jj]
+                        )
+```
+
+:::
+
+The pseudocode includes shortened boundary tiles when $N$ is not divisible by `TILE_SIZE`, the software counterpart of the fringe tax that a fixed-size array pays in idle processing elements.
+
+##### Tiling challenges and trade-offs {#sec-hardware-acceleration-tiling-challenges-tradeoffs-e9c9}
+
+Tiling improves performance only when the tile matches the locality budget of the hardware. If the tile is too small, memory fetches still dominate execution time because reuse is too limited. If the tile is too large, it exceeds fast memory and causes cache thrashing or scratchpad spills. Selecting the right tile size therefore directly determines computational efficiency and memory bandwidth usage.
+
+The tile choice also controls load balance. In architectures such as GPUs and TPUs, computations execute in parallel across thousands of processing units. If tiles are not evenly distributed, some units remain idle while others are overloaded, leading to suboptimal utilization of computational resources. Effective tile scheduling keeps parallel execution balanced and efficient.
+
+Data movement remains a cost after tiling, even when another resource becomes the throughput limit. Although tiling reduces the number of slow memory accesses, transferring tiles between hierarchy levels still incurs latency and energy cost, especially when data falls from cache or scratchpad back to DRAM. Efficient memory prefetching and scheduling strategies minimize this residual movement and ensure that data is available when needed.
+
+Hybrid tiling combines implicit blocking and explicit staging when neither alone captures the workload's reuse, for example relying on caches for an outer tier while staging convolution weights explicitly in a scratchpad.
+
+Register blocking, double buffering, and hierarchical tiling extend the same locality principle at smaller and larger memory tiers. AI compilers and runtime systems such as TensorFlow XLA, TVM, and MLIR automatically select these tiling strategies based on hardware constraints, enabling fine-tuned performance optimization without manual intervention. @Tbl-tiling-strategies compares implicit, explicit, and hybrid tiling.
+
+| Aspect                                                    | **Implicit (Cache) Blocking**                                            | **Explicit (Scratchpad) Staging**                                      | **Hybrid tiling**\index{Hybrid tiling!definition}              |
+|:----------------------------------------------------------|:-------------------------------------------------------------------------|:-----------------------------------------------------------------------|:---------------------------------------------------------------|
+| Who Decides Residency                                     | Hardware cache replacement policy                                        | The program, through explicit copies into software-managed memory      | Caches for some tiers, explicit copies for others              |
+| Optimization Focus                                        | Loop bounds shaped so accesses stay within cache-sized blocks            | Staging tiles and reordering computation around the staged copy        | Matching each memory tier to the mechanism it supports         |
+| **Memory usage**\index{Memory usage!definition}           | Improves cache locality and reduces DRAM access                          | Keeps frequently used data in fast memory for multiple iterations      | Minimizes data movement while ensuring high reuse              |
+| **Common use cases**\index{Common use cases!definition}   | Matrix multiplications, CNNs, self-attention in transformers             | Convolutions, recurrent neural networks (RNNs), iterative computations | AI accelerators with hierarchical memory, mixed workloads      |
+| **Performance gains**\index{Performance gains!definition} | Reduced memory bandwidth requirements, better cache utilization          | Lower memory fetch latency, improved data locality                     | Maximized efficiency across multiple hardware types            |
+| Challenges                                                | Reuse is not guaranteed; eviction can discard a tile before it is reused | Can increase register pressure, requires loop restructuring            | Complexity in tuning tile size and execution order dynamically |
+| **Best when**\index{Best when!definition}                 | Hardware caches are capable and the working set exceeds fast memory      | Fast memory is software managed or reuse must be guaranteed            | Different memory tiers favor different mechanisms              |
+
+: **Tiling Strategies**: Implicit, explicit, and hybrid tiling optimize memory access patterns for improved performance. Implicit (cache) blocking shapes loop bounds and lets caches decide residency, explicit (scratchpad) staging copies tiles into software-managed memory to guarantee reuse, and hybrid tiling combines both across memory tiers. AI compilers and runtime systems use these techniques to automatically optimize model execution on diverse hardware. {#tbl-tiling-strategies tbl-colwidths="[16,31,27,26]"}
+
 ### Numerics in AI acceleration {#sec-hardware-acceleration-numerics-ai-acceleration-f7be}
 
 Systolic arrays and Tensor Cores often support reduced-precision arithmetic. FP16 halves the bytes per value relative to FP32, and a target may provision more low-precision multiply-accumulate capacity. A 2$\times$ speedup is not automatic: it requires a supported kernel and sufficient parallel work without another bottleneck. Reduced precision is a hardware-software decision. Input and accumulation formats may differ, affecting accuracy, throughput, energy, and movement.
@@ -4810,181 +4985,6 @@ The dataflow building blocks are now in place: data locality, tensor layout, and
 - [ ] **Remaining gap**: an operation still repeatedly fetches operands because its active blocks exceed fast-memory capacity. How could tiling from @sec-hardware-acceleration-tiling-principle change this access pattern, and what capacity and reuse evidence would justify that choice?
 
 :::
-
-#### Memory-efficient tiling strategies {#sec-hardware-acceleration-memoryefficient-tiling-strategies-9fce}
-
-Layout changes how values are arranged, and fusion can remove intermediate buffers. Tiling addresses another part of the locality problem by bounding the operand blocks actively reused at each memory tier. @Sec-hardware-acceleration-tiling-principle introduced tiling as the bridge between a graph-level matrix and a fixed systolic array, including the fringe tax and the loop nest in @algo-tiled-gemm. The same partitioning recurs at every tier of the memory hierarchy. Tiling\index{Tiling!memory-efficient strategies}[^fn-tiling-cache-reuse] restructures a computation into blocks that fit within fast local memory (caches, shared memory, or registers), so that each block is reused before eviction rather than refetched from DRAM [@lam1991].
-
-[^fn-tiling-cache-reuse]: **Tiling (loop blocking)**\index{Tiling!DRAM traffic reduction}: This restructuring partitions a computation into blocks sized for a fast local tier. A naive loop makes repeated references to the same elements; caches may capture some, while blocking deliberately concentrates reuse before eviction [@lam1991]. This reduction in lower-tier traffic is a primary source of the gap between naive matrix multiplication and optimized GEMM routines.
-
-Matrix multiplication, widely used in AI models, demonstrates inefficient memory access when implemented naively. @Lst-naive_matmul shows how, without tiling, repeated memory accesses for the same data lead to unnecessary bandwidth consumption.
-
-::: {#lst-naive_matmul lst-cap="**Naïve Matrix Multiplication**: Direct implementation makes $\mathcal{O}(N^3)$ array references for $N{\times}N$ matrices. Caches can serve some references, but the loop order does not deliberately block reuse for the memory hierarchy."}
-
-```{.python}
-for i in range(N):
-    for j in range(N):
-        for k in range(N):
-            C[i, j] += A[i, k] * B[k, j]  # Repeatedly fetching
-            # A[i, k] and B[k, j]
-```
-
-:::
-
-The loop repeatedly references elements of $\mathbf{A}$ and $\mathbf{B}$. Some references can hit in cache, but large matrices and an unfavorable traversal order can still cause excessive lower-tier traffic. @Fig-tiling-diagram diagrams the spatial partitioning of matrix multiplication ($\mathbf{C} = \mathbf{A}\mathbf{B}$) across its three principal dimensions ($M$, $K$, and $N$). Each highlighted region represents the working set staged in fast memory at one moment: an $M_{\text{tile}}{\times}K_{\text{tile}}$ block of $\mathbf{A}$ (within the green row band) multiplies a $K_{\text{tile}}{\times}N_{\text{tile}}$ block of $\mathbf{B}$ (within the pink column band) to accumulate one $M_{\text{tile}}{\times}N_{\text{tile}}$ output tile ($\text{Block}_{m,n}$, shaded blue) of $\mathbf{C}$. Processing all inner-product operations for an active tile before evicting it amortizes off-chip DRAM latency across $M_{\text{tile}} \cdot N_{\text{tile}} \cdot K_{\text{tile}}$ arithmetic operations.
-
-::: {#fig-tiling-diagram fig-env="figure" fig-pos="htb" fig-cap="**Matrix Tiling Mechanics**: Partitioning large matrix multiplication ($\mathbf{C}=\mathbf{A}\mathbf{B}$) into $M_{\text{tile}}\times K_{\text{tile}}$ and $K_{\text{tile}}\times N_{\text{tile}}$ blocks aligns memory footprints with fast on-chip SRAM/registers. Maximizing register reuse within each tile amortizes slow off-chip DRAM accesses and keeps compute engines operating at peak throughput." fig-alt="Three matrices A, B, C with highlighted tiles showing how matrix multiplication partitions into smaller blocks. Dimensions labeled M, N, K with corresponding tile sizes Mtile, Ntile, Ktile."}
-
-```{.tikz}
-\scalebox{0.65}{%
-\begin{tikzpicture}[line join=round,font=\sffamily,x=1mm,y=1mm]
-\tikzset{%
-   Line/.style={draw,line width=1.25pt,black,text=black},
-   LineT/.style={draw,line width=0.75pt,black,text=black},
-  }
-%Bmatrix
-\node[Line,rectangle,anchor=south west,
-minimum width=66mm,minimum height=60mm](BM)at(0,0){};
-\scoped[on background layer]
-\node[LineT,rectangle,anchor=south west,fill=RedFill,
-minimum width=18mm,minimum height=60mm](BM1)at(18mm,0){};
-\node[LineT,rectangle,anchor=south west,fill=RedFill,
-minimum width=18mm,minimum height=9mm](BM2)at(18mm,30mm){};
-%
-\draw[thick,decorate,decoration={brace, amplitude=7pt}]([yshift=2mm]BM.north west)--
-([yshift=2mm]BM.north east)node[midway,above=9pt]{N};
-\draw[thick,decorate,decoration={brace, amplitude=7pt,mirror}]([xshift=-2mm]BM.north west)--
-([xshift=-2mm]BM.south west)node[midway,left=9pt]{K};
-\draw[thick,decorate,decoration={brace, amplitude=5pt}]([xshift=2mm]BM2.north east)--
-([xshift=2mm]BM2.south east)node[midway,right=6pt]{$K_{\text{tile}}$};
-\draw[thick,decorate,decoration={brace, amplitude=5pt,mirror}]([yshift=-2mm,xshift=1mm]BM2.south west)--
-([yshift=-2mm,xshift=-1mm]BM2.south east)node[midway,below=6pt]{$N_{\text{tile}}$};
-\node[below left=2 of BM.north east]{B matrix};
-%Cmatrix
-\node[Line,rectangle,anchor=north west,
-minimum width=66mm,minimum height=48mm](CM)at(0,-10){};
-\node[LineT,rectangle,anchor=north west,
-minimum width=18mm,minimum height=48mm](CM1)at(18mm,-10){};
-\node[LineT,rectangle,anchor=south west,
-minimum width=66mm,minimum height=15mm](CM2)at(CM.south west){};
-\node[LineT,rectangle,anchor=south west,fill=BlueL,
-minimum width=18mm,minimum height=14.8mm](CM3)at(CM1.south west){};
-%
-\draw[thick,decorate,decoration={brace, amplitude=5pt}]([yshift=-1mm,xshift=2mm]CM3.north east)--
-([yshift=1mm,xshift=2mm]CM3.south east)node[midway,right=6pt]{$M_{\text{tile}}$};
-\draw[thick,decorate,decoration={brace, amplitude=5pt,mirror}]([yshift=-2mm,xshift=1mm]CM3.south west)--
-([yshift=-2mm,xshift=-1mm]CM3.south east)node[midway,below=6pt]{$N_{\text{tile}}$};
-\node at (CM3.center){$\text{Block}_{m,n}$};
-%Amatrix
-\node[Line,rectangle,anchor=north east,
-minimum width=60mm,minimum height=48mm](AM)at(-10,-10){};
-\node[LineT,rectangle,anchor=south west,fill=GreenL!40,
-minimum width=60mm,minimum height=15mm](AM1)at(AM.south west){};
-\node[LineT,rectangle,anchor=south west,fill=GreenL,
-minimum width=9mm,minimum height=15mm](AM2)at($(AM.south west)+(21mm,0)$){};
-\node[below left=2 of CM.north east]{C matrix};
-\node[Line,rectangle,anchor=north east,
-minimum width=60mm,minimum height=48mm](AM)at(-10,-10){};
-%
-\draw[thick,decorate,decoration={brace, amplitude=7pt}]([yshift=2mm]AM.north west)--
-([yshift=2mm]AM.north east)node[midway,above=9pt]{K};
-\draw[thick,decorate,decoration={brace, amplitude=7pt,mirror}]([xshift=-2mm]AM.north west)--
-([xshift=-2mm]AM.south west)node[midway,left=9pt]{M};
-\draw[thick,decorate,decoration={brace, amplitude=5pt}]([yshift=-1mm,xshift=2mm]AM2.north east)--
-([yshift=1mm,xshift=2mm]AM2.south east)node[midway,right=6pt]{$M_{\text{tile}}$};
-\draw[thick,decorate,decoration={brace, amplitude=5pt,mirror}]([yshift=-2mm,xshift=1mm]AM2.south west)--
-([yshift=-2mm,xshift=-1mm]AM2.south east)node[midway,below=6pt]{$K_{\text{tile}}$};
-\node[below left=2 of AM.north east]{A matrix};
-\end{tikzpicture}}
-```
-
-:::
-
-##### Tiling fundamentals {#sec-hardware-acceleration-tiling-fundamentals-e9e6}
-
-In @lst-naive_matmul, every iteration of the innermost loop fetches $A_{ik}$ and $B_{kj}$, multiplies them, and updates $C_{ij}$. Because the matrices are large, the processor reloads values it used moments earlier, and each reload that misses on chip pays the DRAM penalty in latency and energy [@horowitz2014; @sze2017].
-
-##### Performance benefits of tiling {#sec-hardware-acceleration-performance-benefits-tiling-e7bd}
-
-Tiling processes one submatrix at a time, so that once a block is loaded it is reused many times before the loop moves on. @Lst-tiled_matmul demonstrates cache-friendly loop blocking: the loop bounds partition the matrices into tiles, and the hardware cache hierarchy keeps recently used tile data close to the compute units when access order has locality.
-
-::: {#lst-tiled_matmul lst-cap="**Cache-Blocked Matrix Multiplication**: This high-level loop blocking approach divides matrices into smaller index ranges so hardware caches can reuse data within each tile, improving computational efficiency without explicit scratchpad loads."}
-
-```{.python}
-TILE_SIZE = 32  # Choose a tile size based on hardware constraints
-
-# Cache blocking: partition data via loop bounds.
-# Loads are implicit through the hardware cache hierarchy.
-for i in range(0, N, TILE_SIZE):
-    for j in range(0, N, TILE_SIZE):
-        for k in range(0, N, TILE_SIZE):
-            # Each tile computed independently
-            for ii in range(i, min(i + TILE_SIZE, N)):
-                for jj in range(j, min(j + TILE_SIZE, N)):
-                    for kk in range(k, min(k + TILE_SIZE, N)):
-                        C[ii, jj] += A[ii, kk] * B[kk, jj]
-```
-
-:::
-
-The restructuring produces a chain of effects. A small tile is revisited while it is still likely to be cached, so most operand references hit in L1/L2 or shared memory instead of DRAM. DRAM traffic falls as a result, and the processing units spend less time waiting for operands. When an untiled access pattern repeatedly fetches operands from lower memory tiers, that traffic can impose a bandwidth ceiling below the arithmetic ceiling.
-
-##### Tiling methods {#sec-hardware-acceleration-tiling-methods-6257}
-
-Tiling implementations differ along one axis, which is whether the hardware or the program decides what stays in fast memory. The two ends are implicit (cache) blocking and explicit (scratchpad) staging, and practical kernels often combine them.
-
-Implicit (cache) blocking\index{Tiling!implicit cache blocking} restructures only the loop bounds. The tiled matrix multiplication in @lst-tiled_matmul issues no explicit loads; its tile-shaped access pattern lets hardware caches reuse nearby values before they are evicted. It suits CPUs and GPUs with capable caches and large tensors that exceed fast-memory capacity.
-
-Explicit (scratchpad) staging\index{Tiling!explicit staging} copies each tile into shared memory, a scratchpad, or registers and reorganizes the computation around the staged copy. It is the only option on accelerators whose fast memory is software managed, and it guarantees reuse that a cache might lose to eviction. Convolution is the classic case, because staging a filter once lets it serve many input regions without being refetched. @Lst-loop_blocking loads blocks of $\mathbf{A}$ and $\mathbf{B}$ into temporary fast storage and reuses them across the inner loops.
-
-::: {#lst-loop_blocking lst-cap="**Explicit Tile Staging Pseudocode**: A backend maps the temporary tile objects to fast storage and reuses them across inner-loop operations."}
-
-```{.python}
-# Explicit tile staging: load data into fast
-# temporary storage before the inner loops.
-for i in range(0, N, TILE_SIZE):
-    for j in range(0, N, TILE_SIZE):
-        for k in range(0, N, TILE_SIZE):
-            # Pseudocode: map these tile objects to fast memory
-            A_tile = A[i : i + TILE_SIZE, k : k + TILE_SIZE]
-            B_tile = B[k : k + TILE_SIZE, j : j + TILE_SIZE]
-
-            # Reuse loaded tiles for all inner iterations
-            for ii in range(A_tile.shape[0]):
-                for jj in range(B_tile.shape[1]):
-                    for kk in range(A_tile.shape[1]):
-                        C[i + ii, j + jj] += (
-                            A_tile[ii, kk] * B_tile[kk, jj]
-                        )
-```
-
-:::
-
-The pseudocode includes shortened boundary tiles when $N$ is not divisible by `TILE_SIZE`, the software counterpart of the fringe tax that a fixed-size array pays in idle processing elements.
-
-##### Tiling challenges and trade-offs {#sec-hardware-acceleration-tiling-challenges-tradeoffs-e9c9}
-
-Tiling improves performance only when the tile matches the locality budget of the hardware. If the tile is too small, memory fetches still dominate execution time because reuse is too limited. If the tile is too large, it exceeds fast memory and causes cache thrashing or scratchpad spills. Selecting the right tile size therefore directly determines computational efficiency and memory bandwidth usage.
-
-The tile choice also controls load balance. In architectures such as GPUs and TPUs, computations execute in parallel across thousands of processing units. If tiles are not evenly distributed, some units remain idle while others are overloaded, leading to suboptimal utilization of computational resources. Effective tile scheduling keeps parallel execution balanced and efficient.
-
-Data movement remains a cost after tiling, even when another resource becomes the throughput limit. Although tiling reduces the number of slow memory accesses, transferring tiles between hierarchy levels still incurs latency and energy cost, especially when data falls from cache or scratchpad back to DRAM. Efficient memory prefetching and scheduling strategies minimize this residual movement and ensure that data is available when needed.
-
-Hybrid tiling combines implicit blocking and explicit staging when neither alone captures the workload's reuse, for example relying on caches for an outer tier while staging convolution weights explicitly in a scratchpad.
-
-Register blocking, double buffering, and hierarchical tiling extend the same locality principle at smaller and larger memory tiers. AI compilers and runtime systems such as TensorFlow XLA, TVM, and MLIR automatically select these tiling strategies based on hardware constraints, enabling fine-tuned performance optimization without manual intervention. @Tbl-tiling-strategies compares implicit, explicit, and hybrid tiling.
-
-| Aspect                                                    | **Implicit (Cache) Blocking**                                            | **Explicit (Scratchpad) Staging**                                      | **Hybrid tiling**\index{Hybrid tiling!definition}              |
-|:----------------------------------------------------------|:-------------------------------------------------------------------------|:-----------------------------------------------------------------------|:---------------------------------------------------------------|
-| Who Decides Residency                                     | Hardware cache replacement policy                                        | The program, through explicit copies into software-managed memory      | Caches for some tiers, explicit copies for others              |
-| Optimization Focus                                        | Loop bounds shaped so accesses stay within cache-sized blocks            | Staging tiles and reordering computation around the staged copy        | Matching each memory tier to the mechanism it supports         |
-| **Memory usage**\index{Memory usage!definition}           | Improves cache locality and reduces DRAM access                          | Keeps frequently used data in fast memory for multiple iterations      | Minimizes data movement while ensuring high reuse              |
-| **Common use cases**\index{Common use cases!definition}   | Matrix multiplications, CNNs, self-attention in transformers             | Convolutions, recurrent neural networks (RNNs), iterative computations | AI accelerators with hierarchical memory, mixed workloads      |
-| **Performance gains**\index{Performance gains!definition} | Reduced memory bandwidth requirements, better cache utilization          | Lower memory fetch latency, improved data locality                     | Maximized efficiency across multiple hardware types            |
-| Challenges                                                | Reuse is not guaranteed; eviction can discard a tile before it is reused | Can increase register pressure, requires loop restructuring            | Complexity in tuning tile size and execution order dynamically |
-| **Best when**\index{Best when!definition}                 | Hardware caches are capable and the working set exceeds fast memory      | Fast memory is software managed or reuse must be guaranteed            | Different memory tiers favor different mechanisms              |
-
-: **Tiling Strategies**: Implicit, explicit, and hybrid tiling optimize memory access patterns for improved performance. Implicit (cache) blocking shapes loop bounds and lets caches decide residency, explicit (scratchpad) staging copies tiles into software-managed memory to guarantee reuse, and hybrid tiling combines both across memory tiers. AI compilers and runtime systems use these techniques to automatically optimize model execution on diverse hardware. {#tbl-tiling-strategies tbl-colwidths="[16,31,27,26]"}
 
 ### Applying mapping strategies to neural networks {#sec-hardware-acceleration-applying-mapping-strategies-neural-networks-3110}
 
