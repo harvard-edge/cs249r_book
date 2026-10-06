@@ -229,82 +229,304 @@ Knowing *what* to measure, however, is only half the problem. Measuring incorrec
 
 [^fn-benchmark-etymology-surveying]: **Benchmark**\index{Benchmark!etymology}: From surveying, where a "bench mark" was a horizontal cut in stone serving as a fixed elevation reference. The term entered computing in the 1970s to describe standardized comparison points, but the surveying metaphor carries a systems lesson: just as an elevation measurement is meaningless without a calibrated reference, an ML throughput number is meaningless without controlled workloads, thermal state, and precision settings.
 
-## Historical Foundations {#sec-benchmarking-historical-context-7350}
+## Benchmarking Granularity {#sec-benchmarking-benchmarking-granularity-3855}
 
-Each benchmark generation\index{Benchmarking!historical evolution} arose when existing metrics failed to predict end-to-end behavior, and those failures are direct precedents for why modern ML evaluation requires the D·A·M taxonomy (Data · Algorithm · Machine). The evolution from early synthetic tests to modern ML suites reveals three methodological shifts: from isolated kernels to representative application suites, from single-metric throughput to multi-objective energy profiles, and from generic compute metrics to domain-specific execution constraints.
+A GPU kernel that runs 3$\times$ faster in isolation may deliver zero end-to-end speedup if the data ingestion pipeline cannot saturate device memory bandwidth. This diagnostic mismatch makes evaluation granularity a fundamental systems design choice. Standardization specifies *how* measurement is kept consistent, while **benchmarking granularity**\index{Benchmarking granularity!definition} specifies *what* physical boundary is measured. System validation spans multiple architectural scales, from individual tensor operations to distributed production pipelines, with each granularity diagnosing distinct bottlenecks:
 
-### Performance benchmarks {#sec-benchmarking-performance-benchmarks-ea8a}
+- Micro benchmarks\index{Micro benchmark!component isolation} isolate individual components: kernel execution time, memory bandwidth utilization, and single-layer numerical behavior. These diagnose *where* low-level hardware inefficiencies occur.
+- Macro benchmarks\index{Macro benchmark!subsystem evaluation} evaluate composed model subsystems: full model training convergence, inference pipeline throughput, and dataset accuracy metrics. These reveal *what* architectural trade-offs exist across layer compositions.
+- End-to-end benchmarks\index{End-to-end benchmark!complete workflow measurement} measure complete operational pipelines: client request-to-response latency including preprocessing, training time-to-accuracy including storage I/O, and model robustness on production data distributions. These show whether the combined system satisfies real-world service-level objectives.
 
-The earliest computing benchmarks revealed an enduring vulnerability in empirical evaluation: benchmark gaming\index{Benchmark gaming!vendor optimization for tests}. Whetstone\index{Whetstone!synthetic floating-point benchmark} [@curnow1976whetstone] used a synthetic mix of scientific operations, while LINPACK\index{LINPACK!matrix operations benchmark}[^fn-whetstone-linpack-history] [@dongarra1979linpack] measured dense linear-system solving. Because these workloads relied on predictable computational loops, compiler and hardware vendors could optimize specifically for the benchmark kernels—such as unrolling synthetic loops or tailoring cache tiling to exact matrix dimensions—without improving general application performance. SPEC CPU\index{SPEC CPU!real application workloads} (1989) addressed this limitation by evaluating complete, portable software suites that stressed integer branching, irregular memory hierarchies, and floating-point pipelines [@dixit1993spec]. This progression directly informs ML systems: model compression claims cannot rely on isolated matrix multiplication kernels, but require validation on representative tasks like ResNet-50 and BERT across the full software runtime.
+Optimization techniques operate across distinct granularities: kernel fusion targets micro-level execution, structured pruning alters macro-level parameter structures, and data curation\index{Data curation!end-to-end generalization} determines end-to-end generalization. System validation must align with these respective boundaries. An isolated micro-benchmark may show substantial kernel speedup, yet a macro-benchmark can reveal that increased activation memory footprints force smaller batch sizes that degrade overall throughput. Similarly, an end-to-end benchmark exposes storage or host deserialization stalls that remain completely invisible at the accelerator kernel level.
 
-[^fn-whetstone-linpack-history]: **Whetstone and LINPACK**\index{Whetstone!etymology}\index{LINPACK!narrow benchmark}: Whetstone [@curnow1976whetstone] was named after the English Electric facility in Whetstone, Leicestershire, where the original ALGOL compiler was built; LINPACK [@dongarra1979linpack] was a package and benchmark for dense linear systems, later used by the Top500 list. Whetstone's fixed synthetic program mix and LINPACK's dense linear-algebra focus made each useful but narrower than a diverse application suite. ML benchmarking inherited the same vulnerability: model-specific kernel tuning can overfit a single workload, which is why MLPerf uses multiple workloads spanning vision, language, and recommendation [@mattson2020mlperf; @reddi2020].
+@Fig-granularity diagrams these nested evaluation scopes across the ML stack, tracing how measurement perimeters expand from left to right across four physical tiers: micro-benchmarks isolate individual kernel layers (ML Layers), macro-benchmarks evaluate composed model topologies (ML Model), application benchmarks introduce supporting host compute (AI Task), and end-to-end benchmarks encompass the complete multi-node pipeline of AI and non-AI compute nodes. The schematic splits the chapter's broader end-to-end scope into single-machine task logic and distributed cluster deployment, visually emphasizing how bottlenecks migrate into auxiliary host systems as the evaluation boundary widens.
 
-As computing expanded into interactive and mobile environments, single-metric evaluation proved insufficient. Graphics benchmarks paired frame rate with rendering quality, and mobile evaluations treated battery draw as co-equal with latency. This multi-objective trade-off mirrors ML serving, where optimizing latency in isolation can trigger catastrophic degradation in model accuracy or energy efficiency.
+::: {#fig-granularity fig-env="figure" fig-pos="htb" fig-cap="**Benchmarking Granularity**: Four-panel block diagram showing micro, macro, application, and end-to-end evaluation layers. Each panel maps a distinct scope of assessment, from isolated kernel operations through full-system deployment, enabling targeted optimization at every level of the ML stack." fig-alt="Block diagram showing four evaluation layers: micro (kernels), macro (models), application (compute logic), and end-to-end (full deployment), connected by arrows to show expanding scope."}
 
-A third shift occurred when distributed computing\index{Distributed computing!system-level performance} demonstrated that component-level microbenchmarks fail to predict cluster-level throughput. Evaluating a CPU or accelerator in isolation cannot capture execution dynamics when network interconnect latency, serialization overheads, and collective communication dominate wall-clock time. Distributed ML training similarly depends on the tight interplay among accelerator matrix engines, host-to-device PCIe bandwidth, input data prefetching pipelines, and gradient synchronization across network fabrics.
+```{.tikz}
+\begin{tikzpicture}[font=\sffamily\small]
+ \tikzset{%
+ Box/.style={
+ node distance=1.25,
+    inner xsep=2pt,
+    draw=RedLine,
+    line width=0.75pt,
+    fill=RedL!20,
+    align=flush center,
+    text width=30mm,
+    minimum width=30mm, minimum height=10mm
+  },
+   Box2/.style={Box, draw=BlueLine,fill=BlueL!20},
+   Box3/.style={Box, draw=GreenLine,fill=GreenL!40},
+   Box4/.style={Box, draw=BrownLine,fill=BrownL!40,text width=24mm,},
+ %
+  Line/.style={line width=0.35pt,black!60,text=black},
+  LineD/.style={line width=0.75pt,black!60,text=black,dashed,dash pattern=on 3pt off 2pt},
+  Line2/.style={line width=0.85pt,black!60,text=black,-{Latex[length=6pt, width=4pt]}}
+}
 
-To capture these interactions, DAWNBench\index{DAWNBench!time-to-accuracy evaluation} [@coleman2019] pioneered time-to-accuracy evaluation, tying raw hardware throughput directly to algorithmic convergence. Maximizing samples processed per second offers no engineering value if numerical instability or suboptimal batch sizing prevents the model from reaching target validation accuracy. These empirical lessons culminated in MLPerf\index{MLPerf!founding and purpose}[^fn-mlperf-benchmark-suite] (2018), which institutionalized full-system measurement, multi-objective constraints, and representative workloads spanning vision, language, and recommendation systems [@mattson2020mlperf; @reddi2020].
+  \def\rows{3}
+  \def\cols{4}
+  \def\r{0.35}
+  \def\xgap{0.15}
+  \def\ygap{0.5}
 
-[^fn-mlperf-benchmark-suite]: **MLPerf**\index{MLPerf!founding}: Launched in 2018 by a consortium of industry and academic institutions, MLPerf takes its name from "ML" combined with "Perf" (performance), echoing SPEC's benchmarking tradition. MLPerf's design principles—representative workloads, full-system measurement, and open submission—directly address the gaming that plagued Whetstone and LINPACK: vendors who could previously report peak kernel throughput on cherry-picked problem sizes must now report end-to-end system performance on standardized tasks [@mattson2020mlperf; @reddi2020].
+\begin{scope}[local bounding box=CEN,shift={($(0,0)+(0,0)$)}]
+  \foreach \i [count=\c] in {0,...,\numexpr\rows-1} {
+    \foreach \j  in {0,...,\numexpr\cols-1} {
+      \pgfmathtruncatemacro{\newX}{\j + 1} %
+      % Circle position
+      \pgfmathsetmacro\x{\j*(2*\r + \xgap)}
+      \pgfmathsetmacro\y{-\i*(2*\r + \ygap)}
+\definecolor{cellcol}{RGB}{253,226,240}
+     \node[fill=VioletLine!60,circle,minimum size=\r](C\c\newX)at(\x,-\y){};
+    }
+  }
+\foreach \a/\b in {C3/C2, C2/C1}{%
+  \foreach \i in {1,2,3,4}{%
+    \foreach \j in {1,2,3,4}{%
+      \draw[Line] (\a\i) -- (\b\j);
+    }%
+  }%
+}
+\end{scope}
+\scoped[on background layer]
+\node[outer sep=0pt,draw=BackLine,inner xsep=3mm,inner ysep=2mm,yshift=0mm,
+           fill=BackColor!20,fit=(C11)(C34),line width=0.75pt](BB1){};
+\node[above=2pt of  BB1.north,anchor=south]{ML Layers};
+%%%
+\node[Box,below right =0.19 and 1.4 of BB1.north east](MA){Model A};
+\node[Box,above right =0.19 and 1.4 of BB1.south east](MB){Model B};
+\scoped[on background layer]
+\node[outer sep=0pt,draw=BackLine,inner xsep=3mm,inner ysep=2mm,yshift=0mm,
+           fill=BackColor!20,fit=(MA)(MB),line width=0.75pt](BB2){};
+\node[above=2pt of  BB2.north,anchor=south]{ML Model};
+%
+\def\du{1.7}
+\node[Box2,right =\du of MA](T1){AI Task 1};
+\node[Box2, right =\du  of MB](T2){Supporting Compute};
+\scoped[on background layer]
+\node[outer sep=0pt,draw=BackLine,inner xsep=3mm,inner ysep=2mm,yshift=0mm,
+           fill=BackColor!20,fit=(T1)(T2),line width=0.75pt](BB3){};
+\node[above=2pt of  BB3.north,anchor=south]{AI Task};
+%
+\node[Box3,right =\du  of T1](CN1){AI Compute Node};
+\node[Box4,right = 1.15 of CN1](NA1){Non-AI Compute Node};
+\node[Box3, right =\du  of T2](CN2){AI Compute Node};
+\node[Box4,right = 1.15 of CN2](NA2){Non-AI Compute Node};
+\scoped[on background layer]
+\node[outer sep=0pt,draw=BackLine,inner xsep=3mm,inner ysep=2mm,yshift=0mm,
+           fill=BackColor!20,fit=(CN1)(NA2),line width=0.75pt](BB4){};
+\node[above=2pt of  BB4.north,anchor=south]{End-to-End Application};
+%
+\draw[Line2](MA)--(MB);
+\draw[Line2](T1)--(T2);
+\draw[Line2](CN1)--(NA1);
+\draw[Line2](CN2)--(NA2);
+\draw[Line2](NA1)--++(0,-0.8)-|(CN2);
+\draw[LineD](BB1.north east)--(MA.170);
+\draw[LineD](BB1.south east)--(MA.190);
+\draw[LineD](BB2.north east)--(T1.170);
+\draw[LineD](BB2.south east)--(T1.190);
+\draw[LineD](BB3.north east)--(CN1.170);
+\draw[LineD](BB3.south east)--(CN2.190);
+\end{tikzpicture}
+```
 
-### Energy benchmarks {#sec-benchmarking-energy-benchmarks-709a}
+:::
 
-The multi-objective evaluation paradigm extended to energy efficiency\index{Benchmarking!energy, first-class metric} as computing diversified beyond mainframes into battery-limited mobile devices and megawatt-scale data centers. Because energy consumption directly dictates battery life at the edge and operating expenses in warehouse-scale clusters, energy became a first-class evaluation metric alongside performance. This shift produced standardized energy benchmarks such as SPEC Power\index{SPEC Power!server energy efficiency}[^fn-spec-power-benchmark] for servers and Green500\index{Green500!HPC energy efficiency ranking}[^fn-green500-energy-efficiency] for supercomputers.
+### Micro benchmarks {#sec-benchmarking-micro-benchmarks-7f5a}
 
-[^fn-spec-power-benchmark]: **SPEC Power**\index{SPEC Power!energy efficiency}: Introduced in 2007, SPEC Power measures performance per watt across 11 load levels from idle (0 percent) through 100 percent in 10 percent increments [@lange2009]. This granularity matters for ML serving: inference workloads rarely sustain 100 percent load, and servers that are efficient at peak but wasteful at partial load inflate the energy cost of real-world deployment.
+While end-to-end metrics govern service-level agreements, optimizing an accelerator pipeline requires isolating the specific mathematical operations that consume execution time and energy. Micro-benchmarks\index{Micro benchmark!diagnostic purpose} serve this diagnostic role by evaluating individual tensor operations in isolation, measuring the accelerator's hardware primitives directly. When profiling a slow inference service, macro-benchmarks report aggregate latency violations, but only micro-benchmarks reveal whether execution time is dominated by matrix multiplications, self-attention projections, memory copies across the host-accelerator interconnect, or elementwise activation kernels.
 
-[^fn-green500-energy-efficiency]: **Green500**\index{Green500!energy efficiency ranking}: Started in 2007 as a counterpart to the Top500, Green500 ranks systems by FLOP/s per watt rather than raw performance [@feng2007green500]. Its lesson for ML systems is methodological: the most cost-effective training cluster is not necessarily the fastest one, but the system that delivers useful work per watt under the workload and measurement boundary that matter.
+::: {.column-margin .margin-pointer}
+↩ The compute primitives that micro-benchmarks isolate, vector and matrix operations and special function units, are established in @sec-hardware-acceleration-ai-compute-primitives-2c99.
+:::
 
-Evaluating energy in ML workloads introduces distinct physical measurement challenges. Accelerators exhibit sharp dynamic power swings: alternating between memory-bound activation layers and power-dense matrix multiplication units creates rapid current fluctuations ($di/dt$) that simple average-power meters fail to resolve. Furthermore, isolating accelerator consumption from host CPU activity, PCIe interconnects, and cooling fans requires rigorous measurement boundaries. MLPerf Power\index{MLPerf!power, ML energy measurement} [@mlperf_power_website] addresses these demands by coupling standardized workloads with strict physical measurement methodologies and calibrated external power analyzers.
+Tensor operations constitute the primary target of micro-benchmarking because matrix multiplications and convolutions dominate the arithmetic budget of deep neural networks. Highly optimized runtime libraries such as cuDNN[^fn-cudnn-library-kernel] [@chetlur2014cudnn] provide hand-tuned kernel implementations tailored to specific microarchitectures. Micro-benchmarks also evaluate standalone activation functions (such as ReLU, Sigmoid, and GELU) and structural submodules (such as multi-head attention projections or transformer feed-forward blocks) across standardized input shapes. Benchmark suites such as Baidu's DeepBench\index{DeepBench!operator-level testing}\index{Micro-benchmark suite!operator-level testing} [@deepbench_github] formalized this methodology by evaluating raw GEMM, convolution, and collective communication primitives across diverse hardware platforms, isolating silicon-level execution efficiency from higher-level framework dispatch overhead.
 
-Energy benchmarking extends beyond hardware telemetry to evaluate algorithmic efficiency. Model compression techniques (pruning, quantization, knowledge distillation) reduce energy consumption by decreasing arithmetic operations and off-chip memory traffic, rather than relying solely on lower-power silicon. For instance, MobileNet architectures replace standard convolutions with depthwise separable convolutions, drastically reducing DRAM access and arithmetic operations relative to standard convolutional neural network (CNN) baselines such as ResNet [@howard2017mobilenets; @sandler2018; @he2016]. As quantified in @sec-model-compression-energy-costs-d1d5, reading an operand from off-chip DRAM consumes orders of magnitude more energy than executing an arithmetic operation, making algorithmic memory-traffic reduction a primary lever for energy-efficient computing.
+[^fn-cudnn-library-kernel]: **cuDNN (CUDA deep neural network library)**\index{cuDNN!benchmarking dependency}: Released by NVIDIA in 2014, cuDNN provides hand-tuned kernel implementations for convolutions, pooling, and normalization. The benchmarking implication: reported inference latencies depend heavily on which cuDNN version and algorithm autotuner settings were used, making cuDNN version a mandatory element of any reproducible benchmark specification.
 
-### Domain-specific benchmarks {#sec-benchmarking-domainspecific-benchmarks-b15f}
+Measuring isolated kernels requires rigorous experimental control. Without disciplined measurement protocols, dynamic hardware frequency scaling, asynchronous execution queues, and cache state introduce transient artifacts that distort kernel runtime.
 
-As specialized accelerators emerged to bypass general-purpose CPU bottlenecks, generic benchmarks failed to capture domain-specific execution constraints. Three operational axes drove this specialization, defining how systems are evaluated under real-world conditions.
+```{python}
+#| echo: false
+#| label: h_h100-specs-calc
+# ┌── LEGO ───────────────────────────────────────────────
+# │ Context: Micro-benchmarking rules callout—SOL Check.
+# │ Goal: H100 FP16/FP8 peak TFLOP/s for speed-of-light diagnostics.
+from mlsysim import Hardware
+from mlsysim.fmt import fmt, fmt_bandwidth, fmt_flop_rate
 
-Deployment constraints dictate core metric priorities based on physical limits. Data center training clusters optimize for aggregate throughput within rack- and facility-level power envelopes. In contrast, mobile AI operates within strict thermal throttling thresholds (typically under 5 watts), and embedded microcontroller systems function within milliwatt power budgets. These physical bounds determine whether a benchmark prioritizes throughput (samples per second) or energy efficiency (Joules per inference).
+class H100SolCheck:
+    """H100 peak throughput for micro-benchmark SOL checks."""
 
-Application requirements impose functional constraints beyond raw speed. Clinical AI models require rigorous calibration and interpretability alongside classification accuracy; high-frequency financial trading systems enforce hard tail-latency cutoffs paired with deterministic execution; autonomous vehicles demand bounded worst-case latency and formal functional safety validation. These requirements broaden evaluation criteria beyond throughput.
+    _h100_fp16 = Hardware.Cloud.H100.compute.peak_flops
+    _h100_fp8 = Hardware.Cloud.H100.compute.precision_flops["fp8"]
+    sol_example_tflops = 10 * (TFLOP / second)
+    cache_bw_low_tbs = 5 * (TB / second)  # scenario assumption: lower observed cache bandwidth
+    cache_bw_high_tbs = 10 * (TB / second)
+    dram_bw_low_tbs = 1 * (TB / second)  # scenario assumption: lower observed DRAM bandwidth
+    dram_bw_high_tbs = 2 * (TB / second)
 
-Operational conditions determine real-world robustness. Edge devices must maintain inference deadlines across ambient temperature swings and noisy sensor streams; data-center serving infrastructure must absorb sudden query spikes and network packet loss without dropping requests; industrial IoT nodes must operate unattended for years. Hardware acceleration capabilities deliver production value only when sustained under these operational environments.
+    # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
+    h100_fp16_tflop_per_s_str = fmt_flop_rate(_h100_fp16, unit=TFLOP / second, precision=0, commas=False)
+    h100_fp8_tflop_per_s_str = fmt_flop_rate(_h100_fp8, unit=TFLOP / second, precision=0, commas=True)
+    sol_example_tflop_per_s_str = fmt_flop_rate(sol_example_tflops, unit=TFLOP / second, precision=0, commas=False)
+    cache_bw_low_tb_per_s_str = fmt_bandwidth(cache_bw_low_tbs, unit=TB / second, precision=0, commas=False)
+    cache_bw_high_tb_per_s_str = fmt_bandwidth(cache_bw_high_tbs, unit=TB / second, precision=0, commas=False)
+    dram_bw_low_tb_per_s_str = fmt_bandwidth(dram_bw_low_tbs, unit=TB / second, precision=0, commas=False)
+    dram_bw_high_tb_per_s_str = fmt_bandwidth(dram_bw_high_tbs, unit=TB / second, precision=0, commas=False)
+```
 
-Machine learning exemplifies this domain-specific divergence. Because ML workloads trigger complex interactions between tensor execution units, memory hierarchy bandwidth, and distributed communication fabrics, no single metric or workload can characterize a system. MLPerf formalizes this specialization across distinct deployment suites: MLPerf Training\index{MLPerf Training!data center multi-node scaling} evaluates multi-node scaling and high-bandwidth interconnects under time-to-quality targets [@mattson2020mlperf]; MLPerf Inference\index{MLPerf Inference!server to edge evaluation} measures throughput and latency percentiles under service level agreements (SLAs) across server and client systems [@reddi2020]; MLPerf Tiny\index{MLPerf Tiny!microcontroller benchmarks} tests ultra-low-power microcontrollers operating with tight memory constraints [@banbury2021mlperftiny]; and the cross-cutting MLPerf Power track evaluates energy efficiency across each environment. Reading @tbl-mlperf-suites down its constraint column illustrates how metrics adapt to physical limits: cluster-scale interconnect bandwidth gives way to latency percentiles at the edge, and ultimately to strict memory footprints on microcontrollers.
+::: {#psp-benchmarking-micro-benchmarking-rules .callout-perspective title="Micro-benchmarking rules"}
+
+To avoid measuring hardware artifacts instead of kernel performance, follow the Systems Detective's Rules:
+
+1.  **The warm-up rule**: Do not measure cold-start iterations as steady-state performance. Modern hardware uses DVFS (dynamic voltage and frequency scaling)\index{DVFS!warm-up measurement artifact} and dynamic frequency boosting\index{Frequency boosting!warm-up measurement artifact}; caches, kernels, and clocks need warm-up before the measured loop represents sustained behavior.
+2.  **The variance rule**: Report the coefficient of variation (CV) $(\text{CV} = \sigma_{\text{run}} / \mu_{\text{run}})$, where $\sigma_{\text{run}}$ and $\mu_{\text{run}}$ are the standard deviation and mean across repeated runs. Investigate values above the protocol's workload-specific tolerance; common causes include background OS jitter, thermal throttling\index{Thermal throttling!impact on sustained perf}, and memory contention, and 5 percent is not a universal cutoff.
+3.  **The "speed of light" (SOL) check**\index{Speed of light check!utilization diagnosis}: Compare the achieved throughput against the roofline. If a kernel achieves `{python} H100SolCheck.sol_example_tflop_per_s_str` on an H100 (peak ~`{python} H100SolCheck.h100_fp16_tflop_per_s_str` FP16, or ~`{python} H100SolCheck.h100_fp8_tflop_per_s_str` FP8 dense), the diagnostic step is to identify the cause of low utilization (often kernel launch latency from too many small kernels) before optimizing the code itself.
+4.  **The cache-state rule**: Set cache state to match the claim. Flush or exceed the L2 cache when measuring cold dynamic random-access memory (DRAM) bandwidth; preserve a warmed cache when measuring steady-state reuse. Otherwise a nominal DRAM result may instead reflect cache bandwidth (~`{python} H100SolCheck.cache_bw_low_tb_per_s_str`--`{python} H100SolCheck.cache_bw_high_tb_per_s_str`) rather than DRAM bandwidth (~`{python} H100SolCheck.dram_bw_low_tb_per_s_str`--`{python} H100SolCheck.dram_bw_high_tb_per_s_str`).
+5.  **The synchronization barrier rule**: Accelerator kernel launches are asynchronous on the host CPU. Timing GPU operations using CPU clocks without an explicit device barrier (such as `torch.cuda.synchronize()`) measures host enqueue latency rather than kernel execution; always place synchronization barriers immediately before and after the timed region, or use GPU-side timestamp events (`cudaEventRecord`).
+
+:::
+
+A profiler translates these measurement rules into physical diagnostics by decomposing kernel execution time into the three governing terms of the iron law: data movement, compute throughput, and latency overhead.
+
+::: {#psp-benchmarking-measuring-iron-law-terms .callout-perspective title="Measuring the iron law terms"}
+
+Moving from theory to trace means mapping the iron law equation onto a profiler timeline (like Nsight Systems or PyTorch Profiler).
+
+**Measuring the data term** $\left(\frac{\DataVolume}{\Bandwidth}\right)$
+
+*   **Signal**: Look for the "Memory Throughput" or "DRAM Bandwidth" line.
+*   **Formula**: $\Bandwidth_{\text{effective}} = \frac{\DataVolume}{T_{\text{kernel}}}$.
+*   **Diagnosis**: If $\Bandwidth_{\text{effective}} \approx \Bandwidth_{\text{peak}}$ (for example, close to the A100's `{python} A100Roofline.a100_bw_tb_per_s_str` peak), bandwidth pressure is a strong candidate bottleneck. Test whether reducing traffic or increasing bandwidth improves time; a high bandwidth reading alone does not establish that changing compute ($O$) has no effect.
+
+**Measuring achieved compute throughput $(\PeakRate \cdot \EfficiencyHw)$**
+
+*   **Signal**: Distinguish "SM Active," which measures activity, from executed-operation throughput. A busy multiprocessor does not imply high useful-model FLOP/s.
+*   **Formula**: $\PeakRate \cdot \EfficiencyHw = \frac{O}{T_{\text{kernel}}}$, reported in TFLOP/s.
+*   **Diagnosis**: If $\EfficiencyHw \ll 1$ AND $\Bandwidth_{\text{effective}} \ll \Bandwidth_{\text{peak}}$, the system is in the "utilization trap": likely latency bound (kernels too small) or grid bound (not enough threads).
+
+**Measuring the latency term $(\Latency)$**
+
+*   **Signal**: Look for gaps (empty space) between colored kernel bars on the timeline.
+*   **Formula**: $\text{Overhead Ratio} = \frac{T_{\text{gap}}}{T_{\text{kernel}} + T_{\text{gap}}}$.
+*   **Diagnosis**: A "Sawtooth" pattern (Compute, Gap, Compute, Gap) suggests exposed waiting; correlate CPU dispatch, dependencies, and transfers before attributing it to software overhead\index{Dispatch overhead reduction!kernel launch batching}. If dispatch dominates, candidates include operator fusion\index{Operator fusion!latency gap elimination}, covered in @sec-hardware-acceleration-kernel-fusion-7faf, or CUDA Graphs\index{CUDA graphs!kernel launch replay}, which capture a repeated sequence of GPU launches so the runtime can replay it with less CPU dispatch overhead.
+
+:::
+
+While standardized benchmarks measure aggregate throughput, profilers reveal the physical mechanisms that cause execution to stall. System diagnosis uses two complementary levels of instrumentation: framework profilers and kernel profilers.
+
+#### Framework profilers {.unnumbered}
+
+Framework profilers, such as the PyTorch Profiler\index{PyTorch profiler!performance analysis}\index{Framework profiler!performance analysis tool}, capture the logical execution trace of a training or inference iteration. They track operator dispatch on the host CPU, determine whether host preparation overlaps asynchronously with accelerator execution, and identify whether the data loader pipeline starves compute queues. The primary diagnostic metric is the step-time breakdown partitioned across data loading, host launch latency, device compute, and inter-device communication. This breakdown pinpoints which subsystem bounds iteration latency before inspecting individual kernels.
+
+::: {.column-margin .margin-pointer}
+↩ The feeding tax, the wall-clock time an accelerator loses waiting on input I/O, is established in @sec-data-engineering-feeding-problem.
+:::
+
+#### Kernel profilers {.unnumbered}
+
+Kernel profilers, such as NVIDIA Nsight Systems and Nsight Compute\index{NVIDIA Nsight!systems and compute profiling}\index{Kernel profiler!hardware-level analysis}, capture physical execution on accelerator silicon. Nsight Systems constructs a global timeline across CPU threads, CUDA API calls, memory transfers, and kernel durations to expose serialization bubbles. Nsight Compute conducts in-depth analysis of individual kernel invocations, measuring Streaming Multiprocessor (SM) warp occupancy, instruction issue stalls, and memory coalescing efficiency against the hardware roofline. Kernel profilers extract these diagnostics directly from on-chip Performance Monitoring Units (PMUs), capturing hardware counters for HBM byte traffic, L2 cache hit rates, and pipeline stall reasons, but counter collection and kernel replay can perturb timing. Compare diagnostic traces with minimally instrumented measurements.
+
+Interpreting these silicon metrics starts from the warp model of @sec-hardware-acceleration-evolution-simd-simt-architectures-e1fd, in which nearby, aligned addresses let a warp's\index{Warp!SIMT execution bundle} loads use fewer memory transactions\index{Memory coalescing!bus transaction efficiency}; transaction granularity depends on the device and access path. Scattered or strided addresses force separate transactions that move bytes no thread uses; a 4-byte load from each 32-byte sector, for example, uses 4 of every 32 bytes fetched. Profilers report the ratio as memory coalescing efficiency, pinpointing why a kernel achieves only a fraction of peak bandwidth.
+
+::: {.column-margin .margin-pointer}
+↩ The single instruction, multiple threads (SIMT) warp model, in which 32 threads issue one instruction and contiguous loads merge into a single coalesced transaction, is established in @sec-hardware-acceleration-evolution-simd-simt-architectures-e1fd.
+:::
+
+A rigorous profiling workflow proceeds top-down. An engineer begins with a framework profiler to isolate the dominant layer in the execution timeline (for example, identifying that a multi-head attention block accounts for 65 percent of step latency). The engineer then applies a kernel profiler to analyze that layer down to the silicon (for example, verifying that the softmax kernel achieves only a small fraction of peak memory bandwidth due to non-coalesced DRAM accesses). This two-stage workflow prevents misdirected optimization by ensuring engineering effort targets the limiting physical bottleneck.
+
+These granular measurements enable precise kernel optimization, but they cannot reveal how components interact when assembled into complete models. Macro-benchmarks address this gap.
+
+### Macro benchmarks {#sec-benchmarking-macro-benchmarks-4283}
+
+Micro-benchmarks verify that isolated operators achieve high compute or memory efficiency. Macro-benchmarks determine whether those gains persist when layers are composed into a complete model. Composing layers introduces physical interactions that isolated benchmarks cannot observe: intermediate activation tensors expand peak memory footprint, sequential kernel launches expose CPU driver dispatch overhead, and memory access streams from preceding operations evict shared cache lines before downstream kernels can reuse them.
+
+Macro-benchmarks serve a central engineering objective: evaluating model architectures and runtime configurations under standardized workloads. Model-level evaluation captures the trade-offs that emerge from layer composition: generalization accuracy on unseen validation data, dynamic memory allocation across batch sizes and context lengths, and aggregate throughput across varied request arrival patterns. These dimensions interact directly: an architecture that achieves higher accuracy may require an activation footprint that forces a smaller batch size under device memory constraints, collapsing the computational throughput that justified its adoption.
+
+Evaluating complete models requires standardized datasets, fixed reference tasks, and reproducible metric definitions. In computer vision, standard benchmarks evaluate models on ImageNet\index{ImageNet!macro benchmark reference} [@imagenet_website], measuring top-1 classification accuracy alongside inference latency across fixed batch sizes. In natural language processing, standardized tasks evaluate sequence-to-sequence translation and autoregressive generation, quantifying output quality against token generation rate across defined context lengths.
+
+Several industry-standard suites establish reproducible model-level comparisons across platforms. The MLPerf suite standardizes evaluation across data centers, edge appliances, mobile devices, and microcontrollers, as detailed in @sec-benchmarking-mlperf-inference-benchmarks-e878. For resource-constrained embedded targets, EEMBC's MLMark quantifies inference throughput and energy consumption under strict memory budgets, while the AI-Benchmark [@ai_benchmark_website] suite evaluates mobile systems-on-chip across heterogeneous compute units.
+
+### End-to-end benchmarks {#sec-benchmarking-endtoend-benchmarks-51bb}
+
+End-to-end benchmarks encompass the entire production pipeline, capturing every stage required to ingest raw data, generate model predictions, and deliver results to downstream clients. While micro- and macro-benchmarks focus on accelerator execution, real-world serving pipelines frequently find their primary bottlenecks outside the model itself.
+
+Data preprocessing forms the initial phase of the pipeline, converting raw external inputs into model-ready tensor representations. In computer vision pipelines, image ingestion requires decoding compressed file formats (such as JPEG decompression), resizing, cropping, and color normalization. When executed on host CPUs without hardware acceleration, these preprocessing steps can take several times longer than model inference on a modern accelerator, leaving high-throughput tensor cores idle while waiting for host memory transfers. Similarly, in natural language pipelines, subword tokenization and dynamic sequence padding on the host CPU often bound serving throughput. Postprocessing introduces analogous latency bottlenecks: object detection pipelines require non-maximum suppression (NMS) and bounding-box coordinate transformations, which create sequential execution stalls if not integrated efficiently into the execution graph.
+
+Distributed infrastructure components introduce further performance constraints beyond the compute fabric. Remote storage systems bound training throughput when reading large multimodal datasets, and network interface card (NIC) saturation in distributed clusters throttles collective communication. End-to-end benchmarks must measure pipeline throughput under realistic network latencies, concurrent query arrival patterns, and actual storage I/O constraints to ensure reproducible evaluation of the deployment as an integrated system.
+
+Public benchmark suites rarely measure storage, networking, and compute within a single unified protocol. While MLPerf Training and Inference evaluate end-to-end scenarios more closely than isolated operator tests, their closed divisions deliberately standardize input data loading to isolate accelerator performance from storage and network variability. Consequently, production end-to-end benchmarking remains primarily an internal engineering practice, evaluated through distributed tracing and production telemetry on live query distributions.
+
+### Granularity trade-offs and selection criteria {#sec-benchmarking-granularity-tradeoffs-selection-criteria-b7d9}
+
+@Tbl-benchmark-comparison contrasts the diagnostic focus, scope, and engineering trade-offs across the three benchmarking granularities. Micro-benchmarks isolate low-level operations to guide kernel optimization and hardware selection, macro-benchmarks evaluate complete models to guide architectural choices, and end-to-end benchmarks measure full pipelines to ensure production deployments satisfy real-world service requirements.
 
 ```{=latex}
 \begingroup
 \renewcommand{\arraystretch}{1.3}
 ```
 
-| **MLPerf Variant**   | **Target Domain** | **Key Constraints**                              | **Primary Metrics**                             |
-|:---------------------|:------------------|:-------------------------------------------------|:------------------------------------------------|
-| **MLPerf Training**  | Data center       | Multi-node scaling, high bandwidth interconnects | Time-to-quality, throughput (samples/sec)       |
-| **MLPerf Inference** | Server/Edge       | Latency SLAs, throughput requirements            | QPS, latency percentiles, accuracy preservation |
-| **MLPerf Tiny**      | MCU/IoT           | Ultra-low-power inference, limited memory        | Latency, accuracy, energy per inference         |
-| **MLPerf Power**     | Cross-cutting     | Energy budgets, thermal constraints              | Performance/W, energy per query                 |
+| **Component**   | **Micro Benchmarks**                                      | **Macro Benchmarks**                                   | **End-to-End Benchmarks**                              |
+|:----------------|:----------------------------------------------------------|:-------------------------------------------------------|:-------------------------------------------------------|
+| **Focus**       | Individual operations                                     | Complete models                                        | Full system pipeline                                   |
+| **Scope**       | Tensor ops, layers, activations                           | Model architecture, training, inference                | Extract, transform, load; model; infrastructure        |
+| **Example**     | Conv layer performance on cuDNN                           | ResNet-50 on ImageNet                                  | Production recommendation system                       |
+| **Advantages**  | Precise bottleneck identification, Component optimization | Model architecture comparison, Standardized evaluation | Realistic performance assessment, System-wide insights |
+| **Challenges**  | May miss interaction effects                              | Limited infrastructure insights                        | Complex to standardize, Often proprietary              |
+| **Typical Use** | Hardware selection, Operation optimization                | Model selection, Research comparison                   | Production system evaluation                           |
 
-: **MLPerf Benchmark Suite Variants**: Each variant addresses a different deployment context, from data-center-scale training to ultra-constrained microcontroller inference, targeting specific operational constraints and measuring metrics relevant to its deployment scenario. {#tbl-mlperf-suites tbl-colwidths="[15,14,36,35]"}
+: **Benchmarking Granularity Levels**: Different benchmark scopes target distinct stages of ML system development. Micro-benchmarks isolate individual operations for low-level optimization, macro-benchmarks evaluate complete models to guide architectural choices, and end-to-end benchmarks assess full system performance in production environments. {#tbl-benchmark-comparison tbl-colwidths="[11,28,32,29]"}
 
 ```{=latex}
 \endgroup
 ```
 
-Across all variants, MLPerf Power\index{MLPerf Power!energy efficiency measurement} measures useful work per watt rather than raw throughput alone. Domain-specific suites ensure that architectural optimizations translate to deployment success rather than remaining confined to isolated synthetic benchmarks.
+Selecting a single granularity level is rarely sufficient because benchmarking presents an inherent trade-off between diagnostic isolation and production fidelity. Along the descending diagonal in @fig-benchmark-tradeoffs, evaluation regimes trade diagnostic power for operational realism: micro-benchmarks (the red point at the top left) isolate kernel-level memory bandwidth and warp occupancy at the expense of end-to-end context, macro-benchmarks (the blue center point) capture composed model topologies, and end-to-end benchmarks (the green point at the bottom right) encompass live production traffic but obscure the root causes of latency spikes. Effective evaluation requires strategically combining all three tiers to verify that kernel speedups survive full-system deployment.
 
-While ML benchmarking suites inherit these historical lessons, machine learning workloads introduce statistical and data-dependent variability\index{Benchmarking!probabilistic variability} absent in traditional deterministic computing. Beyond standard system noise—such as operating system interrupts, background daemon activity, and thermal throttling—ML execution exhibits intrinsic non-determinism. Floating-point reduction across parallel threads is non-associative, causing slight numerical differences when summation order changes; data ingestion pipelines apply pseudo-random augmentations; and stochastic gradient descent navigates non-convex loss surfaces sensitive to weight initialization. Consequently, rigorous ML evaluation requires explicit statistical controls, including multi-seed replication, variance reporting, and deterministic data-loading rules.
+::: {#fig-benchmark-tradeoffs fig-env="figure" fig-pos="htb" fig-cap="**Isolation vs. Representativeness**: The core trade-off in benchmarking granularity. Micro-benchmarks provide high diagnostic precision but limited real-world relevance, while end-to-end benchmarks capture realistic system behavior but offer less precise component-level insights. Effective ML system evaluation requires strategic combination of all three levels." fig-alt="Scatter plot with three labeled points along a diagonal: micro-benchmarks at high isolation, macro-benchmarks, and end-to-end benchmarks at high representativeness."}
 
-Standardization transforms these empirical lessons into a shared engineering methodology. When one team measures inference latency including host preprocessing while another begins timing only after tensors reside in accelerator device memory, or when power meters draw different physical boundaries around the power supply unit, the resulting numbers are incommensurable. Standardized suites replace ad-hoc testing with audited harnesses, uniform measurement boundaries, and verifiable submission rules, enabling rigorous hardware procurement and algorithmic comparison across the industry. @Tbl-benchmark-evolution synthesizes this historical progression from early synthetic loops to multi-dimensional ML systems evaluation.
+```{.tikz}
+\begin{tikzpicture}[font=\sffamily\small,x=8mm,y=8mm]
+\tikzset{%
+  axis/.style={-latex,thick,black},
+  grid/.style={very thin,gray!40},
+  point/.style={circle,fill,inner sep=1.75pt}
+}
+% Draw axes
+\draw[axis] (0,0) -- node[pos=.5, sloped, above=17pt]{\footnotesize Isolation/Diagnostic Power} (0,5.6);
+\draw[axis] (0,0) --node[below=10pt] {\footnotesize Real-World Representativeness} (8,0) ;
+% Draw grid lines
+\foreach \x in {1,2,3,4,5,6,7}
+  \draw[grid] (\x,0) -- (\x,4.75);
+\foreach \y in {1,2,3,4}
+  \draw[grid] (0,\y) -- (7.25,\y);
+% Add trend line (passes through all three points)
+\draw[dashed,thick,gray!60] (1.5,4) -- (4.5,1);
+% Draw benchmark points
+\node[point,color=RedLine] (micro) at (1.5,4) {};
+\node[point,color=BlueLine] (macro) at (3,2.5) {};
+\node[point,color=GreenD] (endtoend) at (4.5,1) {};
+% Add labels
+\node[right=4pt ,color=RedLine] at (micro) {\footnotesize \textbf{Micro-benchmarks}};
+\node[right=4pt ,color=BlueLine] at (macro) {\footnotesize \textbf{Macro-benchmarks}};
+\node[right=4pt ,color=GreenD] at (endtoend) {\footnotesize \textbf{End-to-End benchmarks}};
+% Add axis labels
+\node[rotate=90] at (-0.3,4.5) {\footnotesize High};
+\node[rotate=90] at (-0.3,0.45) {\footnotesize Low};
+\node[below] at (0.5,-0.0) {\footnotesize Low};
+\node[below] at (7.5,-0.0) {\footnotesize High};
+\end{tikzpicture}
+```
 
-| **Benchmark**  | **Year** | **Primary Focus**                   | **Key Metric(s)**                       | **Lesson for ML Benchmarking**                                               |
-|:---------------|:--------:|:------------------------------------|:----------------------------------------|:-----------------------------------------------------------------------------|
-| **Whetstone**  |   1976   | Synthetic floating-point operations | MWIPS                                   | Gaming synthetic tests undermines evaluation validity                        |
-| **LINPACK**    |   1979   | Linear algebra (matrix operations)  | FLOP/s                                  | Isolated operations miss system-level complexity and bottlenecks             |
-| **SPEC CPU**   |   1989   | Real application workloads          | SPECrate, SPECspeed                     | Representative workloads reveal true deployment performance                  |
-| **SPEC Power** |   2007   | Server energy efficiency            | ssj_ops/W across load levels            | Energy efficiency requires multi-load evaluation, not just peak performance  |
-| **Green500**   |   2007   | HPC energy efficiency               | GFLOP/s per watt                        | Efficiency rankings complement raw performance rankings                      |
-| **MLPerf**     |   2018   | ML systems (training + inference)   | Time-to-quality, QPS, latency, accuracy | Synthesizes all lessons: representative workloads + multi-objective + system |
+:::
 
-: **Benchmark Evolution**: Evolution of computing benchmarks from synthetic operations to ML-specific evaluation. Each generation addressed limitations of its predecessors, culminating in MLPerf's synthesis of representative workloads, multi-objective metrics, and integrated system measurement. {#tbl-benchmark-evolution tbl-colwidths="[12,9,23,20,36]"}
+This trade-off maps directly onto the D·A·M taxonomy. Micro-benchmarks assess the physical capability of the Machine ($\text{M}$) executing a primitive Algorithm ($\text{A}$). Macro-benchmarks evaluate how the Algorithm ($\text{A}$) orchestrates tensor data flow across composed layers on the Machine ($\text{M}$). End-to-end benchmarks evaluate how raw Data ($\text{D}$) ingestion from external storage and network infrastructure interacts with both Algorithm and Machine under production load. Systematic performance engineering requires evaluating all three tiers to ensure local kernel optimizations translate into global system speedups.
+
+Selecting the appropriate granularity defines the physical boundary of measurement, but establishing that boundary is only the first step. A complete benchmark also requires specifying the operational ingredients: the task definition, representative datasets, target models, and evaluation metrics. Without these concrete components, measurements at any granularity fail to produce actionable engineering conclusions.
 
 ## Benchmark Components {#sec-benchmarking-benchmark-components-97cc}
 
@@ -781,9 +1003,89 @@ The deployed anomaly detection workflow in @fig-benchmark-components records the
 
 Which of these metrics governs viability depends entirely on the deployment environment and its physical constraints. Energy per inference dictates battery life on untethered edge devices and bounds power distribution limits and cooling costs in server racks. Model size determines whether weights reside entirely within fast on-chip SRAM or spill into off-chip DRAM, while in multi-tenant cloud accelerators, parameter volume dictates how many model replicas fit within HBM. Inference latency determines whether the system satisfies real-time deadlines on streaming audio without dropping frames, whereas batching trades per-sample latency for higher throughput by amortizing weight-transfer overhead across multiple inputs. These metrics expose direct engineering trade-offs: reducing model size below `{python} AnomalySpecs.anomaly_params_k_str` parameters can reduce memory traffic and execution time on a supported path, but risks degrading the `{python} AnomalySpecs.anomaly_auc_str` AUC detection accuracy. Whether these measurements constitute a passing benchmark depends on the operational envelope; the benchmark specification standardizes the evaluation protocol, but application requirements dictate the acceptance thresholds.
 
+## Historical Foundations {#sec-benchmarking-historical-context-7350}
+
+Each benchmark generation\index{Benchmarking!historical evolution} arose when existing metrics failed to predict end-to-end behavior, and those failures are direct precedents for why modern ML evaluation requires the D·A·M taxonomy (Data · Algorithm · Machine). The evolution from early synthetic tests to modern ML suites reveals three methodological shifts: from isolated kernels to representative application suites, from single-metric throughput to multi-objective energy profiles, and from generic compute metrics to domain-specific execution constraints.
+
+### Performance benchmarks {#sec-benchmarking-performance-benchmarks-ea8a}
+
+The earliest computing benchmarks revealed an enduring vulnerability in empirical evaluation: benchmark gaming\index{Benchmark gaming!vendor optimization for tests}. Whetstone\index{Whetstone!synthetic floating-point benchmark} [@curnow1976whetstone] used a synthetic mix of scientific operations, while LINPACK\index{LINPACK!matrix operations benchmark}[^fn-whetstone-linpack-history] [@dongarra1979linpack] measured dense linear-system solving. Because these workloads relied on predictable computational loops, compiler and hardware vendors could optimize specifically for the benchmark kernels—such as unrolling synthetic loops or tailoring cache tiling to exact matrix dimensions—without improving general application performance. SPEC CPU\index{SPEC CPU!real application workloads} (1989) addressed this limitation by evaluating complete, portable software suites that stressed integer branching, irregular memory hierarchies, and floating-point pipelines [@dixit1993spec]. This progression directly informs ML systems: model compression claims cannot rely on isolated matrix multiplication kernels, but require validation on representative tasks like ResNet-50 and BERT across the full software runtime.
+
+[^fn-whetstone-linpack-history]: **Whetstone and LINPACK**\index{Whetstone!etymology}\index{LINPACK!narrow benchmark}: Whetstone [@curnow1976whetstone] was named after the English Electric facility in Whetstone, Leicestershire, where the original ALGOL compiler was built; LINPACK [@dongarra1979linpack] was a package and benchmark for dense linear systems, later used by the Top500 list. Whetstone's fixed synthetic program mix and LINPACK's dense linear-algebra focus made each useful but narrower than a diverse application suite. ML benchmarking inherited the same vulnerability: model-specific kernel tuning can overfit a single workload, which is why MLPerf uses multiple workloads spanning vision, language, and recommendation [@mattson2020mlperf; @reddi2020].
+
+As computing expanded into interactive and mobile environments, single-metric evaluation proved insufficient. Graphics benchmarks paired frame rate with rendering quality, and mobile evaluations treated battery draw as co-equal with latency. This multi-objective trade-off mirrors ML serving, where optimizing latency in isolation can trigger catastrophic degradation in model accuracy or energy efficiency.
+
+A third shift occurred when distributed computing\index{Distributed computing!system-level performance} demonstrated that component-level microbenchmarks fail to predict cluster-level throughput. Evaluating a CPU or accelerator in isolation cannot capture execution dynamics when network interconnect latency, serialization overheads, and collective communication dominate wall-clock time. Distributed ML training similarly depends on the tight interplay among accelerator matrix engines, host-to-device PCIe bandwidth, input data prefetching pipelines, and gradient synchronization across network fabrics.
+
+To capture these interactions, DAWNBench\index{DAWNBench!time-to-accuracy evaluation} [@coleman2019] pioneered time-to-accuracy evaluation, tying raw hardware throughput directly to algorithmic convergence. Maximizing samples processed per second offers no engineering value if numerical instability or suboptimal batch sizing prevents the model from reaching target validation accuracy. These empirical lessons culminated in MLPerf\index{MLPerf!founding and purpose}[^fn-mlperf-benchmark-suite] (2018), which institutionalized full-system measurement, multi-objective constraints, and representative workloads spanning vision, language, and recommendation systems [@mattson2020mlperf; @reddi2020].
+
+[^fn-mlperf-benchmark-suite]: **MLPerf**\index{MLPerf!founding}: Launched in 2018 by a consortium of industry and academic institutions, MLPerf takes its name from "ML" combined with "Perf" (performance), echoing SPEC's benchmarking tradition. MLPerf's design principles—representative workloads, full-system measurement, and open submission—directly address the gaming that plagued Whetstone and LINPACK: vendors who could previously report peak kernel throughput on cherry-picked problem sizes must now report end-to-end system performance on standardized tasks [@mattson2020mlperf; @reddi2020].
+
+### Energy benchmarks {#sec-benchmarking-energy-benchmarks-709a}
+
+The multi-objective evaluation paradigm extended to energy efficiency\index{Benchmarking!energy, first-class metric} as computing diversified beyond mainframes into battery-limited mobile devices and megawatt-scale data centers. Because energy consumption directly dictates battery life at the edge and operating expenses in warehouse-scale clusters, energy became a first-class evaluation metric alongside performance. This shift produced standardized energy benchmarks such as SPEC Power\index{SPEC Power!server energy efficiency}[^fn-spec-power-benchmark] for servers and Green500\index{Green500!HPC energy efficiency ranking}[^fn-green500-energy-efficiency] for supercomputers.
+
+[^fn-spec-power-benchmark]: **SPEC Power**\index{SPEC Power!energy efficiency}: Introduced in 2007, SPEC Power measures performance per watt across 11 load levels from idle (0 percent) through 100 percent in 10 percent increments [@lange2009]. This granularity matters for ML serving: inference workloads rarely sustain 100 percent load, and servers that are efficient at peak but wasteful at partial load inflate the energy cost of real-world deployment.
+
+[^fn-green500-energy-efficiency]: **Green500**\index{Green500!energy efficiency ranking}: Started in 2007 as a counterpart to the Top500, Green500 ranks systems by FLOP/s per watt rather than raw performance [@feng2007green500]. Its lesson for ML systems is methodological: the most cost-effective training cluster is not necessarily the fastest one, but the system that delivers useful work per watt under the workload and measurement boundary that matter.
+
+Evaluating energy in ML workloads introduces distinct physical measurement challenges. Accelerators exhibit sharp dynamic power swings: alternating between memory-bound activation layers and power-dense matrix multiplication units creates rapid current fluctuations ($di/dt$) that simple average-power meters fail to resolve. Furthermore, isolating accelerator consumption from host CPU activity, PCIe interconnects, and cooling fans requires rigorous measurement boundaries. MLPerf Power\index{MLPerf!power, ML energy measurement} [@mlperf_power_website] addresses these demands by coupling standardized workloads with strict physical measurement methodologies and calibrated external power analyzers.
+
+Energy benchmarking extends beyond hardware telemetry to evaluate algorithmic efficiency. Model compression techniques (pruning, quantization, knowledge distillation) reduce energy consumption by decreasing arithmetic operations and off-chip memory traffic, rather than relying solely on lower-power silicon. For instance, MobileNet architectures replace standard convolutions with depthwise separable convolutions, drastically reducing DRAM access and arithmetic operations relative to standard convolutional neural network (CNN) baselines such as ResNet [@howard2017mobilenets; @sandler2018; @he2016]. As quantified in @sec-model-compression-energy-costs-d1d5, reading an operand from off-chip DRAM consumes orders of magnitude more energy than executing an arithmetic operation, making algorithmic memory-traffic reduction a primary lever for energy-efficient computing.
+
+### Domain-specific benchmarks {#sec-benchmarking-domainspecific-benchmarks-b15f}
+
+As specialized accelerators emerged to bypass general-purpose CPU bottlenecks, generic benchmarks failed to capture domain-specific execution constraints. Three operational axes drove this specialization, defining how systems are evaluated under real-world conditions.
+
+Deployment constraints dictate core metric priorities based on physical limits. Data center training clusters optimize for aggregate throughput within rack- and facility-level power envelopes. In contrast, mobile AI operates within strict thermal throttling thresholds (typically under 5 watts), and embedded microcontroller systems function within milliwatt power budgets. These physical bounds determine whether a benchmark prioritizes throughput (samples per second) or energy efficiency (Joules per inference).
+
+Application requirements impose functional constraints beyond raw speed. Clinical AI models require rigorous calibration and interpretability alongside classification accuracy; high-frequency financial trading systems enforce hard tail-latency cutoffs paired with deterministic execution; autonomous vehicles demand bounded worst-case latency and formal functional safety validation. These requirements broaden evaluation criteria beyond throughput.
+
+Operational conditions determine real-world robustness. Edge devices must maintain inference deadlines across ambient temperature swings and noisy sensor streams; data-center serving infrastructure must absorb sudden query spikes and network packet loss without dropping requests; industrial IoT nodes must operate unattended for years. Hardware acceleration capabilities deliver production value only when sustained under these operational environments.
+
+Machine learning exemplifies this domain-specific divergence. Because ML workloads trigger complex interactions between tensor execution units, memory hierarchy bandwidth, and distributed communication fabrics, no single metric or workload can characterize a system. MLPerf formalizes this specialization across distinct deployment suites: MLPerf Training\index{MLPerf Training!data center multi-node scaling} evaluates multi-node scaling and high-bandwidth interconnects under time-to-quality targets [@mattson2020mlperf]; MLPerf Inference\index{MLPerf Inference!server to edge evaluation} measures throughput and latency percentiles under service level agreements (SLAs) across server and client systems [@reddi2020]; MLPerf Tiny\index{MLPerf Tiny!microcontroller benchmarks} tests ultra-low-power microcontrollers operating with tight memory constraints [@banbury2021mlperftiny]; and the cross-cutting MLPerf Power track evaluates energy efficiency across each environment. Reading @tbl-mlperf-suites down its constraint column illustrates how metrics adapt to physical limits: cluster-scale interconnect bandwidth gives way to latency percentiles at the edge, and ultimately to strict memory footprints on microcontrollers.
+
+```{=latex}
+\begingroup
+\renewcommand{\arraystretch}{1.3}
+```
+
+| **MLPerf Variant**   | **Target Domain** | **Key Constraints**                              | **Primary Metrics**                             |
+|:---------------------|:------------------|:-------------------------------------------------|:------------------------------------------------|
+| **MLPerf Training**  | Data center       | Multi-node scaling, high bandwidth interconnects | Time-to-quality, throughput (samples/sec)       |
+| **MLPerf Inference** | Server/Edge       | Latency SLAs, throughput requirements            | QPS, latency percentiles, accuracy preservation |
+| **MLPerf Tiny**      | MCU/IoT           | Ultra-low-power inference, limited memory        | Latency, accuracy, energy per inference         |
+| **MLPerf Power**     | Cross-cutting     | Energy budgets, thermal constraints              | Performance/W, energy per query                 |
+
+: **MLPerf Benchmark Suite Variants**: Each variant addresses a different deployment context, from data-center-scale training to ultra-constrained microcontroller inference, targeting specific operational constraints and measuring metrics relevant to its deployment scenario. {#tbl-mlperf-suites tbl-colwidths="[15,14,36,35]"}
+
+```{=latex}
+\endgroup
+```
+
+Across all variants, MLPerf Power\index{MLPerf Power!energy efficiency measurement} measures useful work per watt rather than raw throughput alone. Domain-specific suites ensure that architectural optimizations translate to deployment success rather than remaining confined to isolated synthetic benchmarks.
+
+While ML benchmarking suites inherit these historical lessons, machine learning workloads introduce statistical and data-dependent variability\index{Benchmarking!probabilistic variability} absent in traditional deterministic computing. Beyond standard system noise—such as operating system interrupts, background daemon activity, and thermal throttling—ML execution exhibits intrinsic non-determinism. Floating-point reduction across parallel threads is non-associative, causing slight numerical differences when summation order changes; data ingestion pipelines apply pseudo-random augmentations; and stochastic gradient descent navigates non-convex loss surfaces sensitive to weight initialization. Consequently, rigorous ML evaluation requires explicit statistical controls, including multi-seed replication, variance reporting, and deterministic data-loading rules.
+
+Standardization transforms these empirical lessons into a shared engineering methodology. When one team measures inference latency including host preprocessing while another begins timing only after tensors reside in accelerator device memory, or when power meters draw different physical boundaries around the power supply unit, the resulting numbers are incommensurable. Standardized suites replace ad-hoc testing with audited harnesses, uniform measurement boundaries, and verifiable submission rules, enabling rigorous hardware procurement and algorithmic comparison across the industry. @Tbl-benchmark-evolution synthesizes this historical progression from early synthetic loops to multi-dimensional ML systems evaluation.
+
+| **Benchmark**  | **Year** | **Primary Focus**                   | **Key Metric(s)**                       | **Lesson for ML Benchmarking**                                               |
+|:---------------|:--------:|:------------------------------------|:----------------------------------------|:-----------------------------------------------------------------------------|
+| **Whetstone**  |   1976   | Synthetic floating-point operations | MWIPS                                   | Gaming synthetic tests undermines evaluation validity                        |
+| **LINPACK**    |   1979   | Linear algebra (matrix operations)  | FLOP/s                                  | Isolated operations miss system-level complexity and bottlenecks             |
+| **SPEC CPU**   |   1989   | Real application workloads          | SPECrate, SPECspeed                     | Representative workloads reveal true deployment performance                  |
+| **SPEC Power** |   2007   | Server energy efficiency            | ssj_ops/W across load levels            | Energy efficiency requires multi-load evaluation, not just peak performance  |
+| **Green500**   |   2007   | HPC energy efficiency               | GFLOP/s per watt                        | Efficiency rankings complement raw performance rankings                      |
+| **MLPerf**     |   2018   | ML systems (training + inference)   | Time-to-quality, QPS, latency, accuracy | Synthesizes all lessons: representative workloads + multi-objective + system |
+
+: **Benchmark Evolution**: Evolution of computing benchmarks from synthetic operations to ML-specific evaluation. Each generation addressed limitations of its predecessors, culminating in MLPerf's synthesis of representative workloads, multi-objective metrics, and integrated system measurement. {#tbl-benchmark-evolution tbl-colwidths="[12,9,23,20,36]"}
+
+
+#### Compression benchmarks
+
 Two benchmark categories recur often enough across the optimization pipeline to warrant specialized checklists: compression benchmarks, which a pruned or quantized model must pass before deployment, and mobile and edge benchmarks, which power and thermal boundaries strictly constrain. Each composes the task, data, model, metrics, harness, and run rules while enforcing domain-specific limits. Compression validation requires a multi-metric protocol that balances size reduction against accuracy and latency (@sec-benchmarking-compression-validation-efficiencyquality-frontier-e9c4), while edge deployment requires sustained-power measurement under realistic thermal and duty-cycle constraints (@sec-benchmarking-power-measurement-techniques-bcc2).
 
-### Mobile and edge benchmarks {#sec-benchmarking-mobile-edge-benchmarks-fd4f}
+#### Mobile and edge benchmarks {#sec-benchmarking-mobile-edge-benchmarks-fd4f}
 
 Unlike data centers with kilowatt-scale power delivery and active cooling infrastructure, mobile and edge deployments\index{Edge deployment!constraint triangle} operate within strict milliwatt- to watt-scale power envelopes and passive thermal dissipation limits. Benchmarking these systems requires navigating an interdependent triangle of power consumption, inference latency, and model accuracy, where optimizing any two typically degrades the third. @Tbl-edge-vs-cloud-constraints contrasts these operational constraints against cloud environments.
 
@@ -899,305 +1201,6 @@ When edge devices offload computation to remote servers over 5G or Wi-Fi network
 [^fn-urllc-latency-guarantee]: **URLLC (ultra-reliable low-latency communication)**\index{URLLC!edge inference constraint}: ITU-R defines a 1 ms radio-interface user-plane latency target and 99.999 percent successful delivery within 1 ms for a 32-byte packet under specified test conditions. These radio-interface targets are not a sub-1-ms end-to-end application guarantee. Edge-inference benchmarks should report radio or network latency and compute latency separately and together, alongside model quality.
 
 Across both cloud data centers and edge devices, benchmarking methodology divides along a fundamental operational boundary: whether the system is executing training or inference. Training executes forward and backward passes, saving or recomputing activations to calculate gradients and updating model weights, with communication when training is distributed. Inference omits the backward pass and can release an activation after its last forward consumer, while retaining state such as KV caches when needed. Both phases can use fusion and reduced precision, but their memory access patterns, arithmetic intensities, and dependencies differ enough to require distinct benchmark objectives.
-
-## Benchmarking Granularity {#sec-benchmarking-benchmarking-granularity-3855}
-
-A GPU kernel that runs 3$\times$ faster in isolation may deliver zero end-to-end speedup if the data ingestion pipeline cannot saturate device memory bandwidth. This diagnostic mismatch makes evaluation granularity a fundamental systems design choice. Standardization specifies *how* measurement is kept consistent, while **benchmarking granularity**\index{Benchmarking granularity!definition} specifies *what* physical boundary is measured. System validation spans multiple architectural scales, from individual tensor operations to distributed production pipelines, with each granularity diagnosing distinct bottlenecks:
-
-- Micro benchmarks\index{Micro benchmark!component isolation} isolate individual components: kernel execution time, memory bandwidth utilization, and single-layer numerical behavior. These diagnose *where* low-level hardware inefficiencies occur.
-- Macro benchmarks\index{Macro benchmark!subsystem evaluation} evaluate composed model subsystems: full model training convergence, inference pipeline throughput, and dataset accuracy metrics. These reveal *what* architectural trade-offs exist across layer compositions.
-- End-to-end benchmarks\index{End-to-end benchmark!complete workflow measurement} measure complete operational pipelines: client request-to-response latency including preprocessing, training time-to-accuracy including storage I/O, and model robustness on production data distributions. These show whether the combined system satisfies real-world service-level objectives.
-
-Optimization techniques operate across distinct granularities: kernel fusion targets micro-level execution, structured pruning alters macro-level parameter structures, and data curation\index{Data curation!end-to-end generalization} determines end-to-end generalization. System validation must align with these respective boundaries. An isolated micro-benchmark may show substantial kernel speedup, yet a macro-benchmark can reveal that increased activation memory footprints force smaller batch sizes that degrade overall throughput. Similarly, an end-to-end benchmark exposes storage or host deserialization stalls that remain completely invisible at the accelerator kernel level.
-
-@Fig-granularity diagrams these nested evaluation scopes across the ML stack, tracing how measurement perimeters expand from left to right across four physical tiers: micro-benchmarks isolate individual kernel layers (ML Layers), macro-benchmarks evaluate composed model topologies (ML Model), application benchmarks introduce supporting host compute (AI Task), and end-to-end benchmarks encompass the complete multi-node pipeline of AI and non-AI compute nodes. The schematic splits the chapter's broader end-to-end scope into single-machine task logic and distributed cluster deployment, visually emphasizing how bottlenecks migrate into auxiliary host systems as the evaluation boundary widens.
-
-::: {#fig-granularity fig-env="figure" fig-pos="htb" fig-cap="**Benchmarking Granularity**: Four-panel block diagram showing micro, macro, application, and end-to-end evaluation layers. Each panel maps a distinct scope of assessment, from isolated kernel operations through full-system deployment, enabling targeted optimization at every level of the ML stack." fig-alt="Block diagram showing four evaluation layers: micro (kernels), macro (models), application (compute logic), and end-to-end (full deployment), connected by arrows to show expanding scope."}
-
-```{.tikz}
-\begin{tikzpicture}[font=\sffamily\small]
- \tikzset{%
- Box/.style={
- node distance=1.25,
-    inner xsep=2pt,
-    draw=RedLine,
-    line width=0.75pt,
-    fill=RedL!20,
-    align=flush center,
-    text width=30mm,
-    minimum width=30mm, minimum height=10mm
-  },
-   Box2/.style={Box, draw=BlueLine,fill=BlueL!20},
-   Box3/.style={Box, draw=GreenLine,fill=GreenL!40},
-   Box4/.style={Box, draw=BrownLine,fill=BrownL!40,text width=24mm,},
- %
-  Line/.style={line width=0.35pt,black!60,text=black},
-  LineD/.style={line width=0.75pt,black!60,text=black,dashed,dash pattern=on 3pt off 2pt},
-  Line2/.style={line width=0.85pt,black!60,text=black,-{Latex[length=6pt, width=4pt]}}
-}
-
-  \def\rows{3}
-  \def\cols{4}
-  \def\r{0.35}
-  \def\xgap{0.15}
-  \def\ygap{0.5}
-
-\begin{scope}[local bounding box=CEN,shift={($(0,0)+(0,0)$)}]
-  \foreach \i [count=\c] in {0,...,\numexpr\rows-1} {
-    \foreach \j  in {0,...,\numexpr\cols-1} {
-      \pgfmathtruncatemacro{\newX}{\j + 1} %
-      % Circle position
-      \pgfmathsetmacro\x{\j*(2*\r + \xgap)}
-      \pgfmathsetmacro\y{-\i*(2*\r + \ygap)}
-\definecolor{cellcol}{RGB}{253,226,240}
-     \node[fill=VioletLine!60,circle,minimum size=\r](C\c\newX)at(\x,-\y){};
-    }
-  }
-\foreach \a/\b in {C3/C2, C2/C1}{%
-  \foreach \i in {1,2,3,4}{%
-    \foreach \j in {1,2,3,4}{%
-      \draw[Line] (\a\i) -- (\b\j);
-    }%
-  }%
-}
-\end{scope}
-\scoped[on background layer]
-\node[outer sep=0pt,draw=BackLine,inner xsep=3mm,inner ysep=2mm,yshift=0mm,
-           fill=BackColor!20,fit=(C11)(C34),line width=0.75pt](BB1){};
-\node[above=2pt of  BB1.north,anchor=south]{ML Layers};
-%%%
-\node[Box,below right =0.19 and 1.4 of BB1.north east](MA){Model A};
-\node[Box,above right =0.19 and 1.4 of BB1.south east](MB){Model B};
-\scoped[on background layer]
-\node[outer sep=0pt,draw=BackLine,inner xsep=3mm,inner ysep=2mm,yshift=0mm,
-           fill=BackColor!20,fit=(MA)(MB),line width=0.75pt](BB2){};
-\node[above=2pt of  BB2.north,anchor=south]{ML Model};
-%
-\def\du{1.7}
-\node[Box2,right =\du of MA](T1){AI Task 1};
-\node[Box2, right =\du  of MB](T2){Supporting Compute};
-\scoped[on background layer]
-\node[outer sep=0pt,draw=BackLine,inner xsep=3mm,inner ysep=2mm,yshift=0mm,
-           fill=BackColor!20,fit=(T1)(T2),line width=0.75pt](BB3){};
-\node[above=2pt of  BB3.north,anchor=south]{AI Task};
-%
-\node[Box3,right =\du  of T1](CN1){AI Compute Node};
-\node[Box4,right = 1.15 of CN1](NA1){Non-AI Compute Node};
-\node[Box3, right =\du  of T2](CN2){AI Compute Node};
-\node[Box4,right = 1.15 of CN2](NA2){Non-AI Compute Node};
-\scoped[on background layer]
-\node[outer sep=0pt,draw=BackLine,inner xsep=3mm,inner ysep=2mm,yshift=0mm,
-           fill=BackColor!20,fit=(CN1)(NA2),line width=0.75pt](BB4){};
-\node[above=2pt of  BB4.north,anchor=south]{End-to-End Application};
-%
-\draw[Line2](MA)--(MB);
-\draw[Line2](T1)--(T2);
-\draw[Line2](CN1)--(NA1);
-\draw[Line2](CN2)--(NA2);
-\draw[Line2](NA1)--++(0,-0.8)-|(CN2);
-\draw[LineD](BB1.north east)--(MA.170);
-\draw[LineD](BB1.south east)--(MA.190);
-\draw[LineD](BB2.north east)--(T1.170);
-\draw[LineD](BB2.south east)--(T1.190);
-\draw[LineD](BB3.north east)--(CN1.170);
-\draw[LineD](BB3.south east)--(CN2.190);
-\end{tikzpicture}
-```
-
-:::
-
-### Micro benchmarks {#sec-benchmarking-micro-benchmarks-7f5a}
-
-While end-to-end metrics govern service-level agreements, optimizing an accelerator pipeline requires isolating the specific mathematical operations that consume execution time and energy. Micro-benchmarks\index{Micro benchmark!diagnostic purpose} serve this diagnostic role by evaluating individual tensor operations in isolation, measuring the accelerator's hardware primitives directly. When profiling a slow inference service, macro-benchmarks report aggregate latency violations, but only micro-benchmarks reveal whether execution time is dominated by matrix multiplications, self-attention projections, memory copies across the host-accelerator interconnect, or elementwise activation kernels.
-
-::: {.column-margin .margin-pointer}
-↩ The compute primitives that micro-benchmarks isolate, vector and matrix operations and special function units, are established in @sec-hardware-acceleration-ai-compute-primitives-2c99.
-:::
-
-Tensor operations constitute the primary target of micro-benchmarking because matrix multiplications and convolutions dominate the arithmetic budget of deep neural networks. Highly optimized runtime libraries such as cuDNN[^fn-cudnn-library-kernel] [@chetlur2014cudnn] provide hand-tuned kernel implementations tailored to specific microarchitectures. Micro-benchmarks also evaluate standalone activation functions (such as ReLU, Sigmoid, and GELU) and structural submodules (such as multi-head attention projections or transformer feed-forward blocks) across standardized input shapes. Benchmark suites such as Baidu's DeepBench\index{DeepBench!operator-level testing}\index{Micro-benchmark suite!operator-level testing} [@deepbench_github] formalized this methodology by evaluating raw GEMM, convolution, and collective communication primitives across diverse hardware platforms, isolating silicon-level execution efficiency from higher-level framework dispatch overhead.
-
-[^fn-cudnn-library-kernel]: **cuDNN (CUDA deep neural network library)**\index{cuDNN!benchmarking dependency}: Released by NVIDIA in 2014, cuDNN provides hand-tuned kernel implementations for convolutions, pooling, and normalization. The benchmarking implication: reported inference latencies depend heavily on which cuDNN version and algorithm autotuner settings were used, making cuDNN version a mandatory element of any reproducible benchmark specification.
-
-Measuring isolated kernels requires rigorous experimental control. Without disciplined measurement protocols, dynamic hardware frequency scaling, asynchronous execution queues, and cache state introduce transient artifacts that distort kernel runtime.
-
-```{python}
-#| echo: false
-#| label: h_h100-specs-calc
-# ┌── LEGO ───────────────────────────────────────────────
-# │ Context: Micro-benchmarking rules callout—SOL Check.
-# │ Goal: H100 FP16/FP8 peak TFLOP/s for speed-of-light diagnostics.
-from mlsysim import Hardware
-from mlsysim.fmt import fmt, fmt_bandwidth, fmt_flop_rate
-
-class H100SolCheck:
-    """H100 peak throughput for micro-benchmark SOL checks."""
-
-    _h100_fp16 = Hardware.Cloud.H100.compute.peak_flops
-    _h100_fp8 = Hardware.Cloud.H100.compute.precision_flops["fp8"]
-    sol_example_tflops = 10 * (TFLOP / second)
-    cache_bw_low_tbs = 5 * (TB / second)  # scenario assumption: lower observed cache bandwidth
-    cache_bw_high_tbs = 10 * (TB / second)
-    dram_bw_low_tbs = 1 * (TB / second)  # scenario assumption: lower observed DRAM bandwidth
-    dram_bw_high_tbs = 2 * (TB / second)
-
-    # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
-    h100_fp16_tflop_per_s_str = fmt_flop_rate(_h100_fp16, unit=TFLOP / second, precision=0, commas=False)
-    h100_fp8_tflop_per_s_str = fmt_flop_rate(_h100_fp8, unit=TFLOP / second, precision=0, commas=True)
-    sol_example_tflop_per_s_str = fmt_flop_rate(sol_example_tflops, unit=TFLOP / second, precision=0, commas=False)
-    cache_bw_low_tb_per_s_str = fmt_bandwidth(cache_bw_low_tbs, unit=TB / second, precision=0, commas=False)
-    cache_bw_high_tb_per_s_str = fmt_bandwidth(cache_bw_high_tbs, unit=TB / second, precision=0, commas=False)
-    dram_bw_low_tb_per_s_str = fmt_bandwidth(dram_bw_low_tbs, unit=TB / second, precision=0, commas=False)
-    dram_bw_high_tb_per_s_str = fmt_bandwidth(dram_bw_high_tbs, unit=TB / second, precision=0, commas=False)
-```
-
-::: {#psp-benchmarking-micro-benchmarking-rules .callout-perspective title="Micro-benchmarking rules"}
-
-To avoid measuring hardware artifacts instead of kernel performance, follow the Systems Detective's Rules:
-
-1.  **The warm-up rule**: Do not measure cold-start iterations as steady-state performance. Modern hardware uses DVFS (dynamic voltage and frequency scaling)\index{DVFS!warm-up measurement artifact} and dynamic frequency boosting\index{Frequency boosting!warm-up measurement artifact}; caches, kernels, and clocks need warm-up before the measured loop represents sustained behavior.
-2.  **The variance rule**: Report the coefficient of variation (CV) $(\text{CV} = \sigma_{\text{run}} / \mu_{\text{run}})$, where $\sigma_{\text{run}}$ and $\mu_{\text{run}}$ are the standard deviation and mean across repeated runs. Investigate values above the protocol's workload-specific tolerance; common causes include background OS jitter, thermal throttling\index{Thermal throttling!impact on sustained perf}, and memory contention, and 5 percent is not a universal cutoff.
-3.  **The "speed of light" (SOL) check**\index{Speed of light check!utilization diagnosis}: Compare the achieved throughput against the roofline. If a kernel achieves `{python} H100SolCheck.sol_example_tflop_per_s_str` on an H100 (peak ~`{python} H100SolCheck.h100_fp16_tflop_per_s_str` FP16, or ~`{python} H100SolCheck.h100_fp8_tflop_per_s_str` FP8 dense), the diagnostic step is to identify the cause of low utilization (often kernel launch latency from too many small kernels) before optimizing the code itself.
-4.  **The cache-state rule**: Set cache state to match the claim. Flush or exceed the L2 cache when measuring cold dynamic random-access memory (DRAM) bandwidth; preserve a warmed cache when measuring steady-state reuse. Otherwise a nominal DRAM result may instead reflect cache bandwidth (~`{python} H100SolCheck.cache_bw_low_tb_per_s_str`--`{python} H100SolCheck.cache_bw_high_tb_per_s_str`) rather than DRAM bandwidth (~`{python} H100SolCheck.dram_bw_low_tb_per_s_str`--`{python} H100SolCheck.dram_bw_high_tb_per_s_str`).
-5.  **The synchronization barrier rule**: Accelerator kernel launches are asynchronous on the host CPU. Timing GPU operations using CPU clocks without an explicit device barrier (such as `torch.cuda.synchronize()`) measures host enqueue latency rather than kernel execution; always place synchronization barriers immediately before and after the timed region, or use GPU-side timestamp events (`cudaEventRecord`).
-
-:::
-
-A profiler translates these measurement rules into physical diagnostics by decomposing kernel execution time into the three governing terms of the iron law: data movement, compute throughput, and latency overhead.
-
-::: {#psp-benchmarking-measuring-iron-law-terms .callout-perspective title="Measuring the iron law terms"}
-
-Moving from theory to trace means mapping the iron law equation onto a profiler timeline (like Nsight Systems or PyTorch Profiler).
-
-**Measuring the data term** $\left(\frac{\DataVolume}{\Bandwidth}\right)$
-
-*   **Signal**: Look for the "Memory Throughput" or "DRAM Bandwidth" line.
-*   **Formula**: $\Bandwidth_{\text{effective}} = \frac{\DataVolume}{T_{\text{kernel}}}$.
-*   **Diagnosis**: If $\Bandwidth_{\text{effective}} \approx \Bandwidth_{\text{peak}}$ (for example, close to the A100's `{python} A100Roofline.a100_bw_tb_per_s_str` peak), bandwidth pressure is a strong candidate bottleneck. Test whether reducing traffic or increasing bandwidth improves time; a high bandwidth reading alone does not establish that changing compute ($O$) has no effect.
-
-**Measuring achieved compute throughput $(\PeakRate \cdot \EfficiencyHw)$**
-
-*   **Signal**: Distinguish "SM Active," which measures activity, from executed-operation throughput. A busy multiprocessor does not imply high useful-model FLOP/s.
-*   **Formula**: $\PeakRate \cdot \EfficiencyHw = \frac{O}{T_{\text{kernel}}}$, reported in TFLOP/s.
-*   **Diagnosis**: If $\EfficiencyHw \ll 1$ AND $\Bandwidth_{\text{effective}} \ll \Bandwidth_{\text{peak}}$, the system is in the "utilization trap": likely latency bound (kernels too small) or grid bound (not enough threads).
-
-**Measuring the latency term $(\Latency)$**
-
-*   **Signal**: Look for gaps (empty space) between colored kernel bars on the timeline.
-*   **Formula**: $\text{Overhead Ratio} = \frac{T_{\text{gap}}}{T_{\text{kernel}} + T_{\text{gap}}}$.
-*   **Diagnosis**: A "Sawtooth" pattern (Compute, Gap, Compute, Gap) suggests exposed waiting; correlate CPU dispatch, dependencies, and transfers before attributing it to software overhead\index{Dispatch overhead reduction!kernel launch batching}. If dispatch dominates, candidates include operator fusion\index{Operator fusion!latency gap elimination}, covered in @sec-hardware-acceleration-kernel-fusion-7faf, or CUDA Graphs\index{CUDA graphs!kernel launch replay}, which capture a repeated sequence of GPU launches so the runtime can replay it with less CPU dispatch overhead.
-
-:::
-
-While standardized benchmarks measure aggregate throughput, profilers reveal the physical mechanisms that cause execution to stall. System diagnosis uses two complementary levels of instrumentation: framework profilers and kernel profilers.
-
-#### Framework profilers {.unnumbered}
-
-Framework profilers, such as the PyTorch Profiler\index{PyTorch profiler!performance analysis}\index{Framework profiler!performance analysis tool}, capture the logical execution trace of a training or inference iteration. They track operator dispatch on the host CPU, determine whether host preparation overlaps asynchronously with accelerator execution, and identify whether the data loader pipeline starves compute queues. The primary diagnostic metric is the step-time breakdown partitioned across data loading, host launch latency, device compute, and inter-device communication. This breakdown pinpoints which subsystem bounds iteration latency before inspecting individual kernels.
-
-::: {.column-margin .margin-pointer}
-↩ The feeding tax, the wall-clock time an accelerator loses waiting on input I/O, is established in @sec-data-engineering-feeding-problem.
-:::
-
-#### Kernel profilers {.unnumbered}
-
-Kernel profilers, such as NVIDIA Nsight Systems and Nsight Compute\index{NVIDIA Nsight!systems and compute profiling}\index{Kernel profiler!hardware-level analysis}, capture physical execution on accelerator silicon. Nsight Systems constructs a global timeline across CPU threads, CUDA API calls, memory transfers, and kernel durations to expose serialization bubbles. Nsight Compute conducts in-depth analysis of individual kernel invocations, measuring Streaming Multiprocessor (SM) warp occupancy, instruction issue stalls, and memory coalescing efficiency against the hardware roofline. Kernel profilers extract these diagnostics directly from on-chip Performance Monitoring Units (PMUs), capturing hardware counters for HBM byte traffic, L2 cache hit rates, and pipeline stall reasons, but counter collection and kernel replay can perturb timing. Compare diagnostic traces with minimally instrumented measurements.
-
-Interpreting these silicon metrics starts from the warp model of @sec-hardware-acceleration-evolution-simd-simt-architectures-e1fd, in which nearby, aligned addresses let a warp's\index{Warp!SIMT execution bundle} loads use fewer memory transactions\index{Memory coalescing!bus transaction efficiency}; transaction granularity depends on the device and access path. Scattered or strided addresses force separate transactions that move bytes no thread uses; a 4-byte load from each 32-byte sector, for example, uses 4 of every 32 bytes fetched. Profilers report the ratio as memory coalescing efficiency, pinpointing why a kernel achieves only a fraction of peak bandwidth.
-
-::: {.column-margin .margin-pointer}
-↩ The single instruction, multiple threads (SIMT) warp model, in which 32 threads issue one instruction and contiguous loads merge into a single coalesced transaction, is established in @sec-hardware-acceleration-evolution-simd-simt-architectures-e1fd.
-:::
-
-A rigorous profiling workflow proceeds top-down. An engineer begins with a framework profiler to isolate the dominant layer in the execution timeline (for example, identifying that a multi-head attention block accounts for 65 percent of step latency). The engineer then applies a kernel profiler to analyze that layer down to the silicon (for example, verifying that the softmax kernel achieves only a small fraction of peak memory bandwidth due to non-coalesced DRAM accesses). This two-stage workflow prevents misdirected optimization by ensuring engineering effort targets the limiting physical bottleneck.
-
-These granular measurements enable precise kernel optimization, but they cannot reveal how components interact when assembled into complete models. Macro-benchmarks address this gap.
-
-### Macro benchmarks {#sec-benchmarking-macro-benchmarks-4283}
-
-Micro-benchmarks verify that isolated operators achieve high compute or memory efficiency. Macro-benchmarks determine whether those gains persist when layers are composed into a complete model. Composing layers introduces physical interactions that isolated benchmarks cannot observe: intermediate activation tensors expand peak memory footprint, sequential kernel launches expose CPU driver dispatch overhead, and memory access streams from preceding operations evict shared cache lines before downstream kernels can reuse them.
-
-Macro-benchmarks serve a central engineering objective: evaluating model architectures and runtime configurations under standardized workloads. Model-level evaluation captures the trade-offs that emerge from layer composition: generalization accuracy on unseen validation data, dynamic memory allocation across batch sizes and context lengths, and aggregate throughput across varied request arrival patterns. These dimensions interact directly: an architecture that achieves higher accuracy may require an activation footprint that forces a smaller batch size under device memory constraints, collapsing the computational throughput that justified its adoption.
-
-Evaluating complete models requires standardized datasets, fixed reference tasks, and reproducible metric definitions. In computer vision, standard benchmarks evaluate models on ImageNet\index{ImageNet!macro benchmark reference} [@imagenet_website], measuring top-1 classification accuracy alongside inference latency across fixed batch sizes. In natural language processing, standardized tasks evaluate sequence-to-sequence translation and autoregressive generation, quantifying output quality against token generation rate across defined context lengths.
-
-Several industry-standard suites establish reproducible model-level comparisons across platforms. The MLPerf suite standardizes evaluation across data centers, edge appliances, mobile devices, and microcontrollers, as detailed in @sec-benchmarking-mlperf-inference-benchmarks-e878. For resource-constrained embedded targets, EEMBC's MLMark quantifies inference throughput and energy consumption under strict memory budgets, while the AI-Benchmark [@ai_benchmark_website] suite evaluates mobile systems-on-chip across heterogeneous compute units.
-
-### End-to-end benchmarks {#sec-benchmarking-endtoend-benchmarks-51bb}
-
-End-to-end benchmarks encompass the entire production pipeline, capturing every stage required to ingest raw data, generate model predictions, and deliver results to downstream clients. While micro- and macro-benchmarks focus on accelerator execution, real-world serving pipelines frequently find their primary bottlenecks outside the model itself.
-
-Data preprocessing forms the initial phase of the pipeline, converting raw external inputs into model-ready tensor representations. In computer vision pipelines, image ingestion requires decoding compressed file formats (such as JPEG decompression), resizing, cropping, and color normalization. When executed on host CPUs without hardware acceleration, these preprocessing steps can take several times longer than model inference on a modern accelerator, leaving high-throughput tensor cores idle while waiting for host memory transfers. Similarly, in natural language pipelines, subword tokenization and dynamic sequence padding on the host CPU often bound serving throughput. Postprocessing introduces analogous latency bottlenecks: object detection pipelines require non-maximum suppression (NMS) and bounding-box coordinate transformations, which create sequential execution stalls if not integrated efficiently into the execution graph.
-
-Distributed infrastructure components introduce further performance constraints beyond the compute fabric. Remote storage systems bound training throughput when reading large multimodal datasets, and network interface card (NIC) saturation in distributed clusters throttles collective communication. End-to-end benchmarks must measure pipeline throughput under realistic network latencies, concurrent query arrival patterns, and actual storage I/O constraints to ensure reproducible evaluation of the deployment as an integrated system.
-
-Public benchmark suites rarely measure storage, networking, and compute within a single unified protocol. While MLPerf Training and Inference evaluate end-to-end scenarios more closely than isolated operator tests, their closed divisions deliberately standardize input data loading to isolate accelerator performance from storage and network variability. Consequently, production end-to-end benchmarking remains primarily an internal engineering practice, evaluated through distributed tracing and production telemetry on live query distributions.
-
-### Granularity trade-offs and selection criteria {#sec-benchmarking-granularity-tradeoffs-selection-criteria-b7d9}
-
-@Tbl-benchmark-comparison contrasts the diagnostic focus, scope, and engineering trade-offs across the three benchmarking granularities. Micro-benchmarks isolate low-level operations to guide kernel optimization and hardware selection, macro-benchmarks evaluate complete models to guide architectural choices, and end-to-end benchmarks measure full pipelines to ensure production deployments satisfy real-world service requirements.
-
-```{=latex}
-\begingroup
-\renewcommand{\arraystretch}{1.3}
-```
-
-| **Component**   | **Micro Benchmarks**                                      | **Macro Benchmarks**                                   | **End-to-End Benchmarks**                              |
-|:----------------|:----------------------------------------------------------|:-------------------------------------------------------|:-------------------------------------------------------|
-| **Focus**       | Individual operations                                     | Complete models                                        | Full system pipeline                                   |
-| **Scope**       | Tensor ops, layers, activations                           | Model architecture, training, inference                | Extract, transform, load; model; infrastructure        |
-| **Example**     | Conv layer performance on cuDNN                           | ResNet-50 on ImageNet                                  | Production recommendation system                       |
-| **Advantages**  | Precise bottleneck identification, Component optimization | Model architecture comparison, Standardized evaluation | Realistic performance assessment, System-wide insights |
-| **Challenges**  | May miss interaction effects                              | Limited infrastructure insights                        | Complex to standardize, Often proprietary              |
-| **Typical Use** | Hardware selection, Operation optimization                | Model selection, Research comparison                   | Production system evaluation                           |
-
-: **Benchmarking Granularity Levels**: Different benchmark scopes target distinct stages of ML system development. Micro-benchmarks isolate individual operations for low-level optimization, macro-benchmarks evaluate complete models to guide architectural choices, and end-to-end benchmarks assess full system performance in production environments. {#tbl-benchmark-comparison tbl-colwidths="[11,28,32,29]"}
-
-```{=latex}
-\endgroup
-```
-
-Selecting a single granularity level is rarely sufficient because benchmarking presents an inherent trade-off between diagnostic isolation and production fidelity. Along the descending diagonal in @fig-benchmark-tradeoffs, evaluation regimes trade diagnostic power for operational realism: micro-benchmarks (the red point at the top left) isolate kernel-level memory bandwidth and warp occupancy at the expense of end-to-end context, macro-benchmarks (the blue center point) capture composed model topologies, and end-to-end benchmarks (the green point at the bottom right) encompass live production traffic but obscure the root causes of latency spikes. Effective evaluation requires strategically combining all three tiers to verify that kernel speedups survive full-system deployment.
-
-::: {#fig-benchmark-tradeoffs fig-env="figure" fig-pos="htb" fig-cap="**Isolation vs. Representativeness**: The core trade-off in benchmarking granularity. Micro-benchmarks provide high diagnostic precision but limited real-world relevance, while end-to-end benchmarks capture realistic system behavior but offer less precise component-level insights. Effective ML system evaluation requires strategic combination of all three levels." fig-alt="Scatter plot with three labeled points along a diagonal: micro-benchmarks at high isolation, macro-benchmarks, and end-to-end benchmarks at high representativeness."}
-
-```{.tikz}
-\begin{tikzpicture}[font=\sffamily\small,x=8mm,y=8mm]
-\tikzset{%
-  axis/.style={-latex,thick,black},
-  grid/.style={very thin,gray!40},
-  point/.style={circle,fill,inner sep=1.75pt}
-}
-% Draw axes
-\draw[axis] (0,0) -- node[pos=.5, sloped, above=17pt]{\footnotesize Isolation/Diagnostic Power} (0,5.6);
-\draw[axis] (0,0) --node[below=10pt] {\footnotesize Real-World Representativeness} (8,0) ;
-% Draw grid lines
-\foreach \x in {1,2,3,4,5,6,7}
-  \draw[grid] (\x,0) -- (\x,4.75);
-\foreach \y in {1,2,3,4}
-  \draw[grid] (0,\y) -- (7.25,\y);
-% Add trend line (passes through all three points)
-\draw[dashed,thick,gray!60] (1.5,4) -- (4.5,1);
-% Draw benchmark points
-\node[point,color=RedLine] (micro) at (1.5,4) {};
-\node[point,color=BlueLine] (macro) at (3,2.5) {};
-\node[point,color=GreenD] (endtoend) at (4.5,1) {};
-% Add labels
-\node[right=4pt ,color=RedLine] at (micro) {\footnotesize \textbf{Micro-benchmarks}};
-\node[right=4pt ,color=BlueLine] at (macro) {\footnotesize \textbf{Macro-benchmarks}};
-\node[right=4pt ,color=GreenD] at (endtoend) {\footnotesize \textbf{End-to-End benchmarks}};
-% Add axis labels
-\node[rotate=90] at (-0.3,4.5) {\footnotesize High};
-\node[rotate=90] at (-0.3,0.45) {\footnotesize Low};
-\node[below] at (0.5,-0.0) {\footnotesize Low};
-\node[below] at (7.5,-0.0) {\footnotesize High};
-\end{tikzpicture}
-```
-
-:::
-
-This trade-off maps directly onto the D·A·M taxonomy. Micro-benchmarks assess the physical capability of the Machine ($\text{M}$) executing a primitive Algorithm ($\text{A}$). Macro-benchmarks evaluate how the Algorithm ($\text{A}$) orchestrates tensor data flow across composed layers on the Machine ($\text{M}$). End-to-end benchmarks evaluate how raw Data ($\text{D}$) ingestion from external storage and network infrastructure interacts with both Algorithm and Machine under production load. Systematic performance engineering requires evaluating all three tiers to ensure local kernel optimizations translate into global system speedups.
-
-Selecting the appropriate granularity defines the physical boundary of measurement, but establishing that boundary is only the first step. A complete benchmark also requires specifying the operational ingredients: the task definition, representative datasets, target models, and evaluation metrics. Without these concrete components, measurements at any granularity fail to produce actionable engineering conclusions.
 
 ## System Benchmarking Suites {#sec-benchmarking-system-benchmarking-suites-e946}
 
