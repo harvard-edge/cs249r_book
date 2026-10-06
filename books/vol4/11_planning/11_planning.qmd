@@ -968,6 +968,276 @@ Verify your understanding of replacement timing budgets, tail latency exposure, 
 - [ ] **Projected seam state**: Why must a trajectory synthesized from a forward-projected reference still undergo reachable-set verification at admission and measured state bridge validation at activation?
 
 :::
+## Choosing a Trajectory Generator {#sec-planning-paradigms}
+
+When a mobile manipulator reaches around a conveyor guard, three distinct algorithmic families can propose the necessary motion. Geometric search discovers collision-free paths through configuration space, continuous optimization synthesizes or adjusts smooth motion along a route under dynamic constraints, and learned action chunking proposes motion sequences directly from multimodal observations. In all three paradigms, deciding where the body can travel geometrically remains separate from determining how quickly actuators can safely traverse that path. Regardless of which family generates a proposal, the resulting trajectory remains an unverified candidate that requires exhaustive dynamic validation before the execution engine commits it to the hardware.
+
+Sampling-based geometric planners explore configuration space without requiring an explicit algebraic representation of obstacles. Probabilistic Roadmaps (PRM) [@kavraki1996probabilistic] construct multi-query roadmaps by sampling collision-free configurations and connecting nearby neighbors with local collision-free segments, amortizing graph construction costs across multiple tasks. Conversely, Rapidly-exploring Random Trees (RRT) [@lavalle1998rapidly] target single-query problems by growing a space-filling tree from the initial configuration toward unexplored territory. Its asymptotically optimal counterpart, RRT* [@karaman2011sampling], continuously rewires parent connections within local neighborhoods as samples accumulate, ensuring that the discovered path cost converges almost surely to the theoretical optimum [@karaman2011sampling]. These methods resolve geometric routes through complex obstacle geometry, yet their completeness guarantees remain strictly probabilistic: the probability of discovering a feasible path approaches one only as the number of samples approaches infinity. When a sampling planner exhausts its computation budget without finding a path, its timeout provides no proof that the route is obstructed. The admission logic must therefore treat planner silence as an unresolved proposal rather than a verified safety determination. Furthermore, evaluating configuration samples and connecting edges requires repeated collision queries against environment geometry—typically accelerated by enclosing manipulator links in bounding spheres or capsules—which consistently dominate the planner's run time. Even when successful, search yields only an un-timed geometric path with discontinuous derivative transitions. The system must still apply time parameterization, smooth corner blends, joint torque verification, and a valid stopping continuation before dispatching the trajectory to physical actuators.
+
+The complementary classical formulation is **constrained continuous trajectory optimization**, exemplified by Covariant Hamiltonian Optimization for Motion Planning (CHOMP) [@ratliff2009chomp], TrajOpt [@schulman2014motion], and receding-horizon Model Predictive Control (MPC) [@tedrake2023manipulation; @lynch2017modern]. Rather than evaluating discrete graph nodes, continuous trajectory optimization represents motion as a continuous, time-indexed curve $\mathbf{q}(t)$ and minimizes an objective functional that balances dynamic smoothness against obstacle proximity:
+
+$$\min_{\mathbf{q}(t)} \quad \mathcal{U}[\mathbf{q}] = \int_0^\Time \left( \frac{1}{2} \|\dddot{\mathbf{q}}(t)\|^2 + \lambda_{\text{obs}} c_{\text{obs}}(\mathbf{q}(t)) \right) dt$$
+
+subject to physical boundary conditions and actuator invariants:
+$$\mathbf{q}(0) = \mathbf{q}_0, \quad \dot{\mathbf{q}}(0) = \dot{\mathbf{q}}_0, \quad \ddot{\mathbf{q}}(0) = \ddot{\mathbf{q}}_0$$
+$$\mathbf{q}(\Time) = \mathbf{q}_{\text{goal}}, \quad \dot{\mathbf{q}}(\Time) = \mathbf{0}, \quad \ddot{\mathbf{q}}(\Time) = \mathbf{0}$$
+$$|\dot{\mathbf{q}}(t)| \le \dot{\mathbf{q}}_{\max}, \quad |\GeneralizedInertiaMatrix\ddot{\mathbf{q}} + \CoriolisCentrifugalMatrix,\dot{\mathbf{q}})\dot{\mathbf{q}} + \GravitationalTorqueVector| \le \boldsymbol{\ResponseThreshold}_{\max}$$
+
+While CHOMP performs functional gradient descent and TrajOpt solves sequential convex subproblems using signed-distance collision constraints, both rely on local optimization. Consequently, non-convex obstacle geometry can trap the solver in infeasible local minima or geometric dead ends. Graphs of Convex Sets (GCS) resolve this susceptibility when the collision-free configuration space can be partitioned beforehand into convex regions. Finding the global sequence of regions and optimizing the polynomial spline within them then formulates as a mixed-integer convex program whose convex relaxation can be solved efficiently [@marcucci2023motion]. Because generating these convex decompositions requires substantial offline computation, GCS suits static structures such as the conveyor guard far better than dynamic, rapidly shifting environments. Although geometric search or learned policies can propose alternative routes around unforeseen obstructions, any candidate motion must still undergo explicit verification against dynamic torque limits and actuator constraints.
+
+Repeatedly re-optimizing from an updated state estimate forms the operational foundation of classical **Model Predictive Control (MPC)**\index{Model Predictive Control!receding horizon}[^fn-mpc-process-origin]\index{Trajectory optimization!collocation and MPC}. In this receding-horizon paradigm, an optimizer computes an optimal trajectory over a finite horizon $\Time$, dispatches an initial prefix to the actuator controllers, and re-solves the problem from the newly observed state on the subsequent cycle. The objective functional ranks candidate motions by performance, while hard constraints eliminate trajectories that exceed physical limits. Classical discrete-time MPC frames this trade-off as a constrained numerical optimization problem over steps $k = 0, \dots, \NumberOfDevices-1$ [@tedrake2023manipulation; @lynch2017modern]:
+
+[^fn-mpc-process-origin]: **Model predictive control**\index{Model Predictive Control!origin}: MPC began in the process industries of the 1970s, in refineries and chemical plants whose slow dynamics left seconds to minutes for each solve; @qin2003survey trace its industrial lineage from the first IDCOM and dynamic matrix control installations. Moving the same receding-horizon loop onto an arm tracked at `{python} PlanningOpeningMachine.f_track_str` shrinks that time to milliseconds, which is why a solver's deadline, and not its optimum, decides what reaches admission.
+
+$$\begin{aligned}
+\min_{\mathbf{u}_{0:\NumberOfDevices-1}} \quad & \sum_{k=0}^{\NumberOfDevices-1} \LayerIndex(\MechanicalPlantState_k, \mathbf{u}_k) + \ell_f(\MechanicalPlantState_N) \\
+\text{subject to} \quad & \MechanicalPlantState_{k+1} = f(\MechanicalPlantState_k, \mathbf{u}_k), \quad k = 0, \dots, \NumberOfDevices-1 \\
+& \MechanicalPlantState_k \in \mathcal{\ScaledResource}_{\text{safe}}, \quad \mathbf{u}_k \in \mathcal{U}_{\text{adm}}, \quad k = 0, \dots, \NumberOfDevices-1 \\
+& \MechanicalPlantState_N \in \mathcal{\ScaledResource}_f
+\end{aligned}$$ {#eq-plan-mpc-formulation}
+
+The variables in @eq-plan-mpc-formulation decouple the predicted state sequence $\MechanicalPlantState_k$ from the selected control inputs $\mathbf{u}_k$. The dynamic transition map $f(\MechanicalPlantState_k, \mathbf{u}_k)$ propagates the system state forward, requiring every intermediate step to remain admissible. The stage cost $\LayerIndex(\MechanicalPlantState_k, \mathbf{u}_k)$ penalizes tracking error and control effort, while the safe state set $\mathcal{\ScaledResource}_{\text{safe}}$ enforces collision margins derived from the spatial perception pipeline. The admissible control set $\mathcal{U}_{\text{adm}}$ bounds actuator torques and voltages according to verified hardware limits.
+
+The terminal constraint forces the horizon endpoint into a **terminal invariant set**, $\MechanicalPlantState_N \in \mathcal{\ScaledResource}_f$. In classical control theory, *recursive feasibility* guarantees that if a feasible solution exists at time step $t$, a feasible solution remains provably discoverable at step $t+1$. Establishing this property requires an accurate dynamic model and a terminal set $\mathcal{\ScaledResource}_f$ within which an invariant fallback control law maintains safety indefinitely. In an embodied robotic system, this terminal invariant is implemented through a validated braking continuation that brings the machine to rest within verified spatial clearance ($\StoppingDistance \le \ClearDistance$). Bringing the machine to a standstill does not guarantee indefinite safety on its own, because dynamic obstacles can move into the workspace of a stationary robot unless external interlocks preserve the boundary.
+
+Continuous-time optimal control problems are typically transcribed into finite-dimensional nonlinear programs through **direct shooting** or **direct collocation**.[^fn-plan-collocation-defects] Direct shooting forward-integrates the control trajectory $\mathbf{u}(t)$, yielding a compact optimization problem that can nonetheless become ill-conditioned over long horizons. Direct collocation parameterizes both states and controls using piecewise polynomial splines, enforcing dynamic defect constraints $f(\MechanicalPlantState_k, \mathbf{u}_k) - \dot{\MechanicalPlantState}_k = \mathbf{0}$ at interior knots to generate large, sparse nonlinear programs that converge rapidly near smooth trajectories [@hargraves1987direct]. However, theoretical MPC guarantees hold only when the dynamic model is accurate, constraints are satisfied, and the numerical solver finishes before its real-time deadline. Contact transitions, stick-slip friction, and unexpected loads degrade solver convergence, often causing iterations to time out. Learned action chunking eliminates online numerical solves during inference, but neural policies do not enforce the terminal invariant constraint $\MechanicalPlantState_N \in \mathcal{\ScaledResource}_f$; an unvalidated action chunk can easily end at high velocity where the robot lacks adequate braking room.
+
+[^fn-plan-collocation-defects]: **Direct Collocation Defects in Real-Time Solvers**\index{Direct collocation!defect constraints}: Direct collocation, introduced for trajectory optimization by @hargraves1987direct, turns a continuous-time control problem into a finite nonlinear program (NLP) by requiring the defect $\Delta_k = \dot{\MechanicalPlantState}(t_k) - f(\MechanicalPlantState_k, \mathbf{u}_k) = \mathbf{0}$ at each collocation point. Contact transitions and unmodeled friction make the problem non-smooth, and the solver then loses its fast local convergence and needs more iterations than a fixed control deadline may allow.
+
+Decoupling generation into a learned proposer and a constrained optimizer reconciles statistical representation with physical safety. The learned policy acts as a proposer, generating behavioral candidates conditioned on raw visual tokens and task semantics. A constrained trajectory generator then adjusts the proposed trajectory to satisfy boundary conditions, actuator limits, and spatial clearances. Because this numerical projection can become infeasible or miss its real-time deadline, it operates entirely on the untrusted proposal side of the architecture, upstream of independent safety admission.
+
+Mathematically, this dual-stage architecture formulates trajectory generation as a constrained projection operator $\Pi_{\mathcal{\Top}}(\hat{\mathbf{a}}_{\text{learned}})$:
+
+$$\mathbf{q}^*(t) = \Pi_{\mathcal{\Top}}(\hat{\mathbf{a}}_{\text{learned}}) = \arg\min_{\mathbf{q}(t)} \int_0^\Time \|\mathbf{q}(t) - \hat{\mathbf{q}}_{\text{learned}}(t)\|_{\mathbf{W}_q}^2 dt + \int_0^\Time \|\dddot{\mathbf{q}}(t)\|_{\mathbf{W}_j}^2 dt$$ {#eq-plan-kinodynamic-projection}
+
+subject to physical boundary conditions and safety invariants across the execution interval $t \in [0, \Time]$:
+$$\mathbf{q}(0) = \mathbf{q}_{\text{actual}}, \quad \dot{\mathbf{q}}(0) = \dot{\mathbf{q}}_{\text{actual}}, \quad \ddot{\mathbf{q}}(0) = \ddot{\mathbf{q}}_{\text{actual}}$$
+$$\mathbf{q}(t) \in \mathcal{\AFourthTaxonomyAxis}_{\text{free}}, \quad |\dot{\mathbf{q}}(t)| \le \dot{\mathbf{q}}_{\max}, \quad |\GeneralizedInertiaMatrix\ddot{\mathbf{q}} + \CoriolisCentrifugalMatrix,\dot{\mathbf{q}})\dot{\mathbf{q}} + \GravitationalTorqueVector| \le \boldsymbol{\ResponseThreshold}_{\max}$$
+$$\StoppingDistance(\mathbf{q}(\CommitmentInstant), \dot{\mathbf{q}}(\CommitmentInstant)) \le \ClearDistance(\CommitmentInstant)$$
+
+In @eq-plan-kinodynamic-projection, the primary term penalizes tracking deviation from the learned nominal trajectory $\hat{\mathbf{q}}_{\text{learned}}(t)$ using positive semidefinite state weights $\mathbf{W}_q$, while the regularization term penalizes joint jerk $\|\dddot{\mathbf{q}}(t)\|_{\mathbf{W}_j}^2$ to minimize mechanical vibration and wear. The weighted quadratic norm is defined as $\|\mathbf{z}\|_{\mathbf{W}}^2 = \mathbf{z}^\top \mathbf{W} \mathbf{z}$, and $\mathcal{\Top}$ denotes the feasible set of trajectories satisfying the displayed physical constraints. These constraints enforce the dynamic invariants that unconstrained learned models cannot guarantee: seamless $C^2$ continuity with the currently executing state, collision avoidance within the free configuration space $\mathcal{\AFourthTaxonomyAxis}_{\text{free}}$, kinematic joint speed bounds, full rigid-body inverse dynamics torque limits, and certified stopping viability at the commitment horizon $\CommitmentInstant$. Even when the optimizer finds a feasible trajectory, that solution remains contingent on model assumptions regarding payload mass and obstacle positions; the independent admission gate must verify those assumptions before granting hardware permission.
+
+Altering the proposer modifies the computational budget and latency profile, but leaves the physical safety obligations unchanged. Action Chunking with Transformers (ACT) [@zhao2023learning] infers an entire chunk of future joint setpoints in a single forward pass and smooths replanning boundaries by ensembling overlapping temporal chunks. However, simple coordinate averaging across predictions fails to enforce higher-order boundary derivatives, which can induce severe acceleration transients at chunk transitions. Diffusion policies [@chi2024diffusionpolicy] capture complex, multimodal behavioral distributions through iterative score-based denoising, but the multiple neural network evaluations required during inference add substantial latency to the replacement planning path. Alternatively, a neural model can warm-start a numerical trajectory optimizer by providing initial collocation knots. While a good warm-start drastically reduces sequential quadratic programming iterations, an out-of-distribution observation can seed the optimizer in an infeasible basin of attraction, causing solver divergence and missed execution deadlines. Generator selection therefore balances configuration-space exploration, constrained local tracking, and multimodal perceptual synthesis against the strict temporal deadlines required to validate and admit candidate trajectories.
+
+@Tbl-11-planning-paradigms compares the inputs, constraints, and seam obligations of the synthesis methods.
+
+| Trajectory paradigm                         | Input representation                                                                         | Dynamic and safety guarantees                                       | Dominant workload        | Boundary continuity across replanning                       |
+|:--------------------------------------------|:---------------------------------------------------------------------------------------------|:--------------------------------------------------------------------|:-------------------------|:------------------------------------------------------------|
+| Sampling-Based Graph Search (PRM, RRT*)     | Configuration samples $\mathbf{q} \in \mathcal{\AFourthTaxonomyAxis}_{\text{free}}$          | Route quality depends on the search; dynamics need separate checks  | Collision queries        | Piecewise-linear ($C^0$); discontinuous $\ddot{\mathbf{q}}$ |
+| Classical Numerical MPC                     | Low-dimensional state vector $\MechanicalPlantState \in \mathbb{R}^\PointToPointMessageSize$ | Constraint and stability guarantees depend on model and assumptions | Constrained solve        | Continuity requires explicit boundary constraints           |
+| Sampling-Based MPC (MPPI)                   | State vector and a Euclidean signed distance field (ESDF)                                    | Constraint treatment depends on the formulation and solver          | Rollouts or optimization | Requires spline smoothing or terminal costs                 |
+| Generative Action Chunking (ACT, Diffusion) | High-dimensional multimodal tokens (vision, text)                                            | Empirical demonstration distribution; no formal safety guarantee    | Model inference          | Discrete samples; requires checked interpolation and seam   |
+
+: **Comparison of trajectory generation paradigms**: Search, optimization, and learned proposals perform different candidate-generation work. Solve time and supported constraints depend on the implementation and problem; every selected pipeline still needs checked dynamics, seams, and stopping clearance. {#tbl-11-planning-paradigms tbl-colwidths="[22,23,23,14,18]"}
+
+The mechanisms in this chapter are durable; the systems that implement them change quickly. @Tbl-11-practice-2026 records the named systems a practitioner meets today, each tied to the mechanism it implements.
+
+```{python}
+#| label: calc-planning-practice-2026
+#| echo: false
+#| warning: false
+#| message: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ STATE OF PRACTICE, AS OF 2026: REPORTED FIGURES FROM EACH SYSTEM'S PAPER
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: tbl-11-practice-2026.
+# │
+# │ Goal:    Hold the literature values the dated table quotes.
+# │ Show:    pi0 chunk H = 50; 50 Hz robots re-infer after 25 actions (0.5 s);
+# │          Ruckig 19.8 us mean / 123 us worst for 7 DoFs.
+# │ How:     black2024pi0 (sec. IV and inference section);
+# │          PlanningTimeParam for the Ruckig figures (berscheid2021jerk).
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim.core.units import ureg, second
+from mlsysim.fmt import check, fmt_int, fmt_frequency, fmt_latency
+
+class PlanningPractice2026:
+    """Literature figures for the dated state-of-practice table."""
+
+    # ┌── 1. LOAD (Constants) ──────────────────────
+    pi0_horizon = 50  # category: literature; action chunk length H (black2024pi0)
+    pi0_rate = 50 * ureg.hertz  # category: literature; control rate of the 50 Hz robots (black2024pi0)
+    pi0_executed = 25  # category: literature; actions executed before re-inference at 50 Hz (black2024pi0)
+
+    # ┌── 2. EXECUTE (The Compute) ─────────────────
+    pi0_reinfer = (pi0_executed / pi0_rate).to(second)
+
+    # ┌── 3. GUARD (Invariants) ────────────────────
+    check(abs(pi0_reinfer.magnitude - 0.5) < 1e-12, "pi0 re-inference interval changed")
+    check(pi0_executed < pi0_horizon, "pi0 no longer executes a prefix of its chunk")
+
+    # ┌── 4. OUTPUT (Formatting) ───────────────────
+    pi0_horizon_str = fmt_int(pi0_horizon)
+    pi0_rate_str = fmt_frequency(pi0_rate)
+    pi0_executed_str = fmt_int(pi0_executed)
+    pi0_reinfer_str = fmt_latency(pi0_reinfer, unit=second, precision=1)
+```
+
+| Job in this chapter              | System                                             | Mechanism                                                                          | Reported figure                                                                                                                                                                                                                              |
+|:---------------------------------|:---------------------------------------------------|:-----------------------------------------------------------------------------------|:---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| Time parameterization            | TOPP-RA [@pham2018new]                             | Reachability analysis over a path grid (@sec-planning-time-parameterization)       | $\mathcal{\Operations}(\NumberOfDevices)$ small linear programs for $\NumberOfDevices$ grid points                                                                                                                                           |
+| Online jerk-limited generation   | Ruckig [@berscheid2021jerk]                        | Time-optimal constant-jerk phases from an arbitrary state                          | `{python} PlanningTimeParam.ruckig_mean_str` mean, `{python} PlanningTimeParam.ruckig_worst_str` worst case for `{python} PlanningTimeParam.ruckig_dofs_str` axes on a desktop processor                                                     |
+| Parallel trajectory optimization | cuRobo [@sundaralingam2023curobo]                  | Parallel optimizer seeds, sphere collision model, time step rescaled to the limits | Kinematics and position derivatives only; full dynamics left open                                                                                                                                                                            |
+| Learned chunk proposals          | $\pi_0$ [@black2024pi0]                            | Flow-matching action chunks executed open loop                                     | `{python} PlanningPractice2026.pi0_horizon_str`-action chunks; `{python} PlanningPractice2026.pi0_rate_str` robots re-infer after `{python} PlanningPractice2026.pi0_executed_str` actions (`{python} PlanningPractice2026.pi0_reinfer_str`) |
+| Chunk-boundary conditioning      | Real-time chunking [@black2025realtime]            | Freeze the actions that run during inference, generate the rest to agree with them | No continuity guarantee stated                                                                                                                                                                                                               |
+| Mobile-base local control        | Nav2 DWB and MPPI controllers [@macenski2023desks] | Velocity-space arcs scored by plugin critics, or sampled control sequences by cost | Both ship in the ROS 2 navigation stack                                                                                                                                                                                                      |
+
+: **Trajectory generation in practice, as of 2026**: Each system implements a mechanism this chapter teaches and remains a proposer in this architecture. Figures come from each system's own paper, measured on its authors' hardware, and are not admission evidence for this machine. {#tbl-11-practice-2026 tbl-colwidths="[18,22,30,30]"}
+
+### Mobile-base planning under nonholonomic constraints {#sec-planning-mobile-base}
+
+```{python}
+#| label: calc-planning-mobile-base
+#| echo: false
+#| warning: false
+#| message: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ DYNAMIC WINDOW AND CLASSICAL ADMISSIBILITY FOR THE BASE
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @sec-planning-mobile-base.
+# │
+# │ Goal:    Size the base's dynamic window over one chunk renewal, and show
+# │          what the classical admissibility test admits on the rack-end arc.
+# │ Show:    2.0 m/s^2 x 50 ms = +/-0.1 m/s; sqrt(2 x 1.10 m x 2.0 m/s^2) =
+# │          2.10 m/s, above the 1.5 m/s drive limit.
+# │ How:     RM base acceleration and velocity limits and chunk renewal
+# │          (registry); AISLE rack-end clear distance and a_brake; DWA
+# │          admissibility v <= sqrt(2 dist a_b) (fox1997dynamic, eq. 14).
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import *
+from mlsysim.core.units import ureg, millisecond
+from mlsysim.fmt import check, fmt_velocity, fmt_acceleration, fmt_latency, fmt_length
+
+RM = Embodied.MobileManipulator.WarehouseMobileManipulator
+AISLE = Embodied.Scenario.WarehouseAisle
+
+class PlanningMobileBase:
+    """Dynamic-window width over one renewal and the classical admissible speed."""
+
+    # ┌── 1. LOAD (Constants) ──────────────────────
+    a_base = RM.base.max_acceleration  # category: illustrative; base acceleration limit, registry
+    v_drive = RM.base.max_velocity  # category: illustrative; drive limit, registry
+    f_renew = RM.chunk_rate  # category: chosen; chunk renewal rate, registry
+    a_brake = AISLE.a_brake  # category: illustrative; credible deceleration, registry
+    d_clear = AISLE.d_clear  # category: illustrative; rack-end clear distance, registry
+
+    # ┌── 2. EXECUTE (The Compute) ─────────────────
+    t_renew = (1 / f_renew).to(millisecond)
+    dv_window = (a_base * t_renew).to(ureg.meter / ureg.second)
+    v_admissible = ((2 * d_clear * a_brake) ** 0.5).to(ureg.meter / ureg.second)
+
+    # ┌── 3. GUARD (Invariants) ────────────────────
+    check(abs(dv_window.magnitude - 0.1) < 1e-12, "dynamic window width changed")
+    check(abs(v_admissible.magnitude - 2.0976) < 1e-4, "classical admissible speed changed")
+    check(v_admissible > v_drive, "classical test no longer admits the drive limit")
+
+    # ┌── 4. OUTPUT (Formatting) ───────────────────
+    a_base_str = fmt_acceleration(a_base)
+    t_renew_str = fmt_latency(t_renew, unit=millisecond)
+    dv_window_str = fmt_velocity(dv_window, precision=1)
+    v_admissible_str = fmt_velocity(v_admissible, precision=2)
+    v_drive_str = fmt_velocity(v_drive)
+    d_clear_str = fmt_length(d_clear, unit=ureg.meter, precision=2)
+```
+
+A mobile base introduces kinematic constraints fundamentally different from those governing an articulated arm. Because its two coaxial drive wheels roll without slipping, the chassis cannot translate sideways along its axle. Expressed in terms of heading angle $\theta_{\text{head}}$, forward linear speed $\SpeedAtDetection$, and yaw rate $\omega$, the differential-drive (unicycle) kinematics satisfy
+
+$$\dot x = \SpeedAtDetection\cos\theta_{\text{head}}, \qquad \dot y = \SpeedAtDetection\sin\theta_{\text{head}}, \qquad \dot\theta_{\text{head}} = \omega, \qquad \dot x\sin\theta_{\text{head}} - \dot y\cos\theta_{\text{head}} = 0$$ {#eq-plan-unicycle}
+
+The non-integrable relation in @eq-plan-unicycle forms a **nonholonomic constraint**\index{Nonholonomic constraint!differential drive},[^fn-holonomic-hertz-etymology] restricting the instantaneous velocity space without diminishing the dimension of the reachable configuration space $SE(2)$ [@siciliano2009robotics]. The base can achieve any planar pose in the warehouse aisle, but @fig-11-nonholonomic-base diagrams how the no-slip condition strictly governs chassis mobility: panel (a) contrasts permitted forward translation $\SpeedAtDetection$ and yaw rate $\omega$ against the physically forbidden lateral translation vector (crossed out along the drive axle of track width $b$); panel (b) traces the resulting three-stage maneuver required to achieve a pure lateral offset—turning in place, translating along the wheel heading, and rotating back to the target orientation—proving that pure lateral steps are kinematically unexecutable. A base planner must therefore search directly over kinematically admissible control trajectories rather than straight geometric paths in configuration space. Furthermore, each wheel's tangential speed equals $\SpeedAtDetection \pm \omega b/2$ for track width $b$, so hardware motor limits constrain linear velocity and turning rate jointly.
+
+[^fn-holonomic-hertz-etymology]: **Holonomic** (Greek *holos*, whole, and *nomos*, law): @hertz1894prinzipien introduced the term for systems whose constraints obey integral laws, relations among positions alone, in contrast to material systems in general, which obey only differential laws. A wheel's no-slip rule is a differential law that cannot be integrated into such a relation. The distinction decides the planner's search space, since a holonomic arm can be planned as a path through configuration space while the base must be planned through its controls.\index{Holonomic constraint!etymology}
+
+::: {#fig-11-nonholonomic-base fig-env="figure" fig-pos="t" fig-cap="**What the wheels allow**: (a) A differential-drive base with track width $b$ can move forward at $\SpeedAtDetection$ and turn at $\omega$ about the center of its axle, but its wheels cannot roll sideways. (b) A pure sideways offset is still reachable, as a maneuver rather than a step: turn in place, drive, and turn back. Proportions are schematic." fig-alt="Two top-view panels of a rectangular base with a drive wheel on each side. In the left panel, a solid arrow points forward along the heading, a curved arrow shows turning, a bracket marks the track width, and a dashed arrow pointing sideways is crossed out. In the right panel, a dashed sideways arrow between a start and a goal pose is crossed out, and a second path shows the base turned a quarter turn in place at the start, driving straight to the goal, and turning back, with the three steps numbered."}
+
+```{python}
+#| label: plot-planning-nonholonomic-base
+#| echo: false
+#| warning: false
+#| message: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ NONHOLONOMIC BASE (FIGURE)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @fig-11-nonholonomic-base in @sec-planning-mobile-base.
+# │
+# │ Goal:    Make the rolling constraint of @eq-plan-unicycle physical: the base
+# │          has two velocity inputs and cannot translate along its axle.
+# │ Show:    admissible v and omega, the forbidden sideways velocity, and the
+# │          turn-drive-turn maneuver that reaches a sideways offset.
+# │ How:     Schematic geometry; no physical values are drawn.
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import viz
+import numpy as np
+from matplotlib.patches import Rectangle, FancyArrowPatch, Polygon
+from matplotlib.transforms import Affine2D
+
+R = viz.VOL4_ROLES
+viz.set_book_style()
+import matplotlib.pyplot as plt
+
+def _footprint(ax, x, y, th, ghost=False):
+    """Base outline, drive wheels on the axle, and heading tick (schematic proportions)."""
+    L, W, wl, ww = 0.9, 0.6, 0.26, 0.09
+    tr = Affine2D().rotate(th).translate(x, y) + ax.transData
+    ec = R["neutral"] if ghost else R["structural"]
+    ax.add_patch(
+        Rectangle((-L / 2, -W / 2), L, W, fc="none" if ghost else "#EEF3F1", ec=ec, lw=1.0, ls=(0, (3, 2)) if ghost else "-", transform=tr, zorder=3)
+    )
+    if not ghost:
+        for s in (1, -1):
+            ax.add_patch(Rectangle((-wl / 2, s * W / 2 - ww / 2), wl, ww, fc=R["structural"], ec="none", transform=tr, zorder=4))
+    ax.add_patch(Polygon([[L / 2 - 0.16, 0.1], [L / 2 - 0.02, 0], [L / 2 - 0.16, -0.1]], closed=True, fc=ec, ec="none", transform=tr, zorder=4))
+
+fig, ax = plt.subplots(figsize=(6.4, 3.8))
+ax.set_aspect("equal")
+ax.axis("off")
+_footprint(ax, 0, 0, 0)
+# allowed: forward speed along the heading, turn rate about the axle center
+ax.add_patch(FancyArrowPatch((0.5, 0), (1.25, 0), arrowstyle="-|>", mutation_scale=11, color=R["structural"], lw=1.4, zorder=5))
+ax.text(1.28, 0, r"$v$", ha="left", va="center", fontsize=10, color=R["structural"])
+ax.add_patch(
+    FancyArrowPatch(
+        (0.28, -0.52), (-0.28, -0.52), connectionstyle="arc3,rad=-0.45", arrowstyle="-|>", mutation_scale=10, color=R["structural"], lw=1.1, zorder=5
+    )
+)
+ax.text(0, -0.8, r"$\omega$", ha="center", va="top", fontsize=10, color=R["structural"])
+# forbidden: translation along the axle
+ax.add_patch(FancyArrowPatch((0, 0.33), (0, 0.95), arrowstyle="-|>", mutation_scale=11, color=R["neutral"], lw=1.2, ls=(0, (3, 2)), zorder=5))
+ax.plot([-0.09, 0.09], [0.55, 0.73], color=R["neutral"], lw=1.6, zorder=6)
+ax.plot([-0.09, 0.09], [0.73, 0.55], color=R["neutral"], lw=1.6, zorder=6)
+ax.text(0.14, 0.95, "no sideways velocity", ha="left", va="center", fontsize=8.5, color=R["neutral"])
+ax.annotate("", xy=(-0.55, 0.3), xytext=(-0.55, -0.3), arrowprops=dict(arrowstyle="<->", color=R["neutral"], lw=0.8))
+ax.text(-0.6, 0, r"$b$", ha="right", va="center", fontsize=10, color=R["neutral"])
+# a sideways offset: the direct step is inadmissible; turn in place, drive, turn back
+x0, dy = 2.9, 1.7
+_footprint(ax, x0, 0, 0)
+_footprint(ax, x0, 0, np.pi / 2, ghost=True)
+_footprint(ax, x0, dy, np.pi / 2, ghost=True)
+_footprint(ax, x0, dy, 0)
+ax.add_patch(FancyArrowPatch((x0, 0.5), (x0, dy - 0.5), arrowstyle="-|>", mutation_scale=11, color=R["proposal"], lw=1.4, ls=(0, (4, 2)), zorder=5))
+for yy, lab in ((0, "1  turn in place"), (dy / 2, "2  drive"), (dy, "3  turn back")):
+    ax.text(x0 + 0.62, yy, lab, ha="left", va="center", fontsize=8.5, color=R["proposal"])
+xs = x0 - 1.0
+ax.add_patch(FancyArrowPatch((xs, 0), (xs, dy), arrowstyle="-|>", mutation_scale=11, color=R["neutral"], lw=1.2, ls=(0, (3, 2)), zorder=5))
+ax.plot([xs - 0.09, xs + 0.09], [dy / 2 - 0.09, dy / 2 + 0.09], color=R["neutral"], lw=1.6, zorder=6)
+ax.plot([xs - 0.09, xs + 0.09], [dy / 2 + 0.09, dy / 2 - 0.09], color=R["neutral"], lw=1.6, zorder=6)
+ax.text(xs - 0.14, dy / 2, "direct\nsideways\nstep", ha="right", va="center", fontsize=8.5, color=R["neutral"])
+ax.text(0, 2.2, "(a) admissible velocities", ha="center", va="bottom", fontsize=9, fontweight="bold", color=R["neutral"])
+ax.text(x0, 2.2, "(b) a sideways offset", ha="center", va="bottom", fontsize=9, fontweight="bold", color=R["neutral"])
+ax.set_xlim(-0.9, 4.6)
+ax.set_ylim(-0.95, 2.45)
+plt.tight_layout()
+plt.show()
+```
+
+:::
+
+Local base planners enforce nonholonomic constraints by planning directly in velocity space over a receding time horizon. The dynamic window approach (DWA) [@fox1997dynamic] maps each control pair $(\SpeedAtDetection, \omega)$ to a circular trajectory arc and evaluates candidate pairs through two nested dynamic criteria. *Reachable velocities* comprise pairs achievable within actuator acceleration limits over the replanning window; with the mobile manipulator's base acceleration limit of `{python} PlanningMobileBase.a_base_str` and a `{python} PlanningMobileBase.t_renew_str` chunk renewal interval, this dynamic window spans `{python} PlanningMobileBase.dv_window_str` on either side of the current forward velocity. *Admissible velocities* select the subset from which the base can decelerate to a complete stop before reaching the nearest obstacle along that arc, satisfying $\SpeedAtDetection \le \sqrt{2\,d_{\text{arc}}(\SpeedAtDetection,\omega)\,\CredibleDecelerationBrake}$. From these admissible candidates, DWA selects the control pair maximizing an objective that balances target heading alignment, obstacle clearance, and forward speed. Model Predictive Path Integral control (MPPI) [@williams2017information] replaces this deterministic velocity grid by rolling forward thousands of stochastic control sequences through the dynamic model on a GPU, synthesizing an optimal control action as a cost-weighted trajectory distribution. Production navigation frameworks such as ROS 2 Nav2 incorporate both controller families [@macenski2023desks].
+
+The admissibility test applies the fundamental stopping requirement across candidate arcs, yet its classical textbook formulation assumes instantaneous, constant-deceleration braking. On a straight trajectory with `{python} PlanningMobileBase.d_clear_str` of rack-end clearance, this simplified test admits forward speeds up to `{python} PlanningMobileBase.v_admissible_str`—well above the physical drive limit of `{python} PlanningMobileBase.v_drive_str`. However, when evaluated against a comprehensive stopping budget—one that accounts for sensor latency, communication delays, localization uncertainty margins, and jerk-limited deceleration—that same clearance fails to guarantee safety even at the nominal drive limit. A mobile base trajectory generator—whether a classical DWA planner or a neural action chunking policy—therefore functions strictly as a proposer of candidate velocities. The real-time permission path must validate each proposed trajectory against the full stopping budget.
+
+The choice of trajectory generator governs how candidate motions are discovered and determines the computational burden placed on downstream verification. However, the system's safety enforcement mechanisms must respond consistently regardless of how a proposal was generated. In particular, the execution architecture must cleanly differentiate between rejecting an invalid replacement candidate and responding to unexpected environmental changes: rejecting an unvalidated proposal leaves the active, verified trajectory safely in control, whereas detecting an unexpected obstacle incursion along the executed path demands an immediate transition to verified braking.
+
 ## Kinodynamic Feasibility {#sec-planning-kinodynamic-feasibility}
 
 A candidate trajectory generated by an embodied model is a geometric and timed proposal, not permission to move. While high-level motion planners and learned policies navigate free configuration space $\mathcal{\AFourthTaxonomyAxis}_{\text{free}}$, physical actuators operate under unyielding electromotive, thermal, and structural limits. Kinodynamic feasibility bridges geometric intent and mechanical reality, ensuring that reference trajectories respect actuator torque limits, velocity boundaries, and transmission dynamics before the low-level controller dispatches setpoints to motor drives.
@@ -2228,276 +2498,6 @@ Before committing an autonomous machine to an action chunk, verify your understa
 
 The mug reach now has a complete execution argument: a timed prefix, a checked seam, and a stop reserved under stated conditions. These obligations let us compare trajectory generators by the candidate work they perform rather than by treating their outputs as permission.
 
-## Choosing a Trajectory Generator {#sec-planning-paradigms}
-
-When a mobile manipulator reaches around a conveyor guard, three distinct algorithmic families can propose the necessary motion. Geometric search discovers collision-free paths through configuration space, continuous optimization synthesizes or adjusts smooth motion along a route under dynamic constraints, and learned action chunking proposes motion sequences directly from multimodal observations. In all three paradigms, deciding where the body can travel geometrically remains separate from determining how quickly actuators can safely traverse that path. Regardless of which family generates a proposal, the resulting trajectory remains an unverified candidate that requires exhaustive dynamic validation before the execution engine commits it to the hardware.
-
-Sampling-based geometric planners explore configuration space without requiring an explicit algebraic representation of obstacles. Probabilistic Roadmaps (PRM) [@kavraki1996probabilistic] construct multi-query roadmaps by sampling collision-free configurations and connecting nearby neighbors with local collision-free segments, amortizing graph construction costs across multiple tasks. Conversely, Rapidly-exploring Random Trees (RRT) [@lavalle1998rapidly] target single-query problems by growing a space-filling tree from the initial configuration toward unexplored territory. Its asymptotically optimal counterpart, RRT* [@karaman2011sampling], continuously rewires parent connections within local neighborhoods as samples accumulate, ensuring that the discovered path cost converges almost surely to the theoretical optimum [@karaman2011sampling]. These methods resolve geometric routes through complex obstacle geometry, yet their completeness guarantees remain strictly probabilistic: the probability of discovering a feasible path approaches one only as the number of samples approaches infinity. When a sampling planner exhausts its computation budget without finding a path, its timeout provides no proof that the route is obstructed. The admission logic must therefore treat planner silence as an unresolved proposal rather than a verified safety determination. Furthermore, evaluating configuration samples and connecting edges requires repeated collision queries against environment geometry—typically accelerated by enclosing manipulator links in bounding spheres or capsules—which consistently dominate the planner's run time. Even when successful, search yields only an un-timed geometric path with discontinuous derivative transitions. The system must still apply time parameterization, smooth corner blends, joint torque verification, and a valid stopping continuation before dispatching the trajectory to physical actuators.
-
-The complementary classical formulation is **constrained continuous trajectory optimization**, exemplified by Covariant Hamiltonian Optimization for Motion Planning (CHOMP) [@ratliff2009chomp], TrajOpt [@schulman2014motion], and receding-horizon Model Predictive Control (MPC) [@tedrake2023manipulation; @lynch2017modern]. Rather than evaluating discrete graph nodes, continuous trajectory optimization represents motion as a continuous, time-indexed curve $\mathbf{q}(t)$ and minimizes an objective functional that balances dynamic smoothness against obstacle proximity:
-
-$$\min_{\mathbf{q}(t)} \quad \mathcal{U}[\mathbf{q}] = \int_0^\Time \left( \frac{1}{2} \|\dddot{\mathbf{q}}(t)\|^2 + \lambda_{\text{obs}} c_{\text{obs}}(\mathbf{q}(t)) \right) dt$$
-
-subject to physical boundary conditions and actuator invariants:
-$$\mathbf{q}(0) = \mathbf{q}_0, \quad \dot{\mathbf{q}}(0) = \dot{\mathbf{q}}_0, \quad \ddot{\mathbf{q}}(0) = \ddot{\mathbf{q}}_0$$
-$$\mathbf{q}(\Time) = \mathbf{q}_{\text{goal}}, \quad \dot{\mathbf{q}}(\Time) = \mathbf{0}, \quad \ddot{\mathbf{q}}(\Time) = \mathbf{0}$$
-$$|\dot{\mathbf{q}}(t)| \le \dot{\mathbf{q}}_{\max}, \quad |\GeneralizedInertiaMatrix\ddot{\mathbf{q}} + \CoriolisCentrifugalMatrix,\dot{\mathbf{q}})\dot{\mathbf{q}} + \GravitationalTorqueVector| \le \boldsymbol{\ResponseThreshold}_{\max}$$
-
-While CHOMP performs functional gradient descent and TrajOpt solves sequential convex subproblems using signed-distance collision constraints, both rely on local optimization. Consequently, non-convex obstacle geometry can trap the solver in infeasible local minima or geometric dead ends. Graphs of Convex Sets (GCS) resolve this susceptibility when the collision-free configuration space can be partitioned beforehand into convex regions. Finding the global sequence of regions and optimizing the polynomial spline within them then formulates as a mixed-integer convex program whose convex relaxation can be solved efficiently [@marcucci2023motion]. Because generating these convex decompositions requires substantial offline computation, GCS suits static structures such as the conveyor guard far better than dynamic, rapidly shifting environments. Although geometric search or learned policies can propose alternative routes around unforeseen obstructions, any candidate motion must still undergo explicit verification against dynamic torque limits and actuator constraints.
-
-Repeatedly re-optimizing from an updated state estimate forms the operational foundation of classical **Model Predictive Control (MPC)**\index{Model Predictive Control!receding horizon}[^fn-mpc-process-origin]\index{Trajectory optimization!collocation and MPC}. In this receding-horizon paradigm, an optimizer computes an optimal trajectory over a finite horizon $\Time$, dispatches an initial prefix to the actuator controllers, and re-solves the problem from the newly observed state on the subsequent cycle. The objective functional ranks candidate motions by performance, while hard constraints eliminate trajectories that exceed physical limits. Classical discrete-time MPC frames this trade-off as a constrained numerical optimization problem over steps $k = 0, \dots, \NumberOfDevices-1$ [@tedrake2023manipulation; @lynch2017modern]:
-
-[^fn-mpc-process-origin]: **Model predictive control**\index{Model Predictive Control!origin}: MPC began in the process industries of the 1970s, in refineries and chemical plants whose slow dynamics left seconds to minutes for each solve; @qin2003survey trace its industrial lineage from the first IDCOM and dynamic matrix control installations. Moving the same receding-horizon loop onto an arm tracked at `{python} PlanningOpeningMachine.f_track_str` shrinks that time to milliseconds, which is why a solver's deadline, and not its optimum, decides what reaches admission.
-
-$$\begin{aligned}
-\min_{\mathbf{u}_{0:\NumberOfDevices-1}} \quad & \sum_{k=0}^{\NumberOfDevices-1} \LayerIndex(\MechanicalPlantState_k, \mathbf{u}_k) + \ell_f(\MechanicalPlantState_N) \\
-\text{subject to} \quad & \MechanicalPlantState_{k+1} = f(\MechanicalPlantState_k, \mathbf{u}_k), \quad k = 0, \dots, \NumberOfDevices-1 \\
-& \MechanicalPlantState_k \in \mathcal{\ScaledResource}_{\text{safe}}, \quad \mathbf{u}_k \in \mathcal{U}_{\text{adm}}, \quad k = 0, \dots, \NumberOfDevices-1 \\
-& \MechanicalPlantState_N \in \mathcal{\ScaledResource}_f
-\end{aligned}$$ {#eq-plan-mpc-formulation}
-
-The variables in @eq-plan-mpc-formulation decouple the predicted state sequence $\MechanicalPlantState_k$ from the selected control inputs $\mathbf{u}_k$. The dynamic transition map $f(\MechanicalPlantState_k, \mathbf{u}_k)$ propagates the system state forward, requiring every intermediate step to remain admissible. The stage cost $\LayerIndex(\MechanicalPlantState_k, \mathbf{u}_k)$ penalizes tracking error and control effort, while the safe state set $\mathcal{\ScaledResource}_{\text{safe}}$ enforces collision margins derived from the spatial perception pipeline. The admissible control set $\mathcal{U}_{\text{adm}}$ bounds actuator torques and voltages according to verified hardware limits.
-
-The terminal constraint forces the horizon endpoint into a **terminal invariant set**, $\MechanicalPlantState_N \in \mathcal{\ScaledResource}_f$. In classical control theory, *recursive feasibility* guarantees that if a feasible solution exists at time step $t$, a feasible solution remains provably discoverable at step $t+1$. Establishing this property requires an accurate dynamic model and a terminal set $\mathcal{\ScaledResource}_f$ within which an invariant fallback control law maintains safety indefinitely. In an embodied robotic system, this terminal invariant is implemented through a validated braking continuation that brings the machine to rest within verified spatial clearance ($\StoppingDistance \le \ClearDistance$). Bringing the machine to a standstill does not guarantee indefinite safety on its own, because dynamic obstacles can move into the workspace of a stationary robot unless external interlocks preserve the boundary.
-
-Continuous-time optimal control problems are typically transcribed into finite-dimensional nonlinear programs through **direct shooting** or **direct collocation**.[^fn-plan-collocation-defects] Direct shooting forward-integrates the control trajectory $\mathbf{u}(t)$, yielding a compact optimization problem that can nonetheless become ill-conditioned over long horizons. Direct collocation parameterizes both states and controls using piecewise polynomial splines, enforcing dynamic defect constraints $f(\MechanicalPlantState_k, \mathbf{u}_k) - \dot{\MechanicalPlantState}_k = \mathbf{0}$ at interior knots to generate large, sparse nonlinear programs that converge rapidly near smooth trajectories [@hargraves1987direct]. However, theoretical MPC guarantees hold only when the dynamic model is accurate, constraints are satisfied, and the numerical solver finishes before its real-time deadline. Contact transitions, stick-slip friction, and unexpected loads degrade solver convergence, often causing iterations to time out. Learned action chunking eliminates online numerical solves during inference, but neural policies do not enforce the terminal invariant constraint $\MechanicalPlantState_N \in \mathcal{\ScaledResource}_f$; an unvalidated action chunk can easily end at high velocity where the robot lacks adequate braking room.
-
-[^fn-plan-collocation-defects]: **Direct Collocation Defects in Real-Time Solvers**\index{Direct collocation!defect constraints}: Direct collocation, introduced for trajectory optimization by @hargraves1987direct, turns a continuous-time control problem into a finite nonlinear program (NLP) by requiring the defect $\Delta_k = \dot{\MechanicalPlantState}(t_k) - f(\MechanicalPlantState_k, \mathbf{u}_k) = \mathbf{0}$ at each collocation point. Contact transitions and unmodeled friction make the problem non-smooth, and the solver then loses its fast local convergence and needs more iterations than a fixed control deadline may allow.
-
-Decoupling generation into a learned proposer and a constrained optimizer reconciles statistical representation with physical safety. The learned policy acts as a proposer, generating behavioral candidates conditioned on raw visual tokens and task semantics. A constrained trajectory generator then adjusts the proposed trajectory to satisfy boundary conditions, actuator limits, and spatial clearances. Because this numerical projection can become infeasible or miss its real-time deadline, it operates entirely on the untrusted proposal side of the architecture, upstream of independent safety admission.
-
-Mathematically, this dual-stage architecture formulates trajectory generation as a constrained projection operator $\Pi_{\mathcal{\Top}}(\hat{\mathbf{a}}_{\text{learned}})$:
-
-$$\mathbf{q}^*(t) = \Pi_{\mathcal{\Top}}(\hat{\mathbf{a}}_{\text{learned}}) = \arg\min_{\mathbf{q}(t)} \int_0^\Time \|\mathbf{q}(t) - \hat{\mathbf{q}}_{\text{learned}}(t)\|_{\mathbf{W}_q}^2 dt + \int_0^\Time \|\dddot{\mathbf{q}}(t)\|_{\mathbf{W}_j}^2 dt$$ {#eq-plan-kinodynamic-projection}
-
-subject to physical boundary conditions and safety invariants across the execution interval $t \in [0, \Time]$:
-$$\mathbf{q}(0) = \mathbf{q}_{\text{actual}}, \quad \dot{\mathbf{q}}(0) = \dot{\mathbf{q}}_{\text{actual}}, \quad \ddot{\mathbf{q}}(0) = \ddot{\mathbf{q}}_{\text{actual}}$$
-$$\mathbf{q}(t) \in \mathcal{\AFourthTaxonomyAxis}_{\text{free}}, \quad |\dot{\mathbf{q}}(t)| \le \dot{\mathbf{q}}_{\max}, \quad |\GeneralizedInertiaMatrix\ddot{\mathbf{q}} + \CoriolisCentrifugalMatrix,\dot{\mathbf{q}})\dot{\mathbf{q}} + \GravitationalTorqueVector| \le \boldsymbol{\ResponseThreshold}_{\max}$$
-$$\StoppingDistance(\mathbf{q}(\CommitmentInstant), \dot{\mathbf{q}}(\CommitmentInstant)) \le \ClearDistance(\CommitmentInstant)$$
-
-In @eq-plan-kinodynamic-projection, the primary term penalizes tracking deviation from the learned nominal trajectory $\hat{\mathbf{q}}_{\text{learned}}(t)$ using positive semidefinite state weights $\mathbf{W}_q$, while the regularization term penalizes joint jerk $\|\dddot{\mathbf{q}}(t)\|_{\mathbf{W}_j}^2$ to minimize mechanical vibration and wear. The weighted quadratic norm is defined as $\|\mathbf{z}\|_{\mathbf{W}}^2 = \mathbf{z}^\top \mathbf{W} \mathbf{z}$, and $\mathcal{\Top}$ denotes the feasible set of trajectories satisfying the displayed physical constraints. These constraints enforce the dynamic invariants that unconstrained learned models cannot guarantee: seamless $C^2$ continuity with the currently executing state, collision avoidance within the free configuration space $\mathcal{\AFourthTaxonomyAxis}_{\text{free}}$, kinematic joint speed bounds, full rigid-body inverse dynamics torque limits, and certified stopping viability at the commitment horizon $\CommitmentInstant$. Even when the optimizer finds a feasible trajectory, that solution remains contingent on model assumptions regarding payload mass and obstacle positions; the independent admission gate must verify those assumptions before granting hardware permission.
-
-Altering the proposer modifies the computational budget and latency profile, but leaves the physical safety obligations unchanged. Action Chunking with Transformers (ACT) [@zhao2023learning] infers an entire chunk of future joint setpoints in a single forward pass and smooths replanning boundaries by ensembling overlapping temporal chunks. However, simple coordinate averaging across predictions fails to enforce higher-order boundary derivatives, which can induce severe acceleration transients at chunk transitions. Diffusion policies [@chi2024diffusionpolicy] capture complex, multimodal behavioral distributions through iterative score-based denoising, but the multiple neural network evaluations required during inference add substantial latency to the replacement planning path. Alternatively, a neural model can warm-start a numerical trajectory optimizer by providing initial collocation knots. While a good warm-start drastically reduces sequential quadratic programming iterations, an out-of-distribution observation can seed the optimizer in an infeasible basin of attraction, causing solver divergence and missed execution deadlines. Generator selection therefore balances configuration-space exploration, constrained local tracking, and multimodal perceptual synthesis against the strict temporal deadlines required to validate and admit candidate trajectories.
-
-@Tbl-11-planning-paradigms compares the inputs, constraints, and seam obligations of the synthesis methods.
-
-| Trajectory paradigm                         | Input representation                                                                         | Dynamic and safety guarantees                                       | Dominant workload        | Boundary continuity across replanning                       |
-|:--------------------------------------------|:---------------------------------------------------------------------------------------------|:--------------------------------------------------------------------|:-------------------------|:------------------------------------------------------------|
-| Sampling-Based Graph Search (PRM, RRT*)     | Configuration samples $\mathbf{q} \in \mathcal{\AFourthTaxonomyAxis}_{\text{free}}$          | Route quality depends on the search; dynamics need separate checks  | Collision queries        | Piecewise-linear ($C^0$); discontinuous $\ddot{\mathbf{q}}$ |
-| Classical Numerical MPC                     | Low-dimensional state vector $\MechanicalPlantState \in \mathbb{R}^\PointToPointMessageSize$ | Constraint and stability guarantees depend on model and assumptions | Constrained solve        | Continuity requires explicit boundary constraints           |
-| Sampling-Based MPC (MPPI)                   | State vector and a Euclidean signed distance field (ESDF)                                    | Constraint treatment depends on the formulation and solver          | Rollouts or optimization | Requires spline smoothing or terminal costs                 |
-| Generative Action Chunking (ACT, Diffusion) | High-dimensional multimodal tokens (vision, text)                                            | Empirical demonstration distribution; no formal safety guarantee    | Model inference          | Discrete samples; requires checked interpolation and seam   |
-
-: **Comparison of trajectory generation paradigms**: Search, optimization, and learned proposals perform different candidate-generation work. Solve time and supported constraints depend on the implementation and problem; every selected pipeline still needs checked dynamics, seams, and stopping clearance. {#tbl-11-planning-paradigms tbl-colwidths="[22,23,23,14,18]"}
-
-The mechanisms in this chapter are durable; the systems that implement them change quickly. @Tbl-11-practice-2026 records the named systems a practitioner meets today, each tied to the mechanism it implements.
-
-```{python}
-#| label: calc-planning-practice-2026
-#| echo: false
-#| warning: false
-#| message: false
-# ┌─────────────────────────────────────────────────────────────────────────────
-# │ STATE OF PRACTICE, AS OF 2026: REPORTED FIGURES FROM EACH SYSTEM'S PAPER
-# ├─────────────────────────────────────────────────────────────────────────────
-# │ Context: tbl-11-practice-2026.
-# │
-# │ Goal:    Hold the literature values the dated table quotes.
-# │ Show:    pi0 chunk H = 50; 50 Hz robots re-infer after 25 actions (0.5 s);
-# │          Ruckig 19.8 us mean / 123 us worst for 7 DoFs.
-# │ How:     black2024pi0 (sec. IV and inference section);
-# │          PlanningTimeParam for the Ruckig figures (berscheid2021jerk).
-# └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.core.units import ureg, second
-from mlsysim.fmt import check, fmt_int, fmt_frequency, fmt_latency
-
-class PlanningPractice2026:
-    """Literature figures for the dated state-of-practice table."""
-
-    # ┌── 1. LOAD (Constants) ──────────────────────
-    pi0_horizon = 50  # category: literature; action chunk length H (black2024pi0)
-    pi0_rate = 50 * ureg.hertz  # category: literature; control rate of the 50 Hz robots (black2024pi0)
-    pi0_executed = 25  # category: literature; actions executed before re-inference at 50 Hz (black2024pi0)
-
-    # ┌── 2. EXECUTE (The Compute) ─────────────────
-    pi0_reinfer = (pi0_executed / pi0_rate).to(second)
-
-    # ┌── 3. GUARD (Invariants) ────────────────────
-    check(abs(pi0_reinfer.magnitude - 0.5) < 1e-12, "pi0 re-inference interval changed")
-    check(pi0_executed < pi0_horizon, "pi0 no longer executes a prefix of its chunk")
-
-    # ┌── 4. OUTPUT (Formatting) ───────────────────
-    pi0_horizon_str = fmt_int(pi0_horizon)
-    pi0_rate_str = fmt_frequency(pi0_rate)
-    pi0_executed_str = fmt_int(pi0_executed)
-    pi0_reinfer_str = fmt_latency(pi0_reinfer, unit=second, precision=1)
-```
-
-| Job in this chapter              | System                                             | Mechanism                                                                          | Reported figure                                                                                                                                                                                                                              |
-|:---------------------------------|:---------------------------------------------------|:-----------------------------------------------------------------------------------|:---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| Time parameterization            | TOPP-RA [@pham2018new]                             | Reachability analysis over a path grid (@sec-planning-time-parameterization)       | $\mathcal{\Operations}(\NumberOfDevices)$ small linear programs for $\NumberOfDevices$ grid points                                                                                                                                           |
-| Online jerk-limited generation   | Ruckig [@berscheid2021jerk]                        | Time-optimal constant-jerk phases from an arbitrary state                          | `{python} PlanningTimeParam.ruckig_mean_str` mean, `{python} PlanningTimeParam.ruckig_worst_str` worst case for `{python} PlanningTimeParam.ruckig_dofs_str` axes on a desktop processor                                                     |
-| Parallel trajectory optimization | cuRobo [@sundaralingam2023curobo]                  | Parallel optimizer seeds, sphere collision model, time step rescaled to the limits | Kinematics and position derivatives only; full dynamics left open                                                                                                                                                                            |
-| Learned chunk proposals          | $\pi_0$ [@black2024pi0]                            | Flow-matching action chunks executed open loop                                     | `{python} PlanningPractice2026.pi0_horizon_str`-action chunks; `{python} PlanningPractice2026.pi0_rate_str` robots re-infer after `{python} PlanningPractice2026.pi0_executed_str` actions (`{python} PlanningPractice2026.pi0_reinfer_str`) |
-| Chunk-boundary conditioning      | Real-time chunking [@black2025realtime]            | Freeze the actions that run during inference, generate the rest to agree with them | No continuity guarantee stated                                                                                                                                                                                                               |
-| Mobile-base local control        | Nav2 DWB and MPPI controllers [@macenski2023desks] | Velocity-space arcs scored by plugin critics, or sampled control sequences by cost | Both ship in the ROS 2 navigation stack                                                                                                                                                                                                      |
-
-: **Trajectory generation in practice, as of 2026**: Each system implements a mechanism this chapter teaches and remains a proposer in this architecture. Figures come from each system's own paper, measured on its authors' hardware, and are not admission evidence for this machine. {#tbl-11-practice-2026 tbl-colwidths="[18,22,30,30]"}
-
-### Mobile-base planning under nonholonomic constraints {#sec-planning-mobile-base}
-
-```{python}
-#| label: calc-planning-mobile-base
-#| echo: false
-#| warning: false
-#| message: false
-# ┌─────────────────────────────────────────────────────────────────────────────
-# │ DYNAMIC WINDOW AND CLASSICAL ADMISSIBILITY FOR THE BASE
-# ├─────────────────────────────────────────────────────────────────────────────
-# │ Context: @sec-planning-mobile-base.
-# │
-# │ Goal:    Size the base's dynamic window over one chunk renewal, and show
-# │          what the classical admissibility test admits on the rack-end arc.
-# │ Show:    2.0 m/s^2 x 50 ms = +/-0.1 m/s; sqrt(2 x 1.10 m x 2.0 m/s^2) =
-# │          2.10 m/s, above the 1.5 m/s drive limit.
-# │ How:     RM base acceleration and velocity limits and chunk renewal
-# │          (registry); AISLE rack-end clear distance and a_brake; DWA
-# │          admissibility v <= sqrt(2 dist a_b) (fox1997dynamic, eq. 14).
-# └─────────────────────────────────────────────────────────────────────────────
-from mlsysim import *
-from mlsysim.core.units import ureg, millisecond
-from mlsysim.fmt import check, fmt_velocity, fmt_acceleration, fmt_latency, fmt_length
-
-RM = Embodied.MobileManipulator.WarehouseMobileManipulator
-AISLE = Embodied.Scenario.WarehouseAisle
-
-class PlanningMobileBase:
-    """Dynamic-window width over one renewal and the classical admissible speed."""
-
-    # ┌── 1. LOAD (Constants) ──────────────────────
-    a_base = RM.base.max_acceleration  # category: illustrative; base acceleration limit, registry
-    v_drive = RM.base.max_velocity  # category: illustrative; drive limit, registry
-    f_renew = RM.chunk_rate  # category: chosen; chunk renewal rate, registry
-    a_brake = AISLE.a_brake  # category: illustrative; credible deceleration, registry
-    d_clear = AISLE.d_clear  # category: illustrative; rack-end clear distance, registry
-
-    # ┌── 2. EXECUTE (The Compute) ─────────────────
-    t_renew = (1 / f_renew).to(millisecond)
-    dv_window = (a_base * t_renew).to(ureg.meter / ureg.second)
-    v_admissible = ((2 * d_clear * a_brake) ** 0.5).to(ureg.meter / ureg.second)
-
-    # ┌── 3. GUARD (Invariants) ────────────────────
-    check(abs(dv_window.magnitude - 0.1) < 1e-12, "dynamic window width changed")
-    check(abs(v_admissible.magnitude - 2.0976) < 1e-4, "classical admissible speed changed")
-    check(v_admissible > v_drive, "classical test no longer admits the drive limit")
-
-    # ┌── 4. OUTPUT (Formatting) ───────────────────
-    a_base_str = fmt_acceleration(a_base)
-    t_renew_str = fmt_latency(t_renew, unit=millisecond)
-    dv_window_str = fmt_velocity(dv_window, precision=1)
-    v_admissible_str = fmt_velocity(v_admissible, precision=2)
-    v_drive_str = fmt_velocity(v_drive)
-    d_clear_str = fmt_length(d_clear, unit=ureg.meter, precision=2)
-```
-
-A mobile base introduces kinematic constraints fundamentally different from those governing an articulated arm. Because its two coaxial drive wheels roll without slipping, the chassis cannot translate sideways along its axle. Expressed in terms of heading angle $\theta_{\text{head}}$, forward linear speed $\SpeedAtDetection$, and yaw rate $\omega$, the differential-drive (unicycle) kinematics satisfy
-
-$$\dot x = \SpeedAtDetection\cos\theta_{\text{head}}, \qquad \dot y = \SpeedAtDetection\sin\theta_{\text{head}}, \qquad \dot\theta_{\text{head}} = \omega, \qquad \dot x\sin\theta_{\text{head}} - \dot y\cos\theta_{\text{head}} = 0$$ {#eq-plan-unicycle}
-
-The non-integrable relation in @eq-plan-unicycle forms a **nonholonomic constraint**\index{Nonholonomic constraint!differential drive},[^fn-holonomic-hertz-etymology] restricting the instantaneous velocity space without diminishing the dimension of the reachable configuration space $SE(2)$ [@siciliano2009robotics]. The base can achieve any planar pose in the warehouse aisle, but @fig-11-nonholonomic-base diagrams how the no-slip condition strictly governs chassis mobility: panel (a) contrasts permitted forward translation $\SpeedAtDetection$ and yaw rate $\omega$ against the physically forbidden lateral translation vector (crossed out along the drive axle of track width $b$); panel (b) traces the resulting three-stage maneuver required to achieve a pure lateral offset—turning in place, translating along the wheel heading, and rotating back to the target orientation—proving that pure lateral steps are kinematically unexecutable. A base planner must therefore search directly over kinematically admissible control trajectories rather than straight geometric paths in configuration space. Furthermore, each wheel's tangential speed equals $\SpeedAtDetection \pm \omega b/2$ for track width $b$, so hardware motor limits constrain linear velocity and turning rate jointly.
-
-[^fn-holonomic-hertz-etymology]: **Holonomic** (Greek *holos*, whole, and *nomos*, law): @hertz1894prinzipien introduced the term for systems whose constraints obey integral laws, relations among positions alone, in contrast to material systems in general, which obey only differential laws. A wheel's no-slip rule is a differential law that cannot be integrated into such a relation. The distinction decides the planner's search space, since a holonomic arm can be planned as a path through configuration space while the base must be planned through its controls.\index{Holonomic constraint!etymology}
-
-::: {#fig-11-nonholonomic-base fig-env="figure" fig-pos="t" fig-cap="**What the wheels allow**: (a) A differential-drive base with track width $b$ can move forward at $\SpeedAtDetection$ and turn at $\omega$ about the center of its axle, but its wheels cannot roll sideways. (b) A pure sideways offset is still reachable, as a maneuver rather than a step: turn in place, drive, and turn back. Proportions are schematic." fig-alt="Two top-view panels of a rectangular base with a drive wheel on each side. In the left panel, a solid arrow points forward along the heading, a curved arrow shows turning, a bracket marks the track width, and a dashed arrow pointing sideways is crossed out. In the right panel, a dashed sideways arrow between a start and a goal pose is crossed out, and a second path shows the base turned a quarter turn in place at the start, driving straight to the goal, and turning back, with the three steps numbered."}
-
-```{python}
-#| label: plot-planning-nonholonomic-base
-#| echo: false
-#| warning: false
-#| message: false
-# ┌─────────────────────────────────────────────────────────────────────────────
-# │ NONHOLONOMIC BASE (FIGURE)
-# ├─────────────────────────────────────────────────────────────────────────────
-# │ Context: @fig-11-nonholonomic-base in @sec-planning-mobile-base.
-# │
-# │ Goal:    Make the rolling constraint of @eq-plan-unicycle physical: the base
-# │          has two velocity inputs and cannot translate along its axle.
-# │ Show:    admissible v and omega, the forbidden sideways velocity, and the
-# │          turn-drive-turn maneuver that reaches a sideways offset.
-# │ How:     Schematic geometry; no physical values are drawn.
-# └─────────────────────────────────────────────────────────────────────────────
-from mlsysim import viz
-import numpy as np
-from matplotlib.patches import Rectangle, FancyArrowPatch, Polygon
-from matplotlib.transforms import Affine2D
-
-R = viz.VOL4_ROLES
-viz.set_book_style()
-import matplotlib.pyplot as plt
-
-def _footprint(ax, x, y, th, ghost=False):
-    """Base outline, drive wheels on the axle, and heading tick (schematic proportions)."""
-    L, W, wl, ww = 0.9, 0.6, 0.26, 0.09
-    tr = Affine2D().rotate(th).translate(x, y) + ax.transData
-    ec = R["neutral"] if ghost else R["structural"]
-    ax.add_patch(
-        Rectangle((-L / 2, -W / 2), L, W, fc="none" if ghost else "#EEF3F1", ec=ec, lw=1.0, ls=(0, (3, 2)) if ghost else "-", transform=tr, zorder=3)
-    )
-    if not ghost:
-        for s in (1, -1):
-            ax.add_patch(Rectangle((-wl / 2, s * W / 2 - ww / 2), wl, ww, fc=R["structural"], ec="none", transform=tr, zorder=4))
-    ax.add_patch(Polygon([[L / 2 - 0.16, 0.1], [L / 2 - 0.02, 0], [L / 2 - 0.16, -0.1]], closed=True, fc=ec, ec="none", transform=tr, zorder=4))
-
-fig, ax = plt.subplots(figsize=(6.4, 3.8))
-ax.set_aspect("equal")
-ax.axis("off")
-_footprint(ax, 0, 0, 0)
-# allowed: forward speed along the heading, turn rate about the axle center
-ax.add_patch(FancyArrowPatch((0.5, 0), (1.25, 0), arrowstyle="-|>", mutation_scale=11, color=R["structural"], lw=1.4, zorder=5))
-ax.text(1.28, 0, r"$v$", ha="left", va="center", fontsize=10, color=R["structural"])
-ax.add_patch(
-    FancyArrowPatch(
-        (0.28, -0.52), (-0.28, -0.52), connectionstyle="arc3,rad=-0.45", arrowstyle="-|>", mutation_scale=10, color=R["structural"], lw=1.1, zorder=5
-    )
-)
-ax.text(0, -0.8, r"$\omega$", ha="center", va="top", fontsize=10, color=R["structural"])
-# forbidden: translation along the axle
-ax.add_patch(FancyArrowPatch((0, 0.33), (0, 0.95), arrowstyle="-|>", mutation_scale=11, color=R["neutral"], lw=1.2, ls=(0, (3, 2)), zorder=5))
-ax.plot([-0.09, 0.09], [0.55, 0.73], color=R["neutral"], lw=1.6, zorder=6)
-ax.plot([-0.09, 0.09], [0.73, 0.55], color=R["neutral"], lw=1.6, zorder=6)
-ax.text(0.14, 0.95, "no sideways velocity", ha="left", va="center", fontsize=8.5, color=R["neutral"])
-ax.annotate("", xy=(-0.55, 0.3), xytext=(-0.55, -0.3), arrowprops=dict(arrowstyle="<->", color=R["neutral"], lw=0.8))
-ax.text(-0.6, 0, r"$b$", ha="right", va="center", fontsize=10, color=R["neutral"])
-# a sideways offset: the direct step is inadmissible; turn in place, drive, turn back
-x0, dy = 2.9, 1.7
-_footprint(ax, x0, 0, 0)
-_footprint(ax, x0, 0, np.pi / 2, ghost=True)
-_footprint(ax, x0, dy, np.pi / 2, ghost=True)
-_footprint(ax, x0, dy, 0)
-ax.add_patch(FancyArrowPatch((x0, 0.5), (x0, dy - 0.5), arrowstyle="-|>", mutation_scale=11, color=R["proposal"], lw=1.4, ls=(0, (4, 2)), zorder=5))
-for yy, lab in ((0, "1  turn in place"), (dy / 2, "2  drive"), (dy, "3  turn back")):
-    ax.text(x0 + 0.62, yy, lab, ha="left", va="center", fontsize=8.5, color=R["proposal"])
-xs = x0 - 1.0
-ax.add_patch(FancyArrowPatch((xs, 0), (xs, dy), arrowstyle="-|>", mutation_scale=11, color=R["neutral"], lw=1.2, ls=(0, (3, 2)), zorder=5))
-ax.plot([xs - 0.09, xs + 0.09], [dy / 2 - 0.09, dy / 2 + 0.09], color=R["neutral"], lw=1.6, zorder=6)
-ax.plot([xs - 0.09, xs + 0.09], [dy / 2 + 0.09, dy / 2 - 0.09], color=R["neutral"], lw=1.6, zorder=6)
-ax.text(xs - 0.14, dy / 2, "direct\nsideways\nstep", ha="right", va="center", fontsize=8.5, color=R["neutral"])
-ax.text(0, 2.2, "(a) admissible velocities", ha="center", va="bottom", fontsize=9, fontweight="bold", color=R["neutral"])
-ax.text(x0, 2.2, "(b) a sideways offset", ha="center", va="bottom", fontsize=9, fontweight="bold", color=R["neutral"])
-ax.set_xlim(-0.9, 4.6)
-ax.set_ylim(-0.95, 2.45)
-plt.tight_layout()
-plt.show()
-```
-
-:::
-
-Local base planners enforce nonholonomic constraints by planning directly in velocity space over a receding time horizon. The dynamic window approach (DWA) [@fox1997dynamic] maps each control pair $(\SpeedAtDetection, \omega)$ to a circular trajectory arc and evaluates candidate pairs through two nested dynamic criteria. *Reachable velocities* comprise pairs achievable within actuator acceleration limits over the replanning window; with the mobile manipulator's base acceleration limit of `{python} PlanningMobileBase.a_base_str` and a `{python} PlanningMobileBase.t_renew_str` chunk renewal interval, this dynamic window spans `{python} PlanningMobileBase.dv_window_str` on either side of the current forward velocity. *Admissible velocities* select the subset from which the base can decelerate to a complete stop before reaching the nearest obstacle along that arc, satisfying $\SpeedAtDetection \le \sqrt{2\,d_{\text{arc}}(\SpeedAtDetection,\omega)\,\CredibleDecelerationBrake}$. From these admissible candidates, DWA selects the control pair maximizing an objective that balances target heading alignment, obstacle clearance, and forward speed. Model Predictive Path Integral control (MPPI) [@williams2017information] replaces this deterministic velocity grid by rolling forward thousands of stochastic control sequences through the dynamic model on a GPU, synthesizing an optimal control action as a cost-weighted trajectory distribution. Production navigation frameworks such as ROS 2 Nav2 incorporate both controller families [@macenski2023desks].
-
-The admissibility test applies the fundamental stopping requirement across candidate arcs, yet its classical textbook formulation assumes instantaneous, constant-deceleration braking. On a straight trajectory with `{python} PlanningMobileBase.d_clear_str` of rack-end clearance, this simplified test admits forward speeds up to `{python} PlanningMobileBase.v_admissible_str`—well above the physical drive limit of `{python} PlanningMobileBase.v_drive_str`. However, when evaluated against the comprehensive stopping budget derived in @sec-planning-base-stopping-budget (which accounts for sensor latency, communication delays, localization uncertainty margins, and jerk-limited deceleration), that same clearance fails to guarantee safety even at the nominal drive limit. A mobile base trajectory generator—whether a classical DWA planner or a neural action chunking policy—therefore functions strictly as a proposer of candidate velocities. The real-time permission path must validate each proposed trajectory against the full stopping budget.
-
-The choice of trajectory generator governs how candidate motions are discovered and determines the computational burden placed on downstream verification. However, the system's safety enforcement mechanisms must respond consistently regardless of how a proposal was generated. In particular, the execution architecture must cleanly differentiate between rejecting an invalid replacement candidate and responding to unexpected environmental changes: rejecting an unvalidated proposal leaves the active, verified trajectory safely in control, whereas detecting an unexpected obstacle incursion along the executed path demands an immediate transition to verified braking.
-
 ## Trajectory Planning Failure Modes and Infeasible Seams {#sec-planning-failure-modes}
 
 In an embodied manipulation task—such as reaching for a mug—a replacement trajectory can fail in three distinct regimes: within the candidate itself, along the boundary where it joins the executing motion, or during execution when the environment changes. The point where a failure first manifests dictates which subsystem has the sensory evidence to reject the trajectory, as well as how much time and clearance remain to bring the machine to a safe stop. Pre-execution candidate and boundary checks intercept the first two failure modes before setpoints can reach actuator registers, whereas runtime monitoring guards against the third.
@@ -2708,10 +2708,10 @@ Real-time execution relies on strict timing contracts between the planner and th
 | $\SmallConstant \le \epsilon_{\text{mission}}/\Top$                                                                                                                                       | The per-handoff tail that a mission target implies, far beyond p99                                                      | @eq-plan-union-bound               |
 | $T_{\text{record}} \ge T_{\text{request}} + Q_{1-\SmallConstant}(\Loss) + T_{\text{reserve}} + T_{\text{stop}}$                                                                           | The time a record must cover, stop included                                                                             | @eq-plan-action-chunk-horizon      |
 | $\boldsymbol{\ResponseThreshold} = \ArticulatedInertiaMatrix\ddot{\mathbf{q}} + \CoriolisMatrix\dot{\mathbf{q}} + \mathbf{\MessageInjectionGap} - \mathbf{J}^\top\mathbf{F}_{\text{ext}}$ | The torque a planned motion demands, evaluated by inverse dynamics at admission                                         | @eq-plan-rigidbody-dynamics        |
-| $\lvert\dot q_k\rvert \le \SpeedBound - \tfrac{1}{2}\ProfileAccelerationBound{}T_s$                                                                                                         | A sampled velocity limit that still holds between samples                                                               | @eq-plan-contracted-velocity-limit |
+| $\lvert\dot q_k\rvert \le \SpeedBound - \tfrac{1}{2}\ProfileAccelerationBound{}T_s$                                                                                                       | A sampled velocity limit that still holds between samples                                                               | @eq-plan-contracted-velocity-limit |
 | $\tau_{\text{request}} = \EffectiveJointInertia\,\Delta\dot q/T_c$                                                                                                                        | The torque a seam's velocity step asks of the reflected inertia                                                         | @eq-plan-seam-torque               |
-| $j(t) = 6a_3 + 24a_4t + 60a_5t^2$                                                                                                                                     | The jerk of a quintic bridge, whose extrema the checker evaluates in closed form                                        | @eq-plan-quintic-jerk              |
-| $V_{\text{bus}} \ge \PhaseInductanceAndResistance\,di_q/dt + \PhaseInductanceAndResistanceTwo\, \TorqueproducingCurrent + \MotorBackEmfConstant\omega$                            | Whether the drive has the voltage for the current slew a bridge demands                                                 | @eq-plan-inverter-headroom         |
+| $j(t) = 6a_3 + 24a_4t + 60a_5t^2$                                                                                                                                                         | The jerk of a quintic bridge, whose extrema the checker evaluates in closed form                                        | @eq-plan-quintic-jerk              |
+| $V_{\text{bus}} \ge \PhaseInductanceAndResistance\,di_q/dt + \PhaseInductanceAndResistanceTwo\, \TorqueproducingCurrent + \MotorBackEmfConstant\omega$                                    | Whether the drive has the voltage for the current slew a bridge demands                                                 | @eq-plan-inverter-headroom         |
 | $\boldsymbol{\ResponseThreshold} = \mathbf{\MicrobatchCount}(s)\ddot s + \mathbf{\PointToPointMessageSize}(s)\dot s^2 + \mathbf{\MessageInjectionGap}(s)$                                 | The path accelerations the torque limits allow, and so the fastest timing of a path                                     | @eq-plan-path-torque               |
 | $\StoppingDistance = v^2/2\ProfileAccelerationBound + \SpeedAtDetection\,\ProfileAccelerationBound/2\JerkLimit$                                                                           | The shortest stop within deceleration and jerk bounds, above the plateau speed $\ProfileAccelerationBound^2/\JerkLimit$ | @eq-plan-c2-stopping-suffix        |
 | $\StoppingDistance(\CommitmentInstant) \le \ClearDistance(\CommitmentInstant)$                                                                                                            | Whether a trajectory may be admitted at all                                                                             | @eq-plan-commitment-invariant      |
