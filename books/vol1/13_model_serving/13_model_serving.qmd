@@ -1868,1012 +1868,6 @@ Latency SLOs are not enforced by *fast inference* alone; they are enforced by *h
 Queuing theory and tail-tolerance policies govern the steady-state processing of requests. They presuppose, however, that serving instances are already initialized and that incoming data matches offline training assumptions—preconditions that frequently fail during cold starts, auto-scaling surges, and silent feature corruption.
 
 
-## Serving Load, Latency, and Architecture {#sec-model-serving-load-latency-architecture-a4d8}
-
-Online serving systems process variable, unbatched request streams while operating under strict latency deadlines. When arrival bursts exhaust a system's reserved headroom, performance degrades nonlinearly.
-
-```{python}
-#| echo: false
-from mlsysim import *
-from mlsysim.core.units import *
-
-# ┌─────────────────────────────────────────────────────────────────────────────
-# │ BLACK FRIDAY TRAFFIC SPIKE
-# ├─────────────────────────────────────────────────────────────────────────────
-# │ Context: Callout "The 'Black Friday' Traffic Spike"
-# │
-# │ Goal: Demonstrate the nonlinear failure mode of serving systems under load.
-# │ Show: That a 10× traffic spike causes system collapse, not just 10× latency.
-# │ How: Model queue explosion using Little's Law parameters.
-# │
-# └─────────────────────────────────────────────────────────────────────────────
-
-from mlsysim.fmt import fmt, fmt_rate
-
-class BlackFridayCalc:
-    """Models the nonlinear failure mode of serving systems under a 10× traffic spike."""
-
-    # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    bf_latency_ms_value = 50 * ms  # scenario assumption: normal operation latency
-    bf_qps_normal_value = 1000  # normal queries per second
-    bf_qps_spike_value = 10000  # Black Friday peak QPS
-    bf_spike_factor_value = 10  # spike multiplier (10x)
-    bf_collapse_latency_s_value = 10 * second  # scenario assumption: latency during collapse
-    bf_full_util_pct_value = 100
-
-    # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
-    bf_latency_ms_str = fmt_time(bf_latency_ms_value, 'millisecond', precision=0, commas=False)
-    bf_qps_normal_str = fmt_rate(bf_qps_normal_value, "QPS")
-    bf_qps_spike_str = fmt_rate(bf_qps_spike_value, "QPS")
-    bf_spike_factor_mult_str = fmt_multiple(bf_spike_factor_value, precision=0, commas=False)
-    bf_collapse_latency_s_str = fmt_time(bf_collapse_latency_s_value, 'second', precision=0, commas=False)
-    bf_full_util_pct_str = fmt_percent(bf_full_util_pct_value / 100, precision=0, commas=False, style='prose')
-```
-
-::: {#exmp-model-serving-black-friday-traffic-spike .callout-example title="The 'Black Friday' traffic spike"}
-
-**Scenario**: An e-commerce recommendation serving system experiences a `{python} BlackFridayCalc.bf_spike_factor_mult_str` traffic surge (`{python} BlackFridayCalc.bf_qps_spike_str`) during Black Friday sales events.
-
-**Diagnosis**: When server utilization approaches `{python} BlackFridayCalc.bf_full_util_pct_str`, queue lengths explode nonlinearly, increasing latency to `{python} BlackFridayCalc.bf_collapse_latency_s_str` and causing client request timeouts.
-
-**Systems lesson**: High average throughput does not prevent queueing collapse under traffic surges. Depending on the service, preserving a tail-latency objective may require load shedding, graceful degradation, or autoscaling before utilization reaches the workload's queueing knee.
-
-:::
-
-@Fig-tail-latency-explosion plots this latency divergence against server utilization using an idealized $M/M/1$ queueing model (in Kendall's notation: Markovian/Poisson arrivals, Markovian/exponential service times, and 1 server). The green zone below 50 percent utilization and the red zone above 70 percent illustrate a planning policy, not universal operating limits. As utilization rises through the marked knee toward saturation, the 99th percentile curve explodes asymptotically toward saturation, scaling as $\text{p99} = -\ln(0.01) \times \text{mean} \approx 4.6 \times \text{mean}$ (a result derived in @sec-model-serving-tail-latency-5376). This rapid compounding near saturation is why latency-sensitive systems reserve headroom rather than planning for permanently high accelerator occupancy\index{Tail latency!utilization threshold}. @Sec-appdx-data-foundations-distributions-long-tail-901f provides a mathematical treatment of long-tailed distributions and explains why high-percentile latency dictates capacity when an SLO covers the slowest requests.
-
-::: {.column-margin .margin-pointer}
-↪ Why long-tailed latency distributions make high percentiles, rather than the mean, govern what users experience is developed in @sec-appdx-data-foundations-distributions-long-tail-901f.
-:::
-
-::: {#fig-tail-latency-explosion fig-env="figure" fig-pos="htb" fig-cap="**The Tail Latency Explosion**: Request latency vs. serving utilization $\ServingUtilization$. Mean latency (blue) and the p99 approximation (red) both grow nonlinearly as utilization approaches saturation; the 70 percent marker is an illustrative planning knee rather than a model-derived breakpoint. In an $M/M/1$ queue, the 99th percentile latency scales as $-\ln(0.01) \approx 4.6\times$ mean latency, illustrating why tail delays compound violently near saturation." fig-alt="Line plot of normalized request latency against serving utilization. A dashed blue mean-latency curve and a solid red p99 curve rise nonlinearly toward saturation, with the red curve remaining 4.6 times the blue curve. Green shading marks 0–50 percent as the Safe Zone, red shading marks 70–100 percent as the Danger Zone, and an arrow labels 70 percent ‘The Knee.’"}
-
-```{python}
-#| echo: false
-# ┌─────────────────────────────────────────────────────────────────────────────
-# │ TAIL LATENCY EXPLOSION FIGURE
-# ├─────────────────────────────────────────────────────────────────────────────
-# │ Context: @fig-tail-latency-explosion—illustrates why tail latency diverges
-# │          from mean latency as system utilization approaches 100%
-# │
-# │ Goal: Visually demonstrate the nonlinear explosion of p99 latency near
-# │       saturation using an M/M/1 queueing model approximation.
-# │ Show: Mean vs. p99 latency curves, with Safe Zone and Danger Zone annotations.
-# │ How: Compute mean = 1/(1-rho_serv) and p99 approx 4.6x mean; plot on shared axes.
-# │
-# └─────────────────────────────────────────────────────────────────────────────
-
-# ┌── 1. CANVAS ────────────────────────────────────────────────────────────────
-# │ Visually demonstrate the nonlinear explosion of p99 latency near
-import numpy as np
-from binder.tools.figures import style as book_style
-
-fig, ax, COLORS, plt = book_style.setup_plot(figsize=(10, 4.3))
-# =============================================================================
-# PLOT: The Tail Latency Explosion
-# =============================================================================
-
-# ┌── 2. ARRAYS ────────────────────────────────────────────────────────────────
-utilization = np.linspace(0, 0.95, 100)
-mean_latency = 1 / (1 - utilization)
-p99_latency = mean_latency * 4.6
-
-# ┌── 3. RENDER ────────────────────────────────────────────────────────────────
-ax.plot(utilization, mean_latency, '--', color=COLORS['BlueLine'], label='Mean Latency', linewidth=2)
-ax.plot(utilization, p99_latency, '-', color=COLORS['RedLine'], label='Tail Latency (p99)', linewidth=2.5)
-
-# ┌── 4. DECORATE ──────────────────────────────────────────────────────────────
-ax.set_xlabel('System Utilization (%)')
-ax.set_ylabel('Request Latency (normalized to service time)')
-ax.set_xlim(0, 1.0)
-ax.set_ylim(0, 50)
-
-ax.axvspan(0, 0.5, color=COLORS['GreenL'], alpha=0.2)
-ax.text(
-    0.25,
-    39,
-    "Safe Zone",
-    color=COLORS['GreenLine'],
-    fontsize=8,
-    fontweight='bold',
-    va='center',
-    ha='center',
-    bbox=dict(facecolor='white', alpha=0.8, edgecolor='none', pad=0.5),
-)
-ax.axvspan(0.7, 1.0, color=COLORS['RedL'], alpha=0.3)
-ax.text(
-    0.78,
-    39,
-    "Danger Zone\n(Queue\nExplosion)",
-    color=COLORS['RedLine'],
-    fontweight='bold',
-    va='center',
-    ha='center',
-    fontsize=8,
-    linespacing=1.4,
-    bbox=dict(facecolor='white', alpha=0.8, edgecolor='none', pad=0.5),
-)
-
-ax.annotate(
-    "The Knee",
-    xy=(0.7, 15),
-    xytext=(0.59, 20),
-    arrowprops=dict(facecolor=COLORS['primary'], arrowstyle='->', lw=1.0),
-    fontsize=9,
-    bbox=dict(facecolor='white', alpha=0.8, edgecolor='none', pad=0.5),
-)
-
-ax.set_xticks([0, 0.2, 0.4, 0.6, 0.8, 1.0])
-ax.set_xticklabels(['0%', '20%', '40%', '60%', '80%', '100%'])
-ax.legend(loc='upper left', fontsize=8, frameon=True, facecolor='white', framealpha=0.95, edgecolor='gray', fancybox=True, borderpad=0.6)
-plt.show()
-plt.close()
-```
-
-:::
-
-Beyond the technical limits of latency, serving economics have also changed rapidly. As models become more efficient and hardware becomes more specialized, the cost per inference has fallen.[^fn-jevons-paradox-efficiency] Falling unit cost has not made serving cheap in aggregate, because volume grows faster than price falls; at fleet scale, recurring inference cost dominates, as Facebook's experience shows.
-
-[^fn-jevons-paradox-efficiency]: **Jevons paradox**\index{Jevons paradox!inference demand}: William Stanley Jevons observed in 1865 that efficiency improvements in coal-powered steam engines increased total coal consumption by making steam power economically viable for applications previously too costly [@jevons1865coal]; the same dynamic can apply to AI inference: each 10$\times$ cost reduction opens application classes that were economically infeasible at the previous price point, expanding aggregate demand by more than the efficiency gain. This is why cheaper inference can increase, not decrease, total GPU fleet demand. Efficiency and demand are often complements in AI, not substitutes.
-
-::: {#exmp-model-serving-facebook-inference-tax .callout-example title="The inference tax at Facebook"}
-
-**Scenario**: Production ML serving systems at Meta execute tens of trillions of inferences daily across global user-facing services [@hazelwood2018].
-
-**Diagnosis**: Recurring inference serving compute and energy costs dwarf initial offline model training expenses. Live request arrival patterns and strict latency bounds constrain GPU batching.
-
-**Systems lesson**: Model architectures cheap to train can prove unviable to serve at fleet scale. Production serving infrastructure requires hardware-software co-design to balance tail latency, batch size, and recurring operational total cost of ownership.
-
-:::
-
-The same serving-economics pressure appears in public API prices. @Fig-intelligence-deflation tracks this cost collapse across representative public API list-price snapshots from 2023 through 2025 on a logarithmic scale. The steep downward trend line isolates how prompt token pricing fell by multiple orders of magnitude—from thirty dollars per million tokens for original GPT-4 down to several cents for Gemini 1.5 Flash and DeepSeek-V3. Vendor prices change frequently, so these points should be read as historical provenance for the trend rather than as current purchasing guidance [@openai2023chatgptwhisper; @openai2023gpt4web; @openaiCommunity2024gpt4oApi; @openai2024gpt4oMini; @anthropic2024claude3family; @google2024gemini15flashPricing; @deepseek2024v3]. Each order-of-magnitude drop changes which applications are economically viable.
-
-::: {#fig-intelligence-deflation fig-env="figure" fig-pos="htb" fig-cap="**Intelligence Deflation**: Representative public API input-token list prices per 1M tokens (\$) over time (Log Scale). Eight model-version points are snapshots collected from the public pricing pages of OpenAI, Anthropic, Google, and DeepSeek between 2023 and 2025; the Legacy GPT-3.5 point is an illustrative baseline rather than a documented model-version snapshot. The series is intended as a market trend indicator, not a controlled or current-price comparison. API token-processing prices have collapsed by multiple orders of magnitude, transforming the economics of automated AI workflows." fig-alt="Log-scale scatter plot of eight source-backed public API input-token price snapshots and one illustrative legacy baseline from 2023 to 2025, ranging from 30 dollars to 0.075 dollars per million tokens. Blue points are labeled by model, and a red dashed trend line slopes downward across the plot."}
-
-```{python}
-#| echo: false
-# ┌─────────────────────────────────────────────────────────────────────────────
-# │ INTELLIGENCE DEFLATION FIGURE
-# ├─────────────────────────────────────────────────────────────────────────────
-# │ Context: @fig-intelligence-deflation—log-scale scatter plot of representative
-# │          public API input-token prices from 2023 to 2025, annotated with model names
-# │
-# │ Goal: Visualize the decline in inference token prices that is transforming AI
-# │       serving economics.
-# │ Show: Named input/prompt-token price points on a log scale with deflation trend line.
-# │ How: Fit a log-linear trend through representative price points; scatter
-# │      remaining models; annotate each with model name.
-# │
-# └─────────────────────────────────────────────────────────────────────────────
-
-# ┌── 1. CANVAS ────────────────────────────────────────────────────────────────
-# │ Visualize the decline in inference token prices.
-import numpy as np
-from binder.tools.figures import style as book_style
-
-fig, ax, COLORS, plt = book_style.setup_plot(figsize=(10, 4.4))
-# =============================================================================
-# DATA: Representative input-token pricing snapshots over time
-# =============================================================================
-
-# ┌── 2. ARRAYS ────────────────────────────────────────────────────────────────
-data = [
-    (2023.0, 20.0, "Legacy GPT-3.5"),
-    (2023.1, 2.0, "GPT-3.5 Turbo"),
-    (2023.2, 30.0, "GPT-4 (Original)"),
-    (2024.2, 15.0, "Claude 3 Opus"),
-    (2024.2, 0.25, "Claude 3 Haiku"),
-    (2024.3, 5.0, "GPT-4o"),
-    (2024.62, 0.075, "Gemini 1.5 Flash"),
-    (2024.55, 0.15, "GPT-4o-mini"),
-    (2025.1, 0.27, "DeepSeek-V3"),
-]
-data.sort(key=lambda x: x[0])
-
-years = np.array([d[0] for d in data])
-prices = np.array([d[1] for d in data])
-labels = [d[2] for d in data]
-
-# =============================================================================
-# PLOT: Intelligence Deflation
-# =============================================================================
-trend_years = np.array([2023.0, 2023.1, 2024.2, 2024.4, 2025.1])
-trend_prices = np.array([20.0, 2.0, 0.25, 0.075, 0.27])
-slope, intercept = np.polyfit(trend_years, np.log10(trend_prices), 1)
-line_years = np.linspace(2023.0, 2025.5, 100)
-line_prices = 10 ** (slope * line_years + intercept)
-
-# -----------------------------------------------------------------------------
-# RENDER
-# -----------------------------------------------------------------------------
-ax.plot(line_years, line_prices, linestyle='--', linewidth=1.5, color=COLORS['RedLine'])
-ax.scatter(years, prices, s=45, color=COLORS['BlueLine'], edgecolors='white', zorder=3)
-
-# -----------------------------------------------------------------------------
-# Default label style
-# -----------------------------------------------------------------------------
-default_label_style = {
-    "xytext": (6, 6),
-    "textcoords": "offset points",
-    "ha": "left",
-    "va": "bottom",
-    "fontsize": 8,
-    "color": COLORS["primary"],
-    "bbox": dict(boxstyle="round,pad=0.2", facecolor="white", edgecolor="none", alpha=0.8),
-}
-
-# -----------------------------------------------------------------------------
-# Individual overrides by label
-# -----------------------------------------------------------------------------
-label_styles = {
-    "Legacy GPT-3.5": {
-        "xytext": (-10, -11),
-        "ha": "center",
-        "va": "center",
-    },
-    "GPT-3.5 Turbo": {
-        "xytext": (0, 10),
-        "ha": "center",
-        "va": "center",
-    },
-    "GPT-4 (Original)": {
-        "xytext": (0, 10),
-        "ha": "center",
-        "va": "center",
-    },
-    "Claude 3 Opus": {
-        "xytext": (0, 10),
-        "ha": "center",
-        "va": "center",
-    },
-    "Claude 3 Haiku": {
-        "xytext": (-10, -10),
-        "ha": "center",
-        "va": "center",
-    },
-    "GPT-4o": {
-        "xytext": (0, -10),
-        "ha": "center",
-        "va": "center",
-    },
-    "Gemini 1.5 Flash": {
-        "xytext": (-20, -20),
-        "ha": "center",
-        "va": "center",
-        "arrowprops": dict(arrowstyle="-", shrinkB=5, color=COLORS["primary"], lw=0.8),
-    },
-    "GPT-4o-mini": {
-        "xytext": (20, -20),
-        "ha": "center",
-        "va": "center",
-        "arrowprops": dict(arrowstyle="-", shrinkB=5, color=COLORS["primary"], lw=0.8),
-    },
-    "DeepSeek-V3": {
-        "xytext": (0, 10),
-        "ha": "center",
-        "va": "center",
-    },
-}
-
-# -----------------------------------------------------------------------------
-# Draw labels
-# -----------------------------------------------------------------------------
-for x, y, label in zip(years, prices, labels):
-    style = default_label_style.copy()
-    style.update(label_styles.get(label, {}))
-    ax.annotate(label, (x, y), **style)
-# ┌── 4. DECORATE ──────────────────────────────────────────────────────────────
-ax.set_yscale('log')
-ax.set_yticks([100, 10, 1, 0.1, 0.01])
-ax.set_yticklabels(['$100', '$10', '$1', '$0.10', '$0.01'])
-ax.set_xlabel('Year')
-ax.set_ylabel('Price per 1M Tokens ($)')
-ax.set_ylim(0.01, 500)
-ax.set_xlim(2022.8, 2025.5)
-ax.text(
-    2023.5,
-    0.05,
-    "Prices Decline by\nOrders of Magnitude",
-    color=COLORS['grid'],
-    fontsize=9,
-    ha='center',
-    style='italic',
-    bbox=dict(facecolor='white', alpha=0.8, edgecolor='none', pad=0.5),
-)
-plt.show()
-plt.close()
-```
-
-:::
-
-Two pressures now frame the serving problem: tail latency that explodes once utilization passes the queueing knee, and per-inference economics that fall by orders of magnitude as efficiency improves. Together they force a formal definition of serving built around latency rather than throughput.
-
-::: {#dfn-model-serving-model-serving .callout-definition title="Model serving"}
-
-***Model serving***\index{Model serving!definition} is the operational phase that provides model predictions to end-users or downstream systems under latency, throughput, availability, and cost constraints.
-
-1.  **Significance**: Online serving turns training's throughput priority ($\EfficiencyHw$) into a request-latency constraint ($\EndToEndRequestLatency$), requiring a stack designed around the percentile named by its SLO.
-2.  **Distinction**: Unlike model training, which commonly processes scheduled batches, serving may handle stochastic online requests, synchronized streams, or offline batches.
-3.  **Common pitfall**: A frequent misconception is that serving is "just the forward pass." In reality, it is a systems problem: model execution is only one component of a stack that may include request routing, load balancing, and data transformation.
-
-:::
-
-The SLO[^fn-slo-sla-serving] defines the latency target that shapes every architectural decision in the serving stack, establishing the strict time budget within which all request handling must complete. When an inference server receives a request, model execution represents only one segment of an end-to-end pipeline: network ingress, payload deserialization, feature transformation, queue scheduling, and output serialization all consume time before and after the accelerator runs. @Fig-serving-inference-pipeline diagrams this end-to-end request lifecycle, partitioning execution into three sequential stages: input preprocessing (traditional computing), neural network evaluation (deep learning), and output postprocessing with safety validation (traditional computing). Any of these stages can become the binding latency bottleneck. @Sec-model-serving-latency-budget-ef40 quantifies exactly where time goes, revealing a counterintuitive result about which stages dominate.
-
-::: {.column-margin .margin-pointer}
-↩ SLOs, service level agreements (SLAs), and the tail-latency percentiles they constrain are established in @sec-benchmarking-latency-tail-latency-5cde.
-:::
-
-[^fn-slo-sla-serving]: **Service level objective (SLO) vs. service level agreement (SLA)**\index{SLO!vs. SLA}: An SLO is an *internal* target (for example, "p99 latency under 50 ms") and an SLA is an *external* contractual commitment whose violation may carry remedies or penalties. Teams often set SLOs tighter than SLAs to preserve a safety margin. For ML serving, task quality and inference latency can both contribute to SLOs, creating multidimensional targets where improving one dimension (for example, deploying a larger model for accuracy) can violate another (latency).
-
-::: {#fig-serving-inference-pipeline fig-env="figure" fig-pos="htb" fig-cap="**The Inference Pipeline**: ML serving systems transform raw inputs into final outputs through sequential stages: preprocessing, neural network computation, and postprocessing. The neural network represents just one component; preprocessing and postprocessing make end-to-end latency depend on more than neural-network execution." fig-alt="Left-to-right flow diagram of six connected boxes labeled Raw Data, Pre-processing, Neural Network, Raw Output, Post-processing, and Final Output. Outlined groups beneath the boxes identify Pre-processing, Deep Learning, and Post-processing."}
-
-```{.tikz}
-\begin{tikzpicture}[font=\small\sffamily, >=stealth]
-\tikzset{
-Box/.style={align=center, inner xsep=2pt,draw=GreenLine, line width=1pt,fill=none,
-minimum width=24mm, minimum height=25mm,node distance=1.0},
-LineA/.style={BrownLine!70,line width=4.0pt,{-{Triangle[width=1.5*6pt,length=2.0*5pt]}},shorten <=1pt,shorten >=1pt},
-ALine/.style={black!50, line width=1.1pt,{{Triangle[width=0.9*6pt,length=1.2*6pt]}-}},
-Larrow/.style={fill=violet!50, single arrow,  inner sep=2pt, single arrow head extend=3pt,
-            single arrow head indent=0pt,minimum height=10mm, minimum width=3pt}
-}
-%inbox
-\tikzset{%
- pics/inbox/.style = {
-        code = {
-        \pgfkeys{/channel/.cd, #1}
-\begin{scope}[local bounding box=INBOX,scale=\scalefac, every node/.append style={transform shape}]
-\node[line width=\Linewidth,draw=\drawcolor,fill=\filllcolor!50,
-rectangle,rounded corners=3pt,minimum width=14mm,minimum height=10mm]at(0,0.3){};
-\node[line width=\Linewidth,draw=\drawcolor,fill=\filllcolor,
-rectangle,rounded corners=3pt,minimum width=15mm,minimum height=10mm]at(0,0.1){};
-\node[line width=\Linewidth,draw=\drawcolor,fill=\filllcolor!50,
-,rectangle,rounded corners=3pt,minimum width=17mm,minimum height=10mm]
-at(0,-0.1){};
-\draw[line width=\Linewidth,draw=\drawcolor,fill=\filllcirclecolor,,rounded corners=2pt](-0.92,0.05)--
-(-0.92,-0.78)--(0.92,-0.78)--(0.92,0.05)--(0.40,0.05)--(0.32,-0.2)--(-0.29,-0.2)--(-0.40,0.05)--cycle;
-
-\node[single arrow, line width=\Linewidth,draw=black,fill=cyan!90!black!30, rotate=270,
-      minimum width = 15pt, single arrow head extend=6pt,
-      minimum height=10mm]at(0,0.5) {}; % length of arrow
- \end{scope}
-     }
-  }
-}
-%brain
-\tikzset{pics/brain/.style = {
-        code = {
-        \pgfkeys{/channel/.cd, #1}
-\begin{scope}[local bounding box=BRAIN,scale=\scalefac, every node/.append style={transform shape}]
-\fill[fill=\filllcolor!50](0.1,-0.5)to[out=0,in=180](0.33,-0.5)
-to[out=0,in=270](0.45,-0.38)to(0.45,-0.18)
-to[out=40,in=240](0.57,-0.13)to[out=110,in=310](0.52,-0.05)
-to[out=130,in=290](0.44,0.15)to[out=90,in=340,distance=8](0.08,0.69)
-to[out=160,in=80](-0.42,-0.15)to (-0.48,-0.7)to(0.07,-0.7)to(0.1,-0.5)
-(-0.10,-0.42)to[out=310,in=180](0.1,-0.5);
-\draw[draw=\drawcolor,line width=\Linewidth](0.1,-0.5)to[out=0,in=180](0.33,-0.5)
-to[out=0,in=270](0.45,-0.38)to(0.45,-0.18)
-to[out=40,in=240](0.57,-0.13)to[out=110,in=310](0.52,-0.05)
-to[out=130,in=290](0.44,0.15)to[out=90,in=340,distance=8](0.08,0.69)
-(-0.42,-0.15)to (-0.48,-0.7)
-(0.07,-0.7)to(0.1,-0.5)
-(-0.10,-0.42)to[out=310,in=180](0.1,-0.5);
-\draw[fill=\filllcolor,line width=\Linewidth](-0.3,-0.10)to(0.08,0.60)
-to[out=60,in=50,distance=3](-0.1,0.69)to[out=160,in=80](-0.26,0.59)to[out=170,in=90](-0.46,0.42)
-to[out=170,in=110](-0.54,0.25)to[out=210,in=150](-0.54,0.04)
-to[out=240,in=130](-0.52,-0.1)to[out=300,in=240]cycle;
-\draw[fill=\filllcolor,line width=\Linewidth]
-(-0.04,0.64)to[out=120,in=0](-0.1,0.69)(-0.19,0.52)to[out=120,in=330](-0.26,0.59)
-(-0.4,0.33)to[out=150,in=280](-0.46,0.42)
-%
-(-0.44,-0.03)to[bend left=30](-0.34,-0.04)
-(-0.33,0.08)to[bend left=40](-0.37,0.2) (-0.37,0.12)to[bend left=40](-0.45,0.14)
-(-0.26,0.2)to[bend left=30](-0.24,0.13)
-(-0.16,0.32)to[bend right=30](-0.27,0.3)to[bend right=30](-0.29,0.38)
-(-0.13,0.49)to[bend left=30](-0.04,0.51);
-
-\draw[rounded corners=0.8pt,\drawcircle,-{Circle[fill=\filllcirclecolor,length=2.5pt]}](-0.23,0.03)--(-0.15,-0.03)--(-0.19,-0.18)--(-0.04,-0.28);
-\draw[rounded corners=0.8pt,\drawcircle,-{Circle[fill=\filllcirclecolor,length=2.5pt]}](-0.17,0.13)--(-0.04,0.05)--(-0.06,-0.06)--(0.14,-0.11);
-\draw[rounded corners=0.8pt,\drawcircle,-{Circle[fill=\filllcirclecolor,length=2.5pt]}](-0.12,0.23)--(0.31,0.0);
-\draw[rounded corners=0.8pt,\drawcircle,-{Circle[fill=\filllcirclecolor,length=2.5pt]}](-0.07,0.32)--(0.06,0.26)--(0.16,0.33)--(0.34,0.2);
-\draw[rounded corners=0.8pt,\drawcircle,-{Circle[fill=\filllcirclecolor,length=2.5pt]}](-0.01,0.43)--(0.06,0.39)--(0.18,0.51)--(0.31,0.4);
-\end{scope}
-     }
-  }
-}
-%llm
-\tikzset{
-pics/llm/.style = {
-        code = {
-        \pgfkeys{/channel/.cd, #1}
-\begin{scope}[shift={($(0,0)+(0,0)$)},scale=\scalefac,every node/.append style={transform shape}]
-\node[circle,minimum size=12mm,draw=\drawcolor, fill=\filllcolor!70,line width=0.5*\Linewidth](C\picname) at (0,0){};
-\def\startangle{90}
-\def\radius{1.15}
-\def\radiusI{1.1}
-\foreach \i [evaluate=\i as \j using \i+1] [count =\k] in {0,2,4,6,8} {
-\pgfmathsetmacro{\angle}{\startangle - \i * (360/8)}
-\draw[draw=black,-{Circle[black ,fill=\filllcirclecolor,length=5.5pt,line width=0.5*\Linewidth]},line width=1.5*\Linewidth](C\picname)--++(\startangle - \i*45:\radius) ;
-\node[circle,draw=black,fill=\filllcirclecolor!80!red!50,inner sep=3pt,line width=0.5*\Linewidth](2C\k)at(\startangle - \j*45:\radiusI) {};
-}
-\draw[line width=1.5*\Linewidth](2C1)--++(-0.5,0)|-(2C2);
-\draw[line width=1.5*\Linewidth](2C3)--++(0.5,0)|-(2C4);
-\node[circle,,minimum size=12mm,draw=\drawcolor, fill=\filllcolor!70,line width=0.5*\Linewidth]at (0,0){};
-\node[draw,rectangle,rounded corners=1pt,minimum width=7mm,minimum height=4mm,fill=orange!10](R1)at(0.1,0.1){};
-\draw[BrownLine,shorten <=2pt,shorten >=2pt ]($(R1.north west)!0.35!(R1.south west)$)--($(R1.north east)!0.35!(R1.south east)$);
-\draw[BrownLine,shorten <=2pt,shorten >=2pt ]($(R1.north west)!0.7!(R1.south west)$)--($(R1.north east)!0.7!(R1.south east)$);
-\node[draw,rectangle,rounded corners=1pt,minimum width=6mm,minimum height=4mm,fill=orange!10](R2)at(-0.05,-0.15){};
-\draw[BrownLine,shorten <=2pt,shorten >=2pt ]($(R2.north west)!0.35!(R2.south west)$)--($(R2.north east)!0.35!(R2.south east)$);
-\draw[BrownLine,shorten <=2pt,shorten >=2pt ]($(R2.north west)!0.7!(R2.south west)$)--($(R2.north east)!0.7!(R2.south east)$);
-\end{scope}
-    }
-  }
-}
-%funnel
-\tikzset{%
- pics/funnel/.style = {
-        code = {
-        \pgfkeys{/channel/.cd, #1}
-\begin{scope}[local bounding box=FUNNEL,scale=\scalefac, every node/.append style={transform shape}]
-\draw[fill=\filllcolor,line width=\Linewidth,draw=\drawcolor](-0.12,-0.81)--(-0.19,-0.25)--(-0.7,0.41)--(0.7,0.41)--(0.19,-0.25)--(0.12,-0.81)--cycle;
-\draw[fill=\filllcolor,line width=\Linewidth,draw=\drawcolor](-0.19,-0.25)--(0.08,-0.25);
-\draw[fill=\filllcolor,line width=\Linewidth,draw=\drawcolor](0.16,-0.09)--(0.41,0.31);
-%
-\node[line width=\Linewidth,draw=\drawcolor,fill=\filllcolor,inner sep=1pt,
-rectangle,rounded corners=2pt,minimum width=16mm,minimum height=5pt]at(0,0.5){};
-%
-\foreach \i in{-0.5,0,0.5}{
-\node[single arrow, line width=0.8*\Linewidth,draw=black,fill=\filllcirclecolor, rotate=270,inner sep=1pt,
-      minimum width =9pt, single arrow head extend=2pt,
-      minimum height=5mm]at(\i,0.9) {}; % length of arrow
-   }
-\node[single arrow,line width=0.8*\Linewidth,draw=black,fill=\filllcirclecolor, rotate=270,inner sep=1pt,
-      minimum width =11pt, single arrow head extend=2pt,
-      minimum height=5mm]at(0,-1.1) {}; % length of arrow
- \end{scope}
-     }
-  }
-}
-\def\inset{2.0pt} %
-\def\myshape{%
-  (0,1.34) to[out=220,in=0] (-1.20,1.03) --
-  (-1.20,-0.23) to[out=280,in=160] (0,-1.53) to[out=20,in=260] (1.20,-0.23) --
-  (1.20,1.03)  to[out=180,in=320] cycle
-}
-\tikzset{
-pics/stitC/.style = {
-        code = {
-        \pgfkeys{/channel/.cd, #1}
-\begin{scope}[shift={($(0,0)+(0,0)$)},scale=\scalefac,every node/.append style={transform shape}]
-\fill[fill=\filllcolor!60] \myshape;
-%
-\begin{scope}
-  \clip \myshape;
-  \draw[draw=\filllcolor!60, line width=3*\inset,fill=white] \myshape; % Color and thickness as desired
-\end{scope}
-\draw[red,line width=3pt](-0.7,-0.35)--++(320:0.5)--++(50:1.5);
-\end{scope}
-    }
-  }
-}
-%gear-arrow
-% #1 number of teeths
-% #2 radius intern
-% #3 radius extern
-% #4 angle from start to end of the first arc
-% #5 angle to decale the second arc from the first
-% #6 inner radius to cut off
-\tikzset{
-  pics/gearAR/.style args={#1/#2/#3/#4/#5/#6/#7}{
-   code={
-           \pgfkeys{/channel/.cd, #7}
-\begin{scope}[shift={($(0,0)+(0,0)$)},scale=\scalefac,every node/.append style={transform shape},
-LinE/.style={\filllcirclecolor,line width=5.0pt,
-{{Triangle[width=1.5*10pt,length=2.0*5pt]}-},shorten <=5pt,shorten >=1pt},
-ELin/.style={\filllcirclecolor,line width=7.0pt,
-{-{Triangle[width=1.15*10pt,length=2.0*5pt]}},shorten <=0pt,shorten >=0pt}]
-    \pgfmathtruncatemacro{\N}{#1}%,
-    \def\rin{#2}\def\rout{#3}\def\aA{#4}\def\aOff{#5}\def\rcut{#6}%
-    \path[rounded corners=0.5pt,draw=\drawcolor,fill=\filllcolor]
-      (0:\rin)
-      \foreach \i [evaluate=\i as \n using (\i-1)*360/\N] in {1,...,\N}{%
-        arc (\n:\n+\aA:\rin)
-        -- (\n+\aA+\aOff:\rout)
-        arc (\n+\aA+\aOff:\n+360/\N-\aOff:\rout)
-        -- (\n+360/\N:\rin)
-      } -- cycle;
-      \draw[draw=none,fill=white](0,0) circle[radius=\rcut];
-\draw[ELin](0,0)--++(0:2.5);
-\end{scope}
-  }}
-}
-%testing+pencil
-\tikzset{
-pics/testing/.style = {
-        code = {
-        \pgfkeys{/channel/.cd, #1}
-\begin{scope}[local bounding box=TESTING1,shift={($(0,0)+(0,0)$)},scale=\scalefac,every node/.append style={transform shape}]
-\newcommand{\tikzxmark}{%
-\tikz[scale=0.18] {
-    \draw[line width=0.7,line cap=round,RedLine] (0,0) to [bend left=6] (1,1);
-    \draw[line width=0.7,line cap=round,RedLine] (0.2,0.95) to [bend right=3] (0.8,0.05);
-}}
-\newcommand{\tikzxcheck}{%
-\tikz[scale=0.16] {
-    \draw[line width=0.7,line cap=round,GreenLine] (0.5,0.75)--(0.85,-0.1) to [bend left=16] (1.5,1.55);
-
-}}
- \node[draw, minimum width  =15mm, minimum height = 20mm, inner sep = 0pt,
-        rounded corners,draw = \drawcolor, fill=\filllcolor!10, line width=\Linewidth](COM){};
-\node[draw=GreenLine,inner sep=4pt,fill=white](CB1) at ($(COM.north west)!0.25!(COM.south west)+(0.3,0)$){};
-\node[xshift=0pt]at(CB1){\tikzxcheck};
-\node[draw=RedLine,inner sep=4pt,fill=white](CB2) at ($(COM.north west)!0.5!(COM.south west)+(0.3,0)$){};
-\node[xshift=0pt]at(CB2){\tikzxmark};
-\node[draw=RedLine,inner sep=4pt,fill=white](CB3) at ($(COM.north west)!0.75!(COM.south west)+(0.3,0)$){};
-\node[xshift=0pt]at(CB3){\tikzxmark};
-\draw[GreenLine,decoration={zigzag,segment length=4pt, amplitude=0.5pt},decorate]($(CB1)+(0.3,0.05)$)--++(0:0.8);
-\draw[GreenLine,decoration={zigzag,segment length=4pt, amplitude=0.5pt},decorate]($(CB1)+(0.3,-0.12)$)--++(0:0.7);
-\draw[RedLine,decoration={zigzag,segment length=4pt, amplitude=0.5pt},decorate]($(CB2)+(0.3,0.05)$)--++(0:0.8);
-\draw[RedLine,decoration={zigzag,segment length=4pt, amplitude=0.5pt},decorate]($(CB2)+(0.3,-0.12)$)--++(0:0.6);
-\draw[RedLine,decoration={zigzag,segment length=4pt, amplitude=0.5pt},decorate]($(CB3)+(0.3,0.05)$)--++(0:0.8);
-\draw[RedLine,decoration={zigzag,segment length=4pt, amplitude=0.5pt},decorate]($(CB3)+(0.3,-0.12)$)--++(0:0.6);
-\end{scope}
-    }
-  }
-}
-%pencil
-\tikzset{
-pics/pencil/.style = {
-        code = {
-        \pgfkeys{/channel/.cd, #1}
-\begin{scope}[local bounding box=TESTING1,shift={($(0,0)+(0,0)$)},scale=\scalefac,every node/.append style={transform shape},rotate=340]
-            \fill[fill=\filllcolor!70] (0,4) -- (0.4,4) -- (0.4,0) --(0.3,-0.15) -- (0.2,0) -- (0.1,-0.14) -- (0,0) -- cycle;
-            \draw[color=white,thick] (0.2,4) -- (0.2,0);
-            \fill[black] (0,3.5) -- (0.2,3.47) -- (0.4,3.5) -- (0.4,4) arc(30:150:0.23cm);
-            \fill[fill=\filllcolor!40] (0,0) -- (0.2,-0.8)node[coordinate,pos=0.75](a){} -- (0.4,0)node[coordinate,pos=0.25](b){} -- (0.3,-0.15) -- (0.2,0) -- (0.1,-0.14) -- cycle;
-            \fill[fill=\filllcolor] (a) -- (0.2,-0.8) -- (b) -- cycle;
-
-\end{scope}
-    }
-  }
-}
-\pgfkeys{
-  /channel/.cd,
-   Depth/.store in=\Depth,
-  Height/.store in=\Height,
-  Width/.store in=\Width,
-  filllcirclecolor/.store in=\filllcirclecolor,
-  filllcolor/.store in=\filllcolor,
-  drawcolor/.store in=\drawcolor,
-  drawcircle/.store in=\drawcircle,
-  scalefac/.store in=\scalefac,
-  Linewidth/.store in=\Linewidth,
-  picname/.store in=\picname,
-  filllcolor=BrownLine,
-  filllcirclecolor=violet!20,
-  drawcolor=black,
-  drawcircle=violet,
-  scalefac=1,
-  Linewidth=0.5pt,
-  Depth=1.3,
-  Height=0.8,
-  Width=1.1,
-  picname=C
-}
-%Raw Data
-\node[Box](B1){};
-\fill[cyan!07](B1.north west) rectangle ($(B1.north east)!0.6!(B1.south east)$)coordinate(B1DE);
-\fill[cyan!20](B1.south east) rectangle ($(B1.north west)!0.6!(B1.south west)$)coordinate(B1LE);
-\node[Box,draw=BlueD](){};
-\tikzset{Text2/.style={font=\sffamily\bfseries\small,align=center}}
-\node[Text2]at($(B1.south west)!0.5!(B1DE)$){Raw Data};
-\coordinate(Q1)at($(B1.north west)!0.5!(B1DE)$);
-\pic[shift={(0,0)}] at  (Q1){inbox={scalefac=0.7,picname=1,Linewidth=1.0pt,
- filllcolor=BrownL,drawcolor=black,filllcirclecolor=orange!70!yellow!80}};
-%Pre-processing
-\node[Box, right=0.75 of B1](B2){};
-\fill[cyan!07](B2.north west) rectangle ($(B2.north east)!0.6!(B2.south east)$)coordinate(B2DE);
-\fill[cyan!20](B2.south east) rectangle ($(B2.north west)!0.6!(B2.south west)$)coordinate(B2LE);
-\node[Box, right=0.75 of B1,draw=BlueD](B2){};
-\node[Text2]at($(B2.south west)!0.5!(B2DE)$){Pre-\\processing};
-\coordinate(Q2)at($(B2.north west)!0.5!(B2DE)$);
-\pic[shift={(0,0)}] at  (Q2){funnel={scalefac=0.53,picname=1,Linewidth=0.5pt,
- filllcolor=green!70!orange!70,drawcolor=black,filllcirclecolor=red!70!blue!80}};
-%Neural Network
-\node[Box, right=of B2](B3){};
-\fill[green!07](B3.north west) rectangle ($(B3.north east)!0.6!(B3.south east)$)coordinate(B3DE);
-\fill[green!20](B3.south east) rectangle ($(B3.north west)!0.6!(B3.south west)$)coordinate(B3LE);
-\node[Box, right=of B2,draw=GreenD](B3){};
-\node[Text2]at($(B3.south west)!0.5!(B3DE)$){Neural\\ Network};
-\coordinate(Q3)at($(B3.north west)!0.5!(B3DE)$);
-%\pic[shift={(0,0)}] at  (Q3){brain={scalefac=0.9,picname=1,filllcolor=orange!30!, Linewidth=0.95pt}};
-\pic[shift={(0,0)}] at  (Q3){llm={scalefac=0.6,drawcolor=BlueLine,filllcolor=BlueLine!50!, Linewidth=1pt,filllcirclecolor=red}};
-%Raw output
-\node[Box, right=of B3](B4){};
-\fill[violet!07](B4.north west) rectangle ($(B4.north east)!0.6!(B4.south east)$)coordinate(B4DE);
-\fill[violet!20](B4.south east) rectangle ($(B4.north west)!0.6!(B4.south west)$)coordinate(B4LE);
-\node[Box, right=of B3,draw=VioletLine](B4){};
-\node[Text2]at($(B4.south west)!0.5!(B4DE)$){Raw\\ Output};
-\coordinate(Q4)at($(B4.north west)!0.5!(B4DE)$);
- \pic[shift={(0,0)}] at (Q4) {gearAR={14/1.4/1.8/8/4/0.7/scalefac=0.35,drawcolor=BlueLine,filllcolor=BlueLine,filllcirclecolor=red}};
-%Post-processing
-\node[Box, right=0.75 of B4](B5){};
-\fill[violet!05](B5.north west) rectangle ($(B5.north east)!0.6!(B5.south east)$)coordinate(B5DE);
-\fill[violet!15](B5.south east) rectangle ($(B5.north west)!0.6!(B5.south west)$)coordinate(B5LE);
-\node[Box, right=0.75 of B4,draw=VioletLine](B5){};
-\node[Text2]at($(B5.south west)!0.5!(B5DE)$){Post-\\processing};
-\coordinate(Q5)at($(B5.north west)!0.5!(B5DE)$);
-\pic[shift={(0,0)}] at  (Q5){testing={scalefac=0.65,picname=1,drawcolor=myblue,filllcolor=myblue, Linewidth=1.0pt}};
-\pic[shift={(0,-0.5)},rotate=-15] at  (Q5){pencil={scalefac=0.30,picname=1,filllcolor=mygreen, Linewidth=1.0pt}};
-%%%%%%
-%Final output
-\node[Box, right=0.75 of B5](B6){};
-\fill[violet!05](B6.north west) rectangle ($(B6.north east)!0.6!(B6.south east)$)coordinate(B6DE);
-\fill[violet!15](B6.south east) rectangle ($(B6.north west)!0.6!(B6.south west)$)coordinate(B6LE);
-\node[Box, right=0.75 of B5,draw=VioletLine]{};
-\node[Text2]at($(B6.south west)!0.5!(B6DE)$){Final Output};
-\coordinate(Q6)at($(B6.north west)!0.5!(B6DE)$);
-\pic[shift={(0,0.05)}] at  (Q6){stitC={scalefac=0.45,drawcolor=orange,filllcolor=green!55!black}};
-%arrows
-\foreach \i in{1,2,3,4,5}{
-\pgfmathtruncatemacro{\X}{\i + 1} %
-\draw[LineA](B\i)--(B\X);
-}
-\node[draw=myblue,line width=0.75pt,fit=(B1)(B2),inner ysep=3mm,inner xsep=4mm,xshift=1mm](F1){};
-\node[draw=none,fit=(B3),inner ysep=3mm,inner xsep=4mm](F2){};
-\node[draw=mypurple,line width=0.75pt,fit=(B4)(B6),inner ysep=3mm,inner xsep=4mm,xshift=-1mm](F3){};
-\node[below =0pt of F1,text=myblue]{Pre-processing};
-\node[below =0pt of F2,text=GreenD]{Deep Learning};
-\node[below =0pt of F3,text=mypurple]{Post-processing};
-
-\end{tikzpicture}
-```
-
-:::
-
-This pipeline turns serving into an orchestration problem: because every stage draws from the same latency budget, optimizing accelerator kernel execution yields diminishing returns if data transformation or queueing delays dominate. Before optimizing any individual stage, the system must decide whether predictions are computed ahead of time or on demand.
-
-### Static vs. dynamic inference {#sec-model-serving-static-vs-dynamic-inference-e864}
-
-Deciding whether predictions are generated before or during a user request establishes the fundamental trade-off between offline hardware efficiency and online operational agility [@google2024staticdynamic]. That choice determines whether an accelerator operates in an unconstrained throughput regime or under the strict tail-latency deadlines of an interactive serving loop.
-
-#### Static inference {#sec-model-serving-static-inference-35f4}
-
-Static inference\index{Static inference!precomputed predictions} (also called offline or batch inference) precomputes predictions for anticipated inputs and stores them in a retrieval store. Moving model execution entirely out of the user request path alters the underlying hardware constraints: because batch jobs have no millisecond-level deadlines, accelerators can use large batches ($B \gg 1$) selected for throughput within memory limits. Reusing weights across samples raises arithmetic intensity for weight-dominated operations; a batch-size sweep identifies where throughput stops improving. When a client issues a request—such as a user requesting nightly generated recommendation rankings—the serving system performs a low-latency key-value lookup rather than executing a forward pass on an accelerator. The primary operational constraint shifts from accelerator latency to storage capacity and data freshness: precomputing predictions across an entire input domain scales combinatorially ($\mathcal{O}(N_{\text{users}} \times N_{\text{items}})$ for $N_{\text{users}}$ users and $N_{\text{items}}$ items in recommendation systems), and stale predictions persist until the next batch refresh.
-
-#### Dynamic inference {#sec-model-serving-dynamic-inference-d2d5}
-
-Dynamic inference\index{Dynamic inference!real-time prediction} (also called online or real-time inference) evaluates inputs on demand as requests arrive. On-demand execution accommodates arbitrary, previously unseen inputs within the model schema and immediately reflects newly deployed model weights without requiring precomputation. However, executing the model directly within the user request path subjects inference to the strict end-to-end latency budget set by its SLO. Because user requests arrive stochastically, the serving runtime cannot delay execution indefinitely to accumulate large batches. Serving requests individually or in small batches ($B=1$ to $B=4$) can expose weight traffic or launch overhead that larger batches amortize. When these costs bind execution, the device completes fewer queries per unit time, increasing provisioned cost per query. This tension between interactive response time and hardware efficiency can make dynamic serving more expensive per query than offline batching (example \ref{exmp-cost-latency}).
-
-```{python}
-#| echo: false
-#| label: cost-latency-calc
-# ┌─────────────────────────────────────────────────────────────────────────────
-# │ COST OF LATENCY CALCULATION
-# ├─────────────────────────────────────────────────────────────────────────────
-# │ Context: Callout "The Cost of Latency" (Serving Paradigm section)
-# │
-# │ Goal: Quantify the economic trade-off between response time and hardware bill.
-# │ Show: That reducing latency by 50% can increase costs by 4x.
-# │ How: Calculate cost per million queries across different batch sizes.
-# │
-# └─────────────────────────────────────────────────────────────────────────────
-from mlsysim import Infrastructure
-from mlsysim.fmt import check, fmt, fmt_usd, fmt_time, fmt_rate
-
-class CostLatencyCalc:
-    """Quantifies the economic trade-off between latency and hardware cost per million queries."""
-
-    # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    gpu_cost_per_hour_value = Infrastructure.Pricing.Cloud.GpuTrainingPerHour.rate
-    latency_a_ms_value = 5 * ms  # scenario assumption: Scenario A low latency
-    throughput_a_rps_value = 200 * (count / second)  # scenario assumption: Scenario A throughput
-    latency_b_ms_value = 10 * ms  # scenario assumption: Scenario B higher latency
-    throughput_b_rps_value = 800 * (count / second)  # scenario assumption: Scenario B throughput
-
-    # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    queries_per_hour_a_value = (throughput_a_rps_value * hour).to(count)
-    cost_per_million_a_value = (gpu_cost_per_hour_value * hour) / (queries_per_hour_a_value / (MILLION * count))
-    queries_per_hour_b_value = (throughput_b_rps_value * hour).to(count)
-    cost_per_million_b_value = (gpu_cost_per_hour_value * hour) / (queries_per_hour_b_value / (MILLION * count))
-    cost_increase_pct_value = (cost_per_million_a_value / cost_per_million_b_value - 1) * 100
-    cost_ratio_value = cost_per_million_a_value / cost_per_million_b_value
-
-    # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
-    check(cost_ratio_value > 1, "Scenario A (low latency) must cost more per query than Scenario B.")
-
-    # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
-    gpu_cost_per_hour_str = fmt_usd(gpu_cost_per_hour_value, precision=0, commas=False, per="hour")
-    latency_a_ms_str = fmt_time(latency_a_ms_value, 'millisecond', precision=0, commas=False)
-    throughput_a_rps_str = fmt_rate(throughput_a_rps_value, 'req/s', precision=0, commas=False)
-    latency_b_ms_str = fmt_time(latency_b_ms_value, 'millisecond', precision=0, commas=False)
-    throughput_b_rps_str = fmt_rate(throughput_b_rps_value, 'req/s', precision=0, commas=False)
-    cost_a_str = fmt_usd(cost_per_million_a_value, precision=2, commas=False)
-    cost_b_str = fmt_usd(cost_per_million_b_value, precision=2, commas=False)
-    # low-latency Scenario A costs ≈300% more per query: a >100% change, opt in
-    cost_increase_str = fmt_percent(cost_increase_pct_value / 100, precision=0, commas=False, style='prose', max_ratio=4)
-    cost_ratio_mult_str = fmt_multiple(round(cost_ratio_value), precision=0, commas=False)
-```
-
-::: {#exmp-cost-latency .callout-example title="The cost of latency"}
-
-Latency constraints directly dictate infrastructure costs. Consider a GPU server renting for `{python} CostLatencyCalc.gpu_cost_per_hour_str`.
-
-Scenario A (low latency): Batch size 1.
-
-*   Latency: `{python} CostLatencyCalc.latency_a_ms_str`.
-*   Throughput: `{python} CostLatencyCalc.throughput_a_rps_str`.
-*   Cost per million queries: `{python} CostLatencyCalc.cost_a_str`.
-
-Scenario B (high throughput): Batch size 8.
-
-*   Latency: `{python} CostLatencyCalc.latency_b_ms_str` (doubled due to batching overhead).
-*   Throughput: `{python} CostLatencyCalc.throughput_b_rps_str` (quadrupled due to parallel efficiency).
-*   Cost per million queries: `{python} CostLatencyCalc.cost_b_str`.
-
-**Systems insight**: Reducing latency from `{python} CostLatencyCalc.latency_b_ms_str` to `{python} CostLatencyCalc.latency_a_ms_str` increases the hardware bill by `{python} CostLatencyCalc.cost_increase_str`. Engineers must quantify whether that speedup generates enough business value to justify the `{python} CostLatencyCalc.cost_ratio_mult_str` cost increase.
-
-:::
-
-```{python}
-#| echo: false
-#| label: static-batch-calc
-# ┌─────────────────────────────────────────────────────────────────────────────
-# │ STATIC VS DYNAMIC INFERENCE
-# ├─────────────────────────────────────────────────────────────────────────────
-# │ Context: Static vs Dynamic inference narrative (photo organization example)
-# │
-# │ Goal: Contrast the economics of static vs. dynamic inference.
-# │ Show: That static precomputation is superior for predictable inputs.
-# │ How: Compare total batch time to per-request latency for photo classification.
-# │
-# └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import fmt, fmt_count, fmt_time, check
-
-class StaticBatchCalc:
-    """Contrasts static vs. dynamic inference economics for photo classification."""
-
-    # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    n_photos_value = 10_000  # photos in user library
-    inference_ms_value = 5 * ms  # scenario assumption: ResNet-50 inference time
-    dynamic_latency_budget_ms_value = 100 * ms  # scenario assumption: real-time latency budget
-
-    # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    batch_total_s_value = n_photos_value * inference_ms_value
-
-    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
-    check(batch_total_s_value == 50 * second, f"Expected 50s total batch time, got {batch_total_s_value}")
-
-    # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
-    n_photos_str = fmt_count(n_photos_value, label="photo")
-    inference_ms_str = fmt_time(inference_ms_value, 'millisecond', precision=0, commas=False)
-    batch_total_s_str = fmt_time(batch_total_s_value, 'second', precision=0, commas=False)
-    dynamic_latency_budget_ms_str = fmt_time(dynamic_latency_budget_ms_value, 'millisecond', precision=0, commas=False)
-```
-
-Consider two deployment scenarios for a ResNet-50 image classifier. A static approach suits a photo organization app that preclassifies all images in a user's library overnight. With `{python} StaticBatchCalc.n_photos_str` and `{python} StaticBatchCalc.inference_ms_str` inference each, batch processing takes ~`{python} StaticBatchCalc.batch_total_s_str` total, and users experience instant classification when browsing. A dynamic approach suits a content moderation API that must classify user-uploaded images in real time, with each image requiring the full preprocessing→inference→postprocessing pipeline and a `{python} StaticBatchCalc.dynamic_latency_budget_ms_str` latency budget. A production image-classification system can combine the approaches: frequently requested images, such as popular products or known memes, are preclassified and cached, while novel uploads trigger dynamic inference.
-
-The two modes therefore optimize for contrasting regimes. Static inference maximizes accelerator throughput and amortizes execution costs during offline batch runs, trading storage capacity for zero inference latency during the request. Dynamic inference minimizes tail latency under stochastic, concurrent load, accepting lower accelerator utilization and higher cost per query in exchange for handling arbitrary, live inputs. Production architectures often blend both paradigms into a tiered design: static precomputation caches common or high-probability queries, while a dynamic fallback evaluates novel or personalized requests.
-
-Both static and dynamic cost models traditionally assume a fixed forward pass: a static computation graph executing once per request. Emerging reasoning models alter that economic calculus by deliberately spending variable computation per query to improve answer quality.
-
-::: {#psp-model-serving-looking-ahead-rise-inference-time-compute-system-2 .callout-perspective title="Looking ahead: Spending more compute per query"}
-
-Traditional serving optimizes for minimizing latency ($\EndToEndRequestLatency \to 0$). Here, the optimization target expands to include answer quality. Some inference-time-compute systems\index{Reasoning model!inference-time compute}\index{Inference-time compute!reasoning models} deliberately spend more compute cycles to improve answer quality. These systems may generate far more tokens per request, including intermediate reasoning or search tokens, increasing the total compute and energy spent per query; @sec-model-serving-llm-serving-b8bf develops the serving costs of that token-by-token generation.
-
-:::
-
-Whether a system executes a single deterministic forward pass or an extended reasoning trajectory, deciding when predictions are computed resolves only the temporal dimension of serving. Equally binding is the spatial dimension—where the model physically executes—because physical placement dictates memory hierarchy limits, network boundaries, and the hardware budget available to the serving stack.
-
-### The spectrum of serving architectures {#sec-model-serving-spectrum-serving-architectures-8966}
-
-Although "serving" often implies a networked server processing API requests, the architectural pattern varies by deployment environment. The four deployment paradigms (Cloud, Edge, Mobile, and TinyML) and the physical constraints (the light barrier, the power wall, and the memory wall) that give rise to them shape the serving stack. Architecturally, serving spans a continuum from **centralized networked microservices**\index{Microservice!cloud model serving} (which pool accelerators to optimize throughput and cost-per-query at the expense of network round-trip overhead and cold-start latency) to **application-embedded edge serving**\index{Edge serving!embedded function calls} (which run models inside client processes via direct function calls, eliminating network latency and preserving privacy at the expense of strict device memory and power constraints) and out to **bare-metal firmware execution**\index{TinyML!bare-metal serving} on microcontrollers. Those constraints do not disappear at serving time; serving adds latency SLOs and cost pressure on top of hardware limits that training could absorb through patience. The same model may require different serving strategies depending on where it executes.
-
-::: {.column-margin .margin-pointer}
-↩ The light barrier, power wall, and memory wall that give rise to the four deployment paradigms are established in @sec-ml-systems-deployment-spectrum-71be.
-:::
-
-#### Networked serving (cloud/data center) {#sec-model-serving-networked-serving-clouddatacenter-0328}
-
-In networked serving\index{Serving!cloud/data center}\index{Microservice!model serving}, the model runs as a standalone service (microservice), matching the cloud deployment paradigm that trades latency for larger pooled compute. The primary interface is the network through protocols such as HTTP or gRPC, so network transfer and serialization join model execution as possible binding constraints. Data-center hardware such as NVIDIA GPUs (V100, A100, H100), Google Tensor Processing Units (TPUs), and AWS Inferentia supports high-throughput batching and concurrency, but cold start\index{Cold start!cloud serving} can still stretch from seconds to minutes because container startup, model loading, and warmup sit outside the steady-state inference path.
-
-#### Application-embedded serving (mobile/edge) {#sec-model-serving-applicationembedded-serving-mobileedge-8bd1}
-
-In application-embedded serving\index{Serving!mobile/edge}\index{Serving!edge inference, embedded serving}, the model runs within the user application process (for example, a smartphone app using CoreML or TensorFlow Lite), following the embedded paradigm, which is chosen for its latency, privacy, and offline advantages. There is no "server." The interface is a function call, so optimization focuses on energy and responsiveness (the MLPerf SingleStream shape) rather than shared-server throughput.
-
-::: {.column-margin .margin-pointer}
-↩ The MLPerf SingleStream, MultiStream, Server, and Offline scenarios are established in @sec-benchmarking-mlperf-execution-scenarios-89f0.
-:::
-
-Embedded execution enables **zero-copy inference**\index{Inference!zero-copy, mobile optimization}: when data moves through a system, each copy consumes CPU cycles and memory bandwidth. In cloud serving, separate physical memory spaces force repeated transfers: a camera frame passes from a network socket buffer to user space, through a preprocessing buffer into page-locked host DRAM, and across PCIe into accelerator memory. A mobile pipeline can eliminate these intermediate copies when its camera, image signal processor (ISP), CPU, and NPU exchange shared buffer descriptors in unified system memory. In unified-memory system-on-chip (SoC) architectures—such as Apple A- and M-series processors or Qualcomm Snapdragon—all compute engines share a single physical DRAM pool. When software passes buffer handles rather than duplicating bytes, inference latency drops and memory bus power decreases, although format conversions may still require CPU or ISP intervention.
-
-Typical hardware includes mobile NPUs (Apple Neural Engine, Qualcomm Hexagon) and embedded GPUs (NVIDIA Jetson). When the model is already resident and compiled, startup can be measured in milliseconds; first inference takes longer if it triggers cold-page faults or just-in-time compilation. Mobile power and thermal envelopes are strictly constrained by passive cooling (1–10 W); sustained high-throughput inference saturates the device chassis thermal capacitance, forcing the operating system's thermal governor to throttle clock frequencies and degrade inference latency.
-
-#### Bare-metal serving (TinyML) {#sec-model-serving-baremetal-serving-tinyml-28cf}
-
-In TinyML serving\index{Serving!TinyML}\index{TinyML!bare-metal serving}, the model is compiled directly into microcontroller firmware, reaching the extreme end of the deployment spectrum: ubiquitous sensing at microwatt power budgets. Many deployments lack a general-purpose operating system or dynamic memory allocator; serving executes as a tight bare-metal loop that samples sensors and invokes a static interpreter. Because static random-access memory (SRAM) is constrained to hundreds of kilobytes, optimization focuses on executing model weights in place from non-volatile flash memory while fitting dynamic activation buffers into a preallocated Tensor Arena\index{Tensor arena!TinyML memory}. Request batching is infeasible on single-stream sensor feeds. Typical hardware includes ARM Cortex-M series, ESP32, and specialized TinyML accelerators. Startup latency is measured in microseconds when weights remain in memory-mapped flash and execution buffers are preallocated statically, operating within a microwatt-to-milliwatt power envelope that sustains battery life across months or years.
-
-The deployment tiers differ first in their operating envelopes. @Tbl-serving-spectrum compares the latency, batch, memory, power, update, failure, and monitoring constraints that follow from each environment.
-
-```{=latex}
-\begingroup
-\renewcommand{\arraystretch}{1.3}
-```
-
-| **Characteristic**   | **Cloud/Data center** | **Mobile/Edge**      | **TinyML**                  |
-|:---------------------|:----------------------|:---------------------|:----------------------------|
-| **Latency Target**   | 10–100 ms             | 20–50 ms             | 1–100 ms                    |
-| **Batch Size**       | 1–128 (dynamic)       | 1 (fixed)            | 1 (fixed)                   |
-| **Memory**           | 16–80 GB VRAM         | 2–8 GB shared        | 256 KB–2 MB SRAM            |
-| **Power**            | 300–700 W             | 1–10 W               | 1–100 mW                    |
-| **Update Mechanism** | Container deploy      | App store update     | Firmware over-the-air (OTA) |
-| **Failure Mode**     | Retry/failover        | Graceful degradation | Silent or reset             |
-| **Monitoring**       | Full telemetry        | Limited analytics    | Heartbeat only              |
-
-: **Serving Architecture Spectrum**: Representative deployment envelopes for cloud, mobile, and TinyML serving. The latency, batch-size, memory, and power ranges are design guides rather than universal limits; update, failure, and monitoring rows summarize the operating pattern associated with each environment. {#tbl-serving-spectrum}
-
-```{=latex}
-\endgroup
-```
-
-```{python}
-#| echo: false
-#| label: resnet-spectrum-calc
-# ┌─────────────────────────────────────────────────────────────────────────────
-# │ RESNET-50 ACROSS THE SERVING SPECTRUM
-# ├─────────────────────────────────────────────────────────────────────────────
-# │ Context: Callout "ResNet-50 Across the Serving Spectrum"
-# │
-# │ Goal: Contrast serving requirements across Cloud, Mobile, and TinyML.
-# │ Show: That the same model requires different formats and architectures.
-# │ How: Calculate model sizes and compare NPU vs. CPU efficiency.
-# │
-# └─────────────────────────────────────────────────────────────────────────────
-from mlsysim import Models
-from mlsysim import Systems
-from mlsysim.fmt import MarkdownStr, check, fmt, fmt_time, fmt_rate, fmt_memory, fmt_memory_capacity, fmt_energy
-
-# ┌── LEGO ───────────────────────────────────────────────
-class ResNetServingSpectrum:
-    """
-    Namespace for ResNet-50 Serving Spectrum comparison.
-    Scenario: Mapping the same architecture (or alternatives) to Cloud, Mobile, TinyML.
-    """
-
-    # ┌── 1. LOAD (Constants) ───────────────────────────────────────────────
-    m_resnet = Models.Vision.ResNet50
-    m_mobilenet = Models.Vision.MobileNetV2
-
-    s_cloud = Platforms.Cloud
-    s_mobile = Platforms.Mobile
-    s_tiny = Platforms.Tiny
-
-    # Cloud (V100) Performance - Source: MLPerf/Vendor reports
-    cloud_inf_b1_ms = 1.4
-    cloud_inf_b16_ms = 14.0
-    cloud_throughput = 1143
-    cloud_vram = 2 * GB  # scenario assumption: batch-32 engine residency
-
-    # Mobile (Smartphone) Performance
-    mobile_inf_npu_ms = 12.0
-    mobile_inf_cpu_ms = 45.0
-    mobile_throughput = 80
-    mobile_energy_npu = 0.8 * mJ  # scenario assumption: per-image mobile NPU energy
-    mobile_energy_cpu = 4.2 * mJ  # scenario assumption: per-image mobile CPU energy
-
-    # TinyML (Cortex-M7) Performance
-    tiny_inf_ms = 120.0
-    tiny_energy = 12.0 * mJ  # scenario assumption: per-image TinyML energy
-
-    # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
-    # Step 1: Calculate sizes using the Digital Twins
-    cloud_size = m_resnet.size_in_bytes(BYTES_FP16)
-    mobile_size = m_resnet.size_in_bytes(BYTES_INT8)
-    tiny_original = m_resnet.size_in_bytes(BYTES_INT8)
-    tiny_alt = m_mobilenet.size_in_bytes(BYTES_INT8)
-
-    # Step 2: TinyML feasibility check
-    tiny_feasibility = tiny_original < s_tiny.ram
-
-    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
-    check(
-        not tiny_feasibility,
-        f"ResNet-50 ({fmt_memory(tiny_original, unit=MB, precision=1, commas=False)}) should NOT fit on TinyML (<{fmt_memory(s_tiny.ram, unit=MB, precision=1, commas=False)}).",
-    )
-    check(mobile_energy_cpu >= mobile_energy_npu * 3, "NPU should be significantly more energy efficient than CPU.")
-
-    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
-    # System names
-    cloud_name_str = MarkdownStr(s_cloud.name)
-    mobile_name_str = MarkdownStr(s_mobile.name)
-    tiny_name_str = MarkdownStr(s_tiny.name)
-
-    cloud_model_mb_str = fmt_memory(cloud_size, unit=MB, precision=1, commas=True)
-    cloud_inf_b1_ms_str = fmt_time(cloud_inf_b1_ms, 'millisecond', precision=1, commas=False)
-    cloud_inf_b16_ms_str = fmt_time(cloud_inf_b16_ms, 'millisecond', precision=0, commas=False)
-    cloud_throughput_img_per_s_str = fmt_rate(cloud_throughput, 'img/s', precision=0)
-    cloud_vram_gb_str = fmt_memory(cloud_vram, unit=GB, precision=0, commas=False)
-
-    mobile_model_mb_str = fmt_memory(mobile_size, unit=MB, precision=1, commas=True)
-    mobile_inf_npu_ms_str = fmt_time(mobile_inf_npu_ms, 'millisecond', precision=0, commas=False)
-    mobile_inf_cpu_ms_str = fmt_time(mobile_inf_cpu_ms, 'millisecond', precision=0, commas=False)
-    mobile_throughput_img_per_s_str = fmt_rate(mobile_throughput, 'img/s', precision=0, commas=False)
-    mobile_energy_npu_mj_str = fmt_energy(mobile_energy_npu, unit=mJ, precision=1, commas=False)
-    mobile_energy_cpu_mj_str = fmt_energy(mobile_energy_cpu, unit=mJ, precision=1, commas=False)
-    mobile_mem_mb_str = fmt_memory(150 * MB, unit=MB, precision=0, commas=False)
-
-    tiny_model_mb_str = fmt_memory(tiny_original, unit=MB, precision=1, commas=True)
-    tiny_alt_mb_str = fmt_memory(tiny_alt, unit=MB, precision=1, commas=True)
-    tiny_inf_ms_str = fmt_time(tiny_inf_ms, 'millisecond', precision=0, commas=False)
-    tiny_throughput_str = fmt_rate(8, "img/s", precision=0, commas=False)
-    tiny_arena_kb_str = fmt_memory(320 * KB, unit=KB, precision=0, commas=False)
-    tiny_sram_kb_str = fmt_memory_capacity(s_tiny.ram, unit=s_tiny.ram.units, precision=0, commas=True)
-    tiny_energy_mj_str = fmt_energy(tiny_energy, unit=mJ, precision=0, commas=False)
-```
-
-::: {#psp-resnet-serving .callout-perspective title="ResNet-50 across the serving spectrum"}
-
-**Systems insight**: The "same model" claim is misleading: the cloud and mobile tiers share the ResNet-50 graph but use different precision and runtimes, while the TinyML tier cannot run ResNet-50 and substitutes an architecture designed for its constraints. Treating these as one model hides the work that makes each deployment possible.
-
-:::
-
-Applying those envelopes to one image-classification workload, @tbl-resnet-serving-spectrum shows why cloud and mobile can adapt ResNet-50 while TinyML must substitute MobileNetV2.
-
-```{=latex}
-\begingroup
-\renewcommand{\arraystretch}{1.65}
-```
-
-| **Dimension**           |                                  **`{python} ResNetServingSpectrum.cloud_name_str`**                                   |                                       **`{python} ResNetServingSpectrum.mobile_name_str`**                                       |                                                  **`{python} ResNetServingSpectrum.tiny_name_str`**                                                 |
-|:------------------------|:----------------------------------------------------------------------------------------------------------------------:|:--------------------------------------------------------------------------------------------------------------------------------:|:---------------------------------------------------------------------------------------------------------------------------------------------------:|
-| **Model format**        |                   TensorRT FP16 engine \mbox{(`{python} ResNetServingSpectrum.cloud_model_mb_str`)}                    |                        TensorFlow Lite INT8 \mbox{(`{python} ResNetServingSpectrum.mobile_model_mb_str`)}                        | Not feasible (`{python} ResNetServingSpectrum.tiny_model_mb_str`); alternative: MobileNetV2 INT8 (`{python} ResNetServingSpectrum.tiny_alt_mb_str`) |
-| **Inference (batch-1)** | `{python} ResNetServingSpectrum.cloud_inf_b1_ms_str` (batch-16: `{python} ResNetServingSpectrum.cloud_inf_b16_ms_str`) |    `{python} ResNetServingSpectrum.mobile_inf_npu_ms_str` (NPU), `{python} ResNetServingSpectrum.mobile_inf_cpu_ms_str` (CPU)    |                                                   `{python} ResNetServingSpectrum.tiny_inf_ms_str`                                                  |
-| **Throughput**          |                       `{python} ResNetServingSpectrum.cloud_throughput_img_per_s_str` (batched)                        |                        ~`{python} ResNetServingSpectrum.mobile_throughput_img_per_s_str` (single-stream)                         |                                                ~`{python} ResNetServingSpectrum.tiny_throughput_str`                                                |
-| **Memory**              |                           `{python} ResNetServingSpectrum.cloud_vram_gb_str` VRAM (batch-32)                           |                            `{python} ResNetServingSpectrum.mobile_mem_mb_str` peak (shared with app)                             |              `{python} ResNetServingSpectrum.tiny_arena_kb_str` arena (fits in `{python} ResNetServingSpectrum.tiny_sram_kb_str` SRAM)              |
-| **Energy/inference**    |                                                           —                                                            | `{python} ResNetServingSpectrum.mobile_energy_npu_mj_str` (NPU), `{python} ResNetServingSpectrum.mobile_energy_cpu_mj_str` (CPU) |                                                 `{python} ResNetServingSpectrum.tiny_energy_mj_str`                                                 |
-
-: **Image Classification Across the Serving Spectrum**: Illustrative side-by-side comparison of cloud, mobile, and TinyML serving for the same image-classification task, showing how model format, latency, throughput, memory footprint, and energy budget differ across deployment contexts. {#tbl-resnet-serving-spectrum tbl-colwidths="[20,26,27,27]"}
-
-```{=latex}
-\endgroup
-```
-
-### The load balancer layer {#sec-model-serving-load-balancer-layer-9c4d}
-
-When traffic exceeds what a single machine can handle, cloud and data center deployments that run multiple replicas of the same model require an additional infrastructure layer: the load balancer. Production serving systems place load balancers\index{Load balancer!serving infrastructure} between clients and model servers.
-
-A serving load balancer performs three functions. First, request distribution routes incoming traffic to available model replicas using algorithms such as round-robin or least-connections; routing away from slow or saturated replicas directly curbs tail latency. Second, health monitoring\index{Monitoring!health, replica readiness} verifies replica readiness by inspecting both process liveness and model initialization state, confirming that weights are loaded and warmup passes are complete before admitting traffic. Third, deployment support enables progressive rollouts by shifting traffic gradually between model versions rather than cutting over abruptly.
-
-::: {.column-margin .margin-pointer}
-↪ Shadow, canary, and blue-green release strategies that build on this traffic shifting are developed in @sec-ml-operations-model-deployment-b9b9.
-:::
-
-For single-machine serving with multiple model instances, such as running several Open Neural Network Exchange (ONNX) Runtime sessions, the framework and operating system handle request queuing. The full complexity of load balancing becomes necessary when scaling to distributed inference systems, where multiple machines serve the same model. The implementation details of request distribution algorithms and multi-replica architectures belong to that distributed context.
-
-In single-machine capacity planning, the serving unit corresponds to the physical node's model throughput. The queueing dynamics analyzed in @sec-model-serving-queuing-theory-tail-latency-29a6 govern this baseline behavior, establishing the utilization boundaries where horizontal scale-out becomes mandatory.
-
-While load balancers distribute requests *across replicas*, achieving predictable latency also requires controlling what happens *within each machine*. The operating system environment introduces its own sources of variability.
-
-### Deterministic latency and resource isolation {#sec-model-serving-deterministic-latency-resource-isolation-4d1c}
-
-::: {.column-margin}
-![](images/svg/model_serving_blast_radius.svg){width="100%" fig-alt="Schematic of one red source node on the left fanning out through four arrows to four identical blue consumer nodes on the right, showing one-to-many propagation from a single source."}
-
-*One noisy neighbor perturbs every workload sharing the node.*
-:::
-
-An inference server does not execute in a dedicated vacuum. On a single host, the operating system multiplexes hardware across background telemetry daemons, logging agents, and kernel worker threads. When these unisolated processes contend for execution resources, they intermittently preempt the inference pipeline. These noisy neighbors are a primary source of **latency jitter**\index{Latency jitter!resource contention}, where the physical time required to execute identical forward passes fluctuates unpredictably. This contention inflates 99th percentile (p99) tail latency even when average hardware utilization remains low. Resource contention thus widens tail latency through service-time variance—a physical degradation distinct from the queuing-delay accumulation along the saturation knee plotted in @fig-tail-latency-explosion.
-
-Reducing performance variability\index{Latency!deterministic}\index{Resource isolation!serving} requires controlling interference from the operating system's default time-sharing heuristics. Serving systems such as Clockwork demonstrate that deep neural network (DNN) inference execution times can be predictable down to sub-millisecond tolerances under their controlled workload and hardware conditions [@gujarati2020]. CPU affinity (thread pinning)\index{CPU affinity!latency reduction} establishes the baseline compute boundary by binding inference worker threads to designated physical cores. Without pinning, the OS scheduler periodically migrates threads between cores, losing access to warm private L1 and L2 cache contents and requiring lines to be refetched from shared L3 cache or DRAM. On multi-socket architectures, thread migration across Non-Uniform Memory Access (NUMA) boundaries is even more penalizing: accesses to memory left on the previous socket cross inter-socket interconnects, adding tens of nanoseconds of latency per transaction. Pinning threads to specific cores and binding their memory allocations to local NUMA nodes reduces migration-related cache misses and remote-socket memory traffic.
-
-Even with pinned CPU cores, memory access latency remains vulnerable to the virtual memory subsystem. Under host memory pressure, the kernel can page inactive address ranges out to disk. When the CPU touches a paged-out address, execution can stall for milliseconds while the page returns to DRAM. Host buffers used for PCIe direct memory access (DMA) also need resident, registered backing pages during the transfer. Memory locking (`mlock`)\index{Memory!locking, mlock} instructs the kernel to pin specified virtual address ranges into physical host RAM, preventing page eviction for host-resident weights, input staging buffers, and offloaded key-value (KV) cache blocks. This removes eviction-related page faults at the cost of host memory flexibility; locked pages remain resident until unlocked, while cache misses and memory contention can still delay access. Because `mlock` operates strictly on host page tables, it does not apply to accelerator HBM, which is allocated directly by the accelerator driver.
-
-Beyond scheduled processes, asynchronous hardware interrupts introduce another source of sub-millisecond preemption. When a network interface card (NIC) receives packet bursts, it triggers hardware interrupt requests (IRQs) that force the handling CPU core to immediately suspend user-space execution and process kernel interrupt handlers. If the OS routes these interrupts to cores running the inference engine's submission loop, the CPU pauses command dispatch to the accelerator. Because GPUs process short inference layers in microseconds, even brief CPU submission stalls drain the accelerator's hardware command ring buffer, causing pipeline bubbles where compute units sit idle waiting for the next kernel descriptor. Interrupt shielding\index{Interrupt shielding!latency isolation} restricts IRQ affinities to dedicated housekeeping cores, reducing preemption of the GPU dispatch thread by those device interrupts.
-
-Isolating physical cores, locking host memory, and shielding interrupt lines reduce specific sources of operating system noise. The resulting service-time distribution still needs measurement under the intended load. Even a predictable single-node execution path leaves a scheduling challenge: processing requests sequentially can underuse accelerator resources when each request exposes little parallel work. To achieve high throughput within latency deadlines, the internal software architecture of the serving engine must coordinate irregular, asynchronous request streams into structured, hardware-saturating batches.
-
-
 ## Throughput Optimization {#sec-model-serving-throughput-optimization-18d1}
 
 Consider a representative ResNet-50 classifier on a V100\index{V100!batching throughput} GPU\index{GPU!batching utilization} operating at batch size one. At small batches, limited weight reuse and repeated kernel launches can restrict throughput; their relative contribution requires a measured execution trace. The GPU achieves only 15 percent hardware utilization and 200 images per second. Processing 32 images at once reaches 95 percent utilization and 1,280 images per second—a 6.4$\times$ throughput improvement on identical hardware—because the loaded weights are reused across inputs in on-chip memory, amortizing both memory bandwidth demands and kernel launch overheads. **Batching**\index{Batching!training vs. serving}[^fn-batch-serving-tradeoff] is the primary lever for improving serving economics, but its operational constraints differ sharply between training and serving [@crankshaw2017clipper]. *Training* batches maximize throughput by grouping hundreds or thousands of samples together with no constraint on individual sample latency. *Serving* batches must balance accelerator saturation against individual request deadlines, ensuring that no early-arriving input waits excessively for a batch to form. An inference server resolves this tension through **dynamic batching**\index{Dynamic batching!definition}, adjusting batch size at runtime to match incoming request arrivals.
@@ -3997,49 +2991,1017 @@ Batching is the primary lever for serving economics, but the optimal strategy de
 
 :::
 
+## Serving Load, Latency, and Architecture {#sec-model-serving-load-latency-architecture-a4d8}
+
+Online serving systems process variable, unbatched request streams while operating under strict latency deadlines. When arrival bursts exhaust a system's reserved headroom, performance degrades nonlinearly.
+
+```{python}
+#| echo: false
+from mlsysim import *
+from mlsysim.core.units import *
+
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ BLACK FRIDAY TRAFFIC SPIKE
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: Callout "The 'Black Friday' Traffic Spike"
+# │
+# │ Goal: Demonstrate the nonlinear failure mode of serving systems under load.
+# │ Show: That a 10× traffic spike causes system collapse, not just 10× latency.
+# │ How: Model queue explosion using Little's Law parameters.
+# │
+# └─────────────────────────────────────────────────────────────────────────────
+
+from mlsysim.fmt import fmt, fmt_rate
+
+class BlackFridayCalc:
+    """Models the nonlinear failure mode of serving systems under a 10× traffic spike."""
+
+    # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
+    bf_latency_ms_value = 50 * ms  # scenario assumption: normal operation latency
+    bf_qps_normal_value = 1000  # normal queries per second
+    bf_qps_spike_value = 10000  # Black Friday peak QPS
+    bf_spike_factor_value = 10  # spike multiplier (10x)
+    bf_collapse_latency_s_value = 10 * second  # scenario assumption: latency during collapse
+    bf_full_util_pct_value = 100
+
+    # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
+    bf_latency_ms_str = fmt_time(bf_latency_ms_value, 'millisecond', precision=0, commas=False)
+    bf_qps_normal_str = fmt_rate(bf_qps_normal_value, "QPS")
+    bf_qps_spike_str = fmt_rate(bf_qps_spike_value, "QPS")
+    bf_spike_factor_mult_str = fmt_multiple(bf_spike_factor_value, precision=0, commas=False)
+    bf_collapse_latency_s_str = fmt_time(bf_collapse_latency_s_value, 'second', precision=0, commas=False)
+    bf_full_util_pct_str = fmt_percent(bf_full_util_pct_value / 100, precision=0, commas=False, style='prose')
+```
+
+::: {#exmp-model-serving-black-friday-traffic-spike .callout-example title="The 'Black Friday' traffic spike"}
+
+**Scenario**: An e-commerce recommendation serving system experiences a `{python} BlackFridayCalc.bf_spike_factor_mult_str` traffic surge (`{python} BlackFridayCalc.bf_qps_spike_str`) during Black Friday sales events.
+
+**Diagnosis**: When server utilization approaches `{python} BlackFridayCalc.bf_full_util_pct_str`, queue lengths explode nonlinearly, increasing latency to `{python} BlackFridayCalc.bf_collapse_latency_s_str` and causing client request timeouts.
+
+**Systems lesson**: High average throughput does not prevent queueing collapse under traffic surges. Depending on the service, preserving a tail-latency objective may require load shedding, graceful degradation, or autoscaling before utilization reaches the workload's queueing knee.
+
+:::
+
+@Fig-tail-latency-explosion plots this latency divergence against server utilization using an idealized $M/M/1$ queueing model (in Kendall's notation: Markovian/Poisson arrivals, Markovian/exponential service times, and 1 server). The green zone below 50 percent utilization and the red zone above 70 percent illustrate a planning policy, not universal operating limits. As utilization rises through the marked knee toward saturation, the 99th percentile curve explodes asymptotically toward saturation, scaling as $\text{p99} = -\ln(0.01) \times \text{mean} \approx 4.6 \times \text{mean}$ (a result derived in @sec-model-serving-tail-latency-5376). This rapid compounding near saturation is why latency-sensitive systems reserve headroom rather than planning for permanently high accelerator occupancy\index{Tail latency!utilization threshold}. @Sec-appdx-data-foundations-distributions-long-tail-901f provides a mathematical treatment of long-tailed distributions and explains why high-percentile latency dictates capacity when an SLO covers the slowest requests.
+
+::: {.column-margin .margin-pointer}
+↪ Why long-tailed latency distributions make high percentiles, rather than the mean, govern what users experience is developed in @sec-appdx-data-foundations-distributions-long-tail-901f.
+:::
+
+::: {#fig-tail-latency-explosion fig-env="figure" fig-pos="htb" fig-cap="**The Tail Latency Explosion**: Request latency vs. serving utilization $\ServingUtilization$. Mean latency (blue) and the p99 approximation (red) both grow nonlinearly as utilization approaches saturation; the 70 percent marker is an illustrative planning knee rather than a model-derived breakpoint. In an $M/M/1$ queue, the 99th percentile latency scales as $-\ln(0.01) \approx 4.6\times$ mean latency, illustrating why tail delays compound violently near saturation." fig-alt="Line plot of normalized request latency against serving utilization. A dashed blue mean-latency curve and a solid red p99 curve rise nonlinearly toward saturation, with the red curve remaining 4.6 times the blue curve. Green shading marks 0–50 percent as the Safe Zone, red shading marks 70–100 percent as the Danger Zone, and an arrow labels 70 percent ‘The Knee.’"}
+
+```{python}
+#| echo: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ TAIL LATENCY EXPLOSION FIGURE
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @fig-tail-latency-explosion—illustrates why tail latency diverges
+# │          from mean latency as system utilization approaches 100%
+# │
+# │ Goal: Visually demonstrate the nonlinear explosion of p99 latency near
+# │       saturation using an M/M/1 queueing model approximation.
+# │ Show: Mean vs. p99 latency curves, with Safe Zone and Danger Zone annotations.
+# │ How: Compute mean = 1/(1-rho_serv) and p99 approx 4.6x mean; plot on shared axes.
+# │
+# └─────────────────────────────────────────────────────────────────────────────
+
+# ┌── 1. CANVAS ────────────────────────────────────────────────────────────────
+# │ Visually demonstrate the nonlinear explosion of p99 latency near
+import numpy as np
+from binder.tools.figures import style as book_style
+
+fig, ax, COLORS, plt = book_style.setup_plot(figsize=(10, 4.3))
+# =============================================================================
+# PLOT: The Tail Latency Explosion
+# =============================================================================
+
+# ┌── 2. ARRAYS ────────────────────────────────────────────────────────────────
+utilization = np.linspace(0, 0.95, 100)
+mean_latency = 1 / (1 - utilization)
+p99_latency = mean_latency * 4.6
+
+# ┌── 3. RENDER ────────────────────────────────────────────────────────────────
+ax.plot(utilization, mean_latency, '--', color=COLORS['BlueLine'], label='Mean Latency', linewidth=2)
+ax.plot(utilization, p99_latency, '-', color=COLORS['RedLine'], label='Tail Latency (p99)', linewidth=2.5)
+
+# ┌── 4. DECORATE ──────────────────────────────────────────────────────────────
+ax.set_xlabel('System Utilization (%)')
+ax.set_ylabel('Request Latency (normalized to service time)')
+ax.set_xlim(0, 1.0)
+ax.set_ylim(0, 50)
+
+ax.axvspan(0, 0.5, color=COLORS['GreenL'], alpha=0.2)
+ax.text(
+    0.25,
+    39,
+    "Safe Zone",
+    color=COLORS['GreenLine'],
+    fontsize=8,
+    fontweight='bold',
+    va='center',
+    ha='center',
+    bbox=dict(facecolor='white', alpha=0.8, edgecolor='none', pad=0.5),
+)
+ax.axvspan(0.7, 1.0, color=COLORS['RedL'], alpha=0.3)
+ax.text(
+    0.78,
+    39,
+    "Danger Zone\n(Queue\nExplosion)",
+    color=COLORS['RedLine'],
+    fontweight='bold',
+    va='center',
+    ha='center',
+    fontsize=8,
+    linespacing=1.4,
+    bbox=dict(facecolor='white', alpha=0.8, edgecolor='none', pad=0.5),
+)
+
+ax.annotate(
+    "The Knee",
+    xy=(0.7, 15),
+    xytext=(0.59, 20),
+    arrowprops=dict(facecolor=COLORS['primary'], arrowstyle='->', lw=1.0),
+    fontsize=9,
+    bbox=dict(facecolor='white', alpha=0.8, edgecolor='none', pad=0.5),
+)
+
+ax.set_xticks([0, 0.2, 0.4, 0.6, 0.8, 1.0])
+ax.set_xticklabels(['0%', '20%', '40%', '60%', '80%', '100%'])
+ax.legend(loc='upper left', fontsize=8, frameon=True, facecolor='white', framealpha=0.95, edgecolor='gray', fancybox=True, borderpad=0.6)
+plt.show()
+plt.close()
+```
+
+:::
+
+Beyond the technical limits of latency, serving economics have also changed rapidly. As models become more efficient and hardware becomes more specialized, the cost per inference has fallen.[^fn-jevons-paradox-efficiency] Falling unit cost has not made serving cheap in aggregate, because volume grows faster than price falls; at fleet scale, recurring inference cost dominates, as Facebook's experience shows.
+
+[^fn-jevons-paradox-efficiency]: **Jevons paradox**\index{Jevons paradox!inference demand}: William Stanley Jevons observed in 1865 that efficiency improvements in coal-powered steam engines increased total coal consumption by making steam power economically viable for applications previously too costly [@jevons1865coal]; the same dynamic can apply to AI inference: each 10$\times$ cost reduction opens application classes that were economically infeasible at the previous price point, expanding aggregate demand by more than the efficiency gain. This is why cheaper inference can increase, not decrease, total GPU fleet demand. Efficiency and demand are often complements in AI, not substitutes.
+
+::: {#exmp-model-serving-facebook-inference-tax .callout-example title="The inference tax at Facebook"}
+
+**Scenario**: Production ML serving systems at Meta execute tens of trillions of inferences daily across global user-facing services [@hazelwood2018].
+
+**Diagnosis**: Recurring inference serving compute and energy costs dwarf initial offline model training expenses. Live request arrival patterns and strict latency bounds constrain GPU batching.
+
+**Systems lesson**: Model architectures cheap to train can prove unviable to serve at fleet scale. Production serving infrastructure requires hardware-software co-design to balance tail latency, batch size, and recurring operational total cost of ownership.
+
+:::
+
+The same serving-economics pressure appears in public API prices. @Fig-intelligence-deflation tracks this cost collapse across representative public API list-price snapshots from 2023 through 2025 on a logarithmic scale. The steep downward trend line isolates how prompt token pricing fell by multiple orders of magnitude—from thirty dollars per million tokens for original GPT-4 down to several cents for Gemini 1.5 Flash and DeepSeek-V3. Vendor prices change frequently, so these points should be read as historical provenance for the trend rather than as current purchasing guidance [@openai2023chatgptwhisper; @openai2023gpt4web; @openaiCommunity2024gpt4oApi; @openai2024gpt4oMini; @anthropic2024claude3family; @google2024gemini15flashPricing; @deepseek2024v3]. Each order-of-magnitude drop changes which applications are economically viable.
+
+::: {#fig-intelligence-deflation fig-env="figure" fig-pos="htb" fig-cap="**Intelligence Deflation**: Representative public API input-token list prices per 1M tokens (\$) over time (Log Scale). Eight model-version points are snapshots collected from the public pricing pages of OpenAI, Anthropic, Google, and DeepSeek between 2023 and 2025; the Legacy GPT-3.5 point is an illustrative baseline rather than a documented model-version snapshot. The series is intended as a market trend indicator, not a controlled or current-price comparison. API token-processing prices have collapsed by multiple orders of magnitude, transforming the economics of automated AI workflows." fig-alt="Log-scale scatter plot of eight source-backed public API input-token price snapshots and one illustrative legacy baseline from 2023 to 2025, ranging from 30 dollars to 0.075 dollars per million tokens. Blue points are labeled by model, and a red dashed trend line slopes downward across the plot."}
+
+```{python}
+#| echo: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ INTELLIGENCE DEFLATION FIGURE
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @fig-intelligence-deflation—log-scale scatter plot of representative
+# │          public API input-token prices from 2023 to 2025, annotated with model names
+# │
+# │ Goal: Visualize the decline in inference token prices that is transforming AI
+# │       serving economics.
+# │ Show: Named input/prompt-token price points on a log scale with deflation trend line.
+# │ How: Fit a log-linear trend through representative price points; scatter
+# │      remaining models; annotate each with model name.
+# │
+# └─────────────────────────────────────────────────────────────────────────────
+
+# ┌── 1. CANVAS ────────────────────────────────────────────────────────────────
+# │ Visualize the decline in inference token prices.
+import numpy as np
+from binder.tools.figures import style as book_style
+
+fig, ax, COLORS, plt = book_style.setup_plot(figsize=(10, 4.4))
+# =============================================================================
+# DATA: Representative input-token pricing snapshots over time
+# =============================================================================
+
+# ┌── 2. ARRAYS ────────────────────────────────────────────────────────────────
+data = [
+    (2023.0, 20.0, "Legacy GPT-3.5"),
+    (2023.1, 2.0, "GPT-3.5 Turbo"),
+    (2023.2, 30.0, "GPT-4 (Original)"),
+    (2024.2, 15.0, "Claude 3 Opus"),
+    (2024.2, 0.25, "Claude 3 Haiku"),
+    (2024.3, 5.0, "GPT-4o"),
+    (2024.62, 0.075, "Gemini 1.5 Flash"),
+    (2024.55, 0.15, "GPT-4o-mini"),
+    (2025.1, 0.27, "DeepSeek-V3"),
+]
+data.sort(key=lambda x: x[0])
+
+years = np.array([d[0] for d in data])
+prices = np.array([d[1] for d in data])
+labels = [d[2] for d in data]
+
+# =============================================================================
+# PLOT: Intelligence Deflation
+# =============================================================================
+trend_years = np.array([2023.0, 2023.1, 2024.2, 2024.4, 2025.1])
+trend_prices = np.array([20.0, 2.0, 0.25, 0.075, 0.27])
+slope, intercept = np.polyfit(trend_years, np.log10(trend_prices), 1)
+line_years = np.linspace(2023.0, 2025.5, 100)
+line_prices = 10 ** (slope * line_years + intercept)
+
+# -----------------------------------------------------------------------------
+# RENDER
+# -----------------------------------------------------------------------------
+ax.plot(line_years, line_prices, linestyle='--', linewidth=1.5, color=COLORS['RedLine'])
+ax.scatter(years, prices, s=45, color=COLORS['BlueLine'], edgecolors='white', zorder=3)
+
+# -----------------------------------------------------------------------------
+# Default label style
+# -----------------------------------------------------------------------------
+default_label_style = {
+    "xytext": (6, 6),
+    "textcoords": "offset points",
+    "ha": "left",
+    "va": "bottom",
+    "fontsize": 8,
+    "color": COLORS["primary"],
+    "bbox": dict(boxstyle="round,pad=0.2", facecolor="white", edgecolor="none", alpha=0.8),
+}
+
+# -----------------------------------------------------------------------------
+# Individual overrides by label
+# -----------------------------------------------------------------------------
+label_styles = {
+    "Legacy GPT-3.5": {
+        "xytext": (-10, -11),
+        "ha": "center",
+        "va": "center",
+    },
+    "GPT-3.5 Turbo": {
+        "xytext": (0, 10),
+        "ha": "center",
+        "va": "center",
+    },
+    "GPT-4 (Original)": {
+        "xytext": (0, 10),
+        "ha": "center",
+        "va": "center",
+    },
+    "Claude 3 Opus": {
+        "xytext": (0, 10),
+        "ha": "center",
+        "va": "center",
+    },
+    "Claude 3 Haiku": {
+        "xytext": (-10, -10),
+        "ha": "center",
+        "va": "center",
+    },
+    "GPT-4o": {
+        "xytext": (0, -10),
+        "ha": "center",
+        "va": "center",
+    },
+    "Gemini 1.5 Flash": {
+        "xytext": (-20, -20),
+        "ha": "center",
+        "va": "center",
+        "arrowprops": dict(arrowstyle="-", shrinkB=5, color=COLORS["primary"], lw=0.8),
+    },
+    "GPT-4o-mini": {
+        "xytext": (20, -20),
+        "ha": "center",
+        "va": "center",
+        "arrowprops": dict(arrowstyle="-", shrinkB=5, color=COLORS["primary"], lw=0.8),
+    },
+    "DeepSeek-V3": {
+        "xytext": (0, 10),
+        "ha": "center",
+        "va": "center",
+    },
+}
+
+# -----------------------------------------------------------------------------
+# Draw labels
+# -----------------------------------------------------------------------------
+for x, y, label in zip(years, prices, labels):
+    style = default_label_style.copy()
+    style.update(label_styles.get(label, {}))
+    ax.annotate(label, (x, y), **style)
+# ┌── 4. DECORATE ──────────────────────────────────────────────────────────────
+ax.set_yscale('log')
+ax.set_yticks([100, 10, 1, 0.1, 0.01])
+ax.set_yticklabels(['$100', '$10', '$1', '$0.10', '$0.01'])
+ax.set_xlabel('Year')
+ax.set_ylabel('Price per 1M Tokens ($)')
+ax.set_ylim(0.01, 500)
+ax.set_xlim(2022.8, 2025.5)
+ax.text(
+    2023.5,
+    0.05,
+    "Prices Decline by\nOrders of Magnitude",
+    color=COLORS['grid'],
+    fontsize=9,
+    ha='center',
+    style='italic',
+    bbox=dict(facecolor='white', alpha=0.8, edgecolor='none', pad=0.5),
+)
+plt.show()
+plt.close()
+```
+
+:::
+
+Two pressures now frame the serving problem: tail latency that explodes once utilization passes the queueing knee, and per-inference economics that fall by orders of magnitude as efficiency improves. Together they force a formal definition of serving built around latency rather than throughput.
+
+::: {#dfn-model-serving-model-serving .callout-definition title="Model serving"}
+
+***Model serving***\index{Model serving!definition} is the operational phase that provides model predictions to end-users or downstream systems under latency, throughput, availability, and cost constraints.
+
+1.  **Significance**: Online serving turns training's throughput priority ($\EfficiencyHw$) into a request-latency constraint ($\EndToEndRequestLatency$), requiring a stack designed around the percentile named by its SLO.
+2.  **Distinction**: Unlike model training, which commonly processes scheduled batches, serving may handle stochastic online requests, synchronized streams, or offline batches.
+3.  **Common pitfall**: A frequent misconception is that serving is "just the forward pass." In reality, it is a systems problem: model execution is only one component of a stack that may include request routing, load balancing, and data transformation.
+
+:::
+
+The SLO[^fn-slo-sla-serving] defines the latency target that shapes every architectural decision in the serving stack, establishing the strict time budget within which all request handling must complete. When an inference server receives a request, model execution represents only one segment of an end-to-end pipeline: network ingress, payload deserialization, feature transformation, queue scheduling, and output serialization all consume time before and after the accelerator runs. @Fig-serving-inference-pipeline diagrams this end-to-end request lifecycle, partitioning execution into three sequential stages: input preprocessing (traditional computing), neural network evaluation (deep learning), and output postprocessing with safety validation (traditional computing). Any of these stages can become the binding latency bottleneck. @Sec-model-serving-latency-budget-ef40 quantifies exactly where time goes, revealing a counterintuitive result about which stages dominate.
+
+::: {.column-margin .margin-pointer}
+↩ SLOs, service level agreements (SLAs), and the tail-latency percentiles they constrain are established in @sec-benchmarking-latency-tail-latency-5cde.
+:::
+
+[^fn-slo-sla-serving]: **Service level objective (SLO) vs. service level agreement (SLA)**\index{SLO!vs. SLA}: An SLO is an *internal* target (for example, "p99 latency under 50 ms") and an SLA is an *external* contractual commitment whose violation may carry remedies or penalties. Teams often set SLOs tighter than SLAs to preserve a safety margin. For ML serving, task quality and inference latency can both contribute to SLOs, creating multidimensional targets where improving one dimension (for example, deploying a larger model for accuracy) can violate another (latency).
+
+::: {#fig-serving-inference-pipeline fig-env="figure" fig-pos="htb" fig-cap="**The Inference Pipeline**: ML serving systems transform raw inputs into final outputs through sequential stages: preprocessing, neural network computation, and postprocessing. The neural network represents just one component; preprocessing and postprocessing make end-to-end latency depend on more than neural-network execution." fig-alt="Left-to-right flow diagram of six connected boxes labeled Raw Data, Pre-processing, Neural Network, Raw Output, Post-processing, and Final Output. Outlined groups beneath the boxes identify Pre-processing, Deep Learning, and Post-processing."}
+
+```{.tikz}
+\begin{tikzpicture}[font=\small\sffamily, >=stealth]
+\tikzset{
+Box/.style={align=center, inner xsep=2pt,draw=GreenLine, line width=1pt,fill=none,
+minimum width=24mm, minimum height=25mm,node distance=1.0},
+LineA/.style={BrownLine!70,line width=4.0pt,{-{Triangle[width=1.5*6pt,length=2.0*5pt]}},shorten <=1pt,shorten >=1pt},
+ALine/.style={black!50, line width=1.1pt,{{Triangle[width=0.9*6pt,length=1.2*6pt]}-}},
+Larrow/.style={fill=violet!50, single arrow,  inner sep=2pt, single arrow head extend=3pt,
+            single arrow head indent=0pt,minimum height=10mm, minimum width=3pt}
+}
+%inbox
+\tikzset{%
+ pics/inbox/.style = {
+        code = {
+        \pgfkeys{/channel/.cd, #1}
+\begin{scope}[local bounding box=INBOX,scale=\scalefac, every node/.append style={transform shape}]
+\node[line width=\Linewidth,draw=\drawcolor,fill=\filllcolor!50,
+rectangle,rounded corners=3pt,minimum width=14mm,minimum height=10mm]at(0,0.3){};
+\node[line width=\Linewidth,draw=\drawcolor,fill=\filllcolor,
+rectangle,rounded corners=3pt,minimum width=15mm,minimum height=10mm]at(0,0.1){};
+\node[line width=\Linewidth,draw=\drawcolor,fill=\filllcolor!50,
+,rectangle,rounded corners=3pt,minimum width=17mm,minimum height=10mm]
+at(0,-0.1){};
+\draw[line width=\Linewidth,draw=\drawcolor,fill=\filllcirclecolor,,rounded corners=2pt](-0.92,0.05)--
+(-0.92,-0.78)--(0.92,-0.78)--(0.92,0.05)--(0.40,0.05)--(0.32,-0.2)--(-0.29,-0.2)--(-0.40,0.05)--cycle;
+
+\node[single arrow, line width=\Linewidth,draw=black,fill=cyan!90!black!30, rotate=270,
+      minimum width = 15pt, single arrow head extend=6pt,
+      minimum height=10mm]at(0,0.5) {}; % length of arrow
+ \end{scope}
+     }
+  }
+}
+%brain
+\tikzset{pics/brain/.style = {
+        code = {
+        \pgfkeys{/channel/.cd, #1}
+\begin{scope}[local bounding box=BRAIN,scale=\scalefac, every node/.append style={transform shape}]
+\fill[fill=\filllcolor!50](0.1,-0.5)to[out=0,in=180](0.33,-0.5)
+to[out=0,in=270](0.45,-0.38)to(0.45,-0.18)
+to[out=40,in=240](0.57,-0.13)to[out=110,in=310](0.52,-0.05)
+to[out=130,in=290](0.44,0.15)to[out=90,in=340,distance=8](0.08,0.69)
+to[out=160,in=80](-0.42,-0.15)to (-0.48,-0.7)to(0.07,-0.7)to(0.1,-0.5)
+(-0.10,-0.42)to[out=310,in=180](0.1,-0.5);
+\draw[draw=\drawcolor,line width=\Linewidth](0.1,-0.5)to[out=0,in=180](0.33,-0.5)
+to[out=0,in=270](0.45,-0.38)to(0.45,-0.18)
+to[out=40,in=240](0.57,-0.13)to[out=110,in=310](0.52,-0.05)
+to[out=130,in=290](0.44,0.15)to[out=90,in=340,distance=8](0.08,0.69)
+(-0.42,-0.15)to (-0.48,-0.7)
+(0.07,-0.7)to(0.1,-0.5)
+(-0.10,-0.42)to[out=310,in=180](0.1,-0.5);
+\draw[fill=\filllcolor,line width=\Linewidth](-0.3,-0.10)to(0.08,0.60)
+to[out=60,in=50,distance=3](-0.1,0.69)to[out=160,in=80](-0.26,0.59)to[out=170,in=90](-0.46,0.42)
+to[out=170,in=110](-0.54,0.25)to[out=210,in=150](-0.54,0.04)
+to[out=240,in=130](-0.52,-0.1)to[out=300,in=240]cycle;
+\draw[fill=\filllcolor,line width=\Linewidth]
+(-0.04,0.64)to[out=120,in=0](-0.1,0.69)(-0.19,0.52)to[out=120,in=330](-0.26,0.59)
+(-0.4,0.33)to[out=150,in=280](-0.46,0.42)
+%
+(-0.44,-0.03)to[bend left=30](-0.34,-0.04)
+(-0.33,0.08)to[bend left=40](-0.37,0.2) (-0.37,0.12)to[bend left=40](-0.45,0.14)
+(-0.26,0.2)to[bend left=30](-0.24,0.13)
+(-0.16,0.32)to[bend right=30](-0.27,0.3)to[bend right=30](-0.29,0.38)
+(-0.13,0.49)to[bend left=30](-0.04,0.51);
+
+\draw[rounded corners=0.8pt,\drawcircle,-{Circle[fill=\filllcirclecolor,length=2.5pt]}](-0.23,0.03)--(-0.15,-0.03)--(-0.19,-0.18)--(-0.04,-0.28);
+\draw[rounded corners=0.8pt,\drawcircle,-{Circle[fill=\filllcirclecolor,length=2.5pt]}](-0.17,0.13)--(-0.04,0.05)--(-0.06,-0.06)--(0.14,-0.11);
+\draw[rounded corners=0.8pt,\drawcircle,-{Circle[fill=\filllcirclecolor,length=2.5pt]}](-0.12,0.23)--(0.31,0.0);
+\draw[rounded corners=0.8pt,\drawcircle,-{Circle[fill=\filllcirclecolor,length=2.5pt]}](-0.07,0.32)--(0.06,0.26)--(0.16,0.33)--(0.34,0.2);
+\draw[rounded corners=0.8pt,\drawcircle,-{Circle[fill=\filllcirclecolor,length=2.5pt]}](-0.01,0.43)--(0.06,0.39)--(0.18,0.51)--(0.31,0.4);
+\end{scope}
+     }
+  }
+}
+%llm
+\tikzset{
+pics/llm/.style = {
+        code = {
+        \pgfkeys{/channel/.cd, #1}
+\begin{scope}[shift={($(0,0)+(0,0)$)},scale=\scalefac,every node/.append style={transform shape}]
+\node[circle,minimum size=12mm,draw=\drawcolor, fill=\filllcolor!70,line width=0.5*\Linewidth](C\picname) at (0,0){};
+\def\startangle{90}
+\def\radius{1.15}
+\def\radiusI{1.1}
+\foreach \i [evaluate=\i as \j using \i+1] [count =\k] in {0,2,4,6,8} {
+\pgfmathsetmacro{\angle}{\startangle - \i * (360/8)}
+\draw[draw=black,-{Circle[black ,fill=\filllcirclecolor,length=5.5pt,line width=0.5*\Linewidth]},line width=1.5*\Linewidth](C\picname)--++(\startangle - \i*45:\radius) ;
+\node[circle,draw=black,fill=\filllcirclecolor!80!red!50,inner sep=3pt,line width=0.5*\Linewidth](2C\k)at(\startangle - \j*45:\radiusI) {};
+}
+\draw[line width=1.5*\Linewidth](2C1)--++(-0.5,0)|-(2C2);
+\draw[line width=1.5*\Linewidth](2C3)--++(0.5,0)|-(2C4);
+\node[circle,,minimum size=12mm,draw=\drawcolor, fill=\filllcolor!70,line width=0.5*\Linewidth]at (0,0){};
+\node[draw,rectangle,rounded corners=1pt,minimum width=7mm,minimum height=4mm,fill=orange!10](R1)at(0.1,0.1){};
+\draw[BrownLine,shorten <=2pt,shorten >=2pt ]($(R1.north west)!0.35!(R1.south west)$)--($(R1.north east)!0.35!(R1.south east)$);
+\draw[BrownLine,shorten <=2pt,shorten >=2pt ]($(R1.north west)!0.7!(R1.south west)$)--($(R1.north east)!0.7!(R1.south east)$);
+\node[draw,rectangle,rounded corners=1pt,minimum width=6mm,minimum height=4mm,fill=orange!10](R2)at(-0.05,-0.15){};
+\draw[BrownLine,shorten <=2pt,shorten >=2pt ]($(R2.north west)!0.35!(R2.south west)$)--($(R2.north east)!0.35!(R2.south east)$);
+\draw[BrownLine,shorten <=2pt,shorten >=2pt ]($(R2.north west)!0.7!(R2.south west)$)--($(R2.north east)!0.7!(R2.south east)$);
+\end{scope}
+    }
+  }
+}
+%funnel
+\tikzset{%
+ pics/funnel/.style = {
+        code = {
+        \pgfkeys{/channel/.cd, #1}
+\begin{scope}[local bounding box=FUNNEL,scale=\scalefac, every node/.append style={transform shape}]
+\draw[fill=\filllcolor,line width=\Linewidth,draw=\drawcolor](-0.12,-0.81)--(-0.19,-0.25)--(-0.7,0.41)--(0.7,0.41)--(0.19,-0.25)--(0.12,-0.81)--cycle;
+\draw[fill=\filllcolor,line width=\Linewidth,draw=\drawcolor](-0.19,-0.25)--(0.08,-0.25);
+\draw[fill=\filllcolor,line width=\Linewidth,draw=\drawcolor](0.16,-0.09)--(0.41,0.31);
+%
+\node[line width=\Linewidth,draw=\drawcolor,fill=\filllcolor,inner sep=1pt,
+rectangle,rounded corners=2pt,minimum width=16mm,minimum height=5pt]at(0,0.5){};
+%
+\foreach \i in{-0.5,0,0.5}{
+\node[single arrow, line width=0.8*\Linewidth,draw=black,fill=\filllcirclecolor, rotate=270,inner sep=1pt,
+      minimum width =9pt, single arrow head extend=2pt,
+      minimum height=5mm]at(\i,0.9) {}; % length of arrow
+   }
+\node[single arrow,line width=0.8*\Linewidth,draw=black,fill=\filllcirclecolor, rotate=270,inner sep=1pt,
+      minimum width =11pt, single arrow head extend=2pt,
+      minimum height=5mm]at(0,-1.1) {}; % length of arrow
+ \end{scope}
+     }
+  }
+}
+\def\inset{2.0pt} %
+\def\myshape{%
+  (0,1.34) to[out=220,in=0] (-1.20,1.03) --
+  (-1.20,-0.23) to[out=280,in=160] (0,-1.53) to[out=20,in=260] (1.20,-0.23) --
+  (1.20,1.03)  to[out=180,in=320] cycle
+}
+\tikzset{
+pics/stitC/.style = {
+        code = {
+        \pgfkeys{/channel/.cd, #1}
+\begin{scope}[shift={($(0,0)+(0,0)$)},scale=\scalefac,every node/.append style={transform shape}]
+\fill[fill=\filllcolor!60] \myshape;
+%
+\begin{scope}
+  \clip \myshape;
+  \draw[draw=\filllcolor!60, line width=3*\inset,fill=white] \myshape; % Color and thickness as desired
+\end{scope}
+\draw[red,line width=3pt](-0.7,-0.35)--++(320:0.5)--++(50:1.5);
+\end{scope}
+    }
+  }
+}
+%gear-arrow
+% #1 number of teeths
+% #2 radius intern
+% #3 radius extern
+% #4 angle from start to end of the first arc
+% #5 angle to decale the second arc from the first
+% #6 inner radius to cut off
+\tikzset{
+  pics/gearAR/.style args={#1/#2/#3/#4/#5/#6/#7}{
+   code={
+           \pgfkeys{/channel/.cd, #7}
+\begin{scope}[shift={($(0,0)+(0,0)$)},scale=\scalefac,every node/.append style={transform shape},
+LinE/.style={\filllcirclecolor,line width=5.0pt,
+{{Triangle[width=1.5*10pt,length=2.0*5pt]}-},shorten <=5pt,shorten >=1pt},
+ELin/.style={\filllcirclecolor,line width=7.0pt,
+{-{Triangle[width=1.15*10pt,length=2.0*5pt]}},shorten <=0pt,shorten >=0pt}]
+    \pgfmathtruncatemacro{\N}{#1}%,
+    \def\rin{#2}\def\rout{#3}\def\aA{#4}\def\aOff{#5}\def\rcut{#6}%
+    \path[rounded corners=0.5pt,draw=\drawcolor,fill=\filllcolor]
+      (0:\rin)
+      \foreach \i [evaluate=\i as \n using (\i-1)*360/\N] in {1,...,\N}{%
+        arc (\n:\n+\aA:\rin)
+        -- (\n+\aA+\aOff:\rout)
+        arc (\n+\aA+\aOff:\n+360/\N-\aOff:\rout)
+        -- (\n+360/\N:\rin)
+      } -- cycle;
+      \draw[draw=none,fill=white](0,0) circle[radius=\rcut];
+\draw[ELin](0,0)--++(0:2.5);
+\end{scope}
+  }}
+}
+%testing+pencil
+\tikzset{
+pics/testing/.style = {
+        code = {
+        \pgfkeys{/channel/.cd, #1}
+\begin{scope}[local bounding box=TESTING1,shift={($(0,0)+(0,0)$)},scale=\scalefac,every node/.append style={transform shape}]
+\newcommand{\tikzxmark}{%
+\tikz[scale=0.18] {
+    \draw[line width=0.7,line cap=round,RedLine] (0,0) to [bend left=6] (1,1);
+    \draw[line width=0.7,line cap=round,RedLine] (0.2,0.95) to [bend right=3] (0.8,0.05);
+}}
+\newcommand{\tikzxcheck}{%
+\tikz[scale=0.16] {
+    \draw[line width=0.7,line cap=round,GreenLine] (0.5,0.75)--(0.85,-0.1) to [bend left=16] (1.5,1.55);
+
+}}
+ \node[draw, minimum width  =15mm, minimum height = 20mm, inner sep = 0pt,
+        rounded corners,draw = \drawcolor, fill=\filllcolor!10, line width=\Linewidth](COM){};
+\node[draw=GreenLine,inner sep=4pt,fill=white](CB1) at ($(COM.north west)!0.25!(COM.south west)+(0.3,0)$){};
+\node[xshift=0pt]at(CB1){\tikzxcheck};
+\node[draw=RedLine,inner sep=4pt,fill=white](CB2) at ($(COM.north west)!0.5!(COM.south west)+(0.3,0)$){};
+\node[xshift=0pt]at(CB2){\tikzxmark};
+\node[draw=RedLine,inner sep=4pt,fill=white](CB3) at ($(COM.north west)!0.75!(COM.south west)+(0.3,0)$){};
+\node[xshift=0pt]at(CB3){\tikzxmark};
+\draw[GreenLine,decoration={zigzag,segment length=4pt, amplitude=0.5pt},decorate]($(CB1)+(0.3,0.05)$)--++(0:0.8);
+\draw[GreenLine,decoration={zigzag,segment length=4pt, amplitude=0.5pt},decorate]($(CB1)+(0.3,-0.12)$)--++(0:0.7);
+\draw[RedLine,decoration={zigzag,segment length=4pt, amplitude=0.5pt},decorate]($(CB2)+(0.3,0.05)$)--++(0:0.8);
+\draw[RedLine,decoration={zigzag,segment length=4pt, amplitude=0.5pt},decorate]($(CB2)+(0.3,-0.12)$)--++(0:0.6);
+\draw[RedLine,decoration={zigzag,segment length=4pt, amplitude=0.5pt},decorate]($(CB3)+(0.3,0.05)$)--++(0:0.8);
+\draw[RedLine,decoration={zigzag,segment length=4pt, amplitude=0.5pt},decorate]($(CB3)+(0.3,-0.12)$)--++(0:0.6);
+\end{scope}
+    }
+  }
+}
+%pencil
+\tikzset{
+pics/pencil/.style = {
+        code = {
+        \pgfkeys{/channel/.cd, #1}
+\begin{scope}[local bounding box=TESTING1,shift={($(0,0)+(0,0)$)},scale=\scalefac,every node/.append style={transform shape},rotate=340]
+            \fill[fill=\filllcolor!70] (0,4) -- (0.4,4) -- (0.4,0) --(0.3,-0.15) -- (0.2,0) -- (0.1,-0.14) -- (0,0) -- cycle;
+            \draw[color=white,thick] (0.2,4) -- (0.2,0);
+            \fill[black] (0,3.5) -- (0.2,3.47) -- (0.4,3.5) -- (0.4,4) arc(30:150:0.23cm);
+            \fill[fill=\filllcolor!40] (0,0) -- (0.2,-0.8)node[coordinate,pos=0.75](a){} -- (0.4,0)node[coordinate,pos=0.25](b){} -- (0.3,-0.15) -- (0.2,0) -- (0.1,-0.14) -- cycle;
+            \fill[fill=\filllcolor] (a) -- (0.2,-0.8) -- (b) -- cycle;
+
+\end{scope}
+    }
+  }
+}
+\pgfkeys{
+  /channel/.cd,
+   Depth/.store in=\Depth,
+  Height/.store in=\Height,
+  Width/.store in=\Width,
+  filllcirclecolor/.store in=\filllcirclecolor,
+  filllcolor/.store in=\filllcolor,
+  drawcolor/.store in=\drawcolor,
+  drawcircle/.store in=\drawcircle,
+  scalefac/.store in=\scalefac,
+  Linewidth/.store in=\Linewidth,
+  picname/.store in=\picname,
+  filllcolor=BrownLine,
+  filllcirclecolor=violet!20,
+  drawcolor=black,
+  drawcircle=violet,
+  scalefac=1,
+  Linewidth=0.5pt,
+  Depth=1.3,
+  Height=0.8,
+  Width=1.1,
+  picname=C
+}
+%Raw Data
+\node[Box](B1){};
+\fill[cyan!07](B1.north west) rectangle ($(B1.north east)!0.6!(B1.south east)$)coordinate(B1DE);
+\fill[cyan!20](B1.south east) rectangle ($(B1.north west)!0.6!(B1.south west)$)coordinate(B1LE);
+\node[Box,draw=BlueD](){};
+\tikzset{Text2/.style={font=\sffamily\bfseries\small,align=center}}
+\node[Text2]at($(B1.south west)!0.5!(B1DE)$){Raw Data};
+\coordinate(Q1)at($(B1.north west)!0.5!(B1DE)$);
+\pic[shift={(0,0)}] at  (Q1){inbox={scalefac=0.7,picname=1,Linewidth=1.0pt,
+ filllcolor=BrownL,drawcolor=black,filllcirclecolor=orange!70!yellow!80}};
+%Pre-processing
+\node[Box, right=0.75 of B1](B2){};
+\fill[cyan!07](B2.north west) rectangle ($(B2.north east)!0.6!(B2.south east)$)coordinate(B2DE);
+\fill[cyan!20](B2.south east) rectangle ($(B2.north west)!0.6!(B2.south west)$)coordinate(B2LE);
+\node[Box, right=0.75 of B1,draw=BlueD](B2){};
+\node[Text2]at($(B2.south west)!0.5!(B2DE)$){Pre-\\processing};
+\coordinate(Q2)at($(B2.north west)!0.5!(B2DE)$);
+\pic[shift={(0,0)}] at  (Q2){funnel={scalefac=0.53,picname=1,Linewidth=0.5pt,
+ filllcolor=green!70!orange!70,drawcolor=black,filllcirclecolor=red!70!blue!80}};
+%Neural Network
+\node[Box, right=of B2](B3){};
+\fill[green!07](B3.north west) rectangle ($(B3.north east)!0.6!(B3.south east)$)coordinate(B3DE);
+\fill[green!20](B3.south east) rectangle ($(B3.north west)!0.6!(B3.south west)$)coordinate(B3LE);
+\node[Box, right=of B2,draw=GreenD](B3){};
+\node[Text2]at($(B3.south west)!0.5!(B3DE)$){Neural\\ Network};
+\coordinate(Q3)at($(B3.north west)!0.5!(B3DE)$);
+%\pic[shift={(0,0)}] at  (Q3){brain={scalefac=0.9,picname=1,filllcolor=orange!30!, Linewidth=0.95pt}};
+\pic[shift={(0,0)}] at  (Q3){llm={scalefac=0.6,drawcolor=BlueLine,filllcolor=BlueLine!50!, Linewidth=1pt,filllcirclecolor=red}};
+%Raw output
+\node[Box, right=of B3](B4){};
+\fill[violet!07](B4.north west) rectangle ($(B4.north east)!0.6!(B4.south east)$)coordinate(B4DE);
+\fill[violet!20](B4.south east) rectangle ($(B4.north west)!0.6!(B4.south west)$)coordinate(B4LE);
+\node[Box, right=of B3,draw=VioletLine](B4){};
+\node[Text2]at($(B4.south west)!0.5!(B4DE)$){Raw\\ Output};
+\coordinate(Q4)at($(B4.north west)!0.5!(B4DE)$);
+ \pic[shift={(0,0)}] at (Q4) {gearAR={14/1.4/1.8/8/4/0.7/scalefac=0.35,drawcolor=BlueLine,filllcolor=BlueLine,filllcirclecolor=red}};
+%Post-processing
+\node[Box, right=0.75 of B4](B5){};
+\fill[violet!05](B5.north west) rectangle ($(B5.north east)!0.6!(B5.south east)$)coordinate(B5DE);
+\fill[violet!15](B5.south east) rectangle ($(B5.north west)!0.6!(B5.south west)$)coordinate(B5LE);
+\node[Box, right=0.75 of B4,draw=VioletLine](B5){};
+\node[Text2]at($(B5.south west)!0.5!(B5DE)$){Post-\\processing};
+\coordinate(Q5)at($(B5.north west)!0.5!(B5DE)$);
+\pic[shift={(0,0)}] at  (Q5){testing={scalefac=0.65,picname=1,drawcolor=myblue,filllcolor=myblue, Linewidth=1.0pt}};
+\pic[shift={(0,-0.5)},rotate=-15] at  (Q5){pencil={scalefac=0.30,picname=1,filllcolor=mygreen, Linewidth=1.0pt}};
+%%%%%%
+%Final output
+\node[Box, right=0.75 of B5](B6){};
+\fill[violet!05](B6.north west) rectangle ($(B6.north east)!0.6!(B6.south east)$)coordinate(B6DE);
+\fill[violet!15](B6.south east) rectangle ($(B6.north west)!0.6!(B6.south west)$)coordinate(B6LE);
+\node[Box, right=0.75 of B5,draw=VioletLine]{};
+\node[Text2]at($(B6.south west)!0.5!(B6DE)$){Final Output};
+\coordinate(Q6)at($(B6.north west)!0.5!(B6DE)$);
+\pic[shift={(0,0.05)}] at  (Q6){stitC={scalefac=0.45,drawcolor=orange,filllcolor=green!55!black}};
+%arrows
+\foreach \i in{1,2,3,4,5}{
+\pgfmathtruncatemacro{\X}{\i + 1} %
+\draw[LineA](B\i)--(B\X);
+}
+\node[draw=myblue,line width=0.75pt,fit=(B1)(B2),inner ysep=3mm,inner xsep=4mm,xshift=1mm](F1){};
+\node[draw=none,fit=(B3),inner ysep=3mm,inner xsep=4mm](F2){};
+\node[draw=mypurple,line width=0.75pt,fit=(B4)(B6),inner ysep=3mm,inner xsep=4mm,xshift=-1mm](F3){};
+\node[below =0pt of F1,text=myblue]{Pre-processing};
+\node[below =0pt of F2,text=GreenD]{Deep Learning};
+\node[below =0pt of F3,text=mypurple]{Post-processing};
+
+\end{tikzpicture}
+```
+
+:::
+
+This pipeline turns serving into an orchestration problem: because every stage draws from the same latency budget, optimizing accelerator kernel execution yields diminishing returns if data transformation or queueing delays dominate. Before optimizing any individual stage, the system must decide whether predictions are computed ahead of time or on demand.
+
+### Static vs. dynamic inference {#sec-model-serving-static-vs-dynamic-inference-e864}
+
+Deciding whether predictions are generated before or during a user request establishes the fundamental trade-off between offline hardware efficiency and online operational agility [@google2024staticdynamic]. That choice determines whether an accelerator operates in an unconstrained throughput regime or under the strict tail-latency deadlines of an interactive serving loop.
+
+#### Static inference {#sec-model-serving-static-inference-35f4}
+
+Static inference\index{Static inference!precomputed predictions} (also called offline or batch inference) precomputes predictions for anticipated inputs and stores them in a retrieval store. Moving model execution entirely out of the user request path alters the underlying hardware constraints: because batch jobs have no millisecond-level deadlines, accelerators can use large batches ($B \gg 1$) selected for throughput within memory limits. Reusing weights across samples raises arithmetic intensity for weight-dominated operations; a batch-size sweep identifies where throughput stops improving. When a client issues a request—such as a user requesting nightly generated recommendation rankings—the serving system performs a low-latency key-value lookup rather than executing a forward pass on an accelerator. The primary operational constraint shifts from accelerator latency to storage capacity and data freshness: precomputing predictions across an entire input domain scales combinatorially ($\mathcal{O}(N_{\text{users}} \times N_{\text{items}})$ for $N_{\text{users}}$ users and $N_{\text{items}}$ items in recommendation systems), and stale predictions persist until the next batch refresh.
+
+#### Dynamic inference {#sec-model-serving-dynamic-inference-d2d5}
+
+Dynamic inference\index{Dynamic inference!real-time prediction} (also called online or real-time inference) evaluates inputs on demand as requests arrive. On-demand execution accommodates arbitrary, previously unseen inputs within the model schema and immediately reflects newly deployed model weights without requiring precomputation. However, executing the model directly within the user request path subjects inference to the strict end-to-end latency budget set by its SLO. Because user requests arrive stochastically, the serving runtime cannot delay execution indefinitely to accumulate large batches. Serving requests individually or in small batches ($B=1$ to $B=4$) can expose weight traffic or launch overhead that larger batches amortize. When these costs bind execution, the device completes fewer queries per unit time, increasing provisioned cost per query. This tension between interactive response time and hardware efficiency can make dynamic serving more expensive per query than offline batching (example \ref{exmp-cost-latency}).
+
+```{python}
+#| echo: false
+#| label: cost-latency-calc
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ COST OF LATENCY CALCULATION
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: Callout "The Cost of Latency" (Serving Paradigm section)
+# │
+# │ Goal: Quantify the economic trade-off between response time and hardware bill.
+# │ Show: That reducing latency by 50% can increase costs by 4x.
+# │ How: Calculate cost per million queries across different batch sizes.
+# │
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import Infrastructure
+from mlsysim.fmt import check, fmt, fmt_usd, fmt_time, fmt_rate
+
+class CostLatencyCalc:
+    """Quantifies the economic trade-off between latency and hardware cost per million queries."""
+
+    # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
+    gpu_cost_per_hour_value = Infrastructure.Pricing.Cloud.GpuTrainingPerHour.rate
+    latency_a_ms_value = 5 * ms  # scenario assumption: Scenario A low latency
+    throughput_a_rps_value = 200 * (count / second)  # scenario assumption: Scenario A throughput
+    latency_b_ms_value = 10 * ms  # scenario assumption: Scenario B higher latency
+    throughput_b_rps_value = 800 * (count / second)  # scenario assumption: Scenario B throughput
+
+    # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
+    queries_per_hour_a_value = (throughput_a_rps_value * hour).to(count)
+    cost_per_million_a_value = (gpu_cost_per_hour_value * hour) / (queries_per_hour_a_value / (MILLION * count))
+    queries_per_hour_b_value = (throughput_b_rps_value * hour).to(count)
+    cost_per_million_b_value = (gpu_cost_per_hour_value * hour) / (queries_per_hour_b_value / (MILLION * count))
+    cost_increase_pct_value = (cost_per_million_a_value / cost_per_million_b_value - 1) * 100
+    cost_ratio_value = cost_per_million_a_value / cost_per_million_b_value
+
+    # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
+    check(cost_ratio_value > 1, "Scenario A (low latency) must cost more per query than Scenario B.")
+
+    # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
+    gpu_cost_per_hour_str = fmt_usd(gpu_cost_per_hour_value, precision=0, commas=False, per="hour")
+    latency_a_ms_str = fmt_time(latency_a_ms_value, 'millisecond', precision=0, commas=False)
+    throughput_a_rps_str = fmt_rate(throughput_a_rps_value, 'req/s', precision=0, commas=False)
+    latency_b_ms_str = fmt_time(latency_b_ms_value, 'millisecond', precision=0, commas=False)
+    throughput_b_rps_str = fmt_rate(throughput_b_rps_value, 'req/s', precision=0, commas=False)
+    cost_a_str = fmt_usd(cost_per_million_a_value, precision=2, commas=False)
+    cost_b_str = fmt_usd(cost_per_million_b_value, precision=2, commas=False)
+    # low-latency Scenario A costs ≈300% more per query: a >100% change, opt in
+    cost_increase_str = fmt_percent(cost_increase_pct_value / 100, precision=0, commas=False, style='prose', max_ratio=4)
+    cost_ratio_mult_str = fmt_multiple(round(cost_ratio_value), precision=0, commas=False)
+```
+
+::: {#exmp-cost-latency .callout-example title="The cost of latency"}
+
+Latency constraints directly dictate infrastructure costs. Consider a GPU server renting for `{python} CostLatencyCalc.gpu_cost_per_hour_str`.
+
+Scenario A (low latency): Batch size 1.
+
+*   Latency: `{python} CostLatencyCalc.latency_a_ms_str`.
+*   Throughput: `{python} CostLatencyCalc.throughput_a_rps_str`.
+*   Cost per million queries: `{python} CostLatencyCalc.cost_a_str`.
+
+Scenario B (high throughput): Batch size 8.
+
+*   Latency: `{python} CostLatencyCalc.latency_b_ms_str` (doubled due to batching overhead).
+*   Throughput: `{python} CostLatencyCalc.throughput_b_rps_str` (quadrupled due to parallel efficiency).
+*   Cost per million queries: `{python} CostLatencyCalc.cost_b_str`.
+
+**Systems insight**: Reducing latency from `{python} CostLatencyCalc.latency_b_ms_str` to `{python} CostLatencyCalc.latency_a_ms_str` increases the hardware bill by `{python} CostLatencyCalc.cost_increase_str`. Engineers must quantify whether that speedup generates enough business value to justify the `{python} CostLatencyCalc.cost_ratio_mult_str` cost increase.
+
+:::
+
+```{python}
+#| echo: false
+#| label: static-batch-calc
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ STATIC VS DYNAMIC INFERENCE
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: Static vs Dynamic inference narrative (photo organization example)
+# │
+# │ Goal: Contrast the economics of static vs. dynamic inference.
+# │ Show: That static precomputation is superior for predictable inputs.
+# │ How: Compare total batch time to per-request latency for photo classification.
+# │
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim.fmt import fmt, fmt_count, fmt_time, check
+
+class StaticBatchCalc:
+    """Contrasts static vs. dynamic inference economics for photo classification."""
+
+    # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
+    n_photos_value = 10_000  # photos in user library
+    inference_ms_value = 5 * ms  # scenario assumption: ResNet-50 inference time
+    dynamic_latency_budget_ms_value = 100 * ms  # scenario assumption: real-time latency budget
+
+    # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
+    batch_total_s_value = n_photos_value * inference_ms_value
+
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(batch_total_s_value == 50 * second, f"Expected 50s total batch time, got {batch_total_s_value}")
+
+    # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
+    n_photos_str = fmt_count(n_photos_value, label="photo")
+    inference_ms_str = fmt_time(inference_ms_value, 'millisecond', precision=0, commas=False)
+    batch_total_s_str = fmt_time(batch_total_s_value, 'second', precision=0, commas=False)
+    dynamic_latency_budget_ms_str = fmt_time(dynamic_latency_budget_ms_value, 'millisecond', precision=0, commas=False)
+```
+
+Consider two deployment scenarios for a ResNet-50 image classifier. A static approach suits a photo organization app that preclassifies all images in a user's library overnight. With `{python} StaticBatchCalc.n_photos_str` and `{python} StaticBatchCalc.inference_ms_str` inference each, batch processing takes ~`{python} StaticBatchCalc.batch_total_s_str` total, and users experience instant classification when browsing. A dynamic approach suits a content moderation API that must classify user-uploaded images in real time, with each image requiring the full preprocessing→inference→postprocessing pipeline and a `{python} StaticBatchCalc.dynamic_latency_budget_ms_str` latency budget. A production image-classification system can combine the approaches: frequently requested images, such as popular products or known memes, are preclassified and cached, while novel uploads trigger dynamic inference.
+
+The two modes therefore optimize for contrasting regimes. Static inference maximizes accelerator throughput and amortizes execution costs during offline batch runs, trading storage capacity for zero inference latency during the request. Dynamic inference minimizes tail latency under stochastic, concurrent load, accepting lower accelerator utilization and higher cost per query in exchange for handling arbitrary, live inputs. Production architectures often blend both paradigms into a tiered design: static precomputation caches common or high-probability queries, while a dynamic fallback evaluates novel or personalized requests.
+
+Both static and dynamic cost models traditionally assume a fixed forward pass: a static computation graph executing once per request. Emerging reasoning models alter that economic calculus by deliberately spending variable computation per query to improve answer quality.
+
+::: {#psp-model-serving-looking-ahead-rise-inference-time-compute-system-2 .callout-perspective title="Looking ahead: Spending more compute per query"}
+
+Traditional serving optimizes for minimizing latency ($\EndToEndRequestLatency \to 0$). Here, the optimization target expands to include answer quality. Some inference-time-compute systems\index{Reasoning model!inference-time compute}\index{Inference-time compute!reasoning models} deliberately spend more compute cycles to improve answer quality. These systems may generate far more tokens per request, including intermediate reasoning or search tokens, increasing the total compute and energy spent per query; @sec-model-serving-llm-serving-b8bf develops the serving costs of that token-by-token generation.
+
+:::
+
+Whether a system executes a single deterministic forward pass or an extended reasoning trajectory, deciding when predictions are computed resolves only the temporal dimension of serving. Equally binding is the spatial dimension—where the model physically executes—because physical placement dictates memory hierarchy limits, network boundaries, and the hardware budget available to the serving stack.
+
+### The spectrum of serving architectures {#sec-model-serving-spectrum-serving-architectures-8966}
+
+Although "serving" often implies a networked server processing API requests, the architectural pattern varies by deployment environment. The four deployment paradigms (Cloud, Edge, Mobile, and TinyML) and the physical constraints (the light barrier, the power wall, and the memory wall) that give rise to them shape the serving stack. Architecturally, serving spans a continuum from **centralized networked microservices**\index{Microservice!cloud model serving} (which pool accelerators to optimize throughput and cost-per-query at the expense of network round-trip overhead and cold-start latency) to **application-embedded edge serving**\index{Edge serving!embedded function calls} (which run models inside client processes via direct function calls, eliminating network latency and preserving privacy at the expense of strict device memory and power constraints) and out to **bare-metal firmware execution**\index{TinyML!bare-metal serving} on microcontrollers. Those constraints do not disappear at serving time; serving adds latency SLOs and cost pressure on top of hardware limits that training could absorb through patience. The same model may require different serving strategies depending on where it executes.
+
+::: {.column-margin .margin-pointer}
+↩ The light barrier, power wall, and memory wall that give rise to the four deployment paradigms are established in @sec-ml-systems-deployment-spectrum-71be.
+:::
+
+#### Networked serving (cloud/data center) {#sec-model-serving-networked-serving-clouddatacenter-0328}
+
+In networked serving\index{Serving!cloud/data center}\index{Microservice!model serving}, the model runs as a standalone service (microservice), matching the cloud deployment paradigm that trades latency for larger pooled compute. The primary interface is the network through protocols such as HTTP or gRPC, so network transfer and serialization join model execution as possible binding constraints. Data-center hardware such as NVIDIA GPUs (V100, A100, H100), Google Tensor Processing Units (TPUs), and AWS Inferentia supports high-throughput batching and concurrency, but cold start\index{Cold start!cloud serving} can still stretch from seconds to minutes because container startup, model loading, and warmup sit outside the steady-state inference path.
+
+#### Application-embedded serving (mobile/edge) {#sec-model-serving-applicationembedded-serving-mobileedge-8bd1}
+
+In application-embedded serving\index{Serving!mobile/edge}\index{Serving!edge inference, embedded serving}, the model runs within the user application process (for example, a smartphone app using CoreML or TensorFlow Lite), following the embedded paradigm, which is chosen for its latency, privacy, and offline advantages. There is no "server." The interface is a function call, so optimization focuses on energy and responsiveness (the MLPerf SingleStream shape) rather than shared-server throughput.
+
+::: {.column-margin .margin-pointer}
+↩ The MLPerf SingleStream, MultiStream, Server, and Offline scenarios are established in @sec-benchmarking-mlperf-execution-scenarios-89f0.
+:::
+
+Embedded execution enables **zero-copy inference**\index{Inference!zero-copy, mobile optimization}: when data moves through a system, each copy consumes CPU cycles and memory bandwidth. In cloud serving, separate physical memory spaces force repeated transfers: a camera frame passes from a network socket buffer to user space, through a preprocessing buffer into page-locked host DRAM, and across PCIe into accelerator memory. A mobile pipeline can eliminate these intermediate copies when its camera, image signal processor (ISP), CPU, and NPU exchange shared buffer descriptors in unified system memory. In unified-memory system-on-chip (SoC) architectures—such as Apple A- and M-series processors or Qualcomm Snapdragon—all compute engines share a single physical DRAM pool. When software passes buffer handles rather than duplicating bytes, inference latency drops and memory bus power decreases, although format conversions may still require CPU or ISP intervention.
+
+Typical hardware includes mobile NPUs (Apple Neural Engine, Qualcomm Hexagon) and embedded GPUs (NVIDIA Jetson). When the model is already resident and compiled, startup can be measured in milliseconds; first inference takes longer if it triggers cold-page faults or just-in-time compilation. Mobile power and thermal envelopes are strictly constrained by passive cooling (1–10 W); sustained high-throughput inference saturates the device chassis thermal capacitance, forcing the operating system's thermal governor to throttle clock frequencies and degrade inference latency.
+
+#### Bare-metal serving (TinyML) {#sec-model-serving-baremetal-serving-tinyml-28cf}
+
+In TinyML serving\index{Serving!TinyML}\index{TinyML!bare-metal serving}, the model is compiled directly into microcontroller firmware, reaching the extreme end of the deployment spectrum: ubiquitous sensing at microwatt power budgets. Many deployments lack a general-purpose operating system or dynamic memory allocator; serving executes as a tight bare-metal loop that samples sensors and invokes a static interpreter. Because static random-access memory (SRAM) is constrained to hundreds of kilobytes, optimization focuses on executing model weights in place from non-volatile flash memory while fitting dynamic activation buffers into a preallocated Tensor Arena\index{Tensor arena!TinyML memory}. Request batching is infeasible on single-stream sensor feeds. Typical hardware includes ARM Cortex-M series, ESP32, and specialized TinyML accelerators. Startup latency is measured in microseconds when weights remain in memory-mapped flash and execution buffers are preallocated statically, operating within a microwatt-to-milliwatt power envelope that sustains battery life across months or years.
+
+The deployment tiers differ first in their operating envelopes. @Tbl-serving-spectrum compares the latency, batch, memory, power, update, failure, and monitoring constraints that follow from each environment.
+
+```{=latex}
+\begingroup
+\renewcommand{\arraystretch}{1.3}
+```
+
+| **Characteristic**   | **Cloud/Data center** | **Mobile/Edge**      | **TinyML**                  |
+|:---------------------|:----------------------|:---------------------|:----------------------------|
+| **Latency Target**   | 10–100 ms             | 20–50 ms             | 1–100 ms                    |
+| **Batch Size**       | 1–128 (dynamic)       | 1 (fixed)            | 1 (fixed)                   |
+| **Memory**           | 16–80 GB VRAM         | 2–8 GB shared        | 256 KB–2 MB SRAM            |
+| **Power**            | 300–700 W             | 1–10 W               | 1–100 mW                    |
+| **Update Mechanism** | Container deploy      | App store update     | Firmware over-the-air (OTA) |
+| **Failure Mode**     | Retry/failover        | Graceful degradation | Silent or reset             |
+| **Monitoring**       | Full telemetry        | Limited analytics    | Heartbeat only              |
+
+: **Serving Architecture Spectrum**: Representative deployment envelopes for cloud, mobile, and TinyML serving. The latency, batch-size, memory, and power ranges are design guides rather than universal limits; update, failure, and monitoring rows summarize the operating pattern associated with each environment. {#tbl-serving-spectrum}
+
+```{=latex}
+\endgroup
+```
+
+```{python}
+#| echo: false
+#| label: resnet-spectrum-calc
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ RESNET-50 ACROSS THE SERVING SPECTRUM
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: Callout "ResNet-50 Across the Serving Spectrum"
+# │
+# │ Goal: Contrast serving requirements across Cloud, Mobile, and TinyML.
+# │ Show: That the same model requires different formats and architectures.
+# │ How: Calculate model sizes and compare NPU vs. CPU efficiency.
+# │
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import Models
+from mlsysim import Systems
+from mlsysim.fmt import MarkdownStr, check, fmt, fmt_time, fmt_rate, fmt_memory, fmt_memory_capacity, fmt_energy
+
+# ┌── LEGO ───────────────────────────────────────────────
+class ResNetServingSpectrum:
+    """
+    Namespace for ResNet-50 Serving Spectrum comparison.
+    Scenario: Mapping the same architecture (or alternatives) to Cloud, Mobile, TinyML.
+    """
+
+    # ┌── 1. LOAD (Constants) ───────────────────────────────────────────────
+    m_resnet = Models.Vision.ResNet50
+    m_mobilenet = Models.Vision.MobileNetV2
+
+    s_cloud = Platforms.Cloud
+    s_mobile = Platforms.Mobile
+    s_tiny = Platforms.Tiny
+
+    # Cloud (V100) Performance - Source: MLPerf/Vendor reports
+    cloud_inf_b1_ms = 1.4
+    cloud_inf_b16_ms = 14.0
+    cloud_throughput = 1143
+    cloud_vram = 2 * GB  # scenario assumption: batch-32 engine residency
+
+    # Mobile (Smartphone) Performance
+    mobile_inf_npu_ms = 12.0
+    mobile_inf_cpu_ms = 45.0
+    mobile_throughput = 80
+    mobile_energy_npu = 0.8 * mJ  # scenario assumption: per-image mobile NPU energy
+    mobile_energy_cpu = 4.2 * mJ  # scenario assumption: per-image mobile CPU energy
+
+    # TinyML (Cortex-M7) Performance
+    tiny_inf_ms = 120.0
+    tiny_energy = 12.0 * mJ  # scenario assumption: per-image TinyML energy
+
+    # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
+    # Step 1: Calculate sizes using the Digital Twins
+    cloud_size = m_resnet.size_in_bytes(BYTES_FP16)
+    mobile_size = m_resnet.size_in_bytes(BYTES_INT8)
+    tiny_original = m_resnet.size_in_bytes(BYTES_INT8)
+    tiny_alt = m_mobilenet.size_in_bytes(BYTES_INT8)
+
+    # Step 2: TinyML feasibility check
+    tiny_feasibility = tiny_original < s_tiny.ram
+
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(
+        not tiny_feasibility,
+        f"ResNet-50 ({fmt_memory(tiny_original, unit=MB, precision=1, commas=False)}) should NOT fit on TinyML (<{fmt_memory(s_tiny.ram, unit=MB, precision=1, commas=False)}).",
+    )
+    check(mobile_energy_cpu >= mobile_energy_npu * 3, "NPU should be significantly more energy efficient than CPU.")
+
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
+    # System names
+    cloud_name_str = MarkdownStr(s_cloud.name)
+    mobile_name_str = MarkdownStr(s_mobile.name)
+    tiny_name_str = MarkdownStr(s_tiny.name)
+
+    cloud_model_mb_str = fmt_memory(cloud_size, unit=MB, precision=1, commas=True)
+    cloud_inf_b1_ms_str = fmt_time(cloud_inf_b1_ms, 'millisecond', precision=1, commas=False)
+    cloud_inf_b16_ms_str = fmt_time(cloud_inf_b16_ms, 'millisecond', precision=0, commas=False)
+    cloud_throughput_img_per_s_str = fmt_rate(cloud_throughput, 'img/s', precision=0)
+    cloud_vram_gb_str = fmt_memory(cloud_vram, unit=GB, precision=0, commas=False)
+
+    mobile_model_mb_str = fmt_memory(mobile_size, unit=MB, precision=1, commas=True)
+    mobile_inf_npu_ms_str = fmt_time(mobile_inf_npu_ms, 'millisecond', precision=0, commas=False)
+    mobile_inf_cpu_ms_str = fmt_time(mobile_inf_cpu_ms, 'millisecond', precision=0, commas=False)
+    mobile_throughput_img_per_s_str = fmt_rate(mobile_throughput, 'img/s', precision=0, commas=False)
+    mobile_energy_npu_mj_str = fmt_energy(mobile_energy_npu, unit=mJ, precision=1, commas=False)
+    mobile_energy_cpu_mj_str = fmt_energy(mobile_energy_cpu, unit=mJ, precision=1, commas=False)
+    mobile_mem_mb_str = fmt_memory(150 * MB, unit=MB, precision=0, commas=False)
+
+    tiny_model_mb_str = fmt_memory(tiny_original, unit=MB, precision=1, commas=True)
+    tiny_alt_mb_str = fmt_memory(tiny_alt, unit=MB, precision=1, commas=True)
+    tiny_inf_ms_str = fmt_time(tiny_inf_ms, 'millisecond', precision=0, commas=False)
+    tiny_throughput_str = fmt_rate(8, "img/s", precision=0, commas=False)
+    tiny_arena_kb_str = fmt_memory(320 * KB, unit=KB, precision=0, commas=False)
+    tiny_sram_kb_str = fmt_memory_capacity(s_tiny.ram, unit=s_tiny.ram.units, precision=0, commas=True)
+    tiny_energy_mj_str = fmt_energy(tiny_energy, unit=mJ, precision=0, commas=False)
+```
+
+::: {#psp-resnet-serving .callout-perspective title="ResNet-50 across the serving spectrum"}
+
+**Systems insight**: The "same model" claim is misleading: the cloud and mobile tiers share the ResNet-50 graph but use different precision and runtimes, while the TinyML tier cannot run ResNet-50 and substitutes an architecture designed for its constraints. Treating these as one model hides the work that makes each deployment possible.
+
+:::
+
+Applying those envelopes to one image-classification workload, @tbl-resnet-serving-spectrum shows why cloud and mobile can adapt ResNet-50 while TinyML must substitute MobileNetV2.
+
+```{=latex}
+\begingroup
+\renewcommand{\arraystretch}{1.65}
+```
+
+| **Dimension**           |                                  **`{python} ResNetServingSpectrum.cloud_name_str`**                                   |                                       **`{python} ResNetServingSpectrum.mobile_name_str`**                                       |                                                  **`{python} ResNetServingSpectrum.tiny_name_str`**                                                 |
+|:------------------------|:----------------------------------------------------------------------------------------------------------------------:|:--------------------------------------------------------------------------------------------------------------------------------:|:---------------------------------------------------------------------------------------------------------------------------------------------------:|
+| **Model format**        |                   TensorRT FP16 engine \mbox{(`{python} ResNetServingSpectrum.cloud_model_mb_str`)}                    |                        TensorFlow Lite INT8 \mbox{(`{python} ResNetServingSpectrum.mobile_model_mb_str`)}                        | Not feasible (`{python} ResNetServingSpectrum.tiny_model_mb_str`); alternative: MobileNetV2 INT8 (`{python} ResNetServingSpectrum.tiny_alt_mb_str`) |
+| **Inference (batch-1)** | `{python} ResNetServingSpectrum.cloud_inf_b1_ms_str` (batch-16: `{python} ResNetServingSpectrum.cloud_inf_b16_ms_str`) |    `{python} ResNetServingSpectrum.mobile_inf_npu_ms_str` (NPU), `{python} ResNetServingSpectrum.mobile_inf_cpu_ms_str` (CPU)    |                                                   `{python} ResNetServingSpectrum.tiny_inf_ms_str`                                                  |
+| **Throughput**          |                       `{python} ResNetServingSpectrum.cloud_throughput_img_per_s_str` (batched)                        |                        ~`{python} ResNetServingSpectrum.mobile_throughput_img_per_s_str` (single-stream)                         |                                                ~`{python} ResNetServingSpectrum.tiny_throughput_str`                                                |
+| **Memory**              |                           `{python} ResNetServingSpectrum.cloud_vram_gb_str` VRAM (batch-32)                           |                            `{python} ResNetServingSpectrum.mobile_mem_mb_str` peak (shared with app)                             |              `{python} ResNetServingSpectrum.tiny_arena_kb_str` arena (fits in `{python} ResNetServingSpectrum.tiny_sram_kb_str` SRAM)              |
+| **Energy/inference**    |                                                           —                                                            | `{python} ResNetServingSpectrum.mobile_energy_npu_mj_str` (NPU), `{python} ResNetServingSpectrum.mobile_energy_cpu_mj_str` (CPU) |                                                 `{python} ResNetServingSpectrum.tiny_energy_mj_str`                                                 |
+
+: **Image Classification Across the Serving Spectrum**: Illustrative side-by-side comparison of cloud, mobile, and TinyML serving for the same image-classification task, showing how model format, latency, throughput, memory footprint, and energy budget differ across deployment contexts. {#tbl-resnet-serving-spectrum tbl-colwidths="[20,26,27,27]"}
+
+```{=latex}
+\endgroup
+```
+
+### The load balancer layer {#sec-model-serving-load-balancer-layer-9c4d}
+
+When traffic exceeds what a single machine can handle, cloud and data center deployments that run multiple replicas of the same model require an additional infrastructure layer: the load balancer. Production serving systems place load balancers\index{Load balancer!serving infrastructure} between clients and model servers.
+
+A serving load balancer performs three functions. First, request distribution routes incoming traffic to available model replicas using algorithms such as round-robin or least-connections; routing away from slow or saturated replicas directly curbs tail latency. Second, health monitoring\index{Monitoring!health, replica readiness} verifies replica readiness by inspecting both process liveness and model initialization state, confirming that weights are loaded and warmup passes are complete before admitting traffic. Third, deployment support enables progressive rollouts by shifting traffic gradually between model versions rather than cutting over abruptly.
+
+::: {.column-margin .margin-pointer}
+↪ Shadow, canary, and blue-green release strategies that build on this traffic shifting are developed in @sec-ml-operations-model-deployment-b9b9.
+:::
+
+For single-machine serving with multiple model instances, such as running several Open Neural Network Exchange (ONNX) Runtime sessions, the framework and operating system handle request queuing. The full complexity of load balancing becomes necessary when scaling to distributed inference systems, where multiple machines serve the same model. The implementation details of request distribution algorithms and multi-replica architectures belong to that distributed context.
+
+In single-machine capacity planning, the serving unit corresponds to the physical node's model throughput. The queueing dynamics analyzed in @sec-model-serving-queuing-theory-tail-latency-29a6 govern this baseline behavior, establishing the utilization boundaries where horizontal scale-out becomes mandatory.
+
+While load balancers distribute requests *across replicas*, achieving predictable latency also requires controlling what happens *within each machine*. The operating system environment introduces its own sources of variability.
+
+### Deterministic latency and resource isolation {#sec-model-serving-deterministic-latency-resource-isolation-4d1c}
+
+::: {.column-margin}
+![](images/svg/model_serving_blast_radius.svg){width="100%" fig-alt="Schematic of one red source node on the left fanning out through four arrows to four identical blue consumer nodes on the right, showing one-to-many propagation from a single source."}
+
+*One noisy neighbor perturbs every workload sharing the node.*
+:::
+
+An inference server does not execute in a dedicated vacuum. On a single host, the operating system multiplexes hardware across background telemetry daemons, logging agents, and kernel worker threads. When these unisolated processes contend for execution resources, they intermittently preempt the inference pipeline. These noisy neighbors are a primary source of **latency jitter**\index{Latency jitter!resource contention}, where the physical time required to execute identical forward passes fluctuates unpredictably. This contention inflates 99th percentile (p99) tail latency even when average hardware utilization remains low. Resource contention thus widens tail latency through service-time variance—a physical degradation distinct from the queuing-delay accumulation along the saturation knee plotted in @fig-tail-latency-explosion.
+
+Reducing performance variability\index{Latency!deterministic}\index{Resource isolation!serving} requires controlling interference from the operating system's default time-sharing heuristics. Serving systems such as Clockwork demonstrate that deep neural network (DNN) inference execution times can be predictable down to sub-millisecond tolerances under their controlled workload and hardware conditions [@gujarati2020]. CPU affinity (thread pinning)\index{CPU affinity!latency reduction} establishes the baseline compute boundary by binding inference worker threads to designated physical cores. Without pinning, the OS scheduler periodically migrates threads between cores, losing access to warm private L1 and L2 cache contents and requiring lines to be refetched from shared L3 cache or DRAM. On multi-socket architectures, thread migration across Non-Uniform Memory Access (NUMA) boundaries is even more penalizing: accesses to memory left on the previous socket cross inter-socket interconnects, adding tens of nanoseconds of latency per transaction. Pinning threads to specific cores and binding their memory allocations to local NUMA nodes reduces migration-related cache misses and remote-socket memory traffic.
+
+Even with pinned CPU cores, memory access latency remains vulnerable to the virtual memory subsystem. Under host memory pressure, the kernel can page inactive address ranges out to disk. When the CPU touches a paged-out address, execution can stall for milliseconds while the page returns to DRAM. Host buffers used for PCIe direct memory access (DMA) also need resident, registered backing pages during the transfer. Memory locking (`mlock`)\index{Memory!locking, mlock} instructs the kernel to pin specified virtual address ranges into physical host RAM, preventing page eviction for host-resident weights, input staging buffers, and offloaded key-value (KV) cache blocks. This removes eviction-related page faults at the cost of host memory flexibility; locked pages remain resident until unlocked, while cache misses and memory contention can still delay access. Because `mlock` operates strictly on host page tables, it does not apply to accelerator HBM, which is allocated directly by the accelerator driver.
+
+Beyond scheduled processes, asynchronous hardware interrupts introduce another source of sub-millisecond preemption. When a network interface card (NIC) receives packet bursts, it triggers hardware interrupt requests (IRQs) that force the handling CPU core to immediately suspend user-space execution and process kernel interrupt handlers. If the OS routes these interrupts to cores running the inference engine's submission loop, the CPU pauses command dispatch to the accelerator. Because GPUs process short inference layers in microseconds, even brief CPU submission stalls drain the accelerator's hardware command ring buffer, causing pipeline bubbles where compute units sit idle waiting for the next kernel descriptor. Interrupt shielding\index{Interrupt shielding!latency isolation} restricts IRQ affinities to dedicated housekeeping cores, reducing preemption of the GPU dispatch thread by those device interrupts.
+
+Isolating physical cores, locking host memory, and shielding interrupt lines reduce specific sources of operating system noise. The resulting service-time distribution still needs measurement under the intended load. Even a predictable single-node execution path leaves a scheduling challenge: processing requests sequentially can underuse accelerator resources when each request exposes little parallel work. To achieve high throughput within latency deadlines, the internal software architecture of the serving engine must coordinate irregular, asynchronous request streams into structured, hardware-saturating batches.
+
+
 ## LLM Serving {#sec-model-serving-llm-serving-b8bf}
 
 Large language models\index{LLM serving!token generation} make three properties far more prominent than in fixed-output serving: *autoregressive generation*[^fn-autoregressive-decoding-serving] (each token depends on all previous tokens, making output inherently sequential), *variable-length output* (response length is unknown at request time, complicating fixed-batch assumptions), and *stateful memory* (the key-value cache grows with each generated token, creating dynamic memory pressure). This section introduces iteration-level scheduling and cache paging, and then evaluates their consequences for request metrics, cached state, and token cost. The p50, p95, and p99 metrics used for classification serving still matter, but they apply to different phases of the request—the initial prompt processing and the subsequent token generation. The same principles of queuing theory, batching trade-offs, and latency budgets remain applicable; LLM serving adds domain-specific techniques atop them.
 
 [^fn-autoregressive-decoding-serving]: **Autoregressive**\index{Autoregressive model!autoregressive, serial bottleneck}: From Greek *auto-* (self) and Latin *regressus* (a going back)—the output "regresses" on itself; George Udny Yule introduced autoregressive models in 1927 for analyzing sunspot cycles. In language modeling, each output token conditions on all previously generated tokens, creating a serial dependency that prevents the parallelism exploited during training. Decode is often weight-bandwidth-bound at small batches; larger batches amortize the weight stream and can shift the bottleneck toward compute or KV-cache traffic [@pope2023efficiently].
-
-### Continuous batching {#sec-model-serving-continuous-batching-8bb6}
-
-Autoregressive models\index{Autoregressive model!token generation}, such as large language models, generate outputs token by token. Because each new token depends on the accumulated sequence history, generation proceeds sequentially. Standard dynamic batching assumes uniform output lengths and commits to a fixed batch for an entire generation cycle. When sequence lengths vary, this static commitment degrades accelerator efficiency. If one sequence in a batch of eight finishes after ten tokens while others require 100 tokens, 90 percent of the compute and memory bandwidth allocated to that sequence slot is wasted on padding tokens or masked dummy operations while awaiting the slowest sequence\index{Sequence length variability!batch waste} [@yu2022orca].
-
-**Continuous batching**\index{Continuous batching!LLM serving}[^fn-continuous-batching-llm] (also called iteration-level batching) eliminates this idle-slot tax by rescheduling batch composition at each decoding iteration [@yu2022orca; @kwon2023]. Rather than committing to a static batch that persists across hundreds of forward passes, the serving engine re-evaluates batch membership at every token-generation step. When a sequence emits its end-of-sequence token, the scheduler immediately reclaims that execution slot, admitting an arriving request into the batch for the subsequent forward pass. Active sequences continue decoding without interruption, maintaining high accelerator utilization across variable-length workloads.
-
-[^fn-continuous-batching-llm]: **Continuous batching**\index{Continuous batching!scheduling granularity}: Also called "iteration-level batching" [@yu2022orca] and, in NVIDIA TensorRT-LLM, "in-flight batching" [@nvidiaTensorRtLlm]; the distinction is scheduling granularity. Traditional batching commits to a fixed batch for an entire generation sequence (potentially hundreds of iterations), while continuous batching reschedules at every token-generation step—analogous to preemptive OS process scheduling vs. run-to-completion. This finer granularity reduces the waste from variable-length sequences, where a batch slot occupied by a completed sequence sits idle until all other sequences finish.
-
-Serving runtimes such as vLLM[^fn-vllm-page-table] and TensorRT-LLM improve throughput via two mechanisms: reclaiming wasted compute from completed sequences and shortening queue wait times for new arrivals [@kwon2023; @nvidiaTensorRtLlm]. However, admitting new requests dynamically creates a systems collision between prompt prefill and token decoding. Long-prompt prefill often exposes high arithmetic intensity and can occupy the GPU for tens of milliseconds. Low-batch decoding often has less weight reuse and is memory-bandwidth bound, advancing one token per active sequence at a time. When an engine executes a prefill in the same iteration as active decodes, the ongoing decode streams stall, causing severe spikes in inter-token latency (ITL). Sarathi-Serve resolves this interference through chunked prefill and stall-free batching [@agrawal2024sarathi]. By splitting long prompts into fixed-size chunks (e.g., 512 tokens) and co-scheduling a single chunk alongside active decode requests per step, the scheduler limits the prefill work admitted per iteration, reducing interference with active decodes; measured iteration times determine the resulting token cadence.
-
-[^fn-vllm-page-table]: **vLLM (virtual large language model (LLM))**\index{vLLM!virtual memory analogy}: An open-source serving system that enables continuous batching via its PagedAttention algorithm [@kwon2023]. Inspired by OS virtual memory, this technique reduces the severe KV-cache fragmentation and reservation waste that constrains static batching. By keeping KV-cache waste low, vLLM can serve larger effective batches on the same hardware.
-
-Continuous batching shifts the primary serving bottleneck to memory management. Because transformer generation appends attention states at every step, the key-value (KV) cache for each active request grows dynamically in accelerator HBM. When sequences of varying lengths share memory, contiguous allocation produces severe external fragmentation. If a completed 100-token sequence releases its cache, an arriving 150-token request cannot occupy that freed memory because it requires a larger contiguous address range. Over time, physical memory fractures into small, noncontiguous gaps, preventing new sequences from launching even when total unallocated capacity appears sufficient. Together with the over-reservation of contiguous allocators, this memory fragmentation\index{Memory fragmentation!KV cache} can waste 60 to 80 percent of KV-cache memory in naive implementations [@kwon2023], severely limiting the concurrent batch size that determines serving throughput.
-
-#### PagedAttention {#sec-model-serving-pagedattention-b8d4}
-
-::: {.column-margin}
-![](images/svg/vol1_model_serving_margin_002.svg){width="100%" fig-alt="Two horizontal bars: the contiguous-allocation bar carries a wide red wasted segment; the paged-allocation bar below shows only a thin red sliver, the rest used."}
-
-*PagedAttention recovers the KV-cache waste of contiguous allocation.*
-:::
-
-**PagedAttention**\index{PagedAttention!memory fragmentation solution},[^fn-paged-attention-memory] introduced in vLLM, resolves this fragmentation by applying operating system virtual memory paging to accelerator memory [@kwon2023]. In static contiguous allocation, reserving maximum sequence length memory up front causes internal waste, while freed regions may be too small or poorly placed to satisfy a new contiguous reservation. Instead of allocating one contiguous region per sequence, PagedAttention divides the KV cache into fixed-size blocks mapped through a block table. A sequence's cache can therefore occupy noncontiguous physical blocks. When a sequence completes, its blocks return to a free pool for reuse. Rather than copying noncontiguous blocks into a temporary contiguous buffer before computing attention, a specialized PagedAttention CUDA kernel traverses the block table directly, staging noncontiguous blocks into on-chip SRAM during query-key multiplication. By eliminating external fragmentation and bounding internal waste to each sequence's last, partially filled block, PagedAttention reduced KV-cache waste below 4 percent in the reported evaluation and enabled substantially higher batch concurrency on the same accelerator hardware [@kwon2023].
-
-[^fn-paged-attention-memory]: **PagedAttention**\index{PagedAttention!memory efficiency}: The name directly references OS virtual memory paging, first implemented on the Atlas computer at Manchester (1962) to solve the same class of allocation problem—programs needed more memory than physically available, and contiguous allocation wasted space [@kilburn1962onelevel]. Introduced at SOSP 2023, PagedAttention applies this six-decade-old abstraction to GPU KV-cache memory: the evaluated earlier serving systems wasted 60 to 80 percent of KV-cache memory due to fragmentation and over-reservation. In that evaluation, PagedAttention reduced waste to under 4 percent, enabling 2--4$\times$ higher throughput on the same hardware [@kwon2023].
-
-PagedAttention recovers physical memory capacity, but serving autoregressive models at scale exposes additional bottlenecks across token verification latency and memory-bandwidth-bound weight streaming.
-
-::: {#psp-model-serving-llm-serving-beyond-fundamentals .callout-perspective title="LLM serving: Beyond the fundamentals"}
-
-The key-value cache that stores attention context scales with sequence length and batch size, often exceeding the model weights themselves in memory consumption. Techniques such as speculative decoding\index{Speculative decoding!latency reduction}\index{Speculative decoding!draft model verification} use small draft models to propose multiple tokens that the target model verifies in parallel; evaluated T5-XXL workloads achieved roughly 2--3$\times$ speedups [@leviathan2023speculative], but gains vary. Weight-only quantization (such as INT4 weights with FP16 activations) is especially relevant for memory-bandwidth-bound LLM inference [@lin2023awq].
-
-These LLM-specific optimizations build directly on core serving mechanics: queueing models govern scheduling timeouts, batching dynamics determine throughput-latency curves, and reduced precision bounds memory traffic. Advanced treatments extend these mechanics to multi-tenant prefix sharing across fleets and multi-node tensor-parallel execution.
-
-:::
-
-Although continuous batching maximizes throughput for multi-tenant language model serving, batching is not universally optimal. Schedulers and dynamic memory allocators introduce coordination complexity and synchronization overhead that can degrade performance in latency-critical or resource-constrained environments. In particular, three operational constraints favor single-request processing. First, under an ultra-low p99 target, even a short batching delay consumes an unacceptable fraction of the latency budget. Second, when serving runtimes lack ragged tensor or paged memory support, batching variable-length inputs incurs padding overhead to match the longest sequence in the batch, whereas single-request processing eliminates padding waste entirely. Finally, memory capacity binds when model weights already consume most of the accelerator's physical memory; under near-capacity conditions, concurrent batch activations and dynamic KV-cache allocations risk out-of-memory aborts, forcing the runtime to process requests individually.
 
 ### Session affinity constraints {#sec-model-serving-session-affinity-constraints-8b1f}
 
@@ -4240,6 +4202,44 @@ LLM serving introduces constraints absent from traditional model serving.
 The chat-energy calculation makes utilization part of the LLM serving budget: the cost of each generated token depends on how requests share the machine. Unlike fixed-output inference, LLM energy grows with response length. Each decode step streams weights once for the active batch, so batching amortizes that traffic across sequences. Carbon accounting additionally requires an emissions factor and a defined boundary.
 
 Energy efficiency depends on the same batching, memory, and prefix-cache mechanisms that govern LLM latency. However, algorithmic scheduling optimizations cannot overcome an inefficient execution engine; achieving optimal energy and latency boundaries ultimately requires selecting an inference runtime that compiles and schedules tensor kernels directly for target accelerator silicon.
+
+### Continuous batching {#sec-model-serving-continuous-batching-8bb6}
+
+Autoregressive models\index{Autoregressive model!token generation}, such as large language models, generate outputs token by token. Because each new token depends on the accumulated sequence history, generation proceeds sequentially. Standard dynamic batching assumes uniform output lengths and commits to a fixed batch for an entire generation cycle. When sequence lengths vary, this static commitment degrades accelerator efficiency. If one sequence in a batch of eight finishes after ten tokens while others require 100 tokens, 90 percent of the compute and memory bandwidth allocated to that sequence slot is wasted on padding tokens or masked dummy operations while awaiting the slowest sequence\index{Sequence length variability!batch waste} [@yu2022orca].
+
+**Continuous batching**\index{Continuous batching!LLM serving}[^fn-continuous-batching-llm] (also called iteration-level batching) eliminates this idle-slot tax by rescheduling batch composition at each decoding iteration [@yu2022orca; @kwon2023]. Rather than committing to a static batch that persists across hundreds of forward passes, the serving engine re-evaluates batch membership at every token-generation step. When a sequence emits its end-of-sequence token, the scheduler immediately reclaims that execution slot, admitting an arriving request into the batch for the subsequent forward pass. Active sequences continue decoding without interruption, maintaining high accelerator utilization across variable-length workloads.
+
+[^fn-continuous-batching-llm]: **Continuous batching**\index{Continuous batching!scheduling granularity}: Also called "iteration-level batching" [@yu2022orca] and, in NVIDIA TensorRT-LLM, "in-flight batching" [@nvidiaTensorRtLlm]; the distinction is scheduling granularity. Traditional batching commits to a fixed batch for an entire generation sequence (potentially hundreds of iterations), while continuous batching reschedules at every token-generation step—analogous to preemptive OS process scheduling vs. run-to-completion. This finer granularity reduces the waste from variable-length sequences, where a batch slot occupied by a completed sequence sits idle until all other sequences finish.
+
+Serving runtimes such as vLLM[^fn-vllm-page-table] and TensorRT-LLM improve throughput via two mechanisms: reclaiming wasted compute from completed sequences and shortening queue wait times for new arrivals [@kwon2023; @nvidiaTensorRtLlm]. However, admitting new requests dynamically creates a systems collision between prompt prefill and token decoding. Long-prompt prefill often exposes high arithmetic intensity and can occupy the GPU for tens of milliseconds. Low-batch decoding often has less weight reuse and is memory-bandwidth bound, advancing one token per active sequence at a time. When an engine executes a prefill in the same iteration as active decodes, the ongoing decode streams stall, causing severe spikes in inter-token latency (ITL). Sarathi-Serve resolves this interference through chunked prefill and stall-free batching [@agrawal2024sarathi]. By splitting long prompts into fixed-size chunks (e.g., 512 tokens) and co-scheduling a single chunk alongside active decode requests per step, the scheduler limits the prefill work admitted per iteration, reducing interference with active decodes; measured iteration times determine the resulting token cadence.
+
+[^fn-vllm-page-table]: **vLLM (virtual large language model (LLM))**\index{vLLM!virtual memory analogy}: An open-source serving system that enables continuous batching via its PagedAttention algorithm [@kwon2023]. Inspired by OS virtual memory, this technique reduces the severe KV-cache fragmentation and reservation waste that constrains static batching. By keeping KV-cache waste low, vLLM can serve larger effective batches on the same hardware.
+
+Continuous batching shifts the primary serving bottleneck to memory management. Because transformer generation appends attention states at every step, the key-value (KV) cache for each active request grows dynamically in accelerator HBM. When sequences of varying lengths share memory, contiguous allocation produces severe external fragmentation. If a completed 100-token sequence releases its cache, an arriving 150-token request cannot occupy that freed memory because it requires a larger contiguous address range. Over time, physical memory fractures into small, noncontiguous gaps, preventing new sequences from launching even when total unallocated capacity appears sufficient. Together with the over-reservation of contiguous allocators, this memory fragmentation\index{Memory fragmentation!KV cache} can waste 60 to 80 percent of KV-cache memory in naive implementations [@kwon2023], severely limiting the concurrent batch size that determines serving throughput.
+
+#### PagedAttention {#sec-model-serving-pagedattention-b8d4}
+
+::: {.column-margin}
+![](images/svg/vol1_model_serving_margin_002.svg){width="100%" fig-alt="Two horizontal bars: the contiguous-allocation bar carries a wide red wasted segment; the paged-allocation bar below shows only a thin red sliver, the rest used."}
+
+*PagedAttention recovers the KV-cache waste of contiguous allocation.*
+:::
+
+**PagedAttention**\index{PagedAttention!memory fragmentation solution},[^fn-paged-attention-memory] introduced in vLLM, resolves this fragmentation by applying operating system virtual memory paging to accelerator memory [@kwon2023]. In static contiguous allocation, reserving maximum sequence length memory up front causes internal waste, while freed regions may be too small or poorly placed to satisfy a new contiguous reservation. Instead of allocating one contiguous region per sequence, PagedAttention divides the KV cache into fixed-size blocks mapped through a block table. A sequence's cache can therefore occupy noncontiguous physical blocks. When a sequence completes, its blocks return to a free pool for reuse. Rather than copying noncontiguous blocks into a temporary contiguous buffer before computing attention, a specialized PagedAttention CUDA kernel traverses the block table directly, staging noncontiguous blocks into on-chip SRAM during query-key multiplication. By eliminating external fragmentation and bounding internal waste to each sequence's last, partially filled block, PagedAttention reduced KV-cache waste below 4 percent in the reported evaluation and enabled substantially higher batch concurrency on the same accelerator hardware [@kwon2023].
+
+[^fn-paged-attention-memory]: **PagedAttention**\index{PagedAttention!memory efficiency}: The name directly references OS virtual memory paging, first implemented on the Atlas computer at Manchester (1962) to solve the same class of allocation problem—programs needed more memory than physically available, and contiguous allocation wasted space [@kilburn1962onelevel]. Introduced at SOSP 2023, PagedAttention applies this six-decade-old abstraction to GPU KV-cache memory: the evaluated earlier serving systems wasted 60 to 80 percent of KV-cache memory due to fragmentation and over-reservation. In that evaluation, PagedAttention reduced waste to under 4 percent, enabling 2--4$\times$ higher throughput on the same hardware [@kwon2023].
+
+PagedAttention recovers physical memory capacity, but serving autoregressive models at scale exposes additional bottlenecks across token verification latency and memory-bandwidth-bound weight streaming.
+
+::: {#psp-model-serving-llm-serving-beyond-fundamentals .callout-perspective title="LLM serving: Beyond the fundamentals"}
+
+The key-value cache that stores attention context scales with sequence length and batch size, often exceeding the model weights themselves in memory consumption. Techniques such as speculative decoding\index{Speculative decoding!latency reduction}\index{Speculative decoding!draft model verification} use small draft models to propose multiple tokens that the target model verifies in parallel; evaluated T5-XXL workloads achieved roughly 2--3$\times$ speedups [@leviathan2023speculative], but gains vary. Weight-only quantization (such as INT4 weights with FP16 activations) is especially relevant for memory-bandwidth-bound LLM inference [@lin2023awq].
+
+These LLM-specific optimizations build directly on core serving mechanics: queueing models govern scheduling timeouts, batching dynamics determine throughput-latency curves, and reduced precision bounds memory traffic. Advanced treatments extend these mechanics to multi-tenant prefix sharing across fleets and multi-node tensor-parallel execution.
+
+:::
+
+Although continuous batching maximizes throughput for multi-tenant language model serving, batching is not universally optimal. Schedulers and dynamic memory allocators introduce coordination complexity and synchronization overhead that can degrade performance in latency-critical or resource-constrained environments. In particular, three operational constraints favor single-request processing. First, under an ultra-low p99 target, even a short batching delay consumes an unacceptable fraction of the latency budget. Second, when serving runtimes lack ragged tensor or paged memory support, batching variable-length inputs incurs padding overhead to match the longest sequence in the batch, whereas single-request processing eliminates padding waste entirely. Finally, memory capacity binds when model weights already consume most of the accelerator's physical memory; under near-capacity conditions, concurrent batch activations and dynamic KV-cache allocations risk out-of-memory aborts, forcing the runtime to process requests individually.
 
 ## Inference Runtime Selection {#sec-model-serving-inference-runtime-selection-5eef}
 
