@@ -59,7 +59,7 @@ The runtime components examined so far each address part of this operational env
 
 The agent harness provides this missing supervisory layer by taking ownership of the execution loop for an individual trajectory. Under this model, the agent proposes candidate actions, while the harness determines whether each step runs immediately, yields to waiting tasks, or halts entirely. Crucially, the harness enforces these transitions against an execution record that only the runtime can modify. Two systems principles govern this supervisory loop. First, every outbound model call or tool dispatch must pass an explicit admission check—evaluating active operator signals, capability grants, cluster capacity, and remaining budget—at the exact instant it would execute. Second, the runtime tracks in-flight operations with strict accountability: no pause signal, timeout, or cancellation serves as proof that running work has stopped or that its cost is settled. Outstanding operations retain a named owner and track unresolved side effects until concrete evidence settles their state.
 
-Tracing a single repair turn through the harness illustrates this division of labor between model proposal and supervisory control. From that baseline, the harness architecture develops in the order these operational decisions arise. Contrasting the unmanaged ReAct loop with a managed runtime loop (@sec-vol3-controlplane-need) establishes why the model cannot govern itself. The trajectory record (@sec-vol3-controlplane-acb) provides the runtime's authoritative account of execution, while guarded trajectory states (@sec-vol3-controlplane-statemachine) establish formal transition rules for that state. External control actions (@sec-vol3-controlplane-signals) allow operators to pause, cancel, or terminate an agent safely at deterministic boundaries. When an agent pauses for background processing or human review, supervised waiting (@sec-vol3-controlplane-yielding) and approval gates (@sec-vol3-controlplane-hitl) preserve supervision without leaking resources or losing execution state. At cluster scale, trajectory scheduling (@sec-vol3-controlplane-scheduling) arbitrates shared model service across competing tasks, while resource budgets (later sections) enforce explicit bounds on cumulative consumption. Throughout this design, the supervisory record resides in host memory; ensuring that these guarantees survive host failure is the work of durable execution (@sec-vol3-durable-execution).
+Tracing a single repair turn through the harness illustrates this division of labor between model proposal and supervisory control. From that baseline, the harness architecture develops in the order these operational decisions arise. Contrasting the unmanaged ReAct loop with a managed runtime loop (@sec-vol3-controlplane-need) establishes why the model cannot govern itself. The trajectory record (@sec-vol3-controlplane-acb) provides the runtime's authoritative account of execution, while guarded trajectory states (@sec-vol3-controlplane-statemachine) establish formal transition rules for that state. External control actions (@sec-vol3-controlplane-signals) allow operators to pause, cancel, or terminate an agent safely at deterministic boundaries. When an agent pauses for background processing or human review, supervised waiting (@sec-vol3-controlplane-yielding) and approval gates (@sec-vol3-controlplane-hitl) preserve supervision without leaking resources or losing execution state. At cluster scale, trajectory scheduling (@sec-vol3-controlplane-scheduling) arbitrates shared model service across competing tasks, while resource budgets enforce explicit bounds on cumulative consumption. Throughout this design, the supervisory record resides in host memory; ensuring that these guarantees survive host failure is the work of durable execution (@sec-vol3-durable-execution).
 
 ## The Loop and the Harness {#sec-vol3-controlplane-need}
 
@@ -222,7 +222,7 @@ Action approval introduces a controlled detour to this cycle. An approved action
 
 ### Transition guards and the admission check {#sec-vol3-agent-harness-transition-guards}
 
-Navigating a legal edge in the state machine is merely a necessary condition for progress, not an unconditional entitlement to execute. Before the runtime admits new work—whether invoking a model or dispatching a tool—it evaluates a comprehensive set of predicates known as the *admission check*. This check enforces several simultaneous invariants: no pending control holds may exist; the active context, credentials, and required action approvals must remain valid; upstream data dependencies must be resolved; and adequate deadline slack and downstream service capacity must be confirmed. Furthermore, the runtime must reserve the operation's bounded financial liability from the task budget without encroaching on the dedicated finalization reserve (later sections). For tool calls, the admission check also verifies that arguments are structurally complete. Because system state evolves continuously, this evaluation holds only for the instant it executes. An approval granted seconds earlier or a scheduling decision made on a previous tick does not carry forward; if an unresolved prior operation blocks a dependent mutation, the trajectory cannot dispatch that mutation even if it remains in `READY` for independent work.
+Navigating a legal edge in the state machine is merely a necessary condition for progress, not an unconditional entitlement to execute. Before the runtime admits new work—whether invoking a model or dispatching a tool—it evaluates a comprehensive set of predicates known as the *admission check*. This check enforces several simultaneous invariants: no pending control holds may exist; the active context, credentials, and required action approvals must remain valid; upstream data dependencies must be resolved; and adequate deadline slack and downstream service capacity must be confirmed. Furthermore, the runtime must reserve the operation's bounded financial liability from the task budget without encroaching on the dedicated finalization reserve. For tool calls, the admission check also verifies that arguments are structurally complete. Because system state evolves continuously, this evaluation holds only for the instant it executes. An approval granted seconds earlier or a scheduling decision made on a previous tick does not carry forward; if an unresolved prior operation blocks a dependent mutation, the trajectory cannot dispatch that mutation even if it remains in `READY` for independent work.
 
 The admission check and its state updates execute as a single atomic transaction. Protected by the trajectory record lock,[^fn-record-lock-monitor] the harness evaluates the guard predicates, reserves the required liability, registers the outgoing invocation or attempt ID, marks the expected observation as eligible, and commits the state transition. Only after releasing the lock does the runtime transmit the request over the network. This design enforces the *register-before-send rule*. Registering state prior to dispatch ensures that ultra-low-latency responses never arrive before the local record exists to receive them. Conversely, transmitting requests strictly outside the critical section prevents slow network I/O, stalled inference endpoints, or lagging tool services from blocking concurrent control actions, scheduler ticks, or arriving results from other workers.
 
@@ -663,176 +663,6 @@ The internal-review submission for `r18` is held while the task approaches its d
 
 The approval gate now has a bounded lifetime and an explicit handoff from held proposal to admitted work. Human agreement is one condition in that handoff, alongside current authority, resource bounds, and action-time preconditions. Multiple trajectories can satisfy those conditions while competing for the same execution capacity, so the harness next needs a policy for sharing that capacity without bypassing their individual gates.
 
-## Budgets and Ceilings {#sec-vol3-controlplane-accounting}
-
-Consider an agent attempting a software repair: its accumulated bill already approaches the allocated task budget, while an asynchronous test suite dispatched minutes earlier has yet to report its cloud execution charges. Proposing another model invocation introduces new, uncommitted liability. A fair scheduler determines when that candidate call should receive accelerator service, but scheduling alone cannot determine whether the trajectory has sufficient funds remaining to afford it. To prevent runaway spending, the harness must enforce an admission control rule that accounts for both inflight work and worst-case execution liabilities before dispatching another request.
-
-### Multi-dimensional budget vectors {#sec-vol3-harness-multidim-budgets}
-
-The necessity of a global lifetime bound becomes obvious when examining a **runaway retry loop**\index{Runaway retry loop!definition}. Suppose an agent generates a candidate code patch that fails its regression test. The model responds by proposing a slight variant, then another permutation, and eventually a broader diagnostic routine that also fails. Each failure appends an error trace to the conversational context. Crucially, every individual tool call remains syntactically well formed and stays strictly within per-invocation token and compute limits. The trajectory yields cleanly at every tool boundary, receives its scheduled turn on the inference server, and satisfies every local admission check. Dozens of turns later, the agent has burned through substantial cloud and inference budgets while making zero measurable progress toward resolving the defect. @Fig-vol3-epistemic-attractor-cycle diagrams this degenerate cycle: failing tests append repeated error observations to the context until turn-completion proposals vanish, showing how an external harness budget halts the runaway retry loop at the admission boundary and forces the trajectory into `FINALIZING` once liability exceeds the available allowance.
-
-Terminating a degenerate loop is fundamentally an architectural responsibility of the harness. As failure outputs accumulate in the prompt context, they dilute the original system instructions and task specifications. Under severe context dilution, model generations that terminate the trajectory become increasingly rare. Prompt-level guardrails, such as injecting notices about remaining funds or requesting that the model self-regulate under a cost ceiling, offer purely probabilistic nudges rather than deterministic bounds. Worse, their efficacy degrades rapidly as the attention window fills with repetitive stack traces. Because an errant model remains syntactically coherent and locally compliant while failing globally, trajectory bounds must reside within the external supervisory control plane (principle \ref{pri-vol3-trajectory-encapsulation}). Deciding whether an agent has stalled requires complex semantic heuristics, but an external budget enforces an absolute guarantee: the trajectory terminates deterministically.
-
-::: {.column-margin .margin-pointer}
-↩ Attention dilution as stale observations and superseded logs accumulate in the working context is established in @sec-vol3-context-engineering-usable-context-test.
-:::
-
-::: {#fig-vol3-epistemic-attractor-cycle fig-env="figure" fig-pos="htb" fig-cap="**A Runaway Loop and the Budget That Ends It**: A failing targeted test appends error observations to the context, completion requests become rare, and each retry is well formed and within per-call limits, so the loop continues without progress. The harness budget, kept outside the context, applies the reservation test at every admission. When a call does not fit or the deadline has passed, admission is refused and the trajectory enters FINALIZING, which settles or transfers its outstanding work." fig-alt="Four boxes in a cycle: model proposes an action, error observations accumulate, ending the turn becomes rare, and runaway loop, connected by arrows labeled targeted test fails and another retry. The return arrow from runaway loop to model is crossed out and marked loop stopped. A harness budget region at the bottom contains an admission test reading actual plus reserved plus proposed plus finalization reserve at most allowance, with an arrow to a box reading FINALIZING, budget or deadline stop. An arrow labeled admission refused runs from the budget region to the crossed-out return arrow."}
-
-![](images/svg/fig-vol3-epistemic-attractor-cycle.svg)
-
-:::
-
-To constrain total resource consumption, the harness establishes a multi-dimensional per-trajectory **budget**\index{Budget!per-trajectory}. We define the budget vector as
-
-$$\TrajectoryBudget = \langle H_{\max},\ N_{\max},\ T_{\max},\ \CostCeiling \rangle$$
-
-where the components establish formal allowances on execution turns ($H_{\max}$), cumulative tokens ($N_{\max}$), elapsed wall-clock time ($T_{\max}$), and total financial cost ($\CostCeiling$). The harness configuration must unambiguously define what increments each meter: admitted model invocations increment the turn counter, effective input prompt tokens plus generated output tokens increment the token counter, and direct API charges, sandboxed execution fees, and paid third-party tool usage increment the dollar ledger. Retried operations, network reconnects, and failed invocations consume real resources and must be billed against these totals. Production harnesses frequently extend this vector with additional domain-specific limits, such as sandbox disk allocations or maximum external API query counts.
-
-Each dimension governs a distinct operational constraint. A trajectory with very few turns can rapidly exhaust financial limits through large-context reasoning models, while an inexpensive agent can tie up execution sandboxes across long asynchronous polling delays. Unlike consumable token or dollar allowances, elapsed time represents a monotonically advancing wall-clock deadline measured from task initiation. Network delays, sandboxed compilation phases, human approval holds, and backoff pauses all advance this deadline unless the task contract explicitly provides a paused clock. When the primary execution deadline expires, the harness halts the admission of new exploratory work while supervising inflight background operations. Crucially, post-execution finalization requires its own separately allocated time allowance and reserved funding; an expired exploration deadline must never trigger an unconstrained cleanup phase that runs indefinitely.
-
-The harness may safely expose current budget metrics to the model, enabling the agent to adjust its planning strategy toward cheaper alternatives. However, the model must never possess the authority to modify accounting records, release reservations, or exempt its own calls from admission gates. This separation allows cooperative optimization while guaranteeing that system bounds remain strictly invariant to model behavior.
-
-### Reservation and settlement {#sec-vol3-agent-harness-reservation-settlement}
-
-In distributed systems, a budget serves as an absolute ceiling only when the admission gate accounts for unbilled inflight operations before authorizing new liabilities.[^fn-reservation-escrow-method]
-
-[^fn-reservation-escrow-method]: **Escrow Reservation**: Database systems solved a version of this problem for shared quantities such as account balances and inventory counts. O'Neil's escrow method let a transaction set aside part of a quantity only after testing that the quantity's invariant would hold whichever concurrent transactions later committed or aborted [@oneil1986escrow]. Bounded-liability admission applies the same test to a trajectory's allowance, with the operation's maximum possible charge standing in for an exact decrement. \index{Escrow transactional method!budget reservation}
-
-::: {#dfn-bounded-liability-admission .callout-definition title="Bounded-liability admission"}
-
-***Bounded-liability admission***\index{Bounded-liability admission!definition} is the harness rule that admits a new operation only when, in every cumulative budget dimension, actual consumption plus outstanding reservations plus the operation's maximum additional charge plus the protected finalization reserve fits within the allowance.
-
-1. **Significance**: It transforms an informational budget ledger into an enforceable upper bound on per-attempt expenditure—the numerator of cost per accepted task (@eq-vol3-cost-per-accepted-task)—while guaranteeing that essential post-task verification checks remain fully funded.
-2. **Distinction**: Whereas a simple spend check merely compares settled invoices against the allowance, bounded-liability admission reserves capacity for inflight requests and charges the worst-case ceiling of the pending operation.
-3. **Common pitfall**: Prematurely releasing an escrow reservation upon a network timeout or client-side cancellation before upstream providers settle actual usage. This error exposes uncommitted budget that concurrent operations can claim before delayed billing charges arrive.
-
-:::
-
-For each cumulative resource dimension, the admission test is
-
-$$\text{actual consumption} + \text{outstanding reservations} + \text{proposed bounded liability} + \text{protected finalization reserve} \leq \text{allowance}$$ {#eq-vol3-bounded-liability-admission}
-
-The harness evaluates this inequality componentwise across all cumulative resource dimensions, while evaluating wall-clock deadlines through a separate timing guard. The term for outstanding reservations encompasses all admitted but unsettled operations, including concurrent inference requests and active paid tools. The protected finalization reserve isolates dedicated funding for validation runs, report generation, and environment teardown, preventing exploratory steps from exhausting the funds needed to verify final results. When the trajectory transitions into finalization, the harness reallocates the necessary portion of this protected reserve into active operation reservations, avoiding duplicate accounting.
-
-Because this inequality forms the core budget clause of the admission check, the harness must execute it under strict concurrency control following the register-before-send rule. This ordering prevents two concurrent subtasks from reading the same uncommitted headroom and double-spending it. If network dispatch fails, the harness releases the reservation only after establishing that the remote service incurred no billable liability. Any ambiguous dispatch outcome must remain reserved until upstream settlement resolves the transaction.
-
-@Lst-vol3-harness-turn assembles one turn from these pieces. The reservation is made inside the guarded transition into `CALLING_MODEL`, so an unaffordable call is refused before any request leaves the host. Usage settles the reservation after the reply, and the reply's status decides the next state before any content can become a tool call. Admission never depends on a charge discovered after the call.
-
-::: {#lst-vol3-harness-turn lst-cap="**One Admitted Turn**: The harness reserves the call's bounded liability inside the guarded transition, settles from reported usage, routes every non-completed status away from dispatch, and reserves and registers tool calls before sending them."}
-```python
-def run_turn(rec):
-    call = new_invocation(rec)
-    liability = bound_call(rec.limits)        # full input + output allowance
-    transition(rec, "CALLING_MODEL", Decision(call.id, rec.record_version),
-               admit=lambda r: reserve(r, call, liability))  # admission test
-    reply = invoke_model(rec.context(), rec.limits, call.id)  # lock released
-    settle(rec, call, reply.usage)            # missing usage stays reserved
-    nxt = Decision(call.id, rec.record_version)
-    if reply.status != "COMPLETED":           # truncated, canceled, refused, ...
-        return transition(rec, route_status(rec, reply), nxt)  # never dispatched
-    proposal = validate(rec, reply)           # schema, epoch, authority
-    if proposal.kind == "complete":
-        return transition(rec, "FINALIZING", nxt)   # completion check follows
-    if proposal.kind == "none":
-        return transition(rec, "READY", nxt)
-    if needs_approval(rec, proposal):
-        return transition(rec, "AWAITING_APPROVAL", nxt,
-                          admit=lambda r: hold(r, proposal))
-    transition(rec, "WAITING_TOOL", nxt,
-               admit=lambda r: reserve_and_register(r, proposal.calls))
-    dispatch(proposal.calls)                  # already registered and reserved
-```
-:::
-
-The `reserve` step evaluates @eq-vol3-bounded-liability-admission and aborts the state transition whenever the proposed invocation exceeds available headroom; `route_status` maps terminal inference conditions according to @tbl-vol3-harness-status-routing. For clarity, the listing abstracts batched invocation checks and multi-step approval lifecycles, both of which adhere strictly to the register-before-send discipline.
-
-Even when the unreserved balance remains strictly positive, it may prove insufficient to cover the maximum liability of the next operation. A naive spend check admits such a call on the basis of past settled invoices, only to exceed the budget ceiling once the provider bills the resulting tokens. While shrinking the requested maximum output tokens can lower the call's worst-case liability, this optimization succeeds only if prompt tokens and outstanding tool charges still fit within the margin. Furthermore, external paid tools that lack enforceable execution timeouts or bounded billing tiers cannot provide a finite liability ceiling. Under a strict enforcement policy, the harness must either reject such open-ended tools outright, substitute bounded proxies, or explicitly declare an approximate threshold that tolerates financial overshoot. Enforcing a client-side network timeout does not provide an immutable cost ceiling because the remote provider may continue billing until its own worker processes finish.
-
-```{python}
-#| label: calc-vol3-harness-admission
-#| echo: false
-# ┌─────────────────────────────────────────────────────────────────────────────
-# │ BOUNDED-LIABILITY ADMISSION VS. A SPEND CHECK (LEGO)
-# ├─────────────────────────────────────────────────────────────────────────────
-# │ Context: @eq-vol3-bounded-liability-admission, nbk-10-bounded-liability-admission,
-# │          and the measured-spend and settlement pitfalls.
-# │ Goal: Show a call that a spend check admits and the reservation test refuses.
-# │ Show: Both headrooms, the call's liability and its input share, the largest
-# │       admissible input, and the context cost of each unsettled dollar.
-# │ How:  liability = n_in * p_in + k_out * p_out (undiscounted input rate).
-# │ Note: Hypothetical prices and allowance, not a provider schedule.
-# └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import check, fmt_int, fmt_usd, fmt_percent
-
-class Admission:
-    # ┌── 1. LOAD (Scenario inputs) ────────────────────────────────────────
-    c_max = 3.50  # hypothetical dollar allowance for the trajectory
-    actual = 2.58  # settled spend so far
-    reserved = 0.50  # outstanding reservation on the unsettled test job
-    fin = 0.30  # protected finalization reserve
-    n_in = 50_000  # next call's input tokens
-    k_out = 4_096  # next call's output allowance
-    p_in, p_out = 3.00, 15.00  # hypothetical dollars per million tokens
-    probe = 0.10  # an unsettled amount used to express sensitivity
-
-    # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────
-    c_input = n_in * p_in / 1e6
-    c_output = k_out * p_out / 1e6
-    liability = c_input + c_output
-    spend_headroom = c_max - actual
-    true_headroom = c_max - actual - reserved - fin
-    input_share = c_input / liability
-    n_in_max = (true_headroom - c_output) / (p_in / 1e6)
-    left_for_fin = c_max - (actual + reserved + liability)
-    fin_short = fin - left_for_fin
-    tokens_per_probe = probe / (p_in / 1e6)
-    reserved_share = reserved / c_max
-
-    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
-    check(liability < spend_headroom, "The spend check must admit the call")
-    check(liability > true_headroom > c_output, "The reservation test must refuse; a smaller input must fit")
-    check(fin_short > 0, "Admitting the call must underfund finalization")
-
-    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
-    c_max_str, actual_str = fmt_usd(c_max, precision=2), fmt_usd(actual, precision=2)
-    reserved_str, fin_str = fmt_usd(reserved, precision=2), fmt_usd(fin, precision=2)
-    n_in_str, k_out_str = fmt_int(n_in), fmt_int(k_out)
-    p_in_str, p_out_str = fmt_usd(p_in), fmt_usd(p_out)
-    c_input_str, c_output_str = fmt_usd(c_input, precision=2), fmt_usd(c_output, precision=2)
-    liability_str = fmt_usd(liability, precision=2)
-    spend_headroom_str = fmt_usd(spend_headroom, precision=2)
-    true_headroom_str = fmt_usd(true_headroom, precision=2)
-    input_share_str = fmt_percent(input_share, style="prose")
-    n_in_max_str = fmt_int(round(n_in_max, -2))
-    fin_short_str = fmt_usd(fin_short, precision=2)
-    probe_str = fmt_usd(probe, precision=2)
-    tokens_per_probe_str = fmt_int(round(tokens_per_probe, -2))
-    reserved_share_str = fmt_percent(reserved_share, style="prose")
-```
-
-::: {#nbk-10-bounded-liability-admission .callout-notebook title="A call the spend check admits"}
-
-**Problem**: A repair trajectory has a `{python} Admission.c_max_str` allowance, `{python} Admission.actual_str` of settled spend, a `{python} Admission.reserved_str` reservation on its unsettled test job, and a `{python} Admission.fin_str` finalization reserve. The next model call carries `{python} Admission.n_in_str` input tokens and a `{python} Admission.k_out_str`-token output allowance, reserved at hypothetical prices of `{python} Admission.p_in_str` and `{python} Admission.p_out_str` per million input and output tokens. Should the harness admit it?
-
-**Math**: The call's bounded liability is `{python} Admission.c_input_str` of input plus `{python} Admission.c_output_str` of output, `{python} Admission.liability_str` in all. A spend check sees `{python} Admission.c_max_str` − `{python} Admission.actual_str` = `{python} Admission.spend_headroom_str` of headroom. @Eq-vol3-bounded-liability-admission subtracts the reservation and the finalization reserve as well, leaving `{python} Admission.true_headroom_str`.
-
-**Result**: The spend check admits the call; bounded-liability admission refuses it. Admitted, the call would leave the final checks `{python} Admission.fin_short_str` short once the test settles in full.
-
-**Systems insight**: Input is `{python} Admission.input_share_str` of this call's liability, so trimming the output allowance barely helps. The call fits only if its input falls to about `{python} Admission.n_in_max_str` tokens, through compaction, or if the test job settles and releases part of its reservation. Every `{python} Admission.probe_str` of unsettled liability removes about `{python} Admission.tokens_per_probe_str` input tokens from what the next call may carry, which is why settling promptly from usage evidence is worth more than a smaller output cap.
-
-:::
-
-::: {.column-margin}
-![](images/svg/vol3_harness_admission_margin.svg){width="100%" fig-alt="Two horizontal bars on one dollar scale. The upper bar, labeled spend check, is long and reads 0.92 dollars. The lower bar, labeled after reservations, is short and red and reads 0.12 dollars. A dashed vertical line marks the next call at 0.21 dollars, inside the upper bar and beyond the end of the lower bar."}
-
-*The spend check sees room for the call; after reservations, it no longer fits.*
-:::
-
-Settlement replaces an estimated reservation with verified consumption once the harness receives an authenticated, cryptographically signed, or correlated usage report from the service provider. An incremental usage report allows the harness to shift confirmed charges into the settled meter while maintaining the remaining liability in escrow. Only terminal billing evidence authorizes releasing the residual reservation. This principle applies equally to remote side effects and financial charges: a dropped network stream, missing telemetry, or client-side timeout provides no guarantee that the remote provider discarded the work without billing.
-
-Prompt caching discounts demand identical accounting rigor. Before dispatching a request, the admission controller must reserve funds at the standard undiscounted input rate unless the service-level agreement contractually guarantees cache hits for specific prompt prefixes. Once the provider reports verified execution data, the harness settles the transaction according to the actual cached and uncached token counts. Similarly, while terminating an inflight model stream early can limit output charges, the admission gate cannot gamble on speculative cancellations when authorizing subsequent tasks. Enforcing an unyielding ceiling requires adherence to classic systems design: complete mediation across all requests [@saltzer1975], conservative worst-case reservation bounds, and authoritative settlement driven solely by verified execution records.
-
 ## Scheduling Concurrent Trajectories {#sec-vol3-controlplane-scheduling}
 
 Consider an automated repair trajectory waiting for a targeted test suite to evaluate patch candidate `r18`. Concurrently, an interactive user session and a backlog of repository maintenance tasks are ready to query the model. When the test execution finishes, the repair trajectory rejoins that active competition. If the harness simply dispatches requests as soon as tasks generate them, aggressive retry loops will monopolize model capacity. If it unconditionally favors interactive requests, large maintenance jobs can wait indefinitely. Concurrency alone does not solve resource allocation; the harness requires an explicit scheduling policy to arbitrate among eligible calls.
@@ -941,6 +771,200 @@ Temporarily blocked admission—whether caused by insufficient deficit credit, e
 
 These three control layers operate in concert. Fair-sharing policies determine which eligible trajectory deserves service next. Provider quotas and capacity gates determine whether that work can execute immediately without overwhelming shared infrastructure. Yet neither mechanism restricts the total cumulative volume of work an agent can request across dozens of turns. An automated repair agent can receive its fair share of tokens in perpetuity without ever converging on a valid patch. Enforcing overall resource discipline requires global trajectory budgets and iteration limits, which supply the final boundary on agentic execution.
 
+## Budgets and Ceilings {#sec-vol3-controlplane-accounting}
+
+Consider an agent attempting a software repair: its accumulated bill already approaches the allocated task budget, while an asynchronous test suite dispatched minutes earlier has yet to report its cloud execution charges. Proposing another model invocation introduces new, uncommitted liability. While future cluster scheduling mechanisms determine when a candidate call should receive accelerator service, scheduling alone cannot determine whether the trajectory has sufficient funds remaining to afford it. To prevent runaway spending, the harness must enforce an admission control rule that accounts for both inflight work and worst-case execution liabilities before dispatching another request.
+
+### Multi-dimensional budget vectors {#sec-vol3-harness-multidim-budgets}
+
+The necessity of a global lifetime bound becomes obvious when examining a **runaway retry loop**\index{Runaway retry loop!definition}. Suppose an agent generates a candidate code patch that fails its regression test. The model responds by proposing a slight variant, then another permutation, and eventually a broader diagnostic routine that also fails. Each failure appends an error trace to the conversational context. Crucially, every individual tool call remains syntactically well formed and stays strictly within per-invocation token and compute limits. The trajectory yields cleanly at every tool boundary, receives its scheduled turn on the inference server, and satisfies every local admission check. Dozens of turns later, the agent has burned through substantial cloud and inference budgets while making zero measurable progress toward resolving the defect. @Fig-vol3-epistemic-attractor-cycle diagrams this degenerate cycle: failing tests append repeated error observations to the context until turn-completion proposals vanish, showing how an external harness budget halts the runaway retry loop at the admission boundary and forces the trajectory into `FINALIZING` once liability exceeds the available allowance.
+
+Terminating a degenerate loop is fundamentally an architectural responsibility of the harness. As failure outputs accumulate in the prompt context, they dilute the original system instructions and task specifications. Under severe context dilution, model generations that terminate the trajectory become increasingly rare. Prompt-level guardrails, such as injecting notices about remaining funds or requesting that the model self-regulate under a cost ceiling, offer purely probabilistic nudges rather than deterministic bounds. Worse, their efficacy degrades rapidly as the attention window fills with repetitive stack traces. Because an errant model remains syntactically coherent and locally compliant while failing globally, trajectory bounds must reside within the external supervisory control plane (principle \ref{pri-vol3-trajectory-encapsulation}). Deciding whether an agent has stalled requires complex semantic heuristics, but an external budget enforces an absolute guarantee: the trajectory terminates deterministically.
+
+::: {.column-margin .margin-pointer}
+↩ Attention dilution as stale observations and superseded logs accumulate in the working context is established in @sec-vol3-context-engineering-usable-context-test.
+:::
+
+::: {#fig-vol3-epistemic-attractor-cycle fig-env="figure" fig-pos="htb" fig-cap="**A Runaway Loop and the Budget That Ends It**: A failing targeted test appends error observations to the context, completion requests become rare, and each retry is well formed and within per-call limits, so the loop continues without progress. The harness budget, kept outside the context, applies the reservation test at every admission. When a call does not fit or the deadline has passed, admission is refused and the trajectory enters FINALIZING, which settles or transfers its outstanding work." fig-alt="Four boxes in a cycle: model proposes an action, error observations accumulate, ending the turn becomes rare, and runaway loop, connected by arrows labeled targeted test fails and another retry. The return arrow from runaway loop to model is crossed out and marked loop stopped. A harness budget region at the bottom contains an admission test reading actual plus reserved plus proposed plus finalization reserve at most allowance, with an arrow to a box reading FINALIZING, budget or deadline stop. An arrow labeled admission refused runs from the budget region to the crossed-out return arrow."}
+
+![](images/svg/fig-vol3-epistemic-attractor-cycle.svg)
+
+:::
+
+To constrain total resource consumption, the harness establishes a multi-dimensional per-trajectory **budget**\index{Budget!per-trajectory}. We define the budget vector as
+
+$$\TrajectoryBudget = \langle H_{\max},\ N_{\max},\ T_{\max},\ \CostCeiling \rangle$$
+
+where the components establish formal allowances on execution turns ($H_{\max}$), cumulative tokens ($N_{\max}$), elapsed wall-clock time ($T_{\max}$), and total financial cost ($\CostCeiling$). The harness configuration must unambiguously define what increments each meter: admitted model invocations increment the turn counter, effective input prompt tokens plus generated output tokens increment the token counter, and direct API charges, sandboxed execution fees, and paid third-party tool usage increment the dollar ledger. Retried operations, network reconnects, and failed invocations consume real resources and must be billed against these totals. Production harnesses frequently extend this vector with additional domain-specific limits, such as sandbox disk allocations or maximum external API query counts.
+
+Each dimension governs a distinct operational constraint. A trajectory with very few turns can rapidly exhaust financial limits through large-context reasoning models, while an inexpensive agent can tie up execution sandboxes across long asynchronous polling delays. Unlike consumable token or dollar allowances, elapsed time represents a monotonically advancing wall-clock deadline measured from task initiation. Network delays, sandboxed compilation phases, human approval holds, and backoff pauses all advance this deadline unless the task contract explicitly provides a paused clock. When the primary execution deadline expires, the harness halts the admission of new exploratory work while supervising inflight background operations. Crucially, post-execution finalization requires its own separately allocated time allowance and reserved funding; an expired exploration deadline must never trigger an unconstrained cleanup phase that runs indefinitely.
+
+The harness may safely expose current budget metrics to the model, enabling the agent to adjust its planning strategy toward cheaper alternatives. However, the model must never possess the authority to modify accounting records, release reservations, or exempt its own calls from admission gates. This separation allows cooperative optimization while guaranteeing that system bounds remain strictly invariant to model behavior.
+
+### Reservation and settlement {#sec-vol3-agent-harness-reservation-settlement}
+
+In distributed systems, a budget serves as an absolute ceiling only when the admission gate accounts for unbilled inflight operations before authorizing new liabilities.[^fn-reservation-escrow-method]
+
+[^fn-reservation-escrow-method]: **Escrow Reservation**: Database systems solved a version of this problem for shared quantities such as account balances and inventory counts. O'Neil's escrow method let a transaction set aside part of a quantity only after testing that the quantity's invariant would hold whichever concurrent transactions later committed or aborted [@oneil1986escrow]. Bounded-liability admission applies the same test to a trajectory's allowance, with the operation's maximum possible charge standing in for an exact decrement. \index{Escrow transactional method!budget reservation}
+
+::: {#dfn-bounded-liability-admission .callout-definition title="Bounded-liability admission"}
+
+***Bounded-liability admission***\index{Bounded-liability admission!definition} is the harness rule that admits a new operation only when, in every cumulative budget dimension, actual consumption plus outstanding reservations plus the operation's maximum additional charge plus the protected finalization reserve fits within the allowance.
+
+1. **Significance**: It transforms an informational budget ledger into an enforceable upper bound on per-attempt expenditure—the numerator of cost per accepted task (@eq-vol3-cost-per-accepted-task)—while guaranteeing that essential post-task verification checks remain fully funded.
+2. **Distinction**: Whereas a simple spend check merely compares settled invoices against the allowance, bounded-liability admission reserves capacity for inflight requests and charges the worst-case ceiling of the pending operation.
+3. **Common pitfall**: Prematurely releasing an escrow reservation upon a network timeout or client-side cancellation before upstream providers settle actual usage. This error exposes uncommitted budget that concurrent operations can claim before delayed billing charges arrive.
+
+:::
+
+For each cumulative resource dimension, the admission test is
+
+$$\text{actual consumption} + \text{outstanding reservations} + \text{proposed bounded liability} + \text{protected finalization reserve} \leq \text{allowance}$$ {#eq-vol3-bounded-liability-admission}
+
+The harness evaluates this inequality componentwise across all cumulative resource dimensions, while evaluating wall-clock deadlines through a separate timing guard. The term for outstanding reservations encompasses all admitted but unsettled operations, including concurrent inference requests and active paid tools. The protected finalization reserve isolates dedicated funding for validation runs, report generation, and environment teardown, preventing exploratory steps from exhausting the funds needed to verify final results. When the trajectory transitions into finalization, the harness reallocates the necessary portion of this protected reserve into active operation reservations, avoiding duplicate accounting.
+
+Because this inequality forms the core budget clause of the admission check, the harness must execute it under strict concurrency control following the register-before-send rule. This ordering prevents two concurrent subtasks from reading the same uncommitted headroom and double-spending it. If network dispatch fails, the harness releases the reservation only after establishing that the remote service incurred no billable liability. Any ambiguous dispatch outcome must remain reserved until upstream settlement resolves the transaction.
+
+@Lst-vol3-harness-turn assembles one turn from these pieces. The reservation is made inside the guarded transition into `CALLING_MODEL`, so an unaffordable call is refused before any request leaves the host. Usage settles the reservation after the reply, and the reply's status decides the next state before any content can become a tool call. Admission never depends on a charge discovered after the call.
+
+::: {#lst-vol3-harness-turn lst-cap="**One Admitted Turn**: The harness reserves the call's bounded liability inside the guarded transition, settles from reported usage, routes every non-completed status away from dispatch, and reserves and registers tool calls before sending them."}
+```python
+def run_turn(rec):
+    call = new_invocation(rec)
+    liability = bound_call(rec.limits)        # full input + output allowance
+    transition(rec, "CALLING_MODEL", Decision(call.id, rec.record_version),
+               admit=lambda r: reserve(r, call, liability))  # admission test
+    reply = invoke_model(rec.context(), rec.limits, call.id)  # lock released
+    settle(rec, call, reply.usage)            # missing usage stays reserved
+    nxt = Decision(call.id, rec.record_version)
+    if reply.status != "COMPLETED":           # truncated, canceled, refused, ...
+        return transition(rec, route_status(rec, reply), nxt)  # never dispatched
+    proposal = validate(rec, reply)           # schema, epoch, authority
+    if proposal.kind == "complete":
+        return transition(rec, "FINALIZING", nxt)   # completion check follows
+    if proposal.kind == "none":
+        return transition(rec, "READY", nxt)
+    if needs_approval(rec, proposal):
+        return transition(rec, "AWAITING_APPROVAL", nxt,
+                          admit=lambda r: hold(r, proposal))
+    transition(rec, "WAITING_TOOL", nxt,
+               admit=lambda r: reserve_and_register(r, proposal.calls))
+    dispatch(proposal.calls)                  # already registered and reserved
+```
+:::
+
+The `reserve` step evaluates @eq-vol3-bounded-liability-admission and aborts the state transition whenever the proposed invocation exceeds available headroom; `route_status` maps terminal inference conditions according to @tbl-vol3-harness-status-routing. For clarity, the listing abstracts batched invocation checks and multi-step approval lifecycles, both of which adhere strictly to the register-before-send discipline.
+
+The bounded liability for an inflight generation request is calculated using the undiscounted input rate and the hard output ceiling:
+
+$$
+\text{liability} = \PertokenPricesIn n_{\text{in}} + \PertokenPricesOut \OutputLimit
+$$ {#eq-vol3-harness-liability}
+
+Even when the unreserved balance remains strictly positive, it may prove insufficient to cover the maximum liability of the next operation. A naive spend check admits such a call on the basis of past settled invoices, only to exceed the budget ceiling once the provider bills the resulting tokens. While shrinking the requested maximum output tokens can lower the call's worst-case liability, this optimization succeeds only if prompt tokens and outstanding tool charges still fit within the margin. Furthermore, external paid tools that lack enforceable execution timeouts or bounded billing tiers cannot provide a finite liability ceiling. Under a strict enforcement policy, the harness must either reject such open-ended tools outright, substitute bounded proxies, or explicitly declare an approximate threshold that tolerates financial overshoot. Enforcing a client-side network timeout does not provide an immutable cost ceiling because the remote provider may continue billing until its own worker processes finish.
+
+```{python}
+#| label: calc-vol3-harness-admission
+#| echo: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ BOUNDED-LIABILITY ADMISSION VS. A SPEND CHECK (LEGO)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @eq-vol3-bounded-liability-admission, nbk-10-bounded-liability-admission,
+# │          and the measured-spend and settlement pitfalls.
+# │ Goal: Show a call that a spend check admits and the reservation test refuses.
+# │ Show: Both headrooms, the call's liability and its input share, the largest
+# │       admissible input, and the context cost of each unsettled dollar.
+# │ How:  liability = n_in * p_in + k_out * p_out (undiscounted input rate).
+# │ Note: Hypothetical prices and allowance, not a provider schedule.
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim.fmt import check, fmt_int, fmt_usd, fmt_percent
+
+class Admission:
+    # ┌── 1. LOAD (Scenario inputs) ────────────────────────────────────────
+    c_max = 3.50  # hypothetical dollar allowance for the trajectory
+    actual = 2.58  # settled spend so far
+    reserved = 0.50  # outstanding reservation on the unsettled test job
+    fin = 0.30  # protected finalization reserve
+    n_in = 50_000  # next call's input tokens
+    k_out = 4_096  # next call's output allowance
+    p_in, p_out = 3.00, 15.00  # hypothetical dollars per million tokens
+    probe = 0.10  # an unsettled amount used to express sensitivity
+
+    # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────
+    c_input = n_in * p_in / 1e6
+    c_output = k_out * p_out / 1e6
+    liability = c_input + c_output
+    spend_headroom = c_max - actual
+    true_headroom = c_max - actual - reserved - fin
+    input_share = c_input / liability
+    n_in_max = (true_headroom - c_output) / (p_in / 1e6)
+    left_for_fin = c_max - (actual + reserved + liability)
+    fin_short = fin - left_for_fin
+    tokens_per_probe = probe / (p_in / 1e6)
+    reserved_share = reserved / c_max
+
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(liability < spend_headroom, "The spend check must admit the call")
+    check(liability > true_headroom > c_output, "The reservation test must refuse; a smaller input must fit")
+    check(fin_short > 0, "Admitting the call must underfund finalization")
+
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
+    c_max_str, actual_str = fmt_usd(c_max, precision=2), fmt_usd(actual, precision=2)
+    reserved_str, fin_str = fmt_usd(reserved, precision=2), fmt_usd(fin, precision=2)
+    n_in_str, k_out_str = fmt_int(n_in), fmt_int(k_out)
+    p_in_str, p_out_str = fmt_usd(p_in), fmt_usd(p_out)
+    c_input_str, c_output_str = fmt_usd(c_input, precision=2), fmt_usd(c_output, precision=2)
+    liability_str = fmt_usd(liability, precision=2)
+    spend_headroom_str = fmt_usd(spend_headroom, precision=2)
+    true_headroom_str = fmt_usd(true_headroom, precision=2)
+    input_share_str = fmt_percent(input_share, style="prose")
+    n_in_max_str = fmt_int(round(n_in_max, -2))
+    fin_short_str = fmt_usd(fin_short, precision=2)
+    probe_str = fmt_usd(probe, precision=2)
+    tokens_per_probe_str = fmt_int(round(tokens_per_probe, -2))
+    reserved_share_str = fmt_percent(reserved_share, style="prose")
+```
+
+::: {#nbk-10-bounded-liability-admission .callout-notebook title="A call the spend check admits"}
+
+**Problem**: A repair trajectory has a `{python} Admission.c_max_str` allowance, `{python} Admission.actual_str` of settled spend, a `{python} Admission.reserved_str` reservation on its unsettled test job, and a `{python} Admission.fin_str` finalization reserve. The next model call carries `{python} Admission.n_in_str` input tokens and a `{python} Admission.k_out_str`-token output allowance, reserved at hypothetical prices of `{python} Admission.p_in_str` and `{python} Admission.p_out_str` per million input and output tokens. Should the harness admit it?
+
+**Math**: The call's bounded liability is `{python} Admission.c_input_str` of input plus `{python} Admission.c_output_str` of output, `{python} Admission.liability_str` in all. A spend check sees `{python} Admission.c_max_str` − `{python} Admission.actual_str` = `{python} Admission.spend_headroom_str` of headroom. @Eq-vol3-bounded-liability-admission subtracts the reservation and the finalization reserve as well, leaving `{python} Admission.true_headroom_str`.
+
+**Result**: The spend check admits the call; bounded-liability admission refuses it. Admitted, the call would leave the final checks `{python} Admission.fin_short_str` short once the test settles in full.
+
+**Systems insight**: Input is `{python} Admission.input_share_str` of this call's liability, so trimming the output allowance barely helps. The call fits only if its input falls to about `{python} Admission.n_in_max_str` tokens, through compaction, or if the test job settles and releases part of its reservation. Every `{python} Admission.probe_str` of unsettled liability removes about `{python} Admission.tokens_per_probe_str` input tokens from what the next call may carry, which is why settling promptly from usage evidence is worth more than a smaller output cap.
+
+:::
+
+::: {.column-margin}
+![](images/svg/vol3_harness_admission_margin.svg){width="100%" fig-alt="Two horizontal bars on one dollar scale. The upper bar, labeled spend check, is long and reads 0.92 dollars. The lower bar, labeled after reservations, is short and red and reads 0.12 dollars. A dashed vertical line marks the next call at 0.21 dollars, inside the upper bar and beyond the end of the lower bar."}
+
+*The spend check sees room for the call; after reservations, it no longer fits.*
+:::
+
+Settlement replaces an estimated reservation with verified consumption once the harness receives an authenticated, cryptographically signed, or correlated usage report from the service provider. An incremental usage report allows the harness to shift confirmed charges into the settled meter while maintaining the remaining liability in escrow. Only terminal billing evidence authorizes releasing the residual reservation. This principle applies equally to remote side effects and financial charges: a dropped network stream, missing telemetry, or client-side timeout provides no guarantee that the remote provider discarded the work without billing.
+
+Prompt caching discounts demand identical accounting rigor. Before dispatching a request, the admission controller must reserve funds at the standard undiscounted input rate unless the service-level agreement contractually guarantees cache hits for specific prompt prefixes. Once the provider reports verified execution data, the harness settles the transaction according to the actual cached and uncached token counts. Similarly, while terminating an inflight model stream early can limit output charges, the admission gate cannot gamble on speculative cancellations when authorizing subsequent tasks. Enforcing an unyielding ceiling requires adherence to classic systems design: complete mediation across all requests [@saltzer1975], conservative worst-case reservation bounds, and authoritative settlement driven solely by verified execution records.
+
+### Metered accounting {#sec-vol3-harness-metered-accounting}
+
+Once an operation successfully concludes, the harness must reconcile the ledger. Settled cumulative expenditure through turn $t$ is tallied across disjoint billing categories, replacing the prior reservations:
+
+$$
+C^{(t)} = C^{(t-1)} + \PertokenPricesIn n_{\text{in}}^{(t)} + \PertokenPricesCache n_{\text{cache}}^{(t)} + \PertokenPricesOut n_{\text{out}}^{(t)} + \sum_j c_{\text{tool}}(a_{t,j})
+$$
+
+### Staged escalation and budget sizing {#sec-vol3-harness-staged-escalation}
+
+The multi-dimensional budget vector $\TrajectoryBudget = \langle H_{\max}, N_{\max}, T_{\max}, \CostCeiling \rangle$ tracks turns, tokens, elapsed time, and cost. The maximum indicator ratio $\max_i (\text{used}_i / \text{allowance}_i)$ serves as the primary signal for staged interventions. For instance, as the bottleneck dimension approaches its ceiling, the control plane may pause exploratory execution while permitting validation and finalization.
+
+Sizing these budget ceilings correctly depends on the overall systems economics, specifically the amortized cost of both successful and failed trajectories. The cost per accepted task effectively bounds how much should be spent on any single run (see @eq-vol3-harness-cost-per-accepted-task):
+
+$$
+\CostPerAcceptedTaskEff = \frac{\mathbb{E}[\AttemptCost]}{\AcceptanceProbability}
+$$ {#eq-vol3-harness-cost-per-accepted-task}
+
 ## Fallacies and Pitfalls {#sec-vol3-agent-harness-fallacies}
 
 Architectural failures in agent systems rarely stem from exotic distributed bugs; they occur when engineers mistake a convenient implementation mechanism or an agreeable language model for an authoritative supervisory guarantee. The harness must enforce safety, resource bounds, and lifecycle invariants externally, regardless of how cooperative the model appears.
@@ -1027,7 +1051,7 @@ The synchronization cost of this discipline is modest: a brief critical section 
 |:----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|:--------------------------------------------------------------------------------------------------------------------------------------------------------|:-------------------------------------|
 | $t_{\text{boundary}} \approx \OutputLimit \times \PertokenDecodeTime$                                                                                                                   | Worst-case control response latency when waiting for generation completion; streaming cancellation eliminates this dependence on $\OutputLimit$         | @sec-vol3-controlplane-signals       |
 | $\text{actual} + \text{reserved} + \text{proposed liability} + \text{finalization reserve} \leq \text{allowance}$                                                                       | Bounded-liability admission gate; permits dispatch only when all cumulative resource dimensions accommodate active work and final checks                | @eq-vol3-bounded-liability-admission |
-| $\text{liability} = \PertokenPricesIn\, n_{\text{in}} + \PertokenPricesOut\, \OutputLimit$                                                                                              | Worst-case reservation for an inflight model invocation, priced at undiscounted input rates and maximum output token allowance                          | later sections    |
+| $\text{liability} = \PertokenPricesIn\, n_{\text{in}} + \PertokenPricesOut\, \OutputLimit$                                                                                              | Worst-case reservation for an inflight model invocation, priced at undiscounted input rates and maximum output token allowance                          | @eq-vol3-harness-liability           |
 | $C^{(t)} = C^{(t-1)} + \PertokenPricesIn n_{\text{in}}^{(t)} + \PertokenPricesCache n_{\text{cache}}^{(t)} + \PertokenPricesOut n_{\text{out}}^{(t)} + \sum_j c_{\text{tool}}(a_{t,j})$ | Settled cumulative expenditure through turn $t$ across disjoint billing categories, reconciling and replacing prior reservations                        | @sec-vol3-harness-metered-accounting |
 | $\TrajectoryBudget = \langle H_{\max}, N_{\max}, T_{\max}, \CostCeiling \rangle$, indicator $\max_i (\text{used}_i / \text{allowance}_i)$                                               | Multi-dimensional budget vector across turns, tokens, elapsed time, and cost; the bottleneck ratio steers staged intervention policies                  | @sec-vol3-harness-staged-escalation  |
 | $\text{calls per round} = w \times \text{quantum} / (n_{\text{in}} + \OutputLimit)$                                                                                                     | Deficit round-robin dispatch rate; class weights establish scheduling shares, while prompt and generation sizes dictate turn latency                    | @sec-vol3-controlplane-scheduling    |

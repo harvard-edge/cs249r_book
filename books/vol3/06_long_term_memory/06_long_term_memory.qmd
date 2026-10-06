@@ -59,7 +59,7 @@ Standard runtime mechanisms do not bridge this gap. Context engineering selects 
 
 Architecting persistent memory for an agent requires solving three interconnected systems problems. First, the data model must establish explicit record roles that keep external sources, tool observations, and agent-authored notes strictly differentiated, ensuring that subsequent sessions recognize what evidence each record supports. Second, the system requires a rigorous retrieval contract. Regardless of the candidate generation mechanism, every read must report its query scope, the snapshot versions it admitted, and whether the search terminated cleanly or degraded under resource budgets. Third, the storage engine needs a robust write lifecycle that admits, updates, supersedes, expires, and deletes records while propagating those mutations to downstream indexes and summaries.
 
-@Sec-vol3-persistent-need establishes the foundation by classifying persistent record roles and demonstrating why retrieval and storage mechanisms share a single operational lifecycle. @Sec-vol3-persistent-governance formalizes the retrieval contract, followed by @sec-vol3-long-term-memory-agentic-retrieval, which contrasts static pre-call evidence staging with autonomous, model-directed search. Three subsequent sections match indexing strategies to specific query semantics: exact and lexical lookup in @sec-vol3-persistent-bm25, dense embedding spaces and hybrid fused ranking in @sec-vol3-persistent-dense-retrieval, and bounded graph traversal over interconnected entities in @sec-vol3-persistent-graphrag. To ensure consistency over time, @sec-vol3-long-term-memory-write-path governs admission and eviction policies, while @sec-vol3-persistent-invalidation prevents stale derived indexes from masking source mutations. Finally, @sec-vol3-persistent-governance-eval evaluates complete durable memory policies by their impact on multi-session task completion. Establishing record roles comes first, because every downstream indexing, retrieval, and invalidation policy depends on knowing what authority a stored record carries.
+This chapter establishes the foundation of long-term memory by classifying persistent record roles and formalizing the retrieval contract. It then contrasts static pre-call evidence staging with autonomous, model-directed search before evaluating indexing strategies matched to specific query semantics: exact lexical lookup, dense embedding spaces, and bounded graph traversal over interconnected entities. To ensure consistency over time, it addresses the admission, eviction, and invalidation policies necessary to prevent stale indexes from masking source mutations. Finally, it evaluates complete durable memory policies by their impact on multi-session task completion. Establishing record roles comes first, because every downstream indexing, retrieval, and invalidation policy depends on knowing what authority a stored record carries.
 
 ## Persistent Records {#sec-vol3-persistent-need}
 
@@ -108,7 +108,7 @@ This divergence mirrors the foundational distinction from cognitive psychology [
 
 A retrieval index serves as an auxiliary acceleration structure for locating information across storage tiers. While an index can store inverted token mappings, dense vector embeddings, or knowledge graph edges across source files, logs, and agent notes, indexing simply facilitates discovery. When a search query matches an index entry, a high similarity score demonstrates lexical or semantic affinity to the query string, but provides no assurance of operational applicability to the current task. Operational applicability depends on whether the referenced record matches the current system state, schema revision, and environment constraints.
 
-### Read and write lifecycle {#sec-vol3-long-term-memory-read-write-lifecycle}
+### The consistency challenge {#sec-vol3-long-term-memory-consistency-challenge}
 
 Consider the state of a code-repair agent immediately after it writes revision `r18`. If its vector or keyword index was generated from revision `r17`, a retrieval query for `src/pool.py` will return the unpatched file. While that record remains an accurate historical reflection of `r17`, serving it as current context leads the model to believe the bug persists, prompting redundant or conflicting edits. The staleness that context invalidation guards against thus extends beyond the active prompt into the persistent storage tiers that feed subsequent inference calls.
 
@@ -116,11 +116,9 @@ Consider the state of a code-repair agent immediately after it writes revision `
 ↩ Context invalidation, which withdraws a staged observation's authority over current state once its source changes, is established in @sec-vol3-context-engineering-context-rot.
 :::
 
-Precomputing search indexes eliminates the need to scan large repositories or execution histories during inference. However, this optimization incurs an ongoing synchronization cost. Every update to a source file requires indexing new content and invalidating or evicting obsolete embeddings. Executing these updates synchronously blocks read or write operations, while background asynchronous indexing introduces a replication lag window. Systems require explicit consistency semantics to govern queries that arrive while background index updates are in flight.
+Precomputing search indexes eliminates the need to scan large repositories or execution histories during inference. However, this optimization introduces severe consistency challenges. Every update to a source file requires indexing new content and invalidating or evicting obsolete embeddings. Executing these updates synchronously blocks read or write operations, while background asynchronous indexing introduces a replication lag window. Systems require explicit consistency semantics to govern queries that arrive while background index updates are in flight.
 
-Dynamic updates create identical consistency challenges in conversational and personal-assistant agents. Suppose a user states, "Schedule no meetings before 10:00 AM," and several weeks later updates the preference: "Schedule no meetings before 11:00 AM." The two directives share nearly identical token sequences and embedding vectors, yet their semantic intent is mutually exclusive. A naive deduplication filter that discards high-similarity entries will drop the newer constraint, retaining stale behavior. Conversely, a memory system that appends the second record without superseding the first introduces a logical contradiction that pollutes downstream planning prompts. Memory systems must maintain explicit lifecycle metadata to differentiate between appending complementary facts and superseding outdated ones, propagating those mutations across every derived search index.
-
-Beyond ingestion, the memory write path manages record validation, time-to-live (TTL) expiration, and cascade deletions that purge obsolete source records alongside their derived index entries. Vector similarity metrics provide no mechanism for these lifecycle transitions, which require explicit state machines as developed in @sec-vol3-long-term-memory-write-path. Robust memory architecture requires formalizing the read contract first, establishing retrieval interfaces that return not only candidate text, but the provenance, version timestamps, and completeness guarantees necessary for safe agent execution.
+Dynamic updates create identical consistency challenges in conversational and personal-assistant agents. Suppose a user states, "Schedule no meetings before 10:00 AM," and several weeks later updates the preference: "Schedule no meetings before 11:00 AM." The two directives share nearly identical token sequences and embedding vectors, yet their semantic intent is mutually exclusive. A naive deduplication filter that discards high-similarity entries will drop the newer constraint, retaining stale behavior. Conversely, a memory system that appends the second record without superseding the first introduces a logical contradiction that pollutes downstream planning prompts. Memory systems must maintain explicit lifecycle metadata to differentiate between appending complementary facts and superseding outdated ones. Robust memory architecture requires formalizing the read contract first, establishing retrieval interfaces that return not only candidate text, but the provenance, version timestamps, and completeness guarantees necessary for safe agent execution.
 
 ## The Retrieval Contract {#sec-vol3-persistent-governance}
 
@@ -157,7 +155,7 @@ A raw information need such as "find the notification logic" underspecifies the 
 
 : **A bounded retrieval request**: The runtime can supply task-wide defaults, while each query specializes the information need within those limits. {#tbl-vol3-query-tuple}
 
-A version requirement differs fundamentally from a wall-clock freshness heuristic. An index entry for revision r17 remains invalid as current r18 source code even if an indexing worker refreshed it seconds ago. Wall-clock TTLs merely trigger periodic reindexing, whereas explicit version tokens establish whether a cached representation strictly matches its underlying source snapshot. When the retrieval service cannot fulfill the requested version from its precomputed index, it must either fall back to an authorized direct read of the primary store or return an explicit incomplete status—a cache invalidation trade-off examined in detail in @sec-vol3-persistent-invalidation.
+A version requirement differs fundamentally from a wall-clock freshness heuristic. An index entry for revision r17 remains invalid as current r18 source code even if an indexing worker refreshed it seconds ago. Wall-clock TTLs merely trigger periodic reindexing, whereas explicit version tokens establish whether a cached representation strictly matches its underlying source snapshot. When the retrieval service cannot fulfill the requested version from its precomputed index, it must either fall back to an authorized direct read of the primary store or return an explicit incomplete status, forcing a strict cache invalidation trade-off.
 
 Similarly, result-count, payload-size, and compute limits constrain different dimensions of system resource consumption. Ten complete source files consume dramatically more serialized tokens than ten function docstrings, yet returning a single item might still require scanning millions of candidate embeddings. The payload limit protects the caller's downstream context window, search-work budgets (such as graph traversal caps or posting-list scan limits) constrain retrieval service compute, and execution deadlines prevent the agent runtime from blocking indefinitely. Crucially, client timeouts must propagate cancellation signals to the underlying storage engines; uncancelled background queries continue to consume backend resources and inflate total execution cost.
 
@@ -279,7 +277,7 @@ Each question presents a retrieval outcome; decide what operational conclusions 
 
 :::
 
-The retrieval contract establishes the operational bounds, provenance requirements, and payload limits for each read, but it leaves open an architectural question, namely which component formulates the query. A runtime can predict needed evidence and pre-stage it before invoking the model, or it can equip the agent with search tools to probe the store interactively as discoveries unfold.
+The retrieval contract establishes the operational bounds, provenance requirements, and payload limits for each read.
 
 ## Agentic Retrieval {#sec-vol3-long-term-memory-agentic-retrieval}
 
@@ -304,14 +302,9 @@ When an agent probes its environment, it can often formulate multiple independen
 
 : **Pre-staging and model-directed retrieval**: Query timing and ownership change between the two policies, while source applicability and runtime-enforced limits remain shared. {#tbl-vol3-long-term-memory-staged-vs-agentic}
 
-Crucially, the execution runtime retains absolute authority over security boundaries and resource consumption under both paradigms. The model acts strictly as an untrusted query generator: it may propose a narrower search path, supply query strings, or request specific filters, but it can never expand the authorized workspace, assume a different principal identity, or increase its own resource ceilings. The runtime enforces these boundaries mechanically at the tool interface—a process detailed in the subsequent Tool Calling chapter. The model submits queries within the structural bounds of those interfaces, and the runtime executes them, safely transmitting bounded results and truncation warnings back to the agent.
-
-::: {.column-margin .margin-pointer}
-↪ Tool interface schemas that bound which request parameters a model may supply are developed in @sec-vol3-tool-calling-schemas.
-:::
+Crucially, the execution runtime retains absolute authority over security boundaries and resource consumption under both paradigms. The model acts strictly as an untrusted query generator: it outputs structured requests (such as a JSON object calling a `search_code` function) that the runtime intercepts and validates. The runtime then executes the requested operation in an isolated sandbox and returns the results to the model as a new observation. Because the runtime enforces these boundaries mechanically at the tool interface, the model may propose a narrower search path, supply query strings, or request specific filters, but it can never expand the authorized workspace, assume a different principal identity, or increase its own resource ceilings. The model submits queries within the structural bounds of those interfaces, and the runtime executes them, safely transmitting bounded results and truncation warnings back to the agent.
 
 In production systems, these two strategies often merge into a tiered hybrid policy. The runtime pre-stages a compact workspace outline, an architectural summary, or persistent user preferences directly into the initial context window, giving the model immediate structural grounding. The agent then issues targeted tool calls to inspect specific function implementations or test traces only when those details become necessary. Evaluating such a hybrid design requires balancing the upfront token overhead of pre-staging against the inference latency and token expenditure of avoided tool turns. Whether an architecture relies on static pre-staging, dynamic agentic probing, or a hybrid combination, the effectiveness of any retrieval pipeline ultimately hinges on its matching mechanism—selecting whether lexical filtering, dense semantic embeddings, or structural graph traversal best surfaces the required evidence.
-
 
 ## Structured Retrieval {#sec-vol3-persistent-bm25}
 
@@ -414,7 +407,7 @@ Restricting an initial probe to `src/pool.py` and `tests/test_pool.py` focuses t
 
 Filtering and ranking interact directly. A service that selects its top-ranked candidates globally and only then discards those outside the requested paths (post-filtering) can easily return an empty set while eligible matches sit farther down the global ranking. Restricting candidates before final scoring (pre-filtering) avoids this loss, as does continuing postings traversal until the requested quota of filtered documents is filled. When query budgets or latency limits terminate the search early, the result remains partial.
 
-Choosing the evaluation order is a cost-based optimization decision analogous to access path selection in relational database optimizers [@selinger1979access].[^fn-selectivity-optimizer-memory] The decision balances the filter's selectivity against the rarity of the query terms. A selective filter—such as isolating two files in a repository of thousands—favors pre-filtering candidate documents and evaluating BM25 scores only on the survivors. Conversely, a broad filter paired with a rare identifier favors scoring first, because the rare term's postings list is already short, provided the search engine continues scanning until enough eligible results remain. This trade-off reemerges with even sharper operational hazards when searching vector proximity graphs (@sec-vol3-persistent-dense-retrieval).
+Choosing the evaluation order is a cost-based optimization decision analogous to access path selection in relational database optimizers [@selinger1979access].[^fn-selectivity-optimizer-memory] The decision balances the filter's selectivity against the rarity of the query terms. A selective filter—such as isolating two files in a repository of thousands—favors pre-filtering candidate documents and evaluating BM25 scores only on the survivors. Conversely, a broad filter paired with a rare identifier favors scoring first, because the rare term's postings list is already short, provided the search engine continues scanning until enough eligible results remain. This trade-off introduces even sharper operational hazards when searching vector proximity graphs.
 
 [^fn-selectivity-optimizer-memory]: **Cost-Based Access Path Selection**: The System R optimizer chose among index scans, sequential scans, and join orders by estimating each predicate's selectivity and the pages each plan would touch [@selinger1979access]. A retrieval gateway faces the same estimate with a scope filter as the predicate and a postings list or vector index as the access path, and a wrong estimate costs either a scan of the whole corpus or an empty result that looks like absence. \index{Query optimization!selectivity}
 
@@ -925,10 +918,6 @@ class IndexMaintenanceCost:
 
 Retrieved evidence represents the source state observed at the moment of the read. In an agentic system, a concurrent write can land before the model finishes deliberating and invokes its chosen action. Any tool call whose correctness depends on an unmodified workspace must therefore enforce an execution-time precondition—such as an optimistic version check—at the tool boundary. The storage subsystem's core duty is to preserve and surface the exact generation metadata that this precondition requires.
 
-::: {.column-margin .margin-pointer}
-↪ The atomic conditional update that enforces this version precondition at the tool boundary is developed in @sec-vol3-tool-calling-conditional-updates.
-:::
-
 Source-generation checks suppress obsolete records, atomic publication prevents straggling workers from reinstating stale representations, and explicit fallback contracts clarify whether fresh evidence is available. Together, these mechanisms enforce internal storage consistency rather than task success. In accordance with the end-to-end argument [@saltzer1984endtoend], whether the `r18` patch truly resolves the connection leak can be established only at the system boundary through integration tests executed against the real runtime environment. What the storage layer guarantees to that boundary is an uncompromised, auditable record of the exact source generation reflected in every retrieved fact.
 
 ## Evaluating Memory Policies {#sec-vol3-persistent-governance-eval}
@@ -998,6 +987,101 @@ Storage measurements require equally clear accounting boundaries. Benchmarks sho
 
 *Dense vectors multiply a store's auxiliary bytes by an order of magnitude.*
 :::
+
+```{python}
+#| label: lego-06-memory-bandwidth-and-latency-floor
+#| echo: false
+from mlsysim import Hardware
+from mlsysim.core.units import BYTES_FP16, GB, GFLOP, byte, flop, millisecond, second
+from mlsysim.fmt import check, fmt_arithmetic_intensity, fmt_bandwidth, fmt_flop_rate, fmt_flops, fmt_int, fmt_memory, fmt_time
+
+class VectorScanLatencyFloor:
+    # ┌── 1. LOAD (Hypothetical corpus; host from the registry) ─────────────
+    host = Hardware.Cloud.ReferenceCPU
+    n_vectors = 10_000_000
+    d_dim = 768
+    bytes_per_val = BYTES_FP16
+    n_probes = 20  # stipulated searches in one trajectory
+    n_filtered = 10_000  # stipulated eligible set after a selective scope filter
+    t_budget = 10 * millisecond  # stipulated per-search latency budget
+
+    # ┌── 2. EXECUTE (Bytes, FLOPs, intensity, and the two time floors) ────
+    bw = host.memory.bandwidth
+    peak = host.compute.peak_flops
+    footprint = n_vectors * d_dim * bytes_per_val
+    flops_total = 2 * n_vectors * d_dim * flop
+    intensity = (flops_total / footprint).to(flop / byte)
+    ridge = (peak / bw).to(flop / byte)
+    t_mem = (footprint / bw).to(millisecond)
+    t_arith = (flops_total / peak).to(millisecond)
+    t_probes = (n_probes * t_mem).to(second)
+    t_filtered = (n_filtered * d_dim * bytes_per_val / bw).to(millisecond)
+    n_budget = int((t_budget * bw / (d_dim * bytes_per_val)).to("").magnitude)
+
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(abs(footprint.to(GB).magnitude - 15.36) < 1e-9, "vector bytes")
+    check(abs(flops_total.to(GFLOP).magnitude - 15.36) < 1e-9, "scan FLOPs")
+    check(abs(intensity.magnitude - 1.0) < 1e-12, "one FLOP per byte at FP16")
+    check(ridge > 10 * intensity, "scan sits far below the host ridge")
+    check(t_mem > 10 * t_arith, "bandwidth term dominates")
+    check(t_filtered < t_budget < t_mem, "filtered scan meets the budget; full scan does not")
+    check(n_filtered < n_budget < n_vectors, "budget crossover lies between the two sets")
+
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
+    n_vectors_str = fmt_int(n_vectors)
+    d_dim_str = fmt_int(d_dim)
+    width_str = fmt_memory(bytes_per_val, unit=byte, precision=0)
+    footprint_str = fmt_memory(footprint, unit=GB, precision=2)
+    work_str = fmt_flops(flops_total, unit=GFLOP, precision=2)
+    intensity_str = fmt_arithmetic_intensity(intensity, precision=0)
+    ridge_str = fmt_arithmetic_intensity(ridge, precision=0)
+    bw_str = fmt_bandwidth(bw, unit=GB / second, precision=0)
+    peak_str = fmt_flop_rate(peak, precision=0)
+    t_mem_str = fmt_time(t_mem, unit=millisecond, precision=1)
+    t_arith_str = fmt_time(t_arith, unit=millisecond, precision=2)
+    n_probes_str = fmt_int(n_probes)
+    t_probes_str = fmt_time(t_probes, unit=second, precision=1)
+    n_filtered_str = fmt_int(n_filtered)
+    t_filtered_str = fmt_time(t_filtered, unit=millisecond, precision=2)
+    t_budget_str = fmt_time(t_budget, unit=millisecond, precision=0)
+    n_budget_str = fmt_int(round(n_budget, -3), approx=True)
+```
+```{python}
+#| label: lego-06-ann-footprint
+#| echo: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ ANN INDEX FOOTPRINT (LEGO)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: Required for StorageAmplification variables.
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim.core.units import BYTES_FP32, GB, KB, byte
+from mlsysim.fmt import check, fmt_int, fmt_memory, fmt_multiple
+
+class AnnFootprint:
+    # ┌── 1. LOAD (Corpus from the exact-scan notebook; stipulated index shape) ─
+    n = VectorScanLatencyFloor.n_vectors
+    d = VectorScanLatencyFloor.d_dim
+    raw = VectorScanLatencyFloor.footprint
+    links_per_node = 32
+    link_bytes = 8 * byte
+    pq_subvectors = 64
+    pq_centroids = 256
+    code_bytes_per_sub = 1 * byte
+    lut_entry = BYTES_FP32
+
+    # ┌── 2. EXECUTE ──────────────────────────────────────────────────────
+    graph = n * links_per_node * link_bytes
+    codes = n * pq_subvectors * code_bytes_per_sub
+    ratio = (raw / codes).to("").magnitude
+    lut = (pq_subvectors * pq_centroids * lut_entry).to(KB)
+    sub_dim = d // pq_subvectors
+
+    # ┌── 3. GUARD ────────────────────────────────────────────────────────
+    check(d % pq_subvectors == 0, "subvectors tile the dimension")
+
+    # ┌── 4. OUTPUT ───────────────────────────────────────────────────────
+    pass
+```
 
 ```{python}
 #| label: lego-06-storage-amplification
@@ -1080,7 +1164,7 @@ class StorageAmplification:
 ```
 
 ::: {#nbk-06-storage-amplification .callout-notebook title="Why two memory stores differ by an order of magnitude"}
-**Problem**: A hypothetical repository holds `{python} StorageAmplification.files_str` files of `{python} StorageAmplification.tokens_per_file_str` tokens each, `{python} StorageAmplification.raw_str` of source. Store A adds a BM25 index and a structural graph with `{python} StorageAmplification.edges_str` edges per file. Store B adds the same BM25 index plus `{python} StorageAmplification.passage_str`-token chunks embedded as `{python} StorageAmplification.d_str`-dimensional FP32 vectors under an HNSW graph shaped like the one in @tbl-vol3-ann-tradeoffs. How do their auxiliary bytes and re-index times compare?
+**Problem**: A hypothetical repository holds `{python} StorageAmplification.files_str` files of `{python} StorageAmplification.tokens_per_file_str` tokens each, `{python} StorageAmplification.raw_str` of source. Store A adds a BM25 index and a structural graph with `{python} StorageAmplification.edges_str` edges per file. Store B adds the same BM25 index plus `{python} StorageAmplification.passage_str`-token chunks embedded as `{python} StorageAmplification.d_str`-dimensional FP32 vectors under an HNSW graph. How do their auxiliary bytes and re-index times compare?
 
 **Math**: Store A's auxiliary structures occupy `{python} StorageAmplification.aux_a_str`, an auxiliary ratio of `{python} StorageAmplification.ratio_aux_a_mult_str` over the raw source (total ratio `{python} StorageAmplification.ratio_tot_a_mult_str`). Store B's occupy `{python} StorageAmplification.aux_b_str`, of which the vectors alone are `{python} StorageAmplification.vectors_str`, an auxiliary ratio of `{python} StorageAmplification.ratio_aux_b_mult_str` (total `{python} StorageAmplification.ratio_tot_b_mult_str`). After an edit to `{python} StorageAmplification.edited_str` files, at stipulated throughputs for postings updates and parsing, Store A re-indexes in `{python} StorageAmplification.t_a_str`. Store B must re-embed `{python} StorageAmplification.edited_chunks_str` chunks; at `{python} StorageAmplification.embed_rate_str` chunks per second it needs `{python} StorageAmplification.t_b_str`.
 
@@ -1164,7 +1248,7 @@ A software repair agent needs far more than an index that matches text embedding
 |:-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|:-----------------------------------------------------------------------------------------------------------------------------|:-------------------------------------|
 | $\operatorname{score}(x,Q)=\sum_{q\in Q}\operatorname{IDF}(q)\frac{f(q,x)(k_1+1)}{f(q,x)+k_1(1-b+b\lvert x\rvert/\overline{\lvert x\rvert})}$                                      | Lexical rank order; saturation ($k_1$) and length normalization ($b$) outweigh raw repetition                                | @sec-vol3-persistent-bm25            |
 | $Ndw$ bytes, $2Nd$ FLOPs, intensity $2/w$                                                                                                                                          | Exact-scan time floor $Ndw/\Bandwidth$ and the eligible-set size at which an ANN index pays                                  | @sec-vol3-persistent-dense-retrieval |
-| $\tilde{d}(\mathbf{q}, \mathbf{x}) = \sum_{j=1}^{m} \text{LUT}[j, c_j]$                                                                                                            | Bytes touched per scored vector under IVF-PQ; $m$ trades fidelity against code size                                          | @eq-vol3-pq-adc                      |
+| $\tilde{d}(\mathbf{q}, \mathbf{x}) = \sum_{j=1}^{m} \text{LUT}[j, c_j]$                                                                                                            | Bytes touched per scored vector under IVF-PQ; $m$ trades fidelity against code size                                          | eq-vol3-pq-adc                       |
 | $\operatorname{RRF}(x) = \sum_{i:\,x\in \mathcal{R}_i} 1/(k_{\text{rrf}} + r_i(x))$                                                                                                | Fused candidate order across methods whose scores share no scale                                                             | @eq-vol3-reciprocal-rank-fusion      |
 | $\lfloor(\text{allowance} - \text{envelope})/(\text{body} + \text{metadata})\rfloor$                                                                                               | Complete records that fit a retrieval allowance once output and envelope are reserved                                        | @sec-vol3-persistent-quarantine      |
 | $(\text{children}^{\text{depth}+1}-1)/(\text{children}-1)$                                                                                                                         | Nodes in a bounded traversal neighborhood, set against the payload budget                                                    | @sec-vol3-persistent-graphrag        |

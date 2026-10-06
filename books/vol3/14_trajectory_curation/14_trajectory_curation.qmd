@@ -198,10 +198,6 @@ A single recorded agent interaction can populate three distinct learning artifac
 
 A **preference comparison**\index{Preference comparison!definition} pairs alternative trajectories generated from a shared initial context, attaching an explicit, justified preference ordering. Two runs of a task form a valid comparison pair only when their initial state, environment configuration, and accessible action spaces are identical. Furthermore, a failing or degraded run belongs in the rejected slot only when an evaluator records explicit diagnostic criteria explaining why its trajectory was inferior. These supporting assessments, tie-breaking criteria, and conditioning contexts allow offline preference optimization methods to construct statistically sound loss objectives.
 
-::: {.column-margin .margin-pointer}
-↪ The trajectory preference loss, which scores the preferred and dispreferred records against a frozen reference policy, is developed in @sec-vol3-fine-tuning-preference-loss.
-:::
-
 A **rollout fixture**\index{Rollout fixture!definition} bundles a reproducible task environment, versioned configuration fixtures, and an automated grading specification to support online exploration during reward-based reinforcement learning. An unsuccessful execution attempt often reveals a valuable environmental corner case even when none of its recorded actions warrant imitation. In this setting, the trace does not provide demonstration data; rather, it seeds a versioned simulation fixture that recreates the problematic state so the policy can explore alternative trajectories and optimize against the reward specification.
 
 ::: {.column-margin .margin-pointer}
@@ -406,6 +402,55 @@ While structural group assignments catch known relationships, heuristic deduplic
 To capture meaningful similarity in agent trajectories, feature extraction must combine textual shingles, parsed code syntax, and tool-call invocation sequences. A **shingle**\index{Shingle!definition} is a localized feature extracted from a document or trace, such as an n-gram of command tokens or a sub-tree from an abstract syntax tree (AST). While parsing code into an AST strips away superficial formatting differences, aggressive canonicalization—such as discarding variable identifiers, literal constants, or statement order—can obscure the subtle difference between a working patch and a broken one. Curation pipelines must therefore version their normalization policies and treat high similarity scores as triggers for contextual inspection rather than automatic deletion. To scale set comparisons across hundreds of thousands of trajectories, pipelines use MinHash [@broder1997resemblance],[^fn-minhash-resemblance-curation] which compresses high-dimensional feature sets into compact signatures using the minimum hash values under random permutations. Because standard MinHash treats feature sets as binary indicators and ignores feature frequencies, workloads that require count sensitivity rely on weighted or bag-based estimators.
 
 [^fn-minhash-resemblance-curation]: **MinHash**: Minwise independent permutations were introduced to detect near-duplicate web pages at search-engine scale, where exhaustive all-pairs comparison is computationally prohibitive [@broder1997resemblance]. MinHash maps an arbitrary-sized feature set to a fixed-size signature such that the probability of two signatures matching on any given component equals the Jaccard similarity of their underlying sets. This allows a curation pipeline to index and screen a large trajectory corpus in linear time and memory, deferring expensive all-pairs comparisons to a small subset of candidate matches. \index{MinHash!origin}
+
+```{python}
+#| label: lego-14-split-screening-budget
+#| echo: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ MINHASH SCREENING PRECISION AND STORAGE
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: sec-vol3-trajectory-dedup-minhash.
+# │ Goal: Separate ideal estimator uncertainty from practical index storage.
+# │ Show: Maximum standard error, raw signature bytes, and candidate probability.
+# │ How: Independent-permutation model; separate uint32 storage assumption.
+# │ Note: No measured detection quality or semantic-equivalence guarantee.
+# └─────────────────────────────────────────────────────────────────────────────
+from math import sqrt
+from mlsysim import *
+
+class SplitScreeningBudget:
+    # 1. LOAD: illustrative signature and storage design.
+    k = 128
+    n_records = 100_000
+    component_bytes = 4 * byte
+    bands, rows = 32, 4
+    similarities = (0.5, 0.8)
+
+    # 2. EXECUTE: ideal precision, raw storage, and banding candidates.
+    max_standard_error = 0.5 / sqrt(k)
+    signature_bytes = k * component_bytes
+    matrix_bytes = n_records * signature_bytes
+    candidate_probabilities = (
+        1 - (1 - similarities[0] ** rows) ** bands,
+        1 - (1 - similarities[1] ** rows) ** bands,
+    )
+
+    # 3. GUARD: design consistency and numerical scales.
+    check(bands * rows == k, "Complete band partition")
+    check(abs(max_standard_error - 0.0441941738) < 1e-9, "Ideal maximum standard error")
+    check(signature_bytes.to(byte).magnitude == 512, "Raw bytes per signature")
+
+    # 4. EXPORT: narrative formatting.
+    k_str = fmt_int(k)
+    se_str = fmt_percent(max_standard_error, precision=1)
+    width_str = fmt_memory(component_bytes, unit=byte, precision=0)
+    signature_str = fmt_memory(signature_bytes, unit=byte, precision=0)
+    n_str = fmt_int(n_records)
+    matrix_str = fmt_memory(matrix_bytes, unit=MB, precision=1)
+    bands_str, rows_str = fmt_int(bands), fmt_int(rows)
+    lower_j_str, higher_j_str = [fmt(j, precision=1) for j in similarities]
+    candidate_str = fmt_percent(candidate_probabilities[0], precision=1, style="prose")
+```
 
 With `{python} SplitScreeningBudget.k_str` independent ideal components, the worst-case standard error is `{python} SplitScreeningBudget.se_str` on the Jaccard scale. Storing each component in `{python} SplitScreeningBudget.width_str` requires `{python} SplitScreeningBudget.signature_str` per signature and `{python} SplitScreeningBudget.matrix_str` for `{python} SplitScreeningBudget.n_str` records. While this raw matrix excludes the feature inverted index, metadata storage, and candidate staging buffers, it demonstrates that signature storage overhead is trivial even for large corpora.
 
@@ -1045,7 +1090,7 @@ The verification cascade applies the evaluation criteria of @sec-vol3-flywheel-v
 Because distributed workers and network connections inevitably fail, message delivery is retried. Each submission is therefore cryptographically bound to its unique collection run identifier, artifact version, and assessment policy. When the pipeline receives a duplicate identifier with an identical payload, it reuses the existing evaluation decision; if an incoming payload conflicts with an earlier submission under the same identifier, the system diverts the record to an operator investigation queue. Under no circumstances may a transient retry publish duplicate training examples or release a staging reservation twice. Durable ownership and idempotency primitives enforce this invariant without requiring an ad hoc recovery protocol.
 
 ::: {.column-margin .margin-pointer}
-↩ Semantic deduplication of retried writes, which acknowledges an identical retry and rejects a conflicting payload under the same identity, is established in @sec-vol3-persistence-engine-design.
+↩ Semantic deduplication of retried writes, which acknowledges an identical retry and rejects a conflicting payload under the same identity, is established in @sec-vol3-persistence-wal.
 :::
 
 ### Collection credits and staging reserves {#sec-vol3-trajectory-curation-collection-credits}
@@ -1377,10 +1422,6 @@ A **derived record**\index{Derived record!definition} must always be created as 
 :::
 
 Heuristic pattern matching and named-entity recognition models act as screening mechanisms rather than complete sanitization guarantees. Engineers must validate these detectors across the full output pipeline using realistic end-to-end test cases, including deeply nested payloads and generated metadata. Synthetic canaries provide an empirical measure of detector recall: the curation audit log must record how many canaries were injected, how many escaped detection, which semantic classes and text transformations were tested, and where the inspection boundary was applied. Observing zero canary escapes bounds the leak probability only for the evaluated canary distribution. Furthermore, false positives impose a severe systems cost, as over-aggressive scrubbing strips necessary context and distorts the training signal.
-
-::: {.column-margin .margin-pointer}
-↩ Canary values, planted synthetic secrets whose escape reveals a leaking path, are established in @sec-vol3-security-detectors-canaries.
-:::
 
 When scrubbing identifiers across multi-step interactions, curators use consistent pseudonyms to preserve relational dependencies across turns while preventing identity linkage beyond the access scope that the trace's disclosure boundary permits. Tokenization effects require careful handling: replacing an identifier with a fixed-width placeholder often alters the sequence's token count and attention boundaries. Similarly, reserializing a structured payload can preserve outer JSON or YAML formatting while silently breaking nested shell escaping, regular expression matches, or tool invocation syntax. Consequently, checking that an artifact parses successfully is entirely distinct from verifying that it still supports the intended learning target.
 
