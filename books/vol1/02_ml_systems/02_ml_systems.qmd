@@ -1627,158 +1627,6 @@ At the stated `{python} CloudEdgeTCO.requests_str`-inference/day operating point
 
 Beyond the direct bill, unpredictable usage spikes complicate budgeting and call for automated monitoring and cost governance. Network dependency, the last of the three costs, creates an availability hazard: any connectivity disruption between clients and the data center immediately degrades or halts service. Proprietary cloud APIs compound the dependency with vendor lock-in\index{Vendor lock-in!cloud deployment}, creating software portability friction when migrating workloads across providers. Even so, centralized infrastructure remains uniquely suited to consumer applications that require elastic capacity at global scale.
 
-### Large-scale training and inference {#sec-ml-systems-largescale-training-inference-e16d}
-
-Cloud ML's\index{Cloud ML!consumer-scale applications} computational advantages manifest most visibly in consumer-facing applications that require massive scale. Virtual assistants\index{Voice assistant!hybrid architecture} like Siri and Alexa illustrate the hybrid architectures\index{Hybrid architecture!wake-word detection} that characterize modern ML systems: wake-word detection\index{Wake-word detection!layered architecture} can run on dedicated sub-milliwatt-to-milliwatt hardware directly on the device, enabling always-on listening without continuously activating the main processor; initial speech recognition can run on-device for privacy and responsiveness; and complex natural language understanding and generation can use cloud infrastructure for access to larger models and broader knowledge.
-
-Economics drive this architecture as much as latency. Attempting to process voice interactions for billions of devices entirely in the cloud runs into both an economic and an infrastructure ceiling. Quantifying the voice assistant wall shows both limits at once.
-
-```{python}
-#| echo: false
-#| label: voice-assistant-wall-calc
-# ┌─────────────────────────────────────────────────────────────────────────────
-# │ VOICE ASSISTANT WALL: ECONOMICS + INFRASTRUCTURE
-# ├─────────────────────────────────────────────────────────────────────────────
-# │ Context: "The Voice Assistant Wall" callout in
-# │          @sec-ml-systems-largescale-training-inference-e16d
-# │
-# │ Goal: Show what the hybrid voice design removes (cloud-side wake-word
-# │       detection, which needs every microphone streamed continuously) and
-# │       what it keeps (post-wake queries served in the cloud).
-# │ Show: The $500M/year cost and ~32 TB/s aggregate audio of cloud-side
-# │       detection; the ~860x cut in audio leaving each device once detection
-# │       is local; the residual post-wake load of 1 billion devices ×
-# │       20 queries/day at 200 ms/query (average and peak data centers).
-# │ How: Calculate always-on audio bandwidth, post-wake audio volume, GPU-hours
-# │       per day, and datacenter count (with 3× peak multiplier).
-# │
-# └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import fmt_percent, fmt_int, fmt_usd, fmt, fmt_count, fmt_time, check, fmt_qty_range, fmt_bandwidth
-from mlsysim.core.units import BILLION, SEC_PER_HOUR, HOURS_PER_DAY, BITS_PER_BYTE, MS_PER_SEC, byte, KB, TB, milliwatt, second
-
-# ┌── LEGO ───────────────────────────────────────────────
-class VoiceAssistantWall:
-    """
-    Namespace for Voice Assistant Scaling logic.
-    Scenario: 1 Billion devices, economics vs infrastructure limits.
-    """
-
-    # ┌── 1. LOAD (Constants) ───────────────────────────────────────────────
-    # Economics
-    ww_devices_b = 1
-    ww_cloud_cost_per_device = 0.50
-    ww_edge_power_min_mw = 0.1
-    ww_edge_power_max_mw = 1
-    ww_edge_cost_per_year = 0.01
-
-    # Infrastructure
-    vi_devices_b = 1
-    vi_queries_per_day = 20
-    vi_gpu_ms_per_query = 200
-    vi_gpus_per_datacenter = 10_000
-    vi_audio_sample_rate = 16_000
-    vi_audio_bits = 16
-    vi_waking_hours = 16
-    vi_peak_multiplier = 3
-    vi_query_audio_s = 5  # scenario assumption: seconds of audio uploaded per post-wake query
-
-    # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
-    # Step 1: Economics
-    ww_total_cloud_cost = ww_devices_b * BILLION * ww_cloud_cost_per_device
-
-    # Step 2: Infrastructure - Compute
-    vi_total_queries_day = vi_devices_b * BILLION * vi_queries_per_day
-    vi_gpu_seconds_day = vi_total_queries_day * vi_gpu_ms_per_query / MS_PER_SEC
-    vi_gpu_hours_day = vi_gpu_seconds_day / SEC_PER_HOUR
-    vi_gpu_hours_dc_value = vi_gpus_per_datacenter * HOURS_PER_DAY
-    vi_datacenters_avg = vi_gpu_hours_day / (vi_gpus_per_datacenter * HOURS_PER_DAY)
-    vi_peak_ratio = vi_peak_multiplier * (HOURS_PER_DAY / vi_waking_hours)
-    vi_datacenters_peak = vi_datacenters_avg * vi_peak_ratio
-
-    # Step 3: Infrastructure - Bandwidth
-    vi_audio_bytes_per_sec = vi_audio_sample_rate * (vi_audio_bits / BITS_PER_BYTE)
-    vi_audio_rate = vi_audio_bytes_per_sec * byte / second
-    # Step 4: Total audio bandwidth across 1 billion devices
-    vi_total_audio_rate = vi_audio_bytes_per_sec * vi_devices_b * BILLION * byte / second
-    # Step 5: Audio that still leaves each device once detection is local
-    vi_stream_s_per_day = HOURS_PER_DAY * SEC_PER_HOUR
-    vi_query_audio_s_per_day = vi_queries_per_day * vi_query_audio_s
-    vi_audio_reduction = vi_stream_s_per_day / vi_query_audio_s_per_day
-
-    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
-    check(vi_datacenters_peak >= 20, f"Residual post-wake load ({vi_datacenters_peak:.0f} DCs) unexpectedly low.")
-    check(800 <= vi_audio_reduction <= 900, f"Local detection should cut uploaded audio ~860x, got {vi_audio_reduction:.0f}x.")
-
-    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
-    # Economics Strings
-    ww_devices_b_str = fmt_count(ww_devices_b * BILLION, scale="B", precision=0, commas=False)
-    ww_cloud_cost_str = fmt_usd(ww_cloud_cost_per_device, precision=2, commas=False, per="device/year")
-    ww_total_cost_str = fmt_usd(ww_total_cloud_cost, precision=0, commas=True, per="year")
-    ww_edge_power_range_str = fmt_qty_range(
-        ww_edge_power_min_mw * milliwatt,
-        ww_edge_power_max_mw * milliwatt,
-        milliwatt,
-        precision=(1, 0),
-        commas=False,
-    )
-    ww_edge_cost_str = fmt_usd(ww_edge_cost_per_year, precision=2, commas=False, per="device/year")
-
-    # Infrastructure Strings
-    vi_devices_str = fmt(vi_devices_b, precision=0, commas=False)
-    vi_queries_str = fmt_rate(vi_queries_per_day, "queries/day", precision=0, commas=False)
-    vi_total_queries_str = fmt_rate(vi_total_queries_day, "queries/day", scale="B", commas=False)
-    vi_gpu_ms_str = fmt_time(vi_gpu_ms_per_query, 'millisecond', precision=0, commas=False)
-    vi_gpu_hours_str = fmt_int(vi_gpu_hours_day, commas=True)
-    vi_gpu_hours_dc_str = fmt_int(vi_gpu_hours_dc_value, commas=True)
-    vi_gpus_dc_str = fmt_count(vi_gpus_per_datacenter, commas=True, label="GPU")
-    vi_dc_avg_str = fmt(vi_datacenters_avg, precision=1, commas=False)
-    vi_dc_peak_str = fmt(vi_datacenters_peak, precision=1, commas=False)
-    vi_peak_ratio_mult_str = fmt_multiple(vi_peak_ratio, precision=1, commas=False)
-    vi_audio_kb_per_s_str = fmt_bandwidth(vi_audio_rate, unit=KB / second, precision=0, commas=False)
-    vi_audio_tb_per_s_str = fmt_bandwidth(vi_total_audio_rate, unit=TB / second, precision=0, commas=False)
-    vi_query_audio_s_str = fmt_time(vi_query_audio_s, 'second', precision=0, commas=False)
-    vi_audio_reduction_mult_str = fmt_multiple(round(vi_audio_reduction, -1), precision=0, commas=True)
-```
-
-::: {#nbk-ml-systems-voice-assistant-wall .callout-notebook title="The voice assistant wall"}
-
-**Problem**: In this illustrative capacity scenario, `{python} VoiceAssistantWall.ww_devices_b_str` voice assistant devices (smartphones, smart speakers, earbuds) each issue `{python} VoiceAssistantWall.vi_queries_str` after the wake word. Detecting the wake word itself in the cloud\index{Cloud ML!scaling limits} would require every microphone to stream audio continuously. What load would cloud-side detection impose, and what load remains in the cloud once detection moves on device?
-
-**Cloud-side detection**: First, the always-listening path that local detection removes.
-
-- **Audio streaming**: Every device streams audio continuously (16 kHz, 16-bit), about `{python} VoiceAssistantWall.vi_audio_kb_per_s_str` each. Across `{python} VoiceAssistantWall.vi_devices_str` billion devices the aggregate is `{python} VoiceAssistantWall.vi_audio_tb_per_s_str`, and each stream would also need its own continuously running detector.
-- **Cloud cost**: ~`{python} VoiceAssistantWall.ww_cloud_cost_str` → `{python} VoiceAssistantWall.ww_devices_b_str` devices = `{python} VoiceAssistantWall.ww_total_cost_str`. Economically prohibitive under these assumptions for a free feature.
-- **TinyML alternative**: `{python} VoiceAssistantWall.ww_edge_power_range_str` local wake-word detection, <`{python} VoiceAssistantWall.ww_edge_cost_str`. If each post-wake query uploads about `{python} VoiceAssistantWall.vi_query_audio_s_str` of audio, local detection cuts the audio leaving each device by about `{python} VoiceAssistantWall.vi_audio_reduction_mult_str`.
-
-```{=latex}
-\vspace*{-1ex}
-```
-**Residual cloud load**: Second, the post-wake queries the hybrid design still serves\index{Scaling!infrastructure, voice assistants} in the cloud.
-
-Five parameters determine the required cluster capacity:
-
-1.  **Query volume**: `{python} VoiceAssistantWall.vi_devices_str` billion devices $\times$ `{python} VoiceAssistantWall.vi_queries_str` = `{python} VoiceAssistantWall.vi_total_queries_str`.
-2.  **GPU demand**: Each query requires ~`{python} VoiceAssistantWall.vi_gpu_ms_str` of GPU time. Total: `{python} VoiceAssistantWall.vi_gpu_hours_str` GPU-hours/day.
-3.  **Scenario capacity**: A data-center equivalent provisioned with `{python} VoiceAssistantWall.vi_gpus_dc_str` provides `{python} VoiceAssistantWall.vi_gpu_hours_dc_str` GPU-hours/day.
-4.  **Average requirement**: ~`{python} VoiceAssistantWall.vi_dc_avg_str` dedicated data centers just for voice inference.
-5.  **Peak reality**: Queries cluster in waking hours (~`{python} VoiceAssistantWall.vi_peak_ratio_mult_str` peak-to-average), requiring ~`{python} VoiceAssistantWall.vi_dc_peak_str` data centers at peak.
-
-**Systems insight**: Detecting the wake word in the cloud would require streaming every microphone continuously, about `{python} VoiceAssistantWall.vi_audio_tb_per_s_str` across a billion devices, before a single user query is answered. Local detection reduces each device's upload to its post-wake queries, `{python} VoiceAssistantWall.vi_queries_str` of a few seconds each. The residual post-wake load is still large, tens of data centers at peak, but it is bounded by what users actually ask, and it is the load the hybrid design deliberately keeps in the cloud because language understanding needs large models.
-
-:::
-
-The voice assistant pipeline illustrates a core systems principle: constraints drive hierarchical architecture. Partitioning the pipeline into an on-device wake-word filter and a cloud-based language model relieves both the client's energy limit and the data center's concurrency wall.
-
-Large-scale recommendation engines demonstrate the cloud bargain in a memory-capacity-bound form. DLRM-style systems[^fn-dlrm-memory-bound] map millions of users and items to dense vectors through embedding tables that routinely exceed terabytes in aggregate, far beyond any single accelerator. The tables are sharded across pooled host and accelerator memory, and the all-to-all lookups of every forward and backward pass need the low-latency cluster fabrics that only a data center provides.
-
-::: {.column-margin .margin-pointer}
-↪ The memory-capacity bounds and sparse gather patterns of high-cardinality embedding tables are developed in @sec-network-architectures-sparse-architectures-recommendation-systems-5d19.
-:::
-
-These applications trade latency for scale, accepting remote-path delay in exchange for computational resources that cannot be supplied locally. The trade fails when a latency budget drops below what the remote path permits, or when data volumes exceed what networks can carry; computation must then move closer to the data source.
-
-[^fn-dlrm-memory-bound]: **Deep learning recommendation model (DLRM)**\index{DLRM!memory-bound constraint}: Meta's 2019 architecture that exemplifies the "Sparse Scatter" archetype. Embedding tables for production recommendation systems can exceed 100 TB, making DLRM constrained by memory capacity and communication $\Bandwidth$ rather than raw $\PeakRate$. This inversion of the typical compute-bound assumption forces specialized cluster designs where memory, not arithmetic, is the scarce resource.
-
 ## Edge ML: Latency and Privacy {#sec-ml-systems-edge-ml-reducing-latency-privacy-risk-2625}
 
 A factory safety interlock that must halt a robotic arm within a few milliseconds cannot consult a data center: the network round trip alone exceeds its entire response budget before a single layer evaluates.[^fn-iiot-edge-latency] Moving computation adjacent to the data source removes that remote transmission term from the request path, and edge ML is the paradigm built on that move.
@@ -3690,6 +3538,158 @@ Production systems demonstrate these integration patterns by placing each tier b
 1. **Industrial defect detection**: Assembly lines running at high cycle rates require sub-10 ms deterministic visual inspection. Streaming high-resolution camera frames over WAN to a data center violates inspection deadlines and exhausts factory uplink bandwidth. The system deploys a train-serve split: centralized cloud infrastructure leverages multi-accelerator pods to train high-capacity vision models across historical defect databases, then compiles and quantizes runtime weights for factory-floor edge servers and embedded smart cameras. These on-premise accelerators execute inference over local PCIe or MIPI camera interfaces, guaranteeing bounded latency without external network dependencies.
 2. **Agricultural monitoring**: Deployed across hundreds of hectares, remote soil probes operate on coin-cell batteries or small solar harvesters, communicating over low-data-rate, high-energy-per-bit LPWAN or LoRa radios. Streaming continuous moisture and temperature telemetry exhausts battery reserves within days. Hierarchical processing confines high-frequency sampling and basic anomaly detection to TinyML microcontrollers operating in sub-milliwatt power budgets. When anomalies occur, local edge gateways aggregate measurements across spatial clusters of probes, transmitting only compressed, field-level summaries over cellular backhaul to cloud servers responsible for farm-wide irrigation scheduling.
 3. **Wearable fitness tracking**: A battery-powered smartwatch must keep its always-on sensing path averaging under $1\text{ mW}$ to preserve battery life. The system employs hierarchical processing: lightweight integer kernels run on an embedded microcontroller to track real-time motion and detect heart-rate thresholds; intermediate biometric data synchronizes over Bluetooth Low Energy (BLE) to a paired smartphone, which leverages mobile neural engines and gigabytes of DRAM to classify complex activity patterns; finally, the smartphone transmits periodic compressed summaries over Wi-Fi or cellular networks to cloud infrastructure for longitudinal health modeling.
+
+### Case study: Voice assistant hybrid architecture {#sec-ml-systems-largescale-training-inference-e16d}
+
+Cloud ML's\index{Cloud ML!consumer-scale applications} computational advantages manifest most visibly in consumer-facing applications that require massive scale. Virtual assistants\index{Voice assistant!hybrid architecture} like Siri and Alexa illustrate the hybrid architectures\index{Hybrid architecture!wake-word detection} that characterize modern ML systems: wake-word detection\index{Wake-word detection!layered architecture} can run on dedicated sub-milliwatt-to-milliwatt hardware directly on the device, enabling always-on listening without continuously activating the main processor; initial speech recognition can run on-device for privacy and responsiveness; and complex natural language understanding and generation can use cloud infrastructure for access to larger models and broader knowledge.
+
+Economics drive this architecture as much as latency. Attempting to process voice interactions for billions of devices entirely in the cloud runs into both an economic and an infrastructure ceiling. Quantifying the voice assistant wall shows both limits at once.
+
+```{python}
+#| echo: false
+#| label: voice-assistant-wall-calc
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ VOICE ASSISTANT WALL: ECONOMICS + INFRASTRUCTURE
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: "The Voice Assistant Wall" callout in
+# │          @sec-ml-systems-largescale-training-inference-e16d
+# │
+# │ Goal: Show what the hybrid voice design removes (cloud-side wake-word
+# │       detection, which needs every microphone streamed continuously) and
+# │       what it keeps (post-wake queries served in the cloud).
+# │ Show: The $500M/year cost and ~32 TB/s aggregate audio of cloud-side
+# │       detection; the ~860x cut in audio leaving each device once detection
+# │       is local; the residual post-wake load of 1 billion devices ×
+# │       20 queries/day at 200 ms/query (average and peak data centers).
+# │ How: Calculate always-on audio bandwidth, post-wake audio volume, GPU-hours
+# │       per day, and datacenter count (with 3× peak multiplier).
+# │
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim.fmt import fmt_percent, fmt_int, fmt_usd, fmt, fmt_count, fmt_time, check, fmt_qty_range, fmt_bandwidth
+from mlsysim.core.units import BILLION, SEC_PER_HOUR, HOURS_PER_DAY, BITS_PER_BYTE, MS_PER_SEC, byte, KB, TB, milliwatt, second
+
+# ┌── LEGO ───────────────────────────────────────────────
+class VoiceAssistantWall:
+    """
+    Namespace for Voice Assistant Scaling logic.
+    Scenario: 1 Billion devices, economics vs infrastructure limits.
+    """
+
+    # ┌── 1. LOAD (Constants) ───────────────────────────────────────────────
+    # Economics
+    ww_devices_b = 1
+    ww_cloud_cost_per_device = 0.50
+    ww_edge_power_min_mw = 0.1
+    ww_edge_power_max_mw = 1
+    ww_edge_cost_per_year = 0.01
+
+    # Infrastructure
+    vi_devices_b = 1
+    vi_queries_per_day = 20
+    vi_gpu_ms_per_query = 200
+    vi_gpus_per_datacenter = 10_000
+    vi_audio_sample_rate = 16_000
+    vi_audio_bits = 16
+    vi_waking_hours = 16
+    vi_peak_multiplier = 3
+    vi_query_audio_s = 5  # scenario assumption: seconds of audio uploaded per post-wake query
+
+    # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
+    # Step 1: Economics
+    ww_total_cloud_cost = ww_devices_b * BILLION * ww_cloud_cost_per_device
+
+    # Step 2: Infrastructure - Compute
+    vi_total_queries_day = vi_devices_b * BILLION * vi_queries_per_day
+    vi_gpu_seconds_day = vi_total_queries_day * vi_gpu_ms_per_query / MS_PER_SEC
+    vi_gpu_hours_day = vi_gpu_seconds_day / SEC_PER_HOUR
+    vi_gpu_hours_dc_value = vi_gpus_per_datacenter * HOURS_PER_DAY
+    vi_datacenters_avg = vi_gpu_hours_day / (vi_gpus_per_datacenter * HOURS_PER_DAY)
+    vi_peak_ratio = vi_peak_multiplier * (HOURS_PER_DAY / vi_waking_hours)
+    vi_datacenters_peak = vi_datacenters_avg * vi_peak_ratio
+
+    # Step 3: Infrastructure - Bandwidth
+    vi_audio_bytes_per_sec = vi_audio_sample_rate * (vi_audio_bits / BITS_PER_BYTE)
+    vi_audio_rate = vi_audio_bytes_per_sec * byte / second
+    # Step 4: Total audio bandwidth across 1 billion devices
+    vi_total_audio_rate = vi_audio_bytes_per_sec * vi_devices_b * BILLION * byte / second
+    # Step 5: Audio that still leaves each device once detection is local
+    vi_stream_s_per_day = HOURS_PER_DAY * SEC_PER_HOUR
+    vi_query_audio_s_per_day = vi_queries_per_day * vi_query_audio_s
+    vi_audio_reduction = vi_stream_s_per_day / vi_query_audio_s_per_day
+
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(vi_datacenters_peak >= 20, f"Residual post-wake load ({vi_datacenters_peak:.0f} DCs) unexpectedly low.")
+    check(800 <= vi_audio_reduction <= 900, f"Local detection should cut uploaded audio ~860x, got {vi_audio_reduction:.0f}x.")
+
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
+    # Economics Strings
+    ww_devices_b_str = fmt_count(ww_devices_b * BILLION, scale="B", precision=0, commas=False)
+    ww_cloud_cost_str = fmt_usd(ww_cloud_cost_per_device, precision=2, commas=False, per="device/year")
+    ww_total_cost_str = fmt_usd(ww_total_cloud_cost, precision=0, commas=True, per="year")
+    ww_edge_power_range_str = fmt_qty_range(
+        ww_edge_power_min_mw * milliwatt,
+        ww_edge_power_max_mw * milliwatt,
+        milliwatt,
+        precision=(1, 0),
+        commas=False,
+    )
+    ww_edge_cost_str = fmt_usd(ww_edge_cost_per_year, precision=2, commas=False, per="device/year")
+
+    # Infrastructure Strings
+    vi_devices_str = fmt(vi_devices_b, precision=0, commas=False)
+    vi_queries_str = fmt_rate(vi_queries_per_day, "queries/day", precision=0, commas=False)
+    vi_total_queries_str = fmt_rate(vi_total_queries_day, "queries/day", scale="B", commas=False)
+    vi_gpu_ms_str = fmt_time(vi_gpu_ms_per_query, 'millisecond', precision=0, commas=False)
+    vi_gpu_hours_str = fmt_int(vi_gpu_hours_day, commas=True)
+    vi_gpu_hours_dc_str = fmt_int(vi_gpu_hours_dc_value, commas=True)
+    vi_gpus_dc_str = fmt_count(vi_gpus_per_datacenter, commas=True, label="GPU")
+    vi_dc_avg_str = fmt(vi_datacenters_avg, precision=1, commas=False)
+    vi_dc_peak_str = fmt(vi_datacenters_peak, precision=1, commas=False)
+    vi_peak_ratio_mult_str = fmt_multiple(vi_peak_ratio, precision=1, commas=False)
+    vi_audio_kb_per_s_str = fmt_bandwidth(vi_audio_rate, unit=KB / second, precision=0, commas=False)
+    vi_audio_tb_per_s_str = fmt_bandwidth(vi_total_audio_rate, unit=TB / second, precision=0, commas=False)
+    vi_query_audio_s_str = fmt_time(vi_query_audio_s, 'second', precision=0, commas=False)
+    vi_audio_reduction_mult_str = fmt_multiple(round(vi_audio_reduction, -1), precision=0, commas=True)
+```
+
+::: {#nbk-ml-systems-voice-assistant-wall .callout-notebook title="The voice assistant wall"}
+
+**Problem**: In this illustrative capacity scenario, `{python} VoiceAssistantWall.ww_devices_b_str` voice assistant devices (smartphones, smart speakers, earbuds) each issue `{python} VoiceAssistantWall.vi_queries_str` after the wake word. Detecting the wake word itself in the cloud\index{Cloud ML!scaling limits} would require every microphone to stream audio continuously. What load would cloud-side detection impose, and what load remains in the cloud once detection moves on device?
+
+**Cloud-side detection**: First, the always-listening path that local detection removes.
+
+- **Audio streaming**: Every device streams audio continuously (16 kHz, 16-bit), about `{python} VoiceAssistantWall.vi_audio_kb_per_s_str` each. Across `{python} VoiceAssistantWall.vi_devices_str` billion devices the aggregate is `{python} VoiceAssistantWall.vi_audio_tb_per_s_str`, and each stream would also need its own continuously running detector.
+- **Cloud cost**: ~`{python} VoiceAssistantWall.ww_cloud_cost_str` → `{python} VoiceAssistantWall.ww_devices_b_str` devices = `{python} VoiceAssistantWall.ww_total_cost_str`. Economically prohibitive under these assumptions for a free feature.
+- **TinyML alternative**: `{python} VoiceAssistantWall.ww_edge_power_range_str` local wake-word detection, <`{python} VoiceAssistantWall.ww_edge_cost_str`. If each post-wake query uploads about `{python} VoiceAssistantWall.vi_query_audio_s_str` of audio, local detection cuts the audio leaving each device by about `{python} VoiceAssistantWall.vi_audio_reduction_mult_str`.
+
+```{=latex}
+\vspace*{-1ex}
+```
+**Residual cloud load**: Second, the post-wake queries the hybrid design still serves\index{Scaling!infrastructure, voice assistants} in the cloud.
+
+Five parameters determine the required cluster capacity:
+
+1.  **Query volume**: `{python} VoiceAssistantWall.vi_devices_str` billion devices $\times$ `{python} VoiceAssistantWall.vi_queries_str` = `{python} VoiceAssistantWall.vi_total_queries_str`.
+2.  **GPU demand**: Each query requires ~`{python} VoiceAssistantWall.vi_gpu_ms_str` of GPU time. Total: `{python} VoiceAssistantWall.vi_gpu_hours_str` GPU-hours/day.
+3.  **Scenario capacity**: A data-center equivalent provisioned with `{python} VoiceAssistantWall.vi_gpus_dc_str` provides `{python} VoiceAssistantWall.vi_gpu_hours_dc_str` GPU-hours/day.
+4.  **Average requirement**: ~`{python} VoiceAssistantWall.vi_dc_avg_str` dedicated data centers just for voice inference.
+5.  **Peak reality**: Queries cluster in waking hours (~`{python} VoiceAssistantWall.vi_peak_ratio_mult_str` peak-to-average), requiring ~`{python} VoiceAssistantWall.vi_dc_peak_str` data centers at peak.
+
+**Systems insight**: Detecting the wake word in the cloud would require streaming every microphone continuously, about `{python} VoiceAssistantWall.vi_audio_tb_per_s_str` across a billion devices, before a single user query is answered. Local detection reduces each device's upload to its post-wake queries, `{python} VoiceAssistantWall.vi_queries_str` of a few seconds each. The residual post-wake load is still large, tens of data centers at peak, but it is bounded by what users actually ask, and it is the load the hybrid design deliberately keeps in the cloud because language understanding needs large models.
+
+:::
+
+The voice assistant pipeline illustrates a core systems principle: constraints drive hierarchical architecture. Partitioning the pipeline into an on-device wake-word filter and a cloud-based language model relieves both the client's energy limit and the data center's concurrency wall.
+
+Large-scale recommendation engines demonstrate the cloud bargain in a memory-capacity-bound form. DLRM-style systems[^fn-dlrm-memory-bound] map millions of users and items to dense vectors through embedding tables that routinely exceed terabytes in aggregate, far beyond any single accelerator. The tables are sharded across pooled host and accelerator memory, and the all-to-all lookups of every forward and backward pass need the low-latency cluster fabrics that only a data center provides.
+
+::: {.column-margin .margin-pointer}
+↪ The memory-capacity bounds and sparse gather patterns of high-cardinality embedding tables are developed in @sec-network-architectures-sparse-architectures-recommendation-systems-5d19.
+:::
+
+These applications trade latency for scale, accepting remote-path delay in exchange for computational resources that cannot be supplied locally. The trade fails when a latency budget drops below what the remote path permits, or when data volumes exceed what networks can carry; computation must then move closer to the data source.
+
+[^fn-dlrm-memory-bound]: **Deep learning recommendation model (DLRM)**\index{DLRM!memory-bound constraint}: Meta's 2019 architecture that exemplifies the "Sparse Scatter" archetype. Embedding tables for production recommendation systems can exceed 100 TB, making DLRM constrained by memory capacity and communication $\Bandwidth$ rather than raw $\PeakRate$. This inversion of the typical compute-bound assumption forces specialized cluster designs where memory, not arithmetic, is the scarce resource.
 
 ### Why hybrid approaches work {#sec-ml-systems-hybrid-approaches-work-4bb8}
 

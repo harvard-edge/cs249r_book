@@ -1848,8 +1848,6 @@ class CurriculumBenchmarks:
 
 The scenario illustrates that useful curriculum gains must be measured at a fixed target metric. The ordering is task-dependent: *anti-curriculum*\index{Anti-curriculum!hard examples first} presents hard examples first, while *self-paced learning*\index{Self-paced learning!adaptive difficulty} adjusts difficulty using the model's current loss. Neither ordering is universally superior.
 
-## Handling Label Scarcity {#sec-data-selection-label-scarcity-cdef}
-
 ### Active learning: Human-in-the-loop {#sec-data-selection-active-learning-humanintheloop-6932}
 
 Curriculum learning optimizes the order in which samples are presented but assumes all samples are already labeled. This assumption breaks down in specialized domains where labeling requires substantial expertise, time, or money. Rather than labeling everything upfront, active learning\index{Active learning!definition}\index{Dynamic selection!active learning}[^fn-active-learning-queries] [@settles2012; @ren2021] shifts the optimization target from choosing which labeled samples to train on to choosing which unlabeled samples are worth labeling.
@@ -2551,233 +2549,6 @@ These efficiency gains depend on benign distribution assumptions. Semi-supervise
 
 Despite these limitations, semi-supervised learning can reduce label requirements while maintaining accuracy on suitable tasks. Across the techniques, coreset selection and deduplication prune low-value samples before training; curriculum learning changes the presentation order; active learning chooses which samples receive human annotation; and semi-supervised learning extracts additional signal from an unlabeled pool. Each technique can reduce dependence on task-specific labels, but none eliminates the need for labeled evaluation. The progression raises a related possibility: task-specific labels may not be necessary for pretraining. The structure of data itself—that cat images resemble other cat images and coherent sentences follow grammatical patterns—may provide a supervision signal, while downstream quality still requires task-aligned validation.
 
-## Self-Supervised Learning {#sec-data-selection-selfsupervised-learning-7518}
-
-When filtering and prioritizing existing labeled data fails to provide sufficient signal for the compute budget, systems engineering must expand what counts as a valid training sample. Self-supervised learning (SSL) is included in the data-selection toolkit because it is a systems-level alternative to acquiring and selecting expensive human labels. Instead of paying human annotators to label data or pruning a small labeled dataset, SSL shifts the boundary of usable data, allowing the system to extract supervisory signal from the raw structure of massive unlabeled corpora.
-
-Labels are one form of supervision; a pretext task can also derive a learning signal from the structure of the data, as @tbl-self-supervised-tasks summarizes.
-
-| **Modality**    | **Self-Supervised Task** |                      **Supervision Signal** |
-|:----------------|:-------------------------|--------------------------------------------:|
-| **Text**        | Masked language modeling |                 Predict [MASK] from context |
-| **Text**        | Next-token prediction    |              Predict next token in sequence |
-| **Images**      | Contrastive learning     | Same image (augmented) vs. different images |
-| **Images**      | Masked autoencoding      |                  Reconstruct masked patches |
-| **Multi-modal** | CLIP-style alignment     |                      Match image-text pairs |
-
-: **Self-Supervised Pretext Tasks by Modality**: Each task extracts supervision from data structure rather than human labels, enabling pretraining on large-scale unlabeled corpora. {#tbl-self-supervised-tasks .striped .hover tbl-colwidths="[30,30,40]"}
-
-### Foundation model paradigm {#sec-data-selection-foundation-model-paradigm-f0f1}
-
-When its pretraining cost is reused across tasks, SSL supports the **foundation model paradigm**\index{Foundation model!definition}\index{Self-supervised learning!foundation model paradigm}[^fn-foundation-model-risk] [@bommasani2021opportunities]. The core data selection principles—coreset selection, curriculum learning, and active learning—remain essential within this paradigm. Pretraining corpus curation applies deduplication and quality filtering at web scale, while downstream selection dictates which fine-tuning examples maximize task-specific transfer.
-
-::: {.column-margin}
-![](images/svg/vol1_data_selection_margin_002.svg){width="100%" fig-alt="One red source node at left fans out through arrows to several blue downstream task nodes at right."}
-
-*One pretraining corpus defect can affect many downstream tasks.*
-:::
-
-[^fn-foundation-model-risk]: **Foundation model**\index{Foundation model!homogenization risk}: The name emphasizes that these models serve as a shared base for many downstream tasks, but this creates a single point of failure. Defects in the foundation model's pretraining data (biases, factual errors, memorized private content) can propagate to multiple applications built upon it, depending on transfer and downstream adaptation. From a systems perspective, this homogenization risk means that data selection quality during pretraining has an outsized blast radius: a curation error that would affect one task in the train-from-scratch paradigm can affect many downstream deployments.
-
-Self-supervised learning addresses the label bottleneck by learning from data structure rather than human annotation, yet it cannot solve data scarcity itself. Rare classes may have too few examples, edge cases may never appear in the wild, and privacy constraints may prevent collecting real samples. Synthetic generation addresses this gap by creating new data on demand rather than selecting or curating existing data.
-
-## Synthetic Data Generation {#sec-data-selection-synthetic-data-generation-415c}
-
-When the required learning signal simply does not exist in the accessible world—whether due to privacy constraints, safety risks of real-world edge cases, or absolute scarcity—even the most sophisticated selection and self-supervised methods run dry. Synthetic data generation is included in the data-selection toolkit as the ultimate systems-level fallback: when you cannot select the data you need from an existing corpus, you must manufacture it. This shifts the engineering objective from *curating* a finite pool to *generating* an unbounded stream of targeted, high-value samples that specifically address the model's deficits.
-
-Real-world data collection encounters physical and legal boundaries: autonomous fleets cannot safely crash vehicles to acquire catastrophic collision trajectories, healthcare systems cannot transmit protected patient telemetry across institutional firewalls, and edge products must handle acoustic environments before any deployed fleet exists to record them. When target distributions exhibit extreme scarcity or zero empirical coverage, neither static filtering nor dynamic sample prioritization can extract signal that does not exist in the source corpus. Synthetic data generation\index{Synthetic data generation!three-stage pipeline} resolves this fundamental bottleneck by manufacturing training distributions directly. The engineering strategy shifts from *curation*—filtering and weighting existing records—to *creation*, generating novel inputs, domain perturbations, or supervisory targets to satisfy statistical coverage constraints.
-
-### Data augmentation: Transformation-based synthesis {#sec-data-selection-data-augmentation-transformationbased-synthesis-3aa7}
-
-Data augmentation\index{Data augmentation!definition} is the lowest-overhead form of synthetic generation: it expands the effective training distribution by transforming existing samples dynamically during ingestion. Because label-preserving transformations generate novel inputs without expanding durable storage, augmentation multiplies dataset diversity with zero additional data acquisition cost. In an accelerator-based training pipeline, however, augmentation shifts the computational bottleneck between the host CPU and the accelerator. When executed on host CPU worker threads, intensive decoding and spatial transformations can saturate host cores, starving the accelerator across the PCIe bus. Offloading transformations directly to accelerator kernels can relieve CPU preprocessing pressure, while inputs still cross the host-to-device link. It consumes HBM and compute cycles that would otherwise perform gradient updates.
-
-For image data, transformation pipelines encode task-valid invariances required at deployment [@shorten2019]. Geometric operations (rotation, horizontal flipping, random cropping, and scaling) encourage viewpoint invariance when they preserve the target label, while photometric adjustments (brightness, contrast, and color jitter) simulate sensor noise and varying illumination. More aggressive strategies alter input topology directly: Cutout\index{Cutout!image augmentation}[^fn-cutout-data-augmentation] applies random rectangular zero-masks to prevent reliance on localized features; MixUp\index{MixUp!image augmentation} [@zhang2018mixup] constructs virtual samples by taking linear combinations of image pairs and their one-hot labels ($\tilde{x} = \lambda_{\text{mix}} x_i + (1 - \lambda_{\text{mix}}) x_j$, with mixing weight $\lambda_{\text{mix}} \in [0, 1]$); and CutMix\index{CutMix!image augmentation}[^fn-cutmix-data-augmentation] pastes rectangular patches from one image into another while blending labels proportionally to the patch area. Because CutMix and MixUp operate via tensor linear combinations and block memory copies directly in device memory, they provide strong data-space regularization with negligible FLOP overhead.
-
-[^fn-cutout-data-augmentation]: **Cutout**\index{Cutout!augmentation efficiency}: Randomly masks square regions of input images during training, forcing the model to recognize objects from partial information rather than relying on any single discriminative region [@devries2017cutout]. Unlike dropout (which zeroes neurons in feature space), Cutout operates in input space. The original Cutout experiments produced 0.3--2.0 percentage-point gains across CIFAR-10/100 and SVHN with negligible compute overhead, making it a high-ICR augmentation technique when occlusion-style invariance matches the task: more information per sample at near-zero additional cost to the pipeline.
-
-[^fn-cutmix-data-augmentation]: **CutMix**\index{CutMix!label mixing}: Replaces Cutout's zeroed-out region with a patch from a different training image, mixing labels proportionally to patch area (30 percent of image A replaced by image B yields a 70/30 label split) [@yun2019cutmix]. This addresses Cutout's weakness: zeroed regions waste pixel information that could carry learning signal. The CutMix paper reports ImageNet top-1 improvements of 2.28 percentage points for ResNet-50 and 1.70 percentage points for ResNet-101, while also improving localization behavior. The method provides stronger regularization than either Cutout or MixUp alone with little additional data-pipeline cost.
-
-Text augmentation presents different constraints because discrete token vocabularies lack smooth geometric manifolds. Back-translation\index{Back-translation!text augmentation}[^fn-back-translation-nlp] provides semantic paraphrasing for sequence-to-sequence tasks by routing target-language monolingual corpora through an intermediate model to generate synthetic source pairings. Simpler heuristic transforms—such as synonym substitution via WordNet, random token insertion, or deletion—introduce local perturbations, but risk corrupting semantic labels if applied without task-specific validation.
-
-[^fn-back-translation-nlp]: **Back-translation**\index{Back-translation!pipeline latency}: In the method described by @sennrich2016backtranslation, target-language monolingual text is translated into the source language, and the synthetic source is paired with the unchanged target for machine-translation training. The systems trade-off is latency because each synthetic source requires translation-model inference. Pipelines can precompute these examples offline rather than generating them in the data loader.
-
-Rather than hand-tuning transformation schedules, automated policy searches optimize augmentation combinations directly. AutoAugment[^fn-autoaugment-policy-search] uses reinforcement learning across discrete operation spaces, but incurs extreme compute overhead. RandAugment[^fn-randaugment-simple-search] eliminates this search cost by parameterizing the policy with just two values: the number of transformations applied to each image and a single global distortion magnitude.
-
-[^fn-autoaugment-policy-search]: **AutoAugment**\index{AutoAugment!search cost}: Treats augmentation policy design as a reinforcement learning search problem: a controller selects operations (rotate, translate, shear, equalize), their magnitudes, and application probabilities to maximize validation accuracy [@cubuk2019]. The original ImageNet search used approximately 15,000 GPU-hours, motivating later methods that reduce the search space.
-
-[^fn-randaugment-simple-search]: **RandAugment**\index{RandAugment!hyperparameter simplicity}: Collapses AutoAugment's policy search to two hyperparameters, a transformation count and a shared magnitude [@cubuk2020]. That small search space matches or exceeds AutoAugment on the reported benchmarks at far lower search cost, making it practical when 15,000 GPU-hours of policy search cannot be justified.
-
-::: {#lhs-data-selection-mobilenet-aggressive-augmentation .callout-lighthouse title="MobileNetV2 and augmentation strength"}
-
-The MobileNetV2 lighthouse model exemplifies how data augmentation complements a resource-constrained architecture. Its depthwise separable convolutions replace standard spatial convolutions with depthwise spatial filters followed by $1 \times 1$ pointwise projections, substantially reducing parameter count and arithmetic intensity.
-
-Compact architectures have limited capacity, so they typically benefit from milder augmentation than large models; excessive distortion can exceed what a compact network can fit and cause underfitting on the underlying task distribution. Augmentation strength is therefore a capacity-matched hyperparameter, and RandAugment's single magnitude knob makes it cheap to tune per model size. Whatever strength is chosen, augmentation adds nothing to inference parameter memory or latency.
-
-:::
-
-### Generative synthesis: Creating new samples {#sec-data-selection-generative-synthesis-creating-new-samples-a43d}
-
-Augmentation perturbs existing training points within their local neighborhoods. Generative synthesis constructs entirely new coordinate tuples $(x, y)$ by sampling from parametric generative models or physical simulation engines. The systems trade-off across generative paradigms spans a cost-fidelity spectrum:
-
-1. Generative Adversarial Networks (GANs)\index{GAN!synthetic data generation} train a generator against a discriminator. Once trained, feed-forward generator inference requires a single forward pass, providing low latency and high sample throughput. However, GAN training is vulnerable to mode collapse, which suppresses the tail variety required for robust edge-case coverage.
-2. Diffusion models\index{Diffusion model!text-to-image synthesis} formulate synthesis as iterative denoising across a parameterized Markov chain or continuous score-based process. Latent diffusion systems such as Stable Diffusion[^fn-stable-diffusion-synthesis] enable precise semantic conditioning from text prompts while operating in a compressed latent space. A sampling recipe with 20 to 50 sequential denoising steps runs the backbone repeatedly for each generated batch. Its arithmetic and memory traffic can make offline generation preferable; whether on-the-fly generation is feasible depends on the sampler, generator, and available resources.
-3. Physical simulation engines (such as CARLA for autonomous driving or Isaac Sim and Unity for robotics) decouple data generation from neural inference entirely, executing rigid-body physics, kinematics, and graphics rendering pipelines. Simulators produce exact ground-truth annotations (including 3D bounding boxes, depth maps, and velocity vectors) from internal state without human labeling cost. The systems bottleneck shifts to host CPU physics computation and GPU graphics rasterization or ray tracing throughput.
-
-[^fn-stable-diffusion-synthesis]: **Stable Diffusion**\index{Stable Diffusion!generation cost}: Performs iterative denoising in a compressed latent space, enabling targeted text-to-image examples [@rombach2022]. Its iterative generation is substantially more compute-intensive than geometric transforms, so it fits cases where novelty matters more than per-sample throughput.
-
-Regardless of the generative engine, synthetic samples inevitably diverge from the statistical distributions of real deployment environments. This divergence defines the domain gap.
-
-### Bridging the domain gap {#sec-data-selection-bridging-domain-gap-100b}
-
-The domain gap\index{Domain gap!training-serving skew}[^fn-domain-gap-shift] represents the statistical divergence between synthetic training distributions and production deployment data. When models optimize purely on synthetic distributions, they can learn simulator or generator artifacts that fail to transfer. The schematic in @fig-domain-gap sketches shifted feature densities and possible boundary misalignment. The marginal densities alone do not determine either decision boundary; class-conditional structure and real-data evaluation are needed to establish how the shift affects classification.
-
-::: {#fig-domain-gap fig-env="figure" fig-pos="htb" fig-cap="**The Domain Gap Problem**: Synthetic data (blue) and real data (orange) occupy shifted feature distributions. The dashed red synthetic boundary and dotted green real-data boundary illustrate possible misalignment; marginal feature densities alone do not determine class boundaries." fig-alt="Density plot over feature space with an overlapping blue synthetic distribution centered near zero and orange real distribution centered near three. A dashed red vertical line near 1.5 is labeled Synthetic boundary, a dotted green vertical line appears at three, and a purple double-headed arrow labeled Domain Gap spans the two distribution centers."}
-
-```{.tikz}
-\begin{tikzpicture}[font=\small\sffamily]
-\begin{axis}[
-    width=11cm, height=50mm,
-    xlabel={Feature Space},
-    ylabel={Density},
-    xmin=-3, xmax=7.25,
-    ymin=0, ymax=0.7,
-    axis lines=left,
-    axis line style={thick,-latex},
-    axis on top,
-    xtick=\empty,
-    ytick=\empty,
-    ylabel style={font=\footnotesize\sffamily},
-    xlabel style={font=\footnotesize\sffamily},
-   % legend style={at={(0.98,0.98)}, anchor=north east, font=\footnotesize\sffamily, draw=none},
-legend style={at={(0.85,0.92)}, anchor=north},
-  legend cell align=left,
-  legend style={fill=BrownL!30,draw=BrownLine,row sep=1.15pt,
-  font=\fontsize{7pt}{7}\selectfont\sffamily},
-    clip=false
-]
-    % Synthetic data distribution (centered at 0)
-    \addplot[line width=1.25pt, blue, domain=-3:4, samples=100, fill=blue!20, fill opacity=0.5]
-        {0.4*exp(-0.5*(x)^2)};
-    \addlegendentry{Synthetic}
-
-    % Real data distribution (centered at 3, slightly different shape)
-    \addplot[line width=1.25pt, orange, domain=0:7, samples=100, fill=orange!20, fill opacity=0.5]
-        {0.35*exp(-0.4*(x-3)^2)};
-    \addlegendentry{Real}
-
-    % Decision boundary learned from synthetic
-    \draw[thick, dashed, red] (axis cs: 1.5, 0) -- (axis cs: 1.5, 0.6)
-    node[red, font=\footnotesize\sffamily, fill=white,above=0pt,inner sep=1pt] {Synthetic boundary};
-
-    % Ideal boundary for real data
-    \draw[thick, dotted, green!60!black] (axis cs: 3, 0) -- (axis cs: 3, 0.50);
- %   \draw[thick, dotted, green!60!black] (axis cs: 0, 0) -- (axis cs: 0, 0.50);
-
-    % Domain gap annotation
-    \draw[latex-latex, thick, purple] (axis cs: 0, 0.48) --
-    node[purple, font=\footnotesize\sffamily, fill=white, inner sep=1pt]{Domain Gap} (axis cs: 3, 0.48);
-
-\end{axis}
-\end{tikzpicture}
-```
-
-:::
-
-[^fn-domain-gap-shift]: **Domain gap**\index{Domain gap!training-serving skew}: The statistical divergence between synthetic and real data distributions, measurable with metrics such as maximum mean discrepancy (MMD) or Frechet Inception Distance (FID). For ML systems, the gap becomes training-serving skew: a simulator-trained model can validate well on synthetic data while failing silently on real deployment data.
-
-Two complementary strategies address this distribution mismatch. Domain randomization\index{Domain randomization!bridging synthetic-real gap}[^fn-domain-randomization-sim] takes an aggressive approach: rather than trying to match the real world precisely, it trains on varied synthetic data by randomizing lighting, textures, backgrounds, and camera parameters during generation.
-
-[^fn-domain-randomization-sim]: **Domain randomization**\index{Domain randomization!rendering trade-off}: Makes synthetic data deliberately varied by randomizing textures, colors, lighting, and physical properties. The goal is not photorealism; it is enough variation to improve coverage of deployment conditions, shifting the cost bottleneck from rendering fidelity to coverage.
-
-The aim is to make deployment conditions fall within the variation seen during training, but coverage is never guaranteed by randomization alone. The method can be effective in robotics and autonomous-driving settings when the simulator spans the relevant physical and visual factors and the result is validated on real data.
-
-Domain adaptation\index{Domain adaptation!feature alignment} takes the opposite approach by explicitly aligning synthetic and real distributions. Feature alignment methods train on synthetic data while simultaneously minimizing the distance between synthetic and real feature distributions, often using adversarial training to learn domain-invariant representations. Fine-tuning offers a simpler path: pretrain on abundant synthetic data to learn general features, then fine-tune on a small real dataset to adapt to deployment conditions. Self-training combines these ideas by using a synthetic-trained model to pseudo-label real unlabeled data, then retraining on the combined labeled set.
-
-In practice, mixing synthetic and real data provides a real-data anchor while retaining some synthetic coverage. Moving the mix from all-synthetic toward all-real trades a larger domain gap for a higher collection cost, and the best ratio depends on the domain, simulator fidelity, model family, and validation protocol rather than on any universal recipe.
-
-```{python}
-#| echo: false
-#| label: kws-data-selection-calc
-
-# ┌─────────────────────────────────────────────────────────────────────────────
-# │ KWS DATA SELECTION ECONOMICS
-# ├─────────────────────────────────────────────────────────────────────────────
-# │ Context: "KWS data selection" callout-example in the synthetic-data section
-# │          immediately below this cell.
-# │
-# │ Goal:    Anchor the seed/augmentation/noise-injection sample counts and the
-# │          recording cost for the Keyword Spotting Lighthouse data pipeline.
-# │ Show:    Seed sample count, augmented total, target sample count, full
-# │          recording cost range, and seed fraction of the target.
-# │ How:     Multiply speakers by utterances and augmentation factor; multiply
-# │          target samples by the per-sample recording cost range.
-# │
-# └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import check, fmt, fmt_percent, fmt_rate, fmt_text, fmt_usd_range
-
-class KwsDataSelectionCalc:
-    # LOAD
-    speakers = 50
-    utterances_per_speaker = 10
-    augmentation_multiplier = 10
-    target_samples = 10_000
-    cost_per_sample_low = 2
-    cost_per_sample_high = 5
-
-    # EXECUTE
-    seed_samples = speakers * utterances_per_speaker
-    augmented_samples = seed_samples * augmentation_multiplier
-    full_cost_low = target_samples * cost_per_sample_low
-    full_cost_high = target_samples * cost_per_sample_high
-    seed_cost_pct = seed_samples / target_samples * 100
-
-    # GUARD
-    check(seed_samples == 500, "Seed recording count should remain 50 speakers × 10 utterances.")
-    check(seed_cost_pct <= 5, "Seed recording should stay near 5% of full recording cost.")
-
-    # OUTPUT
-    speakers_str = fmt(speakers, precision=0, commas=False)
-    utterances_per_speaker_str = fmt_rate(utterances_per_speaker, "utterances/speaker", precision=0, commas=False)
-    seed_samples_str = fmt(seed_samples, precision=0, commas=True)
-    augmented_samples_str = fmt(augmented_samples, precision=0, commas=True)
-    target_samples_str = fmt(target_samples, precision=0, commas=True)
-    target_samples_plus_str = fmt_text(target_samples_str, "+")
-    full_cost_range_str = fmt_usd_range(
-        full_cost_low,
-        full_cost_high,
-        scale="K",
-        precision=0,
-        commas=False,
-        repeat_symbol=False,
-    )
-    cost_per_sample_range_str = fmt_usd_range(
-        cost_per_sample_low,
-        cost_per_sample_high,
-        precision=0,
-        commas=False,
-        repeat_symbol=False,
-        per="sample",
-    )
-    augmentation_mult_str = fmt_multiple(round(augmentation_multiplier), precision=0, commas=False)
-    seed_cost_pct_str = fmt_percent(seed_cost_pct / 100, precision=0, commas=False, style='prose')
-```
-
-::: {#exmp-data-selection-kws-data-selection .callout-example title="KWS data selection"}
-
-**Scenario**: An embedded keyword spotting (KWS) system targets deployment on a 256 KB SRAM microcontroller with a `{python} KwsDataSelectionCalc.target_samples_plus_str` audio sample requirement.
-
-**Diagnosis**: Manually recording `{python} KwsDataSelectionCalc.target_samples_str` real utterances across diverse speakers and acoustic environments costs `{python} KwsDataSelectionCalc.full_cost_range_str`. Staging a 5-tier pipeline (seed recordings $\to$ augmentation $\to$ noise injection $\to$ hard-negative mining $\to$ text-to-speech simulation) builds dataset scale from `{python} KwsDataSelectionCalc.seed_samples_str` seed samples.
-
-**Systems lesson**: Layered data strategies can lower acquisition costs for resource-constrained edge ML deployments. In this scenario, augmentation and noise injection reduce physical collection cost to `{python} KwsDataSelectionCalc.seed_cost_pct_str` of the full-recording estimate; target accuracy and acoustic coverage still require validation.
-
-:::
-
-The keyword-spotting scenario shows how augmentation, noise injection, and simulation can expand a small seed set, but the same creation strategy becomes riskier when samples come from learned generators. In recursive training, *model collapse*\index{Model collapse!recursive synthetic training}[^fn-model-collapse-mechanism] can amplify errors and reduce diversity over generations. Synthetic data therefore requires provenance, mixture controls, and validation against real deployment data rather than an unverified assumption that more generated samples help.
-
-[^fn-model-collapse-mechanism]: **Model collapse**\index{Model collapse!tail distribution compression}: Formally analyzed by @shumailov2024, this phenomenon can arise when errors and missing tail coverage compound during recursive training. Tail distributions contain rare but important patterns that appear infrequently in training data. When generation $n+1$ trains on output from generation $n$ under these conditions, successive generations can further compress the tails, producing increasingly homogeneous data. The degradation can be rapid in recursive training settings, which is why training on unanchored synthetic outputs risks catastrophic collapse of tail diversity.
-
-Together, transformation-based augmentation (@sec-data-selection-data-augmentation-transformationbased-synthesis-3aa7) and generative synthesis (@sec-data-selection-generative-synthesis-creating-new-samples-a43d) provide complementary ways to generate training signals. Where static filtering eliminates redundant input samples and dynamic selection optimizes sample ordering during training, synthetic generation manufactures missing signals when empirical collection hits physical, legal, or economic constraints. Orchestrating these techniques across the data, algorithm, and machine dimensions requires balancing data storage footprint, pipeline preprocessing throughput, and accelerator utilization within a unified systems budget.
-
 ## Selection Engineering {#sec-data-selection-selection-engineering-a4eb}
 
 A naive active learning loop that scans the entire dataset every epoch to select the "best" samples can turn a compute-bound training job into an I/O-bound bottleneck. **Selection engineering**\index{Selection engineering!definition} begins where the decision framework ends: after identifying which algorithms to apply, engineering must ensure that they deliver their promised speedups on real hardware and real data pipelines. Translating algorithmic filtering into realized throughput requires architectural patterns that bound scoring latency, preserve sequential storage access, and prevent accelerator starvation.
@@ -3410,6 +3181,231 @@ A further constraint arises from cluster network topology\index{Distributed Sele
 
 Real ML systems combine data selection with model-level efficiency, machine-level throughput, and distributed training simultaneously. These optimizations interact in ways that can amplify or undermine each other, and understanding these interactions is essential for designing efficient end-to-end pipelines.
 
+## Self-Supervised Learning {#sec-data-selection-selfsupervised-learning-7518}
+
+When filtering and prioritizing existing labeled data fails to provide sufficient signal for the compute budget, systems engineering must expand what counts as a valid training sample. Self-supervised learning (SSL) is included in the data-selection toolkit because it is a systems-level alternative to acquiring and selecting expensive human labels. Instead of paying human annotators to label data or pruning a small labeled dataset, SSL shifts the boundary of usable data, allowing the system to extract supervisory signal from the raw structure of massive unlabeled corpora.
+
+Labels are one form of supervision; a pretext task can also derive a learning signal from the structure of the data, as @tbl-self-supervised-tasks summarizes.
+
+| **Modality**    | **Self-Supervised Task** |                      **Supervision Signal** |
+|:----------------|:-------------------------|--------------------------------------------:|
+| **Text**        | Masked language modeling |                 Predict [MASK] from context |
+| **Text**        | Next-token prediction    |              Predict next token in sequence |
+| **Images**      | Contrastive learning     | Same image (augmented) vs. different images |
+| **Images**      | Masked autoencoding      |                  Reconstruct masked patches |
+| **Multi-modal** | CLIP-style alignment     |                      Match image-text pairs |
+
+: **Self-Supervised Pretext Tasks by Modality**: Each task extracts supervision from data structure rather than human labels, enabling pretraining on large-scale unlabeled corpora. {#tbl-self-supervised-tasks .striped .hover tbl-colwidths="[30,30,40]"}
+
+When its pretraining cost is reused across tasks, SSL supports the **foundation model paradigm**\index{Foundation model!definition}\index{Self-supervised learning!foundation model paradigm}[^fn-foundation-model-risk] [@bommasani2021opportunities]. The core data selection principles—coreset selection, curriculum learning, and active learning—remain essential within this paradigm. Pretraining corpus curation applies deduplication and quality filtering at web scale, while downstream selection dictates which fine-tuning examples maximize task-specific transfer.
+
+::: {.column-margin}
+![](images/svg/vol1_data_selection_margin_002.svg){width="100%" fig-alt="One red source node at left fans out through arrows to several blue downstream task nodes at right."}
+
+*One pretraining corpus defect can affect many downstream tasks.*
+:::
+
+[^fn-foundation-model-risk]: **Foundation model**\index{Foundation model!homogenization risk}: The name emphasizes that these models serve as a shared base for many downstream tasks, but this creates a single point of failure. Defects in the foundation model's pretraining data (biases, factual errors, memorized private content) can propagate to multiple applications built upon it, depending on transfer and downstream adaptation. From a systems perspective, this homogenization risk means that data selection quality during pretraining has an outsized blast radius: a curation error that would affect one task in the train-from-scratch paradigm can affect many downstream deployments.
+
+Self-supervised learning addresses the label bottleneck by learning from data structure rather than human annotation, yet it cannot solve data scarcity itself. Rare classes may have too few examples, edge cases may never appear in the wild, and privacy constraints may prevent collecting real samples. Synthetic generation addresses this gap by creating new data on demand rather than selecting or curating existing data.
+
+## Synthetic Data Generation {#sec-data-selection-synthetic-data-generation-415c}
+
+When the required learning signal simply does not exist in the accessible world—whether due to privacy constraints, safety risks of real-world edge cases, or absolute scarcity—even the most sophisticated selection and self-supervised methods run dry. Synthetic data generation is included in the data-selection toolkit as the ultimate systems-level fallback: when you cannot select the data you need from an existing corpus, you must manufacture it. This shifts the engineering objective from *curating* a finite pool to *generating* an unbounded stream of targeted, high-value samples that specifically address the model's deficits.
+
+Real-world data collection encounters physical and legal boundaries: autonomous fleets cannot safely crash vehicles to acquire catastrophic collision trajectories, healthcare systems cannot transmit protected patient telemetry across institutional firewalls, and edge products must handle acoustic environments before any deployed fleet exists to record them. When target distributions exhibit extreme scarcity or zero empirical coverage, neither static filtering nor dynamic sample prioritization can extract signal that does not exist in the source corpus. Synthetic data generation\index{Synthetic data generation!three-stage pipeline} resolves this fundamental bottleneck by manufacturing training distributions directly. The engineering strategy shifts from *curation*—filtering and weighting existing records—to *creation*, generating novel inputs, domain perturbations, or supervisory targets to satisfy statistical coverage constraints.
+
+### Data augmentation: Transformation-based synthesis {#sec-data-selection-data-augmentation-transformationbased-synthesis-3aa7}
+
+Data augmentation\index{Data augmentation!definition} is the lowest-overhead form of synthetic generation: it expands the effective training distribution by transforming existing samples dynamically during ingestion. Because label-preserving transformations generate novel inputs without expanding durable storage, augmentation multiplies dataset diversity with zero additional data acquisition cost. In an accelerator-based training pipeline, however, augmentation shifts the computational bottleneck between the host CPU and the accelerator. When executed on host CPU worker threads, intensive decoding and spatial transformations can saturate host cores, starving the accelerator across the PCIe bus. Offloading transformations directly to accelerator kernels can relieve CPU preprocessing pressure, while inputs still cross the host-to-device link. It consumes HBM and compute cycles that would otherwise perform gradient updates.
+
+For image data, transformation pipelines encode task-valid invariances required at deployment [@shorten2019]. Geometric operations (rotation, horizontal flipping, random cropping, and scaling) encourage viewpoint invariance when they preserve the target label, while photometric adjustments (brightness, contrast, and color jitter) simulate sensor noise and varying illumination. More aggressive strategies alter input topology directly: Cutout\index{Cutout!image augmentation}[^fn-cutout-data-augmentation] applies random rectangular zero-masks to prevent reliance on localized features; MixUp\index{MixUp!image augmentation} [@zhang2018mixup] constructs virtual samples by taking linear combinations of image pairs and their one-hot labels ($\tilde{x} = \lambda_{\text{mix}} x_i + (1 - \lambda_{\text{mix}}) x_j$, with mixing weight $\lambda_{\text{mix}} \in [0, 1]$); and CutMix\index{CutMix!image augmentation}[^fn-cutmix-data-augmentation] pastes rectangular patches from one image into another while blending labels proportionally to the patch area. Because CutMix and MixUp operate via tensor linear combinations and block memory copies directly in device memory, they provide strong data-space regularization with negligible FLOP overhead.
+
+[^fn-cutout-data-augmentation]: **Cutout**\index{Cutout!augmentation efficiency}: Randomly masks square regions of input images during training, forcing the model to recognize objects from partial information rather than relying on any single discriminative region [@devries2017cutout]. Unlike dropout (which zeroes neurons in feature space), Cutout operates in input space. The original Cutout experiments produced 0.3--2.0 percentage-point gains across CIFAR-10/100 and SVHN with negligible compute overhead, making it a high-ICR augmentation technique when occlusion-style invariance matches the task: more information per sample at near-zero additional cost to the pipeline.
+
+[^fn-cutmix-data-augmentation]: **CutMix**\index{CutMix!label mixing}: Replaces Cutout's zeroed-out region with a patch from a different training image, mixing labels proportionally to patch area (30 percent of image A replaced by image B yields a 70/30 label split) [@yun2019cutmix]. This addresses Cutout's weakness: zeroed regions waste pixel information that could carry learning signal. The CutMix paper reports ImageNet top-1 improvements of 2.28 percentage points for ResNet-50 and 1.70 percentage points for ResNet-101, while also improving localization behavior. The method provides stronger regularization than either Cutout or MixUp alone with little additional data-pipeline cost.
+
+Text augmentation presents different constraints because discrete token vocabularies lack smooth geometric manifolds. Back-translation\index{Back-translation!text augmentation}[^fn-back-translation-nlp] provides semantic paraphrasing for sequence-to-sequence tasks by routing target-language monolingual corpora through an intermediate model to generate synthetic source pairings. Simpler heuristic transforms—such as synonym substitution via WordNet, random token insertion, or deletion—introduce local perturbations, but risk corrupting semantic labels if applied without task-specific validation.
+
+[^fn-back-translation-nlp]: **Back-translation**\index{Back-translation!pipeline latency}: In the method described by @sennrich2016backtranslation, target-language monolingual text is translated into the source language, and the synthetic source is paired with the unchanged target for machine-translation training. The systems trade-off is latency because each synthetic source requires translation-model inference. Pipelines can precompute these examples offline rather than generating them in the data loader.
+
+Rather than hand-tuning transformation schedules, automated policy searches optimize augmentation combinations directly. AutoAugment[^fn-autoaugment-policy-search] uses reinforcement learning across discrete operation spaces, but incurs extreme compute overhead. RandAugment[^fn-randaugment-simple-search] eliminates this search cost by parameterizing the policy with just two values: the number of transformations applied to each image and a single global distortion magnitude.
+
+[^fn-autoaugment-policy-search]: **AutoAugment**\index{AutoAugment!search cost}: Treats augmentation policy design as a reinforcement learning search problem: a controller selects operations (rotate, translate, shear, equalize), their magnitudes, and application probabilities to maximize validation accuracy [@cubuk2019]. The original ImageNet search used approximately 15,000 GPU-hours, motivating later methods that reduce the search space.
+
+[^fn-randaugment-simple-search]: **RandAugment**\index{RandAugment!hyperparameter simplicity}: Collapses AutoAugment's policy search to two hyperparameters, a transformation count and a shared magnitude [@cubuk2020]. That small search space matches or exceeds AutoAugment on the reported benchmarks at far lower search cost, making it practical when 15,000 GPU-hours of policy search cannot be justified.
+
+::: {#lhs-data-selection-mobilenet-aggressive-augmentation .callout-lighthouse title="MobileNetV2 and augmentation strength"}
+
+The MobileNetV2 lighthouse model exemplifies how data augmentation complements a resource-constrained architecture. Its depthwise separable convolutions replace standard spatial convolutions with depthwise spatial filters followed by $1 \times 1$ pointwise projections, substantially reducing parameter count and arithmetic intensity.
+
+Compact architectures have limited capacity, so they typically benefit from milder augmentation than large models; excessive distortion can exceed what a compact network can fit and cause underfitting on the underlying task distribution. Augmentation strength is therefore a capacity-matched hyperparameter, and RandAugment's single magnitude knob makes it cheap to tune per model size. Whatever strength is chosen, augmentation adds nothing to inference parameter memory or latency.
+
+:::
+
+### Generative synthesis: Creating new samples {#sec-data-selection-generative-synthesis-creating-new-samples-a43d}
+
+Augmentation perturbs existing training points within their local neighborhoods. Generative synthesis constructs entirely new coordinate tuples $(x, y)$ by sampling from parametric generative models or physical simulation engines. The systems trade-off across generative paradigms spans a cost-fidelity spectrum:
+
+1. Generative Adversarial Networks (GANs)\index{GAN!synthetic data generation} train a generator against a discriminator. Once trained, feed-forward generator inference requires a single forward pass, providing low latency and high sample throughput. However, GAN training is vulnerable to mode collapse, which suppresses the tail variety required for robust edge-case coverage.
+2. Diffusion models\index{Diffusion model!text-to-image synthesis} formulate synthesis as iterative denoising across a parameterized Markov chain or continuous score-based process. Latent diffusion systems such as Stable Diffusion[^fn-stable-diffusion-synthesis] enable precise semantic conditioning from text prompts while operating in a compressed latent space. A sampling recipe with 20 to 50 sequential denoising steps runs the backbone repeatedly for each generated batch. Its arithmetic and memory traffic can make offline generation preferable; whether on-the-fly generation is feasible depends on the sampler, generator, and available resources.
+3. Physical simulation engines (such as CARLA for autonomous driving or Isaac Sim and Unity for robotics) decouple data generation from neural inference entirely, executing rigid-body physics, kinematics, and graphics rendering pipelines. Simulators produce exact ground-truth annotations (including 3D bounding boxes, depth maps, and velocity vectors) from internal state without human labeling cost. The systems bottleneck shifts to host CPU physics computation and GPU graphics rasterization or ray tracing throughput.
+
+[^fn-stable-diffusion-synthesis]: **Stable Diffusion**\index{Stable Diffusion!generation cost}: Performs iterative denoising in a compressed latent space, enabling targeted text-to-image examples [@rombach2022]. Its iterative generation is substantially more compute-intensive than geometric transforms, so it fits cases where novelty matters more than per-sample throughput.
+
+Regardless of the generative engine, synthetic samples inevitably diverge from the statistical distributions of real deployment environments. This divergence defines the domain gap.
+
+### Bridging the domain gap {#sec-data-selection-bridging-domain-gap-100b}
+
+The domain gap\index{Domain gap!training-serving skew}[^fn-domain-gap-shift] represents the statistical divergence between synthetic training distributions and production deployment data. When models optimize purely on synthetic distributions, they can learn simulator or generator artifacts that fail to transfer. The schematic in @fig-domain-gap sketches shifted feature densities and possible boundary misalignment. The marginal densities alone do not determine either decision boundary; class-conditional structure and real-data evaluation are needed to establish how the shift affects classification.
+
+::: {#fig-domain-gap fig-env="figure" fig-pos="htb" fig-cap="**The Domain Gap Problem**: Synthetic data (blue) and real data (orange) occupy shifted feature distributions. The dashed red synthetic boundary and dotted green real-data boundary illustrate possible misalignment; marginal feature densities alone do not determine class boundaries." fig-alt="Density plot over feature space with an overlapping blue synthetic distribution centered near zero and orange real distribution centered near three. A dashed red vertical line near 1.5 is labeled Synthetic boundary, a dotted green vertical line appears at three, and a purple double-headed arrow labeled Domain Gap spans the two distribution centers."}
+
+```{.tikz}
+\begin{tikzpicture}[font=\small\sffamily]
+\begin{axis}[
+    width=11cm, height=50mm,
+    xlabel={Feature Space},
+    ylabel={Density},
+    xmin=-3, xmax=7.25,
+    ymin=0, ymax=0.7,
+    axis lines=left,
+    axis line style={thick,-latex},
+    axis on top,
+    xtick=\empty,
+    ytick=\empty,
+    ylabel style={font=\footnotesize\sffamily},
+    xlabel style={font=\footnotesize\sffamily},
+   % legend style={at={(0.98,0.98)}, anchor=north east, font=\footnotesize\sffamily, draw=none},
+legend style={at={(0.85,0.92)}, anchor=north},
+  legend cell align=left,
+  legend style={fill=BrownL!30,draw=BrownLine,row sep=1.15pt,
+  font=\fontsize{7pt}{7}\selectfont\sffamily},
+    clip=false
+]
+    % Synthetic data distribution (centered at 0)
+    \addplot[line width=1.25pt, blue, domain=-3:4, samples=100, fill=blue!20, fill opacity=0.5]
+        {0.4*exp(-0.5*(x)^2)};
+    \addlegendentry{Synthetic}
+
+    % Real data distribution (centered at 3, slightly different shape)
+    \addplot[line width=1.25pt, orange, domain=0:7, samples=100, fill=orange!20, fill opacity=0.5]
+        {0.35*exp(-0.4*(x-3)^2)};
+    \addlegendentry{Real}
+
+    % Decision boundary learned from synthetic
+    \draw[thick, dashed, red] (axis cs: 1.5, 0) -- (axis cs: 1.5, 0.6)
+    node[red, font=\footnotesize\sffamily, fill=white,above=0pt,inner sep=1pt] {Synthetic boundary};
+
+    % Ideal boundary for real data
+    \draw[thick, dotted, green!60!black] (axis cs: 3, 0) -- (axis cs: 3, 0.50);
+ %   \draw[thick, dotted, green!60!black] (axis cs: 0, 0) -- (axis cs: 0, 0.50);
+
+    % Domain gap annotation
+    \draw[latex-latex, thick, purple] (axis cs: 0, 0.48) --
+    node[purple, font=\footnotesize\sffamily, fill=white, inner sep=1pt]{Domain Gap} (axis cs: 3, 0.48);
+
+\end{axis}
+\end{tikzpicture}
+```
+
+:::
+
+[^fn-domain-gap-shift]: **Domain gap**\index{Domain gap!training-serving skew}: The statistical divergence between synthetic and real data distributions, measurable with metrics such as maximum mean discrepancy (MMD) or Frechet Inception Distance (FID). For ML systems, the gap becomes training-serving skew: a simulator-trained model can validate well on synthetic data while failing silently on real deployment data.
+
+Two complementary strategies address this distribution mismatch. Domain randomization\index{Domain randomization!bridging synthetic-real gap}[^fn-domain-randomization-sim] takes an aggressive approach: rather than trying to match the real world precisely, it trains on varied synthetic data by randomizing lighting, textures, backgrounds, and camera parameters during generation.
+
+[^fn-domain-randomization-sim]: **Domain randomization**\index{Domain randomization!rendering trade-off}: Makes synthetic data deliberately varied by randomizing textures, colors, lighting, and physical properties. The goal is not photorealism; it is enough variation to improve coverage of deployment conditions, shifting the cost bottleneck from rendering fidelity to coverage.
+
+The aim is to make deployment conditions fall within the variation seen during training, but coverage is never guaranteed by randomization alone. The method can be effective in robotics and autonomous-driving settings when the simulator spans the relevant physical and visual factors and the result is validated on real data.
+
+Domain adaptation\index{Domain adaptation!feature alignment} takes the opposite approach by explicitly aligning synthetic and real distributions. Feature alignment methods train on synthetic data while simultaneously minimizing the distance between synthetic and real feature distributions, often using adversarial training to learn domain-invariant representations. Fine-tuning offers a simpler path: pretrain on abundant synthetic data to learn general features, then fine-tune on a small real dataset to adapt to deployment conditions. Self-training combines these ideas by using a synthetic-trained model to pseudo-label real unlabeled data, then retraining on the combined labeled set.
+
+In practice, mixing synthetic and real data provides a real-data anchor while retaining some synthetic coverage. Moving the mix from all-synthetic toward all-real trades a larger domain gap for a higher collection cost, and the best ratio depends on the domain, simulator fidelity, model family, and validation protocol rather than on any universal recipe.
+
+```{python}
+#| echo: false
+#| label: kws-data-selection-calc
+
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ KWS DATA SELECTION ECONOMICS
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: "KWS data selection" callout-example in the synthetic-data section
+# │          immediately below this cell.
+# │
+# │ Goal:    Anchor the seed/augmentation/noise-injection sample counts and the
+# │          recording cost for the Keyword Spotting Lighthouse data pipeline.
+# │ Show:    Seed sample count, augmented total, target sample count, full
+# │          recording cost range, and seed fraction of the target.
+# │ How:     Multiply speakers by utterances and augmentation factor; multiply
+# │          target samples by the per-sample recording cost range.
+# │
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim.fmt import check, fmt, fmt_percent, fmt_rate, fmt_text, fmt_usd_range
+
+class KwsDataSelectionCalc:
+    # LOAD
+    speakers = 50
+    utterances_per_speaker = 10
+    augmentation_multiplier = 10
+    target_samples = 10_000
+    cost_per_sample_low = 2
+    cost_per_sample_high = 5
+
+    # EXECUTE
+    seed_samples = speakers * utterances_per_speaker
+    augmented_samples = seed_samples * augmentation_multiplier
+    full_cost_low = target_samples * cost_per_sample_low
+    full_cost_high = target_samples * cost_per_sample_high
+    seed_cost_pct = seed_samples / target_samples * 100
+
+    # GUARD
+    check(seed_samples == 500, "Seed recording count should remain 50 speakers × 10 utterances.")
+    check(seed_cost_pct <= 5, "Seed recording should stay near 5% of full recording cost.")
+
+    # OUTPUT
+    speakers_str = fmt(speakers, precision=0, commas=False)
+    utterances_per_speaker_str = fmt_rate(utterances_per_speaker, "utterances/speaker", precision=0, commas=False)
+    seed_samples_str = fmt(seed_samples, precision=0, commas=True)
+    augmented_samples_str = fmt(augmented_samples, precision=0, commas=True)
+    target_samples_str = fmt(target_samples, precision=0, commas=True)
+    target_samples_plus_str = fmt_text(target_samples_str, "+")
+    full_cost_range_str = fmt_usd_range(
+        full_cost_low,
+        full_cost_high,
+        scale="K",
+        precision=0,
+        commas=False,
+        repeat_symbol=False,
+    )
+    cost_per_sample_range_str = fmt_usd_range(
+        cost_per_sample_low,
+        cost_per_sample_high,
+        precision=0,
+        commas=False,
+        repeat_symbol=False,
+        per="sample",
+    )
+    augmentation_mult_str = fmt_multiple(round(augmentation_multiplier), precision=0, commas=False)
+    seed_cost_pct_str = fmt_percent(seed_cost_pct / 100, precision=0, commas=False, style='prose')
+```
+
+::: {#exmp-data-selection-kws-data-selection .callout-example title="KWS data selection"}
+
+**Scenario**: An embedded keyword spotting (KWS) system targets deployment on a 256 KB SRAM microcontroller with a `{python} KwsDataSelectionCalc.target_samples_plus_str` audio sample requirement.
+
+**Diagnosis**: Manually recording `{python} KwsDataSelectionCalc.target_samples_str` real utterances across diverse speakers and acoustic environments costs `{python} KwsDataSelectionCalc.full_cost_range_str`. Staging a 5-tier pipeline (seed recordings $\to$ augmentation $\to$ noise injection $\to$ hard-negative mining $\to$ text-to-speech simulation) builds dataset scale from `{python} KwsDataSelectionCalc.seed_samples_str` seed samples.
+
+**Systems lesson**: Layered data strategies can lower acquisition costs for resource-constrained edge ML deployments. In this scenario, augmentation and noise injection reduce physical collection cost to `{python} KwsDataSelectionCalc.seed_cost_pct_str` of the full-recording estimate; target accuracy and acoustic coverage still require validation.
+
+:::
+
+The keyword-spotting scenario shows how augmentation, noise injection, and simulation can expand a small seed set, but the same creation strategy becomes riskier when samples come from learned generators. In recursive training, *model collapse*\index{Model collapse!recursive synthetic training}[^fn-model-collapse-mechanism] can amplify errors and reduce diversity over generations. Synthetic data therefore requires provenance, mixture controls, and validation against real deployment data rather than an unverified assumption that more generated samples help.
+
+[^fn-model-collapse-mechanism]: **Model collapse**\index{Model collapse!tail distribution compression}: Formally analyzed by @shumailov2024, this phenomenon can arise when errors and missing tail coverage compound during recursive training. Tail distributions contain rare but important patterns that appear infrequently in training data. When generation $n+1$ trains on output from generation $n$ under these conditions, successive generations can further compress the tails, producing increasingly homogeneous data. The degradation can be rapid in recursive training settings, which is why training on unanchored synthetic outputs risks catastrophic collapse of tail diversity.
+
+Together, transformation-based augmentation (@sec-data-selection-data-augmentation-transformationbased-synthesis-3aa7) and generative synthesis (@sec-data-selection-generative-synthesis-creating-new-samples-a43d) provide complementary ways to generate training signals. Where static filtering eliminates redundant input samples and dynamic selection optimizes sample ordering during training, synthetic generation manufactures missing signals when empirical collection hits physical, legal, or economic constraints. Orchestrating these techniques across the data, algorithm, and machine dimensions requires balancing data storage footprint, pipeline preprocessing throughput, and accelerator utilization within a unified systems budget.
+
 ## Cost Modeling {#sec-data-selection-cost-modeling-9b02}
 
 Allocating capital between human annotation and accelerator compute is a primary systems decision in large-scale machine learning. A team operating under a fixed engineering budget must determine whether purchasing 100,000 specialist annotations or leasing an additional 64-GPU cluster yields greater downstream accuracy. Systematic cost modeling\index{Cost modeling!data selection economics} establishes the quantitative framework required to navigate these trade-offs, calculating break-even points for active learning pipelines and determining how many training runs are required to amortize custom data curation tooling.
@@ -4001,8 +3997,6 @@ Once the dominant constraint is named, @tbl-technique-selection compares which t
 ```
 
 :::
-
-### Decision process {.unnumbered}
 
 Each path requires a structured assessment because the same dataset symptom can point to different bottlenecks. Technique selection begins by naming the binding constraint, then checks whether the data, labels, and infrastructure needed by the chosen method exist.
 

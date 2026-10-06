@@ -1569,6 +1569,26 @@ These controls prepare an artifact for release, but deployment must still establ
 ## Deployment and Serving {#sec-ml-operations-production-operations-b76d}
 
 A model that passes every offline gate has still not made a single production decision. Between the validated checkpoint and the first user-facing prediction lie packaging, conversion to a serving runtime, staged exposure to live traffic, and a path back if the new version misbehaves, and at each step the artifact users see can drift from the artifact that was evaluated. Deployment transforms a static checkpoint into a versioned, reproducible execution artifact; serving allocates accelerator memory, stages input batches, and schedules compute kernels to satisfy latency SLOs under dynamic request loads. Operations owns the seams between the two: proving that what ships is what was validated, limiting how much traffic a bad version can reach, and keeping rollback fast enough to use.
+### Infrastructure as code {#sec-ml-operations-infrastructure-management-bf8f}
+
+Three failures illustrate the problem. A model works in staging but fails in production because someone manually provisioned a different GPU type. A training job crashes because a colleague's experiment consumed all available memory. An inference service cannot scale because its resource quotas were set through an informal message six months earlier. These failures share a root cause: infrastructure managed through manual processes rather than code.
+
+Scalable, resilient infrastructure is foundational for operationalizing ML systems, and **infrastructure as code (IaC)**\index{Infrastructure as code!ML systems} is the practice that makes it reliable. IaC treats infrastructure configuration as software (version-controlled, reviewed, tested, and automatically executed) rather than manually configured through graphical interfaces or command-line tools. This approach brings software engineering discipline to resource management: changes are tracked, configurations can be tested before deployment, and environments can be reliably reproduced.
+
+The specific infrastructure tool matters less than the contract it enforces. Terraform\index{Terraform!infrastructure as code} [@terraform], AWS CloudFormation [@aws_cloudformation], and Ansible [@hatcher2024] represent common ways to version infrastructure definitions alongside application code. In MLOps settings, that versioned definition is what lets a team reproduce the GPU type, network policy, storage permissions, and scaling limits used by a training or serving environment across AWS [@aws], Google Cloud Platform [@google_cloud], Microsoft Azure [@azure], or on-premises infrastructure.
+
+Infrastructure management spans the full ML lifecycle. During training, IaC scripts allocate compute instances with GPU or TPU accelerators, configure distributed storage, and deploy container clusters. Because infrastructure definitions are stored as code, they can be audited, reused, and integrated into CI/CD pipelines ensuring consistency across environments.
+
+Containerization\index{Containerization!ML deployment} provides the same reproducibility boundary for runtime dependencies. Docker [@docker] packages the model, libraries, and serving code into an isolated unit, while orchestration systems such as Kubernetes\index{Kubernetes!ML orchestration} [@kubernetes_orchestration] manage those units across clusters. The operational value is not the container name; it is the ability to deploy the same artifact repeatedly while resource allocation, scaling, and health management remain explicit.
+
+To handle changes in workload intensity, including spikes during hyperparameter tuning and surges in prediction traffic, teams rely on cloud elasticity and autoscaling\index{Autoscaling!ML workloads}.[^fn-autoscaling-ml-workloads] Cloud platforms support on-demand provisioning and horizontal scaling of infrastructure resources. Autoscaling mechanisms [@aws_autoscaling] automatically adjust compute capacity based on usage metrics, enabling teams to optimize for both performance and cost-efficiency.
+
+[^fn-autoscaling-ml-workloads]: **ML autoscaling**\index{Autoscaling!ML cold-start trade-off}: Autoscaling adjusts capacity based on demand signals [@aws_autoscaling], but ML serving adds constraints absent from stateless web services. Autoscaling decisions must account for model loading time (cold-start overhead), GPU memory fragmentation, and batching behavior in addition to CPU utilization. Scaling up too slowly violates latency SLOs; scaling down too aggressively forces repeated cold starts that degrade p99 latency.
+
+Infrastructure in MLOps is not limited to the cloud. Many deployments span on-premises, cloud, and edge environments, depending on latency, privacy, or regulatory constraints. A robust infrastructure management strategy must accommodate this diversity by offering flexible deployment targets and consistent configuration management across environments.
+
+Infrastructure as code addresses how to provision resources reproducibly, but operators must still decide when and how much capacity to allocate. ML workloads break the assumptions of conventional web provisioning. Training jobs demand high-concurrency bursts across distributed accelerator topologies, creating friction between cluster utilization efficiency and time-to-solution. Inference services require sustained baseline allocations with rapid elastic scale-out to absorb request spikes under strict tail-latency SLOs.
+
 
 ### Validating the serving artifact {#sec-ml-operations-model-format-optimization-c9d6}
 
@@ -1811,31 +1831,110 @@ Getting models into production is only half the operational challenge. A success
 
 *A deployed model needs continuing evidence of quality.* Conventional software and ML services can both suffer silent semantic failures; ML adds dependence on the relationship between current data and learned parameters. As live inputs change (the system entropy of @sec-ml-systems-system-entropy-9c4e), predictive quality may decline even while HTTP response codes and tail latency (p99) remain healthy. Monitoring is where the third critical interface, production-monitoring, makes that risk observable. Pairing staged rollout with input and outcome monitoring helps teams investigate failing versions and limit their impact, subject to the time needed to collect evidence and act.
 
-### Resource management and monitoring {#sec-ml-operations-resource-management-performance-monitoring-afe7}
+### Infrastructure telemetry and hardware utilization {#sec-ml-operations-infra-telemetry}
 
-Deployment and serving get models into production. Keeping them healthy requires two complementary disciplines: resource management (provisioning and scaling compute, storage, and networking) and monitoring (observing system behavior and detecting degradation before users notice).
+Distribution divergence can accompany accuracy decay, but determining degradation's direction and magnitude requires ground-truth labels that often arrive with substantial delay. In production, serving failures span two fundamentally different physical regimes: immediate hardware execution bottlenecks and gradual distributional drift. Disentangling them requires two distinct telemetry layers: infrastructure metrics that reveal whether the serving system itself is compute-, memory-, or I/O-bound, and distribution and outcome metrics that connect data movement to model performance.
 
-#### Infrastructure management {#sec-ml-operations-infrastructure-management-bf8f}
+The first layer is infrastructure-level monitoring, which tracks indicators such as CPU and GPU utilization, memory bandwidth, disk consumption, network latency, and service availability. Measuring GPU utilization alone is incomplete; an accelerator reporting high execution time may still be stalled waiting for DRAM or PCIe transfers, while low utilization often signals host-side preprocessing bottlenecks. Correlating kernel execution times with memory bandwidth utilization and input pipeline queue depths distinguishes compute-, memory-, and I/O-bound behavior.
 
-Three failures illustrate the problem. A model works in staging but fails in production because someone manually provisioned a different GPU type. A training job crashes because a colleague's experiment consumed all available memory. An inference service cannot scale because its resource quotas were set through an informal message six months earlier. These failures share a root cause: infrastructure managed through manual processes rather than code.
+Power-efficiency metrics (such as inferences per joule or FLOP/s/W, depending on workload) add a cost-normalized view that enables mixed-workload scheduling. Thermal monitoring similarly informs operational scheduling, particularly under sustained high load where thermal throttling forces hardware clocks down, introducing tail-latency spikes that violate SLOs. An MLOps telemetry pipeline incorporates thermal headroom metrics to steer traffic across available accelerators before throttling occurs. Time-series engines such as Prometheus[^fn-prometheus-mlops-monitoring] [@prometheus], Grafana [@grafana], and Elastic [@elastic] collect and visualize these operational metrics across the serving fleet.
 
-Scalable, resilient infrastructure is foundational for operationalizing ML systems, and **infrastructure as code (IaC)**\index{Infrastructure as code!ML systems} is the practice that makes it reliable. IaC treats infrastructure configuration as software (version-controlled, reviewed, tested, and automatically executed) rather than manually configured through graphical interfaces or command-line tools. This approach brings software engineering discipline to resource management: changes are tracked, configurations can be tested before deployment, and environments can be reliably reproduced.
+[^fn-prometheus-mlops-monitoring]: **Prometheus**\index{Prometheus!monitoring trade-off}: Prometheus periodically scrapes targets and stores time series for aggregation. Scrape and rule-evaluation intervals jointly affect alert latency and may miss short excursions. Monitoring per-accelerator thermals allows precise workload routing at higher data cost, while server-level aggregates can mask component-level throttling.
 
-The specific infrastructure tool matters less than the contract it enforces. Terraform\index{Terraform!infrastructure as code} [@terraform], AWS CloudFormation [@aws_cloudformation], and Ansible [@hatcher2024] represent common ways to version infrastructure definitions alongside application code. In MLOps settings, that versioned definition is what lets a team reproduce the GPU type, network policy, storage permissions, and scaling limits used by a training or serving environment across AWS [@aws], Google Cloud Platform [@google_cloud], Microsoft Azure [@azure], or on-premises infrastructure.
+Collecting these signals at production scale introduces severe network and storage constraints: capturing uncompressed telemetry per request can saturate the very networking fabric serving the model. These overheads force a deliberate trade-off between monitoring granularity and infrastructure operating expense.
 
-Infrastructure management spans the full ML lifecycle. During training, IaC scripts allocate compute instances with GPU or TPU accelerators, configure distributed storage, and deploy container clusters. Because infrastructure definitions are stored as code, they can be audited, reused, and integrated into CI/CD pipelines ensuring consistency across environments.
+```{python}
+#| echo: false
+#| label: observability-sampling-calc
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ OBSERVABILITY SAMPLING COST
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: Callout "The economics of observability" and
+# │          @tbl-observability-sampling-cost contrasting trace policies.
+# │
+# │ Goal:    Quantify the data-volume swing between high- and low-frequency
+# │          telemetry sampling at 1M requests per second.
+# │ Show:    1 GB/s full fidelity vs. 16.7 MB/s at one trace in 60.
+# │ How:     Apply the trace-sampling fraction; intervals only batch records.
+# │
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim.fmt import fmt, check, fmt_bandwidth, fmt_memory, fmt_percent, fmt_time, fmt_rate
 
-Containerization\index{Containerization!ML deployment} provides the same reproducibility boundary for runtime dependencies. Docker [@docker] packages the model, libraries, and serving code into an isolated unit, while orchestration systems such as Kubernetes\index{Kubernetes!ML orchestration} [@kubernetes_orchestration] manage those units across clusters. The operational value is not the container name; it is the ability to deploy the same artifact repeatedly while resource allocation, scaling, and health management remain explicit.
+# ┌── LEGO ───────────────────────────────────────────────
+class ObservabilitySampling:
+    """Average ingest volume for high- and low-frequency request sampling."""
 
-To handle changes in workload intensity, including spikes during hyperparameter tuning and surges in prediction traffic, teams rely on cloud elasticity and autoscaling\index{Autoscaling!ML workloads}.[^fn-autoscaling-ml-workloads] Cloud platforms support on-demand provisioning and horizontal scaling of infrastructure resources. Autoscaling mechanisms [@aws_autoscaling] automatically adjust compute capacity based on usage metrics, enabling teams to optimize for both performance and cost-efficiency.
+    # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
+    requests_per_second = MILLION / second
+    telemetry_per_request = 1 * KB  # scenario assumption
+    high_frequency_seconds = 1 * second  # batching interval, not a volume divisor
+    low_frequency_seconds = 60 * second  # batching interval, not a volume divisor
+    low_sample_fraction = 1 / 60  # retain one in every 60 request traces
+    success_sample_fraction = 0.01
+    error_sample_fraction = 1.0
 
-[^fn-autoscaling-ml-workloads]: **ML autoscaling**\index{Autoscaling!ML cold-start trade-off}: Autoscaling adjusts capacity based on demand signals [@aws_autoscaling], but ML serving adds constraints absent from stateless web services. Autoscaling decisions must account for model loading time (cold-start overhead), GPU memory fragmentation, and batching behavior in addition to CPU utilization. Scaling up too slowly violates latency SLOs; scaling down too aggressively forces repeated cold starts that degrade p99 latency.
+    # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
+    high_bytes_per_second = requests_per_second * telemetry_per_request
+    low_bytes_per_second = high_bytes_per_second * low_sample_fraction
+    sampling_ratio = (high_bytes_per_second / low_bytes_per_second).to("").magnitude
 
-Infrastructure in MLOps is not limited to the cloud. Many deployments span on-premises, cloud, and edge environments, depending on latency, privacy, or regulatory constraints. A robust infrastructure management strategy must accommodate this diversity by offering flexible deployment targets and consistent configuration management across environments.
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(
+        round(high_bytes_per_second.to(GB / second).magnitude, 1) == 1.0,
+        f"Expected ~1 GB/s, got {high_bytes_per_second.to(GB/second).magnitude:.2f} GB/s.",
+    )
+    check(
+        round(low_bytes_per_second.to(MB / second).magnitude, 1) == 16.7,
+        f"Expected ~16.7 MB/s, got {low_bytes_per_second.to(MB/second).magnitude:.2f} MB/s.",
+    )
+    check(round(sampling_ratio) == 60, f"Expected 60x sampling ratio, got {sampling_ratio:.1f}x.")
 
-Infrastructure as code addresses how to provision resources reproducibly, but operators must still decide when and how much capacity to allocate. ML workloads break the assumptions of conventional web provisioning. Training jobs demand high-concurrency bursts across distributed accelerator topologies, creating friction between cluster utilization efficiency and time-to-solution. Inference services require sustained baseline allocations with rapid elastic scale-out to absorb request spikes under strict tail-latency SLOs.
+    # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
+    request_rate_m_req_per_s_str = fmt_rate(round(requests_per_second.to(1 / second).magnitude), "req/s", scale="M", precision=0, commas=False)
+    high_seconds_str = fmt_time(high_frequency_seconds, second, precision=0, commas=False)
+    low_seconds_str = fmt_time(low_frequency_seconds, second, precision=0, commas=False)
+    high_gb_per_s_str = fmt_bandwidth(high_bytes_per_second, unit=GB / second, precision=0, commas=False)
+    low_mb_per_s_str = fmt_bandwidth(low_bytes_per_second, unit=MB / second, precision=1, commas=False)
+    sampling_ratio_str = fmt_int(round(sampling_ratio), commas=False)
+    sampling_ratio_mult_str = fmt_multiple(round(sampling_ratio), precision=0, commas=False)
+    telemetry_kb_str = fmt_memory(telemetry_per_request, unit=KB, precision=0, commas=False)
+    success_sample_pct_str = fmt_percent(success_sample_fraction, precision=0, commas=False, style='prose')
+    error_sample_pct_str = fmt_percent(error_sample_fraction, precision=0, commas=False, style='prose')
+```
 
-##### Hardware utilization patterns {#sec-ml-operations-hardware-utilization-patterns-5c10}
+::: {#nbk-ml-ops-economics-observability .callout-notebook title="The economics of observability"}
+
+**Trade-off**: "Measure everything" is economically infeasible at scale. Let $N_{\text{series}}$ be the expanded series count, $f_{\text{sample}}$ the sampling frequency per series, $\SampleStorageSize$ the bytes per sample, and $T_{\text{retention}}$ the retention duration; $C_{\text{ingest/sample}}$ and $C_{\text{storage/byte-time}}$ are provider-specific ingestion and storage prices. @Eq-observability-cost combines these terms into an operating cost rate:
+$$ \text{Cost rate} \approx N_{\text{series}} f_{\text{sample}} \left(C_{\text{ingest/sample}} + \SampleStorageSize T_{\text{retention}} C_{\text{storage/byte-time}}\right) $$ {#eq-observability-cost}
+
+The product is an operating cost rate, not a one-time setup cost.
+
+Both data volumes follow from the same two-step arithmetic. At full fidelity, every request's telemetry enters the stream: `{python} ObservabilitySampling.request_rate_m_req_per_s_str` $\times$ `{python} ObservabilitySampling.telemetry_kb_str` per request = `{python} ObservabilitySampling.high_gb_per_s_str`. Retaining one in `{python} ObservabilitySampling.sampling_ratio_str` request traces reduces average ingest to `{python} ObservabilitySampling.low_mb_per_s_str`; batching sampled traces every `{python} ObservabilitySampling.low_seconds_str` changes delivery timing, not the average byte rate. @Tbl-observability-sampling-cost places the two regimes side by side with their cost impact.
+
+| **Sampling**                                                        | **Granularity** | **Data Volume (`{python} ObservabilitySampling.request_rate_m_req_per_s_str`)** | **Cost Impact**                   |
+|:--------------------------------------------------------------------|:----------------|:-------------------------------------------------------------------------------:|:----------------------------------|
+| **All traces**                                                      | Micro-bursts    |               ~`{python} ObservabilitySampling.high_gb_per_s_str`               | High (Requires dedicated cluster) |
+| **1-in-`{python} ObservabilitySampling.sampling_ratio_str` traces** | Trends          |                ~`{python} ObservabilitySampling.low_mb_per_s_str`               | Lower (Policy-dependent)          |
+
+: **Trace Sampling vs. Observability Cost**: Retaining one in `{python} ObservabilitySampling.sampling_ratio_str` request traces yields a `{python} ObservabilitySampling.sampling_ratio_mult_str` data-volume difference at `{python} ObservabilitySampling.request_rate_m_req_per_s_str`, assuming `{python} ObservabilitySampling.telemetry_kb_str` per request. Batch intervals do not cause the reduction. {#tbl-observability-sampling-cost tbl-colwidths="[14,24,28,34]"}
+
+**Systems insight**: Retain `{python} ObservabilitySampling.success_sample_pct_str` of successful requests and `{python} ObservabilitySampling.error_sample_pct_str` of errors. Monitor aggregate counters every `{python} ObservabilitySampling.high_seconds_str` and high-cardinality sketches every `{python} ObservabilitySampling.low_seconds_str`; @sec-ml-operations-data-quality-monitoring-c6b6 shows how to budget the infrastructure.
+
+:::
+
+Alerting mechanisms convert these operational signals into proactive intervention before silent degradation propagates downstream. A sustained drop in model accuracy triggers drift investigation; infrastructure alerts signal memory saturation, thermal throttling, or degraded network throughput. The latency of these alerts governs the window of undetected failure. Alerts must record the model version, affected input subpopulation, and triggering aggregation window so responders can isolate and reproduce the failure state.
+
+::: {#exmp-ml-ops-recommender-monitoring-at-scale .callout-example title="Recommendation monitoring at scale"}
+
+**Scenario**: Consider a high-throughput streaming recommendation service whose latency remained within its SLO while recommendation quality declined as user behavior changed.
+
+**Diagnosis**: Traditional infrastructure metrics (CPU utilization, HTTP error rates) remained green while model CTR dropped because global metrics masked localized subpopulation degradation.
+
+**Systems lesson**: Infrastructure telemetry alone cannot detect statistical model failure. High-throughput recommendation systems require cohort-level subpopulation tracking and counterfactual evaluation to detect localized accuracy drift.
+
+:::
+
+#### Hardware utilization patterns {#sec-ml-operations-hardware-utilization-patterns-5c10}
 
 Provisioning accelerator resources is only the first half of the problem; using them efficiently requires interpreting hardware metrics correctly rather than taking them at face value. Standard administrative GPU utilization metrics\index{GPU!utilization monitoring} can mislead operators because reported percentages measure time with a kernel executing rather than the fraction of peak arithmetic throughput achieved.
 
@@ -1895,7 +1994,7 @@ For large language model (LLM)\index{LLM!KV-cache serving} serving, the KV cache
 
 Utilization and memory telemetry also feed the number the business sees. Cost per inference\index{Cost per inference!operational tracking}, the hourly accelerator bill divided by sustained throughput, is defined and worked out in @sec-model-serving-cost-per-inference-27fc; operationally it belongs on the same dashboard as the utilization signatures in @tbl-gpu-utilization-patterns, because a rising cost per thousand inferences at constant pricing is often the first visible symptom of efficiency erosion (smaller effective batches, a shift in traffic mix, or a regression that stays inside the latency SLO).
 
-#### Model and infrastructure monitoring {#sec-ml-operations-model-infrastructure-monitoring-3988}
+### Statistical monitoring and drift detection {#sec-ml-operations-model-infrastructure-monitoring-3988}
 
 Infrastructure management provisions resources; monitoring\index{Model monitoring!performance tracking}\index{Model monitoring!drift detection} observes their behavior. Unit tests can verify deterministic components but cannot by themselves establish population-level predictive performance, which must be estimated statistically. Monitoring implements observable degradation (@sec-ml-operations-foundational-principles-44e6), transforming this theoretical limitation into operational practice. Once monitoring surfaces a symptom—a latency SLO miss, throughput below target, or memory creep—@sec-appdx-dam-taxonomy-bottleneck-diagnostic-3fc9 maps that symptom to its dominant D·A·M term and tells the operator which optimizations will move the binding constraint and which will be wasted on serving infrastructure. Without continuous monitoring and the deeper **observability**\index{Observability!system state inference} it enables (the ability to infer internal state from outputs), teams lack the evidence needed to distinguish a healthy model from an unobserved regression.
 
@@ -2159,109 +2258,6 @@ plt.close()
 :::
 
 The two curves turn drift from an abstract statistical problem into an operations policy choice. Scheduled retraining is easy to plan but can retrain too early or too late; trigger-based retraining requires stronger telemetry but aligns intervention with observed degradation.
-
-### Layered monitoring and drift quantification {#sec-ml-operations-quantifying-drift-physics-psi-8c11}
-
-Distribution divergence can accompany accuracy decay, but determining degradation's direction and magnitude requires ground-truth labels that often arrive with substantial delay. In production, serving failures span two fundamentally different physical regimes: immediate hardware execution bottlenecks and gradual distributional drift. Disentangling them requires two distinct telemetry layers: infrastructure metrics that reveal whether the serving system itself is compute-, memory-, or I/O-bound, and distribution and outcome metrics that connect data movement to model performance.
-
-The first layer is infrastructure-level monitoring, which tracks indicators such as CPU and GPU utilization, memory bandwidth, disk consumption, network latency, and service availability. Measuring GPU utilization alone is incomplete; an accelerator reporting high execution time may still be stalled waiting for DRAM or PCIe transfers, while low utilization often signals host-side preprocessing bottlenecks. Correlating kernel execution times with memory bandwidth utilization and input pipeline queue depths distinguishes compute-, memory-, and I/O-bound behavior.
-
-Power-efficiency metrics (such as inferences per joule or FLOP/s/W, depending on workload) add a cost-normalized view that enables mixed-workload scheduling. Thermal monitoring similarly informs operational scheduling, particularly under sustained high load where thermal throttling forces hardware clocks down, introducing tail-latency spikes that violate SLOs. An MLOps telemetry pipeline incorporates thermal headroom metrics to steer traffic across available accelerators before throttling occurs. Time-series engines such as Prometheus[^fn-prometheus-mlops-monitoring] [@prometheus], Grafana [@grafana], and Elastic [@elastic] collect and visualize these operational metrics across the serving fleet.
-
-[^fn-prometheus-mlops-monitoring]: **Prometheus**\index{Prometheus!monitoring trade-off}: Prometheus periodically scrapes targets and stores time series for aggregation. Scrape and rule-evaluation intervals jointly affect alert latency and may miss short excursions. Monitoring per-accelerator thermals allows precise workload routing at higher data cost, while server-level aggregates can mask component-level throttling.
-
-Collecting these signals at production scale introduces severe network and storage constraints: capturing uncompressed telemetry per request can saturate the very networking fabric serving the model. These overheads force a deliberate trade-off between monitoring granularity and infrastructure operating expense.
-
-```{python}
-#| echo: false
-#| label: observability-sampling-calc
-# ┌─────────────────────────────────────────────────────────────────────────────
-# │ OBSERVABILITY SAMPLING COST
-# ├─────────────────────────────────────────────────────────────────────────────
-# │ Context: Callout "The economics of observability" and
-# │          @tbl-observability-sampling-cost contrasting trace policies.
-# │
-# │ Goal:    Quantify the data-volume swing between high- and low-frequency
-# │          telemetry sampling at 1M requests per second.
-# │ Show:    1 GB/s full fidelity vs. 16.7 MB/s at one trace in 60.
-# │ How:     Apply the trace-sampling fraction; intervals only batch records.
-# │
-# └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import fmt, check, fmt_bandwidth, fmt_memory, fmt_percent, fmt_time, fmt_rate
-
-# ┌── LEGO ───────────────────────────────────────────────
-class ObservabilitySampling:
-    """Average ingest volume for high- and low-frequency request sampling."""
-
-    # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    requests_per_second = MILLION / second
-    telemetry_per_request = 1 * KB  # scenario assumption
-    high_frequency_seconds = 1 * second  # batching interval, not a volume divisor
-    low_frequency_seconds = 60 * second  # batching interval, not a volume divisor
-    low_sample_fraction = 1 / 60  # retain one in every 60 request traces
-    success_sample_fraction = 0.01
-    error_sample_fraction = 1.0
-
-    # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    high_bytes_per_second = requests_per_second * telemetry_per_request
-    low_bytes_per_second = high_bytes_per_second * low_sample_fraction
-    sampling_ratio = (high_bytes_per_second / low_bytes_per_second).to("").magnitude
-
-    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
-    check(
-        round(high_bytes_per_second.to(GB / second).magnitude, 1) == 1.0,
-        f"Expected ~1 GB/s, got {high_bytes_per_second.to(GB/second).magnitude:.2f} GB/s.",
-    )
-    check(
-        round(low_bytes_per_second.to(MB / second).magnitude, 1) == 16.7,
-        f"Expected ~16.7 MB/s, got {low_bytes_per_second.to(MB/second).magnitude:.2f} MB/s.",
-    )
-    check(round(sampling_ratio) == 60, f"Expected 60x sampling ratio, got {sampling_ratio:.1f}x.")
-
-    # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
-    request_rate_m_req_per_s_str = fmt_rate(round(requests_per_second.to(1 / second).magnitude), "req/s", scale="M", precision=0, commas=False)
-    high_seconds_str = fmt_time(high_frequency_seconds, second, precision=0, commas=False)
-    low_seconds_str = fmt_time(low_frequency_seconds, second, precision=0, commas=False)
-    high_gb_per_s_str = fmt_bandwidth(high_bytes_per_second, unit=GB / second, precision=0, commas=False)
-    low_mb_per_s_str = fmt_bandwidth(low_bytes_per_second, unit=MB / second, precision=1, commas=False)
-    sampling_ratio_str = fmt_int(round(sampling_ratio), commas=False)
-    sampling_ratio_mult_str = fmt_multiple(round(sampling_ratio), precision=0, commas=False)
-    telemetry_kb_str = fmt_memory(telemetry_per_request, unit=KB, precision=0, commas=False)
-    success_sample_pct_str = fmt_percent(success_sample_fraction, precision=0, commas=False, style='prose')
-    error_sample_pct_str = fmt_percent(error_sample_fraction, precision=0, commas=False, style='prose')
-```
-
-::: {#nbk-ml-ops-economics-observability .callout-notebook title="The economics of observability"}
-
-**Trade-off**: "Measure everything" is economically infeasible at scale. Let $N_{\text{series}}$ be the expanded series count, $f_{\text{sample}}$ the sampling frequency per series, $\SampleStorageSize$ the bytes per sample, and $T_{\text{retention}}$ the retention duration; $C_{\text{ingest/sample}}$ and $C_{\text{storage/byte-time}}$ are provider-specific ingestion and storage prices. @Eq-observability-cost combines these terms into an operating cost rate:
-$$ \text{Cost rate} \approx N_{\text{series}} f_{\text{sample}} \left(C_{\text{ingest/sample}} + \SampleStorageSize T_{\text{retention}} C_{\text{storage/byte-time}}\right) $$ {#eq-observability-cost}
-
-The product is an operating cost rate, not a one-time setup cost.
-
-Both data volumes follow from the same two-step arithmetic. At full fidelity, every request's telemetry enters the stream: `{python} ObservabilitySampling.request_rate_m_req_per_s_str` $\times$ `{python} ObservabilitySampling.telemetry_kb_str` per request = `{python} ObservabilitySampling.high_gb_per_s_str`. Retaining one in `{python} ObservabilitySampling.sampling_ratio_str` request traces reduces average ingest to `{python} ObservabilitySampling.low_mb_per_s_str`; batching sampled traces every `{python} ObservabilitySampling.low_seconds_str` changes delivery timing, not the average byte rate. @Tbl-observability-sampling-cost places the two regimes side by side with their cost impact.
-
-| **Sampling**                                                        | **Granularity** | **Data Volume (`{python} ObservabilitySampling.request_rate_m_req_per_s_str`)** | **Cost Impact**                   |
-|:--------------------------------------------------------------------|:----------------|:-------------------------------------------------------------------------------:|:----------------------------------|
-| **All traces**                                                      | Micro-bursts    |               ~`{python} ObservabilitySampling.high_gb_per_s_str`               | High (Requires dedicated cluster) |
-| **1-in-`{python} ObservabilitySampling.sampling_ratio_str` traces** | Trends          |                ~`{python} ObservabilitySampling.low_mb_per_s_str`               | Lower (Policy-dependent)          |
-
-: **Trace Sampling vs. Observability Cost**: Retaining one in `{python} ObservabilitySampling.sampling_ratio_str` request traces yields a `{python} ObservabilitySampling.sampling_ratio_mult_str` data-volume difference at `{python} ObservabilitySampling.request_rate_m_req_per_s_str`, assuming `{python} ObservabilitySampling.telemetry_kb_str` per request. Batch intervals do not cause the reduction. {#tbl-observability-sampling-cost tbl-colwidths="[14,24,28,34]"}
-
-**Systems insight**: Retain `{python} ObservabilitySampling.success_sample_pct_str` of successful requests and `{python} ObservabilitySampling.error_sample_pct_str` of errors. Monitor aggregate counters every `{python} ObservabilitySampling.high_seconds_str` and high-cardinality sketches every `{python} ObservabilitySampling.low_seconds_str`; @sec-ml-operations-data-quality-monitoring-c6b6 shows how to budget the infrastructure.
-
-:::
-
-Alerting mechanisms convert these operational signals into proactive intervention before silent degradation propagates downstream. A sustained drop in model accuracy triggers drift investigation; infrastructure alerts signal memory saturation, thermal throttling, or degraded network throughput. The latency of these alerts governs the window of undetected failure. Alerts must record the model version, affected input subpopulation, and triggering aggregation window so responders can isolate and reproduce the failure state.
-
-::: {#exmp-ml-ops-recommender-monitoring-at-scale .callout-example title="Recommendation monitoring at scale"}
-
-**Scenario**: Consider a high-throughput streaming recommendation service whose latency remained within its SLO while recommendation quality declined as user behavior changed.
-
-**Diagnosis**: Traditional infrastructure metrics (CPU utilization, HTTP error rates) remained green while model CTR dropped because global metrics masked localized subpopulation degradation.
-
-**Systems lesson**: Infrastructure telemetry alone cannot detect statistical model failure. High-throughput recommendation systems require cohort-level subpopulation tracking and counterfactual evaluation to detect localized accuracy drift.
-
-:::
 
 #### Data quality monitoring {#sec-ml-operations-data-quality-monitoring-c6b6}
 

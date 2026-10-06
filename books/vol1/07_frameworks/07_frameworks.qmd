@@ -195,336 +195,6 @@ Each generation abstracted away details that consumed engineering effort in the 
 
 Resolving execution strategy comes first because runtime dispatch and graph capture determine what optimizations automatic differentiation and hardware mapping can subsequently exploit.
 
-## Anatomy of a Training Step {#sec-ml-frameworks-putting-together-anatomy-training-step-c7f1}
-
-In every iteration of a training loop, millions of floating-point operations, dynamic memory allocations, and hardware kernel launches must synchronize within tens of milliseconds. Execution, differentiation, and hardware abstraction operate simultaneously during model training\index{Training!step, anatomy}. In @lst-training-step-anatomy, a minimal two-layer multilayer perceptron illustrates this convergence across eight executable statements. Tracing each statement through the runtime stack connects the quantitative principles developed in @sec-ml-frameworks-three-problems-every-framework-must-solve-317d to physical execution: tensor allocation, kernel dispatch, dynamic graph recording, gradient computation, and parameter updates.
-
-The example assumes trainable CUDA tensors `W1` and `W2` with shapes `(784, 256)` and `(256, 10)`, matching bias vectors `b1` and `b2`, and an optimizer already constructed over these parameters. The listing shows one iteration after that setup.
-
-::: {#lst-training-step-anatomy lst-cap="**Training Step Anatomy**: A minimal training iteration for a two-layer MLP, exercising tensor allocation, kernel dispatch, autograd recording, gradient computation, and parameter updates."}
-
-```{.python}
-# Single training step for a 2-layer MLP
-x = torch.randn(32, 784, device="cuda")  # Input batch
-y = torch.randint(0, 10, (32,), device="cuda")  # Labels
-
-# Forward pass
-optimizer.zero_grad()
-h = torch.relu(x @ W1 + b1)  # Hidden layer
-logits = h @ W2 + b2  # Output layer
-loss = F.cross_entropy(logits, y)
-
-# Backward pass
-loss.backward()
-
-# Parameter update
-optimizer.step()
-```
-
-:::
-
-```{python}
-#| echo: false
-#| label: training-step-dims
-# ┌─────────────────────────────────────────────────────────────────────────────
-# │ TRAINING STEP DIMENSIONS
-# ├─────────────────────────────────────────────────────────────────────────────
-# │ Context: Phase 1 prose references matrix dimensions inline
-# │
-# │ Goal: Define model dimensions for the training step example.
-# │ Show: The matrix sizes for a 2-layer MLP (784 -> 256 -> 10).
-# │ How: Set constants for input batch, hidden layers, and output classes.
-# │
-# └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import fmt, check
-
-# ┌── LEGO ───────────────────────────────────────────────
-class TrainingStepDims:
-    """Model dimensions for the two-layer MLP training step example."""
-
-    # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    image_side = 28
-
-    # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    input_features = image_side * image_side
-
-    # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
-    check(input_features == 784, f"MNIST flattened input should be 784, got {input_features}.")
-
-    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
-    train_batch_str = fmt(32, precision=0, commas=False)
-    train_input_str = fmt(input_features, precision=0, commas=False)
-    train_hidden_str = fmt(256, precision=0, commas=False)
-```
-
-### Phase 1: Forward pass (solving the execution problem) {.unnumbered}
-
-During the forward pass\index{Forward pass!kernel dispatch}, executing `h = torch.relu(x @ W1 + b1)` triggers an eager execution sequence:
-
-1. Python dispatch\index{Python dispatch!overhead}: The Python interpreter invokes `torch.matmul`, which routes through PyTorch's C++ dispatcher to select the CUDA backend, incurring several microseconds of host CPU overhead before issuing work to the device.
-2. Kernel selection\index{Kernel dispatch!BLAS kernel selection}: cuBLAS selects a GEMM kernel configured for dimensions `{python} TrainingStepDims.train_batch_str` $\times$ `{python} TrainingStepDims.train_input_str` $\times$ `{python} TrainingStepDims.train_hidden_str`, partitioning the computation into thread blocks sized to fit the streaming multiprocessor shared memory and L2 cache tiles.
-3. Kernel launch: The host thread enqueues the launch descriptor into the GPU command stream, consuming driver launch latency while asynchronous execution allows host execution to proceed without blocking on completion.
-4. GPU execution: The streaming multiprocessors stream `W1` from HBM[^fn-hbm-capacity-constraint] through L2 cache into registers and Tensor Cores, evaluate the matrix product, and write the output activations back to HBM.
-5. Autograd recording: Concurrently on the host, PyTorch's autograd engine instantiates an `MmBackward` node on the dynamic tape, saving references to the device tensors needed for the requested gradients. Here the weight gradient requires `x`; no input gradient is requested.
-
-```{python}
-#| echo: false
-#| label: hbm-capacity-footnote-anchor
-# ┌─────────────────────────────────────────────────────────────────────────────
-# │ HBM CAPACITY FOOTNOTE ANCHOR
-# ├─────────────────────────────────────────────────────────────────────────────
-# │ Context: HBM capacity footnote immediately below.
-# │
-# │ Goal: Keep the A100 HBM capacity local to the training-step narrative.
-# │ Show: A100 HBM capacity as a branded hardware-memory prose anchor.
-# │ How: Read the A100 memory capacity constant and format it for prose.
-# │
-# └─────────────────────────────────────────────────────────────────────────────
-from mlsysim import GB, Hardware
-from mlsysim.fmt import check, fmt_memory_capacity
-
-# ┌── LEGO ───────────────────────────────────────────────
-class HbmCapacityFootnote:
-    """Local A100 HBM capacity anchor for the training-step footnote."""
-
-    # ┌── 1. LOAD (Constants) ───────────────────────────────────────────────
-    a100_mem = Hardware.Cloud.A100.memory.capacity
-
-    # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
-    # Direct hardware-constant lookup.
-
-    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
-    check(a100_mem.to(GB).magnitude >= 80, "A100 HBM capacity anchor should be at least 80 GB.")
-
-    # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
-    a100_mem_gb_str = fmt_memory_capacity(a100_mem, unit=GiB, precision=0, commas=False)
-```
-
-[^fn-hbm-capacity-constraint]: **HBM (high bandwidth memory)**\index{HBM!capacity constraint}: Provides 2--3 TB/s bandwidth on modern GPUs, making it the memory tier that most directly feeds accelerator arithmetic; HBM bandwidth determines whether operations are memory bound or compute bound, and its `{python} HbmCapacityFootnote.a100_mem_gb_str` capacity on an A100\index{A100!HBM capacity} sets the hard ceiling on total live training state. Weights, activations, gradients, optimizer state, and temporary workspace must fit during execution. When they do not, the framework must resort to offloading, selective recomputation, or placement across devices, each adding complexity to what the programmer perceives as a single `loss.backward()` call.
-
-The subsequent bias addition (`+ b1`) and activation (`torch.relu`) follow an identical eager path, with each operation dispatching a separate kernel, executing round-trips to HBM, and appending a node to the tape.
-
-### Phase 2: Backward pass (solving the differentiation problem) {.unnumbered}
-
-Calling `loss.backward()`\index{Backward pass!triggering gradient computation} executes reverse-mode automatic differentiation in four stages:
-
-1. Tape traversal\index{Autograd tape!reverse traversal}: The autograd engine traverses the recorded computational graph in reverse topological order, starting from the scalar loss node.
-2. Gradient computation: The engine executes the backward kernel registered to each node. Traversing backward, `CrossEntropyBackward` evaluates $\frac{\partial \mathcal{L}}{\partial \text{logits}}$ using the combined softmax-cross-entropy derivative; `MmBackward` for $\mathbf{W}_2$ computes $\frac{\partial \mathcal{L}}{\partial \mathbf{W}_2} = \mathbf{H}^T \cdot \frac{\partial \mathcal{L}}{\partial \text{logits}}$ and $\frac{\partial \mathcal{L}}{\partial \mathbf{H}}$, where $\mathbf{H}$ is the batch of hidden activations (`h`); `ReluBackward` evaluates the activation mask, zeroing gradients where forward activations satisfy $\mathbf{H} \leq 0$; and `MmBackward` for $\mathbf{W}_1$ computes $\frac{\partial \mathcal{L}}{\partial \mathbf{W}_1} = \mathbf{X}^T \cdot \frac{\partial \mathcal{L}}{\partial \mathbf{Z}_1}$, where $\mathbf{Z}_1 = \mathbf{X}\mathbf{W}_1 + \mathbf{b}_1$ is the pre-activation. Because the input batch $\mathbf{X}$ (`x`) does not set `requires_grad=True`, traversal terminates without evaluating $\frac{\partial \mathcal{L}}{\partial \mathbf{X}}$.
-3. Gradient accumulation: Computed parameter gradients accumulate in-place into the `.grad` fields of leaf tensors ($\mathbf{W}_1$, $\mathbf{b}_1$, $\mathbf{W}_2$, $\mathbf{b}_2$).
-4. Memory deallocation: As each backward node completes, the framework releases its saved forward activations (such as $\mathbf{H}$ and the pre-activation $\mathbf{Z}_1$), allowing the caching allocator to reuse those memory regions for subsequent operations.
-
-After backward fills the parameter `.grad` buffers, `optimizer.step()` reads those gradients, updates the parameters, and advances any optimizer state. This is the update represented in the optimizer memory ledger; backward itself computes gradients without applying that update.
-
-### Phase 3: Memory traffic analysis (the physics at work) {.unnumbered}
-
-The ledger in @tbl-training-step-roofline covers selected forward operations and a modeled backward pass, excluding optimizer-update and bias-addition costs. Applying @eq-dispatch-overhead within that scope gives the FLOPs, memory traffic, and arithmetic intensity for each listed operation:
-
-```{python}
-#| echo: false
-#| label: training-step-calc
-
-# ┌─────────────────────────────────────────────────────────────────────────────
-# │ TRAINING STEP FLOPs AND MEMORY ANALYSIS
-# ├─────────────────────────────────────────────────────────────────────────────
-# │ Context: Training Step Anatomy table showing FLOPs and memory per operation
-# │
-# │ Goal: Quantify the arithmetic intensity of each operation in a forward pass.
-# │      MatMul has high AI (~15), ReLU has near-zero AI (0.125)—demonstrating
-# │      why element-wise ops are memory-bound and benefit most from fusion.
-# │
-# └─────────────────────────────────────────────────────────────────────────────
-from mlsysim import KB, KFLOPs, MB, MFLOPs, byte, flop
-from mlsysim.fmt import check, fmt_arithmetic_intensity, fmt_flops, fmt_math, fmt_memory
-
-# ┌── LEGO ───────────────────────────────────────────────
-class TrainingStepCalc:
-    """FLOPs and memory analysis for each operation in a two-layer MLP training step."""
-
-    # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    _batch = 32
-    _input = 784
-    _hidden = 256
-    _output = 10
-
-    # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    # Step 1: MatMul 1: [32, 784] @ [784, 256]
-    mm1_flops = 2 * _batch * _input * _hidden * flop  # ~12.8M FLOPs
-    mm1_mem = (_batch * _input + _input * _hidden + _batch * _hidden) * 4 * byte  # FP32
-
-    # Step 2: ReLU: [32, 256]
-    relu_flops = _batch * _hidden * flop  # ~8K FLOPs
-    relu_mem = (_batch * _hidden) * 2 * 4 * byte  # read + write
-
-    # Step 3: MatMul 2: [32, 256] @ [256, 10]
-    mm2_flops = 2 * _batch * _hidden * _output * flop  # ~164K FLOPs
-    mm2_mem = (_batch * _hidden + _hidden * _output + _batch * _output) * 4 * byte
-
-    # Step 4: Cross Entropy: [32, 10]
-    # Simplified operation-equivalent estimate: one exp, accumulation, and normalization per logit.
-    ce_flops = _batch * _output * 3 * flop
-    ce_mem = (_batch * _output) * 2 * 4 * byte
-
-    # Step 5: Illustrative backward model (2x forward work, 3x forward memory traffic)
-    forward_flops = mm1_flops + relu_flops + mm2_flops + ce_flops
-    forward_mem = mm1_mem + relu_mem + mm2_mem + ce_mem
-    bwd_flops = 2 * forward_flops
-    bwd_mem = 3 * forward_mem
-    bwd_ai = (bwd_flops / bwd_mem).to(flop / byte).magnitude
-
-    # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
-    check(
-        (mm1_flops / mm1_mem).to(flop / byte).magnitude > (relu_flops / relu_mem).to(flop / byte).magnitude,
-        "MatMul must have higher arithmetic intensity than ReLU.",
-    )
-    check(bwd_flops > forward_flops, "Backward FLOPs should exceed forward FLOPs in this approximation.")
-    check(7 <= bwd_ai <= 9, f"Backward arithmetic intensity ({bwd_ai:.1f}) drifted from the expected range.")
-
-    # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
-    train_mm1_dims_math = fmt_math(f"2 \\times {_batch} \\times {_input}{{\\times}}{_hidden}")
-    train_relu_dims_math = fmt_math(f"{_batch}{{\\times}}{_hidden}")
-    train_mm2_dims_math = fmt_math(f"2 \\times {_batch} \\times {_hidden}{{\\times}}{_output}")
-    train_mm1_mflop_str = fmt_flops(mm1_flops, unit=MFLOPs, commas=False)
-    train_mm1_mem_mb_str = fmt_memory(mm1_mem, unit=MB, precision=1, commas=False)
-    train_mm1_ai_str = fmt_arithmetic_intensity((mm1_flops / mm1_mem), unit=flop / byte, commas=False)
-
-    train_relu_kflop_str = fmt_flops(relu_flops, unit=KFLOPs, commas=False)
-    train_relu_mem_kb_str = fmt_memory(relu_mem, unit=KB, precision=1, commas=False)
-    train_relu_ai_str = fmt_arithmetic_intensity((relu_flops / relu_mem), unit=flop / byte, precision=3, commas=False)
-
-    train_mm2_kflop_str = fmt_flops(mm2_flops, unit=KFLOPs, commas=False)
-    train_mm2_mem_kb_str = fmt_memory(mm2_mem, unit=KB, precision=1, commas=False)
-    train_mm2_ai_str = fmt_arithmetic_intensity((mm2_flops / mm2_mem), unit=flop / byte, commas=False)
-
-    train_ce_kflop_str = fmt_flops(ce_flops, unit=KFLOPs, commas=False)
-    train_ce_mem_kb_str = fmt_memory(ce_mem, unit=KB, precision=1, commas=False)
-    train_ce_ai_str = fmt_arithmetic_intensity((ce_flops / ce_mem), unit=flop / byte, commas=False)
-
-    train_bwd_mflop_str = fmt_flops(bwd_flops, unit=MFLOPs, commas=False)
-    train_bwd_mem_mb_str = fmt_memory(bwd_mem, unit=MB, precision=1, commas=False)
-    train_bwd_ai_str = fmt_arithmetic_intensity((bwd_flops / bwd_mem), unit=flop / byte, commas=False)
-```
-
-| **Component**                            |                                           **Modeled Work**                                          |                 **Memory Traffic**                |            **Arithmetic Intensity**           |
-|:-----------------------------------------|:---------------------------------------------------------------------------------------------------:|:-------------------------------------------------:|:---------------------------------------------:|
-| **MatMul (x @ W1)**                      |  `{python} TrainingStepCalc.train_mm1_dims_math` = `{python} TrainingStepCalc.train_mm1_mflop_str`  |  `{python} TrainingStepCalc.train_mm1_mem_mb_str` |  `{python} TrainingStepCalc.train_mm1_ai_str` |
-| **ReLU**                                 | `{python} TrainingStepCalc.train_relu_dims_math` = `{python} TrainingStepCalc.train_relu_kflop_str` | `{python} TrainingStepCalc.train_relu_mem_kb_str` | `{python} TrainingStepCalc.train_relu_ai_str` |
-| **MatMul (h @ W2)**                      |  `{python} TrainingStepCalc.train_mm2_dims_math` = `{python} TrainingStepCalc.train_mm2_kflop_str`  |  `{python} TrainingStepCalc.train_mm2_mem_kb_str` |  `{python} TrainingStepCalc.train_mm2_ai_str` |
-| **Cross-entropy (simplified)**           |                           ~`{python} TrainingStepCalc.train_ce_kflop_str`                           |  `{python} TrainingStepCalc.train_ce_mem_kb_str`  |  `{python} TrainingStepCalc.train_ce_ai_str`  |
-| **Backward (assumed 2$\times$ forward)** |                           ~`{python} TrainingStepCalc.train_bwd_mflop_str`                          |  `{python} TrainingStepCalc.train_bwd_mem_mb_str` |  `{python} TrainingStepCalc.train_bwd_ai_str` |
-
-: **Per-Operation Roofline Analysis**: Analytical work and memory-traffic estimates for a two-layer MLP training step. The cross-entropy row assigns one operation-equivalent each to exponentiation, accumulation, and normalization per logit, while the backward row assumes twice the forward work and three times its memory traffic. These are modeling assumptions rather than measured instruction counts. MatMul operations have much higher arithmetic intensity than element-wise operations, while the simplified ReLU and cross-entropy models remain memory-sensitive. {#tbl-training-step-roofline tbl-colwidths="[27,33,18,22]"}
-
-The arithmetic-intensity column helps predict each layer's regime when compared with the target machine's compute-to-bandwidth ratio. Matrix multiplications exhibit more operand reuse than element-wise operations, but their shapes still determine whether they reach the compute roofline. Conversely, element-wise ReLU and reduction in cross-entropy perform negligible compute per byte transferred ($0.125$ to $0.375\text{ FLOP/byte}$), making them sensitive to memory bandwidth and, at small sizes, launch latency. In un-fused eager execution, each element-wise operation incurs a separate kernel dispatch and writes intermediate tensors to global-memory buffers between kernels; actual HBM traffic depends on caching.
-
-```{python}
-#| echo: false
-#| label: mnist-training-step-calc
-
-# ┌─────────────────────────────────────────────────────────────────────────────
-# │ MNIST TRAINING STEP ROOFLINE ANALYSIS
-# ├─────────────────────────────────────────────────────────────────────────────
-# │ Context: Showing that small model training is overhead-bound, not compute-bound
-# │
-# │ Goal: On an A100, this small FP32 step's FLOPs and memory each take ~2 μs, but
-# │      Assume 12 ops at the chapter's per-op dispatch tax. The step is overhead-bound!
-# │      This explains why torch.compile provides 2-3x speedup for small models.
-# │
-# └─────────────────────────────────────────────────────────────────────────────
-from mlsysim import Hardware, MB, MFLOPs, TB, TFLOP, byte, flop, microsecond, second
-from mlsysim.fmt import fmt, check, fmt_count, fmt_flops, fmt_time, fmt_bandwidth, fmt_flop_rate, fmt_memory
-
-class MnistTrainingStepCalc:
-    """MNIST overhead-bound analysis: dispatch dominates compute and memory on A100."""
-
-    # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    _batch = 32
-    _input = 784
-    _hidden = 256
-    _output = 10
-    n_ops = 12  # Illustrative launch-count assumption
-    us_per_op = (
-        (Ops.RuntimeOverheads.PythonDispatch + Ops.RuntimeOverheads.KernelLaunch).to(microsecond).magnitude
-    )  # the chapter's per-op tax, from the registry
-    peak_flops = Hardware.Cloud.A100.compute.precision_flops["fp32"]
-    mem_bw = Hardware.Cloud.A100.memory.bandwidth
-    # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    mm1_flops = 2 * _batch * _input * _hidden * flop
-    mm1_mem = (_batch * _input + _input * _hidden + _batch * _hidden) * 4 * byte
-    relu_flops = _batch * _hidden * flop
-    relu_mem = (_batch * _hidden) * 2 * 4 * byte
-    mm2_flops = 2 * _batch * _hidden * _output * flop
-    mm2_mem = (_batch * _hidden + _hidden * _output + _batch * _output) * 4 * byte
-    ce_flops = _batch * _output * 3 * flop
-    ce_mem = (_batch * _output) * 2 * 4 * byte
-    forward_flops = mm1_flops + relu_flops + mm2_flops + ce_flops
-    forward_mem = mm1_mem + relu_mem + mm2_mem + ce_mem
-    bwd_flops = 2 * forward_flops
-    bwd_mem = 3 * forward_mem
-    total_flops = forward_flops + bwd_flops
-    mem_traffic = forward_mem + bwd_mem
-    t_compute = (total_flops / peak_flops).to(microsecond)
-    t_memory = (mem_traffic / mem_bw).to(microsecond)
-    t_overhead_us = n_ops * us_per_op  # dominant term
-    # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
-    check(
-        t_overhead_us > 10 * max(t_compute.to(microsecond).magnitude, t_memory.to(microsecond).magnitude),
-        f"Expected overhead to dominate, got overhead={t_overhead_us:.1f} μs, compute={t_compute.to(microsecond).magnitude:.2f} μs, memory={t_memory.to(microsecond).magnitude:.2f} μs.",
-    )
-    # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
-    mnist_t_compute_us_str = fmt_time(t_compute, microsecond, precision=1, commas=False)
-    mnist_t_memory_us_str = fmt_time(t_memory, microsecond, precision=1, commas=False)
-    mnist_t_overhead_us_str = fmt_time(t_overhead_us, microsecond, precision=0, commas=False)
-    mnist_total_mflop_str = fmt_flops(total_flops, unit=MFLOPs, precision=1, commas=False)
-    mnist_mem_traffic_mb_str = fmt_memory(mem_traffic, unit=MB, precision=1, commas=False)
-    mnist_n_ops_str = fmt_count(n_ops, precision=0, commas=False, label="op")
-    mnist_us_per_op_str = fmt_time(us_per_op, 'microsecond', precision=0, commas=False)
-    a100_peak_tflop_per_s_str = fmt_flop_rate(peak_flops, unit=TFLOP / second, precision=1, commas=False)
-    a100_mem_bw_tb_per_s_str = fmt_bandwidth(mem_bw, unit=TB / second, precision=2, commas=False)
-```
-
-The analytical model yields ~`{python} MnistTrainingStepCalc.mnist_total_mflop_str` of arithmetic work and ~`{python} MnistTrainingStepCalc.mnist_mem_traffic_mb_str` of memory traffic for the operations included in the ledger. Dividing these quantities by peak A100 hardware rates determines the idealized lower bounds:
-
-- $\IronlawTermTimesCompute \approx$ `{python} MnistTrainingStepCalc.mnist_total_mflop_str`/`{python} MnistTrainingStepCalc.a100_peak_tflop_per_s_str` FP32 ≈ `{python} MnistTrainingStepCalc.mnist_t_compute_us_str`
-- $\IronlawTermTimesMemory \approx$ `{python} MnistTrainingStepCalc.mnist_mem_traffic_mb_str`/`{python} MnistTrainingStepCalc.a100_mem_bw_tb_per_s_str` ≈ `{python} MnistTrainingStepCalc.mnist_t_memory_us_str`
-- Assuming `{python} MnistTrainingStepCalc.mnist_n_ops_str` kernel launches, the software overhead $T_{\text{sw}} \approx$ `{python} MnistTrainingStepCalc.mnist_n_ops_str` $\times$ `{python} MnistTrainingStepCalc.mnist_us_per_op_str` ≈ `{python} MnistTrainingStepCalc.mnist_t_overhead_us_str`
-
-In this model, $T_{\text{sw}}$ exceeds the ideal lower bounds $\IronlawTermTimesCompute$ and $\IronlawTermTimesMemory$ by more than an order of magnitude, suggesting a possible overhead-bound\index{Overhead-bound!small model training} regime. Actual kernel times, achieved bandwidth, and host-device overlap must be profiled to confirm that diagnosis. If dispatch dominates, the following mechanisms target the launch tax:
-
-- Kernel fusion (`torch.compile`): Fusing consecutive memory-bound operations into a single kernel avoids intermediate round-trips to HBM and collapses launch boundaries.
-- Batch size scaling: Increasing the batch size scales the arithmetic payload linearly while keeping dispatch overhead constant, amortizing fixed launch latency across more compute operations.
-- Graph capture: Compilation reduces repeated Python work in captured regions; CUDA Graph replay can submit a captured launch sequence with less host overhead. Neither mechanism requires the entire step to become one fused kernel.
-
-### Phase 4: Hardware abstraction (solving the abstraction problem) {.unnumbered}
-
-The identical Python script executes across heterogeneous hardware architectures through backend abstraction layers, as @tbl-framework-backends summarizes.
-
-Each backend maps common tensor semantics to silicon-specific primitives. A single `loss.backward()` invocation routes to different execution pipelines depending on device placement. Differences in floating-point summation order, reduction trees, and non-deterministic atomic operations introduce numerical variation across backends, requiring equivalence to be validated against explicit numerical tolerances rather than bitwise identity.
-
-| **Hardware**                                        | **Backend library**                                    | **Execution mechanism**                                           |
-|:----------------------------------------------------|:-------------------------------------------------------|:------------------------------------------------------------------|
-| **CUDA GPU**\index{GPU backend!CUDA implementation} | cuBLAS [@nvidia_cublas; @choquette2021]                | GEMM kernels and CUDA streams for async execution                 |
-| **CPU**\index{CPU backend!optimized BLAS libraries} | Intel oneMKL or OpenBLAS [@intelOneMKL; @openblasDocs] | Thread-level parallelism around optimized kernels                 |
-| **TPU**\index{TPU!XLA compilation}                  | XLA [@GoogleXLA]                                       | Compilation to TPU-specific high-level optimizer (HLO) operations |
-| **Apple Silicon**                                   | Metal Performance Shaders                              | MPS backend                                                       |
-
-: **Hardware Backends Behind a Single Code Path**: Each backend implements the same tensor operations through a different library and execution mechanism, so identical Python maps onto distinct silicon. {#tbl-framework-backends tbl-colwidths="[15,44,41]"}
-
-Implementation decisions—device placement, batch size, compilation mode—cascade through execution, differentiation, and abstraction layers simultaneously. When systems treat the framework as an opaque mathematical interpreter rather than a hardware-aware scheduler, these interactions trigger launch starvation, memory fragmentation, and throughput collapse.
-
-::: {#psp-frameworks-three-problems-action .callout-perspective title="The three problems in action"}
-
-In D·A·M terms, the single training step exposes how the framework balances algorithm and machine:
-
-- Execution (Machine scheduling): Eager mode preserves imperative line-by-line debugging at the cost of per-kernel launch and dispatch latency.
-- Differentiation (Algorithmic graph): Reverse-mode automatic differentiation retains intermediate forward activations in HBM to compute exact vector-Jacobian products in reverse topological order.
-- Abstraction (Hardware portability): Unified tensor APIs decouple model code from heterogeneous silicon, dispatching identical operations to cuBLAS, oneMKL, or XLA HLO kernels.
-
-Resolving the friction among these dimensions requires matching operator granularity to hardware rooflines: fusing operations to eliminate memory round-trips, scaling batches to amortize launch latency, and structuring tensors to saturate accelerator execution pipelines.
-
-:::
-
-Balancing execution models, differentiation overhead, and hardware abstractions creates a high-performance execution engine when applied correctly. Yet because these mechanisms interact below the surface of standard Python APIs, engineers frequently rely on simplistic assumptions carried over from general-purpose programming. Examining where these assumptions break down reveals the subtle traps that derail real-world framework deployments.
-
 ## Execution Problem {#sec-ml-frameworks-execution-problem-e1e1}
 
 Consider two engineers writing the same neural network. The first debugs interactively, printing tensor shapes after each operation, inspecting intermediate values, and stepping through code with `pdb`. The second waits 30 seconds for compilation, then watches the model run 3$\times$ faster while losing that direct, line-by-line view of intermediate state. Both are correct; they have made different choices about the **execution problem**\index{Execution problem!definition}, the question of whether operations should execute immediately as written or be recorded for later execution. This choice creates a cascade of engineering trade-offs that shape every aspect of framework behavior, from debugging workflows to deployment options to peak hardware utilization.
@@ -2185,6 +1855,23 @@ class Model7B:
 ```
 
 Resuming training requires restoring model weights and optimizer states (like momentum and variance) in lockstep. Frameworks expose internal state dictionaries via `state_dict()` for serialization to checkpoint files, which is necessary for fault tolerance but significantly increases storage and memory overhead.
+
+
+::: {#chk-frameworks-execution-models .callout-checkpoint title="Execution models"}
+
+The choice of execution mode determines both developer velocity and model performance.
+
+**Debuggability vs. speed**
+
+- [ ] **Eager mode (Python-first)**: why does executing ops one-by-one make debugging easy but optimization hard?
+- [ ] **Graph mode (compiler-first)**: why does building a static graph enable kernel fusion?
+
+**Modern compromise**
+
+- [ ] **JIT compilation**: how does `torch.compile` bridge the gap?
+- [ ] **Dispatch-overhead estimate**: if six operations each incur the chapter's `{python} DispatchTaxSmallLarge.dispatch_us_per_op_str` dispatch tax while hardware work takes 2.6 $\mu$s, which term dominates?
+
+:::
 
 ## Differentiation Problem {#sec-ml-frameworks-differentiation-problem-8b8a}
 
@@ -4333,21 +4020,6 @@ These micro-runtimes sacrifice dynamic flexibility to reduce footprint and make 
 
 The spectrum of execution strategies, from dynamic eager execution to static graph compilation and specialized micro-runtimes, requires developers to make deliberate trade-offs. The key execution-mode decisions summarize these architectural choices:
 
-::: {#chk-frameworks-execution-models .callout-checkpoint title="Execution models"}
-
-The choice of execution mode determines both developer velocity and model performance.
-
-**Debuggability vs. speed**
-
-- [ ] **Eager mode (Python-first)**: why does executing ops one-by-one make debugging easy but optimization hard?
-- [ ] **Graph mode (compiler-first)**: why does building a static graph enable kernel fusion?
-
-**Modern compromise**
-
-- [ ] **JIT compilation**: how does `torch.compile` bridge the gap?
-- [ ] **Dispatch-overhead estimate**: if six operations each incur the chapter's `{python} DispatchTaxSmallLarge.dispatch_us_per_op_str` dispatch tax while hardware work takes 2.6 $\mu$s, which term dominates?
-
-:::
 
 The execution problem determines when computation happens and what optimizations are possible. Neural network training, however, requires a capability that no amount of clever scheduling can provide: the ability to compute gradients automatically.
 
@@ -4445,6 +4117,338 @@ Framework viability over a multi-year production lifecycle depends on whether th
 A framework's operational cost often depends more on surrounding ecosystem infrastructure than on the core tensor API. Integration with model registries, serving systems, cluster orchestrators, and accelerator profiling tools accelerates deployment, but each layer introduces an upstream dependency. Custom C++ or CUDA kernel implementations, specialized serialization formats, and vendor-specific compilation passes make framework migration prohibitively expensive once an organization standardizes its pipeline. Preserving an architectural exit path requires deliberate decoupling: standardizing intermediate representations through open formats such as ONNX, isolating data ingestion pipelines from framework-specific tensor classes, and maintaining modular operator boundaries.
 
 The preceding sections evaluated execution, differentiation, and hardware abstraction as distinct architectural choices. In an executing model, however, these three systems operate simultaneously. A single training step is where they collide: eager dispatch or graph scheduling determines when work reaches silicon, reverse-mode automatic differentiation generates the backward pass while retaining intermediate activations, and hardware abstractions coordinate tensor layouts and kernel launches. Tracing one complete training step from input batch to parameter update reveals how these mechanisms integrate under physical machine constraints.
+
+
+## Anatomy of a Training Step {#sec-ml-frameworks-putting-together-anatomy-training-step-c7f1}
+
+In every iteration of a training loop, millions of floating-point operations, dynamic memory allocations, and hardware kernel launches must synchronize within tens of milliseconds. Execution, differentiation, and hardware abstraction operate simultaneously during model training\index{Training!step, anatomy}. In @lst-training-step-anatomy, a minimal two-layer multilayer perceptron illustrates this convergence across eight executable statements. Tracing each statement through the runtime stack connects the quantitative principles developed in @sec-ml-frameworks-three-problems-every-framework-must-solve-317d to physical execution: tensor allocation, kernel dispatch, dynamic graph recording, gradient computation, and parameter updates.
+
+The example assumes trainable CUDA tensors `W1` and `W2` with shapes `(784, 256)` and `(256, 10)`, matching bias vectors `b1` and `b2`, and an optimizer already constructed over these parameters. The listing shows one iteration after that setup.
+
+::: {#lst-training-step-anatomy lst-cap="**Training Step Anatomy**: A minimal training iteration for a two-layer MLP, exercising tensor allocation, kernel dispatch, autograd recording, gradient computation, and parameter updates."}
+
+```{.python}
+# Single training step for a 2-layer MLP
+x = torch.randn(32, 784, device="cuda")  # Input batch
+y = torch.randint(0, 10, (32,), device="cuda")  # Labels
+
+# Forward pass
+optimizer.zero_grad()
+h = torch.relu(x @ W1 + b1)  # Hidden layer
+logits = h @ W2 + b2  # Output layer
+loss = F.cross_entropy(logits, y)
+
+# Backward pass
+loss.backward()
+
+# Parameter update
+optimizer.step()
+```
+
+:::
+
+```{python}
+#| echo: false
+#| label: training-step-dims
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ TRAINING STEP DIMENSIONS
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: Phase 1 prose references matrix dimensions inline
+# │
+# │ Goal: Define model dimensions for the training step example.
+# │ Show: The matrix sizes for a 2-layer MLP (784 -> 256 -> 10).
+# │ How: Set constants for input batch, hidden layers, and output classes.
+# │
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim.fmt import fmt, check
+
+# ┌── LEGO ───────────────────────────────────────────────
+class TrainingStepDims:
+    """Model dimensions for the two-layer MLP training step example."""
+
+    # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
+    image_side = 28
+
+    # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
+    input_features = image_side * image_side
+
+    # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
+    check(input_features == 784, f"MNIST flattened input should be 784, got {input_features}.")
+
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
+    train_batch_str = fmt(32, precision=0, commas=False)
+    train_input_str = fmt(input_features, precision=0, commas=False)
+    train_hidden_str = fmt(256, precision=0, commas=False)
+```
+
+### Phase 1: Forward pass (solving the execution problem) {.unnumbered}
+
+During the forward pass\index{Forward pass!kernel dispatch}, executing `h = torch.relu(x @ W1 + b1)` triggers an eager execution sequence:
+
+1. Python dispatch\index{Python dispatch!overhead}: The Python interpreter invokes `torch.matmul`, which routes through PyTorch's C++ dispatcher to select the CUDA backend, incurring several microseconds of host CPU overhead before issuing work to the device.
+2. Kernel selection\index{Kernel dispatch!BLAS kernel selection}: cuBLAS selects a GEMM kernel configured for dimensions `{python} TrainingStepDims.train_batch_str` $\times$ `{python} TrainingStepDims.train_input_str` $\times$ `{python} TrainingStepDims.train_hidden_str`, partitioning the computation into thread blocks sized to fit the streaming multiprocessor shared memory and L2 cache tiles.
+3. Kernel launch: The host thread enqueues the launch descriptor into the GPU command stream, consuming driver launch latency while asynchronous execution allows host execution to proceed without blocking on completion.
+4. GPU execution: The streaming multiprocessors stream `W1` from HBM[^fn-hbm-capacity-constraint] through L2 cache into registers and Tensor Cores, evaluate the matrix product, and write the output activations back to HBM.
+5. Autograd recording: Concurrently on the host, PyTorch's autograd engine instantiates an `MmBackward` node on the dynamic tape, saving references to the device tensors needed for the requested gradients. Here the weight gradient requires `x`; no input gradient is requested.
+
+```{python}
+#| echo: false
+#| label: hbm-capacity-footnote-anchor
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ HBM CAPACITY FOOTNOTE ANCHOR
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: HBM capacity footnote immediately below.
+# │
+# │ Goal: Keep the A100 HBM capacity local to the training-step narrative.
+# │ Show: A100 HBM capacity as a branded hardware-memory prose anchor.
+# │ How: Read the A100 memory capacity constant and format it for prose.
+# │
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import GB, Hardware
+from mlsysim.fmt import check, fmt_memory_capacity
+
+# ┌── LEGO ───────────────────────────────────────────────
+class HbmCapacityFootnote:
+    """Local A100 HBM capacity anchor for the training-step footnote."""
+
+    # ┌── 1. LOAD (Constants) ───────────────────────────────────────────────
+    a100_mem = Hardware.Cloud.A100.memory.capacity
+
+    # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
+    # Direct hardware-constant lookup.
+
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(a100_mem.to(GB).magnitude >= 80, "A100 HBM capacity anchor should be at least 80 GB.")
+
+    # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
+    a100_mem_gb_str = fmt_memory_capacity(a100_mem, unit=GiB, precision=0, commas=False)
+```
+
+[^fn-hbm-capacity-constraint]: **HBM (high bandwidth memory)**\index{HBM!capacity constraint}: Provides 2--3 TB/s bandwidth on modern GPUs, making it the memory tier that most directly feeds accelerator arithmetic; HBM bandwidth determines whether operations are memory bound or compute bound, and its `{python} HbmCapacityFootnote.a100_mem_gb_str` capacity on an A100\index{A100!HBM capacity} sets the hard ceiling on total live training state. Weights, activations, gradients, optimizer state, and temporary workspace must fit during execution. When they do not, the framework must resort to offloading, selective recomputation, or placement across devices, each adding complexity to what the programmer perceives as a single `loss.backward()` call.
+
+The subsequent bias addition (`+ b1`) and activation (`torch.relu`) follow an identical eager path, with each operation dispatching a separate kernel, executing round-trips to HBM, and appending a node to the tape.
+
+### Phase 2: Backward pass (solving the differentiation problem) {.unnumbered}
+
+Calling `loss.backward()`\index{Backward pass!triggering gradient computation} executes reverse-mode automatic differentiation in four stages:
+
+1. Tape traversal\index{Autograd tape!reverse traversal}: The autograd engine traverses the recorded computational graph in reverse topological order, starting from the scalar loss node.
+2. Gradient computation: The engine executes the backward kernel registered to each node. Traversing backward, `CrossEntropyBackward` evaluates $\frac{\partial \mathcal{L}}{\partial \text{logits}}$ using the combined softmax-cross-entropy derivative; `MmBackward` for $\mathbf{W}_2$ computes $\frac{\partial \mathcal{L}}{\partial \mathbf{W}_2} = \mathbf{H}^T \cdot \frac{\partial \mathcal{L}}{\partial \text{logits}}$ and $\frac{\partial \mathcal{L}}{\partial \mathbf{H}}$, where $\mathbf{H}$ is the batch of hidden activations (`h`); `ReluBackward` evaluates the activation mask, zeroing gradients where forward activations satisfy $\mathbf{H} \leq 0$; and `MmBackward` for $\mathbf{W}_1$ computes $\frac{\partial \mathcal{L}}{\partial \mathbf{W}_1} = \mathbf{X}^T \cdot \frac{\partial \mathcal{L}}{\partial \mathbf{Z}_1}$, where $\mathbf{Z}_1 = \mathbf{X}\mathbf{W}_1 + \mathbf{b}_1$ is the pre-activation. Because the input batch $\mathbf{X}$ (`x`) does not set `requires_grad=True`, traversal terminates without evaluating $\frac{\partial \mathcal{L}}{\partial \mathbf{X}}$.
+3. Gradient accumulation: Computed parameter gradients accumulate in-place into the `.grad` fields of leaf tensors ($\mathbf{W}_1$, $\mathbf{b}_1$, $\mathbf{W}_2$, $\mathbf{b}_2$).
+4. Memory deallocation: As each backward node completes, the framework releases its saved forward activations (such as $\mathbf{H}$ and the pre-activation $\mathbf{Z}_1$), allowing the caching allocator to reuse those memory regions for subsequent operations.
+
+After backward fills the parameter `.grad` buffers, `optimizer.step()` reads those gradients, updates the parameters, and advances any optimizer state. This is the update represented in the optimizer memory ledger; backward itself computes gradients without applying that update.
+
+### Phase 3: Memory traffic analysis (the physics at work) {.unnumbered}
+
+The ledger in @tbl-training-step-roofline covers selected forward operations and a modeled backward pass, excluding optimizer-update and bias-addition costs. Applying @eq-dispatch-overhead within that scope gives the FLOPs, memory traffic, and arithmetic intensity for each listed operation:
+
+```{python}
+#| echo: false
+#| label: training-step-calc
+
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ TRAINING STEP FLOPs AND MEMORY ANALYSIS
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: Training Step Anatomy table showing FLOPs and memory per operation
+# │
+# │ Goal: Quantify the arithmetic intensity of each operation in a forward pass.
+# │      MatMul has high AI (~15), ReLU has near-zero AI (0.125)—demonstrating
+# │      why element-wise ops are memory-bound and benefit most from fusion.
+# │
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import KB, KFLOPs, MB, MFLOPs, byte, flop
+from mlsysim.fmt import check, fmt_arithmetic_intensity, fmt_flops, fmt_math, fmt_memory
+
+# ┌── LEGO ───────────────────────────────────────────────
+class TrainingStepCalc:
+    """FLOPs and memory analysis for each operation in a two-layer MLP training step."""
+
+    # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
+    _batch = 32
+    _input = 784
+    _hidden = 256
+    _output = 10
+
+    # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
+    # Step 1: MatMul 1: [32, 784] @ [784, 256]
+    mm1_flops = 2 * _batch * _input * _hidden * flop  # ~12.8M FLOPs
+    mm1_mem = (_batch * _input + _input * _hidden + _batch * _hidden) * 4 * byte  # FP32
+
+    # Step 2: ReLU: [32, 256]
+    relu_flops = _batch * _hidden * flop  # ~8K FLOPs
+    relu_mem = (_batch * _hidden) * 2 * 4 * byte  # read + write
+
+    # Step 3: MatMul 2: [32, 256] @ [256, 10]
+    mm2_flops = 2 * _batch * _hidden * _output * flop  # ~164K FLOPs
+    mm2_mem = (_batch * _hidden + _hidden * _output + _batch * _output) * 4 * byte
+
+    # Step 4: Cross Entropy: [32, 10]
+    # Simplified operation-equivalent estimate: one exp, accumulation, and normalization per logit.
+    ce_flops = _batch * _output * 3 * flop
+    ce_mem = (_batch * _output) * 2 * 4 * byte
+
+    # Step 5: Illustrative backward model (2x forward work, 3x forward memory traffic)
+    forward_flops = mm1_flops + relu_flops + mm2_flops + ce_flops
+    forward_mem = mm1_mem + relu_mem + mm2_mem + ce_mem
+    bwd_flops = 2 * forward_flops
+    bwd_mem = 3 * forward_mem
+    bwd_ai = (bwd_flops / bwd_mem).to(flop / byte).magnitude
+
+    # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
+    check(
+        (mm1_flops / mm1_mem).to(flop / byte).magnitude > (relu_flops / relu_mem).to(flop / byte).magnitude,
+        "MatMul must have higher arithmetic intensity than ReLU.",
+    )
+    check(bwd_flops > forward_flops, "Backward FLOPs should exceed forward FLOPs in this approximation.")
+    check(7 <= bwd_ai <= 9, f"Backward arithmetic intensity ({bwd_ai:.1f}) drifted from the expected range.")
+
+    # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
+    train_mm1_dims_math = fmt_math(f"2 \\times {_batch} \\times {_input}{{\\times}}{_hidden}")
+    train_relu_dims_math = fmt_math(f"{_batch}{{\\times}}{_hidden}")
+    train_mm2_dims_math = fmt_math(f"2 \\times {_batch} \\times {_hidden}{{\\times}}{_output}")
+    train_mm1_mflop_str = fmt_flops(mm1_flops, unit=MFLOPs, commas=False)
+    train_mm1_mem_mb_str = fmt_memory(mm1_mem, unit=MB, precision=1, commas=False)
+    train_mm1_ai_str = fmt_arithmetic_intensity((mm1_flops / mm1_mem), unit=flop / byte, commas=False)
+
+    train_relu_kflop_str = fmt_flops(relu_flops, unit=KFLOPs, commas=False)
+    train_relu_mem_kb_str = fmt_memory(relu_mem, unit=KB, precision=1, commas=False)
+    train_relu_ai_str = fmt_arithmetic_intensity((relu_flops / relu_mem), unit=flop / byte, precision=3, commas=False)
+
+    train_mm2_kflop_str = fmt_flops(mm2_flops, unit=KFLOPs, commas=False)
+    train_mm2_mem_kb_str = fmt_memory(mm2_mem, unit=KB, precision=1, commas=False)
+    train_mm2_ai_str = fmt_arithmetic_intensity((mm2_flops / mm2_mem), unit=flop / byte, commas=False)
+
+    train_ce_kflop_str = fmt_flops(ce_flops, unit=KFLOPs, commas=False)
+    train_ce_mem_kb_str = fmt_memory(ce_mem, unit=KB, precision=1, commas=False)
+    train_ce_ai_str = fmt_arithmetic_intensity((ce_flops / ce_mem), unit=flop / byte, commas=False)
+
+    train_bwd_mflop_str = fmt_flops(bwd_flops, unit=MFLOPs, commas=False)
+    train_bwd_mem_mb_str = fmt_memory(bwd_mem, unit=MB, precision=1, commas=False)
+    train_bwd_ai_str = fmt_arithmetic_intensity((bwd_flops / bwd_mem), unit=flop / byte, commas=False)
+```
+
+| **Component**                            |                                           **Modeled Work**                                          |                 **Memory Traffic**                |            **Arithmetic Intensity**           |
+|:-----------------------------------------|:---------------------------------------------------------------------------------------------------:|:-------------------------------------------------:|:---------------------------------------------:|
+| **MatMul (x @ W1)**                      |  `{python} TrainingStepCalc.train_mm1_dims_math` = `{python} TrainingStepCalc.train_mm1_mflop_str`  |  `{python} TrainingStepCalc.train_mm1_mem_mb_str` |  `{python} TrainingStepCalc.train_mm1_ai_str` |
+| **ReLU**                                 | `{python} TrainingStepCalc.train_relu_dims_math` = `{python} TrainingStepCalc.train_relu_kflop_str` | `{python} TrainingStepCalc.train_relu_mem_kb_str` | `{python} TrainingStepCalc.train_relu_ai_str` |
+| **MatMul (h @ W2)**                      |  `{python} TrainingStepCalc.train_mm2_dims_math` = `{python} TrainingStepCalc.train_mm2_kflop_str`  |  `{python} TrainingStepCalc.train_mm2_mem_kb_str` |  `{python} TrainingStepCalc.train_mm2_ai_str` |
+| **Cross-entropy (simplified)**           |                           ~`{python} TrainingStepCalc.train_ce_kflop_str`                           |  `{python} TrainingStepCalc.train_ce_mem_kb_str`  |  `{python} TrainingStepCalc.train_ce_ai_str`  |
+| **Backward (assumed 2$\times$ forward)** |                           ~`{python} TrainingStepCalc.train_bwd_mflop_str`                          |  `{python} TrainingStepCalc.train_bwd_mem_mb_str` |  `{python} TrainingStepCalc.train_bwd_ai_str` |
+
+: **Per-Operation Roofline Analysis**: Analytical work and memory-traffic estimates for a two-layer MLP training step. The cross-entropy row assigns one operation-equivalent each to exponentiation, accumulation, and normalization per logit, while the backward row assumes twice the forward work and three times its memory traffic. These are modeling assumptions rather than measured instruction counts. MatMul operations have much higher arithmetic intensity than element-wise operations, while the simplified ReLU and cross-entropy models remain memory-sensitive. {#tbl-training-step-roofline tbl-colwidths="[27,33,18,22]"}
+
+The arithmetic-intensity column helps predict each layer's regime when compared with the target machine's compute-to-bandwidth ratio. Matrix multiplications exhibit more operand reuse than element-wise operations, but their shapes still determine whether they reach the compute roofline. Conversely, element-wise ReLU and reduction in cross-entropy perform negligible compute per byte transferred ($0.125$ to $0.375\text{ FLOP/byte}$), making them sensitive to memory bandwidth and, at small sizes, launch latency. In un-fused eager execution, each element-wise operation incurs a separate kernel dispatch and writes intermediate tensors to global-memory buffers between kernels; actual HBM traffic depends on caching.
+
+```{python}
+#| echo: false
+#| label: mnist-training-step-calc
+
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ MNIST TRAINING STEP ROOFLINE ANALYSIS
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: Showing that small model training is overhead-bound, not compute-bound
+# │
+# │ Goal: On an A100, this small FP32 step's FLOPs and memory each take ~2 μs, but
+# │      Assume 12 ops at the chapter's per-op dispatch tax. The step is overhead-bound!
+# │      This explains why torch.compile provides 2-3x speedup for small models.
+# │
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import Hardware, MB, MFLOPs, TB, TFLOP, byte, flop, microsecond, second
+from mlsysim.fmt import fmt, check, fmt_count, fmt_flops, fmt_time, fmt_bandwidth, fmt_flop_rate, fmt_memory
+
+class MnistTrainingStepCalc:
+    """MNIST overhead-bound analysis: dispatch dominates compute and memory on A100."""
+
+    # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
+    _batch = 32
+    _input = 784
+    _hidden = 256
+    _output = 10
+    n_ops = 12  # Illustrative launch-count assumption
+    us_per_op = (
+        (Ops.RuntimeOverheads.PythonDispatch + Ops.RuntimeOverheads.KernelLaunch).to(microsecond).magnitude
+    )  # the chapter's per-op tax, from the registry
+    peak_flops = Hardware.Cloud.A100.compute.precision_flops["fp32"]
+    mem_bw = Hardware.Cloud.A100.memory.bandwidth
+    # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
+    mm1_flops = 2 * _batch * _input * _hidden * flop
+    mm1_mem = (_batch * _input + _input * _hidden + _batch * _hidden) * 4 * byte
+    relu_flops = _batch * _hidden * flop
+    relu_mem = (_batch * _hidden) * 2 * 4 * byte
+    mm2_flops = 2 * _batch * _hidden * _output * flop
+    mm2_mem = (_batch * _hidden + _hidden * _output + _batch * _output) * 4 * byte
+    ce_flops = _batch * _output * 3 * flop
+    ce_mem = (_batch * _output) * 2 * 4 * byte
+    forward_flops = mm1_flops + relu_flops + mm2_flops + ce_flops
+    forward_mem = mm1_mem + relu_mem + mm2_mem + ce_mem
+    bwd_flops = 2 * forward_flops
+    bwd_mem = 3 * forward_mem
+    total_flops = forward_flops + bwd_flops
+    mem_traffic = forward_mem + bwd_mem
+    t_compute = (total_flops / peak_flops).to(microsecond)
+    t_memory = (mem_traffic / mem_bw).to(microsecond)
+    t_overhead_us = n_ops * us_per_op  # dominant term
+    # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
+    check(
+        t_overhead_us > 10 * max(t_compute.to(microsecond).magnitude, t_memory.to(microsecond).magnitude),
+        f"Expected overhead to dominate, got overhead={t_overhead_us:.1f} μs, compute={t_compute.to(microsecond).magnitude:.2f} μs, memory={t_memory.to(microsecond).magnitude:.2f} μs.",
+    )
+    # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
+    mnist_t_compute_us_str = fmt_time(t_compute, microsecond, precision=1, commas=False)
+    mnist_t_memory_us_str = fmt_time(t_memory, microsecond, precision=1, commas=False)
+    mnist_t_overhead_us_str = fmt_time(t_overhead_us, microsecond, precision=0, commas=False)
+    mnist_total_mflop_str = fmt_flops(total_flops, unit=MFLOPs, precision=1, commas=False)
+    mnist_mem_traffic_mb_str = fmt_memory(mem_traffic, unit=MB, precision=1, commas=False)
+    mnist_n_ops_str = fmt_count(n_ops, precision=0, commas=False, label="op")
+    mnist_us_per_op_str = fmt_time(us_per_op, 'microsecond', precision=0, commas=False)
+    a100_peak_tflop_per_s_str = fmt_flop_rate(peak_flops, unit=TFLOP / second, precision=1, commas=False)
+    a100_mem_bw_tb_per_s_str = fmt_bandwidth(mem_bw, unit=TB / second, precision=2, commas=False)
+```
+
+The analytical model yields ~`{python} MnistTrainingStepCalc.mnist_total_mflop_str` of arithmetic work and ~`{python} MnistTrainingStepCalc.mnist_mem_traffic_mb_str` of memory traffic for the operations included in the ledger. Dividing these quantities by peak A100 hardware rates determines the idealized lower bounds:
+
+- $\IronlawTermTimesCompute \approx$ `{python} MnistTrainingStepCalc.mnist_total_mflop_str`/`{python} MnistTrainingStepCalc.a100_peak_tflop_per_s_str` FP32 ≈ `{python} MnistTrainingStepCalc.mnist_t_compute_us_str`
+- $\IronlawTermTimesMemory \approx$ `{python} MnistTrainingStepCalc.mnist_mem_traffic_mb_str`/`{python} MnistTrainingStepCalc.a100_mem_bw_tb_per_s_str` ≈ `{python} MnistTrainingStepCalc.mnist_t_memory_us_str`
+- Assuming `{python} MnistTrainingStepCalc.mnist_n_ops_str` kernel launches, the software overhead $T_{\text{sw}} \approx$ `{python} MnistTrainingStepCalc.mnist_n_ops_str` $\times$ `{python} MnistTrainingStepCalc.mnist_us_per_op_str` ≈ `{python} MnistTrainingStepCalc.mnist_t_overhead_us_str`
+
+In this model, $T_{\text{sw}}$ exceeds the ideal lower bounds $\IronlawTermTimesCompute$ and $\IronlawTermTimesMemory$ by more than an order of magnitude, suggesting a possible overhead-bound\index{Overhead-bound!small model training} regime. Actual kernel times, achieved bandwidth, and host-device overlap must be profiled to confirm that diagnosis. If dispatch dominates, the following mechanisms target the launch tax:
+
+- Kernel fusion (`torch.compile`): Fusing consecutive memory-bound operations into a single kernel avoids intermediate round-trips to HBM and collapses launch boundaries.
+- Batch size scaling: Increasing the batch size scales the arithmetic payload linearly while keeping dispatch overhead constant, amortizing fixed launch latency across more compute operations.
+- Graph capture: Compilation reduces repeated Python work in captured regions; CUDA Graph replay can submit a captured launch sequence with less host overhead. Neither mechanism requires the entire step to become one fused kernel.
+
+### Phase 4: Hardware abstraction (solving the abstraction problem) {.unnumbered}
+
+The identical Python script executes across heterogeneous hardware architectures through backend abstraction layers, as @tbl-framework-backends summarizes.
+
+Each backend maps common tensor semantics to silicon-specific primitives. A single `loss.backward()` invocation routes to different execution pipelines depending on device placement. Differences in floating-point summation order, reduction trees, and non-deterministic atomic operations introduce numerical variation across backends, requiring equivalence to be validated against explicit numerical tolerances rather than bitwise identity.
+
+| **Hardware**                                        | **Backend library**                                    | **Execution mechanism**                                           |
+|:----------------------------------------------------|:-------------------------------------------------------|:------------------------------------------------------------------|
+| **CUDA GPU**\index{GPU backend!CUDA implementation} | cuBLAS [@nvidia_cublas; @choquette2021]                | GEMM kernels and CUDA streams for async execution                 |
+| **CPU**\index{CPU backend!optimized BLAS libraries} | Intel oneMKL or OpenBLAS [@intelOneMKL; @openblasDocs] | Thread-level parallelism around optimized kernels                 |
+| **TPU**\index{TPU!XLA compilation}                  | XLA [@GoogleXLA]                                       | Compilation to TPU-specific high-level optimizer (HLO) operations |
+| **Apple Silicon**                                   | Metal Performance Shaders                              | MPS backend                                                       |
+
+: **Hardware Backends Behind a Single Code Path**: Each backend implements the same tensor operations through a different library and execution mechanism, so identical Python maps onto distinct silicon. {#tbl-framework-backends tbl-colwidths="[15,44,41]"}
+
+Implementation decisions—device placement, batch size, compilation mode—cascade through execution, differentiation, and abstraction layers simultaneously. When systems treat the framework as an opaque mathematical interpreter rather than a hardware-aware scheduler, these interactions trigger launch starvation, memory fragmentation, and throughput collapse.
+
+::: {#psp-frameworks-three-problems-action .callout-perspective title="The three problems in action"}
+
+In D·A·M terms, the single training step exposes how the framework balances algorithm and machine:
+
+- Execution (Machine scheduling): Eager mode preserves imperative line-by-line debugging at the cost of per-kernel launch and dispatch latency.
+- Differentiation (Algorithmic graph): Reverse-mode automatic differentiation retains intermediate forward activations in HBM to compute exact vector-Jacobian products in reverse topological order.
+- Abstraction (Hardware portability): Unified tensor APIs decouple model code from heterogeneous silicon, dispatching identical operations to cuBLAS, oneMKL, or XLA HLO kernels.
+
+Resolving the friction among these dimensions requires matching operator granularity to hardware rooflines: fusing operations to eliminate memory round-trips, scaling batches to amortize launch latency, and structuring tensors to saturate accelerator execution pipelines.
+
+:::
+
+Balancing execution models, differentiation overhead, and hardware abstractions creates a high-performance execution engine when applied correctly. Yet because these mechanisms interact below the surface of standard Python APIs, engineers frequently rely on simplistic assumptions carried over from general-purpose programming. Examining where these assumptions break down reveals the subtle traps that derail real-world framework deployments.
+
 
 ## Fallacies and Pitfalls {#sec-ml-frameworks-fallacies-pitfalls-61ef}
 
