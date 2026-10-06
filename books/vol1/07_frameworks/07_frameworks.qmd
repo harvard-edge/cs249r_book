@@ -3807,15 +3807,17 @@ class ResNetModuleParams:
 
 Tensors, streams, and kernel dispatch operate at the granularity of individual buffers and operations. While these primitives secure high execution efficiency on hardware, scaling model development requires an organizational abstraction: composing thousands of low-level operations into reusable, nestable building blocks called *modules*.
 
-## Model State Abstractions {#sec-ml-frameworks-nnmodule-abstraction-2622}
+## Model State Abstractions {#sec-ml-frameworks-model-state-abstractions}
 
 Hardware-facing mechanisms—tensors, kernels, streams, and memory managers—ensure individual operations execute efficiently on silicon. Yet a network such as ResNet-50\index{ResNet-50!module hierarchy}, containing `{python} ResNetModuleParams.resnet_params_m_str` parameters across fifty layers, requires extensive coordination: registering weights with optimizers, tracking device placement, toggling training and evaluation modes, and serializing checkpoints. Managing this manually would drown model development in error-prone tensor plumbing. The organizational layer of the framework resolves this through hierarchical composition\index{Module abstraction!hierarchical composition}.
+
+### nn.Module Abstraction {#sec-ml-frameworks-nnmodule-abstraction-2622}
 
 Every major framework implements this through a module abstraction that binds parameter tensors, forward computation, and lifecycle hooks into a unified interface. PyTorch's `nn.Module`\index{Module abstraction!PyTorch nn.Module}[^fn-nn-module-composition] provides an instructive case study because its design patterns recur across frameworks: Keras uses similar layer abstractions [@chollet2018keras], JAX's Flax employs analogous module structures, and TensorFlow's functional API shares conceptual parallels. Three enduring design principles recur regardless of syntax or programming paradigm.
 
 [^fn-nn-module-composition]: **nn.Module**\index{nn.Module!parameter management}: The "design patterns recur" claim holds because `nn.Module` solves a universal organizational problem: it automatically registers any assigned submodule or parameter into a hierarchical tree, enabling a single `.to('cuda')` call to recursively place millions of parameters onto a GPU. Keras layers, JAX Flax modules, and TensorFlow's `tf.Module` all implement the same tree-walking pattern. Without it, managing model state would require manual bookkeeping that scales linearly with architectural depth, a cost that grows prohibitive for models with hundreds of layers.
 
-### Automatic parameter discovery {#sec-ml-frameworks-nn-module-parameter-discovery-4a91}
+#### Automatic parameter discovery {#sec-ml-frameworks-nn-module-parameter-discovery-4a91}
 
 A modern neural network may contain millions of trainable parameters spread across dozens of layers. Without automation, a programmer would need to enumerate every parameter tensor and pass it to the optimizer manually, an error-prone process that scales poorly with model complexity. Frameworks solve this through **automatic parameter discovery**\index{nn.Module!parameter discovery}: the system walks the module tree, collecting every parameter tensor so the optimizer can update them in a single call.
 
@@ -3864,7 +3866,7 @@ for name, param in layer.named_parameters():
 
 : **Parameter Discovery APIs Across Frameworks**: Each framework exposes a different surface for distinguishing trainable parameters from nontrainable buffers, but all four solve the same underlying problem of letting optimizers find weights to update while preserving state (running statistics, frozen tensors) across forward passes. The shared pattern is structured access to parameters and persistent state. Accessor semantics differ: PyTorch also yields frozen registered parameters, so trainability remains a separate property. {#tbl-frameworks-parameter-discovery-apis tbl-colwidths="[23,39,38]"}
 
-### Mode-dependent behavior { .unnumbered}
+#### Mode-dependent behavior { .unnumbered}
 
 Training and inference require different computational behavior\index{nn.Module!train vs. eval modes} from the same model graph. During training, dropout layers\index{Dropout!training vs. inference} randomly zero elements with probability $p_{\text{drop}} = \Pr(\text{drop})$ to regularize the network, while during inference those same layers must perform identity mapping to produce deterministic outputs. Batch normalization\index{Batch normalization!mode-dependent behavior} uses per-batch statistics during training but switches to accumulated running statistics during inference. If these behavioral changes are left to the programmer, forgetting a single mode switch produces silently incorrect predictions in production.
 
@@ -3874,7 +3876,7 @@ Evaluation mode and gradient recording are separate controls. Calling `.eval()` 
 
 This principle extends to parameter freezing\index{Parameter freezing!transfer learning} for transfer learning. Setting `requires_grad=False` prevents autograd from accumulating gradients in those parameters and removes their gradient storage. It does not necessarily remove the layer's backward computation because gradients may still need to pass through its operations to reach trainable inputs or earlier parameters. Savings therefore depend on where the frozen region lies and which tensors require gradients.
 
-### Hierarchical composition and serialization {#sec-ml-frameworks-nn-module-hierarchical-composition-6c13}
+#### Hierarchical composition and serialization {#sec-ml-frameworks-nn-module-hierarchical-composition-6c13}
 
 Complex models compose from reusable submodules\index{nn.Module!hierarchical composition}, creating a tree structure. A ResNet is not implemented as a monolithic block of operations but as a hierarchy: the root module contains a sequence of residual blocks, each block contains convolution layers and normalization layers, and each layer contains parameter tensors. This hierarchical composition must support two critical operations made concrete in @lst-nested_modules: recursive parameter collection for training and **state serialization**\index{Model serialization!state dictionary pattern} for checkpointing and deployment.
 
