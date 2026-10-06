@@ -355,8 +355,9 @@ An exponential service-time distribution provides a reference case, yielding $C_
 At `{python} QueuingTheory.rho_pct_str` utilization $(\ServingUtilization = 0.8)$: with an exponential workload $(C_s = 1)$, $W_q =$ `{python} QueuingTheory.wq_uniform_str` $\times$ the average job duration. With an illustrative high-variability workload $(C_s = 3)$, $W_q =$ `{python} QueuingTheory.wq_ml_str` $\times$ the average job duration. In this M/G/1 model, service-time variability multiplies waiting time at the same offered load. The example does not prescribe a universal GPU-utilization threshold or model gang placement directly. It explains why capacity planning needs the service-time distribution and queue-delay objective as well as average load.
 
 :::
+## Core Allocation Constraints {#sec-fleet-orchestration-core-allocation}
 
-#### Dominant-resource fairness allocation {#sec-fleet-orchestration-drf-worked-allocation}
+### Dominant-resource fairness allocation {#sec-fleet-orchestration-drf-worked-allocation}
 
 Dominant-resource fairness (DRF)\index{Dominant Resource Fairness!worked allocation}\index{DRF|see{Dominant Resource Fairness}} makes a multi-resource entitlement comparable by normalizing each tenant's allocation against fleet capacity and taking its largest share [@ghodsi2011]. Consider the deliberately small cluster in @tbl-fleet-orchestration-drf-allocation: 8 GPUs, 32 CPU cores, 256 GB of memory, and 80 Gb/s of network capacity. Tenant A's replica requires 1 GPU, 4 cores, 32 GB, and 10 Gb/s; Tenant B's distributed worker requires 2 GPUs, 2 cores, 16 GB, and 20 Gb/s.
 
@@ -878,6 +879,214 @@ Before the chapter turns to topology-aware scheduling, review the core trade-off
 :::
 
 The admission and control-plane contracts established so far must now incorporate physical location as well as resource count: the same accelerator count can encounter different communication budgets under different placements. Topology-aware scheduling exploits that structure.
+
+## Multi-Tenancy and Quotas {#sec-fleet-orchestration-multi-tenancy}
+
+When the computer vision team hoards 500 GPUs for a week while the natural language processing team sits blocked trying to push a critical bug fix to production, shared clusters devolve into a tragedy of the commons. Teams with the most aggressive job submission rates, the largest jobs, or the most persistent resubmission scripts consume disproportionate resources, while teams with more modest or intermittent needs find the cluster perpetually occupied. This creates organizational friction, political escalation to management, and underinvestment in slower-moving but potentially higher-value projects whose teams lack the engineering effort to compete for resources.
+
+Multi-tenancy and quotas turn organizational priorities into rules for resource allocation, borrowing, and reclamation. The scheduler can enforce those rules, but their effects on fairness and utilization depend on the policy, workload demand, and availability of feasible placements. A quota therefore defines an entitlement or limit; it does not by itself guarantee prompt admission or productive use of the allocation.
+
+### Hierarchical fair-share {#sec-fleet-orchestration-fair-share-multi}
+
+GPU quota allocation typically operates at the namespace or project level, defining how much of the cluster each team is entitled to use. The simplest approach allocates fixed GPU counts per team: Team A gets 500 GPUs, Team B gets 300 GPUs, Team C gets 200 GPUs. This approach is easy to understand and implement but leads to systematic underutilization when teams have variable workloads. If Team A's 500-GPU allocation sits 50 percent idle during a quiet period while Team B's queue overflows with urgent work, the cluster wastes 250 GPUs of capacity that rigid quotas forbid Team B from using. The alternative, allocating less quota to each team, creates a different problem: teams are blocked from running legitimate work during peak periods even when the cluster has overall spare capacity.
+
+Hierarchical quotas separate a team's guaranteed share from its maximum permitted allocation. In @eq-fleet-orchestration-quota, $Q_{\text{team}}$ denotes that maximum cap, not the guarantee; $Q_{\text{department}}$ is the department's total capacity limit, and $U_{\text{allocated}}$ is each sibling team's current allocation. Assuming those allocations remain within the department limit, the equation gives an admission ceiling before any reclamation:
+
+$$ Q_{\text{effective}} = \min\left(Q_{\text{team}},\ Q_{\text{department}} - \sum_{\text{other teams}} U_{\text{allocated}}\right) $$ {#eq-fleet-orchestration-quota}
+
+The admission ceiling does not encode fair-share weights or guarantees. When demand exceeds capacity, the scheduler must also apply its fairness policy to feasible gangs. Unused guaranteed capacity can be lent within the hierarchy: if Team A uses only 60 percent of its 500-GPU allocation, the remaining 200 GPUs become available to other teams within the same department.
+
+### Burst capacity and quota borrowing {#sec-fleet-orchestration-burst-capacity}
+
+Lending turns unused guarantees into burst capacity. Suppose a small team holds a guarantee of 64 GPUs but needs 256 for a weekend-long training run while a sibling team's guaranteed share sits idle. The small team may borrow idle whole devices up to its maximum quota. Those devices remain part of physical cluster capacity rather than becoming virtual capacity, and they carry lower preemption priority than owned resources. When the sibling team submits work that needs its guarantee, the scheduler reclaims the borrowed devices by preempting or shrinking the borrower's opportunistic jobs.
+
+Borrowing is what allows a multi-tenant cluster to reach high utilization. Without it, organizations face a painful choice between reserving enough quota to handle each team's peak demand, which leaves capacity idle when peaks do not coincide, and allocating less, which blocks teams during peak periods even when reclaimable capacity exists elsewhere. Borrowing provides a reclaimable entitlement subject to the platform's response-time objective, safety headroom, and current physical capacity. A team entitled to 500 GPUs can reclaim borrowed devices according to that contract, but the scheduler must not promise an immediate 500-GPU allocation when failures, nonpreemptible reservations, or recovery headroom reduce reclaimable capacity.
+
+Burst capacity therefore expands aspirational maxima and fair-share weights, not simultaneous guarantees. The sum of guarantees that the platform promises to honor concurrently must fit reclaimable physical capacity after nonpreemptible reservations and safety headroom. Teams may advertise higher maximums or weights because borrowed jobs yield when guaranteed demand returns, but those values are not guarantees. Fractional sharing is a separate mechanism that requires an explicit MIG, MPS, or time-slicing contract.
+
+Reclamation couples quota policy to the checkpoint infrastructure. The admission controller separates guaranteed jobs, which run on the team's owned quota and face preemption only from higher-priority work, from opportunistic jobs, which run on borrowed capacity, yield first, and must checkpoint often enough that reclamation wastes little work. Elastic jobs soften reclamation further through the graceful preemption of @sec-fleet-orchestration-elastic-scheduler-integration, shrinking toward their minimum viable allocation rather than terminating.
+
+One policy for quota borrowing uses four tiers. Production serving\index{Priority class!production serving} (Priority 0) holds capacity protected from routine preemption. Production training\index{Priority class!production training} (Priority 1) yields only under a defined serving-failover policy. Interactive and debug\index{Priority class!interactive and debug} sessions (Priority 2) receive short execution limits to preserve iteration speed without indefinite resource occupation. Batch and research\index{Priority class!batch and research} tasks (Priority 3) use surplus capacity and yield under their reclamation contract. These numbers label this example's tiers; they are not Kubernetes priority values, where larger integers indicate higher priority. The hierarchy establishes precedence, but deadline protection still requires feasible capacity and bounded reclamation time, while lower-priority work needs an explicit starvation policy.
+
+The safe burst limit follows from reclaimability rather than average SM utilization. The scheduler must measure how quickly borrowed jobs can checkpoint, shrink, or terminate; reserve the I/O and network bandwidth required for that transition; and bound the amount of opportunistic capacity that can be reclaimed within the guarantee's response-time objective. A job that averages 70 percent SM activity may still reserve all device memory and require every rank in its gang, so the remaining 30 percent does not constitute an allocatable device fraction.
+
+### Priority preemption cascades {#sec-fleet-orchestration-preemption-cascades}
+
+::: {.column-margin}
+![](images/svg/fleet_orchestration_preempt_cascade.svg){width="100%" fig-alt="One red source node on the left with arrows fanning out to five separate downstream nodes on the right, showing one event displacing many."}
+
+*One eviction ripples to many: the preemption cascade.*
+:::
+
+When a high-priority job enters a saturated cluster, the scheduler must decide which running workloads to terminate to free up resources. This decision is rarely isolated. In tightly packed clusters, evicting a medium-priority job to accommodate a high-priority request often triggers a **preemption cascade**\index{Preemption Cascade!definition}, where the evicted job immediately attempts to reschedule itself by displacing lower-priority workloads. Without dampening controls, a single urgent inference service deployment can ripple through the queue, destabilizing dozens of training jobs and forcing a storm of checkpoint reloads that saturate storage bandwidth.
+
+```{python}
+#| echo: false
+
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ PREEMPTION TAX (LEGO)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @sec-fleet-orchestration-preemption-cascades
+# │
+# │ Goal: Quantify wasted cost and GPU-hours from repeated preemptions.
+# │ How: Convert recovery time across all GPUs into wasted GPU-hour cost.
+# │
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import Systems
+from mlsysim.fmt import check, fmt, fmt_count, fmt_time, fmt_usd
+
+class PreemptionTax:
+    # ┌── 1. LOAD ──────────────────────────────────────────
+    fleet = Systems.Clusters.Lab_64_H100
+    gpus = fleet.total_accelerators
+    lost_duration = 15 * minute  # scenario assumption
+    reload_duration = 20 * minute  # scenario assumption
+    warmup_duration = 10 * minute  # scenario assumption
+    gpu_hour_rate = Infrastructure.Pricing.Fleet.GpuHourRef.rate.to(USD / hour).magnitude
+    preemptions_per_day = 12  # scenario assumption
+    # ┌── 2. EXECUTE ───────────────────────────────────────
+    recovery_duration = lost_duration + reload_duration + warmup_duration
+    recovery_minutes = recovery_duration.to(minute).magnitude
+    recovery_hours = recovery_duration.to(hour).magnitude
+    cost_per_event = gpus * recovery_hours * gpu_hour_rate
+    wasted_duration_per_day = preemptions_per_day * recovery_duration
+    wasted_hours_per_day = wasted_duration_per_day.to(hour).magnitude
+    wasted_gpu_hours_per_day = gpus * wasted_hours_per_day
+    # ┌── 3. GUARD ─────────────────────────────────────────
+    check(recovery_duration.check("[time]"), f"Expected recovery duration, got {recovery_duration}")
+    check(wasted_duration_per_day.check("[time]"), f"Expected wasted duration, got {wasted_duration_per_day}")
+    check(recovery_minutes == 45, f"Expected 45 minutes, got {recovery_minutes}")
+    check(cost_per_event == 96, f"Expected $96, got {cost_per_event}")
+    check(wasted_gpu_hours_per_day == 576, f"Expected 576 GPU-hours, got {wasted_gpu_hours_per_day}")
+    # ┌── 4. OUTPUT ────────────────────────────────────────
+    recovery_duration_min_attr_str = fmt_time(recovery_duration, minute, precision=0, commas=False, style="word", attributive=True)
+    gpu_hour_rate_str = fmt_usd(gpu_hour_rate, precision=0, commas=False, per="GPU-hour")
+    cost_per_event_str = fmt_usd(cost_per_event, precision=0)
+    wasted_duration_per_day_h_str = fmt_time(wasted_duration_per_day, hour, precision=0, commas=False, style="word")
+    wasted_gpu_hours_per_day_str = fmt_count(wasted_gpu_hours_per_day, label="GPU-hour", plural_label="GPU-hours")
+    lost_min_str = fmt_time(lost_duration, minute, precision=0, commas=False, style="word")
+    reload_min_str = fmt_time(reload_duration, minute, precision=0, commas=False, style="word")
+    warmup_min_str = fmt_time(warmup_duration, minute, precision=0, commas=False, style="word")
+    preemptions_per_day_str = fmt(preemptions_per_day, precision=0, commas=False)
+    gpus_str = fmt(gpus, precision=0, commas=False)
+```
+
+The engineering cost of preemption extends beyond scheduling latency. The **preemption tax**\index{Preemption Tax!definition} depends on the exit path. A successful graceful checkpoint adds saving and restart overhead while preserving completed progress; a forced stop can instead discard work since the last durable checkpoint. Consider a forced interruption of the `{python} PreemptionTax.gpus_str`-GPU fine-tuning run for our 175B parameter model. The scenario assumes lost work equivalent to `{python} PreemptionTax.lost_min_str` of execution, followed by `{python} PreemptionTax.reload_min_str` to reload optimizer state and `{python} PreemptionTax.warmup_min_str` of warmup as data pipelines refill and just-in-time (JIT) compilation and runtime initialization complete. The calculation prices replay and restart across the same allocation; it does not also charge for a successful final save.
+
+Reconstructing the distributed data pipeline also belongs in the preemption contract. The checkpoint must preserve the sampling and loader state needed to resume the intended data order, alongside model and optimizer state. If the restart path omits that state, it can repeat or skip samples and lose exact replay of the training trajectory. A different shuffle order does not by itself prove statistical corruption, but the recovery policy must specify which changes are acceptable. The scheduler should therefore measure restoration and pipeline warmup as part of recovery cost, rather than assume that reloading model weights alone makes the job productive.
+
+The resulting `{python} PreemptionTax.recovery_duration_min_attr_str` tax combines discarded execution with reload and warmup time; it is not a measurement of continuous kernel activity after eviction. At `{python} PreemptionTax.gpu_hour_rate_str`, the scenario values each event at `{python} PreemptionTax.cost_per_event_str` in allocation time. Repeating it `{python} PreemptionTax.preemptions_per_day_str` times per day consumes `{python} PreemptionTax.wasted_duration_per_day_h_str` of equivalent allocation time, or `{python} PreemptionTax.wasted_gpu_hours_per_day_str` for this `{python} PreemptionTax.gpus_str`-GPU run. Enforcing **preemption budgets**\index{Preemption Budgets!definition} bounds this disruption, for example by limiting per-job frequency or the fraction of capacity displaced in a time window. When a budget binds, the scheduler must consider waiting, another placement, or a defined emergency exception. The trade-off is reduced recovery churn against delayed admission, measured under the workload's deadlines.
+
+### Resource accounting and observability {#sec-fleet-orchestration-resource-accounting}
+
+The 64 GPUs that sat idle for a weekend because a researcher forgot to cancel a reservation represent invisible waste in a multi-tenant cloud fleet. In a dedicated cluster, such waste is at least visible: the lights are on, but the fans are quiet. In a shared environment, the cost is hidden and compounds across thousands of jobs. Effective governance requires moving beyond simple "allocation" metrics to a tiered accounting model that distinguishes between what was requested, what was used, and what was useful.
+
+Three tiers of measurement expose this gap between requested hardware and actual progress. Allocated capacity counts resources reserved for a job. Compute utilization measures hardware activity under a stated counter definition, which can include communication kernels or work later replayed. Productive utilization requires a workload-level measure of retained training progress or serving work that meets its objective, normalized to a declared reference rate. For example, a team allocated 500 GPUs might average 350 active-device equivalents (70 percent activity) while delivering 280 device-equivalents of useful work at the reference rate (56 percent of its allocation). These are time-averaged equivalents, not necessarily distinct sets of active and productive devices. The gap motivates profiling; it does not identify its cause or imply that necessary communication and recovery can all be eliminated.
+
+::: {.column-margin}
+![](images/svg/vol2_fleet_orchestration_margin_004.svg){width="100%" fig-alt="Three horizontal orange utilization bars labeled allocated 500, active 350, and productive 280, decreasing from top to bottom."}
+
+*Allocated, active, and productive utilization drift far apart.*
+:::
+
+Attribution in a shared fleet presents a control problem. Every admitted job needs an owner, project, workload class, and preemption contract so the scheduler can apply quota and recovery policy consistently. Kubernetes labels and Slurm accounts carry this scheduling identity.
+
+This data feeds the utilization dashboard, the cluster operator's primary instrument for fleet health. This view must synthesize per-team utilization against quotas, queue depth by priority class, and the **fragmentation index**\index{Fragmentation Index!definition}, a measure of free GPUs that cannot be allocated due to topology constraints. It must also track preemption rates, spot interruptions, checkpoint traffic, and the recovery overhead they induce. These measurements let the scheduler distinguish idle capacity it can reclaim from allocated capacity whose apparent idleness reflects communication, I/O, or a rigid gang dependency.
+
+Automated anomaly detection turns these metrics into investigation triggers. A sudden spike in a team's consumption to 3$\times$ its historical norm might reflect a runaway submission script or an intentional experiment. A growing queue can indicate insufficient capacity, but it can also reflect quota limits, fragmented placements, or a stalled dependency. A sudden power drop can accompany a shared storage stall, though job completions and changes in workload mix can produce a similar signal. Operators must correlate these alerts with admission decisions and job progress before changing capacity or policy.
+
+::: {#psp-fleet-orchestration-three-utilization-metrics .callout-perspective title="The three utilization metrics"}
+
+Each tier narrows the investigation. Low allocated utilization\index{Utilization!allocated} calls for checking demand, quotas, device health, and placement feasibility. Low compute utilization\index{Utilization!compute} on allocated devices calls for tracing input supply, communication waits, and runtime execution. Low productive utilization\index{Utilization!productive} despite busy kernels calls for comparing retained progress with replay, synchronization, and other overhead. The metric selects the next evidence to collect; it does not by itself select the remedy.
+
+:::
+
+### Security and namespace isolation {#sec-fleet-orchestration-security-isolation}
+
+Multi-tenancy requires not only fair resource allocation but also security isolation that prevents teams from interfering with or observing each other's workloads. The stakes are real: ML models represent significant intellectual property, training data may contain sensitive information subject to privacy regulations, and the models themselves may encode proprietary business logic. Without proper isolation, a compromised or misconfigured workload in one team's namespace could access another team's model weights, training data, or inference traffic.
+
+In Kubernetes environments, namespace separation provides an administrative boundary that must be reinforced by host, device, network, and storage controls. Role-based access control can restrict a team's Kubernetes API operations, including job submission and access to pod logs, within its namespaces. Model artifacts in external storage require their own authorization policies, and cluster-wide scheduling controls require appropriately scoped permissions. Namespace ownership alone does not establish either boundary.
+
+Network policies restrict permitted traffic when the installed network plugin enforces them. A policy can allow communication among an admitted gang while denying unwanted cross-namespace connections, but it must cover the paths the workload actually uses. Ring AllReduce exchanges chunks along ring neighbors, while other collective algorithms use different peer patterns. Host networking and additional device interfaces require verification of the applicable enforcement boundary. Connection filtering does not encrypt gradient traffic; confidentiality on permitted paths requires separate controls. Egress restrictions can reduce exfiltration opportunities, subject to the same enforcement and coverage checks.
+
+@Tbl-gpu-virtualization-isolation-spectrum compares GPU virtualization options across isolation strength, resource efficiency, and workload fit.
+
+| **Option**                  | **Isolation strength**                                             | **Efficiency and flexibility**                         | **Suitable workload or trust boundary**                                    |
+|:----------------------------|:-------------------------------------------------------------------|:-------------------------------------------------------|:---------------------------------------------------------------------------|
+| **Time-slicing**            | Separate contexts; shared performance and device fault domains.    | Flexible; no spatial reservation.                      | Trusted, bursty jobs.                                                      |
+| **MPS**                     | Separate address spaces; shared performance and GPU fault domains. | Concurrent kernels; configurable limits.               | Mutually trusting jobs with measured demand.                               |
+| **MIG**                     | Hardware-partitioned memory, cache, and compute.                   | Predictable; fixed profiles.                           | SLO-sensitive work; external tenants also need platform security controls. |
+| **Full device passthrough** | Exclusive access to the GPU.                                       | Strongest device isolation; lowest packing efficiency. | Jobs that saturate the device or forbid sharing.                           |
+
+: **GPU Virtualization Isolation Spectrum**: GPU sharing mechanisms trade device-resource isolation against packing efficiency. External tenant isolation additionally depends on the host, driver, identity, network, and storage security boundaries. {#tbl-gpu-virtualization-isolation-spectrum tbl-colwidths="[23,27,23,27]"}
+
+The choice depends on the trust boundary between colocated workloads and the performance sensitivity of each workload type. Security in multi-tenant environments extends beyond simple resource fairness. Side-channel attacks on shared GPUs are a documented vulnerability; by monitoring contention on shared caches or memory controllers, a malicious tenant can infer the architecture or even data properties of a co-resident model. In sensitive environments, MIG or dedicated devices can strengthen device-resource isolation, but either mechanism remains one component of the larger host and platform security boundary.
+
+### Quota governance and organizational dynamics {#sec-fleet-orchestration-quota-governance}
+
+Schedulers manage immediate resource assignments, while **quota governance**\index{Quota Governance!definition} determines the entitlements and limits those assignments must honor. Periodic **quota review cycles**\index{Quota Review Cycle!definition} compare observed use, forecast demand, and the cost of meeting each team's capacity promise. A team using only 40 percent of a 128-GPU guarantee does not necessarily block other teams if unused devices can be borrowed. The governance question is whether the guarantee remains justified and whether its reclamation contract lets the fleet use spare capacity productively between demand peaks.
+
+The central tension in quota management is the **hoarding problem**\index{Hoarding Problem!definition}. Teams can retain idle reservations to avoid queuing again when work becomes ready. For example, a workflow that pauses policy training while awaiting human annotations can leave its reserved accelerators unused. A training run delayed by unfinished tokenization can create the same pattern. These examples concern dependencies in particular workflows, not an unavoidable idle phase of all training. Utilization-based reclamation\index{Quota!utilization-based reclamation} can release idle physical allocations to borrowers, provided the platform preserves any promised return time. Revising the team's longer-term guarantee instead requires comparing expected demand with observed use. Clear return contracts reduce the incentive to hold idle devices without making low activity alone grounds for breaking a capacity promise.
+
+Quota accounting should remain close to the scheduling decision. GPU-hours charged against a reservation, borrowed share, or preemption class make the opportunity cost of hoarding visible and let the control plane reclaim idle guarantees.
+
+```{python}
+#| echo: false
+
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ QUOTA HOARDING COST (LEGO)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: callout-example "Quota hoarding"
+# │
+# │ Goal: Quantify idle reservation cost for 500 GPUs over three weeks.
+# │ How: Convert idle reserved GPUs and idle duration into GPU-hour cost.
+# │
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim.fmt import check, fmt, fmt_time, fmt_usd
+
+class QuotaHoardingCost:
+    # ┌── 1. LOAD ──────────────────────────────────────────
+    gpus = 500
+    weeks = 3
+    hours_per_week = 7 * HOURS_PER_DAY
+    gpu_hour_rate = Infrastructure.Pricing.Fleet.GpuHourRef.rate.to(USD / hour).magnitude
+    # ┌── 2. EXECUTE ───────────────────────────────────────
+    idle_hours = weeks * hours_per_week
+    cost = gpus * idle_hours * gpu_hour_rate
+    # ┌── 3. GUARD ─────────────────────────────────────────
+    check(idle_hours == 504, f"Expected 504 hours, got {idle_hours}")
+    check(cost == 504000, f"Expected 504000, got {cost}")
+    # ┌── 4. OUTPUT ────────────────────────────────────────
+    hoarding_cost_str = fmt_usd(cost, precision=0)
+    hoarding_gpus_str = fmt(gpus, precision=0, commas=False)
+    hoarding_weeks_str = fmt_time(weeks, "week", precision=0, commas=False, style="word")
+```
+
+A concrete quota scenario shows how quickly idle reservations become expensive.
+
+::: {#exmp-fleet-orchestration-quota-hoarding .callout-example title="Quota hoarding"}
+
+**Scenario**: A research team reserves a static block of `{python} QuotaHoardingCost.hoarding_gpus_str` GPUs for an upcoming model refresh.
+
+**Diagnosis**: Upstream data delays postpone training, but the team retains the reservation to ensure future availability. The GPUs sit idle for `{python} QuotaHoardingCost.hoarding_weeks_str`, accumulating `{python} QuotaHoardingCost.hoarding_cost_str` in capital waste while other teams' queues back up.
+
+**Systems lesson**: An idle reservation should trigger a review of lending eligibility and future demand. The orchestrator can admit opportunistic borrowers under a bounded reclamation contract without changing the owner's guarantee. Reducing that guarantee is a separate governance decision; lending owned capacity does not turn it into cloud spot capacity.
+
+:::
+
+The "use it or lose it" reclamation policy addresses the most visible symptom of quota hoarding, but it raises a second-order question: when idle capacity is lent to another team, the system must distinguish borrowed capacity (preemptible on short notice) from guaranteed reservations (protected by SLOs). Defining borrowing, preemption, and guaranteed tiers as first-class policy primitives is the core multi-tenancy design decision.
+
+::: {#chk-fleet-orchestration-multi-tenancy-design-decisions .callout-checkpoint title="Multi-tenancy design decisions"}
+
+Consider a 2,000-GPU cluster shared between a research team (60 percent allocation) and a production team (40 percent allocation):
+
+- [ ] **Idle reclamation**: decide whether the production team can borrow the research team's allocation while half of it sits idle, and describe the preemption behavior when the research team submits a large job.
+- [ ] **Priority classes**: configure priority classes for a production inference workload that needs 100 GPUs with guaranteed latency SLOs and a research training job that can tolerate preemption.
+- [ ] **Sharing contract**: explain why 65 percent average SM utilization does not justify whole-device overcommitment, then identify which measured resource and isolation constraints would make statistical multiplexing safe.
+
+:::
+
+Even with sophisticated multi-tenancy and quota policies in place, the cluster can still fall victim to complex, systemic bottlenecks that defy simple monitoring. When utilization drops inexplicably despite full queues, operators must move from dashboards to systematic utilization debugging.
 
 ## Topology-Aware Scheduling {#sec-fleet-orchestration-topology-aware}
 
@@ -2046,11 +2255,11 @@ Before moving to ML-specific schedulers, review how the cost-optimization mechan
 
 Spot pricing and reservation strategy reduce the cost of capacity, but they do not determine which competing job should receive it. Runtime uncertainty, unequal completion delays, and the cost of interrupting an iteration remain even when prices are known. The ML-aware schedulers examined in @sec-fleet-orchestration-custom-schedulers use workload signals to address these different policy problems. Some also optimize time-to-accuracy, the wall-clock time until a run reaches a target validation metric, by accounting for learning progress as well as execution speed.
 
-## Custom ML Schedulers {#sec-fleet-orchestration-custom-schedulers}
+## Advanced Scheduling Techniques {#sec-fleet-orchestration-custom-schedulers}
 
 A short experiment waiting behind a long training run can suffer even when every running job has an efficient placement. Improving that outcome requires a policy for deciding which job receives the next available resources. Custom ML schedulers use different signals to make that decision: consumed service can prioritize jobs without runtime estimates, iteration boundaries can make preemption cheaper, normalized finish time can expose unfair delay, and measured goodput can guide joint resource and batch-size changes. Only the last of these requires a model of learning progress; the others improve completion time, utilization, or fairness without predicting convergence.
 
-### Tiresias duration-agnostic scheduling {#sec-fleet-orchestration-tiresias}
+### Duration-agnostic scheduling (Tiresias) {#sec-fleet-orchestration-tiresias}
 
 **Tiresias**\index{Tiresias!definition} [@gu2019tiresias] addresses the fundamental problem identified in @sec-fleet-orchestration-gang-scheduling: ML job durations are unpredictable, and scheduling policies that rely on exact duration estimates can make poor decisions when those estimates are unavailable or unreliable. Rather than fighting this information asymmetry, Tiresias eliminates the requirement for duration estimates entirely. It uses a two-dimensional attained service\index{Attained Service Scheduling!two-dimensional}[^fn-attained-service-scheduling] scheduler that makes priority decisions based on what a job has already consumed, not what it claims it will consume. Jobs accumulate "service" based on GPU-time consumed, with priority decreasing as service increases. The two dimensions are time (how long the job has been running) and resources (how many GPUs the job uses), capturing both elapsed duration and resource intensity.
 
@@ -2060,13 +2269,13 @@ A discretized version groups jobs into service bins (illustratively, less than 1
 
 The Tiresias evaluation reports lower average job completion times on its testbed and trace-driven workloads [@gu2019tiresias]. The result depends on job arrivals, sizes, and the comparison policy. Prioritizing low-service jobs can delay long-running jobs, so average completion time must be evaluated alongside starvation prevention and the delay experienced by each job class.
 
-### Gandiva iteration-aware scheduling {#sec-fleet-orchestration-gandiva}
+### Iteration-aware scheduling (Gandiva) {#sec-fleet-orchestration-gandiva}
 
 **Gandiva**\index{Gandiva!definition} [@xiao2018gandiva] exploits repetitive training iterations to profile jobs and share GPUs. Iteration boundaries offer useful switching points because temporary activations can be released, reducing the live state relative to the middle of a step. Persistent tensors and runtime allocations remain, so the boundary does not make switching free. The scheduler must measure memory demand, interference, and transition cost before admitting additional jobs.
 
 Gandiva also implements **grow-shrink elasticity**\index{Grow-Shrink Elasticity!definition}, applying the allocation mechanism of @sec-fleet-orchestration-elastic-training to jobs that explicitly permit resizing. It expands eligible jobs into idle capacity and shrinks them when demand returns, using profiles to estimate which jobs benefit. The published implementation limits growth to one server and waits through an idle period before expanding. Its contribution is the connection between measured job behavior and resource control, rather than a claim that arbitrary training jobs can resize cheaply.
 
-### Themis finish-time fairness {#sec-fleet-orchestration-themis}
+### Finish-time fairness (Themis) {#sec-fleet-orchestration-themis}
 
 Equal GPU-time shares can produce unequal completion delays when workloads respond differently to placement. **Themis**\index{Themis!definition} [@mahajan2020themis] measures fairness in normalized finish time. Each application, which can contain related training jobs, compares completion in the shared cluster with completion on an isolated fair share of its capacity.
 
@@ -2074,7 +2283,7 @@ Themis targets the worst finish-time fairness ratio across applications. Its auc
 
 Applications bid by reporting estimated finish-time fairness for candidate GPU subsets. These bids expose placement preferences rather than monetary willingness to pay. The auction trades short-term allocation efficiency against the long-term fairness objective, making the quality of completion-time and placement estimates part of the scheduler's operating assumptions.
 
-### Pollux adaptive resource allocation {#sec-fleet-orchestration-pollux}
+### Adaptive resource allocation (Pollux) {#sec-fleet-orchestration-pollux}
 
 **Pollux**\index{Pollux!definition} [@qiao2021pollux] extends resource adaptation to include training hyperparameters. Gandiva already changes allocations; Pollux jointly considers allocation, batch size, and learning-rate scaling because a larger batch can use more devices efficiently while changing the amount of work needed to converge. The preferred configuration can therefore change with both cluster demand and the stage of training.
 
@@ -2196,6 +2405,8 @@ Consider the trade-offs between the four research schedulers:
 The training policies just compared balance completion time, fairness, utilization, and learning progress. Serving adds a different deadline: capacity must be ready before an arriving request exhausts its latency budget. That requirement makes provisioning delay and burst headroom central to how the fleet allocates capacity to serving.
 
 ## Serving Capacity in the Shared Fleet {#sec-fleet-orchestration-serving}
+
+While training jobs demand long-running, gang-scheduled allocations, serving workloads introduce a fundamentally different profile: they are long-lived but request-driven, requiring dynamic scaling based on traffic rather than batch completion. Reconciling these competing demands within the same fleet is a critical orchestration challenge.
 
 When an e-commerce platform launches a major sale, requests can arrive faster than its serving replicas can process them. A training job may tolerate waiting in the admission queue; a serving request misses its deadline while additional capacity is still starting. To the fleet orchestrator, serving is therefore a claim on accelerators that must be honored quickly and that competes with training gangs for the same devices.
 
@@ -2586,214 +2797,6 @@ Dynamic sharing recovers `{python} DiurnalGpuShift.ds_reclaimed_str` of effectiv
 :::
 
 Safe sharing requires both a measured interference budget and an enforceable right to reclaim capacity. Isolation mechanisms address the first requirement; they do not decide which team owns a device or when a borrower must release it. Multi-tenancy and quota policies supply that allocation contract, connecting the training-serving boundary to fair access across teams.
-
-## Multi-Tenancy and Quotas {#sec-fleet-orchestration-multi-tenancy}
-
-When the computer vision team hoards 500 GPUs for a week while the natural language processing team sits blocked trying to push a critical bug fix to production, shared clusters devolve into a tragedy of the commons. Teams with the most aggressive job submission rates, the largest jobs, or the most persistent resubmission scripts consume disproportionate resources, while teams with more modest or intermittent needs find the cluster perpetually occupied. This creates organizational friction, political escalation to management, and underinvestment in slower-moving but potentially higher-value projects whose teams lack the engineering effort to compete for resources.
-
-Multi-tenancy and quotas turn organizational priorities into rules for resource allocation, borrowing, and reclamation. The scheduler can enforce those rules, but their effects on fairness and utilization depend on the policy, workload demand, and availability of feasible placements. A quota therefore defines an entitlement or limit; it does not by itself guarantee prompt admission or productive use of the allocation.
-
-### Hierarchical fair-share {#sec-fleet-orchestration-fair-share-multi}
-
-GPU quota allocation typically operates at the namespace or project level, defining how much of the cluster each team is entitled to use. The simplest approach allocates fixed GPU counts per team: Team A gets 500 GPUs, Team B gets 300 GPUs, Team C gets 200 GPUs. This approach is easy to understand and implement but leads to systematic underutilization when teams have variable workloads. If Team A's 500-GPU allocation sits 50 percent idle during a quiet period while Team B's queue overflows with urgent work, the cluster wastes 250 GPUs of capacity that rigid quotas forbid Team B from using. The alternative, allocating less quota to each team, creates a different problem: teams are blocked from running legitimate work during peak periods even when the cluster has overall spare capacity.
-
-Hierarchical quotas separate a team's guaranteed share from its maximum permitted allocation. In @eq-fleet-orchestration-quota, $Q_{\text{team}}$ denotes that maximum cap, not the guarantee; $Q_{\text{department}}$ is the department's total capacity limit, and $U_{\text{allocated}}$ is each sibling team's current allocation. Assuming those allocations remain within the department limit, the equation gives an admission ceiling before any reclamation:
-
-$$ Q_{\text{effective}} = \min\left(Q_{\text{team}},\ Q_{\text{department}} - \sum_{\text{other teams}} U_{\text{allocated}}\right) $$ {#eq-fleet-orchestration-quota}
-
-The admission ceiling does not encode fair-share weights or guarantees. When demand exceeds capacity, the scheduler must also apply its fairness policy to feasible gangs. Unused guaranteed capacity can be lent within the hierarchy: if Team A uses only 60 percent of its 500-GPU allocation, the remaining 200 GPUs become available to other teams within the same department.
-
-### Burst capacity and quota borrowing {#sec-fleet-orchestration-burst-capacity}
-
-Lending turns unused guarantees into burst capacity. Suppose a small team holds a guarantee of 64 GPUs but needs 256 for a weekend-long training run while a sibling team's guaranteed share sits idle. The small team may borrow idle whole devices up to its maximum quota. Those devices remain part of physical cluster capacity rather than becoming virtual capacity, and they carry lower preemption priority than owned resources. When the sibling team submits work that needs its guarantee, the scheduler reclaims the borrowed devices by preempting or shrinking the borrower's opportunistic jobs.
-
-Borrowing is what allows a multi-tenant cluster to reach high utilization. Without it, organizations face a painful choice between reserving enough quota to handle each team's peak demand, which leaves capacity idle when peaks do not coincide, and allocating less, which blocks teams during peak periods even when reclaimable capacity exists elsewhere. Borrowing provides a reclaimable entitlement subject to the platform's response-time objective, safety headroom, and current physical capacity. A team entitled to 500 GPUs can reclaim borrowed devices according to that contract, but the scheduler must not promise an immediate 500-GPU allocation when failures, nonpreemptible reservations, or recovery headroom reduce reclaimable capacity.
-
-Burst capacity therefore expands aspirational maxima and fair-share weights, not simultaneous guarantees. The sum of guarantees that the platform promises to honor concurrently must fit reclaimable physical capacity after nonpreemptible reservations and safety headroom. Teams may advertise higher maximums or weights because borrowed jobs yield when guaranteed demand returns, but those values are not guarantees. Fractional sharing is a separate mechanism that requires an explicit MIG, MPS, or time-slicing contract.
-
-Reclamation couples quota policy to the checkpoint infrastructure. The admission controller separates guaranteed jobs, which run on the team's owned quota and face preemption only from higher-priority work, from opportunistic jobs, which run on borrowed capacity, yield first, and must checkpoint often enough that reclamation wastes little work. Elastic jobs soften reclamation further through the graceful preemption of @sec-fleet-orchestration-elastic-scheduler-integration, shrinking toward their minimum viable allocation rather than terminating.
-
-One policy for quota borrowing uses four tiers. Production serving\index{Priority class!production serving} (Priority 0) holds capacity protected from routine preemption. Production training\index{Priority class!production training} (Priority 1) yields only under a defined serving-failover policy. Interactive and debug\index{Priority class!interactive and debug} sessions (Priority 2) receive short execution limits to preserve iteration speed without indefinite resource occupation. Batch and research\index{Priority class!batch and research} tasks (Priority 3) use surplus capacity and yield under their reclamation contract. These numbers label this example's tiers; they are not Kubernetes priority values, where larger integers indicate higher priority. The hierarchy establishes precedence, but deadline protection still requires feasible capacity and bounded reclamation time, while lower-priority work needs an explicit starvation policy.
-
-The safe burst limit follows from reclaimability rather than average SM utilization. The scheduler must measure how quickly borrowed jobs can checkpoint, shrink, or terminate; reserve the I/O and network bandwidth required for that transition; and bound the amount of opportunistic capacity that can be reclaimed within the guarantee's response-time objective. A job that averages 70 percent SM activity may still reserve all device memory and require every rank in its gang, so the remaining 30 percent does not constitute an allocatable device fraction.
-
-### Resource accounting and observability {#sec-fleet-orchestration-resource-accounting}
-
-The 64 GPUs that sat idle for a weekend because a researcher forgot to cancel a reservation represent invisible waste in a multi-tenant cloud fleet. In a dedicated cluster, such waste is at least visible: the lights are on, but the fans are quiet. In a shared environment, the cost is hidden and compounds across thousands of jobs. Effective governance requires moving beyond simple "allocation" metrics to a tiered accounting model that distinguishes between what was requested, what was used, and what was useful.
-
-Three tiers of measurement expose this gap between requested hardware and actual progress. Allocated capacity counts resources reserved for a job. Compute utilization measures hardware activity under a stated counter definition, which can include communication kernels or work later replayed. Productive utilization requires a workload-level measure of retained training progress or serving work that meets its objective, normalized to a declared reference rate. For example, a team allocated 500 GPUs might average 350 active-device equivalents (70 percent activity) while delivering 280 device-equivalents of useful work at the reference rate (56 percent of its allocation). These are time-averaged equivalents, not necessarily distinct sets of active and productive devices. The gap motivates profiling; it does not identify its cause or imply that necessary communication and recovery can all be eliminated.
-
-::: {.column-margin}
-![](images/svg/vol2_fleet_orchestration_margin_004.svg){width="100%" fig-alt="Three horizontal orange utilization bars labeled allocated 500, active 350, and productive 280, decreasing from top to bottom."}
-
-*Allocated, active, and productive utilization drift far apart.*
-:::
-
-Attribution in a shared fleet presents a control problem. Every admitted job needs an owner, project, workload class, and preemption contract so the scheduler can apply quota and recovery policy consistently. Kubernetes labels and Slurm accounts carry this scheduling identity.
-
-This data feeds the utilization dashboard, the cluster operator's primary instrument for fleet health. This view must synthesize per-team utilization against quotas, queue depth by priority class, and the **fragmentation index**\index{Fragmentation Index!definition}, a measure of free GPUs that cannot be allocated due to topology constraints. It must also track preemption rates, spot interruptions, checkpoint traffic, and the recovery overhead they induce. These measurements let the scheduler distinguish idle capacity it can reclaim from allocated capacity whose apparent idleness reflects communication, I/O, or a rigid gang dependency.
-
-Automated anomaly detection turns these metrics into investigation triggers. A sudden spike in a team's consumption to 3$\times$ its historical norm might reflect a runaway submission script or an intentional experiment. A growing queue can indicate insufficient capacity, but it can also reflect quota limits, fragmented placements, or a stalled dependency. A sudden power drop can accompany a shared storage stall, though job completions and changes in workload mix can produce a similar signal. Operators must correlate these alerts with admission decisions and job progress before changing capacity or policy.
-
-::: {#psp-fleet-orchestration-three-utilization-metrics .callout-perspective title="The three utilization metrics"}
-
-Each tier narrows the investigation. Low allocated utilization\index{Utilization!allocated} calls for checking demand, quotas, device health, and placement feasibility. Low compute utilization\index{Utilization!compute} on allocated devices calls for tracing input supply, communication waits, and runtime execution. Low productive utilization\index{Utilization!productive} despite busy kernels calls for comparing retained progress with replay, synchronization, and other overhead. The metric selects the next evidence to collect; it does not by itself select the remedy.
-
-:::
-
-### Security and namespace isolation {#sec-fleet-orchestration-security-isolation}
-
-Multi-tenancy requires not only fair resource allocation but also security isolation that prevents teams from interfering with or observing each other's workloads. The stakes are real: ML models represent significant intellectual property, training data may contain sensitive information subject to privacy regulations, and the models themselves may encode proprietary business logic. Without proper isolation, a compromised or misconfigured workload in one team's namespace could access another team's model weights, training data, or inference traffic.
-
-In Kubernetes environments, namespace separation provides an administrative boundary that must be reinforced by host, device, network, and storage controls. Role-based access control can restrict a team's Kubernetes API operations, including job submission and access to pod logs, within its namespaces. Model artifacts in external storage require their own authorization policies, and cluster-wide scheduling controls require appropriately scoped permissions. Namespace ownership alone does not establish either boundary.
-
-Network policies restrict permitted traffic when the installed network plugin enforces them. A policy can allow communication among an admitted gang while denying unwanted cross-namespace connections, but it must cover the paths the workload actually uses. Ring AllReduce exchanges chunks along ring neighbors, while other collective algorithms use different peer patterns. Host networking and additional device interfaces require verification of the applicable enforcement boundary. Connection filtering does not encrypt gradient traffic; confidentiality on permitted paths requires separate controls. Egress restrictions can reduce exfiltration opportunities, subject to the same enforcement and coverage checks.
-
-@Tbl-gpu-virtualization-isolation-spectrum compares GPU virtualization options across isolation strength, resource efficiency, and workload fit.
-
-| **Option**                  | **Isolation strength**                                             | **Efficiency and flexibility**                         | **Suitable workload or trust boundary**                                    |
-|:----------------------------|:-------------------------------------------------------------------|:-------------------------------------------------------|:---------------------------------------------------------------------------|
-| **Time-slicing**            | Separate contexts; shared performance and device fault domains.    | Flexible; no spatial reservation.                      | Trusted, bursty jobs.                                                      |
-| **MPS**                     | Separate address spaces; shared performance and GPU fault domains. | Concurrent kernels; configurable limits.               | Mutually trusting jobs with measured demand.                               |
-| **MIG**                     | Hardware-partitioned memory, cache, and compute.                   | Predictable; fixed profiles.                           | SLO-sensitive work; external tenants also need platform security controls. |
-| **Full device passthrough** | Exclusive access to the GPU.                                       | Strongest device isolation; lowest packing efficiency. | Jobs that saturate the device or forbid sharing.                           |
-
-: **GPU Virtualization Isolation Spectrum**: GPU sharing mechanisms trade device-resource isolation against packing efficiency. External tenant isolation additionally depends on the host, driver, identity, network, and storage security boundaries. {#tbl-gpu-virtualization-isolation-spectrum tbl-colwidths="[23,27,23,27]"}
-
-The choice depends on the trust boundary between colocated workloads and the performance sensitivity of each workload type. Security in multi-tenant environments extends beyond simple resource fairness. Side-channel attacks on shared GPUs are a documented vulnerability; by monitoring contention on shared caches or memory controllers, a malicious tenant can infer the architecture or even data properties of a co-resident model. In sensitive environments, MIG or dedicated devices can strengthen device-resource isolation, but either mechanism remains one component of the larger host and platform security boundary.
-
-### Priority preemption cascades {#sec-fleet-orchestration-preemption-cascades}
-
-::: {.column-margin}
-![](images/svg/fleet_orchestration_preempt_cascade.svg){width="100%" fig-alt="One red source node on the left with arrows fanning out to five separate downstream nodes on the right, showing one event displacing many."}
-
-*One eviction ripples to many: the preemption cascade.*
-:::
-
-When a high-priority job enters a saturated cluster, the scheduler must decide which running workloads to terminate to free up resources. This decision is rarely isolated. In tightly packed clusters, evicting a medium-priority job to accommodate a high-priority request often triggers a **preemption cascade**\index{Preemption Cascade!definition}, where the evicted job immediately attempts to reschedule itself by displacing lower-priority workloads. Without dampening controls, a single urgent inference service deployment can ripple through the queue, destabilizing dozens of training jobs and forcing a storm of checkpoint reloads that saturate storage bandwidth.
-
-```{python}
-#| echo: false
-
-# ┌─────────────────────────────────────────────────────────────────────────────
-# │ PREEMPTION TAX (LEGO)
-# ├─────────────────────────────────────────────────────────────────────────────
-# │ Context: @sec-fleet-orchestration-preemption-cascades
-# │
-# │ Goal: Quantify wasted cost and GPU-hours from repeated preemptions.
-# │ How: Convert recovery time across all GPUs into wasted GPU-hour cost.
-# │
-# └─────────────────────────────────────────────────────────────────────────────
-from mlsysim import Systems
-from mlsysim.fmt import check, fmt, fmt_count, fmt_time, fmt_usd
-
-class PreemptionTax:
-    # ┌── 1. LOAD ──────────────────────────────────────────
-    fleet = Systems.Clusters.Lab_64_H100
-    gpus = fleet.total_accelerators
-    lost_duration = 15 * minute  # scenario assumption
-    reload_duration = 20 * minute  # scenario assumption
-    warmup_duration = 10 * minute  # scenario assumption
-    gpu_hour_rate = Infrastructure.Pricing.Fleet.GpuHourRef.rate.to(USD / hour).magnitude
-    preemptions_per_day = 12  # scenario assumption
-    # ┌── 2. EXECUTE ───────────────────────────────────────
-    recovery_duration = lost_duration + reload_duration + warmup_duration
-    recovery_minutes = recovery_duration.to(minute).magnitude
-    recovery_hours = recovery_duration.to(hour).magnitude
-    cost_per_event = gpus * recovery_hours * gpu_hour_rate
-    wasted_duration_per_day = preemptions_per_day * recovery_duration
-    wasted_hours_per_day = wasted_duration_per_day.to(hour).magnitude
-    wasted_gpu_hours_per_day = gpus * wasted_hours_per_day
-    # ┌── 3. GUARD ─────────────────────────────────────────
-    check(recovery_duration.check("[time]"), f"Expected recovery duration, got {recovery_duration}")
-    check(wasted_duration_per_day.check("[time]"), f"Expected wasted duration, got {wasted_duration_per_day}")
-    check(recovery_minutes == 45, f"Expected 45 minutes, got {recovery_minutes}")
-    check(cost_per_event == 96, f"Expected $96, got {cost_per_event}")
-    check(wasted_gpu_hours_per_day == 576, f"Expected 576 GPU-hours, got {wasted_gpu_hours_per_day}")
-    # ┌── 4. OUTPUT ────────────────────────────────────────
-    recovery_duration_min_attr_str = fmt_time(recovery_duration, minute, precision=0, commas=False, style="word", attributive=True)
-    gpu_hour_rate_str = fmt_usd(gpu_hour_rate, precision=0, commas=False, per="GPU-hour")
-    cost_per_event_str = fmt_usd(cost_per_event, precision=0)
-    wasted_duration_per_day_h_str = fmt_time(wasted_duration_per_day, hour, precision=0, commas=False, style="word")
-    wasted_gpu_hours_per_day_str = fmt_count(wasted_gpu_hours_per_day, label="GPU-hour", plural_label="GPU-hours")
-    lost_min_str = fmt_time(lost_duration, minute, precision=0, commas=False, style="word")
-    reload_min_str = fmt_time(reload_duration, minute, precision=0, commas=False, style="word")
-    warmup_min_str = fmt_time(warmup_duration, minute, precision=0, commas=False, style="word")
-    preemptions_per_day_str = fmt(preemptions_per_day, precision=0, commas=False)
-    gpus_str = fmt(gpus, precision=0, commas=False)
-```
-
-The engineering cost of preemption extends beyond scheduling latency. The **preemption tax**\index{Preemption Tax!definition} depends on the exit path. A successful graceful checkpoint adds saving and restart overhead while preserving completed progress; a forced stop can instead discard work since the last durable checkpoint. Consider a forced interruption of the `{python} PreemptionTax.gpus_str`-GPU fine-tuning run for our 175B parameter model. The scenario assumes lost work equivalent to `{python} PreemptionTax.lost_min_str` of execution, followed by `{python} PreemptionTax.reload_min_str` to reload optimizer state and `{python} PreemptionTax.warmup_min_str` of warmup as data pipelines refill and just-in-time (JIT) compilation and runtime initialization complete. The calculation prices replay and restart across the same allocation; it does not also charge for a successful final save.
-
-Reconstructing the distributed data pipeline also belongs in the preemption contract. The checkpoint must preserve the sampling and loader state needed to resume the intended data order, alongside model and optimizer state. If the restart path omits that state, it can repeat or skip samples and lose exact replay of the training trajectory. A different shuffle order does not by itself prove statistical corruption, but the recovery policy must specify which changes are acceptable. The scheduler should therefore measure restoration and pipeline warmup as part of recovery cost, rather than assume that reloading model weights alone makes the job productive.
-
-The resulting `{python} PreemptionTax.recovery_duration_min_attr_str` tax combines discarded execution with reload and warmup time; it is not a measurement of continuous kernel activity after eviction. At `{python} PreemptionTax.gpu_hour_rate_str`, the scenario values each event at `{python} PreemptionTax.cost_per_event_str` in allocation time. Repeating it `{python} PreemptionTax.preemptions_per_day_str` times per day consumes `{python} PreemptionTax.wasted_duration_per_day_h_str` of equivalent allocation time, or `{python} PreemptionTax.wasted_gpu_hours_per_day_str` for this `{python} PreemptionTax.gpus_str`-GPU run. Enforcing **preemption budgets**\index{Preemption Budgets!definition} bounds this disruption, for example by limiting per-job frequency or the fraction of capacity displaced in a time window. When a budget binds, the scheduler must consider waiting, another placement, or a defined emergency exception. The trade-off is reduced recovery churn against delayed admission, measured under the workload's deadlines.
-
-### Quota governance and organizational dynamics {#sec-fleet-orchestration-quota-governance}
-
-Schedulers manage immediate resource assignments, while **quota governance**\index{Quota Governance!definition} determines the entitlements and limits those assignments must honor. Periodic **quota review cycles**\index{Quota Review Cycle!definition} compare observed use, forecast demand, and the cost of meeting each team's capacity promise. A team using only 40 percent of a 128-GPU guarantee does not necessarily block other teams if unused devices can be borrowed. The governance question is whether the guarantee remains justified and whether its reclamation contract lets the fleet use spare capacity productively between demand peaks.
-
-The central tension in quota management is the **hoarding problem**\index{Hoarding Problem!definition}. Teams can retain idle reservations to avoid queuing again when work becomes ready. For example, a workflow that pauses policy training while awaiting human annotations can leave its reserved accelerators unused. A training run delayed by unfinished tokenization can create the same pattern. These examples concern dependencies in particular workflows, not an unavoidable idle phase of all training. Utilization-based reclamation\index{Quota!utilization-based reclamation} can release idle physical allocations to borrowers, provided the platform preserves any promised return time. Revising the team's longer-term guarantee instead requires comparing expected demand with observed use. Clear return contracts reduce the incentive to hold idle devices without making low activity alone grounds for breaking a capacity promise.
-
-Quota accounting should remain close to the scheduling decision. GPU-hours charged against a reservation, borrowed share, or preemption class make the opportunity cost of hoarding visible and let the control plane reclaim idle guarantees.
-
-```{python}
-#| echo: false
-
-# ┌─────────────────────────────────────────────────────────────────────────────
-# │ QUOTA HOARDING COST (LEGO)
-# ├─────────────────────────────────────────────────────────────────────────────
-# │ Context: callout-example "Quota hoarding"
-# │
-# │ Goal: Quantify idle reservation cost for 500 GPUs over three weeks.
-# │ How: Convert idle reserved GPUs and idle duration into GPU-hour cost.
-# │
-# └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import check, fmt, fmt_time, fmt_usd
-
-class QuotaHoardingCost:
-    # ┌── 1. LOAD ──────────────────────────────────────────
-    gpus = 500
-    weeks = 3
-    hours_per_week = 7 * HOURS_PER_DAY
-    gpu_hour_rate = Infrastructure.Pricing.Fleet.GpuHourRef.rate.to(USD / hour).magnitude
-    # ┌── 2. EXECUTE ───────────────────────────────────────
-    idle_hours = weeks * hours_per_week
-    cost = gpus * idle_hours * gpu_hour_rate
-    # ┌── 3. GUARD ─────────────────────────────────────────
-    check(idle_hours == 504, f"Expected 504 hours, got {idle_hours}")
-    check(cost == 504000, f"Expected 504000, got {cost}")
-    # ┌── 4. OUTPUT ────────────────────────────────────────
-    hoarding_cost_str = fmt_usd(cost, precision=0)
-    hoarding_gpus_str = fmt(gpus, precision=0, commas=False)
-    hoarding_weeks_str = fmt_time(weeks, "week", precision=0, commas=False, style="word")
-```
-
-A concrete quota scenario shows how quickly idle reservations become expensive.
-
-::: {#exmp-fleet-orchestration-quota-hoarding .callout-example title="Quota hoarding"}
-
-**Scenario**: A research team reserves a static block of `{python} QuotaHoardingCost.hoarding_gpus_str` GPUs for an upcoming model refresh.
-
-**Diagnosis**: Upstream data delays postpone training, but the team retains the reservation to ensure future availability. The GPUs sit idle for `{python} QuotaHoardingCost.hoarding_weeks_str`, accumulating `{python} QuotaHoardingCost.hoarding_cost_str` in capital waste while other teams' queues back up.
-
-**Systems lesson**: An idle reservation should trigger a review of lending eligibility and future demand. The orchestrator can admit opportunistic borrowers under a bounded reclamation contract without changing the owner's guarantee. Reducing that guarantee is a separate governance decision; lending owned capacity does not turn it into cloud spot capacity.
-
-:::
-
-The "use it or lose it" reclamation policy addresses the most visible symptom of quota hoarding, but it raises a second-order question: when idle capacity is lent to another team, the system must distinguish borrowed capacity (preemptible on short notice) from guaranteed reservations (protected by SLOs). Defining borrowing, preemption, and guaranteed tiers as first-class policy primitives is the core multi-tenancy design decision.
-
-::: {#chk-fleet-orchestration-multi-tenancy-design-decisions .callout-checkpoint title="Multi-tenancy design decisions"}
-
-Consider a 2,000-GPU cluster shared between a research team (60 percent allocation) and a production team (40 percent allocation):
-
-- [ ] **Idle reclamation**: decide whether the production team can borrow the research team's allocation while half of it sits idle, and describe the preemption behavior when the research team submits a large job.
-- [ ] **Priority classes**: configure priority classes for a production inference workload that needs 100 GPUs with guaranteed latency SLOs and a research training job that can tolerate preemption.
-- [ ] **Sharing contract**: explain why 65 percent average SM utilization does not justify whole-device overcommitment, then identify which measured resource and isolation constraints would make statistical multiplexing safe.
-
-:::
-
-Even with sophisticated multi-tenancy and quota policies in place, the cluster can still fall victim to complex, systemic bottlenecks that defy simple monitoring. When utilization drops inexplicably despite full queues, operators must move from dashboards to systematic utilization debugging.
 
 ## Debugging Cluster Utilization {#sec-fleet-orchestration-debugging}
 

@@ -1046,15 +1046,7 @@ Beyond chip-level power, data center infrastructure imposes additional energy ov
 
 $$\text{PUE} = \frac{P_{\text{facility}}}{P_{\text{IT}}}$$ {#eq-sustainable-ai-pue}
 
-::: {#dfn-sustainable-ai-pue .callout-definition title="Power usage effectiveness (PUE)"}
-
-***Power usage effectiveness (PUE)***\index{Power Usage Effectiveness!definition} is the data-center efficiency ratio ML system operators use to compare total facility power consumption against the power consumed specifically by IT equipment $(P_{\text{facility}} / P_{\text{IT}})$.
-
-1.  **Significance**: It measures the Infrastructure Overhead of the data center. A PUE of 1.0 is the theoretical ideal; a PUE of 1.10 means that for every 100 watts consumed by IT equipment, an additional 10 watts are required for non-IT facility overhead, including cooling and facility-side power distribution.
-2.  **Distinction**: Unlike Computing Efficiency (which focuses on FLOPs per Watt), PUE focuses on Facility Efficiency\index{Efficiency!facility}: it measures non-IT overhead relative to IT consumption. Idle equipment and power losses inside the IT measurement boundary remain in the denominator; PUE does not measure useful computation.
-3.  **Common pitfall**: A frequent misconception is that a low PUE means a "green" data center. In reality, PUE only measures Efficiency, not the Carbon Intensity of the energy source; a coal-powered data center can have a better PUE than a solar-powered one while having a much higher environmental impact.
-
-:::
+A PUE of 1.10 means that for every 100 watts consumed by IT equipment, an additional 10 watts are required for cooling and facility-side power distribution. However, PUE only measures facility overhead efficiency, not useful computation or the carbon intensity of the energy source.
 
 ```{python}
 #| echo: false
@@ -1700,6 +1692,112 @@ $$P_{\text{facility}} = P_{\text{IT}} \times \text{PUE} = (P_{\text{servers}} + 
 The PUE calculation above already established how IT load becomes facility load. Operational power is only one term, however; the next model combines that metered energy with a declared grid signal and embodied allocation rather than repeating the facility example.
 
 ## Carbon Footprint Calculation {#sec-sustainable-ai-carbon-footprint-calculation-c2fe}
+### Comprehensive carbon accounting methodologies {#sec-sustainable-ai-comprehensive-carbon-accounting-methodologies-62fc}
+
+The training, inference, and manufacturing account groups emissions by the activity that produces them. The three emission scopes defined by the Greenhouse Gas (GHG) Protocol instead classify them relative to a reporting organization. These are different views of the same footprint, not additional totals to add together. Connecting the workload account to the organizational inventory requires naming who owns the equipment, purchases the electricity, and buys the service.
+
+Within an owned data-center facility boundary, Scope 1 emissions\index{Scope 1 emissions!direct emissions}\index{Scope 1 emissions!backup generators and refrigerants}\index{Scope 1 emissions!direct operational emissions} include direct combustion in owned generators and refrigerant leakage from cooling equipment. Purchased electricity used to run cooling belongs in Scope 2, not Scope 1.
+
+Scope 2 emissions\index{Scope 2 emissions!indirect energy emissions}\index{Scope 2 emissions!purchased electricity}\index{Scope 2 emissions!grid energy mix} represent indirect emissions from purchased electricity, steam, heat, and cooling consumed by the reporting organization. Purchased electricity is often the dominant category for an operator's owned facility, and it varies dramatically by geographic location and grid energy mix. Electricity used by a cloud provider is Scope 2 for that provider, but a customer's purchased cloud service is generally accounted for in the customer's Scope 3 value chain. The physical electrons do not change; the reporting boundary does. The placement example in @sec-sustainable-ai-scale-environmental-impact-ac9a uses a declared pair of illustrative factors; actual accounting requires factors matched to the location, time, and method.
+
+Scope 3 emissions\index{Scope 3 emissions!value chain emissions}\index{Scope 3 emissions!hardware manufacturing and supply chain}\index{Scope 3 emissions!accelerator embodied carbon} constitute the most complex category, encompassing hardware manufacturing, cloud supply chains, transportation, disposal, and downstream use. Semiconductor manufacturing is carbon-intensive.[^fn-euv-lithography-energy] For low-utilization hardware or clean-grid deployments, embodied accelerator emissions can rival months or years of operation; for sustained high-power training on carbon-intensive grids, the break-even can be much shorter. Under company-wide or value-chain AI accounting, Scope 3 can dominate even when Scope 2 dominates a single owned facility's operational footprint.
+
+[^fn-euv-lithography-energy]: **Lithography and Embodied Energy**\index{EUV Lithography Energy Cost!definition}: Advanced semiconductor fabrication can use energy-intensive lithography, including extreme ultraviolet (EUV) processes. Emissions per usable chip depend on the process sequence, facility energy mix, yield, die area, and allocation method. Neither transistor count nor a nominal process-node label alone determines the number of exposure steps or manufacturing footprint.
+
+Downstream use can also enter Scope 3, including end-user smartphones, IoT devices, and edge computing.[^fn-edge-intelligence-paradox] Companywide totals do not by themselves identify the footprint of a particular AI service; that attribution still requires workload-level accounting.
+
+[^fn-edge-intelligence-paradox]: **Edge AI Energy Trade-off**\index{Edge AI Energy Paradox!definition}\index{Edge Computing!energy paradox}: Edge inference can reduce network transfers and response latency, while distributing computation across devices with different duty cycles and power states. It does not eliminate network or cloud work. Compare local compute, idle power, sensors, communications, and any remaining server work over the same service period; distributed consumption is harder to attribute, but remains part of the accounting boundary.
+
+```{python}
+#| echo: false
+#| label: search-overhead-calc
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ DEVELOPMENT SEARCH OVERHEAD (LEGO)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: development-scope prose immediately below.
+# │
+# │ Goal: Show how a hyperparameter or architecture sweep multiplies the
+# │       reported final-run footprint.
+# │ Show: 50 candidates at one-tenth scale = 5x the final run.
+# │ How: overhead = k × f (final-run equivalents).
+# │
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim.fmt import check, fmt, fmt_multiple, fmt_percent
+
+class SearchOverhead:
+    """Final-run equivalents consumed by a development sweep."""
+
+    # ┌── 1. LOAD ──────────────────────────────────────────────────────────
+    k = 50  # scenario assumption: candidates trained in the sweep
+    f = 0.1  # scenario assumption: each candidate's cost relative to the final run
+
+    # ┌── 2. EXECUTE ───────────────────────────────────────────────────────
+    overhead = k * f
+
+    # ┌── 3. GUARD ─────────────────────────────────────────────────────────
+    check(overhead > 1, "The sweep should exceed the reported run")
+
+    # ┌── 4. OUTPUT ────────────────────────────────────────────────────────
+    k_str = fmt(k, precision=0, commas=False)
+    f_str = fmt_percent(f, precision=0, commas=False, style="prose")
+    overhead_mult_str = fmt_multiple(overhead, precision=0, commas=False)
+```
+
+The operational emissions of a final training run and its deployed service omit the development that produced them, including failed experiments, hyperparameter searches, and the build and test infrastructure. Repeated experiments can exceed the cost of the final run. A search that trains $k$ candidates at a fraction $f$ of the final run's cost adds $k f$ final-run equivalents before the chosen model starts, so a sweep of `{python} SearchOverhead.k_str` candidates at `{python} SearchOverhead.f_str` of full scale costs `{python} SearchOverhead.overhead_mult_str` the run that gets reported. Continuous integration, compilation, and evaluation add further work whose contribution depends on run frequency and scale. The development boundary must record these activities before assigning their emissions to the reporting organization's inventory; the phase of model development does not itself determine the emissions scope.
+
+The **Greenhouse Gas (GHG) Protocol**\index{Greenhouse Gas Protocol!definition}[^fn-ghg-protocol-scope] framework [@ghgprotocol2023] formalizes these accounting perimeters into the concentric reporting boundaries diagrammed in @fig-ghg-protocol. Concentric tiers radiate outward from direct data center control—spanning on-site diesel generators in Scope 1, purchased grid electricity for compute and cooling in Scope 2, and upstream semiconductor fabrication and hardware recycling across Scope 3—establishing the classification boundaries applied in the following audit.
+
+[^fn-ghg-protocol-scope]: **Greenhouse Gas (GHG) Protocol**\index{Greenhouse Gas Protocol!three-scope accounting}\index{GHG Protocol|see{Greenhouse Gas Protocol}}: The framework distinguishes direct emissions, purchased energy, and other value-chain emissions [@ghgprotocol2023]. Their relative shares depend on the reporting organization and workload boundary. Explicit classification prevents purchased cloud services or manufacturing from disappearing from an account limited to an operator's own electricity.
+
+::: {#fig-ghg-protocol fig-env="figure" fig-pos="htb" fig-cap="**GHG Emission Scopes**: Concentric rings place the reporting organization's data center at the center, with Scope 1 (direct emissions) innermost, Scope 2 (purchased energy) around it, and Scope 3 (value chain) outermost. Each callout lists representative sources for its ring. The rings show reporting distance from the operator's direct control, not relative size. Scope definitions follow the GHG Protocol [@ghgprotocol2023]." fig-alt="Three concentric circles around a data center icon: an inner gray circle labeled Scope 1, a middle amber ring labeled Scope 2, and an outer blue ring labeled Scope 3. Dashed leaders run from each ring to a callout box on the right. The boxes list on-site diesel generators for Scope 1, purchased grid electricity and cooling power for Scope 2, and supply chain manufacturing, embodied hardware carbon, employee travel, and end-of-life recycling for Scope 3."}
+![](images/svg/ghg-protocol.svg)
+
+:::
+
+Categorizing these emissions into Scope 1, 2, and 3 frameworks provides a standardized vocabulary for corporate environmental reporting. Correctly applying this framework in practice requires classifying the various hidden emission sources across a typical ML platform's operational lifecycle.
+
+::: {#chk-sustainable-ai-accounting-invisible-carbon .callout-checkpoint title="Accounting for invisible carbon"}
+
+Audit the carbon footprint of a machine learning platform by classifying the following emission sources into Scope 1 (Direct), Scope 2 (Indirect Energy), or Scope 3 (Value Chain). State the reporting organization before assigning each scope:
+
+- [ ] **Backup generation**: classify diesel burned by backup generators during a grid outage at an owned facility.
+- [ ] **Leased cloud cluster**: classify the electricity for both reporting entities, the cloud operator that purchases it and the customer that purchases the compute service.
+- [ ] **Embodied manufacturing**: classify the embodied carbon emitted during the manufacturing of the GPUs by TSMC.
+- [ ] **End-user operation**: classify emissions from the end-user's smartphone battery while running a deployed mobile inference app.
+
+:::
+
+```{python}
+#| echo: false
+#| label: dense-rack-power-anchor
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ DENSE RACK POWER ANCHOR (LEGO)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: transition prose immediately below.
+# │
+# │ Goal: Pin the single-cabinet power figure to a named rack-scale system.
+# │ Show: 120 kW per cabinet (GB200 NVL72).
+# │ How: Hardware.Cloud.GB200_NVL72.tdp.
+# │
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import Hardware
+from mlsysim.core.units import kilowatt
+from mlsysim.fmt import check, fmt_power
+
+class DenseRackPowerAnchor:
+    """Rack-scale power of an NVL72-class cabinet."""
+
+    # ┌── 1. LOAD ──────────────────────────────────────────────────────────
+    cabinet_power = Hardware.Cloud.GB200_NVL72.tdp
+
+    # ┌── 3. GUARD ─────────────────────────────────────────────────────────
+    check(abs(cabinet_power.to(kilowatt).magnitude - 120) < 1, f"GB200 NVL72 power drifted: {cabinet_power}")
+
+    # ┌── 4. OUTPUT ────────────────────────────────────────────────────────
+    cabinet_power_kw_str = fmt_power(cabinet_power, unit=kilowatt, precision=0, commas=False)
+```
+
+Accurately classifying these hidden emissions forces engineering teams to take responsibility for the entire value chain of their deployments. The abstract energy metrics of a facility, and the resulting carbon footprint, are ultimately governed by the physical thermodynamics of the rack. Delivering `{python} DenseRackPowerAnchor.cabinet_power_kw_str` to a single cabinet (the rated draw of one GB200 NVL72 rack) and extracting the resulting heat requires moving beyond traditional air conditioning.
 
 Consider a data center supplied by a hydro-heavy grid. Its operational carbon intensity can be far below a fossil-heavy grid, but hydroelectric generation is not lifecycle-zero, and the AI system is not carbon-free. Reservoir construction and operation have impacts, while mining the silicon, manufacturing the GPUs, and pouring the concrete for the data center emitted carbon before the servers were turned on. A complete footprint calculation must account for operational electricity, embodied carbon, and the ecological effects excluded from a carbon-only metric.
 
@@ -1848,7 +1946,7 @@ class TrainingEmissions:
 
 :::
 
-#### Embodied carbon assessment {#sec-sustainable-ai-embodied-carbon-assessment-9de0}
+### Embodied carbon assessment {#sec-sustainable-ai-embodied-carbon-assessment-9de0}
 
 The training-emissions notebook priced electricity only. At the same energy use, a lower grid emissions factor reduces operational carbon and increases the relative importance of chip fabrication and data center construction. Whether embodied carbon becomes the largest term depends on the manufacturing footprint, utilization, and service life. Those quantities must enter the comparison before an engineer can choose between reducing electricity use and extending hardware service.
 
@@ -1970,7 +2068,7 @@ The second step assigns that daily share to the job. A training run lasting `{py
 
 The embodied contribution of `{python} TrainingEmissions.embodied_training_kg_str` represents approximately `{python} TrainingEmissions.embodied_us_ratio_pct_str` of the operational emissions (`{python} TrainingEmissions.emissions_kg_str`) calculated earlier for the US average grid. If training occurred in Quebec's low-carbon grid, where the same run produced `{python} TrainingEmissions.quebec_emissions_kg_str` of operational emissions, the embodied contribution would be about `{python} TrainingEmissions.embodied_quebec_total_share_pct_str` of total emissions.
 
-#### Lifecycle carbon accounting {#sec-sustainable-ai-lifecycle-carbon-accounting-99a1}
+### Lifecycle carbon accounting {#sec-sustainable-ai-lifecycle-carbon-accounting-99a1}
 
 The workload account groups operational emissions into training and inference, then adds embodied emissions. @Eq-lifecycle-carbon aggregates these contributions; completeness depends on the inventory assigned to each term. Development experiments and supporting services must enter that inventory rather than disappear when the account starts with the final training run:
 
@@ -2478,113 +2576,6 @@ plt.tight_layout()
 plt.show()
 ```
 :::
-
-### Comprehensive carbon accounting methodologies {#sec-sustainable-ai-comprehensive-carbon-accounting-methodologies-62fc}
-
-The training, inference, and manufacturing account groups emissions by the activity that produces them. The three emission scopes defined by the Greenhouse Gas (GHG) Protocol instead classify them relative to a reporting organization. These are different views of the same footprint, not additional totals to add together. Connecting the workload account to the organizational inventory requires naming who owns the equipment, purchases the electricity, and buys the service.
-
-Within an owned data-center facility boundary, Scope 1 emissions\index{Scope 1 emissions!direct emissions}\index{Scope 1 emissions!backup generators and refrigerants}\index{Scope 1 emissions!direct operational emissions} include direct combustion in owned generators and refrigerant leakage from cooling equipment. Purchased electricity used to run cooling belongs in Scope 2, not Scope 1.
-
-Scope 2 emissions\index{Scope 2 emissions!indirect energy emissions}\index{Scope 2 emissions!purchased electricity}\index{Scope 2 emissions!grid energy mix} represent indirect emissions from purchased electricity, steam, heat, and cooling consumed by the reporting organization. Purchased electricity is often the dominant category for an operator's owned facility, and it varies dramatically by geographic location and grid energy mix. Electricity used by a cloud provider is Scope 2 for that provider, but a customer's purchased cloud service is generally accounted for in the customer's Scope 3 value chain. The physical electrons do not change; the reporting boundary does. The placement example in @sec-sustainable-ai-scale-environmental-impact-ac9a uses a declared pair of illustrative factors; actual accounting requires factors matched to the location, time, and method.
-
-Scope 3 emissions\index{Scope 3 emissions!value chain emissions}\index{Scope 3 emissions!hardware manufacturing and supply chain}\index{Scope 3 emissions!accelerator embodied carbon} constitute the most complex category, encompassing hardware manufacturing, cloud supply chains, transportation, disposal, and downstream use. Semiconductor manufacturing is carbon-intensive.[^fn-euv-lithography-energy] For low-utilization hardware or clean-grid deployments, embodied accelerator emissions can rival months or years of operation; for sustained high-power training on carbon-intensive grids, the break-even can be much shorter. Under company-wide or value-chain AI accounting, Scope 3 can dominate even when Scope 2 dominates a single owned facility's operational footprint.
-
-[^fn-euv-lithography-energy]: **Lithography and Embodied Energy**\index{EUV Lithography Energy Cost!definition}: Advanced semiconductor fabrication can use energy-intensive lithography, including extreme ultraviolet (EUV) processes. Emissions per usable chip depend on the process sequence, facility energy mix, yield, die area, and allocation method. Neither transistor count nor a nominal process-node label alone determines the number of exposure steps or manufacturing footprint.
-
-Downstream use can also enter Scope 3, including end-user smartphones, IoT devices, and edge computing.[^fn-edge-intelligence-paradox] Companywide totals do not by themselves identify the footprint of a particular AI service; that attribution still requires workload-level accounting.
-
-[^fn-edge-intelligence-paradox]: **Edge AI Energy Trade-off**\index{Edge AI Energy Paradox!definition}\index{Edge Computing!energy paradox}: Edge inference can reduce network transfers and response latency, while distributing computation across devices with different duty cycles and power states. It does not eliminate network or cloud work. Compare local compute, idle power, sensors, communications, and any remaining server work over the same service period; distributed consumption is harder to attribute, but remains part of the accounting boundary.
-
-```{python}
-#| echo: false
-#| label: search-overhead-calc
-# ┌─────────────────────────────────────────────────────────────────────────────
-# │ DEVELOPMENT SEARCH OVERHEAD (LEGO)
-# ├─────────────────────────────────────────────────────────────────────────────
-# │ Context: development-scope prose immediately below.
-# │
-# │ Goal: Show how a hyperparameter or architecture sweep multiplies the
-# │       reported final-run footprint.
-# │ Show: 50 candidates at one-tenth scale = 5x the final run.
-# │ How: overhead = k × f (final-run equivalents).
-# │
-# └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import check, fmt, fmt_multiple, fmt_percent
-
-class SearchOverhead:
-    """Final-run equivalents consumed by a development sweep."""
-
-    # ┌── 1. LOAD ──────────────────────────────────────────────────────────
-    k = 50  # scenario assumption: candidates trained in the sweep
-    f = 0.1  # scenario assumption: each candidate's cost relative to the final run
-
-    # ┌── 2. EXECUTE ───────────────────────────────────────────────────────
-    overhead = k * f
-
-    # ┌── 3. GUARD ─────────────────────────────────────────────────────────
-    check(overhead > 1, "The sweep should exceed the reported run")
-
-    # ┌── 4. OUTPUT ────────────────────────────────────────────────────────
-    k_str = fmt(k, precision=0, commas=False)
-    f_str = fmt_percent(f, precision=0, commas=False, style="prose")
-    overhead_mult_str = fmt_multiple(overhead, precision=0, commas=False)
-```
-
-The operational emissions of a final training run and its deployed service omit the development that produced them, including failed experiments, hyperparameter searches, and the build and test infrastructure. Repeated experiments can exceed the cost of the final run. A search that trains $k$ candidates at a fraction $f$ of the final run's cost adds $k f$ final-run equivalents before the chosen model starts, so a sweep of `{python} SearchOverhead.k_str` candidates at `{python} SearchOverhead.f_str` of full scale costs `{python} SearchOverhead.overhead_mult_str` the run that gets reported. Continuous integration, compilation, and evaluation add further work whose contribution depends on run frequency and scale. The development boundary must record these activities before assigning their emissions to the reporting organization's inventory; the phase of model development does not itself determine the emissions scope.
-
-The **Greenhouse Gas (GHG) Protocol**\index{Greenhouse Gas Protocol!definition}[^fn-ghg-protocol-scope] framework [@ghgprotocol2023] formalizes these accounting perimeters into the concentric reporting boundaries diagrammed in @fig-ghg-protocol. Concentric tiers radiate outward from direct data center control—spanning on-site diesel generators in Scope 1, purchased grid electricity for compute and cooling in Scope 2, and upstream semiconductor fabrication and hardware recycling across Scope 3—establishing the classification boundaries applied in the following audit.
-
-[^fn-ghg-protocol-scope]: **Greenhouse Gas (GHG) Protocol**\index{Greenhouse Gas Protocol!three-scope accounting}\index{GHG Protocol|see{Greenhouse Gas Protocol}}: The framework distinguishes direct emissions, purchased energy, and other value-chain emissions [@ghgprotocol2023]. Their relative shares depend on the reporting organization and workload boundary. Explicit classification prevents purchased cloud services or manufacturing from disappearing from an account limited to an operator's own electricity.
-
-::: {#fig-ghg-protocol fig-env="figure" fig-pos="htb" fig-cap="**GHG Emission Scopes**: Concentric rings place the reporting organization's data center at the center, with Scope 1 (direct emissions) innermost, Scope 2 (purchased energy) around it, and Scope 3 (value chain) outermost. Each callout lists representative sources for its ring. The rings show reporting distance from the operator's direct control, not relative size. Scope definitions follow the GHG Protocol [@ghgprotocol2023]." fig-alt="Three concentric circles around a data center icon: an inner gray circle labeled Scope 1, a middle amber ring labeled Scope 2, and an outer blue ring labeled Scope 3. Dashed leaders run from each ring to a callout box on the right. The boxes list on-site diesel generators for Scope 1, purchased grid electricity and cooling power for Scope 2, and supply chain manufacturing, embodied hardware carbon, employee travel, and end-of-life recycling for Scope 3."}
-![](images/svg/ghg-protocol.svg)
-
-:::
-
-Categorizing these emissions into Scope 1, 2, and 3 frameworks provides a standardized vocabulary for corporate environmental reporting. Correctly applying this framework in practice requires classifying the various hidden emission sources across a typical ML platform's operational lifecycle.
-
-::: {#chk-sustainable-ai-accounting-invisible-carbon .callout-checkpoint title="Accounting for invisible carbon"}
-
-Audit the carbon footprint of a machine learning platform by classifying the following emission sources into Scope 1 (Direct), Scope 2 (Indirect Energy), or Scope 3 (Value Chain). State the reporting organization before assigning each scope:
-
-- [ ] **Backup generation**: classify diesel burned by backup generators during a grid outage at an owned facility.
-- [ ] **Leased cloud cluster**: classify the electricity for both reporting entities, the cloud operator that purchases it and the customer that purchases the compute service.
-- [ ] **Embodied manufacturing**: classify the embodied carbon emitted during the manufacturing of the GPUs by TSMC.
-- [ ] **End-user operation**: classify emissions from the end-user's smartphone battery while running a deployed mobile inference app.
-
-:::
-
-```{python}
-#| echo: false
-#| label: dense-rack-power-anchor
-# ┌─────────────────────────────────────────────────────────────────────────────
-# │ DENSE RACK POWER ANCHOR (LEGO)
-# ├─────────────────────────────────────────────────────────────────────────────
-# │ Context: transition prose immediately below.
-# │
-# │ Goal: Pin the single-cabinet power figure to a named rack-scale system.
-# │ Show: 120 kW per cabinet (GB200 NVL72).
-# │ How: Hardware.Cloud.GB200_NVL72.tdp.
-# │
-# └─────────────────────────────────────────────────────────────────────────────
-from mlsysim import Hardware
-from mlsysim.core.units import kilowatt
-from mlsysim.fmt import check, fmt_power
-
-class DenseRackPowerAnchor:
-    """Rack-scale power of an NVL72-class cabinet."""
-
-    # ┌── 1. LOAD ──────────────────────────────────────────────────────────
-    cabinet_power = Hardware.Cloud.GB200_NVL72.tdp
-
-    # ┌── 3. GUARD ─────────────────────────────────────────────────────────
-    check(abs(cabinet_power.to(kilowatt).magnitude - 120) < 1, f"GB200 NVL72 power drifted: {cabinet_power}")
-
-    # ┌── 4. OUTPUT ────────────────────────────────────────────────────────
-    cabinet_power_kw_str = fmt_power(cabinet_power, unit=kilowatt, precision=0, commas=False)
-```
-
-Accurately classifying these hidden emissions forces engineering teams to take responsibility for the entire value chain of their deployments. The abstract energy metrics of a facility, and the resulting carbon footprint, are ultimately governed by the physical thermodynamics of the rack. Delivering `{python} DenseRackPowerAnchor.cabinet_power_kw_str` to a single cabinet (the rated draw of one GB200 NVL72 rack) and extracting the resulting heat requires moving beyond traditional air conditioning.
 
 ### Power delivery {#sec-sustainable-ai-power-delivery}
 
@@ -3694,7 +3685,7 @@ The structural dataflow split diagrammed in @fig-prefill-decode-energy governs p
 
 Static power waste\index{Static Power!decode phase idleness}\index{Inference!static power waste} occurs when powered circuitry waits rather than producing useful outputs. Reducing that waiting can improve energy efficiency, but a comparison must meter the same hardware boundary and preserve output quality, context, latency, and serving load. Prompt processing and autoregressive generation perform different work; equal token counts alone do not establish a fair energy ratio.
 
-#### Edge AI impact {#sec-sustainable-ai-edge-ai-impact-6694}
+### Edge inference as fleet offloading {#sec-sustainable-ai-edge-ai-impact-6694}
 
 Edge intelligence moves inference onto user devices or nearby computing nodes. Local execution can avoid transferring raw inputs to a data center, but it also adds or extends computation at the edge. The sustainability comparison must include both effects, together with any remaining cloud work and the hardware needed to serve the same task.
 
@@ -3761,79 +3752,6 @@ Power budgets reflect the physical constraints of battery capacity, thermal diss
 | **Autonomous Vehicle** |    10--50 W    |    50--200 W     |     500 W      | Tesla FSD Computer, Mobileye EyeQ, NVIDIA Drive                                                                                                                          |
 
 : **Edge AI Power Budget Categories**: Edge platforms span five orders of magnitude in power consumption, from sub-milliwatt TinyML systems to automotive compute platforms approaching data center power levels. Sustainable deployment requires matching workload requirements to appropriate power tiers. {#tbl-edge-power-budgets}
-
-#### TinyML power state dynamics {#sec-sustainable-ai-tinyml-power-state-dynamics-ceaf}
-
-TinyML devices are the smallest members of edge fleets, sitting below the `{python} EdgePowerTierAnchors.phone_range_str` phones of Archetype C (Federated MobileNet) in both memory and power. Their energy efficiency is a sustainability concern because billions of edge inference calls add up to a measurable carbon footprint at fleet scale. TinyML efficiency depends heavily on duty cycling, where devices alternate between deep sleep and active inference. The duty-cycle model of @eq-edge-duty-cycle applies directly, with $\delta_{\text{duty}} = t_{\text{inference}}/T_{\text{period}}$ and the deep-sleep draw in place of idle power.
-
-```{python}
-#| echo: false
-#| label: tinyml-duty-cycle-calc
-# ┌─────────────────────────────────────────────────────────────────────────────
-# │ TINYML DUTY CYCLE AND BATTERY LIFE (LEGO)
-# ├─────────────────────────────────────────────────────────────────────────────
-# │ Context: keyword-spotting duty-cycle prose immediately below.
-# │
-# │ Goal: Keep the duty-cycle substitution and the coin-cell lifetime computed
-# │       rather than typed, using @eq-edge-duty-cycle.
-# │ Show: 15 mW × 2% + 33 µW × 98% ≈ 0.33 mW; 250 mAh × 3.0 V = 750 mWh →
-# │       ~2,260 hours ≈ 94 days.
-# │ How: P_avg = P_active·δ + P_sleep·(1 − δ); lifetime = E_battery / P_avg.
-# │
-# └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.core.units import A, V, hour, milliwatt, ms, second, uW
-from mlsysim.fmt import check, fmt, fmt_display_math, fmt_energy, fmt_int, fmt_power, fmt_time
-
-class TinymlDutyCycle:
-    """Keyword-spotting duty cycle on a microcontroller and its coin-cell lifetime."""
-
-    # ┌── 1. LOAD ──────────────────────────────────────────────────────────
-    p_active = 15 * milliwatt  # scenario assumption: active inference power
-    t_inference = 20 * ms  # scenario assumption: inference window per cycle
-    t_period = 1 * second  # scenario assumption: detection period
-    i_sleep = 10e-6 * A  # scenario assumption: deep-sleep current
-    v_supply = 3.3 * V  # scenario assumption: supply voltage
-    battery_mah = 250  # scenario assumption: coin-cell capacity (mAh)
-    battery_v = 3.0 * V  # scenario assumption: coin-cell nominal voltage
-
-    # ┌── 2. EXECUTE ───────────────────────────────────────────────────────
-    p_sleep = (i_sleep * v_supply).to(uW)
-    duty = (t_inference / t_period).to("").magnitude
-    active_term = (p_active * duty).to(milliwatt)
-    sleep_term = (p_sleep * (1 - duty)).to(milliwatt)
-    p_average = active_term + sleep_term
-    battery_energy = (battery_mah * 1e-3 * A * hour * battery_v).to("mWh")
-    lifetime = (battery_energy / p_average).to(hour)
-    lifetime_days = lifetime.to("day").magnitude
-
-    # ┌── 3. GUARD ─────────────────────────────────────────────────────────
-    check(0.3 < p_average.magnitude < 0.35, f"Average power drifted: {p_average}")
-    check(90 < lifetime_days < 100, f"Coin-cell lifetime drifted: {lifetime_days:.0f} days")
-
-    # ┌── 4. OUTPUT ────────────────────────────────────────────────────────
-    p_active_str = fmt_power(p_active, unit=milliwatt, precision=0, commas=False)
-    t_inference_str = fmt_time(t_inference, unit=ms, precision=0, commas=False)
-    t_period_str = fmt_time(t_period, unit=second, precision=0, commas=False)
-    i_sleep_ua_str = fmt(i_sleep.to("microampere").magnitude, precision=0, commas=False)
-    v_supply_str = fmt(v_supply.to(V).magnitude, precision=1, commas=False)
-    p_sleep_str = fmt_power(p_sleep, unit=uW, precision=0, commas=False)
-    avg_power_math = fmt_display_math(
-        rf"P_{{\text{{avg}}}} = {p_active.to(milliwatt).magnitude:g}\text{{ mW}} \times {duty:.2f}"
-        rf" + {p_sleep.to(milliwatt).magnitude:.3f}\text{{ mW}} \times {1 - duty:.2f}"
-        rf" = {active_term.magnitude:.2f} + {sleep_term.magnitude:.3f} \approx {p_average.magnitude:.2f}\text{{ mW}}"
-    )
-    battery_mah_str = fmt(battery_mah, precision=0, commas=False)
-    battery_v_str = fmt(battery_v.to(V).magnitude, precision=0, commas=False)
-    battery_mwh_str = fmt_energy(battery_energy, unit="mWh", precision=0, commas=True)
-    lifetime_hours_str = fmt_int(round(lifetime.magnitude, -1), commas=True)  # prose says "approximately"
-    lifetime_days_str = fmt_int(lifetime_days, commas=False)  # prose says "about"
-```
-
-Consider a keyword-spotting model on a Cortex-M4 microcontroller, an extreme case that obeys the same battery arithmetic as the Archetype C phones. The device draws `{python} TinymlDutyCycle.p_active_str` of active inference power for `{python} TinymlDutyCycle.t_inference_str` in each detection cycle, falls to a deep-sleep draw of `{python} TinymlDutyCycle.i_sleep_ua_str` microamps at `{python} TinymlDutyCycle.v_supply_str` V (`{python} TinymlDutyCycle.p_sleep_str`) between evaluations, and repeats on a `{python} TinymlDutyCycle.t_period_str` detection period during continuous listening. Substituting these values into @eq-edge-duty-cycle yields the average power draw:
-
-`{python} TinymlDutyCycle.avg_power_math`
-
-A `{python} TinymlDutyCycle.battery_mah_str` mAh coin cell at `{python} TinymlDutyCycle.battery_v_str` V nominal stores `{python} TinymlDutyCycle.battery_mwh_str`, enough for approximately `{python} TinymlDutyCycle.lifetime_hours_str` hours, about `{python} TinymlDutyCycle.lifetime_days_str` days, under this idealized budget. The estimate covers compute only. Continuous listening also requires powered sensing and input buffering while the microcontroller sleeps, and their energy, regulator losses, and battery derating must enter any deployment estimate.
 
 #### On-device learning and the battery wall {#sec-sustainable-ai-edge-learning-battery}
 
@@ -4018,40 +3936,6 @@ Energy cost per operation (approximate):
 
 ::::
 
-#### Energy harvesting for autonomous edge AI {#sec-sustainable-ai-energy-harvesting-autonomous-edge-ai-ac2b-autonomous-edge-ai-ac2b}
-
-TinyML can operate from harvested ambient energy when the available supply supports the full device workload. Sustained operation requires both an adequate long-term energy budget and a way to handle intervals when harvesting falls below demand, through storage, duty cycling, or suspended execution.
-
-```{python}
-#| echo: false
-from mlsysim.fmt import check, fmt_area
-
-# ┌── LEGO ───────────────────────────────────────────────
-class EnergyHarvestingArea:
-    """Solar-harvesting area references for TinyML energy budgets."""
-
-    solar_cell_area = 1 * ureg.centimeter**2
-    kws_solar_area = 5 * ureg.centimeter**2
-
-    check(kws_solar_area == 5 * solar_cell_area, "Keyword-spotting solar area should be five 1 cm^2 cells.")
-
-    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
-    solar_cell_area_cm2_str = fmt_area(solar_cell_area, unit=ureg.centimeter**2, commas=False)
-    kws_solar_area_cm2_str = fmt_area(kws_solar_area, unit=ureg.centimeter**2, commas=False)
-```
-
-Consider the energy harvesting power budgets\index{Energy Harvesting!power budgets} in @tbl-energy-harvesting. A keyword spotting model optimized to 0.5 mW average power matches the nominal output of approximately `{python} EnergyHarvestingArea.kws_solar_area_cm2_str` of indoor solar harvesting only near the top of the listed illumination range, before conversion losses and other device loads. This average-power comparison does not establish uninterrupted operation. The design must cover sensing, storage losses, and periods of dim or absent light, or permit the workload to pause. Ambient supply removes the need for purchased operating electricity only when it covers that complete budget; manufacturing, storage, maintenance, and disposal still enter the lifecycle account.
-
-| **Harvesting Source**                                                       |  **Typical Power**   | **Viable TinyML Applications** |
-|:----------------------------------------------------------------------------|:--------------------:|:-------------------------------|
-| **Indoor solar (`{python} EnergyHarvestingArea.solar_cell_area_cm2_str`)**  |  10--100 microwatts  | Periodic sensor classification |
-| **Outdoor solar (`{python} EnergyHarvestingArea.solar_cell_area_cm2_str`)** |   1--10 milliwatts   | Continuous keyword spotting    |
-| **Thermoelectric (body heat)**                                              |  10--100 microwatts  | Wearable gesture recognition   |
-| **RF harvesting (Wi-Fi)**                                                   |   1--10 microwatts   | Ultra-low-duty sensor nodes    |
-| **Vibration piezoelectric**                                                 | 100 microwatts--1 mW | Industrial monitoring          |
-
-: **Energy Harvesting Power Budgets**: Ambient energy harvesting enables batteryless TinyML deployments when average power consumption remains within harvesting capacity. Solar harvesting provides the highest power density for most deployments. {#tbl-energy-harvesting}
-
 #### Cascade inference architecture {#sec-sustainable-ai-cascade-inference-architecture-c710}
 
 Beyond individual device efficiency, architectural patterns determine total system energy consumption across edge-cloud boundaries. A cascade architecture deploys a task-appropriate small edge model to filter inputs before cloud inference. @Eq-cascade-energy expresses total energy as the sum of local processing plus probabilistically-triggered cloud costs:
@@ -4189,6 +4073,8 @@ Federated learning becomes more energy-efficient only when repeated model commun
 
 Training, serving, and edge deployment all draw operational energy, and none of these accounts includes the hardware that performs the work. That physical supply chain, from fabrication through disposal, is the lifecycle term the next section examines.
 
+While offloading inference to the edge and optimizing the balance between training and serving can dramatically reduce the operational energy of a deployed fleet, the sustainability accounting does not end there. The physical hardware required to execute these workloads carries its own massive environmental cost---long before it is ever powered on and long after it is decommissioned. The analysis must therefore transition from the operational flow of electrons to the physical lifecycle of the servers, accelerators, and network switches that make up the fleet.
+
 ## Hardware Lifecycle and E-Waste {#sec-sustainable-ai-hardware-lifecycle-environmental-assessment-66ee}
 
 The environmental cost of an AI accelerator begins long before its first FLOP is calculated [@gupta2022chasing; @luccioni2023estimating; @nvidia2025hgxh100pcf]. The per-H100 manufacturing footprint quantified in @sec-sustainable-ai-embodied-carbon-assessment-9de0 is incurred before the device is ever powered on.[^fn-lca-hardware-footprint] A training fleet of a few thousand such accelerators therefore carries a manufacturing debt of the same order as the operational emissions of a GPT-3-scale training run on the US-average grid (about `{python} CarbonCostGPT3.total_emissions_kg_str`). A comprehensive **life cycle assessment (LCA)**\index{Life Cycle Assessment!definition} quantifies the cumulative environmental impact across four key phases: design, manufacture, use, and disposal. LCA can reveal manufacturing as a major share of lifecycle impact, making it a critical sustainability lever that operational efficiency improvements alone cannot address.
@@ -4301,6 +4187,14 @@ The reported final run for the 600-billion-parameter GShard model emitted under 
 
 Addressing the design phase's sustainability challenges requires innovations in training efficiency: sparse training, low-precision arithmetic, weight-sharing, and energy-aware NAS approaches. Transfer learning and fine-tuning pretrained models reuse pretrained representations instead of requiring every task to be trained from scratch [@Raffel2020exploring].
 
+### Manufacturing phase {#sec-sustainable-ai-manufacturing-phase-4ce1}
+
+The manufacturing footprint\index{Life Cycle Assessment!manufacturing and fabrication} combines the embodied carbon established in @sec-sustainable-ai-embodied-carbon-assessment-9de0 with the water, chemical, and material demands in @sec-sustainable-ai-water-usage-caae. Accelerator design changes how much of that resource investment produces a usable device.
+
+Die yield and packaging both affect the resource cost of a usable accelerator. A larger die occupies more wafer area and, at the same random-defect density, has more area in which a defect can occur. Yield therefore affects how much fabrication effort must be allocated to each working device; die size alone does not determine that allocation. Packaging adds another boundary. Designs that integrate high bandwidth memory through technologies such as TSMC's Chip-on-Wafer-on-Substrate (CoWoS) combine logic, memory stacks, and interconnect structures within one package. Their inventory must include those components and assembly stages rather than counting only the accelerator die. Hardware longevity can spread this manufacturing investment over more useful work, while design and process changes can reduce the investment itself.
+
+Longer useful service spreads that manufacturing investment across more work. Lower-toxicity materials, recycling, and cleaner manufacturing address the production burden itself [@cenci2021; @irimia-vladu2014].
+
 ### Water, chemicals, and critical materials {#sec-sustainable-ai-water-usage-caae}
 
 Before an accelerator exists, its fabrication consumes physical resources that an energy account alone does not quantify: ultrapure water, process chemicals, and materials. Their burdens occur across extraction, refining, fabrication, and assembly sites, not only where the finished hardware operates. Water demand must be evaluated against local availability and competing uses, while material supply depends on the component and manufacturing process [@jha2014; @chen2006]. These resource accounts extend the lifecycle boundary beyond carbon without reducing unlike impacts to a single energy total.
@@ -4340,14 +4234,6 @@ AI hardware and its manufacturing supply chain depend on **critical materials**\
 The construction and operation of fabs and data centers also directly impacts natural ecosystems through habitat disruption, water stress, and pollution from chemical discharge. Semiconductor-industry effluents can contaminate nearby fluvial sediments with heavy metals and trace elements [@hsu2016]. Waste generation from fabrication, including gaseous emissions, VOC-laden air, and metal-contaminated wastewater, requires advanced treatment systems, and end-of-life hardware adds the e-waste stream examined in @sec-sustainable-ai-disposal-phase-b4f1.
 
 These water, chemical, and material demands are what fabrication spends to produce each usable accelerator. The manufacturing phase that follows explains why an AI accelerator spends more of them than its wafer area suggests.
-
-### Manufacturing phase {#sec-sustainable-ai-manufacturing-phase-4ce1}
-
-The manufacturing footprint\index{Life Cycle Assessment!manufacturing and fabrication} combines the embodied carbon established in @sec-sustainable-ai-embodied-carbon-assessment-9de0 with the water, chemical, and material demands in @sec-sustainable-ai-water-usage-caae. Accelerator design changes how much of that resource investment produces a usable device.
-
-Die yield and packaging both affect the resource cost of a usable accelerator. A larger die occupies more wafer area and, at the same random-defect density, has more area in which a defect can occur. Yield therefore affects how much fabrication effort must be allocated to each working device; die size alone does not determine that allocation. Packaging adds another boundary. Designs that integrate high bandwidth memory through technologies such as TSMC's Chip-on-Wafer-on-Substrate (CoWoS) combine logic, memory stacks, and interconnect structures within one package. Their inventory must include those components and assembly stages rather than counting only the accelerator die. Hardware longevity can spread this manufacturing investment over more useful work, while design and process changes can reduce the investment itself.
-
-Longer useful service spreads that manufacturing investment across more work. Lower-toxicity materials, recycling, and cleaner manufacturing address the production burden itself [@cenci2021; @irimia-vladu2014].
 
 ### Use phase {#sec-sustainable-ai-use-phase-a0a1}
 
@@ -4974,7 +4860,7 @@ class ReboundScenario:
 
 **Fallacy**: *Efficiency improvements automatically reduce total environmental impact.*
 
-Engineers assume that halving inference cost cuts environmental impact in half. Jevons Paradox warns that efficiency improvements can increase total consumption by enabling expanded usage. In a rebound scenario, suppose reducing token cost from `{python} ReboundScenario.price_old_str` to `{python} ReboundScenario.price_new_str` per 1,000 tokens accompanies a proportional `{python} ReboundScenario.unit_gain_mult_str` reduction in measured energy per query at fixed output length and quality. A `{python} ReboundScenario.volume_growth_mult_str` increase in query volume then raises total energy by `{python} ReboundScenario.net_growth_mult_str` and, at unchanged grid intensity, emissions by the same factor. Any implementation change that lowers per-query energy can still raise total energy when usage grows by a larger factor. Teams must therefore evaluate deployment volume against the intended carbon or resource budget; per-query gains alone do not control the rebound illustrated in @fig-jevons-ai.
+Engineers assume that halving inference cost cuts environmental impact in half. Jevons Paradox warns that efficiency improvements can increase total consumption by enabling expanded usage. In a rebound scenario, suppose reducing token cost from `{python} ReboundScenario.price_old_str` to `{python} ReboundScenario.price_new_str` per 1,000 tokens accompanies a proportional `{python} ReboundScenario.unit_gain_mult_str` reduction in measured energy per query at fixed output length and quality. A `{python} ReboundScenario.volume_growth_mult_str` increase in query volume then raises total energy by `{python} ReboundScenario.net_growth_mult_str` and, at unchanged grid intensity, emissions by the same factor. Any implementation change that lowers per-query energy can still raise total energy when usage grows by a larger factor. Teams must therefore evaluate deployment volume against the intended carbon or resource budget; per-query gains alone do not control the rebound illustrated in @fig-jevons-ai, where the red area of new consumption at the lower unit cost completely swallows the green area of initial efficiency savings.
 
 :::
 

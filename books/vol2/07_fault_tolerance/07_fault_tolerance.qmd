@@ -158,7 +158,7 @@ The transition from small-scale experimentation to large-scale production change
 
 Because failures cannot be eliminated at this scale, fault-tolerant systems verify completion rather than assume it, treat failure as a normal code path, exercise recovery continuously, and account for partial failures that naive error handling may not anticipate. These techniques draw on decades of distributed systems research, but ML workloads change the economics. Training checkpoints are large but can be sized from the model and optimizer state, while some optimization algorithms tolerate bounded numerical perturbations without requiring bitwise replay. That tolerance must be established for the training method; stochasticity does not make arbitrary corruption or inconsistent recovery safe. A recovery design can exploit approximate execution only while preserving its declared convergence and quality requirements.
 
-### The mathematics of inevitable failure {#sec-fault-tolerance-reliability-reliability-mathematics-inevitable-failure-93ef}
+### Mathematical modeling of reliability {#sec-fault-tolerance-reliability-reliability-mathematics-inevitable-failure-93ef}
 
 System reliability engineering provides the foundational framework for understanding failure at scale [@birolini2017]. Individual components exhibit failure rates characterized by the failure rate parameter $\lambda$,[^fn-fits-failure-rate] measured in failures per unit time. For a single component with constant failure rate $\lambda$, the probability of surviving without failure until time $t$ follows an exponential distribution,[^fn-poisson-failure-rate] as in @eq-single-component-reliability:
 
@@ -272,249 +272,7 @@ plt.close()
 
 :::
 
-### The Young-Daly checkpoint interval {#sec-fault-tolerance-young-daly}
-
-Every training recovery path in this chapter ultimately falls back on a saved copy of training state, so the first question is what that copy must contain.
-
-::: {#dfn-fault-tolerance-checkpointing .callout-definition title="Checkpointing"}
-
-***Checkpointing***\index{Checkpointing!definition} is the periodic serialization of the complete training state (parameters, optimizer state, data loader position, and random state) to persistent storage at a recorded training step.
-
-1.  **Significance**: It minimizes lost work after a system failure by trading checkpoint I/O against rework. Writing too often wastes accelerator time on storage traffic; writing too rarely risks replaying many completed steps after a failure. The Young-Daly interval\index{Young-Daly formula!square-root trade-off} developed in this section chooses the cadence that balances write cost against expected lost work.
-2.  **Distinction**: A resumable checkpoint captures a consistent execution state, including optimizer state, random-number generator state, data position, and learning rate schedules. It can use full or incremental storage; bitwise replay additionally requires compatible deterministic execution.
-3.  **Common pitfall**: A frequent misconception is that checkpointing is "just writing to disk." For large models it is a storage-system stress test, because the simultaneous write from thousands of GPUs can trigger a checkpoint storm that saturates the entire network fabric $(\Bandwidth)$.
-
-:::
-
-A checkpoint is useful only if it resumes the recorded step consistently. In distributed training, every shard must belong to the same recoverable state; a collection of files from different steps does not preserve progress. For the interval model, assume that writing a checkpoint completes durably before it becomes available for recovery and that a failure discards the work performed since the last completed checkpoint.
-
-When failures are expected during a job, the key engineering decision is how often to write that state, because every save costs I/O time and every unsaved step is work a failure can erase. The Young-Daly formula\index{Young-Daly formula!optimal interval}\index{Daly formula|see{Young-Daly formula}}[^fn-young-daly-formula] (principle \ref{pri-young-daly}, applied in @sec-fault-tolerance-reliability-reliability-checkpoint-interval-failure-analysis-c28d) gives a first-order estimate of that balance through a square-root rule:
-
-$$ \OptimalCheckpointIntervalCkpt = \sqrt{2 \cdot \CheckpointWriteTime \cdot \MeanTimeBetweenFailures_{\text{system}}} $$
-
-```{python}
-#| echo: false
-#| label: young-daly-checkpoint-state
-# ┌─────────────────────────────────────────────────────────────────────────────
-# │ RESUMABLE CHECKPOINT STATE (LEGO)
-# ├─────────────────────────────────────────────────────────────────────────────
-# │ Context: @sec-fault-tolerance-young-daly, the T_write paragraph below.
-# │
-# │ Goal: Size a resumable mixed-precision Adam checkpoint for a 70B model and
-# │       for the 175B running example from one bytes-per-parameter anchor.
-# │ Show: 14 bytes per parameter; ~1 TB (70B) and >2 TB (175B).
-# │ How:  params x ReferenceStats.MixedPrecisionAdam.CheckpointBytesPerParameter.
-# └─────────────────────────────────────────────────────────────────────────────
-from mlsysim import Models, ReferenceStats
-from mlsysim.fmt import check, fmt
-
-class YoungDalyCheckpointState:
-    # ┌── 1. LOAD (Constants) ──────────────────────
-    ckpt_bpp = ReferenceStats.MixedPrecisionAdam.CheckpointBytesPerParameter
-    params_70b = Models.Language.Llama3_70B.parameters
-    params_175b = Models.Language.GPT3.parameters
-
-    # ┌── 2. EXECUTE (The Compute) ─────────────────
-    ckpt_70b_tb = (params_70b * ckpt_bpp).to(TB).magnitude
-    ckpt_175b_tb = (params_175b * ckpt_bpp).to(TB).magnitude
-
-    # ┌── 3. GUARD (Invariants) ────────────────────
-    check(0.9 < ckpt_70b_tb < 1.0, "70B checkpoint must 'approach a terabyte'")
-    check(ckpt_175b_tb > 2.0, "175B checkpoint must 'exceed two terabytes'")
-
-    # ┌── 4. OUTPUT (Formatting) ───────────────────
-    ckpt_bpp_str = fmt(ckpt_bpp.magnitude, precision=0)
-```
-
-$\CheckpointWriteTime$ in distributed ML training is not the time to flush a small process state; it includes transferring model weights and optimizer state to durable storage. The reference format here stores BF16 weights, separate FP32 master weights, and two FP32 moment tensors per parameter for Adaptive Moment Estimation (Adam). A single resumable checkpoint for a 70B-parameter model therefore approaches a terabyte at `{python} YoungDalyCheckpointState.ckpt_bpp_str` bytes per parameter; for the later 175B-parameter running example, it exceeds two terabytes. Reducing $\CheckpointWriteTime$ requires a smaller payload or higher sustained write bandwidth, and $\CheckpointWriteTime$ itself is the central constraint that determines how tightly the checkpoint interval can be set before I/O overhead displaces productive training compute.
-
-To see the balance, consider an interval between saves. Doubling that interval approximately halves the checkpoint writes per unit of training, but a failure then loses twice as much work on average. Under the constant-rate, rare-failure approximation, failure occurs approximately uniformly within an interval, so the average lost work is half the interval. When write time is small relative to the interval, the wasted fraction from saving and replaying work is approximately the sum below. Detection, allocation, and restoration time require a separate recovery budget.
-
-$$ W(\CheckpointIntervalCkpt) \approx \frac{\CheckpointWriteTime}{\CheckpointIntervalCkpt} + \frac{\CheckpointIntervalCkpt}{2 \cdot \MeanTimeBetweenFailures_{\text{system}}} $$
-
-Setting the first derivative to zero ($\frac{dW}{d\CheckpointIntervalCkpt} = -\frac{\CheckpointWriteTime}{\CheckpointIntervalCkpt^2} + \frac{1}{2 \cdot \MeanTimeBetweenFailures_{\text{system}}} = 0$) directly yields the square-root minimum $\OptimalCheckpointIntervalCkpt = \sqrt{2 \cdot \CheckpointWriteTime \cdot \MeanTimeBetweenFailures_{\text{system}}}$. In @fig-checkpoint-tradeoff, this balance forms a U-shaped convex curve for the chapter's 10,000-GPU cluster running a 175B-parameter model: write overhead (dashed blue) falls hyperbolically while expected rework (dashed red) climbs linearly, reaching a minimum near $\OptimalCheckpointIntervalCkpt \approx 14$ minutes. The modeled saving-and-rework loss there is 5.9 percent, before adding recovery downtime. Its scaling consequence is the one to carry forward. As clusters grow, system MTBF drops, so the optimal interval shrinks, demanding higher-bandwidth storage to keep $\CheckpointWriteTime$ small before the "checkpoint tax" consumes the cluster's compute capacity. Because the relationship is a square root, halving MTBF tightens the interval by only $\sqrt{2}\approx 1.4\times$, so doubling cluster size does not demand doubling checkpoint I/O bandwidth when checkpoint size and the other assumptions stay fixed. The chapter applies the formula to its own cluster once the system MTBF is in hand.
-
-::: {.column-margin .margin-pointer}
-↩ The per-tier storage bandwidths that bound how quickly a checkpoint can be written are established in @sec-storage-hierarchy.
-:::
-
-[^fn-young-daly-formula]: **Young-Daly formula**\index{Young-Daly formula!history}: @young1974 derived the first-order optimal checkpoint interval, and @daly2006 independently refined it with tighter second-order bounds.
-
-```{python}
-#| echo: false
-#| label: checkpoint-tradeoff-inputs
-# ┌─────────────────────────────────────────────────────────────────────────────
-# │ CHECKPOINT TRADE-OFF INPUTS (LEGO)
-# ├─────────────────────────────────────────────────────────────────────────────
-# │ Context: @fig-checkpoint-tradeoff and its caption.
-# │
-# │ Goal: Feed the U-curve the same two inputs the Young-Daly notebook uses
-# │       later, so the plotted optimum and the worked interval agree.
-# │ Show: T_write ~24.5 s (175B, 14 B/param, registry write bandwidth);
-# │       full-system MTBF ~3.87 h (GPU + PCIe + shared NIC, 10,000 GPUs);
-# │       tau_opt ~13.8 min.
-# │ How:  Same series-rate composition as the worked MTBF cascade (redundant
-# │       PSUs add no term); tau_opt = sqrt(2 * T_write * MTBF_system).
-# └─────────────────────────────────────────────────────────────────────────────
-import math
-from mlsysim import Models, Systems
-from mlsysim.physics import calc_checkpoint_size
-from mlsysim.fmt import check, fmt_time
-
-class CheckpointTradeoffInputs:
-    # ┌── 1. LOAD (Constants) ──────────────────────
-    ckpt_bytes = calc_checkpoint_size(Models.Language.GPT3.parameters)  # 14 B/param
-    write_bw = float(Systems.Reliability.Recovery.checkpoint_write_bw_gbs) * (GB / second)
-    n_gpus = Systems.Clusters.Training_10K.total_accelerators
-    gpus_per_node = Systems.Nodes.DGX_H100.accelerators_per_node
-    gpu_mttf_h = float(Systems.Reliability.Gpu.mttf_hours)
-    pcie_mttf_h = float(Systems.Reliability.PcieSwitch.mttf_hours)
-    nic_mttf_h = float(Systems.Reliability.Nic.mttf_hours)
-
-    # ┌── 2. EXECUTE (The Compute) ─────────────────
-    t_write_h = (ckpt_bytes / write_bw).to(hour).magnitude
-    rate_per_gpu = 1 / gpu_mttf_h + 1 / pcie_mttf_h + (1 / gpus_per_node) / nic_mttf_h
-    mtbf_h = 1 / (n_gpus * rate_per_gpu)
-    tau_opt_h = math.sqrt(2 * t_write_h * mtbf_h)
-
-    # ┌── 3. GUARD (Invariants) ────────────────────
-    check(22 < t_write_h * 3600 < 27, "175B checkpoint write should be ~24.5 s")
-    check(3.5 < mtbf_h < 4.2, "full-system MTBF should match the worked cascade (~3.87 h)")
-    check(12 < tau_opt_h * 60 < 15, "tau_opt should match the Young-Daly notebook (~13.8 min)")
-
-    # ┌── 4. OUTPUT (Formatting) ───────────────────
-    t_write_s_str = fmt_time(t_write_h * 3600, "second", precision=1, commas=False)
-    mtbf_h_str = fmt_time(mtbf_h, "hour", precision=1, commas=False)
-    tau_opt_min_str = fmt_time(round(tau_opt_h * 60), "minute", precision=0, commas=False)
-    n_gpus_str = fmt(n_gpus, precision=0)
-```
-
-::: {#fig-checkpoint-tradeoff fig-env="figure" fig-pos="htb" fig-cap="**The checkpoint trade-off**: Checkpoint save overhead (dashed blue) falls as the interval lengthens, while expected rework after a failure (dashed red) rises; their sum (solid) is minimized at the Young-Daly interval. The curves use this chapter's 175B running example on its `{python} CheckpointTradeoffInputs.n_gpus_str`-GPU cluster, with a `{python} CheckpointTradeoffInputs.t_write_s_str` checkpoint write and a `{python} CheckpointTradeoffInputs.mtbf_h_str` full-system MTBF, which put the optimum near `{python} CheckpointTradeoffInputs.tau_opt_min_str`. The minimum is shallow, so an interval somewhat off the optimum costs little, while a far shorter or far longer one costs a great deal." fig-alt="Three curves against checkpoint interval in minutes: checkpoint overhead decreasing, rework cost increasing linearly, and total wasted time with a shallow minimum marked near 14 minutes."}
-
-```{python}
-#| echo: false
-# ┌─────────────────────────────────────────────────────────────────────────────
-# │ CHECKPOINT TRADE-OFF (FIGURE)
-# ├─────────────────────────────────────────────────────────────────────────────
-# │ Context: @fig-checkpoint-tradeoff.
-# │
-# │ Goal: Plot save overhead, expected rework, and their sum vs. interval for
-# │       the chapter's 175B / 10,000-GPU example; mark tau_opt.
-# │ Show: Three curves; optimum annotation near 14 min.
-# │ How:  Inputs from CheckpointTradeoffInputs (no literals); book_style.
-# └─────────────────────────────────────────────────────────────────────────────
-import numpy as np
-from binder.tools.figures import style as book_style
-
-fig, ax, COLORS, plt = book_style.setup_plot(figsize=(8, 4.5))
-
-t_write = CheckpointTradeoffInputs.t_write_h
-mtbf = CheckpointTradeoffInputs.mtbf_h
-tau_opt = CheckpointTradeoffInputs.tau_opt_h
-
-tau = np.linspace(tau_opt / 6, tau_opt * 4, 300)
-over_ckpt = t_write / tau
-over_rework = tau / (2 * mtbf)
-total_waste = over_ckpt + over_rework
-waste_opt = t_write / tau_opt + tau_opt / (2 * mtbf)
-
-ax.plot(tau * 60, over_ckpt * 100, label='Checkpoint overhead ($T_{\\mathrm{write}}/T_{\\mathrm{ckpt}}$)', color=COLORS['BlueLine'], linestyle='--')
-ax.plot(
-    tau * 60,
-    over_rework * 100,
-    label='Expected rework ($T_{\\mathrm{ckpt}}/(2\\,\\mathrm{MTBF}_{\\mathrm{system}})$)',
-    color=COLORS['RedLine'],
-    linestyle='--',
-)
-ax.plot(tau * 60, total_waste * 100, label='Total wasted time', color=COLORS['primary'], linewidth=2.5)
-
-ax.scatter([tau_opt * 60], [waste_opt * 100], color=COLORS['primary'], s=40, zorder=5)
-ax.annotate(
-    f'$T^*_{{\\mathrm{{ckpt}}}} \\approx {tau_opt * 60:.0f}$ min, {waste_opt * 100:.1f}% wasted',
-    xy=(tau_opt * 60, waste_opt * 100),
-    xytext=(tau_opt * 60 + 12, waste_opt * 100 + 7),
-    ha='left',
-    arrowprops=dict(arrowstyle='->', color=COLORS['primary'], shrinkB=4, lw=0.75),
-    bbox=dict(boxstyle='round,pad=0.25', facecolor='white', edgecolor='#CBD5E1', lw=0.6, alpha=0.95),
-)
-
-ax.set_xlabel('Checkpoint interval $T_{\\mathrm{ckpt}}$ (minutes)')
-ax.set_ylabel('Share of wall time wasted (%)')
-ax.set_xlim(0, tau_opt * 4 * 60)
-ax.set_yticks([0, 5, 10, 15, 20])
-ax.set_ylim(0, 20)
-
-ax.legend(loc='upper right', frameon=True, facecolor='white', edgecolor='#CBD5E1', framealpha=0.95)
-
-plt.tight_layout()
-plt.show()
-plt.close()
-```
-
-:::
-
-A quick availability calculation shows the same scaling pressure from another angle.
-
-```{python}
-#| echo: false
-#| label: lego-nines-reliability
-from mlsysim.fmt import check, fmt, fmt_int, fmt_percent, fmt_time
-
-class NinesReliability:
-    # ┌── 1. LOAD ──────────────────────────────────────────
-    n_gpus = Systems.Clusters.Training_10K.total_accelerators
-    availability_pct = 99.99
-    single_gpu_success = availability_pct / 100
-
-    # ┌── 2. EXECUTE ───────────────────────────────────────
-    downtime_min_year = (1 - single_gpu_success) * HOURS_PER_YEAR * MINUTES_PER_HOUR
-    cluster_prob = single_gpu_success**n_gpus
-    fleet_mtbf = FleetReliabilityRates.hours_between * hour
-    fast_mttr = 5 * minute
-    slow_mttr = 30 * minute
-    fast_availability = (fleet_mtbf / (fleet_mtbf + fast_mttr)).to("").magnitude
-    slow_availability = (fleet_mtbf / (fleet_mtbf + slow_mttr)).to("").magnitude
-
-    # ┌── 3. GUARD ─────────────────────────────────────────
-    check(0 < cluster_prob < 1, "Probability must be in (0,1)")
-    check(cluster_prob < 0.5, "Cluster survival must be low at scale")
-    check(0 < slow_availability < fast_availability < 1, "Faster repair must improve availability")
-
-    # ┌── 4. OUTPUT ────────────────────────────────────────
-    n_gpus_str = fmt(n_gpus, precision=0)
-    availability_str = fmt_percent(availability_pct / 100, precision=2, commas=False, style='prose')
-    downtime_min_str = fmt_time(downtime_min_year, 'minute', precision=1, commas=False, style='word')
-    survival_str = fmt(single_gpu_success, precision=4, commas=False)
-    cluster_prob_str = fmt(cluster_prob, precision=2, commas=False)
-    cluster_pct_str = fmt_percent(round(cluster_prob * 100) / 100, precision=0, commas=False, style='prose')
-    fleet_mtbf_str = fmt_time(fleet_mtbf, hour, precision=0, commas=False, style="word")
-    fast_mttr_str = fmt_time(fast_mttr, minute, precision=0, commas=False, style="word")
-    slow_mttr_str = fmt_time(slow_mttr, minute, precision=0, commas=False, style="word")
-    fast_availability_str = fmt_percent(fast_availability, precision=2, commas=False, style="prose")
-    slow_availability_str = fmt_percent(slow_availability, precision=2, commas=False, style="prose")
-```
-
-::: {#nbk-fault-tolerance-9s-reliability .callout-notebook title="The 9s of reliability"}
-
-**Problem**: A cluster of `{python} NinesReliability.n_gpus_str` GPUs runs with each GPU at `{python} NinesReliability.availability_str` availability (only `{python} NinesReliability.downtime_min_str` of downtime per year). Assuming independent up/down states, what is the probability that the entire cluster is up at the same instant?
-
-**Math**:
-
-1.  Single GPU availability probability $(R_{\text{GPU}})$: A GPU with `{python} NinesReliability.availability_str` availability has an all-up probability $R_{\text{GPU}} =$ `{python} NinesReliability.survival_str` at a randomly chosen instant.
-2.  Cluster availability probability $(R_{\text{cluster}})$: $R_{\text{cluster}} = (R_{\text{GPU}})^{N}$.
-3.  **Result**: $(R_{\text{GPU}})^{N} \approx$ `{python} NinesReliability.cluster_prob_str`.
-
-**Systems insight**: Even with `{python} NinesReliability.availability_str` reliable hardware, a `{python} NinesReliability.n_gpus_str`-GPU cluster has only a `{python} NinesReliability.cluster_pct_str` chance that every GPU is simultaneously available. Hardware reliability alone is insufficient; software must handle failures automatically.
-
-:::
-
-::: {#psp-fault-tolerance-scale-transforms-failure .callout-perspective title="Scale transforms failure"}
-
-A cluster of `{python} NinesReliability.n_gpus_str` GPUs turns a per-GPU MTBF of `{python} FleetReliabilityRates.gpu_mttf_prose_str` into a system MTBF of `{python} NinesReliability.fleet_mtbf_str`. For a repairable system, steady-state availability\index{Availability!MTBF and MTTR} is $A = \MeanTimeBetweenFailures/(\MeanTimeBetweenFailures+\MeanTimeToRepair)$, where mean time to recovery (MTTR)\index{MTTR!availability impact}\index{MTTR!recovery interval}\index{Mean time to recovery|see{MTTR}} is the recovery interval. Cutting MTTR from `{python} NinesReliability.slow_mttr_str` to `{python} NinesReliability.fast_mttr_str` raises availability from `{python} NinesReliability.slow_availability_str` to `{python} NinesReliability.fast_availability_str`. This stationary two-state model assumes unconstrained repair capacity and complete outage; correlated incidents, repair contention, and degraded operation require direct measurement [@birolini2017]. Systems must engineer recovery, not merely improve components.
-
-:::
-
-### Quantitative reliability analysis {#sec-fault-tolerance-reliability-quantitative-analysis}
+#### Quantitative reliability analysis {#sec-fault-tolerance-reliability-quantitative-analysis}
 
 The GPU-only calculation in the opening reliability example supplies the scale intuition; a real training system then composes GPUs, HBM, links, power supplies, storage paths, and redundancy into one failure budget. With MTBF and the FIT rate already defined ($\text{FIT} = 10^9/\MeanTimeBetweenFailures$, so a `{python} FleetReliabilityRates.gpu_mttf_attr_str` GPU contributes `{python} FleetReliabilityRates.gpu_fit_str` FIT), the new question is how component rates compose. The composition rule depends on the redundancy structure and the independence assumptions. For series systems\index{Reliability!series system}\index{Series system!reliability calculation} (for example, a node where all `{python} FleetReliabilityRates.node_gpus_str` GPUs must work), failure of any component fails the whole. With independent constant-rate failures, reliabilities multiply and rates add:
 $$\ReliabilityFunctionSystem = \prod_{i=1}^{N} R_i(t), \qquad \MeanTimeBetweenFailures_{\text{system}} = \frac{1}{\sum \lambda_i}$$
@@ -558,7 +316,7 @@ Composition makes the distinction between raw faults and job interruptions essen
 
 These per-component FIT figures describe a raw soft-error budget, which differs from the `{python} FleetReliabilityRates.gpu_mttf_attr_str` device MTTF used in the worked cascade that follows. A device-level interruption rate includes the effects of its protection mechanisms and the failure modes assigned to that device boundary. The cascade treats its GPU, PCIe, power, and network contributions as separate categories; a measured whole-node rate that already includes those paths cannot be added to them again. The raw-bit calculation motivates memory protection, while the interruption model sets the checkpoint interval.
 
-### Cluster MTBF calculation {#sec-fault-tolerance-reliability-reliability-worked-example-cluster-mtbf-calculation-9255}
+#### Cluster MTBF calculation {#sec-fault-tolerance-reliability-reliability-worked-example-cluster-mtbf-calculation-9255}
 
 ```{python}
 #| echo: false
@@ -959,7 +717,7 @@ plt.close()
 
 :::
 
-### Failure taxonomy {#sec-fault-tolerance-reliability-reliability-failure-taxonomy-e78c}
+### Failure manifestation taxonomy: Transient vs. fail-stop {#sec-fault-tolerance-reliability-reliability-failure-taxonomy-e78c}
 
 The MTBF calculations in the reliability analysis quantify how often failures occur, which is critical for setting checkpoint intervals and sizing recovery infrastructure. Designing effective fault tolerance also requires understanding what kind of failures occur. Use the vocabulary carefully: a fault is the underlying defect or event, an error is the corrupted state it produces, and a failure is the externally visible behavior the training system must handle [@avizienis2004basic]. A network partition that resolves in seconds demands different handling than a permanent GPU failure. A silent memory corruption that produces incorrect gradients requires different detection mechanisms than a node crash that stops responding entirely.
 
@@ -1370,7 +1128,7 @@ While the mathematics of failure rates apply universally, the failure impact by 
 
 : **Failure Impact by Model Type**: The cost of training failures varies dramatically by model type, driven by training duration, checkpoint overhead, and the value of accumulated training state. These differences demand model-specific fault tolerance strategies. {#tbl-failure-impact-by-model}
 
-Large language model training illustrates how a costly allocation magnifies each hour of lost progress. For example, a large training run consuming `{python} FaultToleranceIntroRecap.gpus_example_str` GPUs at approximately `{python} FaultToleranceIntroRecap.rate_str` incurs `{python} FaultToleranceIntroRecap.daily_cost_str` in compute costs per day. A failure that loses 24 hours of training progress costs `{python} FaultToleranceIntroRecap.daily_cost_str` in wasted compute plus schedule delay. The checkpoint overhead is correspondingly large. The reference resumable checkpoint stores `{python} FaultToleranceIntroRecap.ckpt_bpp_str` bytes per parameter (BF16 weights, FP32 master weights, and the two FP32 Adam moments, but no gradients or activations), so a 70B-class model approaches a terabyte and the 175B-parameter running example reaches `{python} FaultToleranceIntroRecap.gpt3_ckpt_tb_str`.
+Large language model training illustrates how a costly allocation magnifies each hour of lost progress. For example, a large training run consuming `{python} FaultToleranceIntroRecap.gpus_example_str` GPUs at approximately `{python} FaultToleranceIntroRecap.rate_str` incurs `{python} FaultToleranceIntroRecap.daily_cost_str` in compute costs per day. A failure that loses 24 hours of training progress costs `{python} FaultToleranceIntroRecap.daily_cost_str` in wasted compute plus schedule delay. The checkpoint overhead is correspondingly large. The reference resumable checkpoint stores `{python} FaultToleranceIntroRecap.ckpt_bpp_str` bytes per parameter (BF16 weights, FP32 master weights, and the two FP32 Adaptive Moment Estimation (Adam) moments, but no gradients or activations), so a 70B-class model approaches a terabyte and the 175B-parameter running example reaches `{python} FaultToleranceIntroRecap.gpt3_ckpt_tb_str`.
 
 Recommendation systems such as Archetype B (DLRM at Scale) present a different challenge when training updates models continuously rather than episodically. For a workload whose useful signals change rapidly, delayed embedding updates can reduce recommendation quality even if serving remains available. A failure that loses recent updates therefore has a freshness cost as well as a replay cost. The recovery budget must reflect the workload's measured sensitivity to stale state.[^fn-recsys-model-freshness]
 
@@ -1428,7 +1186,7 @@ ML workloads raise the stakes of each fault. A training step performs trillions 
 
 Fleet scale turns these rare device events into routine operating conditions. Smaller geometries and lower operating voltages can reduce the charge needed to disturb a stored value [@baumann2005], and fleet studies at Google and Meta found that a small but persistent population of processors, on the order of a few per several thousand machines, computes wrong results without raising any error [@hochschild2021; @dixit2021silent]. Studies of accelerator training fleets reach the same conclusion: rare hardware faults appear often enough that software-level detection and recovery become part of the training system design [@he2023]. ML system architects must therefore treat hardware as an unreliable substrate\index{Hardware!unreliable substrate} and budget for end-to-end integrity checks, replayed computation on high-value paths, and periodic consistency checks as system requirements rather than high-performance computing specialties.
 
-### Fault persistence and the fleet response {#sec-ft-fault-persistence-response}
+### Hardware fault persistence: Transient, intermittent, and permanent {#sec-ft-fault-persistence-response}
 
 Each persistence class from the taxonomy maps to a different fleet action. A transient fault\index{Transient fault!fleet response} leaves no lasting defect from that event. A single-event upset, a voltage droop on an unstable power path [@reddi2013], a timing violation, or a soft error in combinational logic [@mukherjee2005] can corrupt a tensor, packet, or instruction. Detection and correction can prevent propagation; affected state may otherwise require rollback. During training, an undetected error in weights or gradients can compromise convergence and contaminate subsequent checkpoints [@he2023]. During stateless inference, an activation error can remain confined to one request [@mahmoud2020]. If that activation enters retained state such as a KV cache, later outputs can also depend on it.
 
@@ -1467,7 +1225,7 @@ Verify your understanding of the transient, permanent, and intermittent fault ca
 
 :::
 
-## Check-and-Verify Defenses Against Silent Data Corruption {#sec-ft-sdc-verification}
+### Check-and-Verify Defenses Against Silent Data Corruption {#sec-ft-sdc-verification}
 
 ::: {.column-margin}
 ![](images/svg/vol2_fault_tolerance_margin_001.svg){width="100%" fig-alt="One red curve over training steps that rises and flattens toward a dashed certainty line, with a dot marking 63 percent: cumulative silent-corruption probability approaches certainty over a long run."}
@@ -1565,113 +1323,6 @@ These safeguards matter only when each gate targets a concrete corruption path. 
 
 Several rows of @tbl-software-faults-summary-ft claim more than a passing test. They claim that a detector fires and a recovery path holds when something breaks, and a claim of that kind can be checked only by breaking something on purpose.
 
-## Fault Injection Tools and Frameworks {#sec-ft-fault-injection-tools-frameworks}
-
-An injected failure is useful evidence only when it resembles the production failure the system must survive. A multi-node training cluster that claims to tolerate network partitions should have that connection severed in a staging environment so engineers can observe what the orchestration layer does. Fault injection\index{Fault injection!testing discipline}\index{Fault injection!tools and frameworks} is the engineering discipline of deliberately perturbing a system to empirically verify that robustness mechanisms work before production traffic discovers the gap. Fault-injection tools for tensors and accelerators cover bit flips, corrupted tensor values, and accelerator-oriented failures [@chen2020tensorfi; @tsai2021; @grafe2023], while network partitions, latency injection, dependency termination, and API-response faults belong to chaos and distributed-systems testing practice [@basiri2016].
-
-### Fault and error models {#sec-ft-fault-error-models}
-
-A fault-injection experiment must specify duration, location, granularity, and propagation path. Its fault model\index{Fault model!abstraction} describes the originating disturbance, such as a transient single-bit upset or a permanent multi-bit defect. Its error model\index{Error model!propagation} describes the resulting corrupted state or computation. Results for transient single-bit faults do not establish resilience to permanent multi-bit defects [@sangchoolie2017].
-
-The injection level determines which propagation paths the experiment includes. A register-level bit flip in a simulator such as gem5 [@binkert2011] can expose effects that a mutation of a PyTorch weight tensor omits. Conversely, hardware may mask an injected fault before software observes it. Location and propagation therefore matter when comparing results across fault models [@sangchoolie2017; @papadimitriou2021].
-
-This divergence highlights the multi-tier filtering formalized by error masking [@mohanram2003]. The flowchart in @fig-error-masking-ft traces how a physical soft error traverses two successive screening diamonds—asking first whether corrupted data is read, and second whether it produces incorrect output or a crash—before escalating to an observable failure. A hardware disturbance that hits an unused functional unit, is overwritten prior to use, or lands in dynamically dead instructions is silently absorbed within the microarchitecture or runtime [@ko2021]. Because tensor-level mutations inject perturbations downstream of these architectural filters, their empirical error rates must be evaluated at that higher abstraction level.
-
-::: {#fig-error-masking-ft fig-env="figure" fig-pos="htb" fig-cap="**Error masking**: Follow a soft error from the top. It becomes a failure only if the corrupted data is read and then also produces incorrect output; at each No branch it is masked, first by microarchitectural effects (unused components, overwritten values, squashed speculative instructions) and then by software effects (dead instructions, logical and compare operations, uninfluential branches). Because software-level fault injection sees only the second filter, it can misestimate a system's true resilience to transient errors." fig-alt="Flowchart starting at a soft error. A decision diamond asks whether corrupted data is read; No leads to masked in the microarchitecture. Yes leads to a second diamond asking whether output is incorrect or the system crashes; No leads to masked in software, Yes leads to failure. A shaded panel lists microarchitecture-level and software-level masking causes."}
-
-```{.tikz}
-\scalebox{0.77}{
-\begin{tikzpicture}[font=\small\sffamily]
-\tikzset{%
-Line/.style={line width=1.0pt,black!50,text=black},
-Box/.style={inner xsep=2pt,
-    node distance=0.6,
-    draw=RedLine,
-    line width=0.75pt,
-    fill=RedL!60,
-    align=flush center,
-    minimum width=25mm, minimum height=9mm
-  },
-Box2/.style={inner xsep=2pt,
-    node distance=1.4,
-    draw=GreenLine,
-    line width=0.75pt,
-    fill=GreenL0,
-    align=flush center,
-    minimum width=29mm, minimum height=9mm
-  },
-Box3/.style={inner xsep=2pt,
-    node distance=1.1,
-    draw=GrayLine,
-    line width=0.75pt,
-    fill=white,
-    align=flush left,
-    minimum width=55mm, minimum height=9mm
-  },
-   decision/.style={diamond, minimum width=50mm,node distance=0.6,inner sep=-1ex,
-     minimum height=25mm, align=flush center, draw=GrayLine, fill=GrayL!50}
-}
-\node[Box](B1){Soft error};
-\node[Box,decision,below=of B1](B2){Corrupted  data \\are read?};
-\node[Box,decision,below=of B2](B3){Incorrect  output \\ or  system crash?};
-\node[Box2,right=of B2](B4){\textbf{Masked} \\ (microarchitecture)};
-\node[Box2,right=of B3](B5){\textbf{Masked} \\ (software)};
-\node[Box,below=of B3](B6){Failure};
-%%
-\node[Box3,right=of B4](MLA){\textbf{Microarchitecture-level analysis}
-\\[0.5ex]
-$\bullet$ Errors on unused components
-\\[0.5ex]
-$\bullet$ Overwritten by write operations
-\\[0.5ex]
-$\bullet$ Errors on speculative instructions};
-\node[Box3,right=of B5](SLA){\textbf{Software-level analysis}
-\\[0.5ex]
-$\bullet$ Dynamically dead instructions
-\\[0.5ex]
-$\bullet$ Logical, compare instructions
-\\[0.5ex]
-$\bullet$ Uninfluential branch instructions};
-%%
-\draw[Line,-latex](B1)--(B2);
-\draw[Line,-latex](B2)--
-node[right,font=\footnotesize\sffamily]{Yes}(B3);
-\draw[Line,-latex](B3)--
-node[right,font=\footnotesize\sffamily]{Yes}(B6);
-\draw[Line,-latex](B2)--
-node[above,pos=0.3,font=\footnotesize\sffamily]{No}(B4);
-\draw[Line,-latex](B3)--
-node[above,pos=0.3,font=\footnotesize\sffamily]{No}(B5);
-%fitting
-\scoped[on background layer]
-\node[draw=BackLine,inner xsep=4mm,inner ysep=5mm,
-yshift=2.5mm,fill=BackColor!50,fit=(B4)(SLA)(MLA),line width=0.75pt](BB2){};
-\node[below=4pt of  BB2.north,inner sep=0pt,
-anchor=north]{\textbf{System-level masking effect analysis}};
-\end{tikzpicture}
-}
-```
-
-:::
-
-These masking effects determine which abstraction level an experiment should target.
-
-### Fault injection methods {#sec-ft-fault-injection-methods}
-
-Fault injection methods trade realism against experimental scale. Hardware-based injection, through field-programmable gate array (FPGA) emulation or accelerated particle-beam exposure of a running accelerator [@velazco2010], supplies the calibration point because its faults pass through the same circuit-level masking as production faults. Software-based injection\index{Fault injection!software-based} is the scalable counterpart. Tools such as PyTorchFI\index{PyTorchFI!fault injection} [@mahmoud2020] perturb weights, activations, and gradients directly, covering many model states quickly without special hardware, and have shown that single bit-level faults can produce severe misclassifications, including "phantom" objects in detection models. The cost is an abstraction gap\index{Fault injection!abstraction gap}: a software tool that mutates a tensor skips the hardware masking that would have absorbed many of the same disturbances. Frameworks such as Fidelity\index{Fidelity!fault injection framework} [@he2020fidelity] narrow that gap by mapping how faults in registers, memory hierarchies, and numerical units become software-visible errors, so that injected faults resemble what physical hardware would produce.
-
-::: {#exmp-fault-tolerance-software-fault-injection-limits .callout-example title="Software fault injection limits"}
-
-**Scenario**: An engineering team validates a distributed training pipeline using software fault injection, concluding that tensor bit-flips always corrupt model gradient updates.
-
-**Diagnosis**: Hardware-calibrated experiments reveal that software injection bypasses low-level hardware masking effects (such as ECC memory correction and gate-level masking) that prevent many register-level bit-flips from ever mutating software variables.
-
-**Systems lesson**: In this experiment, bypassing hardware masking overstates the effect of the modeled physical faults. Tensor mutation still tests the software response to corrupted values; estimating production vulnerability additionally requires a calibrated model of which physical faults reach those values. The result must be interpreted at the injection level actually tested.
-
-:::
-
-For fleet recovery, the most valuable experiments inject faults at the level where recovery decisions are made. Killing a rank in the middle of a collective, partitioning a node from the rendezvous service, delaying a heartbeat past its timeout, and corrupting one checkpoint shard each exercise one row of @tbl-software-faults-summary-ft. Running these experiments continuously in staging, and in controlled form in production, keeps rarely executed recovery code from decaying between real incidents [@basiri2016]. A detection mechanism can identify corrupted or missing state, but only a recovery mechanism can replace it. Fault persistence determines whether to retry, quarantine, or replace a component, and checkpointing supplies the known-good training state from which any of those paths can resume.
-
 ## Checkpointing and Progress Preservation {#sec-fault-tolerance-reliability-reliability-checkpoint-restart-fundamentals-0ac2}
 
 When a top-of-rack switch dies two weeks into the training run of a 175-billion-parameter model, the cluster loses 64 GPUs instantly. The system cannot simply restart from scratch; the sunk cost of weeks of compute is too high. The failure analysis in @sec-fault-tolerance-reliability-reliability-failure-analysis-scale-6b4b established that large-scale training systems will experience such failures frequently, requiring robust mechanisms to preserve and resume progress.
@@ -1715,7 +1366,249 @@ class FaultToleranceCheckpointRecap:
     aggregate_read_gb_per_s_str = fmt_bandwidth(aggregate_ckpt_bw, unit=GB / second, precision=0, commas=False)
 ```
 
-[^fn-adam-state-memory]: **Adam optimizer state**\index{Adam optimizer!state}\index{Adam optimizer!checkpoint memory}: Adaptive Moment Estimation (Adam) maintains per-parameter first-moment ($m$) and second-moment ($v$) estimates, tripling memory requirements compared to vanilla stochastic gradient descent (SGD) (3$\times$: parameters + two state vectors). For a `{python} FaultToleranceCheckpointRecap.gpt3_params_b_str` parameter model, optimizer state alone reaches `{python} FaultToleranceCheckpointRecap.gpt3_adam_tb_str`, which typically dominates checkpoint size and recovery time, making optimizer state the primary bottleneck in checkpoint I/O design.
+[^fn-adam-state-memory]: **Adam optimizer state**\index{Adam optimizer!state}\index{Adam optimizer!checkpoint memory}: Adam maintains per-parameter first-moment ($m$) and second-moment ($v$) estimates, tripling memory requirements compared to vanilla stochastic gradient descent (SGD) (3$\times$: parameters + two state vectors). For a `{python} FaultToleranceCheckpointRecap.gpt3_params_b_str` parameter model, optimizer state alone reaches `{python} FaultToleranceCheckpointRecap.gpt3_adam_tb_str`, which typically dominates checkpoint size and recovery time, making optimizer state the primary bottleneck in checkpoint I/O design.
+
+### The Young-Daly checkpoint interval {#sec-fault-tolerance-young-daly}
+
+Every training recovery path in this chapter ultimately falls back on a saved copy of training state, so the first question is what that copy must contain.
+
+::: {#dfn-fault-tolerance-checkpointing .callout-definition title="Checkpointing"}
+
+***Checkpointing***\index{Checkpointing!definition} is the periodic serialization of the complete training state (parameters, optimizer state, data loader position, and random state) to persistent storage at a recorded training step.
+
+1.  **Significance**: It minimizes lost work after a system failure by trading checkpoint I/O against rework. Writing too often wastes accelerator time on storage traffic; writing too rarely risks replaying many completed steps after a failure. The Young-Daly interval\index{Young-Daly formula!square-root trade-off} developed in this section chooses the cadence that balances write cost against expected lost work.
+2.  **Distinction**: A resumable checkpoint captures a consistent execution state, including optimizer state, random-number generator state, data position, and learning rate schedules. It can use full or incremental storage; bitwise replay additionally requires compatible deterministic execution.
+3.  **Common pitfall**: A frequent misconception is that checkpointing is "just writing to disk." For large models it is a storage-system stress test, because the simultaneous write from thousands of GPUs can trigger a checkpoint storm that saturates the entire network fabric $(\Bandwidth)$.
+
+:::
+
+A checkpoint is useful only if it resumes the recorded step consistently. In distributed training, every shard must belong to the same recoverable state; a collection of files from different steps does not preserve progress. For the interval model, assume that writing a checkpoint completes durably before it becomes available for recovery and that a failure discards the work performed since the last completed checkpoint.
+
+When failures are expected during a job, the key engineering decision is how often to write that state, because every save costs I/O time and every unsaved step is work a failure can erase. The Young-Daly formula\index{Young-Daly formula!optimal interval}\index{Daly formula|see{Young-Daly formula}}[^fn-young-daly-formula] (principle \ref{pri-young-daly}, applied in @sec-fault-tolerance-reliability-reliability-checkpoint-interval-failure-analysis-c28d) gives a first-order estimate of that balance through a square-root rule:
+
+$$ \OptimalCheckpointIntervalCkpt = \sqrt{2 \cdot \CheckpointWriteTime \cdot \MeanTimeBetweenFailures_{\text{system}}} $$
+
+```{python}
+#| echo: false
+#| label: young-daly-checkpoint-state
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ RESUMABLE CHECKPOINT STATE (LEGO)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @sec-fault-tolerance-young-daly, the T_write paragraph below.
+# │
+# │ Goal: Size a resumable mixed-precision Adam checkpoint for a 70B model and
+# │       for the 175B running example from one bytes-per-parameter anchor.
+# │ Show: 14 bytes per parameter; ~1 TB (70B) and >2 TB (175B).
+# │ How:  params x ReferenceStats.MixedPrecisionAdam.CheckpointBytesPerParameter.
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import Models, ReferenceStats
+from mlsysim.fmt import check, fmt
+
+class YoungDalyCheckpointState:
+    # ┌── 1. LOAD (Constants) ──────────────────────
+    ckpt_bpp = ReferenceStats.MixedPrecisionAdam.CheckpointBytesPerParameter
+    params_70b = Models.Language.Llama3_70B.parameters
+    params_175b = Models.Language.GPT3.parameters
+
+    # ┌── 2. EXECUTE (The Compute) ─────────────────
+    ckpt_70b_tb = (params_70b * ckpt_bpp).to(TB).magnitude
+    ckpt_175b_tb = (params_175b * ckpt_bpp).to(TB).magnitude
+
+    # ┌── 3. GUARD (Invariants) ────────────────────
+    check(0.9 < ckpt_70b_tb < 1.0, "70B checkpoint must 'approach a terabyte'")
+    check(ckpt_175b_tb > 2.0, "175B checkpoint must 'exceed two terabytes'")
+
+    # ┌── 4. OUTPUT (Formatting) ───────────────────
+    ckpt_bpp_str = fmt(ckpt_bpp.magnitude, precision=0)
+```
+
+$\CheckpointWriteTime$ in distributed ML training is not the time to flush a small process state; it includes transferring model weights and optimizer state to durable storage. The reference format here stores BF16 weights, separate FP32 master weights, and two FP32 moment tensors per parameter for Adam. A single resumable checkpoint for a 70B-parameter model therefore approaches a terabyte at `{python} YoungDalyCheckpointState.ckpt_bpp_str` bytes per parameter; for the later 175B-parameter running example, it exceeds two terabytes. Reducing $\CheckpointWriteTime$ requires a smaller payload or higher sustained write bandwidth, and $\CheckpointWriteTime$ itself is the central constraint that determines how tightly the checkpoint interval can be set before I/O overhead displaces productive training compute.
+
+To see the balance, consider an interval between saves. Doubling that interval approximately halves the checkpoint writes per unit of training, but a failure then loses twice as much work on average. Under the constant-rate, rare-failure approximation, failure occurs approximately uniformly within an interval, so the average lost work is half the interval. When write time is small relative to the interval, the wasted fraction from saving and replaying work is approximately the sum below. Detection, allocation, and restoration time require a separate recovery budget.
+
+$$ W(\CheckpointIntervalCkpt) \approx \frac{\CheckpointWriteTime}{\CheckpointIntervalCkpt} + \frac{\CheckpointIntervalCkpt}{2 \cdot \MeanTimeBetweenFailures_{\text{system}}} $$
+
+Setting the first derivative to zero ($\frac{dW}{d\CheckpointIntervalCkpt} = -\frac{\CheckpointWriteTime}{\CheckpointIntervalCkpt^2} + \frac{1}{2 \cdot \MeanTimeBetweenFailures_{\text{system}}} = 0$) directly yields the square-root minimum $\OptimalCheckpointIntervalCkpt = \sqrt{2 \cdot \CheckpointWriteTime \cdot \MeanTimeBetweenFailures_{\text{system}}}$. In @fig-checkpoint-tradeoff, this balance forms a U-shaped convex curve for the chapter's 10,000-GPU cluster running a 175B-parameter model: write overhead (dashed blue) falls hyperbolically while expected rework (dashed red) climbs linearly, reaching a minimum near $\OptimalCheckpointIntervalCkpt \approx 14$ minutes. The modeled saving-and-rework loss there is 5.9 percent, before adding recovery downtime. Its scaling consequence is the one to carry forward. As clusters grow, system MTBF drops, so the optimal interval shrinks, demanding higher-bandwidth storage to keep $\CheckpointWriteTime$ small before the "checkpoint tax" consumes the cluster's compute capacity. Because the relationship is a square root, halving MTBF tightens the interval by only $\sqrt{2}\approx 1.4\times$, so doubling cluster size does not demand doubling checkpoint I/O bandwidth when checkpoint size and the other assumptions stay fixed. The chapter applies the formula to its own cluster once the system MTBF is in hand.
+
+::: {.column-margin .margin-pointer}
+↩ The per-tier storage bandwidths that bound how quickly a checkpoint can be written are established in @sec-storage-hierarchy.
+:::
+
+[^fn-young-daly-formula]: **Young-Daly formula**\index{Young-Daly formula!history}: @young1974 derived the first-order optimal checkpoint interval, and @daly2006 independently refined it with tighter second-order bounds.
+
+```{python}
+#| echo: false
+#| label: checkpoint-tradeoff-inputs
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ CHECKPOINT TRADE-OFF INPUTS (LEGO)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @fig-checkpoint-tradeoff and its caption.
+# │
+# │ Goal: Feed the U-curve the same two inputs the Young-Daly notebook uses
+# │       later, so the plotted optimum and the worked interval agree.
+# │ Show: T_write ~24.5 s (175B, 14 B/param, registry write bandwidth);
+# │       full-system MTBF ~3.87 h (GPU + PCIe + shared NIC, 10,000 GPUs);
+# │       tau_opt ~13.8 min.
+# │ How:  Same series-rate composition as the worked MTBF cascade (redundant
+# │       PSUs add no term); tau_opt = sqrt(2 * T_write * MTBF_system).
+# └─────────────────────────────────────────────────────────────────────────────
+import math
+from mlsysim import Models, Systems
+from mlsysim.physics import calc_checkpoint_size
+from mlsysim.fmt import check, fmt_time
+
+class CheckpointTradeoffInputs:
+    # ┌── 1. LOAD (Constants) ──────────────────────
+    ckpt_bytes = calc_checkpoint_size(Models.Language.GPT3.parameters)  # 14 B/param
+    write_bw = float(Systems.Reliability.Recovery.checkpoint_write_bw_gbs) * (GB / second)
+    n_gpus = Systems.Clusters.Training_10K.total_accelerators
+    gpus_per_node = Systems.Nodes.DGX_H100.accelerators_per_node
+    gpu_mttf_h = float(Systems.Reliability.Gpu.mttf_hours)
+    pcie_mttf_h = float(Systems.Reliability.PcieSwitch.mttf_hours)
+    nic_mttf_h = float(Systems.Reliability.Nic.mttf_hours)
+
+    # ┌── 2. EXECUTE (The Compute) ─────────────────
+    t_write_h = (ckpt_bytes / write_bw).to(hour).magnitude
+    rate_per_gpu = 1 / gpu_mttf_h + 1 / pcie_mttf_h + (1 / gpus_per_node) / nic_mttf_h
+    mtbf_h = 1 / (n_gpus * rate_per_gpu)
+    tau_opt_h = math.sqrt(2 * t_write_h * mtbf_h)
+
+    # ┌── 3. GUARD (Invariants) ────────────────────
+    check(22 < t_write_h * 3600 < 27, "175B checkpoint write should be ~24.5 s")
+    check(3.5 < mtbf_h < 4.2, "full-system MTBF should match the worked cascade (~3.87 h)")
+    check(12 < tau_opt_h * 60 < 15, "tau_opt should match the Young-Daly notebook (~13.8 min)")
+
+    # ┌── 4. OUTPUT (Formatting) ───────────────────
+    t_write_s_str = fmt_time(t_write_h * 3600, "second", precision=1, commas=False)
+    mtbf_h_str = fmt_time(mtbf_h, "hour", precision=1, commas=False)
+    tau_opt_min_str = fmt_time(round(tau_opt_h * 60), "minute", precision=0, commas=False)
+    n_gpus_str = fmt(n_gpus, precision=0)
+```
+
+::: {#fig-checkpoint-tradeoff fig-env="figure" fig-pos="htb" fig-cap="**The checkpoint trade-off**: Checkpoint save overhead (dashed blue) falls as the interval lengthens, while expected rework after a failure (dashed red) rises; their sum (solid) is minimized at the Young-Daly interval. The curves use this chapter's 175B running example on its `{python} CheckpointTradeoffInputs.n_gpus_str`-GPU cluster, with a `{python} CheckpointTradeoffInputs.t_write_s_str` checkpoint write and a `{python} CheckpointTradeoffInputs.mtbf_h_str` full-system MTBF, which put the optimum near `{python} CheckpointTradeoffInputs.tau_opt_min_str`. The minimum is shallow, so an interval somewhat off the optimum costs little, while a far shorter or far longer one costs a great deal." fig-alt="Three curves against checkpoint interval in minutes: checkpoint overhead decreasing, rework cost increasing linearly, and total wasted time with a shallow minimum marked near 14 minutes."}
+
+```{python}
+#| echo: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ CHECKPOINT TRADE-OFF (FIGURE)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @fig-checkpoint-tradeoff.
+# │
+# │ Goal: Plot save overhead, expected rework, and their sum vs. interval for
+# │       the chapter's 175B / 10,000-GPU example; mark tau_opt.
+# │ Show: Three curves; optimum annotation near 14 min.
+# │ How:  Inputs from CheckpointTradeoffInputs (no literals); book_style.
+# └─────────────────────────────────────────────────────────────────────────────
+import numpy as np
+from binder.tools.figures import style as book_style
+
+fig, ax, COLORS, plt = book_style.setup_plot(figsize=(8, 4.5))
+
+t_write = CheckpointTradeoffInputs.t_write_h
+mtbf = CheckpointTradeoffInputs.mtbf_h
+tau_opt = CheckpointTradeoffInputs.tau_opt_h
+
+tau = np.linspace(tau_opt / 6, tau_opt * 4, 300)
+over_ckpt = t_write / tau
+over_rework = tau / (2 * mtbf)
+total_waste = over_ckpt + over_rework
+waste_opt = t_write / tau_opt + tau_opt / (2 * mtbf)
+
+ax.plot(tau * 60, over_ckpt * 100, label='Checkpoint overhead ($T_{\\mathrm{write}}/T_{\\mathrm{ckpt}}$)', color=COLORS['BlueLine'], linestyle='--')
+ax.plot(
+    tau * 60,
+    over_rework * 100,
+    label='Expected rework ($T_{\\mathrm{ckpt}}/(2\\,\\mathrm{MTBF}_{\\mathrm{system}})$)',
+    color=COLORS['RedLine'],
+    linestyle='--',
+)
+ax.plot(tau * 60, total_waste * 100, label='Total wasted time', color=COLORS['primary'], linewidth=2.5)
+
+ax.scatter([tau_opt * 60], [waste_opt * 100], color=COLORS['primary'], s=40, zorder=5)
+ax.annotate(
+    f'$T^*_{{\\mathrm{{ckpt}}}} \\approx {tau_opt * 60:.0f}$ min, {waste_opt * 100:.1f}% wasted',
+    xy=(tau_opt * 60, waste_opt * 100),
+    xytext=(tau_opt * 60 + 12, waste_opt * 100 + 7),
+    ha='left',
+    arrowprops=dict(arrowstyle='->', color=COLORS['primary'], shrinkB=4, lw=0.75),
+    bbox=dict(boxstyle='round,pad=0.25', facecolor='white', edgecolor='#CBD5E1', lw=0.6, alpha=0.95),
+)
+
+ax.set_xlabel('Checkpoint interval $T_{\\mathrm{ckpt}}$ (minutes)')
+ax.set_ylabel('Share of wall time wasted (%)')
+ax.set_xlim(0, tau_opt * 4 * 60)
+ax.set_yticks([0, 5, 10, 15, 20])
+ax.set_ylim(0, 20)
+
+ax.legend(loc='upper right', frameon=True, facecolor='white', edgecolor='#CBD5E1', framealpha=0.95)
+
+plt.tight_layout()
+plt.show()
+plt.close()
+```
+
+:::
+
+A quick availability calculation shows the same scaling pressure from another angle.
+
+```{python}
+#| echo: false
+#| label: lego-nines-reliability
+from mlsysim.fmt import check, fmt, fmt_int, fmt_percent, fmt_time
+
+class NinesReliability:
+    # ┌── 1. LOAD ──────────────────────────────────────────
+    n_gpus = Systems.Clusters.Training_10K.total_accelerators
+    availability_pct = 99.99
+    single_gpu_success = availability_pct / 100
+
+    # ┌── 2. EXECUTE ───────────────────────────────────────
+    downtime_min_year = (1 - single_gpu_success) * HOURS_PER_YEAR * MINUTES_PER_HOUR
+    cluster_prob = single_gpu_success**n_gpus
+    fleet_mtbf = FleetReliabilityRates.hours_between * hour
+    fast_mttr = 5 * minute
+    slow_mttr = 30 * minute
+    fast_availability = (fleet_mtbf / (fleet_mtbf + fast_mttr)).to("").magnitude
+    slow_availability = (fleet_mtbf / (fleet_mtbf + slow_mttr)).to("").magnitude
+
+    # ┌── 3. GUARD ─────────────────────────────────────────
+    check(0 < cluster_prob < 1, "Probability must be in (0,1)")
+    check(cluster_prob < 0.5, "Cluster survival must be low at scale")
+    check(0 < slow_availability < fast_availability < 1, "Faster repair must improve availability")
+
+    # ┌── 4. OUTPUT ────────────────────────────────────────
+    n_gpus_str = fmt(n_gpus, precision=0)
+    availability_str = fmt_percent(availability_pct / 100, precision=2, commas=False, style='prose')
+    downtime_min_str = fmt_time(downtime_min_year, 'minute', precision=1, commas=False, style='word')
+    survival_str = fmt(single_gpu_success, precision=4, commas=False)
+    cluster_prob_str = fmt(cluster_prob, precision=2, commas=False)
+    cluster_pct_str = fmt_percent(round(cluster_prob * 100) / 100, precision=0, commas=False, style='prose')
+    fleet_mtbf_str = fmt_time(fleet_mtbf, hour, precision=0, commas=False, style="word")
+    fast_mttr_str = fmt_time(fast_mttr, minute, precision=0, commas=False, style="word")
+    slow_mttr_str = fmt_time(slow_mttr, minute, precision=0, commas=False, style="word")
+    fast_availability_str = fmt_percent(fast_availability, precision=2, commas=False, style="prose")
+    slow_availability_str = fmt_percent(slow_availability, precision=2, commas=False, style="prose")
+```
+
+::: {#nbk-fault-tolerance-9s-reliability .callout-notebook title="The 9s of reliability"}
+
+**Problem**: A cluster of `{python} NinesReliability.n_gpus_str` GPUs runs with each GPU at `{python} NinesReliability.availability_str` availability (only `{python} NinesReliability.downtime_min_str` of downtime per year). Assuming independent up/down states, what is the probability that the entire cluster is up at the same instant?
+
+**Math**:
+
+1.  Single GPU availability probability $(R_{\text{GPU}})$: A GPU with `{python} NinesReliability.availability_str` availability has an all-up probability $R_{\text{GPU}} =$ `{python} NinesReliability.survival_str` at a randomly chosen instant.
+2.  Cluster availability probability $(R_{\text{cluster}})$: $R_{\text{cluster}} = (R_{\text{GPU}})^{N}$.
+3.  **Result**: $(R_{\text{GPU}})^{N} \approx$ `{python} NinesReliability.cluster_prob_str`.
+
+**Systems insight**: Even with `{python} NinesReliability.availability_str` reliable hardware, a `{python} NinesReliability.n_gpus_str`-GPU cluster has only a `{python} NinesReliability.cluster_pct_str` chance that every GPU is simultaneously available. Hardware reliability alone is insufficient; software must handle failures automatically.
+
+:::
+
+::: {#psp-fault-tolerance-scale-transforms-failure .callout-perspective title="Scale transforms failure"}
+
+A cluster of `{python} NinesReliability.n_gpus_str` GPUs turns a per-GPU MTBF of `{python} FleetReliabilityRates.gpu_mttf_prose_str` into a system MTBF of `{python} NinesReliability.fleet_mtbf_str`. For a repairable system, steady-state availability\index{Availability!MTBF and MTTR} is $A = \MeanTimeBetweenFailures/(\MeanTimeBetweenFailures+\MeanTimeToRepair)$, where mean time to recovery (MTTR)\index{MTTR!availability impact}\index{MTTR!recovery interval}\index{Mean time to recovery|see{MTTR}} is the recovery interval. Cutting MTTR from `{python} NinesReliability.slow_mttr_str` to `{python} NinesReliability.fast_mttr_str` raises availability from `{python} NinesReliability.slow_availability_str` to `{python} NinesReliability.fast_availability_str`. This stationary two-state model assumes unconstrained repair capacity and complete outage; correlated incidents, repair contention, and degraded operation require direct measurement [@birolini2017]. Systems must engineer recovery, not merely improve components.
+
+:::
 
 ### Checkpoint interval from failure analysis {#sec-fault-tolerance-reliability-reliability-checkpoint-interval-failure-analysis-c28d}
 
@@ -3082,152 +2975,6 @@ Vision serving is usually closer to the stateless end of the spectrum because ea
 
 When redundancy cannot preserve full service, the remaining choice depends on the application contract. A validated reduced-capability response can preserve useful availability; if no such response is acceptable, the system must reject or defer the work. Graceful degradation makes the permitted reduction explicit before failure occurs.
 
-## Graceful Degradation {#sec-fault-tolerance-reliability-reliability-graceful-degradation-9122}
-
-During a major regional network outage, an e-commerce site suddenly loses access to its heavy, GPU-accelerated recommendation cluster. Rather than showing users empty pages or crashing, the site instantly switches to serving precomputed, generic popular items. The serving fault tolerance mechanisms developed in @sec-fault-tolerance-reliability-reliability-serving-fault-tolerance-5375 aim to maintain full service, but graceful degradation dictates what happens when those defenses are overwhelmed.
-
-::: {#dfn-fault-tolerance-graceful-degradation .callout-definition title="Graceful degradation"}
-
-***Graceful degradation***\index{Graceful Degradation!definition} is a fault tolerance strategy in which a system responds to resource exhaustion or component failure by deliberately reducing service quality (falling back to a smaller model, serving cached results, or returning partial outputs) rather than failing completely, maintaining measurable availability at reduced capability.
-
-1.  **Significance**: Graceful degradation converts total outage risk into a controlled quality reduction. A recommendation system can fall back from a large ranker to a collaborative-filtering model on GPU failure, maintaining request availability with a quality penalty that must be measured for that workload. The engineering calculation includes both the requests served and the utility lost during fallback.
-2.  **Distinction**: Unlike complete system failure (where the service returns errors to all requests), graceful degradation provides a managed transition through a predefined capability hierarchy in which each fallback level has known accuracy, latency, and resource characteristics that allow the system to continue satisfying SLOs at reduced quality.
-3.  **Common pitfall**: A frequent misconception is that degradation is automatic in well-designed systems. Graceful degradation requires explicit preengineering: fallback models must be preloaded or precomputed, switchover logic must detect the failure condition and trigger the transition without human intervention, and each degradation level must have been validated to actually satisfy its reduced SLO before it is needed in production.
-
-:::
-
-### Degradation dimensions {#sec-fault-tolerance-reliability-reliability-degradation-dimensions-4b25}
-
-A degradation plan must name which service property will be sacrificed before an incident begins. @Tbl-graceful-degradation-dimensions summarizes the main levers. The table is a pre-incident design checklist, not an outage-time brainstorming aid: each sacrificed property needs a measured quality budget, an activation condition, and a recovery path before the failure occurs.
-
-| **Dimension**        | **What the System Sacrifices**    | **Typical Fallback**                                                                           |
-|:---------------------|:----------------------------------|:-----------------------------------------------------------------------------------------------|
-| Quality              | Model accuracy or ranking quality | Use a simpler model, such as a collaborative-filtering fallback for a multi-tower recommender. |
-| Latency              | Response speed                    | Batch more requests together to preserve throughput and model quality under high load.         |
-| Coverage             | Result completeness               | Return top-10 search results instead of top-100.                                               |
-| Freshness            | Recency of computed results       | Serve cached or stale candidates, such as hour-old news recommendations during an outage.      |
-| Feature completeness | Input richness                    | Use content features when user history or real-time context is unavailable.                    |
-
-: **Graceful Degradation Dimensions**: Degradation plans choose which service property can be reduced while still returning a useful answer. Naming the dimension in advance prevents the system from treating every failure as a binary serve-or-crash decision. {#tbl-graceful-degradation-dimensions}
-
-These dimensions are not interchangeable. A search product may sacrifice coverage by returning fewer results while keeping freshness intact; a recommender may sacrifice freshness by serving cached candidates while preserving latency; and an interactive assistant may sacrifice quality by using a smaller model while keeping the session alive. The correct fallback is therefore workload-specific. It follows the property whose temporary loss least harms the application and whose recovery path can be validated before the incident.
-
-### Graceful degradation strategies {#sec-fault-tolerance-reliability-reliability-graceful-degradation-strategies-e85e}
-
-The dimensions in @tbl-graceful-degradation-dimensions become operational only when the service binds each sacrificed property to a specific fallback mechanism. The strategy ladder starts with model fallback when the primary inference path is too expensive or unavailable, then moves to feature fallback when input quality degrades, and finally to load shedding when demand exceeds capacity and the system must preserve the highest-value requests first.
-
-#### Model fallback {#sec-fault-tolerance-reliability-reliability-model-fallback-bc6e}
-
-Model fallback turns quality into an explicit availability lever by maintaining multiple model versions with different resource requirements. The primary model\index{Graceful degradation!primary model} provides full capability at the highest resource cost, a secondary model\index{Graceful degradation!secondary model} reduces capability and resource demand, a tertiary model\index{Graceful degradation!tertiary model} preserves minimal capability, and a static fallback\index{Graceful degradation!static fallback} serves precomputed defaults with no inference at all. When the primary path is unavailable or overloaded, the policy descends only as far as resource pressure requires, then returns upward after the primary path is healthy again.
-
-```{python}
-#| echo: false
-#| label: model-fallback-cascade
-# ┌─────────────────────────────────────────────────────────────────────────────
-# │ MODEL FALLBACK CASCADE (LEGO)
-# ├─────────────────────────────────────────────────────────────────────────────
-# │ Context: @sec-fault-tolerance-reliability-reliability-model-fallback-bc6e prose below.
-# │
-# │ Goal: Pin the three named vision models' sizes and ImageNet top-1 accuracy.
-# │ Show: ViT-Large 307M / 88%; EfficientNet-B4 19M / 83%; MobileNetV3-Large 5.4M / 75%.
-# │ How:  Models.Vision.*.parameters; Literature.Benchmarks.*ImageNetTop1.
-# └─────────────────────────────────────────────────────────────────────────────
-from mlsysim import Literature, Models
-from mlsysim.fmt import check, fmt, fmt_percent
-
-class ModelFallbackCascade:
-    # ┌── 1. LOAD (Constants) ──────────────────────
-    vit_params_m = Models.Vision.ViT_Large.parameters.to(param).magnitude / 1e6
-    effnet_params_m = Models.Vision.EfficientNetB4.parameters.to(param).magnitude / 1e6
-    mobilenet_params_m = Models.Vision.MobileNetV3_Large.parameters.to(param).magnitude / 1e6
-    vit_top1 = float(Literature.Benchmarks.ViTLargeImageNetTop1)
-    effnet_top1 = float(Literature.Benchmarks.EfficientNetB4ImageNetTop1)
-    mobilenet_top1 = float(Literature.Benchmarks.MobileNetV3LargeImageNetTop1)
-
-    # ┌── 2. EXECUTE (The Compute) ─────────────────
-    # (no derived values; each rung is a named registry entity)
-
-    # ┌── 3. GUARD (Invariants) ────────────────────
-    check(vit_params_m > effnet_params_m > mobilenet_params_m, "each fallback rung must be smaller")
-    check(vit_top1 > effnet_top1 > mobilenet_top1, "each fallback rung must trade accuracy for cost")
-
-    # ┌── 4. OUTPUT (Formatting) ───────────────────
-    vit_params_str = fmt(vit_params_m, precision=0)
-    effnet_params_str = fmt(effnet_params_m, precision=0)
-    mobilenet_params_str = fmt(mobilenet_params_m, precision=1)
-    vit_top1_str = fmt_percent(round(vit_top1 * 100) / 100, precision=0, style="prose")
-    effnet_top1_str = fmt_percent(round(effnet_top1 * 100) / 100, precision=0, style="prose")
-    mobilenet_top1_str = fmt_percent(round(mobilenet_top1 * 100) / 100, precision=0, style="prose")
-```
-
-An image classification cascade makes the trade-off concrete. The primary path might run a ViT-Large model with `{python} ModelFallbackCascade.vit_params_str` million parameters and `{python} ModelFallbackCascade.vit_top1_str` ImageNet top-1 accuracy, fall back to EfficientNet-B4 with `{python} ModelFallbackCascade.effnet_params_str` million parameters and `{python} ModelFallbackCascade.effnet_top1_str` accuracy under pressure, then fall back again to MobileNet-V3-Large with `{python} ModelFallbackCascade.mobilenet_params_str` million parameters and `{python} ModelFallbackCascade.mobilenet_top1_str` accuracy when only minimal classification remains affordable. If even that path cannot meet the SLO, the service can return cached labels, a coarse category, or "classification unavailable" rather than blocking the request indefinitely. For that ladder to be real rather than aspirational, the production system must keep multiple models deployed, route requests to the appropriate level, monitor fallback frequency, and measure the quality impact of each level.
-
-Recommendation and ranking systems use the same pattern when a complex deep learning model falls back to a top-n popularity list, a linear ranker, or a cached response during primary serving failures. Complex models often fight for the last mile of accuracy while simple heuristics provide the bulk of the utility, so the fallback path must be monitored as a first-class quality signal rather than treated as a silent failover. Otherwise the product appears healthy while quality is silently traded for availability.
-
-#### Feature fallback {#sec-fault-tolerance-reliability-reliability-feature-fallback-0730}
-
-Feature fallback controls how much input quality the model may lose before the request must be blocked. When feature retrieval fails, validated population-level defaults or cached values can substitute for missing user or item features. The model must have been trained or evaluated with those missing-feature semantics; an average embedding or a vector from another encoder is not automatically a compatible input. Approximate features are useful only when their representation and measured prediction quality satisfy the fallback contract.
-
-The key design step is prioritizing features by their measured contribution to prediction quality. @Tbl-feature-degradation-tiers illustrates a four-level policy in which critical features block the request, important features use defaults, useful features use cached values, and optional features can be omitted. Its quality-loss ranges are example policy budgets, not transferable properties of those feature categories; deployment requires measurements showing that each permitted fallback meets its budget.
-
-| **Tier**      |      **Example Features**     | **Missing Action** |  **Quality Impact**  |
-|:--------------|:-----------------------------:|:------------------:|:--------------------:|
-| **Critical**  |        User ID, Item ID       |   Block request    |     Cannot serve     |
-| **Important** | User history, Item attributes |    Use defaults    | 5--10% quality loss  |
-| **Useful**    |       Real-time context       |     Use cached     |  2--5% quality loss  |
-| **Optional**  |       Secondary signals       |        Omit        | $< 2\%$ quality loss |
-
-: **Graceful Feature Degradation Tiers**: Features classified by importance to prediction quality, with the corresponding response when each tier is unavailable. Critical features block the request entirely; lower tiers allow the system to fall back to defaults, cached values, or omission with bounded quality impact. The tiers convert a binary "feature available or not" question into a four-step degradation ladder. {#tbl-feature-degradation-tiers}
-
-When feature degradation alone is insufficient to maintain system stability under extreme load, the serving infrastructure must begin actively dropping requests.
-
-#### Load shedding {#sec-fault-tolerance-reliability-reliability-load-shedding-8476}
-
-Load shedding protects the system by sacrificing selected requests before overload spreads to every request. Random shedding is the simplest policy: drop a fraction of incoming requests and preserve enough capacity for the rest. Its weakness is that it treats all requests as equally valuable. Priority-based shedding turns quality-of-service degradation into an explicit policy by serving premium users before free users, revenue-generating requests before analytics requests, and interactive traffic before background batch work. The system is still degrading, but it is degrading according to a predeclared service contract rather than whichever queue happens to fill first.
-
-Admission control\index{Graceful degradation!admission control} applies the same idea at system entry points. It rejects requests that would exceed capacity rather than accepting work that will degrade every request already in the system. Circuit breakers\index{Circuit breaker!serving resilience} extend the same protection to individual dependencies by failing fast when a model replica, feature store, or supporting service is unhealthy, so that one failing dependency cannot exhaust connection pools across the fleet; @sec-inference-scale-circuit-breakers-backpressure-e61c develops their states and the backpressure signals that accompany them.
-
-#### Graceful degradation implementation {#sec-fault-tolerance-reliability-reliability-graceful-degradation-implementation-1aa5}
-
-Implementation begins by turning the degradation ladder into a control loop. Tail-latency percentiles reveal delayed responses, dependency-specific error rates locate failed calls, resource utilization exposes pressure, and growing queues indicate a mismatch between arrivals and completions. These signals support entry and exit conditions for each degradation level. A trigger can justify load shedding before diagnosis is complete, but the signal alone does not establish the underlying cause.
-
-Degradation triggers\index{Graceful degradation!triggers} define conditions that activate degradation. @Lst-degradation-triggers illustrates three common trigger conditions that progressively activate fallback mechanisms based on latency, error rate, and feature store health.
-
-::: {#lst-degradation-triggers lst-cap="**Progressive Degradation Triggers**: Conditions that activate graceful degradation based on tail latency, error rate, and feature store health. Each trigger activates a different fallback mechanism appropriate to the detected problem."}
-
-```{.python}
-# Monitor tail latency for user-facing impact
-if p99_latency > threshold:
-    activate_model_fallback()  # Switch to faster, simpler model
-
-# Track error rates to detect downstream failures
-if error_rate > threshold:
-    activate_circuit_breaker()  # Fail fast, prevent cascade
-
-# Feature store slowdowns degrade recommendation quality
-if feature_store_latency > threshold:
-    activate_feature_fallback()  # Use cached/default features
-```
-
-:::
-
-Degradation should increase progressively as conditions worsen rather than switch at one cliff. The system can raise the fallback percentage gradually as load increases, then require sustained improvement before traffic returns to higher-capability paths. Hysteresis prevents oscillation between primary and fallback modes when the service hovers near a threshold.
-
-### Degradation monitoring and alerting {#sec-fault-tolerance-reliability-reliability-degradation-monitoring-alerting-87c2}
-
-Because graceful degradation trades quality for availability, monitoring must make that trade visible rather than letting the system appear healthy while serving lower-fidelity results. The monitoring surface must expose how much service quality has been traded away. @Tbl-degradation-monitoring-action-map turns that surface into an action map: fallback share reveals how often model quality was reduced, default-feature share reveals input-quality loss, drop rate reveals capacity protection, and the primary-vs-fallback quality gap reveals whether the degraded path remains acceptable. Its escalation thresholds illustrate one policy; the service's permitted degradation duration and quality loss must determine the deployed thresholds.
-
-| **Signal**                      | **Quality trade exposed**                       | **Escalation rule**                                                              | **Postincident question**                              |
-|:--------------------------------|:------------------------------------------------|:---------------------------------------------------------------------------------|:-------------------------------------------------------|
-| Fallback-model request share    | Model capability reduced to preserve serving    | Sustained activation beyond 5 minutes becomes a warning.                         | Did the fallback preserve enough user value?           |
-| Default-feature request share   | Input richness reduced because dependencies lag | Severe degradation affecting over 50% of requests becomes critical.              | Which feature dependency needs replication or caching? |
-| Load-shed request rate          | Coverage reduced to protect the service         | Any growth after the circuit breaker opens triggers capacity investigation.      | Was admission control early enough to prevent cascade? |
-| Primary-vs-fallback quality gap | Product quality lost during the incident        | Degradation beyond 1 hour escalates even when availability metrics look healthy. | Is the fallback path still a valid product experience? |
-
-: **Degradation Monitoring Action Map**: Graceful degradation is safe only when the quality trade is observable. Each signal ties a degraded serving mode to the escalation and postincident question that prevent silent quality loss. {#tbl-degradation-monitoring-action-map}
-
-After the event, postincident analysis should identify the root cause, evaluate fallback effectiveness, measure user and business impact, and define improvements that prevent recurrence. Implementing these fallback mechanisms safely requires deep visibility into the system's runtime state. When a complex recommendation pipeline begins degrading, operators must rapidly determine which microservice is failing, and that diagnosis depends on distributed debugging and observability.
-
 ## Distributed Debugging and Observability {#sec-fault-tolerance-reliability-reliability-distributed-debugging-observability-1a7f}
 
 At 2:00 AM, latency on the flagship generative API spikes from 200 ms to 5 seconds, but CPU, memory, and network metrics all look perfectly normal. The latency breach can justify immediate mitigation under a predefined policy; choosing a targeted repair requires locating the stalled work across hundreds of microservices. Distributed debugging and observability provide the diagnostic capability required to locate these invisible bottlenecks.
@@ -3584,6 +3331,259 @@ Cascade failures are particularly insidious because the root cause is obscured b
 :::
 
 Correlating metrics, logs, and traces allows operators to isolate failures and trigger automated remediations before an entire cluster is compromised. How these observability pipelines and fault tolerance strategies operate in practice, however, is best understood through real deployments. Production clusters running frontier models and global services illustrate how organizations translate theoretical reliability models into operational systems.
+
+## Graceful Degradation {#sec-fault-tolerance-reliability-reliability-graceful-degradation-9122}
+
+During a major regional network outage, an e-commerce site suddenly loses access to its heavy, GPU-accelerated recommendation cluster. Rather than showing users empty pages or crashing, the site instantly switches to serving precomputed, generic popular items. The serving fault tolerance mechanisms developed in @sec-fault-tolerance-reliability-reliability-serving-fault-tolerance-5375 aim to maintain full service, but graceful degradation dictates what happens when those defenses are overwhelmed.
+
+::: {#dfn-fault-tolerance-graceful-degradation .callout-definition title="Graceful degradation"}
+
+***Graceful degradation***\index{Graceful Degradation!definition} is a fault tolerance strategy in which a system responds to resource exhaustion or component failure by deliberately reducing service quality (falling back to a smaller model, serving cached results, or returning partial outputs) rather than failing completely, maintaining measurable availability at reduced capability.
+
+1.  **Significance**: Graceful degradation converts total outage risk into a controlled quality reduction. A recommendation system can fall back from a large ranker to a collaborative-filtering model on GPU failure, maintaining request availability with a quality penalty that must be measured for that workload. The engineering calculation includes both the requests served and the utility lost during fallback.
+2.  **Distinction**: Unlike complete system failure (where the service returns errors to all requests), graceful degradation provides a managed transition through a predefined capability hierarchy in which each fallback level has known accuracy, latency, and resource characteristics that allow the system to continue satisfying SLOs at reduced quality.
+3.  **Common pitfall**: A frequent misconception is that degradation is automatic in well-designed systems. Graceful degradation requires explicit preengineering: fallback models must be preloaded or precomputed, switchover logic must detect the failure condition and trigger the transition without human intervention, and each degradation level must have been validated to actually satisfy its reduced SLO before it is needed in production.
+
+:::
+
+### Degradation dimensions {#sec-fault-tolerance-reliability-reliability-degradation-dimensions-4b25}
+
+A degradation plan must name which service property will be sacrificed before an incident begins. @Tbl-graceful-degradation-dimensions summarizes the main levers. The table is a pre-incident design checklist, not an outage-time brainstorming aid: each sacrificed property needs a measured quality budget, an activation condition, and a recovery path before the failure occurs.
+
+| **Dimension**        | **What the System Sacrifices**    | **Typical Fallback**                                                                           |
+|:---------------------|:----------------------------------|:-----------------------------------------------------------------------------------------------|
+| Quality              | Model accuracy or ranking quality | Use a simpler model, such as a collaborative-filtering fallback for a multi-tower recommender. |
+| Latency              | Response speed                    | Batch more requests together to preserve throughput and model quality under high load.         |
+| Coverage             | Result completeness               | Return top-10 search results instead of top-100.                                               |
+| Freshness            | Recency of computed results       | Serve cached or stale candidates, such as hour-old news recommendations during an outage.      |
+| Feature completeness | Input richness                    | Use content features when user history or real-time context is unavailable.                    |
+
+: **Graceful Degradation Dimensions**: Degradation plans choose which service property can be reduced while still returning a useful answer. Naming the dimension in advance prevents the system from treating every failure as a binary serve-or-crash decision. {#tbl-graceful-degradation-dimensions}
+
+These dimensions are not interchangeable. A search product may sacrifice coverage by returning fewer results while keeping freshness intact; a recommender may sacrifice freshness by serving cached candidates while preserving latency; and an interactive assistant may sacrifice quality by using a smaller model while keeping the session alive. The correct fallback is therefore workload-specific. It follows the property whose temporary loss least harms the application and whose recovery path can be validated before the incident.
+
+### Graceful degradation strategies {#sec-fault-tolerance-reliability-reliability-graceful-degradation-strategies-e85e}
+
+The dimensions in @tbl-graceful-degradation-dimensions become operational only when the service binds each sacrificed property to a specific fallback mechanism. The strategy ladder starts with model fallback when the primary inference path is too expensive or unavailable, then moves to feature fallback when input quality degrades, and finally to load shedding when demand exceeds capacity and the system must preserve the highest-value requests first.
+
+#### Model fallback {#sec-fault-tolerance-reliability-reliability-model-fallback-bc6e}
+
+Model fallback turns quality into an explicit availability lever by maintaining multiple model versions with different resource requirements. The primary model\index{Graceful degradation!primary model} provides full capability at the highest resource cost, a secondary model\index{Graceful degradation!secondary model} reduces capability and resource demand, a tertiary model\index{Graceful degradation!tertiary model} preserves minimal capability, and a static fallback\index{Graceful degradation!static fallback} serves precomputed defaults with no inference at all. When the primary path is unavailable or overloaded, the policy descends only as far as resource pressure requires, then returns upward after the primary path is healthy again.
+
+```{python}
+#| echo: false
+#| label: model-fallback-cascade
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ MODEL FALLBACK CASCADE (LEGO)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @sec-fault-tolerance-reliability-reliability-model-fallback-bc6e prose below.
+# │
+# │ Goal: Pin the three named vision models' sizes and ImageNet top-1 accuracy.
+# │ Show: ViT-Large 307M / 88%; EfficientNet-B4 19M / 83%; MobileNetV3-Large 5.4M / 75%.
+# │ How:  Models.Vision.*.parameters; Literature.Benchmarks.*ImageNetTop1.
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import Literature, Models
+from mlsysim.fmt import check, fmt, fmt_percent
+
+class ModelFallbackCascade:
+    # ┌── 1. LOAD (Constants) ──────────────────────
+    vit_params_m = Models.Vision.ViT_Large.parameters.to(param).magnitude / 1e6
+    effnet_params_m = Models.Vision.EfficientNetB4.parameters.to(param).magnitude / 1e6
+    mobilenet_params_m = Models.Vision.MobileNetV3_Large.parameters.to(param).magnitude / 1e6
+    vit_top1 = float(Literature.Benchmarks.ViTLargeImageNetTop1)
+    effnet_top1 = float(Literature.Benchmarks.EfficientNetB4ImageNetTop1)
+    mobilenet_top1 = float(Literature.Benchmarks.MobileNetV3LargeImageNetTop1)
+
+    # ┌── 2. EXECUTE (The Compute) ─────────────────
+    # (no derived values; each rung is a named registry entity)
+
+    # ┌── 3. GUARD (Invariants) ────────────────────
+    check(vit_params_m > effnet_params_m > mobilenet_params_m, "each fallback rung must be smaller")
+    check(vit_top1 > effnet_top1 > mobilenet_top1, "each fallback rung must trade accuracy for cost")
+
+    # ┌── 4. OUTPUT (Formatting) ───────────────────
+    vit_params_str = fmt(vit_params_m, precision=0)
+    effnet_params_str = fmt(effnet_params_m, precision=0)
+    mobilenet_params_str = fmt(mobilenet_params_m, precision=1)
+    vit_top1_str = fmt_percent(round(vit_top1 * 100) / 100, precision=0, style="prose")
+    effnet_top1_str = fmt_percent(round(effnet_top1 * 100) / 100, precision=0, style="prose")
+    mobilenet_top1_str = fmt_percent(round(mobilenet_top1 * 100) / 100, precision=0, style="prose")
+```
+
+An image classification cascade makes the trade-off concrete. The primary path might run a ViT-Large model with `{python} ModelFallbackCascade.vit_params_str` million parameters and `{python} ModelFallbackCascade.vit_top1_str` ImageNet top-1 accuracy, fall back to EfficientNet-B4 with `{python} ModelFallbackCascade.effnet_params_str` million parameters and `{python} ModelFallbackCascade.effnet_top1_str` accuracy under pressure, then fall back again to MobileNet-V3-Large with `{python} ModelFallbackCascade.mobilenet_params_str` million parameters and `{python} ModelFallbackCascade.mobilenet_top1_str` accuracy when only minimal classification remains affordable. If even that path cannot meet the SLO, the service can return cached labels, a coarse category, or "classification unavailable" rather than blocking the request indefinitely. For that ladder to be real rather than aspirational, the production system must keep multiple models deployed, route requests to the appropriate level, monitor fallback frequency, and measure the quality impact of each level.
+
+Recommendation and ranking systems use the same pattern when a complex deep learning model falls back to a top-n popularity list, a linear ranker, or a cached response during primary serving failures. Complex models often fight for the last mile of accuracy while simple heuristics provide the bulk of the utility, so the fallback path must be monitored as a first-class quality signal rather than treated as a silent failover. Otherwise the product appears healthy while quality is silently traded for availability.
+
+#### Feature fallback {#sec-fault-tolerance-reliability-reliability-feature-fallback-0730}
+
+Feature fallback controls how much input quality the model may lose before the request must be blocked. When feature retrieval fails, validated population-level defaults or cached values can substitute for missing user or item features. The model must have been trained or evaluated with those missing-feature semantics; an average embedding or a vector from another encoder is not automatically a compatible input. Approximate features are useful only when their representation and measured prediction quality satisfy the fallback contract.
+
+The key design step is prioritizing features by their measured contribution to prediction quality. @Tbl-feature-degradation-tiers illustrates a four-level policy in which critical features block the request, important features use defaults, useful features use cached values, and optional features can be omitted. Its quality-loss ranges are example policy budgets, not transferable properties of those feature categories; deployment requires measurements showing that each permitted fallback meets its budget.
+
+| **Tier**      |      **Example Features**     | **Missing Action** |  **Quality Impact**  |
+|:--------------|:-----------------------------:|:------------------:|:--------------------:|
+| **Critical**  |        User ID, Item ID       |   Block request    |     Cannot serve     |
+| **Important** | User history, Item attributes |    Use defaults    | 5--10% quality loss  |
+| **Useful**    |       Real-time context       |     Use cached     |  2--5% quality loss  |
+| **Optional**  |       Secondary signals       |        Omit        | $< 2\%$ quality loss |
+
+: **Graceful Feature Degradation Tiers**: Features classified by importance to prediction quality, with the corresponding response when each tier is unavailable. Critical features block the request entirely; lower tiers allow the system to fall back to defaults, cached values, or omission with bounded quality impact. The tiers convert a binary "feature available or not" question into a four-step degradation ladder. {#tbl-feature-degradation-tiers}
+
+When feature degradation alone is insufficient to maintain system stability under extreme load, the serving infrastructure must begin actively dropping requests.
+
+#### Load shedding {#sec-fault-tolerance-reliability-reliability-load-shedding-8476}
+
+Load shedding protects the system by sacrificing selected requests before overload spreads to every request. Random shedding is the simplest policy: drop a fraction of incoming requests and preserve enough capacity for the rest. Its weakness is that it treats all requests as equally valuable. Priority-based shedding turns quality-of-service degradation into an explicit policy by serving premium users before free users, revenue-generating requests before analytics requests, and interactive traffic before background batch work. The system is still degrading, but it is degrading according to a predeclared service contract rather than whichever queue happens to fill first.
+
+Admission control\index{Graceful degradation!admission control} applies the same idea at system entry points. It rejects requests that would exceed capacity rather than accepting work that will degrade every request already in the system. Circuit breakers\index{Circuit breaker!serving resilience} extend the same protection to individual dependencies by failing fast when a model replica, feature store, or supporting service is unhealthy, so that one failing dependency cannot exhaust connection pools across the fleet; @sec-inference-scale-circuit-breakers-backpressure-e61c develops their states and the backpressure signals that accompany them.
+
+#### Graceful degradation implementation {#sec-fault-tolerance-reliability-reliability-graceful-degradation-implementation-1aa5}
+
+Implementation begins by turning the degradation ladder into a control loop. Tail-latency percentiles reveal delayed responses, dependency-specific error rates locate failed calls, resource utilization exposes pressure, and growing queues indicate a mismatch between arrivals and completions. These signals support entry and exit conditions for each degradation level. A trigger can justify load shedding before diagnosis is complete, but the signal alone does not establish the underlying cause.
+
+Degradation triggers\index{Graceful degradation!triggers} define conditions that activate degradation. @Lst-degradation-triggers illustrates three common trigger conditions that progressively activate fallback mechanisms based on latency, error rate, and feature store health.
+
+::: {#lst-degradation-triggers lst-cap="**Progressive Degradation Triggers**: Conditions that activate graceful degradation based on tail latency, error rate, and feature store health. Each trigger activates a different fallback mechanism appropriate to the detected problem."}
+
+```{.python}
+# Monitor tail latency for user-facing impact
+if p99_latency > threshold:
+    activate_model_fallback()  # Switch to faster, simpler model
+
+# Track error rates to detect downstream failures
+if error_rate > threshold:
+    activate_circuit_breaker()  # Fail fast, prevent cascade
+
+# Feature store slowdowns degrade recommendation quality
+if feature_store_latency > threshold:
+    activate_feature_fallback()  # Use cached/default features
+```
+
+:::
+
+Degradation should increase progressively as conditions worsen rather than switch at one cliff. The system can raise the fallback percentage gradually as load increases, then require sustained improvement before traffic returns to higher-capability paths. Hysteresis prevents oscillation between primary and fallback modes when the service hovers near a threshold.
+
+### Degradation monitoring and alerting {#sec-fault-tolerance-reliability-reliability-degradation-monitoring-alerting-87c2}
+
+Because graceful degradation trades quality for availability, monitoring must make that trade visible rather than letting the system appear healthy while serving lower-fidelity results. The monitoring surface must expose how much service quality has been traded away. @Tbl-degradation-monitoring-action-map turns that surface into an action map: fallback share reveals how often model quality was reduced, default-feature share reveals input-quality loss, drop rate reveals capacity protection, and the primary-vs-fallback quality gap reveals whether the degraded path remains acceptable. Its escalation thresholds illustrate one policy; the service's permitted degradation duration and quality loss must determine the deployed thresholds.
+
+| **Signal**                      | **Quality trade exposed**                       | **Escalation rule**                                                              | **Postincident question**                              |
+|:--------------------------------|:------------------------------------------------|:---------------------------------------------------------------------------------|:-------------------------------------------------------|
+| Fallback-model request share    | Model capability reduced to preserve serving    | Sustained activation beyond 5 minutes becomes a warning.                         | Did the fallback preserve enough user value?           |
+| Default-feature request share   | Input richness reduced because dependencies lag | Severe degradation affecting over 50% of requests becomes critical.              | Which feature dependency needs replication or caching? |
+| Load-shed request rate          | Coverage reduced to protect the service         | Any growth after the circuit breaker opens triggers capacity investigation.      | Was admission control early enough to prevent cascade? |
+| Primary-vs-fallback quality gap | Product quality lost during the incident        | Degradation beyond 1 hour escalates even when availability metrics look healthy. | Is the fallback path still a valid product experience? |
+
+: **Degradation Monitoring Action Map**: Graceful degradation is safe only when the quality trade is observable. Each signal ties a degraded serving mode to the escalation and postincident question that prevent silent quality loss. {#tbl-degradation-monitoring-action-map}
+
+After the event, postincident analysis should identify the root cause, evaluate fallback effectiveness, measure user and business impact, and define improvements that prevent recurrence. Implementing these fallback mechanisms safely requires deep visibility into the system's runtime state. When a complex recommendation pipeline begins degrading, operators must rapidly determine which microservice is failing, and that diagnosis depends on distributed debugging and observability.
+
+## Fault Injection Tools and Frameworks {#sec-ft-fault-injection-tools-frameworks}
+
+An injected failure is useful evidence only when it resembles the production failure the system must survive. A multi-node training cluster that claims to tolerate network partitions should have that connection severed in a staging environment so engineers can observe what the orchestration layer does. Fault injection\index{Fault injection!testing discipline}\index{Fault injection!tools and frameworks} is the engineering discipline of deliberately perturbing a system to empirically verify that robustness mechanisms work before production traffic discovers the gap. Fault-injection tools for tensors and accelerators cover bit flips, corrupted tensor values, and accelerator-oriented failures [@chen2020tensorfi; @tsai2021; @grafe2023], while network partitions, latency injection, dependency termination, and API-response faults belong to chaos and distributed-systems testing practice [@basiri2016].
+
+### Fault and error models {#sec-ft-fault-error-models}
+
+A fault-injection experiment must specify duration, location, granularity, and propagation path. Its fault model\index{Fault model!abstraction} describes the originating disturbance, such as a transient single-bit upset or a permanent multi-bit defect. Its error model\index{Error model!propagation} describes the resulting corrupted state or computation. Results for transient single-bit faults do not establish resilience to permanent multi-bit defects [@sangchoolie2017].
+
+The injection level determines which propagation paths the experiment includes. A register-level bit flip in a simulator such as gem5 [@binkert2011] can expose effects that a mutation of a PyTorch weight tensor omits. Conversely, hardware may mask an injected fault before software observes it. Location and propagation therefore matter when comparing results across fault models [@sangchoolie2017; @papadimitriou2021].
+
+This divergence highlights the multi-tier filtering formalized by error masking [@mohanram2003]. The flowchart in @fig-error-masking-ft traces how a physical soft error traverses two successive screening diamonds—asking first whether corrupted data is read, and second whether it produces incorrect output or a crash—before escalating to an observable failure. A hardware disturbance that hits an unused functional unit, is overwritten prior to use, or lands in dynamically dead instructions is silently absorbed within the microarchitecture or runtime [@ko2021]. Because tensor-level mutations inject perturbations downstream of these architectural filters, their empirical error rates must be evaluated at that higher abstraction level.
+
+::: {#fig-error-masking-ft fig-env="figure" fig-pos="htb" fig-cap="**Error masking**: Follow a soft error from the top. It becomes a failure only if the corrupted data is read and then also produces incorrect output; at each No branch it is masked, first by microarchitectural effects (unused components, overwritten values, squashed speculative instructions) and then by software effects (dead instructions, logical and compare operations, uninfluential branches). Because software-level fault injection sees only the second filter, it can misestimate a system's true resilience to transient errors." fig-alt="Flowchart starting at a soft error. A decision diamond asks whether corrupted data is read; No leads to masked in the microarchitecture. Yes leads to a second diamond asking whether output is incorrect or the system crashes; No leads to masked in software, Yes leads to failure. A shaded panel lists microarchitecture-level and software-level masking causes."}
+
+```{.tikz}
+\scalebox{0.77}{
+\begin{tikzpicture}[font=\small\sffamily]
+\tikzset{%
+Line/.style={line width=1.0pt,black!50,text=black},
+Box/.style={inner xsep=2pt,
+    node distance=0.6,
+    draw=RedLine,
+    line width=0.75pt,
+    fill=RedL!60,
+    align=flush center,
+    minimum width=25mm, minimum height=9mm
+  },
+Box2/.style={inner xsep=2pt,
+    node distance=1.4,
+    draw=GreenLine,
+    line width=0.75pt,
+    fill=GreenL0,
+    align=flush center,
+    minimum width=29mm, minimum height=9mm
+  },
+Box3/.style={inner xsep=2pt,
+    node distance=1.1,
+    draw=GrayLine,
+    line width=0.75pt,
+    fill=white,
+    align=flush left,
+    minimum width=55mm, minimum height=9mm
+  },
+   decision/.style={diamond, minimum width=50mm,node distance=0.6,inner sep=-1ex,
+     minimum height=25mm, align=flush center, draw=GrayLine, fill=GrayL!50}
+}
+\node[Box](B1){Soft error};
+\node[Box,decision,below=of B1](B2){Corrupted  data \\are read?};
+\node[Box,decision,below=of B2](B3){Incorrect  output \\ or  system crash?};
+\node[Box2,right=of B2](B4){\textbf{Masked} \\ (microarchitecture)};
+\node[Box2,right=of B3](B5){\textbf{Masked} \\ (software)};
+\node[Box,below=of B3](B6){Failure};
+%%
+\node[Box3,right=of B4](MLA){\textbf{Microarchitecture-level analysis}
+\\[0.5ex]
+$\bullet$ Errors on unused components
+\\[0.5ex]
+$\bullet$ Overwritten by write operations
+\\[0.5ex]
+$\bullet$ Errors on speculative instructions};
+\node[Box3,right=of B5](SLA){\textbf{Software-level analysis}
+\\[0.5ex]
+$\bullet$ Dynamically dead instructions
+\\[0.5ex]
+$\bullet$ Logical, compare instructions
+\\[0.5ex]
+$\bullet$ Uninfluential branch instructions};
+%%
+\draw[Line,-latex](B1)--(B2);
+\draw[Line,-latex](B2)--
+node[right,font=\footnotesize\sffamily]{Yes}(B3);
+\draw[Line,-latex](B3)--
+node[right,font=\footnotesize\sffamily]{Yes}(B6);
+\draw[Line,-latex](B2)--
+node[above,pos=0.3,font=\footnotesize\sffamily]{No}(B4);
+\draw[Line,-latex](B3)--
+node[above,pos=0.3,font=\footnotesize\sffamily]{No}(B5);
+%fitting
+\scoped[on background layer]
+\node[draw=BackLine,inner xsep=4mm,inner ysep=5mm,
+yshift=2.5mm,fill=BackColor!50,fit=(B4)(SLA)(MLA),line width=0.75pt](BB2){};
+\node[below=4pt of  BB2.north,inner sep=0pt,
+anchor=north]{\textbf{System-level masking effect analysis}};
+\end{tikzpicture}
+}
+```
+
+:::
+
+These masking effects determine which abstraction level an experiment should target.
+
+### Fault injection methods {#sec-ft-fault-injection-methods}
+
+Fault injection methods trade realism against experimental scale. Hardware-based injection, through field-programmable gate array (FPGA) emulation or accelerated particle-beam exposure of a running accelerator [@velazco2010], supplies the calibration point because its faults pass through the same circuit-level masking as production faults. Software-based injection\index{Fault injection!software-based} is the scalable counterpart. Tools such as PyTorchFI\index{PyTorchFI!fault injection} [@mahmoud2020] perturb weights, activations, and gradients directly, covering many model states quickly without special hardware, and have shown that single bit-level faults can produce severe misclassifications, including "phantom" objects in detection models. The cost is an abstraction gap\index{Fault injection!abstraction gap}: a software tool that mutates a tensor skips the hardware masking that would have absorbed many of the same disturbances. Frameworks such as Fidelity\index{Fidelity!fault injection framework} [@he2020fidelity] narrow that gap by mapping how faults in registers, memory hierarchies, and numerical units become software-visible errors, so that injected faults resemble what physical hardware would produce.
+
+::: {#exmp-fault-tolerance-software-fault-injection-limits .callout-example title="Software fault injection limits"}
+
+**Scenario**: An engineering team validates a distributed training pipeline using software fault injection, concluding that tensor bit-flips always corrupt model gradient updates.
+
+**Diagnosis**: Hardware-calibrated experiments reveal that software injection bypasses low-level hardware masking effects (such as ECC memory correction and gate-level masking) that prevent many register-level bit-flips from ever mutating software variables.
+
+**Systems lesson**: In this experiment, bypassing hardware masking overstates the effect of the modeled physical faults. Tensor mutation still tests the software response to corrupted values; estimating production vulnerability additionally requires a calibrated model of which physical faults reach those values. The result must be interpreted at the injection level actually tested.
+
+:::
+
+For fleet recovery, the most valuable experiments inject faults at the level where recovery decisions are made. Killing a rank in the middle of a collective, partitioning a node from the rendezvous service, delaying a heartbeat past its timeout, and corrupting one checkpoint shard each exercise one row of @tbl-software-faults-summary-ft. Running these experiments continuously in staging, and in controlled form in production, keeps rarely executed recovery code from decaying between real incidents [@basiri2016]. A detection mechanism can identify corrupted or missing state, but only a recovery mechanism can replace it. Fault persistence determines whether to retry, quarantine, or replace a component, and checkpointing supplies the known-good training state from which any of those paths can resume.
 
 ## Case Studies {#sec-fault-tolerance-reliability-reliability-case-studies-927f}
 
